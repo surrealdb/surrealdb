@@ -31,6 +31,8 @@ pub mod td;
 pub mod tt;
 pub mod vm;
 
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::expr;
 use crate::expr::Thing;
 use crate::expr::array::Array;
@@ -46,9 +48,9 @@ use std::borrow::Cow;
 struct Prefix<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -61,7 +63,7 @@ impl KVKey for Prefix<'_> {
 }
 
 impl<'a> Prefix<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -81,9 +83,9 @@ impl<'a> Prefix<'a> {
 struct PrefixIds<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -97,7 +99,7 @@ impl KVKey for PrefixIds<'_> {
 }
 
 impl<'a> PrefixIds<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, fd: &'a Array) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, fd: &'a Array) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -118,9 +120,9 @@ impl<'a> PrefixIds<'a> {
 pub(crate) struct Index<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -142,8 +144,8 @@ impl Categorise for Index<'_> {
 
 impl<'a> Index<'a> {
 	pub fn new(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
 		fd: &'a Array,
@@ -165,41 +167,41 @@ impl<'a> Index<'a> {
 		}
 	}
 
-	fn prefix(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Vec<u8>> {
+	fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str) -> Result<Vec<u8>> {
 		Prefix::new(ns, db, tb, ix).encode_key()
 	}
 
-	pub fn prefix_beg(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Vec<u8>> {
+	pub fn prefix_beg(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix(ns, db, tb, ix)?;
 		beg.extend_from_slice(&[0x00]);
 		Ok(beg)
 	}
 
-	pub fn prefix_end(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Vec<u8>> {
+	pub fn prefix_end(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix(ns, db, tb, ix)?;
 		beg.extend_from_slice(&[0xff]);
 		Ok(beg)
 	}
 
-	fn prefix_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Result<Vec<u8>> {
+	fn prefix_ids(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str, fd: &Array) -> Result<Vec<u8>> {
 		PrefixIds::new(ns, db, tb, ix, fd).encode_key()
 	}
 
-	pub fn prefix_ids_beg(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Result<Vec<u8>> {
+	pub fn prefix_ids_beg(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str, fd: &Array) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		beg.extend_from_slice(&[0x00]);
 		Ok(beg)
 	}
 
-	pub fn prefix_ids_end(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Result<Vec<u8>> {
+	pub fn prefix_ids_end(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str, fd: &Array) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		beg.extend_from_slice(&[0xff]);
 		Ok(beg)
 	}
 
 	pub fn prefix_ids_composite_beg(
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
 		ix: &str,
 		fd: &Array,
@@ -210,8 +212,8 @@ impl<'a> Index<'a> {
 	}
 
 	pub fn prefix_ids_composite_end(
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
 		ix: &str,
 		fd: &Array,
@@ -231,7 +233,7 @@ mod tests {
 		#[rustfmt::skip]
 		let fd = vec!["testfd1", "testfd2"].into();
 		let id = "testid".into();
-		let val = Index::new("testns", "testdb", "testtb", "testix", &fd, Some(&id));
+		let val = Index::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", &fd, Some(&id));
 		let enc = Index::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
@@ -242,7 +244,7 @@ mod tests {
 	#[test]
 	fn key_none() {
 		let fd = vec!["testfd1", "testfd2"].into();
-		let val = Index::new("testns", "testdb", "testtb", "testix", &fd, None);
+		let val = Index::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", &fd, None);
 		let enc = Index::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
@@ -255,11 +257,11 @@ mod tests {
 		let fd = vec!["testfd1"].into();
 
 		let enc =
-			Index::prefix_ids_composite_beg("testns", "testdb", "testtb", "testix", &fd).unwrap();
+			Index::prefix_ids_composite_beg(NamespaceId(1), DatabaseId(2), "testtb", "testix", &fd).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0*\0\0\0\x04testfd1\0\x00");
 
 		let enc =
-			Index::prefix_ids_composite_end("testns", "testdb", "testtb", "testix", &fd).unwrap();
+			Index::prefix_ids_composite_end(NamespaceId(1), DatabaseId(2), "testtb", "testix", &fd).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0*\0\0\0\x04testfd1\0\xff");
 	}
 }

@@ -6,13 +6,16 @@ use crate::kvs::KVKey;
 
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct HdRoot<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -27,7 +30,7 @@ impl KVKey for HdRoot<'_> {
 }
 
 impl<'a> HdRoot<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -49,9 +52,9 @@ impl<'a> HdRoot<'a> {
 pub(crate) struct Hd<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -67,7 +70,7 @@ impl KVKey for Hd<'_> {
 }
 
 impl<'a> Hd<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, doc_id: DocId) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, doc_id: DocId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -92,7 +95,7 @@ mod tests {
 
 	#[test]
 	fn root() {
-		let val = HdRoot::new("testns", "testdb", "testtb", "testix");
+		let val = HdRoot::new(NamespaceId(1), DatabaseId(2), "testtb", "testix");
 		let enc = HdRoot::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!hd");
 	}
@@ -101,8 +104,8 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let val = Hd::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 			7

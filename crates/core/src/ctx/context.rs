@@ -72,7 +72,7 @@ pub struct MutableContext {
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
 	// An optional transaction
-	transaction: Arc<Transaction>,
+	transaction: Option<Arc<Transaction>>,
 	// Does not read from parent `values`.
 	isolated: bool,
 	// A map of bucket connections
@@ -269,7 +269,8 @@ impl MutableContext {
 
 	pub(crate) fn get_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
 		let ns = opt.ns()?;
-		self.tx().get_ns_id(ns)
+		// self.tx().get_ns_id(ns)
+		todo!("STU: GO DO THIS")
 	}
 
 	pub(crate) fn get_db_id(&self, ns: &str, db: &str) -> Result<DatabaseId> {
@@ -278,10 +279,11 @@ impl MutableContext {
 	}
 
 	pub(crate) fn get_ns_db_ids(&self, opt: &Options) -> Result<(NamespaceId, DatabaseId)> {
-		let (ns, db) = opt.ns_db()?;
-		let ns_id = self.get_ns_id(ns)?;
-		let db_id = self.get_db_id(ns, db)?;
-		Ok((ns_id, db_id))
+		// let (ns, db) = opt.ns_db()?;
+		// let ns_id = self.get_ns_id(ns)?;
+		// let db_id = self.get_db_id(ns, db)?;
+		// Ok((ns_id, db_id))
+		todo!("STU: GO DO THIS")
 	}
 
 	pub(crate) fn get_tb_id(&self, ns: &str, db: &str, tb: &str) -> Result<TableId> {
@@ -663,7 +665,7 @@ impl MutableContext {
 			} else {
 				// Obtain the bucket definition
 				let tx = self.tx();
-				let bd = tx.get_db_bucket(ns, db, bu).await?;
+				let bd = tx.expect_db_bucket(ns, db, bu).await?;
 
 				// Connect to the bucket
 				let store = if let Some(ref backend) = bd.backend {

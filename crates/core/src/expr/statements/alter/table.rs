@@ -56,13 +56,15 @@ impl AlterTableStatement {
 		let txn = ctx.tx();
 
 		// Get the table definition
-		let mut dt = match txn.get_tb(ns, db, &self.name).await {
-			Ok(tb) => tb.deref().clone(),
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
+		let mut dt = match txn.get_tb(ns, db, &self.name).await? {
+			Some(tb) => tb.deref().clone(),
+			None => {
+				if self.if_exists {
 					return Ok(Value::None);
 				} else {
-					return Err(e);
+					return Err(Error::TbNotFound {
+						name: self.name.to_string(),
+					}.into());
 				}
 			}
 		};
@@ -92,7 +94,6 @@ impl AlterTableStatement {
 		txn.set(&key, &dt, None).await?;
 		// Record definition change
 		if self.changefeed.is_some() && dt.changefeed.is_some() {
-			let (ns, db) = ctx.get_ns_db_ids(opt)?;
 			txn.lock().await.record_table_change(ns, db, &self.name, &dt);
 		}
 		// Clear the cache

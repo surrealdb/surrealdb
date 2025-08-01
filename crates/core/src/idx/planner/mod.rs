@@ -6,6 +6,7 @@ pub(crate) mod plan;
 pub(in crate::idx) mod rewriter;
 pub(in crate::idx) mod tree;
 
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::err::Error;
@@ -28,8 +29,8 @@ use std::sync::atomic::{self, AtomicU8};
 pub(crate) struct StatementContext<'a> {
 	pub(crate) ctx: &'a Context,
 	pub(crate) opt: &'a Options,
-	pub(crate) ns: &'a str,
-	pub(crate) db: &'a str,
+	pub(crate) ns: NamespaceId,
+	pub(crate) db: DatabaseId,
 	pub(crate) stm: &'a Statement<'a>,
 	pub(crate) fields: Option<&'a Fields>,
 	pub(crate) with: Option<&'a With>,
@@ -73,7 +74,7 @@ pub(crate) enum GrantedPermission {
 impl<'a> StatementContext<'a> {
 	pub(crate) fn new(ctx: &'a Context, opt: &'a Options, stm: &'a Statement<'a>) -> Result<Self> {
 		let is_perm = opt.check_perms(stm.into())?;
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		Ok(Self {
 			ctx,
 			opt,
@@ -94,8 +95,8 @@ impl<'a> StatementContext<'a> {
 			return Ok(GrantedPermission::Full);
 		}
 		// Get the table for this planner
-		match self.ctx.tx().get_tb(self.ns, self.db, tb).await {
-			Ok(table) => {
+		match self.ctx.tx().get_tb(self.ns, self.db, tb).await? {
+			Some(table) => {
 				// TODO(tobiemh): we should really
 				// not even get here if the table
 				// permissions are NONE, because
@@ -113,13 +114,9 @@ impl<'a> StatementContext<'a> {
 					return Ok(GrantedPermission::None);
 				}
 			}
-			Err(e) => {
-				if !matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
-					// We can safely ignore this error,
-					// as it just means that there is no
-					// table and no permissions defined.
-					return Err(e);
-				}
+			None => {
+				// TODO: STU: This previously fell through to Full permissions. Should it actually be None?
+				return Ok(GrantedPermission::None);
 			}
 		}
 		Ok(GrantedPermission::Full)

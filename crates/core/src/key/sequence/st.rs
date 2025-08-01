@@ -1,4 +1,6 @@
 //! Stores sequence states
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::{
 	key::category::{Categorise, Category},
 	kvs::{KVKey, sequences::SequenceState},
@@ -11,9 +13,9 @@ use uuid::Uuid;
 pub(crate) struct St<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	_d: u8,
 	_e: u8,
@@ -36,7 +38,7 @@ impl Categorise for St<'_> {
 }
 
 impl<'a> St<'a> {
-	pub(crate) fn new(ns: &'a str, db: &'a str, sq: &'a str, nid: Uuid) -> Self {
+	pub(crate) fn new(ns: NamespaceId, db: DatabaseId, sq: &'a str, nid: Uuid) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

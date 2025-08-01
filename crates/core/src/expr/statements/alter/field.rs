@@ -1,3 +1,4 @@
+use crate::catalog::TableDefinition;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -47,19 +48,19 @@ impl AlterFieldStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the table definition
 		let name = self.name.to_string();
-		let mut df = match txn.get_tb_field(ns, db, &self.what, &name).await {
-			Ok(tb) => tb.deref().clone(),
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::FdNotFound { .. })) {
+		let mut df = match txn.get_tb_field(ns, db, &self.what, &name).await? {
+			Some(tb) => tb.deref().clone(),
+			None => {
+				if self.if_exists {
 					return Ok(Value::None);
-				} else {
-					return Err(e);
 				}
+
+				return Err(Error::FdNotFound { name: name }.into());
 			}
 		};
 		// Process the statement
@@ -115,10 +116,14 @@ impl AlterFieldStatement {
 		txn.set(&key, &df, None).await?;
 		// Refresh the table cache
 		let key = crate::key::database::tb::new(ns, db, &self.what);
-		let tb = txn.get_tb(ns, db, &self.what).await?;
+		let Some(tb) = txn.get_tb(ns, db, &self.what).await? else {
+			return Err(Error::TbNotFound {
+				name: self.what.to_string(),
+			}.into());
+		};
 		txn.set(
 			&key,
-			&DefineTableStatement {
+			&TableDefinition {
 				cache_fields_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
 			},

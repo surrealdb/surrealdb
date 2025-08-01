@@ -108,8 +108,9 @@ impl DefineUserStatement {
 			Base::Ns => {
 				// Fetch the transaction
 				let txn = ctx.tx();
+				let ns = ctx.get_ns_id(opt)?;
 				// Check if the definition exists
-				if txn.get_ns_user(opt.ns()?, &self.name).await.is_ok() {
+				if txn.get_ns_user(ns, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else if !self.overwrite && !opt.import {
@@ -119,9 +120,14 @@ impl DefineUserStatement {
 						});
 					}
 				}
+
+				let ns = {
+					let ns = opt.ns()?;
+					txn.get_or_add_ns(ns, opt.strict).await?
+				};
+
 				// Process the statement
-				let key = crate::key::namespace::us::new(opt.ns()?, &self.name);
-				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+				let key = crate::key::namespace::us::new(ns.namespace_id, &self.name);
 				txn.set(
 					&key,
 					&DefineUserStatement {
@@ -142,22 +148,27 @@ impl DefineUserStatement {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if the definition exists
-				let (ns, db) = opt.ns_db()?;
+				let (ns, db) = ctx.get_ns_db_ids(opt)?;
 				if txn.get_db_user(ns, db, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else if !self.overwrite && !opt.import {
+						let (ns, db) = opt.ns_db()?;
 						bail!(Error::UserDbAlreadyExists {
 							name: self.name.to_string(),
-							ns: ns.into(),
-							db: db.into(),
+							ns: ns.to_string(),
+							db: db.to_string(),
 						});
 					}
 				}
+
+				let db = {
+					let (ns, db) = opt.ns_db()?;
+					txn.get_or_add_db(ns, db, opt.strict).await?
+				};
+
 				// Process the statement
-				let key = crate::key::database::us::new(ns, db, &self.name);
-				txn.get_or_add_ns(ns, opt.strict).await?;
-				txn.get_or_add_db(ns, db, opt.strict).await?;
+				let key = crate::key::database::us::new(db.namespace_id, db.database_id, &self.name);
 				txn.set(
 					&key,
 					&DefineUserStatement {

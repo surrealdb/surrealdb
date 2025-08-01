@@ -29,29 +29,32 @@ pub async fn timestamp_to_versionstamp(new_ds: impl CreateDs) {
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Give the current versionstamp a timestamp of 0
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	tx.set_timestamp_for_versionstamp(0, "myns", "mydb").await.unwrap();
-	tx.commit().await.unwrap();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let db = tx.get_or_add_db("myns", "mydb", false).await.unwrap();
+
+	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	tr.set_timestamp_for_versionstamp(0, db.namespace_id, db.database_id).await.unwrap();
+	tr.commit().await.unwrap();
 	// Get the versionstamp for timestamp 0
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	let vs1 = tx.get_versionstamp_from_timestamp(0, "myns", "mydb").await.unwrap().unwrap();
-	tx.commit().await.unwrap();
+	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let vs1 = tr.get_versionstamp_from_timestamp(0, db.namespace_id, db.database_id).await.unwrap().unwrap();
+	tr.commit().await.unwrap();
 	// Give the current versionstamp a timestamp of 1
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	tx.set_timestamp_for_versionstamp(1, "myns", "mydb").await.unwrap();
-	tx.commit().await.unwrap();
+	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	tr.set_timestamp_for_versionstamp(1, db.namespace_id, db.database_id).await.unwrap();
+	tr.commit().await.unwrap();
 	// Get the versionstamp for timestamp 1
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	let vs2 = tx.get_versionstamp_from_timestamp(1, "myns", "mydb").await.unwrap().unwrap();
-	tx.commit().await.unwrap();
+	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let vs2 = tr.get_versionstamp_from_timestamp(1, db.namespace_id, db.database_id).await.unwrap().unwrap();
+	tr.commit().await.unwrap();
 	// Give the current versionstamp a timestamp of 2
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	tx.set_timestamp_for_versionstamp(2, "myns", "mydb").await.unwrap();
-	tx.commit().await.unwrap();
+	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	tr.set_timestamp_for_versionstamp(2, db.namespace_id, db.database_id).await.unwrap();
+	tr.commit().await.unwrap();
 	// Get the versionstamp for timestamp 2
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	let vs3 = tx.get_versionstamp_from_timestamp(2, "myns", "mydb").await.unwrap().unwrap();
-	tx.commit().await.unwrap();
+	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let vs3 = tr.get_versionstamp_from_timestamp(2, db.namespace_id, db.database_id).await.unwrap().unwrap();
+	tr.commit().await.unwrap();
 	assert!(vs1 < vs2);
 	assert!(vs2 < vs3);
 }
@@ -65,42 +68,45 @@ pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 	// Declare ns/db
 	ds.execute("USE NS myns; USE DB mydb; CREATE record", &Session::owner(), None).await.unwrap();
 
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let db = tx.get_or_add_db("myns", "mydb", false).await.unwrap();
+
 	// Give the current versionstamp a timestamp of 0
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	tx.set_timestamp_for_versionstamp(0, "myns", "mydb").await.unwrap();
+	tx.set_timestamp_for_versionstamp(0, db.namespace_id, db.database_id).await.unwrap();
 	tx.commit().await.unwrap();
 
 	// Get the versionstamp for timestamp 0
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	let vs1 = tx.get_versionstamp_from_timestamp(0, "myns", "mydb").await.unwrap().unwrap();
+	let vs1 = tx.get_versionstamp_from_timestamp(0, db.namespace_id, db.database_id).await.unwrap().unwrap();
 	tx.commit().await.unwrap();
 
 	// Give the current versionstamp a timestamp of 1
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	tx.set_timestamp_for_versionstamp(1, "myns", "mydb").await.unwrap();
+	tx.set_timestamp_for_versionstamp(1, db.namespace_id, db.database_id).await.unwrap();
 	tx.commit().await.unwrap();
 
 	// Get the versionstamp for timestamp 1
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	let vs2 = tx.get_versionstamp_from_timestamp(1, "myns", "mydb").await.unwrap().unwrap();
+	let vs2 = tx.get_versionstamp_from_timestamp(1, db.namespace_id, db.database_id).await.unwrap().unwrap();
 	tx.commit().await.unwrap();
 
 	assert!(vs1 < vs2);
 
 	// Scan range
-	let start = crate::key::database::ts::new("myns", "mydb", 0).encode_key().unwrap();
-	let end = crate::key::database::ts::new("myns", "mydb", u64::MAX).encode_key().unwrap();
+	let start = crate::key::database::ts::new(db.namespace_id, db.database_id, 0).encode_key().unwrap();
+	let end = crate::key::database::ts::new(db.namespace_id, db.database_id, u64::MAX).encode_key().unwrap();
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	let scanned = tx.scan(start.clone()..end.clone(), u32::MAX, None).await.unwrap();
 	tx.commit().await.unwrap();
 	assert_eq!(scanned.len(), 2);
 	assert_eq!(
 		scanned[0].0,
-		crate::key::database::ts::new("myns", "mydb", 0).encode_key().unwrap()
+		crate::key::database::ts::new(db.namespace_id, db.database_id, 0).encode_key().unwrap()
 	);
 	assert_eq!(
 		scanned[1].0,
-		crate::key::database::ts::new("myns", "mydb", 1).encode_key().unwrap()
+		crate::key::database::ts::new(db.namespace_id, db.database_id, 1).encode_key().unwrap()
 	);
 
 	// Repeating tick
@@ -113,15 +119,15 @@ pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 	assert_eq!(scanned.len(), 3);
 	assert_eq!(
 		scanned[0].0,
-		crate::key::database::ts::new("myns", "mydb", 0).encode_key().unwrap()
+		crate::key::database::ts::new(db.namespace_id, db.database_id, 0).encode_key().unwrap()
 	);
 	assert_eq!(
 		scanned[1].0,
-		crate::key::database::ts::new("myns", "mydb", 1).encode_key().unwrap()
+		crate::key::database::ts::new(db.namespace_id, db.database_id, 1).encode_key().unwrap()
 	);
 	assert_eq!(
 		scanned[2].0,
-		crate::key::database::ts::new("myns", "mydb", 2).encode_key().unwrap()
+		crate::key::database::ts::new(db.namespace_id, db.database_id, 2).encode_key().unwrap()
 	);
 }
 

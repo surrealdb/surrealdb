@@ -1,3 +1,4 @@
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -28,14 +29,14 @@ pub(crate) struct Sequences {
 #[derive(Hash, PartialEq, Eq)]
 pub(crate) enum SequenceDomain {
 	/// A user sequence in a namespace
-	UserName(String, String, String),
+	UserName(NamespaceId, DatabaseId, String),
 	/// A sequence generating DocIds for a FullText search index
 	FullTextDocIds(IndexKeyBase),
 }
 
 impl SequenceDomain {
-	fn new_user(ns: &str, db: &str, sq: &str) -> Self {
-		Self::UserName(ns.to_string(), db.to_string(), sq.to_string())
+	fn new_user(ns: NamespaceId, db: DatabaseId, sq: &str) -> Self {
+		Self::UserName(ns, db, sq.to_string())
 	}
 
 	pub(crate) fn new_ft_doc_ids(ikb: IndexKeyBase) -> Self {
@@ -44,21 +45,21 @@ impl SequenceDomain {
 
 	fn new_batch_range_keys(&self) -> Result<Range<Vec<u8>>> {
 		match self {
-			Self::UserName(ns, db, sq) => Prefix::new_ba_range(ns, db, sq),
+			Self::UserName(ns, db, sq) => Prefix::new_ba_range(*ns, *db, sq),
 			Self::FullTextDocIds(ibk) => ibk.new_ib_range(),
 		}
 	}
 
 	fn new_batch_key(&self, start: i64) -> Result<Vec<u8>> {
 		match &self {
-			Self::UserName(ns, db, sq) => Ba::new(ns, db, sq, start).encode_key(),
+			Self::UserName(ns, db, sq) => Ba::new(*ns, *db, sq, start).encode_key(),
 			Self::FullTextDocIds(ikb) => ikb.new_ib_key(start).encode_key(),
 		}
 	}
 
 	fn new_state_key(&self, nid: Uuid) -> Result<Vec<u8>> {
 		match &self {
-			Self::UserName(ns, db, sq) => St::new(ns, db, sq, nid).encode_key(),
+			Self::UserName(ns, db, sq) => St::new(*ns, *db, sq, nid).encode_key(),
 			Self::FullTextDocIds(ikb) => ikb.new_is_key(nid).encode_key(),
 		}
 	}
@@ -86,17 +87,17 @@ impl Sequences {
 			sequences: Arc::new(Default::default()),
 		}
 	}
-	pub(crate) async fn namespace_removed(&self, tx: &Transaction, ns: &str) -> Result<()> {
-		for db in tx.all_ns().await?.iter() {
-			self.database_removed(tx, ns, &db.name).await?;
+	pub(crate) async fn namespace_removed(&self, tx: &Transaction, ns: NamespaceId) -> Result<()> {
+		for db in tx.all_db(ns).await?.iter() {
+			self.database_removed(tx, ns, db.database_id).await?;
 		}
 		Ok(())
 	}
 	pub(crate) async fn database_removed(
 		&self,
 		tx: &Transaction,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 	) -> Result<()> {
 		for sqs in tx.all_db_sequences(ns, db).await?.iter() {
 			self.sequence_removed(ns, db, &sqs.name);
@@ -104,7 +105,7 @@ impl Sequences {
 		Ok(())
 	}
 
-	pub(crate) fn sequence_removed(&self, ns: &str, db: &str, sq: &str) {
+	pub(crate) fn sequence_removed(&self, ns: NamespaceId, db: DatabaseId, sq: &str) {
 		let key = SequenceDomain::new_user(ns, db, sq);
 		self.sequences.remove(&key);
 	}
@@ -138,7 +139,7 @@ impl Sequences {
 		opt: &Options,
 		sq: &str,
 	) -> Result<i64> {
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		let seq = ctx.tx().get_db_sequence(ns, db, sq).await?;
 		let key = Arc::new(SequenceDomain::new_user(ns, db, sq));
 		self.next_val(ctx, opt.id()?, key, seq.batch, move || {

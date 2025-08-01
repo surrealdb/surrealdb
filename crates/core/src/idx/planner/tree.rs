@@ -1,3 +1,4 @@
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::index::Index;
 use crate::expr::statements::{DefineFieldStatement, DefineIndexStatement};
@@ -134,7 +135,7 @@ impl<'a> TreeBuilder<'a> {
 		if self.schemas.contains_key(table) {
 			return Ok(());
 		}
-		let l = SchemaCache::new(self.ctx.opt, table, tx).await?;
+		let l = SchemaCache::new(self.ctx.ctx, self.ctx.opt, table, tx).await?;
 		self.schemas.insert(table.clone(), l);
 		Ok(())
 	}
@@ -719,8 +720,8 @@ struct SchemaCache {
 }
 
 impl SchemaCache {
-	async fn new(opt: &Options, table: &Table, tx: &Transaction) -> Result<Self> {
-		let (ns, db) = opt.ns_db()?;
+	async fn new(ctx: &Context, opt: &Options, table: &Table, tx: &Transaction) -> Result<Self> {
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		let indexes = tx.all_tb_indexes(ns, db, table).await?;
 		let fields = tx.all_tb_fields(ns, db, table, None).await?;
 		Ok(Self {

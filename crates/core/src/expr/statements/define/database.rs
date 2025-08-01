@@ -1,3 +1,4 @@
+use crate::catalog::DatabaseDefinition;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -39,12 +40,16 @@ impl DefineDatabaseStatement {
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
+
 		// Get the NS
 		let ns = opt.ns()?;
+
 		// Fetch the transaction
 		let txn = ctx.tx();
+		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
+
 		// Check if the definition exists
-		if txn.get_db(ns, &self.name).await.is_ok() {
+		let database_id = if let Some(db) = txn.get_db_by_name(ns, &self.name).await? {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite && !opt.import {
@@ -52,30 +57,45 @@ impl DefineDatabaseStatement {
 					name: self.name.to_string(),
 				});
 			}
-		}
-		// Process the statement
-		let key = crate::key::namespace::db::new(ns, &self.name);
-		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
+
+			db.database_id
+		} else {
+			txn.lock().await.get_next_db_id(nsv.namespace_id).await?
+		};
+
+		
+		let database_id = txn.lock().await.get_next_db_id(nsv.namespace_id).await?;
+		
+		// Set the database definition, keyed by namespace name and database name.
+		let catalog_key = crate::key::catalog::db::new(ns, &self.name);
+		let db_def = DatabaseDefinition {
+			namespace_id: nsv.namespace_id,
+			database_id,
+			name: self.name.to_raw(),
+			comment: self.comment.clone().map(|s| s.to_raw()),
+			changefeed: self.changefeed.clone(),
+		};
 		txn.set(
-			&key,
-			&DefineDatabaseStatement {
-				id: match (self.id, nsv.id) {
-					(Some(id), _) => Some(id),
-					(None, Some(nsv_id)) => Some(txn.lock().await.get_next_db_id(nsv_id).await?),
-					(None, None) => None,
-				},
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
-				..self.clone()
-			},
+			&catalog_key,
+			&db_def,
 			None,
 		)
 		.await?;
+
+		// Set the database definition, keyed by namespace ID and database ID.
+		let key = crate::key::namespace::db::new(nsv.namespace_id, database_id);
+		txn.set(
+			&key,
+			&db_def,
+			None,
+		)
+		.await?;
+
 		// Clear the cache
-		if let Some(cache) = ctx.get_cache() {
-			cache.clear();
-		}
+		// TODO: STU: Do we need to clear the cache now that we're ID based?
+		// if let Some(cache) = ctx.get_cache() {
+		// 	cache.clear();
+		// }
 		// Clear the cache
 		txn.clear();
 		// Ok all good

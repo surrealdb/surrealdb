@@ -28,43 +28,52 @@ impl RemoveDatabaseStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
 		// Get the transaction
 		let txn = ctx.tx();
+
 		let ns = opt.ns()?;
+		let db = match txn.get_db_by_name(ns, &self.name).await? {
+			Some(x) => x,
+			None => {
+				if self.if_exists {
+					return Ok(Value::None);
+				} else {
+					return Err(Error::DbNotFound {
+						name: self.name.to_string(),
+					}.into());
+				}
+			}
+		};
+
 		// Remove the index stores
 		#[cfg(not(target_family = "wasm"))]
 		ctx.get_index_stores()
-			.database_removed(ctx.get_index_builder(), &txn, ns, &self.name)
+			.database_removed(ctx.get_index_builder(), &txn, db.namespace_id, db.database_id)
 			.await?;
 		#[cfg(target_family = "wasm")]
 		ctx.get_index_stores().database_removed(&txn, opt.ns()?, &self.name).await?;
 		// Remove the sequences
 		if let Some(seq) = ctx.get_sequences() {
-			seq.database_removed(&txn, ns, &self.name).await?;
+			seq.database_removed(&txn, db.namespace_id, db.database_id).await?;
 		}
-		// Get the definition
-		let db = match txn.get_db(ns, &self.name).await {
-			Ok(x) => x,
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::DbNotFound { .. })) {
-					return Ok(Value::None);
-				} else {
-					return Err(e);
-				}
-			}
-		};
+
 		// Delete the definition
-		let key = crate::key::namespace::db::new(ns, &db.name);
+		let key = crate::key::namespace::db::new(db.namespace_id, db.database_id);
 		if self.expunge {
 			txn.clr(&key).await?
 		} else {
 			txn.del(&key).await?
 		};
 		// Delete the resource data
-		let key = crate::key::database::all::new(ns, &db.name);
+		let key = crate::key::database::all::new(db.namespace_id, db.database_id);
 		if self.expunge {
 			txn.clrp(&key).await?
 		} else {
 			txn.delp(&key).await?
 		};
+
+		// Delete the catalog entry
+		let key = crate::key::catalog::db::new(ns, &self.name);
+		txn.del(&key).await?;
+
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
 			cache.clear();

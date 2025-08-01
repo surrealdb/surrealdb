@@ -1,4 +1,5 @@
 //! Stores the key prefix for all keys under a namespace access method
+use crate::catalog::NamespaceId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
@@ -9,7 +10,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct AccessRoot<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
 	pub ac: &'a str,
 }
@@ -18,7 +19,7 @@ impl KVKey for AccessRoot<'_> {
 	type ValueType = Vec<u8>;
 }
 
-pub fn new<'a>(ns: &'a str, ac: &'a str) -> AccessRoot<'a> {
+pub fn new<'a>(ns: NamespaceId, ac: &'a str) -> AccessRoot<'a> {
 	AccessRoot::new(ns, ac)
 }
 
@@ -29,7 +30,7 @@ impl Categorise for AccessRoot<'_> {
 }
 
 impl<'a> AccessRoot<'a> {
-	pub fn new(ns: &'a str, ac: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, ac: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

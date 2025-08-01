@@ -3,12 +3,14 @@ use std::fmt::{Display, Formatter};
 use serde::{Deserialize, Serialize};
 use revision::{revisioned, Revisioned};
 
-use crate::expr::ChangeFeed;
+use crate::{catalog::NamespaceId, expr::{statements::info::InfoStructure, ChangeFeed, Value}, kvs::impl_kv_value_revisioned, sql::ToSql};
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(transparent)]
-pub struct DatabaseId(pub u16);
+pub struct DatabaseId(pub u32);
+
+impl_kv_value_revisioned!(DatabaseId);
 
 impl Revisioned for DatabaseId {
     fn revision() -> u16 {
@@ -40,8 +42,25 @@ impl Display for DatabaseId {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DatabaseDefinition {
+	pub namespace_id: NamespaceId,
 	pub database_id: DatabaseId,
 	pub name: String,
 	pub comment: Option<String>,
 	pub changefeed: Option<ChangeFeed>,
+}
+impl_kv_value_revisioned!(DatabaseDefinition);
+
+impl ToSql for DatabaseDefinition {
+	fn to_sql(&self) -> String {
+		format!("DEFINE DATABASE {} {}", self.name, self.comment.as_ref().map(|c| format!("COMMENT {}", c)).unwrap_or_default())
+	}
+}
+
+impl InfoStructure for DatabaseDefinition {
+	fn structure(self) -> Value {
+		Value::from(map! {
+			"name".to_string() => self.name.into(),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
+	}
 }

@@ -1,5 +1,6 @@
 use super::key::Key;
 use crate::expr::id::Id;
+use crate::catalog::{NamespaceId, DatabaseId};
 use quick_cache::Equivalent;
 use uuid::Uuid;
 
@@ -16,47 +17,47 @@ pub(crate) enum Lookup<'a> {
 	/// A cache key for namespaces
 	Nss,
 	/// A cache key for namespace users
-	Nus(&'a str),
+	Nus(NamespaceId),
 	/// A cache key for namespace accesses
-	Nas(&'a str),
+	Nas(NamespaceId),
 	/// A cache key for namespace access grants
-	Ngs(&'a str, &'a str),
+	Ngs(NamespaceId, &'a str),
 	/// A cache key for databases
-	Dbs(&'a str),
+	Dbs(NamespaceId),
 	/// A cache key for database users
-	Dus(&'a str, &'a str),
+	Dus(NamespaceId, DatabaseId),
 	/// A cache key for database accesses
-	Das(&'a str, &'a str),
+	Das(NamespaceId, DatabaseId),
 	/// A cache key for database access grants
-	Dgs(&'a str, &'a str, &'a str),
+	Dgs(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for apis (on a database)
-	Aps(&'a str, &'a str),
+	Aps(NamespaceId, DatabaseId),
 	/// A cache key for analyzers (on a database)
-	Azs(&'a str, &'a str),
+	Azs(NamespaceId, DatabaseId),
 	/// A cache key for buckets (on a database)
-	Bus(&'a str, &'a str),
+	Bus(NamespaceId, DatabaseId),
 	/// A cache key for functions (on a database)
-	Fcs(&'a str, &'a str),
+	Fcs(NamespaceId, DatabaseId),
 	/// A cache key for models (on a database)
-	Mls(&'a str, &'a str),
+	Mls(NamespaceId, DatabaseId),
 	/// A cache key for configs (on a database)
-	Cgs(&'a str, &'a str),
+	Cgs(NamespaceId, DatabaseId),
 	/// A cache key for parameters (on a database)
-	Pas(&'a str, &'a str),
+	Pas(NamespaceId, DatabaseId),
 	/// A cache key for sequences (on a database)
-	Sqs(&'a str, &'a str),
+	Sqs(NamespaceId, DatabaseId),
 	/// A cache key for tables
-	Tbs(&'a str, &'a str),
+	Tbs(NamespaceId, DatabaseId),
 	/// A cache key for events (on a table)
-	Evs(&'a str, &'a str, &'a str),
+	Evs(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for fields (on a table)
-	Fds(&'a str, &'a str, &'a str),
+	Fds(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for views (on a table)
-	Fts(&'a str, &'a str, &'a str),
+	Fts(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for indexes (on a table)
-	Ixs(&'a str, &'a str, &'a str),
+	Ixs(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for live queries (on a table)
-	Lvs(&'a str, &'a str, &'a str),
+	Lvs(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a node
 	Nd(Uuid),
 	/// A cache key for a root user
@@ -66,47 +67,53 @@ pub(crate) enum Lookup<'a> {
 	/// A cache key for a root access grant
 	Rg(&'a str, &'a str),
 	/// A cache key for a namespace
-	Ns(&'a str),
+	NsByName(&'a str),
+	/// A cache key for a namespace by id.
+	NsById(NamespaceId),
 	/// A cache key for a namespace user
-	Nu(&'a str, &'a str),
+	Nu(NamespaceId, &'a str),
 	/// A cache key for a namespace access
-	Na(&'a str, &'a str),
+	Na(NamespaceId, &'a str),
 	/// A cache key for a namespace access grant
-	Ng(&'a str, &'a str, &'a str),
-	/// A cache key for a database
-	Db(&'a str, &'a str),
+	Ng(NamespaceId, &'a str, &'a str),
+	/// A cache key for a database by id.
+	DbById(NamespaceId, DatabaseId),
+	/// A cache key for a database by name.
+	DbByName(&'a str, &'a str),
 	/// A cache key for a database user
-	Du(&'a str, &'a str, &'a str),
+	Du(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a database access
-	Da(&'a str, &'a str, &'a str),
+	Da(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a database access grant
-	Dg(&'a str, &'a str, &'a str, &'a str),
+	Dg(NamespaceId, DatabaseId, &'a str, &'a str),
 	/// A cache key for an api (on a database)
-	Ap(&'a str, &'a str, &'a str),
+	Ap(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for an analyzer (on a database)
-	Az(&'a str, &'a str, &'a str),
+	Az(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a bucket (on a database)
-	Bu(&'a str, &'a str, &'a str),
+	Bu(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a function (on a database)
-	Fc(&'a str, &'a str, &'a str),
+	Fc(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a model (on a database)
-	Ml(&'a str, &'a str, &'a str, &'a str),
+	Ml(NamespaceId, DatabaseId, &'a str, &'a str),
 	/// A cache key for a config (on a database)
-	Cg(&'a str, &'a str, &'a str),
+	Cg(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a parameter (on a database)
-	Pa(&'a str, &'a str, &'a str),
+	Pa(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a sequence (on a database)
-	Sq(&'a str, &'a str, &'a str),
-	/// A cache key for a table
-	Tb(&'a str, &'a str, &'a str),
+	Sq(NamespaceId, DatabaseId, &'a str),
+	/// A cache key for a table by id.
+	TbById(NamespaceId, DatabaseId, &'a str),
+	/// A cache key for a table by name.
+	TbByName(&'a str, &'a str, &'a str),
 	/// A cache key for an event (on a table)
-	Ev(&'a str, &'a str, &'a str, &'a str),
+	Ev(NamespaceId, DatabaseId, &'a str, &'a str),
 	/// A cache key for a field (on a table)
-	Fd(&'a str, &'a str, &'a str, &'a str),
+	Fd(NamespaceId, DatabaseId, &'a str, &'a str),
 	/// A cache key for an index (on a table)
-	Ix(&'a str, &'a str, &'a str, &'a str),
+	Ix(NamespaceId, DatabaseId, &'a str, &'a str),
 	/// A cache key for a record
-	Record(&'a str, &'a str, &'a str, &'a Id),
+	Record(NamespaceId, DatabaseId, &'a str, &'a Id),
 }
 
 impl Equivalent<Key> for Lookup<'_> {
@@ -144,11 +151,13 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Ru(la), Key::Ru(ka)) => la == ka,
 			(Self::Ra(la), Key::Ra(ka)) => la == ka,
 			(Self::Rg(la, lb), Key::Rg(ka, kb)) => la == ka && lb == kb,
-			(Self::Ns(la), Key::Ns(ka)) => la == ka,
+			(Self::NsById(la), Key::NsById(ka)) => la == ka,
+			(Self::NsByName(la), Key::NsByName(ka)) => la == ka,
 			(Self::Nu(la, lb), Key::Nu(ka, kb)) => la == ka && lb == kb,
 			(Self::Na(la, lb), Key::Na(ka, kb)) => la == ka && lb == kb,
 			(Self::Ng(la, lb, lc), Key::Ng(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
-			(Self::Db(la, lb), Key::Db(ka, kb)) => la == ka && lb == kb,
+			(Self::DbById(la, lb), Key::DbById(ka, kb)) => la == ka && lb == kb,
+			(Self::DbByName(la, lb), Key::DbByName(ka, kb)) => la == ka && lb == kb,
 			(Self::Du(la, lb, lc), Key::Du(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Da(la, lb, lc), Key::Da(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Dg(la, lb, lc, ld), Key::Dg(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
@@ -159,7 +168,9 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Ml(la, lb, lc, ld), Key::Ml(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
 			(Self::Cg(la, lb, lc), Key::Cg(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Pa(la, lb, lc), Key::Pa(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
-			(Self::Tb(la, lb, lc), Key::Tb(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
+			(Self::Sq(la, lb, lc), Key::Sq(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
+			(Self::TbById(la, lb, lc), Key::TbById(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
+			(Self::TbByName(la, lb, lc), Key::TbByName(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Ev(la, lb, lc, ld), Key::Ev(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
 			(Self::Fd(la, lb, lc, ld), Key::Fd(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
 			(Self::Ix(la, lb, lc, ld), Key::Ix(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
@@ -168,4 +179,13 @@ impl Equivalent<Key> for Lookup<'_> {
 			_ => false,
 		}
 	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	use rstest::rstest;
+
+	// TODO: STU: Add tests for the code above.
 }

@@ -1,4 +1,6 @@
 //! Stores BTree nodes for postings
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::idx::trees::btree::BState;
 use crate::idx::trees::store::NodeId;
 use crate::key::category::Categorise;
@@ -11,9 +13,9 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct BpRoot<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -34,7 +36,7 @@ impl KVKey for BpRoot<'_> {
 }
 
 impl<'a> BpRoot<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -56,9 +58,9 @@ impl<'a> BpRoot<'a> {
 pub(crate) struct Bp<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -80,7 +82,7 @@ impl KVKey for Bp<'_> {
 }
 
 impl<'a> Bp<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, node_id: NodeId) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, node_id: NodeId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -105,7 +107,7 @@ mod tests {
 
 	#[test]
 	fn root() {
-		let val = BpRoot::new("testns", "testdb", "testtb", "testix");
+		let val = BpRoot::new(NamespaceId(1), DatabaseId(2), "testtb", "testix");
 		let enc = BpRoot::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bp");
 	}
@@ -114,8 +116,8 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let val = Bp::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 			7

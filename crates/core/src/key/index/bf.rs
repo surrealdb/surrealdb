@@ -1,4 +1,5 @@
 //! Stores Term/Doc frequency
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::idx::ft::TermFrequency;
 use crate::idx::ft::search::terms::TermId;
@@ -12,9 +13,9 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct Bf<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -38,8 +39,8 @@ impl Categorise for Bf<'_> {
 
 impl<'a> Bf<'a> {
 	pub fn new(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
 		term_id: TermId,

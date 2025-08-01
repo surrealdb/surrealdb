@@ -172,10 +172,22 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating with record access method `{}`", ac);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
+			let db_def = match tx.get_db_by_name(&ns, &db).await? {
+				Some(db) => db,
+				None => return Err(Error::DbNotFound {
+					name: db.to_string(),
+				}.into()),
+			};
 			// Parse the record id
 			let mut rid: Thing = syn::thing(id)?.into();
 			// Get the database access method
-			let de = tx.get_db_access(ns, db, ac).await?;
+			let Some(de) = tx.get_db_access(db_def.namespace_id, db_def.database_id, &ac).await? else {
+				return Err(Error::AccessDbNotFound {
+					ac: ac.to_string(),
+					ns: ns.to_string(),
+					db: db.to_string(),
+				}.into());
+			};
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
@@ -235,10 +247,26 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to database `{}` with access method `{}`", db, ac);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
+			let db_def = match tx.get_db_by_name(&ns, &db).await? {
+				Some(db) => db,
+				None => return Err(Error::DbNotFound {
+					name: db.to_string(),
+				}.into()),
+			};
+
 			// Get the database access method
-			let de = tx.get_db_access(ns, db, ac).await?;
+			let de = tx.get_db_access(db_def.namespace_id, db_def.database_id, &ac).await?;
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
+
+			let Some(de) = de else {
+				return Err(Error::AccessDbNotFound {
+					ac: ac.to_string(),
+					ns: ns.to_string(),
+					db: db.to_string(),
+				}.into());
+			};
+
 			// Obtain the configuration to verify the token based on the access method
 			match &de.kind {
 				// If the access type is Jwt or Bearer, this is database access
@@ -359,11 +387,21 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to database `{}` with user `{}`", db, id);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
+			let db_def = match tx.get_db_by_name(&ns, &db).await? {
+				Some(db) => db,
+				None => return Err(Error::DbNotFound {
+					name: db.to_string(),
+				}.into()),
+			};
+
 			// Get the database user
-			let de = tx.get_db_user(ns, db, id).await.map_err(|e| {
+			let de = match tx.get_db_user(db_def.namespace_id, db_def.database_id, id).await.map_err(|e| {
 				debug!("Error while authenticating to database `{db}`: {e}");
 				Error::InvalidAuth
-			})?;
+			})? {
+				Some(de) => de,
+				None => return Err(Error::InvalidAuth.into()),
+			};
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Check the algorithm
@@ -397,10 +435,25 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to namespace `{}` with access method `{}`", ns, ac);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
+			let ns_def = match tx.get_ns_by_name(&ns).await? {
+				Some(ns) => ns,
+				None => return Err(Error::NsNotFound {
+					name: ns.to_string(),
+				}.into()),
+			};
+
 			// Get the namespace access method
-			let de = tx.get_ns_access(ns, ac).await?;
+			let de = tx.get_ns_access(ns_def.namespace_id, &ac).await?;
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
+
+			let Some(de) = de else {
+				return Err(Error::AccessNsNotFound {
+					ac: ac.to_string(),
+					ns: ns.to_string(),
+				}.into());
+			};
+
 			// Obtain the configuration to verify the token based on the access method
 			let cf = match &de.kind {
 				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.kind.jwt().verify {
@@ -467,8 +520,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to namespace `{}` with user `{}`", ns, id);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
+			let ns_def = match tx.get_ns_by_name(&ns).await? {
+				Some(ns) => ns,
+				None => return Err(Error::NsNotFound {
+					name: ns.to_string(),
+				}.into()),
+			};
 			// Get the namespace user
-			let de = tx.get_ns_user(ns, id).await.map_err(|e| {
+			let de = tx.expect_ns_user(ns_def.namespace_id, id).await.map_err(|e| {
 				debug!("Error while authenticating to namespace `{ns}`: {e}");
 				Error::InvalidAuth
 			})?;
@@ -505,8 +564,16 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace access method
 			let de = tx.get_root_access(ac).await?;
+			
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
+
+			let Some(de) = de else {
+				return Err(Error::AccessRootNotFound {
+					ac: ac.to_string(),
+				}.into());
+			};
+
 			// Obtain the configuration to verify the token based on the access method
 			let cf = match &de.kind {
 				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.kind.jwt().verify {
@@ -568,7 +635,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace user
-			let de = tx.get_root_user(id).await.map_err(|e| {
+			let de = tx.expect_root_user(id).await.map_err(|e| {
 				debug!("Error while authenticating to root: {e}");
 				Error::InvalidAuth
 			})?;
@@ -606,7 +673,7 @@ pub async fn verify_root_creds(
 	// Create a new readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
-	let user = tx.get_root_user(user).await.map_err(|e| {
+	let user = tx.expect_root_user(user).await.map_err(|e| {
 		debug!("Error retrieving user for authentication to root: {e}");
 		Error::InvalidAuth
 	})?;
@@ -628,8 +695,15 @@ pub async fn verify_ns_creds(
 ) -> Result<DefineUserStatement> {
 	// Create a new readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await?;
+	let ns_def = match tx.get_ns_by_name(&ns).await? {
+		Some(ns) => ns,
+		None => return Err(Error::NsNotFound {
+			name: ns.to_string(),
+		}.into()),
+	};
+
 	// Fetch the specified user from storage
-	let user = tx.get_ns_user(ns, user).await.map_err(|e| {
+	let user = tx.expect_ns_user(ns_def.namespace_id, user).await.map_err(|e| {
 		debug!("Error retrieving user for authentication to namespace `{ns}`: {e}");
 		Error::InvalidAuth
 	})?;
@@ -652,8 +726,14 @@ pub async fn verify_db_creds(
 ) -> Result<DefineUserStatement> {
 	// Create a new readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await?;
+	let db_def = match tx.get_db_by_name(&ns, &db).await? {
+		Some(db) => db,
+		None => return Err(Error::DbNotFound {
+			name: db.to_string(),
+		}.into()),
+	};
 	// Fetch the specified user from storage
-	let user = tx.get_db_user(ns, db, user).await.map_err(|e| {
+	let user = tx.expect_db_user(db_def.namespace_id, db_def.database_id, user).await.map_err(|e| {
 		debug!("Error retrieving user for authentication to database `{ns}/{db}`: {e}");
 		Error::InvalidAuth
 	})?;

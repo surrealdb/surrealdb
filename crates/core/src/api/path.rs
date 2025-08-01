@@ -8,12 +8,9 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-	err::Error,
-	expr::{
-		Kind, Object, Value,
-		fmt::{Fmt, fmt_separated_by},
-	},
-	syn,
+	err::Error, expr::{
+		fmt::{fmt_separated_by, Fmt}, Kind, Object, Value
+	}, sql::ToSql, syn
 };
 
 #[revisioned(revision = 1)]
@@ -275,7 +272,7 @@ impl Display for Segment {
 			Self::Dynamic(v, k) => {
 				write!(f, ":{v}")?;
 				if let Some(k) = k {
-					write!(f, "<{k}>")?;
+					write!(f, "<{}>", k.to_sql())?;
 				}
 
 				Ok(())

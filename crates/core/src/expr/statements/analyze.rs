@@ -41,7 +41,8 @@ impl AnalyzeStatement {
 					Index::Search(p) => {
 						let ft = SearchIndex::new(
 							ctx,
-							opt,
+							ns,
+							db,
 							p.az.as_str(),
 							ikb,
 							p,

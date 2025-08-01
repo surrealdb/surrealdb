@@ -1,4 +1,6 @@
 //! Stores Things of an HNSW index
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::expr::Id;
 use crate::kvs::KVKey;
 
@@ -8,9 +10,9 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct Hi<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -26,7 +28,7 @@ impl KVKey for Hi<'_> {
 }
 
 impl<'a> Hi<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: Id) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, id: Id) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -51,7 +53,7 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Hi::new("testns", "testdb", "testtb", "testix", Id::String("testid".to_string()));
+		let val = Hi::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", Id::String("testid".to_string()));
 		let enc = Hi::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

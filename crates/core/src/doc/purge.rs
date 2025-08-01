@@ -104,9 +104,13 @@ impl Document {
 					yield_now!();
 					// Decode the key
 					let key = res?;
-					let r#ref = Ref::decode_key(&key)?;
+					let ref_key = Ref::decode_key(&key)?;
 					// Obtain the remote field definition
-					let fd = txn.get_tb_field(ns, db, r#ref.ft, r#ref.ff).await?;
+					let Some(fd) = txn.get_tb_field(ns, db, ref_key.ft, ref_key.ff).await? else {
+						return Err(Error::FdNotFound {
+							name: ref_key.ff.to_string(),
+						}.into());
+					};
 					// Check if there is a reference defined on the field
 					if let Some(reference) = &fd.reference {
 						match &reference.on_delete {
@@ -115,8 +119,8 @@ impl Document {
 							// Reject the delete operation, as indicated by the reference
 							ReferenceDeleteStrategy::Reject => {
 								let thing = Thing {
-									tb: r#ref.ft.to_string(),
-									id: r#ref.fk.clone(),
+									tb: ref_key.ft.to_string(),
+									id: ref_key.fk.clone(),
 								};
 
 								bail!(Error::DeleteRejectedByReference(
@@ -127,8 +131,8 @@ impl Document {
 							// Delete the remote record which referenced this record
 							ReferenceDeleteStrategy::Cascade => {
 								let thing = Thing {
-									tb: r#ref.ft.to_string(),
-									id: r#ref.fk.clone(),
+									tb: ref_key.ft.to_string(),
+									id: ref_key.fk.clone(),
 								};
 
 								// Setup the delete statement
@@ -147,8 +151,8 @@ impl Document {
 							// Delete only the reference on the remote record
 							ReferenceDeleteStrategy::Unset => {
 								let thing = Thing {
-									tb: r#ref.ft.to_string(),
-									id: r#ref.fk.clone(),
+									tb: ref_key.ft.to_string(),
+									id: ref_key.fk.clone(),
 								};
 
 								// Determine how we perform the update
@@ -184,8 +188,8 @@ impl Document {
 								let reference = Value::from(rid.as_ref().clone());
 								// Value for the document is the remote record
 								let this = Thing {
-									tb: r#ref.ft.to_string(),
-									id: r#ref.fk.clone(),
+									tb: ref_key.ft.to_string(),
+									id: ref_key.fk.clone(),
 								};
 
 								// Set the `$reference` variable in the context

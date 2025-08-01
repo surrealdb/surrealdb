@@ -1,4 +1,6 @@
 //! Stores a DEFINE API definition
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::expr::statements::define::ApiDefinition;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
@@ -11,9 +13,9 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct Ap<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	_d: u8,
 	_e: u8,
@@ -24,17 +26,17 @@ impl KVKey for Ap<'_> {
 	type ValueType = ApiDefinition;
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str, ap: &'a str) -> Ap<'a> {
+pub fn new<'a>(ns: NamespaceId, db: DatabaseId, ap: &'a str) -> Ap<'a> {
 	Ap::new(ns, db, ap)
 }
 
-pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
+pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"!ap\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>> {
+pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"!ap\xff");
 	Ok(k)
@@ -47,7 +49,7 @@ impl Categorise for Ap<'_> {
 }
 
 impl<'a> Ap<'a> {
-	pub fn new(ns: &'a str, db: &'a str, ap: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, ap: &'a str) -> Self {
 		Self {
 			__: b'/', // /
 			_a: b'*', // *

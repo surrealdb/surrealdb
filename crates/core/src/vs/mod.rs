@@ -20,6 +20,7 @@ use revision::Revisioned;
 /// 327680
 /// 393216
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, PartialOrd)]
+#[repr(transparent)]
 pub struct VersionStamp([u8; 10]);
 
 impl KVValue for VersionStamp {

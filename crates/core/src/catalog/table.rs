@@ -1,6 +1,6 @@
-
 use std::fmt::Display;
 
+use crate::{catalog::{DatabaseId, NamespaceId}, kvs::impl_kv_value_revisioned, sql::ToSql};
 use revision::{revisioned, Revisioned};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -10,6 +10,8 @@ use crate::{catalog::ViewDefinition, expr::{statements::info::InfoStructure, Cha
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(transparent)]
 pub struct TableId(pub u32);
+
+impl_kv_value_revisioned!(TableId);
 
 impl Revisioned for TableId {
     fn revision() -> u16 {
@@ -36,7 +38,10 @@ impl Revisioned for TableId {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct TableDefinition {
+    pub namespace_id: NamespaceId,
+    pub database_id: DatabaseId,
 	pub table_id: TableId,
+
 	pub name: String,
 	pub drop: bool,
 	pub schemafull: bool,
@@ -56,7 +61,35 @@ pub struct TableDefinition {
 	pub cache_indexes_ts: Uuid,
 }
 
+impl_kv_value_revisioned!(TableDefinition);
+
 impl TableDefinition {
+    pub fn new(namespace_id: NamespaceId, database_id: DatabaseId, table_id: TableId, name: String) -> Self {
+        let now = Uuid::now_v7();
+        Self {
+            namespace_id,
+            database_id,
+            table_id,
+            name,
+            drop: false,
+            schemafull: false,
+            view: None,
+            permissions: Permissions::default(),
+            changefeed: None,
+            comment: None,
+            kind: TableKind::Normal,
+            cache_fields_ts: now,
+            cache_events_ts: now,
+            cache_tables_ts: now,
+            cache_indexes_ts: now,
+        }
+    }
+
+    pub fn with_changefeed(mut self, changefeed: ChangeFeed) -> Self {
+        self.changefeed = Some(changefeed);
+        self
+    }
+
     /// Checks if this table allows normal records / documents
 	pub fn allows_normal(&self) -> bool {
 		matches!(self.kind, TableKind::Normal | TableKind::Any)
@@ -64,6 +97,27 @@ impl TableDefinition {
     /// Checks if this table allows graph edges / relations
 	pub fn allows_relation(&self) -> bool {
 		matches!(self.kind, TableKind::Relation(_) | TableKind::Any)
+	}
+}
+
+impl ToSql for TableDefinition {
+    fn to_sql(&self) -> String {
+        format!("DEFINE TABLE {} {}", self.name, self.kind.to_sql())
+    }
+}
+
+impl InfoStructure for TableDefinition {
+	fn structure(self) -> Value {
+		Value::from(map! {
+			"name".to_string() => self.name.into(),
+			"drop".to_string() => self.drop.into(),
+			"schemafull".to_string() => self.schemafull.into(),
+			"kind".to_string() => self.kind.structure(),
+			"view".to_string(), if let Some(v) = self.view => v.structure(),
+			"changefeed".to_string(), if let Some(v) = self.changefeed => v.structure(),
+			"permissions".to_string() => self.permissions.structure(),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
 	}
 }
 
@@ -79,29 +133,30 @@ pub enum TableKind {
 	Relation(Relation),
 }
 
-impl Display for TableKind {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl ToSql for TableKind {
+	fn to_sql(&self) -> String {
+        let mut sql = String::new();
 		match self {
 			TableKind::Normal => {
-				f.write_str(" NORMAL")?;
+				sql.push_str("NORMAL");
 			}
 			TableKind::Relation(rel) => {
-				f.write_str(" RELATION")?;
+				sql.push_str("RELATION");
 				if let Some(kind) = &rel.from {
-					write!(f, " IN {kind}")?;
+					sql.push_str(&format!(" IN {}", kind.to_sql()));
 				}
 				if let Some(kind) = &rel.to {
-					write!(f, " OUT {kind}")?;
+					sql.push_str(&format!(" OUT {}", kind.to_sql()));
 				}
 				if rel.enforced {
-					write!(f, " ENFORCED")?;
+					sql.push_str(" ENFORCED");
 				}
 			}
 			TableKind::Any => {
-				f.write_str(" ANY")?;
+				sql.push_str("ANY");
 			}
 		}
-		Ok(())
+		sql
 	}
 }
 

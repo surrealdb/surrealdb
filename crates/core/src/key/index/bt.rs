@@ -1,4 +1,6 @@
 //! Stores BTree nodes for terms
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::idx::ft::search::terms::SearchTermsState;
 use crate::idx::trees::store::NodeId;
 use crate::key::category::Categorise;
@@ -11,9 +13,9 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct BtRoot<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -34,7 +36,7 @@ impl Categorise for BtRoot<'_> {
 }
 
 impl<'a> BtRoot<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -56,9 +58,9 @@ impl<'a> BtRoot<'a> {
 pub(crate) struct Bt<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -80,7 +82,7 @@ impl Categorise for Bt<'_> {
 }
 
 impl<'a> Bt<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, node_id: NodeId) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, node_id: NodeId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -107,8 +109,8 @@ mod tests {
 	fn root() {
 		#[rustfmt::skip]
 		let val = BtRoot::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 		);
@@ -120,8 +122,8 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let val = Bt::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 			7

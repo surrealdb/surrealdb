@@ -113,7 +113,7 @@ impl FullTextIndex {
 		ikb: IndexKeyBase,
 		p: &FullTextParams,
 	) -> Result<Self> {
-		let az = tx.get_db_analyzer(&ikb.0.ns, &ikb.0.db, &p.analyzer).await?;
+		let az = tx.get_db_analyzer(ikb.0.ns, ikb.0.db, &p.analyzer).await?;
 		ixs.mappers().check(&az).await?;
 		Self::with_analyzer(nid, ixs, az, ikb, p)
 	}
@@ -871,7 +871,8 @@ impl Scorer {
 #[cfg(test)]
 mod tests {
 	use super::{FullTextIndex, TermDocument};
-	use crate::ctx::{Context, MutableContext};
+	use crate::catalog::{DatabaseId, NamespaceId};
+use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
 	use crate::expr::index::FullTextParams;
 	use crate::expr::statements::DefineAnalyzerStatement;
@@ -943,7 +944,7 @@ mod tests {
 				highlight: true,
 			});
 			let nid = Uuid::from_u128(1);
-			let ikb = IndexKeyBase::new("testns", "testdb", "t", "i");
+			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t", "i");
 			let opt = Options::default()
 				.with_id(nid)
 				.with_ns(Some("testns".into()))

@@ -1,5 +1,5 @@
 //! Stores Vector of an HNSW index
-use crate::idx::trees::hnsw::ElementId;
+use crate::{catalog::{DatabaseId, NamespaceId}, idx::trees::hnsw::ElementId};
 use crate::idx::trees::vector::SerializedVector;
 use crate::kvs::KVKey;
 
@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct He<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -27,7 +27,7 @@ impl KVKey for He<'_> {
 }
 
 impl<'a> He<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, element_id: ElementId) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, element_id: ElementId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -54,8 +54,8 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let val = He::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 			7

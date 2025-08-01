@@ -1,4 +1,6 @@
 //! Stores Things of an HNSW index
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::idx::trees::hnsw::docs::ElementDocs;
 use crate::idx::trees::vector::SerializedVector;
 use crate::kvs::KVKey;
@@ -11,9 +13,9 @@ use std::sync::Arc;
 pub(crate) struct Hv<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -30,8 +32,8 @@ impl KVKey for Hv<'_> {
 
 impl<'a> Hv<'a> {
 	pub fn new(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
 		vec: Arc<SerializedVector>,
@@ -61,8 +63,8 @@ mod tests {
 	#[test]
 	fn key() {
 		let val = Hv::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 			Arc::new(SerializedVector::I16(vec![2])),

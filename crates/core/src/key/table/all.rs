@@ -1,17 +1,15 @@
 //! Stores the key prefix for all keys under a table
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::catalog::{NamespaceId, DatabaseId};
+use crate::key::database::all::DatabaseRoot;
 use crate::kvs::KVKey;
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct TableRoot<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: &'a str,
-	_b: u8,
-	pub db: &'a str,
+	pub db_root: DatabaseRoot,
 	_c: u8,
 	pub tb: &'a str,
 }
@@ -20,7 +18,7 @@ impl KVKey for TableRoot<'_> {
 	type ValueType = Vec<u8>;
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> TableRoot<'a> {
+pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str) -> TableRoot<'a> {
 	TableRoot::new(ns, db, tb)
 }
 
@@ -31,13 +29,10 @@ impl Categorise for TableRoot<'_> {
 }
 
 impl<'a> TableRoot<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str) -> Self {
+	#[inline]
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str) -> Self {
 		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
+			db_root: DatabaseRoot::new(ns, db),
 			_c: b'*',
 			tb,
 		}

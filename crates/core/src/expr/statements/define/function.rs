@@ -46,7 +46,7 @@ impl DefineFunctionStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		if txn.get_db_function(ns, db, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
@@ -57,9 +57,12 @@ impl DefineFunctionStatement {
 			}
 		}
 		// Process the statement
+		{
+			let (ns, db) = opt.ns_db()?;
+			txn.get_or_add_db(ns, db, opt.strict).await?
+		};
+
 		let key = crate::key::database::fc::new(ns, db, &self.name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.set(
 			&key,
 			&DefineFunctionStatement {

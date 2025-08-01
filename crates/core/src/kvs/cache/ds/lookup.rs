@@ -6,7 +6,7 @@ use uuid::Uuid;
 #[derive(Hash, Eq, PartialEq)]
 pub(crate) enum Lookup<'a> {
 	/// A cache key for a database
-	Db(NamespaceId, DatabaseId),
+	Db(&'a str, &'a str),
 	/// A cache key for a table
 	Tb(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for events (on a table)

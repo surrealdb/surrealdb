@@ -1,3 +1,4 @@
+use crate::catalog::NamespaceDefinition;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -41,29 +42,39 @@ impl DefineNamespaceStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
-		if txn.get_ns(&self.name).await.is_ok() {
+		let namespace_id = if let Some(ns) = txn.get_ns_by_name(&self.name).await? {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
+			}
+
+			if !self.overwrite && !opt.import {
 				bail!(Error::NsAlreadyExists {
 					name: self.name.to_string(),
 				});
 			}
-		}
+			ns.namespace_id
+		} else {
+			txn.lock().await.get_next_ns_id().await?
+		};
+
 		// Process the statement
-		let key = crate::key::root::ns::new(&self.name);
+		let catalog_key = crate::key::catalog::ns::new(&self.name);
+		let ns_def = NamespaceDefinition {
+			namespace_id,
+			name: self.name.to_string(),
+			comment: self.comment.clone().map(|c| c.to_string()),
+		};
+		txn.set(
+			&catalog_key,
+			&ns_def,
+			None,
+		).await?;
+
+		
+		let key = crate::key::root::ns::new(namespace_id);
 		txn.set(
 			&key,
-			&DefineNamespaceStatement {
-				id: match self.id {
-					Some(id) => Some(id),
-					None => Some(txn.lock().await.get_next_ns_id().await?),
-				},
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
-				..self.clone()
-			},
+			&ns_def,
 			None,
 		)
 		.await?;
@@ -88,14 +99,5 @@ impl Display for DefineNamespaceStatement {
 			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineNamespaceStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
 	}
 }

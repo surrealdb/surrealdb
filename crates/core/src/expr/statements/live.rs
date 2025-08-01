@@ -95,17 +95,20 @@ impl LiveStatement {
 				// Store the current Node ID
 				stm.node = nid.into();
 				// Get the NS and DB
-				let (ns, db) = opt.ns_db()?;
+				let (ns, db) = ctx.get_ns_db_ids(opt)?;
 				// Store the live info
 				let lq = Live {
-					ns: ns.to_string(),
-					db: db.to_string(),
+					ns,
+					db,
 					tb: tb.to_string(),
 				};
 				// Get the transaction
 				let txn = ctx.tx();
 				// Ensure that the table definition exists
-				txn.ensure_ns_db_tb(ns, db, &tb, opt.strict).await?;
+				{
+					let (ns, db) = opt.ns_db()?;
+					txn.ensure_ns_db_tb(ns, db, &tb, opt.strict).await?;
+				}
 				// Insert the node live query
 				let key = crate::key::node::lq::new(nid, id);
 				txn.replace(&key, &lq).await?;

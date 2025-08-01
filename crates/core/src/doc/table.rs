@@ -1,3 +1,4 @@
+use crate::catalog::{TableDefinition, ViewDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::{Force, Statement};
@@ -40,9 +41,9 @@ enum FieldAction {
 }
 
 struct FieldDataContext<'a> {
-	ft: &'a DefineTableStatement,
+	ft: &'a TableDefinition,
 	act: FieldAction,
-	view: &'a View,
+	view: &'a ViewDefinition,
 	groups: &'a Groups,
 	group_ids: Vec<Value>,
 	doc: &'a CursorDoc,
@@ -206,7 +207,7 @@ impl Document {
 				None => {
 					// Set the current record id
 					let rid = Thing {
-						tb: ft.name.to_raw(),
+						tb: ft.name.clone(),
 						id: rid.id.clone(),
 					};
 					// Check if a WHERE clause is specified
@@ -332,7 +333,7 @@ impl Document {
 		let (set_ops, del_ops) = self.fields(stk, ctx, opt, &fdc).await?;
 		//
 		let thg = Thing {
-			tb: fdc.ft.name.to_raw(),
+			tb: fdc.ft.name.clone(),
 			id: fdc.group_ids.into(),
 		};
 		let what = Values(vec![Value::from(thg.clone())]);
@@ -416,7 +417,7 @@ impl Document {
 								val => {
 									bail!(Error::InvalidAggregation {
 										name: name.to_string(),
-										table: fdc.ft.name.to_raw(),
+										table: fdc.ft.name.clone(),
 										message: format!(
 											"This function expects a datetime but found {val}"
 										),
@@ -435,7 +436,7 @@ impl Document {
 								val => {
 									bail!(Error::InvalidAggregation {
 										name: name.to_string(),
-										table: fdc.ft.name.to_raw(),
+										table: fdc.ft.name.clone(),
 										message: format!(
 											"This function expects a datetime but found {val}"
 										),
@@ -454,7 +455,7 @@ impl Document {
 								val => {
 									bail!(Error::InvalidAggregation {
 										name: name.to_string(),
-										table: fdc.ft.name.to_raw(),
+										table: fdc.ft.name.clone(),
 										message: format!(
 											"This function expects a number but found {val}"
 										),
@@ -473,7 +474,7 @@ impl Document {
 								val => {
 									bail!(Error::InvalidAggregation {
 										name: name.to_string(),
-										table: fdc.ft.name.to_raw(),
+										table: fdc.ft.name.clone(),
 										message: format!(
 											"This function expects a number but found {val}"
 										),
@@ -492,7 +493,7 @@ impl Document {
 								val => {
 									bail!(Error::InvalidAggregation {
 										name: name.to_string(),
-										table: fdc.ft.name.to_raw(),
+										table: fdc.ft.name.clone(),
 										message: format!(
 											"This function expects a number but found {val}"
 										),
@@ -511,7 +512,7 @@ impl Document {
 								val => {
 									bail!(Error::InvalidAggregation {
 										name: name.to_string(),
-										table: fdc.ft.name.to_raw(),
+										table: fdc.ft.name.clone(),
 										message: format!(
 											"This function expects a number but found {val}"
 										),

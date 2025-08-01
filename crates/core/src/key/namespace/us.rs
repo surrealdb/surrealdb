@@ -1,4 +1,5 @@
 //! Stores a DEFINE USER ON NAMESPACE config definition
+use crate::catalog::NamespaceId;
 use crate::expr::statements::define::DefineUserStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
@@ -11,7 +12,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct Us<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
 	_c: u8,
 	_d: u8,
@@ -22,17 +23,17 @@ impl KVKey for Us<'_> {
 	type ValueType = DefineUserStatement;
 }
 
-pub fn new<'a>(ns: &'a str, user: &'a str) -> Us<'a> {
+pub fn new<'a>(ns: NamespaceId, user: &'a str) -> Us<'a> {
 	Us::new(ns, user)
 }
 
-pub fn prefix(ns: &str) -> Result<Vec<u8>> {
+pub fn prefix(ns: NamespaceId) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns).encode_key()?;
 	k.extend_from_slice(b"!us\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: &str) -> Result<Vec<u8>> {
+pub fn suffix(ns: NamespaceId) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns).encode_key()?;
 	k.extend_from_slice(b"!us\xff");
 	Ok(k)
@@ -45,7 +46,7 @@ impl Categorise for Us<'_> {
 }
 
 impl<'a> Us<'a> {
-	pub fn new(ns: &'a str, user: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, user: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -66,7 +67,7 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let val = Us::new(
-			"testns",
+			NamespaceId(1),
 			"testuser",
 		);
 		let enc = Us::encode_key(&val).unwrap();
@@ -75,13 +76,13 @@ mod tests {
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix("testns").unwrap();
+		let val = super::prefix(NamespaceId(1)).unwrap();
 		assert_eq!(val, b"/*testns\0!us\0");
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::suffix("testns").unwrap();
+		let val = super::suffix(NamespaceId(1)).unwrap();
 		assert_eq!(val, b"/*testns\0!us\xff");
 	}
 }

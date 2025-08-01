@@ -520,6 +520,10 @@ async fn export_file(
 	chn: async_channel::Sender<Vec<u8>>,
 	config: Option<DbExportConfig>,
 ) -> Result<()> {
+    let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
+
+
+
 	let res = match config {
 		Some(config) => kvs.export_with_config(sess, chn, config).await?.await,
 		None => kvs.export(sess, chn).await?.await,

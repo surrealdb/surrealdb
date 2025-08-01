@@ -71,7 +71,7 @@ impl RebuildIndexStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Get the index definition
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		let res = ctx.tx().get_tb_index(ns, db, &self.what, &self.name).await;
 		let ix = match res {
 			Ok(x) => x,

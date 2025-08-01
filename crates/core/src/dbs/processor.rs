@@ -149,7 +149,7 @@ impl Collected {
 	}
 
 	async fn process_range_key(key: Key) -> Result<Processed> {
-		let key = thing::Thing::decode_key(&key)?;
+		let key = thing::ThingKey::decode_key(&key)?;
 		let val = Value::Null;
 		let rid = Thing::from((key.tb, key.id));
 		// Create a new operable value
@@ -166,7 +166,7 @@ impl Collected {
 	}
 
 	async fn process_table_key(key: Key) -> Result<Processed> {
-		let key = thing::Thing::decode_key(&key)?;
+		let key = thing::ThingKey::decode_key(&key)?;
 		let rid = Thing::from((key.tb, key.id));
 		// Process the record
 		let pro = Processed {
@@ -194,9 +194,11 @@ impl Collected {
 			Operable::Value(Arc::new(Value::Null))
 		} else {
 			// Check that the table exists
-			let (ns, db) = ctx.get_ns_db_ids(opt)?;
-			txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
+			let (ns, db) = opt.ns_db()?;
+			txn.ensure_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
+
 			// Fetch the data from the store
+			let (ns, db) = ctx.get_ns_db_ids(opt)?;
 			let val = txn.get_record(ns, db, &v.tb, &v.id, None).await?;
 			// Create a new operable value
 			Operable::Relate(f, val, w, o.map(|v| v.into()))
@@ -224,9 +226,10 @@ impl Collected {
 			Arc::new(Value::Null)
 		} else {
 			// Check that the table exists
-			let (ns, db) = ctx.get_ns_db_ids(opt)?;
-			txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
+			let (ns, db) = opt.ns_db()?;
+			txn.ensure_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
 			// Fetch the data from the store
+			let (ns, db) = ctx.get_ns_db_ids(opt)?;
 			txn.get_record(ns, db, &v.tb, &v.id, opt.version).await?
 		};
 		// Parse the data from the store
@@ -253,8 +256,8 @@ impl Collected {
 		// if it is skippable we only need the record id
 		if !rid_only {
 			// Check that the table exists
-			let (ns, db) = ctx.get_ns_db_ids(opt)?;
-			txn.check_ns_db_tb(ns, db, &v, opt.strict).await?;
+			let (ns, db) = opt.ns_db()?;
+			txn.ensure_ns_db_tb(ns, db, &v, opt.strict).await?;
 		}
 		// Pass the value through
 		let pro = Processed {
@@ -288,8 +291,8 @@ impl Collected {
 		// if it is skippable we only need the record id
 		if !rid_only {
 			// Check that the table exists
-			let (ns, db) = ctx.get_ns_db_ids(opt)?;
-			txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
+			let (ns, db) = opt.ns_db()?;
+			txn.ensure_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
 		}
 		// Process the document record
 		let pro = Processed {
@@ -313,8 +316,8 @@ impl Collected {
 		// if it is skippable we only need the record id
 		if !rid_only {
 			// Check that the table exists
-			let (ns, db) = ctx.get_ns_db_ids(opt)?;
-			txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
+			let (ns, db) = opt.ns_db()?;
+			txn.ensure_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
 		}
 		// Process the document record
 		let pro = Processed {
@@ -329,7 +332,7 @@ impl Collected {
 	}
 
 	fn process_key_val(key: Key, val: Val) -> Result<Processed> {
-		let key = thing::Thing::decode_key(&key)?;
+		let key = thing::ThingKey::decode_key(&key)?;
 		let mut val: Value = revision::from_slice(&val)?;
 		let rid = Thing::from((key.tb, key.id));
 		// Inject the id field into the document
@@ -587,9 +590,10 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
-		txn.check_ns_db_tb(ns, db, v, opt.strict).await?;
+		let (ns, db) = opt.ns_db()?;
+		txn.ensure_ns_db_tb(ns, db, &v.0, opt.strict).await?;
 		// Prepare the start and end keys
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		let beg = thing::prefix(ns, db, v)?;
 		let end = thing::suffix(ns, db, v)?;
 		// Optionally skip keys
@@ -627,9 +631,10 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
-		txn.check_ns_db_tb(ns, db, v, opt.strict).await?;
+		let (ns, db) = opt.ns_db()?;
+		txn.ensure_ns_db_tb(ns, db, &v, opt.strict).await?;
 		// Prepare the start and end keys
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		let beg = thing::prefix(ns, db, v)?;
 		let end = thing::suffix(ns, db, v)?;
 		// Optionally skip keys
@@ -663,9 +668,10 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
-		txn.check_ns_db_tb(ns, db, v, opt.strict).await?;
+		let (ns, db) = opt.ns_db()?;
+		txn.ensure_ns_db_tb(ns, db, v, opt.strict).await?;
 		// Prepare the start and end keys
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		let beg = thing::prefix(ns, db, v)?;
 		let end = thing::suffix(ns, db, v)?;
 		// Create a new iterable range
@@ -684,9 +690,10 @@ pub(super) trait Collector {
 		r: IdRange,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		// Check that the table exists
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
-		txn.check_ns_db_tb(ns, db, tb, opt.strict).await?;
+		let (ns, db) = opt.ns_db()?;
+		txn.ensure_ns_db_tb(ns, db, tb, opt.strict).await?;
 		// Prepare the range start key
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		let beg = match &r.beg {
 			Bound::Unbounded => thing::prefix(ns, db, tb)?,
 			Bound::Included(v) => thing::new(ns, db, tb, v).encode_key()?,
@@ -850,7 +857,8 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		txn.check_ns_db_tb(ns, db, tb, opt.strict).await?;
+		// TODO: STU: can I remove this?
+		// txn.ensure_ns_db_tb(ns, db, tb, opt.strict).await?;
 		// Loop over the chosen edge types
 		for (beg, end) in keys.into_iter() {
 			// Create a new iterable range
@@ -882,10 +890,11 @@ pub(super) trait Collector {
 		rs: RecordStrategy,
 	) -> Result<()> {
 		// Check that the table exists
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
-		ctx.tx().check_ns_db_tb(ns, db, &table.0, opt.strict).await?;
+		let (ns, db) = opt.ns_db()?;
+		ctx.tx().ensure_ns_db_tb(ns, db, &table.0, opt.strict).await?;
 		if let Some(exe) = ctx.get_query_executor() {
-			if let Some(iterator) = exe.new_iterator(opt, irf).await? {
+			let (ns, db) = ctx.get_ns_db_ids(opt)?;
+			if let Some(iterator) = exe.new_iterator(ns, db, irf).await? {
 				let txn = ctx.tx();
 				match rs {
 					RecordStrategy::Count => {

@@ -1,4 +1,5 @@
 //! Stores a grant associated with an access method
+use crate::catalog::NamespaceId;
 use crate::expr::statements::AccessGrant;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
@@ -11,7 +12,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct Gr<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
 	pub ac: &'a str,
 	_c: u8,
@@ -24,17 +25,17 @@ impl KVKey for Gr<'_> {
 	type ValueType = AccessGrant;
 }
 
-pub fn new<'a>(ns: &'a str, ac: &'a str, gr: &'a str) -> Gr<'a> {
+pub fn new<'a>(ns: NamespaceId, ac: &'a str, gr: &'a str) -> Gr<'a> {
 	Gr::new(ns, ac, gr)
 }
 
-pub fn prefix(ns: &str, ac: &str) -> Result<Vec<u8>> {
+pub fn prefix(ns: NamespaceId, ac: &str) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, ac).encode_key()?;
 	k.extend_from_slice(b"!gr\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, ac: &str) -> Result<Vec<u8>> {
+pub fn suffix(ns: NamespaceId, ac: &str) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, ac).encode_key()?;
 	k.extend_from_slice(b"!gr\xff");
 	Ok(k)
@@ -47,7 +48,7 @@ impl Categorise for Gr<'_> {
 }
 
 impl<'a> Gr<'a> {
-	pub fn new(ns: &'a str, ac: &'a str, gr: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, ac: &'a str, gr: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -70,7 +71,7 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let val = Gr::new(
-			"testns",
+			NamespaceId(1),
 			"testac",
 			"testgr",
 		);

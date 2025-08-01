@@ -1,12 +1,16 @@
 //! Stores change feeds
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::cf::TableMutations;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 
+use crate::key::database::all::DatabaseRoot;
 use crate::kvs::KVKey;
 use crate::vs::VersionStamp;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::marker::PhantomData;
 use std::str;
 
 // Cf stands for change feeds
@@ -14,9 +18,9 @@ use std::str;
 pub(crate) struct Cf<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_d: u8,
 	// vs is the versionstamp of the change feed entry that is encoded in big-endian.
 	pub vs: VersionStamp,
@@ -35,11 +39,11 @@ impl Cf<'_> {
 }
 
 #[expect(unused)]
-pub fn new<'a>(ns: &'a str, db: &'a str, ts: u64, tb: &'a str) -> Cf<'a> {
+pub fn new<'a>(ns: NamespaceId, db: DatabaseId, ts: u64, tb: &'a str) -> Cf<'a> {
 	Cf::new(ns, db, VersionStamp::from_u64(ts), tb)
 }
 
-pub fn versionstamped_key_prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
+pub fn versionstamped_key_prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	let mut k = crate::key::database::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"#");
 	Ok(k)
@@ -54,28 +58,72 @@ pub fn versionstamped_key_suffix(tb: &str) -> Vec<u8> {
 	k
 }
 
+/// A prefix or suffix for a database change feed
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct DatabaseChangeFeedRange {
+	db_prefix: DatabaseRoot,
+	_a: u8,
+	_xx: u8,
+}
+
+impl DatabaseChangeFeedRange {
+	pub fn new_prefix(ns: NamespaceId, db: DatabaseId) -> Self {
+		Self {
+			db_prefix: DatabaseRoot::new(ns, db),
+			_a: b'#',
+			_xx: 0x00,
+		}
+	}
+
+	pub fn new_suffix(ns: NamespaceId, db: DatabaseId) -> Self {
+		Self {
+			db_prefix: DatabaseRoot::new(ns, db),
+			_a: b'#',
+			_xx: 0xff,
+		}
+	}
+}
+
+impl KVKey for DatabaseChangeFeedRange {
+	type ValueType = Vec<u8>;
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct DatabaseChangeFeedTsPrefix {
+	#[serde(flatten)]
+	db_cf_prefix: DatabaseChangeFeedRange,
+	ts: VersionStamp,
+}
+
+impl DatabaseChangeFeedTsPrefix {
+	pub fn new(ns: NamespaceId, db: DatabaseId, vs: VersionStamp) -> Self {
+		Self {
+			db_cf_prefix: DatabaseChangeFeedRange::new_prefix(ns, db),
+			ts: vs,
+		}
+	}
+}
+
+impl KVKey for DatabaseChangeFeedTsPrefix {
+	type ValueType = TableMutations;
+}
+
+
 /// Returns the prefix for the whole database change feeds since the
 /// specified versionstamp.
-pub fn prefix_ts(ns: &str, db: &str, vs: VersionStamp) -> Result<Vec<u8>> {
-	let mut k = crate::key::database::all::new(ns, db).encode_key()?;
-	k.extend_from_slice(b"#");
-	k.extend_from_slice(&vs.as_bytes());
-	Ok(k)
+pub fn prefix_ts(ns: NamespaceId, db: DatabaseId, vs: VersionStamp) -> DatabaseChangeFeedTsPrefix {
+	DatabaseChangeFeedTsPrefix::new(ns, db, vs)
 }
 
 /// Returns the prefix for the whole database change feeds
 #[expect(unused)]
-pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = crate::key::database::all::new(ns, db).encode_key()?;
-	k.extend_from_slice(b"#");
-	Ok(k)
+pub fn prefix(ns: NamespaceId, db: DatabaseId) -> DatabaseChangeFeedRange {
+	DatabaseChangeFeedRange::new_prefix(ns, db)
 }
 
 /// Returns the suffix for the whole database change feeds
-pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = crate::key::database::all::new(ns, db).encode_key()?;
-	k.extend_from_slice(&[b'#', 0xff]);
-	Ok(k)
+pub fn suffix(ns: NamespaceId, db: DatabaseId) -> DatabaseChangeFeedRange {
+	DatabaseChangeFeedRange::new_suffix(ns, db)
 }
 
 impl Categorise for Cf<'_> {
@@ -85,7 +133,7 @@ impl Categorise for Cf<'_> {
 }
 
 impl<'a> Cf<'a> {
-	pub fn new(ns: &'a str, db: &'a str, vs: VersionStamp, tb: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, vs: VersionStamp, tb: &'a str) -> Self {
 		Cf {
 			__: b'/',
 			_a: b'*',
@@ -110,8 +158,8 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let val = Cf::new(
-			"test",
-			"test",
+			NamespaceId(1),
+			DatabaseId(2),
 			VersionStamp::try_from_u128(12345).unwrap(),
 			"test",
 		);

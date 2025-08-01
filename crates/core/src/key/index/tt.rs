@@ -16,6 +16,8 @@
 //! - Supporting concurrent read and write operations
 //! - Enabling efficient term frequency tracking for relevance scoring
 
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::idx::docids::DocId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
@@ -28,9 +30,9 @@ use uuid::Uuid;
 pub(crate) struct Tt<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -76,8 +78,8 @@ impl<'a> Tt<'a> {
 	/// * `add` - Whether this is an addition (true) or removal (false) operation
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
 		term: &'a str,
@@ -123,8 +125,8 @@ impl<'a> Tt<'a> {
 	/// # Returns
 	/// A tuple of (start, end) keys that define the range for database queries
 	pub(crate) fn term_range(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
 		term: &'a str,
@@ -153,8 +155,8 @@ impl<'a> Tt<'a> {
 	/// # Returns
 	/// A tuple of (start, end) keys that define the range for database queries
 	pub(crate) fn terms_range(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
@@ -175,9 +177,9 @@ impl<'a> Tt<'a> {
 struct TtTermPrefix<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -193,7 +195,7 @@ impl KVKey for TtTermPrefix<'_> {
 }
 
 impl<'a> TtTermPrefix<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, term: &'a str) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, term: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -216,9 +218,9 @@ impl<'a> TtTermPrefix<'a> {
 struct TtTermsPrefix<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -233,7 +235,7 @@ impl KVKey for TtTermsPrefix<'_> {
 }
 
 impl<'a> TtTermsPrefix<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -258,8 +260,8 @@ mod tests {
 	#[test]
 	fn key() {
 		let val = Tt::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 			"term",
@@ -274,7 +276,7 @@ mod tests {
 
 	#[test]
 	fn term_range() {
-		let (beg, end) = Tt::term_range("testns", "testdb", "testtb", "testix", "term").unwrap();
+		let (beg, end) = Tt::term_range(NamespaceId(1), DatabaseId(2), "testtb", "testix", "term").unwrap();
 		assert_eq!(beg, b"/*testns\0*testdb\0*testtb\0+testix\0!ttterm\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
 		assert_eq!(
 			end,
@@ -284,7 +286,7 @@ mod tests {
 
 	#[test]
 	fn terms_range() {
-		let (beg, end) = Tt::terms_range("testns", "testdb", "testtb", "testix").unwrap();
+		let (beg, end) = Tt::terms_range(NamespaceId(1), DatabaseId(2), "testtb", "testix").unwrap();
 		assert_eq!(beg, b"/*testns\0*testdb\0*testtb\0+testix\0!tt\0");
 		assert_eq!(end, b"/*testns\0*testdb\0*testtb\0+testix\0!tt\xff");
 	}

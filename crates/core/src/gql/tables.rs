@@ -1,6 +1,7 @@
 use std::fmt::Display;
 use std::sync::Arc;
 
+use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::dbs::Session;
 use crate::expr::order::{OrderList, Ordering};
 use crate::expr::statements::{DefineFieldStatement, DefineTableStatement, SelectStatement};
@@ -66,12 +67,12 @@ fn filter_name_from_table(tb_name: impl Display) -> String {
 
 #[expect(clippy::too_many_arguments)]
 pub async fn process_tbs(
-	tbs: Arc<[DefineTableStatement]>,
+	tbs: Arc<[TableDefinition]>,
 	mut query: Object,
 	types: &mut Vec<Type>,
 	tx: &Transaction,
-	ns: &str,
-	db: &str,
+	ns: NamespaceId,
+	db: DatabaseId,
 	session: &Session,
 	datastore: &Arc<Datastore>,
 ) -> Result<Object, GqlError> {
@@ -107,7 +108,7 @@ pub async fn process_tbs(
 		types.push(Type::InputObject(filter_id()));
 
 		let sess1 = session.to_owned();
-		let fds = tx.all_tb_fields(ns, db, &tb.name.0, None).await?;
+		let fds = tx.all_tb_fields(ns, db, &tb.name, None).await?;
 		let fds1 = fds.clone();
 		let kvs1 = datastore.clone();
 

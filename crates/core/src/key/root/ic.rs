@@ -7,6 +7,7 @@
 //! The `Ic` struct represents an entry in the compaction queue, identifying an index
 //! that needs to be compacted. The compaction thread processes these entries at regular
 //! intervals defined by the `index_compaction_interval` configuration option.
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
@@ -28,8 +29,8 @@ pub(crate) struct Ic<'a> {
 	_a: u8,
 	_b: u8,
 	_c: u8,
-	pub ns: &'a str,
-	pub db: &'a str,
+	pub ns: NamespaceId,
+	pub db: DatabaseId,
 	pub tb: &'a str,
 	pub ix: &'a str,
 	#[serde(with = "uuid::serde::compact")]
@@ -54,8 +55,8 @@ impl<'a> Ic<'a> {
 	}
 
 	pub(crate) fn new(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
 		nid: Uuid,

@@ -1,5 +1,6 @@
 use super::{FlowResultExt, Ident, Kind};
 use crate::ctx::MutableContext;
+use crate::sql::ToSql;
 use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, expr::value::Value};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
@@ -46,7 +47,8 @@ impl Closure {
 						bail!(Error::InvalidArguments {
 							name: "ANONYMOUS".to_string(),
 							message: format!(
-								"Expected a value of type '{kind}' for argument ${}",
+								"Expected a value of type '{}' for argument ${}",
+								kind.to_sql(),
 								name
 							),
 						});
@@ -80,13 +82,13 @@ impl fmt::Display for Closure {
 			}
 			write!(f, "${name}: ")?;
 			match kind {
-				k @ Kind::Either(_) => write!(f, "<{}>", k)?,
-				k => write!(f, "{}", k)?,
+				k @ Kind::Either(_) => write!(f, "<{}>", k.to_sql())?,
+				k => write!(f, "{}", k.to_sql())?,
 			}
 		}
 		f.write_str("|")?;
 		if let Some(returns) = &self.returns {
-			write!(f, " -> {returns}")?;
+			write!(f, " -> {}", returns.to_sql())?;
 		}
 		write!(f, " {}", self.body)
 	}

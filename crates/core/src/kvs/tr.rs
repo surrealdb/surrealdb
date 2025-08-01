@@ -3,6 +3,10 @@ use super::Val;
 use super::Version;
 #[allow(unused_imports, reason = "Not used when none of the storage backends are enabled.")]
 use super::api::Transaction;
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
+use crate::catalog::TableDefinition;
+use crate::catalog::TableId;
 use crate::cf;
 
 use crate::doc::CursorValue;
@@ -18,7 +22,6 @@ use crate::kvs::key::KVKey;
 use crate::kvs::stash::Stash;
 use crate::vs::VersionStamp;
 use anyhow::Result;
-use expr::statements::DefineTableStatement;
 use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
@@ -559,8 +562,8 @@ impl Transactor {
 	#[expect(clippy::too_many_arguments)]
 	pub(crate) fn record_change(
 		&mut self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
 		id: &Thing,
 		previous: CursorValue,
@@ -573,10 +576,10 @@ impl Transactor {
 	// Records the table (re)definition in the changefeed if enabled.
 	pub(crate) fn record_table_change(
 		&mut self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
-		dt: &DefineTableStatement,
+		dt: &TableDefinition,
 	) {
 		self.cf.define_table(ns, db, tb, dt)
 	}
@@ -595,72 +598,36 @@ impl Transactor {
 	}
 
 	/// Gets the next namespace id
-	pub(crate) async fn get_next_ns_id(&mut self) -> Result<u32> {
+	pub(crate) async fn get_next_ns_id(&mut self) -> Result<NamespaceId> {
 		let key = crate::key::root::ni::Ni::default().encode_key()?;
 		let mut seq = self.get_idg(&key).await?;
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
 		self.replace(&k, &v).await?;
-		Ok(nid)
+		Ok(NamespaceId(nid))
 	}
 
 	/// Gets the next database id for the given namespace
-	pub(crate) async fn get_next_db_id(&mut self, ns: u32) -> Result<u32> {
+	pub(crate) async fn get_next_db_id(&mut self, ns: NamespaceId) -> Result<DatabaseId> {
 		let key = crate::key::namespace::di::new(ns).encode_key()?;
 		let mut seq = self.get_idg(&key).await?;
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
 		self.replace(&k, &v).await?;
-		Ok(nid)
+		Ok(DatabaseId(nid))
 	}
 
 	/// Gets the next table id for the given namespace and database
-	pub(crate) async fn get_next_tb_id(&mut self, ns: u32, db: u32) -> Result<u32> {
+	pub(crate) async fn get_next_tb_id(&mut self, ns: NamespaceId, db: DatabaseId) -> Result<TableId> {
 		let key = crate::key::database::ti::new(ns, db).encode_key()?;
 		let mut seq = self.get_idg(&key).await?;
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
 		self.replace(&k, &v).await?;
-		Ok(nid)
-	}
-
-	/// Removes the given namespace from the sequence.
-	#[expect(unused)]
-	pub(crate) async fn remove_ns_id(&mut self, ns: u32) -> Result<()> {
-		let key = crate::key::root::ni::Ni::default().encode_key()?;
-		let mut seq = self.get_idg(&key).await?;
-		seq.remove_id(ns);
-		self.stash.set(key, seq.clone());
-		let (k, v) = seq.finish().unwrap();
-		self.replace(&k, &v).await?;
-		Ok(())
-	}
-
-	/// Removes the given database from the sequence.
-	#[expect(unused)]
-	pub(crate) async fn remove_db_id(&mut self, ns: u32, db: u32) -> Result<()> {
-		let key = crate::key::namespace::di::new(ns).encode_key()?;
-		let mut seq = self.get_idg(&key).await?;
-		seq.remove_id(db);
-		self.stash.set(key, seq.clone());
-		let (k, v) = seq.finish().unwrap();
-		self.replace(&k, &v).await?;
-		Ok(())
-	}
-
-	/// Removes the given table from the sequence.
-	#[expect(unused)]
-	pub(crate) async fn remove_tb_id(&mut self, ns: u32, db: u32, tb: u32) -> Result<()> {
-		let key = crate::key::database::ti::new(ns, db).encode_key()?;
-		let mut seq = self.get_idg(&key).await?;
-		seq.remove_id(tb);
-		self.stash.set(key, seq.clone());
-		let (k, v) = seq.finish().unwrap();
-		self.replace(&k, &v).await?;
-		Ok(())
+		Ok(TableId(nid))
 	}
 
 	// complete_changes will complete the changefeed recording for the given namespace and database.
@@ -692,8 +659,8 @@ impl Transactor {
 	pub(crate) async fn set_timestamp_for_versionstamp(
 		&mut self,
 		ts: u64,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 	) -> Result<VersionStamp> {
 		// This also works as an advisory lock on the ts keys so that there is
 		// on other concurrent transactions that can write to the ts_key or the keys after it.
@@ -738,8 +705,8 @@ impl Transactor {
 	pub(crate) async fn get_versionstamp_from_timestamp(
 		&mut self,
 		ts: u64,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 	) -> Result<Option<VersionStamp>> {
 		let start = crate::key::database::ts::prefix(ns, db)?;
 		let ts_key = crate::key::database::ts::new(ns, db, ts + 1).encode_key()?;

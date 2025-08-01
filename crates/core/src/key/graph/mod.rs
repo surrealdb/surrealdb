@@ -1,9 +1,11 @@
 //! Stores a graph edge pointer
+use crate::catalog::{NamespaceId, DatabaseId};
 use crate::expr::dir::Dir;
 use crate::expr::id::Id;
 use crate::expr::thing::Thing;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::key::table::all::TableRoot;
 use crate::kvs::KVKey;
 
 use anyhow::Result;
@@ -13,9 +15,9 @@ use serde::{Deserialize, Serialize};
 struct Prefix<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -27,7 +29,7 @@ impl KVKey for Prefix<'_> {
 }
 
 impl<'a> Prefix<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &Id) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -46,9 +48,9 @@ impl<'a> Prefix<'a> {
 struct PrefixEg<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -61,7 +63,7 @@ impl KVKey for PrefixEg<'_> {
 }
 
 impl<'a> PrefixEg<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id, eg: &Dir) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &Id, eg: &Dir) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -81,9 +83,9 @@ impl<'a> PrefixEg<'a> {
 struct PrefixFt<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -97,7 +99,7 @@ impl KVKey for PrefixFt<'_> {
 }
 
 impl<'a> PrefixFt<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id, eg: &Dir, ft: &'a str) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &Id, eg: &Dir, ft: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -118,9 +120,9 @@ impl<'a> PrefixFt<'a> {
 pub(crate) struct Graph<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -141,8 +143,8 @@ impl Graph<'_> {
 }
 
 pub fn new<'a>(
-	ns: &'a str,
-	db: &'a str,
+	ns: NamespaceId,
+	db: DatabaseId,
 	tb: &'a str,
 	id: &Id,
 	eg: &Dir,
@@ -151,37 +153,37 @@ pub fn new<'a>(
 	Graph::new(ns, db, tb, id.to_owned(), eg.to_owned(), fk)
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>> {
+pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &Id) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>> {
+pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &Id) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
 
-pub fn egprefix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir) -> Result<Vec<u8>> {
+pub fn egprefix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &Id, eg: &Dir) -> Result<Vec<u8>> {
 	let mut k = PrefixEg::new(ns, db, tb, id, eg).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn egsuffix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir) -> Result<Vec<u8>> {
+pub fn egsuffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &Id, eg: &Dir) -> Result<Vec<u8>> {
 	let mut k = PrefixEg::new(ns, db, tb, id, eg).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
 
-pub fn ftprefix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir, ft: &str) -> Result<Vec<u8>> {
+pub fn ftprefix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &Id, eg: &Dir, ft: &str) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, eg, ft).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir, ft: &str) -> Result<Vec<u8>> {
+pub fn ftsuffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &Id, eg: &Dir, ft: &str) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, eg, ft).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
@@ -194,7 +196,7 @@ impl Categorise for Graph<'_> {
 }
 
 impl<'a> Graph<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: Id, eg: Dir, fk: &'a Thing) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: Id, eg: Dir, fk: &'a Thing) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -212,8 +214,8 @@ impl<'a> Graph<'a> {
 	}
 
 	pub fn new_from_id(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
 		id: Id,
 		eg: Dir,

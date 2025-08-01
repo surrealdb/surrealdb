@@ -14,6 +14,8 @@
 //! - Supporting term-based document retrieval
 //! - Enabling efficient text search operations
 
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::idx::docids::DocId;
 use crate::idx::ft::fulltext::TermDocument;
 use crate::key::category::Categorise;
@@ -27,9 +29,9 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct TdRoot<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -51,7 +53,7 @@ impl Categorise for TdRoot<'_> {
 }
 
 impl<'a> TdRoot<'a> {
-	pub(crate) fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, term: &'a str) -> Self {
+	pub(crate) fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, term: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -74,9 +76,9 @@ impl<'a> TdRoot<'a> {
 pub(crate) struct Td<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -113,8 +115,8 @@ impl<'a> Td<'a> {
 	/// * `term` - The term being indexed
 	/// * `id` - Optional document ID (Some for specific document, None for term prefix)
 	pub(crate) fn new(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
 		term: &'a str,
@@ -145,14 +147,14 @@ mod tests {
 
 	#[test]
 	fn root() {
-		let val = TdRoot::new("testns", "testdb", "testtb", "testix", "term");
+		let val = TdRoot::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", "term");
 		let enc = TdRoot::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!tdterm\0");
 	}
 
 	#[test]
 	fn key() {
-		let val = Td::new("testns", "testdb", "testtb", "testix", "term", 129);
+		let val = Td::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", "term", 129);
 		let enc = Td::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!tdterm\0\0\0\0\0\0\0\0\x81");
 	}

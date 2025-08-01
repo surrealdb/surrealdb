@@ -1,4 +1,5 @@
 //! Stores a DEFINE SEQUENCE config definition
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::expr::statements::define::DefineSequenceStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
@@ -11,9 +12,9 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct Sq<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	_d: u8,
 	_e: u8,
@@ -24,13 +25,13 @@ impl KVKey for Sq<'_> {
 	type ValueType = DefineSequenceStatement;
 }
 
-pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
+pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"*sq\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>> {
+pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"*sq\xff");
 	Ok(k)
@@ -43,7 +44,7 @@ impl Categorise for Sq<'_> {
 }
 
 impl<'a> Sq<'a> {
-	pub(crate) fn new(ns: &'a str, db: &'a str, sq: &'a str) -> Self {
+	pub(crate) fn new(ns: NamespaceId, db: DatabaseId, sq: &'a str) -> Self {
 		Self {
 			__: b'/', // /
 			_a: b'*', // *
@@ -66,8 +67,8 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
             let val = Sq::new(
-            "ns",
-            "db",
+            NamespaceId(1),
+            DatabaseId(2),
             "test",
         );
 		let enc = Sq::encode_key(&val).unwrap();

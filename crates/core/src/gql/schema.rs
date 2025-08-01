@@ -40,7 +40,12 @@ pub async fn generate_schema(
 	let ns = session.ns.as_ref().ok_or(GqlError::UnspecifiedNamespace)?;
 	let db = session.db.as_ref().ok_or(GqlError::UnspecifiedDatabase)?;
 
-	let cg = tx.get_db_config(ns, db, "graphql").await.map_err(|e| {
+	let db_def = match tx.get_db_by_name(ns, &db).await? {
+		Some(db) => db,
+		None => return Err(GqlError::DbError(anyhow::anyhow!("Database not found: {ns} {db}"))),
+	};
+
+	let cg = tx.get_db_config(db_def.namespace_id, db_def.database_id, "graphql").await.map_err(|e| {
 		if matches!(e.downcast_ref(), Some(crate::err::Error::CgNotFound { .. })) {
 			GqlError::NotConfigured
 		} else {
@@ -49,7 +54,7 @@ pub async fn generate_schema(
 	})?;
 	let config = cg.inner.clone().try_into_graphql()?;
 
-	let tbs = tx.all_tb(ns, db, None).await?;
+	let tbs = tx.all_tb(db_def.namespace_id, db_def.database_id, None).await?;
 
 	let tbs = match config.tables {
 		TablesConfig::None => None,
@@ -62,7 +67,7 @@ pub async fn generate_schema(
 		}
 	};
 
-	let fns = tx.all_db_functions(ns, db).await?;
+	let fns = tx.all_db_functions(db_def.namespace_id, db_def.database_id).await?;
 
 	let fns = match config.functions {
 		FunctionsConfig::None => None,
@@ -96,7 +101,7 @@ pub async fn generate_schema(
 
 	match tbs {
 		Some(tbs) if !tbs.is_empty() => {
-			query = process_tbs(tbs, query, &mut types, &tx, ns, db, session, datastore).await?;
+			query = process_tbs(tbs, query, &mut types, &tx, db_def.namespace_id, db_def.database_id, session, datastore).await?;
 		}
 		_ => {}
 	}

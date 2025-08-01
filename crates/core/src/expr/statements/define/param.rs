@@ -47,8 +47,9 @@ impl DefineParamStatement {
 
 		// Fetch the transaction
 		let txn = ctx.tx();
+
 		// Check if the definition exists
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		if txn.get_db_param(ns, db, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
@@ -58,10 +59,14 @@ impl DefineParamStatement {
 				});
 			}
 		}
+
+		let db = {
+			let (ns, db) = opt.ns_db()?;
+			txn.get_or_add_db(ns, db, opt.strict).await?
+		};
+
 		// Process the statement
-		let key = crate::key::database::pa::new(ns, db, &self.name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
+		let key = crate::key::database::pa::new(db.namespace_id, db.database_id, &self.name);
 		txn.set(
 			&key,
 			&DefineParamStatement {

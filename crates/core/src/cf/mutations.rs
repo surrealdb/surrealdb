@@ -1,3 +1,5 @@
+use crate::catalog::TableDefinition;
+use crate::expr::statements::info::InfoStructure;
 use crate::expr::Operation;
 use crate::expr::array::Array;
 use crate::expr::object::Object;
@@ -5,6 +7,7 @@ use crate::expr::statements::DefineTableStatement;
 use crate::expr::thing::Thing;
 use crate::expr::value::Value;
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::ToSql;
 use crate::vs::VersionStamp;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -20,7 +23,7 @@ pub enum TableMutation {
 	// we do include it in the first field for convenience.
 	Set(Thing, Value),
 	Del(Thing),
-	Def(DefineTableStatement),
+	Def(TableDefinition),
 	#[revision(start = 2)]
 	/// Includes the ID, current value (after change), changes that can be applied to get the original
 	/// value
@@ -114,14 +117,14 @@ impl TableMutation {
 				h
 			}
 			TableMutation::Def(t) => {
-				h.insert("define_table".to_string(), Value::from(t));
+				h.insert("define_table".to_string(), t.structure());
 				h
 			}
 			TableMutation::DelWithOriginal(id, _val) => {
 				h.insert(
 					"delete".to_string(),
 					Value::Object(Object::from(map! {
-					"id".to_string() => Value::Thing(id),
+						"id".to_string() => Value::Thing(id),
 					})),
 				);
 				h
@@ -161,7 +164,7 @@ impl Display for TableMutation {
 			TableMutation::SetWithDiff(id, _previous, v) => write!(f, "SET {} {:?}", id, v),
 			TableMutation::Del(id) => write!(f, "DEL {}", id),
 			TableMutation::DelWithOriginal(id, _) => write!(f, "DEL {}", id),
-			TableMutation::Def(t) => write!(f, "{}", t),
+			TableMutation::Def(t) => write!(f, "{}", t.to_sql()),
 		}
 	}
 }
@@ -211,7 +214,9 @@ impl Default for WriteMutationSet {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+	use crate::catalog::{DatabaseId, NamespaceId, TableId};
+
+use super::*;
 	use std::collections::HashMap;
 
 	#[test]
@@ -232,10 +237,12 @@ mod tests {
 						]))),
 					),
 					TableMutation::Del(Thing::from(("mytb".to_string(), "tobie".to_string()))),
-					TableMutation::Def(DefineTableStatement {
-						name: "mytb".into(),
-						..DefineTableStatement::default()
-					}),
+					TableMutation::Def(TableDefinition::new(
+						NamespaceId(1),
+						DatabaseId(2),
+						TableId(3),
+						"mytb".to_string(),
+					)),
 				],
 			)]),
 		);
@@ -292,10 +299,7 @@ mod tests {
 								"note" => Value::from("surreal"),
 						})),
 					),
-					TableMutation::Def(DefineTableStatement {
-						name: "mytb".into(),
-						..DefineTableStatement::default()
-					}),
+					TableMutation::Def(TableDefinition::new(NamespaceId(1), DatabaseId(2), TableId(3), "mytb")),
 				],
 			)]),
 		);

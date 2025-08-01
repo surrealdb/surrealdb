@@ -74,11 +74,11 @@ impl DefineTableStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
-		if txn.get_tb(ns, db, &self.name).await.is_ok() {
+		let table_id = if let Some(tb) = txn.get_tb(ns, db, &self.name).await? {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite && !opt.import {
@@ -86,33 +86,52 @@ impl DefineTableStatement {
 					name: self.name.to_string(),
 				});
 			}
-		}
-		// Process the statement
-		let key = crate::key::database::tb::new(ns, db, &self.name);
-		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
-		let dbv = txn.get_or_add_db(ns, db, opt.strict).await?;
-		let mut dt = DefineTableStatement {
-			id: match (self.id, nsv.id, dbv.id) {
-				(Some(id), _, _) => Some(id),
-				(None, Some(nsv_id), Some(dbv_id)) => {
-					Some(txn.lock().await.get_next_tb_id(nsv_id, dbv_id).await?)
-				}
-				_ => None,
-			},
-			// Don't persist the `IF NOT EXISTS` clause to the schema
-			if_not_exists: false,
-			overwrite: false,
-			..self.clone()
+			tb.table_id
+		} else {
+			txn.lock().await.get_next_tb_id(ns, db).await?
 		};
-		// Make sure we are refreshing the caches
-		dt.cache_fields_ts = Uuid::now_v7();
-		dt.cache_events_ts = Uuid::now_v7();
-		dt.cache_indexes_ts = Uuid::now_v7();
-		dt.cache_tables_ts = Uuid::now_v7();
+
+		// Process the statement
+		let cache_ts = Uuid::now_v7();
+		let mut tb_def = TableDefinition {
+			namespace_id: ns,
+			database_id: db,
+			table_id,
+			name: self.name.to_string(),
+			drop: self.drop,
+			schemafull: self.full,
+			kind: self.kind.clone(),
+			view: self.view.clone().map(|v| v.to_definition()),
+			permissions: self.permissions.clone(),
+			comment: self.comment.clone().map(|c| c.to_string()),
+			changefeed: self.changefeed.clone(),
+
+			cache_fields_ts: cache_ts,
+			cache_events_ts: cache_ts,
+			cache_indexes_ts: cache_ts,
+			cache_tables_ts: cache_ts,
+		};
+
 		// Add table relational fields
-		Self::add_in_out_fields(&txn, ns, db, &mut dt).await?;
-		// Set the table definition
-		txn.set(&key, &dt, None).await?;
+		Self::add_in_out_fields(&txn, ns, db, &mut tb_def).await?;
+
+
+		// Update the catalog
+		{
+			let (ns, db) = opt.ns_db()?;
+			let catalog_key = crate::key::catalog::tb::new(ns, db, &self.name);
+			txn.set(
+				&catalog_key,
+				&tb_def,
+				None,
+			).await?;
+		}
+		{
+			let key = crate::key::database::tb::new(ns, db, &self.name);
+			// Set the table definition
+			txn.set(&key, &tb_def, None).await?;
+		}
+
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
 			cache.clear_tb(ns, db, &self.name);
@@ -120,13 +139,13 @@ impl DefineTableStatement {
 		// Clear the cache
 		txn.clear();
 		// Record definition change
-		if dt.changefeed.is_some() {
-			txn.lock().await.record_table_change(ns, db, &self.name, &dt);
+		if tb_def.changefeed.is_some() {
+			txn.lock().await.record_table_change(ns, db, &self.name, &tb_def);
 		}
 		// Check if table is a view
 		if let Some(view) = &self.view {
 			// Force queries to run
-			let opt = &opt.new_with_force(Force::Table(Arc::new([dt])));
+			let opt = &opt.new_with_force(Force::Table(Arc::new([tb_def.clone()])));
 			// Remove the table data
 			let key = crate::key::table::all::new(ns, db, &self.name);
 			txn.delp(&key).await?;
@@ -134,15 +153,21 @@ impl DefineTableStatement {
 			for ft in view.what.0.iter() {
 				// Save the view config
 				let key = crate::key::table::ft::new(ns, db, ft, &self.name);
-				txn.set(&key, self, None).await?;
+				txn.set(&key, &tb_def, None).await?;
 				// Refresh the table cache
+				let Some(foreign_tb) = txn.get_tb(ns, db, ft).await? else {
+					// TODO: STU: This is what the previous code did, but should this just continue instead?
+					bail!(Error::TbNotFound {
+						name: ft.to_string(),
+					});
+				};
+
 				let key = crate::key::database::tb::new(ns, db, ft);
-				let tb = txn.get_tb(ns, db, ft).await?;
 				txn.set(
 					&key,
-					&DefineTableStatement {
+					&TableDefinition {
 						cache_tables_ts: Uuid::now_v7(),
-						..tb.as_ref().clone()
+						..foreign_tb.as_ref().clone()
 					},
 					None,
 				)
@@ -191,6 +216,8 @@ impl DefineTableStatement {
 		matches!(self.kind, TableKind::Normal | TableKind::Any)
 	}
 	/// Used to add relational fields to existing table records
+	/// 
+	/// Returns the cache key ts.
 	pub async fn add_in_out_fields(
 		txn: &Transaction,
 		ns: NamespaceId,
@@ -207,7 +234,7 @@ impl DefineTableStatement {
 					&key,
 					&DefineFieldStatement {
 						name: Idiom::from(IN.to_vec()),
-						what: tb.name.clone(),
+						what: Ident::from(tb.name.clone()),
 						kind: Some(val),
 						..Default::default()
 					},
@@ -223,7 +250,7 @@ impl DefineTableStatement {
 					&key,
 					&DefineFieldStatement {
 						name: Idiom::from(OUT.to_vec()),
-						what: tb.name.clone(),
+						what: Ident::from(tb.name.clone()),
 						kind: Some(val),
 						..Default::default()
 					},

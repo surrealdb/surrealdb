@@ -1,5 +1,5 @@
 //! Store appended records for concurrent index building
-use crate::kvs::KVKey;
+use crate::{catalog::{DatabaseId, NamespaceId}, kvs::KVKey};
 use crate::kvs::index::Appending;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -8,9 +8,9 @@ use std::fmt::Debug;
 pub(crate) struct Ia<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -26,7 +26,7 @@ impl KVKey for Ia<'_> {
 }
 
 impl<'a> Ia<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, i: u32) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, i: u32) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -51,7 +51,7 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Ia::new("testns", "testdb", "testtb", "testix", 1);
+		let val = Ia::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", 1);
 		let enc = Ia::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

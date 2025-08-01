@@ -2,6 +2,7 @@
 pub mod ba;
 pub mod st;
 
+use crate::catalog::{DatabaseId, NamespaceId};
 use std::ops::Range;
 
 use anyhow::Result;
@@ -13,9 +14,9 @@ use crate::kvs::KVKey;
 pub(crate) struct Prefix<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	_d: u8,
 	_e: u8,
@@ -30,7 +31,7 @@ impl KVKey for Prefix<'_> {
 }
 
 impl<'a> Prefix<'a> {
-	fn new(ns: &'a str, db: &'a str, sq: &'a str, g: u8, h: u8) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, sq: &'a str, g: u8, h: u8) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -47,7 +48,7 @@ impl<'a> Prefix<'a> {
 		}
 	}
 
-	pub(crate) fn new_ba_range(ns: &'a str, db: &'a str, sq: &'a str) -> Result<Range<Vec<u8>>> {
+	pub(crate) fn new_ba_range(ns: NamespaceId, db: DatabaseId, sq: &'a str) -> Result<Range<Vec<u8>>> {
 		let mut beg = Self::new(ns, db, sq, b'b', b'a').encode_key()?;
 		let mut end = Self::new(ns, db, sq, b'b', b'a').encode_key()?;
 		beg.extend_from_slice(&[0x00; 9]);
@@ -55,7 +56,7 @@ impl<'a> Prefix<'a> {
 		Ok(beg..end)
 	}
 
-	pub(crate) fn new_st_range(ns: &'a str, db: &'a str, sq: &'a str) -> Result<Range<Vec<u8>>> {
+	pub(crate) fn new_st_range(ns: NamespaceId, db: DatabaseId, sq: &'a str) -> Result<Range<Vec<u8>>> {
 		let mut beg = Self::new(ns, db, sq, b's', b't').encode_key()?;
 		let mut end = Self::new(ns, db, sq, b's', b't').encode_key()?;
 		beg.extend_from_slice(&[0x00; 9]);

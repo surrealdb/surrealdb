@@ -120,7 +120,7 @@ impl DefineAccessStatement {
 					}
 				}
 				// Process the statement
-				let key = crate::key::namespace::ac::new(opt.ns()?, &self.name);
+				let key = crate::key::namespace::ac::new(ns, &self.name);
 				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 				txn.set(
 					&key,

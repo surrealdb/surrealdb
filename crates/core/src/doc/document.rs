@@ -386,7 +386,7 @@ impl Document {
 	/// Get the database for this document
 	pub async fn db(&self, ctx: &Context, opt: &Options) -> Result<Arc<DatabaseDefinition>> {
 		// Get the NS + DB
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = opt.ns_db()?;
 		// Get transaction
 		let txn = ctx.tx();
 		// Get the table definition
@@ -430,22 +430,16 @@ impl Document {
 				match cache.get(&key) {
 					Some(val) => val,
 					None => {
-						let val = match txn.get_tb(ns, db, &id.tb).await {
-							Err(e) => {
-								// The table doesn't exist
-								if matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
-									// Allowed to run?
-									opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
-									// We can create the table automatically
-									txn.ensure_ns_db_tb(ns, db, &id.tb, opt.strict).await
-								} else {
-									// There was an error
-									Err(e)
-								}
+						let val = match txn.get_tb(ns, db, &id.tb).await? {
+							Some(tb) => tb,
+							None => {
+								// Allowed to run?
+								opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
+								// We can create the table automatically
+								let (ns, db) = opt.ns_db()?;
+								txn.ensure_ns_db_tb(ns, db, &id.tb, opt.strict).await?
 							}
-							// The table exists
-							Ok(tb) => Ok(tb),
-						}?;
+						};
 						let val = cache::ds::Entry::Any(val.clone());
 						cache.insert(key, val.clone());
 						val
@@ -456,28 +450,22 @@ impl Document {
 			// No cache is present on the context
 			_ => {
 				// Return the table or attempt to define it
-				match txn.get_tb(ns, db, &id.tb).await {
-					Err(e) => {
-						// The table doesn't exist
-						if matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
-							// Allowed to run?
-							opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
-							// We can create the table automatically
-							txn.ensure_ns_db_tb(ns, db, &id.tb, opt.strict).await
-						} else {
-							// There was an error
-							Err(e)
-						}
+				match txn.get_tb(ns, db, &id.tb).await? {
+					Some(tb) => Ok(tb),
+					None => {
+						// Allowed to run?
+						opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
+						// We can create the table automatically
+						let (ns, db) = opt.ns_db()?;
+						txn.ensure_ns_db_tb(ns, db, &id.tb, opt.strict).await
 					}
-					// The table exists
-					Ok(tb) => Ok(tb),
 				}
 			}
 		}
 	}
 
 	/// Get the foreign tables for this document
-	pub async fn ft(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineTableStatement]>> {
+	pub async fn ft(&self, ctx: &Context, opt: &Options) -> Result<Arc<[TableDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		// Get the document table

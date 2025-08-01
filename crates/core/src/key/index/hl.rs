@@ -1,4 +1,6 @@
 //! Store and chunked layers of an HNSW index
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::kvs::KVKey;
 
 use serde::{Deserialize, Serialize};
@@ -8,9 +10,9 @@ use std::fmt::Debug;
 pub(crate) struct Hl<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -27,7 +29,7 @@ impl KVKey for Hl<'_> {
 }
 
 impl<'a> Hl<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, layer: u16, chunk: u32) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, layer: u16, chunk: u32) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -53,7 +55,7 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Hl::new("testns", "testdb", "testtb", "testix", 7, 8);
+		let val = Hl::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", 7, 8);
 		let enc = Hl::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

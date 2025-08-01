@@ -1,5 +1,7 @@
 //! Stores a DEFINE FIELD config definition
 use crate::expr::statements::DefineFieldStatement;
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
@@ -11,9 +13,9 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct Fd<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -26,17 +28,17 @@ impl KVKey for Fd<'_> {
 	type ValueType = DefineFieldStatement;
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, fd: &'a str) -> Fd<'a> {
+pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, fd: &'a str) -> Fd<'a> {
 	Fd::new(ns, db, tb, fd)
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
+pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"!fd\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
+pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"!fd\xff");
 	Ok(k)
@@ -49,7 +51,7 @@ impl Categorise for Fd<'_> {
 }
 
 impl<'a> Fd<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, fd: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, fd: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

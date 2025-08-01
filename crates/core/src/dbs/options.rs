@@ -1,3 +1,4 @@
+use crate::catalog::TableDefinition;
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::dbs::Notification;
 use crate::err::Error;
@@ -54,7 +55,7 @@ pub struct Options {
 pub enum Force {
 	All,
 	None,
-	Table(Arc<[DefineTableStatement]>),
+	Table(Arc<[TableDefinition]>),
 	Index(Arc<[DefineIndexStatement]>),
 }
 

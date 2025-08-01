@@ -30,6 +30,8 @@
 //! - **Consistency**: Ensures unique document IDs across the entire cluster
 use std::ops::Range;
 
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::kvs::sequences::BatchValue;
@@ -40,9 +42,9 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct Ib<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -64,7 +66,7 @@ impl Categorise for Ib<'_> {
 }
 
 impl<'a> Ib<'a> {
-	pub(crate) fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, start: i64) -> Self {
+	pub(crate) fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, start: i64) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -83,8 +85,8 @@ impl<'a> Ib<'a> {
 	}
 
 	pub(crate) fn new_range(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
 	) -> anyhow::Result<Range<Vec<u8>>> {
@@ -100,7 +102,7 @@ mod tests {
 
 	#[test]
 	fn ib_range() {
-		let ib_range = Ib::new_range("testns", "testdb", "testtb", "testix").unwrap();
+		let ib_range = Ib::new_range(NamespaceId(1), DatabaseId(2), "testtb", "testix").unwrap();
 		assert_eq!(ib_range.start, b"/*testns\0*testdb\0*testtb\0+testix\0!ib\0\0\0\0\0\0\0\0");
 		assert_eq!(
 			ib_range.end,

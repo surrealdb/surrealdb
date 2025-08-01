@@ -1,5 +1,7 @@
 //! Stores a DEFINE DATABASE config definition
-use crate::expr::statements::define::DefineDatabaseStatement;
+use crate::catalog::DatabaseDefinition;
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
@@ -8,44 +10,44 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub(crate) struct Db<'a> {
+pub(crate) struct NsDbRoot {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
 	_c: u8,
 	_d: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 }
 
-impl KVKey for Db<'_> {
-	type ValueType = DefineDatabaseStatement;
+impl KVKey for NsDbRoot {
+	type ValueType = DatabaseDefinition;
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str) -> Db<'a> {
-	Db::new(ns, db)
+pub fn new(ns: NamespaceId, db: DatabaseId) -> NsDbRoot {
+	NsDbRoot::new(ns, db)
 }
 
-pub fn prefix(ns: &str) -> Result<Vec<u8>> {
+pub fn prefix(ns: NamespaceId) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns).encode_key()?;
 	k.extend_from_slice(b"!db\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: &str) -> Result<Vec<u8>> {
+pub fn suffix(ns: NamespaceId) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns).encode_key()?;
 	k.extend_from_slice(b"!db\xff");
 	Ok(k)
 }
 
-impl Categorise for Db<'_> {
+impl Categorise for NsDbRoot {
 	fn categorise(&self) -> Category {
 		Category::DatabaseAlias
 	}
 }
 
-impl<'a> Db<'a> {
-	pub fn new(ns: &'a str, db: &'a str) -> Self {
+impl NsDbRoot {
+	pub fn new(ns: NamespaceId, db: DatabaseId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -65,11 +67,11 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Db::new(
+		let val = NsDbRoot::new(
 			"testns",
 			"testdb",
 		);
-		let enc = Db::encode_key(&val).unwrap();
+		let enc = NsDbRoot::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0!dbtestdb\0");
 	}
 

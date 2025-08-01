@@ -1,3 +1,4 @@
+use crate::catalog::TableDefinition;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -6,12 +7,14 @@ use crate::expr::statements::define::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident, Strand, Value, Values};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::cache::ds;
 use crate::kvs::impl_kv_value_revisioned;
 use anyhow::{Result, bail};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
+use std::sync::Arc;
 use uuid::Uuid;
 
 #[revisioned(revision = 3)]
@@ -43,7 +46,7 @@ impl DefineEventStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
@@ -56,11 +59,15 @@ impl DefineEventStatement {
 				});
 			}
 		}
+
+		// Ensure the table exists
+		let tb = {
+			let (ns, db) = opt.ns_db()?;
+			txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?
+		};
+
 		// Process the statement
 		let key = crate::key::table::ev::new(ns, db, &self.what, &self.name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-		txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?;
 		txn.set(
 			&key,
 			&DefineEventStatement {
@@ -72,21 +79,26 @@ impl DefineEventStatement {
 			None,
 		)
 		.await?;
+
 		// Refresh the table cache
+		let tb_def = TableDefinition {
+			cache_events_ts: Uuid::now_v7(),
+			..tb.as_ref().clone()
+		};
+
 		let key = crate::key::database::tb::new(ns, db, &self.what);
-		let tb = txn.get_tb(ns, db, &self.what).await?;
 		txn.set(
 			&key,
-			&DefineTableStatement {
-				cache_events_ts: Uuid::now_v7(),
-				..tb.as_ref().clone()
-			},
+			&tb_def,
 			None,
 		)
 		.await?;
-		// Clear the cache
+
+		// Update the cache
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &self.what);
+			// TODO: STU: Instead of clearing the table cache, is it okay to just update the cache?
+			// cache.clear_tb(ns, db, &self.what);
+			cache.insert(ds::Lookup::Tb(ns, db, &tb.name), ds::Entry::Any(Arc::new(tb_def)));
 		}
 		// Clear the cache
 		txn.clear();

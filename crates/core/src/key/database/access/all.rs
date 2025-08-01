@@ -1,4 +1,6 @@
 //! Stores the key prefix for all keys under a database access method
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
@@ -9,9 +11,9 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct DbAccess<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub ac: &'a str,
 }
@@ -20,7 +22,7 @@ impl KVKey for DbAccess<'_> {
 	type ValueType = Vec<u8>;
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str, ac: &'a str) -> DbAccess<'a> {
+pub fn new<'a>(ns: NamespaceId, db: DatabaseId, ac: &'a str) -> DbAccess<'a> {
 	DbAccess::new(ns, db, ac)
 }
 
@@ -31,7 +33,7 @@ impl Categorise for DbAccess<'_> {
 }
 
 impl<'a> DbAccess<'a> {
-	pub fn new(ns: &'a str, db: &'a str, ac: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, ac: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -52,8 +54,8 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let val = DbAccess::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testac",
 		);
 		let enc = DbAccess::encode_key(&val).unwrap();

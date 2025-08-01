@@ -1,3 +1,4 @@
+use crate::catalog::TableDefinition;
 use crate::ctx::Context;
 use crate::dbs::{self, Notification, Options};
 use crate::err::Error;
@@ -29,7 +30,7 @@ impl RemoveTableStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		// Get the transaction
 		let txn = ctx.tx();
 		// Remove the index stores
@@ -40,16 +41,16 @@ impl RemoveTableStatement {
 		#[cfg(target_family = "wasm")]
 		ctx.get_index_stores().table_removed(&txn, ns, db, &self.name).await?;
 		// Get the defined table
-		let tb = match txn.get_tb(ns, db, &self.name).await {
-			Ok(x) => x,
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
-					return Ok(Value::None);
-				} else {
-					return Err(e);
-				}
+		let Some(tb) = txn.get_tb(ns, db, &self.name).await? else {
+			if self.if_exists {
+				return Ok(Value::None);
 			}
+
+			return Err(Error::TbNotFound {
+				name: self.name.to_string(),
+			}.into());
 		};
+
 		// Get the foreign tables
 		let fts = txn.all_tb_views(ns, db, &self.name).await?;
 		// Get the live queries
@@ -70,10 +71,10 @@ impl RemoveTableStatement {
 		for ft in fts.iter() {
 			// Refresh the table cache
 			let key = crate::key::database::tb::new(ns, db, &ft.name);
-			let tb = txn.get_tb(ns, db, &ft.name).await?;
+			let tb = txn.expect_tb(ns, db, &ft.name).await?;
 			txn.set(
 				&key,
-				&DefineTableStatement {
+				&TableDefinition {
 					cache_tables_ts: Uuid::now_v7(),
 					..tb.as_ref().clone()
 				},
@@ -90,10 +91,10 @@ impl RemoveTableStatement {
 				txn.del(&key).await?;
 				// Refresh the table cache for foreign tables
 				let key = crate::key::database::tb::new(ns, db, ft);
-				let tb = txn.get_tb(ns, db, ft).await?;
+				let tb = txn.expect_tb(ns, db, ft).await?;
 				txn.set(
 					&key,
-					&DefineTableStatement {
+					&TableDefinition {
 						cache_tables_ts: Uuid::now_v7(),
 						..tb.as_ref().clone()
 					},

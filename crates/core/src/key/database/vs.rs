@@ -1,4 +1,5 @@
 //! Stores database versionstamps
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
@@ -8,33 +9,33 @@ use serde::{Deserialize, Serialize};
 
 // Vs stands for Database Versionstamp
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub(crate) struct Vs<'a> {
+pub(crate) struct Vs {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	_d: u8,
 	_e: u8,
 }
 
-impl KVKey for Vs<'_> {
+impl KVKey for Vs {
 	type ValueType = VersionStamp;
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str) -> Vs<'a> {
+pub fn new(ns: NamespaceId, db: DatabaseId) -> Vs {
 	Vs::new(ns, db)
 }
 
-impl Categorise for Vs<'_> {
+impl Categorise for Vs {
 	fn categorise(&self) -> Category {
 		Category::DatabaseVersionstamp
 	}
 }
 
-impl<'a> Vs<'a> {
-	pub fn new(ns: &'a str, db: &'a str) -> Self {
+impl Vs {
+	pub fn new(ns: NamespaceId, db: DatabaseId) -> Self {
 		Vs {
 			__: b'/',
 			_a: b'*',

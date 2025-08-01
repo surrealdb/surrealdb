@@ -16,6 +16,8 @@
 //! - Enabling efficient compaction of index data
 //! - Providing accurate document count information for the index
 
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::idx::docids::DocId;
 use crate::idx::ft::fulltext::DocLengthAndCount;
 use crate::key::category::Categorise;
@@ -29,9 +31,9 @@ use uuid::Uuid;
 pub(crate) struct Dc<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -73,8 +75,8 @@ impl<'a> Dc<'a> {
 	/// * `uid` - Transaction ID for concurrency control
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
 		doc_id: DocId,
@@ -114,7 +116,7 @@ impl<'a> Dc<'a> {
 	///
 	/// # Returns
 	/// The encoded root key as a byte vector
-	pub(crate) fn new_root(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Result<Vec<u8>> {
+	pub(crate) fn new_root(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Result<Vec<u8>> {
 		DcPrefix::new(ns, db, tb, ix).encode_key()
 	}
 
@@ -133,8 +135,8 @@ impl<'a> Dc<'a> {
 	/// # Returns
 	/// A tuple of (start, end) keys that define the range for database queries
 	pub(crate) fn range(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
@@ -151,9 +153,9 @@ impl<'a> Dc<'a> {
 struct DcPrefix<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -168,7 +170,7 @@ impl KVKey for DcPrefix<'_> {
 }
 
 impl<'a> DcPrefix<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -193,8 +195,8 @@ mod tests {
 	#[test]
 	fn key_with_ids() {
 		let val = Dc::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 			129,

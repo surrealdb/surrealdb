@@ -1,4 +1,5 @@
 //! Stores BTree nodes for doc lengths
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::trees::btree::BState;
 use crate::idx::trees::store::NodeId;
 use crate::key::category::Categorise;
@@ -11,9 +12,9 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct BlRoot<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -34,7 +35,7 @@ impl Categorise for BlRoot<'_> {
 }
 
 impl<'a> BlRoot<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -56,9 +57,9 @@ impl<'a> BlRoot<'a> {
 pub(crate) struct Bl<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -80,7 +81,7 @@ impl Categorise for Bl<'_> {
 }
 
 impl<'a> Bl<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, node_id: NodeId) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, node_id: NodeId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

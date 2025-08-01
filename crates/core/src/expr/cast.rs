@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Idiom, Kind, Value};
+use crate::sql::ToSql;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -63,6 +64,6 @@ impl Cast {
 
 impl fmt::Display for Cast {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "<{}> {}", self.0, self.1)
+		write!(f, "<{}> {}", self.0.to_sql(), self.1.to_string())
 	}
 }

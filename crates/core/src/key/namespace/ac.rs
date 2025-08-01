@@ -1,5 +1,6 @@
 //! Stores a DEFINE ACCESS ON NAMESPACE configuration
 use crate::expr::statements::define::DefineAccessStatement;
+use crate::catalog::NamespaceId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
@@ -11,7 +12,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct Ac<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
 	_c: u8,
 	_d: u8,
@@ -22,17 +23,17 @@ impl KVKey for Ac<'_> {
 	type ValueType = DefineAccessStatement;
 }
 
-pub fn new<'a>(ns: &'a str, ac: &'a str) -> Ac<'a> {
+pub fn new<'a>(ns: NamespaceId, ac: &'a str) -> Ac<'a> {
 	Ac::new(ns, ac)
 }
 
-pub fn prefix(ns: &str) -> Result<Vec<u8>> {
+pub fn prefix(ns: NamespaceId) -> Result<Vec<u8>> {
 	let mut k = crate::key::namespace::all::new(ns).encode_key()?;
 	k.extend_from_slice(b"!ac\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: &str) -> Result<Vec<u8>> {
+pub fn suffix(ns: NamespaceId) -> Result<Vec<u8>> {
 	let mut k = crate::key::namespace::all::new(ns).encode_key()?;
 	k.extend_from_slice(b"!ac\xff");
 	Ok(k)
@@ -45,7 +46,7 @@ impl Categorise for Ac<'_> {
 }
 
 impl<'a> Ac<'a> {
-	pub fn new(ns: &'a str, ac: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, ac: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
