@@ -21,7 +21,6 @@ pub use protocol::v2::RpcProtocolV2;
 
 use crate::cnf::PROTECTED_PARAM_NAMES;
 
-
 pub fn check_protected_param(key: &str) -> Result<(), RpcError> {
 	if PROTECTED_PARAM_NAMES.contains(&key) {
 		return Err(RpcError::InvalidParams(format!("Cannot set protected variable: {key}")));

@@ -8,15 +8,13 @@ pub use table::AlterTableStatement;
 
 use std::fmt::{self, Display};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[derive(Default)]
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
 pub enum AlterKind<T> {
 	#[default]
- None,
+	None,
 	Set(T),
 	Drop,
 }
-
 
 impl<A, B> From<AlterKind<A>> for crate::expr::statements::alter::AlterKind<B>
 where

@@ -44,7 +44,9 @@ impl RpcData {
 			"replace" => Ok(RpcData::Replace(v)),
 			"content" => Ok(RpcData::Content(v)),
 			"single" => Ok(RpcData::Single(v)),
-			unexpected => Err(RpcError::InvalidParams(format!("Expected 'patch', 'merge', 'replace', 'content', or 'single', got {unexpected}"))),
+			unexpected => Err(RpcError::InvalidParams(format!(
+				"Expected 'patch', 'merge', 'replace', 'content', or 'single', got {unexpected}"
+			))),
 		}
 	}
 }
@@ -139,7 +141,9 @@ impl StatementOptions {
 				if let Value::Strand(v) = v {
 					self.data = Some(RpcData::from_string(v.to_string(), data.value().to_owned())?);
 				} else {
-					return Err(RpcError::InvalidParams("Expected 'data_expr' to be string".to_string()));
+					return Err(RpcError::InvalidParams(
+						"Expected 'data_expr' to be string".to_string(),
+					));
 				}
 			}
 		}
@@ -196,7 +200,9 @@ impl StatementOptions {
 				Value::Datetime(d) => Expr::Literal(Literal::Datetime(d)),
 				Value::Strand(v) => syn::expr_with_capabilities(v.as_str(), capabilities)?,
 				_ => {
-					return Err(RpcError::InvalidParams("Expected 'version' to be string or datetime".to_string()));
+					return Err(RpcError::InvalidParams(
+						"Expected 'version' to be string or datetime".to_string(),
+					));
 				}
 			};
 
@@ -208,7 +214,9 @@ impl StatementOptions {
 			if let Value::Duration(v) = v {
 				self.timeout = Some(Timeout(v))
 			} else {
-				return Err(RpcError::InvalidParams("Expected 'timeout' to be duration".to_string()));
+				return Err(RpcError::InvalidParams(
+					"Expected 'timeout' to be duration".to_string(),
+				));
 			}
 		}
 
@@ -226,7 +234,9 @@ impl StatementOptions {
 			if let Value::Bool(v) = v {
 				self.relation = v;
 			} else {
-				return Err(RpcError::InvalidParams("Expected 'relation' to be boolean".to_string()));
+				return Err(RpcError::InvalidParams(
+					"Expected 'relation' to be boolean".to_string(),
+				));
 			}
 		}
 
@@ -252,7 +262,9 @@ impl StatementOptions {
 		if let Some(v) = obj.remove("diff") {
 			if self.fields.is_some() {
 				// diff and fields cannot co-exist, as diff overwrites the fields
-				return Err(RpcError::InvalidParams("'diff' and 'fields' cannot co-exist".to_string()));
+				return Err(RpcError::InvalidParams(
+					"'diff' and 'fields' cannot co-exist".to_string(),
+				));
 			}
 
 			if let Value::Bool(v) = v {

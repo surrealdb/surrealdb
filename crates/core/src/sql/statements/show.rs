@@ -36,9 +36,7 @@ impl From<ShowSince> for crate::expr::statements::show::ShowSince {
 impl From<crate::expr::statements::show::ShowSince> for ShowSince {
 	fn from(v: crate::expr::statements::show::ShowSince) -> Self {
 		match v {
-			crate::expr::statements::show::ShowSince::Timestamp(v) => {
-				ShowSince::Timestamp(v)
-			}
+			crate::expr::statements::show::ShowSince::Timestamp(v) => ShowSince::Timestamp(v),
 			crate::expr::statements::show::ShowSince::Versionstamp(v) => ShowSince::Versionstamp(v),
 		}
 	}
