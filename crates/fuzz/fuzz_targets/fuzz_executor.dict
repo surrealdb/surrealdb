@@ -308,6 +308,8 @@
 "schema"
 "schema::table::exists("
 "search::analyze("
+"search::linear("
+"search::rrf("
 "search::score("
 "search::highlight("
 "search::offsets("
