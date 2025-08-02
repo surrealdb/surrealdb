@@ -672,7 +672,6 @@ jobs:
           df -h
           ps auxf
 
-  # TODO(DB-662): TiKV engine tests stopped working after July 29th
   tikv-engine:
     name: Rust SDK - TiKV engine
     runs-on: ubuntu-latest
@@ -701,7 +700,6 @@ jobs:
         run: cargo install --debug --locked cargo-make
 
       - name: Test TiKV engine
-        continue-on-error: true
         run: cargo make ci-api-integration-tikv
 
       - name: Debug info
@@ -958,7 +956,22 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
-        run: sleep 10
+        run: |
+          # Wait for SurrealDB to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "SurrealDB is ready"
+              break
+            fi
+            echo "Waiting for SurrealDB to start... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Final check
+          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "SurrealDB failed to start"
+            exit 1
+          fi
 
       - name: Run Golang tests (HTTP)
         run: go test -v -cover ./...
@@ -1000,28 +1013,51 @@ jobs:
         with:
           python-version: ${{ matrix.version }}
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          enable-cache: true
+
       - name: Start SurrealDB
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
-        run: sleep 10
+        run: |
+          # Wait for SurrealDB to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "SurrealDB is ready"
+              break
+            fi
+            echo "Waiting for SurrealDB to start... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Final check
+          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "SurrealDB failed to start"
+            exit 1
+          fi
 
       - name: Install dependencies
-        run: pip install .
+        run: uv sync --group dev
 
       - name: Run Python tests (HTTP)
-        run: python -m unittest discover -s tests
+        run: uv run pytest
         env:
           PYTHONPATH: ./src
           SURREALDB_URL: http://localhost:8000
           SURREALDB_VERSION: ${{ matrix.version }}
+          PYTHONWARNINGS: ignore::ResourceWarning
 
       - name: Run Python tests (WebSocket)
-        run: python -m unittest discover -s tests
+        run: uv run pytest
         env:
           PYTHONPATH: ./src
           SURREALDB_URL: ws://localhost:8000
           SURREALDB_VERSION: ${{ matrix.version }}
+          PYTHONWARNINGS: ignore::ResourceWarning
 
   sdk-php:
     name: PHP SDK tests (${{ matrix.version }})
@@ -1062,7 +1098,22 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
-        run: sleep 10
+        run: |
+          # Wait for SurrealDB to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "SurrealDB is ready"
+              break
+            fi
+            echo "Waiting for SurrealDB to start... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Final check
+          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "SurrealDB failed to start"
+            exit 1
+          fi
 
       - name: Run PHP tests
         run: composer test-coverage-v2
@@ -1110,7 +1161,22 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
-        run: sleep 10
+        run: |
+          # Wait for SurrealDB to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "SurrealDB is ready"
+              break
+            fi
+            echo "Waiting for SurrealDB to start... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Final check
+          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "SurrealDB failed to start"
+            exit 1
+          fi
 
       - name: Run .NET tests
         run: >
