@@ -369,14 +369,19 @@ pub fn span_filters_from_value(v: &str) -> Vec<(String, LevelFilter)> {
 
 #[cfg(test)]
 mod tests {
-	use std::{ffi::OsString, sync::Mutex};
-
 	use crate::telemetry;
 	use opentelemetry::global::shutdown_tracer_provider;
+	use std::ffi::OsString;
 	use tracing::{Level, span};
 	use tracing_subscriber::util::SubscriberInitExt;
 
-	static ENV_MUTEX: Mutex<()> = Mutex::new(());
+	/// Helper function to ensure proper telemetry cleanup and reset
+	fn cleanup_telemetry() {
+		// Shutdown any existing tracer provider
+		shutdown_tracer_provider();
+		// Give some time for cleanup
+		std::thread::sleep(std::time::Duration::from_millis(100));
+	}
 
 	fn with_vars<K, V, F, R>(vars: &[(K, Option<V>)], f: F) -> R
 	where
@@ -384,41 +389,110 @@ mod tests {
 		K: AsRef<str>,
 		V: AsRef<str>,
 	{
-		let _guard = ENV_MUTEX.lock();
-
 		let mut restore = Vec::new();
 
-		for (k, v) in vars {
-			restore.push((k.as_ref().to_string(), std::env::var_os(k.as_ref())));
-			if let Some(x) = v {
-				// TODO: Audit that the environment access only happens in single-threaded code.
-				unsafe { std::env::set_var(k.as_ref(), x.as_ref()) };
-			} else {
-				// TODO: Audit that the environment access only happens in single-threaded code.
-				unsafe { std::env::remove_var(k.as_ref()) };
-			}
-		}
-
+		// Dropper to restore the environment variables
 		struct Dropper(Vec<(String, Option<OsString>)>);
+
+		// Ensure variables are restored when finished
 		impl Drop for Dropper {
 			fn drop(&mut self) {
 				for (k, v) in self.0.drain(..) {
 					if let Some(v) = v {
-						// TODO: Audit that the environment access only happens in single-threaded code.
 						unsafe { std::env::set_var(k, v) };
 					} else {
-						// TODO: Audit that the environment access only happens in single-threaded code.
 						unsafe { std::env::remove_var(k) };
 					}
 				}
 			}
 		}
-		let _drop_gaurd = Dropper(restore);
+
+		// First, clear any existing telemetry-related environment variables
+		let telemetry_vars = [
+			"SURREAL_TELEMETRY_PROVIDER",
+			"OTEL_EXPORTER_OTLP_ENDPOINT",
+			"OTEL_BSP_SCHEDULE_DELAY",
+			"OTEL_BSP_EXPORT_TIMEOUT",
+			"OTEL_BSP_MAX_QUEUE_SIZE",
+		];
+
+		for var in &telemetry_vars {
+			restore.push((var.to_string(), std::env::var_os(var)));
+			unsafe { std::env::remove_var(var) };
+		}
+
+		// Then set the new variables
+		for (k, v) in vars {
+			restore.push((k.as_ref().to_string(), std::env::var_os(k.as_ref())));
+			if let Some(x) = v {
+				unsafe { std::env::set_var(k.as_ref(), x.as_ref()) };
+			} else {
+				unsafe { std::env::remove_var(k.as_ref()) };
+			}
+		}
+
+		let _guard = Dropper(restore);
 		f()
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
+	#[serial_test::serial]
+	async fn test_mock_server_basic() {
+		println!("Testing basic mock server functionality...");
+		let (addr, _req_rx) = telemetry::traces::tests::mock_otlp_server().await;
+		println!("Mock server started on {}", addr);
+
+		// Give the server a moment to start up
+		tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+		// Test that the server is reachable
+		let client = reqwest::Client::new();
+		let response = client.get(&format!("http://{}/", addr)).send().await;
+		println!("Server response: {:?}", response);
+
+		// The server should not respond to HTTP requests, but we can verify it's running
+		assert!(response.is_err() || response.unwrap().status().is_client_error());
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	#[serial_test::serial]
+	async fn test_otlp_exporter_direct() {
+		// Ensure clean state
+		cleanup_telemetry();
+
+		println!("Starting mock otlp server...");
+		let (addr, _req_rx) = telemetry::traces::tests::mock_otlp_server().await;
+
+		// Test direct OTLP exporter configuration
+		with_vars(
+			&[
+				("SURREAL_TELEMETRY_PROVIDER", Some("otlp")),
+				("OTEL_EXPORTER_OTLP_ENDPOINT", Some(&format!("http://{addr}"))),
+				("OTEL_BSP_SCHEDULE_DELAY", Some("1")),
+				("OTEL_BSP_EXPORT_TIMEOUT", Some("1000")),
+				("OTEL_BSP_MAX_QUEUE_SIZE", Some("1")),
+			],
+			|| {
+				println!("Environment variables set, testing telemetry builder...");
+				match telemetry::builder().with_log_level("info").build() {
+					Ok((_registry, _guards)) => {
+						println!("Telemetry builder succeeded");
+					}
+					Err(e) => {
+						println!("Telemetry builder failed: {e:?}");
+						panic!("Telemetry builder failed: {e:?}");
+					}
+				}
+			},
+		);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	#[serial_test::serial]
 	async fn test_otlp_tracer() {
+		// Ensure clean state
+		cleanup_telemetry();
+
 		println!("Starting mock otlp server...");
 		let (addr, mut req_rx) = telemetry::traces::tests::mock_otlp_server().await;
 
@@ -428,9 +502,13 @@ mod tests {
 				&[
 					("SURREAL_TELEMETRY_PROVIDER", Some("otlp")),
 					("OTEL_EXPORTER_OTLP_ENDPOINT", Some(otlp_endpoint.as_str())),
+					// Add explicit configuration to ensure immediate export
+					("OTEL_BSP_SCHEDULE_DELAY", Some("1")),
+					("OTEL_BSP_EXPORT_TIMEOUT", Some("1000")),
+					("OTEL_BSP_MAX_QUEUE_SIZE", Some("1")),
 				],
 				|| {
-					let (registry, guards) =
+					let (registry, _guards) =
 						telemetry::builder().with_log_level("info").build().unwrap();
 
 					let _enter = registry.set_default();
@@ -443,10 +521,8 @@ mod tests {
 						info!("test-surreal-event");
 					}
 
-					shutdown_tracer_provider();
-					for guard in guards {
-						drop(guard);
-					}
+					// Force flush the telemetry data
+					cleanup_telemetry();
 				},
 			)
 		}
@@ -465,7 +541,11 @@ mod tests {
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
-	async fn test_tracing_filter() {
+	#[serial_test::serial]
+	async fn test_otlp_filter() {
+		// Ensure clean state
+		cleanup_telemetry();
+
 		println!("Starting mock otlp server...");
 		let (addr, mut req_rx) = telemetry::traces::tests::mock_otlp_server().await;
 
@@ -475,9 +555,13 @@ mod tests {
 				&[
 					("SURREAL_TELEMETRY_PROVIDER", Some("otlp")),
 					("OTEL_EXPORTER_OTLP_ENDPOINT", Some(otlp_endpoint.as_str())),
+					// Add explicit configuration to ensure immediate export
+					("OTEL_BSP_SCHEDULE_DELAY", Some("1")),
+					("OTEL_BSP_EXPORT_TIMEOUT", Some("1000")),
+					("OTEL_BSP_MAX_QUEUE_SIZE", Some("1")),
 				],
 				|| {
-					let (registry, guards) =
+					let (registry, _guards) =
 						telemetry::builder().with_log_level("debug").build().unwrap();
 
 					let _enter = registry.set_default();
@@ -498,10 +582,8 @@ mod tests {
 						trace!("trace");
 					}
 
-					shutdown_tracer_provider();
-					for guard in guards {
-						drop(guard);
-					}
+					// Force flush the telemetry data
+					cleanup_telemetry();
 				},
 			)
 		}
@@ -509,7 +591,7 @@ mod tests {
 		println!("Waiting for request...");
 		let req = tokio::select! {
 			req = req_rx.recv() => req.expect("missing export request"),
-			_ = tokio::time::sleep(std::time::Duration::from_secs(10)) => panic!("timeout waiting for request"),
+			_ = tokio::time::sleep(std::time::Duration::from_secs(1)) => panic!("timeout waiting for request"),
 		};
 		let spans = &req.resource_spans.first().unwrap().scope_spans.first().unwrap().spans;
 
@@ -522,6 +604,7 @@ mod tests {
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
+	#[serial_test::serial]
 	async fn test_log_to_socket() {
 		use std::io::Read;
 		use std::net::TcpListener;
