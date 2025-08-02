@@ -447,7 +447,7 @@ mod tests {
 
 		// Test that the server is reachable
 		let client = reqwest::Client::new();
-		let response = client.get(&format!("http://{}/", addr)).send().await;
+		let response = client.get(format!("http://{}/", addr)).send().await;
 		println!("Server response: {:?}", response);
 
 		// The server should not respond to HTTP requests, but we can verify it's running
