@@ -958,7 +958,22 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
-        run: sleep 10
+        run: |
+          # Wait for SurrealDB to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "SurrealDB is ready"
+              break
+            fi
+            echo "Waiting for SurrealDB to start... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Final check
+          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "SurrealDB failed to start"
+            exit 1
+          fi
 
       - name: Run Golang tests (HTTP)
         run: go test -v -cover ./...
@@ -1010,7 +1025,22 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
-        run: sleep 10
+        run: |
+          # Wait for SurrealDB to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "SurrealDB is ready"
+              break
+            fi
+            echo "Waiting for SurrealDB to start... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Final check
+          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "SurrealDB failed to start"
+            exit 1
+          fi
 
       - name: Install dependencies
         run: uv sync --group dev
@@ -1070,7 +1100,22 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
-        run: sleep 10
+        run: |
+          # Wait for SurrealDB to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "SurrealDB is ready"
+              break
+            fi
+            echo "Waiting for SurrealDB to start... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Final check
+          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "SurrealDB failed to start"
+            exit 1
+          fi
 
       - name: Run PHP tests
         run: composer test-coverage-v2
@@ -1118,7 +1163,22 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
-        run: sleep 10
+        run: |
+          # Wait for SurrealDB to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "SurrealDB is ready"
+              break
+            fi
+            echo "Waiting for SurrealDB to start... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Final check
+          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "SurrealDB failed to start"
+            exit 1
+          fi
 
       - name: Run .NET tests
         run: >
