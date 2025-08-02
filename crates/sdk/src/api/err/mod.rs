@@ -1,4 +1,5 @@
-use crate::{Value, api::Response};
+use crate::Value;
+use crate::api::Response;
 use serde::Serialize;
 use std::io;
 use std::path::PathBuf;
@@ -245,6 +246,12 @@ pub enum Error {
 	Serializer(String),
 	#[error("failed to deserialize from a Value: {0}")]
 	Deserializer(String),
+
+	#[error("The server returned an unexpected response: {0}")]
+	InvalidResponse(String),
+
+	#[error("Tried to send a value which could not be serialized: {0}")]
+	UnserializableValue(String),
 
 	/// Tried to convert an value which contained something like for example a query or future.
 	#[error(

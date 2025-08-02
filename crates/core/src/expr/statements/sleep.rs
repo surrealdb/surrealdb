@@ -1,8 +1,9 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Base, Duration, Value};
+use crate::expr::Base;
 use crate::iam::{Action, ResourceKind};
+use crate::val::{Duration, Value};
 use anyhow::Result;
 
 use revision::revisioned;
@@ -10,8 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct SleepStatement {
 	pub(crate) duration: Duration,
 }

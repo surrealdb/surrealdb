@@ -2,11 +2,13 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::fmt::Fmt;
 use crate::expr::statements::define::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Strand, Value, Values};
+use crate::expr::{Base, Expr, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
+use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -14,20 +16,17 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use uuid::Uuid;
 
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+use super::DefineKind;
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct DefineEventStatement {
+	pub kind: DefineKind,
 	pub name: Ident,
-	pub what: Ident,
-	pub when: Value,
-	pub then: Values,
+	pub target_table: Ident,
+	pub when: Expr,
+	pub then: Vec<Expr>,
 	pub comment: Option<Strand>,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub overwrite: bool,
 }
 
 impl_kv_value_revisioned!(DefineEventStatement);
@@ -47,34 +46,36 @@ impl DefineEventStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
-		if txn.get_tb_event(ns, db, &self.what, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::EvAlreadyExists {
-					name: self.name.to_string(),
-				});
+		if txn.get_tb_event(ns, db, &self.target_table, &self.name).await.is_ok() {
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::EvAlreadyExists {
+							name: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 		}
 		// Process the statement
-		let key = crate::key::table::ev::new(ns, db, &self.what, &self.name);
+		let key = crate::key::table::ev::new(ns, db, &self.target_table, &self.name);
 		txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.get_or_add_db(ns, db, opt.strict).await?;
-		txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?;
+		txn.get_or_add_tb(ns, db, &self.target_table, opt.strict).await?;
 		txn.set(
 			&key,
 			&DefineEventStatement {
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
+				kind: DefineKind::Default,
 				..self.clone()
 			},
 			None,
 		)
 		.await?;
 		// Refresh the table cache
-		let key = crate::key::database::tb::new(ns, db, &self.what);
-		let tb = txn.get_tb(ns, db, &self.what).await?;
+		let key = crate::key::database::tb::new(ns, db, &self.target_table);
+		let tb = txn.get_tb(ns, db, &self.target_table).await?;
 		txn.set(
 			&key,
 			&DefineTableStatement {
@@ -86,10 +87,10 @@ impl DefineEventStatement {
 		.await?;
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &self.what);
+			cache.clear_tb(ns, db, &self.target_table);
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -98,13 +99,19 @@ impl DefineEventStatement {
 impl Display for DefineEventStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE EVENT",)?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
-		}
-		write!(f, " {} ON {} WHEN {} THEN {}", self.name, self.what, self.when, self.then)?;
+		write!(
+			f,
+			" {} ON {} WHEN {} THEN {}",
+			self.name,
+			self.target_table,
+			self.when,
+			Fmt::comma_separated(self.then.iter())
+		)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}
@@ -116,9 +123,9 @@ impl InfoStructure for DefineEventStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
 			"name".to_string() => self.name.structure(),
-			"what".to_string() => self.what.structure(),
+			"what".to_string() => self.target_table.structure(),
 			"when".to_string() => self.when.structure(),
-			"then".to_string() => self.then.structure(),
+			"then".to_string() => self.then.into_iter().map(|x| x.structure()).collect(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})
 	}

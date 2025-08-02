@@ -1,12 +1,14 @@
 //! Request class implementation
 
-use crate::fnc::script::fetch::{RequestError, body::Body};
+use crate::fnc::script::fetch::RequestError;
+use crate::fnc::script::fetch::body::Body;
 use bytes::Bytes;
-use js::{
-	Class, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value, class::Trace, function::Opt,
-	prelude::Coerced,
-};
-use reqwest::{Method, Url, header::HeaderName};
+use js::class::Trace;
+use js::function::Opt;
+use js::prelude::Coerced;
+use js::{Class, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value};
+use reqwest::header::HeaderName;
+use reqwest::{Method, Url};
 
 use super::{Blob, Headers};
 
@@ -544,7 +546,8 @@ impl<'js> Request<'js> {
 #[cfg(test)]
 mod test {
 	use crate::fnc::script::fetch::test::create_test_context;
-	use js::{CatchResultExt, promise::Promise};
+	use js::CatchResultExt;
+	use js::promise::Promise;
 
 	#[tokio::test]
 	async fn basic_request_use() {

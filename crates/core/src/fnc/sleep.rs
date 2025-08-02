@@ -1,6 +1,5 @@
 use crate::ctx::Context;
-use crate::expr::Duration;
-use crate::expr::Value;
+use crate::val::{Duration, Value};
 use anyhow::Result;
 
 /// Sleep during the provided duration parameter.

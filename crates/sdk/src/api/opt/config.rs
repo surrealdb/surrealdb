@@ -2,7 +2,8 @@ use crate::opt::capabilities::Capabilities;
 #[cfg(storage)]
 use std::path::PathBuf;
 use std::time::Duration;
-use surrealdb_core::{dbs::Capabilities as CoreCapabilities, iam::Level};
+use surrealdb_core::dbs::Capabilities as CoreCapabilities;
+use surrealdb_core::iam::Level;
 
 /// Configuration for server connection, including: strictness, notifications, query_timeout, transaction_timeout
 #[derive(Debug, Clone, Default)]

@@ -14,11 +14,11 @@ use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
 use surrealdb::dbs::Capabilities as CoreCapabilities;
 use surrealdb::engine::any::{self, connect};
-use surrealdb::expr::{Uuid as CoreUuid, Value as CoreValue};
 use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::Config;
 use surrealdb::{Notification, Response, Value};
-use surrealdb_core::sql::{Param, SqlValue as CoreSqlValue, Statement};
+use surrealdb_core::sql::{Expr, Param, TopLevelExpr};
+use surrealdb_core::val;
 
 #[derive(Args, Debug)]
 pub struct SqlCommandArguments {
@@ -196,11 +196,11 @@ pub async fn init(
 				let mut namespace = None;
 				let mut database = None;
 				let mut vars = Vec::new();
-				let init_length = query.len();
+				let init_length = query.expressions.len();
 				// Capture `use` and `set/let` statements from the query
-				for statement in query.iter() {
+				for statement in query.expressions.iter() {
 					match statement {
-						Statement::Use(stmt) => {
+						TopLevelExpr::Use(stmt) => {
 							if let Some(ns) = &stmt.ns {
 								namespace = Some(ns.clone());
 							}
@@ -208,13 +208,15 @@ pub async fn init(
 								database = Some(db.clone());
 							}
 						}
-						Statement::Set(stmt) => vars.push(stmt.name.clone()),
+						TopLevelExpr::Expr(Expr::Let(stmt)) => vars.push(stmt.name.clone()),
 						_ => {}
 					}
 				}
 
 				for var in &vars {
-					query.push(Statement::Value(CoreSqlValue::Param(Param::from(var.as_str()))))
+					query
+						.expressions
+						.push(TopLevelExpr::Expr(Expr::Param(Param::from(var.clone()))))
 				}
 
 				// Extract the namespace and database from the current prompt
@@ -232,7 +234,7 @@ pub async fn init(
 				if let Ok(WithStats(res)) = &mut result {
 					for (i, n) in vars.into_iter().enumerate() {
 						if let Result::<Value, _>::Ok(v) = res.take(init_length + i) {
-							let _ = client.set(n, v).await;
+							let _ = client.set(n.into_string(), v).await;
 						}
 					}
 				}
@@ -288,7 +290,7 @@ fn process(
 		let (stats, result) = response.take(index).ok_or_else(|| {
 			anyhow!("Expected some result for a query with index {index}, but found none")
 		})?;
-		let output = result.unwrap_or_else(|e| Value::from_inner(CoreValue::from(e.to_string())));
+		let output = result.unwrap_or_else(|e| Value::from_inner(val::Value::from(e.to_string())));
 		vec.push((stats, output));
 	}
 
@@ -310,8 +312,8 @@ fn process(
 			let message = match (json, pretty) {
 				// Don't prettify the SurrealQL response
 				(false, false) => {
-					let value = CoreValue::from(map! {
-						String::from("id") => CoreValue::from(CoreUuid::from(query_id)),
+					let value = val::Value::from(map! {
+						String::from("id") => val::Value::from(val::Uuid::from(query_id)),
 						String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
 						String::from("result") => data.into_inner(),
 					});
@@ -323,12 +325,16 @@ fn process(
 				),
 				// Don't pretty print the JSON response
 				(true, false) => {
-					let value = CoreValue::from(map! {
-						String::from("id") => CoreValue::from(CoreUuid::from(query_id)),
+					let value = val::Value::from(map! {
+						String::from("id") => val::Value::from(val::Uuid::from(query_id)),
 						String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
 						String::from("result") => data.into_inner(),
 					});
-					value.into_json().to_string()
+					if let Some(x) = value.into_json_value() {
+						x.to_string()
+					} else {
+						"Value cannot be encoded into json".to_string()
+					}
 				}
 				// Yes prettify the JSON response
 				(true, true) => {
@@ -337,7 +343,7 @@ fn process(
 						&mut buf,
 						PrettyFormatter::with_indent(b"\t"),
 					);
-					data.into_inner().into_json().serialize(&mut serializer).unwrap();
+					data.into_inner().into_json_value().serialize(&mut serializer).unwrap();
 					let output = String::from_utf8(buf).unwrap();
 					format!(
 						"-- Notification (action: {action:?}, live query ID: {query_id})\n{output:#}"
@@ -352,8 +358,7 @@ fn process(
 	Ok(match (json, pretty) {
 		// Don't prettify the SurrealQL response
 		(false, false) => {
-			CoreValue::from(vec.into_iter().map(|(_, x)| x.into_inner()).collect::<Vec<_>>())
-				.to_string()
+			vec.into_iter().map(|(_, x)| x.into_inner()).collect::<val::Value>().to_string()
 		}
 		// Yes prettify the SurrealQL response
 		(false, true) => vec
@@ -369,8 +374,12 @@ fn process(
 		// Don't pretty print the JSON response
 		(true, false) => {
 			let value =
-				CoreValue::from(vec.into_iter().map(|(_, x)| x.into_inner()).collect::<Vec<_>>());
-			serde_json::to_string(&value.into_json()).unwrap()
+				val::Value::from(vec.into_iter().map(|(_, x)| x.into_inner()).collect::<Vec<_>>());
+			if let Some(x) = value.into_json_value() {
+				serde_json::to_string(&x).unwrap()
+			} else {
+				"Value cannot be serialized to json".to_owned()
+			}
 		}
 		// Yes prettify the JSON response
 		(true, true) => vec
@@ -382,8 +391,12 @@ fn process(
 					&mut buf,
 					PrettyFormatter::with_indent(b"\t"),
 				);
-				value.into_inner().into_json().serialize(&mut serializer).unwrap();
-				let output = String::from_utf8(buf).unwrap();
+				let output = if let Some(x) = value.into_inner().into_json_value() {
+					x.serialize(&mut serializer).unwrap();
+					String::from_utf8(buf).unwrap()
+				} else {
+					"Value cannot be serialized to json".to_owned()
+				};
 				let query_num = index + 1;
 				let execution_time = stats.execution_time.unwrap_or_default();
 				format!("-- Query {query_num} (execution time: {execution_time:?}\n{output:#}",)

@@ -1,6 +1,5 @@
 //! Stores a LIVE SELECT query definition on the cluster
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::kvs::live::Live;
 use anyhow::Result;

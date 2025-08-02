@@ -17,6 +17,7 @@ value = "{ doc: { id: place:{ name: 'Earth' }, level: 1 }, double_level: 2, rels
 
     RELATE place:{ name: "Earth" }->contains->place:{ name: "US" };
     RELATE place:{ name: "US" }->contains->place:{ name: "NYC" };
+	NONE
 };
 
 place:{ name: "Earth" }.{..}.{

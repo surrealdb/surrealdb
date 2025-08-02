@@ -73,27 +73,6 @@ macro_rules! expected_whitespace {
 	}};
 }
 
-#[cfg(test)]
-macro_rules! test_parse {
-	($func:ident$( ( $($e:expr_2021),* $(,)? ))? , $t:expr_2021) => {{
-		let mut parser = $crate::syn::parser::Parser::new($t.as_bytes());
-		let mut stack = reblessive::Stack::new();
-		stack.enter(|ctx| parser.$func(ctx,$($($e),*)*)).finish()
-	}};
-}
-
-#[cfg(test)]
-macro_rules! test_parse_with_settings {
-	($func:ident$( ( $($e:expr_2021),* $(,)? ))? , $t:expr_2021, $s:expr_2021) => {{
-		let mut parser = $crate::syn::parser::Parser::new_with_settings(
-			$t.as_bytes(),
-			$s,
-		);
-		let mut stack = reblessive::Stack::new();
-		stack.enter(|ctx| parser.$func(ctx,$($($e),*)*)).finish()
-	}};
-}
-
 macro_rules! enter_object_recursion {
 	($name:ident = $this:expr_2021 => { $($t:tt)* }) => {{
 		if $this.settings.object_recursion_limit == 0 {
@@ -162,50 +141,7 @@ macro_rules! enter_query_recursion {
 	}};
 }
 
-// This macro is used to parse an option in the format `+option`.
-macro_rules! parse_option {
-	($parser: ident, $what: expr_2021, $( $string: expr_2021 => $result: expr_2021, )+ _ => $fallback: expr_2021) => {
-		if $parser.eat(t!("+")) {
-			let what = $what;
-			let kind = $parser.next_token_value::<Ident>()?;
-			match kind.0.as_str() {
-				$(
-					v if v.eq_ignore_ascii_case($string) => { $result },
-				)+
-				found => {
-					let expected = vec![$( $string ),+]
-						.into_iter()
-						.map(|v| format!("`{v}`"))
-						.collect::<Vec<String>>();
-
-					let expected = if expected.len() > 1 {
-						format!(
-							"{} or {}",
-							expected[..expected.len() - 1].join(", "),
-							expected.last().unwrap()
-						)
-					} else {
-						expected[0].clone()
-					};
-
-					bail!("Unexpected {what} `{}` expected {expected}", found, @$parser.last_span());
-				}
-			}
-		} else {
-			$fallback
-		}
-	};
-}
-
-pub(crate) use enter_object_recursion;
-pub(crate) use enter_query_recursion;
-pub(crate) use expected;
-pub(crate) use expected_whitespace;
-pub(crate) use parse_option;
-pub(crate) use pop_glued;
-pub(crate) use unexpected;
-
-#[cfg(test)]
-pub(crate) use test_parse;
-#[cfg(test)]
-pub(crate) use test_parse_with_settings;
+pub(crate) use {
+	enter_object_recursion, enter_query_recursion, expected, expected_whitespace, pop_glued,
+	unexpected,
+};

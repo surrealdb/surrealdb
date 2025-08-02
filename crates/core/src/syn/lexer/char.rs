@@ -1,8 +1,6 @@
-use crate::syn::{
-	error::syntax_error,
-	lexer::Lexer,
-	token::{Token, TokenKind, t},
-};
+use crate::syn::error::syntax_error;
+use crate::syn::lexer::Lexer;
+use crate::syn::token::{Token, TokenKind, t};
 
 impl Lexer<'_> {
 	/// lex non-ascii characters.

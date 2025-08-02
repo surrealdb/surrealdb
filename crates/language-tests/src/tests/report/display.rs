@@ -15,7 +15,7 @@ use super::{
 	TestGrade, TestOutputs, TestReport, TestValueExpectation, ValueMismatchKind,
 };
 use similar::{Algorithm, TextDiff};
-use surrealdb_core::expr::Value as SurValue;
+use surrealdb_core::val::Value as SurValue;
 
 type Fmt<'a> = IndentFormatter<&'a mut String>;
 
@@ -218,7 +218,7 @@ impl TestReport {
 		f.indent(|f| {
 			writeln!(f, "= Got:")?;
 			f.indent(|f| match outputs {
-				TestOutputs::Values(res) => Self::display_value_list(res, f),
+				TestOutputs::Values(res) => Self::display_value_list(&res, f),
 				TestOutputs::ParsingError(res) => {
 					writeln!(f, "- Parsing error: {res}")
 				}
@@ -353,7 +353,7 @@ impl TestReport {
 									f.indent(|f| writeln!(f, "- Any value"))?;
 								}
 								writeln!(f, "= Got:")?;
-								f.indent(|f| writeln!(f, "- Value: {got}"))
+								f.indent(|f| writeln!(f, "- Error: {got}"))
 							})
 						}
 					}

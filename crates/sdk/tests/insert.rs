@@ -1,12 +1,12 @@
-mod parse;
-use parse::Parse;
 use surrealdb_core::iam::Level;
+use surrealdb_core::syn;
+use surrealdb_core::val::{Array, Strand, Value};
 mod helpers;
 use crate::helpers::Test;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::expr::{Part, Value};
+use surrealdb::expr::Part;
 use surrealdb::iam::Role;
 
 #[tokio::test]
@@ -24,7 +24,7 @@ async fn insert_statement_object_single() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: `test-table`:tester, test: true, something: 'other' }]");
+	let val = syn::value("[{ id: `test-table`:tester, test: true, something: 'other' }]").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -52,12 +52,13 @@ async fn insert_statement_object_multiple() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{ id: test:1, test: true, something: 'other' },
 			{ id: test:2, test: false, something: 'else' }
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -74,7 +75,7 @@ async fn insert_statement_values_single() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: test:tester, test: true, something: 'other' }]");
+	let val = syn::value("[{ id: test:tester, test: true, something: 'other' }]").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -91,12 +92,13 @@ async fn insert_statement_values_multiple() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{ id: test:1, test: true, something: 'other' },
 			{ id: test:2, test: false, something: 'else' }
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -113,12 +115,13 @@ async fn insert_statement_values_retable_id() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{ id: test:1, test: true, something: 'other' },
 			{ id: test:2, test: false, something: 'else' }
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -136,11 +139,11 @@ async fn insert_statement_on_duplicate_key() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: test:tester, test: true, something: 'other' }]");
+	let val = syn::value("[{ id: test:tester, test: true, something: 'other' }]").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: test:tester, test: true, something: 'else' }]");
+	let val = syn::value("[{ id: test:tester, test: true, something: 'else' }]").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -223,7 +226,7 @@ async fn insert_statement_output() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ something: 'other' }]");
+	let val = syn::value("[{ something: 'other' }]").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -246,16 +249,34 @@ async fn insert_statement_duplicate_key_update() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp.first().pick(&[Part::from("name")]), Value::from("SurrealDB"));
-	assert_eq!(tmp.first().pick(&[Part::from("founded")]), Value::from("2021-09-10"));
+	assert_eq!(
+		tmp.first().pick(&[Part::field("name".to_owned()).unwrap()]),
+		Value::from(Strand::new("SurrealDB".to_owned()).unwrap())
+	);
+	assert_eq!(
+		tmp.first().pick(&[Part::field("founded".to_owned()).unwrap()]),
+		Value::from(Strand::new("2021-09-10".to_owned()).unwrap())
+	);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp.first().pick(&[Part::from("name")]), Value::from("SurrealDB"));
-	assert_eq!(tmp.first().pick(&[Part::from("founded")]), Value::from("2021-09-11"));
+	assert_eq!(
+		tmp.first().pick(&[Part::field("name".to_owned()).unwrap()]),
+		Value::from(Strand::new("SurrealDB".to_owned()).unwrap())
+	);
+	assert_eq!(
+		tmp.first().pick(&[Part::field("founded".to_owned()).unwrap()]),
+		Value::from(Strand::new("2021-09-11".to_owned()).unwrap())
+	);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp.first().pick(&[Part::from("name")]), Value::from("SurrealDB"));
-	assert_eq!(tmp.first().pick(&[Part::from("founded")]), Value::from("2021-09-12"));
+	assert_eq!(
+		tmp.first().pick(&[Part::field("name".to_owned()).unwrap()]),
+		Value::from(Strand::new("SurrealDB".to_owned()).unwrap())
+	);
+	assert_eq!(
+		tmp.first().pick(&[Part::field("founded".to_owned()).unwrap()]),
+		Value::from(Strand::new("2021-09-12".to_owned()).unwrap())
+	);
 	//
 	Ok(())
 }
@@ -401,9 +422,9 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			let res = resp.remove(0).output();
 
 			if should_succeed {
-				assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", msg);
+				assert!(res.is_ok() && res.unwrap() != Array::new().into(), "{}", msg);
 			} else if res.is_ok() {
-				assert!(res.unwrap() == Value::parse("[]"), "{}", msg);
+				assert!(res.unwrap() == Array::new().into(), "{}", msg);
 			} else {
 				// Not allowed to create a table
 				let err = res.unwrap_err().to_string();
@@ -426,7 +447,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Value::parse("[]"),
+				res.is_ok() && res.unwrap() != Array::new().into(),
 				"unexpected error creating person record"
 			);
 
@@ -436,7 +457,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Value::parse("[]"),
+				res.is_ok() && res.unwrap() != Array::new().into(),
 				"unexpected error creating person record"
 			);
 
@@ -446,7 +467,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Value::parse("[]"),
+				res.is_ok() && res.unwrap() != Array::new().into(),
 				"unexpected error creating person record"
 			);
 
@@ -455,9 +476,9 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			let res = resp.remove(0).output();
 
 			if should_succeed {
-				assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", msg);
+				assert!(res.is_ok() && res.unwrap() != Array::new().into(), "{}", msg);
 			} else if res.is_ok() {
-				assert!(res.unwrap() == Value::parse("[]"), "{}", msg);
+				assert!(res.unwrap() == Array::new().into(), "{}", msg);
 			} else {
 				// Not allowed to create a table
 				let err = res.unwrap_err().to_string();
@@ -533,7 +554,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() == Value::parse("[]"),
+			res.unwrap() == Array::new().into(),
 			"{}",
 			"anonymous user should not be able to insert a new record if the table exists but has no permissions"
 		);
@@ -565,7 +586,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Value::parse("[]"),
+			res.unwrap() != Array::new().into(),
 			"{}",
 			"anonymous user should be able to insert a new record if the table exists and grants full permissions"
 		);
@@ -599,7 +620,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Value::parse("[]"),
+			res.unwrap() != Array::new().into(),
 			"{}",
 			"anonymous user should be able to create the table"
 		);
@@ -631,7 +652,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Value::parse("[]"),
+			res.unwrap() != Array::new().into(),
 			"{}",
 			"anonymous user should not be able to insert a new record if the table exists but has no permissions"
 		);
@@ -663,7 +684,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Value::parse("[]"),
+			res.unwrap() != Array::new().into(),
 			"{}",
 			"anonymous user should be able to insert a new record if the table exists and grants full permissions"
 		);
@@ -705,11 +726,11 @@ async fn insert_relation() -> Result<()> {
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: person:1 }, { id: person:2 }, { id: person:3 }]");
+	let val = syn::value("[{ id: person:1 }, { id: person:2 }, { id: person:3 }]").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"
 		[
 			{
@@ -719,11 +740,12 @@ async fn insert_relation() -> Result<()> {
 			}
 		]
 	",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"
 		[
 			{
@@ -738,11 +760,12 @@ async fn insert_relation() -> Result<()> {
 			}
 		]
 	",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"
 		[
 			{
@@ -752,11 +775,12 @@ async fn insert_relation() -> Result<()> {
        		}
 		]
 	",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"
 		[
 			[
@@ -770,7 +794,8 @@ async fn insert_relation() -> Result<()> {
 			[]
 		]
 	",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

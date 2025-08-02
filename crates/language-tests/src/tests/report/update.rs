@@ -2,7 +2,7 @@ use std::{cmp::Ordering, fmt::Write, ops::Range};
 
 use crate::tests::{ConfigKind, TestSet, report::TestOutputs};
 use anyhow::Result;
-use surrealdb_core::expr::Value as SurValue;
+use surrealdb_core::val::Value as SurValue;
 use tokio::{fs, io::AsyncWriteExt};
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
 

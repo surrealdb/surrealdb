@@ -26,7 +26,7 @@ value = "[1, 2, 3, 4, 4, 'text']"
 value = "['text', 4, 4, 3, 2, 1]"
 
 [[test.results]]
-value = "[|$a: any| {  }, 1..2, /a/, |a:1..2|, a:b, (1, 2), {  }, [], u'ffffffff-ffff-ffff-ffff-ffffffffffff', 1d, 1, true, NULL, NONE]"
+value = "[1..2, /a/, a:b, (1, 2), {  }, [], u'ffffffff-ffff-ffff-ffff-ffffffffffff', 1d, 1, true, NULL, NONE]"
 
 
 */

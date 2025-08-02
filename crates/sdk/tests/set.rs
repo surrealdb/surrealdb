@@ -1,5 +1,4 @@
 mod helpers;
-mod parse;
 use helpers::Test;
 use surrealdb::Result;
 

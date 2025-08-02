@@ -1,26 +1,21 @@
 //! Contains the actual fetch function.
 
-use super::classes::Headers;
-use crate::fnc::{
-	http::resolver,
-	script::{
-		fetch::{
-			RequestError,
-			body::{Body, BodyData, BodyKind},
-			classes::{self, Request, RequestInit, Response, ResponseInit, ResponseType},
-		},
-		modules::surrealdb::query::QueryContext,
-	},
+use crate::fnc::http::resolver::FilteringResolver;
+use crate::fnc::script::fetch::RequestError;
+use crate::fnc::script::fetch::body::{Body, BodyData, BodyKind};
+use crate::fnc::script::fetch::classes::{
+	self, Request, RequestInit, Response, ResponseInit, ResponseType,
 };
+use crate::fnc::script::modules::surrealdb::query::QueryContext;
 use futures::TryStreamExt;
-use js::{Class, Ctx, Exception, Result, Value, function::Opt};
-use reqwest::{
-	Body as ReqBody,
-	header::{CONTENT_TYPE, HeaderValue},
-	redirect,
-};
+use js::function::Opt;
+use js::{Class, Ctx, Exception, Result, Value};
+use reqwest::header::{CONTENT_TYPE, HeaderValue};
+use reqwest::{Body as ReqBody, redirect};
 use std::sync::Arc;
 use tokio::runtime::Handle;
+
+use super::classes::Headers;
 
 #[js::function]
 pub async fn fetch<'js>(
@@ -80,9 +75,7 @@ pub async fn fetch<'js>(
 
 	let client = reqwest::Client::builder()
 		.redirect(policy)
-		.dns_resolver(std::sync::Arc::new(resolver::FilteringResolver::from_capabilities(
-			capabilities,
-		)))
+		.dns_resolver(std::sync::Arc::new(FilteringResolver::from_capabilities(capabilities)))
 		.build()
 		.map_err(|e| {
 			Exception::throw_internal(&ctx, &format!("Could not initialize http client: {e}"))

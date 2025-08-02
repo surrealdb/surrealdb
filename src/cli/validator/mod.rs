@@ -1,15 +1,14 @@
 use std::collections::HashSet;
-use std::{
-	path::{Path, PathBuf},
-	str::FromStr,
-	time::Duration,
-};
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
 
 use surrealdb::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget,
 	Targets,
 };
 use surrealdb::kvs::export::TableConfig;
+use surrealdb_core::val;
 
 pub(crate) mod parser;
 
@@ -88,7 +87,7 @@ pub(crate) fn key_valid(v: &str) -> Result<String, String> {
 }
 
 pub(crate) fn duration(v: &str) -> Result<Duration, String> {
-	surrealdb::sql::Duration::from_str(v).map(|d| d.0).map_err(|_| String::from("invalid duration"))
+	val::Duration::from_str(v).map(|d| d.0).map_err(|_| String::from("invalid duration"))
 }
 
 pub(crate) fn net_targets(value: &str) -> Result<Targets<NetTarget>, String> {

@@ -1,9 +1,7 @@
 //! Stores a DEFINE ACCESS ON NAMESPACE configuration
 use crate::expr::statements::define::DefineAccessStatement;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 

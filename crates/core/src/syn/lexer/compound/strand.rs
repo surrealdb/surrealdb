@@ -1,11 +1,10 @@
 use std::ops::RangeInclusive;
 use std::{char, mem};
 
-use crate::syn::{
-	error::{SyntaxError, bail, syntax_error},
-	lexer::{Lexer, unicode::chars},
-	token::{Token, t},
-};
+use crate::syn::error::{SyntaxError, bail, syntax_error};
+use crate::syn::lexer::Lexer;
+use crate::syn::lexer::unicode::chars;
+use crate::syn::token::{Token, t};
 
 pub fn strand(lexer: &mut Lexer, start: Token) -> Result<String, SyntaxError> {
 	let is_double = match start.kind {

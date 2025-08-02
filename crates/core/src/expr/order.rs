@@ -7,9 +7,7 @@ use std::ops::Deref;
 use std::{cmp, fmt};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Ordering {
 	Random,
 	Order(OrderList),
@@ -25,9 +23,7 @@ impl fmt::Display for Ordering {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct OrderList(pub Vec<Order>);
 
 impl Deref for OrderList {
@@ -47,9 +43,10 @@ impl OrderList {
 	pub(crate) fn compare(&self, a: &Value, b: &Value) -> cmp::Ordering {
 		for order in &self.0 {
 			// Reverse the ordering if DESC
-			let o = match order.direction {
-				true => a.compare(b, &order.value.0, order.collate, order.numeric),
-				false => b.compare(a, &order.value.0, order.collate, order.numeric),
+			let o = if order.direction {
+				a.compare(b, &order.value.0, order.collate, order.numeric)
+			} else {
+				b.compare(a, &order.value.0, order.collate, order.numeric)
 			};
 			//
 			match o {
@@ -64,9 +61,7 @@ impl OrderList {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct Order {
 	/// The value to order by
 	pub value: Idiom,
@@ -90,23 +85,4 @@ impl fmt::Display for Order {
 		}
 		Ok(())
 	}
-}
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct OldOrders(pub Vec<OldOrder>);
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct OldOrder {
-	pub order: Idiom,
-	pub random: bool,
-	pub collate: bool,
-	pub numeric: bool,
-	/// true if the direction is ascending
-	pub direction: bool,
 }

@@ -1,35 +1,50 @@
 // Specify the imports
-use crate::expr::value::Value;
-use js::{Ctx, Object, Result, prelude::Rest};
+use js::prelude::Rest;
+use js::{Coerced, Ctx, Object, Result};
+use std::fmt;
+
+pub struct Printer<'a>(&'a [Coerced<String>]);
+impl fmt::Display for Printer<'_> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		for (idx, x) in self.0.iter().enumerate() {
+			if idx != 0 {
+				write!(f, " ")?;
+			}
+			write!(f, "{}", x.0)?;
+		}
+		Ok(())
+	}
+}
+
 /// Log the input values as INFO
 #[js::function]
-pub fn log(args: Rest<Value>) {
-	info!("{}", args.iter().map(|v| v.to_raw_string()).collect::<Vec<String>>().join(" "));
+pub fn log(args: Rest<Coerced<String>>) {
+	info!("{}", Printer(&args.0));
 }
 /// Log the input values as INFO
 #[js::function]
-pub fn info(args: Rest<Value>) {
-	info!("{}", args.iter().map(|v| v.to_raw_string()).collect::<Vec<String>>().join(" "));
+pub fn info(args: Rest<Coerced<String>>) {
+	info!("{}", Printer(&args.0));
 }
 /// Log the input values as WARN
 #[js::function]
-pub fn warn(args: Rest<Value>) {
-	warn!("{}", args.iter().map(|v| v.to_raw_string()).collect::<Vec<String>>().join(" "));
+pub fn warn(args: Rest<Coerced<String>>) {
+	warn!("{}", Printer(&args.0));
 }
 /// Log the input values as ERROR
 #[js::function]
-pub fn error(args: Rest<Value>) {
-	error!("{}", args.iter().map(|v| v.to_raw_string()).collect::<Vec<String>>().join(" "));
+pub fn error(args: Rest<Coerced<String>>) {
+	error!("{}", Printer(&args.0));
 }
 /// Log the input values as DEBUG
 #[js::function]
-pub fn debug(args: Rest<Value>) {
-	debug!("{}", args.iter().map(|v| v.to_raw_string()).collect::<Vec<String>>().join(" "));
+pub fn debug(args: Rest<Coerced<String>>) {
+	debug!("{}", Printer(&args.0));
 }
 /// Log the input values as TRACE
 #[js::function]
-pub fn trace(args: Rest<Value>) {
-	trace!("{}", args.iter().map(|v| v.to_raw_string()).collect::<Vec<String>>().join(" "));
+pub fn trace(args: Rest<Coerced<String>>) {
+	trace!("{}", Printer(&args.0));
 }
 
 pub fn console<'js>(ctx: &Ctx<'js>) -> Result<Object<'js>> {

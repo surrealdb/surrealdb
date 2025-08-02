@@ -1,13 +1,14 @@
 use std::cell::RefCell;
 
-use js::{
-	Ctx, Exception, FromJs, JsLifetime, Promise, Result, Value,
-	class::{JsClass, OwnedBorrow, Readable, Trace},
-	prelude::{Coerced, Opt},
-};
+use js::class::{JsClass, OwnedBorrow, Readable, Trace};
+use js::prelude::{Coerced, Opt};
+use js::{Ctx, Exception, FromJs, JsLifetime, Promise, Result, Value};
 use reblessive::tree::Stk;
 
-use crate::{ctx::Context, dbs::Options, doc::CursorDoc, expr::FlowResultExt as _};
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::expr::FlowResultExt as _;
 
 mod classes;
 
@@ -74,12 +75,11 @@ pub fn query<'js>(
 			};
 
 			let mut context = MutableContext::new(query_ctx.context);
-			if let Some(vars) = &query.vars {
+			if let Some(v) = query.clone().vars {
 				context
-					.attach_variables(vars.clone().into())
+					.attach_variables(v)
 					.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
-			}
-
+			};
 			let context = context.freeze();
 
 			Stk::enter_scope(|stk| {

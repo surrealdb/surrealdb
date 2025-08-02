@@ -278,11 +278,11 @@ impl<W: std::fmt::Write> std::fmt::Write for Pretty<W> {
 
 #[cfg(test)]
 mod tests {
-	use crate::syn::{parse, value};
+	use crate::syn::{self};
 
 	#[test]
 	fn pretty_query() {
-		let query = parse("SELECT * FROM {foo: [1, 2, 3]};").unwrap();
+		let query = syn::parse("SELECT * FROM {foo: [1, 2, 3]};").unwrap();
 		assert_eq!(format!("{}", query), "SELECT * FROM { foo: [1, 2, 3] };");
 		assert_eq!(
 			format!("{:#}", query),
@@ -292,7 +292,7 @@ mod tests {
 
 	#[test]
 	fn pretty_define_query() {
-		let query = parse("DEFINE TABLE test SCHEMAFULL PERMISSIONS FOR create, update, delete NONE FOR select WHERE public = true;").unwrap();
+		let query = syn::parse("DEFINE TABLE test SCHEMAFULL PERMISSIONS FOR create, update, delete NONE FOR select WHERE public = true;").unwrap();
 		assert_eq!(
 			format!("{}", query),
 			"DEFINE TABLE test TYPE NORMAL SCHEMAFULL PERMISSIONS FOR select WHERE public = true, FOR create, update, delete NONE;"
@@ -305,14 +305,14 @@ mod tests {
 
 	#[test]
 	fn pretty_value() {
-		let value = value("{foo: [1, 2, 3]}").unwrap();
+		let value = syn::expr("{foo: [1, 2, 3]}").unwrap();
 		assert_eq!(format!("{}", value), "{ foo: [1, 2, 3] }");
 		assert_eq!(format!("{:#}", value), "{\n\tfoo: [\n\t\t1,\n\t\t2,\n\t\t3\n\t]\n}");
 	}
 
 	#[test]
 	fn pretty_array() {
-		let array = value("[1, 2, 3]").unwrap();
+		let array = syn::expr("[1, 2, 3]").unwrap();
 		assert_eq!(format!("{}", array), "[1, 2, 3]");
 		assert_eq!(format!("{:#}", array), "[\n\t1,\n\t2,\n\t3\n]");
 	}

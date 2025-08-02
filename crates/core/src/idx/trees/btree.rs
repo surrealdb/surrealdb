@@ -1,8 +1,8 @@
 use crate::err::Error;
-use crate::expr::{Object, Value};
 use crate::idx::trees::bkeys::BKeys;
 use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeStore};
 use crate::kvs::{KVValue, Key, Transaction, Val};
+use crate::val::{Object, Value};
 #[cfg(debug_assertions)]
 use ahash::HashSet;
 use anyhow::{Result, bail};

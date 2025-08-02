@@ -26,7 +26,7 @@ value = "2"
 value = "0"
 
 [[test.results]]
-value = "0"
+value = "2"
 
 [[test.results]]
 value = "1"

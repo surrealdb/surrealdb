@@ -11,11 +11,11 @@ use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::{Read, Write};
 use surrealdb_core::ctx::MutableContext;
 use surrealdb_core::expr::index::{Distance, MTreeParams, VectorType};
-use surrealdb_core::expr::{Id, Number, Thing, Value};
 use surrealdb_core::idx::IndexKeyBase;
 use surrealdb_core::idx::planner::checker::MTreeConditionChecker;
 use surrealdb_core::idx::trees::mtree::MTreeIndex;
 use surrealdb_core::kvs::{Transaction, TransactionType};
+use surrealdb_core::val::{Number, RecordId, RecordIdKey, Value};
 use tokio::runtime::{Builder, Runtime};
 use tokio::task;
 
@@ -47,15 +47,15 @@ async fn mtree_index(
 	cache_size: usize,
 	tt: TransactionType,
 ) -> MTreeIndex {
-	let p = MTreeParams::new(
-		dimension as u16,
-		Distance::Euclidean,
-		VectorType::F64,
-		40,
-		100,
-		cache_size as u32,
-		cache_size as u32,
-	);
+	let p = MTreeParams {
+		dimension: dimension as u16,
+		distance: Distance::Euclidean,
+		vector_type: VectorType::F64,
+		capacity: 40,
+		doc_ids_order: 100,
+		doc_ids_cache: cache_size as u32,
+		mtree_cache: cache_size as u32,
+	};
 	MTreeIndex::new(tx, IndexKeyBase::default(), &p, tt).await.unwrap()
 }
 
@@ -141,8 +141,15 @@ async fn insert_objects(
 			for i in 0..samples_size {
 				let vector: Vec<Number> = random_object(&mut rng, vector_size);
 				// Insert the sample
-				let rid = Thing::from(("test", Id::from(i as i64)));
-				mt.index_document(stk, &tx, &rid, &[Value::from(vector)]).await.unwrap();
+				let rid = RecordId::new("test".to_string(), RecordIdKey::from(i as i64));
+				mt.index_document(
+					stk,
+					&tx,
+					&rid,
+					&[vector.into_iter().map(Value::from).collect::<Value>()],
+				)
+				.await
+				.unwrap();
 			}
 		})
 		.finish()

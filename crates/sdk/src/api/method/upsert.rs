@@ -1,23 +1,17 @@
 use super::transaction::WithTransaction;
-use crate::Surreal;
-use crate::Value;
-use crate::api::Connection;
-use crate::api::Result;
 use crate::api::conn::Command;
-use crate::api::method::BoxFuture;
-use crate::api::method::Content;
-use crate::api::method::Merge;
-use crate::api::method::Patch;
-use crate::api::opt::PatchOp;
-use crate::api::opt::Resource;
+use crate::api::method::{BoxFuture, Content, Merge, Patch};
+use crate::api::opt::{PatchOp, Resource};
+use crate::api::{self, Connection, Result};
 use crate::method::OnceLockExt;
 use crate::opt::KeyRange;
+use crate::{Surreal, Value};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::{Value as CoreValue, to_value as to_core_value};
+use surrealdb_core::val;
 use uuid::Uuid;
 
 use super::validate_data;
@@ -143,7 +137,7 @@ where
 		D: Serialize + 'static,
 	{
 		Content::from_closure(self.client, self.txn, || {
-			let data = to_core_value(data)?;
+			let data = api::value::to_core_value(data)?;
 
 			validate_data(
 				&data,
@@ -151,7 +145,7 @@ where
 			)?;
 
 			let data = match data {
-				CoreValue::None => None,
+				val::Value::None => None,
 				content => Some(content),
 			};
 

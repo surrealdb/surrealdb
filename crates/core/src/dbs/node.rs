@@ -1,8 +1,7 @@
-use crate::expr::Value;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
-use revision::Error;
-use revision::revisioned;
+use crate::val::{Object, Value};
+use revision::{Error, revisioned};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::ops::{Add, Sub};
@@ -58,10 +57,7 @@ impl Node {
 	}
 	// Return the node id if archived
 	pub fn archived(&self) -> Option<Uuid> {
-		match self.is_archived() {
-			true => Some(self.id),
-			false => None,
-		}
+		self.is_archived().then_some(self.id)
 	}
 	// Sets the default gc value for old nodes
 	fn default_id(_revision: u16) -> Result<Uuid, Error> {
@@ -100,11 +96,11 @@ impl Display for Node {
 
 impl InfoStructure for Node {
 	fn structure(self) -> Value {
-		Value::from(map! {
-			"id".to_string() => Value::from(self.id),
+		Value::Object(Object(map! {
+			"id".to_string() => Value::Uuid(self.id.into()),
 			"seen".to_string() => self.hb.structure(),
-			"active".to_string() => Value::from(!self.gc),
-		})
+			"active".to_string() => Value::Bool(!self.gc),
+		}))
 	}
 }
 

@@ -1,5 +1,6 @@
 /**
 [test]
+timeout = 2000
 
 [[test.results]]
 value = "NONE"

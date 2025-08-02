@@ -3,7 +3,7 @@ use surrealdb_core::dbs::{
 	Session,
 	capabilities::{Capabilities, Targets},
 };
-use surrealdb_core::expr::Value as SurValue;
+use surrealdb_core::val::Value as SurValue;
 
 /// Creates the right core capabilities from a test config.
 pub fn core_capabilities_from_test_config(config: &TestConfig) -> Capabilities {

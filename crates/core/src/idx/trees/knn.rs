@@ -617,12 +617,11 @@ pub struct KnnResult {
 #[cfg(test)]
 pub(super) mod tests {
 	use crate::expr::index::{Distance, VectorType};
-	use crate::expr::{Number, Value};
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
-	use crate::sql::Array as SqlArray;
-	use crate::syn::Parse;
+	use crate::syn::{self};
+	use crate::val::{Number, Value};
 	#[cfg(debug_assertions)]
 	use ahash::HashMap;
 	use ahash::HashSet;
@@ -690,8 +689,10 @@ pub(super) mod tests {
 				}
 			}
 			let line = line_result?;
-			let array = SqlArray::parse(&line);
-			let vec = Vector::try_from_value(t, array.len(), &Value::Array(array.into()))?.into();
+			let Ok(Value::Array(array)) = syn::value(&line) else {
+				panic!()
+			};
+			let vec = Vector::try_from_value(t, array.len(), &Value::Array(array))?.into();
 			res.push((i as DocId, vec));
 		}
 		Ok(res)

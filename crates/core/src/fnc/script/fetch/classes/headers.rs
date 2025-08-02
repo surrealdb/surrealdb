@@ -2,11 +2,9 @@
 
 use std::str::FromStr;
 
-use js::{
-	Array, Ctx, Exception, JsLifetime, Result, Value,
-	class::Trace,
-	prelude::{Coerced, List},
-};
+use js::class::Trace;
+use js::prelude::{Coerced, List};
+use js::{Array, Ctx, Exception, JsLifetime, Result, Value};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
 #[derive(Clone, Trace, JsLifetime)]

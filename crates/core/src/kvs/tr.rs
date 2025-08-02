@@ -1,8 +1,6 @@
-use super::Key;
-use super::Val;
-use super::Version;
 #[allow(unused_imports, reason = "Not used when none of the storage backends are enabled.")]
 use super::api::Transaction;
+use super::{Key, Val, Version};
 use crate::cf;
 
 use crate::doc::CursorValue;
@@ -12,10 +10,10 @@ use crate::kvs::batch::Batch;
 
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::expr;
-use crate::expr::thing::Thing;
 use crate::kvs::KVValue;
 use crate::kvs::key::KVKey;
 use crate::kvs::stash::Stash;
+use crate::val::RecordId;
 use crate::vs::VersionStamp;
 use anyhow::Result;
 use expr::statements::DefineTableStatement;
@@ -35,19 +33,10 @@ pub enum Check {
 }
 
 /// Specifies whether the transaction is read-only or writeable.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub enum TransactionType {
 	Read,
 	Write,
-}
-
-impl From<bool> for TransactionType {
-	fn from(value: bool) -> Self {
-		match value {
-			true => TransactionType::Write,
-			false => TransactionType::Read,
-		}
-	}
 }
 
 /// Specifies whether the transaction is optimistic or pessimistic.
@@ -562,7 +551,7 @@ impl Transactor {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		id: &Thing,
+		id: &RecordId,
 		previous: CursorValue,
 		current: CursorValue,
 		store_difference: bool,

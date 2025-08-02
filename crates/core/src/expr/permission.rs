@@ -1,18 +1,14 @@
-use crate::expr::Value;
-use crate::expr::fmt::is_pretty;
-use crate::expr::fmt::pretty_indent;
-use crate::expr::fmt::pretty_sequence_item;
+use crate::expr::Expr;
+use crate::expr::fmt::{is_pretty, pretty_indent, pretty_sequence_item};
 use crate::expr::statements::info::InfoStructure;
+use crate::val::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::Write;
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Display, Formatter, Write};
 use std::str;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct Permissions {
 	pub select: Permission,
 	pub create: Permission,
@@ -159,14 +155,12 @@ impl Display for PermissionKind {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Permission {
 	None,
 	#[default]
 	Full,
-	Specific(Value),
+	Specific(Expr),
 }
 
 impl Permission {

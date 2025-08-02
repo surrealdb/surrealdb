@@ -1,5 +1,6 @@
-use super::{median::Median, midhinge::Midhinge};
-use crate::expr::number::{Number, Sorted};
+use super::median::Median;
+use super::midhinge::Midhinge;
+use crate::val::{Number, number::Sorted};
 
 pub trait Trimean {
 	/// Bowley's Trimean - the Average of the median and the MidHinge

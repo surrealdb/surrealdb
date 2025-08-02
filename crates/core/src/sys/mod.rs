@@ -1,7 +1,6 @@
 use futures::lock::Mutex;
 use std::sync::LazyLock;
-use sysinfo::Pid;
-use sysinfo::System;
+use sysinfo::{Pid, System};
 
 /// The current system environment which is used to
 /// periodically fetch and compute the system metrics.

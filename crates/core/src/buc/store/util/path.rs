@@ -1,15 +1,18 @@
 use core::fmt;
-use std::{
-	borrow::Borrow,
-	hash::{Hash, Hasher},
-	ops::Deref,
-};
+use std::hash::{Hash, Hasher};
+use std::ops::Deref;
 
-use crate::expr::Value;
+use crate::val::Value;
 
 /// Path represents a normalized file path in the object store.
 #[derive(Clone, Debug)]
 pub struct ObjectKey(String);
+
+impl Default for ObjectKey {
+	fn default() -> Self {
+		ObjectKey("/".to_owned())
+	}
+}
 
 impl ObjectKey {
 	/// Create a new path, ensuring it starts with "/"
@@ -36,12 +39,11 @@ impl ObjectKey {
 
 	/// Remove a prefix from this path, returning a new Path.
 	/// If this path doesn't start with the given prefix, returns None.
-	pub fn strip_prefix(&self, prefix: impl AsRef<str>) -> Option<Self> {
-		let prefix_str = prefix.as_ref();
-		let normalized_prefix = if prefix_str.starts_with('/') {
-			prefix_str.to_string()
+	pub fn strip_prefix(&self, prefix: &str) -> Option<Self> {
+		let normalized_prefix = if prefix.starts_with('/') {
+			prefix.to_string()
 		} else {
-			format!("/{}", prefix_str)
+			format!("/{}", prefix)
 		};
 
 		// Ensure the prefix ends without a trailing slash for comparison
@@ -68,18 +70,6 @@ impl ObjectKey {
 	}
 }
 
-impl From<String> for ObjectKey {
-	fn from(value: String) -> Self {
-		ObjectKey::new(value)
-	}
-}
-
-impl From<&str> for ObjectKey {
-	fn from(value: &str) -> Self {
-		ObjectKey::new(value)
-	}
-}
-
 impl From<ObjectKey> for Value {
 	fn from(val: ObjectKey) -> Self {
 		Value::from(val.0)
@@ -97,18 +87,6 @@ impl Deref for ObjectKey {
 impl fmt::Display for ObjectKey {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "{}", self.0)
-	}
-}
-
-impl AsRef<str> for ObjectKey {
-	fn as_ref(&self) -> &str {
-		self.as_str()
-	}
-}
-
-impl Borrow<str> for ObjectKey {
-	fn borrow(&self) -> &str {
-		self.as_str()
 	}
 }
 

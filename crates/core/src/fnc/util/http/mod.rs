@@ -1,8 +1,9 @@
 use crate::cnf::SURREALDB_USER_AGENT;
 use crate::ctx::Context;
 use crate::err::Error;
-use crate::expr::{Bytes, Object, Strand, Value};
 use crate::syn;
+use crate::val::{Bytes, Object, Strand, Value};
+
 use anyhow::{Context as _, Result, bail};
 use reqwest::header::CONTENT_TYPE;
 #[cfg(not(target_family = "wasm"))]
@@ -18,13 +19,21 @@ pub(crate) fn uri_is_valid(uri: &str) -> bool {
 	reqwest::Url::parse(uri).is_ok()
 }
 
-fn encode_body(req: RequestBuilder, body: Value) -> RequestBuilder {
-	match body {
-		Value::Bytes(v) => req.body(v.0),
-		Value::Strand(v) => req.body(v.0),
-		_ if body.is_some() => req.json(&body.into_json()),
+fn encode_body(req: RequestBuilder, body: Value) -> Result<RequestBuilder> {
+	let res = match body {
+		Value::Bytes(v) => req.body(v.into_inner()),
+		Value::Strand(v) => req.body(v.into_string()),
+		//TODO: Improve the handling here. We should check if this value can be send as a json
+		//value.
+		_ if !body.is_nullish() => req.json(&body.into_json_value().ok_or_else(|| {
+			anyhow::Error::new(Error::Thrown(
+				"tried to send request with surealql value body which cannot be encoded into json"
+					.to_owned(),
+			))
+		})?),
 		_ => req,
-	}
+	};
+	Ok(res)
 }
 
 async fn decode_response(res: Response) -> Result<Value> {
@@ -36,7 +45,7 @@ async fn decode_response(res: Response) -> Result<Value> {
 					let val = syn::json(&txt)
 						.context("Failed to parse JSON response")
 						.map_err(|e| Error::Http(e.to_string()))?;
-					Ok(val.into())
+					Ok(val)
 				}
 				Ok(v) if v.starts_with("application/octet-stream") => {
 					let bytes = res.bytes().await.map_err(Error::from)?;
@@ -116,7 +125,7 @@ async fn request(
 
 	if let Some(b) = body {
 		// Submit the request body
-		req = encode_body(req, b);
+		req = encode_body(req, b)?;
 	}
 
 	// Send the request and wait

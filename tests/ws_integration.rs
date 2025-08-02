@@ -1357,8 +1357,10 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 		socket.send_request("kill", json!(["tester"])),
 	];
 	// Futures are executed sequentially as some operations rely on the previous state
-	for operation in operations_ko {
+	for (idx, operation) in operations_ko.into_iter().enumerate() {
+		println!("Operation: {idx}");
 		let res = operation.await;
+		println!("res: {res:?}");
 		assert!(res.is_ok(), "result: {res:?}");
 		let res = res.unwrap();
 		assert!(res.is_object(), "result: {res:?}");
@@ -1377,7 +1379,8 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 		socket.send_request("invalidate", json!([])),
 	];
 	// Futures are executed sequentially as some operations rely on the previous state
-	for operation in operations_ok {
+	for (idx, operation) in operations_ok.into_iter().enumerate() {
+		println!("operation: {idx}");
 		let res = operation.await;
 		assert!(res.is_ok(), "result: {res:?}");
 		let res = res.unwrap();
@@ -2166,14 +2169,17 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 			socket.send_request("delete", json!(["tester"])),
 			socket.send_request("invalidate", json!([])),
 		];
-		for operation in operations_ok {
+		for (idx, operation) in operations_ok.into_iter().enumerate() {
 			let res = operation.await;
 			assert!(res.is_ok(), "result: {res:?}");
 			let res = res.unwrap();
 			assert!(res.is_object(), "result: {res:?}");
 			let res = res.as_object().unwrap();
 			// Verify response contains no error
-			assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {res:?}");
+			assert!(
+				res.keys().all(|k| ["id", "result"].contains(&k.as_str())),
+				"[{idx}] result: {res:?}"
+			);
 		}
 
 		// Test passed

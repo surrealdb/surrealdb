@@ -1,5 +1,4 @@
-use crate::expr::geometry::Geometry;
-use crate::expr::strand::Strand;
+use crate::val::{Geometry, Strand};
 use geo::Point;
 
 static BASE32: &[char] = &[

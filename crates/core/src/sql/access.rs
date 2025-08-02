@@ -1,12 +1,8 @@
-use crate::sql::{Duration, Id, Ident, Thing, escape::EscapeIdent, fmt::Fmt, strand::no_nul_bytes};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use crate::sql::escape::EscapeIdent;
+use crate::val::Duration;
 use std::fmt::{self, Display, Formatter};
-use std::ops::Deref;
-use std::str;
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 // Durations representing the expiration of different elements of the access method
 // In this context, the None variant represents that the element does not expire
@@ -37,9 +33,9 @@ impl Default for AccessDuration {
 impl From<AccessDuration> for crate::expr::access::AccessDuration {
 	fn from(v: AccessDuration) -> Self {
 		Self {
-			grant: v.grant.map(Into::into),
-			token: v.token.map(Into::into),
-			session: v.session.map(Into::into),
+			grant: v.grant,
+			token: v.token,
+			session: v.session,
 		}
 	}
 }
@@ -47,78 +43,20 @@ impl From<AccessDuration> for crate::expr::access::AccessDuration {
 impl From<crate::expr::access::AccessDuration> for AccessDuration {
 	fn from(v: crate::expr::access::AccessDuration) -> Self {
 		Self {
-			grant: v.grant.map(Into::into),
-			token: v.token.map(Into::into),
-			session: v.session.map(Into::into),
+			grant: v.grant,
+			token: v.token,
+			session: v.session,
 		}
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Accesses(pub Vec<Access>);
 
-impl From<Access> for Accesses {
-	fn from(v: Access) -> Self {
-		Accesses(vec![v])
-	}
-}
-
-impl Deref for Accesses {
-	type Target = Vec<Access>;
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
-
-impl Display for Accesses {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&Fmt::comma_separated(&self.0), f)
-	}
-}
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Access")]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct Access(#[serde(with = "no_nul_bytes")] pub String);
-
-impl From<String> for Access {
-	fn from(v: String) -> Self {
-		Self(v)
-	}
-}
-
-impl From<&str> for Access {
-	fn from(v: &str) -> Self {
-		Self::from(String::from(v))
-	}
-}
-
-impl From<Ident> for Access {
-	fn from(v: Ident) -> Self {
-		Self(v.0)
-	}
-}
-
-impl Deref for Access {
-	type Target = String;
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
-
-impl Access {
-	pub fn generate(&self) -> Thing {
-		Thing {
-			tb: self.0.clone(),
-			id: Id::rand(),
-		}
-	}
-}
+pub struct Access(pub String);
 
 impl Display for Access {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {

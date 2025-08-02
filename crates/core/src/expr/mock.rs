@@ -1,54 +1,45 @@
-use crate::expr::{Id, Thing, escape::EscapeIdent};
+use crate::expr::escape::EscapeIdent;
+use crate::val::{RecordId, RecordIdKey};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Mock";
-
-#[non_exhaustive]
 pub struct IntoIter {
 	model: Mock,
-	index: u64,
 }
 
 impl Iterator for IntoIter {
-	type Item = Thing;
-	fn next(&mut self) -> Option<Thing> {
-		match &self.model {
-			Mock::Count(tb, c) => {
-				if self.index < *c {
-					self.index += 1;
-					Some(Thing {
-						tb: tb.to_string(),
-						id: Id::rand(),
-					})
-				} else {
+	type Item = RecordId;
+	fn next(&mut self) -> Option<RecordId> {
+		match self.model {
+			Mock::Count(ref tb, ref mut c) => {
+				if *c == 0 {
 					None
+				} else {
+					*c -= 1;
+					Some(RecordId {
+						table: tb.to_string(),
+						key: RecordIdKey::rand(),
+					})
 				}
 			}
-			Mock::Range(tb, b, e) => {
-				if self.index == 0 {
-					self.index = *b - 1;
+			Mock::Range(ref tb, ref mut b, e) => {
+				if *b >= e {
+					return None;
 				}
-				if self.index < *e {
-					self.index += 1;
-					Some(Thing {
-						tb: tb.to_string(),
-						id: Id::from(self.index),
-					})
-				} else {
-					None
-				}
+				let idx = *b;
+				*b += 1;
+				Some(RecordId {
+					table: tb.to_string(),
+					key: RecordIdKey::from(idx as i64),
+				})
 			}
 		}
 	}
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Mock")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Mock {
 	Count(String, u64),
 	Range(String, u64, u64),
@@ -56,12 +47,11 @@ pub enum Mock {
 }
 
 impl IntoIterator for Mock {
-	type Item = Thing;
+	type Item = RecordId;
 	type IntoIter = IntoIter;
 	fn into_iter(self) -> Self::IntoIter {
 		IntoIter {
 			model: self,
-			index: 0,
 		}
 	}
 }

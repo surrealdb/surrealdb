@@ -1,12 +1,10 @@
-use super::Key;
-use super::Val;
 use super::tx::Transaction;
+use super::{Key, Val};
 use crate::err::Error;
 use crate::idx::planner::ScanDirection;
 use anyhow::Result;
-use futures::Future;
-use futures::FutureExt;
 use futures::stream::Stream;
+use futures::{Future, FutureExt};
 use std::collections::VecDeque;
 use std::ops::Range;
 use std::pin::Pin;

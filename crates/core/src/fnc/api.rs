@@ -3,12 +3,13 @@ use http::HeaderMap;
 use reblessive::tree::Stk;
 use std::collections::BTreeMap;
 
-use crate::{
-	api::{body::ApiBody, invocation::ApiInvocation, method::Method},
-	ctx::Context,
-	dbs::Options,
-	expr::{Object, Value, statements::FindApi},
-};
+use crate::api::body::ApiBody;
+use crate::api::invocation::ApiInvocation;
+use crate::api::method::Method;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::expr::statements::define::ApiDefinition;
+use crate::val::{Object, Value};
 
 use super::args::Optional;
 
@@ -50,7 +51,7 @@ pub async fn invoke(
 	let apis = ctx.tx().all_db_apis(ns, db).await?;
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
-	if let Some((api, params)) = apis.as_ref().find_api(segments, method) {
+	if let Some((api, params)) = ApiDefinition::find_definition(&apis, segments, method) {
 		let invocation = ApiInvocation {
 			params,
 			method,
@@ -59,7 +60,7 @@ pub async fn invoke(
 		};
 
 		match invocation.invoke_with_context(stk, ctx, opt, api, ApiBody::from_value(body)).await {
-			Ok(Some(v)) => Ok(v.0.try_into()?),
+			Ok(Some(v)) => Ok(v.0.into_response_value()?),
 			Err(e) => Err(e),
 			_ => Ok(Value::None),
 		}

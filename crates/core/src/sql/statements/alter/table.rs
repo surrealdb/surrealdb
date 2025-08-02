@@ -1,36 +1,21 @@
 use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::{ChangeFeed, Ident, Permissions, Strand};
-use crate::sql::{Kind, TableType};
-use anyhow::Result;
+use crate::sql::{ChangeFeed, Ident, Kind, Permissions, TableType};
+use crate::val::Strand;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use super::AlterKind;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct AlterTableStatement {
 	pub name: Ident,
 	pub if_exists: bool,
-	#[revision(end = 2, convert_fn = "convert_drop")]
-	pub _drop: Option<bool>,
-	pub full: Option<bool>,
+	pub schemafull: AlterKind<()>,
 	pub permissions: Option<Permissions>,
-	pub changefeed: Option<Option<ChangeFeed>>,
-	pub comment: Option<Option<Strand>>,
+	pub changefeed: AlterKind<ChangeFeed>,
+	pub comment: AlterKind<Strand>,
 	pub kind: Option<TableType>,
-}
-
-impl AlterTableStatement {
-	fn convert_drop(
-		&mut self,
-		_revision: u16,
-		_value: Option<bool>,
-	) -> Result<(), revision::Error> {
-		Ok(())
-	}
 }
 
 impl Display for AlterTableStatement {
@@ -49,18 +34,22 @@ impl Display for AlterTableStatement {
 				TableType::Relation(rel) => {
 					f.write_str(" RELATION")?;
 					if let Some(Kind::Record(kind)) = &rel.from {
-						write!(
-							f,
-							" IN {}",
-							kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
-						)?;
+						write!(f, " IN ",)?;
+						for (idx, k) in kind.iter().enumerate() {
+							if idx != 0 {
+								write!(f, " | ")?;
+							}
+							write!(f, "{}", k)?;
+						}
 					}
 					if let Some(Kind::Record(kind)) = &rel.to {
-						write!(
-							f,
-							" OUT {}",
-							kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
-						)?;
+						write!(f, " OUT ",)?;
+						for (idx, k) in kind.iter().enumerate() {
+							if idx != 0 {
+								write!(f, " | ")?;
+							}
+							write!(f, "{}", k)?;
+						}
 					}
 				}
 				TableType::Any => {
@@ -68,27 +57,25 @@ impl Display for AlterTableStatement {
 				}
 			}
 		}
-		if let Some(full) = self.full {
-			f.write_str(if full {
-				" SCHEMAFULL"
-			} else {
-				" SCHEMALESS"
-			})?;
+
+		match self.schemafull {
+			AlterKind::Set(_) => " SCHEMAFULL".fmt(f)?,
+			AlterKind::Drop => " SCHEMALESS".fmt(f)?,
+			AlterKind::None => {}
 		}
-		if let Some(comment) = &self.comment {
-			if let Some(comment) = comment {
-				write!(f, " COMMENT {}", comment.clone())?;
-			} else {
-				write!(f, " DROP COMMENT")?;
-			}
+
+		match self.comment {
+			AlterKind::Set(ref comment) => write!(f, " COMMENT {}", comment)?,
+			AlterKind::Drop => write!(f, " DROP COMMENT")?,
+			AlterKind::None => {}
 		}
-		if let Some(changefeed) = &self.changefeed {
-			if let Some(changefeed) = changefeed {
-				write!(f, " CHANGEFEED {}", changefeed.clone())?;
-			} else {
-				write!(f, " DROP CHANGEFEED")?;
-			}
+
+		match self.changefeed {
+			AlterKind::Set(ref changefeed) => write!(f, " CHANGEFEED {}", changefeed)?,
+			AlterKind::Drop => write!(f, " DROP CHANGEFEED")?,
+			AlterKind::None => {}
 		}
+
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
 		} else {
@@ -107,10 +94,10 @@ impl From<AlterTableStatement> for crate::expr::statements::alter::AlterTableSta
 		crate::expr::statements::alter::AlterTableStatement {
 			name: v.name.into(),
 			if_exists: v.if_exists,
-			full: v.full,
+			schemafull: v.schemafull.into(),
 			permissions: v.permissions.map(Into::into),
-			changefeed: v.changefeed.map(|opt| opt.map(Into::into)),
-			comment: v.comment.map(|opt| opt.map(Into::into)),
+			changefeed: v.changefeed.into(),
+			comment: v.comment.into(),
 			kind: v.kind.map(Into::into),
 		}
 	}
@@ -121,10 +108,10 @@ impl From<crate::expr::statements::alter::AlterTableStatement> for AlterTableSta
 		AlterTableStatement {
 			name: v.name.into(),
 			if_exists: v.if_exists,
-			full: v.full,
+			schemafull: v.schemafull.into(),
 			permissions: v.permissions.map(Into::into),
-			changefeed: v.changefeed.map(|opt| opt.map(Into::into)),
-			comment: v.comment.map(|opt| opt.map(Into::into)),
+			changefeed: v.changefeed.into(),
+			comment: v.comment.into(),
 			kind: v.kind.map(Into::into),
 		}
 	}

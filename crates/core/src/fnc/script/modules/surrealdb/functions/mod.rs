@@ -1,6 +1,6 @@
-use crate::expr::Value;
 use crate::fnc;
 use crate::fnc::script::modules::impl_module_def;
+use crate::val::Value;
 use js::Result;
 use js::prelude::Async;
 use reblessive::tree::Stk;

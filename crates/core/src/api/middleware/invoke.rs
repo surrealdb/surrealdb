@@ -1,11 +1,9 @@
-use crate::{api::context::InvocationContext, expr::Value, fnc::args};
+use crate::api::context::InvocationContext;
+use crate::fnc::args;
+use crate::val::Value;
 use anyhow::Result;
 
 use super::api;
-
-pub trait InvokeMiddleware<'a> {
-	fn invoke(self, context: &'a mut InvocationContext) -> Result<()>;
-}
 
 macro_rules! dispatch {
 	($name: ident, $args: expr_2021, $context: expr_2021, $($function_name: literal => $(($wrapper: tt))* $($function_path: ident)::+,)+) => {
@@ -27,23 +25,19 @@ macro_rules! dispatch {
 	};
 }
 
-impl<'a> InvokeMiddleware<'a> for (&'a String, &'a Vec<Value>) {
-	fn invoke(self, context: &'a mut InvocationContext) -> Result<()> {
-		let name = self.0.as_str();
-
-		dispatch!(
-			name,
-			self.1.to_owned(),
-			context,
-			//
-			"api::req::max_body" => api::req::max_body,
-			"api::req::raw_body" => api::req::raw_body,
-			//
-			"api::res::raw_body" => api::res::raw_body,
-			"api::res::headers" => api::res::headers,
-			"api::res::header" => api::res::header,
-			//
-			"api::timeout" => api::timeout,
-		)
-	}
+pub fn invoke(context: &mut InvocationContext, name: &str, args: Vec<Value>) -> Result<()> {
+	dispatch!(
+		name,
+		args,
+		context,
+		//
+		"api::req::max_body" => api::req::max_body,
+		"api::req::raw_body" => api::req::raw_body,
+		//
+		"api::res::raw_body" => api::res::raw_body,
+		"api::res::headers" => api::res::headers,
+		"api::res::header" => api::res::header,
+		//
+		"api::timeout" => api::timeout,
+	)
 }

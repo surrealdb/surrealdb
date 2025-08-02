@@ -1,7 +1,6 @@
 //! Stores a DEFINE EVENT config definition
 use crate::expr::statements::define::DefineEventStatement;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
 use anyhow::Result;

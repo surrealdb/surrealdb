@@ -5,11 +5,10 @@ use super::error::ResponseError;
 use super::headers::ContentType;
 use crate::net::error::Error as NetError;
 use anyhow::Result;
-use axum::Router;
 use axum::body::Body;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::routing::options;
-use axum::{Extension, response::Response};
+use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use http::StatusCode;
@@ -44,8 +43,24 @@ async fn post_handler(
 ) -> Result<impl IntoResponse, ResponseError> {
 	let fmt = content_type.deref();
 	let fmt: Format = fmt.into();
-	let val = fmt.parse_value(body)?;
-	let cfg = export::Config::from_value(&val.into()).map_err(ResponseError)?;
+	let val = match fmt {
+		Format::Json => surrealdb_core::rpc::format::json::decode(&body)
+			.map_err(anyhow::Error::msg)
+			.map_err(ResponseError)?,
+		Format::Cbor => surrealdb_core::rpc::format::cbor::decode(&body)
+			.map_err(anyhow::Error::msg)
+			.map_err(ResponseError)?,
+		Format::Bincode => surrealdb_core::rpc::format::bincode::decode(&body)
+			.map_err(anyhow::Error::msg)
+			.map_err(ResponseError)?,
+		Format::Revision => surrealdb_core::rpc::format::revision::decode(&body)
+			.map_err(anyhow::Error::msg)
+			.map_err(ResponseError)?,
+		Format::Unsupported => {
+			return Err(ResponseError(anyhow::Error::msg("unsupported body format")));
+		}
+	};
+	let cfg = export::Config::from_value(&val).map_err(ResponseError)?;
 	handle_inner(state, session, cfg).await
 }
 

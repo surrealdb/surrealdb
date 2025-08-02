@@ -1,5 +1,6 @@
 /**
 [test]
+wip = true
 
 [[test.results]]
 value = "NONE"
@@ -25,7 +26,7 @@ value = "[{ id: product:one, subproducts: [product:two] }, { id: product:two, su
 */
 
 DEFINE TABLE product;
-DEFINE FIELD subproducts ON product VALUE <future> { ->contains->product };
+DEFINE FIELD subproducts ON product VALUE COMPUTED { ->contains->product };
 CREATE product:one, product:two;
 RELATE product:one->contains:test->product:two;
 SELECT * FROM product;

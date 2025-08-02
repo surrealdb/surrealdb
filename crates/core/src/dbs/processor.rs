@@ -3,13 +3,15 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement};
 use crate::err::Error;
+use crate::expr::Ident;
 use crate::expr::dir::Dir;
-use crate::expr::id::range::IdRange;
-use crate::expr::{Edges, Table, Thing, Value};
+use crate::expr::graph::ComputedGraphSubject;
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, thing};
 use crate::kvs::{KVKey, Key, Transaction, Val};
+use crate::syn;
+use crate::val::{RecordId, RecordIdKeyRange, Value};
 use anyhow::{Result, bail};
 use futures::StreamExt;
 use reblessive::tree::Stk;
@@ -73,16 +75,16 @@ pub(super) enum Collected {
 	RangeKey(Key),
 	TableKey(Key),
 	Relatable {
-		f: Thing,
-		v: Thing,
-		w: Thing,
+		f: RecordId,
+		v: RecordId,
+		w: RecordId,
 		o: Option<Value>,
 	},
-	Thing(Thing),
-	Yield(Table),
+	RecordId(RecordId),
+	Yield(Ident),
 	Value(Value),
-	Defer(Thing),
-	Mergeable(Thing, Value),
+	Defer(RecordId),
+	Mergeable(RecordId, Value),
 	KeyVal(Key, Val),
 	Count(usize),
 	IndexItem(IndexItemRecord),
@@ -106,7 +108,7 @@ impl Collected {
 				w,
 				o,
 			} => Self::process_relatable(opt, txn, f, v, w, o, rid_only).await,
-			Self::Thing(thing) => Self::process_thing(opt, txn, thing, rid_only).await,
+			Self::RecordId(record_id) => Self::process_thing(opt, txn, record_id, rid_only).await,
 			Self::Yield(table) => Self::process_yield(opt, txn, table, rid_only).await,
 			Self::Value(value) => Ok(Self::process_value(value)),
 			Self::Defer(key) => Self::process_defer(opt, txn, key, rid_only).await,
@@ -133,7 +135,10 @@ impl Collected {
 			let (ns, db) = opt.ns_db()?;
 			txn.get_record(ns, db, gra.ft, &gra.fk, None).await?
 		};
-		let rid = Thing::from((gra.ft, gra.fk));
+		let rid = RecordId {
+			table: gra.ft.to_owned(),
+			key: gra.fk,
+		};
 		// Parse the data from the store
 		let val = Operable::Value(val);
 		// Process the record
@@ -149,7 +154,10 @@ impl Collected {
 	async fn process_range_key(key: Key) -> Result<Processed> {
 		let key = thing::Thing::decode_key(&key)?;
 		let val = Value::Null;
-		let rid = Thing::from((key.tb, key.id));
+		let rid = RecordId {
+			table: key.tb.to_owned(),
+			key: key.id,
+		};
 		// Create a new operable value
 		let val = Operable::Value(val.into());
 		// Process the record
@@ -165,7 +173,10 @@ impl Collected {
 
 	async fn process_table_key(key: Key) -> Result<Processed> {
 		let key = thing::Thing::decode_key(&key)?;
-		let rid = Thing::from((key.tb, key.id));
+		let rid = RecordId {
+			table: key.tb.to_owned(),
+			key: key.id,
+		};
 		// Process the record
 		let pro = Processed {
 			rs: RecordStrategy::KeysOnly,
@@ -180,9 +191,9 @@ impl Collected {
 	async fn process_relatable(
 		opt: &Options,
 		txn: &Transaction,
-		f: Thing,
-		v: Thing,
-		w: Thing,
+		f: RecordId,
+		v: RecordId,
+		w: RecordId,
 		o: Option<Value>,
 		rid_only: bool,
 	) -> Result<Processed> {
@@ -192,9 +203,9 @@ impl Collected {
 		} else {
 			// Check that the table exists
 			let (ns, db) = opt.ns_db()?;
-			txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
+			txn.check_ns_db_tb(ns, db, &v.table, opt.strict).await?;
 			// Fetch the data from the store
-			let val = txn.get_record(ns, db, &v.tb, &v.id, None).await?;
+			let val = txn.get_record(ns, db, &v.table, &v.key, None).await?;
 			// Create a new operable value
 			Operable::Relate(f, val, w, o.map(|v| v.into()))
 		};
@@ -212,7 +223,7 @@ impl Collected {
 	async fn process_thing(
 		opt: &Options,
 		txn: &Transaction,
-		v: Thing,
+		v: RecordId,
 		rid_only: bool,
 	) -> Result<Processed> {
 		// if it is skippable we only need the record id
@@ -221,9 +232,9 @@ impl Collected {
 		} else {
 			// Check that the table exists
 			let (ns, db) = opt.ns_db()?;
-			txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
+			txn.check_ns_db_tb(ns, db, &v.table, opt.strict).await?;
 			// Fetch the data from the store
-			txn.get_record(ns, db, &v.tb, &v.id, opt.version).await?
+			txn.get_record(ns, db, &v.table, &v.key, opt.version).await?
 		};
 		// Parse the data from the store
 		let val = Operable::Value(val);
@@ -242,7 +253,7 @@ impl Collected {
 	async fn process_yield(
 		opt: &Options,
 		txn: &Transaction,
-		v: Table,
+		v: Ident,
 		rid_only: bool,
 	) -> Result<Processed> {
 		// if it is skippable we only need the record id
@@ -266,7 +277,7 @@ impl Collected {
 		// Try to extract the id field if present and parse as Thing
 		let rid = match &v {
 			Value::Object(obj) => match obj.get("id") {
-				Some(Value::Strand(strand)) => strand.parse::<Thing>().ok().map(Arc::new),
+				Some(Value::Strand(strand)) => syn::thing(strand.as_str()).ok().map(Arc::new),
 				Some(Value::Thing(thing)) => Some(Arc::new(thing.clone())),
 				_ => None,
 			},
@@ -285,14 +296,14 @@ impl Collected {
 	async fn process_defer(
 		opt: &Options,
 		txn: &Transaction,
-		v: Thing,
+		v: RecordId,
 		rid_only: bool,
 	) -> Result<Processed> {
 		// if it is skippable we only need the record id
 		if !rid_only {
 			// Check that the table exists
 			let (ns, db) = opt.ns_db()?;
-			txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
+			txn.check_ns_db_tb(ns, db, &v.table, opt.strict).await?;
 		}
 		// Process the document record
 		let pro = Processed {
@@ -308,7 +319,7 @@ impl Collected {
 	async fn process_mergeable(
 		opt: &Options,
 		txn: &Transaction,
-		v: Thing,
+		v: RecordId,
 		o: Value,
 		rid_only: bool,
 	) -> Result<Processed> {
@@ -316,7 +327,7 @@ impl Collected {
 		if !rid_only {
 			// Check that the table exists
 			let (ns, db) = opt.ns_db()?;
-			txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
+			txn.check_ns_db_tb(ns, db, &v.table, opt.strict).await?;
 		}
 		// Process the document record
 		let pro = Processed {
@@ -333,7 +344,10 @@ impl Collected {
 	fn process_key_val(key: Key, val: Val) -> Result<Processed> {
 		let key = thing::Thing::decode_key(&key)?;
 		let mut val: Value = revision::from_slice(&val)?;
-		let rid = Thing::from((key.tb, key.id));
+		let rid = RecordId {
+			table: key.tb.to_owned(),
+			key: key.id,
+		};
 		// Inject the id field into the document
 		val.def(&rid);
 		// Create a new operable value
@@ -455,9 +469,9 @@ pub(super) trait Collector {
 
 	fn iterator(&mut self) -> &mut Iterator;
 
-	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b Table) -> Cow<'b, Context> {
+	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b Ident) -> Cow<'b, Context> {
 		if let Some(qp) = ctx.get_query_planner() {
-			if let Some(exe) = qp.get_query_executor(&table.0) {
+			if let Some(exe) = qp.get_query_executor(table.as_str()) {
 				// We set the query executor matching the current table in the Context
 				// Avoiding search in the hashmap of the query planner for each doc
 				let mut ctx = MutableContext::new(ctx);
@@ -477,14 +491,18 @@ pub(super) trait Collector {
 		if ctx.is_ok(true).await? {
 			match iterable {
 				Iterable::Value(v) => {
-					if v.is_some() {
+					if !v.is_nullish() {
 						return self.collect(Collected::Value(v)).await;
 					}
 				}
 				Iterable::Yield(v) => self.collect(Collected::Yield(v)).await?,
-				Iterable::Thing(v) => self.collect(Collected::Thing(v)).await?,
+				Iterable::Thing(v) => self.collect(Collected::RecordId(v)).await?,
 				Iterable::Defer(v) => self.collect(Collected::Defer(v)).await?,
-				Iterable::Edges(e) => self.collect_edges(ctx, opt, e).await?,
+				Iterable::Edges {
+					from,
+					dir,
+					what,
+				} => self.collect_edges(ctx, opt, from, dir, what).await?,
 				Iterable::Range(tb, v, rs, sc) => match rs {
 					RecordStrategy::Count => self.collect_range_count(ctx, opt, &tb, v).await?,
 					RecordStrategy::KeysOnly => {
@@ -508,7 +526,7 @@ pub(super) trait Collector {
 				}
 				Iterable::Index(v, irf, rs) => {
 					if let Some(qp) = ctx.get_query_planner() {
-						if let Some(exe) = qp.get_query_executor(&v.0) {
+						if let Some(exe) = qp.get_query_executor(v.as_str()) {
 							// We set the query executor matching the current table in the Context
 							// Avoiding search in the hashmap of the query planner for each doc
 							let mut ctx = MutableContext::new(ctx);
@@ -582,7 +600,7 @@ pub(super) trait Collector {
 		&mut self,
 		ctx: &Context,
 		opt: &Options,
-		v: &Table,
+		v: &Ident,
 		sc: ScanDirection,
 	) -> Result<()> {
 		// Get the transaction
@@ -622,7 +640,7 @@ pub(super) trait Collector {
 		&mut self,
 		ctx: &Context,
 		opt: &Options,
-		v: &Table,
+		v: &Ident,
 		sc: ScanDirection,
 	) -> Result<()> {
 		// Get the transaction
@@ -660,7 +678,7 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
-	async fn collect_table_count(&mut self, ctx: &Context, opt: &Options, v: &Table) -> Result<()> {
+	async fn collect_table_count(&mut self, ctx: &Context, opt: &Options, v: &Ident) -> Result<()> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
@@ -681,13 +699,13 @@ pub(super) trait Collector {
 		txn: &Transaction,
 		opt: &Options,
 		tb: &str,
-		r: IdRange,
+		r: RecordIdKeyRange,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		// Check that the table exists
 		let (ns, db) = opt.ns_db()?;
 		txn.check_ns_db_tb(ns, db, tb, opt.strict).await?;
 		// Prepare the range start key
-		let beg = match &r.beg {
+		let beg = match &r.start {
 			Bound::Unbounded => thing::prefix(ns, db, tb)?,
 			Bound::Included(v) => thing::new(ns, db, tb, v).encode_key()?,
 			Bound::Excluded(v) => {
@@ -714,7 +732,7 @@ pub(super) trait Collector {
 		ctx: &Context,
 		opt: &Options,
 		tb: &str,
-		r: IdRange,
+		r: RecordIdKeyRange,
 		sc: ScanDirection,
 	) -> Result<()> {
 		// Get the transaction
@@ -753,7 +771,7 @@ pub(super) trait Collector {
 		ctx: &Context,
 		opt: &Options,
 		tb: &str,
-		r: IdRange,
+		r: RecordIdKeyRange,
 		sc: ScanDirection,
 	) -> Result<()> {
 		// Get the transaction
@@ -791,7 +809,7 @@ pub(super) trait Collector {
 		ctx: &Context,
 		opt: &Options,
 		tb: &str,
-		r: IdRange,
+		r: RecordIdKeyRange,
 	) -> Result<()> {
 		// Get the transaction
 		let txn = ctx.tx();
@@ -805,47 +823,50 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
-	async fn collect_edges(&mut self, ctx: &Context, opt: &Options, e: Edges) -> Result<()> {
+	async fn collect_edges(
+		&mut self,
+		ctx: &Context,
+		opt: &Options,
+		from: RecordId,
+		dir: Dir,
+		what: Vec<ComputedGraphSubject>,
+	) -> Result<()> {
 		// Pull out options
 		let (ns, db) = opt.ns_db()?;
-		let tb = &e.from.tb;
-		let id = &e.from.id;
+		let tb = &from.table;
+		let id = &from.key;
 		// Fetch start and end key pairs
-		let keys = match e.what.len() {
-			0 => match e.dir {
+		let keys = if what.is_empty() {
+			match dir {
 				// /ns/db/tb/id
 				Dir::Both => {
 					vec![(graph::prefix(ns, db, tb, id), graph::suffix(ns, db, tb, id))]
 				}
 				// /ns/db/tb/id/IN
 				Dir::In => vec![(
-					graph::egprefix(ns, db, tb, id, &e.dir),
-					graph::egsuffix(ns, db, tb, id, &e.dir),
+					graph::egprefix(ns, db, tb, id, &dir),
+					graph::egsuffix(ns, db, tb, id, &dir),
 				)],
 				// /ns/db/tb/id/OUT
 				Dir::Out => vec![(
-					graph::egprefix(ns, db, tb, id, &e.dir),
-					graph::egsuffix(ns, db, tb, id, &e.dir),
+					graph::egprefix(ns, db, tb, id, &dir),
+					graph::egsuffix(ns, db, tb, id, &dir),
 				)],
-			},
-			_ => match e.dir {
+			}
+		} else {
+			match dir {
 				// /ns/db/tb/id/IN/TB
-				Dir::In => {
-					e.what.iter().map(|v| v.presuf(ns, db, tb, id, &e.dir)).collect::<Vec<_>>()
-				}
+				Dir::In => what.iter().map(|v| v.presuf(ns, db, tb, id, &dir)).collect::<Vec<_>>(),
 				// /ns/db/tb/id/OUT/TB
-				Dir::Out => {
-					e.what.iter().map(|v| v.presuf(ns, db, tb, id, &e.dir)).collect::<Vec<_>>()
-				}
+				Dir::Out => what.iter().map(|v| v.presuf(ns, db, tb, id, &dir)).collect::<Vec<_>>(),
 				// /ns/db/tb/id/IN/TB, /ns/db/tb/id/OUT/TB
-				Dir::Both => e
-					.what
+				Dir::Both => what
 					.iter()
 					.flat_map(|v| {
 						[v.presuf(ns, db, tb, id, &Dir::In), v.presuf(ns, db, tb, id, &Dir::Out)]
 					})
 					.collect::<Vec<_>>(),
-			},
+			}
 		};
 		// Get the transaction
 		let txn = ctx.tx();
@@ -877,13 +898,13 @@ pub(super) trait Collector {
 		&mut self,
 		ctx: &Context,
 		opt: &Options,
-		table: &Table,
+		table: &Ident,
 		irf: IteratorRef,
 		rs: RecordStrategy,
 	) -> Result<()> {
 		// Check that the table exists
 		let (ns, db) = opt.ns_db()?;
-		ctx.tx().check_ns_db_tb(ns, db, &table.0, opt.strict).await?;
+		ctx.tx().check_ns_db_tb(ns, db, table.as_str(), opt.strict).await?;
 		if let Some(exe) = ctx.get_query_executor() {
 			if let Some(iterator) = exe.new_iterator(opt, irf).await? {
 				let txn = ctx.tx();
@@ -978,11 +999,11 @@ impl Iterable {
 	pub(crate) async fn fetch_thing(
 		txn: &Transaction,
 		opt: &Options,
-		thg: &Thing,
+		thg: &RecordId,
 	) -> Result<Arc<Value>> {
 		// Fetch and parse the data from the store
 		let (ns, db) = opt.ns_db()?;
-		let val = txn.get_record(ns, db, &thg.tb, &thg.id, None).await?;
+		let val = txn.get_record(ns, db, &thg.table, &thg.key, None).await?;
 		// Return the result
 		Ok(val)
 	}

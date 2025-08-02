@@ -1,12 +1,10 @@
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Scoring {
 	Bm {
 		k1: f32,

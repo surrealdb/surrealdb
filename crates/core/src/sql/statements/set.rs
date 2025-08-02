@@ -1,18 +1,12 @@
-use crate::sql::Kind;
-use crate::sql::SqlValue;
+use crate::sql::{Expr, Ident, Kind};
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct SetStatement {
-	pub name: String,
-	pub what: SqlValue,
-	#[revision(start = 2)]
+	pub name: Ident,
+	pub what: Expr,
 	pub kind: Option<Kind>,
 }
 
@@ -30,7 +24,7 @@ impl fmt::Display for SetStatement {
 impl From<SetStatement> for crate::expr::statements::SetStatement {
 	fn from(v: SetStatement) -> Self {
 		crate::expr::statements::SetStatement {
-			name: v.name,
+			name: v.name.into(),
 			what: v.what.into(),
 			kind: v.kind.map(Into::into),
 		}
@@ -40,7 +34,7 @@ impl From<SetStatement> for crate::expr::statements::SetStatement {
 impl From<crate::expr::statements::SetStatement> for SetStatement {
 	fn from(v: crate::expr::statements::SetStatement) -> Self {
 		SetStatement {
-			name: v.name,
+			name: v.name.into(),
 			what: v.what.into(),
 			kind: v.kind.map(Into::into),
 		}
@@ -49,14 +43,14 @@ impl From<crate::expr::statements::SetStatement> for SetStatement {
 
 #[cfg(test)]
 mod tests {
-	use crate::syn::parse;
+	use crate::syn;
 
 	#[test]
 	fn check_type() {
-		let query = parse("LET $param = 5").unwrap();
+		let query = syn::parse("LET $param = 5").unwrap();
 		assert_eq!(format!("{}", query), "LET $param = 5;");
 
-		let query = parse("LET $param: number = 5").unwrap();
+		let query = syn::parse("LET $param: number = 5").unwrap();
 		assert_eq!(format!("{}", query), "LET $param: number = 5;");
 	}
 }

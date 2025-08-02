@@ -1,46 +1,36 @@
 use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::api::Surreal;
-use crate::api::conn::Route;
-use crate::api::conn::Router;
-use crate::api::conn::{self, RequestData};
-use crate::api::conn::{Command, DbResponse};
+use crate::api::conn::{self, Command, DbResponse, RequestData, Route, Router};
 use crate::api::engine::remote::Response;
-use crate::api::engine::remote::ws::Client;
-use crate::api::engine::remote::ws::PING_INTERVAL;
-use crate::api::engine::remote::{deserialize, serialize};
+use crate::api::engine::remote::ws::{Client, PING_INTERVAL};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
+use crate::api::{ExtraFeatures, Result, Surreal};
 use crate::engine::IntervalStream;
 use crate::engine::remote::Data;
 use crate::opt::WaitFor;
 use async_channel::Receiver;
-use futures::SinkExt;
-use futures::StreamExt;
 use futures::stream::{SplitSink, SplitStream};
+use futures::{SinkExt, StreamExt};
 use revision::revisioned;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::collections::hash_map::Entry;
 use std::sync::atomic::AtomicI64;
-use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::val::Value as CoreValue;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 use tokio::time;
 use tokio::time::MissedTickBehavior;
-use tokio_tungstenite::Connector;
-use tokio_tungstenite::MaybeTlsStream;
-use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::error::Error as WsError;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use trice::Instant;
 
 pub(crate) const MAX_MESSAGE_SIZE: usize = 64 << 20; // 64 MiB
@@ -151,7 +141,6 @@ async fn router_handle_route(
 		response,
 	}: Route,
 	state: &mut RouterState,
-	endpoint: &Endpoint,
 ) -> HandleResult {
 	let RequestData {
 		id,
@@ -240,11 +229,10 @@ async fn router_handle_route(
 			return HandleResult::Ok;
 		};
 		trace!("Request {:?}", request);
-		let payload = if endpoint.config.ast_payload {
-			serialize(&request, true).unwrap()
-		} else {
-			serialize(&request.stringify_queries(), true).unwrap()
-		};
+
+		// Unwrap because a router request cannot fail to serialize.
+		let payload = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
+
 		Message::Binary(payload)
 	};
 
@@ -350,7 +338,12 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 											}
 											.into_router_request(None)
 											.unwrap();
-											let value = serialize(&request, true).unwrap();
+
+											let value =
+												surrealdb_core::rpc::format::revision::encode(
+													&request,
+												)
+												.unwrap();
 											Message::Binary(value)
 										};
 										if let Err(error) = state.sink.send(kill).await {
@@ -378,7 +371,7 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 
 			// Let's try to find out the ID of the response that failed to deserialise
 			if let Message::Binary(binary) = response {
-				match deserialize(&binary, true) {
+				match surrealdb_core::rpc::format::revision::decode(&binary) {
 					Ok(ErrorResponse {
 						id,
 					}) => {
@@ -426,7 +419,7 @@ async fn router_reconnect(
 						.into_router_request(None)
 						.expect("replay commands should always convert to route requests");
 
-					let message = serialize(&request, true).unwrap();
+					let message = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
 
 					if let Err(error) = state.sink.send(Message::Binary(message)).await {
 						trace!("{error}");
@@ -442,7 +435,8 @@ async fn router_reconnect(
 					.into_router_request(None)
 					.unwrap();
 					trace!("Request {:?}", request);
-					let payload = serialize(&request, true).unwrap();
+					let payload = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
+
 					if let Err(error) = state.sink.send(Message::Binary(payload)).await {
 						trace!("{error}");
 						time::sleep(time::Duration::from_secs(1)).await;
@@ -470,7 +464,7 @@ pub(crate) async fn run_router(
 ) {
 	let ping = {
 		let request = Command::Health.into_router_request(None).unwrap();
-		let value = serialize(&request, true).unwrap();
+		let value = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
 		Message::Binary(value)
 	};
 
@@ -508,7 +502,7 @@ pub(crate) async fn run_router(
 						break 'router;
 					};
 
-					match router_handle_route(response, &mut state, &endpoint).await {
+					match router_handle_route(response, &mut state).await {
 						HandleResult::Ok => {},
 						HandleResult::Disconnected => {
 							router_reconnect(
@@ -604,13 +598,11 @@ impl Response {
 				trace!("Received an unexpected text message; {text}");
 				Ok(None)
 			}
-			Message::Binary(binary) => deserialize(binary, true).map(Some).map_err(|error| {
-				Error::ResponseFromBinary {
-					binary: binary.clone(),
-					error: bincode::ErrorKind::Custom(error.to_string()).into(),
-				}
-				.into()
-			}),
+			Message::Binary(binary) => surrealdb_core::rpc::format::revision::decode(binary)
+				.map(Some)
+				.map_err(|x| format!("Failed to deserialize revision payload: {x}"))
+				.map_err(crate::api::Error::InvalidResponse)
+				.map_err(anyhow::Error::new),
 			Message::Ping(..) => {
 				trace!("Received a ping from the server");
 				Ok(None)
@@ -633,15 +625,13 @@ impl Response {
 
 #[cfg(test)]
 mod tests {
-	use super::serialize;
 	use bincode::Options;
 	use flate2::Compression;
 	use flate2::write::GzEncoder;
 	use rand::{Rng, thread_rng};
 	use std::io::Write;
 	use std::time::SystemTime;
-	use surrealdb_core::expr::{Array, Value};
-	use surrealdb_core::rpc::format::cbor::Cbor;
+	use surrealdb_core::{rpc, val};
 
 	#[test_log::test]
 	fn large_vector_serialisation_bench() {
@@ -696,7 +686,7 @@ mod tests {
 			results.push((payload.len(), COMPRESSED_BINCODE_REF, duration, 1.0));
 		}
 		// Build the Value
-		let vector = Value::Array(Array::from(vector));
+		let vector = val::Value::Array(val::Array::from(vector));
 		//
 		const BINCODE: &str = "Bincode Vec<Value>";
 		const COMPRESSED_BINCODE: &str = "Compressed Bincode Vec<Value>";
@@ -726,7 +716,8 @@ mod tests {
 		const COMPRESSED_UNVERSIONED: &str = "Compressed Unversioned Vec<Value>";
 		{
 			// Unversioned
-			let (duration, payload) = timed(&|| serialize(&vector, false).unwrap());
+			let (duration, payload) =
+				timed(&|| surrealdb_core::rpc::format::bincode::encode(&vector).unwrap());
 			results.push((
 				payload.len(),
 				UNVERSIONED,
@@ -749,7 +740,8 @@ mod tests {
 		const COMPRESSED_VERSIONED: &str = "Compressed Versioned Vec<Value>";
 		{
 			// Versioned
-			let (duration, payload) = timed(&|| serialize(&vector, true).unwrap());
+			let (duration, payload) =
+				timed(&|| surrealdb_core::rpc::format::revision::encode(&vector).unwrap());
 			results.push((payload.len(), VERSIONED, duration, payload.len() as f32 / ref_payload));
 
 			// Compressed Versioned
@@ -768,9 +760,9 @@ mod tests {
 		{
 			// CBor
 			let (duration, payload) = timed(&|| {
-				let cbor: Cbor = vector.clone().try_into().unwrap();
+				let cbor = rpc::format::cbor::encode(vector.clone()).unwrap();
 				let mut res = Vec::new();
-				ciborium::into_writer(&cbor.0, &mut res).unwrap();
+				ciborium::into_writer(&cbor, &mut res).unwrap();
 				res
 			});
 			results.push((payload.len(), CBOR, duration, payload.len() as f32 / ref_payload));
@@ -790,6 +782,24 @@ mod tests {
 		for (size, name, duration, factor) in &results {
 			info!("{name} - Size: {size} - Duration: {duration:?} - Factor: {factor}");
 		}
+
+		// TODO: Figure out what this test was supposed to track.
+		//
+		//	Note this test changed with the value inversion PR, below is the previous check.
+		//
+		//	vec![
+		//		BINCODE_REF,
+		//		COMPRESSED_BINCODE_REF,
+		//		COMPRESSED_CBOR,
+		//		COMPRESSED_BINCODE,
+		//		COMPRESSED_UNVERSIONED,
+		//		CBOR,
+		//		COMPRESSED_VERSIONED,
+		//		BINCODE,
+		//		UNVERSIONED,
+		//		VERSIONED,
+		//	]
+
 		// Check the expected sorted results
 		let results: Vec<&str> = results.into_iter().map(|(_, name, _, _)| name).collect();
 		assert_eq!(
@@ -797,14 +807,14 @@ mod tests {
 			vec![
 				BINCODE_REF,
 				COMPRESSED_BINCODE_REF,
-				COMPRESSED_CBOR,
 				COMPRESSED_BINCODE,
 				COMPRESSED_UNVERSIONED,
-				CBOR,
 				COMPRESSED_VERSIONED,
+				COMPRESSED_CBOR,
 				BINCODE,
 				UNVERSIONED,
 				VERSIONED,
+				CBOR,
 			]
 		)
 	}

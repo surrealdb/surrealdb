@@ -8,10 +8,7 @@ use crate::kvs::surrealkv::cnf::commit_pool;
 use crate::kvs::{Check, Key, Val, Version};
 use anyhow::{Result, bail, ensure};
 use std::ops::Range;
-use surrealkv::Options;
-use surrealkv::Store;
-use surrealkv::Transaction as Tx;
-use surrealkv::{Durability, Mode};
+use surrealkv::{Durability, Mode, Options, Store, Transaction as Tx};
 
 use super::savepoint::SavePoints;
 

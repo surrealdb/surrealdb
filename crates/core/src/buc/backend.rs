@@ -1,4 +1,5 @@
-use super::store::{ObjectStore, memory::MemoryStore};
+use super::store::ObjectStore;
+use super::store::memory::MemoryStore;
 use crate::err::Error;
 use std::sync::Arc;
 

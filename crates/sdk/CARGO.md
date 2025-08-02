@@ -172,15 +172,6 @@ UPDATE person SET
 ;
 ```
 
-Store dynamically computed fields which are calculated when retrieved.
-
-```sql
-CREATE person SET
-	birthday = "2007-06-22",
-	can_drive = <future> { time::now() > birthday + 18y }
-;
-```
-
 Easily work with unstructured or structured data, in schema-less or schema-full mode.
 
 ```sql

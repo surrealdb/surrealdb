@@ -2,8 +2,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::number::Number;
-use crate::expr::value::Value;
+use crate::expr::Expr;
+use crate::val::{Number, Value};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -13,10 +13,8 @@ use std::fmt;
 use super::FlowResultExt as _;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct Start(pub Value);
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+pub struct Start(pub Expr);
 
 impl Start {
 	pub(crate) async fn process(
@@ -26,7 +24,7 @@ impl Start {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<u32> {
-		match self.0.compute(stk, ctx, opt, doc).await.catch_return() {
+		match stk.run(|stk| self.0.compute(stk, ctx, opt, doc)).await.catch_return() {
 			// This is a valid starting number
 			Ok(Value::Number(Number::Int(v))) if v >= 0 => {
 				if v > u32::MAX as i64 {
@@ -39,7 +37,7 @@ impl Start {
 			}
 			// An invalid value was specified
 			Ok(v) => Err(anyhow::Error::new(Error::InvalidStart {
-				value: v.as_string(),
+				value: v.as_raw_string(),
 			})),
 			// A different error occurred
 			Err(e) => Err(e),

@@ -2,13 +2,13 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::statements::DefineAnalyzerStatement;
-use crate::expr::{FlowResultExt as _, Value};
-use crate::expr::{Function, Strand};
+use crate::expr::{FlowResultExt as _, Function};
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::{Tokenizer, Tokens};
 use crate::idx::ft::offset::Offset;
 use crate::idx::ft::{DocLength, TermFrequency};
 use crate::idx::trees::store::IndexStores;
+use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 use filter::Filter;
 use reblessive::tree::Stk;
@@ -60,7 +60,9 @@ impl Analyzer {
 		tks: &mut Vec<Tokens>,
 	) -> Result<()> {
 		match val {
-			Value::Strand(s) => tks.push(self.generate_tokens(stk, ctx, opt, stage, s.0).await?),
+			Value::Strand(s) => {
+				tks.push(self.generate_tokens(stk, ctx, opt, stage, s.into_string()).await?)
+			}
 			Value::Number(n) => {
 				tks.push(self.generate_tokens(stk, ctx, opt, stage, n.to_string()).await?)
 			}
@@ -90,11 +92,20 @@ impl Analyzer {
 		stage: FilteringStage,
 		mut input: String,
 	) -> Result<Tokens> {
-		if let Some(function_name) = self.az.function.as_ref().map(|i| i.0.clone()) {
-			let fns = Function::Custom(function_name.clone(), vec![Value::Strand(Strand(input))]);
-			let val = fns.compute(stk, ctx, opt, None).await.catch_return()?;
+		if let Some(function_name) = self.az.function.as_ref().map(|i| i.as_str().to_owned()) {
+			let val = Function::Custom(function_name.clone())
+				// TODO: Null byte check
+				.compute(
+					stk,
+					ctx,
+					opt,
+					None,
+					vec![Value::Strand(unsafe { Strand::new_unchecked(input) })],
+				)
+				.await
+				.catch_return()?;
 			if let Value::Strand(val) = val {
-				input = val.0;
+				input = val.into_string();
 			} else {
 				bail!(Error::InvalidFunction {
 					name: function_name,
@@ -172,10 +183,8 @@ mod tests {
 	use crate::idx::ft::analyzer::filter::FilteringStage;
 	use crate::idx::ft::analyzer::tokenizer::{Token, Tokens};
 	use crate::kvs::{Datastore, LockType, TransactionType};
-	use crate::{
-		sql::{Statement, statements::DefineStatement},
-		syn,
-	};
+	use crate::sql::{DefineStatement, Expr};
+	use crate::syn;
 	use std::sync::Arc;
 
 	async fn get_analyzer_tokens(def: &str, input: &str) -> Tokens {
@@ -185,10 +194,14 @@ mod tests {
 		ctx.set_transaction(Arc::new(txn));
 		let ctx = ctx.freeze();
 
-		let mut stmt = syn::parse(&format!("DEFINE {def}")).unwrap();
-		let Some(Statement::Define(DefineStatement::Analyzer(az))) = stmt.0.0.pop() else {
+		let expr = syn::expr(&format!("DEFINE {def}")).unwrap();
+		let Expr::Define(d) = expr else {
 			panic!()
 		};
+		let DefineStatement::Analyzer(az) = *d else {
+			panic!()
+		};
+
 		let a = Analyzer::new(ctx.get_index_stores(), Arc::new(az.into())).unwrap();
 
 		let mut stack = reblessive::TreeStack::new();

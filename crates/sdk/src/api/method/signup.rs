@@ -1,11 +1,9 @@
-use crate::Surreal;
-use crate::api::Connection;
-use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
+use crate::api::{Connection, Result};
 use crate::error::Api;
-use crate::expr::to_value;
 use crate::method::OnceLockExt;
+use crate::{Surreal, api};
 use serde::de::DeserializeOwned;
 use serde_content::Value as Content;
 use std::borrow::Cow;
@@ -50,10 +48,11 @@ where
 		} = self;
 		Box::pin(async move {
 			let router = client.inner.router.extract()?;
-			let content = credentials.map_err(crate::error::Db::from)?;
+			let content =
+				credentials.map_err(|x| crate::error::Api::DeSerializeValue(x.to_string()))?;
 			router
 				.execute(Command::Signup {
-					credentials: to_value(content)?
+					credentials: api::value::to_core_value(content)?
 						.into_object()
 						.ok_or(Api::CrendentialsNotObject)?,
 				})

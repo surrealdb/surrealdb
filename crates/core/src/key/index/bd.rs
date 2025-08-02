@@ -1,8 +1,7 @@
 //! Stores BTree nodes for doc ids
 use crate::idx::docids::btdocids::BTreeDocIdsState;
 use crate::idx::trees::store::NodeId;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
 

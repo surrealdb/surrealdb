@@ -13,7 +13,8 @@ use surrealdb::dbs::capabilities::Capabilities;
 use surrealdb::iam::{Auth, Level, Role};
 use surrealdb::kvs::Datastore;
 use surrealdb_core::dbs::Response;
-use surrealdb_core::expr::{Number, Value, value};
+use surrealdb_core::syn;
+use surrealdb_core::val::{Number, Value};
 
 pub async fn new_ds() -> Result<Datastore> {
 	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())
@@ -62,7 +63,7 @@ pub async fn iam_run_case(
 			ensure!(tmp.is_ok(), "Check statement errored for test: {}", tmp.unwrap_err());
 
 			let tmp = tmp.unwrap();
-			let expected = value(check_expected_result[i])?;
+			let expected = syn::value(check_expected_result[i])?;
 			ensure!(
 				tmp == expected,
 				"Check statement failed for test: expected value '{:#}' doesn't match '{:#}'",
@@ -317,11 +318,6 @@ impl Test {
 		// Then check they are indeed the same values
 		//
 		// If it is a constant we need to transform it as a number
-		let val = if let Value::Constant(c) = val {
-			c.compute().unwrap_or_else(|e| panic!("Can't convert constant {c} - {e}"))
-		} else {
-			val
-		};
 		if val.as_number().map(|x| x.is_nan()).unwrap_or(false) {
 			assert!(
 				tmp.as_number().map(|x| x.is_nan()).unwrap_or(false),
@@ -370,7 +366,7 @@ impl Test {
 	#[allow(dead_code)]
 	pub fn expect_val_info<I: Display>(&mut self, val: &str, info: I) -> Result<&mut Self> {
 		self.expect_value_info(
-			value(val).unwrap_or_else(|_| panic!("INVALID VALUE {info}:\n{val}")),
+			syn::value(val).unwrap_or_else(|_| panic!("INVALID VALUE {info}:\n{val}")),
 			info,
 		)
 	}

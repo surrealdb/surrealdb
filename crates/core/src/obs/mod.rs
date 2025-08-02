@@ -5,18 +5,15 @@
 use anyhow::Result;
 use bytes::Bytes;
 use futures::stream::BoxStream;
-use object_store::ObjectStore;
 #[cfg(not(target_family = "wasm"))]
 use object_store::local::LocalFileSystem;
 #[cfg(target_family = "wasm")]
 use object_store::memory::InMemory;
-use object_store::parse_url;
 use object_store::path::Path;
+use object_store::{ObjectStore, parse_url};
 use sha1::{Digest, Sha1};
-use std::env;
-use std::fs;
-use std::sync::Arc;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
+use std::{env, fs};
 use url::Url;
 
 fn initialize_store(env_var: &str, default_dir: &str) -> Arc<dyn ObjectStore> {

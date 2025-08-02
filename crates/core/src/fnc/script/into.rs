@@ -1,19 +1,9 @@
 use super::classes;
-use crate::expr::geometry::Geometry;
-use crate::expr::number::Number;
-use crate::expr::value::Value;
-use js::Array;
-use js::BigInt;
-use js::Class;
-use js::Ctx;
-use js::Error;
-use js::Exception;
-use js::FromIteratorJs as _;
-use js::IntoJs;
-use js::Null;
-use js::Object;
-use js::TypedArray;
-use js::Undefined;
+use crate::val::{Geometry, Number, Value};
+use js::{
+	Array, BigInt, Class, Ctx, Error, Exception, FromIteratorJs as _, IntoJs, Null, Object,
+	TypedArray, Undefined,
+};
 use rust_decimal::prelude::ToPrimitive;
 
 const F64_INT_MAX: i64 = ((1u64 << f64::MANTISSA_DIGITS) - 1) as i64;

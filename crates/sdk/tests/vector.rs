@@ -1,10 +1,8 @@
 mod helpers;
-mod parse;
 use crate::helpers::{Test, new_ds, skip_ok};
-use parse::Parse;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::sql::SqlValue;
+use surrealdb_core::syn;
 
 #[tokio::test]
 async fn select_where_mtree_knn() -> Result<()> {
@@ -85,7 +83,7 @@ async fn delete_update_mtree_index() -> Result<()> {
 		let _ = res.remove(0).result?;
 	}
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 			{
 				dist: 2f,
@@ -100,7 +98,8 @@ async fn delete_update_mtree_index() -> Result<()> {
 				id: pts:3
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
@@ -132,7 +131,7 @@ async fn index_embedding() -> Result<()> {
 	let _ = res.remove(0).result?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"{
 			id: Document:1,
 			items: [
@@ -147,7 +146,8 @@ async fn index_embedding() -> Result<()> {
 				}
 			]
 		}",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
@@ -323,7 +323,7 @@ async fn select_mtree_knn_with_condition() -> Result<()> {
 	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 					{
 						detail: {
@@ -343,11 +343,12 @@ async fn select_mtree_knn_with_condition() -> Result<()> {
 						operation: 'Collector'
 					}
 			]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 				{
 					id: pts:5,
@@ -360,7 +361,8 @@ async fn select_mtree_knn_with_condition() -> Result<()> {
 					distance: 14f
 				}
 			]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	Ok(())
@@ -395,7 +397,7 @@ async fn select_hnsw_knn_with_condition() -> Result<()> {
 	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 					{
 						detail: {
@@ -415,11 +417,12 @@ async fn select_hnsw_knn_with_condition() -> Result<()> {
 						operation: 'Collector'
 					}
 			]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 				{
 					distance: 6f,
@@ -432,7 +435,8 @@ async fn select_hnsw_knn_with_condition() -> Result<()> {
 					id: pts:3
 				}
 			]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	Ok(())
@@ -466,7 +470,7 @@ async fn select_bruteforce_knn_with_condition() -> Result<()> {
 	skip_ok(res, 2)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 				{
 					detail: {
@@ -482,11 +486,12 @@ async fn select_bruteforce_knn_with_condition() -> Result<()> {
 					operation: 'Collector'
 				}
 			]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 				{
 					distance: 6f,
@@ -499,7 +504,8 @@ async fn select_bruteforce_knn_with_condition() -> Result<()> {
 					id: pts:3
 				}
 			]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	Ok(())

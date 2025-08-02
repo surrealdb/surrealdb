@@ -20,7 +20,7 @@ value = "[{ color: NONE }, { color: NONE }, { color: NONE }, { color: NONE }]"
 BEGIN;
     DEFINE TABLE UserTag SCHEMAFULL PERMISSIONS FULL;
     DEFINE FIELD name ON TABLE UserTag TYPE option<string>;
-    DEFINE FIELD color ON TABLE UserTag VALUE <future> {RETURN SELECT VALUE group.color FROM ONLY $this};
+    DEFINE FIELD color ON TABLE UserTag VALUE COMPUTED {RETURN SELECT VALUE group.color FROM ONLY $this};
     DEFINE FIELD group ON TABLE UserTag TYPE option<record<UserTagGroup>>;
 
 

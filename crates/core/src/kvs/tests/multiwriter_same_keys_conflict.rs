@@ -4,14 +4,10 @@ use super::CreateDs;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{
-	dbs::node::Timestamp,
-	kvs::{
-		LockType::*,
-		TransactionType::*,
-		clock::{FakeClock, SizedClock},
-	},
-};
+use crate::dbs::node::Timestamp;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
+use crate::kvs::clock::{FakeClock, SizedClock};
 
 pub async fn multiwriter_same_keys_conflict(new_ds: impl CreateDs) {
 	// Create a new datastore

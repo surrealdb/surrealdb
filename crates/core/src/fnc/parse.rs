@@ -1,6 +1,6 @@
 pub mod email {
 
-	use crate::expr::value::Value;
+	use crate::val::Value;
 	use addr::email::Host;
 	use anyhow::Result;
 
@@ -47,7 +47,7 @@ pub mod email {
 
 pub mod url {
 
-	use crate::expr::value::Value;
+	use crate::val::Value;
 	use anyhow::Result;
 	use url::Url;
 
@@ -123,7 +123,7 @@ pub mod url {
 
 	#[cfg(test)]
 	mod tests {
-		use crate::expr::value::Value;
+		use crate::val::Value;
 
 		#[test]
 		fn port_default_port_specified() {

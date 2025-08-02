@@ -1,7 +1,6 @@
 //! Authentication types
 
-use serde::Deserialize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// A signup action

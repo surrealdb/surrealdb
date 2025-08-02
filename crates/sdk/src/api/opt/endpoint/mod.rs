@@ -16,9 +16,8 @@ mod surrealkv;
 #[cfg(feature = "kv-tikv")]
 mod tikv;
 
-use crate::api::Connection;
-use crate::api::Result;
 use crate::api::err::Error;
+use crate::api::{Connection, Result};
 use url::Url;
 
 use super::Config;

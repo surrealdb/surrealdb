@@ -13,8 +13,8 @@ pub enum RpcError {
 	MethodNotFound,
 	#[error("Method not allowed")]
 	MethodNotAllowed,
-	#[error("Invalid params")]
-	InvalidParams,
+	#[error("Invalid params: {0}")]
+	InvalidParams(String),
 	#[error("There was a problem with the database: {0}")]
 	InternalError(anyhow::Error),
 	#[error("Live Query was made, but is not supported")]
@@ -25,6 +25,10 @@ pub enum RpcError {
 	BadGQLConfig,
 	#[error("Error: {0}")]
 	Thrown(String),
+	#[error("Could not serialize surreal value: {0}")]
+	Serialize(String),
+	#[error("Could not deserialize surreal value: {0}")]
+	Deserialize(String),
 }
 
 impl From<anyhow::Error> for RpcError {

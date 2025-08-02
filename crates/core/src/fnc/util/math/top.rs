@@ -1,4 +1,4 @@
-use crate::expr::number::Number;
+use crate::val::Number;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 

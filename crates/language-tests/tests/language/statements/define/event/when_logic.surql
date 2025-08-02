@@ -11,7 +11,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ events: { test: 'DEFINE EVENT test ON user WHEN $before.email != $after.email THEN (CREATE activity SET user = $this, `value` = $after.email, action = $event)' }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"
+value = "{ events: { test: 'DEFINE EVENT test ON user WHEN $before.email != $after.email THEN CREATE activity SET user = $this, `value` = $after.email, action = $event' }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"
 
 [[test.results]]
 value = "[{ email: 'info@surrealdb.com', id: user:test, updated_at: d'2024-11-28T14:57:41.914308226Z' }]"

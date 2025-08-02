@@ -1,8 +1,6 @@
-use crate::syn::{
-	error::{MessageKind, SyntaxError},
-	lexer::unicode::chars::JS_LINE_TERIMATORS,
-	token::{Token, t},
-};
+use crate::syn::error::{MessageKind, SyntaxError};
+use crate::syn::lexer::unicode::chars::JS_LINE_TERIMATORS;
+use crate::syn::token::{Token, t};
 
 use super::Lexer;
 

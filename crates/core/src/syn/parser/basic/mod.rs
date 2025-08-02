@@ -1,15 +1,17 @@
-use crate::{
-	sql::{
-		Bytes, Datetime, Duration, File, Ident, Param, Regex, Strand, Table, Uuid,
-		language::Language,
-	},
-	syn::{
-		lexer::compound,
-		parser::{ParseResult, Parser, mac::unexpected},
-		token::{self, TokenKind, t},
-	},
-};
+use std::mem;
 
+use rust_decimal::Decimal;
+
+use crate::sql::language::Language;
+use crate::sql::{Ident, Param};
+use crate::syn::error::{bail, syntax_error};
+use crate::syn::lexer::compound::{self, NumberKind};
+use crate::syn::parser::mac::unexpected;
+use crate::syn::parser::{ParseResult, Parser};
+use crate::syn::token::{self, TokenKind, t};
+use crate::val::{Bytes, Datetime, DecimalExt as _, Duration, File, Number, Regex, Strand, Uuid};
+
+use super::GluedValue;
 use super::mac::pop_glued;
 
 mod number;
@@ -26,22 +28,18 @@ impl TokenValue for Ident {
 			TokenKind::Identifier => {
 				parser.pop_peek();
 				let str = parser.lexer.string.take().unwrap();
-				Ok(Ident(str))
+				// Safety: lexer ensures no null bytes are present in the identifier.
+				Ok(unsafe { Ident::new_unchecked(str) })
 			}
 			x if Parser::kind_is_keyword_like(x) => {
 				let s = parser.pop_peek().span;
-				Ok(Ident(parser.lexer.span_str(s).to_owned()))
+				// Safety: lexer ensures no null bytes are present in the identifier.
+				Ok(unsafe { Ident::new_unchecked(parser.lexer.span_str(s).to_owned()) })
 			}
 			_ => {
 				unexpected!(parser, token, "an identifier");
 			}
 		}
-	}
-}
-
-impl TokenValue for Table {
-	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
-		parser.next_token_value::<Ident>().map(|x| Table(x.0))
 	}
 }
 
@@ -70,7 +68,8 @@ impl TokenValue for Param {
 			TokenKind::Parameter => {
 				parser.pop_peek();
 				let param = parser.lexer.string.take().unwrap();
-				Ok(Param(Ident(param)))
+				// Safety: Lexer guarentees no null bytes.
+				Ok(unsafe { Param::new_unchecked(param) })
 			}
 			_ => unexpected!(parser, peek, "a parameter"),
 		}
@@ -115,7 +114,8 @@ impl TokenValue for Strand {
 			t!("\"") | t!("'") => {
 				parser.pop_peek();
 				let v = parser.lexer.lex_compound(token, compound::strand)?.value;
-				Ok(Strand(v))
+				// Safety: The lexer ensures that no null bytes can be present in the string.
+				Ok(unsafe { Strand::new_unchecked(v) })
 			}
 			_ => unexpected!(parser, token, "a strand"),
 		}
@@ -183,9 +183,79 @@ impl TokenValue for Regex {
 					parser.backup_after(peek.span);
 				}
 				let v = parser.lexer.lex_compound(peek, compound::regex)?.value;
-				Ok(Regex(v))
+				Ok(v)
 			}
 			_ => unexpected!(parser, peek, "a regex"),
+		}
+	}
+}
+
+pub enum NumberToken {
+	Float(f64),
+	Integer(i64),
+	Decimal(Decimal),
+}
+
+impl TokenValue for NumberToken {
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		let token = parser.peek();
+		match token.kind {
+			TokenKind::Glued(token::Glued::Number) => {
+				parser.pop_peek();
+				let GluedValue::Number(x) = mem::take(&mut parser.glued_value) else {
+					panic!("Glued token was next but glued value was not of the correct value");
+				};
+				let number_str = parser.lexer.span_str(token.span);
+				match x {
+					NumberKind::Integer => number_str
+						.parse()
+						.map(NumberToken::Integer)
+						.map_err(|e| syntax_error!("Failed to parse number: {e}", @token.span)),
+					NumberKind::Float => number_str
+						.trim_end_matches("f")
+						.parse()
+						.map(NumberToken::Float)
+						.map_err(|e| syntax_error!("Failed to parse number: {e}", @token.span)),
+					NumberKind::Decimal => {
+						let number_str = number_str.trim_end_matches("dec");
+						let decimal = if number_str.contains(['e', 'E']) {
+							Decimal::from_scientific(number_str).map_err(
+								|e| syntax_error!("Failed to parser decimal: {e}", @token.span),
+							)?
+						} else {
+							Decimal::from_str_normalized(number_str).map_err(
+								|e| syntax_error!("Failed to parser decimal: {e}", @token.span),
+							)?
+						};
+						Ok(NumberToken::Decimal(decimal))
+					}
+				}
+			}
+			t!("+") | t!("-") | TokenKind::Digits => {
+				parser.pop_peek();
+				let token = parser.lexer.lex_compound(token, compound::number)?;
+				match token.value {
+					compound::Numeric::Float(f) => Ok(NumberToken::Float(f)),
+					compound::Numeric::Integer(i) => Ok(NumberToken::Integer(i)),
+					compound::Numeric::Decimal(d) => Ok(NumberToken::Decimal(d)),
+					compound::Numeric::Duration(_) => {
+						bail!("Unexpected token `duration`, expected a number", @token.span)
+					}
+				}
+			}
+			_ => unexpected!(parser, token, "a number"),
+		}
+	}
+}
+
+// TODO: Remove once properly seperating AST from Expr.
+impl TokenValue for Number {
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		let token = parser.next_token_value::<NumberToken>()?;
+		match token {
+			NumberToken::Float(x) => Ok(Number::Float(x)),
+			NumberToken::Integer(x) => Ok(Number::Int(x)),
+			NumberToken::Decimal(x) => Ok(Number::Decimal(x)),
 		}
 	}
 }
@@ -212,14 +282,17 @@ impl Parser<'_> {
 					}
 					_ => token.span,
 				};
-				Ok(Ident(self.lexer.span_str(span).to_owned()))
+				// Safety: Lexer guarentees no null bytes.
+				Ok(unsafe { Ident::new_unchecked(self.lexer.span_str(span).to_owned()) })
 			}
 			TokenKind::Identifier => {
 				let str = self.lexer.string.take().unwrap();
-				Ok(Ident(str))
+				// Safety: Lexer guarentees no null bytes.
+				Ok(unsafe { Ident::new_unchecked(str) })
 			}
 			x if Self::kind_is_keyword_like(x) => {
-				Ok(Ident(self.lexer.span_str(token.span).to_owned()))
+				// Safety: Lexer guarentees no null bytes.
+				Ok(unsafe { Ident::new_unchecked(self.lexer.span_str(token.span).to_owned()) })
 			}
 			_ => {
 				unexpected!(self, token, "an identifier");
@@ -248,10 +321,10 @@ mod test {
 				.unwrap_or_else(|_| panic!("failed on {}", ident));
 
 			assert_eq!(
-				r,
-				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::SqlValue::Idiom(
-					sql::Idiom(vec![Part::Field(Ident(ident.to_string()))])
-				))]))
+				r.expressions,
+				vec![sql::TopLevelExpr::Expr(sql::Expr::Idiom(sql::Idiom(vec![Part::Field(
+					Ident::new(ident.to_owned()).unwrap()
+				)])))]
 			)
 		}
 

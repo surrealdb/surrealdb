@@ -31,7 +31,7 @@ FOR $i in 0..$COUNT{
 // All the possible options should get roughly the same amount of samples.
 // So we test if they are all roughly around 500 samples.
 FOR $i in 0..$RANGE{
-    $cur = type::thing("result",$i);
+    let $cur = type::thing("result",$i);
     fn::assert($cur.count > 400, "The count should be larger then 400, got " + <string> $cur.count);
     fn::assert($cur.count < 600, "The count should be smaller then 600, got " + <string> $cur.count);
 };

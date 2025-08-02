@@ -1,29 +1,66 @@
 use crate::sql::reference::Reference;
-use crate::sql::{Ident, Permissions, SqlValue, Strand};
-use crate::sql::{Idiom, Kind};
+use crate::sql::{Expr, Ident, Idiom, Kind, Permissions};
+use crate::val::Strand;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use super::AlterKind;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+pub enum AlterDefault {
+	#[default]
+	None,
+	Drop,
+	Always(Expr),
+	Set(Expr),
+}
+
+impl From<crate::expr::statements::alter::AlterDefault> for AlterDefault {
+	fn from(value: crate::expr::statements::alter::AlterDefault) -> Self {
+		match value {
+			crate::expr::statements::alter::AlterDefault::None => AlterDefault::None,
+			crate::expr::statements::alter::AlterDefault::Drop => AlterDefault::Drop,
+			crate::expr::statements::alter::AlterDefault::Always(expr) => {
+				AlterDefault::Always(expr.into())
+			}
+			crate::expr::statements::alter::AlterDefault::Set(expr) => {
+				AlterDefault::Set(expr.into())
+			}
+		}
+	}
+}
+
+impl From<AlterDefault> for crate::expr::statements::alter::AlterDefault {
+	fn from(value: AlterDefault) -> Self {
+		match value {
+			AlterDefault::None => crate::expr::statements::alter::AlterDefault::None,
+			AlterDefault::Drop => crate::expr::statements::alter::AlterDefault::Drop,
+			AlterDefault::Always(expr) => {
+				crate::expr::statements::alter::AlterDefault::Always(expr.into())
+			}
+			AlterDefault::Set(expr) => {
+				crate::expr::statements::alter::AlterDefault::Set(expr.into())
+			}
+		}
+	}
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AlterFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
 	pub if_exists: bool,
-	pub flex: Option<bool>,
-	pub kind: Option<Option<Kind>>,
-	pub readonly: Option<bool>,
-	pub value: Option<Option<SqlValue>>,
-	pub assert: Option<Option<SqlValue>>,
-	pub default: Option<Option<SqlValue>>,
+	pub flex: AlterKind<()>,
+	pub kind: AlterKind<Kind>,
+	pub readonly: AlterKind<()>,
+	pub value: AlterKind<Expr>,
+	pub assert: AlterKind<Expr>,
+	pub default: AlterDefault,
 	pub permissions: Option<Permissions>,
-	pub comment: Option<Option<Strand>>,
-	pub reference: Option<Option<Reference>>,
-	pub default_always: Option<bool>,
+	pub comment: AlterKind<Strand>,
+	pub reference: AlterKind<Reference>,
 }
 
 impl Display for AlterFieldStatement {
@@ -33,69 +70,52 @@ impl Display for AlterFieldStatement {
 			write!(f, " IF EXISTS")?
 		}
 		write!(f, " {} ON {}", self.name, self.what)?;
-		if let Some(flex) = self.flex {
-			if flex {
-				write!(f, " FLEXIBLE")?;
-			} else {
-				write!(f, " DROP FLEXIBLE")?;
-			}
+		match self.flex {
+			AlterKind::Set(_) => write!(f, " FLEXIBLE")?,
+			AlterKind::Drop => write!(f, " DROP FLEXIBLE")?,
+			AlterKind::None => {}
 		}
-		if let Some(kind) = &self.kind {
-			if let Some(kind) = kind {
-				write!(f, " TYPE {kind}")?;
-			} else {
-				write!(f, " DROP TYPE")?;
-			}
+		match self.kind {
+			AlterKind::Set(ref x) => write!(f, " TYPE {x}")?,
+			AlterKind::Drop => write!(f, " DROP TYPE")?,
+			AlterKind::None => {}
 		}
-		if let Some(readonly) = self.readonly {
-			if readonly {
-				write!(f, " READONLY")?;
-			} else {
-				write!(f, " DROP READONLY")?;
-			}
+		match self.readonly {
+			AlterKind::Set(_) => write!(f, " READONLY")?,
+			AlterKind::Drop => write!(f, " DROP READONLY")?,
+			AlterKind::None => {}
 		}
-		if let Some(value) = &self.value {
-			if let Some(value) = value {
-				write!(f, " VALUE {value}")?;
-			} else {
-				write!(f, " DROP VALUE")?;
-			}
+		match self.value {
+			AlterKind::Set(ref x) => write!(f, " VALUE {x}")?,
+			AlterKind::Drop => write!(f, " DROP VALUE")?,
+			AlterKind::None => {}
 		}
-		if let Some(assert) = &self.assert {
-			if let Some(assert) = assert {
-				write!(f, " ASSERT {assert}")?;
-			} else {
-				write!(f, " DROP ASSERT")?;
-			}
+		match self.assert {
+			AlterKind::Set(ref x) => write!(f, " ASSERT {x}")?,
+			AlterKind::Drop => write!(f, " DROP ASSERT")?,
+			AlterKind::None => {}
 		}
-		if let Some(default) = &self.default {
-			if let Some(default) = default {
-				write!(f, " DEFAULT")?;
-				if self.default_always.is_some_and(|x| x) {
-					write!(f, " ALWAYS")?;
-				}
 
-				write!(f, " {default}")?;
-			} else {
-				write!(f, " DROP DEFAULT")?;
-			}
+		match self.default {
+			AlterDefault::None => {}
+			AlterDefault::Drop => write!(f, "DROP DEFAULT")?,
+			AlterDefault::Always(ref d) => write!(f, "DEFAULT ALWAYS {d}")?,
+			AlterDefault::Set(ref d) => write!(f, "DEFAULT {d}")?,
 		}
+
 		if let Some(permissions) = &self.permissions {
 			write!(f, "{permissions}")?;
 		}
-		if let Some(comment) = &self.comment {
-			if let Some(comment) = comment {
-				write!(f, " COMMENT {comment}")?;
-			} else {
-				write!(f, " DROP COMMENT")?;
-			}
+
+		match self.comment {
+			AlterKind::Set(ref x) => write!(f, " COMMENT {x}")?,
+			AlterKind::Drop => write!(f, " DROP COMMENT")?,
+			AlterKind::None => {}
 		}
-		if let Some(reference) = &self.reference {
-			if let Some(reference) = reference {
-				write!(f, " REFERENCE {reference}")?;
-			} else {
-				write!(f, " DROP REFERENCE")?;
-			}
+		match self.reference {
+			AlterKind::Set(ref x) => write!(f, " REFERENCE {x}")?,
+			AlterKind::Drop => write!(f, " DROP REFERENCE")?,
+			AlterKind::None => {}
 		}
 		Ok(())
 	}
@@ -107,16 +127,15 @@ impl From<AlterFieldStatement> for crate::expr::statements::alter::AlterFieldSta
 			name: v.name.into(),
 			what: v.what.into(),
 			if_exists: v.if_exists,
-			flex: v.flex,
-			kind: v.kind.map(|opt| opt.map(Into::into)),
-			readonly: v.readonly,
-			value: v.value.map(|opt| opt.map(Into::into)),
-			assert: v.assert.map(|opt| opt.map(Into::into)),
-			default: v.default.map(|opt| opt.map(Into::into)),
+			flex: v.flex.into(),
+			kind: v.kind.into(),
+			readonly: v.readonly.into(),
+			value: v.value.into(),
+			assert: v.assert.into(),
+			default: v.default.into(),
 			permissions: v.permissions.map(Into::into),
-			comment: v.comment.map(|opt| opt.map(Into::into)),
-			reference: v.reference.map(|opt| opt.map(Into::into)),
-			default_always: v.default_always,
+			comment: v.comment.into(),
+			reference: v.reference.into(),
 		}
 	}
 }
@@ -127,16 +146,15 @@ impl From<crate::expr::statements::alter::AlterFieldStatement> for AlterFieldSta
 			name: v.name.into(),
 			what: v.what.into(),
 			if_exists: v.if_exists,
-			flex: v.flex,
-			kind: v.kind.map(|opt| opt.map(Into::into)),
-			readonly: v.readonly,
-			value: v.value.map(|opt| opt.map(Into::into)),
-			assert: v.assert.map(|opt| opt.map(Into::into)),
-			default: v.default.map(|opt| opt.map(Into::into)),
+			flex: v.flex.into(),
+			kind: v.kind.into(),
+			readonly: v.readonly.into(),
+			value: v.value.into(),
+			assert: v.assert.into(),
+			default: v.default.into(),
 			permissions: v.permissions.map(Into::into),
-			comment: v.comment.map(|opt| opt.map(Into::into)),
-			reference: v.reference.map(|opt| opt.map(Into::into)),
-			default_always: v.default_always,
+			comment: v.comment.into(),
+			reference: v.reference.into(),
 		}
 	}
 }

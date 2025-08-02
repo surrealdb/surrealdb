@@ -6,16 +6,16 @@ use crate::cnf::HTTP_MAX_SIGNIN_BODY_SIZE;
 use crate::net::error::Error as NetError;
 use crate::net::input::bytes_to_utf8;
 use anyhow::Context as _;
-use axum::Extension;
-use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::routing::options;
+use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use serde::Serialize;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::RouteTarget;
-use surrealdb::sql::SqlValue;
+use surrealdb_core::syn;
+use surrealdb_core::val::Value;
 use tower_http::limit::RequestBodyLimitLayer;
 
 #[derive(Serialize)]
@@ -63,15 +63,15 @@ async fn handler(
 	// Convert the HTTP body into text
 	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
 	// Parse the provided data as JSON
-	match surrealdb::sql::json(data) {
+	match syn::json(data) {
 		// The provided value was an object
-		Ok(SqlValue::Object(vars)) => {
-			match surrealdb::iam::signup::signup(kvs, &mut session, vars.into()).await {
+		Ok(Value::Object(vars)) => {
+			match surrealdb::iam::signup::signup(kvs, &mut session, vars).await {
 				// Authentication was successful
 				Ok(v) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => {
-						Ok(Output::json(&Success::new(v.token, v.refresh)))
+						Ok(Output::json_other(&Success::new(v.token, v.refresh)))
 					}
 					Some(Accept::ApplicationCbor) => {
 						Ok(Output::cbor(&Success::new(v.token, v.refresh)))
@@ -80,7 +80,9 @@ async fn handler(
 					// NOTE: Only the token is returned in a plain text response.
 					Some(Accept::TextPlain) => Ok(Output::Text(v.token.unwrap_or_default())),
 					// Internal serialization
-					Some(Accept::Surrealdb) => Ok(Output::full(&Success::new(v.token, v.refresh))),
+					Some(Accept::Surrealdb) => {
+						Ok(Output::bincode(&Success::new(v.token, v.refresh)))
+					}
 					// Return nothing
 					None => Ok(Output::None),
 					// An incorrect content-type was requested

@@ -1,7 +1,6 @@
 use axum_extra::headers;
 use axum_extra::headers::Header;
-use http::HeaderName;
-use http::HeaderValue;
+use http::{HeaderName, HeaderValue};
 use surrealdb::headers::ID;
 
 /// Typed header implementation for the id header.

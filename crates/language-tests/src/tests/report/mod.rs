@@ -8,9 +8,10 @@ use crate::tests::{
 	set::TestId,
 };
 use surrealdb_core::dbs::{Session, Variables};
-use surrealdb_core::expr::Value as SurValue;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_core::sql::{Ast, Expr, TopLevelExpr};
 use surrealdb_core::syn::error::RenderedError;
+use surrealdb_core::val::Value as SurValue;
 
 mod display;
 mod update;
@@ -110,7 +111,7 @@ pub enum MatcherMismatch {
 	},
 	/// Running the matcher returned false
 	Failed {
-		matcher: SurValue,
+		matcher: Expr,
 		value: Result<SurValue, String>,
 	},
 	/// The test returned a value when an error was expected
@@ -170,7 +171,7 @@ pub enum MatchValueType {
 #[derive(Clone)]
 pub struct MatcherExpectation {
 	matcher_value_type: MatchValueType,
-	value: SurValue,
+	value: Expr,
 }
 
 #[derive(Clone)]
@@ -632,10 +633,21 @@ impl TestReport {
 
 		let session = Session::viewer().with_ns("match").with_db("match");
 
-		let res =
-			matcher_datastore.compute(expectation.value.clone(), &session, Some(run_vars)).await;
+		let ast = Ast {
+			expressions: vec![TopLevelExpr::Expr(expectation.value.clone())],
+		};
+		let res = matcher_datastore.process(ast, &session, Some(run_vars)).await;
 
 		let x = match res {
+			Err(e) => {
+				return Some(MatcherMismatch::Error {
+					error: e.to_string(),
+					got: value,
+				});
+			}
+			Ok(x) => x,
+		};
+		let x = match x.into_iter().next().unwrap().result {
 			Err(e) => {
 				return Some(MatcherMismatch::Error {
 					error: e.to_string(),

@@ -15,7 +15,6 @@ use tokio::sync::RwLock;
 use crate::err::Error;
 
 use crate::expr::index::{Distance, MTreeParams, VectorType};
-use crate::expr::{Number, Object, Thing, Value};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::docids::btdocids::BTreeDocIds;
@@ -26,6 +25,7 @@ use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder, PriorityNode};
 use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeStore};
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val};
+use crate::val::{Number, Object, RecordId, Value};
 
 #[non_exhaustive]
 pub struct MTreeIndex {
@@ -84,7 +84,7 @@ impl MTreeIndex {
 		&mut self,
 		stk: &mut Stk,
 		txn: &Transaction,
-		rid: &Thing,
+		rid: &RecordId,
 		content: &[Value],
 	) -> Result<()> {
 		// Resolve the doc_id
@@ -94,7 +94,7 @@ impl MTreeIndex {
 		drop(doc_ids);
 		// Index the values
 		let mut mtree = self.mtree.write().await;
-		for v in content.iter().filter(|v| v.is_some()) {
+		for v in content.iter().filter(|v| !v.is_nullish()) {
 			// Extract the vector
 			let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
 			vector.check_dimension(self.dim)?;
@@ -109,7 +109,7 @@ impl MTreeIndex {
 		&mut self,
 		stk: &mut Stk,
 		txn: &Transaction,
-		rid: &Thing,
+		rid: &RecordId,
 		content: &[Value],
 	) -> Result<()> {
 		let mut doc_ids = self.doc_ids.write().await;
@@ -118,7 +118,7 @@ impl MTreeIndex {
 		if let Some(doc_id) = doc_id {
 			// Lock the index
 			let mut mtree = self.mtree.write().await;
-			for v in content.iter().filter(|v| v.is_some()) {
+			for v in content.iter().filter(|v| !v.is_nullish()) {
 				// Extract the vector
 				let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
 				vector.check_dimension(self.dim)?;
@@ -1491,8 +1491,7 @@ mod tests {
 	use crate::idx::trees::store::{NodeId, TreeNodeProvider, TreeStore};
 	use crate::idx::trees::vector::SharedVector;
 	use crate::kvs::LockType::*;
-	use crate::kvs::Transaction;
-	use crate::kvs::{Datastore, TransactionType};
+	use crate::kvs::{Datastore, Transaction, TransactionType};
 	use ahash::{HashMap, HashMapExt, HashSet};
 	use anyhow::Result;
 	use reblessive::tree::Stk;

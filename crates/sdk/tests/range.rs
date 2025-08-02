@@ -1,5 +1,4 @@
 mod helpers;
-mod parse;
 use crate::helpers::Test;
 use surrealdb::Result;
 

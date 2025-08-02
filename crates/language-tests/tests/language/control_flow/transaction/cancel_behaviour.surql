@@ -2,7 +2,7 @@
 [test]
 
 [[test.results]]
-error = "Invalid statement: CANCEL cannot be used outside of a manual transaction"
+error = "Invalid statement: Cannot CANCEL without starting a transaction"
 
 */
 

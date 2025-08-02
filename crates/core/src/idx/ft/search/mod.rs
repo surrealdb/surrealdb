@@ -9,7 +9,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::index::SearchParams;
 use crate::expr::statements::DefineAnalyzerStatement;
-use crate::expr::{Idiom, Object, Scoring, Thing, Value};
+use crate::expr::{Idiom, Scoring};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::docids::btdocids::BTreeDocIds;
@@ -28,6 +28,7 @@ use crate::idx::planner::iterators::MatchesHitsIterator;
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::IndexStores;
 use crate::kvs::{KVValue, Key, Transaction, TransactionType};
+use crate::val::{Object, RecordId, Value};
 use reblessive::tree::Stk;
 use revision::Revisioned;
 use revision::revisioned;
@@ -217,7 +218,7 @@ impl SearchIndex {
 	pub(crate) async fn remove_document(
 		&mut self,
 		ctx: &Context,
-		rid: &Thing,
+		rid: &RecordId,
 	) -> anyhow::Result<()> {
 		let tx = ctx.tx();
 		// Extract and remove the doc_id (if any)
@@ -268,7 +269,7 @@ impl SearchIndex {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		rid: &Thing,
+		rid: &RecordId,
 		content: Vec<Value>,
 	) -> anyhow::Result<()> {
 		let tx = ctx.tx();
@@ -546,7 +547,7 @@ impl SearchIndex {
 	pub(in crate::idx) async fn highlight(
 		&self,
 		tx: &Transaction,
-		thg: &Thing,
+		thg: &RecordId,
 		terms: &[Option<(TermId, TermLen)>],
 		hlp: HighlightParams,
 		idiom: &Idiom,
@@ -572,7 +573,7 @@ impl SearchIndex {
 	pub(in crate::idx) async fn read_offsets(
 		&self,
 		tx: &Transaction,
-		thg: &Thing,
+		thg: &RecordId,
 		terms: &[Option<(TermId, u32)>],
 		partial: bool,
 	) -> anyhow::Result<Value> {
@@ -639,7 +640,7 @@ impl MatchesHitsIterator for SearchHitsIterator {
 		self.iter.size_hint().0
 	}
 
-	async fn next(&mut self, tx: &Transaction) -> anyhow::Result<Option<(Thing, DocId)>> {
+	async fn next(&mut self, tx: &Transaction) -> anyhow::Result<Option<(RecordId, DocId)>> {
 		for doc_id in self.iter.by_ref() {
 			let doc_id_key = self.ikb.new_bi_key(doc_id);
 			if let Some(v) = tx.get(&doc_id_key, None).await? {
@@ -656,15 +657,16 @@ mod tests {
 	use crate::dbs::Options;
 	use crate::expr::index::SearchParams;
 	use crate::expr::statements::DefineAnalyzerStatement;
-	use crate::expr::{Array, Thing, Value};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::Score;
 	use crate::idx::ft::search::scorer::BM25Scorer;
 	use crate::idx::ft::search::{SearchHitsIterator, SearchIndex};
 	use crate::idx::planner::iterators::MatchesHitsIterator;
 	use crate::kvs::{Datastore, LockType::*, TransactionType};
-	use crate::sql::{Statement, statements::DefineStatement};
+	use crate::sql::Expr;
+	use crate::sql::statements::DefineStatement;
 	use crate::syn;
+	use crate::val::{Array, RecordId, Value};
 	use reblessive::tree::Stk;
 	use std::collections::HashMap;
 	use std::sync::Arc;
@@ -674,7 +676,7 @@ mod tests {
 		ctx: &Context,
 		hits: Option<SearchHitsIterator>,
 		scr: BM25Scorer,
-		e: Vec<(&Thing, Option<Score>)>,
+		e: Vec<(&RecordId, Option<Score>)>,
 	) {
 		let tx = ctx.tx();
 		if let Some(mut hits) = hits {
@@ -756,8 +758,11 @@ mod tests {
 	async fn test_ft_index() {
 		let ds = Datastore::new("memory").await.unwrap();
 		let ctx = ds.setup_ctx().unwrap().freeze();
-		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
+		let q = syn::expr("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+		let Expr::Define(q) = q else {
+			panic!()
+		};
+		let DefineStatement::Analyzer(az) = *q else {
 			panic!()
 		};
 		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
@@ -765,9 +770,9 @@ mod tests {
 
 		let btree_order = 5;
 
-		let doc1: Thing = ("t", "doc1").into();
-		let doc2: Thing = ("t", "doc2").into();
-		let doc3: Thing = ("t", "doc3").into();
+		let doc1 = RecordId::new("t".to_string(), strand!("doc1").to_owned());
+		let doc2 = RecordId::new("t".to_string(), strand!("doc2").to_owned());
+		let doc3 = RecordId::new("t".to_string(), strand!("doc3").to_owned());
 
 		stack
 			.enter(|stk| async {
@@ -896,17 +901,20 @@ mod tests {
 		for _ in 0..10 {
 			let ds = Datastore::new("memory").await.unwrap();
 			let ctx = ds.setup_ctx().unwrap().freeze();
-			let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-			let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
+			let q = syn::expr("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+			let Expr::Define(q) = q else {
+				panic!()
+			};
+			let DefineStatement::Analyzer(az) = *q else {
 				panic!()
 			};
 			let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
 			let mut stack = reblessive::TreeStack::new();
 
-			let doc1: Thing = ("t", "doc1").into();
-			let doc2: Thing = ("t", "doc2").into();
-			let doc3: Thing = ("t", "doc3").into();
-			let doc4: Thing = ("t", "doc4").into();
+			let doc1 = RecordId::new("t".to_string(), strand!("doc1").to_owned());
+			let doc2 = RecordId::new("t".to_string(), strand!("doc2").to_owned());
+			let doc3 = RecordId::new("t".to_string(), strand!("doc3").to_owned());
+			let doc4 = RecordId::new("t".to_string(), strand!("doc4").to_owned());
 
 			let btree_order = 5;
 			stack
@@ -1034,12 +1042,15 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let ctx = ds.setup_ctx().unwrap().freeze();
 		let mut stack = reblessive::TreeStack::new();
-		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
+		let q = syn::expr("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+		let Expr::Define(q) = q else {
+			panic!()
+		};
+		let DefineStatement::Analyzer(az) = *q else {
 			panic!()
 		};
 		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
-		let doc: Thing = ("t", "doc1").into();
+		let doc = RecordId::new("t".to_string(), strand!("doc1").to_owned());
 		let content = Value::from(Array::from(vec![
 			"Enter a search term",
 			"Welcome",

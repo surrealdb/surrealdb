@@ -4,7 +4,6 @@ pub mod http;
 pub mod response;
 pub mod websocket;
 
-use crate::rpc::response::success;
 use crate::rpc::websocket::Websocket;
 use crate::telemetry::metrics::ws::NotificationContext;
 use futures::stream::FuturesUnordered;
@@ -13,6 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::kvs::Datastore;
+use surrealdb_core::rpc::Data;
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
@@ -78,7 +78,7 @@ pub(crate) async fn notifications(
 						// Ensure the specified WebSocket exists
 						if let Some(rpc) = websocket {
 							// Serialize the message to send
-							let message = success(None, notification);
+							let message = response::success(None, Data::Live(notification));
 							// Add telemetry metrics
 							let cx = TelemetryContext::new();
 							let not_ctx = NotificationContext::default()

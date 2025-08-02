@@ -1,26 +1,20 @@
-use std::{
-	convert::Infallible,
-	sync::Arc,
-	task::{Context, Poll},
-	time::Duration,
-};
+use std::convert::Infallible;
+use std::sync::Arc;
+use std::task::{Context, Poll};
+use std::time::Duration;
 
-use async_graphql::{
-	Executor, ParseRequestError,
-	http::{create_multipart_mixed_stream, is_accept_multipart_mixed},
-};
-use async_graphql_axum::{
-	GraphQLBatchRequest, GraphQLRequest, GraphQLResponse, rejection::GraphQLRejection,
-};
-use axum::{
-	BoxError,
-	body::{Body, HttpBody},
-	extract::FromRequest,
-	http::{Request as HttpRequest, Response as HttpResponse},
-	response::IntoResponse,
-};
+use async_graphql::http::{create_multipart_mixed_stream, is_accept_multipart_mixed};
+use async_graphql::{Executor, ParseRequestError};
+use async_graphql_axum::rejection::GraphQLRejection;
+use async_graphql_axum::{GraphQLBatchRequest, GraphQLRequest, GraphQLResponse};
+use axum::BoxError;
+use axum::body::{Body, HttpBody};
+use axum::extract::FromRequest;
+use axum::http::{Request as HttpRequest, Response as HttpResponse};
+use axum::response::IntoResponse;
 use bytes::Bytes;
-use futures_util::{StreamExt, future::BoxFuture};
+use futures_util::StreamExt;
+use futures_util::future::BoxFuture;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::gql::cache::{Invalidator, SchemaCache};

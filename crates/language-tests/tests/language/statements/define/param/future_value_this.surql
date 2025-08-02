@@ -1,5 +1,6 @@
 /**
 [test]
+wip = true
 
 [[test.results]]
 value = "NONE"
@@ -9,6 +10,6 @@ value = "{ a: { parent: NONE, this: { a: { parent: NONE, this: 'this' } } } }"
 
 */
 
-DEFINE PARAM $a VALUE <future> { { this: $this, parent: $parent } };
+DEFINE PARAM $a VALUE COMPUTED { { this: $this, parent: $parent } };
 
 SELECT $a, * FROM ONLY (SELECT $a FROM ONLY "this");

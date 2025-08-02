@@ -2,15 +2,10 @@ use std::fmt::{self, Display, Write};
 
 use crate::sql::fmt::{Fmt, Pretty, pretty_indent};
 
-use crate::sql::{Ident, Part, SqlValue};
+use crate::sql::Ident;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct GraphQLConfig {
 	pub tables: TablesConfig,
 	pub functions: FunctionsConfig,
@@ -34,10 +29,8 @@ impl From<crate::expr::statements::define::config::graphql::GraphQLConfig> for G
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum TablesConfig {
 	#[default]
 	None,
@@ -72,10 +65,8 @@ impl From<crate::expr::statements::define::config::graphql::TablesConfig> for Ta
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct TableConfig {
 	pub name: String,
 }
@@ -95,10 +86,8 @@ impl From<crate::expr::statements::define::config::graphql::TableConfig> for Tab
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum FunctionsConfig {
 	#[default]
 	None,
@@ -157,43 +146,18 @@ impl Display for TablesConfig {
 					drop(indent);
 				}
 			}
-			TablesConfig::Exclude(_) => todo!(),
+			TablesConfig::Exclude(cs) => {
+				let mut f = Pretty::from(f);
+				write!(f, "EXCLUDE")?;
+				if !cs.is_empty() {
+					let indent = pretty_indent();
+					write!(f, "{}", Fmt::pretty_comma_separated(cs.as_slice()))?;
+					drop(indent);
+				}
+			}
 		}
 
 		Ok(())
-	}
-}
-
-impl From<String> for TableConfig {
-	fn from(value: String) -> Self {
-		Self {
-			name: value,
-		}
-	}
-}
-
-pub fn val_to_ident(val: SqlValue) -> Result<Ident, SqlValue> {
-	match val {
-		SqlValue::Strand(s) => Ok(s.0.into()),
-		SqlValue::Table(n) => Ok(n.0.into()),
-		SqlValue::Idiom(ref i) => match &i[..] {
-			[Part::Field(n)] => Ok(n.to_raw().into()),
-			_ => Err(val),
-		},
-		_ => Err(val),
-	}
-}
-
-impl TryFrom<SqlValue> for TableConfig {
-	type Error = SqlValue;
-
-	fn try_from(value: SqlValue) -> Result<Self, Self::Error> {
-		match value {
-			v @ SqlValue::Strand(_) | v @ SqlValue::Table(_) | v @ SqlValue::Idiom(_) => {
-				val_to_ident(v).map(|i| i.0.into())
-			}
-			_ => Err(value),
-		}
 	}
 }
 

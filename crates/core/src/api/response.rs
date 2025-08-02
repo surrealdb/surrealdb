@@ -1,15 +1,14 @@
-use http::{
-	HeaderMap, StatusCode,
-	header::{ACCEPT, CONTENT_TYPE},
-};
+use http::header::{ACCEPT, CONTENT_TYPE};
+use http::{HeaderMap, StatusCode};
 
-use crate::{
-	err::Error,
-	expr::{Object, Value},
-	rpc::format::Format,
-};
+use crate::err::Error;
+use crate::rpc::format::Format;
+use crate::val::{Object, Value};
+use anyhow::Result;
 
-use super::{convert, err::ApiError, invocation::ApiInvocation};
+use super::convert;
+use super::err::ApiError;
+use super::invocation::ApiInvocation;
 
 #[derive(Debug)]
 pub struct ApiResponse {
@@ -19,9 +18,9 @@ pub struct ApiResponse {
 	pub headers: HeaderMap,
 }
 
-impl TryFrom<Value> for ApiResponse {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
+impl ApiResponse {
+	/// Try to create a ApiResponse from the value as it should be returned from an API action.
+	pub fn from_action_result(value: Value) -> Result<Self, Error> {
 		if let Value::Object(mut opts) = value {
 			let raw = opts.remove("raw").map(|v| v.cast_to()).transpose()?;
 			let status = opts
@@ -66,20 +65,14 @@ impl TryFrom<Value> for ApiResponse {
 			Err(ApiError::InvalidApiResponse("Expected an object".into()).into())
 		}
 	}
-}
 
-impl TryInto<Value> for ApiResponse {
-	type Error = anyhow::Error;
-	fn try_into(self) -> Result<Value, Self::Error> {
-		Ok(Value::Object(
-			map! {
-				"raw" => Value::from(self.raw.unwrap_or(false)),
-				"status" => Value::from(self.status.as_u16() as i64),
-				"headers" => Value::Object(convert::headermap_to_object(self.headers)?),
-				"body", if let Some(body) = self.body => body,
-			}
-			.into(),
-		))
+	pub fn into_response_value(self) -> Result<Value> {
+		Ok(Value::Object(Object(map! {
+			"raw".to_owned() => Value::from(self.raw.unwrap_or(false)),
+			"status".to_owned() => Value::from(self.status.as_u16() as i64),
+			"headers".to_owned() => Value::Object(convert::headermap_to_object(self.headers)?),
+			"body".to_owned(), if let Some(body) = self.body => body,
+		})))
 	}
 }
 
