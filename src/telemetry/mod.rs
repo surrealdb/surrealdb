@@ -285,10 +285,18 @@ impl Builder {
 			layers.push(layer);
 		}
 
-		// Setup the registry
-		let registry = registry.with(layers);
-		// Return the registry and guards
-		Ok((Box::new(registry), guards))
+		match layers.len() {
+			0 => {
+				// Return the registry and guards
+				Ok((Box::new(registry), guards))
+			}
+			_ => {
+				// Setup the registry layers
+				let registry = registry.with(layers);
+				// Return the registry and guards
+				Ok((Box::new(registry), guards))
+			}
+		}
 	}
 }
 
