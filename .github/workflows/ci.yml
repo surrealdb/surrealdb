@@ -1000,6 +1000,12 @@ jobs:
         with:
           python-version: ${{ matrix.version }}
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          enable-cache: true
+
       - name: Start SurrealDB
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
@@ -1007,21 +1013,23 @@ jobs:
         run: sleep 10
 
       - name: Install dependencies
-        run: pip install .
+        run: uv sync --group dev
 
       - name: Run Python tests (HTTP)
-        run: python -m unittest discover -s tests
+        run: uv run pytest
         env:
           PYTHONPATH: ./src
           SURREALDB_URL: http://localhost:8000
           SURREALDB_VERSION: ${{ matrix.version }}
+          PYTHONWARNINGS: ignore::ResourceWarning
 
       - name: Run Python tests (WebSocket)
-        run: python -m unittest discover -s tests
+        run: uv run pytest
         env:
           PYTHONPATH: ./src
           SURREALDB_URL: ws://localhost:8000
           SURREALDB_VERSION: ${{ matrix.version }}
+          PYTHONWARNINGS: ignore::ResourceWarning
 
   sdk-php:
     name: PHP SDK tests (${{ matrix.version }})
