@@ -1049,7 +1049,7 @@ jobs:
           PYTHONPATH: ./src
           SURREALDB_URL: http://localhost:8000
           SURREALDB_VERSION: ${{ matrix.version }}
-          PYTHONWARNINGS: ignore::ResourceWarning
+          PYTHONWARNINGS: ignore::ResourceWarning,ignore::UserWarning
 
       - name: Run Python tests (WebSocket)
         run: uv run pytest
@@ -1057,7 +1057,7 @@ jobs:
           PYTHONPATH: ./src
           SURREALDB_URL: ws://localhost:8000
           SURREALDB_VERSION: ${{ matrix.version }}
-          PYTHONWARNINGS: ignore::ResourceWarning
+          PYTHONWARNINGS: ignore::ResourceWarning,ignore::UserWarning
 
   sdk-php:
     name: PHP SDK tests (${{ matrix.version }})

@@ -14,7 +14,7 @@ use tracing_subscriber::registry::LookupSpan;
 const DEFAULT_TOKIO_CONSOLE_ADDR: SocketAddr =
 	SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 6669);
 
-pub fn new<S>() -> Result<impl Layer<S> + Send + Sync>
+pub fn new<S>() -> Result<Box<dyn Layer<S> + Send + Sync>>
 where
 	S: Subscriber + for<'a> LookupSpan<'a> + Send + Sync,
 {
@@ -23,8 +23,10 @@ where
 		None => DEFAULT_TOKIO_CONSOLE_ADDR,
 	};
 	info!("Tokio Console server configured to run on {socket_addr}");
-	Ok(ConsoleLayer::builder()
-		.server_addr(socket_addr)
-		.retention(Duration::from_secs(*TOKIO_CONSOLE_RETENTION))
-		.spawn())
+	Ok(Box::new(
+		ConsoleLayer::builder()
+			.server_addr(socket_addr)
+			.retention(Duration::from_secs(*TOKIO_CONSOLE_RETENTION))
+			.spawn(),
+	))
 }
