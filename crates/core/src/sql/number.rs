@@ -2,10 +2,12 @@ use super::value::{TryAdd, TryNeg};
 use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
 use crate::sql::strand::Strand;
-use anyhow::Result;
+use anyhow::{Result, bail};
 use revision::revisioned;
 use rust_decimal::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::{
+	Deserialize, Deserializer as SerdeDeserializer, Serialize, Serializer as SerdeSerializer,
+};
 use std::cmp::Ordering;
 use std::f64::consts::PI;
 use std::fmt::Debug;
@@ -17,13 +19,13 @@ use std::ops::{self, Add, Neg};
 
 pub mod decimal;
 
+use crate::sql::number::decimal::{decode_decimal_lex, encode_decimal_lex};
 pub use decimal::DecimalExt;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
-#[serde(rename = "$surrealdb::private::sql::Number")]
+#[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Number {
@@ -36,6 +38,25 @@ pub enum Number {
 impl Default for Number {
 	fn default() -> Self {
 		Self::Int(0)
+	}
+}
+
+impl Serialize for Number {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: SerdeSerializer,
+	{
+		serializer.serialize_bytes(&self.to_decimal_buf())
+	}
+}
+
+impl<'de> Deserialize<'de> for Number {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: SerdeDeserializer<'de>,
+	{
+		let bytes = <[u8; 15]>::deserialize(deserializer)?;
+		Self::from_decimal_buf(bytes).map_err(serde::de::Error::custom)
 	}
 }
 
@@ -350,6 +371,65 @@ impl Number {
 			Number::Int(v) => Decimal::from(*v),
 			Number::Float(v) => Decimal::from_f64(*v).unwrap_or_default(),
 			Number::Decimal(v) => *v,
+		}
+	}
+
+	const NUMBER_MARKER_INT: u8 = 0;
+	const NUMBER_MARKER_FLOAT: u8 = 64;
+	const NUMBER_MARKER_FLOAT_INFINITE_POSITIVE: u8 = 65;
+	const NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE: u8 = 66;
+	const NUMBER_MARKER_FLOAT_INFINITE_NAN: u8 = 67;
+	const NUMBER_MARKER_DECIMAL: u8 = 128;
+
+	pub(crate) fn to_decimal_buf(&self) -> [u8; 15] {
+		match self {
+			Self::Int(v) => encode_decimal_lex(Decimal::from(*v), Self::NUMBER_MARKER_INT),
+			Self::Float(v) => {
+				// Handle extreme float values that can't be converted to Decimal
+				if v.is_infinite() {
+					if v.is_sign_positive() {
+						// Positive infinity - largest possible value
+						let mut buf = [0xFF; 15];
+						buf[14] = Self::NUMBER_MARKER_FLOAT_INFINITE_POSITIVE;
+						buf
+					} else {
+						// Negative infinity - smallest possible value
+						let mut buf = [0x00; 15];
+						buf[14] = Self::NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE;
+						buf
+					}
+				} else if v.is_nan() {
+					// NaN - treat as largest value
+					let mut buf = [0xFF; 15];
+					buf[14] = Self::NUMBER_MARKER_FLOAT_INFINITE_NAN;
+					buf
+				} else {
+					match Decimal::from_f64(*v) {
+						Some(decimal) => encode_decimal_lex(decimal, Self::NUMBER_MARKER_FLOAT),
+						None => {
+							// Report error when Decimal::from_f64() fails
+							panic!("Failed to convert float {} to decimal", v)
+						}
+					}
+				}
+			}
+			Self::Decimal(v) => encode_decimal_lex(*v, Self::NUMBER_MARKER_DECIMAL),
+		}
+	}
+
+	pub(crate) fn from_decimal_buf(b: [u8; 15]) -> Result<Self> {
+		match b[14] {
+			Self::NUMBER_MARKER_INT => Ok(Number::Int(decode_decimal_lex(b)?.to_i64().unwrap())),
+			Self::NUMBER_MARKER_FLOAT => {
+				// Decode as normal decimal and fail if it doesn't work
+				let decimal = decode_decimal_lex(b)?;
+				Ok(Number::Float(decimal.to_f64().unwrap()))
+			}
+			Self::NUMBER_MARKER_FLOAT_INFINITE_POSITIVE => Ok(Number::Float(f64::INFINITY)),
+			Self::NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE => Ok(Number::Float(f64::NEG_INFINITY)),
+			Self::NUMBER_MARKER_FLOAT_INFINITE_NAN => Ok(Number::Float(f64::NAN)),
+			Self::NUMBER_MARKER_DECIMAL => Ok(Number::Decimal(decode_decimal_lex(b)?)),
+			v => bail!("Invalid number variant: {v}"),
 		}
 	}
 
@@ -995,9 +1075,10 @@ mod tests {
 	#[test]
 	fn serialised_ord_test() {
 		let ordering = [
+			Number::from(f64::NEG_INFINITY),
+			Number::from(f64::MIN),
 			Number::from(Decimal::MIN),
 			Number::Int(i64::MIN),
-			Number::from(f64::MIN),
 			Number::from(-10),
 			Number::from(-3.141592654),
 			Number::from(-3.14),
@@ -1009,9 +1090,11 @@ mod tests {
 			Number::from(3.141592654),
 			Number::from(100),
 			Number::from(1000),
-			Number::from(f64::MAX),
 			Number::from(i64::MAX),
 			Number::from(Decimal::MAX),
+			Number::from(f64::MAX),
+			Number::from(f64::INFINITY),
+			Number::from(f64::NAN),
 		];
 		for window in ordering.windows(2) {
 			let n1 = &window[0];
