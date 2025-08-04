@@ -17,7 +17,6 @@ use uuid::Uuid;
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Content<'r, C: Connection, R> {
-	#[allow(dead_code)]
 	pub(super) txn: Option<Uuid>,
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) command: Result<Command>,

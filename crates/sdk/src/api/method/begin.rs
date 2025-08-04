@@ -2,11 +2,10 @@ use crate::api::Connection;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::api::method::BoxFuture;
-use crate::api::method::Cancel;
-use crate::api::method::Commit;
+use crate::api::method::Transaction;
 use std::future::IntoFuture;
-use std::ops::Deref;
 use surrealdb_core::sql::statements::BeginStatement;
+use uuid::Uuid;
 
 /// A beginning of a transaction
 #[derive(Debug)]
@@ -26,45 +25,9 @@ where
 		Box::pin(async move {
 			self.client.query(BeginStatement::default()).await?;
 			Ok(Transaction {
+				id: Uuid::new_v4(),
 				client: self.client,
 			})
 		})
-	}
-}
-
-/// An ongoing transaction
-#[derive(Debug)]
-#[must_use = "transactions must be committed or cancelled to complete them"]
-pub struct Transaction<C: Connection> {
-	client: Surreal<C>,
-}
-
-impl<C> Transaction<C>
-where
-	C: Connection,
-{
-	/// Creates a commit future
-	pub fn commit(self) -> Commit<C> {
-		Commit {
-			client: self.client,
-		}
-	}
-
-	/// Creates a cancel future
-	pub fn cancel(self) -> Cancel<C> {
-		Cancel {
-			client: self.client,
-		}
-	}
-}
-
-impl<C> Deref for Transaction<C>
-where
-	C: Connection,
-{
-	type Target = Surreal<C>;
-
-	fn deref(&self) -> &Self::Target {
-		&self.client
 	}
 }

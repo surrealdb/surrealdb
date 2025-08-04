@@ -517,7 +517,6 @@ pub(crate) struct RouterRequest {
 	id: Option<i64>,
 	method: &'static str,
 	params: Option<CoreValue>,
-	#[allow(dead_code)]
 	transaction: Option<Uuid>,
 }
 
@@ -600,6 +599,7 @@ impl Serialize for RouterRequest {
 				serializer.serialize_newtype_struct("$surrealdb::private::sql::Uuid", self.0)
 			}
 		}
+
 		impl Serialize for InnerStrand {
 			fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
 			where
