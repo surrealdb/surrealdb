@@ -87,7 +87,7 @@ impl ApiInvocation {
 			}
 		}
 
-		// run the middl ware for the api definition.
+		// run the middleware for the api definition.
 		for m in api.config.middleware.iter() {
 			invoke::invoke(&mut inv_ctx, &m.name, m.args.clone())?;
 		}

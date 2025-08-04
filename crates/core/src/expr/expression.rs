@@ -440,7 +440,10 @@ impl Expr {
 		doc: Option<&CursorDoc>,
 		expr: &Expr,
 	) -> FlowResult<Value> {
-		// TODO: This is weird, knn should participate more naturally in compute.
+		// TODO: The structure here is somewhat convoluted, because knn needs to have access to the
+		// expression itself instead of just the op and left/right expressions we need to pass in
+		// the parent expression when encountering a binary expression and then match again here.
+		// Ideally knn should be able to be called more naturally.
 		let Expr::Binary {
 			left,
 			op,

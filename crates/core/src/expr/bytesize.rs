@@ -59,20 +59,20 @@ impl Bytesize {
 			let unit = chars.next().ok_or(Error::InvalidBytesize)?.to_ascii_lowercase();
 
 			// Handle optional 'b' suffix
-			if !matches!(unit, b'b' | b'B') {
-				match chars.next() {
-					Some(b'b' | b'B') => (),
+			if unit != b'b' {
+				match chars.next().map(|x| x.to_ascii_lowercase()) {
+					Some(b'b') => (),
 					_ => bail!(Error::InvalidBytesize),
 				}
 			}
 
 			let bytesize = match unit {
-				b'b' | b'B' => Bytesize::b(value),
-				b'k' | b'K' => Bytesize::kb(value),
-				b'm' | b'M' => Bytesize::mb(value),
-				b'g' | b'G' => Bytesize::gb(value),
-				b't' | b'T' => Bytesize::tb(value),
-				b'p' | b'P' => Bytesize::pb(value),
+				b'b' => Bytesize::b(value),
+				b'k' => Bytesize::kb(value),
+				b'm' => Bytesize::mb(value),
+				b'g' => Bytesize::gb(value),
+				b't' => Bytesize::tb(value),
+				b'p' => Bytesize::pb(value),
 				_ => bail!(Error::InvalidBytesize),
 			};
 

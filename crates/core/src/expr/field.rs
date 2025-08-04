@@ -271,8 +271,8 @@ impl Fields {
 										} else {
 											// TODO: Alias is ignored here, figure out the right
 											// behaviour. Maybe make an alias result in sub fields?
-											// `select type::field("foo") as bar` resulting in `{
-											// "bar.foo": value }`?
+											// `select type::fields(["foo","faz"]) as bar` resulting in
+											// `{ "bar": { foo: value, faz: value} }`?
 											for (idiom, idiom_res) in
 												idioms.iter().zip(idiom_results.into_iter())
 											{

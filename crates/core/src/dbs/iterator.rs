@@ -193,7 +193,7 @@ impl Iterator {
 					&& graph.start.is_none()
 					&& graph.expr.is_none()
 				{
-					// TODO: Do we suport `RETURN a:b` here? What do we do when it is not of the
+					// TODO: Do we support `RETURN a:b` here? What do we do when it is not of the
 					// right type?
 					let from = match from.compute(stk, ctx, opt, doc).await {
 						Ok(x) => x,
@@ -454,7 +454,7 @@ impl Iterator {
 						&& graph.start.is_none()
 						&& graph.expr.is_none()
 					{
-						// TODO: Do we suport `RETURN a:b` here? What do we do when it is not of the
+						// TODO: Do we support `RETURN a:b` here? What do we do when it is not of the
 						// right type?
 						let from = match from.compute(stk, ctx, opt, doc).await {
 							Ok(x) => x,
