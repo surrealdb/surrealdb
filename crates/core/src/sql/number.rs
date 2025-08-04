@@ -993,6 +993,37 @@ mod tests {
 	}
 
 	#[test]
+	fn serialised_ord_test() {
+		let ordering = [
+			Number::from(Decimal::MIN),
+			Number::Int(i64::MIN),
+			Number::from(f64::MIN),
+			Number::from(-10),
+			Number::from(-3.141592654),
+			Number::from(-3.14),
+			Number::from(-1),
+			Number::from(0),
+			Number::from(1),
+			Number::from(2),
+			Number::from(3.14),
+			Number::from(3.141592654),
+			Number::from(100),
+			Number::from(1000),
+			Number::from(f64::MAX),
+			Number::from(i64::MAX),
+			Number::from(Decimal::MAX),
+		];
+		for window in ordering.windows(2) {
+			let n1 = &window[0];
+			let n2 = &window[1];
+			assert!(n1 < n2, "{n1:?} < {n2:?} (before serialization)");
+			let v1: Vec<u8> = bincode::serialize(n1).unwrap();
+			let v2: Vec<u8> = bincode::serialize(n2).unwrap();
+			assert!(v1 < v2, "{n1:?} < {n2:?} (after serialization) - {v1:?} < {v2:?}");
+		}
+	}
+
+	#[test]
 	fn ord_fuzz() {
 		fn random_number() -> Number {
 			let mut rng = thread_rng();

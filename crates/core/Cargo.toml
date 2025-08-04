@@ -87,6 +87,7 @@ js = { workspace = true, features = [
     "rust-alloc",
 ], optional = true }
 lexicmp.workspace = true
+memcomparable = { version = "0.2.0", features = ["decimal"] }
 reblessive = { workspace = true, features = ["tree"] }
 revision = { workspace = true, features = [
     "chrono",
