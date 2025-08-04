@@ -17,7 +17,7 @@ use std::slice::Iter;
 
 use super::paths::ID;
 
-/// TODO: Convert this to a struct and document what the boolean does.
+/// The `foo,bar,*` part of statements like `SELECT foo,bar.* FROM faz`.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Fields {
@@ -46,7 +46,7 @@ impl InfoStructure for Fields {
 }
 
 impl Fields {
-	/// Check if computing this value can be done on a read only transaction.
+	/// Returns true if computing this value can be done on a read only transaction.
 	pub fn read_only(&self) -> bool {
 		match self {
 			Fields::Value(field) => field.read_only(),

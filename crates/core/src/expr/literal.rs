@@ -105,7 +105,6 @@ impl Literal {
 				}
 				Value::Array(Array(array))
 			}
-			// TODO: Geometry matching.
 			Literal::Object(items) => {
 				let mut map = BTreeMap::new();
 				for i in items.iter() {

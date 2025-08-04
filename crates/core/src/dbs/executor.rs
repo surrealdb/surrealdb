@@ -68,7 +68,7 @@ impl Executor {
 	fn execute_option_statement(&mut self, stmt: OptionStatement) -> Result<()> {
 		// Allowed to run?
 		self.opt.is_allowed(Action::Edit, ResourceKind::Option, &Base::Db)?;
-		// Convert to uppercase
+
 		if stmt.name.eq_ignore_ascii_case("IMPORT") {
 			self.opt.set_import(stmt.what);
 		} else if stmt.name.eq_ignore_ascii_case("FORCE") {
@@ -108,7 +108,7 @@ impl Executor {
 			}
 			TopLevelExpr::Option(_) => {
 				return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
-					"TopLevelExpr::Use should have been handled by a calling function",
+					"TopLevelExpr::Option should have been handled by a calling function",
 				))));
 			}
 
@@ -287,12 +287,7 @@ impl Executor {
 		match stmt {
 			// These statements don't need a transaction.
 			TopLevelExpr::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
-			stmt => {
-				//let planner = SqlToLogical::new();
-				//let plan = planner.statement_to_logical(stmt)?;
-
-				self.execute_plan_impl(kvs, start, stmt).await
-			}
+			stmt => self.execute_plan_impl(kvs, start, stmt).await,
 		}
 	}
 
@@ -572,9 +567,8 @@ impl Executor {
 				stmt => {
 					skip_remaining = matches!(stmt, TopLevelExpr::Expr(Expr::Return(_)));
 
+					// reintroduce planner later.
 					let plan = stmt;
-					//let planner = SqlToLogical::new();
-					//let plan = planner.statement_to_logical(stmt)?;
 
 					let r = match self.execute_plan_in_transaction(txn.clone(), &before, plan).await
 					{

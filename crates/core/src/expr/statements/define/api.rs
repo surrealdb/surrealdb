@@ -257,6 +257,7 @@ impl InfoStructure for ApiAction {
 	}
 }
 
+/// The ApiAction as it is stored in the KV.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct ApiActionStore {

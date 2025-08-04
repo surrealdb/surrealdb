@@ -40,6 +40,8 @@ struct FieldDataContext<'a> {
 	doc: &'a CursorDoc,
 }
 
+/// utlity function for `OR`ing expressions together, modifies accum to be the expression of all
+/// `new`'s OR'ed together.
 fn accumulate_delete_expr(accum: &mut Option<Expr>, new: Expr) {
 	match accum.take() {
 		Some(old) => {
