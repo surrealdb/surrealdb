@@ -16,7 +16,14 @@ use crate::val::{Array, Object, Strand, Value};
 pub struct Path(pub Vec<Segment>);
 
 impl<'a> Path {
-	/// TODO: Document what this does
+	/// Attempts to fit a passed URL into a already parsed Path Segments.
+	/// A segment can be fixed, be a dynamic variable or a collect the rest of the url
+	/// Considering path the parsed path of an API, and url the current subject, this method:
+	///  - iterates over each path segment (divided by `/`)
+	///  - attempts to to match against url segment
+	///  - extracting variables where instructed by the path segment
+	///  - when we no longer match, or when the url is to short, we return None
+	///  - when the url is too long and there is no rest segment, we return None
 	pub fn fit(&'a self, segments: &'a [&'a str]) -> Option<Object> {
 		let mut obj = Object::default();
 		for (i, segment) in self.iter().enumerate() {
