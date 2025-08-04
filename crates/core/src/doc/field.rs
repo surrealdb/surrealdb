@@ -18,6 +18,7 @@ use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use std::sync::Arc;
 
+/// Removes `NONE` values recursively from objects, but not when `NONE` is a direct child of an array
 fn clean_none(v: &mut Value) -> bool {
 	match v {
 		Value::None => false,
