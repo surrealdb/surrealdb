@@ -17,7 +17,6 @@ use func::js_fetch;
 // But with how we implement streams RequestError must be clone.
 /// Error returned by the request.
 #[derive(Debug, Clone)]
-#[non_exhaustive]
 pub enum RequestError {
 	Reqwest(Arc<reqwest::Error>),
 }

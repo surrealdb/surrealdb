@@ -49,7 +49,6 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Default, Hash, PartialEq, Eq)]
-#[non_exhaustive]
 pub struct IndexKeyBase(Arc<Inner>);
 
 #[derive(Debug, Default, Hash, PartialEq, Eq)]

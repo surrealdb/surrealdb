@@ -989,7 +989,6 @@ impl<'a> Product<&'a Self> for Number {
 	}
 }
 
-#[non_exhaustive]
 pub struct Sorted<T>(pub T);
 
 pub trait Sort {

@@ -9,7 +9,6 @@ use super::{Action, Actor, Error, Level, Resource, Role, is_allowed};
 #[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Auth {
 	actor: Actor,
 }

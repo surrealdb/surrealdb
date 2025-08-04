@@ -7,7 +7,6 @@ use std::ops::Range;
 use super::{Location, MessageKind};
 
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub struct RenderedError {
 	pub errors: Vec<String>,
 	pub snippets: Vec<Snippet>,

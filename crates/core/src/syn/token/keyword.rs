@@ -3,7 +3,7 @@ macro_rules! keyword {
 
 		#[repr(u8)]
 		#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-		#[non_exhaustive] pub enum Keyword{
+		pub enum Keyword{
 			$($name,)*
 		}
 

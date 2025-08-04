@@ -10,7 +10,6 @@ use uuid::Uuid;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[non_exhaustive]
 pub struct Node {
 	#[revision(start = 2, default_fn = "default_id")]
 	pub id: Uuid,
@@ -109,7 +108,6 @@ impl InfoStructure for Node {
 // one available in TiKV via the client `TimestampExt` implementation.
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Deserialize, Serialize, Hash)]
-#[non_exhaustive]
 pub struct Timestamp {
 	pub value: u64,
 }

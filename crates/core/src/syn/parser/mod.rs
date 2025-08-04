@@ -91,7 +91,6 @@ pub type ParseResult<T> = Result<T, SyntaxError>;
 
 /// A result of trying to parse a possibly partial query.
 #[derive(Debug)]
-#[non_exhaustive]
 pub enum PartialResult<T> {
 	MoreData,
 	/// Parsing the source produced no reasonable value.

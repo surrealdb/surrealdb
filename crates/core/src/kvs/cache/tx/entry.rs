@@ -14,7 +14,6 @@ use std::any::Any;
 use std::sync::Arc;
 
 #[derive(Clone)]
-#[non_exhaustive]
 pub(crate) enum Entry {
 	/// A cached entry of any type
 	Any(Arc<dyn Any + Send + Sync>),

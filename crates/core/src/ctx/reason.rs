@@ -2,7 +2,6 @@ use crate::err::Error;
 use std::{fmt, io};
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-#[non_exhaustive]
 pub enum Reason {
 	Timedout,
 	Canceled,

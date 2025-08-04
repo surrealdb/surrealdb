@@ -18,7 +18,6 @@ pub type Payload = u64;
 type BStoredNode<BK> = StoredNode<BTreeNode<BK>>;
 pub(in crate::idx) type BTreeStore<BK> = TreeStore<BTreeNode<BK>>;
 
-#[non_exhaustive]
 pub struct BTree<BK>
 where
 	BK: BKeys,
@@ -30,7 +29,6 @@ where
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Serialize, Deserialize)]
-#[non_exhaustive]
 pub struct BState {
 	minimum_degree: u32,
 	root: Option<NodeId>,
@@ -153,7 +151,6 @@ impl From<BStatistics> for Value {
 }
 
 #[derive(Debug, Clone)]
-#[non_exhaustive]
 pub enum BTreeNode<BK>
 where
 	BK: BKeys + Clone,

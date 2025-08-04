@@ -3,7 +3,6 @@ use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct RemoveAnalyzerStatement {
 	pub name: Ident,
 	pub if_exists: bool,

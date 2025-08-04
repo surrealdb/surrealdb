@@ -35,7 +35,6 @@ pub(crate) struct Document {
 	pub(super) record_strategy: RecordStrategy,
 }
 
-#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub(crate) struct CursorDoc {
 	pub(crate) rid: Option<Arc<RecordId>>,
@@ -43,7 +42,6 @@ pub(crate) struct CursorDoc {
 	pub(crate) doc: CursorValue,
 }
 
-#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub(crate) struct CursorValue {
 	mutable: Value,

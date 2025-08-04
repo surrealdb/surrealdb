@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Id {
 	Number(i64),
 	String(String),
@@ -64,7 +63,6 @@ pub mod key {
 	use super::Id;
 
 	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-	#[non_exhaustive]
 	pub struct Graph<'a> {
 		__: u8,
 		_a: u8,
@@ -126,7 +124,6 @@ pub mod key {
 	}
 
 	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-	#[non_exhaustive]
 	pub struct Thing<'a> {
 		__: u8,
 		_a: u8,

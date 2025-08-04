@@ -14,7 +14,6 @@ pub use init::ResponseInit;
 
 #[expect(dead_code)]
 #[derive(Clone, Copy)]
-#[non_exhaustive]
 pub enum ResponseType {
 	Basic,
 	Cors,
@@ -26,7 +25,6 @@ pub enum ResponseType {
 
 #[derive(Trace, JsLifetime)]
 #[js::class]
-#[non_exhaustive]
 pub struct Response<'js> {
 	#[qjs(skip_trace)]
 	pub(crate) body: Body,

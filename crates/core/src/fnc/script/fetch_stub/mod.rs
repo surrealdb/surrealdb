@@ -34,7 +34,7 @@ macro_rules! impl_stub_class {
 			mod $module{
 				use super::*;
 
-				#[non_exhaustive] pub struct $name;
+				pub struct $name;
 
 				unsafe impl<'js> js::JsLifetime<'js> for $name{
 					type Changed<'to> = $name;

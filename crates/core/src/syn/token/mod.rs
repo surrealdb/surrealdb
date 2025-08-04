@@ -13,7 +13,6 @@ pub(crate) use mac::t;
 
 /// A location in the source passed to the lexer.
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-#[non_exhaustive]
 pub struct Span {
 	/// Offset in bytes.
 	pub offset: u32,
@@ -72,7 +71,6 @@ impl Span {
 
 #[repr(u8)]
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-#[non_exhaustive]
 pub enum Operator {
 	/// `!`
 	Not,
@@ -202,7 +200,6 @@ impl Operator {
 
 /// A delimiting token, denoting the start or end of a certain production.
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-#[non_exhaustive]
 pub enum Delim {
 	/// `()`
 	Paren,
@@ -213,7 +210,6 @@ pub enum Delim {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-#[non_exhaustive]
 pub enum DistanceKind {
 	Chebyshev,
 	Cosine,
@@ -241,7 +237,6 @@ impl DistanceKind {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-#[non_exhaustive]
 pub enum VectorTypeKind {
 	F64,
 	F32,
@@ -350,7 +345,6 @@ impl Glued {
 
 /// The type of token
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-#[non_exhaustive]
 pub enum TokenKind {
 	WhiteSpace,
 	Keyword(Keyword),

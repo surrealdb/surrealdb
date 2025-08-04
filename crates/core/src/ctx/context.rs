@@ -36,7 +36,6 @@ use std::path::PathBuf;
 
 pub type Context = Arc<MutableContext>;
 
-#[non_exhaustive]
 pub struct MutableContext {
 	// An optional parent context.
 	parent: Option<Context>,

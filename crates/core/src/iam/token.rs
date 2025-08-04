@@ -15,7 +15,6 @@ pub enum Audience {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
-#[non_exhaustive]
 pub struct Claims {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub iat: Option<i64>,

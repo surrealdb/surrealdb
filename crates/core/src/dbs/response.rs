@@ -126,7 +126,6 @@ impl Serialize for Response {
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize)]
-#[non_exhaustive]
 pub struct QueryMethodResponse {
 	pub time: String,
 	pub status: Status,

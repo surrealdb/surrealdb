@@ -4,7 +4,6 @@ use crate::syn::error::SyntaxError;
 use crate::syn::token::Span;
 
 #[derive(Error, Debug)]
-#[non_exhaustive]
 pub enum CharError {
 	#[error("found eof inside multi byte character")]
 	Eof,
@@ -24,7 +23,6 @@ impl From<CharError> for SyntaxError {
 }
 
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub struct BytesReader<'a> {
 	data: &'a [u8],
 	current: usize,

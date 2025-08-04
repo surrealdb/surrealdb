@@ -48,7 +48,6 @@ pub struct Options {
 }
 
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub enum Force {
 	All,
 	None,

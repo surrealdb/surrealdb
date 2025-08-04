@@ -4,7 +4,6 @@ use js::class::Trace;
 
 #[derive(Clone, Trace, JsLifetime)]
 #[js::class]
-#[non_exhaustive]
 pub struct File {
 	#[qjs(skip_trace)]
 	pub(crate) value: val::File,

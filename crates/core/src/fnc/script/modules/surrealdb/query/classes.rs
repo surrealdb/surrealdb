@@ -8,7 +8,6 @@ use js::{Array, Ctx, Exception, FromJs, JsLifetime, Result, Value};
 
 #[js::class]
 #[derive(Trace, Clone, JsLifetime)]
-#[non_exhaustive]
 pub struct Query {
 	#[qjs(skip_trace)]
 	pub(crate) query: Expr,
@@ -17,7 +16,6 @@ pub struct Query {
 }
 
 #[derive(Default, Clone)]
-#[non_exhaustive]
 pub struct QueryVariables(pub Variables);
 
 impl QueryVariables {

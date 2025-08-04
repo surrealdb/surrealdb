@@ -16,18 +16,15 @@ use anyhow::Result;
 // value = serialized table mutations
 type PreparedWrite = (Vec<u8>, Vec<u8>, Vec<u8>, crate::kvs::Val);
 
-#[non_exhaustive]
 pub struct Writer {
 	buf: Buffer,
 }
 
-#[non_exhaustive]
 pub struct Buffer {
 	pub b: HashMap<ChangeKey, TableMutations>,
 }
 
 #[derive(Hash, Eq, PartialEq, Debug)]
-#[non_exhaustive]
 pub struct ChangeKey {
 	pub ns: String,
 	pub db: String,

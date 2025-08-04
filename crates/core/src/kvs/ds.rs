@@ -74,7 +74,6 @@ const LQ_CHANNEL_SIZE: usize = 15_000;
 const INITIAL_USER_ROLE: &str = "owner";
 
 /// The underlying datastore instance which stores the dataset.
-#[non_exhaustive]
 pub struct Datastore {
 	transaction_factory: TransactionFactory,
 	/// The unique id of this datastore, used in notifications.

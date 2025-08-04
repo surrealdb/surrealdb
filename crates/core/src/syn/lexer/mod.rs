@@ -26,7 +26,6 @@ use crate::syn::token::{Span, Token, TokenKind};
 /// Note that SurrealQL syntax cannot be lexed in advance. For example, record strings and regexes,
 /// both cannot be parsed correctly without knowledge of previous tokens as they are both ambigious
 /// with other tokens.
-#[non_exhaustive]
 pub struct Lexer<'a> {
 	/// The reader for reading the source bytes.
 	pub(super) reader: BytesReader<'a>,

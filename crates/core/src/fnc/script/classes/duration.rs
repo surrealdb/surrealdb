@@ -5,7 +5,6 @@ use crate::val;
 
 #[derive(Clone, Trace, JsLifetime)]
 #[js::class]
-#[non_exhaustive]
 pub struct Duration {
 	#[qjs(skip_trace)]
 	pub(crate) value: Option<val::Duration>,

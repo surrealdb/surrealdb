@@ -180,7 +180,6 @@ impl Ord for FloatKey {
 #[derive(Debug, Clone, PartialEq)]
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize)]
-#[non_exhaustive]
 pub(in crate::idx) enum Ids64 {
 	Empty,
 	One(u64),
@@ -519,7 +518,6 @@ where
 	}
 }
 
-#[non_exhaustive]
 pub(super) struct KnnResultBuilder {
 	knn: u64,
 	docs: RoaringTreemap,

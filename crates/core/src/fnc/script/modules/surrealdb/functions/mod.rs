@@ -32,7 +32,6 @@ mod r#type;
 mod value;
 mod vector;
 
-#[non_exhaustive]
 pub struct Package;
 
 impl_module_def!(

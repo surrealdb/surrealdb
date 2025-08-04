@@ -6,7 +6,6 @@ use js::prelude::{Coerced, Opt};
 use js::{ArrayBuffer, Class, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value};
 
 #[derive(Clone, Copy)]
-#[non_exhaustive]
 pub enum EndingType {
 	Transparent,
 	Native,
@@ -77,7 +76,6 @@ fn normalize_type(mut ty: String) -> String {
 
 #[derive(Clone, Trace, JsLifetime)]
 #[js::class]
-#[non_exhaustive]
 pub struct Blob {
 	pub(crate) mime: String,
 	// TODO: make bytes?

@@ -9,7 +9,6 @@ use reblessive::Stk;
 use unicase::UniCase;
 
 /// The kind of a parsed path.
-#[non_exhaustive]
 pub enum PathKind {
 	Constant(Constant),
 	Function,

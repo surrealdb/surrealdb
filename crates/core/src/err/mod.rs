@@ -29,6 +29,7 @@ use thiserror::Error;
 
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
+// kept, non_exhaustive because it is still public in the sdk.
 #[non_exhaustive]
 pub enum Error {
 	/// The database encountered unreachable logic
