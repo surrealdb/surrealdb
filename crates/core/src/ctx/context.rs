@@ -275,7 +275,7 @@ impl MutableContext {
 
 	pub(crate) async fn get_ns_db_ids(&self, opt: &Options) -> Result<(NamespaceId, DatabaseId)> {
 		let (ns, db) = opt.ns_db()?;
-		let db_def = self.tx().get_or_add_db(ns, db, opt.strict).await?;
+		let db_def = self.tx().ensure_ns_db(ns, db, opt.strict).await?;
 		Ok((db_def.namespace_id, db_def.database_id))
 	}
 

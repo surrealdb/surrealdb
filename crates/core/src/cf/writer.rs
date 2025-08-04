@@ -277,7 +277,7 @@ mod tests {
 
 		let want: Vec<ChangeSet> = vec![
 			ChangeSet(
-				VersionStamp::from_u64(2),
+				VersionStamp::from_u64(1),
 				DatabaseMutation(vec![TableMutations(
 					TB.to_string(),
 					vec![TableMutation::Set(
@@ -287,7 +287,7 @@ mod tests {
 				)]),
 			),
 			ChangeSet(
-				VersionStamp::from_u64(3),
+				VersionStamp::from_u64(2),
 				DatabaseMutation(vec![TableMutations(
 					TB.to_string(),
 					vec![TableMutation::Set(
@@ -297,7 +297,7 @@ mod tests {
 				)]),
 			),
 			ChangeSet(
-				VersionStamp::from_u64(4),
+				VersionStamp::from_u64(3),
 				DatabaseMutation(vec![TableMutations(
 					TB.to_string(),
 					vec![

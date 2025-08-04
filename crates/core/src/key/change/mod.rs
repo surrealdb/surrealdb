@@ -98,7 +98,7 @@ impl KVKey for DatabaseChangeFeedRange {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct DatabaseChangeFeedTsPrefix {
+pub struct DatabaseChangeFeedTsRange {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -108,7 +108,7 @@ pub struct DatabaseChangeFeedTsPrefix {
 	pub ts: VersionStamp,
 }
 
-impl DatabaseChangeFeedTsPrefix {
+impl DatabaseChangeFeedTsRange {
 	pub fn new(ns: NamespaceId, db: DatabaseId, vs: VersionStamp) -> Self {
 		Self {
 			__: b'/',
@@ -122,14 +122,14 @@ impl DatabaseChangeFeedTsPrefix {
 	}
 }
 
-impl KVKey for DatabaseChangeFeedTsPrefix {
+impl KVKey for DatabaseChangeFeedTsRange {
 	type ValueType = TableMutations;
 }
 
 /// Returns the prefix for the whole database change feeds since the
 /// specified versionstamp.
-pub fn prefix_ts(ns: NamespaceId, db: DatabaseId, vs: VersionStamp) -> DatabaseChangeFeedTsPrefix {
-	DatabaseChangeFeedTsPrefix::new(ns, db, vs)
+pub fn prefix_ts(ns: NamespaceId, db: DatabaseId, vs: VersionStamp) -> DatabaseChangeFeedTsRange {
+	DatabaseChangeFeedTsRange::new(ns, db, vs)
 }
 
 /// Returns the prefix for the whole database change feeds
@@ -180,6 +180,16 @@ mod tests {
 		);
 		let enc = Cf::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02#\x00\x00\x00\x00\x00\x00\x00\x00\x30\x39*test\x00");
+
+
+		let val = Cf::new(
+			NamespaceId(1),
+			DatabaseId(2),
+			VersionStamp::try_from_u128(12346).unwrap(),
+			"test",
+		);
+		let enc = Cf::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02#\x00\x00\x00\x00\x00\x00\x00\x00\x30\x3a*test\x00");
 	}
 
 	#[test]
@@ -195,12 +205,12 @@ mod tests {
 
 	#[test]
 	fn ts_prefix_key() {
-		let val = DatabaseChangeFeedTsPrefix::new(
+		let val = DatabaseChangeFeedTsRange::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			VersionStamp::try_from_u128(12345).unwrap(),
 		);
-		let enc = DatabaseChangeFeedTsPrefix::encode_key(&val).unwrap();
+		let enc = DatabaseChangeFeedTsRange::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02#\x00\x00\x00\x00\x00\x00\x00\x00\x30\x39"

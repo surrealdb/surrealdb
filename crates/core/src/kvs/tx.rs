@@ -1916,7 +1916,7 @@ impl Transaction {
 	/// Get or add a namespace with a default configuration, only if we are in dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_or_add_ns(&self, ns: &str, strict: bool) -> Result<Arc<NamespaceDefinition>> {
-		self.get_or_add_ns_upwards(ns, strict, false).await
+		self.get_or_add_ns_upwards(ns, strict).await
 	}
 
 	/// Get or add a database with a default configuration, only if we are in dynamic mode.
@@ -1928,6 +1928,15 @@ impl Transaction {
 		strict: bool,
 	) -> Result<Arc<DatabaseDefinition>> {
 		self.get_or_add_db_upwards(ns, db, strict, false).await
+	}
+
+	pub async fn ensure_ns_db(
+		&self,
+		ns: &str,
+		db: &str,
+		strict: bool,
+	) -> Result<Arc<DatabaseDefinition>> {
+		self.get_or_add_db_upwards(ns, db, strict, true).await
 	}
 
 	/// Get or add a table with a default configuration, only if we are in dynamic mode.
@@ -1972,26 +1981,31 @@ impl Transaction {
 		&self,
 		ns: &str,
 		strict: bool,
-		_upwards: bool,
 	) -> Result<Arc<NamespaceDefinition>> {
 		match self.get_ns_by_name(ns).await? {
-			Some(val) => Ok(val),
+			Some(val) => {
+				println!("GOT NS: {:?}\n\n\n", val);
+				eprintln!("GOT NS: {:?}\n\n\n", val);
+				Ok(val)
+			},
 			// The entry is not in the database
 			None => {
-				if !strict {
-					let ns = NamespaceDefinition {
-						namespace_id: self.lock().await.get_next_ns_id().await?,
-						name: ns.to_string(),
-						comment: None,
-					};
-
-					return self.put_ns(ns).await;
+				println!("NO NS: {ns} {strict}");
+				eprintln!("NO NS: {ns} {strict}");
+				if strict {
+					return Err(Error::NsNotFound {
+						name: ns.to_owned(),
+					}
+					.into());
 				}
 
-				return Err(Error::NsNotFound {
-					name: ns.to_owned(),
-				}
-				.into());
+				let ns = NamespaceDefinition {
+					namespace_id: self.lock().await.get_next_ns_id().await?,
+					name: ns.to_string(),
+					comment: None,
+				};
+
+				return self.put_ns(ns).await;
 			}
 		}
 	}
@@ -2019,7 +2033,7 @@ impl Transaction {
 				// Database does not exist
 				if !strict {
 					let ns_def = if upwards {
-						self.get_or_add_ns_upwards(ns, strict, upwards).await?
+						self.get_or_add_ns_upwards(ns, strict).await?
 					} else {
 						match self.get_ns_by_name(ns).await? {
 							Some(ns_def) => ns_def,
@@ -2041,6 +2055,14 @@ impl Transaction {
 					};
 
 					return self.put_db(&ns_def, db_def).await;
+				}
+
+				// Ensure the namespace exists
+				if self.get_ns_by_name(ns).await?.is_none() {
+					return Err(Error::NsNotFound {
+						name: ns.to_owned(),
+					}
+					.into());
 				}
 
 				return Err(Error::DbNotFound {
