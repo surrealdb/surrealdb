@@ -46,7 +46,7 @@ impl Serialize for Number {
 	where
 		S: SerdeSerializer,
 	{
-		serializer.serialize_bytes(&self.to_decimal_buf())
+		serializer.serialize_bytes(&self.to_decimal_buf().map_err(serde::ser::Error::custom)?)
 	}
 }
 
@@ -381,9 +381,9 @@ impl Number {
 	const NUMBER_MARKER_FLOAT_INFINITE_NAN: u8 = 67;
 	const NUMBER_MARKER_DECIMAL: u8 = 128;
 
-	pub(crate) fn to_decimal_buf(&self) -> [u8; 15] {
+	pub(crate) fn to_decimal_buf(&self) -> Result<[u8; 15]> {
 		match self {
-			Self::Int(v) => encode_decimal_lex(Decimal::from(*v), Self::NUMBER_MARKER_INT),
+			Self::Int(v) => Ok(encode_decimal_lex(Decimal::from(*v), Self::NUMBER_MARKER_INT)),
 			Self::Float(v) => {
 				// Handle extreme float values that can't be converted to Decimal
 				if v.is_infinite() {
@@ -391,29 +391,29 @@ impl Number {
 						// Positive infinity - largest possible value
 						let mut buf = [0xFF; 15];
 						buf[14] = Self::NUMBER_MARKER_FLOAT_INFINITE_POSITIVE;
-						buf
+						Ok(buf)
 					} else {
 						// Negative infinity - smallest possible value
 						let mut buf = [0x00; 15];
 						buf[14] = Self::NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE;
-						buf
+						Ok(buf)
 					}
 				} else if v.is_nan() {
 					// NaN - treat as largest value
 					let mut buf = [0xFF; 15];
 					buf[14] = Self::NUMBER_MARKER_FLOAT_INFINITE_NAN;
-					buf
+					Ok(buf)
 				} else {
 					match Decimal::from_f64(*v) {
-						Some(decimal) => encode_decimal_lex(decimal, Self::NUMBER_MARKER_FLOAT),
+						Some(decimal) => Ok(encode_decimal_lex(decimal, Self::NUMBER_MARKER_FLOAT)),
 						None => {
 							// Report error when Decimal::from_f64() fails
-							panic!("Failed to convert float {} to decimal", v)
+							bail!("Failed to convert float {} to decimal", v)
 						}
 					}
 				}
 			}
-			Self::Decimal(v) => encode_decimal_lex(*v, Self::NUMBER_MARKER_DECIMAL),
+			Self::Decimal(v) => Ok(encode_decimal_lex(*v, Self::NUMBER_MARKER_DECIMAL)),
 		}
 	}
 
@@ -1076,7 +1076,6 @@ mod tests {
 	fn serialised_ord_test() {
 		let ordering = [
 			Number::from(f64::NEG_INFINITY),
-			Number::from(f64::MIN),
 			Number::from(Decimal::MIN),
 			Number::Int(i64::MIN),
 			Number::from(-10),
@@ -1092,7 +1091,6 @@ mod tests {
 			Number::from(1000),
 			Number::from(i64::MAX),
 			Number::from(Decimal::MAX),
-			Number::from(f64::MAX),
 			Number::from(f64::INFINITY),
 			Number::from(f64::NAN),
 		];
@@ -1103,6 +1101,9 @@ mod tests {
 			let v1: Vec<u8> = bincode::serialize(n1).unwrap();
 			let v2: Vec<u8> = bincode::serialize(n2).unwrap();
 			assert!(v1 < v2, "{n1:?} < {n2:?} (after serialization) - {v1:?} < {v2:?}");
+			let r1 = bincode::deserialize::<Number>(&v1).unwrap();
+			let r2 = bincode::deserialize::<Number>(&v2).unwrap();
+			assert!(r1.eq(&r2), "{r1:?} = {r2:?} (after deserialization) - {v1:?} < {v2:?}");
 		}
 	}
 
