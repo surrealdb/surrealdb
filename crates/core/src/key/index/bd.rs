@@ -107,22 +107,25 @@ mod tests {
 
 	#[test]
 	fn root() {
-		let val = BdRoot::new("testns", "testdb", "testtb", "testix");
+		let val = BdRoot::new(NamespaceId(1), DatabaseId(2), "testtb", "testix");
 		let enc = BdRoot::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bd");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!bd");
 	}
 
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
 		let val = Bd::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 			7
 		);
 		let enc = Bd::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bd\0\0\0\0\0\0\0\x07");
+		assert_eq!(
+			enc,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!bd\0\0\0\0\0\0\0\x07"
+		);
 	}
 }

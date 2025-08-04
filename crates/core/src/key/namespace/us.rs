@@ -71,18 +71,18 @@ mod tests {
 			"testuser",
 		);
 		let enc = Us::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\x00!ustestuser\x00");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01!ustestuser\0");
 	}
 
 	#[test]
 	fn test_prefix() {
 		let val = super::prefix(NamespaceId(1)).unwrap();
-		assert_eq!(val, b"/*testns\0!us\0");
+		assert_eq!(val, b"/*\x00\x00\x00\x01!us\0");
 	}
 
 	#[test]
 	fn test_suffix() {
 		let val = super::suffix(NamespaceId(1)).unwrap();
-		assert_eq!(val, b"/*testns\0!us\xff");
+		assert_eq!(val, b"/*\x00\x00\x00\x01!us\xff");
 	}
 }

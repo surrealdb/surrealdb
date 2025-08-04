@@ -247,8 +247,8 @@ mod tests {
 		let fk: Thing = SqlThing::parse("other:test").into();
 		#[rustfmt::skip]
 		let val = Graph::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testid".into(),
 			Dir::Out,
@@ -257,7 +257,7 @@ mod tests {
 		let enc = Graph::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\0*testdb\0*testtb\x00~\0\0\0\x01testid\0\0\0\0\x01other\0\0\0\0\x01test\0"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\x00~\0\0\0\x01testid\0\0\0\0\x01other\0\0\0\0\x01test\0"
 		);
 	}
 }

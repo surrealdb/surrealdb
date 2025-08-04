@@ -71,6 +71,9 @@ mod tests {
 			7
 		);
 		let enc = Bk::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bk\0\0\0\0\0\0\0\x07");
+		assert_eq!(
+			enc,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!bk\0\0\0\0\0\0\0\x07"
+		);
 	}
 }

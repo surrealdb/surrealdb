@@ -209,23 +209,23 @@ mod tests {
 			Uuid::from_u128(2),
 		);
 		let enc = Dc::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dc\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!dc\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
 	}
 
 	#[test]
 	fn key_root() {
-		let enc = Dc::new_root("testns", "testdb", "testtb", "testix").unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dc");
+		let enc = Dc::new_root(NamespaceId(1), DatabaseId(2), "testtb", "testix").unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!dc");
 	}
 
 	#[test]
 	fn range() {
-		let (beg, end) = Dc::range("testns", "testdb", "testtb", "testix").unwrap();
+		let (beg, end) = Dc::range(NamespaceId(1), DatabaseId(2), "testtb", "testix").unwrap();
 		println!("{} {}", beg.len(), end.len());
-		assert_eq!(beg, b"/*testns\0*testdb\0*testtb\0+testix\0!dc\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
+		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!dc\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
 		assert_eq!(
 			end,
-			b"/*testns\0*testdb\0*testtb\0+testix\0!dc\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!dc\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
 		);
 	}
 }

@@ -79,11 +79,14 @@ mod tests {
 
 	#[test]
 	fn ba_range() {
-		let range = Prefix::new_ba_range("testns", "testdb", "testsq").unwrap();
-		assert_eq!(range.start, b"/*testns\0*testdb\0!sqtestsq\0!ba\0\0\0\0\0\0\0\0\0");
+		let range = Prefix::new_ba_range(NamespaceId(1), DatabaseId(2), "testsq").unwrap();
+		assert_eq!(
+			range.start,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!sqtestsq\0!ba\0\0\0\0\0\0\0\0\0"
+		);
 		assert_eq!(
 			range.end,
-			b"/*testns\0*testdb\0!sqtestsq\0!ba\xff\xff\xff\xff\xff\xff\xff\xff\xff"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!sqtestsq\0!ba\xff\xff\xff\xff\xff\xff\xff\xff\xff"
 		);
 	}
 }

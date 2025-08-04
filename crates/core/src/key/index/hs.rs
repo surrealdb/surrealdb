@@ -54,7 +54,7 @@ mod tests {
 		let enc = Hs::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\0*testdb\0*testtb\0+testix\0!hs",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!hs",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);

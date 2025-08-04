@@ -54,7 +54,6 @@ mod tests {
 			DatabaseId(234),
 		);
 		let enc = Ti::encode_key(&val).unwrap();
-		// [47, 43, 0, 0, 0, 123, 42, 0, 0, 0, 234, 33, 116, 105]
-		assert_eq!(&enc, b"/+\x00\x00\x00\x7b*\x00\x00\x00\xea!\x74\x69");
+		assert_eq!(&enc, b"/*\x00\x00\x00\x7b*\x00\x00\x00\xea!\x74\x69");
 	}
 }

@@ -61,6 +61,6 @@ mod tests {
 	fn key() {
 		let val = Ns::new(NamespaceId(1));
 		let enc = Ns::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/!ns1\0");
+		assert_eq!(enc, b"/!ns\x00\x00\x00\x01");
 	}
 }

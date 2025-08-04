@@ -77,18 +77,18 @@ mod tests {
             "test",
         );
 		let enc = BucketKey::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*1\0*2\0!butest\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!butest\0");
 	}
 
 	#[test]
 	fn prefix() {
 		let val = super::prefix(NamespaceId(1), DatabaseId(2)).unwrap();
-		assert_eq!(val, b"/*1\0*2\0!bu\0");
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!bu\0");
 	}
 
 	#[test]
 	fn suffix() {
 		let val = super::suffix(NamespaceId(1), DatabaseId(2)).unwrap();
-		assert_eq!(val, b"/*1\0*2\0!bu\xff");
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!bu\xff");
 	}
 }

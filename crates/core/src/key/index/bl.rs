@@ -106,22 +106,25 @@ mod tests {
 
 	#[test]
 	fn root() {
-		let val = BlRoot::new("testns", "testdb", "testtb", "testix");
+		let val = BlRoot::new(NamespaceId(1), DatabaseId(2), "testtb", "testix");
 		let enc = BlRoot::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bl");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!bl");
 	}
 
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
 		let val = Bl::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 			7
 		);
 		let enc = Bl::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bl\0\0\0\0\0\0\0\x07");
+		assert_eq!(
+			enc,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!bl\0\0\0\0\0\0\0\x07"
+		);
 	}
 }

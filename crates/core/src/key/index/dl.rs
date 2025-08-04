@@ -89,8 +89,11 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Dl::new("testns", "testdb", "testtb", "testix", 16);
+		let val = Dl::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", 16);
 		let enc = Dl::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dl\0\0\0\0\0\0\0\x10");
+		assert_eq!(
+			enc,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!dl\0\0\0\0\0\0\0\x10"
+		);
 	}
 }

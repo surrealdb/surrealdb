@@ -97,7 +97,7 @@ mod tests {
 	fn root() {
 		let val = HdRoot::new(NamespaceId(1), DatabaseId(2), "testtb", "testix");
 		let enc = HdRoot::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!hd");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!hd");
 	}
 
 	#[test]
@@ -111,6 +111,9 @@ mod tests {
 			7
 		);
 		let enc = Hd::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!hd\0\0\0\0\0\0\0\x07");
+		assert_eq!(
+			enc,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!hd\0\0\0\0\0\0\0\x07"
+		);
 	}
 }

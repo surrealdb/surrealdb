@@ -80,18 +80,18 @@ mod tests {
 			"testft",
 		);
 		let enc = Ft::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\x00*testdb\x00*testtb\x00!fttestft\x00");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!fttestft\0");
 	}
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix("testns", "testdb", "testtb").unwrap();
-		assert_eq!(val, b"/*testns\0*testdb\0*testtb\0!ft\0");
+		let val = super::prefix(NamespaceId(1), DatabaseId(2), "testtb").unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!ft\0");
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::suffix("testns", "testdb", "testtb").unwrap();
-		assert_eq!(val, b"/*testns\0*testdb\0*testtb\0!ft\xff");
+		let val = super::suffix(NamespaceId(1), DatabaseId(2), "testtb").unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!ft\xff");
 	}
 }

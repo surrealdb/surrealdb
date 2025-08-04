@@ -271,17 +271,17 @@ mod tests {
 			true,
 		);
 		let enc = Tt::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!ttterm\0\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02\x01");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!ttterm\0\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02\x01");
 	}
 
 	#[test]
 	fn term_range() {
 		let (beg, end) =
 			Tt::term_range(NamespaceId(1), DatabaseId(2), "testtb", "testix", "term").unwrap();
-		assert_eq!(beg, b"/*testns\0*testdb\0*testtb\0+testix\0!ttterm\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
+		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!ttterm\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
 		assert_eq!(
 			end,
-			b"/*testns\0*testdb\0*testtb\0+testix\0!ttterm\0\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!ttterm\0\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
 		);
 	}
 
@@ -289,7 +289,7 @@ mod tests {
 	fn terms_range() {
 		let (beg, end) =
 			Tt::terms_range(NamespaceId(1), DatabaseId(2), "testtb", "testix").unwrap();
-		assert_eq!(beg, b"/*testns\0*testdb\0*testtb\0+testix\0!tt\0");
-		assert_eq!(end, b"/*testns\0*testdb\0*testtb\0+testix\0!tt\xff");
+		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!tt\0");
+		assert_eq!(end, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!tt\xff");
 	}
 }

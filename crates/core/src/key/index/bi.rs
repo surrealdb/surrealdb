@@ -65,13 +65,16 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let val = Bi::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 			7
 		);
 		let enc = Bi::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bi\0\0\0\0\0\0\0\x07");
+		assert_eq!(
+			enc,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!bi\0\0\0\0\0\0\0\x07"
+		);
 	}
 }

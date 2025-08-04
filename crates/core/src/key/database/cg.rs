@@ -71,23 +71,23 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let val = Cg::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testty",
 		);
 		let enc = Cg::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\x00*testdb\x00!cgtestty\x00");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!cgtestty\0");
 	}
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix("testns", "testdb").unwrap();
-		assert_eq!(val, b"/*testns\0*testdb\0!cg\0");
+		let val = super::prefix(NamespaceId(1), DatabaseId(2)).unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!cg\0");
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::suffix("testns", "testdb").unwrap();
-		assert_eq!(val, b"/*testns\0*testdb\0!cg\xff");
+		let val = super::suffix(NamespaceId(1), DatabaseId(2)).unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!cg\xff");
 	}
 }

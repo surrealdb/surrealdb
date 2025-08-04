@@ -67,22 +67,22 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let val = Ac::new(
-			"testns",
+			NamespaceId(1),
 			"testac",
 		);
 		let enc = Ac::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0!actestac\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01!actestac\0");
 	}
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix("testns").unwrap();
-		assert_eq!(val, b"/*testns\0!ac\0");
+		let val = super::prefix(NamespaceId(1)).unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01!ac\0");
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::suffix("testns").unwrap();
-		assert_eq!(val, b"/*testns\0!ac\xff");
+		let val = super::suffix(NamespaceId(1)).unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01!ac\xff");
 	}
 }

@@ -187,5 +187,107 @@ mod tests {
 
 	use rstest::rstest;
 
-	// TODO: STU: Add tests for the code above.
+	#[rstest]
+	#[case(Lookup::Nds, Key::Nds, true)]
+	#[case(Lookup::Rus, Key::Rus, true)]
+	#[case(Lookup::Ras, Key::Ras, true)]
+	#[case(Lookup::Rgs("test"), Key::Rgs("test".to_string()), true)]
+	#[case(Lookup::Nss, Key::Nss, true)]
+	#[case(Lookup::Nus(NamespaceId(1)), Key::Nus(NamespaceId(1)), true)]
+	#[case(Lookup::Nas(NamespaceId(1)), Key::Nas(NamespaceId(1)), true)]
+	#[case(Lookup::Ngs(NamespaceId(1), "test"), Key::Ngs(NamespaceId(1), "test".to_string()), true)]
+	#[case(Lookup::Dbs(NamespaceId(1)), Key::Dbs(NamespaceId(1)), true)]
+	#[case(
+		Lookup::Dus(NamespaceId(1), DatabaseId(1)),
+		Key::Dus(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
+		Lookup::Das(NamespaceId(1), DatabaseId(1)),
+		Key::Das(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(Lookup::Dgs(NamespaceId(1), DatabaseId(1), "test"), Key::Dgs(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(
+		Lookup::Aps(NamespaceId(1), DatabaseId(1)),
+		Key::Aps(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
+		Lookup::Azs(NamespaceId(1), DatabaseId(1)),
+		Key::Azs(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
+		Lookup::Bus(NamespaceId(1), DatabaseId(1)),
+		Key::Bus(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
+		Lookup::Fcs(NamespaceId(1), DatabaseId(1)),
+		Key::Fcs(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
+		Lookup::Mls(NamespaceId(1), DatabaseId(1)),
+		Key::Mls(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
+		Lookup::Cgs(NamespaceId(1), DatabaseId(1)),
+		Key::Cgs(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
+		Lookup::Pas(NamespaceId(1), DatabaseId(1)),
+		Key::Pas(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
+		Lookup::Tbs(NamespaceId(1), DatabaseId(1)),
+		Key::Tbs(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(Lookup::Evs(NamespaceId(1), DatabaseId(1), "test"), Key::Evs(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Fds(NamespaceId(1), DatabaseId(1), "test"), Key::Fds(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Fts(NamespaceId(1), DatabaseId(1), "test"), Key::Fts(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Ixs(NamespaceId(1), DatabaseId(1), "test"), Key::Ixs(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Lvs(NamespaceId(1), DatabaseId(1), "test"), Key::Lvs(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Nd(Uuid::from_u128(1)), Key::Nd(Uuid::from_u128(1)), true)]
+	#[case(Lookup::Ru("test"), Key::Ru("test".to_string()), true)]
+	#[case(Lookup::Ra("test"), Key::Ra("test".to_string()), true)]
+	#[case(Lookup::Rg("test", "test"), Key::Rg("test".to_string(), "test".to_string()), true)]
+	#[case(Lookup::NsById(NamespaceId(1)), Key::NsById(NamespaceId(1)), true)]
+	#[case(Lookup::NsByName("test"), Key::NsByName("test".to_string()), true)]
+	#[case(Lookup::Nu(NamespaceId(1), "test"), Key::Nu(NamespaceId(1), "test".to_string()), true)]
+	#[case(Lookup::Na(NamespaceId(1), "test"), Key::Na(NamespaceId(1), "test".to_string()), true)]
+	#[case(Lookup::Ng(NamespaceId(1), "test", "test"), Key::Ng(NamespaceId(1), "test".to_string(), "test".to_string()), true)]
+	#[case(
+		Lookup::DbById(NamespaceId(1), DatabaseId(1)),
+		Key::DbById(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(Lookup::DbByName("test", "test"), Key::DbByName("test".to_string(), "test".to_string()), true)]
+	#[case(Lookup::Du(NamespaceId(1), DatabaseId(1), "test"), Key::Du(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Da(NamespaceId(1), DatabaseId(1), "test"), Key::Da(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Dg(NamespaceId(1), DatabaseId(1), "test", "test"), Key::Dg(NamespaceId(1), DatabaseId(1), "test".to_string(), "test".to_string()), true)]
+	#[case(Lookup::Ap(NamespaceId(1), DatabaseId(1), "test"), Key::Ap(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Az(NamespaceId(1), DatabaseId(1), "test"), Key::Az(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Bu(NamespaceId(1), DatabaseId(1), "test"), Key::Bu(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Fc(NamespaceId(1), DatabaseId(1), "test"), Key::Fc(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Ml(NamespaceId(1), DatabaseId(1), "test", "test"), Key::Ml(NamespaceId(1), DatabaseId(1), "test".to_string(), "test".to_string()), true)]
+	#[case(Lookup::Cg(NamespaceId(1), DatabaseId(1), "test"), Key::Cg(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Pa(NamespaceId(1), DatabaseId(1), "test"), Key::Pa(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Sq(NamespaceId(1), DatabaseId(1), "test"), Key::Sq(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::TbById(NamespaceId(1), DatabaseId(1), "test"), Key::TbById(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::TbByName("test", "test", "test"), Key::TbByName("test".to_string(), "test".to_string(), "test".to_string()), true)]
+	#[case(Lookup::Ev(NamespaceId(1), DatabaseId(1), "test", "test"), Key::Ev(NamespaceId(1), DatabaseId(1), "test".to_string(), "test".to_string()), true)]
+	#[case(Lookup::Fd(NamespaceId(1), DatabaseId(1), "test", "test"), Key::Fd(NamespaceId(1), DatabaseId(1), "test".to_string(), "test".to_string()), true)]
+	#[case(Lookup::Ix(NamespaceId(1), DatabaseId(1), "test", "test"), Key::Ix(NamespaceId(1), DatabaseId(1), "test".to_string(), "test".to_string()), true)]
+	#[case(Lookup::Record(NamespaceId(1), DatabaseId(1), "test", &Id::Number(1)), Key::Record(NamespaceId(1), DatabaseId(1), "test".to_string(), Id::Number(1)), true)]
+	#[case(Lookup::Record(NamespaceId(1), DatabaseId(1), "test", &Id::Number(1)), Key::Record(NamespaceId(1), DatabaseId(1), "test".to_string(), Id::Number(2)), false)]
+	#[case(Lookup::Record(NamespaceId(1), DatabaseId(1), "test", &Id::Number(1)), Key::Record(NamespaceId(1), DatabaseId(2), "test".to_string(), Id::Number(1)), false)]
+	fn test_equivalent(#[case] l: Lookup<'_>, #[case] k: Key, #[case] expected: bool) {
+		assert_eq!(l.equivalent(&k), expected);
+	}
 }

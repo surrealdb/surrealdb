@@ -159,9 +159,6 @@ mod tests {
 	use crate::expr::changefeed::ChangeFeed;
 	use crate::expr::id::Id;
 	use crate::expr::statements::show::ShowSince;
-	use crate::expr::statements::{
-		DefineDatabaseStatement, DefineNamespaceStatement, DefineTableStatement,
-	};
 	use crate::expr::thing::Thing;
 	use crate::expr::value::Value;
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
@@ -187,7 +184,8 @@ mod tests {
 		//
 
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
-		let tb = tx.get_or_add_tb(NS, DB, TB, false).await.unwrap();
+		let tb = tx.ensure_ns_db_tb(NS, DB, TB, false).await.unwrap();
+		tx.commit().await.unwrap();
 
 		let mut tx1 = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let thing_a = Thing {
@@ -197,9 +195,9 @@ mod tests {
 		let value_a: Value = "a".into();
 		let previous = Value::None;
 		tx1.record_change(
-			NS,
-			DB,
-			TB,
+			tb.namespace_id,
+			tb.database_id,
+			&tb.name,
 			&thing_a,
 			previous.clone().into(),
 			value_a.into(),
@@ -215,9 +213,9 @@ mod tests {
 		};
 		let value_c: Value = "c".into();
 		tx2.record_change(
-			NS,
-			DB,
-			TB,
+			tb.namespace_id,
+			tb.database_id,
+			&tb.name,
 			&thing_c,
 			previous.clone().into(),
 			value_c.into(),
@@ -233,9 +231,9 @@ mod tests {
 		};
 		let value_b: Value = "b".into();
 		tx3.record_change(
-			NS,
-			DB,
-			TB,
+			tb.namespace_id,
+			tb.database_id,
+			&tb.name,
 			&thing_b,
 			previous.clone().into(),
 			value_b.into(),
@@ -247,9 +245,9 @@ mod tests {
 		};
 		let value_c2: Value = "c2".into();
 		tx3.record_change(
-			NS,
-			DB,
-			TB,
+			tb.namespace_id,
+			tb.database_id,
+			&tb.name,
 			&thing_c2,
 			previous.clone().into(),
 			value_c2.into(),
@@ -265,9 +263,16 @@ mod tests {
 		let start: u64 = 0;
 
 		let tx4 = ds.transaction(Write, Optimistic).await.unwrap();
-		let r = crate::cf::read(&tx4, NS, DB, Some(TB), ShowSince::Versionstamp(start), Some(10))
-			.await
-			.unwrap();
+		let r = crate::cf::read(
+			&tx4,
+			tb.namespace_id,
+			tb.database_id,
+			Some(&tb.name),
+			ShowSince::Versionstamp(start),
+			Some(10),
+		)
+		.await
+		.unwrap();
 		tx4.commit().await.unwrap();
 
 		let want: Vec<ChangeSet> = vec![
@@ -313,15 +318,24 @@ mod tests {
 
 		let tx5 = ds.transaction(Write, Optimistic).await.unwrap();
 		// gc_all needs to be committed before we can read the changes
-		crate::cf::gc_range(&tx5, NS, DB, VersionStamp::from_u64(4)).await.unwrap();
+		crate::cf::gc_range(&tx5, tb.namespace_id, tb.database_id, VersionStamp::from_u64(4))
+			.await
+			.unwrap();
 		// We now commit tx5, which should persist the gc_all resullts
 		tx5.commit().await.unwrap();
 
 		// Now we should see the gc_all results
 		let tx6 = ds.transaction(Write, Optimistic).await.unwrap();
-		let r = crate::cf::read(&tx6, NS, DB, Some(TB), ShowSince::Versionstamp(start), Some(10))
-			.await
-			.unwrap();
+		let r = crate::cf::read(
+			&tx6,
+			tb.namespace_id,
+			tb.database_id,
+			Some(&tb.name),
+			ShowSince::Versionstamp(start),
+			Some(10),
+		)
+		.await
+		.unwrap();
 		tx6.commit().await.unwrap();
 
 		let want: Vec<ChangeSet> = vec![ChangeSet(
@@ -346,9 +360,16 @@ mod tests {
 		ds.changefeed_process_at(None, (ts.0.timestamp() + 5).try_into().unwrap()).await.unwrap();
 
 		let tx7 = ds.transaction(Write, Optimistic).await.unwrap();
-		let r = crate::cf::read(&tx7, NS, DB, Some(TB), ShowSince::Timestamp(ts), Some(10))
-			.await
-			.unwrap();
+		let r = crate::cf::read(
+			&tx7,
+			tb.namespace_id,
+			tb.database_id,
+			Some(&tb.name),
+			ShowSince::Timestamp(ts),
+			Some(10),
+		)
+		.await
+		.unwrap();
 		tx7.commit().await.unwrap();
 		assert_eq!(r, want);
 	}
@@ -357,42 +378,60 @@ mod tests {
 	async fn scan_picks_up_from_offset() {
 		// Given we have 2 entries in change feeds
 		let ds = init(false).await;
+
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tb = tx.ensure_ns_db_tb(NS, DB, TB, false).await.unwrap();
+		tx.commit().await.unwrap();
+
 		ds.changefeed_process_at(None, 5).await.unwrap();
 		let _id1 = record_change_feed_entry(
 			ds.transaction(Write, Optimistic).await.unwrap(),
+			&tb,
 			"First".to_string(),
 		)
 		.await;
 		ds.changefeed_process_at(None, 10).await.unwrap();
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-		let vs1 = tx.get_versionstamp_from_timestamp(5, NS, DB).await.unwrap().unwrap();
-		let vs2 = tx.get_versionstamp_from_timestamp(10, NS, DB).await.unwrap().unwrap();
+		let vs1 = tx
+			.get_versionstamp_from_timestamp(5, tb.namespace_id, tb.database_id)
+			.await
+			.unwrap()
+			.unwrap();
+		let vs2 = tx
+			.get_versionstamp_from_timestamp(10, tb.namespace_id, tb.database_id)
+			.await
+			.unwrap()
+			.unwrap();
 		tx.cancel().await.unwrap();
 		let _id2 = record_change_feed_entry(
 			ds.transaction(Write, Optimistic).await.unwrap(),
+			&tb,
 			"Second".to_string(),
 		)
 		.await;
 
 		// When we scan from the versionstamp between the changes
-		let r = change_feed_vs(ds.transaction(Write, Optimistic).await.unwrap(), &vs2).await;
+		let r = change_feed_vs(ds.transaction(Write, Optimistic).await.unwrap(), &tb, &vs2).await;
 
 		// Then there is only 1 change
 		assert_eq!(r.len(), 1);
 		assert!(r[0].0 >= vs2, "{:?}", r);
 
 		// And scanning with previous offset includes both values (without table definitions)
-		let r = change_feed_vs(ds.transaction(Write, Optimistic).await.unwrap(), &vs1).await;
+		let r = change_feed_vs(ds.transaction(Write, Optimistic).await.unwrap(), &tb, &vs1).await;
 		assert_eq!(r.len(), 2);
 	}
 
-	async fn change_feed_vs(tx: Transaction, vs: &VersionStamp) -> Vec<ChangeSet> {
-		let db = tx.get_db_by_name(NS, DB).await.unwrap().unwrap();
+	async fn change_feed_vs(
+		tx: Transaction,
+		tb: &TableDefinition,
+		vs: &VersionStamp,
+	) -> Vec<ChangeSet> {
 		let r = crate::cf::read(
 			&tx,
-			db.namespace_id,
-			db.database_id,
-			Some(TB),
+			tb.namespace_id,
+			tb.database_id,
+			Some(&tb.name),
 			ShowSince::Versionstamp(vs.into_u64_lossy()),
 			Some(10),
 		)
@@ -402,17 +441,17 @@ mod tests {
 		r
 	}
 
-	async fn record_change_feed_entry(tx: Transaction, id: String) -> Thing {
+	async fn record_change_feed_entry(tx: Transaction, tb: &TableDefinition, id: String) -> Thing {
 		let thing = Thing {
-			tb: TB.to_owned(),
+			tb: tb.name.clone(),
 			id: Id::from(id),
 		};
 		let value_a: Value = "a".into();
 		let previous = Value::None.into();
 		tx.lock().await.record_change(
-			NS,
-			DB,
-			TB,
+			tb.namespace_id,
+			tb.database_id,
+			&tb.name,
 			&thing,
 			previous,
 			value_a.into(),
@@ -435,7 +474,7 @@ mod tests {
 		let ddb = DatabaseDefinition {
 			namespace_id,
 			database_id,
-			name: DB.to_string(),
+			name: NS.to_string(),
 			changefeed: Some(ChangeFeed {
 				expiry: Duration::from_secs(10),
 				store_diff,

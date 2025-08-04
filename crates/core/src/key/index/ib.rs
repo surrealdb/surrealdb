@@ -109,10 +109,13 @@ mod tests {
 	#[test]
 	fn ib_range() {
 		let ib_range = Ib::new_range(NamespaceId(1), DatabaseId(2), "testtb", "testix").unwrap();
-		assert_eq!(ib_range.start, b"/*testns\0*testdb\0*testtb\0+testix\0!ib\0\0\0\0\0\0\0\0");
+		assert_eq!(
+			ib_range.start,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!ib\0\0\0\0\0\0\0\0"
+		);
 		assert_eq!(
 			ib_range.end,
-			b"/*testns\0*testdb\0*testtb\0+testix\0!ib\xff\xff\xff\xff\xff\xff\xff\xff"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!ib\xff\xff\xff\xff\xff\xff\xff\xff"
 		);
 	}
 }

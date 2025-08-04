@@ -65,6 +65,9 @@ mod tests {
 	fn key() {
 		let val = Ii::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", 1);
 		let enc = Ii::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!ii\0\0\0\x01");
+		assert_eq!(
+			enc,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!ii\0\0\0\0\0\0\0\x01"
+		);
 	}
 }

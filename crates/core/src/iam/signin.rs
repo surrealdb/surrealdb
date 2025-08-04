@@ -1310,7 +1310,11 @@ mod tests {
 
 			// Get the stored bearer key representing the refresh token
 			let tx = ds.transaction(Read, Optimistic).await.unwrap().enclose();
-			let grant = tx.get_db_access_grant("test", "test", "user", id).await.unwrap();
+			let grant = tx
+				.get_db_access_grant(NamespaceId(1), DatabaseId(2), "user", id)
+				.await
+				.unwrap()
+				.unwrap();
 			let key = match &grant.grant {
 				access::Grant::Bearer(grant) => grant.key.clone(),
 				_ => panic!("Incorrect grant type returned, expected a bearer grant"),
@@ -3230,12 +3234,22 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				// Get the stored bearer grant
 				let tx = ds.transaction(Read, Optimistic).await.unwrap().enclose();
 				let grant = match level.level {
-					"DB" => tx
-						.get_db_access_grant(level.ns.unwrap(), level.db.unwrap(), "api", &id)
-						.await
-						.unwrap(),
-					"NS" => tx.get_ns_access_grant(level.ns.unwrap(), "api", &id).await.unwrap(),
-					"ROOT" => tx.get_root_access_grant("api", &id).await.unwrap(),
+					"DB" => {
+						let db = tx
+							.get_db_by_name(level.ns.unwrap(), level.db.unwrap())
+							.await
+							.unwrap()
+							.unwrap();
+						tx.get_db_access_grant(db.namespace_id, db.database_id, "api", &id)
+							.await
+							.unwrap()
+							.unwrap()
+					}
+					"NS" => {
+						let ns = tx.get_ns_by_name(level.ns.unwrap()).await.unwrap().unwrap();
+						tx.get_ns_access_grant(ns.namespace_id, "api", &id).await.unwrap().unwrap()
+					}
+					"ROOT" => tx.get_root_access_grant("api", &id).await.unwrap().unwrap(),
 					_ => panic!("Unsupported level"),
 				};
 				let key = match &grant.grant {
@@ -4119,7 +4133,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Get the stored bearer grant
 			let tx = ds.transaction(Read, Optimistic).await.unwrap().enclose();
-			let grant = tx.get_db_access_grant("test", "test", "api", &id).await.unwrap();
+			let grant = tx
+				.get_db_access_grant(NamespaceId(1), DatabaseId(2), "api", &id)
+				.await
+				.unwrap()
+				.unwrap();
 			let key = match &grant.grant {
 				access::Grant::Bearer(grant) => grant.key.clone(),
 				_ => panic!("Incorrect grant type returned, expected a bearer grant"),

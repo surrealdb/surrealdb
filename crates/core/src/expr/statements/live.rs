@@ -159,6 +159,7 @@ impl InfoStructure for LiveStatement {
 
 #[cfg(test)]
 mod tests {
+	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::dbs::{Action, Capabilities, Notification, Session};
 	use crate::expr::Thing;
 	use crate::expr::Value;
@@ -182,9 +183,11 @@ mod tests {
 		let (ns, db, tb) = ("test", "test", "person");
 		let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
 
+		let (ns_id, db_id) = (NamespaceId(1), DatabaseId(2));
+
 		// Create a new transaction and verify that there are no tables defined.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns_id, db_id, None).await.unwrap());
 		assert!(table_occurrences.is_empty());
 		tx.cancel().await.unwrap();
 
@@ -200,9 +203,9 @@ mod tests {
 
 		// Verify that the table definition has been created.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns_id, db_id, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
-		assert_eq!(table_occurrences[0].name.0, tb);
+		assert_eq!(table_occurrences[0].name, tb);
 		tx.cancel().await.unwrap();
 
 		// Initiate a Create record
@@ -222,9 +225,9 @@ mod tests {
 
 		// Create a new transaction to verify that the same table was used.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns_id, db_id, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
-		assert_eq!(table_occurrences[0].name.0, tb);
+		assert_eq!(table_occurrences[0].name, tb);
 		tx.cancel().await.unwrap();
 
 		// Validate notification
@@ -253,9 +256,11 @@ mod tests {
 		let (ns, db, tb) = ("test", "test", "person");
 		let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
 
+		let (ns_id, db_id) = (NamespaceId(1), DatabaseId(2));
+
 		// Create a new transaction and verify that there are no tables defined.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns_id, db_id, None).await.unwrap());
 		assert!(table_occurrences.is_empty());
 		tx.cancel().await.unwrap();
 
@@ -265,9 +270,9 @@ mod tests {
 
 		// Create a new transaction and confirm that a new table is created.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns_id, db_id, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
-		assert_eq!(table_occurrences[0].name.0, tb);
+		assert_eq!(table_occurrences[0].name, tb);
 		tx.cancel().await.unwrap();
 
 		// Initiate a live query statement
@@ -276,9 +281,9 @@ mod tests {
 
 		// Verify that the old table definition was used.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns_id, db_id, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
-		assert_eq!(table_occurrences[0].name.0, tb);
+		assert_eq!(table_occurrences[0].name, tb);
 		tx.cancel().await.unwrap();
 	}
 }

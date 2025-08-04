@@ -2,15 +2,16 @@
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::key::namespace::all::NamespaceRoot;
 use crate::kvs::KVKey;
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct DatabaseRoot {
-	ns_root: NamespaceRoot,
+	__: u8,
 	_a: u8,
+	pub ns: NamespaceId,
+	_b: u8,
 	pub db: DatabaseId,
 }
 
@@ -32,8 +33,10 @@ impl DatabaseRoot {
 	#[inline]
 	pub fn new(ns: NamespaceId, db: DatabaseId) -> Self {
 		Self {
-			ns_root: NamespaceRoot::new(ns),
+			__: b'/',
 			_a: b'*',
+			ns,
+			_b: b'*',
 			db,
 		}
 	}
@@ -51,6 +54,6 @@ mod tests {
 			DatabaseId(2),
 		);
 		let enc = val.encode_key().unwrap();
-		assert_eq!(enc, b"/*1\0*2\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02");
 	}
 }

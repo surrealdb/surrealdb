@@ -72,18 +72,18 @@ mod tests {
             "test",
         );
 		let enc = Sq::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*ns\0*db\0*sqtest\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*sqtest\0");
 	}
 
 	#[test]
 	fn prefix() {
-		let val = super::prefix("namespace", "database").unwrap();
-		assert_eq!(val, b"/*namespace\0*database\0*sq\0");
+		let val = super::prefix(NamespaceId(1), DatabaseId(2)).unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*sq\0");
 	}
 
 	#[test]
 	fn suffix() {
-		let val = super::suffix("namespace", "database").unwrap();
-		assert_eq!(val, b"/*namespace\0*database\0*sq\xff");
+		let val = super::suffix(NamespaceId(1), DatabaseId(2)).unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*sq\xff");
 	}
 }

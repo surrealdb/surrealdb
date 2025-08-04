@@ -76,18 +76,18 @@ mod tests {
 			"testgr",
 		);
 		let enc = Gr::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0&testac\0!grtestgr\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01&testac\0!grtestgr\0");
 	}
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix("testns", "testac").unwrap();
-		assert_eq!(val, b"/*testns\0&testac\0!gr\0");
+		let val = super::prefix(NamespaceId(1), "testac").unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01&testac\0!gr\0");
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::suffix("testns", "testac").unwrap();
-		assert_eq!(val, b"/*testns\0&testac\0!gr\xff");
+		let val = super::suffix(NamespaceId(1), "testac").unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01&testac\0!gr\xff");
 	}
 }

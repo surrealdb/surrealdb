@@ -94,7 +94,7 @@ mod tests {
 	fn root() {
 		let val = VmRoot::new(NamespaceId(1), DatabaseId(2), "testtb", "testix");
 		let enc = VmRoot::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!vm");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!vm");
 	}
 
 	#[test]
@@ -108,6 +108,9 @@ mod tests {
 			8
 		);
 		let enc = Vm::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!vm\0\0\0\0\0\0\0\x08");
+		assert_eq!(
+			enc,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!vm\0\0\0\0\0\0\0\x08"
+		);
 	}
 }

@@ -57,10 +57,10 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let val = Vs::new(
-			"test",
-			"test",
+			NamespaceId(1),
+			DatabaseId(2),
 		);
 		let enc = Vs::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*test\0*test\0!vs");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!vs");
 	}
 }

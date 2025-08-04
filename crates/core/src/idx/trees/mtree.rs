@@ -1480,6 +1480,7 @@ impl KVValue for MState {
 
 #[cfg(test)]
 mod tests {
+	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::ctx::{Context, MutableContext};
 	use crate::expr::index::{Distance, VectorType};
 	use crate::idx::IndexKeyBase;
@@ -1764,10 +1765,15 @@ mod tests {
 
 				let (ctx, _st) = new_operation(&ds, &t, TransactionType::Read, cache_size).await;
 				let tx = ctx.tx();
-				let doc_ids =
-					BTreeDocIds::new(&tx, TransactionType::Read, IndexKeyBase::default(), 7, 100)
-						.await
-						.unwrap();
+				let doc_ids = BTreeDocIds::new(
+					&tx,
+					TransactionType::Read,
+					IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
+					7,
+					100,
+				)
+				.await
+				.unwrap();
 
 				let map = if collection.len() < 1000 {
 					insert_collection_one_by_one(stk, &ds, &mut t, &collection, cache_size).await?

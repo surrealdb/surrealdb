@@ -76,6 +76,6 @@ mod tests {
 			"testpa",
 		);
 		let enc = Pa::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0!patestpa\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!patestpa\0");
 	}
 }

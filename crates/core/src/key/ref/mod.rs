@@ -255,8 +255,8 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let val = Ref::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testid".into(),
 			"othertb",
@@ -266,7 +266,7 @@ mod tests {
 		let enc = Ref::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\0*testdb\0*testtb\x00&\0\0\0\x01testid\0othertb\0test.*\0\0\0\0\x01otherid\0"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\x00&\0\0\0\x01testid\0othertb\0test.*\0\0\0\0\x01otherid\0"
 		);
 	}
 }

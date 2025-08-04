@@ -47,11 +47,11 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let val = TableRoot::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 		);
 		let enc = TableRoot::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0");
 	}
 }

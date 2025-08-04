@@ -654,6 +654,7 @@ impl MatchesHitsIterator for SearchHitsIterator {
 
 #[cfg(test)]
 mod tests {
+	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
 	use crate::expr::index::SearchParams;
@@ -737,7 +738,7 @@ mod tests {
 			ctx.get_index_stores(),
 			&tx,
 			az,
-			IndexKeyBase::default(),
+			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
 			&p,
 			tt,
 		)

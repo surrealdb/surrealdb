@@ -62,6 +62,6 @@ mod tests {
 	fn key() {
 		let val = Ba::new(NamespaceId(1), DatabaseId(2), "testsq", 100);
 		let enc = Ba::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0!sqtestsq\0!ba\x80\0\0\0\0\0\0\x64");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!sqtestsq\0!ba\x80\0\0\0\0\0\0\x64");
 	}
 }

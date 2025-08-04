@@ -80,18 +80,18 @@ mod tests {
 			"1.0.0",
 		);
 		let enc = Ml::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\x00*testdb\x00!mltestml\x001.0.0\x00");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!mltestml\01.0.0\0");
 	}
 
 	#[test]
 	fn test_prefix() {
 		let val = super::prefix(NamespaceId(1), DatabaseId(2)).unwrap();
-		assert_eq!(val, b"/*testns\0*testdb\0!ml\0");
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!ml\0");
 	}
 
 	#[test]
 	fn test_suffix() {
 		let val = super::suffix(NamespaceId(1), DatabaseId(2)).unwrap();
-		assert_eq!(val, b"/*testns\0*testdb\0!ml\xff");
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!ml\xff");
 	}
 }

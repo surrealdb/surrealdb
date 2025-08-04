@@ -81,11 +81,11 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let val = Ts::new(
-			"test",
-			"test",
+			NamespaceId(1),
+			DatabaseId(2),
 			123,
 		);
 		let enc = Ts::encode_key(&val).unwrap();
-		assert_eq!(&enc, b"/*test\0*test\0!ts\x00\x00\x00\x00\x00\x00\x00\x7b");
+		assert_eq!(&enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!ts\0\0\0\0\0\0\0\x7b");
 	}
 }

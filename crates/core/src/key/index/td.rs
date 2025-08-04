@@ -155,13 +155,16 @@ mod tests {
 	fn root() {
 		let val = TdRoot::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", "term");
 		let enc = TdRoot::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!tdterm\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!tdterm\0");
 	}
 
 	#[test]
 	fn key() {
 		let val = Td::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", "term", 129);
 		let enc = Td::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!tdterm\0\0\0\0\0\0\0\0\x81");
+		assert_eq!(
+			enc,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!tdterm\0\0\0\0\0\0\0\0\x81"
+		);
 	}
 }

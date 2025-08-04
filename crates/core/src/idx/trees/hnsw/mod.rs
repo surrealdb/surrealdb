@@ -434,6 +434,7 @@ where
 
 #[cfg(test)]
 mod tests {
+	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::ctx::{Context, MutableContext};
 	use crate::expr::index::{Distance, HnswParams, VectorType};
 	use crate::expr::{Id, Value};
@@ -530,7 +531,9 @@ mod tests {
 
 	async fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut h = HnswFlavor::new(IndexKeyBase::default(), p).unwrap();
+		let mut h =
+			HnswFlavor::new(IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"), p)
+				.unwrap();
 		let map = {
 			let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
 			let map = insert_collection_hnsw(&tx, &mut h, collection).await;
@@ -727,8 +730,14 @@ mod tests {
 		let (mut h, map) = {
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
-			let mut h =
-				HnswIndex::new(&tx, IndexKeyBase::default(), "test".to_string(), &p).await.unwrap();
+			let mut h = HnswIndex::new(
+				&tx,
+				IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
+				"test".to_string(),
+				&p,
+			)
+			.await
+			.unwrap();
 			// Fill index
 			let map = insert_collection_hnsw_index(&tx, &mut h, &collection).await.unwrap();
 			tx.commit().await.unwrap();
@@ -809,7 +818,7 @@ mod tests {
 			(9, new_i16_vec(-4, -2)),
 			(10, new_i16_vec(0, 3)),
 		]);
-		let ikb = IndexKeyBase::default();
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix");
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true);
 		let mut h = HnswFlavor::new(ikb, &p).unwrap();
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
@@ -847,7 +856,13 @@ mod tests {
 
 		let ctx = new_ctx(&ds, TransactionType::Write).await;
 		let tx = ctx.tx();
-		let mut h = HnswIndex::new(&tx, IndexKeyBase::default(), "Index".to_string(), &p).await?;
+		let mut h = HnswIndex::new(
+			&tx,
+			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
+			"Index".to_string(),
+			&p,
+		)
+		.await?;
 		info!("Insert collection");
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
