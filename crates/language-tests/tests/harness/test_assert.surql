@@ -8,13 +8,13 @@ imports = ["harness/assert.surql"]
 value = "NONE"
 
 [[test.results]]
-error = "An error occurred: should throw"
+error = "Execution halted with output: `should throw`"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-error = "An error occurred: 1 != 2 should throw"
+error = "Execution halted with output: `1 != 2 should throw`"
 */
 
 fn::assert(true, "should not throw");
