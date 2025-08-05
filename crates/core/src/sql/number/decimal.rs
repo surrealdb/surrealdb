@@ -110,6 +110,190 @@ impl DecimalLexEncoder {
 		10_000_000_000_000_000_000_000_000_000,
 	];
 
+	/// Counts the number of digits in a u128 value using binary search
+	#[inline]
+	fn count_digits(value: u128) -> i32 {
+		if value == 0 {
+			return 1;
+		}
+
+		// Binary search on POW10 array to find the number of digits
+		// This is O(log log n) instead of O(log n) for the division approach
+		let mut left = 0;
+		let mut right = Self::POW10.len();
+
+		while left < right {
+			let mid = (left + right) / 2;
+			if value >= Self::POW10[mid] {
+				left = mid + 1;
+			} else {
+				right = mid;
+			}
+		}
+
+		left as i32
+	}
+
+	/// Extracts decimal digits from mantissa into an array, most significant first
+	fn extract_digits(mantissa: u128) -> [u8; 29] {
+		let mut digits = [0u8; 29];
+		let mut value = mantissa;
+
+		if value == 0 {
+			digits[0] = 0;
+			return digits;
+		}
+
+		// Calculate number of digits to know where to start placing them
+		let digit_count = Self::count_digits(value) as usize;
+
+		// Extract digits directly in most significant first order
+		// by using powers of 10 to extract from left to right
+		for (i, digit) in digits.iter_mut().enumerate().take(digit_count) {
+			let power = Self::POW10[digit_count - 1 - i];
+			*digit = (value / power) as u8;
+			value %= power;
+		}
+
+		digits
+	}
+
+	/// Packs digits into bytes using nibbles, handling both positive and negative cases
+	fn pack_digits(digits: &[u8; 29], digit_count: i32, is_negative: bool) -> Vec<u8> {
+		// Calculate exact capacity: ceil(digit_count/2) + terminator if even digit count
+		let capacity = (digit_count as usize + 1).div_ceil(2)
+			+ if (digit_count & 1) == 0 {
+				1
+			} else {
+				0
+			};
+		let mut result = Vec::with_capacity(capacity);
+		let mut i = 0usize;
+
+		while i < digit_count as usize {
+			let hi = digits[i] + 1; // Add 1 to avoid zero nibbles (1-10 range)
+			i += 1;
+
+			if i < digit_count as usize {
+				// We have a pair of digits - pack both into one byte
+				let lo = digits[i] + 1;
+				i += 1;
+				let byte = (hi << 4) | lo; // High nibble | low nibble
+				result.push(if is_negative {
+					!byte
+				} else {
+					byte
+				});
+			} else {
+				// Odd number of digits - last digit goes in high nibble,
+				// low nibble is 0 (terminator)
+				let byte = hi << 4;
+				result.push(if is_negative {
+					!byte
+				} else {
+					byte
+				});
+			}
+		}
+
+		// If we had an even number of digits, we need a separate terminator byte
+		if (digit_count & 1) == 0 {
+			let terminator = 0x00;
+			result.push(if is_negative {
+				!terminator
+			} else {
+				terminator
+			});
+		}
+
+		result
+	}
+
+	/// Extracts and unbiases the exponent from encoded bytes
+	#[inline]
+	fn extract_exponent(bytes: &[u8], is_negative: bool) -> i32 {
+		let biased_exponent = if !is_negative {
+			// Positive: exponent is stored directly
+			bytes[1]
+		} else {
+			// Negative: exponent was complemented, so reverse it
+			0xFF - bytes[1]
+		};
+		// Remove the bias to get the actual exponent
+		(biased_exponent as i32) - 128
+	}
+
+	/// Unpacks nibble-encoded digits and reconstructs the mantissa, returning both mantissa and digit count
+	fn unpack_mantissa(bytes: &[u8], is_negative: bool) -> (u128, i32) {
+		let mut idx = 2usize; // Start after sign and exponent bytes
+		let mut mantissa: u128 = 0; // Accumulator for the mantissa
+		let mut digit_count: i32 = 0; // Track digits as we unpack them
+
+		loop {
+			let byte = *bytes.get(idx).expect("truncated");
+			idx += 1;
+
+			// For negative numbers, complement the byte to reverse the encoding transformation
+			let value = if !is_negative {
+				byte // Positive: use byte as-is
+			} else {
+				!byte // Negative: complement to undo the encoding complement
+			};
+
+			// Process high nibble (upper 4 bits)
+			let hi = value >> 4;
+			if hi == 0 {
+				// Terminator nibble found - end of digits
+				break;
+			}
+			// Convert back from encoded form: subtract 1 to get original digit (0-9)
+			let digit = (hi - 1) as u128;
+			debug_assert!(digit < 10);
+			// Accumulate digit into mantissa (shift left by multiplying by 10)
+			mantissa = mantissa * 10 + digit;
+			digit_count += 1;
+
+			// Process low nibble (lower 4 bits)
+			let lo = value & 0x0F;
+			if lo == 0 {
+				// Terminator nibble found - end of digits
+				break;
+			}
+			// Convert back from encoded form and accumulate
+			let digit = (lo - 1) as u128;
+			debug_assert!(digit < 10);
+			mantissa = mantissa * 10 + digit;
+			digit_count += 1;
+		}
+
+		(mantissa, digit_count)
+	}
+
+	/// Calculates the final coefficient and scale from mantissa, exponent, and digit count
+	#[inline]
+	fn calculate_coefficient_and_scale(
+		mantissa: u128,
+		exponent: i32,
+		digit_count: i32,
+	) -> (i128, u32) {
+		// Reconstruct the scale from exponent and digit count
+		// Reverse of: e = nd - s - 1, so s = nd - e - 1
+		let scale_i32 = digit_count - exponent - 1;
+
+		// Handle cases where the calculated scale would be negative
+		// This happens when the number needs more integer digits than we have
+		if scale_i32 >= 0 {
+			// Normal case: scale is non-negative
+			(mantissa as i128, scale_i32 as u32)
+		} else {
+			// Scale would be negative: multiply mantissa by appropriate power of 10
+			// to shift decimal point and set scale to 0
+			let k = (-scale_i32) as usize; // How many powers of 10 to multiply by
+			let coefficient = mantissa.checked_mul(Self::POW10[k]).expect("overflow");
+			(coefficient as i128, 0u32) // Scale becomes 0 after adjustment
+		}
+	}
+
 	/// Encodes a Decimal value into a lexicographically ordered byte sequence.
 	///
 	/// The encoding preserves sort order: if `a < b` then `encode(a) < encode(b)`.
@@ -122,123 +306,48 @@ impl DecimalLexEncoder {
 		}
 
 		// Extract sign and work with absolute normalized value
-		let neg = dec.is_sign_negative();
-		let t = dec.abs().normalize(); // Remove trailing zeros for canonical form
-		let s = t.scale() as i32; // Number of digits after decimal point
-		let c = t.mantissa() as u128; // The significant digits as an integer
-		debug_assert!(c > 0); // Should never be zero after the check above
+		let is_negative = dec.is_sign_negative();
+		let normalized = dec.abs().normalize(); // Remove trailing zeros for canonical form
+		let scale = normalized.scale() as i32; // Number of digits after decimal point
+		let mantissa = normalized.mantissa() as u128; // The significant digits as an integer
+		debug_assert!(mantissa > 0); // Should never be zero after the check above
 
 		// Calculate number of digits in the mantissa
-		let nd = {
-			let mut tmp = c;
-			let mut d = 0;
-			while tmp > 0 {
-				tmp /= 10;
-				d += 1;
-			}
-			d
-		};
+		let digit_count = Self::count_digits(mantissa);
 
 		// Calculate the exponent: position of most significant digit relative to decimal point
 		// For 123.45 (mantissa=12345, scale=2): nd=5, s=2, e=5-2-1=2
 		// For 0.00123 (mantissa=123, scale=5): nd=3, s=5, e=3-5-1=-3
-		let e = nd - s - 1;
+		let exponent = digit_count - scale - 1;
 
 		// Bias the exponent by 128 to make it unsigned for lexicographic ordering
 		// This ensures larger exponents sort after smaller ones
-		let bex = (e + 128) as u8;
+		let biased_exponent = (exponent + 128) as u8;
 
 		// Extract individual decimal digits from mantissa, most significant first
-		// We need digits in order for the nibble packing that follows
-		let mut digs = [0u8; 29]; // Max 29 digits for Decimal
-		{
-			let mut v = c;
-			let mut k = 0usize;
-			let mut rev = [0u8; 29]; // Temporary buffer for digits in reverse order
+		let digits = Self::extract_digits(mantissa);
 
-			// Extract digits least significant first (easier with modulo)
-			while v > 0 {
-				rev[k] = (v % 10) as u8;
-				v /= 10;
-				k += 1;
-			}
+		// Build the final encoded result
+		let mut result = Vec::with_capacity(3 + (digit_count as usize + 1).div_ceil(2));
 
-			// Reverse the digits to get most significant first
-			for i in 0..k {
-				digs[i] = rev[k - 1 - i];
-			}
-		}
-
-		// Pack digits into bytes using nibbles (4-bit values)
-		// Each digit is stored as (digit + 1) to avoid zero values in the encoding
-		// Terminator nibble = 0 marks the end of the digit sequence
-		let mut out = Vec::with_capacity(3 + (nd as usize + 1).div_ceil(2));
-
-		if !neg {
-			// === POSITIVE NUMBER ENCODING ===
-			// Sign marker: 0xFF ensures positive numbers sort after negative ones
-			out.push(0xFF);
-
-			// Biased exponent: larger exponents sort later (correct for positive numbers)
-			out.push(bex);
-
-			// Pack digits two per byte as nibbles
-			let mut i = 0usize;
-			while i < nd as usize {
-				let hi = digs[i] + 1; // Add 1 to avoid zero nibbles (1-10 range)
-				i += 1;
-
-				if i < nd as usize {
-					// We have a pair of digits - pack both into one byte
-					let lo = digs[i] + 1;
-					i += 1;
-					out.push((hi << 4) | lo); // High nibble | low nibble
-				} else {
-					// Odd number of digits - last digit goes in high nibble,
-					// low nibble is 0 (terminator)
-					out.push(hi << 4);
-				}
-			}
-
-			// If we had an even number of digits, we need a separate terminator byte
-			// since there was no free nibble for the terminator
-			if (nd & 1) == 0 {
-				out.push(0x00); // Both nibbles are 0 (terminator)
-			}
-		} else {
-			// === NEGATIVE NUMBER ENCODING ===
+		// Add sign marker and exponent
+		if is_negative {
 			// Sign marker: 0x00 ensures negative numbers sort before positive ones
-			out.push(0x00);
-
+			result.push(0x00);
 			// Complement of biased exponent: larger magnitude (more negative) sorts first
-			// This reverses the ordering for negative numbers
-			out.push(0xFF - bex);
-
-			// Pack digits with bitwise complement to reverse lexicographic order
-			// This ensures more negative numbers sort before less negative ones
-			let mut i = 0usize;
-			while i < nd as usize {
-				let hi = digs[i] + 1;
-				i += 1;
-
-				if i < nd as usize {
-					let lo = digs[i] + 1;
-					i += 1;
-					// Complement the entire byte to reverse ordering
-					out.push(!((hi << 4) | lo));
-				} else {
-					// Last digit with terminator nibble, then complement
-					// After complement, terminator 0 becomes 0xF
-					out.push(!(hi << 4));
-				}
-			}
-
-			if (nd & 1) == 0 {
-				// Complement of terminator byte: !0x00 = 0xFF
-				out.push(!0x00);
-			}
+			result.push(0xFF - biased_exponent);
+		} else {
+			// Sign marker: 0xFF ensures positive numbers sort after negative ones
+			result.push(0xFF);
+			// Biased exponent: larger exponents sort later (correct for positive numbers)
+			result.push(biased_exponent);
 		}
-		out
+
+		// Pack digits into bytes using nibbles
+		let packed_digits = Self::pack_digits(&digits, digit_count, is_negative);
+		result.extend(packed_digits);
+
+		result
 	}
 
 	/// Decodes a lexicographically encoded byte sequence back to a Decimal value.
@@ -253,93 +362,27 @@ impl DecimalLexEncoder {
 			// Non-zero values: 0xFF for positive, 0x00 for negative
 			0xFF | 0x00 => {
 				// Determine sign from the first byte
-				let neg = bytes[0] == 0x00;
+				let is_negative = bytes[0] == 0x00;
 
 				// Extract and unbias the exponent
-				let bex = if !neg {
-					// Positive: exponent is stored directly
-					bytes[1]
-				} else {
-					// Negative: exponent was complemented, so reverse it
-					0xFF - bytes[1]
-				};
-				// Remove the bias to get the actual exponent
-				let e = (bex as i32) - 128;
+				let exponent = Self::extract_exponent(bytes, is_negative);
 
-				// Reconstruct the mantissa by reading nibble-packed digits
-				// Continue until we encounter a terminator nibble (0 for positive, 0xF for negative after complement)
-				let mut idx = 2usize; // Start after sign and exponent bytes
-				let mut c: u128 = 0; // Accumulator for the mantissa
+				// Reconstruct the mantissa by unpacking nibble-encoded digits
+				// This also returns the digit count, eliminating redundant computation
+				let (mantissa, digit_count) = Self::unpack_mantissa(bytes, is_negative);
 
-				loop {
-					let b = *bytes.get(idx).expect("truncated");
-					idx += 1;
-
-					// For negative numbers, complement the byte to reverse the encoding transformation
-					let v = if !neg {
-						b // Positive: use byte as-is
-					} else {
-						!b // Negative: complement to undo the encoding complement
-					};
-
-					// Process high nibble (upper 4 bits)
-					let hi = v >> 4;
-					if hi == 0 {
-						// Terminator nibble found - end of digits
-						break;
-					}
-					// Convert back from encoded form: subtract 1 to get original digit (0-9)
-					let d = (hi - 1) as u128;
-					debug_assert!(d < 10);
-					// Accumulate digit into mantissa (shift left by multiplying by 10)
-					c = c * 10 + d;
-
-					// Process low nibble (lower 4 bits)
-					let lo = v & 0x0F;
-					if lo == 0 {
-						// Terminator nibble found - end of digits
-						break;
-					}
-					// Convert back from encoded form and accumulate
-					let d = (lo - 1) as u128;
-					debug_assert!(d < 10);
-					c = c * 10 + d;
-				}
-
-				// Calculate the number of digits in the reconstructed mantissa
-				// This is needed to determine the scale (decimal places)
-				let mut tmp = c;
-				let mut nd = 0i32;
-				while tmp > 0 {
-					tmp /= 10;
-					nd += 1;
-				}
-
-				// Reconstruct the scale from exponent and digit count
-				// Reverse of: e = nd - s - 1, so s = nd - e - 1
-				let s_i32 = nd - e - 1;
-
-				// Handle cases where the calculated scale would be negative
-				// This happens when the number needs more integer digits than we have
-				let (coeff, scale) = if s_i32 >= 0 {
-					// Normal case: scale is non-negative
-					(c as i128, s_i32 as u32)
-				} else {
-					// Scale would be negative: multiply mantissa by appropriate power of 10
-					// to shift decimal point and set scale to 0
-					let k = (-s_i32) as usize; // How many powers of 10 to multiply by
-					let coeff = c.checked_mul(Self::POW10[k]).expect("overflow");
-					(coeff as i128, 0u32) // Scale becomes 0 after adjustment
-				};
+				// Calculate the final coefficient and scale
+				let (coefficient, scale) =
+					Self::calculate_coefficient_and_scale(mantissa, exponent, digit_count);
 
 				// Create the final Decimal with the reconstructed coefficient and scale
-				let dec = Decimal::from_i128_with_scale(coeff, scale);
+				let decimal = Decimal::from_i128_with_scale(coefficient, scale);
 
 				// Apply the sign
-				if neg {
-					-dec
+				if is_negative {
+					-decimal
 				} else {
-					dec
+					decimal
 				}
 			}
 			_ => unreachable!("bad sentinel"),
