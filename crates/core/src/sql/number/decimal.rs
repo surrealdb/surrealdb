@@ -2,9 +2,9 @@
 
 use std::str::FromStr;
 
+use crate::err::Error;
 use anyhow::Result;
 use rust_decimal::Decimal;
-use crate::err::Error;
 
 /// A trait to extend the Decimal type with additional functionality.
 pub trait DecimalExt {
@@ -234,7 +234,9 @@ impl DecimalLexEncoder {
 		let mut digit_count: i32 = 0; // Track digits as we unpack them
 
 		loop {
- 		let byte = *bytes.get(idx).ok_or_else(|| Error::Serialization(format!("Truncated buffer at index {}", idx)))?;
+			let byte = *bytes.get(idx).ok_or_else(|| {
+				Error::Serialization(format!("Truncated buffer at index {}", idx))
+			})?;
 			idx += 1;
 
 			// For negative numbers, complement the byte to reverse the encoding transformation
@@ -254,10 +256,10 @@ impl DecimalLexEncoder {
 			let digit = (hi - 1) as u128;
 			debug_assert!(digit < 10);
 			// Accumulate digit into mantissa (shift left by multiplying by 10)
-			mantissa = mantissa
-				.checked_mul(10)
-				.and_then(|v| v.checked_add(digit))
-				.ok_or_else(|| Error::Internal("Arithmetic overflow in mantissa calculation".to_string()))?;
+			mantissa =
+				mantissa.checked_mul(10).and_then(|v| v.checked_add(digit)).ok_or_else(|| {
+					Error::Internal("Arithmetic overflow in mantissa calculation".to_string())
+				})?;
 			digit_count += 1;
 
 			// Process low nibble (lower 4 bits)
@@ -269,10 +271,10 @@ impl DecimalLexEncoder {
 			// Convert back from encoded form and accumulate
 			let digit = (lo - 1) as u128;
 			debug_assert!(digit < 10);
-			mantissa = mantissa
-				.checked_mul(10)
-				.and_then(|v| v.checked_add(digit))
-				.ok_or_else(|| Error::Internal("Arithmetic overflow in mantissa calculation".to_string()))?;
+			mantissa =
+				mantissa.checked_mul(10).and_then(|v| v.checked_add(digit)).ok_or_else(|| {
+					Error::Internal("Arithmetic overflow in mantissa calculation".to_string())
+				})?;
 			digit_count += 1;
 		}
 
@@ -299,15 +301,20 @@ impl DecimalLexEncoder {
 			// Scale would be negative: multiply mantissa by appropriate power of 10
 			// to shift decimal point and set scale to 0
 			let k = (-scale_i32) as usize; // How many powers of 10 to multiply by
-			
+
 			// Check bounds for POW10 array access
 			if k >= Self::POW10.len() {
-				return Err(Error::Internal(format!("Power of 10 index {} exceeds array bounds {}", k, Self::POW10.len())).into());
+				return Err(Error::Internal(format!(
+					"Power of 10 index {} exceeds array bounds {}",
+					k,
+					Self::POW10.len()
+				))
+				.into());
 			}
-			
-			let coefficient = mantissa
-				.checked_mul(Self::POW10[k])
-				.ok_or_else(|| Error::Internal("Arithmetic overflow in coefficient calculation".to_string()))?;
+
+			let coefficient = mantissa.checked_mul(Self::POW10[k]).ok_or_else(|| {
+				Error::Internal("Arithmetic overflow in coefficient calculation".to_string())
+			})?;
 			Ok((coefficient as i128, 0u32)) // Scale becomes 0 after adjustment
 		}
 	}
@@ -386,9 +393,13 @@ impl DecimalLexEncoder {
 			0xFF | 0x00 => {
 				// Non-zero values require at least 2 bytes (sign + exponent)
 				if bytes.len() < 2 {
-					return Err(Error::Serialization(format!("Buffer too short for non-zero value: expected at least 2 bytes, got {}", bytes.len())).into());
+					return Err(Error::Serialization(format!(
+						"Buffer too short for non-zero value: expected at least 2 bytes, got {}",
+						bytes.len()
+					))
+					.into());
 				}
-				
+
 				// Determine sign from the first byte
 				let is_negative = bytes[0] == 0x00;
 
@@ -413,7 +424,9 @@ impl DecimalLexEncoder {
 					decimal
 				})
 			}
-			_ => Err(Error::Serialization(format!("Invalid sentinel byte: {:#x}", bytes[0])).into()),
+			_ => {
+				Err(Error::Serialization(format!("Invalid sentinel byte: {:#x}", bytes[0])).into())
+			}
 		}
 	}
 }

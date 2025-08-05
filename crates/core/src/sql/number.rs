@@ -471,7 +471,11 @@ impl Number {
 						}
 						None => {
 							// This should be rare - occurs when float is too large/small for Decimal
-							Err(Error::Serialization(format!("Failed to convert float {} to decimal", v)).into())
+							Err(Error::Serialization(format!(
+								"Failed to convert float {} to decimal",
+								v
+							))
+							.into())
 						}
 					}
 				}
@@ -532,9 +536,10 @@ impl Number {
 				match decimal.to_i64() {
 					Some(value) => Ok(Number::Int(value)),
 					None => Err(Error::Serialization(format!(
-						"Decoded decimal {} cannot fit in i64 range", 
+						"Decoded decimal {} cannot fit in i64 range",
 						decimal
-					)).into()),
+					))
+					.into()),
 				}
 			}
 			Some(Self::NUMBER_MARKER_FLOAT) => {
@@ -543,9 +548,10 @@ impl Number {
 				match decimal.to_f64() {
 					Some(value) => Ok(Number::Float(value)),
 					None => Err(Error::Serialization(format!(
-						"Decoded decimal {} cannot be converted to f64", 
+						"Decoded decimal {} cannot be converted to f64",
 						decimal
-					)).into()),
+					))
+					.into()),
 				}
 			}
 			// Handle special float values that were encoded with fixed byte patterns
