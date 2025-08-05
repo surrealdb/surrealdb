@@ -46,7 +46,8 @@ impl Serialize for Number {
 	where
 		S: SerdeSerializer,
 	{
-		serializer.serialize_bytes(&self.to_decimal_buf().map_err(serde::ser::Error::custom)?)
+		let buf = self.as_decimal_buf().map_err(serde::ser::Error::custom)?;
+		serializer.serialize_bytes(&buf)
 	}
 }
 
@@ -55,8 +56,33 @@ impl<'de> Deserialize<'de> for Number {
 	where
 		D: SerdeDeserializer<'de>,
 	{
-		let bytes = <[u8; 16]>::deserialize(deserializer)?;
-		Self::from_decimal_buf(bytes).map_err(serde::de::Error::custom)
+		// A small visitor that accepts both borrowed and owned byte
+		// buffers and forwards them to `from_decimal_buf`.
+		struct NumberVisitor;
+
+		impl serde::de::Visitor<'_> for NumberVisitor {
+			type Value = Number;
+
+			fn expecting(&self, f: &mut Formatter) -> fmt::Result {
+				f.write_str("SurrealDB binary-encoded Number")
+			}
+
+			fn visit_bytes<E>(self, v: &[u8]) -> Result<Number, E>
+			where
+				E: serde::de::Error,
+			{
+				Number::from_decimal_buf(v).map_err(E::custom)
+			}
+
+			fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Number, E>
+			where
+				E: serde::de::Error,
+			{
+				self.visit_bytes(&v)
+			}
+		}
+
+		deserializer.deserialize_bytes(NumberVisitor)
 	}
 }
 
@@ -378,37 +404,35 @@ impl Number {
 	const NUMBER_MARKER_FLOAT: u8 = 64;
 	const NUMBER_MARKER_FLOAT_INFINITE_POSITIVE: u8 = 65;
 	const NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE: u8 = 66;
-	const NUMBER_MARKER_FLOAT_INFINITE_NAN: u8 = 67;
+	const NUMBER_MARKER_FLOAT_NAN: u8 = 67;
 	const NUMBER_MARKER_DECIMAL: u8 = 128;
 
-	pub(crate) fn to_decimal_buf(&self) -> Result<[u8; 16]> {
+	pub(crate) fn as_decimal_buf(&self) -> Result<Vec<u8>> {
 		match self {
 			Self::Int(v) => {
-				Ok(DecimalLexEncoder::encode(Decimal::from(*v), Self::NUMBER_MARKER_INT))
+				let mut b = DecimalLexEncoder::encode(Decimal::from(*v));
+				b.push(Self::NUMBER_MARKER_INT);
+				Ok(b)
 			}
 			Self::Float(v) => {
 				// Handle extreme float values that can't be converted to Decimal
 				if v.is_infinite() {
 					if v.is_sign_positive() {
 						// Positive infinity - largest possible value
-						let mut buf = [0xFF; 16];
-						buf[15] = Self::NUMBER_MARKER_FLOAT_INFINITE_POSITIVE;
-						Ok(buf)
+						Ok(vec![0xFF, 0xFF, Self::NUMBER_MARKER_FLOAT_INFINITE_POSITIVE])
 					} else {
 						// Negative infinity - smallest possible value
-						let mut buf = [0x00; 16];
-						buf[15] = Self::NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE;
-						Ok(buf)
+						Ok(vec![0x00, 0x00, Self::NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE])
 					}
 				} else if v.is_nan() {
 					// NaN - treat as largest value
-					let mut buf = [0xFF; 16];
-					buf[15] = Self::NUMBER_MARKER_FLOAT_INFINITE_NAN;
-					Ok(buf)
+					Ok(vec![0xFF, 0xFF, Self::NUMBER_MARKER_FLOAT_NAN])
 				} else {
 					match Decimal::from_f64(*v) {
 						Some(decimal) => {
-							Ok(DecimalLexEncoder::encode(decimal, Self::NUMBER_MARKER_FLOAT))
+							let mut b = DecimalLexEncoder::encode(decimal);
+							b.push(Self::NUMBER_MARKER_FLOAT);
+							Ok(b)
 						}
 						None => {
 							// Report error when Decimal::from_f64() fails
@@ -417,25 +441,32 @@ impl Number {
 					}
 				}
 			}
-			Self::Decimal(v) => Ok(DecimalLexEncoder::encode(*v, Self::NUMBER_MARKER_DECIMAL)),
+			Self::Decimal(v) => {
+				let mut b = DecimalLexEncoder::encode(*v);
+				b.push(Self::NUMBER_MARKER_DECIMAL);
+				Ok(b)
+			}
 		}
 	}
 
-	pub(crate) fn from_decimal_buf(b: [u8; 16]) -> Result<Self> {
-		match b[15] {
-			Self::NUMBER_MARKER_INT => {
+	pub(crate) fn from_decimal_buf(b: &[u8]) -> Result<Self> {
+		match b.last().copied() {
+			Some(Self::NUMBER_MARKER_INT) => {
 				Ok(Number::Int(DecimalLexEncoder::decode(b).to_i64().unwrap()))
 			}
-			Self::NUMBER_MARKER_FLOAT => {
+			Some(Self::NUMBER_MARKER_FLOAT) => {
 				// Decode as normal decimal and fail if it doesn't work
 				let decimal = DecimalLexEncoder::decode(b);
 				Ok(Number::Float(decimal.to_f64().unwrap()))
 			}
-			Self::NUMBER_MARKER_FLOAT_INFINITE_POSITIVE => Ok(Number::Float(f64::INFINITY)),
-			Self::NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE => Ok(Number::Float(f64::NEG_INFINITY)),
-			Self::NUMBER_MARKER_FLOAT_INFINITE_NAN => Ok(Number::Float(f64::NAN)),
-			Self::NUMBER_MARKER_DECIMAL => Ok(Number::Decimal(DecimalLexEncoder::decode(b))),
-			v => bail!("Unknown number marker: {v}"),
+			Some(Self::NUMBER_MARKER_FLOAT_INFINITE_POSITIVE) => Ok(Number::Float(f64::INFINITY)),
+			Some(Self::NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE) => {
+				Ok(Number::Float(f64::NEG_INFINITY))
+			}
+			Some(Self::NUMBER_MARKER_FLOAT_NAN) => Ok(Number::Float(f64::NAN)),
+			Some(Self::NUMBER_MARKER_DECIMAL) => Ok(Number::Decimal(DecimalLexEncoder::decode(b))),
+			Some(m) => bail!("Unknown number marker: {m}"),
+			None => bail!("Empty buffer"),
 		}
 	}
 
@@ -1085,14 +1116,14 @@ mod tests {
 			Number::from(Decimal::MIN),
 			Number::Int(i64::MIN),
 			Number::from(-10),
-			Number::from(-3.141592654),
-			Number::from(-3.14),
+			Number::from(-3.15),
+			Number::from(-PI),
 			Number::from(-1),
 			Number::from(0),
 			Number::from(1),
 			Number::from(2),
-			Number::from(3.14),
-			Number::from(3.141592654),
+			Number::from(PI),
+			Number::from(3.15),
 			Number::from(100),
 			Number::from(1000),
 			Number::from(i64::MAX),
@@ -1104,11 +1135,11 @@ mod tests {
 			let n1 = &window[0];
 			let n2 = &window[1];
 			assert!(n1 < n2, "{n1:?} < {n2:?} (before serialization)");
-			let b1 = n1.to_decimal_buf().unwrap();
-			let b2 = n2.to_decimal_buf().unwrap();
+			let b1 = n1.as_decimal_buf().unwrap();
+			let b2 = n2.as_decimal_buf().unwrap();
 			assert!(b1 < b2, "{n1:?} < {n2:?} (after serialization) - {b1:?} < {b2:?}");
-			let r1 = Number::from_decimal_buf(b1).unwrap();
-			let r2 = Number::from_decimal_buf(b2).unwrap();
+			let r1 = Number::from_decimal_buf(&b1).unwrap();
+			let r2 = Number::from_decimal_buf(&b2).unwrap();
 			assert!(r1.eq(n1), "{r1:?} = {n1:?} (after deserialization)");
 			assert!(r2.eq(n2), "{r2:?} = {n2:?} (after deserialization)");
 		}
