@@ -407,10 +407,40 @@ impl Number {
 	const NUMBER_MARKER_FLOAT_NAN: u8 = 67;
 	const NUMBER_MARKER_DECIMAL: u8 = 128;
 
+	/// Converts this Number to a lexicographically-ordered byte buffer.
+	///
+	/// This method serializes the Number into a byte representation that preserves
+	/// numeric ordering when compared lexicographically. This is essential for
+	/// database indexing where byte-level comparison must match numeric comparison.
+	///
+	/// # Ordering Guarantees
+	///
+	/// If `a < b` numerically, then `a.as_decimal_buf() < b.as_decimal_buf()`
+	/// lexicographically (byte-wise comparison).
+	///
+	/// # Format
+	///
+	/// The returned buffer consists of:
+	/// - Variable-length lexicographic encoding of the numeric value
+	/// - Single-byte type marker suffix to distinguish original Number variant
+	///
+	/// # Special Value Handling
+	///
+	/// - **Positive Infinity**: `[0xFF, 0xFF, MARKER_FLOAT_INFINITE_POSITIVE]`
+	/// - **Negative Infinity**: `[0x00, 0x00, MARKER_FLOAT_INFINITE_NEGATIVE]`  
+	/// - **NaN**: `[0xFF, 0xFF, MARKER_FLOAT_NAN]` (treated as largest value)
+	///
+	/// # Returns
+	///
+	/// - `Ok(Vec<u8>)`: Lexicographically-ordered byte buffer
+	/// - `Err(Error)`: If float value cannot be converted to decimal representation
+	///
 	pub(crate) fn as_decimal_buf(&self) -> Result<Vec<u8>> {
 		match self {
 			Self::Int(v) => {
+				// Convert integer to decimal for consistent encoding across all numeric types
 				let mut b = DecimalLexEncoder::encode(Decimal::from(*v));
+				// Append type marker to preserve original Number variant for round-trip conversion
 				b.push(Self::NUMBER_MARKER_INT);
 				Ok(b)
 			}
@@ -418,55 +448,113 @@ impl Number {
 				// Handle extreme float values that can't be converted to Decimal
 				if v.is_infinite() {
 					if v.is_sign_positive() {
-						// Positive infinity - largest possible value
+						// Positive infinity - largest possible value in ordering
+						// Uses 0xFF prefix to ensure it sorts after all finite numbers
 						Ok(vec![0xFF, 0xFF, Self::NUMBER_MARKER_FLOAT_INFINITE_POSITIVE])
 					} else {
-						// Negative infinity - smallest possible value
+						// Negative infinity - smallest possible value in ordering
+						// Uses 0x00 prefix to ensure it sorts before all finite numbers
 						Ok(vec![0x00, 0x00, Self::NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE])
 					}
 				} else if v.is_nan() {
-					// NaN - treat as largest value
+					// NaN - treat as largest value for consistent ordering
+					// Uses same prefix as positive infinity but different marker
 					Ok(vec![0xFF, 0xFF, Self::NUMBER_MARKER_FLOAT_NAN])
 				} else {
+					// Convert finite float to decimal for lexicographic encoding
 					match Decimal::from_f64(*v) {
 						Some(decimal) => {
 							let mut b = DecimalLexEncoder::encode(decimal);
+							// Append float marker to distinguish from native decimals
 							b.push(Self::NUMBER_MARKER_FLOAT);
 							Ok(b)
 						}
 						None => {
-							// Report error when Decimal::from_f64() fails
+							// This should be rare - occurs when float is too large/small for Decimal
 							bail!("Failed to convert float {} to decimal", v)
 						}
 					}
 				}
 			}
 			Self::Decimal(v) => {
+				// Direct encoding of decimal values using lexicographic encoder
 				let mut b = DecimalLexEncoder::encode(*v);
+				// Append decimal marker for type preservation
 				b.push(Self::NUMBER_MARKER_DECIMAL);
 				Ok(b)
 			}
 		}
 	}
 
+	/// Reconstructs a Number from a lexicographically-ordered byte buffer.
+	///
+	/// This method deserializes a byte buffer created by `as_decimal_buf()` back into
+	/// the original Number, preserving both the numeric value and the original type
+	/// variant (Int, Float, or Decimal).
+	///
+	/// # Parameters
+	///
+	/// - `b`: Byte slice containing the lexicographically-encoded number with type marker suffix
+	///
+	/// # Buffer Format
+	///
+	/// The input buffer must have the format produced by `as_decimal_buf()`:
+	/// - Variable-length lexicographic encoding of the numeric value
+	/// - Single-byte type marker suffix indicating the original Number variant
+	///
+	/// # Type Reconstruction
+	///
+	/// The method examines the last byte (type marker) to determine how to decode:
+	/// - `NUMBER_MARKER_INT`: Decode as decimal, convert to i64
+	/// - `NUMBER_MARKER_FLOAT`: Decode as decimal, convert to f64  
+	/// - `NUMBER_MARKER_DECIMAL`: Decode directly as Decimal
+	/// - `NUMBER_MARKER_FLOAT_INFINITE_POSITIVE`: Return f64::INFINITY
+	/// - `NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE`: Return f64::NEG_INFINITY
+	/// - `NUMBER_MARKER_FLOAT_NAN`: Return f64::NAN
+	///
+	/// # Returns
+	///
+	/// - `Ok(Number)`: Successfully reconstructed Number with original type and value
+	/// - `Err(Error)`: If buffer is empty, has unknown marker, or decoding fails
+	///
+	/// # Errors
+	///
+	/// - **Empty buffer**: Input slice has no bytes
+	/// - **Unknown marker**: Last byte is not a recognized type marker
+	/// - **Decode failure**: Lexicographic decoding fails or type conversion fails
+	///
 	pub(crate) fn from_decimal_buf(b: &[u8]) -> Result<Self> {
+		// Examine the type marker (last byte) to determine decoding strategy
 		match b.last().copied() {
 			Some(Self::NUMBER_MARKER_INT) => {
+				// Decode lexicographic encoding and convert back to i64
+				// The unwrap() is safe because the original was an i64
 				Ok(Number::Int(DecimalLexEncoder::decode(b).to_i64().unwrap()))
 			}
 			Some(Self::NUMBER_MARKER_FLOAT) => {
-				// Decode as normal decimal and fail if it doesn't work
+				// Decode as decimal representation of the original float
 				let decimal = DecimalLexEncoder::decode(b);
+				// Convert back to f64 - unwrap() is safe for values that came from f64
 				Ok(Number::Float(decimal.to_f64().unwrap()))
 			}
+			// Handle special float values that were encoded with fixed byte patterns
 			Some(Self::NUMBER_MARKER_FLOAT_INFINITE_POSITIVE) => Ok(Number::Float(f64::INFINITY)),
 			Some(Self::NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE) => {
 				Ok(Number::Float(f64::NEG_INFINITY))
 			}
 			Some(Self::NUMBER_MARKER_FLOAT_NAN) => Ok(Number::Float(f64::NAN)),
-			Some(Self::NUMBER_MARKER_DECIMAL) => Ok(Number::Decimal(DecimalLexEncoder::decode(b))),
-			Some(m) => bail!("Unknown number marker: {m}"),
-			None => bail!("Empty buffer"),
+			Some(Self::NUMBER_MARKER_DECIMAL) => {
+				// Direct decoding for native Decimal values
+				Ok(Number::Decimal(DecimalLexEncoder::decode(b)))
+			}
+			Some(m) => {
+				// Unknown type marker - indicates corrupted data or version mismatch
+				bail!("Unknown number marker: {m}")
+			}
+			None => {
+				// Empty buffer is invalid input
+				bail!("Empty buffer")
+			}
 		}
 	}
 
