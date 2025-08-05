@@ -119,7 +119,7 @@ reqwest = { version = "0.12.7", default-features = false }
 ring = "0.17.13"
 roaring = "0.10.6"
 rustls = { version = "0.23.12", default-features = false }
-rust_decimal = { version = "1.37.1" }
+rust_decimal = { version = "1.37.2" }
 # Sub dependency of the rustls dependency, should be updated whenever rustls is.
 # Defined so we can enable features on this dependency.
 rustls-pki-types = "1.7.0"

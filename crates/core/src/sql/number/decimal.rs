@@ -39,99 +39,218 @@ impl DecimalExt for Decimal {
 	}
 }
 
-pub(crate) fn encode_decimal_lex(d: Decimal, marker: u8) -> [u8; 15] {
-	// Canonicalize: remove trailing zeros; treat -0 as +0
-	let decimal = d.normalize();
+/// Fixed-width lexicographic encoding for Decimal values
+/// Uses 16 bytes to handle the full 96-bit mantissa plus scale, sign,
+/// and an external marker.
+pub struct DecimalLexEncoder;
 
-	let (negative, scale, coeff) = {
-		let s = decimal.serialize();
-		let negative = s[12] & 0x80 != 0;
-		let scale = s[12] & 0x7F;
-		let mut coeff = [0u8; 12];
-		coeff.copy_from_slice(&s[0..12]);
-		(negative, scale, coeff)
-	};
+impl DecimalLexEncoder {
+	const ZERO: u8 = 0x80;
+	const POSITIVE: u8 = 0xFF; // NEGATIVE = 0x00
 
-	// Compose: [sign+scale][coefficient: 12 bytes][pad][marker]
-	let mut out = [0u8; 15];
-	out[14] = marker;
+	const POW10: [u128; 29] = [
+		1,
+		10,
+		100,
+		1_000,
+		10_000,
+		100_000,
+		1_000_000,
+		10_000_000,
+		100_000_000,
+		1_000_000_000,
+		10_000_000_000,
+		100_000_000_000,
+		1_000_000_000_000,
+		10_000_000_000_000,
+		100_000_000_000_000,
+		1_000_000_000_000_000,
+		10_000_000_000_000_000,
+		100_000_000_000_000_000,
+		1_000_000_000_000_000_000,
+		10_000_000_000_000_000_000,
+		100_000_000_000_000_000_000,
+		1_000_000_000_000_000_000_000,
+		10_000_000_000_000_000_000_000,
+		100_000_000_000_000_000_000_000,
+		1_000_000_000_000_000_000_000_000,
+		10_000_000_000_000_000_000_000_000,
+		100_000_000_000_000_000_000_000_000,
+		1_000_000_000_000_000_000_000_000_000,
+		10_000_000_000_000_000_000_000_000_000,
+	];
 
-	// First byte: sign and scale
-	// 0x00-0x7F: negative, decreasing scale
-	// 0x80: zero
-	// 0x81-0xFF: positive, increasing scale
-	let prefix = if decimal.is_zero() {
-		0x80
-	} else if negative {
-		0x7F - scale
-	} else {
-		0x81 + scale
-	};
-	out[0] = prefix;
+	/// Encodes a Decimal to a fixed-width byte array where lexicographic order == numeric order
+	/// Returns a 16-byte array that preserves total ordering of all finite decimals
+	pub(crate) fn encode(dec: Decimal, external_marker: u8) -> [u8; 16] {
+		// Output
+		let mut out = [0u8; 16];
+		out[15] = external_marker;
 
-	// Negatives: invert the coefficient for total order
-	if negative && !decimal.is_zero() {
-		for i in 0..12 {
-			out[i + 1] = !coeff[i];
+		// fast-path zero so it sits between negatives and positives
+		if dec.is_zero() {
+			out[0] = Self::ZERO;
+			return out;
 		}
-	} else {
-		out[1..13].copy_from_slice(&coeff);
+
+		let neg = dec.is_sign_negative();
+		let y = dec.abs();
+
+		// Extract canonical (c, s). Ensure no trailing zeros in c.
+		let t = y.normalize(); // or `.normalized()`
+		let s = t.scale() as i32;
+		// coefficient (fits; decimal uses 96-bit integer coeff)
+		let c = t.mantissa() as u128;
+
+		let nd = Self::digits10(c);
+		debug_assert!((1..=29).contains(&nd), "dec: {dec} nd: {nd}");
+		let e = nd as i32 - s - 1;
+		debug_assert!((-128..=127).contains(&e));
+
+		// Bias exponent
+		let bex = (e + 128) as u8;
+
+		// Build fixed-D mantissa: M = c * 10^(D - nd)
+		let scale_up = (29 - nd) as usize;
+		debug_assert!(scale_up <= 28);
+		// Multiply by 10^k safely (k <= 28). Use pow10 table to avoid overflow loops.
+		let m = c.checked_mul(Self::POW10[scale_up]).expect("fits in 97 bits");
+
+		// Write positive form: [0]=0xFF, [1]=bex, [2..14]=BE(m), [15]=0
+		out[0] = Self::POSITIVE;
+		out[1] = bex;
+		// write 13-byte big-endian m
+		let tmp = m.to_be_bytes();
+		// take the lowest 13 bytes of the big-endian u128 (since m < 2^97)
+		out[2..15].copy_from_slice(&tmp[3..16]); // low 13 bytes (BE)
+
+		if neg {
+			// Invert bytes 0..14 to enter the negative region and reverse order
+			for b in &mut out[0..15] {
+				*b = !*b;
+			}
+		}
+
+		out
 	}
 
-	// Last byte: sign bit for positives/negatives or zero marker
-	// This isn't strictly necessary, but helps guarantee round-trip
-	out[13] = if negative && !decimal.is_zero() {
-		0x00
-	} else if decimal.is_zero() {
-		0x80
-	} else {
-		0xFF
-	};
-
-	out
-}
-
-pub(crate) fn decode_decimal_lex(data: [u8; 15]) -> Result<Decimal> {
-	let prefix = data[0];
-	let mut coeff = [0u8; 12];
-
-	let (negative, scale) = if prefix == 0x80 {
-		(false, 0) // zero
-	} else if prefix <= 0x7F {
-		(true, 0x7F - prefix)
-	} else {
-		(false, prefix - 0x81)
-	};
-
-	if prefix == 0x80 {
-		// Zero
-		return Ok(Decimal::ZERO);
-	} else if negative {
-		// Negatives: invert coefficient
-		for i in 0..12 {
-			coeff[i] = !data[i + 1];
+	// Count base-10 digits of a nonzero i128 (c fits in 96 bits, so i128 is fine).
+	fn digits10(mut x: u128) -> u32 {
+		let mut d = 0;
+		while x > 0 {
+			x /= 10;
+			d += 1;
 		}
-	} else {
-		coeff.copy_from_slice(&data[1..13]);
+		d
 	}
 
-	// Compose the bytes for Decimal::deserialize
-	let mut bytes = [0u8; 16];
-	bytes[0..12].copy_from_slice(&coeff);
-	bytes[12] = scale
-		| if negative {
-			0x80
+	/// Decodes a byte array back to a Decimal
+	pub(crate) fn decode(bytes: [u8; 16]) -> Decimal {
+		if bytes[0] == Self::ZERO {
+			return Decimal::ZERO;
+		}
+
+		let (neg, buf) = if bytes[0] == Self::POSITIVE {
+			(false, bytes)
 		} else {
-			0
+			// negative: invert 0..14 back to positive form
+			let mut b = bytes;
+			for i in 0..15 {
+				b[i] = !b[i];
+			}
+			(true, b)
 		};
-	// The rest are already zero
-	Ok(Decimal::deserialize(bytes))
+
+		let e = (buf[1] as i32) - 128;
+
+		// read 13-byte mantissa into u128
+		let mut be = [0u8; 16];
+		be[3..16].copy_from_slice(&buf[2..15]); // align low 13 bytes
+		let m = u128::from_be_bytes(be);
+
+		// Strip ALL trailing decimal zeros from M to get canonical c (no factor 10)
+		let mut v = m;
+		while v != 0 && v % 10 == 0 {
+			v /= 10;
+		}
+		let c = v; // canonical coefficient (no trailing zeros)
+		let nd = Self::digits10(c) as i32;
+
+		// Compute "virtual" scale; may be negative for integers with trailing zeros.
+		let s_i32 = nd - e - 1;
+
+		// Build a Decimal with a non-negative scale by shifting 10^{-s} into the coeff when needed.
+		let (coeff_i128, scale_u32) = if s_i32 >= 0 {
+			(c as i128, s_i32 as u32)
+		} else {
+			let k = (-s_i32) as usize; // how many 10s to move into the coefficient
+			let coeff = c
+				.checked_mul(Self::POW10[k])
+				.expect("coefficient overflow when adjusting negative scale");
+			(coeff as i128, 0u32)
+		};
+
+		let dec = Decimal::from_i128_with_scale(coeff_i128, scale_u32);
+		if neg {
+			-dec
+		} else {
+			dec
+		}
+	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use num_traits::FromPrimitive;
 	use rust_decimal::prelude::ToPrimitive;
+
+	fn test_cases() -> [Decimal; 15] {
+		[
+			Decimal::MIN,
+			Decimal::from(i64::MIN),
+			Decimal::from(-10),
+			Decimal::from_f64(-std::f64::consts::PI).unwrap(),
+			Decimal::from_f64(-3.14).unwrap(),
+			Decimal::NEGATIVE_ONE,
+			Decimal::ZERO,
+			Decimal::ONE,
+			Decimal::TWO,
+			Decimal::from_f64(3.14).unwrap(),
+			Decimal::from_f64(std::f64::consts::PI).unwrap(),
+			Decimal::ONE_HUNDRED,
+			Decimal::ONE_THOUSAND,
+			Decimal::from(i64::MAX),
+			Decimal::MAX,
+		]
+	}
+
+	#[test]
+	fn test_encode_decode_roundtrip() {
+		let cases = test_cases();
+		for (i, case) in cases.into_iter().enumerate() {
+			let encoded = DecimalLexEncoder::encode(case, 0);
+			let decoded = DecimalLexEncoder::decode(encoded);
+			assert_eq!(
+				case.normalize(),
+				decoded.normalize(),
+				"Roundtrip failed for {i}: {case} != {decoded}"
+			);
+		}
+	}
+
+	#[test]
+	fn test_lexicographic_ordering() {
+		let cases = test_cases();
+		for window in cases.windows(2) {
+			let n1 = &window[0];
+			let n2 = &window[1];
+			assert!(n1 < n2, "{n1:?} < {n2:?} (before serialization)");
+			let b1 = DecimalLexEncoder::encode(*n1, 0);
+			let b2 = DecimalLexEncoder::encode(*n2, 0);
+			assert!(b1 < b2, "{n1:?} < {n2:?} (after serialization) - {b1:?} < {b2:?}");
+		}
+	}
 
 	#[test]
 	fn test_decimal_ext_from_str_normalized() {
@@ -170,57 +289,5 @@ mod tests {
 		assert!(decimal.is_err());
 		let err = decimal.unwrap_err();
 		assert_eq!(err.to_string(), "Number has a high precision that can not be represented.");
-	}
-
-	#[test]
-	fn test_encode_decode_roundtrip() {
-		let test_cases = vec![
-			"0", "1", "-1", "123.456", "-123.456", "0.001", "-0.001", "1000000", "-1000000",
-			"123.000", // Trailing zeros
-			"0.100",   // Trailing zeros after decimal
-		];
-
-		for case in test_cases {
-			let original = Decimal::from_str(case).unwrap();
-			let encoded = encode_decimal_lex(original, 0);
-			let decoded = decode_decimal_lex(encoded).unwrap();
-
-			assert_eq!(
-				original.normalize(),
-				decoded.normalize(),
-				"Roundtrip failed for {}: {} != {}",
-				case,
-				original,
-				decoded
-			);
-		}
-	}
-
-	#[test]
-	fn test_lexicographic_ordering() {
-		let test_pairs = vec![
-			("0", "1"),
-			("-1", "0"),
-			("-1", "1"),
-			("123", "124"),
-			("123.4", "123.5"),
-			("-123.5", "-123.4"),
-			("0.001", "0.002"),
-		];
-
-		for (smaller, larger) in test_pairs {
-			let dec_smaller = Decimal::from_str(smaller).unwrap();
-			let dec_larger = Decimal::from_str(larger).unwrap();
-
-			let encoded_smaller = encode_decimal_lex(dec_smaller, 0);
-			let encoded_larger = encode_decimal_lex(dec_larger, 0);
-
-			assert!(
-				encoded_smaller < encoded_larger,
-				"Lexicographic ordering failed: {} should be < {} but encoded bytes don't reflect this",
-				smaller,
-				larger
-			);
-		}
 	}
 }

@@ -19,7 +19,7 @@ use std::ops::{self, Add, Neg};
 
 pub mod decimal;
 
-use crate::sql::number::decimal::{decode_decimal_lex, encode_decimal_lex};
+use crate::sql::number::decimal::DecimalLexEncoder;
 pub use decimal::DecimalExt;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
@@ -55,7 +55,7 @@ impl<'de> Deserialize<'de> for Number {
 	where
 		D: SerdeDeserializer<'de>,
 	{
-		let bytes = <[u8; 15]>::deserialize(deserializer)?;
+		let bytes = <[u8; 16]>::deserialize(deserializer)?;
 		Self::from_decimal_buf(bytes).map_err(serde::de::Error::custom)
 	}
 }
@@ -381,31 +381,35 @@ impl Number {
 	const NUMBER_MARKER_FLOAT_INFINITE_NAN: u8 = 67;
 	const NUMBER_MARKER_DECIMAL: u8 = 128;
 
-	pub(crate) fn to_decimal_buf(&self) -> Result<[u8; 15]> {
+	pub(crate) fn to_decimal_buf(&self) -> Result<[u8; 16]> {
 		match self {
-			Self::Int(v) => Ok(encode_decimal_lex(Decimal::from(*v), Self::NUMBER_MARKER_INT)),
+			Self::Int(v) => {
+				Ok(DecimalLexEncoder::encode(Decimal::from(*v), Self::NUMBER_MARKER_INT))
+			}
 			Self::Float(v) => {
 				// Handle extreme float values that can't be converted to Decimal
 				if v.is_infinite() {
 					if v.is_sign_positive() {
 						// Positive infinity - largest possible value
-						let mut buf = [0xFF; 15];
-						buf[14] = Self::NUMBER_MARKER_FLOAT_INFINITE_POSITIVE;
+						let mut buf = [0xFF; 16];
+						buf[15] = Self::NUMBER_MARKER_FLOAT_INFINITE_POSITIVE;
 						Ok(buf)
 					} else {
 						// Negative infinity - smallest possible value
-						let mut buf = [0x00; 15];
-						buf[14] = Self::NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE;
+						let mut buf = [0x00; 16];
+						buf[15] = Self::NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE;
 						Ok(buf)
 					}
 				} else if v.is_nan() {
 					// NaN - treat as largest value
-					let mut buf = [0xFF; 15];
-					buf[14] = Self::NUMBER_MARKER_FLOAT_INFINITE_NAN;
+					let mut buf = [0xFF; 16];
+					buf[15] = Self::NUMBER_MARKER_FLOAT_INFINITE_NAN;
 					Ok(buf)
 				} else {
 					match Decimal::from_f64(*v) {
-						Some(decimal) => Ok(encode_decimal_lex(decimal, Self::NUMBER_MARKER_FLOAT)),
+						Some(decimal) => {
+							Ok(DecimalLexEncoder::encode(decimal, Self::NUMBER_MARKER_FLOAT))
+						}
 						None => {
 							// Report error when Decimal::from_f64() fails
 							bail!("Failed to convert float {} to decimal", v)
@@ -413,23 +417,25 @@ impl Number {
 					}
 				}
 			}
-			Self::Decimal(v) => Ok(encode_decimal_lex(*v, Self::NUMBER_MARKER_DECIMAL)),
+			Self::Decimal(v) => Ok(DecimalLexEncoder::encode(*v, Self::NUMBER_MARKER_DECIMAL)),
 		}
 	}
 
-	pub(crate) fn from_decimal_buf(b: [u8; 15]) -> Result<Self> {
-		match b[14] {
-			Self::NUMBER_MARKER_INT => Ok(Number::Int(decode_decimal_lex(b)?.to_i64().unwrap())),
+	pub(crate) fn from_decimal_buf(b: [u8; 16]) -> Result<Self> {
+		match b[15] {
+			Self::NUMBER_MARKER_INT => {
+				Ok(Number::Int(DecimalLexEncoder::decode(b).to_i64().unwrap()))
+			}
 			Self::NUMBER_MARKER_FLOAT => {
 				// Decode as normal decimal and fail if it doesn't work
-				let decimal = decode_decimal_lex(b)?;
+				let decimal = DecimalLexEncoder::decode(b);
 				Ok(Number::Float(decimal.to_f64().unwrap()))
 			}
 			Self::NUMBER_MARKER_FLOAT_INFINITE_POSITIVE => Ok(Number::Float(f64::INFINITY)),
 			Self::NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE => Ok(Number::Float(f64::NEG_INFINITY)),
 			Self::NUMBER_MARKER_FLOAT_INFINITE_NAN => Ok(Number::Float(f64::NAN)),
-			Self::NUMBER_MARKER_DECIMAL => Ok(Number::Decimal(decode_decimal_lex(b)?)),
-			v => bail!("Invalid number variant: {v}"),
+			Self::NUMBER_MARKER_DECIMAL => Ok(Number::Decimal(DecimalLexEncoder::decode(b))),
+			v => bail!("Unknown number marker: {v}"),
 		}
 	}
 
@@ -1098,12 +1104,13 @@ mod tests {
 			let n1 = &window[0];
 			let n2 = &window[1];
 			assert!(n1 < n2, "{n1:?} < {n2:?} (before serialization)");
-			let v1: Vec<u8> = bincode::serialize(n1).unwrap();
-			let v2: Vec<u8> = bincode::serialize(n2).unwrap();
-			assert!(v1 < v2, "{n1:?} < {n2:?} (after serialization) - {v1:?} < {v2:?}");
-			let r1 = bincode::deserialize::<Number>(&v1).unwrap();
-			let r2 = bincode::deserialize::<Number>(&v2).unwrap();
-			assert!(r1.eq(&r2), "{r1:?} = {r2:?} (after deserialization) - {v1:?} < {v2:?}");
+			let b1 = n1.to_decimal_buf().unwrap();
+			let b2 = n2.to_decimal_buf().unwrap();
+			assert!(b1 < b2, "{n1:?} < {n2:?} (after serialization) - {b1:?} < {b2:?}");
+			let r1 = Number::from_decimal_buf(b1).unwrap();
+			let r2 = Number::from_decimal_buf(b2).unwrap();
+			assert!(r1.eq(n1), "{r1:?} = {n1:?} (after deserialization)");
+			assert!(r2.eq(n2), "{r2:?} = {n2:?} (after deserialization)");
 		}
 	}
 
