@@ -25,7 +25,7 @@ impl RemoveSequenceStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
 
-		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 
 		// Get the transaction
 		let txn = ctx.tx();

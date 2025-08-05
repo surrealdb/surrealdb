@@ -76,11 +76,11 @@ impl Document {
 		n: Option<Vec<Value>>,
 		rid: &Thing,
 	) -> Result<()> {
-		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 
 		#[cfg(not(target_family = "wasm"))]
 		let (o, n) = if let Some(ib) = ctx.get_index_builder() {
-			match ib.consume(ctx, (ns, db), ix, o, n, rid).await? {
+			match ib.consume(ctx, ns, db, ix, o, n, rid).await? {
 				// The index builder consumed the value, which means it is currently building the index asynchronously,
 				// we don't index the document and let the index builder do it later.
 				ConsumeResult::Enqueued => return Ok(()),
@@ -99,8 +99,8 @@ impl Document {
 			Index::Uniq => ic.index_unique(ctx).await?,
 			Index::Idx => ic.index_non_unique(ctx).await?,
 			Index::Search(p) => ic.index_search(stk, ctx, p).await?,
-			Index::FullText(p) => ic.index_fulltext(stk, ctx, p).await?,
-			Index::MTree(p) => ic.index_mtree(stk, ctx, p).await?,
+			Index::FullText(p) => ic.index_fulltext(stk, ctx, ns, db, p).await?,
+			Index::MTree(p) => ic.index_mtree(stk, ctx, ns, db, p).await?,
 			Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
 		}
 		Ok(())
@@ -417,9 +417,10 @@ impl<'a> IndexOperation<'a> {
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
+		ns: NamespaceId,
+		db: DatabaseId,
 		p: &FullTextParams,
 	) -> Result<()> {
-		let (ns, db) = ctx.get_ns_db_ids(self.opt).await?;
 		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name);
 		let tx = ctx.tx();
 		// Build a FullText instance
@@ -445,9 +446,8 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	async fn index_mtree(&mut self, stk: &mut Stk, ctx: &Context, p: &MTreeParams) -> Result<()> {
+	async fn index_mtree(&mut self, stk: &mut Stk, ctx: &Context, ns: NamespaceId, db: DatabaseId, p: &MTreeParams) -> Result<()> {
 		let txn = ctx.tx();
-		let (ns, db) = ctx.get_ns_db_ids(self.opt).await?;
 		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name);
 		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write).await?;
 		// Delete the old index data
@@ -462,7 +462,7 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	async fn index_hnsw(&mut self, ctx: &Context, p: &HnswParams) -> Result<()> {
-		let hnsw = ctx.get_index_stores().get_index_hnsw(ctx, self.opt, self.ix, p).await?;
+		let hnsw = ctx.get_index_stores().get_index_hnsw(ctx, self.ns, self.db, self.ix, p).await?;
 		let mut hnsw = hnsw.write().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {

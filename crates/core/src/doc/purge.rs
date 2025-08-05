@@ -46,7 +46,7 @@ impl Document {
 		// Get the record id
 		if let Some(rid) = &self.id {
 			// Get the namespace / database
-			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+			let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 			// Purge the record data
 			txn.del_record(ns, db, &rid.tb, &rid.id).await?;
 			// Purge the record edges

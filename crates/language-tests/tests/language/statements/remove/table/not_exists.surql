@@ -2,7 +2,11 @@
 [test]
 
 [[test.results]]
+value = 'NONE'
+
+[[test.results]]
 error = "The table 'foo' does not exist"
 
 */
-		REMOVE TABLE foo;
+DEFINE DB test;
+REMOVE TABLE foo;

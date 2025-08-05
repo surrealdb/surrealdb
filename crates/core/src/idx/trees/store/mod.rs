@@ -6,7 +6,6 @@ pub(crate) mod tree;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
-use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::Index;
 use crate::expr::index::HnswParams;
@@ -235,11 +234,11 @@ impl IndexStores {
 	pub(crate) async fn get_index_hnsw(
 		&self,
 		ctx: &Context,
-		opt: &Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ix: &DefineIndexStatement,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex> {
-		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 		self.0.hnsw_indexes.get(ctx, &ix.what, &ikb, p).await
 	}

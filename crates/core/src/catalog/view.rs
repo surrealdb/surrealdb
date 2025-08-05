@@ -1,6 +1,6 @@
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Fields, Groups, Tables, Value};
-use crate::sql::ToSql;
+use crate::sql::{ToSql, View};
 use revision::revisioned;
 
 use serde::{Deserialize, Serialize};
@@ -14,6 +14,17 @@ pub struct ViewDefinition {
 	pub what: Tables,
 	pub cond: Option<Cond>,
 	pub group: Option<Groups>,
+}
+
+impl ViewDefinition {
+    pub(crate) fn to_sql_definition(&self) -> View {
+        View {
+            expr: self.expr.clone().into(),
+            what: self.what.clone().into(),
+            cond: self.cond.clone().map(Into::into),
+            group: self.group.clone().map(Into::into),
+        }
+    }
 }
 
 impl ToSql for ViewDefinition {

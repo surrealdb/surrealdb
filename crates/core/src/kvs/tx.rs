@@ -1140,6 +1140,15 @@ impl Transaction {
 		}
 	}
 
+	pub async fn expect_ns_by_name(&self, ns: &str) -> Result<Arc<NamespaceDefinition>> {
+		match self.get_ns_by_name(ns).await? {
+			Some(val) => Ok(val),
+			None => anyhow::bail!(Error::NsNotFound {
+				name: ns.to_owned(),
+			}),
+		}
+	}
+
 	async fn put_ns(&self, ns: NamespaceDefinition) -> Result<Arc<NamespaceDefinition>> {
 		let key = crate::key::catalog::ns::new(&ns.name);
 		self.put(&key, &ns, None).await?;
@@ -1234,20 +1243,6 @@ impl Transaction {
 		}
 	}
 
-	pub async fn expect_ns_user(
-		&self,
-		ns: NamespaceId,
-		us: &str,
-	) -> Result<Arc<DefineUserStatement>> {
-		match self.get_ns_user(ns, us).await? {
-			Some(val) => Ok(val),
-			None => anyhow::bail!(Error::UserNsNotFound {
-				name: us.to_owned(),
-				ns: ns.to_string(),
-			}),
-		}
-	}
-
 	/// Retrieve a specific namespace access definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_ns_access(
@@ -1268,20 +1263,6 @@ impl Transaction {
 				self.cache.insert(qey, entr);
 				Ok(Some(val))
 			}
-		}
-	}
-
-	pub async fn expect_ns_access(
-		&self,
-		ns: NamespaceId,
-		na: &str,
-	) -> Result<Arc<DefineAccessStatement>> {
-		match self.get_ns_access(ns, na).await? {
-			Some(val) => Ok(val),
-			None => anyhow::bail!(Error::AccessNsNotFound {
-				ac: na.to_owned(),
-				ns: ns.to_string(),
-			}),
 		}
 	}
 
@@ -1387,22 +1368,6 @@ impl Transaction {
 		}
 	}
 
-	pub async fn expect_db_user(
-		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		us: &str,
-	) -> Result<Arc<DefineUserStatement>> {
-		match self.get_db_user(ns, db, us).await? {
-			Some(val) => Ok(val),
-			None => anyhow::bail!(Error::UserDbNotFound {
-				name: us.to_owned(),
-				ns: ns.to_string(),
-				db: db.to_string(),
-			}),
-		}
-	}
-
 	/// Retrieve a specific database access definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_access(
@@ -1424,22 +1389,6 @@ impl Transaction {
 				self.cache.insert(qey, entr);
 				Ok(Some(val))
 			}
-		}
-	}
-
-	pub async fn expect_db_access(
-		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		da: &str,
-	) -> Result<Arc<DefineAccessStatement>> {
-		match self.get_db_access(ns, db, da).await? {
-			Some(val) => Ok(val),
-			None => anyhow::bail!(Error::AccessDbNotFound {
-				ac: da.to_owned(),
-				ns: ns.to_string(),
-				db: db.to_string(),
-			}),
 		}
 	}
 
@@ -1964,6 +1913,26 @@ impl Transaction {
 		self.get_or_add_tb_upwards(ns, db, tb, strict, true).await
 	}
 
+	pub async fn check_ns_db_tb(&self, ns: &str, db: &str, tb: &str) -> Result<()> {
+		let db = match self.get_db_by_name(ns, db).await? {
+			Some(db) => db,
+			None => {
+				return Err(Error::DbNotFound {
+					name: db.to_owned(),
+				}
+				.into());
+			}
+		};
+
+		if self.get_tb(db.namespace_id, db.database_id, tb).await?.is_none() {
+			return Err(Error::TbNotFound {
+				name: tb.to_owned(),
+			}
+			.into());
+		}
+		Ok(())
+	}
+
 	/// Clears all keys from the transaction cache.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	#[inline(always)]
@@ -1983,15 +1952,9 @@ impl Transaction {
 		strict: bool,
 	) -> Result<Arc<NamespaceDefinition>> {
 		match self.get_ns_by_name(ns).await? {
-			Some(val) => {
-				println!("GOT NS: {:?}\n\n\n", val);
-				eprintln!("GOT NS: {:?}\n\n\n", val);
-				Ok(val)
-			},
+			Some(val) => Ok(val),
 			// The entry is not in the database
 			None => {
-				println!("NO NS: {ns} {strict}");
-				eprintln!("NO NS: {ns} {strict}");
 				if strict {
 					return Err(Error::NsNotFound {
 						name: ns.to_owned(),
@@ -2001,7 +1964,7 @@ impl Transaction {
 
 				let ns = NamespaceDefinition {
 					namespace_id: self.lock().await.get_next_ns_id().await?,
-					name: ns.to_string(),
+					name: ns.to_owned(),
 					comment: None,
 				};
 

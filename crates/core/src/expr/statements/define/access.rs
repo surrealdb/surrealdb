@@ -77,12 +77,12 @@ impl DefineAccessStatement {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if access method already exists
-				if txn.get_root_access(&self.name).await.is_ok() {
+				if let Some(access) = txn.get_root_access(&self.name).await? {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else if !self.overwrite && !opt.import {
 						bail!(Error::AccessRootAlreadyExists {
-							ac: self.name.to_string(),
+							ac: access.name.to_string(),
 						});
 					}
 				}
@@ -109,12 +109,12 @@ impl DefineAccessStatement {
 				let txn = ctx.tx();
 				// Check if the definition exists
 				let ns = ctx.get_ns_id(opt).await?;
-				if txn.get_ns_access(ns, &self.name).await.is_ok() {
+				if let Some(access) = txn.get_ns_access(ns, &self.name).await? {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else if !self.overwrite && !opt.import {
 						bail!(Error::AccessNsAlreadyExists {
-							ac: self.name.to_string(),
+							ac: access.name.to_string(),
 							ns: opt.ns()?.into(),
 						});
 					}
@@ -143,13 +143,14 @@ impl DefineAccessStatement {
 				let txn = ctx.tx();
 				// Check if the definition exists
 				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-				if txn.get_db_access(ns, db, &self.name).await.is_ok() {
+				if let Some(access) = txn.get_db_access(ns, db, &self.name).await? {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else if !self.overwrite && !opt.import {
 						let (ns, db) = opt.ns_db()?;
 						bail!(Error::AccessDbAlreadyExists {
-							ac: self.name.to_string(),
+							ac: access.name.to_string(),
+							// TODO: This is wrong, ns is not a string.
 							ns: ns.to_string(),
 							db: db.to_string(),
 						});

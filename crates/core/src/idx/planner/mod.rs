@@ -6,7 +6,6 @@ pub(crate) mod plan;
 pub(in crate::idx) mod rewriter;
 pub(in crate::idx) mod tree;
 
-use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::expr::with::With;
@@ -28,8 +27,6 @@ use std::sync::atomic::{self, AtomicU8};
 pub(crate) struct StatementContext<'a> {
 	pub(crate) ctx: &'a Context,
 	pub(crate) opt: &'a Options,
-	pub(crate) ns: NamespaceId,
-	pub(crate) db: DatabaseId,
 	pub(crate) stm: &'a Statement<'a>,
 	pub(crate) fields: Option<&'a Fields>,
 	pub(crate) with: Option<&'a With>,
@@ -74,8 +71,6 @@ impl<'a> StatementContext<'a> {
 	pub(crate) fn new(
 		ctx: &'a Context,
 		opt: &'a Options,
-		ns: NamespaceId,
-		db: DatabaseId,
 		stm: &'a Statement<'a>,
 	) -> Result<Self> {
 		let is_perm = opt.check_perms(stm.into())?;
@@ -83,8 +78,6 @@ impl<'a> StatementContext<'a> {
 			ctx,
 			opt,
 			stm,
-			ns,
-			db,
 			fields: stm.expr(),
 			with: stm.with(),
 			order: stm.order(),
@@ -99,7 +92,8 @@ impl<'a> StatementContext<'a> {
 			return Ok(GrantedPermission::Full);
 		}
 		// Get the table for this planner
-		match self.ctx.tx().get_tb(self.ns, self.db, tb).await? {
+		let (ns, db) = self.ctx.get_ns_db_ids_ro(self.opt).await?;
+		match self.ctx.tx().get_tb(ns, db, tb).await? {
 			Some(table) => {
 				// TODO(tobiemh): we should really
 				// not even get here if the table

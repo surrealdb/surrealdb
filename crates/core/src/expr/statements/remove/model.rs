@@ -28,7 +28,7 @@ impl RemoveModelStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the defined model
-		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 		let ml = match txn.get_db_model(ns, db, &self.name, &self.version).await? {
 			Some(x) => x,
 			None => {

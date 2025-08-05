@@ -549,10 +549,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				}
 			};
 			// Get the namespace user
-			let de = tx.expect_ns_user(ns_def.namespace_id, id).await.map_err(|e| {
+			let de = tx.get_ns_user(ns_def.namespace_id, id).await.map_err(|e| {
 				debug!("Error while authenticating to namespace `{ns}`: {e}");
 				Error::InvalidAuth
-			})?;
+			})?.ok_or(Error::InvalidAuth)?;
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Check the algorithm
@@ -729,10 +729,10 @@ pub async fn verify_ns_creds(
 	};
 
 	// Fetch the specified user from storage
-	let user = tx.expect_ns_user(ns_def.namespace_id, user).await.map_err(|e| {
+	let user = tx.get_ns_user(ns_def.namespace_id, user).await.map_err(|e| {
 		debug!("Error retrieving user for authentication to namespace `{ns}`: {e}");
 		Error::InvalidAuth
-	})?;
+	})?.ok_or(Error::InvalidAuth)?;
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
 	// Verify the specified password for the user
@@ -763,10 +763,10 @@ pub async fn verify_db_creds(
 	};
 	// Fetch the specified user from storage
 	let user =
-		tx.expect_db_user(db_def.namespace_id, db_def.database_id, user).await.map_err(|e| {
+		tx.get_db_user(db_def.namespace_id, db_def.database_id, user).await.map_err(|e| {
 			debug!("Error retrieving user for authentication to database `{ns}/{db}`: {e}");
 			Error::InvalidAuth
-		})?;
+		})?.ok_or(Error::InvalidAuth)?;
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
 	// Verify the specified password for the user

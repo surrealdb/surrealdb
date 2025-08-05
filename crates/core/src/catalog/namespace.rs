@@ -54,11 +54,12 @@ impl_kv_value_revisioned!(NamespaceDefinition);
 
 impl ToSql for NamespaceDefinition {
 	fn to_sql(&self) -> String {
-		format!(
-			"DEFINE NAMESPACE {} {}",
-			self.name,
-			self.comment.as_ref().map(|c| format!("COMMENT {}", c)).unwrap_or_default()
-		)
+		let mut out = String::new();
+		out.push_str(&format!("DEFINE NAMESPACE {}", self.name));
+		if let Some(comment) = &self.comment {
+			out.push_str(&format!(" COMMENT {comment}"));
+		}
+		out
 	}
 }
 

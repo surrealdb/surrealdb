@@ -106,7 +106,7 @@ impl Collected {
 				v,
 				w,
 				o,
-			} => Self::process_relatable(ctx, opt, txn, f, v, w, o, rid_only).await,
+			} => Self::process_relatable(opt, txn, f, v, w, o, rid_only).await,
 			Self::Thing(thing) => Self::process_thing(ctx, opt, txn, thing, rid_only).await,
 			Self::Yield(table) => Self::process_yield(opt, txn, table, rid_only).await,
 			Self::Value(value) => Ok(Self::process_value(value)),
@@ -132,7 +132,7 @@ impl Collected {
 		let val = if rid_only {
 			Arc::new(Value::Null)
 		} else {
-			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+			let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 			txn.get_record(ns, db, gra.ft, &gra.fk, None).await?
 		};
 		let rid = Thing::from((gra.ft, gra.fk));
@@ -180,7 +180,6 @@ impl Collected {
 	}
 
 	async fn process_relatable(
-		ctx: &Context,
 		opt: &Options,
 		txn: &Transaction,
 		f: Thing,
@@ -195,11 +194,9 @@ impl Collected {
 		} else {
 			// Check that the table exists
 			let (ns, db) = opt.ns_db()?;
-			txn.ensure_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
-
+			let tb = txn.ensure_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
 			// Fetch the data from the store
-			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-			let val = txn.get_record(ns, db, &v.tb, &v.id, None).await?;
+			let val = txn.get_record(tb.namespace_id, tb.database_id, &tb.name, &v.id, None).await?;
 			// Create a new operable value
 			Operable::Relate(f, val, w, o.map(|v| v.into()))
 		};
@@ -226,11 +223,10 @@ impl Collected {
 			Arc::new(Value::Null)
 		} else {
 			// Check that the table exists
-			let (ns, db) = opt.ns_db()?;
-			txn.ensure_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
+			let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
+			let tb = txn.expect_tb(ns, db, &v.tb).await?;
 			// Fetch the data from the store
-			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-			txn.get_record(ns, db, &v.tb, &v.id, opt.version).await?
+			txn.get_record(tb.namespace_id, tb.database_id, &tb.name, &v.id, opt.version).await?
 		};
 		// Parse the data from the store
 		let val = Operable::Value(val);
@@ -256,7 +252,7 @@ impl Collected {
 		if !rid_only {
 			// Check that the table exists
 			let (ns, db) = opt.ns_db()?;
-			txn.ensure_ns_db_tb(ns, db, &v, opt.strict).await?;
+			txn.check_ns_db_tb(ns, db, &v).await?;
 		}
 		// Pass the value through
 		let pro = Processed {
@@ -290,7 +286,7 @@ impl Collected {
 		if !rid_only {
 			// Check that the table exists
 			let (ns, db) = opt.ns_db()?;
-			txn.ensure_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
+			txn.check_ns_db_tb(ns, db, &v.tb).await?;
 		}
 		// Process the document record
 		let pro = Processed {
@@ -314,7 +310,7 @@ impl Collected {
 		if !rid_only {
 			// Check that the table exists
 			let (ns, db) = opt.ns_db()?;
-			txn.ensure_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
+			txn.check_ns_db_tb(ns, db, &v.tb).await?;
 		}
 		// Process the document record
 		let pro = Processed {
@@ -588,9 +584,9 @@ pub(super) trait Collector {
 		let txn = ctx.tx();
 		// Check that the table exists
 		let (ns, db) = opt.ns_db()?;
-		txn.ensure_ns_db_tb(ns, db, &v.0, opt.strict).await?;
+		txn.check_ns_db_tb(ns, db, &v.0).await?;
 		// Prepare the start and end keys
-		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 		let beg = thing::prefix(ns, db, v)?;
 		let end = thing::suffix(ns, db, v)?;
 		// Optionally skip keys
@@ -629,9 +625,9 @@ pub(super) trait Collector {
 		let txn = ctx.tx();
 		// Check that the table exists
 		let (ns, db) = opt.ns_db()?;
-		txn.ensure_ns_db_tb(ns, db, &v, opt.strict).await?;
+		txn.check_ns_db_tb(ns, db, &v).await?;
 		// Prepare the start and end keys
-		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 		let beg = thing::prefix(ns, db, v)?;
 		let end = thing::suffix(ns, db, v)?;
 		// Optionally skip keys
@@ -666,9 +662,9 @@ pub(super) trait Collector {
 		let txn = ctx.tx();
 		// Check that the table exists
 		let (ns, db) = opt.ns_db()?;
-		txn.ensure_ns_db_tb(ns, db, v, opt.strict).await?;
+		txn.check_ns_db_tb(ns, db, &v.0).await?;
 		// Prepare the start and end keys
-		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 		let beg = thing::prefix(ns, db, v)?;
 		let end = thing::suffix(ns, db, v)?;
 		// Create a new iterable range
@@ -688,9 +684,9 @@ pub(super) trait Collector {
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		// Check that the table exists
 		let (ns, db) = opt.ns_db()?;
-		txn.ensure_ns_db_tb(ns, db, tb, opt.strict).await?;
+		txn.check_ns_db_tb(ns, db, tb).await?;
 		// Prepare the range start key
-		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 		let beg = match &r.beg {
 			Bound::Unbounded => thing::prefix(ns, db, tb)?,
 			Bound::Included(v) => thing::new(ns, db, tb, v).encode_key()?,
@@ -811,7 +807,7 @@ pub(super) trait Collector {
 
 	async fn collect_edges(&mut self, ctx: &Context, opt: &Options, e: Edges) -> Result<()> {
 		// Pull out options
-		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 		let tb = &e.from.tb;
 		let id = &e.from.id;
 		// Fetch start and end key pairs
@@ -886,9 +882,9 @@ pub(super) trait Collector {
 	) -> Result<()> {
 		// Check that the table exists
 		let (ns, db) = opt.ns_db()?;
-		ctx.tx().ensure_ns_db_tb(ns, db, &table.0, opt.strict).await?;
+		ctx.tx().check_ns_db_tb(ns, db, &table.0).await?;
 		if let Some(exe) = ctx.get_query_executor() {
-			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+			let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 			if let Some(iterator) = exe.new_iterator(ns, db, irf).await? {
 				let txn = ctx.tx();
 				match rs {
@@ -986,7 +982,7 @@ impl Iterable {
 		thg: &Thing,
 	) -> Result<Arc<Value>> {
 		// Fetch and parse the data from the store
-		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 		let val = txn.get_record(ns, db, &thg.tb, &thg.id, None).await?;
 		// Return the result
 		Ok(val)

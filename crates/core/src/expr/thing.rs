@@ -143,7 +143,7 @@ impl Thing {
 		ft: Option<&Table>,
 		ff: Option<&Idiom>,
 	) -> Result<Vec<Thing>> {
-		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 
 		let (prefix, suffix) = match (ft, ff) {
 			(Some(ft), Some(ff)) => {

@@ -640,24 +640,25 @@ pub async fn signin_bearer(
 		// Fetch the specified user from storage.
 		let user = match (&ns, &db) {
 			(Some((ns, _)), Some((db, _))) => {
-				tx.expect_db_user(*ns, *db, user).await.map_err(|e| {
+				tx.get_db_user(*ns, *db, user).await.map_err(|e| {
 					debug!("Error retrieving user for bearer access to database `{ns}/{db}`: {e}");
 					// Return opaque error to avoid leaking grant subject existence.
 					Error::InvalidAuth
 				})
 			}
-			(Some((ns, _)), None) => tx.expect_ns_user(*ns, user).await.map_err(|e| {
+			(Some((ns, _)), None) => tx.get_ns_user(*ns, user).await.map_err(|e| {
 				debug!("Error retrieving user for bearer access to namespace `{ns}`: {e}");
 				// Return opaque error to avoid leaking grant subject existence.
 				Error::InvalidAuth
 			}),
-			(None, None) => tx.expect_root_user(user).await.map_err(|e| {
+			(None, None) => tx.get_root_user(user).await.map_err(|e| {
 				debug!("Error retrieving user for bearer access to root: {e}");
 				// Return opaque error to avoid leaking grant subject existence.
 				Error::InvalidAuth
 			}),
 			(None, Some(_)) => bail!(Error::NsEmpty),
-		}?;
+		}?.ok_or(Error::InvalidAuth)?;
+		
 		// Ensure that the transaction is cancelled.
 		tx.cancel().await?;
 		user.roles.clone()

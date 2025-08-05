@@ -186,8 +186,7 @@ impl<'a> IndexOperation<'a> {
 		p: &FullTextParams,
 		require_compaction: &AtomicBool,
 	) -> Result<()> {
-		let (ns, db) = self.ctx.get_ns_db_ids(self.opt).await?;
-		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name);
+		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.what, &self.ix.name);
 		let mut rc = false;
 		// Build a FullText instance
 		let s =
@@ -216,8 +215,7 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_mtree(&mut self, stk: &mut Stk, p: &MTreeParams) -> Result<()> {
 		let txn = self.ctx.tx();
-		let (ns, db) = self.ctx.get_ns_db_ids(self.opt).await?;
-		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name);
+		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.what, &self.ix.name);
 		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write).await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
@@ -233,7 +231,7 @@ impl<'a> IndexOperation<'a> {
 	async fn index_hnsw(&mut self, p: &HnswParams) -> Result<()> {
 		let txn = self.ctx.tx();
 		let hnsw =
-			self.ctx.get_index_stores().get_index_hnsw(self.ctx, self.opt, self.ix, p).await?;
+			self.ctx.get_index_stores().get_index_hnsw(self.ctx, self.ns, self.db, self.ix, p).await?;
 		let mut hnsw = hnsw.write().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {

@@ -41,12 +41,12 @@ impl DefineBucketStatement {
 		let txn = ctx.tx();
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
-		if txn.get_db_bucket(ns, db, &self.name).await.is_ok() {
+		if let Some(bucket) = txn.get_db_bucket(ns, db, &self.name).await? {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite && !opt.import {
 				bail!(Error::BuAlreadyExists {
-					value: self.name.to_string(),
+					value: bucket.name.to_string(),
 				});
 			}
 		}

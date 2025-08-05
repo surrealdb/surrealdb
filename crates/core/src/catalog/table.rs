@@ -1,7 +1,7 @@
 use crate::{
 	catalog::{DatabaseId, NamespaceId},
 	kvs::impl_kv_value_revisioned,
-	sql::ToSql,
+	sql::{statements::DefineTableStatement, ToSql},
 };
 use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
@@ -86,7 +86,7 @@ impl TableDefinition {
 			permissions: Permissions::default(),
 			changefeed: None,
 			comment: None,
-			kind: TableKind::Normal,
+			kind: TableKind::default(),
 			cache_fields_ts: now,
 			cache_events_ts: now,
 			cache_tables_ts: now,
@@ -107,11 +107,31 @@ impl TableDefinition {
 	pub fn allows_relation(&self) -> bool {
 		matches!(self.kind, TableKind::Relation(_) | TableKind::Any)
 	}
+
+    fn to_sql_definition(&self) -> DefineTableStatement {
+        DefineTableStatement {
+            id: Some(self.table_id.0),
+            name: self.name.clone().into(),
+            drop: self.drop,
+            full: self.schemafull,
+            view: self.view.clone().map(|v| v.to_sql_definition()),
+            permissions: self.permissions.clone().into(),
+            changefeed: self.changefeed.clone().map(|v| v.into()),
+            comment: self.comment.clone().map(|v| v.into()),
+            if_not_exists: false,
+            kind: self.kind.clone().into(),
+            overwrite: false,
+            cache_fields_ts: self.cache_fields_ts,
+            cache_events_ts: self.cache_events_ts,
+            cache_tables_ts: self.cache_tables_ts,
+            cache_indexes_ts: self.cache_indexes_ts,
+        }
+    }
 }
 
 impl ToSql for TableDefinition {
 	fn to_sql(&self) -> String {
-		format!("DEFINE TABLE {} {}", self.name, self.kind.to_sql())
+		self.to_sql_definition().to_string()
 	}
 }
 

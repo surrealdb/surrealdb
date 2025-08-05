@@ -13,7 +13,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, databases: {  }, users: {  } }"
+error = "The namespace 'TEST' does not exist"
 */
 
 

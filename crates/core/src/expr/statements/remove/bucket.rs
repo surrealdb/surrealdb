@@ -26,7 +26,7 @@ impl RemoveBucketStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the definition
-		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 		let Some(bu) = txn.get_db_bucket(ns, db, &self.name).await? else {
 			if self.if_exists {
 				return Ok(Value::None);

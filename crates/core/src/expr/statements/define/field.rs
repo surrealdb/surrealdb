@@ -81,12 +81,12 @@ impl DefineFieldStatement {
 		// Get the name of the field
 		let fd = self.name.to_string();
 		// Check if the definition exists
-		if txn.get_tb_field(ns, db, &self.what, &fd).await.is_ok() {
+		if let Some(fd) = txn.get_tb_field(ns, db, &self.what, &fd).await? {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite && !opt.import {
 				bail!(Error::FdAlreadyExists {
-					name: fd,
+					name: fd.name.to_string(),
 				});
 			}
 		}
@@ -98,7 +98,6 @@ impl DefineFieldStatement {
 
 		// Process the statement
 		let key = crate::key::table::fd::new(ns, db, &tb.name, &fd);
-
 		txn.set(
 			&key,
 			&DefineFieldStatement {

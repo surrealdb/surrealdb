@@ -56,11 +56,12 @@ impl_kv_value_revisioned!(DatabaseDefinition);
 
 impl ToSql for DatabaseDefinition {
 	fn to_sql(&self) -> String {
-		format!(
-			"DEFINE DATABASE {} {}",
-			self.name,
-			self.comment.as_ref().map(|c| format!("COMMENT {}", c)).unwrap_or_default()
-		)
+		let mut s = String::new();
+		s.push_str(&format!("DEFINE DATABASE {}", self.name));
+		if let Some(comment) = &self.comment {
+			s.push_str(&format!(" COMMENT {}", comment));
+		}
+		s
 	}
 }
 

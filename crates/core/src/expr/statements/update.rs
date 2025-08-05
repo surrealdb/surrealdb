@@ -56,8 +56,7 @@ impl UpdateStatement {
 		// Get a query planner
 		let mut planner = QueryPlanner::new();
 
-		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-		let stm_ctx = StatementContext::new(&ctx, opt, ns, db, &stm)?;
+		let stm_ctx = StatementContext::new(&ctx, opt, &stm)?;
 		// Loop over the update targets
 		for w in self.what.0.iter() {
 			let v = w.compute(stk, &ctx, opt, doc).await.catch_return()?;

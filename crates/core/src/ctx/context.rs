@@ -267,15 +267,45 @@ impl MutableContext {
 		Ok(x)
 	}
 
+	/// Get the namespace id for the current context.
+	/// If the namespace does not exist, it will be try to be created based on the `strict` option.
 	pub(crate) async fn get_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
 		let ns = opt.ns()?;
 		let ns_def = self.tx().get_or_add_ns(ns, opt.strict).await?;
 		Ok(ns_def.namespace_id)
 	}
 
+	/// Get the namespace id for the current context.
+	/// If the namespace does not exist, it will return an error.
+	pub(crate) async fn get_ns_id_ro(&self, opt: &Options) -> Result<NamespaceId> {
+		let ns = opt.ns()?;
+		let Some(ns_def) = self.tx().get_ns_by_name(ns).await? else {
+			return Err(Error::NsNotFound {
+				name: ns.to_string(),
+			}
+			.into());
+		};
+		Ok(ns_def.namespace_id)
+	}
+
+	/// Get the namespace and database ids for the current context.
+	/// If the namespace or database does not exist, it will be try to be created based on the `strict` option.
 	pub(crate) async fn get_ns_db_ids(&self, opt: &Options) -> Result<(NamespaceId, DatabaseId)> {
 		let (ns, db) = opt.ns_db()?;
 		let db_def = self.tx().ensure_ns_db(ns, db, opt.strict).await?;
+		Ok((db_def.namespace_id, db_def.database_id))
+	}
+
+	/// Get the namespace and database ids for the current context.
+	/// If the namespace or database does not exist, it will return an error.
+	pub(crate) async fn get_ns_db_ids_ro(&self, opt: &Options) -> Result<(NamespaceId, DatabaseId)> {
+		let (ns, db) = opt.ns_db()?;
+		let Some(db_def) = self.tx().get_db_by_name(ns, db).await? else {
+			return Err(Error::DbNotFound {
+				name: db.to_string(),
+			}
+			.into());
+		};
 		Ok((db_def.namespace_id, db_def.database_id))
 	}
 

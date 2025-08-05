@@ -61,6 +61,7 @@ impl RemoveAccessStatement {
 					if self.if_exists {
 						return Ok(Value::None);
 					} else {
+						let ns = opt.ns()?;
 						return Err(anyhow::Error::new(Error::AccessNsNotFound {
 							ac: self.name.to_raw(),
 							ns: ns.to_string(),
@@ -83,11 +84,12 @@ impl RemoveAccessStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Get the definition
-				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+				let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 				let Some(ac) = txn.get_db_access(ns, db, &self.name).await? else {
 					if self.if_exists {
 						return Ok(Value::None);
 					} else {
+						let (ns, db) = opt.ns_db()?;
 						return Err(anyhow::Error::new(Error::AccessDbNotFound {
 							ac: self.name.to_raw(),
 							ns: ns.to_string(),

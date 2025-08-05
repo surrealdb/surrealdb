@@ -160,7 +160,7 @@ impl InnerQueryExecutor {
 							}
 						}
 						Entry::Vacant(e) => {
-							let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+							let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 							let ix: &DefineIndexStatement = e.key();
 							let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 							let si = SearchIndex::new(
@@ -201,7 +201,7 @@ impl InnerQueryExecutor {
 							}
 						}
 						Entry::Vacant(e) => {
-							let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+							let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 							let ix: &DefineIndexStatement = e.key();
 							let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 							let ft = FullTextIndex::new(
@@ -252,7 +252,7 @@ impl InnerQueryExecutor {
 								}
 							}
 							Entry::Vacant(e) => {
-								let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+								let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 								let ix: &DefineIndexStatement = e.key();
 								let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 								let tx = ctx.tx();
@@ -294,8 +294,9 @@ impl InnerQueryExecutor {
 								}
 							}
 							Entry::Vacant(e) => {
+								let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 								let hi =
-									ctx.get_index_stores().get_index_hnsw(ctx, opt, ixr, p).await?;
+									ctx.get_index_stores().get_index_hnsw(ctx, ns, db, ixr, p).await?;
 								// Ensure the local HNSW index is up to date with the KVS
 								hi.write().await.check_state(&ctx.tx()).await?;
 								// Now we can execute the request

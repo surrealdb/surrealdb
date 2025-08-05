@@ -28,7 +28,7 @@ impl RemoveIndexStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 		// Get the transaction
 		let txn = ctx.tx();
 		// Clear the index store cache

@@ -45,7 +45,7 @@ pub async fn invoke(
 		(Default::default(), Method::Get, Default::default(), Default::default())
 	};
 
-	let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+	let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 	let apis = ctx.tx().all_db_apis(ns, db).await?;
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 

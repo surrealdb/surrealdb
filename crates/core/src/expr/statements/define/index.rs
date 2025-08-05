@@ -53,15 +53,11 @@ impl DefineIndexStatement {
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
-		// Get the NS and DB
-		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-
 		// Fetch the transaction
 		let txn = ctx.tx();
-		let tb = {
-			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?
-		};
+
+		let (ns, db) = opt.ns_db()?;
+		let tb = txn.ensure_ns_db_tb(ns, db, &self.what, opt.strict).await?;
 
 		// Check if the definition exists
 		if txn.get_tb_index(tb.namespace_id, tb.database_id, &tb.name, &self.name).await.is_ok() {
@@ -75,10 +71,19 @@ impl DefineIndexStatement {
 			// Clear the index store cache
 			#[cfg(not(target_family = "wasm"))]
 			ctx.get_index_stores()
-				.index_removed(ctx.get_index_builder(), &txn, ns, db, &self.what, &self.name)
+				.index_removed(
+					ctx.get_index_builder(),
+					&txn,
+					tb.namespace_id,
+					tb.database_id,
+					&tb.name,
+					&self.name,
+				)
 				.await?;
 			#[cfg(target_family = "wasm")]
-			ctx.get_index_stores().index_removed(&txn, ns, db, &self.what, &self.name).await?;
+			ctx.get_index_stores()
+				.index_removed(&txn, tb.namespace_id, tb.database_id, &tb.name, &self.name)
+				.await?;
 		}
 
 		// If the table is schemafull, ensure that the fields exist.
@@ -88,8 +93,15 @@ impl DefineIndexStatement {
 				let Some(Part::Field(first)) = idiom.0.first() else {
 					continue;
 				};
-				txn.get_tb_field(tb.namespace_id, tb.database_id, &self.what, &first.to_string())
-					.await?;
+				if txn
+					.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, &first.to_string())
+					.await?
+					.is_none()
+				{
+					bail!(Error::FdNotFound {
+						name: first.to_string(),
+					});
+				}
 			}
 		}
 
@@ -177,7 +189,7 @@ impl DefineIndexStatement {
 		_doc: Option<&CursorDoc>,
 		blocking: bool,
 	) -> Result<()> {
-		let (ns, db) = ctx.get_ns_db_ids(&opt).await?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(&opt).await?;
 		let rcv = ctx
 			.get_index_builder()
 			.ok_or_else(|| Error::unreachable("No Index Builder"))?

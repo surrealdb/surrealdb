@@ -221,7 +221,8 @@ impl IndexBuilder {
 	pub(crate) async fn consume(
 		&self,
 		ctx: &Context,
-		(ns, db): (NamespaceId, DatabaseId),
+		ns: NamespaceId,
+		db: DatabaseId,
 		ix: &DefineIndexStatement,
 		old_values: Option<Vec<Value>>,
 		new_values: Option<Vec<Value>>,
@@ -414,19 +415,18 @@ impl Building {
 	}
 
 	async fn run(&self) -> Result<()> {
-		let (ns, db) = self.ctx.get_ns_db_ids(&self.opt).await?;
 		// Remove the index data
 		{
 			self.set_status(BuildingStatus::Cleaning).await;
 			let ctx = self.new_write_tx_ctx().await?;
-			let key = crate::key::index::all::new(ns, db, self.ikb.table(), self.ikb.index());
+			let key = crate::key::index::all::new(self.ns, self.db, self.ikb.table(), self.ikb.index());
 			let tx = ctx.tx();
 			tx.delp(&key).await?;
 			tx.commit().await?;
 		}
 		// First iteration, we index every key
-		let beg = thing::prefix(ns, db, self.ikb.table())?;
-		let end = thing::suffix(ns, db, self.ikb.table())?;
+		let beg = thing::prefix(self.ns, self.db, self.ikb.table())?;
+		let end = thing::suffix(self.ns, self.db, self.ikb.table())?;
 		let mut next = Some(beg..end);
 		let mut initial_count = 0;
 		// Set the initial status
