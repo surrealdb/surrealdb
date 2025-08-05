@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use rust_decimal::Decimal;
+use crate::err::Error;
 
 /// A trait to extend the Decimal type with additional functionality.
 pub trait DecimalExt {
@@ -150,7 +151,10 @@ impl DecimalLexEncoder {
 		// Extract digits directly in most significant first order
 		// by using powers of 10 to extract from left to right
 		for (i, digit) in digits.iter_mut().enumerate().take(digit_count) {
-			let power = Self::POW10[digit_count - 1 - i];
+			let power_index = digit_count - 1 - i;
+			// This should never happen with valid input, but check bounds for safety
+			debug_assert!(power_index < Self::POW10.len());
+			let power = Self::POW10[power_index];
 			*digit = (value / power) as u8;
 			value %= power;
 		}
@@ -224,13 +228,13 @@ impl DecimalLexEncoder {
 	}
 
 	/// Unpacks nibble-encoded digits and reconstructs the mantissa, returning both mantissa and digit count
-	fn unpack_mantissa(bytes: &[u8], is_negative: bool) -> (u128, i32) {
+	fn unpack_mantissa(bytes: &[u8], is_negative: bool) -> Result<(u128, i32)> {
 		let mut idx = 2usize; // Start after sign and exponent bytes
 		let mut mantissa: u128 = 0; // Accumulator for the mantissa
 		let mut digit_count: i32 = 0; // Track digits as we unpack them
 
 		loop {
-			let byte = *bytes.get(idx).expect("truncated");
+ 		let byte = *bytes.get(idx).ok_or_else(|| Error::Serialization(format!("Truncated buffer at index {}", idx)))?;
 			idx += 1;
 
 			// For negative numbers, complement the byte to reverse the encoding transformation
@@ -250,7 +254,10 @@ impl DecimalLexEncoder {
 			let digit = (hi - 1) as u128;
 			debug_assert!(digit < 10);
 			// Accumulate digit into mantissa (shift left by multiplying by 10)
-			mantissa = mantissa * 10 + digit;
+			mantissa = mantissa
+				.checked_mul(10)
+				.and_then(|v| v.checked_add(digit))
+				.ok_or_else(|| Error::Internal("Arithmetic overflow in mantissa calculation".to_string()))?;
 			digit_count += 1;
 
 			// Process low nibble (lower 4 bits)
@@ -262,11 +269,14 @@ impl DecimalLexEncoder {
 			// Convert back from encoded form and accumulate
 			let digit = (lo - 1) as u128;
 			debug_assert!(digit < 10);
-			mantissa = mantissa * 10 + digit;
+			mantissa = mantissa
+				.checked_mul(10)
+				.and_then(|v| v.checked_add(digit))
+				.ok_or_else(|| Error::Internal("Arithmetic overflow in mantissa calculation".to_string()))?;
 			digit_count += 1;
 		}
 
-		(mantissa, digit_count)
+		Ok((mantissa, digit_count))
 	}
 
 	/// Calculates the final coefficient and scale from mantissa, exponent, and digit count
@@ -275,7 +285,7 @@ impl DecimalLexEncoder {
 		mantissa: u128,
 		exponent: i32,
 		digit_count: i32,
-	) -> (i128, u32) {
+	) -> Result<(i128, u32)> {
 		// Reconstruct the scale from exponent and digit count
 		// Reverse of: e = nd - s - 1, so s = nd - e - 1
 		let scale_i32 = digit_count - exponent - 1;
@@ -284,13 +294,21 @@ impl DecimalLexEncoder {
 		// This happens when the number needs more integer digits than we have
 		if scale_i32 >= 0 {
 			// Normal case: scale is non-negative
-			(mantissa as i128, scale_i32 as u32)
+			Ok((mantissa as i128, scale_i32 as u32))
 		} else {
 			// Scale would be negative: multiply mantissa by appropriate power of 10
 			// to shift decimal point and set scale to 0
 			let k = (-scale_i32) as usize; // How many powers of 10 to multiply by
-			let coefficient = mantissa.checked_mul(Self::POW10[k]).expect("overflow");
-			(coefficient as i128, 0u32) // Scale becomes 0 after adjustment
+			
+			// Check bounds for POW10 array access
+			if k >= Self::POW10.len() {
+				return Err(Error::Internal(format!("Power of 10 index {} exceeds array bounds {}", k, Self::POW10.len())).into());
+			}
+			
+			let coefficient = mantissa
+				.checked_mul(Self::POW10[k])
+				.ok_or_else(|| Error::Internal("Arithmetic overflow in coefficient calculation".to_string()))?;
+			Ok((coefficient as i128, 0u32)) // Scale becomes 0 after adjustment
 		}
 	}
 
@@ -354,13 +372,23 @@ impl DecimalLexEncoder {
 	///
 	/// This reverses the encoding process, reconstructing the original Decimal
 	/// from its byte representation while handling all the encoding transformations.
-	pub fn decode(bytes: &[u8]) -> Decimal {
+	pub fn decode(bytes: &[u8]) -> Result<Decimal> {
+		// Input validation
+		if bytes.is_empty() {
+			return Err(Error::Serialization("Cannot decode from empty buffer".to_string()).into());
+		}
+
 		match bytes[0] {
 			// Special case: zero has its own fixed encoding
-			0x80 => Decimal::ZERO,
+			0x80 => Ok(Decimal::ZERO),
 
 			// Non-zero values: 0xFF for positive, 0x00 for negative
 			0xFF | 0x00 => {
+				// Non-zero values require at least 2 bytes (sign + exponent)
+				if bytes.len() < 2 {
+					return Err(Error::Serialization(format!("Buffer too short for non-zero value: expected at least 2 bytes, got {}", bytes.len())).into());
+				}
+				
 				// Determine sign from the first byte
 				let is_negative = bytes[0] == 0x00;
 
@@ -369,23 +397,23 @@ impl DecimalLexEncoder {
 
 				// Reconstruct the mantissa by unpacking nibble-encoded digits
 				// This also returns the digit count, eliminating redundant computation
-				let (mantissa, digit_count) = Self::unpack_mantissa(bytes, is_negative);
+				let (mantissa, digit_count) = Self::unpack_mantissa(bytes, is_negative)?;
 
 				// Calculate the final coefficient and scale
 				let (coefficient, scale) =
-					Self::calculate_coefficient_and_scale(mantissa, exponent, digit_count);
+					Self::calculate_coefficient_and_scale(mantissa, exponent, digit_count)?;
 
 				// Create the final Decimal with the reconstructed coefficient and scale
 				let decimal = Decimal::from_i128_with_scale(coefficient, scale);
 
 				// Apply the sign
-				if is_negative {
+				Ok(if is_negative {
 					-decimal
 				} else {
 					decimal
-				}
+				})
 			}
-			_ => unreachable!("bad sentinel"),
+			_ => Err(Error::Serialization(format!("Invalid sentinel byte: {:#x}", bytes[0])).into()),
 		}
 	}
 }
@@ -430,7 +458,7 @@ mod tests {
 		let cases = test_cases();
 		for (i, case) in cases.into_iter().enumerate() {
 			let encoded = DecimalLexEncoder::encode(case);
-			let decoded = DecimalLexEncoder::decode(&encoded);
+			let decoded = DecimalLexEncoder::decode(&encoded).expect("Decode should succeed");
 			assert_eq!(
 				case.normalize(),
 				decoded.normalize(),
@@ -489,5 +517,34 @@ mod tests {
 		assert!(decimal.is_err());
 		let err = decimal.unwrap_err();
 		assert_eq!(err.to_string(), "Number has a high precision that can not be represented.");
+	}
+
+	#[test]
+	fn test_decode_empty_buffer() {
+		let result = DecimalLexEncoder::decode(&[]);
+		assert!(result.is_err());
+		assert!(result.unwrap_err().to_string().contains("Cannot decode from empty buffer"));
+	}
+
+	#[test]
+	fn test_decode_truncated_buffer() {
+		let result = DecimalLexEncoder::decode(&[0xFF]);
+		assert!(result.is_err());
+		assert!(result.unwrap_err().to_string().contains("Buffer too short"));
+	}
+
+	#[test]
+	fn test_decode_invalid_sentinel() {
+		let result = DecimalLexEncoder::decode(&[0x42, 0x00]);
+		assert!(result.is_err());
+		assert!(result.unwrap_err().to_string().contains("Invalid sentinel byte"));
+	}
+
+	#[test]
+	fn test_decode_truncated_mantissa() {
+		// Create a buffer that starts correctly but is truncated during mantissa decoding
+		let result = DecimalLexEncoder::decode(&[0xFF, 0x80]); // Missing mantissa data
+		assert!(result.is_err());
+		assert!(result.unwrap_err().to_string().contains("Truncated buffer"));
 	}
 }

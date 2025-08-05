@@ -2,7 +2,7 @@ use super::value::{TryAdd, TryNeg};
 use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
 use crate::sql::strand::Strand;
-use anyhow::{Result, bail};
+use anyhow::Result;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{
@@ -471,7 +471,7 @@ impl Number {
 						}
 						None => {
 							// This should be rare - occurs when float is too large/small for Decimal
-							bail!("Failed to convert float {} to decimal", v)
+							Err(Error::Serialization(format!("Failed to convert float {} to decimal", v)).into())
 						}
 					}
 				}
@@ -528,14 +528,25 @@ impl Number {
 		match b.last().copied() {
 			Some(Self::NUMBER_MARKER_INT) => {
 				// Decode lexicographic encoding and convert back to i64
-				// The unwrap() is safe because the original was an i64
-				Ok(Number::Int(DecimalLexEncoder::decode(b).to_i64().unwrap()))
+				let decimal = DecimalLexEncoder::decode(b)?;
+				match decimal.to_i64() {
+					Some(value) => Ok(Number::Int(value)),
+					None => Err(Error::Serialization(format!(
+						"Decoded decimal {} cannot fit in i64 range", 
+						decimal
+					)).into()),
+				}
 			}
 			Some(Self::NUMBER_MARKER_FLOAT) => {
 				// Decode as decimal representation of the original float
-				let decimal = DecimalLexEncoder::decode(b);
-				// Convert back to f64 - unwrap() is safe for values that came from f64
-				Ok(Number::Float(decimal.to_f64().unwrap()))
+				let decimal = DecimalLexEncoder::decode(b)?;
+				match decimal.to_f64() {
+					Some(value) => Ok(Number::Float(value)),
+					None => Err(Error::Serialization(format!(
+						"Decoded decimal {} cannot be converted to f64", 
+						decimal
+					)).into()),
+				}
 			}
 			// Handle special float values that were encoded with fixed byte patterns
 			Some(Self::NUMBER_MARKER_FLOAT_INFINITE_POSITIVE) => Ok(Number::Float(f64::INFINITY)),
@@ -545,15 +556,15 @@ impl Number {
 			Some(Self::NUMBER_MARKER_FLOAT_NAN) => Ok(Number::Float(f64::NAN)),
 			Some(Self::NUMBER_MARKER_DECIMAL) => {
 				// Direct decoding for native Decimal values
-				Ok(Number::Decimal(DecimalLexEncoder::decode(b)))
+				Ok(Number::Decimal(DecimalLexEncoder::decode(b)?))
 			}
 			Some(m) => {
 				// Unknown type marker - indicates corrupted data or version mismatch
-				bail!("Unknown number marker: {m}")
+				Err(Error::Serialization(format!("Unknown number marker: {m}")).into())
 			}
 			None => {
 				// Empty buffer is invalid input
-				bail!("Empty buffer")
+				Err(Error::Serialization("Empty buffer".to_string()).into())
 			}
 		}
 	}
