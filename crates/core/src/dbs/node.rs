@@ -32,7 +32,6 @@ impl Node {
 			id,
 			hb,
 			gc,
-			..Default::default()
 		}
 	}
 	/// Mark this node as archived

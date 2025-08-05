@@ -263,7 +263,6 @@ impl Capabilities {
 			Targets::Some(x) => {
 				x.insert(target);
 			}
-			_ => unreachable!(),
 		}
 		Ok(self)
 	}
@@ -302,7 +301,6 @@ impl Capabilities {
 			Targets::Some(x) => {
 				x.insert(target);
 			}
-			_ => unreachable!(),
 		}
 		Ok(self)
 	}
@@ -389,7 +387,6 @@ impl Capabilities {
 			Targets::Some(x) => {
 				x.insert(target);
 			}
-			_ => unreachable!(),
 		}
 		Ok(self)
 	}
@@ -428,7 +425,6 @@ impl Capabilities {
 			Targets::Some(x) => {
 				x.insert(target);
 			}
-			_ => unreachable!(),
 		}
 		Ok(self)
 	}
@@ -460,7 +456,6 @@ impl Capabilities {
 			Targets::Some(set) => {
 				set.extend(features);
 			}
-			_ => unreachable!(),
 		}
 		self
 	}
@@ -489,7 +484,6 @@ impl Capabilities {
 			Targets::Some(set) => {
 				set.insert(feature);
 			}
-			_ => unreachable!(),
 		}
 		self
 	}
@@ -542,7 +536,6 @@ impl Capabilities {
 			Targets::Some(set) => {
 				set.extend(features);
 			}
-			_ => unreachable!(),
 		}
 		self
 	}
@@ -571,7 +564,6 @@ impl Capabilities {
 			Targets::Some(set) => {
 				set.insert(feature);
 			}
-			_ => unreachable!(),
 		}
 		self
 	}

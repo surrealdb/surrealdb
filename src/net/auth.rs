@@ -123,12 +123,14 @@ async fn check_auth(parts: &mut Parts) -> Result<Session> {
 		parts.extract_with_state(&state).await.unwrap_or(ExtractClientIP(None));
 
 	// Create session
-	let mut session = Session::default();
-	session.ip = ip;
-	session.or = or;
-	session.id = id;
-	session.ns = ns;
-	session.db = db;
+	let session = Session {
+		ip,
+		or,
+		id,
+		ns,
+		db,
+		..Session::default()
+	};
 
 	// If Basic authentication data was supplied
 	if let Ok(au) = parts.extract::<TypedHeader<Authorization<Basic>>>().await {

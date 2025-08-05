@@ -1,7 +1,6 @@
 pub(crate) mod access;
 pub(crate) mod alter;
 pub(crate) mod analyze;
-pub(crate) mod begin;
 pub(crate) mod create;
 pub(crate) mod define;
 pub(crate) mod delete;
@@ -26,7 +25,6 @@ pub(crate) mod r#use;
 
 pub use self::access::{AccessGrant, AccessStatement};
 pub use self::analyze::AnalyzeStatement;
-pub use self::begin::BeginStatement;
 pub use self::create::CreateStatement;
 pub use self::delete::DeleteStatement;
 pub use self::foreach::ForeachStatement;

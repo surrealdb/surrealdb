@@ -83,8 +83,8 @@ pub(crate) use mac::{enter_object_recursion, enter_query_recursion, unexpected};
 
 use super::error::{RenderedError, syntax_error};
 
-//#[cfg(test)]
-//pub mod test;
+#[cfg(test)]
+pub mod test;
 
 /// The result returned by most parser function.
 pub type ParseResult<T> = Result<T, SyntaxError>;
