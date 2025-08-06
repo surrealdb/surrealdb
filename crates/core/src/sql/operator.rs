@@ -1,14 +1,13 @@
+use super::SqlValue;
 use crate::idx::ft::MatchRef;
 use crate::sql::index::Distance;
-use revision::revisioned;
+use revision::{Error, revisioned};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Write;
 
-use super::SqlValue;
-
 /// Binary operators.
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -45,7 +44,14 @@ pub enum Operator {
 	AllLike, // *~
 	#[revision(end = 3, convert_fn = "like_convert")]
 	AnyLike, // ?~
-	Matches(Option<MatchRef>), // @{ref}@
+	#[revision(
+		end = 4,
+		convert_fn = "convert_old_matches",
+		fields_name = "OldMatchesOperatorField"
+	)]
+	Matches(Option<MatchRef>), // @{ref}
+	#[revision(start = 4)]
+	Matches(Option<MatchRef>, Option<BooleanOperation>), // @{ref},{AND|OR}@
 	//
 	LessThan,        // <
 	LessThanOrEqual, // <=
@@ -76,6 +82,13 @@ pub enum Operator {
 impl Operator {
 	fn like_convert<T>(_: T, _revision: u16) -> Result<Self, revision::Error> {
 		Err(revision::Error::Conversion("Like operators are no longer supported".to_owned()))
+	}
+
+	fn convert_old_matches(
+		field: OldMatchesOperatorField,
+		_revision: u16,
+	) -> anyhow::Result<Self, Error> {
+		Ok(Operator::Matches(field.0, None))
 	}
 }
 
@@ -124,9 +137,15 @@ impl fmt::Display for Operator {
 			Self::NoneInside => f.write_str("NONEINSIDE"),
 			Self::Outside => f.write_str("OUTSIDE"),
 			Self::Intersects => f.write_str("INTERSECTS"),
-			Self::Matches(reference) => {
+			Self::Matches(reference, operator) => {
 				if let Some(r) = reference {
-					write!(f, "@{r}@")
+					if let Some(o) = operator {
+						write!(f, "@{r},{o}@")
+					} else {
+						write!(f, "@{r}@")
+					}
+				} else if let Some(o) = operator {
+					write!(f, "@{o}@")
 				} else {
 					f.write_str("@@")
 				}
@@ -168,7 +187,7 @@ impl From<Operator> for crate::expr::Operator {
 			Operator::NotEqual => crate::expr::Operator::NotEqual,
 			Operator::AllEqual => crate::expr::Operator::AllEqual,
 			Operator::AnyEqual => crate::expr::Operator::AnyEqual,
-			Operator::Matches(r) => crate::expr::Operator::Matches(r),
+			Operator::Matches(r, o) => crate::expr::Operator::Matches(r, o.map(Into::into)),
 			Operator::LessThan => crate::expr::Operator::LessThan,
 			Operator::LessThanOrEqual => crate::expr::Operator::LessThanOrEqual,
 			Operator::MoreThan => crate::expr::Operator::MoreThan,
@@ -214,7 +233,7 @@ impl From<crate::expr::Operator> for Operator {
 			crate::expr::Operator::NotEqual => Self::NotEqual,
 			crate::expr::Operator::AllEqual => Self::AllEqual,
 			crate::expr::Operator::AnyEqual => Self::AnyEqual,
-			crate::expr::Operator::Matches(r) => Self::Matches(r),
+			crate::expr::Operator::Matches(r, o) => Self::Matches(r, o.map(Into::into)),
 			crate::expr::Operator::LessThan => Self::LessThan,
 			crate::expr::Operator::LessThanOrEqual => Self::LessThanOrEqual,
 			crate::expr::Operator::MoreThan => Self::MoreThan,
@@ -233,6 +252,43 @@ impl From<crate::expr::Operator> for Operator {
 			crate::expr::Operator::Intersects => Self::Intersects,
 			crate::expr::Operator::Knn(k, d) => Self::Knn(k, d.map(Into::into)),
 			crate::expr::Operator::Ann(k, ef) => Self::Ann(k, ef),
+		}
+	}
+}
+
+/// Boolean operation executed by the full-text index
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub enum BooleanOperation {
+	And,
+	Or,
+}
+
+impl fmt::Display for BooleanOperation {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Self::Or => f.write_str("OR"),
+			Self::And => f.write_str("AND"),
+		}
+	}
+}
+
+impl From<BooleanOperation> for crate::expr::BooleanOperation {
+	fn from(v: BooleanOperation) -> Self {
+		match v {
+			BooleanOperation::And => crate::expr::BooleanOperation::And,
+			BooleanOperation::Or => crate::expr::BooleanOperation::Or,
+		}
+	}
+}
+
+impl From<crate::expr::BooleanOperation> for BooleanOperation {
+	fn from(v: crate::expr::BooleanOperation) -> Self {
+		match v {
+			crate::expr::BooleanOperation::And => BooleanOperation::And,
+			crate::expr::BooleanOperation::Or => BooleanOperation::Or,
 		}
 	}
 }
@@ -283,7 +339,7 @@ impl BindingPower {
 			| Operator::LessThanOrEqual
 			| Operator::MoreThan
 			| Operator::MoreThanOrEqual
-			| Operator::Matches(_)
+			| Operator::Matches(_, _)
 			| Operator::Contain
 			| Operator::NotContain
 			| Operator::ContainAll

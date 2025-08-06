@@ -244,6 +244,8 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("record::refs") => PathKind::Function,
 		//
 		UniCase::ascii("search::analyze") => PathKind::Function,
+		UniCase::ascii("search::linear") => PathKind::Function,
+		UniCase::ascii("search::rrf") => PathKind::Function,
 		UniCase::ascii("search::score") => PathKind::Function,
 		UniCase::ascii("search::highlight") => PathKind::Function,
 		UniCase::ascii("search::offsets") => PathKind::Function,
@@ -450,7 +452,9 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("time::EPOCH") => PathKind::Constant(Constant::TimeEpoch),
 		UniCase::ascii("time::MINIMUM") => PathKind::Constant(Constant::TimeMin),
 		UniCase::ascii("time::MAXIMUM") => PathKind::Constant(Constant::TimeMax),
-		UniCase::ascii("duration::MAX") => PathKind::Constant(Constant::DurationMax)
+		UniCase::ascii("duration::MAX") => PathKind::Constant(Constant::DurationMax),
+		//
+		UniCase::ascii("schema::table::exists") => PathKind::Function,
 };
 
 const MAX_LEVENSTHEIN_CUT_OFF: u8 = 4;

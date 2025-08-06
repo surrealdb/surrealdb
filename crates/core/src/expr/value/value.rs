@@ -17,6 +17,7 @@ use crate::expr::{
 	model::Model,
 };
 use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind};
+use crate::kvs::impl_kv_value_revisioned;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 
@@ -148,6 +149,8 @@ pub enum Value {
 	File(File),
 	// Add new variants here
 }
+
+impl_kv_value_revisioned!(Value);
 
 impl Value {
 	fn convert_old_range(

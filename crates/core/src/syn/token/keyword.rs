@@ -100,6 +100,7 @@ keyword! {
 	For => "FOR",
 	From => "FROM",
 	Full => "FULL",
+	Fulltext => "FULLTEXT",
 	Function => "FUNCTION",
 	Functions => "FUNCTIONS",
 	Grant => "GRANT",

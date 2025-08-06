@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::key::root::tl::Tl;
 use crate::kvs::ds::TransactionFactory;
-use crate::kvs::{Key, KeyEncode, LockType, TransactionType};
+use crate::kvs::{LockType, TransactionType, impl_kv_value_revisioned};
 use anyhow::{Result, bail};
 use chrono::{DateTime, Duration, Utc};
 use rand::{Rng, thread_rng};
@@ -15,15 +15,18 @@ use uuid::Uuid;
 pub(crate) enum TaskLeaseType {
 	/// Task for cleaning up old changefeed data
 	ChangeFeedCleanup,
+	/// Index compaction
+	IndexCompaction,
 }
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[non_exhaustive]
-struct TaskLease {
+pub(crate) struct TaskLease {
 	owner: Uuid,
 	expiration: DateTime<Utc>,
 }
+
+impl_kv_value_revisioned!(TaskLease);
 
 /// Manages distributed task leases in a multi-node environment.
 ///
@@ -44,8 +47,6 @@ pub struct LeaseHandler {
 	task_type: TaskLeaseType,
 	/// How long each acquired lease should remain valid
 	lease_duration: Duration,
-	/// Storage key for the lease in the datastore
-	key: Key,
 }
 
 impl LeaseHandler {
@@ -55,13 +56,11 @@ impl LeaseHandler {
 		task_type: TaskLeaseType,
 		lease_duration: std::time::Duration,
 	) -> Result<Self> {
-		let key: Key = Tl::new(&task_type).encode()?;
 		Ok(Self {
 			node,
 			tf,
 			task_type,
 			lease_duration: Duration::from_std(lease_duration)?,
-			key,
 		})
 	}
 
@@ -159,8 +158,7 @@ impl LeaseHandler {
 	/// * `Err` - If database operations fail
 	async fn check_valid_lease(&self, t: DateTime<Utc>) -> Result<Option<TaskLease>> {
 		let tx = self.tf.transaction(TransactionType::Read, LockType::Optimistic).await?;
-		if let Some(l) = tx.get(&self.key, None).await? {
-			let l: TaskLease = revision::from_slice(&l)?;
+		if let Some(l) = tx.get(&Tl::new(&self.task_type), None).await? {
 			// If the lease hasn't expired yet, return the lease object
 			if l.expiration > t {
 				// Return the lease object which contains owner information
@@ -184,7 +182,8 @@ impl LeaseHandler {
 			owner: self.node,
 			expiration: Utc::now() + self.lease_duration, // Set expiration to current time plus lease duration
 		};
-		tx.set(&self.key, revision::to_vec(&lease)?, None).await?;
+		let key = Tl::new(&self.task_type);
+		tx.set(&key, &lease, None).await?;
 		tx.commit().await?;
 		// Successfully acquired the lease
 		Ok(true)

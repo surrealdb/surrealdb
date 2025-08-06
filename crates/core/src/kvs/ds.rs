@@ -13,12 +13,15 @@ use crate::dbs::capabilities::{
 use crate::dbs::node::Timestamp;
 use crate::dbs::{Capabilities, Executor, Notification, Options, Response, Session, Variables};
 use crate::err::Error;
-use crate::expr::LogicalPlan;
 use crate::expr::{Base, FlowResultExt as _, Value, statements::DefineUserStatement};
+use crate::expr::{Index, LogicalPlan};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
+use crate::idx::IndexKeyBase;
+use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::trees::store::IndexStores;
+use crate::key::root::ic::Ic;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SizedClock;
 #[expect(unused_imports)]
@@ -76,6 +79,8 @@ pub struct Datastore {
 	auth_enabled: bool,
 	/// The maximum duration timeout for running multiple statements in a query.
 	query_timeout: Option<Duration>,
+	/// The duration threshold determining when a query should be logged
+	slow_log_threshold: Option<Duration>,
 	/// The maximum duration timeout for running multiple statements in a transaction.
 	transaction_timeout: Option<Duration>,
 	/// The security and feature capabilities for this datastore.
@@ -393,6 +398,7 @@ impl Datastore {
 				strict: false,
 				auth_enabled: false,
 				query_timeout: None,
+				slow_log_threshold: None,
 				transaction_timeout: None,
 				notification_channel: None,
 				capabilities: Arc::new(Capabilities::default()),
@@ -418,6 +424,7 @@ impl Datastore {
 			strict: self.strict,
 			auth_enabled: self.auth_enabled,
 			query_timeout: self.query_timeout,
+			slow_log_threshold: self.slow_log_threshold,
 			transaction_timeout: self.transaction_timeout,
 			capabilities: self.capabilities,
 			notification_channel: self.notification_channel,
@@ -456,6 +463,12 @@ impl Datastore {
 	/// Set a global query timeout for this Datastore
 	pub fn with_query_timeout(mut self, duration: Option<Duration>) -> Self {
 		self.query_timeout = duration;
+		self
+	}
+
+	/// Set a global slow log threshold
+	pub fn with_slow_log_threshold(mut self, duration: Option<Duration>) -> Self {
+		self.slow_log_threshold = duration;
 		self
 	}
 
@@ -558,28 +571,13 @@ impl Datastore {
 		// Create the key where the version is stored
 		let key = crate::key::version::new();
 		// Check if a version is already set in storage
-		let val = match catch!(txn, txn.get(key.clone(), None).await) {
+		let val = match catch!(txn, txn.get(&key, None).await) {
 			// There is a version set in the storage
-			Some(v) => {
-				// Attempt to decode the current stored version
-				let val = TryInto::<Version>::try_into(v);
-				// Check for errors, and cancel the transaction
-				match val {
-					// There was en error getting the version
-					Err(err) => {
-						// We didn't write anything, so just rollback
-						catch!(txn, txn.cancel().await);
-						// Return the error
-						bail!(err);
-					}
-					// We could decode the version correctly
-					Ok(val) => {
-						// We didn't write anything, so just rollback
-						catch!(txn, txn.cancel().await);
-						// Return the current version
-						val
-					}
-				}
+			Some(val) => {
+				// We didn't write anything, so just rollback
+				catch!(txn, txn.cancel().await);
+				// Return the current version
+				val
 			}
 			// There is no version set in the storage
 			None => {
@@ -587,21 +585,19 @@ impl Datastore {
 				let rng = crate::key::version::proceeding();
 				let keys = catch!(txn, txn.keys(rng, 1, None).await);
 				// Check the storage if there are any other keys set
-				let val = if keys.is_empty() {
+				let version = if keys.is_empty() {
 					// There are no keys set in storage, so this is a new database
 					Version::latest()
 				} else {
 					// There were keys in storage, so this is an upgrade
 					Version::v1()
 				};
-				// Convert the version to binary
-				let bytes: Vec<u8> = val.into();
 				// Attempt to set the current version in storage
-				catch!(txn, txn.replace(key, bytes).await);
+				catch!(txn, txn.replace(&key, &version).await);
 				// We set the version, so commit the transaction
 				catch!(txn, txn.commit().await);
 				// Return the current version
-				val
+				version
 			}
 		};
 		// Everything ok
@@ -774,6 +770,96 @@ impl Datastore {
 		Ok(())
 	}
 
+	/// Processes the index compaction queue
+	///
+	/// This method is called periodically by the index compaction thread to process
+	/// indexes that have been marked for compaction. It acquires a distributed lease
+	/// to ensure only one node in a cluster performs the compaction at a time.
+	///
+	/// The method scans the index compaction queue (stored as `Ic` keys) and processes
+	/// each index that needs compaction. Currently, only full-text indexes support
+	/// compaction, which helps optimize their performance by consolidating changes
+	/// and removing unnecessary data.
+	///
+	/// After processing an index, it is removed from the compaction queue.
+	///
+	/// # Arguments
+	///
+	/// * `interval` - The time interval between compaction runs, used to calculate
+	///   the lease duration
+	///
+	/// # Returns
+	///
+	/// * `Result<()>` - Ok if the compaction was successful or if another node
+	///   is handling the compaction, Error otherwise
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn index_compaction(&self, interval: Duration) -> Result<()> {
+		let lh = LeaseHandler::new(
+			self.id,
+			self.transaction_factory.clone(),
+			TaskLeaseType::IndexCompaction,
+			interval * 2,
+		)?;
+		// We continue without interruptions while there are keys and the lease
+		loop {
+			// Attempt to acquire a lease for the ChangeFeedCleanup task
+			// If we don't get the lease, another node is handling this task
+			if !lh.has_lease().await? {
+				return Ok(());
+			}
+			// Create a new transaction
+			let txn = self.transaction(Write, Optimistic).await?;
+			// Collect every item in the queue
+			let (beg, end) = Ic::range();
+			let range = beg..end;
+			let mut previous: Option<IndexKeyBase> = None;
+			let mut count = 0;
+			// Returns an ordered list of indexes that require compaction
+			for (k, _) in txn.getr(range.clone(), None).await? {
+				count += 1;
+				lh.try_maintain_lease().await?;
+				let ic = Ic::decode_key(&k)?;
+				// If the index has already been compacted, we can ignore the task
+				if let Some(p) = &previous {
+					if p.match_ic(&ic) {
+						continue;
+					}
+				}
+				match txn.get_tb_index(ic.ns, ic.db, ic.tb, ic.ix).await {
+					Ok(ix) => {
+						if let Index::FullText(p) = &ix.index {
+							let ft = FullTextIndex::new(
+								self.id(),
+								&self.index_stores,
+								&txn,
+								IndexKeyBase::from_ic(&ic),
+								p,
+							)
+							.await?;
+							ft.compaction(&txn).await?;
+						}
+					}
+					Err(e) => {
+						error!(target: TARGET, "Index compaction: Failed to get index: {}", e);
+						if matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
+							trace!(target: TARGET, "Index compaction: Index {} not found, skipping", ic.ix);
+						} else {
+							bail!(e);
+						}
+					}
+				}
+				previous = Some(IndexKeyBase::from_ic(&ic));
+			}
+			if count > 0 {
+				txn.delr(range).await?;
+				txn.commit().await?;
+			} else {
+				txn.cancel().await?;
+				return Ok(());
+			}
+		}
+	}
+
 	/// Performs a database import from SQL
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn startup(&self, sql: &str, sess: &Session) -> Result<Vec<Response>> {
@@ -785,7 +871,7 @@ impl Datastore {
 		self.execute(sql, sess, None).await
 	}
 
-	/// Run the datastore shutdown tasks, perfoming any necessary cleanup
+	/// Run the datastore shutdown tasks, performing any necessary cleanup
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn shutdown(&self) -> Result<()> {
 		// Output function invocation details to logs
@@ -1314,6 +1400,7 @@ impl Datastore {
 	pub fn setup_ctx(&self) -> Result<MutableContext> {
 		let mut ctx = MutableContext::from_ds(
 			self.query_timeout,
+			self.slow_log_threshold,
 			self.capabilities.clone(),
 			self.index_stores.clone(),
 			#[cfg(not(target_family = "wasm"))]

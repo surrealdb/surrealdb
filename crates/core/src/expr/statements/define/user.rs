@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident, Strand, Value, escape::QuoteStr, fmt::Fmt, user::UserDuration};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::impl_kv_value_revisioned;
 use anyhow::{Result, bail};
 use argon2::{
 	Argon2,
@@ -34,6 +35,8 @@ pub struct DefineUserStatement {
 	#[revision(start = 4)]
 	pub overwrite: bool,
 }
+
+impl_kv_value_revisioned!(DefineUserStatement);
 
 #[expect(clippy::fallible_impl_from)]
 impl From<(Base, &str, &str, &str)> for DefineUserStatement {
@@ -87,13 +90,13 @@ impl DefineUserStatement {
 				// Process the statement
 				let key = crate::key::root::us::new(&self.name);
 				txn.set(
-					key,
-					revision::to_vec(&DefineUserStatement {
+					&key,
+					&DefineUserStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
 						if_not_exists: false,
 						overwrite: false,
 						..self.clone()
-					})?,
+					},
 					None,
 				)
 				.await?;
@@ -120,13 +123,13 @@ impl DefineUserStatement {
 				let key = crate::key::namespace::us::new(opt.ns()?, &self.name);
 				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 				txn.set(
-					key,
-					revision::to_vec(&DefineUserStatement {
+					&key,
+					&DefineUserStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
 						if_not_exists: false,
 						overwrite: false,
 						..self.clone()
-					})?,
+					},
 					None,
 				)
 				.await?;
@@ -156,13 +159,13 @@ impl DefineUserStatement {
 				txn.get_or_add_ns(ns, opt.strict).await?;
 				txn.get_or_add_db(ns, db, opt.strict).await?;
 				txn.set(
-					key,
-					revision::to_vec(&DefineUserStatement {
+					&key,
+					&DefineUserStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
 						if_not_exists: false,
 						overwrite: false,
 						..self.clone()
-					})?,
+					},
 					None,
 				)
 				.await?;

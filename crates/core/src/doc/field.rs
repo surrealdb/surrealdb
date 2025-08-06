@@ -15,7 +15,6 @@ use crate::expr::value::every::ArrayBehaviour;
 use crate::expr::value::{CoerceError, Value};
 use crate::expr::{FlowResultExt as _, Part};
 use crate::iam::Action;
-use crate::kvs::KeyEncode as _;
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use std::sync::Arc;
@@ -707,19 +706,18 @@ impl FieldEditContext<'_> {
 				// Create the reference, if it does not exist yet.
 				RefAction::Set(thing) => {
 					let (ns, db) = self.opt.ns_db()?;
+					let name = self.def.name.to_string();
 					let key = crate::key::r#ref::new(
 						ns,
 						db,
 						&thing.tb,
 						&thing.id,
 						&self.rid.tb,
-						&self.def.name.to_string(),
+						&name,
 						&self.rid.id,
-					)
-					.encode_owned()
-					.unwrap();
+					);
 
-					self.ctx.tx().set(key, vec![], None).await?;
+					self.ctx.tx().set(&key, &(), None).await?;
 
 					Ok(())
 				}
@@ -735,11 +733,9 @@ impl FieldEditContext<'_> {
 							&self.rid.tb,
 							&ff,
 							&self.rid.id,
-						)
-						.encode_owned()
-						.unwrap();
+						);
 
-						self.ctx.tx().del(key).await?;
+						self.ctx.tx().del(&key).await?;
 					}
 
 					Ok(())

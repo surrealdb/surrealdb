@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use ahash::{HashMap, HashMapExt, HashSet};
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::revisioned;
+use revision::{Revisioned, revisioned};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
@@ -16,23 +16,24 @@ use crate::err::Error;
 
 use crate::expr::index::{Distance, MTreeParams, VectorType};
 use crate::expr::{Number, Object, Thing, Value};
-use crate::idx::docids::{DocId, DocIds};
+use crate::idx::IndexKeyBase;
+use crate::idx::docids::DocId;
+use crate::idx::docids::btdocids::BTreeDocIds;
 use crate::idx::planner::checker::MTreeConditionChecker;
 use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder, PriorityNode};
 use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeStore};
 use crate::idx::trees::vector::{SharedVector, Vector};
-use crate::idx::{IndexKeyBase, VersionedStore};
-use crate::kvs::{Key, Transaction, TransactionType, Val};
+use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val};
 
 #[non_exhaustive]
 pub struct MTreeIndex {
-	state_key: Key,
+	ikb: IndexKeyBase,
 	dim: usize,
 	vector_type: VectorType,
 	store: MTreeStore,
-	doc_ids: Arc<RwLock<DocIds>>,
+	doc_ids: Arc<RwLock<BTreeDocIds>>,
 	mtree: Arc<RwLock<MTree>>,
 }
 
@@ -51,18 +52,18 @@ impl MTreeIndex {
 		tt: TransactionType,
 	) -> Result<Self> {
 		let doc_ids = Arc::new(RwLock::new(
-			DocIds::new(txn, tt, ikb.clone(), p.doc_ids_order, p.doc_ids_cache).await?,
+			BTreeDocIds::new(txn, tt, ikb.clone(), p.doc_ids_order, p.doc_ids_cache).await?,
 		));
-		let state_key = ikb.new_vm_key(None)?;
-		let state: MState = if let Some(val) = txn.get(state_key.clone(), None).await? {
-			VersionedStore::try_from(val)?
+		let state_key = ikb.new_vm_root_key();
+		let state: MState = if let Some(val) = txn.get(&state_key, None).await? {
+			val
 		} else {
 			MState::new(p.capacity)
 		};
 		let store = txn
 			.index_caches()
 			.get_store_mtree(
-				TreeNodeProvider::Vector(ikb),
+				TreeNodeProvider::Vector(ikb.clone()),
 				state.generation,
 				tt,
 				p.mtree_cache as usize,
@@ -70,7 +71,7 @@ impl MTreeIndex {
 			.await?;
 		let mtree = Arc::new(RwLock::new(MTree::new(state, p.distance.clone())));
 		Ok(Self {
-			state_key,
+			ikb,
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
 			doc_ids,
@@ -88,8 +89,8 @@ impl MTreeIndex {
 	) -> Result<()> {
 		// Resolve the doc_id
 		let mut doc_ids = self.doc_ids.write().await;
-		let resolved = doc_ids.resolve_doc_id(txn, revision::to_vec(rid)?).await?;
-		let doc_id = *resolved.doc_id();
+		let resolved = doc_ids.resolve_doc_id(txn, rid).await?;
+		let doc_id = resolved.doc_id();
 		drop(doc_ids);
 		// Index the values
 		let mut mtree = self.mtree.write().await;
@@ -112,7 +113,7 @@ impl MTreeIndex {
 		content: &[Value],
 	) -> Result<()> {
 		let mut doc_ids = self.doc_ids.write().await;
-		let doc_id = doc_ids.remove_doc(txn, revision::to_vec(rid)?).await?;
+		let doc_id = doc_ids.remove_doc(txn, rid).await?;
 		drop(doc_ids);
 		if let Some(doc_id) = doc_id {
 			// Lock the index
@@ -172,7 +173,8 @@ impl MTreeIndex {
 		let mut mtree = self.mtree.write().await;
 		if let Some(new_cache) = self.store.finish(tx).await? {
 			mtree.state.generation += 1;
-			tx.set(self.state_key.clone(), VersionedStore::try_into(&mtree.state)?, None).await?;
+			let state_key = self.ikb.new_vm_root_key();
+			tx.set(&state_key, &mtree.state, None).await?;
 			tx.index_caches().advance_store_mtree(new_cache);
 		}
 		drop(mtree);
@@ -182,7 +184,6 @@ impl MTreeIndex {
 
 // https://en.wikipedia.org/wiki/M-tree
 // https://arxiv.org/pdf/1004.4216.pdf
-#[non_exhaustive]
 struct MTree {
 	state: MState,
 	distance: Distance,
@@ -202,7 +203,7 @@ impl MTree {
 	async fn knn_search(
 		&self,
 		search: &MTreeSearchContext<'_>,
-		doc_ids: &DocIds,
+		doc_ids: &BTreeDocIds,
 		stk: &mut Stk,
 		chk: &mut MTreeConditionChecker<'_>,
 	) -> Result<KnnResult> {
@@ -1408,7 +1409,7 @@ impl From<MtStatistics> for Value {
 #[revisioned(revision = 2)]
 #[derive(Clone, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct MState {
+pub(crate) struct MState {
 	capacity: u16,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
@@ -1463,14 +1464,27 @@ impl ObjectProperties {
 	}
 }
 
-impl VersionedStore for MState {}
+impl KVValue for MState {
+	#[inline]
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let mut val = Vec::new();
+		self.serialize_revisioned(&mut val)?;
+		Ok(val)
+	}
+
+	#[inline]
+	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
+		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
+	}
+}
 
 #[cfg(test)]
 mod tests {
 	use crate::ctx::{Context, MutableContext};
 	use crate::expr::index::{Distance, VectorType};
 	use crate::idx::IndexKeyBase;
-	use crate::idx::docids::{DocId, DocIds};
+	use crate::idx::docids::DocId;
+	use crate::idx::docids::btdocids::BTreeDocIds;
 	use crate::idx::planner::checker::MTreeConditionChecker;
 	use crate::idx::trees::knn::tests::TestCollection;
 	use crate::idx::trees::mtree::{MState, MTree, MTreeNode, MTreeSearchContext, MTreeStore};
@@ -1577,7 +1591,7 @@ mod tests {
 	async fn delete_collection(
 		stk: &mut Stk,
 		ds: &Datastore,
-		doc_ids: &DocIds,
+		doc_ids: &BTreeDocIds,
 		t: &mut MTree,
 		collection: &TestCollection,
 		cache_size: usize,
@@ -1634,7 +1648,7 @@ mod tests {
 	async fn find_collection(
 		stk: &mut Stk,
 		ds: &Datastore,
-		doc_ids: &DocIds,
+		doc_ids: &BTreeDocIds,
 		t: &mut MTree,
 		collection: &TestCollection,
 		cache_size: usize,
@@ -1685,7 +1699,7 @@ mod tests {
 	async fn check_full_knn(
 		stk: &mut Stk,
 		ds: &Datastore,
-		doc_ids: &DocIds,
+		doc_ids: &BTreeDocIds,
 		t: &mut MTree,
 		map: &HashMap<DocId, SharedVector>,
 		cache_size: usize,
@@ -1751,7 +1765,7 @@ mod tests {
 				let (ctx, _st) = new_operation(&ds, &t, TransactionType::Read, cache_size).await;
 				let tx = ctx.tx();
 				let doc_ids =
-					DocIds::new(&tx, TransactionType::Read, IndexKeyBase::default(), 7, 100)
+					BTreeDocIds::new(&tx, TransactionType::Read, IndexKeyBase::default(), 7, 100)
 						.await
 						.unwrap();
 

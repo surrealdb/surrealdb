@@ -27,6 +27,7 @@ pub mod operate;
 pub mod parse;
 pub mod rand;
 pub mod record;
+pub mod schema;
 pub mod script;
 pub mod search;
 pub mod sequence;
@@ -87,6 +88,7 @@ pub async fn run(
 		|| name.starts_with("crypto::bcrypt")
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
+		|| name.eq("schema::table::exists")
 	{
 		stk.run(|stk| asynchronous(stk, ctx, opt, doc, name, args)).await
 	} else {
@@ -510,7 +512,7 @@ pub async fn asynchronous(
 	#[cfg(not(target_family = "wasm"))]
 	fn cpu_intensive<R: Send + 'static>(
 		function: impl FnOnce() -> R + Send + 'static,
-	) -> impl FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = R> + Send>> {
+	) -> impl FnOnce() -> std::pin::Pin<Box<dyn Future<Output = R> + Send>> {
 		|| Box::pin(crate::exe::spawn(function))
 	}
 
@@ -575,6 +577,8 @@ pub async fn asynchronous(
 		"record::refs" => record::refs((stk, ctx, opt, doc)).await,
 		//
 		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
+		"search::linear" => search::linear(ctx).await,
+		"search::rrf" => search::rrf(ctx).await,
 		"search::score" => search::score((ctx, doc)).await,
 		"search::highlight" => search::highlight((ctx, doc)).await,
 		"search::offsets" => search::offsets((ctx, doc)).await,
@@ -588,6 +592,8 @@ pub async fn asynchronous(
 		//
 		"value::diff" => value::diff((stk, ctx, Some(opt), doc)).await,
 		"value::patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+		//
+		"schema::table::exists" => schema::table::exists((ctx, Some(opt))).await,
 	)
 }
 

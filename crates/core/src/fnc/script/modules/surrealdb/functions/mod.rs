@@ -22,6 +22,7 @@ mod object;
 mod parse;
 mod rand;
 mod record;
+mod schema;
 mod search;
 mod sequence;
 mod session;
@@ -62,7 +63,8 @@ impl_module_def!(
 	"time" => (time::Package),
 	"type" => (r#type::Package),
 	"value" => (value::Package),
-	"vector" => (vector::Package)
+	"vector" => (vector::Package),
+	"schema" => (schema::Package)
 );
 
 fn run(js_ctx: js::Ctx<'_>, name: &str, args: Vec<Value>) -> Result<Value> {

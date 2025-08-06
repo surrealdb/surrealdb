@@ -9,7 +9,7 @@ use crate::expr::{Edges, Table, Thing, Value};
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, thing};
-use crate::kvs::{Key, KeyDecode, KeyEncode, Transaction, Val};
+use crate::kvs::{KVKey, Key, Transaction, Val};
 use anyhow::{Result, bail};
 use futures::StreamExt;
 use reblessive::tree::Stk;
@@ -125,7 +125,7 @@ impl Collected {
 		rid_only: bool,
 	) -> Result<Processed> {
 		// Parse the data from the store
-		let gra: graph::Graph = graph::Graph::decode(&key)?;
+		let gra: graph::Graph = graph::Graph::decode_key(&key)?;
 		// Fetch the data from the store
 		let val = if rid_only {
 			Arc::new(Value::Null)
@@ -147,7 +147,7 @@ impl Collected {
 	}
 
 	async fn process_range_key(key: Key) -> Result<Processed> {
-		let key = thing::Thing::decode(&key)?;
+		let key = thing::Thing::decode_key(&key)?;
 		let val = Value::Null;
 		let rid = Thing::from((key.tb, key.id));
 		// Create a new operable value
@@ -164,7 +164,7 @@ impl Collected {
 	}
 
 	async fn process_table_key(key: Key) -> Result<Processed> {
-		let key = thing::Thing::decode(&key)?;
+		let key = thing::Thing::decode_key(&key)?;
 		let rid = Thing::from((key.tb, key.id));
 		// Process the record
 		let pro = Processed {
@@ -263,11 +263,20 @@ impl Collected {
 	}
 
 	fn process_value(v: Value) -> Processed {
-		// Pass the value through
+		// Try to extract the id field if present and parse as Thing
+		let rid = match &v {
+			Value::Object(obj) => match obj.get("id") {
+				Some(Value::Strand(strand)) => strand.parse::<Thing>().ok().map(Arc::new),
+				Some(Value::Thing(thing)) => Some(Arc::new(thing.clone())),
+				_ => None,
+			},
+			Value::Thing(thing) => Some(Arc::new(thing.clone())),
+			_ => None,
+		};
 		Processed {
 			rs: RecordStrategy::KeysAndValues,
 			generate: None,
-			rid: None,
+			rid,
 			ir: None,
 			val: Operable::Value(v.into()),
 		}
@@ -322,7 +331,7 @@ impl Collected {
 	}
 
 	fn process_key_val(key: Key, val: Val) -> Result<Processed> {
-		let key = thing::Thing::decode(&key)?;
+		let key = thing::Thing::decode_key(&key)?;
 		let mut val: Value = revision::from_slice(&val)?;
 		let rid = Thing::from((key.tb, key.id));
 		// Inject the id field into the document
@@ -680,9 +689,9 @@ pub(super) trait Collector {
 		// Prepare the range start key
 		let beg = match &r.beg {
 			Bound::Unbounded => thing::prefix(ns, db, tb)?,
-			Bound::Included(v) => thing::new(ns, db, tb, v).encode()?,
+			Bound::Included(v) => thing::new(ns, db, tb, v).encode_key()?,
 			Bound::Excluded(v) => {
-				let mut key = thing::new(ns, db, tb, v).encode()?;
+				let mut key = thing::new(ns, db, tb, v).encode_key()?;
 				key.push(0x00);
 				key
 			}
@@ -690,9 +699,9 @@ pub(super) trait Collector {
 		// Prepare the range end key
 		let end = match &r.end {
 			Bound::Unbounded => thing::suffix(ns, db, tb)?,
-			Bound::Excluded(v) => thing::new(ns, db, tb, v).encode()?,
+			Bound::Excluded(v) => thing::new(ns, db, tb, v).encode_key()?,
 			Bound::Included(v) => {
-				let mut key = thing::new(ns, db, tb, v).encode()?;
+				let mut key = thing::new(ns, db, tb, v).encode_key()?;
 				key.push(0x00);
 				key
 			}

@@ -864,7 +864,7 @@ impl TryFrom<Operator> for proto::Operator {
 			Operator::NoneInside => Ok(proto::Operator::NoneInside),
 			Operator::Outside => Ok(proto::Operator::Outside),
 			Operator::Intersects => Ok(proto::Operator::Intersects),
-			Operator::Matches(_) => Err(anyhow::anyhow!("matches is not supported")),
+			Operator::Matches(_, _) => Err(anyhow::anyhow!("matches is not supported")),
 			Operator::Knn(_, _) => Err(anyhow::anyhow!("knn is not supported")),
 			Operator::Ann(_, _) => Err(anyhow::anyhow!("ann is not supported")),
 		}

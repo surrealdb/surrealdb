@@ -1,3 +1,5 @@
+pub mod socket;
+
 use crate::cli::LogFormat;
 use crate::cli::validator::parser::tracing::CustomFilter;
 use anyhow::Result;

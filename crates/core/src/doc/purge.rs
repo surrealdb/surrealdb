@@ -24,7 +24,7 @@ use crate::expr::statements::UpdateStatement;
 use crate::expr::value::{Value, Values};
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
-use crate::kvs::KeyDecode;
+
 use anyhow::{Result, bail};
 use futures::StreamExt;
 use reblessive::tree::Stk;
@@ -62,16 +62,16 @@ impl Document {
 					let (ref o, ref i) = (Dir::Out, Dir::In);
 					// Purge the left pointer edge
 					let key = crate::key::graph::new(ns, db, &l.tb, &l.id, o, rid);
-					txn.del(key).await?;
+					txn.del(&key).await?;
 					// Purge the left inner edge
 					let key = crate::key::graph::new(ns, db, &rid.tb, &rid.id, i, l);
-					txn.del(key).await?;
+					txn.del(&key).await?;
 					// Purge the right inner edge
 					let key = crate::key::graph::new(ns, db, &rid.tb, &rid.id, o, r);
-					txn.del(key).await?;
+					txn.del(&key).await?;
 					// Purge the right pointer edge
 					let key = crate::key::graph::new(ns, db, &r.tb, &r.id, i, rid);
-					txn.del(key).await?;
+					txn.del(&key).await?;
 					// Release the transaction
 					drop(txn);
 				}
@@ -104,7 +104,7 @@ impl Document {
 					yield_now!();
 					// Decode the key
 					let key = res?;
-					let r#ref = Ref::decode(&key)?;
+					let r#ref = Ref::decode_key(&key)?;
 					// Obtain the remote field definition
 					let fd = txn.get_tb_field(ns, db, r#ref.ft, r#ref.ff).await?;
 					// Check if there is a reference defined on the field
