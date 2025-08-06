@@ -123,7 +123,7 @@ async fn check_auth(parts: &mut Parts) -> Result<Session> {
 		parts.extract_with_state(&state).await.unwrap_or(ExtractClientIP(None));
 
 	// Create session
-	let session = Session {
+	let mut session = Session {
 		ip,
 		or,
 		id,
