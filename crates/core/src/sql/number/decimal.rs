@@ -112,27 +112,9 @@ impl DecimalLexEncoder {
 	];
 
 	/// Counts the number of digits in a u128 value using binary search
-	#[inline]
+	/// 0 returns 1
 	fn count_digits(value: u128) -> i32 {
-		if value == 0 {
-			return 1;
-		}
-
-		// Binary search on POW10 array to find the number of digits
-		// This is O(log log n) instead of O(log n) for the division approach
-		let mut left = 0;
-		let mut right = Self::POW10.len();
-
-		while left < right {
-			let mid = (left + right) / 2;
-			if value >= Self::POW10[mid] {
-				left = mid + 1;
-			} else {
-				right = mid;
-			}
-		}
-
-		left as i32
+		value.checked_ilog10().unwrap_or(0) as i32 + 1
 	}
 
 	/// Extracts decimal digits from mantissa into an array, most significant first
@@ -258,7 +240,7 @@ impl DecimalLexEncoder {
 			// Accumulate digit into mantissa (shift left by multiplying by 10)
 			mantissa =
 				mantissa.checked_mul(10).and_then(|v| v.checked_add(digit)).ok_or_else(|| {
-					Error::Internal("Arithmetic overflow in mantissa calculation".to_string())
+					Error::Serialization("Arithmetic overflow in mantissa calculation".to_string())
 				})?;
 			digit_count += 1;
 
@@ -559,5 +541,16 @@ mod tests {
 		let result = DecimalLexEncoder::decode(&[0xFF, 0x80]); // Missing mantissa data
 		assert!(result.is_err());
 		assert!(result.unwrap_err().to_string().contains("Truncated buffer"));
+	}
+
+	#[test]
+	fn test_count_digits() {
+		assert_eq!(Decimal::MAX.mantissa().to_string().chars().count(), 29);
+		assert_eq!(DecimalLexEncoder::count_digits(Decimal::MAX.mantissa() as u128), 29);
+		assert_eq!(DecimalLexEncoder::count_digits(1234567890), 10);
+		assert_eq!(DecimalLexEncoder::count_digits(1000), 4);
+		assert_eq!(DecimalLexEncoder::count_digits(999), 3);
+		assert_eq!(DecimalLexEncoder::count_digits(1), 1);
+		assert_eq!(DecimalLexEncoder::count_digits(0), 1);
 	}
 }
