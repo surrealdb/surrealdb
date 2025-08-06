@@ -426,9 +426,9 @@ impl Number {
 	///
 	/// # Special Value Handling
 	///
-	/// - **Positive Infinity**: `[0xFF, 0xFF, MARKER_FLOAT_INFINITE_POSITIVE]`
-	/// - **Negative Infinity**: `[0x00, 0x00, MARKER_FLOAT_INFINITE_NEGATIVE]`  
-	/// - **NaN**: `[0xFF, 0xFF, MARKER_FLOAT_NAN]` (treated as largest value)
+	/// - **Positive Infinity**: `[0xFF, 0xFF, NUMBER_MARKER_FLOAT_INFINITE_POSITIVE]`
+	/// - **Negative Infinity**: `[0x00, 0x00, NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE]`
+	/// - **NaN**: `[0xFF, 0xFF, NUMBER_MARKER_FLOAT_NAN]` (treated as largest value)
 	///
 	/// # Returns
 	///
