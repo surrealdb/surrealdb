@@ -1,4 +1,4 @@
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
@@ -220,15 +220,14 @@ impl IndexBuilder {
 
 	pub(crate) async fn consume(
 		&self,
+		db: &DatabaseDefinition,
 		ctx: &Context,
-		ns: NamespaceId,
-		db: DatabaseId,
 		ix: &DefineIndexStatement,
 		old_values: Option<Vec<Value>>,
 		new_values: Option<Vec<Value>>,
 		rid: &Thing,
 	) -> Result<ConsumeResult> {
-		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
+		let key = IndexKey::new(db.namespace_id, db.database_id, &ix.what, &ix.name);
 		if let Some(r) = self.indexes.get(&key) {
 			let (b, _) = r.value();
 			return b.maybe_consume(ctx, old_values, new_values, rid).await;

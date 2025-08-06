@@ -1,3 +1,4 @@
+use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Options};
 use crate::doc::CursorDoc;
@@ -41,13 +42,14 @@ impl<'a> HnswConditionChecker<'a> {
 
 	pub(in crate::idx) async fn check_truthy(
 		&mut self,
+		db: &DatabaseDefinition,
 		tx: &Transaction,
 		stk: &mut Stk,
 		docs: &HnswDocs,
 		doc_ids: Ids64,
 	) -> Result<bool> {
 		match self {
-			Self::HnswCondition(c) => c.check_any_truthy(tx, stk, docs, doc_ids).await,
+			Self::HnswCondition(c) => c.check_any_truthy(db, tx, stk, docs, doc_ids).await,
 			Self::Hnsw(_) => Ok(true),
 		}
 	}
@@ -99,12 +101,13 @@ impl<'a> MTreeConditionChecker<'a> {
 
 	pub(in crate::idx) async fn check_truthy(
 		&mut self,
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		doc_ids: &BTreeDocIds,
 		doc_id: DocId,
 	) -> Result<bool> {
 		match self {
-			Self::MTreeCondition(c) => c.check_truthy(stk, doc_ids, doc_id).await,
+			Self::MTreeCondition(c) => c.check_truthy(db, stk, doc_ids, doc_id).await,
 			Self::MTree(_) => Ok(true),
 		}
 	}
@@ -176,6 +179,7 @@ impl CheckerCacheEntry {
 
 	async fn build(
 		stk: &mut Stk,
+		db: &DatabaseDefinition,
 		ctx: &Context,
 		opt: &Options,
 		rid: Option<Thing>,
@@ -184,7 +188,7 @@ impl CheckerCacheEntry {
 		if let Some(rid) = rid {
 			let rid = Arc::new(rid);
 			let txn = ctx.tx();
-			let val = Iterable::fetch_thing(&txn, ctx, opt, &rid).await?;
+			let val = txn.get_record(db.namespace_id, db.database_id, &rid.tb, &rid.id, None).await?;
 			if !val.is_none_or_null() {
 				let (value, truthy) = {
 					let mut cursor_doc = CursorDoc {
@@ -222,6 +226,7 @@ pub struct MTreeCondChecker<'a> {
 impl MTreeCondChecker<'_> {
 	async fn check_truthy(
 		&mut self,
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		doc_ids: &BTreeDocIds,
 		doc_id: u64,
@@ -232,7 +237,7 @@ impl MTreeCondChecker<'_> {
 				let txn = self.ctx.tx();
 				let rid = doc_ids.get_doc_key(&txn, doc_id).await?;
 				let ent =
-					CheckerCacheEntry::build(stk, self.ctx, self.opt, rid, self.cond.as_ref())
+					CheckerCacheEntry::build(stk, db, self.ctx, self.opt, rid, self.cond.as_ref())
 						.await?;
 				let truthy = ent.truthy;
 				e.insert(ent);
@@ -292,6 +297,7 @@ impl HnswCondChecker<'_> {
 
 	async fn check_any_truthy(
 		&mut self,
+		db: &DatabaseDefinition,
 		tx: &Transaction,
 		stk: &mut Stk,
 		docs: &HnswDocs,
@@ -304,7 +310,7 @@ impl HnswCondChecker<'_> {
 				Entry::Vacant(e) => {
 					let rid = docs.get_thing(tx, doc_id).await?;
 					let ent =
-						CheckerCacheEntry::build(stk, self.ctx, self.opt, rid, self.cond.as_ref())
+						CheckerCacheEntry::build(stk, db, self.ctx, self.opt, rid, self.cond.as_ref())
 							.await?;
 					let truthy = ent.truthy;
 					e.insert(ent);

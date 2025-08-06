@@ -6,6 +6,7 @@ pub(crate) mod plan;
 pub(in crate::idx) mod rewriter;
 pub(in crate::idx) mod tree;
 
+use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::expr::with::With;
@@ -256,6 +257,7 @@ impl QueryPlanner {
 
 	pub(crate) async fn add_iterables(
 		&mut self,
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		ctx: &StatementContext<'_>,
 		t: Table,
@@ -268,6 +270,7 @@ impl QueryPlanner {
 
 		let is_knn = !tree.knn_expressions.is_empty();
 		let mut exe = InnerQueryExecutor::new(
+			db,
 			stk,
 			ctx.ctx,
 			ctx.opt,

@@ -1,3 +1,4 @@
+use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::ctx::{Canceller, MutableContext};
 use crate::dbs::Options;
@@ -69,7 +70,7 @@ pub(crate) enum Iterable {
 	/// An iterable which iterates over an index range for a
 	/// table, which then fetches the corresponding records
 	/// which are matched within the index.
-	/// When the 3rd argument is true, we iterate over keys only.
+	/// When the 3rd argument is `KeysOnly`, we iterate over keys only.
 	Index(Table, IteratorRef, RecordStrategy),
 }
 
@@ -154,6 +155,7 @@ impl Iterator {
 	/// Prepares a value for processing
 	pub(crate) async fn prepare(
 		&mut self,
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		planner: &mut QueryPlanner,
 		ctx: &StatementContext<'_>,
@@ -162,10 +164,10 @@ impl Iterator {
 		// Match the values
 		match val {
 			Value::Mock(v) => self.prepare_mock(ctx, v).await?,
-			Value::Table(v) => self.prepare_table(stk, planner, ctx, v).await?,
+			Value::Table(v) => self.prepare_table(db, stk, planner, ctx, v).await?,
 			Value::Edges(v) => self.prepare_edges(ctx.stm, *v)?,
 			Value::Object(v) if !ctx.stm.is_select() => self.prepare_object(ctx.stm, v)?,
-			Value::Array(v) => self.prepare_array(stk, planner, ctx, v).await?,
+			Value::Array(v) => self.prepare_array(db, stk, planner, ctx, v).await?,
 			Value::Thing(v) => self.prepare_thing(planner, ctx, v).await?,
 			v if ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
 			v => {
@@ -181,6 +183,7 @@ impl Iterator {
 	/// Prepares a value for processing
 	pub(crate) async fn prepare_table(
 		&mut self,
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		planner: &mut QueryPlanner,
 		ctx: &StatementContext<'_>,
@@ -195,10 +198,10 @@ impl Iterator {
 		match ctx.stm.is_deferable() {
 			true => self.ingest(Iterable::Yield(v)),
 			false => match ctx.stm.is_guaranteed() {
-				false => planner.add_iterables(stk, ctx, v, p, self).await?,
+				false => planner.add_iterables(db, stk, ctx, v, p, self).await?,
 				true => {
 					self.guaranteed = Some(Iterable::Yield(v.clone()));
-					planner.add_iterables(stk, ctx, v, p, self).await?;
+					planner.add_iterables(db, stk, ctx, v, p, self).await?;
 				}
 			},
 		}
@@ -316,6 +319,7 @@ impl Iterator {
 	/// Prepares a value for processing
 	pub(crate) async fn prepare_array(
 		&mut self,
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		planner: &mut QueryPlanner,
 		ctx: &StatementContext<'_>,
@@ -326,7 +330,7 @@ impl Iterator {
 		for v in v {
 			match v {
 				Value::Mock(v) => self.prepare_mock(ctx, v).await?,
-				Value::Table(v) => self.prepare_table(stk, planner, ctx, v).await?,
+				Value::Table(v) => self.prepare_table(db, stk, planner, ctx, v).await?,
 				Value::Edges(v) => self.prepare_edges(ctx.stm, *v)?,
 				Value::Object(v) if !ctx.stm.is_select() => self.prepare_object(ctx.stm, v)?,
 				Value::Thing(v) => self.prepare_thing(planner, ctx, v).await?,
@@ -346,6 +350,8 @@ impl Iterator {
 	pub async fn output(
 		&mut self,
 		stk: &mut Stk,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
@@ -377,23 +383,23 @@ impl Iterator {
 				e.add_record_strategy(rs);
 			}
 			// Process prepared values
-			let sp = if let Some(qp) = ctx.get_query_planner() {
-				let sp = qp.is_any_specific_permission();
+			let is_specific_permission = if let Some(qp) = ctx.get_query_planner() {
+				let is_specific_permission = qp.is_any_specific_permission();
 				while let Some(s) = qp.next_iteration_stage().await {
 					let is_last = matches!(s, IterationStage::Iterate(_));
 					let mut c = MutableContext::unfreeze(cancel_ctx)?;
 					c.set_iteration_stage(s);
 					cancel_ctx = c.freeze();
 					if !is_last {
-						self.clone().iterate(stk, &cancel_ctx, opt, stm, sp, None).await?;
+						self.clone().iterate(stk, ns, db, &cancel_ctx, opt, stm, is_specific_permission, None).await?;
 					};
 				}
-				sp
+				is_specific_permission
 			} else {
 				false
 			};
 			// Process all documents
-			self.iterate(stk, &cancel_ctx, opt, stm, sp, plan.explanation.as_mut()).await?;
+			self.iterate(stk, ns, db, &cancel_ctx, opt, stm, is_specific_permission, plan.explanation.as_mut()).await?;
 			// Return any document errors
 			if let Some(e) = self.error.take() {
 				return Err(e);
@@ -405,7 +411,7 @@ impl Iterator {
 					// Ingest the pre-defined guaranteed record yield
 					self.ingest(guaranteed);
 					// Process the pre-defined guaranteed document
-					self.iterate(stk, &cancel_ctx, opt, stm, sp, None).await?;
+					self.iterate(stk, ns, db, &cancel_ctx, opt, stm, is_specific_permission, None).await?;
 				}
 			}
 			// Process any SPLIT AT clause
@@ -626,6 +632,8 @@ impl Iterator {
 	async fn iterate(
 		&mut self,
 		stk: &mut Stk,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
@@ -645,7 +653,7 @@ impl Iterator {
 		let mut distinct = SyncDistinct::new(ctx);
 		// Process all prepared values
 		for (count, v) in mem::take(&mut self.entries).into_iter().enumerate() {
-			v.iterate(stk, ctx, &opt, stm, self, distinct.as_mut()).await?;
+			v.iterate(stk, ctx, &opt, stm, ns, db, self, distinct.as_mut()).await?;
 			// MOCK can create a large collection of iterators,
 			// we need to make space for possible cancellations
 			if ctx.is_done(count % 100 == 0).await? {

@@ -171,8 +171,11 @@ impl RelateStatement {
 		}
 		// Assign the statement
 		let stm = Statement::from(self);
+
+		let (ns, db) = opt.ns_db()?;
+		let db = ctx.tx().ensure_ns_db(ns, db, opt.strict).await?;
 		// Process the statement
-		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
+		let res = i.output(stk, db.namespace_id, db.database_id, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout
 		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
 		// Output the results

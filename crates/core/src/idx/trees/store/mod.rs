@@ -4,7 +4,7 @@ mod lru;
 mod mapper;
 pub(crate) mod tree;
 
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::expr::Index;
@@ -233,9 +233,9 @@ impl Default for IndexStores {
 impl IndexStores {
 	pub(crate) async fn get_index_hnsw(
 		&self,
-		ctx: &Context,
 		ns: NamespaceId,
 		db: DatabaseId,
+		ctx: &Context,
 		ix: &DefineIndexStatement,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex> {

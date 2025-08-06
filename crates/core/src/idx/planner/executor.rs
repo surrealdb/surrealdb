@@ -1,4 +1,4 @@
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -132,6 +132,7 @@ impl IteratorEntry {
 impl InnerQueryExecutor {
 	#[expect(clippy::mutable_key_type)]
 	pub(super) async fn new(
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
@@ -160,13 +161,12 @@ impl InnerQueryExecutor {
 							}
 						}
 						Entry::Vacant(e) => {
-							let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 							let ix: &DefineIndexStatement = e.key();
-							let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
+							let ikb = IndexKeyBase::new(db.namespace_id, db.database_id, &ix.what, &ix.name);
 							let si = SearchIndex::new(
 								ctx,
-								ns,
-								db,
+								db.namespace_id,
+								db.database_id,
 								p.az.as_str(),
 								ikb,
 								p,
@@ -201,9 +201,8 @@ impl InnerQueryExecutor {
 							}
 						}
 						Entry::Vacant(e) => {
-							let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 							let ix: &DefineIndexStatement = e.key();
-							let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
+							let ikb = IndexKeyBase::new(db.namespace_id, db.database_id, &ix.what, &ix.name);
 							let ft = FullTextIndex::new(
 								opt.id()?,
 								ctx.get_index_stores(),
@@ -237,6 +236,7 @@ impl InnerQueryExecutor {
 								if let PerIndexReferenceIndex::MTree(mti) = e.get() {
 									Some(
 										MtEntry::new(
+											db,
 											stk,
 											ctx,
 											opt,
@@ -252,15 +252,14 @@ impl InnerQueryExecutor {
 								}
 							}
 							Entry::Vacant(e) => {
-								let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 								let ix: &DefineIndexStatement = e.key();
-								let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
+								let ikb = IndexKeyBase::new(db.namespace_id, db.database_id, &ix.what, &ix.name);
 								let tx = ctx.tx();
 								let mti =
 									MTreeIndex::new(&tx, ikb, p, TransactionType::Read).await?;
 								drop(tx);
 								let entry =
-									MtEntry::new(stk, ctx, opt, &mti, a, *k, knn_condition.clone())
+									MtEntry::new(db, stk, ctx, opt, &mti, a, *k, knn_condition.clone())
 										.await?;
 								e.insert(PerIndexReferenceIndex::MTree(mti));
 								Some(entry)
@@ -278,6 +277,7 @@ impl InnerQueryExecutor {
 								if let PerIndexReferenceIndex::Hnsw(hi) = e.get() {
 									Some(
 										HnswEntry::new(
+											db,
 											stk,
 											ctx,
 											opt,
@@ -294,13 +294,13 @@ impl InnerQueryExecutor {
 								}
 							}
 							Entry::Vacant(e) => {
-								let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 								let hi =
-									ctx.get_index_stores().get_index_hnsw(ctx, ns, db, ixr, p).await?;
+									ctx.get_index_stores().get_index_hnsw(db.namespace_id, db.database_id, ctx, ixr, p).await?;
 								// Ensure the local HNSW index is up to date with the KVS
 								hi.write().await.check_state(&ctx.tx()).await?;
 								// Now we can execute the request
 								let entry = HnswEntry::new(
+									&db,
 									stk,
 									ctx,
 									opt,
@@ -1414,6 +1414,7 @@ pub(super) struct MtEntry {
 
 impl MtEntry {
 	async fn new(
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
@@ -1427,7 +1428,7 @@ impl MtEntry {
 		} else {
 			MTreeConditionChecker::new(ctx)
 		};
-		let res = mt.knn_search(stk, ctx, o, k as usize, cond_checker).await?;
+		let res = mt.knn_search(db, stk, ctx, o, k as usize, cond_checker).await?;
 		Ok(Self {
 			res,
 		})
@@ -1442,6 +1443,7 @@ pub(super) struct HnswEntry {
 impl HnswEntry {
 	#[expect(clippy::too_many_arguments)]
 	async fn new(
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
@@ -1459,7 +1461,7 @@ impl HnswEntry {
 		let res = h
 			.read()
 			.await
-			.knn_search(&ctx.tx(), stk, v, n as usize, ef as usize, cond_checker)
+			.knn_search(db, &ctx.tx(), stk, v, n as usize, ef as usize, cond_checker)
 			.await?;
 		Ok(Self {
 			res,

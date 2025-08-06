@@ -1913,7 +1913,11 @@ impl Transaction {
 		self.get_or_add_tb_upwards(ns, db, tb, strict, true).await
 	}
 
-	pub async fn check_ns_db_tb(&self, ns: &str, db: &str, tb: &str) -> Result<()> {
+	pub async fn check_ns_db_tb(&self, ns: &str, db: &str, tb: &str, strict: bool) -> Result<()> {
+		if !strict {
+			return Ok(())
+		}
+
 		let db = match self.get_db_by_name(ns, db).await? {
 			Some(db) => db,
 			None => {
@@ -1924,12 +1928,15 @@ impl Transaction {
 			}
 		};
 
-		if self.get_tb(db.namespace_id, db.database_id, tb).await?.is_none() {
-			return Err(Error::TbNotFound {
-				name: tb.to_owned(),
+		match self.get_tb(db.namespace_id, db.database_id, tb).await? {
+			Some(tb) => tb,
+			None => {
+				return Err(Error::TbNotFound {
+					name: tb.to_owned(),
+				}
+				.into());
 			}
-			.into());
-		}
+		};
 		Ok(())
 	}
 

@@ -5,6 +5,7 @@ mod heuristic;
 pub mod index;
 mod layer;
 
+use crate::catalog::DatabaseDefinition;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::docs::HnswDocs;
@@ -357,6 +358,7 @@ where
 
 	async fn knn_search_checked(
 		&self,
+		db: &DatabaseDefinition,
 		tx: &Transaction,
 		stk: &mut Stk,
 		search: &HnswSearch,
@@ -375,7 +377,7 @@ where
 				);
 				let w = self
 					.layer0
-					.search_single_checked(tx, stk, &search_ctx, &ep_pt, ep_dist, ep_id, chk)
+					.search_single_checked(&db, tx, stk, &search_ctx, &ep_pt, ep_dist, ep_id, chk)
 					.await?;
 				return Ok(w.to_vec_limit(search.k));
 			}
