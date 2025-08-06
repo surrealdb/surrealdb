@@ -18,8 +18,7 @@ use std::iter::Sum;
 use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
 pub mod decimal;
 
-use crate::expr::number::decimal::DecimalLexEncoder;
-pub use decimal::DecimalExt;
+pub use decimal::{DecimalExt, DecimalLexEncoder};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 
