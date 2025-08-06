@@ -3,6 +3,7 @@ use crate::err::Error;
 use crate::expr::strand::Strand;
 use crate::fnc::util::math::ToFloat;
 use anyhow::{Result, bail};
+use fastnum::D128;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{
@@ -16,9 +17,11 @@ use std::hash;
 use std::iter::Product;
 use std::iter::Sum;
 use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
+
 pub mod decimal;
 
-pub use decimal::{DecimalExt, DecimalLexEncoder};
+pub use decimal::DecimalExt;
+use decimal::DecimalLexEncoder;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 
@@ -417,7 +420,7 @@ impl Number {
 		match self {
 			Self::Int(v) => {
 				// Convert integer to decimal for consistent encoding across all numeric types
-				let mut b = DecimalLexEncoder::encode(Decimal::from(*v));
+				let mut b = DecimalLexEncoder::encode(D128::from(*v));
 				// Append type marker to preserve original Number variant for round-trip conversion
 				b.push(Self::NUMBER_MARKER_INT);
 				Ok(b)
@@ -442,6 +445,7 @@ impl Number {
 					// Convert finite float to decimal for lexicographic encoding
 					match Decimal::from_f64(*v) {
 						Some(decimal) => {
+							let decimal = DecimalLexEncoder::to_d128(decimal)?;
 							let mut b = DecimalLexEncoder::encode(decimal);
 							// Append float marker to distinguish from native decimals
 							b.push(Self::NUMBER_MARKER_FLOAT);
@@ -460,7 +464,8 @@ impl Number {
 			}
 			Self::Decimal(v) => {
 				// Direct encoding of decimal values using lexicographic encoder
-				let mut b = DecimalLexEncoder::encode(*v);
+				let dec = DecimalLexEncoder::to_d128(*v)?;
+				let mut b = DecimalLexEncoder::encode(dec);
 				// Append decimal marker for type preservation
 				b.push(Self::NUMBER_MARKER_DECIMAL);
 				Ok(b)
@@ -512,25 +517,17 @@ impl Number {
 				// Decode lexicographic encoding and convert back to i64
 				let decimal = DecimalLexEncoder::decode(b)?;
 				match decimal.to_i64() {
-					Some(value) => Ok(Number::Int(value)),
-					None => Err(Error::Serialization(format!(
-						"Decoded decimal {} cannot fit in i64 range",
-						decimal
-					))
-					.into()),
+					Ok(value) => Ok(Number::Int(value)),
+					Err(e) => {
+						Err(Error::Serialization(format!("Decoded decimal {decimal} error: {e}"))
+							.into())
+					}
 				}
 			}
 			Some(Self::NUMBER_MARKER_FLOAT) => {
 				// Decode as decimal representation of the original float
 				let decimal = DecimalLexEncoder::decode(b)?;
-				match decimal.to_f64() {
-					Some(value) => Ok(Number::Float(value)),
-					None => Err(Error::Serialization(format!(
-						"Decoded decimal {} cannot be converted to f64",
-						decimal
-					))
-					.into()),
-				}
+				Ok(Number::Float(decimal.to_f64()))
 			}
 			// Handle special float values that were encoded with fixed byte patterns
 			Some(Self::NUMBER_MARKER_FLOAT_INFINITE_POSITIVE) => Ok(Number::Float(f64::INFINITY)),
@@ -539,8 +536,10 @@ impl Number {
 			}
 			Some(Self::NUMBER_MARKER_FLOAT_NAN) => Ok(Number::Float(f64::NAN)),
 			Some(Self::NUMBER_MARKER_DECIMAL) => {
+				let dec = DecimalLexEncoder::decode(b)?;
+				let dec = DecimalLexEncoder::to_decimal(dec)?;
 				// Direct decoding for native Decimal values
-				Ok(Number::Decimal(DecimalLexEncoder::decode(b)?))
+				Ok(Number::Decimal(dec))
 			}
 			Some(m) => {
 				// Unknown type marker - indicates corrupted data or version mismatch

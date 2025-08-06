@@ -127,6 +127,7 @@ chrono = { workspace = true, features = ["serde"] }
 ciborium.workspace = true
 dashmap.workspace = true
 deunicode.workspace = true
+fastnum = "0.3.2"
 flatbuffers.workspace = true
 fst.workspace = true
 futures.workspace = true
@@ -160,7 +161,7 @@ rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
 rust-stemmers.workspace = true
 scrypt.workspace = true
 semver = { workspace = true, features = ["serde"] }
-serde = { workspace = true, features = ["derive","rc"] }
+serde = { workspace = true, features = ["derive", "rc"] }
 serde_json.workspace = true
 sha1.workspace = true
 sha2.workspace = true

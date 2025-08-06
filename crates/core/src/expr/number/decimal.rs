@@ -3,6 +3,8 @@
 use std::str::FromStr;
 
 use crate::err::Error;
+use anyhow::Result;
+use fastnum::{D128, U128};
 use rust_decimal::Decimal;
 
 /// A trait to extend the Decimal type with additional functionality.
@@ -75,79 +77,26 @@ impl DecimalExt for Decimal {
 /// - Handles full Decimal range including extreme values
 /// - Zero-copy decoding possible
 ///
-pub struct DecimalLexEncoder;
+pub(crate) struct DecimalLexEncoder;
 
 impl DecimalLexEncoder {
-	const POW10: [u128; 29] = [
-		1,
-		10,
-		100,
-		1_000,
-		10_000,
-		100_000,
-		1_000_000,
-		10_000_000,
-		100_000_000,
-		1_000_000_000,
-		10_000_000_000,
-		100_000_000_000,
-		1_000_000_000_000,
-		10_000_000_000_000,
-		100_000_000_000_000,
-		1_000_000_000_000_000,
-		10_000_000_000_000_000,
-		100_000_000_000_000_000,
-		1_000_000_000_000_000_000,
-		10_000_000_000_000_000_000,
-		100_000_000_000_000_000_000,
-		1_000_000_000_000_000_000_000,
-		10_000_000_000_000_000_000_000,
-		100_000_000_000_000_000_000_000,
-		1_000_000_000_000_000_000_000_000,
-		10_000_000_000_000_000_000_000_000,
-		100_000_000_000_000_000_000_000_000,
-		1_000_000_000_000_000_000_000_000_000,
-		10_000_000_000_000_000_000_000_000_000,
-	];
-
-	/// Counts the number of digits in a u128 value using binary search
-	/// 0 returns 1
-	fn count_digits(value: u128) -> i32 {
-		value.checked_ilog10().unwrap_or(0) as i32 + 1
-	}
-
-	/// Extracts decimal digits from mantissa into an array, most significant first
-	fn extract_digits(mantissa: u128) -> [u8; 29] {
-		let mut digits = [0u8; 29];
-		let mut value = mantissa;
-
-		if value == 0 {
-			digits[0] = 0;
-			return digits;
-		}
-
-		// Calculate number of digits to know where to start placing them
-		let digit_count = Self::count_digits(value) as usize;
-
-		// Extract digits directly in most significant first order
-		// by using powers of 10 to extract from left to right
-		for (i, digit) in digits.iter_mut().enumerate().take(digit_count) {
-			let power_index = digit_count - 1 - i;
-			// This should never happen with valid input, but check bounds for safety
-			debug_assert!(power_index < Self::POW10.len());
-			let power = Self::POW10[power_index];
-			*digit = (value / power) as u8;
-			value %= power;
-		}
-
-		digits
-	}
+	const EXP_BIAS: i32 = 32768;
 
 	/// Packs digits into bytes using nibbles, handling both positive and negative cases
-	fn pack_digits(digits: &[u8; 29], digit_count: i32, is_negative: bool) -> Vec<u8> {
+	fn pack_digits(mantissa: u128, is_negative: bool) -> Vec<u8> {
+		// Extract individual decimal digits from mantissa, most significant first
+		let mantissa = mantissa.to_string();
+		let digits = mantissa.as_bytes();
+		// if is_negative {
+		// 	for i in 0..digits.len() {
+		// 		digits[i] = !digits[i];
+		// 	}
+		// }
+		// digits.push(0u8);
+		// digits
 		// Calculate exact capacity: ceil(digit_count/2) + terminator if even digit count
-		let capacity = (digit_count as usize + 1).div_ceil(2)
-			+ if (digit_count & 1) == 0 {
+		let capacity = (digits.len() + 1).div_ceil(2)
+			+ if (digits.len() & 1) == 0 {
 				1
 			} else {
 				0
@@ -155,13 +104,15 @@ impl DecimalLexEncoder {
 		let mut result = Vec::with_capacity(capacity);
 		let mut i = 0usize;
 
-		while i < digit_count as usize {
-			let hi = digits[i] + 1; // Add 1 to avoid zero nibbles (1-10 range)
+		while i < digits.len() {
+			let hi = digits[i] - 47; // Convert ascii '0'-'9' to 1-10 and avoid zero nibbles
+			debug_assert!((1..11).contains(&hi), "Digit {} is out of range", hi);
 			i += 1;
 
-			if i < digit_count as usize {
+			if i < digits.len() {
 				// We have a pair of digits - pack both into one byte
-				let lo = digits[i] + 1;
+				let lo = digits[i] - 47;
+				debug_assert!((1..11).contains(&lo), "Digit {} is out of range", hi);
 				i += 1;
 				let byte = (hi << 4) | lo; // High nibble | low nibble
 				result.push(if is_negative {
@@ -182,7 +133,7 @@ impl DecimalLexEncoder {
 		}
 
 		// If we had an even number of digits, we need a separate terminator byte
-		if (digit_count & 1) == 0 {
+		if (digits.len() & 1) == 0 {
 			let terminator = 0x00;
 			result.push(if is_negative {
 				!terminator
@@ -194,25 +145,10 @@ impl DecimalLexEncoder {
 		result
 	}
 
-	/// Extracts and unbiases the exponent from encoded bytes
-	#[inline]
-	fn extract_exponent(bytes: &[u8], is_negative: bool) -> i32 {
-		let biased_exponent = if !is_negative {
-			// Positive: exponent is stored directly
-			bytes[1]
-		} else {
-			// Negative: exponent was complemented, so reverse it
-			0xFF - bytes[1]
-		};
-		// Remove the bias to get the actual exponent
-		(biased_exponent as i32) - 128
-	}
-
 	/// Unpacks nibble-encoded digits and reconstructs the mantissa, returning both mantissa and digit count
-	fn unpack_mantissa(bytes: &[u8], is_negative: bool) -> anyhow::Result<(u128, i32)> {
-		let mut idx = 2usize; // Start after sign and exponent bytes
-		let mut mantissa: u128 = 0; // Accumulator for the mantissa
-		let mut digit_count: i32 = 0; // Track digits as we unpack them
+	fn unpack_mantissa(bytes: &[u8], is_negative: bool) -> Result<(U128, i32)> {
+		let mut idx = 3usize; // Start after sign and exponent bytes
+		let mut mantissa = String::new(); // Accumulator for the mantissa
 
 		loop {
 			let byte = *bytes.get(idx).ok_or_else(|| {
@@ -233,15 +169,9 @@ impl DecimalLexEncoder {
 				// Terminator nibble found - end of digits
 				break;
 			}
-			// Convert back from encoded form: subtract 1 to get original digit (0-9)
-			let digit = (hi - 1) as u128;
-			debug_assert!(digit < 10);
-			// Accumulate digit into mantissa (shift left by multiplying by 10)
-			mantissa =
-				mantissa.checked_mul(10).and_then(|v| v.checked_add(digit)).ok_or_else(|| {
-					Error::Serialization("Arithmetic overflow in mantissa calculation".to_string())
-				})?;
-			digit_count += 1;
+			debug_assert!((1..11).contains(&hi), "Digit {hi} is out of range");
+			// Convert back from encoded form: add 47 to get original ascii (0-9)
+			mantissa.push((hi + 47) as char);
 
 			// Process low nibble (lower 4 bits)
 			let lo = value & 0x0F;
@@ -249,26 +179,24 @@ impl DecimalLexEncoder {
 				// Terminator nibble found - end of digits
 				break;
 			}
-			// Convert back from encoded form and accumulate
-			let digit = (lo - 1) as u128;
-			debug_assert!(digit < 10);
-			mantissa =
-				mantissa.checked_mul(10).and_then(|v| v.checked_add(digit)).ok_or_else(|| {
-					Error::Internal("Arithmetic overflow in mantissa calculation".to_string())
-				})?;
-			digit_count += 1;
+			debug_assert!((1..11).contains(&lo), "Digit {lo} is out of range");
+			// Convert back from encoded form: add 47 to get original ascii (0-9)
+			mantissa.push((lo + 47) as char);
 		}
-
-		Ok((mantissa, digit_count))
+		// Restore the mantisse
+		let digit_count = mantissa.len() as i32;
+		let mantisse = U128::from_str_radix(&mantissa, 10)
+			.map_err(|e| Error::Serialization(format!("Invalid decimal digits: {e}",)))?;
+		Ok((mantisse, digit_count))
 	}
 
 	/// Calculates the final coefficient and scale from mantissa, exponent, and digit count
 	#[inline]
 	fn calculate_coefficient_and_scale(
-		mantissa: u128,
+		mantissa: U128,
 		exponent: i32,
 		digit_count: i32,
-	) -> anyhow::Result<(i128, u32)> {
+	) -> Result<(U128, u32)> {
 		// Reconstruct the scale from exponent and digit count
 		// Reverse of: e = nd - s - 1, so s = nd - e - 1
 		let scale_i32 = digit_count - exponent - 1;
@@ -277,90 +205,78 @@ impl DecimalLexEncoder {
 		// This happens when the number needs more integer digits than we have
 		if scale_i32 >= 0 {
 			// Normal case: scale is non-negative
-			Ok((mantissa as i128, scale_i32 as u32))
+			Ok((mantissa, scale_i32 as u32))
 		} else {
 			// Scale would be negative: multiply mantissa by appropriate power of 10
 			// to shift decimal point and set scale to 0
 			let k = (-scale_i32) as usize; // How many powers of 10 to multiply by
-
-			// Check bounds for POW10 array access
-			if k >= Self::POW10.len() {
-				return Err(Error::Internal(format!(
-					"Power of 10 index {} exceeds array bounds {}",
-					k,
-					Self::POW10.len()
-				))
-				.into());
-			}
-
-			let coefficient = mantissa.checked_mul(Self::POW10[k]).ok_or_else(|| {
-				Error::Internal("Arithmetic overflow in coefficient calculation".to_string())
-			})?;
-			Ok((coefficient as i128, 0u32)) // Scale becomes 0 after adjustment
+			let coefficient = mantissa * 10.pow(k);
+			Ok((coefficient, 0u32))
 		}
 	}
 
-	/// Encodes a Decimal value into a lexicographically ordered byte sequence.
+	/// Encodes a D128 value into a lexicographically ordered byte sequence.
 	///
 	/// The encoding preserves sort order: if `a < b` then `encode(a) < encode(b)`.
 	/// This is essential for database indexing where byte-level comparison must
 	/// match numeric comparison.
-	pub fn encode(dec: Decimal) -> Vec<u8> {
+	pub(crate) fn encode(dec: D128) -> Vec<u8> {
 		// Special case: zero gets a fixed encoding that sorts between negative and positive
 		if dec.is_zero() {
 			return vec![0x80]; // 0x80 = 128, middle value for proper ordering
 		}
 
-		// Extract sign and work with absolute normalized value
+		// Extract sign and work with absolute value
 		let is_negative = dec.is_sign_negative();
-		let normalized = dec.abs().normalize(); // Remove trailing zeros for canonical form
-		let scale = normalized.scale() as i32; // Number of digits after decimal point
-		let mantissa = normalized.mantissa() as u128; // The significant digits as an integer
-		debug_assert!(mantissa > 0); // Should never be zero after the check above
-
-		// Calculate number of digits in the mantissa
-		let digit_count = Self::count_digits(mantissa);
+		let normalized = dec.abs(); // Get absolute value
+		let scale = normalized.fractional_digits_count() as i32; // Number of digits after decimal point
+		let mantissa = normalized.digits().to_u128().unwrap_or(0); // The significant digits as an integer
+		let digit_count = normalized.digits_count();
+		println!(
+			"{dec}: - is_negative: {is_negative} - scale: {scale} digit_count: {digit_count} - mantissa: {mantissa}"
+		);
 
 		// Calculate the exponent: position of most significant digit relative to decimal point
 		// For 123.45 (mantissa=12345, scale=2): nd=5, s=2, e=5-2-1=2
 		// For 0.00123 (mantissa=123, scale=5): nd=3, s=5, e=3-5-1=-3
-		let exponent = digit_count - scale - 1;
+		let exponent = digit_count as i32 - scale - 1;
 
-		// Bias the exponent by 128 to make it unsigned for lexicographic ordering
+		// Bias the exponent by 32768 to make it unsigned for lexicographic ordering
 		// This ensures larger exponents sort after smaller ones
-		let biased_exponent = (exponent + 128) as u8;
-
-		// Extract individual decimal digits from mantissa, most significant first
-		let digits = Self::extract_digits(mantissa);
+		let biased_exponent = exponent + Self::EXP_BIAS;
+		debug_assert!(
+			(0..=0xFFFF).contains(&biased_exponent),
+			"Exponent out of range: {biased_exponent} - {exponent}"
+		);
 
 		// Build the final encoded result
-		let mut result = Vec::with_capacity(3 + (digit_count as usize + 1).div_ceil(2));
+		let mut result = Vec::with_capacity(4 + (digit_count + 1).div_ceil(2));
 
 		// Add sign marker and exponent
 		if is_negative {
 			// Sign marker: 0x00 ensures negative numbers sort before positive ones
 			result.push(0x00);
 			// Complement of biased exponent: larger magnitude (more negative) sorts first
-			result.push(0xFF - biased_exponent);
+			let biased_exponent = 0xFFFF - biased_exponent;
+			result.extend(biased_exponent.to_be_bytes());
 		} else {
 			// Sign marker: 0xFF ensures positive numbers sort after negative ones
 			result.push(0xFF);
 			// Biased exponent: larger exponents sort later (correct for positive numbers)
-			result.push(biased_exponent);
+			result.extend(biased_exponent.to_be_bytes());
 		}
-
 		// Pack digits into bytes using nibbles
-		let packed_digits = Self::pack_digits(&digits, digit_count, is_negative);
+		let packed_digits = Self::pack_digits(mantissa, is_negative);
 		result.extend(packed_digits);
 
 		result
 	}
 
-	/// Decodes a lexicographically encoded byte sequence back to a Decimal value.
+	/// Decodes a lexicographically encoded byte sequence back to a D128 value.
 	///
-	/// This reverses the encoding process, reconstructing the original Decimal
+	/// This reverses the encoding process, reconstructing the original D128
 	/// from its byte representation while handling all the encoding transformations.
-	pub fn decode(bytes: &[u8]) -> anyhow::Result<Decimal> {
+	pub(crate) fn decode(bytes: &[u8]) -> Result<D128> {
 		// Input validation
 		if bytes.is_empty() {
 			return Err(Error::Serialization("Cannot decode from empty buffer".to_string()).into());
@@ -368,12 +284,12 @@ impl DecimalLexEncoder {
 
 		match bytes[0] {
 			// Special case: zero has its own fixed encoding
-			0x80 => Ok(Decimal::ZERO),
+			0x80 => Ok(D128::ZERO),
 
 			// Non-zero values: 0xFF for positive, 0x00 for negative
 			0xFF | 0x00 => {
 				// Non-zero values require at least 2 bytes (sign + exponent)
-				if bytes.len() < 2 {
+				if bytes.len() < 3 {
 					return Err(Error::Serialization(format!(
 						"Buffer too short for non-zero value: expected at least 2 bytes, got {}",
 						bytes.len()
@@ -385,7 +301,14 @@ impl DecimalLexEncoder {
 				let is_negative = bytes[0] == 0x00;
 
 				// Extract and unbias the exponent
-				let exponent = Self::extract_exponent(bytes, is_negative);
+				// read and un-bias exponent ------------------------------------------
+				let exp_raw = u16::from_be_bytes([bytes[1], bytes[2]]);
+				let biased_exponent = if is_negative {
+					!exp_raw
+				} else {
+					exp_raw
+				};
+				let exponent = (biased_exponent as i32) - Self::EXP_BIAS;
 
 				// Reconstruct the mantissa by unpacking nibble-encoded digits
 				// This also returns the digit count, eliminating redundant computation
@@ -395,11 +318,17 @@ impl DecimalLexEncoder {
 				let (coefficient, scale) =
 					Self::calculate_coefficient_and_scale(mantissa, exponent, digit_count)?;
 
-				// Create the final Decimal with the reconstructed coefficient and scale
-				let decimal = Decimal::from_i128_with_scale(coefficient, scale);
+				// Create the final D128 with the reconstructed coefficient and scale
+				// Convert coefficient to D128 and apply scale
+				let mut decimal = D128::from_i128(coefficient)?;
+				// Apply scale by dividing by 10^scale
+				if scale > 0 {
+					let scale_factor = D128::from_i128(10_i128.pow(scale))?;
+					decimal = decimal / scale_factor;
+				}
 
 				// Apply the sign
-				Ok(if is_negative {
+				Ok(if is_negative || coefficient < 0 {
 					-decimal
 				} else {
 					decimal
@@ -410,40 +339,70 @@ impl DecimalLexEncoder {
 			}
 		}
 	}
+
+	pub(crate) fn to_d128(dec: Decimal) -> Result<D128> {
+		// First convert to raw parts using available methods
+		let scale = dec.scale();
+		let is_negative = dec.is_sign_negative();
+
+		// Get the unscaled value as i128
+		let unscaled = dec.mantissa();
+
+		// Create D128 from the unscaled value
+		let mut d128 = D128::from_i128(unscaled)?;
+
+		// Apply scale
+		if scale > 0 {
+			d128 = d128 / D128::from(10_i32.pow(scale));
+		}
+
+		// Apply sign
+		if is_negative {
+			Ok(-d128)
+		} else {
+			Ok(d128)
+		}
+	}
+
+	pub(crate) fn to_decimal(d128: D128) -> Result<Decimal> {
+		Ok(Decimal::from_str_exact(&d128.to_string())?)
+	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use num_traits::FromPrimitive;
 	use rust_decimal::prelude::ToPrimitive;
 
-	fn test_cases() -> [Decimal; 24] {
+	fn test_cases() -> [D128; 27] {
 		[
-			Decimal::MIN,
-			Decimal::from(i64::MIN),
-			Decimal::from(-1001),
-			-Decimal::ONE_THOUSAND,
-			Decimal::from(-999),
-			-Decimal::ONE_HUNDRED,
-			-Decimal::TEN,
-			Decimal::from(-9),
-			Decimal::from_f64(-3.15).unwrap(),
-			Decimal::from_f64(-std::f64::consts::PI).unwrap(),
-			Decimal::NEGATIVE_ONE,
-			Decimal::ZERO,
-			Decimal::ONE,
-			Decimal::TWO,
-			Decimal::from_f64(std::f64::consts::PI).unwrap(),
-			Decimal::from_f64(3.15).unwrap(),
-			Decimal::from(9),
-			Decimal::TEN,
-			Decimal::ONE_HUNDRED,
-			Decimal::from(999),
-			Decimal::ONE_THOUSAND,
-			Decimal::from(1001),
-			Decimal::from(i64::MAX),
-			Decimal::MAX,
+			D128::from(f64::MIN),
+			D128::from_i128(i128::MIN).unwrap(),
+			D128::from(i64::MIN),
+			D128::from(-1001),
+			D128::from(-1000),
+			D128::from(-999),
+			D128::from(-100),
+			-D128::TEN,
+			D128::from(-9),
+			D128::from(-3.15),
+			D128::from(-std::f64::consts::PI),
+			-D128::ONE,
+			D128::ZERO,
+			D128::ONE,
+			D128::from(2),
+			D128::from(std::f64::consts::PI),
+			D128::from(3.15),
+			D128::from(9),
+			D128::TEN,
+			D128::from(100),
+			D128::from(999),
+			D128::from(1000),
+			D128::from(1001),
+			D128::from(i64::MAX),
+			D128::from_i128(i128::MAX).unwrap(),
+			D128::from_u128(u128::MAX).unwrap(),
+			D128::from(f64::MAX),
 		]
 	}
 
@@ -453,24 +412,20 @@ mod tests {
 		for (i, case) in cases.into_iter().enumerate() {
 			let encoded = DecimalLexEncoder::encode(case);
 			let decoded = DecimalLexEncoder::decode(&encoded).expect("Decode should succeed");
-			assert_eq!(
-				case.normalize(),
-				decoded.normalize(),
-				"Roundtrip failed for {i}: {case} != {decoded}"
-			);
+			assert_eq!(case, decoded, "Roundtrip failed for {i}: {case} != {decoded}");
 		}
 	}
 
 	#[test]
 	fn test_lexicographic_ordering() {
 		let cases = test_cases();
-		for window in cases.windows(2) {
+		for (i, window) in cases.windows(2).enumerate() {
 			let n1 = &window[0];
 			let n2 = &window[1];
-			assert!(n1 < n2, "{n1:?} < {n2:?} (before serialization)");
+			assert!(n1 < n2, "#{i} - {n1:?} < {n2:?} (before serialization)");
 			let b1 = DecimalLexEncoder::encode(*n1);
 			let b2 = DecimalLexEncoder::encode(*n2);
-			assert!(b1 < b2, "{n1:?} < {n2:?} (after serialization) - {b1:?} < {b2:?}");
+			assert!(b1 < b2, "#{i} - {n1:?} < {n2:?} (after serialization) - {b1:?} < {b2:?}");
 		}
 	}
 
@@ -501,17 +456,6 @@ mod tests {
 		let result = DecimalLexEncoder::decode(&[0xFF, 0x80]); // Missing mantissa data
 		assert!(result.is_err());
 		assert!(result.unwrap_err().to_string().contains("Truncated buffer"));
-	}
-
-	#[test]
-	fn test_count_digits() {
-		assert_eq!(Decimal::MAX.mantissa().to_string().chars().count(), 29);
-		assert_eq!(DecimalLexEncoder::count_digits(Decimal::MAX.mantissa() as u128), 29);
-		assert_eq!(DecimalLexEncoder::count_digits(1234567890), 10);
-		assert_eq!(DecimalLexEncoder::count_digits(1000), 4);
-		assert_eq!(DecimalLexEncoder::count_digits(999), 3);
-		assert_eq!(DecimalLexEncoder::count_digits(1), 1);
-		assert_eq!(DecimalLexEncoder::count_digits(0), 1);
 	}
 
 	#[test]

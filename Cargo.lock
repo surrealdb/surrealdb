@@ -905,6 +905,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bnum"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f781dba93de3a5ef6dc5b17c9958b208f6f3f021623b360fb605ea51ce443f10"
+
+[[package]]
 name = "borsh"
 version = "1.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1776,6 +1782,16 @@ dependencies = [
  "lazy_static",
  "log",
  "rand 0.7.3",
+]
+
+[[package]]
+name = "fastnum"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aaa0b51af582b2c8bb5db89abf8a8d73a98b7e9561a7f25ec93f3b0ea25ef2db"
+dependencies = [
+ "autocfg",
+ "bnum",
 ]
 
 [[package]]
@@ -5790,6 +5806,7 @@ dependencies = [
  "dmp",
  "env_logger",
  "ext-sort",
+ "fastnum",
  "flatbuffers",
  "flate2",
  "foundationdb",
