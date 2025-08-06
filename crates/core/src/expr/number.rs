@@ -5,7 +5,9 @@ use crate::fnc::util::math::ToFloat;
 use anyhow::{Result, bail};
 use revision::revisioned;
 use rust_decimal::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::{
+	Deserialize, Deserializer as SerdeDeserializer, Serialize, Serializer as SerdeSerializer,
+};
 use std::cmp::Ordering;
 use std::f64::consts::PI;
 use std::fmt::Debug;
@@ -14,16 +16,15 @@ use std::hash;
 use std::iter::Product;
 use std::iter::Sum;
 use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
-
 pub mod decimal;
 
+use crate::expr::number::decimal::DecimalLexEncoder;
 pub use decimal::DecimalExt;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
-#[serde(rename = "$surrealdb::private::sql::Number")]
+#[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Number {
@@ -36,6 +37,51 @@ pub enum Number {
 impl Default for Number {
 	fn default() -> Self {
 		Self::Int(0)
+	}
+}
+
+impl Serialize for Number {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: SerdeSerializer,
+	{
+		let buf = self.as_decimal_buf().map_err(serde::ser::Error::custom)?;
+		serializer.serialize_bytes(&buf)
+	}
+}
+
+impl<'de> Deserialize<'de> for Number {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: SerdeDeserializer<'de>,
+	{
+		// A small visitor that accepts both borrowed and owned byte
+		// buffers and forwards them to `from_decimal_buf`.
+		struct NumberVisitor;
+
+		impl serde::de::Visitor<'_> for NumberVisitor {
+			type Value = Number;
+
+			fn expecting(&self, f: &mut Formatter) -> fmt::Result {
+				f.write_str("SurrealDB binary-encoded Number")
+			}
+
+			fn visit_bytes<E>(self, v: &[u8]) -> Result<Number, E>
+			where
+				E: serde::de::Error,
+			{
+				Number::from_decimal_buf(v).map_err(E::custom)
+			}
+
+			fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Number, E>
+			where
+				E: serde::de::Error,
+			{
+				self.visit_bytes(&v)
+			}
+		}
+
+		deserializer.deserialize_bytes(NumberVisitor)
 	}
 }
 
@@ -330,6 +376,181 @@ impl Number {
 			Number::Int(v) => Decimal::from(*v),
 			Number::Float(v) => Decimal::from_f64(*v).unwrap_or_default(),
 			Number::Decimal(v) => *v,
+		}
+	}
+
+	const NUMBER_MARKER_INT: u8 = 0;
+	const NUMBER_MARKER_FLOAT: u8 = 64;
+	const NUMBER_MARKER_FLOAT_INFINITE_POSITIVE: u8 = 65;
+	const NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE: u8 = 66;
+	const NUMBER_MARKER_FLOAT_NAN: u8 = 67;
+	const NUMBER_MARKER_DECIMAL: u8 = 128;
+
+	/// Converts this Number to a lexicographically-ordered byte buffer.
+	///
+	/// This method serializes the Number into a byte representation that preserves
+	/// numeric ordering when compared lexicographically. This is essential for
+	/// database indexing where byte-level comparison must match numeric comparison.
+	///
+	/// # Ordering Guarantees
+	///
+	/// If `a < b` numerically, then `a.as_decimal_buf() < b.as_decimal_buf()`
+	/// lexicographically (byte-wise comparison).
+	///
+	/// # Format
+	///
+	/// The returned buffer consists of:
+	/// - Variable-length lexicographic encoding of the numeric value
+	/// - Single-byte type marker suffix to distinguish original Number variant
+	///
+	/// # Special Value Handling
+	///
+	/// - **Positive Infinity**: `[0xFF, 0xFF, NUMBER_MARKER_FLOAT_INFINITE_POSITIVE]`
+	/// - **Negative Infinity**: `[0x00, 0x00, NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE]`
+	/// - **NaN**: `[0xFF, 0xFF, NUMBER_MARKER_FLOAT_NAN]` (treated as largest value)
+	///
+	/// # Returns
+	///
+	/// - `Ok(Vec<u8>)`: Lexicographically-ordered byte buffer
+	/// - `Err(Error)`: If float value cannot be converted to decimal representation
+	///
+	pub(crate) fn as_decimal_buf(&self) -> Result<Vec<u8>> {
+		match self {
+			Self::Int(v) => {
+				// Convert integer to decimal for consistent encoding across all numeric types
+				let mut b = DecimalLexEncoder::encode(Decimal::from(*v));
+				// Append type marker to preserve original Number variant for round-trip conversion
+				b.push(Self::NUMBER_MARKER_INT);
+				Ok(b)
+			}
+			Self::Float(v) => {
+				// Handle extreme float values that can't be converted to Decimal
+				if v.is_infinite() {
+					if v.is_sign_positive() {
+						// Positive infinity - largest possible value in ordering
+						// Uses 0xFF prefix to ensure it sorts after all finite numbers
+						Ok(vec![0xFF, 0xFF, Self::NUMBER_MARKER_FLOAT_INFINITE_POSITIVE])
+					} else {
+						// Negative infinity - smallest possible value in ordering
+						// Uses 0x00 prefix to ensure it sorts before all finite numbers
+						Ok(vec![0x00, 0x00, Self::NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE])
+					}
+				} else if v.is_nan() {
+					// NaN - treat as largest value for consistent ordering
+					// Uses same prefix as positive infinity but different marker
+					Ok(vec![0xFF, 0xFF, Self::NUMBER_MARKER_FLOAT_NAN])
+				} else {
+					// Convert finite float to decimal for lexicographic encoding
+					match Decimal::from_f64(*v) {
+						Some(decimal) => {
+							let mut b = DecimalLexEncoder::encode(decimal);
+							// Append float marker to distinguish from native decimals
+							b.push(Self::NUMBER_MARKER_FLOAT);
+							Ok(b)
+						}
+						None => {
+							// This should be rare - occurs when float is too large/small for Decimal
+							Err(Error::Serialization(format!(
+								"Failed to convert float {} to decimal",
+								v
+							))
+							.into())
+						}
+					}
+				}
+			}
+			Self::Decimal(v) => {
+				// Direct encoding of decimal values using lexicographic encoder
+				let mut b = DecimalLexEncoder::encode(*v);
+				// Append decimal marker for type preservation
+				b.push(Self::NUMBER_MARKER_DECIMAL);
+				Ok(b)
+			}
+		}
+	}
+
+	/// Reconstructs a Number from a lexicographically-ordered byte buffer.
+	///
+	/// This method deserializes a byte buffer created by `as_decimal_buf()` back into
+	/// the original Number, preserving both the numeric value and the original type
+	/// variant (Int, Float, or Decimal).
+	///
+	/// # Parameters
+	///
+	/// - `b`: Byte slice containing the lexicographically-encoded number with type marker suffix
+	///
+	/// # Buffer Format
+	///
+	/// The input buffer must have the format produced by `as_decimal_buf()`:
+	/// - Variable-length lexicographic encoding of the numeric value
+	/// - Single-byte type marker suffix indicating the original Number variant
+	///
+	/// # Type Reconstruction
+	///
+	/// The method examines the last byte (type marker) to determine how to decode:
+	/// - `NUMBER_MARKER_INT`: Decode as decimal, convert to i64
+	/// - `NUMBER_MARKER_FLOAT`: Decode as decimal, convert to f64
+	/// - `NUMBER_MARKER_DECIMAL`: Decode directly as Decimal
+	/// - `NUMBER_MARKER_FLOAT_INFINITE_POSITIVE`: Return f64::INFINITY
+	/// - `NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE`: Return f64::NEG_INFINITY
+	/// - `NUMBER_MARKER_FLOAT_NAN`: Return f64::NAN
+	///
+	/// # Returns
+	///
+	/// - `Ok(Number)`: Successfully reconstructed Number with original type and value
+	/// - `Err(Error)`: If buffer is empty, has unknown marker, or decoding fails
+	///
+	/// # Errors
+	///
+	/// - **Empty buffer**: Input slice has no bytes
+	/// - **Unknown marker**: Last byte is not a recognized type marker
+	/// - **Decode failure**: Lexicographic decoding fails or type conversion fails
+	///
+	pub(crate) fn from_decimal_buf(b: &[u8]) -> Result<Self> {
+		// Examine the type marker (last byte) to determine decoding strategy
+		match b.last().copied() {
+			Some(Self::NUMBER_MARKER_INT) => {
+				// Decode lexicographic encoding and convert back to i64
+				let decimal = DecimalLexEncoder::decode(b)?;
+				match decimal.to_i64() {
+					Some(value) => Ok(Number::Int(value)),
+					None => Err(Error::Serialization(format!(
+						"Decoded decimal {} cannot fit in i64 range",
+						decimal
+					))
+					.into()),
+				}
+			}
+			Some(Self::NUMBER_MARKER_FLOAT) => {
+				// Decode as decimal representation of the original float
+				let decimal = DecimalLexEncoder::decode(b)?;
+				match decimal.to_f64() {
+					Some(value) => Ok(Number::Float(value)),
+					None => Err(Error::Serialization(format!(
+						"Decoded decimal {} cannot be converted to f64",
+						decimal
+					))
+					.into()),
+				}
+			}
+			// Handle special float values that were encoded with fixed byte patterns
+			Some(Self::NUMBER_MARKER_FLOAT_INFINITE_POSITIVE) => Ok(Number::Float(f64::INFINITY)),
+			Some(Self::NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE) => {
+				Ok(Number::Float(f64::NEG_INFINITY))
+			}
+			Some(Self::NUMBER_MARKER_FLOAT_NAN) => Ok(Number::Float(f64::NAN)),
+			Some(Self::NUMBER_MARKER_DECIMAL) => {
+				// Direct decoding for native Decimal values
+				Ok(Number::Decimal(DecimalLexEncoder::decode(b)?))
+			}
+			Some(m) => {
+				// Unknown type marker - indicates corrupted data or version mismatch
+				Err(Error::Serialization(format!("Unknown number marker: {m}")).into())
+			}
+			None => {
+				// Empty buffer is invalid input
+				Err(Error::Serialization("Empty buffer".to_string()).into())
+			}
 		}
 	}
 
@@ -1153,6 +1374,42 @@ mod tests {
 			let b = random_permutation(a);
 			let c = random_permutation(b);
 			assert_consistent(a, b, c);
+		}
+	}
+
+	#[test]
+	fn serialised_ord_test() {
+		let ordering = [
+			Number::from(f64::NEG_INFINITY),
+			Number::from(Decimal::MIN),
+			Number::Int(i64::MIN),
+			Number::from(-10),
+			Number::from(-3.15),
+			Number::from(-PI),
+			Number::from(-1),
+			Number::from(0),
+			Number::from(1),
+			Number::from(2),
+			Number::from(PI),
+			Number::from(3.15),
+			Number::from(100),
+			Number::from(1000),
+			Number::from(i64::MAX),
+			Number::from(Decimal::MAX),
+			Number::from(f64::INFINITY),
+			Number::from(f64::NAN),
+		];
+		for window in ordering.windows(2) {
+			let n1 = &window[0];
+			let n2 = &window[1];
+			assert!(n1 < n2, "{n1:?} < {n2:?} (before serialization)");
+			let b1 = n1.as_decimal_buf().unwrap();
+			let b2 = n2.as_decimal_buf().unwrap();
+			assert!(b1 < b2, "{n1:?} < {n2:?} (after serialization) - {b1:?} < {b2:?}");
+			let r1 = Number::from_decimal_buf(&b1).unwrap();
+			let r2 = Number::from_decimal_buf(&b2).unwrap();
+			assert!(r1.eq(n1), "{r1:?} = {n1:?} (after deserialization)");
+			assert!(r2.eq(n2), "{r2:?} = {n2:?} (after deserialization)");
 		}
 	}
 }
