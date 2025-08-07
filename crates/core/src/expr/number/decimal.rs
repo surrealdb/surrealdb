@@ -68,17 +68,18 @@ impl DecimalExt for Decimal {
 ///    - For negative: stored as `0xFFFF - biased_exponent` (complement for reverse ordering)
 ///    - EXP_BIAS = 6144 to handle IEEE-754 decimal-128 exponent range [-6143, +6144]
 ///
-/// 3. **Radix-100 digit representation** (variable length):
-///    - Digits are converted to radix-100 string representation
+/// 3. **Packed digit representation** (variable length):
+///    - Digits are converted to radix-10 string representation
+///    - Each pair of digits is packed into a single byte (4 bits each)
 ///    - For positive numbers: stored as raw bytes
 ///    - For negative numbers: all bytes are bitwise complemented
-///    - Terminated by a `0x00` byte
+///    - Terminated when a nibble contains `0x0` (indicating end of digits)
 ///
 /// ## Properties
 /// - Preserves lexicographic ordering: if `a < b` then `encode(a) < encode(b)`
-/// - Variable length encoding (4+ bytes typical: 1 sign + 2 exponent + digits + 1 terminator)
+/// - Variable length encoding (3+ bytes typical: 1 sign + 2 exponent + packed digits)
 /// - Handles full D128 range including extreme values
-/// - Uses radix-100 encoding for efficient digit storage
+/// - Uses packed digit encoding for efficient storage (2 digits per byte)
 ///
 pub(crate) struct DecimalLexEncoder;
 
@@ -116,9 +117,6 @@ impl DecimalLexEncoder {
 		let mut result = Vec::with_capacity(5 + (digit_count + 1).div_ceil(2));
 
 		let radix10 = normalized.digits().to_str_radix(10);
-		println!(
-			"Mantissa: {radix10} - Digit count: {digit_count} - Scale: {scale} - Biased Exponent: {biased_exponent} - Exponent: {e} - Is negative: {is_negative}"
-		);
 
 		// Encode sign marker and exponent based on sign
 		if is_negative {
@@ -127,14 +125,14 @@ impl DecimalLexEncoder {
 			// Complement of biased exponent: larger magnitude (more negative) sorts first
 			// This reverses the ordering for negative numbers to maintain lexicographic order
 			result.extend((0xFFFF - biased_exponent).to_be_bytes());
-			// Complement all radix-100 bytes to reverse their ordering for negative numbers
+			// Complement all packed digit bytes to reverse their ordering for negative numbers
 			Self::pack_digits_negative(radix10, &mut result);
 		} else {
 			// Sign marker: 0xFF ensures positive numbers sort after negative ones
 			result.push(0xFF);
 			// Biased exponent: larger exponents sort later (correct for positive numbers)
 			result.extend(biased_exponent.to_be_bytes());
-			// Store radix-100 bytes directly for positive numbers
+			// Store packed digit bytes directly for positive numbers
 			Self::pack_digits_positive(radix10, &mut result);
 		}
 		//
@@ -152,20 +150,24 @@ impl DecimalLexEncoder {
 		}
 
 		// Special case: zero
-		if bytes.len() == 1 && bytes[0] == 0x80 {
+		if bytes[0] == 0x80 {
 			return Ok(D128::ZERO);
 		}
 
-		// Need at least 4 bytes: sign (1) + exponent (2) + terminator (1)
-		if bytes.len() < 4 {
-			return Err(Error::Serialization("Buffer too short".to_string()).into());
+		// Need at least 3 bytes: sign (1) + exponent (2)
+		if bytes.len() < 3 {
+			return Err(Error::Serialization(format!("Buffer too short: {}", bytes.len())).into());
 		}
 
 		let sign_byte = bytes[0];
 		let is_negative = match sign_byte {
 			0x00 => true,  // Negative
 			0xFF => false, // Positive
-			_ => return Err(Error::Serialization("Invalid sentinel byte".to_string()).into()),
+			_ => {
+				return Err(
+					Error::Serialization(format!("Invalid sentinel byte: {sign_byte}")).into()
+				);
+			}
 		};
 
 		// Extract biased exponent (2 bytes, big-endian)
@@ -192,11 +194,6 @@ impl DecimalLexEncoder {
 			Error::Serialization(format!("Failed to parse mantissa '{mantissa}'. Error: {e}"))
 		})?;
 
-		println!(
-			"Mantissa: {mantissa} - Digit count: {} - Scale: {scale} - Biased Exponent: {biased_exponent} - Exponent: {exponent} - Is negative: {is_negative}",
-			mantissa.digits().len()
-		);
-
 		Ok(D128::from_parts(
 			mantissa,
 			exponent,
@@ -209,29 +206,40 @@ impl DecimalLexEncoder {
 		))
 	}
 
+	/// Packs decimal digits for negative numbers with bit inversion for lexicographic ordering.
+	/// Each pair of ASCII digits is packed into a single byte (4 bits each) and then inverted.
 	fn pack_digits_negative(radix10: String, buf: &mut Vec<u8>) {
 		let mut iter = radix10.as_bytes().chunks_exact(2);
 		for pair in &mut iter {
 			// pair is &[u8; 2]
+			// Convert ASCII digits to numeric values: '0' (48) -> 1, '1' (49) -> 2, etc.
+			// We subtract 47 instead of 48 to map '0'->1, '1'->2, ..., '9'->10
+			// This ensures no digit maps to 0, which we use as termination marker
 			let hi = pair[0] - 47;
 			let lo = pair[1] - 47;
 			let packed = (hi << 4) | lo;
-			buf.push(!packed);
+			buf.push(!packed); // Invert bits for negative number lexicographic ordering
 		}
 		// If the length is odd, the remainder (the last lone byte) is here:
 		if let Some(remainder) = iter.remainder().first() {
 			let hi = remainder - 47;
-			let packed = (hi << 4) | 0x00;
+			let packed = hi << 4;
 			buf.push(!packed);
 		} else {
+			// Set the termination byte (inverted)
 			buf.push(0xFF);
 		}
 	}
 
+	/// Packs decimal digits for positive numbers into bytes for lexicographic ordering.
+	/// Each pair of ASCII digits is packed into a single byte (4 bits each).
 	fn pack_digits_positive(radix10: String, buf: &mut Vec<u8>) {
 		let mut iter = radix10.as_bytes().chunks_exact(2);
 		for pair in &mut iter {
 			// pair is &[u8; 2]
+			// Convert ASCII digits to numeric values: '0' (48) -> 1, '1' (49) -> 2, etc.
+			// We subtract 47 instead of 48 to map '0'->1, '1'->2, ..., '9'->10
+			// This ensures no digit maps to 0, which we use as termination marker
 			let hi = pair[0] - 47;
 			let lo = pair[1] - 47;
 			let packed = (hi << 4) | lo;
@@ -241,57 +249,84 @@ impl DecimalLexEncoder {
 		// If the length is odd, the remainder (the last lone byte) is here:
 		if let Some(remainder) = iter.remainder().first() {
 			let hi = remainder - 47;
-			let packed = (hi << 4) | 0x00;
+			let packed = hi << 4;
 			buf.push(packed);
 		} else {
+			// Set the termination byte
 			buf.push(0x00);
 		}
 	}
 
+	/// Unpacks digits from bytes for positive numbers.
+	/// Reverses the packing process by extracting digit pairs from each byte.
 	fn unpack_digits_positive(buf: &[u8]) -> String {
 		let mut r = String::new();
 		for pack in buf {
-			Self::unpack_digit(*pack, &mut r);
+			if !Self::unpack_digit(*pack, &mut r) {
+				break; // Hit termination marker (0x0 nibble)
+			}
 		}
 		r
 	}
 
+	/// Unpacks digits from bytes for negative numbers.
+	/// First inverts each byte to undo the bit inversion, then extracts digit pairs.
 	fn unpack_digits_negative(buf: &[u8]) -> String {
 		let mut r = String::new();
 		for pack in buf {
-			Self::unpack_digit(!*pack, &mut r);
+			if !Self::unpack_digit(!*pack, &mut r) {
+				break; // Hit termination marker (0x0 nibble after inversion)
+			}
 		}
 		r
 	}
 
-	fn unpack_digit(pack: u8, s: &mut String) {
-		let hi = pack >> 4;
-		let lo = pack & 0x0F;
-		if hi > 0 {
-			s.push((hi + 47) as char);
+	/// Unpacks a single byte into one or two ASCII digits.
+	/// Returns false when hitting a termination marker (0x0 nibble), true otherwise.
+	///
+	/// The byte contains two 4-bit values (nibbles): high nibble and low nibble.
+	/// Each nibble represents a digit value (1-10 mapping to '0'-'9').
+	fn unpack_digit(pack: u8, s: &mut String) -> bool {
+		let hi = pack >> 4; // Extract high nibble (upper 4 bits)
+		let lo = pack & 0x0F; // Extract low nibble (lower 4 bits)
+
+		if hi == 0 {
+			// High nibble is 0: termination marker reached
+			return false;
 		}
-		if lo > 0 {
-			s.push((lo + 47) as char);
+		// Convert back to ASCII: 1->48('0'), 2->49('1'), ..., 10->57('9')
+		s.push((hi + 47) as char);
+
+		if lo == 0 {
+			// Low nibble is 0: termination marker reached (odd number of digits)
+			return false;
 		}
+		// Convert back to ASCII: 1->48('0'), 2->49('1'), ..., 10->57('9')
+		s.push((lo + 47) as char);
+		true
 	}
 
+	/// Converts a rust_decimal::Decimal to a fastnum::D128.
+	///
+	/// This conversion extracts the mantissa, scale, and sign from the Decimal
+	/// and reconstructs them as a D128 value.
 	pub(crate) fn to_d128(dec: Decimal) -> Result<D128> {
-		// First convert to raw parts using available methods
+		// Extract components from the Decimal
 		let scale = dec.scale();
 		let is_negative = dec.is_sign_negative();
 
-		// Get the unscaled value as i128
+		// Get the unscaled integer value (mantissa)
 		let unscaled = dec.mantissa();
 
 		// Create D128 from the unscaled value
 		let mut d128 = D128::from_i128(unscaled)?;
 
-		// Apply scale
+		// Apply the decimal scale by dividing by 10^scale
 		if scale > 0 {
 			d128 = d128 / D128::from(10_i32.pow(scale));
 		}
 
-		// Apply sign
+		// Apply the sign
 		if is_negative {
 			Ok(-d128)
 		} else {
@@ -299,8 +334,12 @@ impl DecimalLexEncoder {
 		}
 	}
 
+	/// Converts a fastnum::D128 to a rust_decimal::Decimal.
+	///
+	/// This conversion uses string representation as an intermediate format
+	/// to ensure precision is maintained during the conversion.
 	pub(crate) fn to_decimal(d128: D128) -> Result<Decimal> {
-		Ok(Decimal::from_str_exact(&d128.to_string())?)
+		Ok(Decimal::from_str_radix(&d128.to_string(), 10)?)
 	}
 }
 
