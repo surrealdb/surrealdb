@@ -178,17 +178,6 @@ pub enum Subject {
 	User(Ident),
 }
 
-impl Subject {
-	// Returns the main identifier of a subject as a string.
-	/*
-	pub fn id(&self) -> String {
-		match self {
-			Subject::Record(id) => id.into_raw_string()(),
-			Subject::User(name) => name.into_string(),
-		}
-	}*/
-}
-
 impl From<Subject> for crate::expr::statements::access::Subject {
 	fn from(v: Subject) -> Self {
 		match v {

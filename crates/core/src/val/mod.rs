@@ -264,20 +264,6 @@ impl Value {
 	}
 
 	// -----------------------------------
-	// Expensive conversion of value
-	// -----------------------------------
-
-	/*
-	/// Converts a `surrealdb::sq::Value` into a `serde_json::Value`
-	///
-	/// This converts certain types like `Thing` into their simpler formats
-	/// instead of the format used internally by SurrealDB.
-	pub fn into_json(self) -> Json {
-		self.into()
-	}
-	*/
-
-	// -----------------------------------
 	// Simple output of value type
 	// -----------------------------------
 
@@ -357,7 +343,6 @@ impl Value {
 			Self::Thing(_) => "thing",
 			// TODO: Dubious types
 			Self::Table(_) => "table",
-			//Self::Closure(_) => "closure",
 		}
 	}
 
@@ -1040,6 +1025,8 @@ impl FromIterator<(String, Value)> for Value {
 
 #[cfg(test)]
 mod tests {
+	use crate::syn;
+
 	use super::*;
 	use chrono::TimeZone;
 
@@ -1128,25 +1115,21 @@ mod tests {
 		assert_eq!(3, enc.len());
 		let enc: Vec<u8> = revision::to_vec(&Value::from("test")).unwrap();
 		assert_eq!(8, enc.len());
-		/*
 		let enc: Vec<u8> =
-			revision::to_vec(&Value::from(SqlValue::parse("{ hello: 'world' }"))).unwrap();
+			revision::to_vec(&Value::from(syn::value("{ hello: 'world' }"))).unwrap();
 		assert_eq!(19, enc.len());
 		let enc: Vec<u8> =
-			revision::to_vec(&Value::from(SqlValue::parse("{ compact: true, schema: 0 }")))
-				.unwrap();
+			revision::to_vec(&Value::from(syn::value("{ compact: true, schema: 0 }"))).unwrap();
 		assert_eq!(27, enc.len());
-		*/
 	}
 
-	/*
 	#[test]
 	fn serialize_deserialize() {
-		let val: Value = SqlValue::parse(
+		let val: Value = syn::value(
 			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: nulll }] } }",
 		)
 		.into();
-		let res: Value = SqlValue::parse(
+		let res: Value = syn::value(
 			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: nulll }] } }",
 		)
 		.into();
@@ -1154,5 +1137,4 @@ mod tests {
 		let dec: Value = revision::from_slice(&enc).unwrap();
 		assert_eq!(res, dec);
 	}
-	*/
 }

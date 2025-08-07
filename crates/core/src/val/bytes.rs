@@ -108,10 +108,9 @@ impl<'de> Deserialize<'de> for Bytes {
 	}
 }
 
-/*
 #[cfg(test)]
 mod tests {
-	use crate::expr::{Bytes, Value};
+	use crate::val::{Bytes, Value};
 
 	#[test]
 	fn serialize() {
@@ -124,9 +123,9 @@ mod tests {
 
 	#[test]
 	fn json_roundtrip() {
-		let val = Bytes::from(vec![1, 2, 3, 5]);
+		let val = Bytes(vec![1, 2, 3, 5]);
 		let json = serde_json::to_string(&val).unwrap();
 		let deserialized = serde_json::from_str(&json).unwrap();
 		assert_eq!(val, deserialized);
 	}
-}*/
+}

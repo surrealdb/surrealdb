@@ -470,6 +470,7 @@ impl Action {
 /// For deletions the data is the record before it was deleted. For everything else, it's the newly created record or updated record depending on whether
 /// the action is create or update.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[non_exhaustive]
 pub struct Notification<R> {
 	pub query_id: Uuid,
 	pub action: Action,

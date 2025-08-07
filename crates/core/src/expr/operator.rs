@@ -6,7 +6,6 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-//TODO(3.0): Rename to prefix operator after idiom overhaul.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum PrefixOperator {

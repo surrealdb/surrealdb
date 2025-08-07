@@ -30,35 +30,3 @@ impl From<&str> for Format {
 		}
 	}
 }
-
-/*
-impl Format {
-	/// Process a request using the specified format
-	pub fn req(&self, val: &[u8]) -> Result<Request, RpcError> {
-		let val = self.parse_value(val)?;
-		let object = val.into_object().ok_or(RpcError::InvalidRequest)?;
-		Request::from_object(object)
-	}
-
-	/// Process a response using the specified format
-	pub fn res(&self, val: Value) -> Result<Vec<u8>, RpcError> {
-		match self {
-			Self::Json => json::encode(val),
-			Self::Cbor => cbor::encode(val),
-			Self::Bincode => bincode::encode(&val),
-			Self::Revision => revision::encode(&val),
-			Self::Unsupported => Err(RpcError::InvalidRequest),
-		}
-	}
-
-	/// Process a request using the specified format
-	pub fn parse_value(&self, val: &[u8]) -> Result<Value, RpcError> {
-		match self {
-			Self::Json => json::decode(val),
-			Self::Cbor => cbor::decode(val),
-			Self::Bincode => bincode::decode(val),
-			Self::Revision => revision::decode(val),
-			Self::Unsupported => Err(RpcError::InvalidRequest),
-		}
-	}
-}*/

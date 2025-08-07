@@ -556,117 +556,117 @@ impl Parser<'_> {
 	}
 }
 
-// #[cfg(test)]
-// mod tests {
-// 	use super::*;
-// 	use crate::syn::Parse;
-//
-// 	#[test]
-// 	fn subquery_expression_statement() {
-// 		let sql = "(1 + 2 + 3)";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!("1 + 2 + 3", format!("{}", out))
-// 	}
-//
-// 	#[test]
-// 	fn subquery_ifelse_statement() {
-// 		let sql = "IF true THEN false END";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!("IF true THEN false END", format!("{}", out))
-// 	}
-//
-// 	#[test]
-// 	fn subquery_select_statement() {
-// 		let sql = "(SELECT * FROM test)";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!("(SELECT * FROM test)", format!("{}", out))
-// 	}
-//
-// 	#[test]
-// 	fn subquery_define_statement() {
-// 		let sql = "(DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1))";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!(
-// 			"(DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1))",
-// 			format!("{}", out)
-// 		)
-// 	}
-//
-// 	#[test]
-// 	fn subquery_remove_statement() {
-// 		let sql = "(REMOVE EVENT foo_event ON foo)";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!("(REMOVE EVENT foo_event ON foo)", format!("{}", out))
-// 	}
-//
-// 	#[test]
-// 	fn subquery_insert_statment() {
-// 		let sql = "(INSERT INTO test [])";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!("(INSERT INTO test [])", format!("{}", out))
-// 	}
-//
-// 	#[test]
-// 	fn mock_count() {
-// 		let sql = "|test:1000|";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!("|test:1000|", format!("{}", out));
-// 		assert_eq!(out, SqlValue::from(Mock::Count(String::from("test"), 1000)));
-// 	}
-//
-// 	#[test]
-// 	fn mock_range() {
-// 		let sql = "|test:1..1000|";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!("|test:1..1000|", format!("{}", out));
-// 		assert_eq!(out, SqlValue::from(Mock::Range(String::from("test"), 1, 1000)));
-// 	}
-//
-// 	#[test]
-// 	fn regex_simple() {
-// 		let sql = "/test/";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!("/test/", format!("{}", out));
-// 		let SqlValue::Regex(regex) = out else {
-// 			panic!()
-// 		};
-// 		assert_eq!(regex, "test".parse().unwrap());
-// 	}
-//
-// 	#[test]
-// 	fn regex_complex() {
-// 		let sql = r"/(?i)test\/[a-z]+\/\s\d\w{1}.*/";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!(r"/(?i)test\/[a-z]+\/\s\d\w{1}.*/", format!("{}", out));
-// 		let SqlValue::Regex(regex) = out else {
-// 			panic!()
-// 		};
-// 		assert_eq!(regex, r"(?i)test/[a-z]+/\s\d\w{1}.*".parse().unwrap());
-// 	}
-//
-// 	#[test]
-// 	fn plain_string() {
-// 		let sql = r#""hello""#;
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!(r#"'hello'"#, format!("{}", out));
-//
-// 		let sql = r#"s"hello""#;
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!(r#"'hello'"#, format!("{}", out));
-//
-// 		let sql = r#"s'hello'"#;
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!(r#"'hello'"#, format!("{}", out));
-// 	}
-//
-// 	#[test]
-// 	fn params() {
-// 		let sql = "$hello";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!("$hello", format!("{}", out));
-//
-// 		let sql = "$__hello";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!("$__hello", format!("{}", out));
-// 	}
-// }
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::syn;
+
+	#[test]
+	fn subquery_expression_statement() {
+		let sql = "(1 + 2 + 3)";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!("1 + 2 + 3", format!("{}", out))
+	}
+
+	#[test]
+	fn subquery_ifelse_statement() {
+		let sql = "IF true THEN false END";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!("IF true THEN false END", format!("{}", out))
+	}
+
+	#[test]
+	fn subquery_select_statement() {
+		let sql = "(SELECT * FROM test)";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!("SELECT * FROM test", format!("{}", out))
+	}
+
+	#[test]
+	fn subquery_define_statement() {
+		let sql = "(DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1))";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!(
+			"DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1)",
+			format!("{}", out)
+		)
+	}
+
+	#[test]
+	fn subquery_remove_statement() {
+		let sql = "(REMOVE EVENT foo_event ON foo)";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!("REMOVE EVENT foo_event ON foo", format!("{}", out))
+	}
+
+	#[test]
+	fn subquery_insert_statment() {
+		let sql = "(INSERT INTO test [])";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!("INSERT INTO test []", format!("{}", out))
+	}
+
+	#[test]
+	fn mock_count() {
+		let sql = "|test:1000|";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!("|test:1000|", format!("{}", out));
+		assert_eq!(out, Expr::Mock(Mock::Count(String::from("test"), 1000)));
+	}
+
+	#[test]
+	fn mock_range() {
+		let sql = "|test:1..1000|";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!("|test:1..1000|", format!("{}", out));
+		assert_eq!(out, Expr::Mock(Mock::Range(String::from("test"), 1, 1000)));
+	}
+
+	#[test]
+	fn regex_simple() {
+		let sql = "/test/";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!("/test/", format!("{}", out));
+		let Expr::Literal(Literal::Regex(regex)) = out else {
+			panic!()
+		};
+		assert_eq!(regex, "test".parse().unwrap());
+	}
+
+	#[test]
+	fn regex_complex() {
+		let sql = r"/(?i)test\/[a-z]+\/\s\d\w{1}.*/";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!(r"/(?i)test\/[a-z]+\/\s\d\w{1}.*/", format!("{}", out));
+		let Expr::Literal(Literal::Regex(regex)) = out else {
+			panic!()
+		};
+		assert_eq!(regex, r"(?i)test/[a-z]+/\s\d\w{1}.*".parse().unwrap());
+	}
+
+	#[test]
+	fn plain_string() {
+		let sql = r#""hello""#;
+		let out = syn::expr(sql).unwrap();
+		assert_eq!(r#"'hello'"#, format!("{}", out));
+
+		let sql = r#"s"hello""#;
+		let out = syn::expr(sql).unwrap();
+		assert_eq!(r#"'hello'"#, format!("{}", out));
+
+		let sql = r#"s'hello'"#;
+		let out = syn::expr(sql).unwrap();
+		assert_eq!(r#"'hello'"#, format!("{}", out));
+	}
+
+	#[test]
+	fn params() {
+		let sql = "$hello";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!("$hello", format!("{}", out));
+
+		let sql = "$__hello";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!("$__hello", format!("{}", out));
+	}
+}

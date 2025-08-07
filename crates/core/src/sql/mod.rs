@@ -3,6 +3,7 @@
 pub(crate) mod access;
 pub(crate) mod access_type;
 pub(crate) mod algorithm;
+pub(crate) mod ast;
 pub(crate) mod base;
 pub(crate) mod block;
 pub(crate) mod changefeed;
@@ -11,8 +12,6 @@ pub(crate) mod cond;
 pub(crate) mod constant;
 pub(crate) mod data;
 pub(crate) mod dir;
-//pub(crate) mod edges;
-pub(crate) mod ast;
 pub(crate) mod escape;
 pub(crate) mod explain;
 pub(crate) mod expression;
@@ -42,8 +41,6 @@ pub(crate) mod permission;
 pub(crate) mod planner;
 pub(crate) mod record_id;
 pub(crate) mod reference;
-// TODO: Remove file.
-//pub(crate) mod regex;
 pub(crate) mod scoring;
 pub(crate) mod script;
 pub(crate) mod split;

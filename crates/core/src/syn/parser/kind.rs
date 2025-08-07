@@ -285,7 +285,6 @@ impl Parser<'_> {
 	}
 }
 
-/*
 #[cfg(test)]
 mod tests {
 	use reblessive::Stack;
@@ -297,6 +296,10 @@ mod tests {
 		let mut parser = Parser::new(i.as_bytes());
 		let mut stack = Stack::new();
 		stack.enter(|ctx| parser.parse_inner_kind(ctx)).finish()
+	}
+
+	fn i(i: &str) -> Ident {
+		Ident::new(i.to_owned()).unwrap()
 	}
 
 	#[test]
@@ -449,7 +452,13 @@ mod tests {
 		let res = kind(sql);
 		let out = res.unwrap();
 		assert_eq!("record<person | animal>", format!("{}", out));
-		assert_eq!(out, Kind::Record(vec![Ident::new("person".to_owned()).unwrap(), Ident::new("animal".to_owned()).unwrap()]));
+		assert_eq!(
+			out,
+			Kind::Record(vec![
+				Ident::new("person".to_owned()).unwrap(),
+				Ident::new("animal".to_owned()).unwrap()
+			])
+		);
 	}
 
 	#[test]
@@ -552,33 +561,6 @@ mod tests {
 	}
 
 	#[test]
-	fn kind_discriminated_object() {
-		let sql = "{ status: 'ok', data: object } | { status: 'error', message: string }";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!(
-			"{ data: object, status: 'ok' } | { message: string, status: 'error' }",
-			format!("{}", out)
-		);
-		assert_eq!(
-			out,
-			Kind::Literal(KindLiteral::DiscriminatedObject(
-				"status".to_string(),
-				vec![
-					map! {
-						"status".to_string() => Kind::Literal(KindLiteral::String("ok".into())),
-						"data".to_string() => Kind::Object,
-					},
-					map! {
-						"status".to_string() => Kind::Literal(KindLiteral::String("error".into())),
-						"message".to_string() => Kind::String,
-					},
-				]
-			))
-		);
-	}
-
-	#[test]
 	fn kind_union_literal_object() {
 		let sql = "{ status: 'ok', data: object } | { status: string, message: string }";
 		let res = kind(sql);
@@ -617,7 +599,7 @@ mod tests {
 		let res = kind(sql);
 		let out = res.unwrap();
 		assert_eq!("file<one>", format!("{}", out));
-		assert_eq!(out, Kind::File(vec![Ident::from("one")]));
+		assert_eq!(out, Kind::File(vec![i("one")]));
 	}
 
 	#[test]
@@ -626,6 +608,6 @@ mod tests {
 		let res = kind(sql);
 		let out = res.unwrap();
 		assert_eq!("file<one | two>", format!("{}", out));
-		assert_eq!(out, Kind::File(vec![Ident::from("one"), Ident::from("two")]));
+		assert_eq!(out, Kind::File(vec![i("one"), i("two")]));
 	}
-}*/
+}

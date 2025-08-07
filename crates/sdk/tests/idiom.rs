@@ -985,7 +985,6 @@ async fn idiom_recursion_limits() -> Result<()> {
 	Ok(())
 }
 
-// TODO: Delete once ported tests are verified.
 #[tokio::test]
 async fn idiom_function_argument_computation() -> Result<()> {
 	let sql = r#"

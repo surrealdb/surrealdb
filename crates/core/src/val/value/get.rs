@@ -7,7 +7,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
-//use crate::expr::edges::Edges;
 use crate::expr::field::{Field, Fields};
 use crate::expr::idiom::recursion::{Recursion, compute_idiom_recursion};
 use crate::expr::part::{FindRecursionPlan, Next, NextMethod, Part, Skip, SplitByRepeatRecurse};
@@ -382,32 +381,6 @@ impl Value {
 						stk.run(|stk| mapped.get(stk, ctx, opt, doc, path.skip(len))).await
 					}
 				},
-				// Current value at path is an edges
-				/* TODO: Figure out where this is used ans see if we can fix the issue.
-				Value::Edges(v) => {
-					// Clone the thing
-					let val = v.clone();
-					// Check how many path parts are remaining
-					match path.len() {
-						// No remote embedded fields, so just return this
-						0 => Ok(Value::Edges(val)),
-						// Remote embedded field, so fetch the thing
-						_ => {
-							let stm = SelectStatement {
-								expr: Fields(vec![Field::All], false),
-								what: vec![Value::from(val)],
-								..SelectStatement::default()
-							};
-							let v = stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.all();
-							stk.run(|stk| v.get(stk, ctx, opt, None, path))
-								.await?
-								.flatten()
-								.ok()
-								.map_err(ControlFlow::from)
-						}
-					}
-				}
-				*/
 				// Current value at path is a thing
 				Value::Thing(v) => {
 					// Clone the thing

@@ -122,214 +122,248 @@ impl Parser<'_> {
 	}
 }
 
-// #[cfg(test)]
-// mod test {
-// 	use crate::{
-// 		sql::{Script, SqlValue},
-// 		syn::{self, Parse},
-// 	};
-//
-// 	use super::*;
-//
-// 	#[test]
-// 	fn function_single() {
-// 		let sql = "count()";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!("count()", format!("{}", out));
-// 		assert_eq!(out, SqlValue::from(Function::Normal(String::from("count"), vec![])));
-// 	}
-//
-// 	#[test]
-// 	fn function_single_not() {
-// 		let sql = "not(10)";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!("not(10)", format!("{}", out));
-// 		assert_eq!(out, SqlValue::from(Function::Normal("not".to_owned(), vec![10.into()])));
-// 	}
-//
-// 	#[test]
-// 	fn function_module() {
-// 		let sql = "rand::uuid()";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!("rand::uuid()", format!("{}", out));
-// 		assert_eq!(out, SqlValue::from(Function::Normal(String::from("rand::uuid"), vec![])));
-// 	}
-//
-// 	#[test]
-// 	fn function_arguments() {
-// 		let sql = "string::is::numeric(null)";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!("string::is::numeric(NULL)", format!("{}", out));
-// 		assert_eq!(
-// 			out,
-// 			SqlValue::from(Function::Normal(
-// 				String::from("string::is::numeric"),
-// 				vec![SqlValue::Null]
-// 			))
-// 		);
-// 	}
-//
-// 	#[test]
-// 	fn function_simple_together() {
-// 		let sql = "function() { return 'test'; }";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!("function() { return 'test'; }", format!("{}", out));
-// 		assert_eq!(out, SqlValue::from(Function::Script(Script::from(" return 'test'; "), vec![])));
-// 	}
-//
-// 	#[test]
-// 	fn function_simple_whitespace() {
-// 		let sql = "function () { return 'test'; }";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!("function() { return 'test'; }", format!("{}", out));
-// 		assert_eq!(out, SqlValue::from(Function::Script(Script::from(" return 'test'; "), vec![])));
-// 	}
-//
-// 	#[test]
-// 	fn function_script_expression() {
-// 		let sql = "function() { return this.tags.filter(t => { return t.length > 3; }); }";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!(
-// 			"function() { return this.tags.filter(t => { return t.length > 3; }); }",
-// 			format!("{}", out)
-// 		);
-// 		assert_eq!(
-// 			out,
-// 			SqlValue::from(Function::Script(
-// 				Script::from(" return this.tags.filter(t => { return t.length > 3; }); "),
-// 				vec![]
-// 			))
-// 		);
-// 	}
-//
-// 	#[test]
-// 	fn ml_model_example() {
-// 		let sql = r#"ml::insurance::prediction<1.0.0>({
-// 			age: 18,
-// 			disposable_income: "yes",
-// 			purchased_before: true
-// 		})
-// 		"#;
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!(
-// 			"ml::insurance::prediction<1.0.0>({ age: 18, disposable_income: 'yes', purchased_before: true })",
-// 			out.to_string()
-// 		);
-// 	}
-//
-// 	#[test]
-// 	fn ml_model_example_in_select() {
-// 		let sql = r"
-// 			SELECT
-// 			name,
-// 			age,
-// 			ml::insurance::prediction<1.0.0>({
-// 				age: age,
-// 				disposable_income: math::round(income),
-// 				purchased_before: array::len(->purchased->property) > 0,
-// 			}) AS likely_to_buy FROM person:tobie;
-// 		";
-// 		let out = syn::parse(sql).unwrap();
-// 		assert_eq!(
-// 			"SELECT name, age, ml::insurance::prediction<1.0.0>({ age: age, disposable_income: math::round(income), purchased_before: array::len(->purchased->property) > 0 }) AS likely_to_buy FROM person:tobie;",
-// 			out.to_string()
-// 		);
-// 	}
-//
-// 	#[test]
-// 	fn ml_model_with_mutiple_arguments() {
-// 		let sql = "ml::insurance::prediction<1.0.0>(1,2,3,4,)";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!("ml::insurance::prediction<1.0.0>(1,2,3,4)", out.to_string());
-// 	}
-//
-// 	#[test]
-// 	fn script_basic() {
-// 		let sql = "function(){return true;}";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!("function() {return true;}", format!("{}", out));
-// 		assert_eq!(out, SqlValue::from(Function::Script(Script::from("return true;"), Vec::new())));
-// 	}
-//
-// 	#[test]
-// 	fn script_object() {
-// 		let sql = "function(){return { test: true, something: { other: true } };}";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!(
-// 			"function() {return { test: true, something: { other: true } };}",
-// 			format!("{}", out)
-// 		);
-// 		assert_eq!(
-// 			out,
-// 			SqlValue::from(Function::Script(
-// 				Script::from("return { test: true, something: { other: true } };"),
-// 				Vec::new()
-// 			))
-// 		);
-// 	}
-//
-// 	#[test]
-// 	fn script_closure() {
-// 		let sql = "function(){return this.values.map(v => `This value is ${Number(v * 3)}`);}";
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!(
-// 			"function() {return this.values.map(v => `This value is ${Number(v * 3)}`);}",
-// 			format!("{}", out)
-// 		);
-// 		assert_eq!(
-// 			out,
-// 			SqlValue::from(Function::Script(
-// 				Script::from("return this.values.map(v => `This value is ${Number(v * 3)}`);"),
-// 				Vec::new()
-// 			))
-// 		);
-// 	}
-//
-// 	#[test]
-// 	fn script_complex() {
-// 		let sql = r#"function(){return { test: true, some: { object: "some text with uneven {{{ {} \" brackets", else: false } };}"#;
-// 		let out = SqlValue::parse(sql);
-// 		assert_eq!(
-// 			r#"function() {return { test: true, some: { object: "some text with uneven {{{ {} \" brackets", else: false } };}"#,
-// 			format!("{}", out)
-// 		);
-// 		assert_eq!(
-// 			out,
-// 			SqlValue::from(Function::Script(
-// 				Script::from(
-// 					r#"return { test: true, some: { object: "some text with uneven {{{ {} \" brackets", else: false } };"#
-// 				),
-// 				Vec::new()
-// 			))
-// 		);
-// 	}
-//
-// 	#[test]
-// 	fn script_advanced() {
-// 		let body = r#"
-// 			// {
-// 			// }
-// 			// {}
-// 			// { }
-// 			/* { */
-// 			/* } */
-// 			/* {} */
-// 			/* { } */
-// 			/* {{{ $ }} */
-// 			/* /* /* /* */
-// 			let x = {};
-// 			let x = { };
-// 			let x = '{';
-// 			let x = "{";
-// 			let x = '}';
-// 			let x = "}";
-// 			let x = '} } { {';
-// 			let x = 3 / 4 * 2;
-// 			let x = /* something */ 45 + 2;
-// 			"#;
-// 		let sql = "function() {".to_owned() + body + "}";
-// 		let out = SqlValue::parse(&sql);
-// 		assert_eq!(sql, format!("{}", out));
-// 		assert_eq!(out, SqlValue::from(Function::Script(Script::from(body), Vec::new())));
-// 	}
-// }
+#[cfg(test)]
+mod test {
+	use crate::{sql, syn};
+
+	use super::*;
+
+	#[test]
+	fn function_single() {
+		let sql = "count()";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!("count()", format!("{}", out));
+		let Expr::FunctionCall(f) = out else {
+			panic!()
+		};
+		assert_eq!(f.receiver, Function::Normal(String::from("count")));
+		assert_eq!(f.arguments, vec![]);
+	}
+
+	#[test]
+	fn function_single_not() {
+		let sql = "not(10)";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!("not(10)", format!("{}", out));
+		let Expr::FunctionCall(f) = out else {
+			panic!()
+		};
+		assert_eq!(f.receiver, Function::Normal(String::from("count")));
+		assert_eq!(f.arguments, vec![sql::Expr::Literal(sql::Literal::Integer(10))]);
+	}
+
+	#[test]
+	fn function_module() {
+		let sql = "rand::uuid()";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!("rand::uuid()", format!("{}", out));
+		let Expr::FunctionCall(f) = out else {
+			panic!()
+		};
+		assert_eq!(f.receiver, Function::Normal(String::from("rand::uuid")));
+		assert_eq!(f.arguments, vec![]);
+	}
+
+	#[test]
+	fn function_arguments() {
+		let sql = "string::is::numeric(null)";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!("string::is::numeric(NULL)", format!("{}", out));
+		let Expr::FunctionCall(f) = out else {
+			panic!()
+		};
+		assert_eq!(f.receiver, Function::Normal(String::from("string::is::numeric")));
+		assert_eq!(f.arguments, vec![sql::Expr::Literal(sql::Literal::Null)]);
+	}
+
+	#[test]
+	fn function_simple_together() {
+		let sql = "function() { return 'test'; }";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!("function() { return 'test'; }", format!("{}", out));
+		let Expr::FunctionCall(f) = out else {
+			panic!()
+		};
+		assert_eq!(f.receiver, Function::Script(sql::Script::from(" return 'test'; ")));
+		assert_eq!(f.arguments, vec![]);
+	}
+
+	#[test]
+	fn function_simple_whitespace() {
+		let sql = "function () { return 'test'; }";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!("function() { return 'test'; }", format!("{}", out));
+		let Expr::FunctionCall(f) = out else {
+			panic!()
+		};
+		assert_eq!(f.receiver, Function::Script(sql::Script::from(" return 'test'; ")));
+		assert_eq!(f.arguments, vec![]);
+	}
+
+	#[test]
+	fn function_script_expression() {
+		let sql = "function() { return this.tags.filter(t => { return t.length > 3; }); }";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!(
+			"function() { return this.tags.filter(t => { return t.length > 3; }); }",
+			format!("{}", out)
+		);
+		let Expr::FunctionCall(f) = out else {
+			panic!()
+		};
+		assert_eq!(
+			f.receiver,
+			Function::Script(sql::Script::from(
+				" return this.tags.filter(t => { return t.length > 3; }); "
+			))
+		);
+		assert_eq!(f.arguments, vec![]);
+	}
+
+	#[test]
+	fn ml_model_example() {
+		let sql = r#"ml::insurance::prediction<1.0.0>({
+ 			age: 18,
+ 			disposable_income: "yes",
+ 			purchased_before: true
+ 		})
+ 		"#;
+		let out = syn::expr(sql).unwrap();
+		assert_eq!(
+			"ml::insurance::prediction<1.0.0>({ age: 18, disposable_income: 'yes', purchased_before: true })",
+			out.to_string()
+		);
+	}
+
+	#[test]
+	fn ml_model_example_in_select() {
+		let sql = r"
+ 			SELECT
+ 			name,
+ 			age,
+ 			ml::insurance::prediction<1.0.0>({
+ 				age: age,
+ 				disposable_income: math::round(income),
+ 				purchased_before: array::len(->purchased->property) > 0,
+ 			}) AS likely_to_buy FROM person:tobie;
+ 		";
+		let out = syn::parse(sql).unwrap();
+		assert_eq!(
+			"SELECT name, age, ml::insurance::prediction<1.0.0>({ age: age, disposable_income: math::round(income), purchased_before: array::len(->purchased->property) > 0 }) AS likely_to_buy FROM person:tobie;",
+			out.to_string()
+		);
+	}
+
+	#[test]
+	fn ml_model_with_mutiple_arguments() {
+		let sql = "ml::insurance::prediction<1.0.0>(1,2,3,4,)";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!("ml::insurance::prediction<1.0.0>(1,2,3,4)", out.to_string());
+	}
+
+	#[test]
+	fn script_basic() {
+		let sql = "function(){return true;}";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!("function() {return true;}", format!("{}", out));
+		let Expr::FunctionCall(f) = out else {
+			panic!()
+		};
+		assert_eq!(f.receiver, Function::Script(sql::Script::from("return true;")));
+		assert_eq!(f.arguments, vec![]);
+	}
+
+	#[test]
+	fn script_object() {
+		let sql = "function(){return { test: true, something: { other: true } };}";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!(
+			"function() {return { test: true, something: { other: true } };}",
+			format!("{}", out)
+		);
+		let Expr::FunctionCall(f) = out else {
+			panic!()
+		};
+
+		assert_eq!(
+			f.receiver,
+			Function::Script(sql::Script::from(
+				"return { test: true, something: { other: true } };"
+			))
+		);
+		assert_eq!(f.arguments, vec![]);
+	}
+
+	#[test]
+	fn script_closure() {
+		let sql = "function(){return this.values.map(v => `This value is ${Number(v * 3)}`);}";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!(
+			"function() {return this.values.map(v => `This value is ${Number(v * 3)}`);}",
+			format!("{}", out)
+		);
+		let Expr::FunctionCall(f) = out else {
+			panic!()
+		};
+
+		assert_eq!(
+			f.receiver,
+			Function::Script(sql::Script::from(
+				"return this.values.map(v => `This value is ${Number(v * 3)}`);"
+			))
+		);
+		assert_eq!(f.arguments, vec![]);
+	}
+
+	#[test]
+	fn script_complex() {
+		let sql = r#"function(){return { test: true, some: { object: "some text with uneven {{{ {} \" brackets", else: false } };}"#;
+		let out = syn::expr(sql).unwrap();
+		assert_eq!(
+			r#"function() {return { test: true, some: { object: "some text with uneven {{{ {} \" brackets", else: false } };}"#,
+			format!("{}", out)
+		);
+		let Expr::FunctionCall(f) = out else {
+			panic!()
+		};
+		assert_eq!(
+			f.receiver,
+			Function::Script(sql::Script::from(
+				r#"return { test: true, some: { object: "some text with uneven {{{ {} \" brackets", else: false } };"#
+			))
+		);
+	}
+
+	#[test]
+	fn script_advanced() {
+		let body = r#"
+ 			// {
+ 			// }
+ 			// {}
+ 			// { }
+ 			/* { */
+ 			/* } */
+ 			/* {} */
+ 			/* { } */
+ 			/* {{{ $ }} */
+ 			/* /* /* /* */
+ 			let x = {};
+ 			let x = { };
+ 			let x = '{';
+ 			let x = "{";
+ 			let x = '}';
+ 			let x = "}";
+ 			let x = '} } { {';
+ 			let x = 3 / 4 * 2;
+ 			let x = /* something */ 45 + 2;
+ 			"#;
+		let sql = "function() {".to_owned() + body + "}";
+		let out = syn::expr(&sql).unwrap();
+
+		assert_eq!(sql, format!("{}", out));
+		let Expr::FunctionCall(f) = out else {
+			panic!()
+		};
+		assert_eq!(f.receiver, Function::Script(sql::Script::from(body)));
+	}
+}

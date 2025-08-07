@@ -353,271 +353,276 @@ impl Parser<'_> {
 	}
 }
 
-// #[cfg(test)]
-// mod tests {
-// 	use reblessive::Stack;
-//
-// 	use super::*;
-// 	use crate::sql::SqlValue;
-// 	use crate::sql::array::Array;
-// 	use crate::sql::object::Object;
-// 	use crate::syn::Parse as _;
-// 	use crate::syn::parser::ParserSettings;
-//
-// 	fn thing(i: &str) -> ParseResult<Thing> {
-// 		let mut parser = Parser::new(i.as_bytes());
-// 		let mut stack = Stack::new();
-// 		stack.enter(|ctx| async move { parser.parse_thing(ctx).await }).finish()
-// 	}
-//
-// 	#[test]
-// 	fn thing_normal() {
-// 		let sql = "test:id";
-// 		let res = thing(sql);
-// 		let out = res.unwrap();
-// 		assert_eq!("test:id", format!("{}", out));
-// 		assert_eq!(
-// 			out,
-// 			Thing {
-// 				tb: String::from("test"),
-// 				id: Id::from("id"),
-// 			}
-// 		);
-// 	}
-//
-// 	#[test]
-// 	fn thing_integer() {
-// 		let sql = "test:001";
-// 		let res = thing(sql);
-// 		let out = res.unwrap();
-// 		assert_eq!("test:1", format!("{}", out));
-// 		assert_eq!(
-// 			out,
-// 			Thing {
-// 				tb: String::from("test"),
-// 				id: Id::from(1),
-// 			}
-// 		);
-// 	}
-//
-// 	#[test]
-// 	fn thing_integer_min() {
-// 		let sql = format!("test:{}", i64::MIN);
-// 		let res = thing(&sql);
-// 		let out = res.unwrap();
-// 		assert_eq!(
-// 			out,
-// 			Thing {
-// 				tb: String::from("test"),
-// 				id: Id::from(i64::MIN),
-// 			}
-// 		);
-// 	}
-//
-// 	#[test]
-// 	fn thing_integer_max() {
-// 		let sql = format!("test:{}", i64::MAX);
-// 		let res = thing(&sql);
-// 		let out = res.unwrap();
-// 		assert_eq!(
-// 			out,
-// 			Thing {
-// 				tb: String::from("test"),
-// 				id: Id::from(i64::MAX),
-// 			}
-// 		);
-// 	}
-//
-// 	#[test]
-// 	fn thing_integer_more_then_max() {
-// 		let max_str = format!("{}", (i64::MAX as u64) + 1);
-// 		let sql = format!("test:{}", max_str);
-// 		let res = thing(&sql);
-// 		let out = res.unwrap();
-// 		assert_eq!(
-// 			out,
-// 			Thing {
-// 				tb: String::from("test"),
-// 				id: Id::from(max_str),
-// 			}
-// 		);
-// 	}
-//
-// 	#[test]
-// 	fn thing_integer_more_then_min() {
-// 		let min_str = format!("-{}", (i64::MAX as u64) + 2);
-// 		let sql = format!("test:{}", min_str);
-// 		let res = thing(&sql);
-// 		let out = res.unwrap();
-// 		assert_eq!(
-// 			out,
-// 			Thing {
-// 				tb: String::from("test"),
-// 				id: Id::from(min_str),
-// 			}
-// 		);
-// 	}
-//
-// 	#[test]
-// 	fn thing_string() {
-// 		let sql = "r'test:001'";
-// 		let res = SqlValue::parse(sql);
-// 		let SqlValue::Thing(out) = res else {
-// 			panic!()
-// 		};
-// 		assert_eq!("test:1", format!("{}", out));
-// 		assert_eq!(
-// 			out,
-// 			Thing {
-// 				tb: String::from("test"),
-// 				id: Id::from(1),
-// 			}
-// 		);
-//
-// 		let sql = "r'test:001'";
-// 		let res = SqlValue::parse(sql);
-// 		let SqlValue::Thing(out) = res else {
-// 			panic!()
-// 		};
-// 		assert_eq!("test:1", format!("{}", out));
-// 		assert_eq!(
-// 			out,
-// 			Thing {
-// 				tb: String::from("test"),
-// 				id: Id::from(1),
-// 			}
-// 		);
-// 	}
-//
-// 	#[test]
-// 	fn thing_quoted_backtick() {
-// 		let sql = "`test`:`id`";
-// 		let res = thing(sql);
-// 		let out = res.unwrap();
-// 		assert_eq!("test:id", format!("{}", out));
-// 		assert_eq!(
-// 			out,
-// 			Thing {
-// 				tb: String::from("test"),
-// 				id: Id::from("id"),
-// 			}
-// 		);
-// 	}
-//
-// 	#[test]
-// 	fn thing_quoted_brackets() {
-// 		let sql = "⟨test⟩:⟨id⟩";
-// 		let res = thing(sql);
-// 		let out = res.unwrap();
-// 		assert_eq!("test:id", format!("{}", out));
-// 		assert_eq!(
-// 			out,
-// 			Thing {
-// 				tb: String::from("test"),
-// 				id: Id::from("id"),
-// 			}
-// 		);
-// 	}
-//
-// 	#[test]
-// 	fn thing_object() {
-// 		let sql = "test:{ location: 'GBR', year: 2022 }";
-// 		let res = thing(sql);
-// 		let out = res.unwrap();
-// 		assert_eq!("test:{ location: 'GBR', year: 2022 }", format!("{}", out));
-// 		assert_eq!(
-// 			out,
-// 			Thing {
-// 				tb: String::from("test"),
-// 				id: Id::from(Object::from(map! {
-// 					"location".to_string() => SqlValue::from("GBR"),
-// 					"year".to_string() => SqlValue::from(2022),
-// 				})),
-// 			}
-// 		);
-// 	}
-//
-// 	#[test]
-// 	fn thing_array() {
-// 		let sql = "test:['GBR', 2022]";
-// 		let res = thing(sql);
-// 		let out = res.unwrap();
-// 		assert_eq!("test:['GBR', 2022]", format!("{}", out));
-// 		assert_eq!(
-// 			out,
-// 			Thing {
-// 				tb: String::from("test"),
-// 				id: Id::from(Array::from(vec![SqlValue::from("GBR"), SqlValue::from(2022)])),
-// 			}
-// 		);
-// 	}
-//
-// 	#[test]
-// 	fn weird_things() {
-// 		use crate::sql;
-//
-// 		fn assert_ident_parses_correctly(ident: &str) {
-// 			let thing = format!("t:{}", ident);
-// 			let mut parser = Parser::new_with_settings(
-// 				thing.as_bytes(),
-// 				ParserSettings {
-// 					flexible_record_id: true,
-// 					..Default::default()
-// 				},
-// 			);
-// 			let mut stack = Stack::new();
-// 			let r = stack
-// 				.enter(|ctx| async move { parser.parse_thing(ctx).await })
-// 				.finish()
-// 				.unwrap_or_else(|_| panic!("failed on {}", ident))
-// 				.id;
-// 			assert_eq!(r, Id::from(ident.to_string()),);
-//
-// 			let mut parser = Parser::new(thing.as_bytes());
-// 			let r = stack
-// 				.enter(|ctx| async move { parser.parse_query(ctx).await })
-// 				.finish()
-// 				.unwrap_or_else(|_| panic!("failed on {}", ident));
-//
-// 			assert_eq!(
-// 				r,
-// 				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::SqlValue::Thing(
-// 					sql::Thing {
-// 						tb: "t".to_string(),
-// 						id: Id::from(ident.to_string())
-// 					}
-// 				))]))
-// 			)
-// 		}
-//
-// 		assert_ident_parses_correctly("123abc");
-// 		assert_ident_parses_correctly("123d");
-// 		assert_ident_parses_correctly("123de");
-// 		assert_ident_parses_correctly("123dec");
-// 		assert_ident_parses_correctly("1e23dec");
-// 		assert_ident_parses_correctly("1e23f");
-// 		assert_ident_parses_correctly("123f");
-// 		assert_ident_parses_correctly("1ns");
-// 		assert_ident_parses_correctly("1ns1");
-// 		assert_ident_parses_correctly("1ns1h");
-// 		assert_ident_parses_correctly("000e8");
-// 		assert_ident_parses_correctly("000e8bla");
-//
-// 		assert_ident_parses_correctly("y123");
-// 		assert_ident_parses_correctly("w123");
-// 		assert_ident_parses_correctly("d123");
-// 		assert_ident_parses_correctly("h123");
-// 		assert_ident_parses_correctly("m123");
-// 		assert_ident_parses_correctly("s123");
-// 		assert_ident_parses_correctly("ms123");
-// 		assert_ident_parses_correctly("us123");
-// 		assert_ident_parses_correctly("ns123");
-// 		assert_ident_parses_correctly("dec123");
-// 		assert_ident_parses_correctly("f123");
-// 		assert_ident_parses_correctly("e123");
-//
-// 		assert_ident_parses_correctly("ulid");
-// 		assert_ident_parses_correctly("uuid");
-// 		assert_ident_parses_correctly("rand");
-// 	}
-// }
+#[cfg(test)]
+mod tests {
+	use reblessive::Stack;
+
+	use super::*;
+	use crate::sql::{Expr, Literal};
+	use crate::syn::parser::ParserSettings;
+	use crate::{sql, syn};
+
+	fn thing(i: &str) -> ParseResult<RecordIdLit> {
+		let mut parser = Parser::new(i.as_bytes());
+		let mut stack = Stack::new();
+		stack.enter(|ctx| async move { parser.parse_record_id(ctx).await }).finish()
+	}
+
+	#[test]
+	fn thing_normal() {
+		let sql = "test:id";
+		let res = thing(sql);
+		let out = res.unwrap();
+		assert_eq!("test:id", format!("{}", out));
+		assert_eq!(
+			out,
+			RecordIdLit {
+				tb: String::from("test"),
+				id: RecordIdKeyLit::String(strand!("id").to_owned()),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_integer() {
+		let sql = "test:001";
+		let res = thing(sql);
+		let out = res.unwrap();
+		assert_eq!("test:1", format!("{}", out));
+		assert_eq!(
+			out,
+			RecordIdLit {
+				tb: String::from("test"),
+				id: RecordIdKeyLit::Number(1),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_integer_min() {
+		let sql = format!("test:{}", i64::MIN);
+		let res = thing(&sql);
+		let out = res.unwrap();
+		assert_eq!(
+			out,
+			RecordIdLit {
+				tb: String::from("test"),
+				id: RecordIdKeyLit::Number(i64::MIN),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_integer_max() {
+		let sql = format!("test:{}", i64::MAX);
+		let res = thing(&sql);
+		let out = res.unwrap();
+		assert_eq!(
+			out,
+			RecordIdLit {
+				tb: String::from("test"),
+				id: RecordIdKeyLit::Number(i64::MAX),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_integer_more_then_max() {
+		let max_str = format!("{}", (i64::MAX as u64) + 1);
+		let sql = format!("test:{}", max_str);
+		let res = thing(&sql);
+		let out = res.unwrap();
+		assert_eq!(
+			out,
+			RecordIdLit {
+				tb: String::from("test"),
+				id: RecordIdKeyLit::String(Strand::new(max_str).unwrap()),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_integer_more_then_min() {
+		let min_str = format!("-{}", (i64::MAX as u64) + 2);
+		let sql = format!("test:{}", min_str);
+		let res = thing(&sql);
+		let out = res.unwrap();
+		assert_eq!(
+			out,
+			RecordIdLit {
+				tb: String::from("test"),
+				id: RecordIdKeyLit::String(Strand::new(min_str).unwrap()),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_string() {
+		let sql = "r'test:001'";
+		let res = syn::expr(sql).unwrap();
+		let sql::Expr::Literal(sql::Literal::RecordId(out)) = res else {
+			panic!()
+		};
+		assert_eq!("test:1", format!("{}", out));
+		assert_eq!(
+			out,
+			RecordIdLit {
+				tb: String::from("test"),
+				id: RecordIdKeyLit::Number(1),
+			}
+		);
+
+		let sql = "r'test:001'";
+		let res = syn::expr(sql).unwrap();
+		let sql::Expr::Literal(sql::Literal::RecordId(out)) = res else {
+			panic!()
+		};
+		assert_eq!("test:1", format!("{}", out));
+		assert_eq!(
+			out,
+			RecordIdLit {
+				tb: String::from("test"),
+				id: RecordIdKeyLit::Number(1),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_quoted_backtick() {
+		let sql = "`test`:`id`";
+		let res = thing(sql);
+		let out = res.unwrap();
+		assert_eq!("test:id", format!("{}", out));
+		assert_eq!(
+			out,
+			RecordIdLit {
+				tb: String::from("test"),
+				id: RecordIdKeyLit::String(strand!("id").to_owned()),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_quoted_brackets() {
+		let sql = "⟨test⟩:⟨id⟩";
+		let res = thing(sql);
+		let out = res.unwrap();
+		assert_eq!("test:id", format!("{}", out));
+		assert_eq!(
+			out,
+			RecordIdLit {
+				tb: String::from("test"),
+				id: RecordIdKeyLit::String(strand!("id")),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_object() {
+		let sql = "test:{ location: 'GBR', year: 2022 }";
+		let res = thing(sql);
+		let out = res.unwrap();
+		assert_eq!("test:{ location: 'GBR', year: 2022 }", format!("{}", out));
+		assert_eq!(
+			out,
+			RecordIdLit {
+				tb: String::from("test"),
+				id: RecordIdKeyLit::Object(vec![
+					sql::literal::ObjectEntry {
+						key: "location".to_string(),
+						value: sql::Expr::Literal(sql::Literal::Strand(strand!("GBR").to_owned()))
+					},
+					sql::literal::ObjectEntry {
+						key: "year".to_string(),
+						value: sql::Expr::Literal(sql::Literal::Integer(2022)),
+					},
+				])
+			}
+		);
+	}
+
+	#[test]
+	fn thing_array() {
+		let sql = "test:['GBR', 2022]";
+		let res = thing(sql);
+		let out = res.unwrap();
+		assert_eq!("test:['GBR', 2022]", format!("{}", out));
+		assert_eq!(
+			out,
+			RecordIdLit {
+				tb: String::from("test"),
+				id: RecordIdKeyLit::Array(vec![
+					sql::Expr::Literal(sql::Literal::Strand(strand!("GBR").to_owned())),
+					sql::Expr::Literal(sql::Literal::Integer(2022)),
+				])
+			}
+		);
+	}
+
+	#[test]
+	fn weird_things() {
+		use crate::sql;
+
+		fn assert_ident_parses_correctly(ident: &str) {
+			let thing = format!("t:{}", ident);
+			let mut parser = Parser::new_with_settings(
+				thing.as_bytes(),
+				ParserSettings {
+					flexible_record_id: true,
+					..Default::default()
+				},
+			);
+			let mut stack = Stack::new();
+			let r = stack
+				.enter(|ctx| async move { parser.parse_record_id(ctx).await })
+				.finish()
+				.unwrap_or_else(|_| panic!("failed on {}", ident))
+				.id;
+			assert_eq!(r, RecordIdKeyLit::String(Strand::new(ident.to_string()).unwrap()),);
+
+			let mut parser = Parser::new(thing.as_bytes());
+			let r = stack
+				.enter(|ctx| async move { parser.parse_expr_inherit(ctx).await })
+				.finish()
+				.unwrap_or_else(|_| panic!("failed on {}", ident));
+
+			assert_eq!(
+				r,
+				Expr::Literal(Literal::RecordId(sql::RecordIdLit {
+					tb: "t".to_string(),
+					id: RecordIdKeyLit::String(Strand::new(ident.to_string()).unwrap())
+				}))
+			)
+		}
+
+		assert_ident_parses_correctly("123abc");
+		assert_ident_parses_correctly("123d");
+		assert_ident_parses_correctly("123de");
+		assert_ident_parses_correctly("123dec");
+		assert_ident_parses_correctly("1e23dec");
+		assert_ident_parses_correctly("1e23f");
+		assert_ident_parses_correctly("123f");
+		assert_ident_parses_correctly("1ns");
+		assert_ident_parses_correctly("1ns1");
+		assert_ident_parses_correctly("1ns1h");
+		assert_ident_parses_correctly("000e8");
+		assert_ident_parses_correctly("000e8bla");
+
+		assert_ident_parses_correctly("y123");
+		assert_ident_parses_correctly("w123");
+		assert_ident_parses_correctly("d123");
+		assert_ident_parses_correctly("h123");
+		assert_ident_parses_correctly("m123");
+		assert_ident_parses_correctly("s123");
+		assert_ident_parses_correctly("ms123");
+		assert_ident_parses_correctly("us123");
+		assert_ident_parses_correctly("ns123");
+		assert_ident_parses_correctly("dec123");
+		assert_ident_parses_correctly("f123");
+		assert_ident_parses_correctly("e123");
+
+		assert_ident_parses_correctly("ulid");
+		assert_ident_parses_correctly("uuid");
+		assert_ident_parses_correctly("rand");
+	}
+}

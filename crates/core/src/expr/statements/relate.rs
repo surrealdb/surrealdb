@@ -173,9 +173,6 @@ impl RelateStatement {
 			}
 		}
 
-		// HACK: This is a fix to avoid having fields in data 'computed' twice resulting in queries
-		// running twice. This should be fixed after a thorough restructuring of the executor.
-
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Process the statement

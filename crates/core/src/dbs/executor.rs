@@ -160,7 +160,7 @@ impl Executor {
 			}
 			TopLevelExpr::Begin => {
 				return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
-					"Cannot begin a transaction within a transaction".to_string(),
+					"Cannot BEGIN a transaction within a transaction".to_string(),
 				))));
 			}
 			TopLevelExpr::Commit => {
