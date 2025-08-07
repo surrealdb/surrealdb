@@ -78,7 +78,10 @@ impl TryFrom<Highlighter> for Record {
 	fn try_from(hl: Highlighter) -> Result<Self> {
 		let metadata = hl.metadata;
 		if hl.fields.is_empty() {
-			return Ok(Record { metadata, data: Default::default() });
+			return Ok(Record {
+				metadata,
+				data: Default::default(),
+			});
 		}
 		let mut vals = vec![];
 		for (_, f) in hl.fields {
@@ -117,9 +120,18 @@ impl TryFrom<Highlighter> for Record {
 			}
 		}
 		Ok(match res.len() {
-			0 => Record { metadata, data: Default::default() },
-			1 => Record { metadata, data: res.remove(0) },
-			_ => Record { metadata, data: Value::from(res) },
+			0 => Record {
+				metadata,
+				data: Default::default(),
+			},
+			1 => Record {
+				metadata,
+				data: res.remove(0),
+			},
+			_ => Record {
+				metadata,
+				data: Value::from(res),
+			},
 		})
 	}
 }

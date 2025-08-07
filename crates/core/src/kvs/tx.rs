@@ -4,6 +4,7 @@ use super::{Key, Val, Version, util};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
+use crate::expr::record::Record;
 use crate::expr::statements::access::AccessGrantStore;
 use crate::expr::statements::define::config::ConfigStore;
 use crate::expr::statements::define::{ApiDefinition, BucketDefinition, DefineSequenceStatement};
@@ -14,7 +15,6 @@ use crate::expr::statements::{
 	LiveStatement,
 };
 use crate::expr::{Ident, Permissions};
-use crate::expr::record::Record;
 use crate::idx::planner::ScanDirection;
 use crate::idx::trees::store::cache::IndexTreeCaches;
 use crate::key::database::sq::Sq;

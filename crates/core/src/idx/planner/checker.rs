@@ -1,8 +1,8 @@
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Options};
 use crate::doc::CursorDoc;
-use crate::expr::{Cond, Expr, FlowResultExt as _, Literal};
 use crate::expr::record::Record;
+use crate::expr::{Cond, Expr, FlowResultExt as _, Literal};
 use crate::idx::docids::DocId;
 use crate::idx::docids::btdocids::BTreeDocIds;
 use crate::idx::planner::iterators::KnnIteratorResult;

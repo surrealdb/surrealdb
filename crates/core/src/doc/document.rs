@@ -2,13 +2,13 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Workable};
 use crate::err::Error;
 use crate::expr::permission::Permission;
+use crate::expr::record::Record;
 use crate::expr::statements::define::{
 	DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement, DefineIndexStatement,
 	DefineTableStatement,
 };
 use crate::expr::statements::live::LiveStatement;
 use crate::expr::{Base, FlowResultExt as _, Ident};
-use crate::expr::record::Record;
 use crate::iam::{Action, ResourceKind};
 use crate::idx::planner::RecordStrategy;
 use crate::idx::planner::iterators::IteratorRecord;
