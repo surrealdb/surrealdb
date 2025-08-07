@@ -5891,6 +5891,8 @@ dependencies = [
 [[package]]
 name = "surrealdb-protocol"
 version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d410576c0fb53dfb68a68c7b4a4c9a442e3693a2751218fd1bb15b278024408"
 dependencies = [
  "anyhow",
  "async-trait",
