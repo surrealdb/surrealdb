@@ -9,16 +9,18 @@ use surrealdb_protocol::proto::prost_types::{
 };
 use surrealdb_protocol::proto::v1 as proto;
 
-use crate::expr::{idiom, Data, Duration, Fetch, Fetchs, Field, Fields, Idiom, Number, Operator, Timeout, Value};
+use crate::expr::{
+	Data, Duration, Fetch, Fetchs, Field, Fields, Idiom, Number, Operator, Timeout, Value, idiom,
+};
 use anyhow::Context;
 use anyhow::Result;
 use surrealdb_protocol::TryFromValue;
 use surrealdb_protocol::proto::v1::value::Value as ValueInner;
 use surrealdb_protocol::proto::v1::{
-	Array as ArrayProto, File as FileProto, Geometry as GeometryProto, RecordIdKey as RecordIdKeyProto,
-	NullValue as NullValueProto, Object as ObjectProto, RecordId as RecordIdProto,
-	Uuid as UuidProto, Value as ValueProto, geometry as geometry_proto, record_id_key as record_id_key_proto,
-	value as value_proto,
+	Array as ArrayProto, File as FileProto, Geometry as GeometryProto, NullValue as NullValueProto,
+	Object as ObjectProto, RecordId as RecordIdProto, RecordIdKey as RecordIdKeyProto,
+	Uuid as UuidProto, Value as ValueProto, geometry as geometry_proto,
+	record_id_key as record_id_key_proto, value as value_proto,
 };
 
 impl TryFrom<ValueProto> for crate::expr::Value {
@@ -333,10 +335,10 @@ impl TryFrom<RecordIdKeyProto> for crate::expr::Id {
 		};
 
 		Ok(match inner {
-				record_id_key_proto::Id::Int64(v) => crate::expr::Id::Number(v),
-				record_id_key_proto::Id::String(v) => crate::expr::Id::String(v),
-				record_id_key_proto::Id::Uuid(v) => crate::expr::Id::Uuid(v.try_into()?),
-				record_id_key_proto::Id::Array(v) => crate::expr::Id::Array(v.try_into()?),
+			record_id_key_proto::Id::Int64(v) => crate::expr::Id::Number(v),
+			record_id_key_proto::Id::String(v) => crate::expr::Id::String(v),
+			record_id_key_proto::Id::Uuid(v) => crate::expr::Id::Uuid(v.try_into()?),
+			record_id_key_proto::Id::Array(v) => crate::expr::Id::Array(v.try_into()?),
 			record_id_key_proto::Id::Range(_v) => todo!("Id::Range conversion not implemented"),
 		})
 	}
@@ -351,7 +353,9 @@ impl TryFrom<crate::expr::Id> for RecordIdKeyProto {
 			crate::expr::Id::String(v) => record_id_key_proto::Id::String(v),
 			crate::expr::Id::Uuid(v) => record_id_key_proto::Id::Uuid(v.0.into()),
 			crate::expr::Id::Array(v) => record_id_key_proto::Id::Array(v.try_into()?),
-			crate::expr::Id::Range(_v) => return Err(anyhow::anyhow!("Id::Range is not supported in proto conversion")),
+			crate::expr::Id::Range(_v) => {
+				return Err(anyhow::anyhow!("Id::Range is not supported in proto conversion"));
+			}
 			crate::expr::Id::Generate(v) => {
 				return Err(anyhow::anyhow!(
 					"Id::Generate is not supported in proto conversion: {v:?}"
@@ -983,4 +987,3 @@ impl TryFrom<crate::expr::With> for proto::With {
 		})
 	}
 }
-

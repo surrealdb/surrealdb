@@ -1,5 +1,5 @@
-use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use crate::expr::{Array, Kind, Object, Value};
+use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use anyhow::Context;
 use std::collections::BTreeMap;
 
@@ -31,7 +31,9 @@ impl ToFlatbuffers for BTreeMap<String, Kind> {
 		let entries_vector = builder.create_vector(&entries);
 		Ok(proto_fb::LiteralObject::create(
 			builder,
-			&proto_fb::LiteralObjectArgs { fields: Some(entries_vector) },
+			&proto_fb::LiteralObjectArgs {
+				fields: Some(entries_vector),
+			},
 		))
 	}
 }

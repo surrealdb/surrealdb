@@ -1,5 +1,5 @@
-use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use crate::expr::{Duration, Ident, Kind, Literal, Number, Strand, Table};
+use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use rust_decimal::Decimal;
 use std::collections::BTreeMap;
 use surrealdb_protocol::fb::v1 as proto_fb;
@@ -16,8 +16,7 @@ impl ToFlatbuffers for Kind {
 			Self::Any => proto_fb::KindArgs {
 				kind_type: proto_fb::KindType::Any,
 				kind: Some(
-					proto_fb::AnyKind::create(builder, &proto_fb::AnyKindArgs {})
-						.as_union_value(),
+					proto_fb::AnyKind::create(builder, &proto_fb::AnyKindArgs {}).as_union_value(),
 				),
 			},
 			Self::Null => proto_fb::KindArgs {
@@ -72,8 +71,7 @@ impl ToFlatbuffers for Kind {
 			Self::Int => proto_fb::KindArgs {
 				kind_type: proto_fb::KindType::Int,
 				kind: Some(
-					proto_fb::IntKind::create(builder, &proto_fb::IntKindArgs {})
-						.as_union_value(),
+					proto_fb::IntKind::create(builder, &proto_fb::IntKindArgs {}).as_union_value(),
 				),
 			},
 			Self::Number => proto_fb::KindArgs {
@@ -119,12 +117,9 @@ impl ToFlatbuffers for Kind {
 				),
 			},
 			Self::Record(tables) => {
-				let table_offsets: Vec<_> = tables
-					.iter()
-					.map(|t| t.to_fb(builder))
-					.collect::<anyhow::Result<Vec<_>>>()?;
-				let tables = builder.create_vector(&table_offsets
-				);
+				let table_offsets: Vec<_> =
+					tables.iter().map(|t| t.to_fb(builder)).collect::<anyhow::Result<Vec<_>>>()?;
+				let tables = builder.create_vector(&table_offsets);
 				proto_fb::KindArgs {
 					kind_type: proto_fb::KindType::Record,
 					kind: Some(
@@ -139,12 +134,9 @@ impl ToFlatbuffers for Kind {
 				}
 			}
 			Self::Geometry(types) => {
-				let type_offsets: Vec<_> = types
-					.iter()
-					.map(|t| builder.create_string(t.as_str()))
-					.collect();
-				let types = builder.create_vector(&type_offsets
-				);
+				let type_offsets: Vec<_> =
+					types.iter().map(|t| builder.create_string(t.as_str())).collect();
+				let types = builder.create_vector(&type_offsets);
 
 				proto_fb::KindArgs {
 					kind_type: proto_fb::KindType::Geometry,
@@ -153,7 +145,7 @@ impl ToFlatbuffers for Kind {
 							builder,
 							&proto_fb::GeometryKindArgs {
 								types: Some(types),
-							}
+							},
 						)
 						.as_union_value(),
 					),
@@ -167,12 +159,9 @@ impl ToFlatbuffers for Kind {
 				}
 			}
 			Self::Either(kinds) => {
-				let kind_offsets: Vec<_> = kinds
-					.iter()
-					.map(|k| k.to_fb(builder))
-					.collect::<anyhow::Result<Vec<_>>>()?;
-				let kinds = builder.create_vector(&kind_offsets
-				);
+				let kind_offsets: Vec<_> =
+					kinds.iter().map(|k| k.to_fb(builder)).collect::<anyhow::Result<Vec<_>>>()?;
+				let kinds = builder.create_vector(&kind_offsets);
 
 				proto_fb::KindArgs {
 					kind_type: proto_fb::KindType::Either,
@@ -231,14 +220,13 @@ impl ToFlatbuffers for Kind {
 							.iter()
 							.map(|arg| arg.to_fb(builder))
 							.collect::<anyhow::Result<Vec<_>>>()?;
-						Ok(builder.create_vector(&arg_offsets
-						))
+						Ok(builder.create_vector(&arg_offsets))
 					})
 					.transpose()?;
 
 				let return_type = return_type
 					.as_ref()
-					.map(|return_type|return_type.to_fb(builder))
+					.map(|return_type| return_type.to_fb(builder))
 					.transpose()?;
 
 				proto_fb::KindArgs {
@@ -270,12 +258,9 @@ impl ToFlatbuffers for Kind {
 				}
 			}
 			Self::File(buckets) => {
-				let bucket_offsets: Vec<_> = buckets
-					.iter()
-					.map(|b| builder.create_string(b.as_str()))
-					.collect();
-				let buckets = builder.create_vector(&bucket_offsets
-				);
+				let bucket_offsets: Vec<_> =
+					buckets.iter().map(|b| builder.create_string(b.as_str())).collect();
+				let buckets = builder.create_vector(&bucket_offsets);
 
 				proto_fb::KindArgs {
 					kind_type: proto_fb::KindType::File,
@@ -328,13 +313,13 @@ impl ToFlatbuffers for Literal {
 						proto_fb::StringValue::create(
 							builder,
 							&proto_fb::StringValueArgs {
-									value: Some(string_offset),
-								},
+								value: Some(string_offset),
+							},
 						)
 						.as_union_value(),
 					),
 				}
-			},
+			}
 			Self::Number(number) => match number {
 				Number::Int(i) => proto_fb::LiteralKindArgs {
 					literal_type: proto_fb::LiteralType::Int64,
@@ -370,28 +355,26 @@ impl ToFlatbuffers for Literal {
 				literal: Some(duration.to_fb(builder)?.as_union_value()),
 			},
 			Self::Array(array) => {
-				let array_items: Vec<_> = array.iter().map(|item| item.to_fb(builder)).collect::<anyhow::Result<Vec<_>>>()?;
+				let array_items: Vec<_> = array
+					.iter()
+					.map(|item| item.to_fb(builder))
+					.collect::<anyhow::Result<Vec<_>>>()?;
 				proto_fb::LiteralKindArgs {
 					literal_type: proto_fb::LiteralType::Array,
-					literal: Some(builder
-						.create_vector(&array_items)
-						.as_union_value()
-					),
-				}
-			},
-			Self::Object(object) => {
-				proto_fb::LiteralKindArgs {
-					literal_type: proto_fb::LiteralType::Object,
-					literal: Some(object.to_fb(builder)?.as_union_value()),
+					literal: Some(builder.create_vector(&array_items).as_union_value()),
 				}
 			}
+			Self::Object(object) => proto_fb::LiteralKindArgs {
+				literal_type: proto_fb::LiteralType::Object,
+				literal: Some(object.to_fb(builder)?.as_union_value()),
+			},
 			Self::DiscriminatedObject(discriminant_key, variants) => {
 				let discriminant_key = builder.create_string(discriminant_key);
 				let variant_offsets: Vec<_> = variants
 					.iter()
 					.map(|map| map.to_fb(builder))
 					.collect::<anyhow::Result<Vec<_>>>()?;
-				
+
 				let variants_vector = builder.create_vector(&variant_offsets);
 				let literal_discriminated_object = proto_fb::LiteralDiscriminatedObject::create(
 					builder,
@@ -439,12 +422,15 @@ impl FromFlatbuffers for Kind {
 					return Err(anyhow::anyhow!("Missing record kind"));
 				};
 				let tables = if let Some(tables) = record.tables() {
-					tables.iter().map(|t| {
-						let Some(name) = t.name() else {
-							return Err(anyhow::anyhow!("Missing table name"));
-						};
-						Ok(Table::from(name))
-					}).collect::<anyhow::Result<Vec<_>>>()?
+					tables
+						.iter()
+						.map(|t| {
+							let Some(name) = t.name() else {
+								return Err(anyhow::anyhow!("Missing table name"));
+							};
+							Ok(Table::from(name))
+						})
+						.collect::<anyhow::Result<Vec<_>>>()?
 				} else {
 					Vec::new()
 				};
@@ -548,7 +534,7 @@ impl FromFlatbuffers for Literal {
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		use proto_fb::LiteralType;
-		
+
 		let literal_type = input.literal_type();
 
 		match literal_type {
@@ -617,9 +603,10 @@ impl FromFlatbuffers for Literal {
 					return Err(anyhow::anyhow!("Missing discriminant key"));
 				};
 				let variants = if let Some(variants) = disc_obj.variants() {
-					variants.iter().map(|variant| {
-						BTreeMap::<String, Kind>::from_fb(variant)
-					}).collect::<anyhow::Result<Vec<_>>>()?
+					variants
+						.iter()
+						.map(|variant| BTreeMap::<String, Kind>::from_fb(variant))
+						.collect::<anyhow::Result<Vec<_>>>()?
 				} else {
 					Vec::new()
 				};

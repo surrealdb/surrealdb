@@ -1,5 +1,5 @@
-use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use crate::expr::{Bytes, Duration, Uuid};
+use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -166,8 +166,7 @@ impl FromFlatbuffers for Decimal {
 		let Some(value_str) = input.value() else {
 			return Err(anyhow::anyhow!("Missing decimal string"));
 		};
-		value_str.parse::<Decimal>()
-			.context("Failed to parse decimal")
+		value_str.parse::<Decimal>().context("Failed to parse decimal")
 	}
 }
 
@@ -291,8 +290,8 @@ impl ToFlatbuffers for Bytes {
 		let data = builder.create_vector(&self.0);
 		Ok(proto_fb::Bytes::create(
 			builder,
-			&proto_fb::BytesArgs { 
-				value: Some(data) 
+			&proto_fb::BytesArgs {
+				value: Some(data),
 			},
 		))
 	}

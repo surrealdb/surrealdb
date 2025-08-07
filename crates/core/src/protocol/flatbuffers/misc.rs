@@ -1,5 +1,5 @@
-use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use crate::expr::{Fetch, Fetchs, File, Value};
+use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 
 use surrealdb_protocol::fb::v1 as proto_fb;
 

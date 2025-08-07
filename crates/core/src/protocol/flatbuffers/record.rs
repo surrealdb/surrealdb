@@ -1,5 +1,5 @@
-use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use crate::expr::{Id, IdRange, Table, Thing};
+use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use std::ops::Bound;
 
 use surrealdb_protocol::fb::v1::{self as proto_fb, RecordIdKeyBound};
@@ -15,7 +15,9 @@ impl ToFlatbuffers for Table {
 		let name = builder.create_string(self.as_str());
 		Ok(proto_fb::TableName::create(
 			builder,
-			&proto_fb::TableNameArgs { name: Some(name) },
+			&proto_fb::TableNameArgs {
+				name: Some(name),
+			},
 		))
 	}
 }
@@ -188,7 +190,6 @@ impl ToFlatbuffers for IdRange {
 			},
 		))
 	}
-	
 }
 
 impl FromFlatbuffers for IdRange {
@@ -198,15 +199,21 @@ impl FromFlatbuffers for IdRange {
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		let beg = match input.start_type() {
 			RecordIdKeyBound::Unbounded => {
-				input.start_as_unbounded().ok_or_else(|| anyhow::anyhow!("Missing start in IdRange"))?;
+				input
+					.start_as_unbounded()
+					.ok_or_else(|| anyhow::anyhow!("Missing start in IdRange"))?;
 				Bound::Unbounded
 			}
 			RecordIdKeyBound::Inclusive => {
-				let start = input.start_as_inclusive().ok_or_else(|| anyhow::anyhow!("Missing start in IdRange"))?;
+				let start = input
+					.start_as_inclusive()
+					.ok_or_else(|| anyhow::anyhow!("Missing start in IdRange"))?;
 				Bound::Included(Id::from_fb(start)?)
 			}
-			RecordIdKeyBound::Exclusive => {	
-				let start = input.start_as_exclusive().ok_or_else(|| anyhow::anyhow!("Missing start in IdRange"))?;
+			RecordIdKeyBound::Exclusive => {
+				let start = input
+					.start_as_exclusive()
+					.ok_or_else(|| anyhow::anyhow!("Missing start in IdRange"))?;
 				Bound::Excluded(Id::from_fb(start)?)
 			}
 			_ => return Err(anyhow::anyhow!("Invalid start type in IdRange")),
@@ -214,15 +221,21 @@ impl FromFlatbuffers for IdRange {
 
 		let end = match input.end_type() {
 			RecordIdKeyBound::Unbounded => {
-				input.end_as_unbounded().ok_or_else(|| anyhow::anyhow!("Missing end in IdRange"))?;
+				input
+					.end_as_unbounded()
+					.ok_or_else(|| anyhow::anyhow!("Missing end in IdRange"))?;
 				Bound::Unbounded
 			}
 			RecordIdKeyBound::Inclusive => {
-				let end = input.end_as_inclusive().ok_or_else(|| anyhow::anyhow!("Missing end in IdRange"))?;
+				let end = input
+					.end_as_inclusive()
+					.ok_or_else(|| anyhow::anyhow!("Missing end in IdRange"))?;
 				Bound::Included(Id::from_fb(end)?)
 			}
 			RecordIdKeyBound::Exclusive => {
-				let end = input.end_as_exclusive().ok_or_else(|| anyhow::anyhow!("Missing end in IdRange"))?;
+				let end = input
+					.end_as_exclusive()
+					.ok_or_else(|| anyhow::anyhow!("Missing end in IdRange"))?;
 				Bound::Excluded(Id::from_fb(end)?)
 			}
 			_ => return Err(anyhow::anyhow!("Invalid end type in IdRange")),
@@ -236,7 +249,8 @@ impl FromFlatbuffers for IdRange {
 }
 
 impl ToFlatbuffers for Bound<Id> {
-	type Output<'bldr> = (proto_fb::RecordIdKeyBound, Option<flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>>);
+	type Output<'bldr> =
+		(proto_fb::RecordIdKeyBound, Option<flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>>);
 
 	#[inline]
 	fn to_fb<'bldr>(

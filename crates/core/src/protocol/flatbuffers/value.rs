@@ -1,5 +1,7 @@
+use crate::expr::{
+	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Strand, Thing, Uuid, Value,
+};
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
-use crate::expr::{Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Strand, Thing, Uuid, Value};
 use anyhow::anyhow;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
