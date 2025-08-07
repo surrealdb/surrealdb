@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err)]
 use std::{backtrace, fmt::Debug};
 
 use async_graphql::{InputType, InputValueError};

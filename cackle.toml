@@ -752,6 +752,9 @@ from.build.allow_apis = ["fs"]
 [pkg.smol_str]
 allow_unsafe = true
 
+[pkg.fastnum]
+build.allow_apis = ["fs"]
+
 [pkg.rust_decimal]
 build.allow_apis = ["fs"]
 
