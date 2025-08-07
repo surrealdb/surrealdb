@@ -417,7 +417,7 @@ impl Number {
 	/// - `Ok(Vec<u8>)`: Lexicographically-ordered byte buffer
 	/// - `Err(Error)`: If float value cannot be converted to decimal representation
 	///
-	pub(crate) fn as_decimal_buf(&self) -> Result<Vec<u8>> {
+	pub fn as_decimal_buf(&self) -> Result<Vec<u8>> {
 		match self {
 			Self::Int(v) => {
 				// Convert integer to decimal for consistent encoding across all numeric types
@@ -499,7 +499,7 @@ impl Number {
 	/// - **Unknown marker**: Last byte is not a recognized type marker
 	/// - **Decode failure**: Lexicographic decoding fails or type conversion fails
 	///
-	pub(crate) fn from_decimal_buf(b: &[u8]) -> Result<Self> {
+	pub fn from_decimal_buf(b: &[u8]) -> Result<Self> {
 		// Examine the type marker (last byte) to determine decoding strategy
 		match b.last().copied() {
 			Some(Self::NUMBER_MARKER_INT) => {
