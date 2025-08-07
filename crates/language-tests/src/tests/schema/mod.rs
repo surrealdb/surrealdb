@@ -496,7 +496,7 @@ impl<'de> Deserialize<'de> for SurrealExpr {
 		};
 
 		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
-			parser.parse_expr_table(stk).await
+			parser.parse_expr_start(stk).await
 		})
 		.map_err(<D::Error as serde::de::Error>::custom)?;
 
