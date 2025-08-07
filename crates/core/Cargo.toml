@@ -127,7 +127,7 @@ chrono = { workspace = true, features = ["serde"] }
 ciborium.workspace = true
 dashmap.workspace = true
 deunicode.workspace = true
-fastnum = "0.3.2"
+fastnum.workspace = true
 flatbuffers.workspace = true
 fst.workspace = true
 futures.workspace = true

@@ -443,23 +443,11 @@ impl Number {
 					Ok(vec![0xFF, 0xFF, Self::NUMBER_MARKER_FLOAT_NAN])
 				} else {
 					// Convert finite float to decimal for lexicographic encoding
-					match Decimal::from_f64(*v) {
-						Some(decimal) => {
-							let decimal = DecimalLexEncoder::to_d128(decimal)?;
-							let mut b = DecimalLexEncoder::encode(decimal);
-							// Append float marker to distinguish from native decimals
-							b.push(Self::NUMBER_MARKER_FLOAT);
-							Ok(b)
-						}
-						None => {
-							// This should be rare - occurs when float is too large/small for Decimal
-							Err(Error::Serialization(format!(
-								"Failed to convert float {} to decimal",
-								v
-							))
-							.into())
-						}
-					}
+					let dec = D128::from_f64(*v);
+					let mut b = DecimalLexEncoder::encode(dec);
+					// Append float marker to distinguish from native decimals
+					b.push(Self::NUMBER_MARKER_FLOAT);
+					Ok(b)
 				}
 			}
 			Self::Decimal(v) => {
@@ -526,8 +514,8 @@ impl Number {
 			}
 			Some(Self::NUMBER_MARKER_FLOAT) => {
 				// Decode as decimal representation of the original float
-				let decimal = DecimalLexEncoder::decode(b)?;
-				Ok(Number::Float(decimal.to_f64()))
+				let dec = DecimalLexEncoder::decode(b)?;
+				Ok(Number::Float(dec.to_f64()))
 			}
 			// Handle special float values that were encoded with fixed byte patterns
 			Some(Self::NUMBER_MARKER_FLOAT_INFINITE_POSITIVE) => Ok(Number::Float(f64::INFINITY)),
@@ -1379,7 +1367,7 @@ mod tests {
 	fn serialised_ord_test() {
 		let ordering = [
 			Number::from(f64::NEG_INFINITY),
-			Number::from(Decimal::MIN),
+			Number::from(f64::MIN),
 			Number::Int(i64::MIN),
 			Number::from(-10),
 			Number::from(-3.15),
@@ -1393,7 +1381,7 @@ mod tests {
 			Number::from(100),
 			Number::from(1000),
 			Number::from(i64::MAX),
-			Number::from(Decimal::MAX),
+			Number::from(f64::MAX),
 			Number::from(f64::INFINITY),
 			Number::from(f64::NAN),
 		];

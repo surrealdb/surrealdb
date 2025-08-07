@@ -78,6 +78,7 @@ ciborium = "0.2.1"
 dashmap = "6.1.0"
 deunicode = "1.6.1"
 ext-sort = "^0.1.4"
+fastnum = "0.3.2"
 flatbuffers = { version = "25.2.10", features = ["serde"] }
 fst = "0.4.7"
 futures = "0.3.30"
