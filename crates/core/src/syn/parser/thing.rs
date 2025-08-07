@@ -512,7 +512,7 @@ mod tests {
 			out,
 			RecordIdLit {
 				tb: String::from("test"),
-				id: RecordIdKeyLit::String(strand!("id")),
+				id: RecordIdKeyLit::String(strand!("id").to_owned()),
 			}
 		);
 	}

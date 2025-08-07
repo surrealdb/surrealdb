@@ -38,7 +38,6 @@ pub(crate) mod output;
 pub(crate) mod param;
 pub(crate) mod part;
 pub(crate) mod permission;
-pub(crate) mod planner;
 pub(crate) mod record_id;
 pub(crate) mod reference;
 pub(crate) mod scoring;

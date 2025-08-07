@@ -9,8 +9,8 @@ use crate::sql::{
 };
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::{self, Numeric};
+use crate::syn::parser::enter_object_recursion;
 use crate::syn::parser::mac::{expected, unexpected};
-use crate::syn::parser::{enter_object_recursion, enter_query_recursion};
 use crate::syn::token::{Glued, Span, TokenKind, t};
 use crate::val::{Duration, Strand};
 
@@ -178,130 +178,94 @@ impl Parser<'_> {
 				self.parse_model(stk).await.map(|x| Expr::FunctionCall(Box::new(x)))?
 			}
 			t!("IF") => {
-				enter_query_recursion!(this = self => {
-					this.pop_peek();
-					let stmt = stk.run(|ctx| this.parse_if_stmt(ctx)).await?;
-					Expr::If(Box::new(stmt))
-				})
+				self.pop_peek();
+				let stmt = stk.run(|ctx| self.parse_if_stmt(ctx)).await?;
+				Expr::If(Box::new(stmt))
 			}
 			t!("SELECT") => {
-				enter_query_recursion!(this = self => {
-					this.pop_peek();
-					let stmt = this.parse_select_stmt(stk).await?;
-					Expr::Select(Box::new(stmt))
-				})
+				self.pop_peek();
+				let stmt = self.parse_select_stmt(stk).await?;
+				Expr::Select(Box::new(stmt))
 			}
 			t!("CREATE") => {
-				enter_query_recursion!(this = self => {
-					this.pop_peek();
-					let stmt = this.parse_create_stmt(stk).await?;
-					Expr::Create(Box::new(stmt))
-				})
+				self.pop_peek();
+				let stmt = self.parse_create_stmt(stk).await?;
+				Expr::Create(Box::new(stmt))
 			}
 			t!("UPDATE") => {
-				enter_query_recursion!(this = self => {
-					this.pop_peek();
-					let stmt = this.parse_update_stmt(stk).await?;
-					Expr::Update(Box::new(stmt))
-				})
+				self.pop_peek();
+				let stmt = self.parse_update_stmt(stk).await?;
+				Expr::Update(Box::new(stmt))
 			}
 			t!("UPSERT") => {
-				enter_query_recursion!(this = self => {
-					this.pop_peek();
-					let stmt = this.parse_upsert_stmt(stk).await?;
-					Expr::Upsert(Box::new(stmt))
-				})
+				self.pop_peek();
+				let stmt = self.parse_upsert_stmt(stk).await?;
+				Expr::Upsert(Box::new(stmt))
 			}
 			t!("DELETE") => {
-				enter_query_recursion!(this = self => {
-					this.pop_peek();
-					let stmt = this.parse_delete_stmt(stk).await?;
-					Expr::Delete(Box::new(stmt))
-				})
+				self.pop_peek();
+				let stmt = self.parse_delete_stmt(stk).await?;
+				Expr::Delete(Box::new(stmt))
 			}
 			t!("RELATE") => {
-				enter_query_recursion!(this = self => {
-					this.pop_peek();
-					let stmt = this.parse_relate_stmt(stk).await?;
-					Expr::Relate(Box::new(stmt))
-				})
+				self.pop_peek();
+				let stmt = self.parse_relate_stmt(stk).await?;
+				Expr::Relate(Box::new(stmt))
 			}
 			t!("INSERT") => {
-				enter_query_recursion!(this = self => {
-					this.pop_peek();
-					let stmt = this.parse_insert_stmt(stk).await?;
-					Expr::Insert(Box::new(stmt))
-				})
+				self.pop_peek();
+				let stmt = self.parse_insert_stmt(stk).await?;
+				Expr::Insert(Box::new(stmt))
 			}
 			t!("DEFINE") => {
-				enter_query_recursion!(this = self => {
-					this.pop_peek();
-					let stmt = this.parse_define_stmt(stk).await?;
-					Expr::Define(Box::new(stmt))
-				})
+				self.pop_peek();
+				let stmt = self.parse_define_stmt(stk).await?;
+				Expr::Define(Box::new(stmt))
 			}
 			t!("REMOVE") => {
-				enter_query_recursion!(this = self => {
-					this.pop_peek();
-					let stmt = this.parse_remove_stmt(stk).await?;
-					Expr::Remove(Box::new(stmt))
-				})
+				self.pop_peek();
+				let stmt = self.parse_remove_stmt(stk).await?;
+				Expr::Remove(Box::new(stmt))
 			}
 			t!("REBUILD") => {
-				enter_query_recursion!(this = self => {
-					this.pop_peek();
-					let stmt = this.parse_rebuild_stmt()?;
-					Expr::Rebuild(Box::new(stmt))
-				})
+				self.pop_peek();
+				let stmt = self.parse_rebuild_stmt()?;
+				Expr::Rebuild(Box::new(stmt))
 			}
 			t!("ALTER") => {
-				enter_query_recursion!(this = self => {
-					this.pop_peek();
-					let stmt = this.parse_alter_stmt(stk).await?;
-					Expr::Alter(Box::new(stmt))
-				})
+				self.pop_peek();
+				let stmt = self.parse_alter_stmt(stk).await?;
+				Expr::Alter(Box::new(stmt))
 			}
 			t!("INFO") => {
-				enter_query_recursion!(this = self => {
-					this.pop_peek();
-					let stmt = this.parse_info_stmt(stk).await?;
-					Expr::Info(Box::new(stmt))
-				})
+				self.pop_peek();
+				let stmt = self.parse_info_stmt(stk).await?;
+				Expr::Info(Box::new(stmt))
 			}
 			t!("FOR") => {
-				enter_query_recursion!(this = self => {
-					this.pop_peek();
-					let stmt = this.parse_for_stmt(stk).await?;
-					Expr::Foreach(Box::new(stmt))
-				})
+				self.pop_peek();
+				let stmt = self.parse_for_stmt(stk).await?;
+				Expr::Foreach(Box::new(stmt))
 			}
 			t!("LET") => {
-				enter_query_recursion!(this = self => {
-					this.pop_peek();
-					let stmt = this.parse_let_stmt(stk).await?;
-					Expr::Let(Box::new(stmt))
-				})
+				self.pop_peek();
+				let stmt = self.parse_let_stmt(stk).await?;
+				Expr::Let(Box::new(stmt))
 			}
 			t!("SLEEP") if self.peek1().kind != t!("(") => {
-				enter_query_recursion!(this = self => {
-					this.pop_peek();
-					let stmt = this.parse_sleep_stmt()?;
-					Expr::Sleep(Box::new(stmt))
-				})
+				self.pop_peek();
+				let stmt = self.parse_sleep_stmt()?;
+				Expr::Sleep(Box::new(stmt))
 			}
 			t!("RETURN") => {
-				enter_query_recursion!(this = self => {
-					this.pop_peek();
-					let stmt = this.parse_return_stmt(stk).await?;
-					Expr::Return(Box::new(stmt))
-				})
+				self.pop_peek();
+				let stmt = self.parse_return_stmt(stk).await?;
+				Expr::Return(Box::new(stmt))
 			}
 			t!("THROW") => {
-				enter_query_recursion!(this = self => {
-					this.pop_peek();
-					let expr = stk.run(|stk| this.parse_expr_inherit(stk)).await?;
-					Expr::Throw(Box::new(expr))
-				})
+				self.pop_peek();
+				let expr = stk.run(|stk| self.parse_expr_inherit(stk)).await?;
+				Expr::Throw(Box::new(expr))
 			}
 			t!("CONTINUE") => {
 				self.pop_peek();
@@ -587,7 +551,7 @@ mod tests {
 		let sql = "(DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1))";
 		let out = syn::expr(sql).unwrap();
 		assert_eq!(
-			"DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1)",
+			"DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN CREATE x SET y = 1",
 			format!("{}", out)
 		)
 	}

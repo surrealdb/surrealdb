@@ -944,7 +944,7 @@ mod tests {
 			sql::Expr::Idiom(Idiom(vec![
 				Part::Start(Expr::Param(Param::new("test".to_owned()).unwrap())),
 				f("temporary"),
-				Part::Where(Expr::Literal(sql::Literal::Integer(0))),
+				Part::Value(Expr::Literal(sql::Literal::Integer(0))),
 				f("embedded"),
 				Part::Flatten,
 			]))
@@ -1059,7 +1059,7 @@ mod tests {
 			out,
 			Expr::Idiom(Idiom(vec![
 				Part::Start(Expr::Literal(Literal::Object(Vec::new()))),
-				Part::Where(Expr::Literal(Literal::Integer(0)))
+				Part::Value(Expr::Literal(Literal::Integer(0)))
 			]))
 		);
 	}

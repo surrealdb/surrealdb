@@ -212,7 +212,8 @@ impl Parser<'_> {
 						alias,
 					} = field
 					else {
-						unreachable!()
+						// All is in the idiom so assume that the field is present.
+						return Ok(());
 					};
 
 					if let Some(alias) = alias {

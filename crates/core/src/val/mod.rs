@@ -1115,24 +1115,23 @@ mod tests {
 		assert_eq!(3, enc.len());
 		let enc: Vec<u8> = revision::to_vec(&Value::from("test")).unwrap();
 		assert_eq!(8, enc.len());
-		let enc: Vec<u8> =
-			revision::to_vec(&Value::from(syn::value("{ hello: 'world' }"))).unwrap();
+		let enc: Vec<u8> = revision::to_vec(&syn::value("{ hello: 'world' }").unwrap()).unwrap();
 		assert_eq!(19, enc.len());
 		let enc: Vec<u8> =
-			revision::to_vec(&Value::from(syn::value("{ compact: true, schema: 0 }"))).unwrap();
+			revision::to_vec(&syn::value("{ compact: true, schema: 0 }").unwrap()).unwrap();
 		assert_eq!(27, enc.len());
 	}
 
 	#[test]
 	fn serialize_deserialize() {
-		let val: Value = syn::value(
-			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: nulll }] } }",
+		let val = syn::value(
+			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: null }] } }",
 		)
-		.into();
-		let res: Value = syn::value(
-			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: nulll }] } }",
+		.unwrap();
+		let res = syn::value(
+			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: null }] } }",
 		)
-		.into();
+		.unwrap();
 		let enc: Vec<u8> = revision::to_vec(&val).unwrap();
 		let dec: Value = revision::from_slice(&enc).unwrap();
 		assert_eq!(res, dec);

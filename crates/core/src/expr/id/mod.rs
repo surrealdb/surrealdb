@@ -1,5 +1,6 @@
 use super::FlowResultExt as _;
-use super::fmt::Fmt;
+use super::escape::EscapeKey;
+use super::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -12,7 +13,7 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Display, Formatter, Write as _};
 
 pub mod range;
 pub use range::RecordIdKeyRangeLit;
@@ -60,9 +61,40 @@ impl Display for RecordIdKeyLit {
 			Self::String(v) => EscapeRid(v).fmt(f),
 			Self::Uuid(v) => Display::fmt(v, f),
 			Self::Array(v) => {
-				write!(f, "[{}]", Fmt::comma_separated(v.iter()))
+				let mut f = Pretty::from(f);
+				f.write_char('[')?;
+				if !v.is_empty() {
+					let indent = pretty_indent();
+					write!(f, "{}", Fmt::pretty_comma_separated(v.iter()))?;
+					drop(indent);
+				}
+				f.write_char(']')
 			}
-			Self::Object(v) => write!(f, "{{{}}}", Fmt::comma_separated(v.iter())),
+			Self::Object(v) => {
+				let mut f = Pretty::from(f);
+				if is_pretty() {
+					f.write_char('{')?;
+				} else {
+					f.write_str("{ ")?;
+				}
+				if !v.is_empty() {
+					let indent = pretty_indent();
+					write!(
+						f,
+						"{}",
+						Fmt::pretty_comma_separated(v.iter().map(|args| Fmt::new(
+							args,
+							|entry, f| write!(f, "{}: {}", EscapeKey(&entry.key), &entry.value)
+						)),)
+					)?;
+					drop(indent);
+				}
+				if is_pretty() {
+					f.write_char('}')
+				} else {
+					f.write_str(" }")
+				}
+			}
 			Self::Generate(v) => match v {
 				Gen::Rand => Display::fmt("rand()", f),
 				Gen::Ulid => Display::fmt("ulid()", f),

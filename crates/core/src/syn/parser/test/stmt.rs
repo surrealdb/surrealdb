@@ -155,10 +155,10 @@ fn parse_create() {
 					value: ident_field("baz")
 				},
 			])),
-			output: Some(Output::Fields(Fields::Select(vec![Field::Single {
+			output: Some(Output::Fields(Fields::Value(Box::new(Field::Single {
 				expr: ident_field("foo"),
 				alias: Some(Idiom(vec![Part::Field(Ident::new("bar".to_string()).unwrap())])),
-			}]))),
+			})))),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
 			version: None,
@@ -314,7 +314,7 @@ fn parse_define_user() {
 
 		assert_eq!(stmt.name, Ident::from_strand(strand!("user").to_owned()));
 		assert_eq!(stmt.base, Base::Root);
-		assert_eq!(stmt.pass_type, PassType::Password("hunter2".to_owned()));
+		assert_eq!(stmt.pass_type, PassType::Hash("hunter2".to_owned()));
 		assert_eq!(stmt.roles, vec![Ident::from_strand(strand!("Viewer").to_owned())]);
 		assert_eq!(stmt.comment, Some(strand!("*******").to_owned()));
 		assert_eq!(stmt.token_duration, Some(Duration::from_hours(1).unwrap()));
@@ -338,7 +338,7 @@ fn parse_define_user() {
 
 		assert_eq!(stmt.name, Ident::from_strand(strand!("user").to_owned()));
 		assert_eq!(stmt.base, Base::Root);
-		assert_eq!(stmt.pass_type, PassType::Password("hunter2".to_owned()));
+		assert_eq!(stmt.pass_type, PassType::Hash("hunter2".to_owned()));
 		assert_eq!(
 			stmt.roles,
 			vec![
@@ -367,10 +367,10 @@ fn parse_define_user() {
 
 		assert_eq!(stmt.name, Ident::from_strand(strand!("user").to_owned()));
 		assert_eq!(stmt.base, Base::Root);
-		assert_eq!(stmt.pass_type, PassType::Password("hunter2".to_owned()));
+		assert_eq!(stmt.pass_type, PassType::Hash("hunter2".to_owned()));
 		assert_eq!(stmt.roles, vec![Ident::from_strand(strand!("Viewer").to_owned())]);
 		assert_eq!(stmt.token_duration, Some(Duration::from_hours(1).unwrap()));
-		assert_eq!(stmt.session_duration, None);
+		assert_eq!(stmt.session_duration, Some(Duration::from_hours(6).unwrap()));
 	}
 	// With session and token duration.
 	{
@@ -389,9 +389,9 @@ fn parse_define_user() {
 
 		assert_eq!(stmt.name, Ident::from_strand(strand!("user").to_owned()));
 		assert_eq!(stmt.base, Base::Root);
-		assert_eq!(stmt.pass_type, PassType::Password("hunter2".to_owned()));
+		assert_eq!(stmt.pass_type, PassType::Hash("hunter2".to_owned()));
 		assert_eq!(stmt.roles, vec![Ident::from_strand(strand!("Viewer").to_owned())]);
-		assert_eq!(stmt.token_duration, Some(Duration::from_mins(16).unwrap()));
+		assert_eq!(stmt.token_duration, Some(Duration::from_mins(15).unwrap()));
 		assert_eq!(stmt.session_duration, Some(Duration::from_hours(6).unwrap()));
 	}
 	// With none token duration.
@@ -2221,8 +2221,8 @@ fn parse_use() {
 	.pop()
 	.unwrap();
 	let expect = TopLevelExpr::Use(UseStatement {
-		ns: None,
-		db: Some(Ident::from_strand(strand!("foo").to_owned())),
+		ns: Some(Ident::from_strand(strand!("foo").to_owned())),
+		db: None,
 	});
 	assert_eq!(res, expect);
 
@@ -2363,7 +2363,7 @@ fn parse_insert() {
 						Part::Field(Ident::from_strand(strand!("d").to_owned())),
 					]),
 					operator: crate::sql::AssignOperator::Add,
-					value: Expr::Literal(Literal::Null)
+					value: Expr::Literal(Literal::None)
 				},
 			])),
 			output: Some(Output::After),
@@ -2464,7 +2464,7 @@ fn parse_live() {
 	let TopLevelExpr::Live(stmt) = res else {
 		panic!()
 	};
-	assert_eq!(stmt.expr, Fields::Select(Vec::new()));
+	assert_eq!(stmt.expr, Fields::Select(vec![Field::All]));
 	assert_eq!(stmt.what, Expr::Param(Param::from_strand(strand!("foo").to_owned())));
 
 	let res = syn::parse_with(

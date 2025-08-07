@@ -3,8 +3,8 @@ use crate::{
 		Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, Explain, Expr,
 		Fetch, Fetchs, Field, Fields, Function, FunctionCall, Graph, Group, Groups, Ident, Idiom,
 		Idioms, Index, Kind, Limit, Literal, Mock, Order, Output, Param, Part, Permission,
-		Permissions, RecordIdKeyLit, RecordIdLit, RemoveNamespaceStatement, Scoring, Script, Split,
-		Splits, Start, TableType, Timeout, TopLevelExpr, With,
+		Permissions, RecordAccess, RecordIdKeyLit, RecordIdLit, RemoveFunctionStatement, Scoring,
+		Script, Split, Splits, Start, TableType, Timeout, TopLevelExpr, With,
 		access::AccessDuration,
 		access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey},
 		changefeed::ChangeFeed,
@@ -108,8 +108,8 @@ static SOURCE: &str = r#"
 	RELATE ONLY [1,2]->a:b->(CREATE foo) UNIQUE SET a += 1 RETURN NONE PARALLEL;
 	REMOVE FUNCTION fn::foo::bar();
 	REMOVE FIELD foo.bar[10] ON bar;
-	UPDATE ONLY <future> { "text" }, a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL EXPLAIN FULL;
-	UPSERT ONLY <future> { "text" }, a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL EXPLAIN FULL;
+	UPDATE ONLY a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL EXPLAIN FULL;
+	UPSERT ONLY a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL EXPLAIN FULL;
 	function(){ ((1 + 1)) };
 	"a b c d e f g h";
 	u"ffffffff-ffff-ffff-ffff-ffffffffffff";
@@ -156,15 +156,15 @@ fn statements() -> Vec<TopLevelExpr> {
 				Assignment {
 					place: Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned()))]),
 					operator: AssignOperator::Extend,
-					value: ident_field("baz"),
+					value: Expr::Literal(Literal::Integer(4)),
 				},
 			])),
-			output: Some(Output::Fields(Fields::Select(vec![Field::Single {
+			output: Some(Output::Fields(Fields::Value(Box::new(Field::Single {
 				expr: ident_field("foo"),
 				alias: Some(Idiom(vec![Part::Field(Ident::from_strand(
 					strand!("bar").to_owned(),
 				))])),
-			}]))),
+			})))),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
 			version: None,
@@ -193,7 +193,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				comment: Some(strand!("test").to_owned()),
 				changefeed: Some(ChangeFeed {
 					expiry: std::time::Duration::from_secs(60) * 10,
-					store_diff: true,
+					store_diff: false,
 				}),
 			},
 		)))),
@@ -231,12 +231,17 @@ fn statements() -> Vec<TopLevelExpr> {
 				kind: DefineKind::Default,
 				name: Ident::from_strand(strand!("a").to_owned()),
 				base: Base::Db,
-				access_type: AccessType::Jwt(JwtAccess {
-					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
-						alg: Algorithm::EdDSA,
-						key: "foo".to_string(),
-					}),
-					issue: None,
+				access_type: AccessType::Record(RecordAccess {
+					signup: None,
+					signin: None,
+					jwt: JwtAccess {
+						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+							alg: Algorithm::EdDSA,
+							key: "foo".to_string(),
+						}),
+						issue: None,
+					},
+					bearer: None,
 				}),
 				authenticate: None,
 				// Default durations.
@@ -289,11 +294,11 @@ fn statements() -> Vec<TopLevelExpr> {
 				}),
 				create: Permission::None,
 				update: Permission::None,
-				delete: Permission::Full,
+				delete: Permission::None,
 			},
 			changefeed: Some(ChangeFeed {
 				expiry: std::time::Duration::from_secs(1),
-				store_diff: true,
+				store_diff: false,
 			}),
 			comment: None,
 
@@ -385,7 +390,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				doc_ids_order: 7,
 				doc_ids_cache: 8,
 				mtree_cache: 9,
-				vector_type: VectorType::I16,
+				vector_type: VectorType::F64,
 			}),
 			comment: None,
 			concurrently: false,
@@ -441,7 +446,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			output: Some(Output::Null),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(60 * 60)))),
 			parallel: true,
-			explain: Some(Explain(false)),
+			explain: Some(Explain(true)),
 		}))),
 		TopLevelExpr::Expr(Expr::Foreach(Box::new(ForeachStatement {
 			param: Param::from_strand(strand!("foo").to_owned()),
@@ -622,7 +627,7 @@ fn statements() -> Vec<TopLevelExpr> {
 						Part::Field(Ident::from_strand(strand!("d").to_owned())),
 					]),
 					operator: crate::sql::AssignOperator::Add,
-					value: Expr::Literal(Literal::Null),
+					value: Expr::Literal(Literal::None),
 				},
 			])),
 			output: Some(Output::After),
@@ -669,11 +674,10 @@ fn statements() -> Vec<TopLevelExpr> {
 			timeout: None,
 			parallel: true,
 		}))),
-		TopLevelExpr::Expr(Expr::Remove(Box::new(RemoveStatement::Namespace(
-			RemoveNamespaceStatement {
-				name: Ident::from_strand(strand!("ns").to_owned()),
+		TopLevelExpr::Expr(Expr::Remove(Box::new(RemoveStatement::Function(
+			RemoveFunctionStatement {
+				name: Ident::new("foo::bar".to_owned()).unwrap(),
 				if_exists: false,
-				expunge: false,
 			},
 		)))),
 		TopLevelExpr::Expr(Expr::Remove(Box::new(RemoveStatement::Field(RemoveFieldStatement {
@@ -751,7 +755,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			output: Some(Output::Diff),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
-			explain: Some(Explain(false)),
+			explain: Some(Explain(true)),
 		}))),
 		TopLevelExpr::Expr(Expr::FunctionCall(Box::new(FunctionCall {
 			receiver: Function::Script(Script(" ((1 + 1)) ".to_owned())),

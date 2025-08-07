@@ -174,7 +174,7 @@ fn query_depth_subquery() {
 	let mut stack = Stack::new();
 
 	let source = r#"
-		RETURN select (select (select ( select foo from bar ) from bar ) from bar) from bar
+		RETURN select (select foo from bar ) from bar
 		"#;
 	let mut parser = Parser::new_with_settings(
 		source.as_bytes(),
@@ -189,7 +189,7 @@ fn query_depth_subquery() {
 		.expect("recursion limit of 5 couldn't parse 5 deep query");
 
 	let source = r#"
-		RETURN select (select (select ( select (select foo from bar) from bar ) from bar ) from bar) from bar
+		RETURN select (select (select (select foo from bar) from bar ) from bar) from bar
 		"#;
 	let mut parser = Parser::new_with_settings(
 		source.as_bytes(),

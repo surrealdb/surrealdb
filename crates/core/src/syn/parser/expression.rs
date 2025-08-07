@@ -2,6 +2,7 @@
 
 use reblessive::Stk;
 
+use super::enter_query_recursion;
 use super::mac::unexpected;
 use crate::sql::operator::{BindingPower, BooleanOperator, MatchesOperator, NearestNeighbor};
 use crate::sql::{BinaryOperator, Expr, Ident, Literal, Part, PostfixOperator, PrefixOperator};
@@ -13,15 +14,26 @@ use crate::syn::token::{self, Glued, Token, TokenKind, t};
 use crate::val;
 
 impl Parser<'_> {
+	/// Parse a generic expression without triggering the query depth and setting table_as_field.
+	///
+	/// Meant to be used when parsing an expression the first time to avoid having the depth limit
+	/// be lowered unnessacrily
+	pub async fn parse_expr_start(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
+		self.table_as_field = true;
+		self.pratt_parse_expr(ctx, BindingPower::Base).await
+	}
+
 	/// Parsers a generic value.
 	///
 	/// A generic loose ident like `foo` in for example `foo.bar` can be two different values
 	/// depending on context: a table or a field the current document. This function parses loose
 	/// idents as a table, see [`parse_expr_field`] for parsing loose idents as fields
-	pub async fn parse_expr_table(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
+	pub(crate) async fn parse_expr_table(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
 		let old = self.table_as_field;
 		self.table_as_field = false;
-		let res = self.pratt_parse_expr(ctx, BindingPower::Base).await;
+		let res = enter_query_recursion!(this = self => {
+			this.pratt_parse_expr(ctx, BindingPower::Base).await
+		});
 		self.table_as_field = old;
 		res
 	}
@@ -34,7 +46,9 @@ impl Parser<'_> {
 	pub(crate) async fn parse_expr_field(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
 		let old = self.table_as_field;
 		self.table_as_field = true;
-		let res = self.pratt_parse_expr(ctx, BindingPower::Base).await;
+		let res = enter_query_recursion!(this = self => {
+			this.pratt_parse_expr(ctx, BindingPower::Base).await
+		});
 		self.table_as_field = old;
 		res
 	}
@@ -43,7 +57,9 @@ impl Parser<'_> {
 	///
 	/// Inherits how loose identifiers are parsed from it's caller.
 	pub(super) async fn parse_expr_inherit(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
-		self.pratt_parse_expr(ctx, BindingPower::Base).await
+		enter_query_recursion!(this = self => {
+			this.pratt_parse_expr(ctx, BindingPower::Base).await
+		})
 	}
 
 	/// Returns the binding power of an infix operator.

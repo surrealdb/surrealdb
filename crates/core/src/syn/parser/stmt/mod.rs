@@ -118,7 +118,7 @@ impl Parser<'_> {
 				self.pop_peek();
 				self.parse_show_stmt().map(TopLevelExpr::Show)
 			}
-			_ => self.parse_expr_field(stk).await.map(TopLevelExpr::Expr),
+			_ => self.parse_expr_start(stk).await.map(TopLevelExpr::Expr),
 		}
 	}
 

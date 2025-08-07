@@ -148,7 +148,7 @@ mod test {
 		let Expr::FunctionCall(f) = out else {
 			panic!()
 		};
-		assert_eq!(f.receiver, Function::Normal(String::from("count")));
+		assert_eq!(f.receiver, Function::Normal(String::from("not")));
 		assert_eq!(f.arguments, vec![sql::Expr::Literal(sql::Literal::Integer(10))]);
 	}
 
@@ -258,7 +258,7 @@ mod test {
 	fn ml_model_with_mutiple_arguments() {
 		let sql = "ml::insurance::prediction<1.0.0>(1,2,3,4,)";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("ml::insurance::prediction<1.0.0>(1,2,3,4)", out.to_string());
+		assert_eq!("ml::insurance::prediction<1.0.0>(1, 2, 3, 4)", out.to_string());
 	}
 
 	#[test]
