@@ -114,8 +114,10 @@ impl DecimalLexEncoder {
 		let biased_exponent = (scale + Self::EXP_BIAS) as u16;
 
 		// Build the final encoded result
+		// Capacity: 1 sign + 2 exponent + packed digits (2 digits per byte) + potential terminator
 		let mut result = Vec::with_capacity(5 + (digit_count + 1).div_ceil(2));
 
+		// Convert the mantissa to decimal string representation for digit packing
 		let radix10 = normalized.digits().to_str_radix(10);
 
 		// Encode sign marker and exponent based on sign
@@ -175,12 +177,15 @@ impl DecimalLexEncoder {
 		let biased_exponent = u16::from_be_bytes(exp_bytes);
 		// Unbias the exponent, handling negative number complement
 		let biased_exponent = if is_negative {
+			// For negative numbers, undo the complement applied during encoding
 			0xFFFF - biased_exponent
 		} else {
 			biased_exponent
 		};
+		// Convert back to the original scale by removing the bias
 		let scale = biased_exponent as i32 - Self::EXP_BIAS;
 
+		// Unpack the digit bytes back to decimal string, handling sign-specific encoding
 		let mantissa = if is_negative {
 			Self::unpack_digits_negative(&bytes[3..])
 		} else {
@@ -189,7 +194,9 @@ impl DecimalLexEncoder {
 		if mantissa.is_empty() {
 			return Err(Error::Serialization("Empty mantissa".to_string()).into());
 		}
+		// Calculate the final exponent: scale minus the position adjustment for scientific notation
 		let exponent = scale - (mantissa.len() as i32 - 1);
+		// Convert the decimal string back to a numeric mantissa
 		let mantissa = U128::from_str(&mantissa).map_err(|e| {
 			Error::Serialization(format!("Failed to parse mantissa '{mantissa}'. Error: {e}"))
 		})?;

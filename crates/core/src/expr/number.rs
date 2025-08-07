@@ -6,9 +6,7 @@ use anyhow::{Result, bail};
 use fastnum::D128;
 use revision::revisioned;
 use rust_decimal::prelude::*;
-use serde::{
-	Deserialize, Deserializer as SerdeDeserializer, Serialize, Serializer as SerdeSerializer,
-};
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::f64::consts::PI;
 use std::fmt::Debug;
@@ -26,7 +24,8 @@ use decimal::DecimalLexEncoder;
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
+#[serde(rename = "$surrealdb::private::sql::Number")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Number {
@@ -42,50 +41,52 @@ impl Default for Number {
 	}
 }
 
-impl Serialize for Number {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: SerdeSerializer,
-	{
-		let buf = self.as_decimal_buf().map_err(serde::ser::Error::custom)?;
-		serializer.serialize_bytes(&buf)
-	}
-}
-
-impl<'de> Deserialize<'de> for Number {
-	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-	where
-		D: SerdeDeserializer<'de>,
-	{
-		// A small visitor that accepts both borrowed and owned byte
-		// buffers and forwards them to `from_decimal_buf`.
-		struct NumberVisitor;
-
-		impl serde::de::Visitor<'_> for NumberVisitor {
-			type Value = Number;
-
-			fn expecting(&self, f: &mut Formatter) -> fmt::Result {
-				f.write_str("SurrealDB binary-encoded Number")
-			}
-
-			fn visit_bytes<E>(self, v: &[u8]) -> Result<Number, E>
-			where
-				E: serde::de::Error,
-			{
-				Number::from_decimal_buf(v).map_err(E::custom)
-			}
-
-			fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Number, E>
-			where
-				E: serde::de::Error,
-			{
-				self.visit_bytes(&v)
-			}
-		}
-
-		deserializer.deserialize_bytes(NumberVisitor)
-	}
-}
+// Possible Serialiser keeping the lexical number ordering on Number
+//
+// impl Serialize for Number {
+// 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+// 	where
+// 		S: SerdeSerializer,
+// 	{
+// 		let buf = self.as_decimal_buf().map_err(serde::ser::Error::custom)?;
+// 		serializer.serialize_bytes(&buf)
+// 	}
+// }
+//
+// impl<'de> Deserialize<'de> for Number {
+// 	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+// 	where
+// 		D: SerdeDeserializer<'de>,
+// 	{
+// 		// A small visitor that accepts both borrowed and owned byte
+// 		// buffers and forwards them to `from_decimal_buf`.
+// 		struct NumberVisitor;
+//
+// 		impl serde::de::Visitor<'_> for NumberVisitor {
+// 			type Value = Number;
+//
+// 			fn expecting(&self, f: &mut Formatter) -> fmt::Result {
+// 				f.write_str("SurrealDB binary-encoded Number")
+// 			}
+//
+// 			fn visit_bytes<E>(self, v: &[u8]) -> Result<Number, E>
+// 			where
+// 				E: serde::de::Error,
+// 			{
+// 				Number::from_decimal_buf(v).map_err(E::custom)
+// 			}
+//
+// 			fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Number, E>
+// 			where
+// 				E: serde::de::Error,
+// 			{
+// 				self.visit_bytes(&v)
+// 			}
+// 		}
+//
+// 		deserializer.deserialize_bytes(NumberVisitor)
+// 	}
+// }
 
 macro_rules! from_prim_ints {
 	($($int: ty),*) => {
@@ -503,10 +504,12 @@ impl Number {
 		match b.last().copied() {
 			Some(Self::NUMBER_MARKER_INT) => {
 				// Decode lexicographic encoding and convert back to i64
+				// The decoder automatically ignores the type marker at the end
 				let decimal = DecimalLexEncoder::decode(b)?;
 				match decimal.to_i64() {
 					Ok(value) => Ok(Number::Int(value)),
 					Err(e) => {
+						// Handle overflow or precision loss during i64 conversion
 						Err(Error::Serialization(format!("Decoded decimal {decimal} error: {e}"))
 							.into())
 					}
@@ -514,7 +517,9 @@ impl Number {
 			}
 			Some(Self::NUMBER_MARKER_FLOAT) => {
 				// Decode as decimal representation of the original float
+				// The decoder automatically ignores the type marker at the end
 				let dec = DecimalLexEncoder::decode(b)?;
+				// Convert back to f64, preserving the original float precision
 				Ok(Number::Float(dec.to_f64()))
 			}
 			// Handle special float values that were encoded with fixed byte patterns
@@ -524,7 +529,10 @@ impl Number {
 			}
 			Some(Self::NUMBER_MARKER_FLOAT_NAN) => Ok(Number::Float(f64::NAN)),
 			Some(Self::NUMBER_MARKER_DECIMAL) => {
+				// Decode lexicographic encoding back to D128
+				// The decoder automatically ignores the type marker at the end
 				let dec = DecimalLexEncoder::decode(b)?;
+				// Convert D128 back to rust_decimal::Decimal for native representation
 				let dec = DecimalLexEncoder::to_decimal(dec)?;
 				// Direct decoding for native Decimal values
 				Ok(Number::Decimal(dec))
