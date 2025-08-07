@@ -259,7 +259,7 @@ impl ToFlatbuffers for Kind {
 			}
 			Self::File(buckets) => {
 				let bucket_offsets: Vec<_> =
-					buckets.iter().map(|b| builder.create_string(b.as_str())).collect();
+					buckets.iter().map(|b| builder.create_string(&b.0)).collect();
 				let buckets = builder.create_vector(&bucket_offsets);
 
 				proto_fb::KindArgs {
@@ -454,7 +454,7 @@ impl FromFlatbuffers for Kind {
 				let Some(inner) = set.inner() else {
 					return Err(anyhow::anyhow!("Missing set item kind"));
 				};
-				let size = set.size().map(|s| u64::from_fb(s)).transpose()?;
+				let size = set.size().map(u64::from_fb).transpose()?;
 				Ok(Kind::Set(Box::new(Kind::from_fb(inner)?), size))
 			}
 			KindType::Array => {
@@ -464,7 +464,7 @@ impl FromFlatbuffers for Kind {
 				let Some(inner) = array.inner() else {
 					return Err(anyhow::anyhow!("Missing array item kind"));
 				};
-				let size = array.size().map(|s| u64::from_fb(s)).transpose()?;
+				let size = array.size().map(u64::from_fb).transpose()?;
 				Ok(Kind::Array(Box::new(Kind::from_fb(inner)?), size))
 			}
 			KindType::Either => {
@@ -499,8 +499,7 @@ impl FromFlatbuffers for Kind {
 					return Err(anyhow::anyhow!("Missing file kind"));
 				};
 				let buckets = if let Some(buckets) = file.buckets() {
-					// TODO(kearfy): This Ident should probably be parsed right?
-					buckets.iter().map(|b| Ident::from(b)).collect()
+					buckets.iter().map(|b| Ident::from(b.to_string())).collect()
 				} else {
 					Vec::new()
 				};
@@ -605,7 +604,7 @@ impl FromFlatbuffers for Literal {
 				let variants = if let Some(variants) = disc_obj.variants() {
 					variants
 						.iter()
-						.map(|variant| BTreeMap::<String, Kind>::from_fb(variant))
+						.map(BTreeMap::<String, Kind>::from_fb)
 						.collect::<anyhow::Result<Vec<_>>>()?
 				} else {
 					Vec::new()
