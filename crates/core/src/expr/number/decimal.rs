@@ -330,7 +330,7 @@ impl DecimalLexEncoder {
 
 		// Apply the decimal scale by dividing by 10^scale
 		if scale > 0 {
-			d128 = d128 / D128::from(10_i32.pow(scale));
+			d128 /= D128::from(10_i32.pow(scale));
 		}
 
 		// Apply the sign

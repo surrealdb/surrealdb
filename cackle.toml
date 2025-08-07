@@ -755,6 +755,9 @@ allow_unsafe = true
 [pkg.fastnum]
 build.allow_apis = ["fs"]
 
+[pkg.bnum]
+allow_unsafe = true
+
 [pkg.rust_decimal]
 build.allow_apis = ["fs"]
 
