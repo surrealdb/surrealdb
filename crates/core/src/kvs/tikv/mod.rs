@@ -4,6 +4,10 @@ mod cnf;
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
+use crate::kvs::Check;
+use crate::kvs::Key;
+use crate::kvs::TLSOptions;
+use crate::kvs::Val;
 use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare};
 use crate::kvs::{Check, Key, Val};
 use crate::vs::VersionStamp;
@@ -58,7 +62,7 @@ impl Drop for Transaction {
 
 impl Datastore {
 	/// Open a new database
-	pub(crate) async fn new(path: &str) -> Result<Datastore> {
+	pub(crate) async fn new(path: &str, tls: Option<TLSOptions>) -> Result<Datastore> {
 		// Configure the client and keyspace
 		let config = match *cnf::TIKV_API_VERSION {
 			2 => match *cnf::TIKV_KEYSPACE {
@@ -82,6 +86,11 @@ impl Datastore {
 		// Set the max decoding message size
 		let config =
 			config.with_grpc_max_decoding_message_size(*cnf::TIKV_GRPC_MAX_DECODING_MESSAGE_SIZE);
+		// Set the TLS security
+		let config = match tls {
+			None => config,
+			Some(tls) => config.with_security(tls.ca, tls.crt, tls.key),
+		};
 		// Create the client with the config
 		let client = TransactionClient::new_with_config(vec![path], config);
 		// Check for errors with the client
