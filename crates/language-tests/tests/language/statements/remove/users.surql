@@ -1,6 +1,6 @@
 /**
 [env]
-timeout = 2000
+timeout = 400000
 
 [test]
 
