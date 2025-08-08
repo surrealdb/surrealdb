@@ -25,7 +25,7 @@ SURREAL_SCRIPTING_MAX_TIME_LIMIT = { value = "500", condition = { env_not_set = 
 [tasks.ci-format]
 category = "CI - CHECK"
 command = "cargo"
-args = ["+nightly", "fmt", "--all", "--check"]
+args = ["fmt", "--all", "--check"]
 
 [tasks.ci-check]
 category = "CI - CHECK"
