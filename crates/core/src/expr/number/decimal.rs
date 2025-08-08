@@ -62,31 +62,42 @@ impl DecimalExt for Decimal {
 ///    - `0xFF` for positive numbers
 ///    - `0x00` for negative numbers
 ///
-/// 2. **Biased exponent** (2 bytes, big-endian):
-///    - Calculated as: `scale + EXP_BIAS` where scale = e + (digit_count - 1)
-///    - For positive: stored as-is
-///    - For negative: stored as `0xFFFF - biased_exponent` (complement for reverse ordering)
-///    - EXP_BIAS = 6144 to handle IEEE-754 decimal-128 exponent range [-6143, +6144]
+/// 2. **Biased scale** (2 bytes, big-endian):
+///    - We bias the "scale" (not the raw exponent). Scale is defined as:
+///      `scale = exponent + (digit_count - 1)`, i.e., the position of the most-significant digit
+///      in a scientific-notation sense.
+///    - Stored as: `biased = scale + EXP_BIAS` (unsigned 16-bit)
+///    - For negative numbers: stored as `0xFFFF - biased` (one's complement) to reverse order
+///    - EXP_BIAS = 6144. With D128, `exponent ∈ [-6143, +6144]` and `digit_count ∈ [1, 34]`,
+///      so `scale ∈ [-6143, 6177]`, which maps into `[1, 12321]` after biasing, well within `u16`.
 ///
 /// 3. **Packed digit representation** (variable length):
-///    - Digits are converted to radix-10 string representation
-///    - Each pair of digits is packed into a single byte (4 bits each)
-///    - For positive numbers: stored as raw bytes
-///    - For negative numbers: all bytes are bitwise complemented
-///    - Terminated when a nibble contains `0x0` (indicating end of digits)
+///    - Digits are taken from the absolute value's base-10 representation
+///    - Each pair of digits is packed into one byte (4 bits per digit)
+///    - For positive numbers: stored as-is
+///    - For negative numbers: all bytes are bitwise complemented to reverse ordering
+///    - Termination: encoding stops when a nibble equals `0x0`. This naturally handles both
+///      odd and even digit counts:
+///      • odd count: the last byte has a low nibble of 0
+///      • even count: an extra full terminator byte is appended (0x00 for positives, 0xFF for negatives)
+///
+/// Because a terminator is always present within (or immediately after) the mantissa, any trailing
+/// type-marker byte appended by higher layers will never be consumed by the mantissa decoder.
 ///
 /// ## Properties
 /// - Preserves lexicographic ordering: if `a < b` then `encode(a) < encode(b)`
-/// - Variable length encoding (3+ bytes typical: 1 sign + 2 exponent + packed digits)
+/// - Variable length encoding (3+ bytes typical: 1 sign + 2 scale + packed digits)
 /// - Handles full D128 range including extreme values
 /// - Uses packed digit encoding for efficient storage (2 digits per byte)
 ///
 pub(crate) struct DecimalLexEncoder;
 
 impl DecimalLexEncoder {
-	/// IEEE-754 decimal-128 allows E ∈ [-6143, +6144]
-	/// We map that closed range into an unsigned 16-bit space by adding BIAS:
-	const EXP_BIAS: i32 = 6144; // Emin → 0,  Emax → 12 287 (< 2¹⁴)
+	/// We use a 16-bit biased "scale" (not the raw exponent).
+	/// With D128: exponent ∈ [-6143, +6144] and digit_count ∈ [1, 34], so
+	/// scale = exponent + (digit_count - 1) ∈ [-6143, 6177]. Adding EXP_BIAS maps this
+	/// into [1, 12321], comfortably within u16.
+	const EXP_BIAS: i32 = 6144; // bias used for mapping signed scale into u16 space
 
 	/// Encodes a D128 value into a lexicographically ordered byte sequence.
 	///
@@ -109,8 +120,8 @@ impl DecimalLexEncoder {
 		// This normalizes the number to scientific notation form
 		let scale = e + (digit_count as i32 - 1); // Scale for scientific notation
 
-		// Apply bias to map the exponent range to unsigned 16-bit space
-		// IEEE-754 decimal-128 exponents [-6143, +6144] → [1, 12287]
+		// Apply bias to map the scale range to unsigned 16-bit space
+		// For D128, scale ∈ [-6143, 6177] → [1, 12321] after adding EXP_BIAS.
 		let biased_exponent = (scale + Self::EXP_BIAS) as u16;
 
 		// Build the final encoded result
@@ -120,19 +131,19 @@ impl DecimalLexEncoder {
 		// Convert the mantissa to decimal string representation for digit packing
 		let radix10 = normalized.digits().to_str_radix(10);
 
-		// Encode sign marker and exponent based on sign
+		// Encode sign marker and biased scale based on sign
 		if is_negative {
 			// Sign marker: 0x00 ensures negative numbers sort before positive ones
 			result.push(0x00);
-			// Complement of biased exponent: larger magnitude (more negative) sorts first
-			// This reverses the ordering for negative numbers to maintain lexicographic order
+			// Complement of biased scale: reverses ordering so that more negative values sort first
+			// This maintains total ordering for negatives when compared bytewise.
 			result.extend((0xFFFF - biased_exponent).to_be_bytes());
 			// Complement all packed digit bytes to reverse their ordering for negative numbers
 			Self::pack_digits_negative(radix10, &mut result);
 		} else {
 			// Sign marker: 0xFF ensures positive numbers sort after negative ones
 			result.push(0xFF);
-			// Biased exponent: larger exponents sort later (correct for positive numbers)
+			// Biased scale: larger scales (greater magnitude) sort later for positives
 			result.extend(biased_exponent.to_be_bytes());
 			// Store packed digit bytes directly for positive numbers
 			Self::pack_digits_positive(radix10, &mut result);
@@ -175,7 +186,7 @@ impl DecimalLexEncoder {
 		// Extract biased exponent (2 bytes, big-endian)
 		let exp_bytes = [bytes[1], bytes[2]];
 		let biased_exponent = u16::from_be_bytes(exp_bytes);
-		// Unbias the exponent, handling negative number complement
+		// Unbias the scale, handling negative number complement
 		let biased_exponent = if is_negative {
 			// For negative numbers, undo the complement applied during encoding
 			0xFFFF - biased_exponent
@@ -186,20 +197,16 @@ impl DecimalLexEncoder {
 		let scale = biased_exponent as i32 - Self::EXP_BIAS;
 
 		// Unpack the digit bytes back to decimal string, handling sign-specific encoding
-		let mantissa = if is_negative {
-			Self::unpack_digits_negative(&bytes[3..])
+		let (mantissa, digit_count) = if is_negative {
+			Self::unpack_digits_negative(&bytes[3..])?
 		} else {
-			Self::unpack_digits_positive(&bytes[3..])
+			Self::unpack_digits_positive(&bytes[3..])?
 		};
-		if mantissa.is_empty() {
+		if digit_count == 0 {
 			return Err(Error::Serialization("Empty mantissa".to_string()).into());
 		}
 		// Calculate the final exponent: scale minus the position adjustment for scientific notation
-		let exponent = scale - (mantissa.len() as i32 - 1);
-		// Convert the decimal string back to a numeric mantissa
-		let mantissa = U128::from_str(&mantissa).map_err(|e| {
-			Error::Serialization(format!("Failed to parse mantissa '{mantissa}'. Error: {e}"))
-		})?;
+		let exponent = scale - (digit_count - 1);
 
 		Ok(D128::from_parts(
 			mantissa,
@@ -215,6 +222,9 @@ impl DecimalLexEncoder {
 
 	/// Packs decimal digits for negative numbers with bit inversion for lexicographic ordering.
 	/// Each pair of ASCII digits is packed into a single byte (4 bits each) and then inverted.
+	/// Mapping: '0'..'9' → 1..10 (we avoid 0 so that 0 nibbles can be used as terminators).
+	/// For odd digit counts, the last byte has a zero low nibble; for even counts, an extra 0xFF
+	/// terminator byte is appended after bit inversion.
 	fn pack_digits_negative(radix10: String, buf: &mut Vec<u8>) {
 		let mut iter = radix10.as_bytes().chunks_exact(2);
 		for pair in &mut iter {
@@ -240,6 +250,9 @@ impl DecimalLexEncoder {
 
 	/// Packs decimal digits for positive numbers into bytes for lexicographic ordering.
 	/// Each pair of ASCII digits is packed into a single byte (4 bits each).
+	/// Mapping: '0'..'9' → 1..10. For odd digit counts, the last byte has a zero low nibble;
+	/// for even counts, an extra 0x00 terminator byte is appended. This ensures decode will
+	/// stop before any trailing type marker appended by higher layers.
 	fn pack_digits_positive(radix10: String, buf: &mut Vec<u8>) {
 		let mut iter = radix10.as_bytes().chunks_exact(2);
 		for pair in &mut iter {
@@ -266,51 +279,67 @@ impl DecimalLexEncoder {
 
 	/// Unpacks digits from bytes for positive numbers.
 	/// Reverses the packing process by extracting digit pairs from each byte.
-	fn unpack_digits_positive(buf: &[u8]) -> String {
-		let mut r = String::new();
+	/// Stops when a nibble equals 0 (terminator). Accumulates the mantissa directly into U128
+	/// and returns the total number of decoded digits.
+	fn unpack_digits_positive(buf: &[u8]) -> Result<(U128, i32)> {
+		let mut m = U128::ZERO;
+		let mut l = 0;
 		for pack in buf {
-			if !Self::unpack_digit(*pack, &mut r) {
-				break; // Hit termination marker (0x0 nibble)
+			let d = Self::unpack_digit(*pack, &mut m)?;
+			l += d as i32;
+			if d < 2 {
+				break;
 			}
 		}
-		r
+		Ok((m, l))
 	}
 
 	/// Unpacks digits from bytes for negative numbers.
 	/// First inverts each byte to undo the bit inversion, then extracts digit pairs.
-	fn unpack_digits_negative(buf: &[u8]) -> String {
-		let mut r = String::new();
+	/// Stops when a nibble equals 0 (after inversion). Accumulates into U128 and returns
+	/// the number of decoded digits.
+	fn unpack_digits_negative(buf: &[u8]) -> Result<(U128, i32)> {
+		let mut m = U128::ZERO;
+		let mut l = 0i32;
 		for pack in buf {
-			if !Self::unpack_digit(!*pack, &mut r) {
-				break; // Hit termination marker (0x0 nibble after inversion)
+			let d = Self::unpack_digit(!*pack, &mut m)?;
+			l += d as i32;
+			if d < 2 {
+				break;
 			}
 		}
-		r
+		Ok((m, l))
 	}
 
-	/// Unpacks a single byte into one or two ASCII digits.
-	/// Returns false when hitting a termination marker (0x0 nibble), true otherwise.
+	/// Unpacks a single packed byte into one or two digits.
+	/// Returns the number of digits appended (0, 1, or 2). A return of 0 or 1 indicates
+	/// that a terminator nibble (0x0) was encountered and the caller should stop.
 	///
 	/// The byte contains two 4-bit values (nibbles): high nibble and low nibble.
-	/// Each nibble represents a digit value (1-10 mapping to '0'-'9').
-	fn unpack_digit(pack: u8, s: &mut String) -> bool {
-		let hi = pack >> 4; // Extract high nibble (upper 4 bits)
-		let lo = pack & 0x0F; // Extract low nibble (lower 4 bits)
-
+	/// Each nibble represents a digit value (1..=10 mapping to '0'..'9'). Values outside
+	/// 1..=10 are rejected as corrupted input.
+	fn unpack_digit(pack: u8, m: &mut U128) -> Result<u8> {
+		let hi = pack >> 4;
+		let lo = pack & 0x0F;
 		if hi == 0 {
-			// High nibble is 0: termination marker reached
-			return false;
+			return Ok(0);
 		}
-		// Convert back to ASCII: 1->48('0'), 2->49('1'), ..., 10->57('9')
-		s.push((hi + 47) as char);
-
+		if !(1..=10).contains(&hi) {
+			return Err(anyhow::Error::new(Error::Serialization(format!(
+				"Invalid high nibble: {hi}"
+			))));
+		}
+		*m = *m * U128::TEN + U128::from(hi - 1);
 		if lo == 0 {
-			// Low nibble is 0: termination marker reached (odd number of digits)
-			return false;
+			return Ok(1);
 		}
-		// Convert back to ASCII: 1->48('0'), 2->49('1'), ..., 10->57('9')
-		s.push((lo + 47) as char);
-		true
+		if !(1..=10).contains(&lo) {
+			return Err(anyhow::Error::new(Error::Serialization(format!(
+				"Invalid low nibble: {lo}"
+			))));
+		}
+		*m = *m * U128::TEN + U128::from(lo - 1);
+		Ok(2)
 	}
 
 	/// Converts a rust_decimal::Decimal to a fastnum::D128.
@@ -318,27 +347,17 @@ impl DecimalLexEncoder {
 	/// This conversion extracts the mantissa, scale, and sign from the Decimal
 	/// and reconstructs them as a D128 value.
 	pub(crate) fn to_d128(dec: Decimal) -> Result<D128> {
-		// Extract components from the Decimal
 		let scale = dec.scale();
-		let is_negative = dec.is_sign_negative();
-
-		// Get the unscaled integer value (mantissa)
-		let unscaled = dec.mantissa();
-
-		// Create D128 from the unscaled value
-		let mut d128 = D128::from_i128(unscaled)?;
-
-		// Apply the decimal scale by dividing by 10^scale
-		if scale > 0 {
-			d128 /= D128::from(10_i32.pow(scale));
-		}
-
-		// Apply the sign
-		if is_negative {
-			Ok(-d128)
+		let mantissa = dec.mantissa(); // i128
+		let sign = if mantissa < 0 {
+			Sign::Minus
 		} else {
-			Ok(d128)
-		}
+			Sign::Plus
+		};
+		let abs = U128::from_u128(mantissa.unsigned_abs()).map_err(|e| {
+			Error::Serialization(format!("Failed to convert mantissa to u128: {e}"))
+		})?;
+		Ok(D128::from_parts(abs, -(scale as i32), sign, Context::default()))
 	}
 
 	/// Converts a fastnum::D128 to a rust_decimal::Decimal.

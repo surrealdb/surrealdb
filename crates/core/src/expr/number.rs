@@ -399,23 +399,29 @@ impl Number {
 	///
 	/// If `a < b` numerically, then `a.as_decimal_buf() < b.as_decimal_buf()`
 	/// lexicographically (byte-wise comparison).
+	/// Equal numerics across different variants are ordered by their trailing type marker
+	/// (Int < Float < Decimal) to establish a total ordering.
 	///
 	/// # Format
 	///
 	/// The returned buffer consists of:
-	/// - Variable-length lexicographic encoding of the numeric value
-	/// - Single-byte type marker suffix to distinguish original Number variant
+	/// - Variable-length lexicographic encoding of the numeric value (see DecimalLexEncoder)
+	/// - Single-byte type marker suffix to distinguish the original Number variant
 	///
-	/// # Special Value Handling
+	/// The mantissa encoding always contains an explicit terminator nibble/byte, ensuring
+	/// a trailing type marker cannot be misinterpreted as additional digits.
 	///
-	/// - **Positive Infinity**: `[0xFF, 0xFF, NUMBER_MARKER_FLOAT_INFINITE_POSITIVE]`
-	/// - **Negative Infinity**: `[0x00, 0x00, NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE]`
-	/// - **NaN**: `[0xFF, 0xFF, NUMBER_MARKER_FLOAT_NAN]` (treated as largest value)
+	/// # Special Value Handling (Float)
+	///
+	/// The following fixed encodings are used to place special float values at the extremes:
+	/// - **Positive Infinity**: `[0xFF, 0xFF, NUMBER_MARKER_FLOAT_INFINITE_POSITIVE]` (largest)
+	/// - **Negative Infinity**: `[0x00, 0x00, NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE]` (smallest)
+	/// - **NaN**: `[0xFF, 0xFF, NUMBER_MARKER_FLOAT_NAN]` (treated as larger than all other values)
 	///
 	/// # Returns
 	///
 	/// - `Ok(Vec<u8>)`: Lexicographically-ordered byte buffer
-	/// - `Err(Error)`: If float value cannot be converted to decimal representation
+	/// - `Err(Error)`: If Decimal conversion fails (for Decimal variant)
 	///
 	pub fn as_decimal_buf(&self) -> Result<Vec<u8>> {
 		match self {
@@ -470,7 +476,7 @@ impl Number {
 	///
 	/// # Parameters
 	///
-	/// - `b`: Byte slice containing the lexicographically-encoded number with type marker suffix
+	/// - `b`: Byte slice containing the lexicographically-encoded number with trailing type marker
 	///
 	/// # Buffer Format
 	///
@@ -487,6 +493,10 @@ impl Number {
 	/// - `NUMBER_MARKER_FLOAT_INFINITE_POSITIVE`: Return f64::INFINITY
 	/// - `NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE`: Return f64::NEG_INFINITY
 	/// - `NUMBER_MARKER_FLOAT_NAN`: Return f64::NAN
+	///
+	/// It is safe to pass the whole buffer (including the trailing marker) to the decimal
+	/// decoder because the mantissa encoding always includes an internal terminator nibble/byte.
+	/// The decoder will stop before reaching the marker.
 	///
 	/// # Returns
 	///
