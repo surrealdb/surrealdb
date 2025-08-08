@@ -74,6 +74,12 @@ pub struct TLSOptions {
 	pub key: PathBuf,
 }
 
+#[derive(Clone, Debug)]
+pub struct DatastoreOptions {
+	pub clock: Option<Arc<SizedClock>>,
+	pub tls: Option<TLSOptions>,
+}
+
 /// The underlying datastore instance which stores the dataset.
 #[non_exhaustive]
 pub struct Datastore {
@@ -270,16 +276,7 @@ impl Datastore {
 		Self::new_with_clock(path, None, None).await
 	}
 
-	pub async fn new_with_options(path: &str, tls: Option<TLSOptions>) -> Result<Self> {
-		Self::new_with_clock(path, None, tls).await
-	}
-
-	#[allow(unused_variables)]
-	pub async fn new_with_clock(
-		path: &str,
-		clock: Option<Arc<SizedClock>>,
-		tls: Option<TLSOptions>,
-	) -> Result<Datastore> {
+	pub async fn new_with_options(path: &str, options: DatastoreOptions) -> Result<Datastore> {
 		// Initiate the desired datastore
 		let (flavor, clock): (Result<DatastoreFlavor>, Arc<SizedClock>) = match path {
 			// Initiate an in-memory datastore
@@ -289,7 +286,7 @@ impl Datastore {
 					// Initialise the storage engine
 					info!(target: TARGET, "Starting kvs store in {}", path);
 					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem);
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					let c = options.clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started kvs store in {}", path);
 					Ok((v, c))
 				}
@@ -308,7 +305,7 @@ impl Datastore {
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
 					let v = super::rocksdb::Datastore::new(s).await.map(DatastoreFlavor::RocksDB);
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					let c = options.clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started kvs store at {}", path);
 					Ok((v, c))
 				}
@@ -326,7 +323,7 @@ impl Datastore {
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
 					let v = super::rocksdb::Datastore::new(s).await.map(DatastoreFlavor::RocksDB);
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					let c = options.clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started kvs store at {}", path);
 					Ok((v, c))
 				}
@@ -346,7 +343,7 @@ impl Datastore {
 					let v = super::surrealkv::Datastore::new(path, enable_versions)
 						.await
 						.map(DatastoreFlavor::SurrealKV);
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					let c = options.clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started kvs store at {} with versions {}", path, if enable_versions { "enabled" } else { "disabled" });
 					Ok((v, c))
 				}
@@ -361,7 +358,7 @@ impl Datastore {
 					let s = s.trim_start_matches("indxdb://");
 					let s = s.trim_start_matches("indxdb:");
 					let v = super::indxdb::Datastore::new(s).await.map(DatastoreFlavor::IndxDB);
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					let c = options.clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started kvs store at {}", path);
 					Ok((v, c))
 				}
@@ -375,10 +372,10 @@ impl Datastore {
 					info!(target: TARGET, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("tikv://");
 					let s = s.trim_start_matches("tikv:");
-					let v = super::tikv::Datastore::new_with_options(s, tls)
+					let v = super::tikv::Datastore::new_with_options(s, options.tls)
 						.await
 						.map(DatastoreFlavor::TiKV);
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					let c = options.clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Connected to kvs store at {}", path);
 					Ok((v, c))
 				}
@@ -393,7 +390,7 @@ impl Datastore {
 					let s = s.trim_start_matches("fdb://");
 					let s = s.trim_start_matches("fdb:");
 					let v = super::fdb::Datastore::new(s).await.map(DatastoreFlavor::FoundationDB);
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					let c = options.clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Connected to kvs store at {}", path);
 					Ok((v, c))
 				}

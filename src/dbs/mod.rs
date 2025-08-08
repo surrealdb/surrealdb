@@ -541,16 +541,21 @@ pub async fn init(
 	// Log the specified server capabilities
 	debug!("Server capabilities: {capabilities}");
 	// Parse and setup the desired kv datastore
-	let dbs = Datastore::new_with_options(&opt.path, opt.kvs.clone())
-		.await?
-		.with_notifications()
-		.with_strict_mode(strict_mode)
-		.with_query_timeout(query_timeout)
-		.with_transaction_timeout(transaction_timeout)
-		.with_auth_enabled(!unauthenticated)
-		.with_temporary_directory(temporary_directory)
-		.with_capabilities(capabilities)
-		.with_slow_log_threshold(slow_log_threshold);
+	let dbs = Datastore::new_with_options(
+		&opt.path,
+		DatastoreOptions {
+			tls: opt.tls.clone(),
+		},
+	)
+	.await?
+	.with_notifications()
+	.with_strict_mode(strict_mode)
+	.with_query_timeout(query_timeout)
+	.with_transaction_timeout(transaction_timeout)
+	.with_auth_enabled(!unauthenticated)
+	.with_temporary_directory(temporary_directory)
+	.with_capabilities(capabilities)
+	.with_slow_log_threshold(slow_log_threshold);
 	// Ensure the storage version is up to date to prevent corruption
 	dbs.check_version().await?;
 	// Import file at start, if provided
