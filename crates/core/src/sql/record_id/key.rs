@@ -1,39 +1,36 @@
 use crate::sql::escape::{EscapeKey, EscapeRid};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{
-	Expr,
+	Expr, RecordIdKeyRangeLit,
 	fmt::{Fmt, Pretty, is_pretty, pretty_indent},
 };
 use crate::val::{Strand, Uuid};
 use std::fmt::{self, Display, Formatter, Write as _};
 
-pub mod range;
-pub use range::RecordIdKeyRangeLit;
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Gen {
+pub enum RecordIdKeyGen {
 	Rand,
 	Ulid,
 	Uuid,
 }
 
-impl From<Gen> for crate::expr::id::Gen {
-	fn from(value: Gen) -> Self {
+impl From<RecordIdKeyGen> for crate::expr::RecordIdKeyGen {
+	fn from(value: RecordIdKeyGen) -> Self {
 		match value {
-			Gen::Rand => crate::expr::id::Gen::Rand,
-			Gen::Ulid => crate::expr::id::Gen::Ulid,
-			Gen::Uuid => crate::expr::id::Gen::Uuid,
+			RecordIdKeyGen::Rand => crate::expr::RecordIdKeyGen::Rand,
+			RecordIdKeyGen::Ulid => crate::expr::RecordIdKeyGen::Ulid,
+			RecordIdKeyGen::Uuid => crate::expr::RecordIdKeyGen::Uuid,
 		}
 	}
 }
 
-impl From<crate::expr::id::Gen> for Gen {
-	fn from(value: crate::expr::id::Gen) -> Self {
+impl From<crate::expr::RecordIdKeyGen> for RecordIdKeyGen {
+	fn from(value: crate::expr::RecordIdKeyGen) -> Self {
 		match value {
-			crate::expr::id::Gen::Rand => Gen::Rand,
-			crate::expr::id::Gen::Ulid => Gen::Ulid,
-			crate::expr::id::Gen::Uuid => Gen::Uuid,
+			crate::expr::RecordIdKeyGen::Rand => RecordIdKeyGen::Rand,
+			crate::expr::RecordIdKeyGen::Ulid => RecordIdKeyGen::Ulid,
+			crate::expr::RecordIdKeyGen::Uuid => RecordIdKeyGen::Uuid,
 		}
 	}
 }
@@ -46,7 +43,7 @@ pub enum RecordIdKeyLit {
 	Uuid(Uuid),
 	Array(Vec<Expr>),
 	Object(Vec<ObjectEntry>),
-	Generate(Gen),
+	Generate(RecordIdKeyGen),
 	Range(Box<RecordIdKeyRangeLit>),
 }
 
@@ -128,9 +125,9 @@ impl Display for RecordIdKeyLit {
 				}
 			}
 			Self::Generate(v) => match v {
-				Gen::Rand => Display::fmt("rand()", f),
-				Gen::Ulid => Display::fmt("ulid()", f),
-				Gen::Uuid => Display::fmt("uuid()", f),
+				RecordIdKeyGen::Rand => Display::fmt("rand()", f),
+				RecordIdKeyGen::Ulid => Display::fmt("ulid()", f),
+				RecordIdKeyGen::Uuid => Display::fmt("uuid()", f),
 			},
 			Self::Range(v) => Display::fmt(v, f),
 		}

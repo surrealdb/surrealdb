@@ -60,7 +60,7 @@ impl Value {
 			Value::Bytes(bytes) => {
 				JsonValue::Array(bytes.0.into_iter().map(|x| JsonValue::Number(x.into())).collect())
 			}
-			Value::Thing(thing) => JsonValue::String(thing.to_string()),
+			Value::RecordId(thing) => JsonValue::String(thing.to_string()),
 			// TODO: Maybe remove
 			Value::Regex(regex) => JsonValue::String(regex.0.to_string()),
 			Value::File(file) => JsonValue::String(file.to_string()),
@@ -272,9 +272,9 @@ mod tests {
 		])),
 	)]
 	#[case::thing(
-		Value::Thing(RecordId{ table: "foo".to_string(), key: RecordIdKey::String("bar".into())}) ,
+		Value::RecordId(RecordId{ table: "foo".to_string(), key: RecordIdKey::String("bar".into())}) ,
 		json!("foo:bar"),
-		Value::Thing(RecordId{ table: "foo".to_string(), key: RecordIdKey::String("bar".into())}) ,
+		Value::RecordId(RecordId{ table: "foo".to_string(), key: RecordIdKey::String("bar".into())}) ,
 	)]
 	#[case::array(
 		Value::Array(val::Array(vec![])),

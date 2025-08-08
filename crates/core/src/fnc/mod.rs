@@ -939,8 +939,8 @@ pub async fn idiom(
 				"repeat" => array::repeat,
 			)
 		}
-		Value::Thing(t) => {
-			args.insert(0, Value::Thing(t));
+		Value::RecordId(t) => {
+			args.insert(0, Value::RecordId(t));
 			dispatch!(
 				ctx,
 				name,

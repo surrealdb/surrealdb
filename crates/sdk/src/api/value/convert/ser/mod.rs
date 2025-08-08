@@ -264,7 +264,7 @@ mod tests {
 	fn thing() {
 		let record_id = syn::thing("foo:bar").unwrap();
 		let value = to_value(record_id.clone()).unwrap();
-		let expected = val::Value::Thing(record_id);
+		let expected = val::Value::RecordId(record_id);
 		assert_eq!(value, expected);
 		assert_eq!(expected.clone(), to_value(expected).unwrap());
 	}

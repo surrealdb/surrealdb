@@ -31,7 +31,7 @@ fn value_to_table(value: Value) -> Expr {
 fn singular(value: &Value) -> bool {
 	match value {
 		Value::Object(_) => true,
-		Value::Thing(t) => !matches!(t.key, RecordIdKey::Range(_)),
+		Value::RecordId(t) => !matches!(t.key, RecordIdKey::Range(_)),
 		_ => false,
 	}
 }
@@ -434,7 +434,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// If the what is a single record with a non range value, make it return only a single
 		// result.
 		let only = match what {
-			Value::Thing(ref x) => !x.key.is_range(),
+			Value::RecordId(ref x) => !x.key.is_range(),
 			_ => false,
 		};
 
@@ -579,7 +579,7 @@ pub trait RpcProtocolV1: RpcContext {
 
 		let only = match what {
 			Value::Strand(_) | Value::Table(_) => true,
-			Value::Thing(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
+			Value::RecordId(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
 			_ => false,
 		};
 
@@ -628,7 +628,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
 
 		let only = match what {
-			Value::Thing(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
+			Value::RecordId(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
 			_ => false,
 		};
 
@@ -681,7 +681,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.ok_or(RpcError::InvalidParams("Expected (what, data)".to_string()))?;
 
 		let only = match what {
-			Value::Thing(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
+			Value::RecordId(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
 			_ => false,
 		};
 
@@ -733,7 +733,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
 
 		let only = match what {
-			Value::Thing(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
+			Value::RecordId(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
 			_ => false,
 		};
 
@@ -784,7 +784,7 @@ pub trait RpcProtocolV1: RpcContext {
 
 		// Process the method arguments
 		let only = match what {
-			Value::Thing(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
+			Value::RecordId(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
 			_ => false,
 		};
 

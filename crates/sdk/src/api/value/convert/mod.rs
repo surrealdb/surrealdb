@@ -45,7 +45,7 @@ fn into_content(this: val::Value) -> Result<Content<'static>> {
 		},
 		val::Value::Bytes(v) => Ok(Content::Bytes(Cow::Owned(v.into_inner()))),
 		val::Value::Table(v) => serializer.serialize(v.into_string()).map_err(Into::into),
-		val::Value::Thing(v) => serializer.serialize(v).map_err(Into::into),
+		val::Value::RecordId(v) => serializer.serialize(v).map_err(Into::into),
 		val::Value::Range(v) => serializer.serialize(v).map_err(Into::into),
 		val::Value::Closure(v) => serializer.serialize(v).map_err(Into::into),
 		val::Value::File(v) => serializer.serialize(v).map_err(Into::into),

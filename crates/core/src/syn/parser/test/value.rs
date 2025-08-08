@@ -132,7 +132,7 @@ fn parse_large_depth_record_id() {
 	};
 	let mut rid = rid;
 	for _ in 0..999 {
-		let RecordIdKeyLit::Array(ref x) = rid.id else {
+		let RecordIdKeyLit::Array(ref x) = rid.key else {
 			panic!()
 		};
 		let Expr::Literal(Literal::RecordId(ref new_rid)) = x[0] else {
@@ -151,14 +151,14 @@ fn parse_recursive_record_string() {
 	assert_eq!(
 		res,
 		Expr::Literal(Literal::RecordId(RecordIdLit {
-			tb: "a".to_owned(),
-			id: RecordIdKeyLit::Array(vec![Expr::Literal(Literal::RecordId(RecordIdLit {
-				tb: "b".to_owned(),
-				id: RecordIdKeyLit::Object(vec![ObjectEntry {
+			table: "a".to_owned(),
+			key: RecordIdKeyLit::Array(vec![Expr::Literal(Literal::RecordId(RecordIdLit {
+				table: "b".to_owned(),
+				key: RecordIdKeyLit::Object(vec![ObjectEntry {
 					key: "c".to_owned(),
 					value: Expr::Literal(Literal::RecordId(RecordIdLit {
-						tb: "d".to_owned(),
-						id: RecordIdKeyLit::Number(1)
+						table: "d".to_owned(),
+						key: RecordIdKeyLit::Number(1)
 					}))
 				}])
 			}))])
@@ -175,8 +175,8 @@ fn parse_record_string_2() {
 	assert_eq!(
 		res,
 		Expr::Literal(Literal::RecordId(RecordIdLit {
-			tb: "a".to_owned(),
-			id: RecordIdKeyLit::Array(vec![Expr::Literal(Literal::Strand(
+			table: "a".to_owned(),
+			key: RecordIdKeyLit::Array(vec![Expr::Literal(Literal::Strand(
 				strand!("foo").to_owned()
 			))])
 		}))

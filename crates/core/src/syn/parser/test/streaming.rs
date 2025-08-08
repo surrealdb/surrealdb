@@ -431,8 +431,8 @@ fn statements() -> Vec<TopLevelExpr> {
 			only: true,
 			what: vec![Expr::Idiom(Idiom(vec![
 				Part::Start(Expr::Literal(Literal::RecordId(RecordIdLit {
-					tb: "a".to_owned(),
-					id: RecordIdKeyLit::String(strand!("b").to_owned()),
+					table: "a".to_owned(),
+					key: RecordIdKeyLit::String(strand!("b").to_owned()),
 				}))),
 				Part::Graph(Graph {
 					dir: Dir::Out,
@@ -544,8 +544,8 @@ fn statements() -> Vec<TopLevelExpr> {
 				direction: true,
 			}]))),
 			limit: Some(Limit(Expr::Literal(Literal::RecordId(RecordIdLit {
-				tb: "a".to_owned(),
-				id: RecordIdKeyLit::String(strand!("b").to_owned()),
+				table: "a".to_owned(),
+				key: RecordIdKeyLit::String(strand!("b").to_owned()),
 			})))),
 			start: Some(Start(Expr::Literal(Literal::Object(vec![ObjectEntry {
 				key: "a".to_owned(),
@@ -648,8 +648,8 @@ fn statements() -> Vec<TopLevelExpr> {
 		TopLevelExpr::Expr(Expr::Relate(Box::new(RelateStatement {
 			only: true,
 			through: Expr::Literal(Literal::RecordId(RecordIdLit {
-				tb: "a".to_owned(),
-				id: RecordIdKeyLit::String(strand!("b").to_owned()),
+				table: "a".to_owned(),
+				key: RecordIdKeyLit::String(strand!("b").to_owned()),
 			})),
 			from: Expr::Literal(Literal::Array(vec![
 				Expr::Literal(Literal::Integer(1)),
@@ -766,8 +766,8 @@ fn statements() -> Vec<TopLevelExpr> {
 			0xffffffff_ffff_ffff_ffff_ffffffffffff,
 		))))),
 		TopLevelExpr::Expr(Expr::Literal(Literal::RecordId(RecordIdLit {
-			tb: "a".to_string(),
-			id: RecordIdKeyLit::Array(
+			table: "a".to_string(),
+			key: RecordIdKeyLit::Array(
 				[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 					.iter()
 					.copied()

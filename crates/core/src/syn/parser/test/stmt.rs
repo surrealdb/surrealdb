@@ -1874,8 +1874,8 @@ fn parse_delete_2() {
 			only: true,
 			what: vec![Expr::Idiom(Idiom(vec![
 				Part::Start(Expr::Literal(Literal::RecordId(RecordIdLit {
-					tb: "a".to_owned(),
-					id: RecordIdKeyLit::String(strand!("b").to_owned()),
+					table: "a".to_owned(),
+					key: RecordIdKeyLit::String(strand!("b").to_owned()),
 				}))),
 				Part::Graph(Graph {
 					dir: Dir::Out,
@@ -2121,8 +2121,8 @@ fn parse_select() {
 				direction: true,
 			}]))),
 			limit: Some(Limit(Expr::Literal(Literal::RecordId(RecordIdLit {
-				tb: "a".to_owned(),
-				id: RecordIdKeyLit::String(strand!("b").to_owned()),
+				table: "a".to_owned(),
+				key: RecordIdKeyLit::String(strand!("b").to_owned()),
 			})))),
 			start: Some(Start(Expr::Literal(Literal::Object(vec![ObjectEntry {
 				key: "a".to_owned(),
@@ -2544,8 +2544,8 @@ fn parse_relate() {
 		Expr::Relate(Box::new(RelateStatement {
 			only: true,
 			through: Expr::Literal(Literal::RecordId(RecordIdLit {
-				tb: "a".to_owned(),
-				id: RecordIdKeyLit::String(strand!("b").to_owned()),
+				table: "a".to_owned(),
+				key: RecordIdKeyLit::String(strand!("b").to_owned()),
 			})),
 			from: Expr::Literal(Literal::Array(vec![
 				Expr::Literal(Literal::Integer(1)),
@@ -2858,8 +2858,8 @@ fn parse_access_grant() {
 				ac: Ident::from_strand(strand!("a").to_owned()),
 				base: Some(Base::Ns),
 				subject: access::Subject::Record(RecordIdLit {
-					tb: "b".to_owned(),
-					id: RecordIdKeyLit::String(strand!("c").to_owned()),
+					table: "b".to_owned(),
+					key: RecordIdKeyLit::String(strand!("c").to_owned()),
 				}),
 			})))
 		);

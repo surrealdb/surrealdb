@@ -960,8 +960,8 @@ mod tests {
 			out,
 			Expr::Idiom(Idiom(vec![
 				Part::Start(Expr::Literal(Literal::RecordId(RecordIdLit {
-					tb: "person".to_owned(),
-					id: RecordIdKeyLit::String(strand!("test").to_owned())
+					table: "person".to_owned(),
+					key: RecordIdKeyLit::String(strand!("test").to_owned())
 				}))),
 				f("friend"),
 				Part::Graph(Graph {
@@ -1108,8 +1108,8 @@ mod tests {
 			out,
 			Expr::Idiom(Idiom(vec![
 				Part::Start(Expr::Literal(Literal::RecordId(RecordIdLit {
-					tb: "test".to_owned(),
-					id: RecordIdKeyLit::Number(1),
+					table: "test".to_owned(),
+					key: RecordIdKeyLit::Number(1),
 				}))),
 				f("foo"),
 			]))
@@ -1124,8 +1124,8 @@ mod tests {
 			out,
 			Expr::Idiom(Idiom(vec![
 				Part::Start(Expr::Literal(Literal::RecordId(RecordIdLit {
-					tb: "test".to_owned(),
-					id: RecordIdKeyLit::Number(1),
+					table: "test".to_owned(),
+					key: RecordIdKeyLit::Number(1),
 				}))),
 				Part::Value(Expr::Literal(Literal::Strand(strand!("foo").to_owned()))),
 			]))
@@ -1140,8 +1140,8 @@ mod tests {
 			out,
 			Expr::Idiom(Idiom(vec![
 				Part::Start(Expr::Literal(Literal::RecordId(RecordIdLit {
-					tb: "test".to_owned(),
-					id: RecordIdKeyLit::Number(1),
+					table: "test".to_owned(),
+					key: RecordIdKeyLit::Number(1),
 				}))),
 				Part::All
 			]))

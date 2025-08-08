@@ -96,7 +96,7 @@ impl Literal {
 			Literal::Bytes(bytes) => Value::Bytes(bytes.clone()),
 			Literal::Regex(regex) => Value::Regex(regex.clone()),
 			Literal::RecordId(record_id_lit) => {
-				Value::Thing(record_id_lit.compute(stk, ctx, opt, doc).await?)
+				Value::RecordId(record_id_lit.compute(stk, ctx, opt, doc).await?)
 			}
 			Literal::Array(exprs) => {
 				let mut array = Vec::with_capacity(exprs.len());
