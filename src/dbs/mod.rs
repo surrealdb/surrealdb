@@ -605,7 +605,7 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_setup_superuser() {
-		let ds = Datastore::new("memory", None).await.unwrap();
+		let ds = Datastore::new("memory").await.unwrap();
 		let creds = Root {
 			username: "root",
 			password: "root",
@@ -704,7 +704,7 @@ mod tests {
 			// 0 - Functions and Networking are allowed
 			//
 			(
-				Datastore::new("memory", None).await.unwrap().with_capabilities(
+				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::All),
@@ -718,7 +718,7 @@ mod tests {
 			// 1 - Scripting is allowed
 			//
 			(
-				Datastore::new("memory", None)
+				Datastore::new("memory")
 					.await
 					.unwrap()
 					.with_capabilities(Capabilities::default().with_scripting(true)),
@@ -731,7 +731,7 @@ mod tests {
 			// 2 - Scripting is not allowed
 			//
 			(
-				Datastore::new("memory", None)
+				Datastore::new("memory")
 					.await
 					.unwrap()
 					.with_capabilities(Capabilities::default().with_scripting(false)),
@@ -744,7 +744,7 @@ mod tests {
 			// 3 - Anonymous actor when guest access is allowed and auth is enabled, succeeds
 			//
 			(
-				Datastore::new("memory", None)
+				Datastore::new("memory")
 					.await
 					.unwrap()
 					.with_auth_enabled(true)
@@ -758,7 +758,7 @@ mod tests {
 			// 4 - Anonymous actor when guest access is not allowed and auth is enabled, throws error
 			//
 			(
-				Datastore::new("memory", None)
+				Datastore::new("memory")
 					.await
 					.unwrap()
 					.with_auth_enabled(true)
@@ -772,7 +772,7 @@ mod tests {
 			// 5 - Anonymous actor when guest access is not allowed and auth is disabled, succeeds
 			//
 			(
-				Datastore::new("memory", None)
+				Datastore::new("memory")
 					.await
 					.unwrap()
 					.with_auth_enabled(false)
@@ -786,7 +786,7 @@ mod tests {
 			// 6 - Authenticated user when guest access is not allowed and auth is enabled, succeeds
 			//
 			(
-				Datastore::new("memory", None)
+				Datastore::new("memory")
 					.await
 					.unwrap()
 					.with_auth_enabled(true)
@@ -822,7 +822,7 @@ mod tests {
 			// 9 - Some functions are not allowed
 			//
 			(
-				Datastore::new("memory", None).await.unwrap().with_capabilities(
+				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::Some(
 							[FuncTarget::from_str("string::*").unwrap()].into(),
@@ -838,7 +838,7 @@ mod tests {
 			),
 			// 10 -
 			(
-				Datastore::new("memory", None).await.unwrap().with_capabilities(
+				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::Some(
 							[FuncTarget::from_str("string::*").unwrap()].into(),
@@ -854,7 +854,7 @@ mod tests {
 			),
 			// 11 -
 			(
-				Datastore::new("memory", None).await.unwrap().with_capabilities(
+				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::Some(
 							[FuncTarget::from_str("string::*").unwrap()].into(),
@@ -872,7 +872,7 @@ mod tests {
 			// 12 - Some net targets are not allowed
 			//
 			(
-				Datastore::new("memory", None).await.unwrap().with_capabilities(
+				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::Some(
@@ -893,7 +893,7 @@ mod tests {
 			),
 			// 13 -
 			(
-				Datastore::new("memory", None).await.unwrap().with_capabilities(
+				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::Some(
@@ -914,7 +914,7 @@ mod tests {
 			),
 			// 14 -
 			(
-				Datastore::new("memory", None).await.unwrap().with_capabilities(
+				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::Some(
