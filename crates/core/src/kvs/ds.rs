@@ -74,7 +74,7 @@ pub struct TLSOptions {
 	pub key: PathBuf,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct DatastoreOptions {
 	pub clock: Option<Arc<SizedClock>>,
 	pub tls: Option<TLSOptions>,
@@ -273,7 +273,14 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Self> {
-		Self::new_with_clock(path, None, None).await
+		Self::new_with_options(
+			path,
+			DatastoreOptions {
+				clock: None,
+				tls: None,
+			},
+		)
+		.await
 	}
 
 	pub async fn new_with_options(path: &str, options: DatastoreOptions) -> Result<Datastore> {
