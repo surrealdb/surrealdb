@@ -81,7 +81,7 @@ jobs:
     name: Check format
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
+      - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.NIGHTLY_RUST_VERSION }}
