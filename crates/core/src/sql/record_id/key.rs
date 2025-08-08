@@ -1,9 +1,7 @@
 use crate::sql::escape::{EscapeKey, EscapeRid};
+use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::sql::literal::ObjectEntry;
-use crate::sql::{
-	Expr, RecordIdKeyRangeLit,
-	fmt::{Fmt, Pretty, is_pretty, pretty_indent},
-};
+use crate::sql::{Expr, RecordIdKeyRangeLit};
 use crate::val::{Strand, Uuid};
 use std::fmt::{self, Display, Formatter, Write as _};
 

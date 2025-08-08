@@ -2,11 +2,10 @@ use anyhow::{Result, ensure};
 use std::mem;
 use std::sync::Arc;
 
-use crate::dbs::Variables;
 #[cfg(not(target_family = "wasm"))]
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::capabilities::MethodTarget;
-use crate::dbs::{QueryType, Response};
+use crate::dbs::{QueryType, Response, Variables};
 use crate::err::Error;
 use crate::rpc::args::extract_args;
 use crate::rpc::{Data, Method, RpcContext, RpcError};

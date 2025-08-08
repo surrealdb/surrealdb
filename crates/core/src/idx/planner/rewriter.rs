@@ -1,7 +1,9 @@
-use crate::expr::RecordIdKeyRangeLit;
 use crate::expr::literal::ObjectEntry;
 use crate::expr::part::DestructurePart;
-use crate::expr::{Cond, Expr, FunctionCall, Idiom, Literal, Part, RecordIdKeyLit, RecordIdLit};
+use crate::expr::{
+	Cond, Expr, FunctionCall, Idiom, Literal, Part, RecordIdKeyLit, RecordIdKeyRangeLit,
+	RecordIdLit,
+};
 use crate::idx::planner::executor::KnnExpressions;
 
 use std::ops::Bound;

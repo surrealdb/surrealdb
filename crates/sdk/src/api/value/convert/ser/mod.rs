@@ -115,9 +115,8 @@ mod tests {
 	use ::serde::Serialize;
 	use std::collections::BTreeMap;
 	use std::ops::Bound;
-	use surrealdb_core::map;
-	use surrealdb_core::syn;
 	use surrealdb_core::val::Regex;
+	use surrealdb_core::{map, syn};
 
 	#[test]
 	fn value_none() {

@@ -1,5 +1,6 @@
 use anyhow::Result;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use serde_content::{Deserializer, Number, Serializer, Value as Content};
 use std::borrow::Cow;
 use surrealdb_core::val;

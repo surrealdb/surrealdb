@@ -709,10 +709,9 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
-	use crate::{
-		sql::{self, BinaryOperator, RecordIdKeyLit, RecordIdLit, graph::GraphSubject},
-		syn,
-	};
+	use crate::sql::graph::GraphSubject;
+	use crate::sql::{self, BinaryOperator, RecordIdKeyLit, RecordIdLit};
+	use crate::syn;
 
 	use super::*;
 

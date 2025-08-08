@@ -1,12 +1,10 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::FlowResultExt as _;
-use crate::expr::escape::EscapeKey;
-use crate::expr::escape::EscapeRid;
+use crate::expr::escape::{EscapeKey, EscapeRid};
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::literal::ObjectEntry;
-use crate::expr::{Expr, RecordIdKeyRangeLit};
+use crate::expr::{Expr, FlowResultExt as _, RecordIdKeyRangeLit};
 use crate::val::{Array, Object, RecordIdKey, Strand, Uuid};
 
 use anyhow::Result;

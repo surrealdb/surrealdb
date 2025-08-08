@@ -1,8 +1,9 @@
+use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::expr::FlowResult;
 use crate::expr::escape::EscapeRid;
 use crate::val::RecordId;
-use crate::{ctx::Context, doc::CursorDoc};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

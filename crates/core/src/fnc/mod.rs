@@ -1581,8 +1581,8 @@ mod tests {
 	use regex::Regex;
 
 	use crate::dbs::Capabilities;
-	use crate::sql::Expr;
-	use crate::{dbs::capabilities::ExperimentalTarget, sql::Function};
+	use crate::dbs::capabilities::ExperimentalTarget;
+	use crate::sql::{Expr, Function};
 
 	#[tokio::test]
 	async fn implementations_are_present() {

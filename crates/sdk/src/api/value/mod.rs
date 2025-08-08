@@ -9,8 +9,7 @@ use std::fmt;
 use std::ops::{Deref, Index};
 use std::str::FromStr;
 use surrealdb_core::dbs::Action as CoreAction;
-use surrealdb_core::syn;
-use surrealdb_core::val;
+use surrealdb_core::{syn, val};
 use uuid::Uuid;
 
 mod convert;

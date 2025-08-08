@@ -1,7 +1,5 @@
-use crate::{
-	syn,
-	val::{Object, Value},
-};
+use crate::syn;
+use crate::val::{Object, Value};
 
 #[test]
 fn object_with_negative() {

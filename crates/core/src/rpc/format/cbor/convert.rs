@@ -3,8 +3,9 @@ use ciborium::Value as CborValue;
 use geo::{LineString, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use rust_decimal::Decimal;
+use std::collections::BTreeMap;
+use std::iter::once;
 use std::ops::Bound;
-use std::{collections::BTreeMap, iter::once};
 
 use crate::val::{
 	self, Array, DecimalExt, Geometry, Number, Object, Range, RecordIdKey, RecordIdKeyRange, Table,

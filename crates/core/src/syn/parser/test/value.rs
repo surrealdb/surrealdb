@@ -1,17 +1,13 @@
 use reblessive::Stack;
 use rust_decimal::Decimal;
 
-use crate::{
-	sql::{
-		BinaryOperator, Constant, Expr, Ident, Idiom, Literal, Part, RecordIdKeyLit, RecordIdLit,
-		literal::ObjectEntry,
-	},
-	syn::{
-		self,
-		parser::{Parser, ParserSettings},
-	},
-	val::Geometry,
+use crate::sql::literal::ObjectEntry;
+use crate::sql::{
+	BinaryOperator, Constant, Expr, Ident, Idiom, Literal, Part, RecordIdKeyLit, RecordIdLit,
 };
+use crate::syn::parser::{Parser, ParserSettings};
+use crate::syn::{self};
+use crate::val::Geometry;
 
 #[test]
 fn parse_index_expression() {

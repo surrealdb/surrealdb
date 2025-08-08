@@ -6,8 +6,7 @@ pub mod traces;
 use crate::cli::LogFormat;
 use crate::cli::validator::parser::tracing::CustomFilter;
 use crate::cnf::ENABLE_TOKIO_CONSOLE;
-use anyhow::Result;
-use anyhow::anyhow;
+use anyhow::{Result, anyhow};
 use opentelemetry::{KeyValue, global};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::resource::{
