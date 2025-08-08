@@ -368,7 +368,7 @@ pub fn span_filters_from_value(v: &str) -> Vec<(String, LevelFilter)> {
 mod tests {
 	use crate::telemetry;
 	use opentelemetry::global::shutdown_tracer_provider;
-	use std::ffi::OsString;
+	use std::{ffi::OsString, time::Duration};
 	use tracing::{Level, span};
 	use tracing_subscriber::util::SubscriberInitExt;
 
@@ -525,10 +525,10 @@ mod tests {
 		}
 
 		println!("Waiting for request...");
-		let req = tokio::select! {
-			req = req_rx.recv() => req.expect("missing export request"),
-			_ = tokio::time::sleep(std::time::Duration::from_secs(1)) => panic!("timeout waiting for request"),
-		};
+		let req = tokio::time::timeout(Duration::from_secs(1), req_rx.recv())
+			.await
+			.expect("timeout waiting for request")
+			.expect("missing export request");
 
 		let first_span =
 			req.resource_spans.first().unwrap().scope_spans.first().unwrap().spans.first().unwrap();
@@ -586,10 +586,11 @@ mod tests {
 		}
 
 		println!("Waiting for request...");
-		let req = tokio::select! {
-			req = req_rx.recv() => req.expect("missing export request"),
-			_ = tokio::time::sleep(std::time::Duration::from_secs(1)) => panic!("timeout waiting for request"),
-		};
+		let req = tokio::time::timeout(Duration::from_secs(1), req_rx.recv())
+			.await
+			.expect("timeout waiting for request")
+			.expect("missing export request");
+
 		let spans = &req.resource_spans.first().unwrap().scope_spans.first().unwrap().spans;
 
 		assert_eq!(1, spans.len());
