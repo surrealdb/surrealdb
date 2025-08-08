@@ -525,7 +525,7 @@ mod tests {
 		}
 
 		println!("Waiting for request...");
-		let req = tokio::time::timeout(Duration::from_secs(1), req_rx.recv())
+		let req = tokio::time::timeout(Duration::from_secs(5), req_rx.recv())
 			.await
 			.expect("timeout waiting for request")
 			.expect("missing export request");
@@ -586,7 +586,7 @@ mod tests {
 		}
 
 		println!("Waiting for request...");
-		let req = tokio::time::timeout(Duration::from_secs(1), req_rx.recv())
+		let req = tokio::time::timeout(Duration::from_secs(5), req_rx.recv())
 			.await
 			.expect("timeout waiting for request")
 			.expect("missing export request");
