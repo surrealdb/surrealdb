@@ -9,7 +9,6 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 
 /// An Insert Relation future
-///
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct InsertRelation<'r, C: Connection, R> {

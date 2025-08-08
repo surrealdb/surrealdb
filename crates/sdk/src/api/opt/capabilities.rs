@@ -71,7 +71,7 @@ impl From<&ExperimentalFeature> for ExperimentalTarget {
 ///  # Ok(cap)
 /// # }
 /// ```
-///
+/// 
 /// Will allow all and only all `http::*` functions except the function
 /// `http::post`.
 ///

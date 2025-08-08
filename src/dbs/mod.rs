@@ -294,9 +294,9 @@ impl DbsCapabilities {
 		// specific allows for networks
 		if self.deny_all {
 			match &self.allow_net {
-				Some(Targets::Some(_)) => return self.allow_net.clone().unwrap(), /* We already
-				                                                                    * checked for
-				                                                                    * Some */
+				Some(Targets::Some(_)) => return self.allow_net.clone().unwrap(), /* We already */
+				// checked for
+				// Some
 				Some(Targets::All) => return Targets::All,
 				Some(_) => return Targets::None,
 				None => return Targets::None,
@@ -307,9 +307,9 @@ impl DbsCapabilities {
 		// allows for networks
 		if let Some(Targets::All) = self.deny_net {
 			match &self.allow_net {
-				Some(Targets::Some(_)) => return self.allow_net.clone().unwrap(), /* We already
-				                                                                    * checked for
-				                                                                    * Some */
+				Some(Targets::Some(_)) => return self.allow_net.clone().unwrap(), /* We already */
+				// checked for
+				// Some
 				Some(_) => return Targets::None,
 				None => return Targets::None,
 			}
@@ -331,9 +331,9 @@ impl DbsCapabilities {
 		// specific allows for RPC
 		if self.deny_all {
 			match &self.allow_rpc {
-				Some(Targets::Some(_)) => return self.allow_rpc.clone().unwrap(), /* We already
-				                                                                    * checked for
-				                                                                    * Some */
+				Some(Targets::Some(_)) => return self.allow_rpc.clone().unwrap(), /* We already */
+				// checked for
+				// Some
 				Some(Targets::All) => return Targets::All,
 				Some(_) => return Targets::None,
 				None => return Targets::None,
@@ -344,9 +344,9 @@ impl DbsCapabilities {
 		// for RPC methods
 		if let Some(Targets::All) = self.deny_rpc {
 			match &self.allow_rpc {
-				Some(Targets::Some(_)) => return self.allow_rpc.clone().unwrap(), /* We already
-				                                                                    * checked for
-				                                                                    * Some */
+				Some(Targets::Some(_)) => return self.allow_rpc.clone().unwrap(), /* We already */
+				// checked for
+				// Some
 				Some(_) => return Targets::None,
 				None => return Targets::None,
 			}
@@ -367,9 +367,9 @@ impl DbsCapabilities {
 		// specific allows for HTTP
 		if self.deny_all {
 			match &self.allow_http {
-				Some(Targets::Some(_)) => return self.allow_http.clone().unwrap(), /* We already
-				                                                                     * checked for
-				                                                                     * Some */
+				Some(Targets::Some(_)) => return self.allow_http.clone().unwrap(), /* We already */
+				// checked for
+				// Some
 				Some(Targets::All) => return Targets::All,
 				Some(_) => return Targets::None,
 				None => return Targets::None,
@@ -380,9 +380,9 @@ impl DbsCapabilities {
 		// for HTTP routes
 		if let Some(Targets::All) = self.deny_http {
 			match &self.allow_http {
-				Some(Targets::Some(_)) => return self.allow_http.clone().unwrap(), /* We already
-				                                                                     * checked for
-				                                                                     * Some */
+				Some(Targets::Some(_)) => return self.allow_http.clone().unwrap(), /* We already */
+				// checked for
+				// Some
 				Some(_) => return Targets::None,
 				None => return Targets::None,
 			}
@@ -447,8 +447,8 @@ impl DbsCapabilities {
 		// functions On top of what is explicitly allowed, we deny what is
 		// specifically denied
 		match &self.deny_funcs {
-			Some(Targets::Some(_)) => self.deny_funcs.clone().unwrap(), /* We already checked
-			                                                              * for Some */
+			Some(Targets::Some(_)) => self.deny_funcs.clone().unwrap(), /* We already checked */
+			// for Some
 			Some(_) => Targets::None,
 			None => Targets::None,
 		}
@@ -459,8 +459,8 @@ impl DbsCapabilities {
 		// networks On top of what is explicitly allowed, we deny what is specifically
 		// denied
 		match &self.deny_net {
-			Some(Targets::Some(_)) => self.deny_net.clone().unwrap(), /* We already checked for
-			                                                            * Some */
+			Some(Targets::Some(_)) => self.deny_net.clone().unwrap(), /* We already checked for */
+			// Some
 			Some(_) => Targets::None,
 			None => Targets::None,
 		}
@@ -474,8 +474,8 @@ impl DbsCapabilities {
 		// Allowed RPC methods already consider a global deny and a general deny for RPC
 		// On top of what is explicitly allowed, we deny what is specifically denied
 		match &self.deny_rpc {
-			Some(Targets::Some(_)) => self.deny_rpc.clone().unwrap(), /* We already checked for
-			                                                            * Some */
+			Some(Targets::Some(_)) => self.deny_rpc.clone().unwrap(), /* We already checked for */
+			// Some
 			Some(_) => Targets::None,
 			None => Targets::None,
 		}
@@ -486,8 +486,8 @@ impl DbsCapabilities {
 		// HTTP On top of what is explicitly allowed, we deny what is specifically
 		// denied
 		match &self.deny_http {
-			Some(Targets::Some(_)) => self.deny_http.clone().unwrap(), /* We already checked for
-			                                                             * Some */
+			Some(Targets::Some(_)) => self.deny_http.clone().unwrap(), /* We already checked for */
+			// Some
 			Some(_) => Targets::None,
 			None => Targets::None,
 		}
