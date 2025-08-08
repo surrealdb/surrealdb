@@ -109,7 +109,7 @@ pub fn session_from_test_config(config: &TestConfig) -> Session {
 				access,
 				rid,
 			} => {
-				let v = SurValue::Thing(rid.0.clone());
+				let v = SurValue::RecordId(rid.0.clone());
 				Session::for_record(&namespace, &database, &access, v)
 			}
 		}

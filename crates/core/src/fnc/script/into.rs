@@ -64,7 +64,7 @@ impl<'js> IntoJs<'js> for &Value {
 				let date: js::function::Constructor = ctx.globals().get("Date")?;
 				date.construct((v.0.timestamp_millis(),))
 			}
-			Value::Thing(ref v) => Ok(Class::<classes::record::Record>::instance(
+			Value::RecordId(ref v) => Ok(Class::<classes::record::Record>::instance(
 				ctx.clone(),
 				classes::record::Record {
 					value: v.to_owned(),

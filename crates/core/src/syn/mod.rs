@@ -5,8 +5,7 @@ use crate::dbs::Capabilities;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
 use crate::sql::{Ast, Block, Expr, Fetchs, Fields, Idiom, Kind, Output, RecordIdLit};
-use crate::val::{Datetime, Duration};
-use crate::val::{RecordId, Value};
+use crate::val::{Datetime, Duration, RecordId, Value};
 
 pub mod error;
 pub mod lexer;

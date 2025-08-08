@@ -1,48 +1,47 @@
-use crate::{
-	sql::{
-		Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, Explain, Expr,
-		Fetch, Fetchs, Field, Fields, Graph, Group, Groups, Ident, Idiom, Idioms, Index, Kind,
-		Limit, Literal, Mock, Order, Output, Param, Part, Permission, Permissions, RecordIdKeyLit,
-		RecordIdLit, Scoring, Split, Splits, Start, TableType, Timeout, TopLevelExpr, With,
-		access::AccessDuration,
-		access_type::{
-			AccessType, BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess,
-			JwtAccessIssue, JwtAccessVerify, JwtAccessVerifyJwks, JwtAccessVerifyKey, RecordAccess,
-		},
-		changefeed::ChangeFeed,
-		data::Assignment,
-		filter::Filter,
-		graph::GraphSubject,
-		index::{Distance, HnswParams, MTreeParams, SearchParams, VectorType},
-		language::Language,
-		literal::ObjectEntry,
-		order::{OrderList, Ordering},
-		statements::{
-			AccessStatement, CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
-			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
-			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
-			DefineParamStatement, DefineStatement, DefineTableStatement, DeleteStatement,
-			ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
-			OptionStatement, OutputStatement, RelateStatement, RemoveAccessStatement,
-			RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
-			RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
-			RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
-			RemoveUserStatement, SelectStatement, UpdateStatement, UpsertStatement, UseStatement,
-			access::{
-				self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
-				AccessStatementShow,
-			},
-			analyze::AnalyzeStatement,
-			define::{DefineDefault, DefineKind, user::PassType},
-			show::{ShowSince, ShowStatement},
-			sleep::SleepStatement,
-		},
-		tokenizer::Tokenizer,
-	},
-	syn::{self, parser::ParserSettings},
-	val::{Datetime, Duration, Number, Strand, Uuid},
+use crate::sql::access::AccessDuration;
+use crate::sql::access_type::{
+	AccessType, BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess, JwtAccessIssue,
+	JwtAccessVerify, JwtAccessVerifyJwks, JwtAccessVerifyKey, RecordAccess,
 };
-use chrono::{NaiveDate, Offset, Utc, offset::TimeZone};
+use crate::sql::changefeed::ChangeFeed;
+use crate::sql::data::Assignment;
+use crate::sql::filter::Filter;
+use crate::sql::graph::GraphSubject;
+use crate::sql::index::{Distance, HnswParams, MTreeParams, SearchParams, VectorType};
+use crate::sql::language::Language;
+use crate::sql::literal::ObjectEntry;
+use crate::sql::order::{OrderList, Ordering};
+use crate::sql::statements::access::{
+	self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke, AccessStatementShow,
+};
+use crate::sql::statements::analyze::AnalyzeStatement;
+use crate::sql::statements::define::user::PassType;
+use crate::sql::statements::define::{DefineDefault, DefineKind};
+use crate::sql::statements::show::{ShowSince, ShowStatement};
+use crate::sql::statements::sleep::SleepStatement;
+use crate::sql::statements::{
+	AccessStatement, CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
+	DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
+	DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
+	DefineTableStatement, DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement,
+	InsertStatement, KillStatement, OptionStatement, OutputStatement, RelateStatement,
+	RemoveAccessStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
+	RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement,
+	RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
+	SelectStatement, UpdateStatement, UpsertStatement, UseStatement,
+};
+use crate::sql::tokenizer::Tokenizer;
+use crate::sql::{
+	Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, Explain, Expr, Fetch,
+	Fetchs, Field, Fields, Graph, Group, Groups, Ident, Idiom, Idioms, Index, Kind, Limit, Literal,
+	Mock, Order, Output, Param, Part, Permission, Permissions, RecordIdKeyLit, RecordIdLit,
+	Scoring, Split, Splits, Start, TableType, Timeout, TopLevelExpr, With,
+};
+use crate::syn::parser::ParserSettings;
+use crate::syn::{self};
+use crate::val::{Datetime, Duration, Number, Strand, Uuid};
+use chrono::offset::TimeZone;
+use chrono::{NaiveDate, Offset, Utc};
 
 fn ident_field(name: &str) -> Expr {
 	Expr::Idiom(Idiom(vec![Part::Field(Ident::new(name.to_string()).unwrap())]))
@@ -1874,8 +1873,8 @@ fn parse_delete_2() {
 			only: true,
 			what: vec![Expr::Idiom(Idiom(vec![
 				Part::Start(Expr::Literal(Literal::RecordId(RecordIdLit {
-					tb: "a".to_owned(),
-					id: RecordIdKeyLit::String(strand!("b").to_owned()),
+					table: "a".to_owned(),
+					key: RecordIdKeyLit::String(strand!("b").to_owned()),
 				}))),
 				Part::Graph(Graph {
 					dir: Dir::Out,
@@ -2121,8 +2120,8 @@ fn parse_select() {
 				direction: true,
 			}]))),
 			limit: Some(Limit(Expr::Literal(Literal::RecordId(RecordIdLit {
-				tb: "a".to_owned(),
-				id: RecordIdKeyLit::String(strand!("b").to_owned()),
+				table: "a".to_owned(),
+				key: RecordIdKeyLit::String(strand!("b").to_owned()),
 			})))),
 			start: Some(Start(Expr::Literal(Literal::Object(vec![ObjectEntry {
 				key: "a".to_owned(),
@@ -2544,8 +2543,8 @@ fn parse_relate() {
 		Expr::Relate(Box::new(RelateStatement {
 			only: true,
 			through: Expr::Literal(Literal::RecordId(RecordIdLit {
-				tb: "a".to_owned(),
-				id: RecordIdKeyLit::String(strand!("b").to_owned()),
+				table: "a".to_owned(),
+				key: RecordIdKeyLit::String(strand!("b").to_owned()),
 			})),
 			from: Expr::Literal(Literal::Array(vec![
 				Expr::Literal(Literal::Integer(1)),
@@ -2858,8 +2857,8 @@ fn parse_access_grant() {
 				ac: Ident::from_strand(strand!("a").to_owned()),
 				base: Some(Base::Ns),
 				subject: access::Subject::Record(RecordIdLit {
-					tb: "b".to_owned(),
-					id: RecordIdKeyLit::String(strand!("c").to_owned()),
+					table: "b".to_owned(),
+					key: RecordIdKeyLit::String(strand!("c").to_owned()),
 				}),
 			})))
 		);

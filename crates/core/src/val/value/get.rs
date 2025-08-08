@@ -108,7 +108,7 @@ impl Value {
 				// Try to obtain a Record ID from the document, otherwise we'll operate on NONE
 				let v = match doc {
 					Some(doc) => match &doc.rid {
-						Some(id) => Value::Thing(id.deref().to_owned()),
+						Some(id) => Value::RecordId(id.deref().to_owned()),
 						_ => Value::None,
 					},
 					None => Value::None,
@@ -169,14 +169,14 @@ impl Value {
 				Value::Object(v) => match p {
 					// If requesting an `id` field, check if it is a complex Record ID
 					Part::Field(f) if f.is_id() && path.len() > 1 => match v.get(f.as_str()) {
-						Some(Value::Thing(RecordId {
+						Some(Value::RecordId(RecordId {
 							key: RecordIdKey::Object(v),
 							..
 						})) => {
 							let v = Value::Object(v.clone());
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 						}
-						Some(Value::Thing(RecordId {
+						Some(Value::RecordId(RecordId {
 							key: RecordIdKey::Array(v),
 							..
 						})) => {
@@ -190,7 +190,7 @@ impl Value {
 					},
 					Part::Graph(_) => match v.rid() {
 						Some(v) => {
-							let v = Value::Thing(v);
+							let v = Value::RecordId(v);
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path)).await
 						}
 						None => {
@@ -219,7 +219,7 @@ impl Value {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
-						Value::Thing(t) => match v.get(&t.to_string()) {
+						Value::RecordId(t) => match v.get(&t.to_string()) {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
@@ -382,12 +382,12 @@ impl Value {
 					}
 				},
 				// Current value at path is a thing
-				Value::Thing(v) => {
+				Value::RecordId(v) => {
 					// Clone the thing
 					let val = v.clone();
 					// Check how many path parts are remaining
 					if path.is_empty() {
-						return Ok(Value::Thing(val));
+						return Ok(Value::RecordId(val));
 					}
 
 					match p {

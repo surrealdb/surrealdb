@@ -395,7 +395,7 @@ impl Iterator {
 				self.prepare_object(stm_ctx.stm, o)?;
 			}
 			Value::Table(v) => self.prepare_table(stk, planner, stm_ctx, v.into()).await?,
-			Value::Thing(v) => self.prepare_thing(planner, stm_ctx, v).await?,
+			Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
 			Value::Array(a) => a.into_iter().for_each(|x| self.ingest(Iterable::Value(x))),
 			v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
 			v => {

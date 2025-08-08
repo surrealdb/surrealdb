@@ -239,7 +239,7 @@ impl Expr {
 				// one. Here it behaves similar to `CREATE ([thing:1,thing:2,thing:3...])` so when
 				// we encounted mock outside of create we return the array here instead.
 				//
-				let record_ids = mock.clone().into_iter().map(Value::Thing).collect();
+				let record_ids = mock.clone().into_iter().map(Value::RecordId).collect();
 				Ok(Value::Array(Array(record_ids)))
 			}
 			Expr::Block(block) => block.compute(stk, ctx, &opt, doc).await,

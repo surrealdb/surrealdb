@@ -107,7 +107,7 @@ impl Document {
 			// If this document existed before, check the `in` field
 			match (self.initial.doc.pick(&*IN), self.is_new()) {
 				// If the document id matches, then all good
-				(Value::Thing(id), false) if id.eq(l) => {
+				(Value::RecordId(id), false) if id.eq(l) => {
 					self.current.doc.to_mut().put(&*IN, l.clone().into());
 				}
 				// If the document is new then all good
@@ -124,7 +124,7 @@ impl Document {
 			// If this document existed before, check the `out` field
 			match (self.initial.doc.pick(&*OUT), self.is_new()) {
 				// If the document id matches, then all good
-				(Value::Thing(id), false) if id.eq(r) => {
+				(Value::RecordId(id), false) if id.eq(r) => {
 					self.current.doc.to_mut().put(&*OUT, r.clone().into());
 				}
 				// If the document is new then all good

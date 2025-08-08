@@ -252,7 +252,7 @@ impl_roughly_eq_enum!(
 		Object(o),
 		Geometry(g),
 		Bytes(b),
-		Thing(t),
+		RecordId(t),
 		Table(t),
 		Regex(r),
 		Range(r),

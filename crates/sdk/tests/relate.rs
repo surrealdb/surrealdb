@@ -149,7 +149,7 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 		assert_eq!(o.get("out").unwrap(), &syn::value("person:jaime").unwrap());
 		let id = o.get("id").unwrap();
 
-		let Value::Thing(t) = id else {
+		let Value::RecordId(t) = id else {
 			panic!("should be thing {id:?}")
 		};
 		assert_eq!(t.table, "knows");

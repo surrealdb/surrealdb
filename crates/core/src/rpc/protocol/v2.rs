@@ -1,14 +1,12 @@
 use std::mem;
 use std::sync::Arc;
 
-use crate::dbs::Variables;
 use crate::dbs::capabilities::MethodTarget;
-use crate::dbs::{QueryType, Response};
+use crate::dbs::{QueryType, Response, Variables};
 use crate::err::Error;
-use crate::rpc::Data;
 use crate::rpc::args::extract_args;
 use crate::rpc::statement_options::StatementOptions;
-use crate::rpc::{Method, RpcContext, RpcError};
+use crate::rpc::{Data, Method, RpcContext, RpcError};
 use crate::sql::{
 	Ast, CreateStatement, DeleteStatement, Expr, Fields, Function, FunctionCall, Ident,
 	InsertStatement, KillStatement, LiveStatement, Model, Output, Param, RelateStatement,

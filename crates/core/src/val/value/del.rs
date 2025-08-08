@@ -77,7 +77,7 @@ impl Value {
 									_ => Ok(()),
 								},
 							},
-							Value::Thing(t) => match path.len() {
+							Value::RecordId(t) => match path.len() {
 								1 => {
 									v.remove(&t.to_string());
 									Ok(())

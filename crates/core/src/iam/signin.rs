@@ -801,10 +801,11 @@ pub fn verify_grant_bearer(
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::dbs::Capabilities;
 	use crate::iam::Role;
+	use crate::sql::statements::define::DefineKind;
 	use crate::sql::statements::define::user::PassType;
 	use crate::sql::{Ast, Expr, Ident, TopLevelExpr};
-	use crate::{dbs::Capabilities, sql::statements::define::DefineKind};
 	use chrono::Duration;
 	use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 	use regex::Regex;

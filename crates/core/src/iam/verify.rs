@@ -702,13 +702,10 @@ fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Resu
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{
-		iam::token::{Audience, HEADER},
-		sql::{
-			Ast, Ident,
-			statements::define::{DefineKind, user::PassType},
-		},
-	};
+	use crate::iam::token::{Audience, HEADER};
+	use crate::sql::statements::define::DefineKind;
+	use crate::sql::statements::define::user::PassType;
+	use crate::sql::{Ast, Ident};
 	use argon2::password_hash::{PasswordHasher, SaltString};
 	use chrono::Duration;
 	use jsonwebtoken::{EncodingKey, encode};

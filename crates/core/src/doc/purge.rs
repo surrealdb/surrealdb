@@ -43,7 +43,7 @@ impl Document {
 				self.initial.doc.as_ref().pick(&*IN),
 				self.initial.doc.as_ref().pick(&*OUT),
 			) {
-				(Value::Bool(true), Value::Thing(ref l), Value::Thing(ref r)) => {
+				(Value::Bool(true), Value::RecordId(ref l), Value::RecordId(ref r)) => {
 					// Lock the transaction
 					let mut txn = txn.lock().await;
 					// Get temporary edge references
@@ -196,7 +196,7 @@ impl Document {
 								let ctx = ctx.freeze();
 
 								// Obtain the document for the remote record
-								let doc: CursorValue = Value::Thing(this)
+								let doc: CursorValue = Value::RecordId(this)
 									.get(
 										stk,
 										&ctx,

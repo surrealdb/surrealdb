@@ -128,11 +128,14 @@ pub async fn delete(
 
 #[cfg(all(not(target_family = "wasm"), feature = "http"))]
 pub mod resolver {
-	use crate::dbs::{Capabilities, capabilities::NetTarget};
+	use crate::dbs::Capabilities;
+	use crate::dbs::capabilities::NetTarget;
 	use ipnet::IpNet;
 	use reqwest::dns::{Addrs, Name, Resolve, Resolving};
+	use std::error::Error;
+	use std::net::ToSocketAddrs;
 	use std::str::FromStr;
-	use std::{error::Error, net::ToSocketAddrs, sync::Arc};
+	use std::sync::Arc;
 
 	pub struct FilteringResolver {
 		pub cap: Arc<Capabilities>,

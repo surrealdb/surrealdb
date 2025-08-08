@@ -236,8 +236,8 @@ impl BTreeDocIdsState {
 mod tests {
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::btdocids::{BTreeDocIds, Resolved};
-	use crate::kvs::{Datastore, Transaction, TransactionType};
-	use crate::kvs::{LockType, TransactionType::*};
+	use crate::kvs::TransactionType::*;
+	use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 	use crate::val::RecordId;
 
 	const BTREE_ORDER: u32 = 7;

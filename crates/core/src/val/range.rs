@@ -1,4 +1,5 @@
-use crate::expr::{self, kind::HasKind};
+use crate::expr::kind::HasKind;
+use crate::expr::{self};
 use crate::val::value::{Coerce, CoerceError};
 use crate::val::{Array, Number, Value};
 use revision::revisioned;

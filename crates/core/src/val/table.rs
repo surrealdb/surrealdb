@@ -1,6 +1,8 @@
-use std::{fmt, ops::Deref};
+use std::fmt;
+use std::ops::Deref;
 
-use crate::expr::{Ident, escape::EscapeIdent};
+use crate::expr::Ident;
+use crate::expr::escape::EscapeIdent;
 use crate::val::Strand;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

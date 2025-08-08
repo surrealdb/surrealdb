@@ -278,10 +278,10 @@ impl Collected {
 		let rid = match &v {
 			Value::Object(obj) => match obj.get("id") {
 				Some(Value::Strand(strand)) => syn::thing(strand.as_str()).ok().map(Arc::new),
-				Some(Value::Thing(thing)) => Some(Arc::new(thing.clone())),
+				Some(Value::RecordId(thing)) => Some(Arc::new(thing.clone())),
 				_ => None,
 			},
-			Value::Thing(thing) => Some(Arc::new(thing.clone())),
+			Value::RecordId(thing) => Some(Arc::new(thing.clone())),
 			_ => None,
 		};
 		Processed {

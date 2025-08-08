@@ -169,7 +169,7 @@ impl fmt::Display for InsertStatement {
 fn iterable(id: RecordId, v: Value, relation: bool) -> Result<Iterable> {
 	if relation {
 		let f = match v.pick(&*IN) {
-			Value::Thing(v) => v,
+			Value::RecordId(v) => v,
 			v => {
 				bail!(Error::InsertStatementIn {
 					value: v.to_string(),
@@ -177,7 +177,7 @@ fn iterable(id: RecordId, v: Value, relation: bool) -> Result<Iterable> {
 			}
 		};
 		let w = match v.pick(&*OUT) {
-			Value::Thing(v) => v,
+			Value::RecordId(v) => v,
 			v => {
 				bail!(Error::InsertStatementOut {
 					value: v.to_string(),
@@ -194,7 +194,7 @@ fn gen_id(v: &Value, into: &Option<Table>) -> Result<RecordId> {
 	match into {
 		Some(into) => v.rid().generate(into.clone().into_strand(), true),
 		None => match v.rid() {
-			Value::Thing(v) => Ok(v),
+			Value::RecordId(v) => Ok(v),
 			v => Err(anyhow::Error::new(Error::InsertStatementId {
 				value: v.to_string(),
 			})),

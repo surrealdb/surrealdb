@@ -444,7 +444,7 @@ impl Transaction {
 		// Match on the value to determine if it is a graph edge record or a normal record.
 		match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
 			// If the value is a graph edge record (indicated by EDGE, IN, and OUT fields):
-			(Value::Bool(true), Value::Thing(_), Value::Thing(_)) => {
+			(Value::Bool(true), Value::RecordId(_), Value::RecordId(_)) => {
 				if let Some(version) = version {
 					// If a version exists, format the value as an INSERT RELATION VERSION command.
 					let ts = Utc.timestamp_nanos(version as i64);

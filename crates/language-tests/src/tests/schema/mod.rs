@@ -538,7 +538,7 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 			parser.parse_value(stk).await
 		})
 		.map_err(<D::Error as serde::de::Error>::custom)?;
-		if let CoreValue::Thing(x) = v {
+		if let CoreValue::RecordId(x) = v {
 			Ok(SurrealRecordId(x))
 		} else {
 			Err(<D::Error as serde::de::Error>::custom(format_args!(

@@ -662,10 +662,8 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod test {
-	use crate::{
-		sql::{BinaryOperator, Expr, Kind, Literal, PrefixOperator},
-		syn,
-	};
+	use crate::sql::{BinaryOperator, Expr, Kind, Literal, PrefixOperator};
+	use crate::syn;
 
 	#[test]
 	fn cast_int() {

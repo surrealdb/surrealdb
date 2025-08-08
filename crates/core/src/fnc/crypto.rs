@@ -214,7 +214,8 @@ pub mod scrypt {
 /// Code borrowed from [joaat-rs](https://github.com/Pocakking/joaat-rs).
 /// All credits to its author.
 mod joaat {
-	use std::{default::Default, hash::Hasher};
+	use std::default::Default;
+	use std::hash::Hasher;
 
 	pub struct JoaatHasher(u32);
 

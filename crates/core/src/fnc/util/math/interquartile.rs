@@ -1,5 +1,6 @@
 use super::percentile::Percentile;
-use crate::val::{Number, number::Sorted};
+use crate::val::Number;
+use crate::val::number::Sorted;
 
 pub trait Interquartile {
 	/// Interquartile Range - the difference between the upper and lower quartiles

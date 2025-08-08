@@ -1,7 +1,8 @@
 //! Stores the DocIds -> Thing of an HNSW index
+use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::docs::HnswDocsState;
 use crate::kvs::KVKey;
-use crate::{idx::docids::DocId, val::RecordIdKey};
+use crate::val::RecordIdKey;
 
 use serde::{Deserialize, Serialize};
 

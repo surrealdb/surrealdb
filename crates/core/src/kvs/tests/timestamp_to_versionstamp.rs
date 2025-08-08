@@ -4,8 +4,10 @@ use uuid::Uuid;
 
 use crate::dbs::Session;
 use crate::dbs::node::Timestamp;
+use crate::kvs::KVKey;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
 use crate::kvs::clock::{FakeClock, SizedClock};
-use crate::kvs::{KVKey, LockType::*, TransactionType::*};
 
 // Timestamp to versionstamp tests
 // This translation mechanism is currently used by the garbage collector to determine which change feed entries to delete.

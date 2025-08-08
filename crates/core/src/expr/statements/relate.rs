@@ -54,11 +54,11 @@ impl RelateStatement {
 		let from = {
 			let mut out = Vec::new();
 			match stk.run(|stk| self.from.compute(stk, &ctx, opt, doc)).await.catch_return()? {
-				Value::Thing(v) => out.push(v),
+				Value::RecordId(v) => out.push(v),
 				Value::Array(v) => {
 					for v in v {
 						match v {
-							Value::Thing(v) => out.push(v),
+							Value::RecordId(v) => out.push(v),
 							Value::Object(v) => match v.rid() {
 								Some(v) => out.push(v),
 								_ => {
@@ -96,11 +96,11 @@ impl RelateStatement {
 		let to = {
 			let mut out = Vec::new();
 			match stk.run(|stk| self.to.compute(stk, &ctx, opt, doc)).await.catch_return()? {
-				Value::Thing(v) => out.push(v),
+				Value::RecordId(v) => out.push(v),
 				Value::Array(v) => {
 					for v in v {
 						match v {
-							Value::Thing(v) => out.push(v),
+							Value::RecordId(v) => out.push(v),
 							Value::Object(v) => match v.rid() {
 								Some(v) => out.push(v),
 								None => {
@@ -142,7 +142,7 @@ impl RelateStatement {
 					.catch_return()?
 				{
 					// The relation has a specific record id
-					Value::Thing(id) => {
+					Value::RecordId(id) => {
 						i.ingest(Iterable::Relatable(f.clone(), id.clone(), t.clone(), None))
 					}
 					// The relation does not have a specific record id

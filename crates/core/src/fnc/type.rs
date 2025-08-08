@@ -147,7 +147,7 @@ pub fn string_lossy((val,): (Value,)) -> Result<Value> {
 pub fn table((val,): (Value,)) -> Result<Value> {
 	let strand = match val {
 		// TODO: null byte check.
-		Value::Thing(t) => unsafe { Strand::new_unchecked(t.table) },
+		Value::RecordId(t) => unsafe { Strand::new_unchecked(t.table) },
 		// TODO: Handle null byte
 		v => unsafe { Strand::new_unchecked(v.as_raw_string()) },
 	};
@@ -162,9 +162,9 @@ pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> 
 		}),
 
 		// Handle second argument
-		(arg1, Some(arg2)) => Ok(Value::Thing(RecordId {
+		(arg1, Some(arg2)) => Ok(Value::RecordId(RecordId {
 			key: match arg2 {
-				Value::Thing(v) => v.key,
+				Value::RecordId(v) => v.key,
 				Value::Array(v) => v.into(),
 				Value::Object(v) => v.into(),
 				Value::Number(v) => match v {

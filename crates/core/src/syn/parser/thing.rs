@@ -2,9 +2,7 @@ use reblessive::Stk;
 
 use super::{ParseResult, Parser};
 use crate::sql::graph::GraphSubject;
-use crate::sql::id::Gen;
-use crate::sql::id::range::RecordIdKeyRangeLit;
-use crate::sql::{Ident, Param, RecordIdKeyLit, RecordIdLit};
+use crate::sql::{Ident, Param, RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit};
 use crate::syn::error::bail;
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
@@ -49,8 +47,8 @@ impl Parser<'_> {
 				Bound::Unbounded
 			};
 			return Ok(RecordIdLit {
-				tb: ident.into_string(),
-				id: RecordIdKeyLit::Range(Box::new(RecordIdKeyRangeLit {
+				table: ident.into_string(),
+				key: RecordIdKeyLit::Range(Box::new(RecordIdKeyRangeLit {
 					start: Bound::Unbounded,
 					end,
 				})),
@@ -84,8 +82,8 @@ impl Parser<'_> {
 				Bound::Unbounded
 			};
 			Ok(RecordIdLit {
-				tb: ident.into_string(),
-				id: RecordIdKeyLit::Range(Box::new(RecordIdKeyRangeLit {
+				table: ident.into_string(),
+				key: RecordIdKeyLit::Range(Box::new(RecordIdKeyRangeLit {
 					start: beg,
 					end,
 				})),
@@ -111,8 +109,8 @@ impl Parser<'_> {
 				Bound::Included(v) => v,
 			};
 			Ok(RecordIdLit {
-				tb: ident.into_string(),
-				id,
+				table: ident.into_string(),
+				key: id,
 			})
 		}
 	}
@@ -185,8 +183,8 @@ impl Parser<'_> {
 		let id = ctx.run(|ctx| self.parse_record_id_key(ctx)).await?;
 
 		Ok(RecordIdLit {
-			tb: ident,
-			id,
+			table: ident,
+			key: id,
 		})
 	}
 
@@ -309,7 +307,7 @@ impl Parser<'_> {
 				let token = self.pop_peek();
 				if self.eat(t!("(")) {
 					expected!(self, t!(")"));
-					Ok(RecordIdKeyLit::Generate(Gen::Ulid))
+					Ok(RecordIdKeyLit::Generate(RecordIdKeyGen::Ulid))
 				} else {
 					let slice = self.lexer.span_str(token.span);
 					// Safety: Parser guarentees no null bytes present in string.
@@ -321,7 +319,7 @@ impl Parser<'_> {
 				let token = self.pop_peek();
 				if self.eat(t!("(")) {
 					expected!(self, t!(")"));
-					Ok(RecordIdKeyLit::Generate(Gen::Uuid))
+					Ok(RecordIdKeyLit::Generate(RecordIdKeyGen::Uuid))
 				} else {
 					let slice = self.lexer.span_str(token.span);
 					// Safety: Parser guarentees no null bytes present in string.
@@ -333,7 +331,7 @@ impl Parser<'_> {
 				let token = self.pop_peek();
 				if self.eat(t!("(")) {
 					expected!(self, t!(")"));
-					Ok(RecordIdKeyLit::Generate(Gen::Rand))
+					Ok(RecordIdKeyLit::Generate(RecordIdKeyGen::Rand))
 				} else {
 					let slice = self.lexer.span_str(token.span);
 					// Safety: Parser guarentees no null bytes present in string.
@@ -377,8 +375,8 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				tb: String::from("test"),
-				id: RecordIdKeyLit::String(strand!("id").to_owned()),
+				table: String::from("test"),
+				key: RecordIdKeyLit::String(strand!("id").to_owned()),
 			}
 		);
 	}
@@ -392,8 +390,8 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				tb: String::from("test"),
-				id: RecordIdKeyLit::Number(1),
+				table: String::from("test"),
+				key: RecordIdKeyLit::Number(1),
 			}
 		);
 	}
@@ -406,8 +404,8 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				tb: String::from("test"),
-				id: RecordIdKeyLit::Number(i64::MIN),
+				table: String::from("test"),
+				key: RecordIdKeyLit::Number(i64::MIN),
 			}
 		);
 	}
@@ -420,8 +418,8 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				tb: String::from("test"),
-				id: RecordIdKeyLit::Number(i64::MAX),
+				table: String::from("test"),
+				key: RecordIdKeyLit::Number(i64::MAX),
 			}
 		);
 	}
@@ -435,8 +433,8 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				tb: String::from("test"),
-				id: RecordIdKeyLit::String(Strand::new(max_str).unwrap()),
+				table: String::from("test"),
+				key: RecordIdKeyLit::String(Strand::new(max_str).unwrap()),
 			}
 		);
 	}
@@ -450,8 +448,8 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				tb: String::from("test"),
-				id: RecordIdKeyLit::String(Strand::new(min_str).unwrap()),
+				table: String::from("test"),
+				key: RecordIdKeyLit::String(Strand::new(min_str).unwrap()),
 			}
 		);
 	}
@@ -467,8 +465,8 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				tb: String::from("test"),
-				id: RecordIdKeyLit::Number(1),
+				table: String::from("test"),
+				key: RecordIdKeyLit::Number(1),
 			}
 		);
 
@@ -481,8 +479,8 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				tb: String::from("test"),
-				id: RecordIdKeyLit::Number(1),
+				table: String::from("test"),
+				key: RecordIdKeyLit::Number(1),
 			}
 		);
 	}
@@ -496,8 +494,8 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				tb: String::from("test"),
-				id: RecordIdKeyLit::String(strand!("id").to_owned()),
+				table: String::from("test"),
+				key: RecordIdKeyLit::String(strand!("id").to_owned()),
 			}
 		);
 	}
@@ -511,8 +509,8 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				tb: String::from("test"),
-				id: RecordIdKeyLit::String(strand!("id").to_owned()),
+				table: String::from("test"),
+				key: RecordIdKeyLit::String(strand!("id").to_owned()),
 			}
 		);
 	}
@@ -526,8 +524,8 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				tb: String::from("test"),
-				id: RecordIdKeyLit::Object(vec![
+				table: String::from("test"),
+				key: RecordIdKeyLit::Object(vec![
 					sql::literal::ObjectEntry {
 						key: "location".to_string(),
 						value: sql::Expr::Literal(sql::Literal::Strand(strand!("GBR").to_owned()))
@@ -550,8 +548,8 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				tb: String::from("test"),
-				id: RecordIdKeyLit::Array(vec![
+				table: String::from("test"),
+				key: RecordIdKeyLit::Array(vec![
 					sql::Expr::Literal(sql::Literal::Strand(strand!("GBR").to_owned())),
 					sql::Expr::Literal(sql::Literal::Integer(2022)),
 				])
@@ -577,7 +575,7 @@ mod tests {
 				.enter(|ctx| async move { parser.parse_record_id(ctx).await })
 				.finish()
 				.unwrap_or_else(|_| panic!("failed on {}", ident))
-				.id;
+				.key;
 			assert_eq!(r, RecordIdKeyLit::String(Strand::new(ident.to_string()).unwrap()),);
 
 			let mut parser = Parser::new(thing.as_bytes());
@@ -589,8 +587,8 @@ mod tests {
 			assert_eq!(
 				r,
 				Expr::Literal(Literal::RecordId(sql::RecordIdLit {
-					tb: "t".to_string(),
-					id: RecordIdKeyLit::String(Strand::new(ident.to_string()).unwrap())
+					table: "t".to_string(),
+					key: RecordIdKeyLit::String(Strand::new(ident.to_string()).unwrap())
 				}))
 			)
 		}
