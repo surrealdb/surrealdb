@@ -77,7 +77,8 @@ impl BTreeDocIds {
 	}
 
 	/// Returns the doc_id for the given doc_key.
-	/// If the doc_id does not exists, a new one is created, and associated with the given key.
+	/// If the doc_id does not exists, a new one is created, and associated with
+	/// the given key.
 	pub(in crate::idx) async fn resolve_doc_id(
 		&mut self,
 		tx: &Transaction,
@@ -236,8 +237,8 @@ impl BTreeDocIdsState {
 mod tests {
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::btdocids::{BTreeDocIds, Resolved};
-	use crate::kvs::{Datastore, Transaction, TransactionType};
-	use crate::kvs::{LockType, TransactionType::*};
+	use crate::kvs::TransactionType::*;
+	use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 	use crate::val::RecordId;
 
 	const BTREE_ORDER: u32 = 7;

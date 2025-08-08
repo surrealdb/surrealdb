@@ -1,7 +1,6 @@
-use std::collections::BTreeMap;
-
-use reblessive::Stk;
-
+use super::basic::NumberToken;
+use super::mac::unexpected;
+use super::{ParseResult, Parser};
 use crate::sql::kind::KindLiteral;
 use crate::sql::{Ident, Idiom, Kind};
 use crate::syn::error::bail;
@@ -9,10 +8,8 @@ use crate::syn::lexer::compound;
 use crate::syn::parser::mac::expected;
 use crate::syn::token::{Glued, Keyword, Span, TokenKind, t};
 use crate::val::{Duration, Strand};
-
-use super::basic::NumberToken;
-use super::mac::unexpected;
-use super::{ParseResult, Parser};
+use reblessive::Stk;
+use std::collections::BTreeMap;
 
 impl Parser<'_> {
 	/// Parse a kind production.
@@ -287,10 +284,9 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
-	use reblessive::Stack;
-
 	use super::*;
 	use crate::sql::Ident;
+	use reblessive::Stack;
 
 	fn kind(i: &str) -> ParseResult<Kind> {
 		let mut parser = Parser::new(i.as_bytes());

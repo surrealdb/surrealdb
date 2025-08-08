@@ -1,7 +1,8 @@
 use super::Key;
 use std::ops::Range;
 
-/// A batch scan result returned from the [`Transaction::batch`] or [`Transactor::batch`] functions.
+/// A batch scan result returned from the [`Transaction::batch`] or
+/// [`Transactor::batch`] functions.
 #[derive(Debug)]
 pub struct Batch<T> {
 	pub next: Option<Range<Key>>,

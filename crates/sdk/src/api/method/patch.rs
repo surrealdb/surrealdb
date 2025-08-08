@@ -27,7 +27,8 @@ impl<C, R> Patch<'_, C, R>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Patch<'static, C, R> {
 		Patch {
 			client: Cow::Owned(self.client.into_owned()),
@@ -106,7 +107,8 @@ impl<'r, C, R> Patch<'r, C, R>
 where
 	C: Connection,
 {
-	/// Applies JSON Patch changes to all records, or a specific record, in the database.
+	/// Applies JSON Patch changes to all records, or a specific record, in the
+	/// database.
 	pub fn patch(mut self, patch: impl Into<PatchOp>) -> Patch<'r, C, R> {
 		let PatchOp(patch) = patch.into();
 		match patch {

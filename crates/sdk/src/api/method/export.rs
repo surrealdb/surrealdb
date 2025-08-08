@@ -147,7 +147,8 @@ impl<C, R, T> Export<'_, C, R, T>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Export<'static, C, R, T> {
 		Export {
 			client: Cow::Owned(self.client.into_owned()),

@@ -20,26 +20,25 @@ use crate::key::index::bp::{Bp, BpRoot};
 use crate::key::index::bs::Bs;
 use crate::key::index::bt::{Bt, BtRoot};
 use crate::key::index::bu::Bu;
+use crate::key::index::dc::Dc;
+use crate::key::index::dl::Dl;
 use crate::key::index::hd::{Hd, HdRoot};
 use crate::key::index::he::He;
 use crate::key::index::hi::Hi;
 use crate::key::index::hl::Hl;
 use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
-use crate::key::index::id::Id as IdKey;
-use crate::key::index::ii::Ii;
-use crate::key::index::vm::{Vm, VmRoot};
-
-use crate::key::index::dc::Dc;
-use crate::key::index::dl::Dl;
 #[cfg(not(target_family = "wasm"))]
 use crate::key::index::ia::Ia;
 use crate::key::index::ib::Ib;
+use crate::key::index::id::Id as IdKey;
+use crate::key::index::ii::Ii;
 #[cfg(not(target_family = "wasm"))]
 use crate::key::index::ip::Ip;
 use crate::key::index::is::Is;
 use crate::key::index::td::{Td, TdRoot};
 use crate::key::index::tt::Tt;
+use crate::key::index::vm::{Vm, VmRoot};
 use crate::key::root::ic::Ic;
 use crate::kvs::Key;
 use crate::val::RecordIdKey;

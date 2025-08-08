@@ -1,10 +1,9 @@
 mod helpers;
 
+use hashbrown::HashSet;
 use helpers::*;
 use std::collections::BTreeSet;
 use std::sync::Arc;
-
-use hashbrown::HashSet;
 use surrealdb::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;

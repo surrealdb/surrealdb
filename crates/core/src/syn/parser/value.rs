@@ -1,11 +1,4 @@
-use std::cmp::Ordering;
-use std::collections::BTreeMap;
-use std::ops::Bound;
-
-use reblessive::Stk;
-
 use super::{ParseResult, Parser};
-
 use crate::sql::Ident;
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::{self, Numeric};
@@ -15,6 +8,10 @@ use crate::syn::token::{Glued, Span, TokenKind, t};
 use crate::val::{
 	self, Array, Duration, Geometry, Number, Object, Range, RecordId, RecordIdKey, Strand, Value,
 };
+use reblessive::Stk;
+use std::cmp::Ordering;
+use std::collections::BTreeMap;
+use std::ops::Bound;
 
 trait ValueParseFunc {
 	async fn parse(parser: &mut Parser<'_>, ctx: &mut Stk) -> ParseResult<Value>;
@@ -66,13 +63,15 @@ impl Parser<'_> {
 				//HACK: This is an annoying hack to have geometries work.
 				//
 				// Geometries look exactly like objects and are a strict subsect of objects.
-				// However in code they are distinct and in surrealql the have different behavior.
+				// However in code they are distinct and in surrealql the have different
+				// behavior.
 				//
 				// Geom functions don't work with objects and vice-versa.
 				//
-				// The previous parse automatically converted an object to geometry if it found an
-				// matching object. Now it no longer does that and relies on the 'planning' stage
-				// to convert it. But here we still need to do it in the parser.
+				// The previous parse automatically converted an object to geometry if it found
+				// an matching object. Now it no longer does that and relies on the
+				// 'planning' stage to convert it. But here we still need to do it in the
+				// parser.
 				if let Some(geom) = Geometry::try_from_object(&object) {
 					Value::Geometry(geom)
 				} else {

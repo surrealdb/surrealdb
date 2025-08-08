@@ -1,4 +1,5 @@
 use super::transaction::WithTransaction;
+use super::validate_data;
 use crate::api::conn::Command;
 use crate::api::method::{BoxFuture, Content, Merge, Patch};
 use crate::api::opt::{PatchOp, Resource};
@@ -13,8 +14,6 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::val;
 use uuid::Uuid;
-
-use super::validate_data;
 
 /// An update future
 #[derive(Debug)]
@@ -40,7 +39,8 @@ impl<C, R> Update<'_, C, R>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Update<'static, C, R> {
 		Update {
 			client: Cow::Owned(self.client.into_owned()),
@@ -174,7 +174,8 @@ where
 		}
 	}
 
-	/// Patches the current document / record data with the specified JSON Patch data
+	/// Patches the current document / record data with the specified JSON Patch
+	/// data
 	pub fn patch(self, patch: impl Into<PatchOp>) -> Patch<'r, C, R> {
 		let PatchOp(result) = patch.into();
 		let patches = match result {

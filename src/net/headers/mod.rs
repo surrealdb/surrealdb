@@ -46,7 +46,8 @@ pub fn add_server_header(enabled: bool) -> SetResponseHeaderLayer<Option<HeaderV
 	SetResponseHeaderLayer::if_not_present(SERVER, header_value)
 }
 
-// Parse a TypedHeader, returning None if the header is missing and an error if the header is invalid.
+// Parse a TypedHeader, returning None if the header is missing and an error if
+// the header is invalid.
 pub fn parse_typed_header<H>(
 	header: Result<TypedHeader<H>, TypedHeaderRejection>,
 ) -> Result<Option<String>, Error>

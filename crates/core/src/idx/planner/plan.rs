@@ -21,7 +21,8 @@ pub(super) struct PlanBuilder {
 	/// List of indexes allowed in this plan
 	with_indexes: Option<Vec<IndexReference>>,
 	/// Group each possible optimisations local to a SubQuery
-	groups: BTreeMap<GroupRef, Group>, // The order matters because we want the plan to be consistent across repeated queries.
+	groups: BTreeMap<GroupRef, Group>, /* The order matters because we want the plan to be
+	                                    * consistent across repeated queries. */
 }
 
 pub(super) struct PlanBuilderParameters {
@@ -99,7 +100,8 @@ impl PlanBuilder {
 				}
 			}
 
-			// Otherwise, we try to find the most interesting (todo: TBD) single index option
+			// Otherwise, we try to find the most interesting (todo: TBD) single index
+			// option
 			if let Some((e, i)) = b.non_range_indexes.pop() {
 				// Evaluate the record strategy
 				let record_strategy =
@@ -171,7 +173,8 @@ impl PlanBuilder {
 		true
 	}
 
-	/// Check if the ordering is compatible with the datastore transaction capabilities
+	/// Check if the ordering is compatible with the datastore transaction
+	/// capabilities
 	fn check_order_scan(has_reverse_scan: bool, op: &IndexOperator) -> bool {
 		has_reverse_scan || matches!(op, IndexOperator::Order(false))
 	}

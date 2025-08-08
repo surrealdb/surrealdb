@@ -1,3 +1,4 @@
+use super::IgnoreError;
 use crate::ctx::Context;
 use crate::dbs::{Operable, Options, Processed, Statement, Workable};
 use crate::doc::Document;
@@ -5,8 +6,6 @@ use crate::err::Error;
 use crate::val::Value;
 use reblessive::tree::Stk;
 use std::sync::Arc;
-
-use super::IgnoreError;
 
 impl Document {
 	pub(crate) async fn process(

@@ -25,10 +25,9 @@ pub use model::RemoveModelStatement;
 pub use namespace::RemoveNamespaceStatement;
 pub use param::RemoveParamStatement;
 pub use sequence::RemoveSequenceStatement;
+use std::fmt::{self, Display, Formatter};
 pub use table::RemoveTableStatement;
 pub use user::RemoveUserStatement;
-
-use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

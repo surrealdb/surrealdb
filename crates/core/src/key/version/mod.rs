@@ -1,7 +1,6 @@
 //! Stores a record document
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 

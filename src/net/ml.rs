@@ -1,11 +1,11 @@
-//! This file defines the endpoints for the ML API for importing and exporting SurrealML models.
+//! This file defines the endpoints for the ML API for importing and exporting
+//! SurrealML models.
 
+use crate::cnf::HTTP_MAX_ML_BODY_SIZE;
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
 use tower_http::limit::RequestBodyLimitLayer;
-
-use crate::cnf::HTTP_MAX_ML_BODY_SIZE;
 
 /// The router definition for the ML API endpoints.
 pub(super) fn router<S>() -> Router<S>
@@ -21,6 +21,9 @@ where
 
 #[cfg(feature = "ml")]
 mod implementation {
+	use crate::net::AppState;
+	use crate::net::error::{Error as NetError, ResponseError};
+	use crate::net::output::Output;
 	use anyhow::Context;
 	use axum::Extension;
 	use axum::body::Body;
@@ -37,10 +40,6 @@ mod implementation {
 	use surrealdb_core::iam::{Action, ResourceKind};
 	use surrealdb_core::kvs::{LockType, TransactionType};
 	use surrealdb_core::ml::storage::surml_file::SurMlFile;
-
-	use crate::net::AppState;
-	use crate::net::error::{Error as NetError, ResponseError};
-	use crate::net::output::Output;
 
 	/// This endpoint allows the user to import a model into the database.
 	pub async fn import(
@@ -157,14 +156,13 @@ mod implementation {
 
 #[cfg(not(feature = "ml"))]
 mod implementation {
+	use crate::net::AppState;
+	use crate::net::error::{Error as NetError, ResponseError};
 	use axum::Extension;
 	use axum::body::Body;
 	use axum::extract::Path;
 	use surrealdb_core::dbs::Session;
 	use surrealdb_core::dbs::capabilities::RouteTarget;
-
-	use crate::net::AppState;
-	use crate::net::error::{Error as NetError, ResponseError};
 
 	/// This endpoint allows the user to import a model into the database.
 	pub async fn import(

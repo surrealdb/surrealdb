@@ -1,15 +1,12 @@
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
-
 use crate::val::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, RecordId, RecordIdKey,
 	Strand, Uuid, Value,
 };
-
 use anyhow::{Context, anyhow};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use std::collections::BTreeMap;
-
 use surrealdb_protocol::fb::v1 as proto_fb;
 
 impl ToFlatbuffers for Value {

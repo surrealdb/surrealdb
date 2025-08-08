@@ -92,7 +92,8 @@ impl Executor {
 		}
 	}
 
-	/// Executes a statement which needs a transaction with the supplied transaction.
+	/// Executes a statement which needs a transaction with the supplied
+	/// transaction.
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	async fn execute_plan_in_transaction(
 		&mut self,
@@ -361,7 +362,8 @@ impl Executor {
 		}
 	}
 
-	/// Execute the begin statement and all statements after which are within a transaction block.
+	/// Execute the begin statement and all statements after which are within a
+	/// transaction block.
 	async fn execute_begin_statement<S>(
 		&mut self,
 		kvs: &Datastore,
@@ -393,7 +395,8 @@ impl Executor {
 			return Ok(());
 		};
 
-		// Create a sender for this transaction only if the context allows for notifications.
+		// Create a sender for this transaction only if the context allows for
+		// notifications.
 		let receiver = self.ctx.has_notifications().then(|| {
 			let (send, recv) = async_channel::unbounded();
 			self.opt.sender = Some(send);
@@ -586,7 +589,8 @@ impl Executor {
 								res.result = Err(anyhow!(Error::QueryNotExecuted));
 							}
 
-							// statement return an error. Consume all the other statement until we hit a cancel or commit.
+							// statement return an error. Consume all the other statement until we
+							// hit a cancel or commit.
 							self.results.push(Response {
 								time: before.elapsed(),
 								result: Err(e),

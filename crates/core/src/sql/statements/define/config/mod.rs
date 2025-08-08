@@ -1,11 +1,10 @@
 pub mod api;
 pub mod graphql;
 
+use super::DefineKind;
 use api::ApiConfig;
 use graphql::GraphQLConfig;
 use std::fmt::{self, Display};
-
-use super::DefineKind;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

@@ -1,40 +1,38 @@
-use crate::{
-	sql::{
-		Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, Explain, Expr,
-		Fetch, Fetchs, Field, Fields, Function, FunctionCall, Graph, Group, Groups, Ident, Idiom,
-		Idioms, Index, Kind, Limit, Literal, Mock, Order, Output, Param, Part, Permission,
-		Permissions, RecordAccess, RecordIdKeyLit, RecordIdLit, RemoveFunctionStatement, Scoring,
-		Script, Split, Splits, Start, TableType, Timeout, TopLevelExpr, With,
-		access::AccessDuration,
-		access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey},
-		changefeed::ChangeFeed,
-		data::Assignment,
-		filter::Filter,
-		graph::GraphSubject,
-		index::{Distance, MTreeParams, SearchParams, VectorType},
-		language::Language,
-		literal::ObjectEntry,
-		order::{OrderList, Ordering},
-		statements::{
-			CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
-			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
-			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
-			DefineParamStatement, DefineStatement, DefineTableStatement, DeleteStatement,
-			ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
-			OutputStatement, RelateStatement, RemoveFieldStatement, RemoveStatement,
-			SelectStatement, SetStatement, UpdateStatement, UpsertStatement,
-			analyze::AnalyzeStatement,
-			define::{DefineDefault, DefineKind},
-			show::{ShowSince, ShowStatement},
-			sleep::SleepStatement,
-		},
-		tokenizer::Tokenizer,
-	},
-	syn::parser::StatementStream,
-	val::{Datetime, Duration, Number, Regex, Strand, Uuid},
+use crate::sql::access::AccessDuration;
+use crate::sql::access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey};
+use crate::sql::changefeed::ChangeFeed;
+use crate::sql::data::Assignment;
+use crate::sql::filter::Filter;
+use crate::sql::graph::GraphSubject;
+use crate::sql::index::{Distance, MTreeParams, SearchParams, VectorType};
+use crate::sql::language::Language;
+use crate::sql::literal::ObjectEntry;
+use crate::sql::order::{OrderList, Ordering};
+use crate::sql::statements::analyze::AnalyzeStatement;
+use crate::sql::statements::define::{DefineDefault, DefineKind};
+use crate::sql::statements::show::{ShowSince, ShowStatement};
+use crate::sql::statements::sleep::SleepStatement;
+use crate::sql::statements::{
+	CreateStatement, DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
+	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
+	DefineNamespaceStatement, DefineParamStatement, DefineStatement, DefineTableStatement,
+	DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement, InsertStatement,
+	KillStatement, OutputStatement, RelateStatement, RemoveFieldStatement, RemoveStatement,
+	SelectStatement, SetStatement, UpdateStatement, UpsertStatement,
 };
+use crate::sql::tokenizer::Tokenizer;
+use crate::sql::{
+	Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, Explain, Expr, Fetch,
+	Fetchs, Field, Fields, Function, FunctionCall, Graph, Group, Groups, Ident, Idiom, Idioms,
+	Index, Kind, Limit, Literal, Mock, Order, Output, Param, Part, Permission, Permissions,
+	RecordAccess, RecordIdKeyLit, RecordIdLit, RemoveFunctionStatement, Scoring, Script, Split,
+	Splits, Start, TableType, Timeout, TopLevelExpr, With,
+};
+use crate::syn::parser::StatementStream;
+use crate::val::{Datetime, Duration, Number, Regex, Strand, Uuid};
 use bytes::BytesMut;
-use chrono::{NaiveDate, Offset, Utc, offset::TimeZone};
+use chrono::offset::TimeZone;
+use chrono::{NaiveDate, Offset, Utc};
 
 fn ident_field(name: &str) -> Expr {
 	Expr::Idiom(Idiom(vec![Part::Field(Ident::new(name.to_string()).unwrap())]))

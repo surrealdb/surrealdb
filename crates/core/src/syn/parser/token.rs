@@ -1,6 +1,5 @@
-use crate::syn::token::{Glued, TokenKind, t};
-
 use super::Parser;
+use crate::syn::token::{Glued, TokenKind, t};
 
 impl Parser<'_> {
 	/// Returns true if the next token can start a statement.

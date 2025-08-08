@@ -1,17 +1,16 @@
-use std::fmt;
-use std::time::Duration;
-
+use super::client_ip::ExtractClientIP;
 use axum::extract::MatchedPath;
 use http::header;
 use hyper::{Request, Response};
+use std::fmt;
+use std::time::Duration;
 use tower_http::request_id::RequestId;
 use tower_http::trace::{MakeSpan, OnFailure, OnRequest, OnResponse};
 use tracing::{Level, Span, field};
 
-use super::client_ip::ExtractClientIP;
-
 ///
-/// HttpTraceLayerHooks implements custom hooks for the tower_http::trace::TraceLayer layer.
+/// HttpTraceLayerHooks implements custom hooks for the
+/// tower_http::trace::TraceLayer layer.
 ///
 /// Example:
 ///

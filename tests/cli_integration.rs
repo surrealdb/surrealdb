@@ -2,6 +2,7 @@
 mod common;
 
 mod cli_integration {
+	use super::common::{self, PASS, StartServerArguments, USER};
 	use crate::remove_debug_info;
 	use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
 	use chrono::{Duration as ChronoDuration, Utc};
@@ -22,8 +23,6 @@ mod cli_integration {
 	use tokio::time::sleep;
 	use tracing::info;
 	use ulid::Ulid;
-
-	use super::common::{self, PASS, StartServerArguments, USER};
 
 	#[test]
 	fn version_command() {
@@ -1275,7 +1274,8 @@ mod cli_integration {
 			server.finish().unwrap();
 		}
 
-		// Deny all, denies all users to execute functions and access any network address
+		// Deny all, denies all users to execute functions and access any network
+		// address
 		info!("* When all capabilities are denied");
 		{
 			let (addr, mut server) = common::start_server(StartServerArguments {
@@ -1307,7 +1307,8 @@ mod cli_integration {
 			server.finish().unwrap();
 		}
 
-		// When all capabilities are allowed, anyone (including non-authenticated users) can execute functions and access any network address
+		// When all capabilities are allowed, anyone (including non-authenticated users)
+		// can execute functions and access any network address
 		info!("* When all capabilities are allowed");
 		{
 			let (addr, mut server) = common::start_server(StartServerArguments {

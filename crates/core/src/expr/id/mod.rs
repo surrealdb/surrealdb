@@ -8,7 +8,6 @@ use crate::expr::Expr;
 use crate::expr::escape::EscapeRid;
 use crate::expr::literal::ObjectEntry;
 use crate::val::{Array, Object, RecordIdKey, Strand, Uuid};
-
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;

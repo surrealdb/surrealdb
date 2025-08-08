@@ -1,3 +1,4 @@
+use super::IgnoreError;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
@@ -11,12 +12,11 @@ use crate::val::Value;
 use reblessive::tree::Stk;
 use std::sync::Arc;
 
-use super::IgnoreError;
-
 impl Document {
-	/// Evaluates a doc that has been modified so that it can be further computed into a result Value
-	/// This includes some permissions handling, output format handling (as specified in statement),
-	/// field handling (like params, links etc).
+	/// Evaluates a doc that has been modified so that it can be further
+	/// computed into a result Value This includes some permissions handling,
+	/// output format handling (as specified in statement), field handling
+	/// (like params, links etc).
 	pub(super) async fn pluck(
 		&mut self,
 		stk: &mut Stk,

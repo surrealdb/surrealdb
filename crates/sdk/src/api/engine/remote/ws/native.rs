@@ -279,7 +279,8 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 									match pending.effect {
 										RequestEffect::None => {}
 										RequestEffect::Insert => {
-											// For insert, we need to flatten single responses in an array
+											// For insert, we need to flatten single responses in an
+											// array
 											if let DbResponse::Other(CoreValue::Array(array)) = resp
 											{
 												if array.len() == 1 {
@@ -329,7 +330,8 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 								let live_query_id = notification.id;
 								// Check if this live query is registered
 								if let Some(sender) = state.live_queries.get(&live_query_id) {
-									// Send the notification back to the caller or kill live query if the receiver is already dropped
+									// Send the notification back to the caller or kill live query
+									// if the receiver is already dropped
 									if sender.send(notification).await.is_err() {
 										state.live_queries.remove(&live_query_id);
 										let kill = {
@@ -478,8 +480,8 @@ pub(crate) async fn run_router(
 
 		let mut pinger = IntervalStream::new(interval);
 		// Turn into a stream instead of calling recv_async
-		// The stream seems to be able to keep some state which would otherwise need to be
-		// recreated with each next.
+		// The stream seems to be able to keep some state which would otherwise need to
+		// be recreated with each next.
 
 		state.last_activity = Instant::now();
 		state.live_queries.clear();
@@ -785,7 +787,8 @@ mod tests {
 
 		// TODO: Figure out what this test was supposed to track.
 		//
-		//	Note this test changed with the value inversion PR, below is the previous check.
+		//	Note this test changed with the value inversion PR, below is the previous
+		// check.
 		//
 		//	vec![
 		//		BINCODE_REF,

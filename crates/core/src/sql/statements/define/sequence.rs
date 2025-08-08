@@ -1,7 +1,6 @@
+use super::DefineKind;
 use crate::sql::{Ident, Timeout};
 use std::fmt::{self, Display};
-
-use super::DefineKind;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

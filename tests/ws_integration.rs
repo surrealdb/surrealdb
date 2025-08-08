@@ -710,7 +710,8 @@ pub async fn live_query(cfg_server: Option<Format>, cfg_format: Format) {
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
-	// Wait some time for all messages to arrive, and then search for the notification message
+	// Wait some time for all messages to arrive, and then search for the
+	// notification message
 	let msgs: Result<_, Box<dyn std::error::Error>> =
 		tokio::time::timeout(Duration::from_secs(1), async {
 			Ok(vec![
@@ -780,7 +781,8 @@ pub async fn live_rpc(cfg_server: Option<Format>, cfg_format: Format) {
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
-	// Wait some time for all messages to arrive, and then search for the notification message
+	// Wait some time for all messages to arrive, and then search for the
+	// notification message
 	let msgs: Result<_, Box<dyn std::error::Error>> =
 		tokio::time::timeout(Duration::from_secs(1), async {
 			Ok(vec![
@@ -851,7 +853,8 @@ pub async fn kill(cfg_server: Option<Format>, cfg_format: Format) {
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
-	// Wait some time for all messages to arrive, and then search for the notification message
+	// Wait some time for all messages to arrive, and then search for the
+	// notification message
 	let msgs = socket.receive_all_other_messages(2, Duration::from_secs(1)).await.unwrap();
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
 	// Check for first live query notifcation
@@ -883,7 +886,8 @@ pub async fn kill(cfg_server: Option<Format>, cfg_format: Format) {
 	let res = socket.send_request("kill", json!([live1])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_null(), "result: {res:?}");
-	// Wait some time for all messages to arrive, and then search for the notification message
+	// Wait some time for all messages to arrive, and then search for the
+	// notification message
 	let msgs = socket.receive_all_other_messages(1, Duration::from_secs(1)).await.unwrap();
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
 	// Check for second live query notifcation
@@ -902,7 +906,8 @@ pub async fn kill(cfg_server: Option<Format>, cfg_format: Format) {
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
-	// Wait some time for all messages to arrive, and then search for the notification message
+	// Wait some time for all messages to arrive, and then search for the
+	// notification message
 	let msgs = socket.receive_all_other_messages(1, Duration::from_secs(1)).await.unwrap();
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
 	// Check for second live query notifcation
@@ -925,7 +930,8 @@ pub async fn kill(cfg_server: Option<Format>, cfg_format: Format) {
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	assert!(res[0]["result"].is_null(), "result: {res:?}");
 	assert!(res[0]["type"].is_string(), "type: {res:?}");
-	// Wait some time for all messages to arrive, and then search for the notification message
+	// Wait some time for all messages to arrive, and then search for the
+	// notification message
 	let msgs = socket.receive_all_other_messages(1, Duration::from_secs(1)).await.unwrap();
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
 	// Check for second live query notifcation
@@ -944,7 +950,8 @@ pub async fn kill(cfg_server: Option<Format>, cfg_format: Format) {
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
-	// Wait some time for all messages to arrive, and then search for the notification message
+	// Wait some time for all messages to arrive, and then search for the
+	// notification message
 	let msgs = socket.receive_all_other_messages(0, Duration::from_secs(1)).await.unwrap();
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
 	// Test passed
@@ -971,7 +978,8 @@ pub async fn live_table_removal(cfg_server: Option<Format>, cfg_format: Format) 
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
-	// Wait some time for all messages to arrive, and then search for the notification message
+	// Wait some time for all messages to arrive, and then search for the
+	// notification message
 	let msgs = socket.receive_all_other_messages(1, Duration::from_secs(1)).await.unwrap();
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
 	// Check for second live query notifcation
@@ -1014,7 +1022,8 @@ pub async fn live_second_connection(cfg_server: Option<Format>, cfg_format: Form
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
-	// Wait some time for all messages to arrive, and then search for the notification message
+	// Wait some time for all messages to arrive, and then search for the
+	// notification message
 	let msgs = socket1.receive_all_other_messages(1, Duration::from_secs(1)).await.unwrap();
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
 	// Check for live query notifcation
@@ -1093,7 +1102,8 @@ pub async fn variable_auth_live_query(cfg_server: Option<Format>, cfg_format: Fo
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
-	// Wait some time for all messages to arrive, and then search for the notification message
+	// Wait some time for all messages to arrive, and then search for the
+	// notification message
 	let msgs =
 		socket_expiring_auth.receive_all_other_messages(0, Duration::from_secs(1)).await.unwrap();
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
@@ -1356,7 +1366,8 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 		socket.send_request("live", json!(["tester"])),
 		socket.send_request("kill", json!(["tester"])),
 	];
-	// Futures are executed sequentially as some operations rely on the previous state
+	// Futures are executed sequentially as some operations rely on the previous
+	// state
 	for (idx, operation) in operations_ko.into_iter().enumerate() {
 		println!("Operation: {idx}");
 		let res = operation.await;
@@ -1378,7 +1389,8 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 		socket.send_request("version", json!([])),
 		socket.send_request("invalidate", json!([])),
 	];
-	// Futures are executed sequentially as some operations rely on the previous state
+	// Futures are executed sequentially as some operations rely on the previous
+	// state
 	for (idx, operation) in operations_ok.into_iter().enumerate() {
 		println!("operation: {idx}");
 		let res = operation.await;
@@ -1455,7 +1467,8 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 		json!({"code": -32000, "message": "There was a problem with the database: The session has expired"})
 	);
 
-	// This needs to be last operation as the session will no longer expire afterwards
+	// This needs to be last operation as the session will no longer expire
+	// afterwards
 	let res = socket.send_request("authenticate", json!([root_token,])).await;
 	assert!(res.is_ok(), "result: {res:?}");
 	let res = res.unwrap();
@@ -1747,7 +1760,8 @@ pub async fn session_use_change_database(cfg_server: Option<Format>, cfg_format:
 	socket.send_message_use(Some(NS), Some("different")).await.unwrap();
 	// Verify that the authenticated session is unable to query data
 	let res = socket.send_message_query("SELECT VALUE name FROM user:1").await.unwrap();
-	// The query succeeds but the results does not contain the value with permissions
+	// The query succeeds but the results does not contain the value with
+	// permissions
 	assert_eq!(res[0]["status"], "OK", "result: {:?}", res);
 	assert_eq!(res[0]["result"], json!([]), "result: {:?}", res);
 	// Test passed
@@ -2296,8 +2310,8 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 	}
 }
 
-/// A macro which defines a macro which can be used to define tests running the above functions
-/// with a set of given paramenters.
+/// A macro which defines a macro which can be used to define tests running the
+/// above functions with a set of given paramenters.
 macro_rules! define_include_tests {
 	( $( $( #[$m:meta] )* $test_name:ident),* $(,)? ) => {
 		macro_rules! include_tests {

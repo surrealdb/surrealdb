@@ -22,7 +22,8 @@ pub enum Error {
 	#[error("There was an error processing a remote WS request: {0}")]
 	Ws(String),
 
-	/// The specified scheme does not match any supported protocol or storage engine
+	/// The specified scheme does not match any supported protocol or storage
+	/// engine
 	#[error("Unsupported protocol or storage engine, `{0}`")]
 	Scheme(String),
 
@@ -62,7 +63,8 @@ pub enum Error {
 	#[error("Tried to add a range to an unspecified resource")]
 	RangeOnUnspecified,
 
-	/// Tried to use `table:id` syntax as a method parameter when `(table, id)` should be used instead
+	/// Tried to use `table:id` syntax as a method parameter when `(table, id)`
+	/// should be used instead
 	#[error(
 		"Table name `{table}` contained a colon (:), this is dissallowed to avoid confusion with record-id's try `Table(\"{table}\")` instead."
 	)]
@@ -148,16 +150,18 @@ pub enum Error {
 		error: io::Error,
 	},
 
-	/// Tried to take only a single result when the query returned multiple records
+	/// Tried to take only a single result when the query returned multiple
+	/// records
 	#[error("Tried to take only a single result from a query that contains multiple")]
 	LossyTake(Response),
 
-	/// The protocol or storage engine being used does not support backups on the architecture
-	/// it's running on
+	/// The protocol or storage engine being used does not support backups on
+	/// the architecture it's running on
 	#[error("The protocol or storage engine does not support backups on this architecture")]
 	BackupsNotSupported,
 
-	/// The version of the server is not compatible with the versions supported by this SDK
+	/// The version of the server is not compatible with the versions supported
+	/// by this SDK
 	#[error(
 		"server version `{server_version}` does not match the range supported by the client `{supported_versions}`"
 	)]
@@ -166,7 +170,8 @@ pub enum Error {
 		supported_versions: String,
 	},
 
-	/// The build metadata of the server is older than the minimum supported by this SDK
+	/// The build metadata of the server is older than the minimum supported by
+	/// this SDK
 	#[error(
 		"server build `{server_metadata}` is older than the minimum supported build `{supported_metadata}`"
 	)]
@@ -175,8 +180,8 @@ pub enum Error {
 		supported_metadata: semver::BuildMetadata,
 	},
 
-	/// The protocol or storage engine being used does not support live queries on the architecture
-	/// it's running on
+	/// The protocol or storage engine being used does not support live queries
+	/// on the architecture it's running on
 	#[error("The protocol or storage engine does not support live queries on this architecture")]
 	LiveQueriesNotSupported,
 
@@ -196,15 +201,18 @@ pub enum Error {
 	#[error("Live queries on unspecified resource not supported")]
 	LiveOnUnspecified,
 
-	/// Tried to access a query statement as a live query when it isn't a live query
+	/// Tried to access a query statement as a live query when it isn't a live
+	/// query
 	#[error("Query statement {0} is not a live query")]
 	NotLiveQuery(usize),
 
-	/// Tried to access a query statement falling outside the bounds of the statements supplied
+	/// Tried to access a query statement falling outside the bounds of the
+	/// statements supplied
 	#[error("Query statement {0} is out of bounds")]
 	QueryIndexOutOfBounds(usize),
 
-	/// Called `Response::take` or `Response::stream` on a query response more than once
+	/// Called `Response::take` or `Response::stream` on a query response more
+	/// than once
 	#[error("Tried to take a query response that has already been taken")]
 	ResponseAlreadyTaken,
 
@@ -253,7 +261,8 @@ pub enum Error {
 	#[error("Tried to send a value which could not be serialized: {0}")]
 	UnserializableValue(String),
 
-	/// Tried to convert an value which contained something like for example a query or future.
+	/// Tried to convert an value which contained something like for example a
+	/// query or future.
 	#[error(
 		"tried to convert from a value which contained non-primitive values to a value which only allows primitive values."
 	)]

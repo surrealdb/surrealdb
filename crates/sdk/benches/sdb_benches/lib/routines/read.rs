@@ -1,5 +1,4 @@
 use std::sync::Arc;
-
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 use surrealdb_core::val::RecordIdKey;

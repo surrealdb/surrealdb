@@ -49,7 +49,8 @@ enum InnerOp<'a, T> {
 /// From the official website:
 ///
 /// > JSON Patch is a format for describing changes to a JSON document.
-/// > It can be used to avoid sending a whole document when only a part has changed.
+/// > It can be used to avoid sending a whole document when only a part has
+/// > changed.
 ///
 /// [JSON Patch]: https://jsonpatch.com/
 #[derive(Debug)]
@@ -60,7 +61,8 @@ impl PatchOp {
 	/// Adds a value to an object or inserts it into an array.
 	///
 	/// In the case of an array, the value is inserted before the given index.
-	/// The `-` character can be used instead of an index to insert at the end of an array.
+	/// The `-` character can be used instead of an index to insert at the end
+	/// of an array.
 	///
 	/// # Examples
 	///
@@ -167,7 +169,8 @@ impl PatchOps {
 	/// Adds a value to an object or inserts it into an array.
 	///
 	/// In the case of an array, the value is inserted before the given index.
-	/// The `-` character can be used instead of an index to insert at the end of an array.
+	/// The `-` character can be used instead of an index to insert at the end
+	/// of an array.
 	///
 	/// # Examples
 	///
@@ -234,7 +237,8 @@ impl PatchOps {
 	}
 }
 
-/// Makes the client wait for a certain event or call to happen before continuing
+/// Makes the client wait for a certain event or call to happen before
+/// continuing
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum WaitFor {

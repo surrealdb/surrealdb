@@ -1,5 +1,3 @@
-use reblessive::Stk;
-
 use crate::sql::Param;
 use crate::sql::statements::remove::{
 	RemoveAnalyzerStatement, RemoveBucketStatement, RemoveSequenceStatement,
@@ -12,6 +10,7 @@ use crate::sql::statements::{
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::t;
+use reblessive::Stk;
 
 impl Parser<'_> {
 	pub async fn parse_remove_stmt(&mut self, ctx: &mut Stk) -> ParseResult<RemoveStatement> {

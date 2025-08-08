@@ -5,11 +5,9 @@ use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _, Literal};
 use crate::iam::Auth;
-use crate::kvs::Live;
-use crate::kvs::impl_kv_value_revisioned;
+use crate::kvs::{Live, impl_kv_value_revisioned};
 use crate::val::{Uuid, Value};
 use anyhow::{Result, bail};
-
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

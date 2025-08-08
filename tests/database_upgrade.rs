@@ -237,7 +237,8 @@ mod database_upgrade {
 		let client = Surreal::<Any>::init();
 		let db = client.clone();
 		let localhost = Ipv4Addr::LOCALHOST;
-		// We need HTTP because we are using the import method which is not available with WS
+		// We need HTTP because we are using the import method which is not available
+		// with WS
 		let endpoint = format!("http://{localhost}:{port}");
 		info!("Wait for the database to be ready; endpoint => {endpoint}");
 		tokio::spawn(async move {

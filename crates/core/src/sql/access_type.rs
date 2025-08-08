@@ -1,5 +1,5 @@
+use super::Expr;
 use crate::err::Error;
-
 use crate::sql::Algorithm;
 use crate::sql::escape::QuoteStr;
 use anyhow::Result;
@@ -8,8 +8,6 @@ use rand::distributions::Alphanumeric;
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
-
-use super::Expr;
 
 pub(crate) fn random_key() -> String {
 	rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()
@@ -107,7 +105,8 @@ impl AccessType {
 		match self {
 			// The JWT access method cannot issue stateful grants.
 			AccessType::Jwt(_) => false,
-			// The record access method can be used to issue grants if defined with bearer AKA refresh.
+			// The record access method can be used to issue grants if defined with bearer AKA
+			// refresh.
 			AccessType::Record(ac) => ac.bearer.is_some(),
 			AccessType::Bearer(_) => true,
 		}

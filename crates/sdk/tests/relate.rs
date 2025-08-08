@@ -1,6 +1,5 @@
 mod helpers;
 use crate::helpers::Test;
-
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;

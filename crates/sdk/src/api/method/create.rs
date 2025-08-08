@@ -1,4 +1,5 @@
 use super::transaction::WithTransaction;
+use super::{Content, validate_data};
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
@@ -12,8 +13,6 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::val;
 use uuid::Uuid;
-
-use super::{Content, validate_data};
 
 /// A record create future
 #[derive(Debug)]
@@ -38,7 +37,8 @@ impl<C, R> Create<'_, C, R>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Create<'static, C, R> {
 		Create {
 			client: Cow::Owned(self.client.into_owned()),

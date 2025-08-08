@@ -1,8 +1,7 @@
+use super::Lexer;
 use crate::syn::error::{MessageKind, SyntaxError};
 use crate::syn::lexer::unicode::chars::JS_LINE_TERIMATORS;
 use crate::syn::token::{Token, t};
-
-use super::Lexer;
 
 pub fn javascript(lexer: &mut Lexer, start: Token) -> Result<(), SyntaxError> {
 	assert_eq!(start.kind, t!("{"), "Invalid start of JavaScript compound token");

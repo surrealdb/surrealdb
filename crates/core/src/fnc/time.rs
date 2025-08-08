@@ -1,10 +1,9 @@
+use super::args::Optional;
 use crate::err::Error;
 use crate::val::{Datetime, Duration, Value};
 use anyhow::Result;
 use chrono::offset::TimeZone;
 use chrono::{DateTime, Datelike, DurationRound, Local, Timelike, Utc};
-
-use super::args::Optional;
 
 pub fn ceil((val, duration): (Datetime, Duration)) -> Result<Value> {
 	match chrono::Duration::from_std(*duration) {

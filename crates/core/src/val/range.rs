@@ -1,4 +1,6 @@
-use crate::expr::{self, kind::HasKind};
+use super::value::CoerceErrorExt;
+use crate::expr::kind::HasKind;
+use crate::expr::{self};
 use crate::val::value::{Coerce, CoerceError};
 use crate::val::{Array, Number, Value};
 use revision::revisioned;
@@ -6,8 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Bound;
-
-use super::value::CoerceErrorExt;
 
 /// A range of surrealql values,
 ///
@@ -29,8 +29,8 @@ impl Range {
 		}
 	}
 
-	/// Creates a new range with the first argument as the start bound and the second as the end
-	/// bound.
+	/// Creates a new range with the first argument as the start bound and the
+	/// second as the end bound.
 	pub const fn new(start: Bound<Value>, end: Bound<Value>) -> Self {
 		Range {
 			start,
@@ -176,8 +176,8 @@ impl Range {
 	}
 }
 
-/// A range of a specific type, can be converted back into a general range and coerced from a
-/// general range.
+/// A range of a specific type, can be converted back into a general range and
+/// coerced from a general range.
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct TypedRange<T> {
 	pub start: Bound<T>,

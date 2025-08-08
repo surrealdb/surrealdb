@@ -1,5 +1,4 @@
 use crate::sql::ident::Ident;
-
 use std::fmt;
 use std::fmt::{Display, Formatter};
 

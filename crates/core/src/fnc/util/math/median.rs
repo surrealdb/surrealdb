@@ -1,4 +1,5 @@
-use crate::val::{Number, number::Sorted};
+use crate::val::Number;
+use crate::val::number::Sorted;
 
 pub trait Median {
 	fn median(self) -> f64;
