@@ -10,13 +10,13 @@ clean = true
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, databases: {  }, users: {  } }"
+error = "The namespace 'foo' does not exist"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, databases: {  }, users: {  } }"
+error = "The namespace 'TEST' does not exist"
 */
 
 

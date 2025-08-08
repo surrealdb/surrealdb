@@ -52,13 +52,17 @@ impl DeleteStatement {
 		let opt = &opt.new_with_futures(false);
 		// Check if there is a timeout
 		let ctx = stm.setup_timeout(ctx)?;
+
+		let (ns, db) = opt.ns_db()?;
+		let db = ctx.tx().ensure_ns_db(ns, db, opt.strict).await?;
 		// Get a query planner
 		let mut planner = QueryPlanner::new();
+
 		let stm_ctx = StatementContext::new(&ctx, opt, &stm)?;
 		// Loop over the delete targets
 		for w in self.what.0.iter() {
 			let v = w.compute(stk, &ctx, opt, doc).await.catch_return()?;
-			i.prepare(stk, &mut planner, &stm_ctx, v).await.map_err(|e| {
+			i.prepare(&db, stk, &mut planner, &stm_ctx, v).await.map_err(|e| {
 				if matches!(e.downcast_ref(), Some(Error::InvalidStatementTarget { .. })) {
 					let Ok(Error::InvalidStatementTarget {
 						value,
@@ -76,8 +80,19 @@ impl DeleteStatement {
 		}
 		// Attach the query planner to the context
 		let ctx = stm.setup_query_planner(planner, ctx);
+
 		// Process the statement
-		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
+		let res = i
+			.output(
+				stk,
+				db.namespace_id,
+				db.database_id,
+				&ctx,
+				opt,
+				&stm,
+				RecordStrategy::KeysAndValues,
+			)
+			.await?;
 		// Catch statement timeout
 		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
 		// Output the results

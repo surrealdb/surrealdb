@@ -53,16 +53,16 @@ impl KillStatement {
 		let key = crate::key::node::lq::new(nid, lid);
 		// Fetch the live query key if it exists
 		match txn.get(&key, None).await? {
-			Some(val) => {
+			Some(live) => {
 				// Delete the node live query
 				let key = crate::key::node::lq::new(nid, lid);
 				txn.clr(&key).await?;
 				// Delete the table live query
-				let key = crate::key::table::lq::new(&val.ns, &val.db, &val.tb, lid);
+				let key = crate::key::table::lq::new(live.ns, live.db, &live.tb, lid);
 				txn.clr(&key).await?;
 				// Refresh the table cache for lives
 				if let Some(cache) = ctx.get_cache() {
-					cache.new_live_queries_version(&val.ns, &val.db, &val.tb);
+					cache.new_live_queries_version(live.ns, live.db, &live.tb);
 				}
 				// Clear the cache
 				txn.clear();

@@ -1,17 +1,15 @@
+use crate::catalog::{DatabaseDefinition, NamespaceDefinition, TableDefinition};
 use crate::dbs::node::Node;
 use crate::expr::Value;
 use crate::expr::statements::AccessGrant;
 use crate::expr::statements::DefineAccessStatement;
 use crate::expr::statements::DefineAnalyzerStatement;
-use crate::expr::statements::DefineDatabaseStatement;
 use crate::expr::statements::DefineEventStatement;
 use crate::expr::statements::DefineFieldStatement;
 use crate::expr::statements::DefineFunctionStatement;
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::statements::DefineModelStatement;
-use crate::expr::statements::DefineNamespaceStatement;
 use crate::expr::statements::DefineParamStatement;
-use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::DefineUserStatement;
 use crate::expr::statements::LiveStatement;
 use crate::expr::statements::define::DefineConfigStatement;
@@ -35,16 +33,16 @@ pub(crate) enum Entry {
 	Ras(Arc<[DefineAccessStatement]>),
 	/// A slice of AccessGrant specified at the root.
 	Rag(Arc<[AccessGrant]>),
-	/// A slice of DefineNamespaceStatement specified on a namespace.
-	Nss(Arc<[DefineNamespaceStatement]>),
+	/// A slice of NamespaceDefinition specified on a namespace.
+	Nss(Arc<[NamespaceDefinition]>),
 	/// A slice of DefineUserStatement specified on a namespace.
 	Nus(Arc<[DefineUserStatement]>),
 	/// A slice of DefineAccessStatement specified on a namespace.
 	Nas(Arc<[DefineAccessStatement]>),
 	/// A slice of AccessGrant specified at on a namespace.
 	Nag(Arc<[AccessGrant]>),
-	/// A slice of DefineDatabaseStatement specified on a namespace.
-	Dbs(Arc<[DefineDatabaseStatement]>),
+	/// A slice of DatabaseDefinition specified on a namespace.
+	Dbs(Arc<[DatabaseDefinition]>),
 	/// A slice of ApiDefinition specified on a namespace.
 	Aps(Arc<[ApiDefinition]>),
 	/// A slice of DefineAnalyzerStatement specified on a namespace.
@@ -59,8 +57,8 @@ pub(crate) enum Entry {
 	Dus(Arc<[DefineUserStatement]>),
 	/// A slice of DefineFunctionStatement specified on a database.
 	Fcs(Arc<[DefineFunctionStatement]>),
-	/// A slice of DefineTableStatement specified on a database.
-	Tbs(Arc<[DefineTableStatement]>),
+	/// A slice of TableDefinition specified on a database.
+	Tbs(Arc<[TableDefinition]>),
 	/// A slice of DefineModelStatement specified on a database.
 	Mls(Arc<[DefineModelStatement]>),
 	/// A slice of DefineConfigStatement specified on a database.
@@ -73,8 +71,8 @@ pub(crate) enum Entry {
 	Evs(Arc<[DefineEventStatement]>),
 	/// A slice of DefineFieldStatement specified on a table.
 	Fds(Arc<[DefineFieldStatement]>),
-	/// A slice of DefineTableStatement specified on a table.
-	Fts(Arc<[DefineTableStatement]>),
+	/// A slice of TableDefinition specified on a table.
+	Fts(Arc<[TableDefinition]>),
 	/// A slice of DefineIndexStatement specified on a table.
 	Ixs(Arc<[DefineIndexStatement]>),
 	/// A slice of LiveStatement specified on a table.
@@ -127,9 +125,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Rag"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`DefineNamespaceStatement`].
+	/// Converts this cache entry into a slice of [`NamespaceDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Nss`].
-	pub(crate) fn try_into_nss(self) -> Result<Arc<[DefineNamespaceStatement]>> {
+	pub(crate) fn try_into_nss(self) -> Result<Arc<[NamespaceDefinition]>> {
 		match self {
 			Entry::Nss(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Nss"),
@@ -159,9 +157,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Nus"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`DefineDatabaseStatement`].
+	/// Converts this cache entry into a slice of [`DatabaseDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Dbs`].
-	pub(crate) fn try_into_dbs(self) -> Result<Arc<[DefineDatabaseStatement]>> {
+	pub(crate) fn try_into_dbs(self) -> Result<Arc<[DatabaseDefinition]>> {
 		match self {
 			Entry::Dbs(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Dbs"),
@@ -256,9 +254,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Cgs"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`DefineTableStatement`].
+	/// Converts this cache entry into a slice of [`TableDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Tbs`].
-	pub(crate) fn try_into_tbs(self) -> Result<Arc<[DefineTableStatement]>> {
+	pub(crate) fn try_into_tbs(self) -> Result<Arc<[TableDefinition]>> {
 		match self {
 			Entry::Tbs(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Tbs"),
@@ -288,9 +286,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Ixs"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`DefineTableStatement`].
+	/// Converts this cache entry into a slice of [`TableDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Fts`].
-	pub(crate) fn try_into_fts(self) -> Result<Arc<[DefineTableStatement]>> {
+	pub(crate) fn try_into_fts(self) -> Result<Arc<[TableDefinition]>> {
 		match self {
 			Entry::Fts(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Fts"),

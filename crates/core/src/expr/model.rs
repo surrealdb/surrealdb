@@ -75,10 +75,14 @@ impl Model {
 		// Check this function is allowed
 		ctx.check_allowed_function(name.as_str())?;
 		// Get the model definition
-		let (ns, db) = opt.ns_db()?;
-		let val = ctx.tx().get_db_model(ns, db, &self.name, &self.version).await?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
+		let Some(val) = ctx.tx().get_db_model(ns, db, &self.name, &self.version).await? else {
+			return Err(ControlFlow::from(anyhow::Error::new(Error::MlNotFound {
+				name: format!("{}<{}>", self.name, self.version),
+			})));
+		};
+
 		// Calculate the model path
-		let (ns, db) = opt.ns_db()?;
 		let path = format!("ml/{}/{}/{}-{}-{}.surml", ns, db, self.name, self.version, val.hash);
 		// Check permissions
 		if opt.check_perms(Action::View)? {

@@ -4,8 +4,8 @@ mod lru;
 mod mapper;
 pub(crate) mod tree;
 
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
-use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::Index;
 use crate::expr::index::HnswParams;
@@ -233,12 +233,12 @@ impl Default for IndexStores {
 impl IndexStores {
 	pub(crate) async fn get_index_hnsw(
 		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ctx: &Context,
-		opt: &Options,
 		ix: &DefineIndexStatement,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex> {
-		let (ns, db) = opt.ns_db()?;
 		let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 		self.0.hnsw_indexes.get(ctx, &ix.what, &ikb, p).await
 	}
@@ -247,8 +247,8 @@ impl IndexStores {
 		&self,
 		#[cfg(not(target_family = "wasm"))] ib: Option<&IndexBuilder>,
 		tx: &Transaction,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
 		ix: &str,
 	) -> Result<()> {
@@ -263,13 +263,13 @@ impl IndexStores {
 		&self,
 		#[cfg(not(target_family = "wasm"))] ib: Option<&IndexBuilder>,
 		tx: &Transaction,
-		ns: &str,
+		ns: NamespaceId,
 	) -> Result<()> {
 		for db in tx.all_db(ns).await?.iter() {
 			#[cfg(not(target_family = "wasm"))]
-			self.database_removed(ib, tx, ns, &db.name).await?;
+			self.database_removed(ib, tx, ns, db.database_id).await?;
 			#[cfg(target_family = "wasm")]
-			self.database_removed(tx, ns, &db.name).await?;
+			self.database_removed(tx, ns, db.database_id).await?;
 		}
 		Ok(())
 	}
@@ -278,8 +278,8 @@ impl IndexStores {
 		&self,
 		#[cfg(not(target_family = "wasm"))] ib: Option<&IndexBuilder>,
 		tx: &Transaction,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 	) -> Result<()> {
 		for tb in tx.all_tb(ns, db, None).await?.iter() {
 			#[cfg(not(target_family = "wasm"))]
@@ -294,8 +294,8 @@ impl IndexStores {
 		&self,
 		#[cfg(not(target_family = "wasm"))] ib: Option<&IndexBuilder>,
 		tx: &Transaction,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
 	) -> Result<()> {
 		for ix in tx.all_tb_indexes(ns, db, tb).await?.iter() {
@@ -308,7 +308,12 @@ impl IndexStores {
 		Ok(())
 	}
 
-	async fn remove_index(&self, ns: &str, db: &str, ix: &DefineIndexStatement) -> Result<()> {
+	async fn remove_index(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix: &DefineIndexStatement,
+	) -> Result<()> {
 		if matches!(ix.index, Index::Hnsw(_)) {
 			let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 			self.remove_hnsw_index(ikb).await?;

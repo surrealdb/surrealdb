@@ -85,7 +85,10 @@ async fn handler(
 			.await
 			.map_err(ResponseError)?,
 	);
-	let apis = tx.all_db_apis(&ns, &db).await.map_err(ResponseError)?;
+
+	let db = tx.ensure_ns_db(&ns, &db, false).await.map_err(ResponseError)?;
+
+	let apis = tx.all_db_apis(db.namespace_id, db.database_id).await.map_err(ResponseError)?;
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
 	let res = match apis.as_ref().find_api(segments, method) {

@@ -421,9 +421,9 @@ pub enum Error {
 	},
 
 	/// The requested api does not exist
-	#[error("The bucket '{value}' does not exist")]
+	#[error("The bucket '{name}' does not exist")]
 	BuNotFound {
-		value: String,
+		name: String,
 	},
 
 	/// The requested analyzer does not exist

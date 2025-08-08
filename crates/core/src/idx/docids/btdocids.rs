@@ -234,6 +234,7 @@ impl BTreeDocIdsState {
 
 #[cfg(test)]
 mod tests {
+	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::expr::Thing;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::btdocids::{BTreeDocIds, Resolved};
@@ -244,7 +245,15 @@ mod tests {
 
 	async fn new_operation(ds: &Datastore, tt: TransactionType) -> (Transaction, BTreeDocIds) {
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		let d = BTreeDocIds::new(&tx, tt, IndexKeyBase::default(), BTREE_ORDER, 100).await.unwrap();
+		let d = BTreeDocIds::new(
+			&tx,
+			tt,
+			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
+			BTREE_ORDER,
+			100,
+		)
+		.await
+		.unwrap();
 		(tx, d)
 	}
 

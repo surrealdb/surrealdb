@@ -77,12 +77,12 @@ impl DefineAccessStatement {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if access method already exists
-				if txn.get_root_access(&self.name).await.is_ok() {
+				if let Some(access) = txn.get_root_access(&self.name).await? {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else if !self.overwrite && !opt.import {
 						bail!(Error::AccessRootAlreadyExists {
-							ac: self.name.to_string(),
+							ac: access.name.to_string(),
 						});
 					}
 				}
@@ -108,18 +108,19 @@ impl DefineAccessStatement {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if the definition exists
-				if txn.get_ns_access(opt.ns()?, &self.name).await.is_ok() {
+				let ns = ctx.get_ns_id(opt).await?;
+				if let Some(access) = txn.get_ns_access(ns, &self.name).await? {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else if !self.overwrite && !opt.import {
 						bail!(Error::AccessNsAlreadyExists {
-							ac: self.name.to_string(),
+							ac: access.name.to_string(),
 							ns: opt.ns()?.into(),
 						});
 					}
 				}
 				// Process the statement
-				let key = crate::key::namespace::ac::new(opt.ns()?, &self.name);
+				let key = crate::key::namespace::ac::new(ns, &self.name);
 				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 				txn.set(
 					&key,
@@ -141,22 +142,22 @@ impl DefineAccessStatement {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if the definition exists
-				let (ns, db) = opt.ns_db()?;
-				if txn.get_db_access(ns, db, &self.name).await.is_ok() {
+				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+				if let Some(access) = txn.get_db_access(ns, db, &self.name).await? {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else if !self.overwrite && !opt.import {
+						let (ns, db) = opt.ns_db()?;
 						bail!(Error::AccessDbAlreadyExists {
-							ac: self.name.to_string(),
-							ns: ns.into(),
-							db: db.into(),
+							ac: access.name.to_string(),
+							// TODO: This is wrong, ns is not a string.
+							ns: ns.to_string(),
+							db: db.to_string(),
 						});
 					}
 				}
 				// Process the statement
 				let key = crate::key::database::ac::new(ns, db, &self.name);
-				txn.get_or_add_ns(ns, opt.strict).await?;
-				txn.get_or_add_db(ns, db, opt.strict).await?;
 				txn.set(
 					&key,
 					&DefineAccessStatement {

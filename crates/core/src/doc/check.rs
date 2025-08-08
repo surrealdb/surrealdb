@@ -12,6 +12,7 @@ use crate::expr::paths::OUT;
 use crate::expr::permission::Permission;
 use crate::expr::value::Value;
 use crate::iam::Action;
+use crate::sql::ToSql;
 use anyhow::Result;
 use anyhow::bail;
 use anyhow::ensure;
@@ -42,7 +43,7 @@ impl Document {
 					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: false,
-						target_type: tb.kind.to_string(),
+						target_type: tb.kind.to_sql(),
 					}
 				);
 			}
@@ -52,7 +53,7 @@ impl Document {
 					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: false,
-						target_type: tb.kind.to_string(),
+						target_type: tb.kind.to_sql(),
 					}
 				);
 			}
@@ -62,7 +63,7 @@ impl Document {
 					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: true,
-						target_type: tb.kind.to_string(),
+						target_type: tb.kind.to_sql(),
 					}
 				);
 			}
@@ -73,7 +74,7 @@ impl Document {
 						Error::TableCheck {
 							thing: self.id()?.to_string(),
 							relation: true,
-							target_type: tb.kind.to_string(),
+							target_type: tb.kind.to_sql(),
 						}
 					);
 				}
@@ -83,7 +84,7 @@ impl Document {
 						Error::TableCheck {
 							thing: self.id()?.to_string(),
 							relation: false,
-							target_type: tb.kind.to_string(),
+							target_type: tb.kind.to_sql(),
 						}
 					);
 				}

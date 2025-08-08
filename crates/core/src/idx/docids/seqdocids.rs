@@ -149,6 +149,7 @@ impl SeqDocIds {
 
 #[cfg(test)]
 mod tests {
+	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::ctx::Context;
 	use crate::expr::Id;
 	use crate::idx::IndexKeyBase;
@@ -160,15 +161,15 @@ mod tests {
 	use crate::kvs::{Datastore, TransactionType};
 	use uuid::Uuid;
 
-	const TEST_NS: &str = "test_ns";
-	const TEST_DB: &str = "test_db";
+	const TEST_NS_ID: NamespaceId = NamespaceId(1);
+	const TEST_DB_ID: DatabaseId = DatabaseId(1);
 	const TEST_TB: &str = "test_tb";
 	const TEST_IX: &str = "test_ix";
 
 	async fn new_operation(ds: &Datastore, tt: TransactionType) -> (Context, SeqDocIds) {
 		let mut ctx = ds.setup_ctx().unwrap();
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		let ikb = IndexKeyBase::new(TEST_NS, TEST_DB, TEST_TB, TEST_IX);
+		let ikb = IndexKeyBase::new(TEST_NS_ID, TEST_DB_ID, TEST_TB, TEST_IX);
 		ctx.set_transaction(tx.into());
 		let d = SeqDocIds::new(Uuid::nil(), ikb);
 		(ctx.freeze(), d)
@@ -338,12 +339,17 @@ mod tests {
 			let (ctx, _) = new_operation(&ds, Read).await;
 			let tx = ctx.tx();
 			for id in ["Foo", "Bar", "Hello", "World"] {
-				let id =
-					crate::key::index::id::Id::new(TEST_NS, TEST_DB, TEST_TB, TEST_IX, id.into());
+				let id = crate::key::index::id::Id::new(
+					TEST_NS_ID,
+					TEST_DB_ID,
+					TEST_TB,
+					TEST_IX,
+					id.into(),
+				);
 				assert!(!tx.exists(&id, None).await.unwrap());
 			}
 			for doc_id in 0..=3 {
-				let bi = Bi::new(TEST_NS, TEST_DB, TEST_TB, TEST_IX, doc_id);
+				let bi = Bi::new(TEST_NS_ID, TEST_DB_ID, TEST_TB, TEST_IX, doc_id);
 				assert!(!tx.exists(&bi, None).await.unwrap());
 			}
 		}

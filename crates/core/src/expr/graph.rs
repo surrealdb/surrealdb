@@ -1,3 +1,4 @@
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -219,8 +220,8 @@ impl GraphSubject {
 
 	pub(crate) fn presuf(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
 		id: &Id,
 		dir: &Dir,

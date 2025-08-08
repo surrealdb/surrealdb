@@ -1,5 +1,6 @@
 #![cfg(not(target_family = "wasm"))]
 
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -19,6 +20,8 @@ use std::sync::atomic::AtomicBool;
 pub(crate) struct IndexOperation<'a> {
 	ctx: &'a Context,
 	opt: &'a Options,
+	ns: NamespaceId,
+	db: DatabaseId,
 	ix: &'a DefineIndexStatement,
 	/// The old values (if existing)
 	o: Option<Vec<Value>>,
@@ -28,9 +31,12 @@ pub(crate) struct IndexOperation<'a> {
 }
 
 impl<'a> IndexOperation<'a> {
+	#[expect(clippy::too_many_arguments)]
 	pub(crate) fn new(
 		ctx: &'a Context,
 		opt: &'a Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ix: &'a DefineIndexStatement,
 		o: Option<Vec<Value>>,
 		n: Option<Vec<Value>>,
@@ -39,6 +45,8 @@ impl<'a> IndexOperation<'a> {
 		Self {
 			ctx,
 			opt,
+			ns,
+			db,
 			ix,
 			o,
 			n,
@@ -63,13 +71,18 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	fn get_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
-		let (ns, db) = self.opt.ns_db()?;
-		Ok(key::index::Index::new(ns, db, &self.ix.what, &self.ix.name, v, None))
+		Ok(key::index::Index::new(self.ns, self.db, &self.ix.what, &self.ix.name, v, None))
 	}
 
 	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
-		let (ns, db) = self.opt.ns_db()?;
-		Ok(key::index::Index::new(ns, db, &self.ix.what, &self.ix.name, v, Some(&self.rid.id)))
+		Ok(key::index::Index::new(
+			self.ns,
+			self.db,
+			&self.ix.what,
+			&self.ix.name,
+			v,
+			Some(&self.rid.id),
+		))
 	}
 
 	async fn index_unique(&mut self) -> Result<()> {
@@ -154,11 +167,11 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	async fn index_search(&mut self, stk: &mut Stk, p: &SearchParams) -> Result<()> {
-		let (ns, db) = self.opt.ns_db()?;
-		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name);
+		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.what, &self.ix.name);
 
 		let mut ft =
-			SearchIndex::new(self.ctx, self.opt, &p.az, ikb, p, TransactionType::Write).await?;
+			SearchIndex::new(self.ctx, self.ns, self.db, &p.az, ikb, p, TransactionType::Write)
+				.await?;
 
 		if let Some(n) = self.n.take() {
 			ft.index_document(stk, self.ctx, self.opt, self.rid, n).await?;
@@ -174,8 +187,7 @@ impl<'a> IndexOperation<'a> {
 		p: &FullTextParams,
 		require_compaction: &AtomicBool,
 	) -> Result<()> {
-		let (ns, db) = self.opt.ns_db()?;
-		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name);
+		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.what, &self.ix.name);
 		let mut rc = false;
 		// Build a FullText instance
 		let s =
@@ -204,8 +216,7 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_mtree(&mut self, stk: &mut Stk, p: &MTreeParams) -> Result<()> {
 		let txn = self.ctx.tx();
-		let (ns, db) = self.opt.ns_db()?;
-		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name);
+		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.what, &self.ix.name);
 		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write).await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
@@ -220,8 +231,11 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_hnsw(&mut self, p: &HnswParams) -> Result<()> {
 		let txn = self.ctx.tx();
-		let hnsw =
-			self.ctx.get_index_stores().get_index_hnsw(self.ctx, self.opt, self.ix, p).await?;
+		let hnsw = self
+			.ctx
+			.get_index_stores()
+			.get_index_hnsw(self.ns, self.db, self.ctx, self.ix, p)
+			.await?;
 		let mut hnsw = hnsw.write().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {

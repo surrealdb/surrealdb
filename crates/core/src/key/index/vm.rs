@@ -1,4 +1,6 @@
 //! Stores MTree state and nodes
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::idx::trees::{mtree::MState, store::NodeId};
 use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
@@ -7,9 +9,9 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct VmRoot<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -24,7 +26,7 @@ impl KVKey for VmRoot<'_> {
 }
 
 impl<'a> VmRoot<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -47,9 +49,9 @@ impl<'a> VmRoot<'a> {
 pub(crate) struct Vm<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -65,7 +67,7 @@ impl KVKey for Vm<'_> {
 }
 
 impl<'a> Vm<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, node_id: NodeId) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, node_id: NodeId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -90,22 +92,25 @@ mod tests {
 
 	#[test]
 	fn root() {
-		let val = VmRoot::new("testns", "testdb", "testtb", "testix");
+		let val = VmRoot::new(NamespaceId(1), DatabaseId(2), "testtb", "testix");
 		let enc = VmRoot::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!vm");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!vm");
 	}
 
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
 		let val = Vm::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 			8
 		);
 		let enc = Vm::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!vm\0\0\0\0\0\0\0\x08");
+		assert_eq!(
+			enc,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!vm\0\0\0\0\0\0\0\x08"
+		);
 	}
 }

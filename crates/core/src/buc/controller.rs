@@ -42,8 +42,8 @@ impl<'a> BucketController<'a> {
 		doc: Option<&'a CursorDoc>,
 		buc: &str,
 	) -> Result<Self> {
-		let (ns, db) = opt.ns_db()?;
-		let bucket = ctx.tx().get_db_bucket(ns, db, buc).await?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
+		let bucket = ctx.tx().expect_db_bucket(ns, db, buc).await?;
 		let store = ctx.get_bucket_store(ns, db, buc).await?;
 
 		Ok(Self {

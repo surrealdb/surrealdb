@@ -54,7 +54,7 @@ impl TestConfig {
 
 	/// Whether this test can use one of the datastorage struct which are reused between tests.
 	pub fn can_use_reusable_ds(&self) -> bool {
-		self.env.as_ref().map(|x| !x.clean).unwrap_or(true)
+		self.env.as_ref().map(|x| !x.clean).unwrap_or(false)
 	}
 
 	/// Returns a list of keys which are not in the schema but still define.

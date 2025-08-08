@@ -34,6 +34,8 @@
 //! - **Cache Friendly**: Sequential numeric IDs improve cache locality
 //! - **Concurrent Safe**: Works with distributed sequence mechanism to prevent ID conflicts
 //! - **Scalable**: Efficient lookups scale with the number of indexed documents
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
@@ -44,9 +46,9 @@ use std::fmt::Debug;
 pub(crate) struct Id<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -69,7 +71,13 @@ impl Categorise for Id<'_> {
 
 impl<'a> Id<'a> {
 	#[cfg_attr(target_family = "wasm", allow(dead_code))]
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: crate::expr::Id) -> Self {
+	pub fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a str,
+		ix: &'a str,
+		id: crate::expr::Id,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -95,8 +103,8 @@ mod tests {
 	#[test]
 	fn key() {
 		let val = Id::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 			crate::expr::Id::from("id".to_string()),
@@ -104,7 +112,7 @@ mod tests {
 		let enc = Id::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\0*testdb\0*testtb\0+testix\0!id\0\0\0\x01id\0",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!id\0\0\0\x01id\0",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);

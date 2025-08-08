@@ -31,7 +31,7 @@ impl From<RemoveFieldStatement> for crate::expr::statements::RemoveFieldStatemen
 		crate::expr::statements::RemoveFieldStatement {
 			name: v.name.into(),
 			if_exists: v.if_exists,
-			what: v.what.into(),
+			table_name: v.what.into(),
 		}
 	}
 }
@@ -41,7 +41,7 @@ impl From<crate::expr::statements::RemoveFieldStatement> for RemoveFieldStatemen
 		RemoveFieldStatement {
 			name: v.name.into(),
 			if_exists: v.if_exists,
-			what: v.what.into(),
+			what: v.table_name.into(),
 		}
 	}
 }

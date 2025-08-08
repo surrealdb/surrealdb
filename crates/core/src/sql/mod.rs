@@ -214,3 +214,7 @@ impl FlowResultExt for FlowResult<SqlValue> {
 		}
 	}
 }
+
+pub trait ToSql {
+	fn to_sql(&self) -> String;
+}

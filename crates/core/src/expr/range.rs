@@ -7,6 +7,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::Value;
 use crate::expr::operator::BindingPower;
+use crate::sql::ToSql;
 use crate::syn;
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -49,19 +50,19 @@ impl Range {
 	pub fn coerce_to_typed<T: Coerce + HasKind>(self) -> Result<TypedRange<T>, CoerceError> {
 		let beg = match self.beg {
 			Bound::Included(x) => Bound::Included(
-				x.coerce_to::<T>().with_element_of(|| format!("range<{}>", T::kind()))?,
+				x.coerce_to::<T>().with_element_of(|| format!("range<{}>", T::kind().to_sql()))?,
 			),
 			Bound::Excluded(x) => Bound::Excluded(
-				x.coerce_to::<T>().with_element_of(|| format!("range<{}>", T::kind()))?,
+				x.coerce_to::<T>().with_element_of(|| format!("range<{}>", T::kind().to_sql()))?,
 			),
 			Bound::Unbounded => Bound::Unbounded,
 		};
 		let end = match self.end {
 			Bound::Included(x) => Bound::Included(
-				x.coerce_to::<T>().with_element_of(|| format!("range<{}>", T::kind()))?,
+				x.coerce_to::<T>().with_element_of(|| format!("range<{}>", T::kind().to_sql()))?,
 			),
 			Bound::Excluded(x) => Bound::Excluded(
-				x.coerce_to::<T>().with_element_of(|| format!("range<{}>", T::kind()))?,
+				x.coerce_to::<T>().with_element_of(|| format!("range<{}>", T::kind().to_sql()))?,
 			),
 			Bound::Unbounded => Bound::Unbounded,
 		};

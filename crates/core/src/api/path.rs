@@ -13,6 +13,7 @@ use crate::{
 		Kind, Object, Value,
 		fmt::{Fmt, fmt_separated_by},
 	},
+	sql::ToSql,
 	syn,
 };
 
@@ -275,7 +276,7 @@ impl Display for Segment {
 			Self::Dynamic(v, k) => {
 				write!(f, ":{v}")?;
 				if let Some(k) = k {
-					write!(f, "<{k}>")?;
+					write!(f, "<{}>", k.to_sql())?;
 				}
 
 				Ok(())

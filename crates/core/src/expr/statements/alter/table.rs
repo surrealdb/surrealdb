@@ -1,11 +1,12 @@
+use crate::catalog::TableKind;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::Kind;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::DefineTableStatement;
-use crate::expr::{Base, ChangeFeed, Ident, Permissions, Strand, Value};
-use crate::expr::{Kind, TableType};
+use crate::expr::{Base, ChangeFeed, Ident, Permissions, Value};
 use crate::iam::{Action, ResourceKind};
 use anyhow::Result;
 
@@ -24,11 +25,11 @@ pub struct AlterTableStatement {
 	pub if_exists: bool,
 	#[revision(end = 2, convert_fn = "convert_drop")]
 	pub _drop: Option<bool>,
-	pub full: Option<bool>,
+	pub schemafull: Option<bool>,
 	pub permissions: Option<Permissions>,
 	pub changefeed: Option<Option<ChangeFeed>>,
-	pub comment: Option<Option<Strand>>,
-	pub kind: Option<TableType>,
+	pub comment: Option<Option<String>>,
+	pub kind: Option<TableKind>,
 }
 
 impl AlterTableStatement {
@@ -50,25 +51,28 @@ impl AlterTableStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 
 		// Get the table definition
-		let mut dt = match txn.get_tb(ns, db, &self.name).await {
-			Ok(tb) => tb.deref().clone(),
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
+		let mut dt = match txn.get_tb(ns, db, &self.name).await? {
+			Some(tb) => tb.deref().clone(),
+			None => {
+				if self.if_exists {
 					return Ok(Value::None);
 				} else {
-					return Err(e);
+					return Err(Error::TbNotFound {
+						name: self.name.to_string(),
+					}
+					.into());
 				}
 			}
 		};
 		// Process the statement
 		let key = crate::key::database::tb::new(ns, db, &self.name);
-		if let Some(full) = &self.full {
-			dt.full = *full;
+		if let Some(schemafull) = &self.schemafull {
+			dt.schemafull = *schemafull;
 		}
 		if let Some(permissions) = &self.permissions {
 			dt.permissions = permissions.clone();
@@ -84,7 +88,7 @@ impl AlterTableStatement {
 		}
 
 		// Add table relational fields
-		if matches!(self.kind, Some(TableType::Relation(_))) {
+		if matches!(self.kind, Some(TableKind::Relation(_))) {
 			DefineTableStatement::add_in_out_fields(&txn, ns, db, &mut dt).await?;
 		}
 		// Set the table definition
@@ -110,10 +114,10 @@ impl Display for AlterTableStatement {
 		if let Some(kind) = &self.kind {
 			write!(f, " TYPE")?;
 			match &kind {
-				TableType::Normal => {
+				TableKind::Normal => {
 					f.write_str(" NORMAL")?;
 				}
-				TableType::Relation(rel) => {
+				TableKind::Relation(rel) => {
 					f.write_str(" RELATION")?;
 					if let Some(Kind::Record(kind)) = &rel.from {
 						write!(
@@ -130,12 +134,12 @@ impl Display for AlterTableStatement {
 						)?;
 					}
 				}
-				TableType::Any => {
+				TableKind::Any => {
 					f.write_str(" ANY")?;
 				}
 			}
 		}
-		if let Some(full) = self.full {
+		if let Some(full) = self.schemafull {
 			f.write_str(if full {
 				" SCHEMAFULL"
 			} else {

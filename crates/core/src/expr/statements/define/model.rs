@@ -44,20 +44,19 @@ impl DefineModelStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
-		let (ns, db) = opt.ns_db()?;
-		if txn.get_db_model(ns, db, &self.name, &self.version).await.is_ok() {
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+		if let Some(model) = txn.get_db_model(ns, db, &self.name, &self.version).await? {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite && !opt.import {
 				bail!(Error::MlAlreadyExists {
-					name: self.name.to_string(),
+					name: model.name.to_string(),
 				});
 			}
 		}
+
 		// Process the statement
 		let key = crate::key::database::ml::new(ns, db, &self.name, &self.version);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.set(
 			&key,
 			&DefineModelStatement {

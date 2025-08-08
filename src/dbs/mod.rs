@@ -3,7 +3,6 @@ use anyhow::Result;
 use clap::Args;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::{
@@ -575,22 +574,6 @@ pub async fn init(
 	Ok(dbs)
 }
 
-/// Performs a database fix
-pub async fn fix(path: String) -> Result<()> {
-	// Parse and setup the desired kv datastore
-	let dbs = Arc::new(Datastore::new(&path).await?);
-	// Ensure the storage version is up-to-date to prevent corruption
-	let version = dbs.get_version().await?;
-	// Apply fixes
-	version.fix(dbs).await?;
-	// Log success
-	println!(
-		"Database storage version was updated successfully. Please carefully read back logs to see if any manual changes need to be applied"
-	);
-	// All ok
-	Ok(())
-}
-
 #[cfg(test)]
 mod tests {
 	use std::str::FromStr;
@@ -632,7 +615,7 @@ mod tests {
 			.transaction(Read, Optimistic)
 			.await
 			.unwrap()
-			.get_root_user(creds.username)
+			.expect_root_user(creds.username)
 			.await
 			.unwrap()
 			.hash
@@ -644,7 +627,7 @@ mod tests {
 			ds.transaction(Read, Optimistic)
 				.await
 				.unwrap()
-				.get_root_user(creds.username)
+				.expect_root_user(creds.username)
 				.await
 				.unwrap()
 				.hash
