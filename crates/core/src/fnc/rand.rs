@@ -146,7 +146,7 @@ pub fn string((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) 
 		ensure!(
 			lower <= upper,
 			Error::InvalidArguments {
-				name: String::from("rand::guid"),
+				name: String::from("rand::string"),
 				message: "Lowerbound of number of characters must be less then the upperbound."
 					.to_string(),
 			}
@@ -154,7 +154,7 @@ pub fn string((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) 
 		ensure!(
 			upper <= LIMIT,
 			Error::InvalidArguments {
-				name: String::from("rand::guid"),
+				name: String::from("rand::string"),
 				message: format!(
 					"To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."
 				),
@@ -166,7 +166,7 @@ pub fn string((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) 
 		ensure!(
 			lower <= LIMIT,
 			Error::InvalidArguments {
-				name: String::from("rand::guid"),
+				name: String::from("rand::string"),
 				message: format!(
 					"To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."
 				),
