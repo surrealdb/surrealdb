@@ -9,6 +9,7 @@ use crate::{
 		FlowResultExt as _, Graph, Ident, Idiom, Number, Thing, Value, fmt::Fmt,
 		strand::no_nul_bytes,
 	},
+	sql::ToSql,
 };
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -194,7 +195,7 @@ impl fmt::Display for Part {
 			Part::Last => f.write_str("[$]"),
 			Part::First => f.write_str("[0]"),
 			Part::Start(v) => write!(f, "{v}"),
-			Part::Field(v) => write!(f, ".{v}"),
+			Part::Field(v) => write!(f, ".{}", v.to_sql()),
 			Part::Flatten => f.write_str("…"),
 			Part::Index(v) => write!(f, "[{v}]"),
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
@@ -489,7 +490,7 @@ impl fmt::Display for DestructurePart {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			DestructurePart::All(fd) => write!(f, "{fd}.*"),
-			DestructurePart::Field(fd) => write!(f, "{fd}"),
+			DestructurePart::Field(fd) => write!(f, "{}", fd.to_sql()),
 			DestructurePart::Aliased(fd, v) => write!(f, "{fd}: {v}"),
 			DestructurePart::Destructure(fd, d) => {
 				write!(f, "{fd}{}", Part::Destructure(d.clone()))

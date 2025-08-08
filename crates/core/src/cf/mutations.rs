@@ -250,7 +250,7 @@ mod tests {
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,
-			r#"{"changes":[{"update":{"id":"mytb:tobie","note":"surreal"}},{"delete":{"id":"mytb:tobie"}},{"define_table":{"drop":false,"kind":{"kind":"NORMAL"},"name":"mytb","permissions":{"create":true,"delete":true,"select":true,"update":true},"schemafull":false}}],"versionstamp":65536}"#
+			r#"{"changes":[{"update":{"id":"mytb:tobie","note":"surreal"}},{"delete":{"id":"mytb:tobie"}},{"define_table":{"drop":false,"kind":{"kind":"ANY"},"name":"mytb","permissions":{"create":true,"delete":true,"select":true,"update":true},"schemafull":false}}],"versionstamp":65536}"#
 		);
 	}
 

@@ -29,14 +29,14 @@ impl ViewDefinition {
 
 impl ToSql for ViewDefinition {
 	fn to_sql(&self) -> String {
-		let mut sql = format!("AS SELECT {} FROM {}", self.expr, self.what);
+		let mut out = format!("AS SELECT {} FROM {}", self.expr, self.what);
 		if let Some(ref v) = self.cond {
-			sql.push_str(&format!(" {}", v));
+			out.push_str(&format!(" {}", v));
 		}
 		if let Some(ref v) = self.group {
-			sql.push_str(&format!(" {}", v));
+			out.push_str(&format!(" {}", v));
 		}
-		sql
+		out
 	}
 }
 impl InfoStructure for ViewDefinition {

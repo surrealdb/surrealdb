@@ -6,6 +6,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident, Strand, Value, escape::QuoteStr, fmt::Fmt, user::UserDuration};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::ToSql;
 use anyhow::{Result, bail};
 use argon2::{
 	Argon2,
@@ -233,7 +234,7 @@ impl Display for DefineUserStatement {
 			}
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		Ok(())
 	}

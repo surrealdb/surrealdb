@@ -1,4 +1,4 @@
-use crate::sql::{Ident, Idioms, Index, Strand};
+use crate::sql::{Ident, Idioms, Index, Strand, ToSql};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -35,7 +35,7 @@ impl Display for DefineIndexStatement {
 			write!(f, " {}", self.index)?;
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		if self.concurrently {
 			write!(f, " CONCURRENTLY")?

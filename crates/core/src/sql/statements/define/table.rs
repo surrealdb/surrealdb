@@ -1,6 +1,6 @@
 use crate::sql::fmt::{is_pretty, pretty_indent};
 
-use crate::sql::{Ident, Permissions, Strand, View, changefeed::ChangeFeed};
+use crate::sql::{Ident, Permissions, Strand, ToSql, View, changefeed::ChangeFeed};
 use crate::sql::{Kind, TableType};
 use anyhow::Result;
 
@@ -77,7 +77,7 @@ impl Display for DefineTableStatement {
 		if self.overwrite {
 			write!(f, " OVERWRITE")?
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", self.name.to_sql())?;
 		write!(f, " TYPE")?;
 		match &self.kind {
 			TableType::Normal => {
@@ -116,7 +116,7 @@ impl Display for DefineTableStatement {
 			" SCHEMALESS"
 		})?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		if let Some(ref v) = self.view {
 			write!(f, " {v}")?

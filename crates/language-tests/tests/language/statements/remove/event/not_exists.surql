@@ -2,7 +2,7 @@
 [test]
 
 [[test.results]]
-error = "The database 'test' does not exist"
+error = "The event 'foo' does not exist"
 
 [[test.results]]
 value = 'NONE'

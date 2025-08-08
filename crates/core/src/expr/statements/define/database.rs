@@ -7,6 +7,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident, Strand, Value, changefeed::ChangeFeed};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::ToSql;
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -102,7 +103,7 @@ impl Display for DefineDatabaseStatement {
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		if let Some(ref v) = self.changefeed {
 			write!(f, " {v}")?;

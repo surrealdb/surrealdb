@@ -1,7 +1,7 @@
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
 
-use crate::sql::{Ident, Idiom, Kind, Permissions, SqlValue, Strand};
+use crate::sql::{Ident, Idiom, Kind, Permissions, SqlValue, Strand, ToSql};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -72,7 +72,7 @@ impl Display for DefineFieldStatement {
 			write!(f, " REFERENCE {v}")?
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

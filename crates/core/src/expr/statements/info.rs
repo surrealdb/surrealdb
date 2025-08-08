@@ -276,7 +276,7 @@ impl InfoStatement {
 						"events".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_events(ns, db, tb).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.to_string(), v.to_string().into());
 							}
 							out.into()
 						},

@@ -18,6 +18,7 @@ use crate::expr::{
 };
 use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind};
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::ToSql;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 
@@ -927,7 +928,7 @@ impl fmt::Display for Value {
 			Value::Param(v) => write!(f, "{v}"),
 			Value::Range(v) => write!(f, "{v}"),
 			Value::Regex(v) => write!(f, "{v}"),
-			Value::Strand(v) => write!(f, "{v}"),
+			Value::Strand(v) => write!(f, "{}", v.to_sql()),
 			Value::Query(v) => write!(f, "{v}"),
 			Value::Subquery(v) => write!(f, "{v}"),
 			Value::Table(v) => write!(f, "{v}"),

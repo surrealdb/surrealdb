@@ -85,7 +85,13 @@ impl Strand {
 
 impl Display for Strand {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		QuoteStr(&self.0).fmt(f)
+		f.write_str(&self.0)
+	}
+}
+
+impl crate::sql::ToSql for Strand {
+	fn to_sql(&self) -> String {
+		QuoteStr(&self.0).to_string()
 	}
 }
 

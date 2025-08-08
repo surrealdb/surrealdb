@@ -7,6 +7,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, FlowResultExt as _, Ident, Permission, Strand, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::ToSql;
 use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
@@ -96,9 +97,9 @@ impl Display for DefineParamStatement {
 		if self.overwrite {
 			write!(f, " OVERWRITE")?
 		}
-		write!(f, " ${} VALUE {}", self.name, self.value)?;
+		write!(f, " ${} VALUE {}", self.name.to_sql(), self.value)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

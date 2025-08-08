@@ -164,28 +164,24 @@ pub enum TableKind {
 
 impl ToSql for TableKind {
 	fn to_sql(&self) -> String {
-		let mut sql = String::new();
 		match self {
-			TableKind::Normal => {
-				sql.push_str("NORMAL");
-			}
+			TableKind::Normal => "NORMAL".to_string(),
 			TableKind::Relation(rel) => {
-				sql.push_str("RELATION");
+				let mut out = "RELATION".to_string();
 				if let Some(kind) = &rel.from {
-					sql.push_str(&format!(" IN {}", kind.to_sql()));
+					out.push_str(&format!(" IN {}", kind));
 				}
 				if let Some(kind) = &rel.to {
-					sql.push_str(&format!(" OUT {}", kind.to_sql()));
+					out.push_str(&format!(" OUT {}", kind));
 				}
 				if rel.enforced {
-					sql.push_str(" ENFORCED");
+					out.push_str(" ENFORCED");
 				}
+
+				out
 			}
-			TableKind::Any => {
-				sql.push_str("ANY");
-			}
+			TableKind::Any => "ANY".to_string(),
 		}
-		sql
 	}
 }
 

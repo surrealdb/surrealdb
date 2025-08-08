@@ -1,6 +1,6 @@
 use crate::sql::fmt::{is_pretty, pretty_indent};
 
-use crate::sql::{Block, Ident, Kind, Permission, Strand};
+use crate::sql::{Block, Ident, Kind, Permission, Strand, ToSql};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -46,7 +46,7 @@ impl fmt::Display for DefineFunctionStatement {
 		}
 		Display::fmt(&self.block, f)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

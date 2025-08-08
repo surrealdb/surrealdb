@@ -14,6 +14,7 @@ use crate::expr::{
 use crate::expr::{Idiom, Kind};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Transaction, impl_kv_value_revisioned};
+use crate::sql::ToSql;
 use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
@@ -307,7 +308,7 @@ impl Display for DefineTableStatement {
 			" SCHEMALESS"
 		})?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		if let Some(ref v) = self.view {
 			write!(f, " {v}")?

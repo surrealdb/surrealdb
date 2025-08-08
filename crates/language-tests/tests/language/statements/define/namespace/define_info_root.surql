@@ -1,4 +1,8 @@
 /**
+[env]
+namespace = false
+database = false
+
 [test]
 
 [[test.results]]

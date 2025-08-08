@@ -127,7 +127,7 @@ impl SelectStatement {
 		let ctx = stm.setup_timeout(ctx)?;
 
 		let (ns, db) = opt.ns_db()?;
-		let db = ctx.tx().ensure_ns_db(ns, db, opt.strict).await?;
+		let db = ctx.tx().expect_db_by_name(ns, db).await?;
 
 		// Get a query planner
 		let mut planner = QueryPlanner::new();

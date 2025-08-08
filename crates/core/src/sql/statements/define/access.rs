@@ -1,4 +1,4 @@
-use crate::sql::{AccessType, Base, Ident, SqlValue, Strand, access::AccessDuration};
+use crate::sql::{AccessType, Base, Ident, SqlValue, Strand, ToSql, access::AccessDuration};
 
 use rand::Rng;
 use rand::distributions::Alphanumeric;
@@ -99,7 +99,7 @@ impl Display for DefineAccessStatement {
 			}
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		Ok(())
 	}

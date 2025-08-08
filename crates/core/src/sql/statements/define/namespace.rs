@@ -1,4 +1,4 @@
-use crate::sql::{Ident, Strand};
+use crate::sql::{Ident, Strand, ToSql};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -29,7 +29,7 @@ impl Display for DefineNamespaceStatement {
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		Ok(())
 	}

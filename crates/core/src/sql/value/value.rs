@@ -13,7 +13,7 @@ use crate::sql::{
 	id::{Gen, Id},
 	model::Model,
 };
-use crate::sql::{Closure, Ident, Kind};
+use crate::sql::{Closure, Ident, Kind, ToSql};
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 
@@ -884,7 +884,7 @@ impl fmt::Display for SqlValue {
 			SqlValue::Param(v) => write!(f, "{v}"),
 			SqlValue::Range(v) => write!(f, "{v}"),
 			SqlValue::Regex(v) => write!(f, "{v}"),
-			SqlValue::Strand(v) => write!(f, "{v}"),
+			SqlValue::Strand(v) => write!(f, "{}", v.to_sql()),
 			SqlValue::Query(v) => write!(f, "{v}"),
 			SqlValue::Subquery(v) => write!(f, "{v}"),
 			SqlValue::Table(v) => write!(f, "{v}"),

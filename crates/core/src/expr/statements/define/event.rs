@@ -8,6 +8,7 @@ use crate::expr::{Base, Ident, Strand, Value, Values};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::cache::ds;
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::ToSql;
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -110,7 +111,7 @@ impl Display for DefineEventStatement {
 		}
 		write!(f, " {} ON {} WHEN {} THEN {}", self.name, self.what, self.when, self.then)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		Ok(())
 	}

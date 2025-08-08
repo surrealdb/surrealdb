@@ -1,5 +1,5 @@
 use crate::sql::{
-	Part,
+	Part, ToSql,
 	fmt::{Fmt, fmt_separated_by},
 };
 use revision::revisioned;
@@ -132,8 +132,8 @@ impl Display for Idiom {
 			&Fmt::new(
 				self.0.iter().enumerate().map(|args| {
 					Fmt::new(args, |(i, p), f| match (i, p) {
-						(0, Part::Field(v)) => Display::fmt(v, f),
-						_ => Display::fmt(p, f),
+						(0, Part::Field(v)) => f.write_str(&v.to_sql()),
+						_ => p.fmt(f),
 					})
 				}),
 				fmt_separated_by(""),

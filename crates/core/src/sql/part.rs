@@ -1,7 +1,7 @@
 use crate::{
 	cnf::IDIOM_RECURSION_LIMIT,
 	err::Error,
-	sql::{Graph, Ident, Idiom, Number, SqlValue, fmt::Fmt, strand::no_nul_bytes},
+	sql::{Graph, Ident, Idiom, Number, SqlValue, ToSql, fmt::Fmt, strand::no_nul_bytes},
 };
 use anyhow::Result;
 use revision::revisioned;
@@ -175,7 +175,7 @@ impl fmt::Display for Part {
 			Part::Last => f.write_str("[$]"),
 			Part::First => f.write_str("[0]"),
 			Part::Start(v) => write!(f, "{v}"),
-			Part::Field(v) => write!(f, ".{v}"),
+			Part::Field(v) => write!(f, ".{}", v.to_sql()),
 			Part::Flatten => f.write_str("…"),
 			Part::Index(v) => write!(f, "[{v}]"),
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
@@ -275,11 +275,11 @@ impl DestructurePart {
 impl fmt::Display for DestructurePart {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			DestructurePart::All(fd) => write!(f, "{fd}.*"),
-			DestructurePart::Field(fd) => write!(f, "{fd}"),
-			DestructurePart::Aliased(fd, v) => write!(f, "{fd}: {v}"),
+			DestructurePart::All(fd) => write!(f, "{}.*", fd.to_sql()),
+			DestructurePart::Field(fd) => write!(f, "{}", fd.to_sql()),
+			DestructurePart::Aliased(fd, v) => write!(f, "{}: {}", fd.to_sql(), v),
 			DestructurePart::Destructure(fd, d) => {
-				write!(f, "{fd}{}", Part::Destructure(d.clone()))
+				write!(f, "{}{}", fd.to_sql(), Part::Destructure(d.clone()))
 			}
 		}
 	}

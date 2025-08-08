@@ -1,6 +1,6 @@
 use crate::sql::fmt::{is_pretty, pretty_indent};
 
-use crate::sql::{Ident, Permission, SqlValue, Strand};
+use crate::sql::{Ident, Permission, SqlValue, Strand, ToSql};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -32,7 +32,7 @@ impl Display for DefineParamStatement {
 		}
 		write!(f, " ${} VALUE {}", self.name, self.value)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

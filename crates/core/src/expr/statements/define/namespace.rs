@@ -6,6 +6,7 @@ use crate::err::Error;
 use crate::expr::{Base, Ident, Strand, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::ToSql;
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -85,7 +86,7 @@ impl Display for DefineNamespaceStatement {
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		Ok(())
 	}

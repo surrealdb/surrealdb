@@ -471,9 +471,11 @@ pub(super) trait Collector {
 				Iterable::Table(v, rs, sc) => {
 					let ctx = Self::check_query_planner_context(ctx, &v);
 					match rs {
-						RecordStrategy::Count => self.collect_table_count(ns, db, &ctx, &v).await?,
+						RecordStrategy::Count => {
+							self.collect_table_count(ns, db, &ctx, opt, &v).await?
+						}
 						RecordStrategy::KeysOnly => {
-							self.collect_table_keys(ns, db, &ctx, &v, sc).await?
+							self.collect_table_keys(ns, db, &ctx, opt, &v, sc).await?
 						}
 						RecordStrategy::KeysAndValues => {
 							self.collect_table(ns, db, &ctx, opt, &v, sc).await?
@@ -569,7 +571,9 @@ pub(super) trait Collector {
 	) -> Result<()> {
 		// Get the transaction
 		let txn = ctx.tx();
-		// TODO: Check that the table exists
+		// Check that the table exists
+		txn.check_tb(ns, db, v.0.as_str(), opt.strict).await?;
+
 		// Prepare the start and end keys
 		let beg = thing::prefix(ns, db, v)?;
 		let end = thing::suffix(ns, db, v)?;
@@ -603,12 +607,15 @@ pub(super) trait Collector {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ctx: &Context,
+		opt: &Options,
 		v: &Table,
 		sc: ScanDirection,
 	) -> Result<()> {
 		// Get the transaction
 		let txn = ctx.tx();
-		// TODO: Check that the table exists
+		// Check that the table exists
+		txn.check_tb(ns, db, v.0.as_str(), opt.strict).await?;
+
 		// Prepare the start and end keys
 		let beg = thing::prefix(ns, db, v)?;
 		let end = thing::suffix(ns, db, v)?;
@@ -644,11 +651,14 @@ pub(super) trait Collector {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ctx: &Context,
+		opt: &Options,
 		v: &Table,
 	) -> Result<()> {
 		// Get the transaction
 		let txn = ctx.tx();
-		// TODO: Check that the table exists
+		// Check that the table exists
+		txn.check_tb(ns, db, v.0.as_str(), opt.strict).await?;
+
 		let beg = thing::prefix(ns, db, v)?;
 		let end = thing::suffix(ns, db, v)?;
 		// Create a new iterable range

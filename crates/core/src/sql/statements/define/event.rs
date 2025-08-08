@@ -1,4 +1,4 @@
-use crate::sql::{Ident, SqlValue, SqlValues, Strand};
+use crate::sql::{Ident, SqlValue, SqlValues, Strand, ToSql};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -31,7 +31,7 @@ impl Display for DefineEventStatement {
 		}
 		write!(f, " {} ON {} WHEN {} THEN {}", self.name, self.what, self.when, self.then)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		Ok(())
 	}

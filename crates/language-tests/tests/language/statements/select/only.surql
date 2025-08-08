@@ -2,9 +2,6 @@
 [test]
 
 [[test.results]]
-value = "NONE"
-
-[[test.results]]
 value = "1"
 
 [[test.results]]
@@ -35,7 +32,6 @@ error = "Expected a single result output when using the ONLY keyword"
 value = "1"
 
 */
-DEFINE DATABASE test;
 SELECT * FROM ONLY 1;
 SELECT * FROM ONLY NONE;
 SELECT * FROM ONLY [];

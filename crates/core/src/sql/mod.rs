@@ -215,6 +215,7 @@ impl FlowResultExt for FlowResult<SqlValue> {
 	}
 }
 
+/// Trait for types that can be converted to SQL representation
 pub trait ToSql {
 	fn to_sql(&self) -> String;
 }

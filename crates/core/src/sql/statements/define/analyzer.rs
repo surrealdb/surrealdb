@@ -1,4 +1,4 @@
-use crate::sql::{Ident, Strand, filter::Filter, tokenizer::Tokenizer};
+use crate::sql::{Ident, Strand, ToSql, filter::Filter, tokenizer::Tokenizer};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -43,7 +43,7 @@ impl Display for DefineAnalyzerStatement {
 			write!(f, " FILTERS {}", tokens.join(","))?;
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		Ok(())
 	}

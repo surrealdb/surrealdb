@@ -3,6 +3,7 @@ use std::fmt::{Display, Formatter};
 use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
 
+use crate::sql::statements::define::DefineDatabaseStatement;
 use crate::{
 	catalog::NamespaceId,
 	expr::{ChangeFeed, Value, statements::info::InfoStructure},
@@ -60,14 +61,20 @@ pub struct DatabaseDefinition {
 }
 impl_kv_value_revisioned!(DatabaseDefinition);
 
+impl DatabaseDefinition {
+	pub fn to_sql_definition(&self) -> DefineDatabaseStatement {
+		DefineDatabaseStatement {
+			name: self.name.clone().into(),
+			comment: self.comment.clone().map(|v| v.into()),
+			changefeed: self.changefeed.map(|v| v.into()),
+			..Default::default()
+		}
+	}
+}
+
 impl ToSql for DatabaseDefinition {
 	fn to_sql(&self) -> String {
-		let mut s = String::new();
-		s.push_str(&format!("DEFINE DATABASE {}", self.name));
-		if let Some(comment) = &self.comment {
-			s.push_str(&format!(" COMMENT {}", comment));
-		}
-		s
+		self.to_sql_definition().to_string()
 	}
 }
 

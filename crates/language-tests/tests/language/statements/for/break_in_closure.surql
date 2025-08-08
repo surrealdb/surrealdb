@@ -2,12 +2,17 @@
 [test]
 
 [[test.results]]
-value = "NONE"
+error = "Invalid control flow statement, break or continue statement found outside of loop."
 
 [[test.results]]
-error = "The table 'test' does not exist"
+value = "[]"
 
 */
 
-DEFINE DB test;
+FOR $test in 1..10{
+	if $test == 5 {
+		(|| { break; })();
+	};
+	CREATE type::thing('test',$test);
+};
 SELECT * FROM test;

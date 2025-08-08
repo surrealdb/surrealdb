@@ -9,6 +9,7 @@ use crate::expr::{
 	fmt::{Fmt, Pretty, is_pretty, pretty_indent},
 };
 use crate::sql::ToSql;
+
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use revision::revisioned;
 use rust_decimal::Decimal;
@@ -363,66 +364,66 @@ impl From<&Kind> for Box<Kind> {
 
 impl ToSql for Kind {
 	fn to_sql(&self) -> String {
-		let mut sql = String::new();
+		let mut out = String::new();
 		match self {
-			Kind::Any => sql.push_str("any"),
-			Kind::Null => sql.push_str("null"),
-			Kind::Bool => sql.push_str("bool"),
-			Kind::Bytes => sql.push_str("bytes"),
-			Kind::Datetime => sql.push_str("datetime"),
-			Kind::Decimal => sql.push_str("decimal"),
-			Kind::Duration => sql.push_str("duration"),
-			Kind::Float => sql.push_str("float"),
-			Kind::Int => sql.push_str("int"),
-			Kind::Number => sql.push_str("number"),
-			Kind::Object => sql.push_str("object"),
-			Kind::Point => sql.push_str("point"),
-			Kind::String => sql.push_str("string"),
-			Kind::Uuid => sql.push_str("uuid"),
-			Kind::Regex => sql.push_str("regex"),
-			Kind::Function(_, _) => sql.push_str("function"),
-			Kind::Option(k) => sql.push_str(&format!("option<{}>", k.to_sql())),
+			Kind::Any => out.push_str("any"),
+			Kind::Null => out.push_str("null"),
+			Kind::Bool => out.push_str("bool"),
+			Kind::Bytes => out.push_str("bytes"),
+			Kind::Datetime => out.push_str("datetime"),
+			Kind::Decimal => out.push_str("decimal"),
+			Kind::Duration => out.push_str("duration"),
+			Kind::Float => out.push_str("float"),
+			Kind::Int => out.push_str("int"),
+			Kind::Number => out.push_str("number"),
+			Kind::Object => out.push_str("object"),
+			Kind::Point => out.push_str("point"),
+			Kind::String => out.push_str("string"),
+			Kind::Uuid => out.push_str("uuid"),
+			Kind::Regex => out.push_str("regex"),
+			Kind::Function(_, _) => out.push_str("function"),
+			Kind::Option(k) => out.push_str(&format!("option<{}>", k)),
 			Kind::Record(k) => {
 				if k.is_empty() {
-					sql.push_str("record")
+					out.push_str("record")
 				} else {
-					sql.push_str(&format!("record<{}>", Fmt::verbar_separated(k)))
+					out.push_str(&format!("record<{}>", Fmt::verbar_separated(k)))
 				}
 			}
 			Kind::Geometry(k) => {
 				if k.is_empty() {
-					sql.push_str("geometry")
+					out.push_str("geometry")
 				} else {
-					sql.push_str(&format!("geometry<{}>", Fmt::verbar_separated(k)))
+					out.push_str(&format!("geometry<{}>", Fmt::verbar_separated(k)))
 				}
 			}
 			Kind::Set(k, l) => match (k, l) {
-				(k, None) if k.is_any() => sql.push_str("set"),
-				(k, None) => sql.push_str(&format!("set<{}>", k.to_sql())),
-				(k, Some(l)) => sql.push_str(&format!("set<{}, {}>", k.to_sql(), l)),
+				(k, None) if k.is_any() => out.push_str("set"),
+				(k, None) => out.push_str(&format!("set<{}>", k)),
+				(k, Some(l)) => out.push_str(&format!("set<{}, {}>", k, l)),
 			},
 			Kind::Array(k, l) => match (k, l) {
-				(k, None) if k.is_any() => sql.push_str("array"),
-				(k, None) => sql.push_str(&format!("array<{}>", k.to_sql())),
-				(k, Some(l)) => sql.push_str(&format!("array<{}, {}>", k.to_sql(), l)),
+				(k, None) if k.is_any() => out.push_str("array"),
+				(k, None) => out.push_str(&format!("array<{}>", k)),
+				(k, Some(l)) => out.push_str(&format!("array<{}, {}>", k, l)),
 			},
-			Kind::Either(k) => sql.push_str(&format!("{}", Fmt::verbar_separated(k))),
-			Kind::Range => sql.push_str("range"),
-			Kind::Literal(l) => sql.push_str(&format!("{}", l)),
+			Kind::Either(k) => out.push_str(&format!("{}", Fmt::verbar_separated(k))),
+			Kind::Range => out.push_str("range"),
+			Kind::Literal(l) => out.push_str(&format!("{}", l)),
 			Kind::References(t, i) => match (t, i) {
-				(Some(t), None) => sql.push_str(&format!("references<{}>", t)),
-				(Some(t), Some(i)) => sql.push_str(&format!("references<{}, {}>", t, i)),
-				(None, _) => sql.push_str("references"),
+				(Some(t), None) => out.push_str(&format!("references<{}>", t)),
+				(Some(t), Some(i)) => out.push_str(&format!("references<{}, {}>", t, i)),
+				(None, _) => out.push_str("references"),
 			},
 			Kind::File(k) => {
 				if k.is_empty() {
-					sql.push_str("file")
+					out.push_str("file")
 				} else {
-					sql.push_str(&format!("file<{}>", Fmt::verbar_separated(k)))
+					out.push_str(&format!("file<{}>", Fmt::verbar_separated(k)))
 				}
 			}
 		}
-		sql
+		out
 	}
 }
 
@@ -621,7 +622,7 @@ impl Literal {
 impl Display for Literal {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Literal::String(s) => write!(f, "{}", s),
+			Literal::String(s) => write!(f, "{}", s.to_sql()),
 			Literal::Number(n) => write!(f, "{}", n),
 			Literal::Duration(d) => write!(f, "{}", d),
 			Literal::Bool(b) => write!(f, "{}", b),

@@ -1343,6 +1343,22 @@ impl Transaction {
 		}
 	}
 
+	pub async fn expect_db_by_name(&self, ns: &str, db: &str) -> Result<Arc<DatabaseDefinition>> {
+		match self.get_db_by_name(ns, db).await? {
+			Some(val) => Ok(val),
+			None => {
+				// Check if the namespace exists.
+				// If it doesn't, return a namespace not found error.
+				self.expect_ns_by_name(ns).await?;
+
+				// Return a database not found error.
+				Err(anyhow::anyhow!(Error::DbNotFound {
+					name: db.to_owned()
+				}))
+			}
+		}
+	}
+
 	/// Retrieve a specific user definition from a database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_user(
@@ -1664,6 +1680,20 @@ impl Transaction {
 				Ok(Some(val))
 			}
 		}
+	}
+
+	pub async fn check_tb(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		strict: bool,
+	) -> Result<()> {
+		if !strict {
+			return Ok(());
+		}
+		self.expect_tb(ns, db, tb).await?;
+		Ok(())
 	}
 
 	pub async fn expect_tb(

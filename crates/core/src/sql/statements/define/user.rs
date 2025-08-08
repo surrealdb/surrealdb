@@ -1,4 +1,6 @@
-use crate::sql::{Base, Duration, Ident, Strand, escape::QuoteStr, fmt::Fmt, user::UserDuration};
+use crate::sql::{
+	Base, Duration, Ident, Strand, ToSql, escape::QuoteStr, fmt::Fmt, user::UserDuration,
+};
 use argon2::{
 	Argon2,
 	password_hash::{PasswordHasher, SaltString},
@@ -133,7 +135,7 @@ impl Display for DefineUserStatement {
 			}
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		Ok(())
 	}

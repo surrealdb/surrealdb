@@ -7,7 +7,7 @@ use revision::{Revisioned, revisioned};
 use crate::{
 	expr::{Value, statements::info::InfoStructure},
 	kvs::impl_kv_value_revisioned,
-	sql::ToSql,
+	sql::{ToSql, statements::DefineNamespaceStatement},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -43,7 +43,7 @@ impl Display for NamespaceId {
 
 impl From<u32> for NamespaceId {
 	fn from(value: u32) -> Self {
-		Self(value)
+		NamespaceId(value)
 	}
 }
 
@@ -58,14 +58,19 @@ pub struct NamespaceDefinition {
 }
 impl_kv_value_revisioned!(NamespaceDefinition);
 
+impl NamespaceDefinition {
+	fn to_sql_definition(&self) -> DefineNamespaceStatement {
+		DefineNamespaceStatement {
+			name: self.name.clone().into(),
+			comment: self.comment.clone().map(|v| v.into()),
+			..Default::default()
+		}
+	}
+}
+
 impl ToSql for NamespaceDefinition {
 	fn to_sql(&self) -> String {
-		let mut out = String::new();
-		out.push_str(&format!("DEFINE NAMESPACE {}", self.name));
-		if let Some(comment) = &self.comment {
-			out.push_str(&format!(" COMMENT {comment}"));
-		}
-		out
+		self.to_sql_definition().to_string()
 	}
 }
 

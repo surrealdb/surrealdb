@@ -1,4 +1,4 @@
-use crate::sql::{Ident, Strand, changefeed::ChangeFeed};
+use crate::sql::{Ident, Strand, ToSql, changefeed::ChangeFeed};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -30,12 +30,32 @@ impl Display for DefineDatabaseStatement {
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		if let Some(ref v) = self.changefeed {
 			write!(f, " {v}")?;
 		}
 		Ok(())
+	}
+}
+
+impl crate::sql::ToSql for DefineDatabaseStatement {
+	fn to_sql(&self) -> String {
+		let mut out = "DEFINE DATABASE".to_string();
+		if self.if_not_exists {
+			out.push_str(" IF NOT EXISTS");
+		}
+		if self.overwrite {
+			out.push_str(" OVERWRITE");
+		}
+		out.push_str(&format!(" {}", self.name));
+		if let Some(ref v) = self.comment {
+			out.push_str(&format!(" COMMENT {}", v.to_sql()));
+		}
+		if let Some(ref v) = self.changefeed {
+			out.push_str(&format!(" {v}"));
+		}
+		out
 	}
 }
 

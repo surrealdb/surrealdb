@@ -13,6 +13,7 @@ use crate::expr::{Base, Ident, Idioms, Index, Part, Strand, Value};
 use crate::expr::{Output, Values};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::ToSql;
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -94,7 +95,7 @@ impl DefineIndexStatement {
 					continue;
 				};
 				if txn
-					.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, &first.to_string())
+					.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, &first.to_sql())
 					.await?
 					.is_none()
 				{
@@ -211,12 +212,12 @@ impl Display for DefineIndexStatement {
 		if self.overwrite {
 			write!(f, " OVERWRITE")?
 		}
-		write!(f, " {} ON {} FIELDS {}", self.name, self.what, self.cols)?;
+		write!(f, " {} ON {} FIELDS {}", self.name, self.what.to_sql(), self.cols)?;
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index)?;
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		if self.concurrently {
 			write!(f, " CONCURRENTLY")?
