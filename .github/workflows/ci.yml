@@ -99,7 +99,7 @@ jobs:
         run: cargo install --debug --locked cargo-make
 
       - name: Check format
-        run: cargo make ci-format
+        run: cargo +${{ env.NIGHTLY_RUST_VERSION }} make ci-format
 
   clippy:
     name: Check clippy
