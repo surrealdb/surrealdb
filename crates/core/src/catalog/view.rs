@@ -17,24 +17,24 @@ pub struct ViewDefinition {
 }
 
 impl ViewDefinition {
-    pub(crate) fn to_sql_definition(&self) -> View {
-        View {
-            expr: self.expr.clone().into(),
-            what: self.what.clone().into(),
-            cond: self.cond.clone().map(Into::into),
-            group: self.group.clone().map(Into::into),
-        }
-    }
+	pub(crate) fn to_sql_definition(&self) -> View {
+		View {
+			expr: self.expr.clone().into(),
+			what: self.what.clone().into(),
+			cond: self.cond.clone().map(Into::into),
+			group: self.group.clone().map(Into::into),
+		}
+	}
 }
 
 impl ToSql for ViewDefinition {
 	fn to_sql(&self) -> String {
 		let mut sql = format!("AS SELECT {} FROM {}", self.expr, self.what);
 		if let Some(ref v) = self.cond {
-			sql.push_str(&format!(" {}", v.to_string()));
+			sql.push_str(&format!(" {}", v));
 		}
 		if let Some(ref v) = self.group {
-			sql.push_str(&format!(" {}", v.to_string()));
+			sql.push_str(&format!(" {}", v));
 		}
 		sql
 	}

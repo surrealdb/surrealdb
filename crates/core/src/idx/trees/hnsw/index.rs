@@ -135,6 +135,7 @@ impl HnswIndex {
 		self.hnsw.check_state(tx).await
 	}
 
+	#[expect(clippy::too_many_arguments)]
 	pub async fn knn_search(
 		&self,
 		db: &DatabaseDefinition,
@@ -150,7 +151,7 @@ impl HnswIndex {
 		vector.check_dimension(self.dim)?;
 		let search = HnswSearch::new(vector, k, ef);
 		// Do the search
-		let result = self.search(&db, tx, stk, &search, &mut chk).await?;
+		let result = self.search(db, tx, stk, &search, &mut chk).await?;
 		let res = chk.convert_result(tx, &self.docs, result.docs).await?;
 		Ok(res)
 	}
@@ -168,7 +169,7 @@ impl HnswIndex {
 			HnswConditionChecker::Hnsw(_) => self.hnsw.knn_search(tx, search).await?,
 			HnswConditionChecker::HnswCondition(_) => {
 				self.hnsw
-					.knn_search_checked(&db, tx, stk, search, &self.docs, &self.vec_docs, chk)
+					.knn_search_checked(db, tx, stk, search, &self.docs, &self.vec_docs, chk)
 					.await?
 			}
 		};

@@ -18,7 +18,7 @@ impl KVKey for TableRoot<'_> {
 	type ValueType = Vec<u8>;
 }
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str) -> TableRoot<'a> {
+pub fn new(ns: NamespaceId, db: DatabaseId, tb: &str) -> TableRoot<'_> {
 	TableRoot::new(ns, db, tb)
 }
 

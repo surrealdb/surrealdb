@@ -1329,6 +1329,10 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	let cache = ds.get_cache();
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 
+	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+	let db = txn.ensure_ns_db("test", "test", false).await?;
+	drop(txn);
+
 	// Define the table, set the initial uuids
 	let sql = r"DEFINE TABLE test;".to_owned();
 	let res = &mut ds.execute(&sql, &ses, None).await?;
@@ -1336,8 +1340,9 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	res.remove(0).result.unwrap();
 	// Obtain the initial uuids
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
-	let initial = txn.get_tb("test", "test", "test").await?;
-	let initial_live_query_version = cache.get_live_queries_version("test", "test", "test")?;
+	let initial = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+	let initial_live_query_version =
+		cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
 	drop(txn);
 
 	// Define some resources to refresh the UUIDs
@@ -1359,8 +1364,9 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	assert!(matches!(lqid, Value::Uuid(_)));
 	// Obtain the uuids after definitions
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
-	let after_define = txn.get_tb("test", "test", "test").await?;
-	let after_define_live_query_version = cache.get_live_queries_version("test", "test", "test")?;
+	let after_define = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+	let after_define_live_query_version =
+		cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
 	drop(txn);
 	// Compare uuids after definitions
 	assert_ne!(initial.cache_fields_ts, after_define.cache_fields_ts);
@@ -1388,8 +1394,9 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	res.remove(0).result.unwrap();
 	// Obtain the uuids after definitions
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
-	let after_remove = txn.get_tb("test", "test", "test").await?;
-	let after_remove_live_query_version = cache.get_live_queries_version("test", "test", "test")?;
+	let after_remove = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+	let after_remove_live_query_version =
+		cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
 	drop(txn);
 	// Compare uuids after definitions
 	assert_ne!(after_define.cache_fields_ts, after_remove.cache_fields_ts);

@@ -125,8 +125,19 @@ mod implementation {
 			.transaction(TransactionType::Read, LockType::Optimistic)
 			.await
 			.map_err(ResponseError)?;
+
+		let db = tx.ensure_ns_db(&nsv, &dbv, false).await.map_err(ResponseError)?;
 		// Attempt to get the model definition
-		let info = tx.get_db_model(&nsv, &dbv, &name, &version).await.map_err(ResponseError)?;
+		let info = match tx
+			.get_db_model(db.namespace_id, db.database_id, &name, &version)
+			.await
+			.map_err(ResponseError)?
+		{
+			Some(info) => info,
+			None => {
+				return Err(NetError::NotFound(format!("Model {name} {version} not found")).into());
+			}
+		};
 		// Calculate the path of the model file
 		let path = format!("ml/{nsv}/{dbv}/{name}-{version}-{}.surml", info.hash);
 		// Export the file data in to the store

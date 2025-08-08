@@ -36,7 +36,7 @@ impl Cf<'_> {
 }
 
 #[expect(unused)]
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, ts: u64, tb: &'a str) -> Cf<'a> {
+pub fn new(ns: NamespaceId, db: DatabaseId, ts: u64, tb: &str) -> Cf<'_> {
 	Cf::new(ns, db, VersionStamp::from_u64(ts), tb)
 }
 
@@ -180,7 +180,6 @@ mod tests {
 		);
 		let enc = Cf::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02#\x00\x00\x00\x00\x00\x00\x00\x00\x30\x39*test\x00");
-
 
 		let val = Cf::new(
 			NamespaceId(1),

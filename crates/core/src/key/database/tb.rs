@@ -26,7 +26,7 @@ impl KVKey for Tb<'_> {
 	type ValueType = TableDefinition;
 }
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str) -> Tb<'a> {
+pub fn new(ns: NamespaceId, db: DatabaseId, tb: &str) -> Tb<'_> {
 	Tb::new(ns, db, tb)
 }
 

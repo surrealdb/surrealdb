@@ -25,7 +25,7 @@ impl KVKey for Pa<'_> {
 	type ValueType = DefineParamStatement;
 }
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, pa: &'a str) -> Pa<'a> {
+pub fn new(ns: NamespaceId, db: DatabaseId, pa: &str) -> Pa<'_> {
 	Pa::new(ns, db, pa)
 }
 

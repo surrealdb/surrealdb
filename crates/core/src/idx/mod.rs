@@ -62,10 +62,10 @@ struct Inner {
 }
 
 impl IndexKeyBase {
-	pub(crate) fn new(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str) -> Self {
+	pub fn new(ns: impl Into<NamespaceId>, db: impl Into<DatabaseId>, tb: &str, ix: &str) -> Self {
 		Self(Arc::new(Inner {
-			ns,
-			db,
+			ns: ns.into(),
+			db: db.into(),
 			tb: tb.to_string(),
 			ix: ix.to_string(),
 		}))

@@ -1,6 +1,6 @@
-use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
+use crate::catalog::DatabaseDefinition;
 use crate::ctx::Context;
-use crate::dbs::{Iterable, Options};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Cond, FlowResultExt as _, Thing, Value};
 use crate::idx::docids::DocId;
@@ -188,7 +188,8 @@ impl CheckerCacheEntry {
 		if let Some(rid) = rid {
 			let rid = Arc::new(rid);
 			let txn = ctx.tx();
-			let val = txn.get_record(db.namespace_id, db.database_id, &rid.tb, &rid.id, None).await?;
+			let val =
+				txn.get_record(db.namespace_id, db.database_id, &rid.tb, &rid.id, None).await?;
 			if !val.is_none_or_null() {
 				let (value, truthy) = {
 					let mut cursor_doc = CursorDoc {
@@ -309,9 +310,15 @@ impl HnswCondChecker<'_> {
 				Entry::Occupied(e) => e.get().truthy,
 				Entry::Vacant(e) => {
 					let rid = docs.get_thing(tx, doc_id).await?;
-					let ent =
-						CheckerCacheEntry::build(stk, db, self.ctx, self.opt, rid, self.cond.as_ref())
-							.await?;
+					let ent = CheckerCacheEntry::build(
+						stk,
+						db,
+						self.ctx,
+						self.opt,
+						rid,
+						self.cond.as_ref(),
+					)
+					.await?;
 					let truthy = ent.truthy;
 					e.insert(ent);
 					truthy

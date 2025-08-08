@@ -15,7 +15,7 @@ pub(crate) mod ns {
 		type ValueType = NamespaceDefinition;
 	}
 
-	pub fn new<'a>(ns: &'a str) -> CatalogNamespaceKey<'a> {
+	pub fn new(ns: &str) -> CatalogNamespaceKey<'_> {
 		CatalogNamespaceKey::new(ns)
 	}
 

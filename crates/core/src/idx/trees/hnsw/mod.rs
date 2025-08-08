@@ -356,6 +356,7 @@ where
 		}
 	}
 
+	#[expect(clippy::too_many_arguments)]
 	async fn knn_search_checked(
 		&self,
 		db: &DatabaseDefinition,
@@ -377,7 +378,7 @@ where
 				);
 				let w = self
 					.layer0
-					.search_single_checked(&db, tx, stk, &search_ctx, &ep_pt, ep_dist, ep_id, chk)
+					.search_single_checked(db, tx, stk, &search_ctx, &ep_pt, ep_dist, ep_id, chk)
 					.await?;
 				return Ok(w.to_vec_limit(search.k));
 			}
@@ -436,7 +437,7 @@ where
 
 #[cfg(test)]
 mod tests {
-	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 	use crate::ctx::{Context, MutableContext};
 	use crate::expr::index::{Distance, HnswParams, VectorType};
 	use crate::expr::{Id, Value};
@@ -649,6 +650,7 @@ mod tests {
 
 	async fn find_collection_hnsw_index(
 		tx: &Transaction,
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		h: &mut HnswIndex,
 		collection: &TestCollection,
@@ -658,7 +660,7 @@ mod tests {
 			for knn in 1..max_knn {
 				let mut chk = HnswConditionChecker::new();
 				let search = HnswSearch::new(obj.clone(), knn, 500);
-				let res = h.search(tx, stk, &search, &mut chk).await.unwrap();
+				let res = h.search(db, tx, stk, &search, &mut chk).await.unwrap();
 				if knn == 1 && res.docs.len() == 1 && res.docs[0].1 > 0.0 {
 					let docs: Vec<DocId> = res.docs.iter().map(|(d, _)| *d).collect();
 					if collection.is_unique() {
@@ -751,9 +753,12 @@ mod tests {
 			let mut stack = reblessive::tree::TreeStack::new();
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
 			let tx = ctx.tx();
+
+			let db = tx.ensure_ns_db("myns", "mydb", false).await.unwrap();
+
 			stack
 				.enter(|stk| async {
-					find_collection_hnsw_index(&tx, stk, &mut h, &collection).await;
+					find_collection_hnsw_index(&tx, &db, stk, &mut h, &collection).await;
 				})
 				.finish()
 				.await;
@@ -899,7 +904,9 @@ mod tests {
 							let search = HnswSearch::new(pt.clone(), knn, efs);
 							let ctx = new_ctx(&ds, TransactionType::Read).await;
 							let tx = ctx.tx();
-							let hnsw_res = h.search(&tx, stk, &search, &mut chk).await.unwrap();
+							let db = tx.ensure_ns_db("myns", "mydb", false).await.unwrap();
+							let hnsw_res =
+								h.search(&db, &tx, stk, &search, &mut chk).await.unwrap();
 							assert_eq!(hnsw_res.docs.len(), knn, "Different size - knn: {knn}",);
 							let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
 							let rec = brute_force_res.recall(&hnsw_res);

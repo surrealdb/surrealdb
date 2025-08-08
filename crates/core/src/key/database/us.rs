@@ -26,7 +26,7 @@ impl KVKey for Us<'_> {
 	type ValueType = DefineUserStatement;
 }
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, user: &'a str) -> Us<'a> {
+pub fn new(ns: NamespaceId, db: DatabaseId, user: &str) -> Us<'_> {
 	Us::new(ns, db, user)
 }
 

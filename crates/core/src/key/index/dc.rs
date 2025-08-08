@@ -73,7 +73,6 @@ impl<'a> Dc<'a> {
 	/// * `doc_id` - The document ID being tracked
 	/// * `nid` - Node ID for distributed transaction tracking
 	/// * `uid` - Transaction ID for concurrency control
-	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
 		ns: NamespaceId,
 		db: DatabaseId,

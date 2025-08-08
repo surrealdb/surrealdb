@@ -241,7 +241,7 @@ pub async fn process_tbs(
                 })
             },
         )
-        .description(if let Some(c) = &tb.comment { format!("{c}") } else { format!("Generated from table `{}`\nallows querying a table with filters", tb.name) })
+        .description(if let Some(c) = &tb.comment { c.to_string() } else { format!("Generated from table `{}`\nallows querying a table with filters", tb.name) })
         .argument(limit_input!())
         .argument(start_input!())
         .argument(InputValue::new("order", TypeRef::named(&table_order_name)))
@@ -289,7 +289,7 @@ pub async fn process_tbs(
 				},
 			)
 			.description(if let Some(c) = &tb.comment {
-				format!("{c}")
+				c.to_string()
 			} else {
 				format!(
 					"Generated from table `{}`\nallows querying a single record in a table by ID",

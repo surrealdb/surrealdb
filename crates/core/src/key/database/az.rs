@@ -26,7 +26,7 @@ impl KVKey for Az<'_> {
 	type ValueType = DefineAnalyzerStatement;
 }
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, az: &'a str) -> Az<'a> {
+pub fn new(ns: NamespaceId, db: DatabaseId, az: &str) -> Az<'_> {
 	Az::new(ns, db, az)
 }
 

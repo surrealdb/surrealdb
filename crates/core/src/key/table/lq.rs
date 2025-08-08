@@ -32,7 +32,7 @@ impl KVKey for Lq<'_> {
 	type ValueType = LiveStatement;
 }
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, lq: Uuid) -> Lq<'a> {
+pub fn new(ns: NamespaceId, db: DatabaseId, tb: &str, lq: Uuid) -> Lq<'_> {
 	Lq::new(ns, db, tb, lq)
 }
 

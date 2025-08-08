@@ -76,7 +76,7 @@ impl<'a> Tt<'a> {
 	/// * `nid` - Node ID for distributed transaction tracking
 	/// * `uid` - Transaction ID for concurrency control
 	/// * `add` - Whether this is an addition (true) or removal (false) operation
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	pub(crate) fn new(
 		ns: NamespaceId,
 		db: DatabaseId,

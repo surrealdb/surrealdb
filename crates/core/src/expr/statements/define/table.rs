@@ -104,7 +104,7 @@ impl DefineTableStatement {
 			view: self.view.clone().map(|v| v.to_definition()),
 			permissions: self.permissions.clone(),
 			comment: self.comment.clone().map(|c| c.to_string()),
-			changefeed: self.changefeed.clone(),
+			changefeed: self.changefeed,
 
 			cache_fields_ts: cache_ts,
 			cache_events_ts: cache_ts,

@@ -70,7 +70,7 @@ impl DefineDatabaseStatement {
 			database_id,
 			name: self.name.to_raw(),
 			comment: self.comment.clone().map(|s| s.to_raw()),
-			changefeed: self.changefeed.clone(),
+			changefeed: self.changefeed,
 		};
 		txn.set(&catalog_key, &db_def, None).await?;
 

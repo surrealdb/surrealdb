@@ -6,7 +6,7 @@ pub(crate) mod plan;
 pub(in crate::idx) mod rewriter;
 pub(in crate::idx) mod tree;
 
-use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
+use crate::catalog::DatabaseDefinition;
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::expr::with::With;
@@ -69,11 +69,7 @@ pub(crate) enum GrantedPermission {
 }
 
 impl<'a> StatementContext<'a> {
-	pub(crate) fn new(
-		ctx: &'a Context,
-		opt: &'a Options,
-		stm: &'a Statement<'a>,
-	) -> Result<Self> {
+	pub(crate) fn new(ctx: &'a Context, opt: &'a Options, stm: &'a Statement<'a>) -> Result<Self> {
 		let is_perm = opt.check_perms(stm.into())?;
 		Ok(Self {
 			ctx,

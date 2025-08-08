@@ -41,6 +41,12 @@ impl Display for NamespaceId {
 	}
 }
 
+impl From<u32> for NamespaceId {
+	fn from(value: u32) -> Self {
+		Self(value)
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

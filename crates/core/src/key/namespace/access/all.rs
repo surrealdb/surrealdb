@@ -19,7 +19,7 @@ impl KVKey for AccessRoot<'_> {
 	type ValueType = Vec<u8>;
 }
 
-pub fn new<'a>(ns: NamespaceId, ac: &'a str) -> AccessRoot<'a> {
+pub fn new(ns: NamespaceId, ac: &str) -> AccessRoot<'_> {
 	AccessRoot::new(ns, ac)
 }
 

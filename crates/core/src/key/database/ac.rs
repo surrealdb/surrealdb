@@ -25,7 +25,7 @@ impl KVKey for Ac<'_> {
 	type ValueType = DefineAccessStatement;
 }
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, ac: &'a str) -> Ac<'a> {
+pub fn new(ns: NamespaceId, db: DatabaseId, ac: &str) -> Ac<'_> {
 	Ac::new(ns, db, ac)
 }
 

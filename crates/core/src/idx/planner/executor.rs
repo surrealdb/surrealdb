@@ -131,6 +131,7 @@ impl IteratorEntry {
 
 impl InnerQueryExecutor {
 	#[expect(clippy::mutable_key_type)]
+	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn new(
 		db: &DatabaseDefinition,
 		stk: &mut Stk,
@@ -162,7 +163,12 @@ impl InnerQueryExecutor {
 						}
 						Entry::Vacant(e) => {
 							let ix: &DefineIndexStatement = e.key();
-							let ikb = IndexKeyBase::new(db.namespace_id, db.database_id, &ix.what, &ix.name);
+							let ikb = IndexKeyBase::new(
+								db.namespace_id,
+								db.database_id,
+								&ix.what,
+								&ix.name,
+							);
 							let si = SearchIndex::new(
 								ctx,
 								db.namespace_id,
@@ -202,7 +208,12 @@ impl InnerQueryExecutor {
 						}
 						Entry::Vacant(e) => {
 							let ix: &DefineIndexStatement = e.key();
-							let ikb = IndexKeyBase::new(db.namespace_id, db.database_id, &ix.what, &ix.name);
+							let ikb = IndexKeyBase::new(
+								db.namespace_id,
+								db.database_id,
+								&ix.what,
+								&ix.name,
+							);
 							let ft = FullTextIndex::new(
 								opt.id()?,
 								ctx.get_index_stores(),
@@ -253,14 +264,27 @@ impl InnerQueryExecutor {
 							}
 							Entry::Vacant(e) => {
 								let ix: &DefineIndexStatement = e.key();
-								let ikb = IndexKeyBase::new(db.namespace_id, db.database_id, &ix.what, &ix.name);
+								let ikb = IndexKeyBase::new(
+									db.namespace_id,
+									db.database_id,
+									&ix.what,
+									&ix.name,
+								);
 								let tx = ctx.tx();
 								let mti =
 									MTreeIndex::new(&tx, ikb, p, TransactionType::Read).await?;
 								drop(tx);
-								let entry =
-									MtEntry::new(db, stk, ctx, opt, &mti, a, *k, knn_condition.clone())
-										.await?;
+								let entry = MtEntry::new(
+									db,
+									stk,
+									ctx,
+									opt,
+									&mti,
+									a,
+									*k,
+									knn_condition.clone(),
+								)
+								.await?;
 								e.insert(PerIndexReferenceIndex::MTree(mti));
 								Some(entry)
 							}
@@ -294,13 +318,15 @@ impl InnerQueryExecutor {
 								}
 							}
 							Entry::Vacant(e) => {
-								let hi =
-									ctx.get_index_stores().get_index_hnsw(db.namespace_id, db.database_id, ctx, ixr, p).await?;
+								let hi = ctx
+									.get_index_stores()
+									.get_index_hnsw(db.namespace_id, db.database_id, ctx, ixr, p)
+									.await?;
 								// Ensure the local HNSW index is up to date with the KVS
 								hi.write().await.check_state(&ctx.tx()).await?;
 								// Now we can execute the request
 								let entry = HnswEntry::new(
-									&db,
+									db,
 									stk,
 									ctx,
 									opt,
@@ -1154,7 +1180,7 @@ impl QueryExecutor {
 		Ok(false)
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	async fn search_matches_with_value(
 		&self,
 		stk: &mut Stk,
@@ -1183,7 +1209,7 @@ impl QueryExecutor {
 		Ok(se.0.query_terms_set.is_subset(&t))
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	async fn fulltext_matches_with_value(
 		&self,
 		_stk: &mut Stk,
@@ -1413,6 +1439,7 @@ pub(super) struct MtEntry {
 }
 
 impl MtEntry {
+	#[expect(clippy::too_many_arguments)]
 	async fn new(
 		db: &DatabaseDefinition,
 		stk: &mut Stk,

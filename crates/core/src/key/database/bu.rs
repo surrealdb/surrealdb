@@ -26,7 +26,7 @@ impl KVKey for BucketKey<'_> {
 	type ValueType = BucketDefinition;
 }
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, bu: &'a str) -> BucketKey<'a> {
+pub fn new(ns: NamespaceId, db: DatabaseId, bu: &str) -> BucketKey<'_> {
 	BucketKey::new(ns, db, bu)
 }
 

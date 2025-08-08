@@ -1,9 +1,9 @@
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement};
 use crate::err::Error;
-use crate::catalog::{DatabaseId, NamespaceId};
 use crate::expr::dir::Dir;
 use crate::expr::id::range::IdRange;
 use crate::expr::{Edges, Table, Thing, Value};
@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::vec;
 
 impl Iterable {
+	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn iterate(
 		self,
 		stk: &mut Stk,
@@ -97,8 +98,6 @@ impl Collected {
 		self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ctx: &Context,
-		opt: &Options,
 		txn: &Transaction,
 		rid_only: bool,
 	) -> Result<Processed> {
@@ -113,10 +112,10 @@ impl Collected {
 				o,
 			} => Self::process_relatable(ns, db, txn, f, v, w, o, rid_only).await,
 			Self::Thing(thing) => Self::process_thing(ns, db, txn, thing, rid_only).await,
-			Self::Yield(table) => Self::process_yield(ns, db, table, rid_only).await,
+			Self::Yield(table) => Self::process_yield(table).await,
 			Self::Value(value) => Ok(Self::process_value(value)),
 			Self::Defer(key) => Self::process_defer(key).await,
-			Self::Mergeable(v, o) => Self::process_mergeable(ns, db, opt, txn, v, o, rid_only).await,
+			Self::Mergeable(v, o) => Self::process_mergeable(v, o).await,
 			Self::KeyVal(key, val) => Ok(Self::process_key_val(key, val)?),
 			Self::Count(c) => Ok(Self::process_count(c)),
 			Self::IndexItem(i) => Self::process_index_item(ns, db, txn, i, rid_only).await,
@@ -183,6 +182,7 @@ impl Collected {
 		Ok(pro)
 	}
 
+	#[expect(clippy::too_many_arguments)]
 	async fn process_relatable(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -238,12 +238,7 @@ impl Collected {
 		Ok(pro)
 	}
 
-	async fn process_yield(
-		ns: NamespaceId,
-		db: DatabaseId,
-		v: Table,
-		rid_only: bool,
-	) -> Result<Processed> {
+	async fn process_yield(v: Table) -> Result<Processed> {
 		// Pass the value through
 		let pro = Processed {
 			rs: RecordStrategy::KeysAndValues,
@@ -266,9 +261,7 @@ impl Collected {
 		}
 	}
 
-	async fn process_defer(
-		v: Thing,
-	) -> Result<Processed> {
+	async fn process_defer(v: Thing) -> Result<Processed> {
 		// Process the document record
 		let pro = Processed {
 			rs: RecordStrategy::KeysAndValues,
@@ -280,19 +273,7 @@ impl Collected {
 		Ok(pro)
 	}
 
-	async fn process_mergeable(
-		ns: NamespaceId,
-		db: DatabaseId,
-		opt: &Options,
-		txn: &Transaction,
-		v: Thing,
-		o: Value,
-		rid_only: bool,
-	) -> Result<Processed> {
-		// if it is skippable we only need the record id
-		if !rid_only {
-			// TODO: Check that the table exists
-		}
+	async fn process_mergeable(v: Thing, o: Value) -> Result<Processed> {
 		// Process the document record
 		let pro = Processed {
 			rs: RecordStrategy::KeysAndValues,
@@ -381,10 +362,15 @@ pub(super) struct ConcurrentCollector<'a> {
 	ite: &'a mut Iterator,
 }
 impl Collector for ConcurrentCollector<'_> {
-	async fn collect(&mut self, ns: NamespaceId, db: DatabaseId, collected: Collected) -> Result<()> {
+	async fn collect(
+		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		collected: Collected,
+	) -> Result<()> {
 		// if it is skippable don't need to process the document
 		if self.ite.skippable() == 0 {
-			let pro = collected.process(ns, db, self.ctx, self.opt, self.txn, false).await?;
+			let pro = collected.process(ns, db, self.txn, false).await?;
 			self.ite.process(self.stk, self.ctx, self.opt, self.stm, pro).await?;
 		} else {
 			self.ite.skipped(1);
@@ -403,11 +389,16 @@ pub(super) struct ConcurrentDistinctCollector<'a> {
 }
 
 impl Collector for ConcurrentDistinctCollector<'_> {
-	async fn collect(&mut self, ns: NamespaceId, db: DatabaseId, collected: Collected) -> Result<()> {
+	async fn collect(
+		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		collected: Collected,
+	) -> Result<()> {
 		let skippable = self.coll.ite.skippable() > 0;
 		// If it is skippable, we just need to collect the record id (if any)
 		// to ensure that distinct can be checked.
-		let pro = collected.process(ns, db, self.coll.ctx, self.coll.opt, self.coll.txn, skippable).await?;
+		let pro = collected.process(ns, db, self.coll.txn, skippable).await?;
 		if !self.dis.check_already_processed(&pro) {
 			if !skippable {
 				self.coll
@@ -427,7 +418,12 @@ impl Collector for ConcurrentDistinctCollector<'_> {
 }
 
 pub(super) trait Collector {
-	async fn collect(&mut self, ns: NamespaceId, db: DatabaseId, collected: Collected) -> Result<()>;
+	async fn collect(
+		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		collected: Collected,
+	) -> Result<()>;
 
 	fn iterator(&mut self) -> &mut Iterator;
 
@@ -492,19 +488,25 @@ pub(super) trait Collector {
 							let mut ctx = MutableContext::new(ctx);
 							ctx.set_query_executor(exe.clone());
 							let ctx = ctx.freeze();
-							return self.collect_index_items(ns, db, &ctx, &v, irf, rs).await;
+							return self.collect_index_items(ns, db, &ctx, irf, rs).await;
 						}
 					}
-					self.collect_index_items(ns, db, &ctx, &v, irf, rs).await?
+					self.collect_index_items(ns, db, ctx, irf, rs).await?
 				}
-				Iterable::Mergeable(v, o) => self.collect(ns, db, Collected::Mergeable(v, o)).await?,
+				Iterable::Mergeable(v, o) => {
+					self.collect(ns, db, Collected::Mergeable(v, o)).await?
+				}
 				Iterable::Relatable(f, v, w, o) => {
-					self.collect(ns, db, Collected::Relatable {
-						f,
-						v,
-						w,
-						o,
-					})
+					self.collect(
+						ns,
+						db,
+						Collected::Relatable {
+							f,
+							v,
+							w,
+							o,
+						},
+					)
 					.await?
 				}
 			}
@@ -637,7 +639,13 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
-	async fn collect_table_count(&mut self, ns: NamespaceId, db: DatabaseId, ctx: &Context, v: &Table) -> Result<()> {
+	async fn collect_table_count(
+		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ctx: &Context,
+		v: &Table,
+	) -> Result<()> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// TODO: Check that the table exists
@@ -778,7 +786,13 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
-	async fn collect_edges(&mut self, ns: NamespaceId, db: DatabaseId, ctx: &Context, e: Edges) -> Result<()> {
+	async fn collect_edges(
+		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ctx: &Context,
+		e: Edges,
+	) -> Result<()> {
 		// Pull out options
 		let tb = &e.from.tb;
 		let id = &e.from.id;
@@ -849,7 +863,6 @@ pub(super) trait Collector {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ctx: &Context,
-		table: &Table,
 		irf: IteratorRef,
 		rs: RecordStrategy,
 	) -> Result<()> {

@@ -22,7 +22,7 @@ impl KVKey for DbAccess<'_> {
 	type ValueType = Vec<u8>;
 }
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, ac: &'a str) -> DbAccess<'a> {
+pub fn new(ns: NamespaceId, db: DatabaseId, ac: &str) -> DbAccess<'_> {
 	DbAccess::new(ns, db, ac)
 }
 

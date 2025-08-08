@@ -214,7 +214,7 @@ impl MutableContext {
 	}
 
 	/// Creates a new context from a configured datastore.
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	pub(crate) fn from_ds(
 		time_out: Option<Duration>,
 		slow_log_threshold: Option<Duration>,
@@ -298,7 +298,10 @@ impl MutableContext {
 
 	/// Get the namespace and database ids for the current context.
 	/// If the namespace or database does not exist, it will return an error.
-	pub(crate) async fn get_ns_db_ids_ro(&self, opt: &Options) -> Result<(NamespaceId, DatabaseId)> {
+	pub(crate) async fn get_ns_db_ids_ro(
+		&self,
+		opt: &Options,
+	) -> Result<(NamespaceId, DatabaseId)> {
 		let (ns, db) = opt.ns_db()?;
 		let Some(db_def) = self.tx().get_db_by_name(ns, db).await? else {
 			return Err(Error::DbNotFound {

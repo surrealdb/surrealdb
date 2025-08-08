@@ -25,7 +25,7 @@ impl KVKey for Fc<'_> {
 	type ValueType = DefineFunctionStatement;
 }
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, fc: &'a str) -> Fc<'a> {
+pub fn new(ns: NamespaceId, db: DatabaseId, fc: &str) -> Fc<'_> {
 	Fc::new(ns, db, fc)
 }
 

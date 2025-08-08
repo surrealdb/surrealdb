@@ -172,7 +172,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating with record access method `{}`", ac);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
-			let db_def = match tx.get_db_by_name(&ns, &db).await? {
+			let db_def = match tx.get_db_by_name(ns, db).await? {
 				Some(db) => db,
 				None => {
 					return Err(Error::DbNotFound {
@@ -184,7 +184,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Parse the record id
 			let mut rid: Thing = syn::thing(id)?.into();
 			// Get the database access method
-			let Some(de) = tx.get_db_access(db_def.namespace_id, db_def.database_id, &ac).await?
+			let Some(de) = tx.get_db_access(db_def.namespace_id, db_def.database_id, ac).await?
 			else {
 				return Err(Error::AccessDbNotFound {
 					ac: ac.to_string(),
@@ -252,7 +252,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to database `{}` with access method `{}`", db, ac);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
-			let db_def = match tx.get_db_by_name(&ns, &db).await? {
+			let db_def = match tx.get_db_by_name(ns, db).await? {
 				Some(db) => db,
 				None => {
 					return Err(Error::DbNotFound {
@@ -263,7 +263,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			};
 
 			// Get the database access method
-			let de = tx.get_db_access(db_def.namespace_id, db_def.database_id, &ac).await?;
+			let de = tx.get_db_access(db_def.namespace_id, db_def.database_id, ac).await?;
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 
@@ -396,7 +396,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to database `{}` with user `{}`", db, id);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
-			let db_def = match tx.get_db_by_name(&ns, &db).await? {
+			let db_def = match tx.get_db_by_name(ns, db).await? {
 				Some(db) => db,
 				None => {
 					return Err(Error::DbNotFound {
@@ -450,7 +450,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to namespace `{}` with access method `{}`", ns, ac);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
-			let ns_def = match tx.get_ns_by_name(&ns).await? {
+			let ns_def = match tx.get_ns_by_name(ns).await? {
 				Some(ns) => ns,
 				None => {
 					return Err(Error::NsNotFound {
@@ -461,7 +461,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			};
 
 			// Get the namespace access method
-			let de = tx.get_ns_access(ns_def.namespace_id, &ac).await?;
+			let de = tx.get_ns_access(ns_def.namespace_id, ac).await?;
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 
@@ -539,7 +539,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to namespace `{}` with user `{}`", ns, id);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
-			let ns_def = match tx.get_ns_by_name(&ns).await? {
+			let ns_def = match tx.get_ns_by_name(ns).await? {
 				Some(ns) => ns,
 				None => {
 					return Err(Error::NsNotFound {
@@ -549,10 +549,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				}
 			};
 			// Get the namespace user
-			let de = tx.get_ns_user(ns_def.namespace_id, id).await.map_err(|e| {
-				debug!("Error while authenticating to namespace `{ns}`: {e}");
-				Error::InvalidAuth
-			})?.ok_or(Error::InvalidAuth)?;
+			let de = tx
+				.get_ns_user(ns_def.namespace_id, id)
+				.await
+				.map_err(|e| {
+					debug!("Error while authenticating to namespace `{ns}`: {e}");
+					Error::InvalidAuth
+				})?
+				.ok_or(Error::InvalidAuth)?;
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Check the algorithm
@@ -718,7 +722,7 @@ pub async fn verify_ns_creds(
 ) -> Result<DefineUserStatement> {
 	// Create a new readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await?;
-	let ns_def = match tx.get_ns_by_name(&ns).await? {
+	let ns_def = match tx.get_ns_by_name(ns).await? {
 		Some(ns) => ns,
 		None => {
 			return Err(Error::NsNotFound {
@@ -729,10 +733,14 @@ pub async fn verify_ns_creds(
 	};
 
 	// Fetch the specified user from storage
-	let user = tx.get_ns_user(ns_def.namespace_id, user).await.map_err(|e| {
-		debug!("Error retrieving user for authentication to namespace `{ns}`: {e}");
-		Error::InvalidAuth
-	})?.ok_or(Error::InvalidAuth)?;
+	let user = tx
+		.get_ns_user(ns_def.namespace_id, user)
+		.await
+		.map_err(|e| {
+			debug!("Error retrieving user for authentication to namespace `{ns}`: {e}");
+			Error::InvalidAuth
+		})?
+		.ok_or(Error::InvalidAuth)?;
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
 	// Verify the specified password for the user
@@ -752,7 +760,7 @@ pub async fn verify_db_creds(
 ) -> Result<DefineUserStatement> {
 	// Create a new readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await?;
-	let db_def = match tx.get_db_by_name(&ns, &db).await? {
+	let db_def = match tx.get_db_by_name(ns, db).await? {
 		Some(db) => db,
 		None => {
 			return Err(Error::DbNotFound {
@@ -762,11 +770,14 @@ pub async fn verify_db_creds(
 		}
 	};
 	// Fetch the specified user from storage
-	let user =
-		tx.get_db_user(db_def.namespace_id, db_def.database_id, user).await.map_err(|e| {
+	let user = tx
+		.get_db_user(db_def.namespace_id, db_def.database_id, user)
+		.await
+		.map_err(|e| {
 			debug!("Error retrieving user for authentication to database `{ns}/{db}`: {e}");
 			Error::InvalidAuth
-		})?.ok_or(Error::InvalidAuth)?;
+		})?
+		.ok_or(Error::InvalidAuth)?;
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
 	// Verify the specified password for the user

@@ -25,7 +25,7 @@ impl KVKey for Cg<'_> {
 	type ValueType = DefineConfigStatement;
 }
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, ty: &'a str) -> Cg<'a> {
+pub fn new(ns: NamespaceId, db: DatabaseId, ty: &str) -> Cg<'_> {
 	Cg::new(ns, db, ty)
 }
 

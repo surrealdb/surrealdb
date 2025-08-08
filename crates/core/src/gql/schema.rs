@@ -40,7 +40,7 @@ pub async fn generate_schema(
 	let ns = session.ns.as_ref().ok_or(GqlError::UnspecifiedNamespace)?;
 	let db = session.db.as_ref().ok_or(GqlError::UnspecifiedDatabase)?;
 
-	let db_def = match tx.get_db_by_name(ns, &db).await? {
+	let db_def = match tx.get_db_by_name(ns, db).await? {
 		Some(db) => db,
 		None => return Err(GqlError::DbError(anyhow::anyhow!("Database not found: {ns} {db}"))),
 	};

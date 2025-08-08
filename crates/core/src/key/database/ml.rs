@@ -80,7 +80,7 @@ mod tests {
 			"1.0.0",
 		);
 		let enc = Ml::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!mltestml\01.0.0\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!mltestml\x001.0.0\0");
 	}
 
 	#[test]

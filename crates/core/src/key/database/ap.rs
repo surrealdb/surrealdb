@@ -26,7 +26,7 @@ impl KVKey for Ap<'_> {
 	type ValueType = ApiDefinition;
 }
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, ap: &'a str) -> Ap<'a> {
+pub fn new(ns: NamespaceId, db: DatabaseId, ap: &str) -> Ap<'_> {
 	Ap::new(ns, db, ap)
 }
 

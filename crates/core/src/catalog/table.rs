@@ -1,7 +1,7 @@
 use crate::{
 	catalog::{DatabaseId, NamespaceId},
 	kvs::impl_kv_value_revisioned,
-	sql::{statements::DefineTableStatement, ToSql},
+	sql::{ToSql, statements::DefineTableStatement},
 };
 use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
@@ -108,25 +108,25 @@ impl TableDefinition {
 		matches!(self.kind, TableKind::Relation(_) | TableKind::Any)
 	}
 
-    fn to_sql_definition(&self) -> DefineTableStatement {
-        DefineTableStatement {
-            id: Some(self.table_id.0),
-            name: self.name.clone().into(),
-            drop: self.drop,
-            full: self.schemafull,
-            view: self.view.clone().map(|v| v.to_sql_definition()),
-            permissions: self.permissions.clone().into(),
-            changefeed: self.changefeed.clone().map(|v| v.into()),
-            comment: self.comment.clone().map(|v| v.into()),
-            if_not_exists: false,
-            kind: self.kind.clone().into(),
-            overwrite: false,
-            cache_fields_ts: self.cache_fields_ts,
-            cache_events_ts: self.cache_events_ts,
-            cache_tables_ts: self.cache_tables_ts,
-            cache_indexes_ts: self.cache_indexes_ts,
-        }
-    }
+	fn to_sql_definition(&self) -> DefineTableStatement {
+		DefineTableStatement {
+			id: Some(self.table_id.0),
+			name: self.name.clone().into(),
+			drop: self.drop,
+			full: self.schemafull,
+			view: self.view.clone().map(|v| v.to_sql_definition()),
+			permissions: self.permissions.clone().into(),
+			changefeed: self.changefeed.map(|v| v.into()),
+			comment: self.comment.clone().map(|v| v.into()),
+			if_not_exists: false,
+			kind: self.kind.clone().into(),
+			overwrite: false,
+			cache_fields_ts: self.cache_fields_ts,
+			cache_events_ts: self.cache_events_ts,
+			cache_tables_ts: self.cache_tables_ts,
+			cache_indexes_ts: self.cache_indexes_ts,
+		}
+	}
 }
 
 impl ToSql for TableDefinition {

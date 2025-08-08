@@ -64,6 +64,6 @@ impl Cast {
 
 impl fmt::Display for Cast {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "<{}> {}", self.0.to_sql(), self.1.to_string())
+		write!(f, "<{}> {}", self.0.to_sql(), self.1)
 	}
 }

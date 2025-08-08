@@ -322,21 +322,17 @@ pub async fn create_grant(
 		Base::Root => txn.expect_root_access(&stmt.ac).await?,
 		Base::Ns => {
 			let ns = ctx.get_ns_id_ro(opt).await?;
-			txn.get_ns_access(ns, &stmt.ac).await?.ok_or_else(|| {
-				Error::AccessNsNotFound {
-					ac: stmt.ac.to_string(),
-					ns: ns.to_string(),
-				}
+			txn.get_ns_access(ns, &stmt.ac).await?.ok_or_else(|| Error::AccessNsNotFound {
+				ac: stmt.ac.to_string(),
+				ns: ns.to_string(),
 			})?
 		}
 		Base::Db => {
 			let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
-			txn.get_db_access(ns, db, &stmt.ac).await?.ok_or_else(|| {
-				Error::AccessDbNotFound {
-					ac: stmt.ac.to_string(),
-					ns: ns.to_string(),
-					db: db.to_string(),
-				}
+			txn.get_db_access(ns, db, &stmt.ac).await?.ok_or_else(|| Error::AccessDbNotFound {
+				ac: stmt.ac.to_string(),
+				ns: ns.to_string(),
+				db: db.to_string(),
 			})?
 		}
 		_ => {

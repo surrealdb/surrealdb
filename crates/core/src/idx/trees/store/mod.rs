@@ -4,7 +4,7 @@ mod lru;
 mod mapper;
 pub(crate) mod tree;
 
-use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::expr::Index;

@@ -1,6 +1,4 @@
 use crate::catalog::DatabaseDefinition;
-use crate::catalog::DatabaseId;
-use crate::catalog::NamespaceId;
 use crate::ctx::Context;
 use ahash::{HashMap, HashMapExt, HashSet};
 use anyhow::Result;
@@ -1503,7 +1501,13 @@ mod tests {
 	use anyhow::Result;
 	use reblessive::tree::Stk;
 	use std::collections::VecDeque;
+	use std::sync::Arc;
 	use test_log::test;
+
+	async fn get_db(ds: &Datastore) -> Arc<DatabaseDefinition> {
+		let tx = ds.transaction(TransactionType::Read, Optimistic).await.unwrap();
+		tx.ensure_ns_db("myns", "mydb", false).await.unwrap()
+	}
 
 	async fn new_operation(
 		ds: &Datastore,
@@ -1768,6 +1772,7 @@ mod tests {
 					vector_type,
 				);
 				let ds = Datastore::new("memory").await?;
+				let db = get_db(&ds).await;
 
 				let mut t = MTree::new(MState::new(*capacity), distance.clone());
 
@@ -1789,13 +1794,15 @@ mod tests {
 					insert_collection_batch(stk, &ds, &mut t, &collection, cache_size).await?
 				};
 				if check_find {
-					find_collection(db, stk, &ds, &doc_ids, &mut t, &collection, cache_size).await?;
+					find_collection(&db, stk, &ds, &doc_ids, &mut t, &collection, cache_size)
+						.await?;
 				}
 				if check_full {
-					check_full_knn(db, stk, &ds, &doc_ids, &mut t, &map, cache_size).await?;
+					check_full_knn(&db, stk, &ds, &doc_ids, &mut t, &map, cache_size).await?;
 				}
 				if check_delete {
-					delete_collection(db, stk, &ds, &doc_ids, &mut t, &collection, cache_size).await?;
+					delete_collection(&db, stk, &ds, &doc_ids, &mut t, &collection, cache_size)
+						.await?;
 				}
 			}
 		}

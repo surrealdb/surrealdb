@@ -71,6 +71,7 @@ impl Document {
 		Ok(())
 	}
 
+	#[expect(clippy::too_many_arguments)]
 	async fn one_index(
 		db: &DatabaseDefinition,
 		stk: &mut Stk,

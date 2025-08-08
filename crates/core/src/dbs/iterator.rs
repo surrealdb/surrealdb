@@ -347,6 +347,7 @@ impl Iterator {
 	}
 
 	/// Process the records and output
+	#[expect(clippy::too_many_arguments)]
 	pub async fn output(
 		&mut self,
 		stk: &mut Stk,
@@ -391,7 +392,18 @@ impl Iterator {
 					c.set_iteration_stage(s);
 					cancel_ctx = c.freeze();
 					if !is_last {
-						self.clone().iterate(stk, ns, db, &cancel_ctx, opt, stm, is_specific_permission, None).await?;
+						self.clone()
+							.iterate(
+								stk,
+								ns,
+								db,
+								&cancel_ctx,
+								opt,
+								stm,
+								is_specific_permission,
+								None,
+							)
+							.await?;
 					};
 				}
 				is_specific_permission
@@ -399,7 +411,17 @@ impl Iterator {
 				false
 			};
 			// Process all documents
-			self.iterate(stk, ns, db, &cancel_ctx, opt, stm, is_specific_permission, plan.explanation.as_mut()).await?;
+			self.iterate(
+				stk,
+				ns,
+				db,
+				&cancel_ctx,
+				opt,
+				stm,
+				is_specific_permission,
+				plan.explanation.as_mut(),
+			)
+			.await?;
 			// Return any document errors
 			if let Some(e) = self.error.take() {
 				return Err(e);
@@ -411,7 +433,8 @@ impl Iterator {
 					// Ingest the pre-defined guaranteed record yield
 					self.ingest(guaranteed);
 					// Process the pre-defined guaranteed document
-					self.iterate(stk, ns, db, &cancel_ctx, opt, stm, is_specific_permission, None).await?;
+					self.iterate(stk, ns, db, &cancel_ctx, opt, stm, is_specific_permission, None)
+						.await?;
 				}
 			}
 			// Process any SPLIT AT clause
@@ -629,6 +652,7 @@ impl Iterator {
 		Ok(())
 	}
 
+	#[expect(clippy::too_many_arguments)]
 	async fn iterate(
 		&mut self,
 		stk: &mut Stk,

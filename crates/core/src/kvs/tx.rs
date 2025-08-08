@@ -1915,7 +1915,7 @@ impl Transaction {
 
 	pub async fn check_ns_db_tb(&self, ns: &str, db: &str, tb: &str, strict: bool) -> Result<()> {
 		if !strict {
-			return Ok(())
+			return Ok(());
 		}
 
 		let db = match self.get_db_by_name(ns, db).await? {
@@ -2103,7 +2103,7 @@ impl Transaction {
 						.await
 						.get_next_tb_id(db_def.namespace_id, db_def.database_id)
 						.await?,
-					tb.to_owned().into(),
+					tb.to_owned(),
 				);
 				self.put_tb(ns, db, tb_def).await
 			}

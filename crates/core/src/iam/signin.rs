@@ -186,7 +186,7 @@ pub async fn db_access(
 				Some((db_def.namespace_id, ns)),
 				Some((db_def.database_id, db)),
 				Arc::clone(&access),
-				&at,
+				at,
 				key,
 			)
 			.await
@@ -442,7 +442,7 @@ pub async fn ns_access(
 				Some((ns_def.namespace_id, ns)),
 				None,
 				Arc::clone(&access),
-				&at,
+				at,
 				key,
 			)
 			.await
@@ -657,8 +657,9 @@ pub async fn signin_bearer(
 				Error::InvalidAuth
 			}),
 			(None, Some(_)) => bail!(Error::NsEmpty),
-		}?.ok_or(Error::InvalidAuth)?;
-		
+		}?
+		.ok_or(Error::InvalidAuth)?;
+
 		// Ensure that the transaction is cancelled.
 		tx.cancel().await?;
 		user.roles.clone()
@@ -708,11 +709,11 @@ pub async fn signin_bearer(
 				access::Subject::Record(rid) => {
 					if let (Some((_, ns)), Some((_, db))) = (&ns, &db) {
 						// Revoke the used refresh token.
-						revoke_refresh_token_record(kvs, gr.id.clone(), gr.ac.clone(), &ns, &db)
+						revoke_refresh_token_record(kvs, gr.id.clone(), gr.ac.clone(), ns, db)
 							.await?;
 						// Create a new refresh token to replace it.
 						let refresh =
-							create_refresh_token_record(kvs, gr.ac.clone(), &ns, &db, rid.clone())
+							create_refresh_token_record(kvs, gr.ac.clone(), ns, db, rid.clone())
 								.await?;
 						Some(refresh)
 					} else {

@@ -418,7 +418,8 @@ impl Building {
 		{
 			self.set_status(BuildingStatus::Cleaning).await;
 			let ctx = self.new_write_tx_ctx().await?;
-			let key = crate::key::index::all::new(self.ns, self.db, self.ikb.table(), self.ikb.index());
+			let key =
+				crate::key::index::all::new(self.ns, self.db, self.ikb.table(), self.ikb.index());
 			let tx = ctx.tx();
 			tx.delp(&key).await?;
 			tx.commit().await?;

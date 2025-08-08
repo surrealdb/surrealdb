@@ -132,6 +132,7 @@ impl HnswFlavor {
 			HnswFlavor::Hset(h) => h.knn_search(tx, search).await,
 		}
 	}
+	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn knn_search_checked(
 		&self,
 		db: &DatabaseDefinition,

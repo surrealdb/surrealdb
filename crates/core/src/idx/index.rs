@@ -31,6 +31,7 @@ pub(crate) struct IndexOperation<'a> {
 }
 
 impl<'a> IndexOperation<'a> {
+	#[expect(clippy::too_many_arguments)]
 	pub(crate) fn new(
 		ctx: &'a Context,
 		opt: &'a Options,
@@ -230,7 +231,11 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_hnsw(&mut self, p: &HnswParams) -> Result<()> {
 		let txn = self.ctx.tx();
-		let hnsw = self.ctx.get_index_stores().get_index_hnsw(self.ns, self.db, self.ctx, self.ix, p).await?;
+		let hnsw = self
+			.ctx
+			.get_index_stores()
+			.get_index_hnsw(self.ns, self.db, self.ctx, self.ix, p)
+			.await?;
 		let mut hnsw = hnsw.write().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {

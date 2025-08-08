@@ -326,10 +326,13 @@ impl InfoStatement {
 						let ns = txn.expect_ns_by_name(opt.ns()?).await?;
 						match txn.get_ns_user(ns.namespace_id, user).await? {
 							Some(user) => user,
-							None => return Err(Error::UserNsNotFound {
-								name: user.to_string(),
-								ns: ns.name.clone()
-							}.into()),
+							None => {
+								return Err(Error::UserNsNotFound {
+									name: user.to_string(),
+									ns: ns.name.clone(),
+								}
+								.into());
+							}
 						}
 					}
 					Base::Db => {
@@ -339,15 +342,16 @@ impl InfoStatement {
 								name: user.to_string(),
 								ns: ns.to_string(),
 								db: db.to_string(),
-							}.into())
+							}
+							.into());
 						};
-						txn.get_db_user(db_def.namespace_id, db_def.database_id, user).await?.ok_or_else(|| {
-							Error::UserDbNotFound {
+						txn.get_db_user(db_def.namespace_id, db_def.database_id, user)
+							.await?
+							.ok_or_else(|| Error::UserDbNotFound {
 								name: user.to_string(),
 								ns: ns.to_string(),
 								db: db.to_string(),
-							}
-						})?
+							})?
 					}
 					_ => bail!(Error::InvalidLevel(base.to_string())),
 				};
