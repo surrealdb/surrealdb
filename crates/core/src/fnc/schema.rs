@@ -2,8 +2,9 @@ pub mod table {
 	use crate::ctx::Context;
 	use crate::dbs::Options;
 	use crate::err::Error;
-	use crate::expr::{Base, Value};
+	use crate::expr::Base;
 	use crate::iam::{Action, ResourceKind};
+	use crate::val::Value;
 	use anyhow::Result;
 
 	pub async fn exists(

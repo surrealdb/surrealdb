@@ -1,8 +1,6 @@
-use crate::syn::{
-	error::SyntaxError,
-	lexer::Lexer,
-	token::{Span, Token},
-};
+use crate::syn::error::SyntaxError;
+use crate::syn::lexer::Lexer;
+use crate::syn::token::{Span, Token};
 
 mod bytes;
 mod datetime;

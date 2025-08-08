@@ -1,16 +1,14 @@
 #![allow(clippy::regex_creation_in_loops)]
 
-mod parse;
-use parse::Parse;
 mod helpers;
 use helpers::new_ds;
 use regex::Regex;
 use surrealdb::dbs::capabilities::ExperimentalTarget;
 use surrealdb::dbs::{Capabilities, Session};
-use surrealdb::expr::Value as ExprValue;
 use surrealdb::iam::Role;
 use surrealdb::sql::Base;
 use surrealdb_core::iam::Level;
+use surrealdb_core::val::Array;
 use tokio::time::Duration;
 
 struct TestLevel {
@@ -980,7 +978,7 @@ async fn permissions_access_grant() {
 
 				if should_succeed {
 					assert!(res.is_ok(), "{}: {:?}", msg, res);
-					assert_ne!(res.unwrap(), ExprValue::parse("[]"), "{}", msg);
+					assert_ne!(res.unwrap(), Array::new().into(), "{}", msg);
 				} else {
 					let err = res.unwrap_err().to_string();
 					assert!(

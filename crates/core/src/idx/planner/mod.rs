@@ -9,8 +9,9 @@ pub(in crate::idx) mod tree;
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::err::Error;
+use crate::expr::order::Ordering;
 use crate::expr::with::With;
-use crate::expr::{Cond, Fields, Groups, Table, order::Ordering};
+use crate::expr::{Cond, Fields, Groups, Ident};
 use crate::idx::planner::executor::{InnerQueryExecutor, IteratorEntry, QueryExecutor};
 use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::knn::KnnBruteForceResults;
@@ -264,7 +265,7 @@ impl QueryPlanner {
 		&mut self,
 		stk: &mut Stk,
 		ctx: &StatementContext<'_>,
-		t: Table,
+		t: Ident,
 		gp: GrantedPermission,
 		it: &mut Iterator,
 	) -> Result<()> {
@@ -346,13 +347,13 @@ impl QueryPlanner {
 
 	fn add(
 		&mut self,
-		tb: Table,
+		tb: Ident,
 		irf: Option<IteratorRef>,
 		exe: InnerQueryExecutor,
 		it: &mut Iterator,
 		rs: RecordStrategy,
 	) {
-		self.executors.insert(tb.0.clone(), exe.into());
+		self.executors.insert(tb.clone().into_string(), exe.into());
 		if let Some(irf) = irf {
 			it.ingest(Iterable::Index(tb, irf, rs));
 		}

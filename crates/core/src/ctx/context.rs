@@ -5,7 +5,6 @@ use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
 use crate::dbs::{Capabilities, Notification, Session, Variables};
 use crate::err::Error;
-use crate::expr::value::Value;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
@@ -13,6 +12,7 @@ use crate::kvs::Transaction;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::sequences::Sequences;
 use crate::mem::ALLOC;
+use crate::val::Value;
 use anyhow::{Result, bail};
 use async_channel::Sender;
 use std::borrow::Cow;
@@ -36,7 +36,6 @@ use std::path::PathBuf;
 
 pub type Context = Arc<MutableContext>;
 
-#[non_exhaustive]
 pub struct MutableContext {
 	// An optional parent context.
 	parent: Option<Context>,

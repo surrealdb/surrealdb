@@ -1,8 +1,8 @@
-use crate::{dbs::Statement, expr::permission::PermissionKind};
+use crate::dbs::Statement;
+use crate::expr::permission::PermissionKind;
 
 // TODO(sgirones): For now keep it simple. In the future, we will allow for custom roles and policies using a more exhaustive list of actions and resources.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
-#[non_exhaustive]
 pub enum Action {
 	View,
 	Edit,

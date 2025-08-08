@@ -1,8 +1,6 @@
-use crate::syn::{
-	error::{SyntaxError, bail},
-	lexer::Lexer,
-	token::{Token, t},
-};
+use crate::syn::error::{SyntaxError, bail};
+use crate::syn::lexer::Lexer;
+use crate::syn::token::{Token, t};
 use uuid::Uuid;
 
 pub fn uuid(lexer: &mut Lexer, start: Token) -> Result<Uuid, SyntaxError> {

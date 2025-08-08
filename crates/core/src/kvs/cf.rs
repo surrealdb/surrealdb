@@ -1,6 +1,7 @@
+use super::tasklease::LeaseHandler;
 use crate::kvs::Datastore;
-use crate::kvs::tasklease::LeaseHandler;
-use crate::kvs::{LockType::*, TransactionType::*};
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
 use crate::vs::VersionStamp;
 use anyhow::Result;
 

@@ -102,18 +102,19 @@ pub mod http;
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-ws")))]
 pub mod ws;
 
-use crate::api::{self, Result, conn::DbResponse, err::Error, method::query::QueryResult};
+use crate::api::conn::DbResponse;
+use crate::api::err::Error;
+use crate::api::method::query::QueryResult;
+use crate::api::{self, Result};
 use crate::dbs::{self, Status};
 use crate::method::Stats;
 use indexmap::IndexMap;
-use revision::Revisioned;
 use revision::revisioned;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::Deserialize;
-use serde::de::DeserializeOwned;
 use std::time::Duration;
-use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::val;
 
 const NANOS_PER_SEC: i64 = 1_000_000_000;
 const NANOS_PER_MILLI: i64 = 1_000_000;
@@ -180,7 +181,7 @@ pub(crate) struct Failure {
 #[revisioned(revision = 1)]
 #[derive(Debug, Deserialize)]
 pub(crate) enum Data {
-	Other(CoreValue),
+	Other(val::Value),
 	Query(Vec<dbs::QueryMethodResponse>),
 	Live(dbs::Notification),
 }
@@ -221,7 +222,6 @@ impl DbResponse {
 								(stats, Err(Error::Query(response.result.as_raw_string()).into())),
 							);
 						}
-						_ => unreachable!(),
 					}
 				}
 
@@ -239,35 +239,6 @@ impl DbResponse {
 #[revisioned(revision = 1)]
 #[derive(Debug, Deserialize)]
 pub(crate) struct Response {
-	id: Option<CoreValue>,
+	id: Option<val::Value>,
 	pub(crate) result: ServerResult,
-}
-
-fn serialize<V>(value: &V, revisioned: bool) -> Result<Vec<u8>>
-where
-	V: serde::Serialize + Revisioned,
-{
-	if revisioned {
-		let mut buf = Vec::new();
-		value.serialize_revisioned(&mut buf)?;
-		return Ok(buf);
-	}
-	surrealdb_core::expr::serde::serialize(value)
-		.map_err(surrealdb_core::err::Error::from)
-		.map_err(anyhow::Error::new)
-}
-
-fn deserialize<T>(bytes: &[u8], revisioned: bool) -> Result<T>
-where
-	T: Revisioned + DeserializeOwned,
-{
-	if revisioned {
-		let mut read = std::io::Cursor::new(bytes);
-		return T::deserialize_revisioned(&mut read)
-			.map_err(surrealdb_core::err::Error::from)
-			.map_err(anyhow::Error::new);
-	}
-	surrealdb_core::expr::serde::deserialize(bytes)
-		.map_err(surrealdb_core::err::Error::from)
-		.map_err(anyhow::Error::new)
 }

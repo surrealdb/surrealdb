@@ -14,7 +14,6 @@ pub(crate) type Id = u32;
 // It is used to generate ids for any SurrealDB objects that need aliases (e.g. namespaces, databases, tables, indexes, etc.)
 #[revisioned(revision = 1)]
 #[derive(Clone)]
-#[non_exhaustive]
 pub struct U32 {
 	state_key: Key,
 	available_ids: Option<RoaringBitmap>,
@@ -115,7 +114,9 @@ impl SerdeState for State {}
 #[cfg(test)]
 mod tests {
 	use crate::idg::u32::U32;
-	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
+	use crate::kvs::LockType::*;
+	use crate::kvs::TransactionType::*;
+	use crate::kvs::{Datastore, Transaction};
 	use anyhow::Result;
 
 	async fn get_ids(ds: &Datastore) -> (Transaction, U32) {

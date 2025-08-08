@@ -1,16 +1,11 @@
-use crate::sql::{Block, Param, SqlValue};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use crate::sql::{Block, Expr, Param};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct ForeachStatement {
 	pub param: Param,
-	pub range: SqlValue,
+	pub range: Expr,
 	pub block: Block,
 }
 

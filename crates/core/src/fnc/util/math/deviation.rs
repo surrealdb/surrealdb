@@ -1,7 +1,7 @@
-use crate::expr::number::Number;
 use crate::fnc::util::math::ToFloat;
 use crate::fnc::util::math::mean::Mean;
 use crate::fnc::util::math::variance::variance;
+use crate::val::Number;
 
 pub trait Deviation {
 	/// Population Standard Deviation

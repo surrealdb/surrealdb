@@ -133,12 +133,9 @@ mod native;
 #[cfg(target_family = "wasm")]
 mod wasm;
 
-use crate::api::Connect;
-use crate::api::Result;
-use crate::api::Surreal;
 use crate::api::err::Error;
-use crate::api::opt::Config;
-use crate::api::opt::Endpoint;
+use crate::api::opt::{Config, Endpoint};
+use crate::api::{Connect, Result, Surreal};
 use crate::opt::path_to_string;
 use std::marker::PhantomData;
 use url::Url;
@@ -307,11 +304,10 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests {
 
-	use surrealdb_core::expr::Object;
+	use surrealdb_core::val;
 
 	use super::*;
 	use crate::Value;
-	use crate::expr::Value as CoreValue;
 	use crate::opt::auth::Root;
 	use crate::opt::capabilities::Capabilities;
 
@@ -340,7 +336,7 @@ mod tests {
 
 		assert_eq!(
 			users.into_inner(),
-			CoreValue::from(Object::default()),
+			val::Value::from(val::Object::default()),
 			"there should be no users in the system"
 		);
 	}

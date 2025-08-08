@@ -1,18 +1,21 @@
-use crate::expr::serde::{deserialize, serialize};
-use crate::rpc::RpcError;
-use crate::rpc::format::ResTrait;
-use crate::rpc::request::Request;
-use crate::sql::SqlValue;
+use bincode::Options;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
-pub fn parse_value(val: &[u8]) -> Result<SqlValue, RpcError> {
-	deserialize::<SqlValue>(val).map_err(|_| RpcError::ParseError)
+pub fn encode<S: Serialize>(value: &S) -> Result<Vec<u8>, String> {
+	bincode::options()
+		.with_no_limit()
+		.with_little_endian()
+		.with_varint_encoding()
+		.serialize(value)
+		.map_err(|e| e.to_string())
 }
 
-pub fn req(val: &[u8]) -> Result<Request, RpcError> {
-	parse_value(val)?.try_into()
-}
-
-pub fn res(res: impl ResTrait) -> Result<Vec<u8>, RpcError> {
-	// Serialize the response with full internal type information
-	Ok(serialize(&res).unwrap())
+pub fn decode<D: DeserializeOwned>(value: &[u8]) -> Result<D, String> {
+	bincode::options()
+		.with_no_limit()
+		.with_little_endian()
+		.with_varint_encoding()
+		.deserialize_from(value)
+		.map_err(|e| e.to_string())
 }

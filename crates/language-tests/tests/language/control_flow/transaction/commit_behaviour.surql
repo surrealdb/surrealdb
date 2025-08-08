@@ -2,7 +2,7 @@
 [test]
 
 [[test.results]]
-error = "Invalid statement: COMMIT cannot be used outside of a manual transaction"
+error = "Invalid statement: Cannot COMMIT without starting a transaction"
 
 */
 

@@ -1,31 +1,31 @@
-use std::{
-	fmt::{self, Display, Formatter},
-	ops::Deref,
-	str::FromStr,
-};
+use std::fmt::{self, Display, Formatter};
+use std::ops::Deref;
+use std::str::FromStr;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-	err::Error,
-	expr::{
-		Kind, Object, Value,
-		fmt::{Fmt, fmt_separated_by},
-	},
-	syn,
-};
+use crate::err::Error;
+use crate::expr::Kind;
+use crate::expr::fmt::{Fmt, fmt_separated_by};
+use crate::syn;
+use crate::val::{Array, Object, Strand, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct Path(pub Vec<Segment>);
 
 impl<'a> Path {
-	pub fn fit(&'a self, segments: impl Into<&'a [&'a str]>) -> Option<Object> {
+	/// Attempts to fit a passed URL into a already parsed Path Segments.
+	/// A segment can be fixed, be a dynamic variable or a collect the rest of the url
+	/// Considering path the parsed path of an API, and url the current subject, this method:
+	///  - iterates over each path segment (divided by `/`)
+	///  - attempts to to match against url segment
+	///  - extracting variables where instructed by the path segment
+	///  - when we no longer match, or when the url is to short, we return None
+	///  - when the url is too long and there is no rest segment, we return None
+	pub fn fit(&'a self, segments: &'a [&'a str]) -> Option<Object> {
 		let mut obj = Object::default();
-		let segments: &'a [&'a str] = segments.into();
 		for (i, segment) in self.iter().enumerate() {
 			if let Some(res) = segment.fit(&segments[i..]) {
 				if let Some((k, v)) = res {
@@ -43,7 +43,7 @@ impl<'a> Path {
 		}
 	}
 
-	pub fn specifity(&self) -> u8 {
+	pub fn specificity(&self) -> u8 {
 		self.iter().map(|s| s.specificity()).sum()
 	}
 }
@@ -225,9 +225,7 @@ impl FromStr for Path {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Segment {
 	Fixed(String),
 	Dynamic(String, Option<Kind>),
@@ -251,7 +249,16 @@ impl Segment {
 
 					val.map(|val| Some((x.to_owned(), val)))
 				}
-				Self::Rest(x) => Some(Some((x.to_owned(), segments.to_vec().into()))),
+				Self::Rest(x) => {
+					// TODO: Null byte validity
+					let values = segments
+						.iter()
+						.copied()
+						.map(|x| Value::Strand(Strand::new(x.to_owned()).unwrap()))
+						.collect::<Vec<_>>();
+
+					Some(Some((x.to_owned(), Value::Array(Array(values)))))
+				}
 				_ => None,
 			}
 		} else {
