@@ -375,7 +375,9 @@ impl Datastore {
 					info!(target: TARGET, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("tikv://");
 					let s = s.trim_start_matches("tikv:");
-					let v = super::tikv::Datastore::new(s, tls).await.map(DatastoreFlavor::TiKV);
+					let v = super::tikv::Datastore::new_with_options(s, tls)
+						.await
+						.map(DatastoreFlavor::TiKV);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Connected to kvs store at {}", path);
 					Ok((v, c))

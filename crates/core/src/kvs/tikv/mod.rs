@@ -62,6 +62,10 @@ impl Drop for Transaction {
 impl Datastore {
 	/// Open a new database
 	pub(crate) async fn new(path: &str) -> Result<Datastore> {
+		Self::new_with_options(path, None).await
+	}
+
+	pub(crate) async fn new_with_options(path: &str, tls: Option<TLSOptions>) -> Result<Datastore> {
 		// Configure the client and keyspace
 		let config = match *cnf::TIKV_API_VERSION {
 			2 => match *cnf::TIKV_KEYSPACE {
