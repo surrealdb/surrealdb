@@ -102,7 +102,8 @@ impl Socket {
 		})
 	}
 
-	/// Connect to a WebSocket server using a specific format with custom headers
+	/// Connect to a WebSocket server using a specific format with custom
+	/// headers
 	pub async fn connect_with_headers(
 		addr: &str,
 		format: Option<Format>,
@@ -267,7 +268,8 @@ impl Socket {
 		}
 	}
 
-	/// Send a text or binary message and receive a reponse from the WebSocket server
+	/// Send a text or binary message and receive a reponse from the WebSocket
+	/// server
 	pub async fn send_request(
 		&self,
 		method: &str,
@@ -294,7 +296,8 @@ impl Socket {
 	}
 
 	/// When testing Live Queries, we may receive multiple messages unordered.
-	/// This method captures all the expected messages before the given timeout. The result can be inspected later on to find the desired message.
+	/// This method captures all the expected messages before the given timeout.
+	/// The result can be inspected later on to find the desired message.
 	pub async fn receive_other_message(&mut self) -> Result<serde_json::Value> {
 		match self.other_messages.recv().await {
 			Some(x) => Ok(x),
@@ -371,7 +374,8 @@ impl Socket {
 		}
 	}
 
-	/// Send a signin authentication query message to the server and check the response
+	/// Send a signin authentication query message to the server and check the
+	/// response
 	pub async fn send_message_signin(
 		&mut self,
 		user: &str,

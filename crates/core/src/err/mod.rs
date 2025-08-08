@@ -214,14 +214,16 @@ pub enum Error {
 		message: String,
 	},
 
-	/// The wrong quantity or magnitude of arguments was given for the specified function
+	/// The wrong quantity or magnitude of arguments was given for the specified
+	/// function
 	#[error("Incorrect arguments for function {name}(). {message}")]
 	InvalidArguments {
 		name: String,
 		message: String,
 	},
 
-	/// The wrong quantity or magnitude of arguments was given for the specified function
+	/// The wrong quantity or magnitude of arguments was given for the specified
+	/// function
 	#[error("Incorrect arguments for aggregate function {name}() on table '{table}'. {message}")]
 	InvalidAggregation {
 		name: String,
@@ -229,7 +231,8 @@ pub enum Error {
 		message: String,
 	},
 
-	/// The wrong quantity or magnitude of arguments was given for the specified function
+	/// The wrong quantity or magnitude of arguments was given for the specified
+	/// function
 	#[error(
 		"There was a problem running the {name} function. Expected this function to return a value of type {check}, but found {value}"
 	)]
@@ -299,7 +302,8 @@ pub enum Error {
 	#[error("The query was not executed due to a failed transaction")]
 	QueryNotExecuted,
 
-	/// The query did not execute, because the transaction has failed (with a message)
+	/// The query did not execute, because the transaction has failed (with a
+	/// message)
 	#[error("The query was not executed due to a failed transaction. {message}")]
 	QueryNotExecutedDetail {
 		message: String,
@@ -465,7 +469,8 @@ pub enum Error {
 	#[error("Unable to perform the realtime query")]
 	RealtimeDisabled,
 
-	/// Reached excessive computation depth due to functions, subqueries, or futures
+	/// Reached excessive computation depth due to functions, subqueries, or
+	/// futures
 	#[error("Reached excessive computation depth due to functions, subqueries, or futures")]
 	ComputationDepthExceeded,
 
@@ -592,7 +597,8 @@ pub enum Error {
 		op: BucketOperation,
 	},
 
-	/// The specified table can not be written as it is setup as a foreign table view
+	/// The specified table can not be written as it is setup as a foreign table
+	/// view
 	#[error("Unable to write to the `{table}` table while setup as a view")]
 	TableIsView {
 		table: String,
@@ -800,7 +806,8 @@ pub enum Error {
 	#[error("Index is corrupted: {0}")]
 	CorruptedIndex(&'static str),
 
-	/// The query planner did not find an index able to support the given expression
+	/// The query planner did not find an index able to support the given
+	/// expression
 	#[error("There was no suitable index supporting the expression: {exp}")]
 	NoIndexFoundForMatch {
 		exp: String,
@@ -840,17 +847,20 @@ pub enum Error {
 		mr: MatchRef,
 	},
 
-	/// Represents a failure in timestamp arithmetic related to database internals
+	/// Represents a failure in timestamp arithmetic related to database
+	/// internals
 	#[error("Timestamp arithmetic error: {0}")]
 	TimestampOverflow(String),
 
-	/// Represents a failure in timestamp arithmetic related to database internals
+	/// Represents a failure in timestamp arithmetic related to database
+	/// internals
 	#[error("Invalid timestamp '{0}', datetime lies outside of valid timestamp range")]
 	InvalidTimestamp(String),
 
 	/// Internal server error
-	/// This should be used extremely sporadically, since we lose the type of error as a consequence
-	/// There will be times when it is useful, such as with unusual type conversion errors
+	/// This should be used extremely sporadically, since we lose the type of
+	/// error as a consequence There will be times when it is useful, such as
+	/// with unusual type conversion errors
 	#[error("Internal database error: {0}")]
 	Internal(String),
 
@@ -871,7 +881,6 @@ pub enum Error {
 
 	//
 	// Capabilities
-	//
 	/// Scripting is not allowed
 	#[error("Scripting functions are not allowed")]
 	ScriptingNotAllowed,
@@ -886,7 +895,6 @@ pub enum Error {
 
 	//
 	// Authentication / Signup
-	//
 	#[error("There was an error creating the token")]
 	TokenMakingFailed,
 
@@ -910,13 +918,15 @@ pub enum Error {
 
 	/// There was an error with authentication
 	///
-	/// This error hides different kinds of errors directly related to authentication
+	/// This error hides different kinds of errors directly related to
+	/// authentication
 	#[error("There was a problem with authentication")]
 	InvalidAuth,
 
 	/// There was an unexpected error while performing authentication
 	///
-	/// This error hides different kinds of unexpected errors that may affect authentication
+	/// This error hides different kinds of unexpected errors that may affect
+	/// authentication
 	#[error("There was an unexpected error while performing authentication")]
 	UnexpectedAuth,
 
@@ -1244,7 +1254,8 @@ pub enum Error {
 	#[error("Size of query script exceeded maximum supported size of 4,294,967,295 bytes.")]
 	QueryTooLarge,
 
-	/// Represents a failure in timestamp arithmetic related to database internals
+	/// Represents a failure in timestamp arithmetic related to database
+	/// internals
 	#[error("Failed to compute: \"{0}\", as the operation results in an arithmetic overflow.")]
 	ArithmeticOverflow(String),
 
@@ -1287,7 +1298,8 @@ pub enum Error {
 		symbol: String,
 	},
 
-	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not supported
+	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not
+	/// supported
 	#[error("Tried to use a `@` repeat recurse symbol in a position where it is not supported")]
 	UnsupportedRepeatRecurse,
 
@@ -1296,7 +1308,8 @@ pub enum Error {
 		found: Value,
 	},
 
-	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not supported
+	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not
+	/// supported
 	#[error("Can not construct a recursion plan when an instruction is provided")]
 	RecursionInstructionPlanConflict,
 
@@ -1304,17 +1317,20 @@ pub enum Error {
 	#[error("Cannot delete `{0}` as it is referenced by `{1}` with an ON DELETE REJECT clause")]
 	DeleteRejectedByReference(String, String),
 
-	/// The `REFERENCE` keyword can only be used in combination with a type referencing a record
+	/// The `REFERENCE` keyword can only be used in combination with a type
+	/// referencing a record
 	#[error(
 		"Cannot use the `REFERENCE` keyword with `TYPE {0}`. Specify a `record` type, or a type containing only records, instead."
 	)]
 	ReferenceTypeConflict(String),
 
-	/// The `references` type cannot be used with other clauses altering or working with the value
+	/// The `references` type cannot be used with other clauses altering or
+	/// working with the value
 	#[error("Cannot use the `{0}` keyword with `TYPE {0}`.")]
 	RefsTypeConflict(String, String),
 
-	/// The `references` type cannot be used with other clauses altering or working with the value
+	/// The `references` type cannot be used with other clauses altering or
+	/// working with the value
 	#[error(
 		"When specifying a `TYPE` clause with `references`, all variants must be of type `references`."
 	)]
@@ -1324,7 +1340,8 @@ pub enum Error {
 	#[error("An error occured while updating references for `{0}`: {1}")]
 	RefsUpdateFailure(String, String),
 
-	/// Cannot process `Value::Refs` as there is no Record ID in the context for the operation
+	/// Cannot process `Value::Refs` as there is no Record ID in the context for
+	/// the operation
 	#[error(
 		"Cannot obtain a list of references as there is no Record ID in the context for the operation"
 	)]

@@ -1,7 +1,5 @@
 //! This module defines the pratt parser for operators.
 
-use reblessive::Stk;
-
 use super::enter_query_recursion;
 use super::mac::unexpected;
 use crate::sql::operator::{BindingPower, BooleanOperator, MatchesOperator, NearestNeighbor};
@@ -12,12 +10,14 @@ use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{self, Glued, Token, TokenKind, t};
 use crate::val;
+use reblessive::Stk;
 
 impl Parser<'_> {
-	/// Parse a generic expression without triggering the query depth and setting table_as_field.
+	/// Parse a generic expression without triggering the query depth and
+	/// setting table_as_field.
 	///
-	/// Meant to be used when parsing an expression the first time to avoid having the depth limit
-	/// be lowered unnessacrily
+	/// Meant to be used when parsing an expression the first time to avoid
+	/// having the depth limit be lowered unnessacrily
 	pub async fn parse_expr_start(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
 		self.table_as_field = true;
 		self.pratt_parse_expr(ctx, BindingPower::Base).await
@@ -25,9 +25,10 @@ impl Parser<'_> {
 
 	/// Parsers a generic value.
 	///
-	/// A generic loose ident like `foo` in for example `foo.bar` can be two different values
-	/// depending on context: a table or a field the current document. This function parses loose
-	/// idents as a table, see [`parse_expr_field`] for parsing loose idents as fields
+	/// A generic loose ident like `foo` in for example `foo.bar` can be two
+	/// different values depending on context: a table or a field the current
+	/// document. This function parses loose idents as a table, see
+	/// [`parse_expr_field`] for parsing loose idents as fields
 	pub(crate) async fn parse_expr_table(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
 		let old = self.table_as_field;
 		self.table_as_field = false;
@@ -40,9 +41,10 @@ impl Parser<'_> {
 
 	/// Parsers a generic value.
 	///
-	/// A generic loose ident like `foo` in for example `foo.bar` can be two different values
-	/// depending on context: a table or a field the current document. This function parses loose
-	/// idents as a field, see [`parse_value`] for parsing loose idents as table
+	/// A generic loose ident like `foo` in for example `foo.bar` can be two
+	/// different values depending on context: a table or a field the current
+	/// document. This function parses loose idents as a field, see
+	/// [`parse_value`] for parsing loose idents as table
 	pub(crate) async fn parse_expr_field(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
 		let old = self.table_as_field;
 		self.table_as_field = true;
@@ -64,12 +66,13 @@ impl Parser<'_> {
 
 	/// Returns the binding power of an infix operator.
 	///
-	/// Binding power is the opposite of precedence: a higher binding power means that a token is
-	/// more like to operate directly on it's neighbours. Example `*` has a higher binding power
-	/// than `-` resulting in 1 - 2 * 3 being parsed as 1 - (2 * 3).
+	/// Binding power is the opposite of precedence: a higher binding power
+	/// means that a token is more like to operate directly on it's neighbours.
+	/// Example `*` has a higher binding power than `-` resulting in 1 - 2 * 3
+	/// being parsed as 1 - (2 * 3).
 	///
-	/// All operators in SurrealQL which are parsed by the functions in this module are left
-	/// associative or have no defined associativity.
+	/// All operators in SurrealQL which are parsed by the functions in this
+	/// module are left associative or have no defined associativity.
 	fn infix_binding_power(&mut self, token: TokenKind) -> Option<BindingPower> {
 		// TODO: Look at ordering of operators.
 		match token {
@@ -372,8 +375,8 @@ impl Parser<'_> {
 		ctx: &mut Stk,
 		min_bp: BindingPower,
 		lhs: Expr,
-		lhs_prime: bool, // if lhs was a prime expression, required for ensuring (a..b)..c does not
-		                 // fail.
+		lhs_prime: bool, /* if lhs was a prime expression, required for ensuring (a..b)..c does
+		                  * not fail. */
 	) -> ParseResult<Expr> {
 		let token = self.next();
 		let operator = match token.kind {

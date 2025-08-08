@@ -67,7 +67,6 @@ pub mod cbor {
 #[cfg(test)]
 mod tests {
 	use super::*;
-
 	use crate::fnc::args::Optional;
 	use crate::val::{Bytes, Value};
 

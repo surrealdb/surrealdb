@@ -10,8 +10,9 @@ pub(crate) type Id = u32;
 
 // U64 is a generator that generates unique unsigned 64-bit integer ids.
 // It can reuse freed ids by keeping track of them in a roaring bitmap.
-// This doesn't do any variable-length encoding, so it's not as space efficient as it could be.
-// It is used to generate ids for any SurrealDB objects that need aliases (e.g. namespaces, databases, tables, indexes, etc.)
+// This doesn't do any variable-length encoding, so it's not as space efficient
+// as it could be. It is used to generate ids for any SurrealDB objects that
+// need aliases (e.g. namespaces, databases, tables, indexes, etc.)
 #[revisioned(revision = 1)]
 #[derive(Clone)]
 pub struct U32 {

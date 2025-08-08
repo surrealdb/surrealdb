@@ -207,7 +207,8 @@ async fn router_handle_response(
 								match pending.effect {
 									RequestEffect::None => {}
 									RequestEffect::Insert => {
-										// For insert, we need to flatten single responses in an array
+										// For insert, we need to flatten single responses in an
+										// array
 										if let Ok(Data::Other(CoreValue::Array(value))) =
 											response.result
 										{
@@ -260,7 +261,8 @@ async fn router_handle_response(
 							let live_query_id = notification.id;
 							// Check if this live query is registered
 							if let Some(sender) = state.live_queries.get(&live_query_id) {
-								// Send the notification back to the caller or kill live query if the receiver is already dropped
+								// Send the notification back to the caller or kill live query if
+								// the receiver is already dropped
 								if sender.send(notification).await.is_err() {
 									state.live_queries.remove(&live_query_id);
 									let kill = {

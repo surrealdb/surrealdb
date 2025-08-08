@@ -1,9 +1,8 @@
+use super::Ident;
 use crate::sql::fmt::Fmt;
 use crate::sql::order::Ordering;
 use crate::sql::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits, Start};
 use std::fmt::{self, Display, Formatter, Write};
-
-use super::Ident;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

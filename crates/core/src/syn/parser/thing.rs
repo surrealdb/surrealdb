@@ -1,5 +1,3 @@
-use reblessive::Stk;
-
 use super::{ParseResult, Parser};
 use crate::sql::graph::GraphSubject;
 use crate::sql::{Ident, Param, RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit};
@@ -8,6 +6,7 @@ use crate::syn::lexer::compound;
 use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
 use crate::syn::token::{Glued, TokenKind, t};
 use crate::val::Strand;
+use reblessive::Stk;
 use std::cmp::Ordering;
 use std::ops::Bound;
 
@@ -296,9 +295,10 @@ impl Parser<'_> {
 				Ok(RecordIdKeyLit::String(text))
 			}
 			TokenKind::Glued(_) => {
-				// If we glue before a parsing a record id, for example 123s456z would return an error as it is
-				// an invalid duration, however it is a valid flexible record id identifier.
-				// So calling glue before using that token to create a record id is not allowed.
+				// If we glue before a parsing a record id, for example 123s456z would return an
+				// error as it is an invalid duration, however it is a valid flexible record
+				// id identifier. So calling glue before using that token to create a record
+				// id is not allowed.
 				panic!(
 					"Glueing tokens used in parsing a record id would result in inproper parsing"
 				)
@@ -353,12 +353,11 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
-	use reblessive::Stack;
-
 	use super::*;
 	use crate::sql::{Expr, Literal};
 	use crate::syn::parser::ParserSettings;
 	use crate::{sql, syn};
+	use reblessive::Stack;
 
 	fn thing(i: &str) -> ParseResult<RecordIdLit> {
 		let mut parser = Parser::new(i.as_bytes());

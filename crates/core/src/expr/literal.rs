@@ -19,10 +19,11 @@ use std::hash::{Hash, Hasher};
 /// A literal value, should be computed to get an actual value.
 ///
 /// # Note regarding equality.
-/// A literal is equal to an other literal if it is the exact same byte representation, so normal float rules
-/// regarding equality do not apply, i.e. if `a != b` then `Literal::Float(a)` could still be equal
-/// to `Literal::Float(b)` in the case of `NaN` floats for example. Also surrealql rules regarding
-/// number equality are not observed, 1f != 1dec.
+/// A literal is equal to an other literal if it is the exact same byte
+/// representation, so normal float rules regarding equality do not apply, i.e.
+/// if `a != b` then `Literal::Float(a)` could still be equal
+/// to `Literal::Float(b)` in the case of `NaN` floats for example. Also
+/// surrealql rules regarding number equality are not observed, 1f != 1dec.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::sql::Value")]

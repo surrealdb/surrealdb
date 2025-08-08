@@ -60,12 +60,10 @@ We would love it if you could star the repository (https://github.com/surrealdb/
 struct Cli {
 	//
 	// Commands
-	//
 	#[command(subcommand)]
 	command: Commands,
 	//
 	// Logging
-	//
 	#[arg(help = "The logging level for the command-line tool", help_heading = "Logging")]
 	#[arg(env = "SURREAL_LOG", short = 'l', long = "log")]
 	#[arg(global = true)]
@@ -84,7 +82,6 @@ struct Cli {
 	log_socket: Option<String>,
 	//
 	// Log level overrides
-	//
 	#[arg(help = "Override the logging level for file output", help_heading = "Logging")]
 	#[arg(env = "SURREAL_LOG_FILE_LEVEL", long = "log-file-level")]
 	#[arg(global = true)]
@@ -102,7 +99,6 @@ struct Cli {
 	log_socket_level: Option<CustomFilter>,
 	//
 	// Log socket options
-	//
 	#[arg(help = "The format for socket output", help_heading = "Logging")]
 	#[arg(env = "SURREAL_LOG_SOCKET_FORMAT", long = "log-socket-format")]
 	#[arg(global = true)]
@@ -111,7 +107,6 @@ struct Cli {
 	log_socket_format: LogFormat,
 	//
 	// Log file options
-	//
 	#[arg(help = "Whether to enable log file output", help_heading = "Logging")]
 	#[arg(env = "SURREAL_LOG_FILE_ENABLED", long = "log-file-enabled")]
 	#[arg(global = true)]
@@ -141,7 +136,6 @@ struct Cli {
 	log_file_rotation: LogFileRotation,
 	//
 	// Version check
-	//
 	#[arg(help = "Whether to allow web check for client version upgrades at start")]
 	#[arg(env = "SURREAL_ONLINE_VERSION_CHECK", long)]
 	#[arg(default_value_t = true)]
@@ -325,8 +319,8 @@ async fn check_upgrade<C: VersionClient>(
 		}
 		_ => {
 			// Request failed, check against date
-			// TODO: We don't have an "expiry" set per-version, so this is a todo
-			// It would return Err(None) if the version is too old
+			// TODO: We don't have an "expiry" set per-version, so this is a
+			// todo It would return Err(None) if the version is too old
 		}
 	}
 	Ok(())

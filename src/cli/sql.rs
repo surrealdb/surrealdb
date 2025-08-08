@@ -72,8 +72,11 @@ pub async fn init(
 	let capabilities = capabilities.into_cli_capabilities();
 	let config = Config::new().capabilities(capabilities.clone().into());
 	let is_local = any::__into_endpoint(&endpoint)?.parse_kind()?.is_local();
-	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
-	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
+	// If username and password are specified, and we are connecting to a remote
+	// SurrealDB server, then we need to authenticate. If we are connecting
+	// directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we
+	// don't need to authenticate because we use an embedded (local) SurrealDB
+	// instance with auth disabled.
 	let client = if username.is_some() && password.is_some() && !is_local {
 		debug!("Connecting to the database engine with authentication");
 		let creds = CredentialsBuilder::default()
@@ -248,9 +251,11 @@ pub async fn init(
 
 				// Process the last `use` statements, if any
 				if namespace.is_some() || database.is_some() {
-					// Use the namespace provided in the query if any, otherwise use the one in the prompt
+					// Use the namespace provided in the query if any, otherwise use the one in the
+					// prompt
 					let namespace = namespace.as_deref().unwrap_or(prompt_ns);
-					// Use the database provided in the query if any, otherwise use the one in the prompt
+					// Use the database provided in the query if any, otherwise use the one in the
+					// prompt
 					let database = database.as_deref().unwrap_or(prompt_db);
 					// If the database is empty we should only use the namespace
 					if database.is_empty() {

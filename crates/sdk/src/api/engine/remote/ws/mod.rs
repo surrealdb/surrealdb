@@ -105,7 +105,8 @@ pub struct Wss;
 pub struct Client(());
 
 impl Surreal<Client> {
-	/// Connects to a specific database endpoint, saving the connection on the static client
+	/// Connects to a specific database endpoint, saving the connection on the
+	/// static client
 	///
 	/// # Examples
 	///

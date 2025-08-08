@@ -58,9 +58,10 @@ impl Categorise for Dc<'_> {
 impl<'a> Dc<'a> {
 	/// Creates a new document count and length key
 	///
-	/// This constructor creates a key that represents document statistics for the full-text index.
-	/// It's used to track document count and length information, which is essential for
-	/// relevance scoring algorithms like BM25.
+	/// This constructor creates a key that represents document statistics for
+	/// the full-text index. It's used to track document count and length
+	/// information, which is essential for relevance scoring algorithms like
+	/// BM25.
 	///
 	/// # Arguments
 	/// * `ns` - Namespace identifier
@@ -103,7 +104,8 @@ impl<'a> Dc<'a> {
 	///
 	/// This method generates a root key that serves as the base for storing
 	/// aggregated document statistics. It's used for maintaining the overall
-	/// document count and total length information needed for scoring calculations.
+	/// document count and total length information needed for scoring
+	/// calculations.
 	///
 	/// # Arguments
 	/// * `ns` - Namespace identifier
@@ -120,8 +122,9 @@ impl<'a> Dc<'a> {
 	/// Creates a key range for querying document count and length statistics
 	///
 	/// This method generates a key range that can be used to query all document
-	/// count and length statistics for a specific index. It's used for operations
-	/// like compaction, scoring calculations, and index maintenance.
+	/// count and length statistics for a specific index. It's used for
+	/// operations like compaction, scoring calculations, and index
+	/// maintenance.
 	///
 	/// # Arguments
 	/// * `ns` - Namespace identifier

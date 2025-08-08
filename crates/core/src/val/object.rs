@@ -169,13 +169,12 @@ impl Display for Object {
 }
 
 mod no_nul_bytes_in_keys {
+	use crate::val::Value;
 	use serde::de::{self, Visitor};
 	use serde::ser::SerializeMap;
 	use serde::{Deserializer, Serializer};
 	use std::collections::BTreeMap;
 	use std::fmt;
-
-	use crate::val::Value;
 
 	pub(crate) fn serialize<S>(
 		m: &BTreeMap<String, Value>,

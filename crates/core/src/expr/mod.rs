@@ -145,10 +145,12 @@ impl From<anyhow::Error> for ControlFlow {
 
 /// Helper trait to catch controlflow return unwinding.
 pub trait FlowResultExt {
-	/// Function which catches `ControlFlow::Return(x)` and turns it into `Ok(x)`.
+	/// Function which catches `ControlFlow::Return(x)` and turns it into
+	/// `Ok(x)`.
 	///
-	/// If the error value is either `ControlFlow::Break` or `ControlFlow::Continue` it will
-	/// instead create an error that break/continue was used within an invalid location.
+	/// If the error value is either `ControlFlow::Break` or
+	/// `ControlFlow::Continue` it will instead create an error that
+	/// break/continue was used within an invalid location.
 	fn catch_return(self) -> Result<Value, anyhow::Error>;
 }
 

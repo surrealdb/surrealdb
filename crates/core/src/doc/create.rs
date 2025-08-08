@@ -1,10 +1,9 @@
+use super::IgnoreError;
 use crate::ctx::Context;
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::val::Value;
 use reblessive::tree::Stk;
-
-use super::IgnoreError;
 
 impl Document {
 	pub(super) async fn create(

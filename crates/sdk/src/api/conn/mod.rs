@@ -11,11 +11,10 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use surrealdb_core::val::Value as CoreValue;
 
 mod cmd;
+use super::opt::Config;
 pub(crate) use cmd::Command;
 #[cfg(feature = "protocol-http")]
 pub(crate) use cmd::RouterRequest;
-
-use super::opt::Config;
 
 #[derive(Debug)]
 #[allow(dead_code, reason = "Used by the embedded and remote connections.")]

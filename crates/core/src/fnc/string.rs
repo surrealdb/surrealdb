@@ -1,10 +1,9 @@
+use super::args::{Any, Cast, Optional};
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
 use crate::fnc::util::string;
 use crate::val::{Regex, Strand, Value};
 use anyhow::{Result, ensure};
-
-use super::args::{Any, Cast, Optional};
 
 /// Returns `true` if a string of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<()> {
@@ -196,7 +195,6 @@ pub mod distance {
 	use crate::err::Error;
 	use crate::val::Value;
 	use anyhow::Result;
-
 	use strsim;
 
 	/// Calculate the Damerau-Levenshtein distance between two strings
@@ -205,8 +203,8 @@ pub mod distance {
 		Ok(strsim::damerau_levenshtein(&a, &b).into())
 	}
 
-	/// Calculate the normalized Damerau-Levenshtein distance between two strings
-	/// via [`strsim::normalized_damerau_levenshtein`].
+	/// Calculate the normalized Damerau-Levenshtein distance between two
+	/// strings via [`strsim::normalized_damerau_levenshtein`].
 	pub fn normalized_damerau_levenshtein((a, b): (String, String)) -> Result<Value> {
 		Ok(strsim::normalized_damerau_levenshtein(&a, &b).into())
 	}
@@ -214,7 +212,8 @@ pub mod distance {
 	/// Calculate the Hamming distance between two strings
 	/// via [`strsim::hamming`].
 	///
-	/// Will result in an [`Error::InvalidArguments`] if the given strings are of different lengths.
+	/// Will result in an [`Error::InvalidArguments`] if the given strings are
+	/// of different lengths.
 	pub fn hamming((a, b): (String, String)) -> Result<Value> {
 		match strsim::hamming(&a, &b) {
 			Ok(v) => Ok(v.into()),
@@ -238,8 +237,8 @@ pub mod distance {
 	}
 
 	/// Calculate the OSA distance &ndash; a variant of the Levenshtein distance
-	/// that allows for transposition of adjacent characters &ndash; between two strings
-	/// via [`strsim::osa_distance`].
+	/// that allows for transposition of adjacent characters &ndash; between two
+	/// strings via [`strsim::osa_distance`].
 	pub fn osa_distance((a, b): (String, String)) -> Result<Value> {
 		Ok(strsim::osa_distance(&a, &b).into())
 	}

@@ -17,7 +17,8 @@ impl<C> Invalidate<'_, C>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Invalidate<'static, C> {
 		Invalidate {
 			client: Cow::Owned(self.client.into_owned()),

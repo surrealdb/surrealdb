@@ -656,7 +656,8 @@ where
 
 		// CLRS: 2c
 		// Merge children
-		// The payload is set to 0. The payload does not matter, as the key will be deleted after anyway.
+		// The payload is set to 0. The payload does not matter, as the key will be
+		// deleted after anyway.
 		#[cfg(debug_assertions)]
 		{
 			left_node.n.check();

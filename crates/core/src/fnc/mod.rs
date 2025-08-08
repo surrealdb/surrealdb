@@ -1,4 +1,5 @@
-//! Executes functions from SQL. If there is an SQL function it will be defined in this module.
+//! Executes functions from SQL. If there is an SQL function it will be defined
+//! in this module.
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -94,10 +95,11 @@ pub async fn run(
 	}
 }
 
-/// Each function is specified by its name (a string literal) followed by its path. The path
-/// may be followed by one parenthesized argument, e.g. ctx, which is passed to the function
-/// before the remainder of the arguments. The path may be followed by `.await` to signify that
-/// it is `async`. Finally, the path may be prefixed by a parenthesized wrapper function e.g.
+/// Each function is specified by its name (a string literal) followed by its
+/// path. The path may be followed by one parenthesized argument, e.g. ctx,
+/// which is passed to the function before the remainder of the arguments. The
+/// path may be followed by `.await` to signify that it is `async`. Finally, the
+/// path may be prefixed by a parenthesized wrapper function e.g.
 /// `cpu_intensive`.
 macro_rules! dispatch {
     ($ctx: ident, $name: ident, $args: expr_2021, $message: expr_2021,
@@ -505,8 +507,8 @@ pub async fn asynchronous(
 	name: &str,
 	args: Vec<Value>,
 ) -> Result<Value> {
-	// Wrappers return a function as opposed to a value so that the dispatch! method can always
-	// perform a function call.
+	// Wrappers return a function as opposed to a value so that the dispatch! method
+	// can always perform a function call.
 	#[cfg(not(target_family = "wasm"))]
 	fn cpu_intensive<R: Send + 'static>(
 		function: impl FnOnce() -> R + Send + 'static,
@@ -1578,15 +1580,15 @@ fn idiom_name_to_normal(kind: &str, name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-	use regex::Regex;
-
 	use crate::dbs::Capabilities;
 	use crate::dbs::capabilities::ExperimentalTarget;
 	use crate::sql::{Expr, Function};
+	use regex::Regex;
 
 	#[tokio::test]
 	async fn implementations_are_present() {
-		// Accumulate and display all problems at once to avoid a test -> fix -> test -> fix cycle.
+		// Accumulate and display all problems at once to avoid a test -> fix -> test ->
+		// fix cycle.
 		let mut problems = Vec::new();
 
 		// Read the source code of this file
@@ -1649,7 +1651,8 @@ mod tests {
 				let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 				let tmp = res.remove(0).result.unwrap();
 				if tmp == Value::Strand(crate::val::Strand::new("object".to_owned()).unwrap()) {
-					// Assume this function is superseded by a module of the same name.
+					// Assume this function is superseded by a module of the
+					// same name.
 				} else if tmp
 					!= Value::Strand(crate::val::Strand::new("function".to_owned()).unwrap())
 				{

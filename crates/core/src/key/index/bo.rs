@@ -4,7 +4,6 @@ use crate::idx::ft::offset::OffsetRecords;
 use crate::idx::ft::search::terms::TermId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

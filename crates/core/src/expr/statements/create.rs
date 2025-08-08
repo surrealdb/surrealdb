@@ -7,7 +7,6 @@ use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::{Datetime, Value};
 use anyhow::{Result, ensure};
-
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

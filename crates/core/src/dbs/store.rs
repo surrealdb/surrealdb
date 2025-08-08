@@ -3,13 +3,12 @@ use crate::dbs::plan::Explanation;
 use crate::err::Error;
 use crate::expr::order::OrderList;
 use crate::val::Value;
-use std::cmp::{Ordering, Reverse};
-use std::collections::BinaryHeap;
-
 use rand::prelude::SliceRandom;
 use rand::{Rng, thread_rng};
 #[cfg(not(target_family = "wasm"))]
 use rayon::prelude::ParallelSliceMut;
+use std::cmp::{Ordering, Reverse};
+use std::collections::BinaryHeap;
 use std::mem;
 use std::sync::Arc;
 #[cfg(not(target_family = "wasm"))]
@@ -60,7 +59,8 @@ impl From<Vec<Value>> for MemoryCollector {
 
 pub(super) const DEFAULT_BATCH_SIZE: usize = 1024;
 
-/// The struct MemoryRandom represents an in-memory store that aggregates data randomly.
+/// The struct MemoryRandom represents an in-memory store that aggregates data
+/// randomly.
 pub(in crate::dbs) struct MemoryRandom {
 	/// Collected values
 	values: Vec<Value>,
@@ -171,7 +171,8 @@ impl MemoryRandom {
 	}
 }
 
-/// The struct MemoryOrdered represents an in-memory store that aggregates ordered data.
+/// The struct MemoryOrdered represents an in-memory store that aggregates
+/// ordered data.
 pub(in crate::dbs) struct MemoryOrdered {
 	/// Collected values
 	values: Vec<Value>,
@@ -205,7 +206,8 @@ impl MemoryOrdered {
 			// If we have a finalized result, we return its size
 			result.len()
 		} else {
-			// If we don't have a finalized result, we return the amount of value summed with the current batch
+			// If we don't have a finalized result, we return the amount of value summed
+			// with the current batch
 			self.values.len() + self.batch.len()
 		}
 	}

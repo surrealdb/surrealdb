@@ -48,7 +48,8 @@ impl QueryType {
 pub struct Response {
 	pub time: Duration,
 	pub result: Result<Value>,
-	// Record the query type in case processing the response is necessary (such as tracking live queries).
+	// Record the query type in case processing the response is necessary (such as tracking live
+	// queries).
 	pub query_type: QueryType,
 }
 

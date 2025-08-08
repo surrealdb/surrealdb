@@ -1,7 +1,6 @@
+use crate::val;
 use js::JsLifetime;
 use js::class::Trace;
-
-use crate::val;
 
 #[derive(Clone, Trace, JsLifetime)]
 #[js::class]

@@ -1,8 +1,7 @@
-use js::Ctx;
-use js::prelude::Rest;
-
 use super::run;
 use crate::val::Value;
+use js::Ctx;
+use js::prelude::Rest;
 
 mod uuid;
 

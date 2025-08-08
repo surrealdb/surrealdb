@@ -6,7 +6,6 @@ use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::literal::ObjectEntry;
 use crate::expr::{Expr, FlowResultExt as _, RecordIdKeyRangeLit};
 use crate::val::{Array, Object, RecordIdKey, Strand, Uuid};
-
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;

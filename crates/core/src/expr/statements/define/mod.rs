@@ -15,10 +15,15 @@ mod sequence;
 mod table;
 mod user;
 
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::val::Value;
 pub use access::DefineAccessStatement;
 pub use analyzer::DefineAnalyzerStatement;
-pub use api::DefineApiStatement;
-pub use bucket::DefineBucketStatement;
+use anyhow::Result;
+pub use api::{ApiAction, ApiDefinition, DefineApiStatement};
+pub use bucket::{BucketDefinition, DefineBucketStatement};
 pub use config::DefineConfigStatement;
 pub use database::DefineDatabaseStatement;
 pub use event::DefineEventStatement;
@@ -28,24 +33,13 @@ pub use index::DefineIndexStatement;
 pub use model::DefineModelStatement;
 pub use namespace::DefineNamespaceStatement;
 pub use param::{DefineParamStatement, DefineParamStore};
-pub use sequence::DefineSequenceStatement;
-pub use table::DefineTableStatement;
-pub use user::DefineUserStatement;
-
-pub use api::{ApiAction, ApiDefinition};
-
-pub use bucket::BucketDefinition;
-
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::val::Value;
-use anyhow::Result;
-
 use reblessive::tree::Stk;
 use revision::revisioned;
+pub use sequence::DefineSequenceStatement;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
+pub use table::DefineTableStatement;
+pub use user::DefineUserStatement;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

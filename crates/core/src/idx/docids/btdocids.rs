@@ -77,7 +77,8 @@ impl BTreeDocIds {
 	}
 
 	/// Returns the doc_id for the given doc_key.
-	/// If the doc_id does not exists, a new one is created, and associated with the given key.
+	/// If the doc_id does not exists, a new one is created, and associated with
+	/// the given key.
 	pub(in crate::idx) async fn resolve_doc_id(
 		&mut self,
 		tx: &Transaction,

@@ -4,6 +4,8 @@ use crate::dbs::StartCommandDbsOptions;
 use crate::net::client_ip::ClientIp;
 use crate::net::{self};
 use crate::{dbs, env};
+#[cfg(feature = "ml")]
+use anyhow::Context;
 use anyhow::Result;
 use clap::Args;
 use std::net::SocketAddr;
@@ -12,12 +14,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::engine::{any, tasks};
 use surrealdb::options::EngineOptions;
-use tokio_util::sync::CancellationToken;
-
-#[cfg(feature = "ml")]
-use anyhow::Context;
 #[cfg(feature = "ml")]
 use surrealdb_core::ml::execution::session::set_environment;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
@@ -37,7 +36,6 @@ pub struct StartCommandArguments {
 	key: Option<String>,
 	//
 	// Tasks
-	//
 	#[arg(
 		help = "The interval at which to refresh node registration information",
 		help_heading = "Database"
@@ -71,7 +69,6 @@ pub struct StartCommandArguments {
 	index_compaction_interval: Duration,
 	//
 	// Authentication
-	//
 	#[arg(
 		help = "The username for the initial database root user. Only if no other root user exists",
 		help_heading = "Authentication"
@@ -98,13 +95,11 @@ pub struct StartCommandArguments {
 	password: Option<String>,
 	//
 	// Datastore connection
-	//
 	#[command(next_help_heading = "Datastore connection")]
 	#[command(flatten)]
 	kvs: Option<StartCommandRemoteTlsOptions>,
 	//
 	// HTTP Server
-	//
 	#[command(next_help_heading = "HTTP server")]
 	#[command(flatten)]
 	web: Option<StartCommandWebTlsOptions>,
@@ -122,7 +117,6 @@ pub struct StartCommandArguments {
 	no_identification_headers: bool,
 	//
 	// Database options
-	//
 	#[command(flatten)]
 	#[command(next_help_heading = "Database")]
 	dbs: StartCommandDbsOptions,

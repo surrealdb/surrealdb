@@ -85,9 +85,8 @@ mod mem {
 mod rocksdb {
 	use super::{ClockType, Kvs};
 	use crate::kvs::Datastore;
-	use uuid::Uuid;
-
 	use temp_dir::TempDir;
+	use uuid::Uuid;
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the temporary data storage path
@@ -106,9 +105,8 @@ mod rocksdb {
 mod surrealkv {
 	use super::{ClockType, Kvs};
 	use crate::kvs::Datastore;
-	use uuid::Uuid;
-
 	use temp_dir::TempDir;
+	use uuid::Uuid;
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the temporary data storage path

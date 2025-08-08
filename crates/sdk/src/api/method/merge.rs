@@ -29,7 +29,8 @@ impl<C, D, R> Merge<'_, C, D, R>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Merge<'static, C, D, R> {
 		Merge {
 			client: Cow::Owned(self.client.into_owned()),

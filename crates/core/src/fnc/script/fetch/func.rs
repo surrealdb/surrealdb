@@ -1,5 +1,6 @@
 //! Contains the actual fetch function.
 
+use super::classes::Headers;
 use crate::fnc::http::resolver::FilteringResolver;
 use crate::fnc::script::fetch::RequestError;
 use crate::fnc::script::fetch::body::{Body, BodyData, BodyKind};
@@ -14,8 +15,6 @@ use reqwest::header::{CONTENT_TYPE, HeaderValue};
 use reqwest::{Body as ReqBody, redirect};
 use std::sync::Arc;
 use tokio::runtime::Handle;
-
-use super::classes::Headers;
 
 #[js::function]
 pub async fn fetch<'js>(
@@ -45,8 +44,8 @@ pub async fn fetch<'js>(
 
 	let req = reqwest::Request::new(js_req.init.method, url.clone());
 
-	// SurrealDB Implementation keeps all javascript parts inside the context::with scope so this
-	// unwrap should never panic.
+	// SurrealDB Implementation keeps all javascript parts inside the context::with
+	// scope so this unwrap should never panic.
 	let headers = js_req.init.headers;
 	let headers = headers.borrow();
 	let mut headers = headers.inner.clone();

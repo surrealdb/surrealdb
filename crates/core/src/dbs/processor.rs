@@ -391,7 +391,8 @@ impl Collected {
 	) -> Result<Processed> {
 		let (t, v, ir) = i.consume();
 		let v = if let Some(v) = v {
-			// The value may already be fetched by the KNN iterator to evaluate the condition
+			// The value may already be fetched by the KNN iterator to evaluate the
+			// condition
 			v
 		} else if rid_only {
 			// if it is skippable we only need the record id
@@ -995,7 +996,8 @@ pub(super) trait Collector {
 }
 
 impl Iterable {
-	/// Returns the value from the store, or Value::None it the value does not exist.
+	/// Returns the value from the store, or Value::None it the value does not
+	/// exist.
 	pub(crate) async fn fetch_thing(
 		txn: &Transaction,
 		opt: &Options,

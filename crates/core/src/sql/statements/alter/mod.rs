@@ -4,9 +4,8 @@ mod table;
 
 pub use field::AlterFieldStatement;
 pub use sequence::AlterSequenceStatement;
-pub use table::AlterTableStatement;
-
 use std::fmt::{self, Display};
+pub use table::AlterTableStatement;
 
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

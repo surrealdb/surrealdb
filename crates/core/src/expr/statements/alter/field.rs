@@ -1,3 +1,4 @@
+use super::AlterKind;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -8,7 +9,6 @@ use crate::expr::statements::define::DefineDefault;
 use crate::expr::{Base, Expr, Ident, Idiom, Kind, Permissions};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
-
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -16,8 +16,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::ops::Deref;
 use uuid::Uuid;
-
-use super::AlterKind;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]

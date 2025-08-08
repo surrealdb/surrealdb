@@ -85,8 +85,11 @@ pub async fn init(
 	}: ExportCommandArguments,
 ) -> Result<()> {
 	let is_local = any::__into_endpoint(&endpoint)?.parse_kind()?.is_local();
-	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
-	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
+	// If username and password are specified, and we are connecting to a remote
+	// SurrealDB server, then we need to authenticate. If we are connecting
+	// directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we
+	// don't need to authenticate because we use an embedded (local) SurrealDB
+	// instance with auth disabled.
 	let client = if username.is_some() && password.is_some() && !is_local {
 		debug!("Connecting to the database engine with authentication");
 		let creds = CredentialsBuilder::default()

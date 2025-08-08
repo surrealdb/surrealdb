@@ -37,7 +37,8 @@ impl<C, T> Import<'_, C, T>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Import<'static, C, T> {
 		Import {
 			client: Cow::Owned(self.client.into_owned()),

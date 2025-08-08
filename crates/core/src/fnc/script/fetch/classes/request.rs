@@ -1,5 +1,6 @@
 //! Request class implementation
 
+use super::{Blob, Headers};
 use crate::fnc::script::fetch::RequestError;
 use crate::fnc::script::fetch::body::Body;
 use bytes::Bytes;
@@ -9,8 +10,6 @@ use js::prelude::Coerced;
 use js::{Class, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value};
 use reqwest::header::HeaderName;
 use reqwest::{Method, Url};
-
-use super::{Blob, Headers};
 
 #[derive(Clone, Copy, Eq, PartialEq, JsLifetime)]
 pub enum RequestMode {
@@ -282,7 +281,8 @@ fn normalize_method(ctx: &Ctx<'_>, m: String) -> Result<Method> {
 		return Err(Exception::throw_type(ctx, &format!("method {m} is forbidden")));
 	}
 
-	// The following methods must be uppercased to the default case insensitive equivalent.
+	// The following methods must be uppercased to the default case insensitive
+	// equivalent.
 	if m.as_bytes().eq_ignore_ascii_case(b"DELETE") {
 		return Ok(Method::DELETE);
 	}

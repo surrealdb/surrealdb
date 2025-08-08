@@ -13,8 +13,13 @@ mod sequence;
 mod table;
 mod user;
 
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::expr::Value;
 pub use access::RemoveAccessStatement;
 pub use analyzer::RemoveAnalyzerStatement;
+use anyhow::Result;
 pub use bucket::RemoveBucketStatement;
 pub use database::RemoveDatabaseStatement;
 pub use event::RemoveEventStatement;
@@ -24,19 +29,12 @@ pub use index::RemoveIndexStatement;
 pub use model::RemoveModelStatement;
 pub use namespace::RemoveNamespaceStatement;
 pub use param::RemoveParamStatement;
-pub use sequence::RemoveSequenceStatement;
-pub use table::RemoveTableStatement;
-pub use user::RemoveUserStatement;
-
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::expr::Value;
-use anyhow::Result;
-
 use revision::revisioned;
+pub use sequence::RemoveSequenceStatement;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
+pub use table::RemoveTableStatement;
+pub use user::RemoveUserStatement;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]

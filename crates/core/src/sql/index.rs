@@ -1,7 +1,6 @@
 use crate::sql::ident::Ident;
 use crate::sql::scoring::Scoring;
 use crate::val::Number;
-
 use std::fmt;
 use std::fmt::{Display, Formatter};
 

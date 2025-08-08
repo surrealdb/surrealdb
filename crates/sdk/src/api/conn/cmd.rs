@@ -12,12 +12,11 @@ use std::path::PathBuf;
 use surrealdb_core::dbs::Notification;
 use surrealdb_core::expr::LogicalPlan;
 use surrealdb_core::kvs::export::Config as DbExportConfig;
+#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
+use surrealdb_core::val::Table as CoreTable;
 #[allow(unused_imports)]
 use surrealdb_core::val::{Array as CoreArray, Object as CoreObject, Value as CoreValue};
 use uuid::Uuid;
-
-#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-use surrealdb_core::val::Table as CoreTable;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -140,10 +139,9 @@ pub(crate) enum Command {
 impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
+		use crate::engine::resource_to_exprs;
 		use surrealdb_core::expr::{Data, Output, UpdateStatement, UpsertStatement};
 		use surrealdb_core::val::{self, Strand};
-
-		use crate::engine::resource_to_exprs;
 
 		let res = match self {
 			Command::Use {
@@ -551,7 +549,8 @@ impl Command {
 	}
 }
 
-/// A struct which will be serialized as a map to behave like the previously used BTreeMap.
+/// A struct which will be serialized as a map to behave like the previously
+/// used BTreeMap.
 ///
 /// This struct serializes as if it is a surrealdb_core::expr::Value::Object.
 #[derive(Debug)]
@@ -772,13 +771,11 @@ impl Revisioned for RouterRequest {
 
 #[cfg(test)]
 mod test {
-	use std::io::Cursor;
-
+	use super::RouterRequest;
 	use revision::Revisioned;
+	use std::io::Cursor;
 	use surrealdb_core::val::{Number, Value};
 	use uuid::Uuid;
-
-	use super::RouterRequest;
 
 	fn assert_converts<S, D, I>(req: &RouterRequest, s: S, d: D)
 	where

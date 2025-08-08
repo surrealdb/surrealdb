@@ -1,8 +1,7 @@
+use super::Ident;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self};
-
-use super::Ident;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]

@@ -94,7 +94,8 @@ where
 		}
 	}
 
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Query<'static, C> {
 		Query {
 			txn: self.txn,
@@ -494,20 +495,22 @@ impl Response {
 	/// # }
 	/// ```
 	///
-	/// Consume the stream the same way you would any other type that implements `futures::Stream`.
+	/// Consume the stream the same way you would any other type that implements
+	/// `futures::Stream`.
 	pub fn stream<R>(&mut self, index: impl opt::QueryStream<R>) -> Result<QueryStream<R>> {
 		index.query_stream(self)
 	}
 
 	/// Take all errors from the query response
 	///
-	/// The errors are keyed by the corresponding index of the statement that failed.
-	/// Afterwards the response is left with only statements that did not produce any errors.
+	/// The errors are keyed by the corresponding index of the statement that
+	/// failed. Afterwards the response is left with only statements that did
+	/// not produce any errors.
 	///
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -532,12 +535,13 @@ impl Response {
 		errors
 	}
 
-	/// Check query response for errors and return the first error, if any, or the response
+	/// Check query response for errors and return the first error, if any, or
+	/// the response
 	///
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -567,7 +571,7 @@ impl Response {
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -656,13 +660,14 @@ impl WithStats<Response> {
 
 	/// Take all errors from the query response
 	///
-	/// The errors are keyed by the corresponding index of the statement that failed.
-	/// Afterwards the response is left with only statements that did not produce any errors.
+	/// The errors are keyed by the corresponding index of the statement that
+	/// failed. Afterwards the response is left with only statements that did
+	/// not produce any errors.
 	///
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -687,12 +692,13 @@ impl WithStats<Response> {
 		errors
 	}
 
-	/// Check query response for errors and return the first error, if any, or the response
+	/// Check query response for errors and return the first error, if any, or
+	/// the response
 	///
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -711,7 +717,7 @@ impl WithStats<Response> {
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;

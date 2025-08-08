@@ -30,11 +30,13 @@ impl_kv_value_revisioned!(TaskLease);
 
 /// Manages distributed task leases in a multi-node environment.
 ///
-/// The LeaseHandler provides a mechanism for coordinating tasks across multiple nodes
-/// by implementing a distributed lease system. This ensures that only one node at a time
-/// performs a specific task, preventing duplicate work and race conditions in a distributed setup.
+/// The LeaseHandler provides a mechanism for coordinating tasks across multiple
+/// nodes by implementing a distributed lease system. This ensures that only one
+/// node at a time performs a specific task, preventing duplicate work and race
+/// conditions in a distributed setup.
 ///
-/// The handler uses a datastore to persist lease information, with built-in support for:
+/// The handler uses a datastore to persist lease information, with built-in
+/// support for:
 /// - Lease acquisition with exponential backoff and jitter to handle contention
 /// - Automatic lease expiration based on configurable duration
 /// - Lease ownership verification
@@ -66,12 +68,14 @@ impl LeaseHandler {
 
 	/// Attempts to acquire or check a lease for a specific task type.
 	///
-	/// This method tries to determine if the current node has a lease for the specified task.
-	/// It uses exponential backoff with jitter to handle contention when multiple nodes
-	/// attempt to acquire the same lease simultaneously.
+	/// This method tries to determine if the current node has a lease for the
+	/// specified task. It uses exponential backoff with jitter to handle
+	/// contention when multiple nodes attempt to acquire the same lease
+	/// simultaneously.
 	///
 	/// # Returns
-	/// * `Ok(true)` - If the node successfully acquired or already owns the lease
+	/// * `Ok(true)` - If the node successfully acquired or already owns the
+	///   lease
 	/// * `Ok(false)` - If another node owns the lease
 	/// * `Err` - If the operation timed out or encountered other errors
 	pub(super) async fn has_lease(&self) -> Result<bool> {
@@ -100,7 +104,8 @@ impl LeaseHandler {
 		bail!(Error::QueryTimedout)
 	}
 
-	/// Attempts to maintain the current lease by checking and potentially renewing it.
+	/// Attempts to maintain the current lease by checking and potentially
+	/// renewing it.
 	///
 	/// This method is a simplified wrapper around `check_lease()` that:
 	/// 1. Checks if the current node owns a valid lease
@@ -108,22 +113,27 @@ impl LeaseHandler {
 	/// 3. Ignores the boolean return value from `check_lease()`
 	///
 	/// # Returns
-	/// * `Ok(())` - If the lease check completed successfully (regardless of ownership)
+	/// * `Ok(())` - If the lease check completed successfully (regardless of
+	///   ownership)
 	/// * `Err` - If database operations fail
 	pub(crate) async fn try_maintain_lease(&self) -> Result<()> {
 		self.check_lease().await?;
 		Ok(())
 	}
 
-	/// Checks if a lease exists and attempts to acquire it if it doesn't or has expired.
+	/// Checks if a lease exists and attempts to acquire it if it doesn't or has
+	/// expired.
 	///
 	/// This method performs the actual lease checking and acquisition logic:
 	/// 1. First checks if there's an existing valid lease in the datastore
-	/// 2. If a valid lease exists, returns whether the current node is the owner
-	/// 3. If no valid lease exists or it has expired, attempts to create a new lease
+	/// 2. If a valid lease exists, returns whether the current node is the
+	///    owner
+	/// 3. If no valid lease exists or it has expired, attempts to create a new
+	///    lease
 	///
 	/// # Returns
-	/// * `Ok(true)` - If the node successfully acquired or already owns the lease
+	/// * `Ok(true)` - If the node successfully acquired or already owns the
+	///   lease
 	/// * `Ok(false)` - If another node owns the lease
 	/// * `Err` - If database operations fail
 	async fn check_lease(&self) -> Result<bool> {
@@ -134,8 +144,8 @@ impl LeaseHandler {
 			if current_lease.owner != self.node {
 				return Ok(false);
 			}
-			// If we own the lease and it's not close to expiring (more than half the lease duration remaining),
-			// we can continue using it without renewal
+			// If we own the lease and it's not close to expiring (more than half the lease
+			// duration remaining), we can continue using it without renewal
 			// First ensure the lease hasn't expired (defensive check)
 			if current_lease.expiration > now
 				&& current_lease.expiration - now > self.lease_duration / 2
@@ -150,11 +160,14 @@ impl LeaseHandler {
 		self.acquire_new_lease().await
 	}
 
-	/// Checks if there's an existing valid lease and determines if the current node is the owner.
+	/// Checks if there's an existing valid lease and determines if the current
+	/// node is the owner.
 	///
 	/// # Returns
-	/// * `Ok(Some(TaskLease))` - If a valid lease exists, returns the lease object
-	/// * `Ok(None)` - If no valid lease exists (either no lease or it has expired)
+	/// * `Ok(Some(TaskLease))` - If a valid lease exists, returns the lease
+	///   object
+	/// * `Ok(None)` - If no valid lease exists (either no lease or it has
+	///   expired)
 	/// * `Err` - If database operations fail
 	async fn check_valid_lease(&self, t: DateTime<Utc>) -> Result<Option<TaskLease>> {
 		let tx = self.tf.transaction(TransactionType::Read, LockType::Optimistic).await?;
@@ -180,7 +193,8 @@ impl LeaseHandler {
 		let tx = self.tf.transaction(TransactionType::Write, LockType::Optimistic).await?;
 		let lease = TaskLease {
 			owner: self.node,
-			expiration: Utc::now() + self.lease_duration, // Set expiration to current time plus lease duration
+			expiration: Utc::now() + self.lease_duration, /* Set expiration to current time plus
+			                                               * lease duration */
 		};
 		let key = Tl::new(&self.task_type);
 		tx.set(&key, &lease, None).await?;
@@ -207,9 +221,12 @@ mod tests {
 
 	/// Tracks the results of lease acquisition attempts by a node.
 	///
-	/// This struct collects statistics about the outcomes of multiple lease acquisition attempts:
-	/// * `ok_true` - Count of successful lease acquisitions (node owns the lease)
-	/// * `ok_false` - Count of failed lease acquisitions (another node owns the lease)
+	/// This struct collects statistics about the outcomes of multiple lease
+	/// acquisition attempts:
+	/// * `ok_true` - Count of successful lease acquisitions (node owns the
+	///   lease)
+	/// * `ok_false` - Count of failed lease acquisitions (another node owns the
+	///   lease)
 	/// * `err` - Count of errors encountered during lease acquisition attempts
 	#[derive(Default)]
 	struct NodeResult {
@@ -218,22 +235,27 @@ mod tests {
 		err: usize,
 	}
 
-	/// Simulates a node repeatedly attempting to acquire a lease for a specified duration.
+	/// Simulates a node repeatedly attempting to acquire a lease for a
+	/// specified duration.
 	///
-	/// This function represents a single node in a distributed system that continuously
-	/// tries to acquire a task lease for the ChangeFeedCleanup task. It runs for a fixed
-	/// duration and collects statistics on the outcomes of each attempt.
+	/// This function represents a single node in a distributed system that
+	/// continuously tries to acquire a task lease for the ChangeFeedCleanup
+	/// task. It runs for a fixed duration and collects statistics on the
+	/// outcomes of each attempt.
 	///
 	/// # Parameters
 	/// * `id` - UUID identifying the node
 	/// * `tf` - Transaction factory for database operations
-	/// * `test_duration` - How long the node should run and attempt to acquire leases
+	/// * `test_duration` - How long the node should run and attempt to acquire
+	///   leases
 	/// * `lease_duration` - How long each acquired lease should be valid
 	///
 	/// # Returns
-	/// A `NodeResult` containing statistics about the lease acquisition attempts:
+	/// A `NodeResult` containing statistics about the lease acquisition
+	/// attempts:
 	/// * How many times the node successfully acquired the lease
-	/// * How many times the node failed to acquire the lease (owned by another node)
+	/// * How many times the node failed to acquire the lease (owned by another
+	///   node)
 	/// * How many errors occurred during lease acquisition attempts
 	async fn node_task_lease(
 		id: Uuid,
@@ -263,17 +285,20 @@ mod tests {
 
 	/// Tests the task lease mechanism with multiple concurrent nodes.
 	///
-	/// This function simulates a distributed environment where multiple nodes compete
-	/// for the same task lease. It creates three concurrent nodes, each with a unique ID,
-	/// and has them all attempt to acquire the same lease repeatedly for a fixed duration.
+	/// This function simulates a distributed environment where multiple nodes
+	/// compete for the same task lease. It creates three concurrent nodes,
+	/// each with a unique ID, and has them all attempt to acquire the same
+	/// lease repeatedly for a fixed duration.
 	///
 	/// The test verifies that:
 	/// 1. At least one node successfully acquires the lease at some point
-	/// 2. At least one node fails to acquire the lease at some point (because another node owns it)
+	/// 2. At least one node fails to acquire the lease at some point (because
+	///    another node owns it)
 	/// 3. No errors occur during the lease acquisition process
 	///
 	/// # Parameters
-	/// * `flavor` - The type of datastore to use for the test (memory or RocksDB)
+	/// * `flavor` - The type of datastore to use for the test (memory or
+	///   RocksDB)
 	async fn task_lease_concurrency(flavor: DatastoreFlavor) {
 		// Create a fake clock for deterministic testing
 		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
@@ -297,7 +322,8 @@ mod tests {
 
 		// Verify that at least one node successfully acquired the lease
 		assert!(res1.ok_true + res2.ok_true + res3.ok_true > 0);
-		// Verify that at least one node failed to acquire the lease (another node owned it)
+		// Verify that at least one node failed to acquire the lease (another node owned
+		// it)
 		assert!(res1.ok_false + res2.ok_false + res3.ok_false > 0);
 		// Verify that no errors occurred during lease acquisition
 		assert_eq!(res1.err + res2.err + res3.err, 0);
@@ -305,9 +331,9 @@ mod tests {
 
 	/// Tests the task lease concurrency mechanism using an in-memory datastore.
 	///
-	/// This test creates an in-memory datastore and runs the task lease concurrency test
-	/// to verify that the lease mechanism works correctly in a multi-threaded environment
-	/// with an in-memory storage backend.
+	/// This test creates an in-memory datastore and runs the task lease
+	/// concurrency test to verify that the lease mechanism works correctly in
+	/// a multi-threaded environment with an in-memory storage backend.
 	///
 	/// The test is only compiled and run when the "kv-mem" feature is enabled.
 	#[cfg(feature = "kv-mem")]
@@ -321,11 +347,12 @@ mod tests {
 
 	/// Tests the task lease concurrency mechanism using a RocksDB datastore.
 	///
-	/// This test creates a temporary RocksDB datastore and runs the task lease concurrency test
-	/// to verify that the lease mechanism works correctly in a multi-threaded environment
-	/// with a persistent storage backend.
+	/// This test creates a temporary RocksDB datastore and runs the task lease
+	/// concurrency test to verify that the lease mechanism works correctly in
+	/// a multi-threaded environment with a persistent storage backend.
 	///
-	/// The test is only compiled and run when the "kv-rocksdb" feature is enabled.
+	/// The test is only compiled and run when the "kv-rocksdb" feature is
+	/// enabled.
 	#[cfg(feature = "kv-rocksdb")]
 	#[tokio::test(flavor = "multi_thread")]
 	async fn task_lease_concurrency_rocksdb() {
@@ -341,14 +368,20 @@ mod tests {
 	/// Tests the lease renewal behavior when a node already owns a lease.
 	///
 	/// This test verifies that:
-	/// 1. A node that owns a lease doesn't try to re-acquire it if more than half the lease duration remains
-	/// 2. A node that owns a lease does try to re-acquire it if less than half the lease duration remains
+	/// 1. A node that owns a lease doesn't try to re-acquire it if more than
+	///    half the lease duration remains
+	/// 2. A node that owns a lease does try to re-acquire it if less than half
+	///    the lease duration remains
 	///
-	/// Note: This test has limitations because we can't directly control the `Utc::now()` used in `check_lease()`.
-	/// Instead, we verify the behavior by:
-	/// - Checking that multiple calls to `check_lease()` in quick succession don't change the lease expiration
-	/// - Manually verifying the condition that would trigger renewal (less than half duration remaining)
-	/// - Forcing a renewal by calling `check_lease()` and verifying the expiration changes
+	/// Note: This test has limitations because we can't directly control the
+	/// `Utc::now()` used in `check_lease()`. Instead, we verify the behavior
+	/// by:
+	/// - Checking that multiple calls to `check_lease()` in quick succession
+	///   don't change the lease expiration
+	/// - Manually verifying the condition that would trigger renewal (less than
+	///   half duration remaining)
+	/// - Forcing a renewal by calling `check_lease()` and verifying the
+	///   expiration changes
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_lease_renewal_behavior() {
@@ -391,8 +424,8 @@ mod tests {
 		);
 
 		// PART 3: Verify the condition for renewal
-		// We can't directly control Utc::now() in check_lease(), so we'll manually verify
-		// the condition that would trigger renewal
+		// We can't directly control Utc::now() in check_lease(), so we'll manually
+		// verify the condition that would trigger renewal
 
 		// Calculate a time that would be beyond the halfway point of the lease
 		let after_halfway = now + chrono::Duration::minutes(6); // 6 minutes into a 10-minute lease
@@ -411,23 +444,25 @@ mod tests {
 		);
 
 		// PART 4: Force a renewal and verify it happened
-		// We can't directly control time, but we can force a renewal by manipulating the lease
-		// First, let's get the current lease expiration
+		// We can't directly control time, but we can force a renewal by manipulating
+		// the lease First, let's get the current lease expiration
 		let current_lease = lh.check_valid_lease(now).await.unwrap().unwrap();
 		let original_expiration = current_lease.expiration;
 
 		// Now force a renewal by calling check_lease() again
-		// In a real scenario with time passing, this would only renew if less than half duration remains
-		// But for testing purposes, we're forcing it to demonstrate the renewal behavior
+		// In a real scenario with time passing, this would only renew if less than half
+		// duration remains But for testing purposes, we're forcing it to demonstrate
+		// the renewal behavior
 		let has_lease = lh.check_lease().await.unwrap();
 		assert!(has_lease, "Should still have the lease after attempted renewal");
 
 		// Get the lease again and check if it was renewed
 		let renewed_lease = lh.check_valid_lease(now).await.unwrap();
 
-		// In a real scenario with less than half duration remaining, the expiration would change
-		// But in our test without time control, it might not change unless we forced it
-		// The important part is that the code correctly implements the condition check
+		// In a real scenario with less than half duration remaining, the expiration
+		// would change But in our test without time control, it might not change
+		// unless we forced it The important part is that the code correctly
+		// implements the condition check
 		if renewed_lease.unwrap().expiration > original_expiration {
 			// If the expiration changed, the lease was renewed
 			println!("Lease was renewed as expected when conditions were right");
@@ -436,7 +471,7 @@ mod tests {
 			println!("Note: Lease wasn't renewed in test, but the renewal condition was verified");
 		}
 
-		// The most important assertion is that the condition for renewal is correctly implemented
-		// which we verified above
+		// The most important assertion is that the condition for renewal is
+		// correctly implemented which we verified above
 	}
 }

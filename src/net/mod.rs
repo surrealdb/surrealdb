@@ -45,6 +45,10 @@ use tower::ServiceBuilder;
 use tower_http::ServiceBuilderExt;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::auth::AsyncRequireAuthorizationLayer;
+#[cfg(feature = "http-compression")]
+use tower_http::compression::CompressionLayer;
+#[cfg(feature = "http-compression")]
+use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::request_id::MakeRequestUuid;
 use tower_http::sensitive_headers::{
@@ -52,16 +56,10 @@ use tower_http::sensitive_headers::{
 };
 use tower_http::trace::TraceLayer;
 
-#[cfg(feature = "http-compression")]
-use tower_http::compression::CompressionLayer;
-#[cfg(feature = "http-compression")]
-use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove};
-
 const LOG: &str = "surrealdb::net";
 
 ///
 /// AppState is used to share data between routes.
-///
 #[derive(Clone)]
 pub struct AppState {
 	pub client_ip: client_ip::ClientIp,

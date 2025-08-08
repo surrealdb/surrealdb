@@ -1,3 +1,4 @@
+use super::{ControlFlow, FlowResult, FlowResultExt as _, Kind};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -11,8 +12,6 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-
-use super::{ControlFlow, FlowResult, FlowResultExt as _, Kind};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]

@@ -7,7 +7,6 @@ use crate::iam::{Action, ResourceKind};
 use crate::sys::INFORMATION;
 use crate::val::{Datetime, Object, Value};
 use anyhow::{Result, bail};
-
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

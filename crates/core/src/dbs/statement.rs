@@ -182,15 +182,16 @@ impl Statement<'_> {
 	/// UPSERT some:thing UNSET test;
 	/// UPSERT some:thing SET test = true;
 	/// UPSERT some:thing MERGE { test: true };
-	/// UPSERT some:thing PATCH [{ op: 'replace', path: '/', value: { test: true } }];
-	/// UPSERT |some:1000| UNSET test;
+	/// UPSERT some:thing PATCH [{ op: 'replace', path: '/', value: { test: true
+	/// } }]; UPSERT |some:1000| UNSET test;
 	/// UPSERT |some:1000| SET test = true;
 	/// UPSERT |some:1000| MERGE { test: true };
-	/// UPSERT |some:1000| PATCH [{ op: 'replace', path: '/', value: { test: true } }];
-	/// UPSERT |some:1..1000| UNSET test;
+	/// UPSERT |some:1000| PATCH [{ op: 'replace', path: '/', value: { test:
+	/// true } }]; UPSERT |some:1..1000| UNSET test;
 	/// UPSERT |some:1..1000| SET test = true;
 	/// UPSERT |some:1..1000| MERGE { test: true };
-	/// UPSERT |some:1..1000| PATCH [{ op: 'replace', path: '/', value: { test: true } }];
+	/// UPSERT |some:1..1000| PATCH [{ op: 'replace', path: '/', value: { test:
+	/// true } }];
 	///
 	/// Importantly, when a WHERE clause condition is
 	/// specified on an UPSERT clause, then we do

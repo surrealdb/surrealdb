@@ -1,5 +1,4 @@
 use crate::sql::Ident;
-
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]

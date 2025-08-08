@@ -4,7 +4,8 @@ use crate::syn::token::{DistanceKind, Keyword, TokenKind, VectorTypeKind};
 use phf::{phf_map, phf_set};
 use unicase::UniCase;
 
-/// A set of keywords which might in some contexts are dissallowed as an identifier.
+/// A set of keywords which might in some contexts are dissallowed as an
+/// identifier.
 pub static RESERVED_KEYWORD: phf::Set<UniCase<&'static str>> = phf_set! {
 	UniCase::ascii("ALTER"),
 	UniCase::ascii("ANALYZE"),

@@ -17,10 +17,11 @@ pub enum TableMutation {
 	Set(RecordId, Value),
 	Del(RecordId),
 	Def(DefineTableStatement),
-	/// Includes the ID, current value (after change), changes that can be applied to get the original
-	/// value
-	/// Example, ("mytb:tobie", {{"note": "surreal"}}, [{"op": "add", "path": "/note", "value": "surreal"}], false)
-	/// Means that we have already applied the add "/note" operation to achieve the recorded result
+	/// Includes the ID, current value (after change), changes that can be
+	/// applied to get the original value
+	/// Example, ("mytb:tobie", {{"note": "surreal"}}, [{"op": "add", "path":
+	/// "/note", "value": "surreal"}], false) Means that we have already
+	/// applied the add "/note" operation to achieve the recorded result
 	SetWithDiff(RecordId, Value, Vec<Operation>),
 	/// Delete a record where the ID is stored, and the now-deleted value
 	DelWithOriginal(RecordId, Value),
@@ -73,7 +74,8 @@ pub struct ChangeSet(pub VersionStamp, pub DatabaseMutation);
 
 impl TableMutation {
 	/// Convert a stored change feed table mutation (record change) into a
-	/// Value that can be used in the storage of change feeds and their transmission to consumers
+	/// Value that can be used in the storage of change feeds and their
+	/// transmission to consumers
 	pub fn into_value(self) -> Value {
 		let mut h = BTreeMap::<String, Value>::new();
 		let h = match self {
@@ -182,7 +184,8 @@ impl Display for ChangeSet {
 	}
 }
 
-// WriteMutationSet is a set of mutations to be to a table at the specific timestamp.
+// WriteMutationSet is a set of mutations to be to a table at the specific
+// timestamp.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct WriteMutationSet(pub Vec<TableMutations>);
@@ -201,9 +204,8 @@ impl Default for WriteMutationSet {
 
 #[cfg(test)]
 mod tests {
-	use crate::expr::Ident;
-
 	use super::*;
+	use crate::expr::Ident;
 	use std::collections::HashMap;
 
 	#[test]

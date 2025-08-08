@@ -18,7 +18,8 @@ pub(crate) const REGEX_TOKEN: &str = "$surrealdb::private::Regex";
 pub struct Regex(pub regex::Regex);
 
 impl Regex {
-	// Deref would expose `regex::Regex::as_str` which wouldn't have the '/' delimiters.
+	// Deref would expose `regex::Regex::as_str` which wouldn't have the '/'
+	// delimiters.
 	pub fn regex(&self) -> &regex::Regex {
 		&self.0
 	}

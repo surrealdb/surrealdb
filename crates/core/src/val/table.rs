@@ -27,7 +27,8 @@ impl Table {
 	/// Create a new strand, without checking the string.
 	///
 	/// # Safety
-	/// Caller must ensure that string handed as an argument does not contain any null bytes.
+	/// Caller must ensure that string handed as an argument does not contain
+	/// any null bytes.
 	pub unsafe fn new_unchecked(s: String) -> Table {
 		// Check in debug mode if the variants
 		debug_assert!(!s.contains('\0'));

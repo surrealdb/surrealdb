@@ -598,25 +598,37 @@ impl QueryExecutor {
 		Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(irf, ns, db, ix, array)?))
 	}
 
-	/// This function takes a reference to a `Number` enum and a conversion function `float_to_int`.
-	/// It returns a tuple containing the variants of the `Number` as `Option<i64>`, `Option<f64>`, and `Option<Decimal>`.
+	/// This function takes a reference to a `Number` enum and a conversion
+	/// function `float_to_int`. It returns a tuple containing the variants of
+	/// the `Number` as `Option<i64>`, `Option<f64>`, and `Option<Decimal>`.
 	///
 	/// The `Number` enum can be one of the following:
 	/// - `Int(i64)`: Integer value.
 	/// - `Float(f64)`: Floating point value.
 	/// - `Decimal(Decimal)`: Decimal value.
 	///
-	/// The function performs the following conversions based on the type of the `Number`:
-	/// - For `Int`, it returns the original `Int` value as `Option<i64>`, the equivalent `Float` value as `Option<f64>`, and the equivalent `Decimal` value as `Option<Decimal>`.
-	/// - For `Float`, it uses the provided `float_to_int` function to convert the `Float` to `Option<i64>`, returns the original `Float` value as `Option<f64>`, and the equivalent `Decimal` value as `Option<Decimal>`.
-	/// - For `Decimal`, it converts the `Decimal` to `Option<i64>` (if representable as `i64`), returns the equivalent `Float` value as `Option<f64>` (if representable as `f64`), and the original `Decimal` value as `Option<Decimal>`.
+	/// The function performs the following conversions based on the type of the
+	/// `Number`:
+	/// - For `Int`, it returns the original `Int` value as `Option<i64>`, the
+	///   equivalent `Float` value as `Option<f64>`, and the equivalent
+	///   `Decimal` value as `Option<Decimal>`.
+	/// - For `Float`, it uses the provided `float_to_int` function to convert
+	///   the `Float` to `Option<i64>`, returns the original `Float` value as
+	///   `Option<f64>`, and the equivalent `Decimal` value as
+	///   `Option<Decimal>`.
+	/// - For `Decimal`, it converts the `Decimal` to `Option<i64>` (if
+	///   representable as `i64`), returns the equivalent `Float` value as
+	///   `Option<f64>` (if representable as `f64`), and the original `Decimal`
+	///   value as `Option<Decimal>`.
 	///
 	/// # Parameters
 	/// - `n`: A reference to a `Number` enum.
-	/// - `float_to_int`: A function that converts a reference to `f64` to `Option<i64>`.
+	/// - `float_to_int`: A function that converts a reference to `f64` to
+	///   `Option<i64>`.
 	///
 	/// # Returns
-	/// A tuple of `(Option<i64>, Option<f64>, Option<Decimal>)` representing the converted variants of the input `Number`.
+	/// A tuple of `(Option<i64>, Option<f64>, Option<Decimal>)` representing
+	/// the converted variants of the input `Number`.
 	fn get_number_variants<F>(
 		n: &Number,
 		float_to_int: F,

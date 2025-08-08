@@ -127,7 +127,6 @@ mod conn;
 use self::conn::Router;
 use self::err::Error;
 use self::opt::{Endpoint, EndpointKind, WaitFor};
-
 pub use method::query::Response;
 
 // Channel for waiters
@@ -264,9 +263,9 @@ struct Inner {
 
 /// A database client instance for embedded or remote databases.
 ///
-/// See [Running SurrealDB embedded in Rust](crate#running-surrealdb-embedded-in-rust)
-/// for tips on how to optimize performance for the client when working
-/// with embedded instances.
+/// See [Running SurrealDB embedded in
+/// Rust](crate#running-surrealdb-embedded-in-rust) for tips on how to optimize
+/// performance for the client when working with embedded instances.
 pub struct Surreal<C: Connection> {
 	inner: Arc<Inner>,
 	engine: PhantomData<C>,

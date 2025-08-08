@@ -301,12 +301,12 @@ impl Intersect<Self> for Array {
 
 // Documented with the assumption that it is just for arrays.
 pub(crate) trait Matches<T> {
-	/// Returns an array complimenting the original where each value is true or false
-	/// depending on whether it is == to the compared value.
+	/// Returns an array complimenting the original where each value is true or
+	/// false depending on whether it is == to the compared value.
 	///
-	/// Admittedly, this is most often going to be used in `count(array::matches($arr, $val))`
-	/// to count the number of times an element appears in an array but it's nice to have
-	/// this in addition.
+	/// Admittedly, this is most often going to be used in
+	/// `count(array::matches($arr, $val))` to count the number of times an
+	/// element appears in an array but it's nice to have this in addition.
 	fn matches(self, compare_val: Value) -> T;
 }
 
@@ -320,14 +320,16 @@ impl Matches<Array> for Array {
 
 // Documented with the assumption that it is just for arrays.
 pub(crate) trait Transpose<T> {
-	/// Stacks arrays on top of each other. This can serve as 2d array transposition.
+	/// Stacks arrays on top of each other. This can serve as 2d array
+	/// transposition.
 	///
-	/// The input array can contain regular values which are treated as arrays with
-	/// a single element.
+	/// The input array can contain regular values which are treated as arrays
+	/// with a single element.
 	///
-	/// It's best to think of the function as creating a layered structure of the arrays
-	/// rather than transposing them when the input is not a 2d array. See the examples
-	/// for what happense when the input arrays are not all the same size.
+	/// It's best to think of the function as creating a layered structure of
+	/// the arrays rather than transposing them when the input is not a 2d
+	/// array. See the examples for what happense when the input arrays are not
+	/// all the same size.
 	///
 	/// Here's a diagram:
 	/// [0, 1, 2, 3], [4, 5, 6]
@@ -373,8 +375,8 @@ impl Transpose<Array> for Array {
 				}
 			})
 			.collect::<Vec<_>>();
-		// We know there is at least one element in the array therefore iters is not empty.
-		// This is safe.
+		// We know there is at least one element in the array therefore iters is not
+		// empty. This is safe.
 		let longest_length = iters.iter().map(|i| i.len()).max().unwrap();
 		for _ in 0..longest_length {
 			transposed_vec.push(

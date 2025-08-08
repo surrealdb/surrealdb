@@ -73,8 +73,8 @@ impl Child {
 		output
 	}
 
-	/// Read the child's stdout concatenated with its stderr. Returns Ok if the child
-	/// returns successfully, Err otherwise.
+	/// Read the child's stdout concatenated with its stderr. Returns Ok if the
+	/// child returns successfully, Err otherwise.
 	pub fn output(&mut self) -> Result<String, String> {
 		let status = self.inner.as_mut().map(|child| child.wait().unwrap()).unwrap();
 		let buffer = self.stdout_and_stderr();

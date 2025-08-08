@@ -77,7 +77,8 @@ impl<R> Connect<Db, R> {
 	pub fn versioned(mut self) -> Self {
 		let replace_scheme = |mut endpoint: Endpoint| -> Result<Endpoint> {
 			match endpoint.url.scheme() {
-				// If the engine is an unversioned SurrealKV, we want to switch it to a versioned one
+				// If the engine is an unversioned SurrealKV, we want to switch it to a versioned
+				// one
 				"surrealkv" => {
 					// Replace the scheme in the URL
 					endpoint.url.set_scheme(VERSIONED_SCHEME).unwrap_or_else(|_| {

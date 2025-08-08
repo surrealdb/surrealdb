@@ -1,7 +1,6 @@
+use crate::expr::Bytesize;
 use http::StatusCode;
 use thiserror::Error;
-
-use crate::expr::Bytesize;
 
 #[derive(Error, Debug)]
 pub enum ApiError {

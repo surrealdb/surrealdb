@@ -17,7 +17,8 @@ pub struct Ident(#[serde(with = "no_nul_bytes")] String);
 impl Ident {
 	/// Create a new identifier
 	///
-	/// This function checks if the string has a null byte, returns None if it has.
+	/// This function checks if the string has a null byte, returns None if it
+	/// has.
 	pub fn new(str: String) -> Option<Self> {
 		if str.contains('\0') {
 			return None;

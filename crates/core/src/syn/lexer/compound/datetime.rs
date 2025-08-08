@@ -1,10 +1,8 @@
-use std::ops::RangeInclusive;
-
-use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Utc};
-
 use crate::syn::error::{SyntaxError, bail, syntax_error};
 use crate::syn::lexer::Lexer;
 use crate::syn::token::{Token, t};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Utc};
+use std::ops::RangeInclusive;
 
 pub fn datetime(lexer: &mut Lexer, start: Token) -> Result<DateTime<Utc>, SyntaxError> {
 	let double = match start.kind {
@@ -111,16 +109,16 @@ pub fn datetime_inner(lexer: &mut Lexer) -> Result<DateTime<Utc>, SyntaxError> {
 		Some(b'-') => {
 			lexer.reader.next();
 			let (hour, minute) = parse_timezone(lexer)?;
-			// The range checks on the digits ensure that the offset can't exceed 23:59 so below
-			// unwraps won't panic.
+			// The range checks on the digits ensure that the offset can't exceed 23:59 so
+			// below unwraps won't panic.
 			FixedOffset::west_opt((hour * 3600 + minute * 60) as i32).unwrap()
 		}
 		Some(b'+') => {
 			lexer.reader.next();
 			let (hour, minute) = parse_timezone(lexer)?;
 
-			// The range checks on the digits ensure that the offset can't exceed 23:59 so below
-			// unwraps won't panic.
+			// The range checks on the digits ensure that the offset can't exceed 23:59 so
+			// below unwraps won't panic.
 			FixedOffset::east_opt((hour * 3600 + minute * 60) as i32).unwrap()
 		}
 		Some(b'Z') => {

@@ -67,10 +67,11 @@ impl FakeClock {
 	}
 }
 
-/// IncFakeClock increments a local clock every time the clock is accessed, similar to a real clock.
-/// This is useful when you need unique and partially deterministic timestamps for tests.
-/// Partially deterministic, because you do not have direct control over how many times a clock
-/// is accessed, and due to the nature of async - you neither have order guarantee.
+/// IncFakeClock increments a local clock every time the clock is accessed,
+/// similar to a real clock. This is useful when you need unique and partially
+/// deterministic timestamps for tests. Partially deterministic, because you do
+/// not have direct control over how many times a clock is accessed, and due to
+/// the nature of async - you neither have order guarantee.
 pub struct IncFakeClock {
 	now: AtomicU64,
 	increment: Duration,

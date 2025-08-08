@@ -1,5 +1,4 @@
 use crate::val::Duration;
-
 use std::fmt::{self, Display, Formatter};
 use std::time;
 

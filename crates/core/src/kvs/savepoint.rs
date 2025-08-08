@@ -77,7 +77,8 @@ impl SavePoints {
 			match prep {
 				SavePrepare::AlreadyPresent(key, op) => {
 					if let Some(sv) = current.get_mut(&key) {
-						// We keep the last operation executed in the transaction so we can do the appropriate rollback action (SET or PUT)
+						// We keep the last operation executed in the transaction so we can do the
+						// appropriate rollback action (SET or PUT)
 						sv.last_operation = op;
 					}
 				}

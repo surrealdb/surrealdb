@@ -1,5 +1,3 @@
-use std::collections::btree_map::Entry;
-
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::exe::try_join_all_buffered;
@@ -8,6 +6,7 @@ use crate::expr::{Expr, FlowResultExt as _, Literal};
 use crate::val::{Object, Value};
 use anyhow::Result;
 use reblessive::tree::Stk;
+use std::collections::btree_map::Entry;
 
 impl Value {
 	/// Asynchronous method for setting a field on a `Value`
@@ -31,9 +30,9 @@ impl Value {
 		let mut prev = path;
 
 		// Index forward trying to find the location where to insert the value
-		// Whenever we hit an existing path in the value we update place to point to the new value.
-		// If we hit a dead end, we then assign the into that dead end. If any path is not yet
-		// matched we use that to create an object to assign.
+		// Whenever we hit an existing path in the value we update place to point to the
+		// new value. If we hit a dead end, we then assign the into that dead end. If
+		// any path is not yet matched we use that to create an object to assign.
 		while let Some(p) = iter.next() {
 			match place {
 				Value::RecordId(_) | Value::Null | Value::None => {

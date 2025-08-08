@@ -19,7 +19,8 @@ impl Document {
 	/// - Data clause specified IDs (including function calls and expressions)
 	/// - Randomly generated IDs when no ID is specified
 	///
-	/// The method ensures that all expressions are properly evaluated before being used as record IDs.
+	/// The method ensures that all expressions are properly evaluated before
+	/// being used as record IDs.
 	pub(super) async fn generate_record_id(
 		&mut self,
 		stk: &mut Stk,
@@ -65,11 +66,13 @@ impl Document {
 			}
 			// This is a INSERT statement
 			else if let Workable::Insert(_) = &self.extras {
-				// TODO(tobiemh): implement last-step id generation for INSERT statements
+				// TODO(tobiemh): implement last-step id generation for INSERT
+				// statements
 			}
 			// This is a RELATE statement
 			else if let Workable::Relate(_, _, _) = &self.extras {
-				// TODO(tobiemh): implement last-step id generation for RELATE statements
+				// TODO(tobiemh): implement last-step id generation for RELATE
+				// statements
 			}
 		}
 		//

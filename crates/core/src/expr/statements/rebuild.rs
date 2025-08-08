@@ -8,7 +8,6 @@ use crate::expr::statements::define::DefineKind;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 use anyhow::Result;
-
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

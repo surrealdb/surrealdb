@@ -16,6 +16,7 @@ pub mod remote;
 #[doc(hidden)]
 pub mod tasks;
 
+use super::opt::Resource;
 use futures::Stream;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -28,8 +29,6 @@ use tokio::time::Interval;
 use wasmtimer::std::Instant;
 #[cfg(target_family = "wasm")]
 use wasmtimer::tokio::Interval;
-
-use super::opt::Resource;
 
 // used in http and all local engines.
 #[allow(dead_code)]

@@ -8,7 +8,6 @@ use crate::iam::Auth;
 use crate::kvs::{Live, impl_kv_value_revisioned};
 use crate::val::{Uuid, Value};
 use anyhow::{Result, bail};
-
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

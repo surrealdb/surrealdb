@@ -1,14 +1,12 @@
-use std::cell::RefCell;
-
-use js::class::{JsClass, OwnedBorrow, Readable, Trace};
-use js::prelude::{Coerced, Opt};
-use js::{Ctx, Exception, FromJs, JsLifetime, Promise, Result, Value};
-use reblessive::tree::Stk;
-
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::FlowResultExt as _;
+use js::class::{JsClass, OwnedBorrow, Readable, Trace};
+use js::prelude::{Coerced, Opt};
+use js::{Ctx, Exception, FromJs, JsLifetime, Promise, Result, Value};
+use reblessive::tree::Stk;
+use std::cell::RefCell;
 
 mod classes;
 
@@ -57,7 +55,8 @@ pub fn query<'js>(
 	let promise = Promise::wrap_future(&ctx_clone, async move {
 		let query_ctx = ctx.userdata::<QueryContext<'js>>().expect("query context should be set");
 
-		// Wait on existing query ctx so that we can't spawn more then one query at the same time.
+		// Wait on existing query ctx so that we can't spawn more then one query at the
+		// same time.
 		if let Some(x) = pending_query_future {
 			let _ = x.await;
 		}

@@ -1,3 +1,4 @@
+use super::IgnoreError;
 use crate::ctx::Context;
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
@@ -8,8 +9,6 @@ use crate::val::Value;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use super::IgnoreError;
-
 impl Document {
 	pub(super) async fn insert(
 		&mut self,
@@ -18,11 +17,11 @@ impl Document {
 		opt: &Options,
 		stm: &InsertStatement,
 	) -> Result<Value, IgnoreError> {
-		// Even though we haven't tried to create first this can still not be the 'initial iteration' if
-		// the initial doc is not set.
+		// Even though we haven't tried to create first this can still not be the
+		// 'initial iteration' if the initial doc is not set.
 		//
-		// If this is not the initial iteration we immediatly skip trying to create and go straight
-		// to updating.
+		// If this is not the initial iteration we immediatly skip trying to create and
+		// go straight to updating.
 		if !self.is_iteration_initial() {
 			return self.insert_update(stk, ctx, opt, &Statement::Insert(stm)).await;
 		}
@@ -35,11 +34,11 @@ impl Document {
 			ctx.tx().lock().await.new_save_point();
 		}
 
-		// First try to create the value and if that is not possible due to an existing value fall
-		// back to update instead.
+		// First try to create the value and if that is not possible due to an existing
+		// value fall back to update instead.
 		//
-		// This is done this way to make the create path fast and take priority over the update
-		// path.
+		// This is done this way to make the create path fast and take priority over the
+		// update path.
 		let retry = match self.insert_create(stk, ctx, opt, &Statement::Insert(stm)).await {
 			// We received an index exists error, so we
 			// ignore the error, and attempt to update the

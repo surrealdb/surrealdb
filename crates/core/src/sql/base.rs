@@ -22,7 +22,8 @@ impl fmt::Display for Base {
 		match self {
 			Self::Ns => f.write_str("NAMESPACE"),
 			Self::Db => f.write_str("DATABASE"),
-			// TODO(gguillemas): This variant is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
+			// TODO(gguillemas): This variant is kept in 2.0.0 for backward compatibility. Drop in
+			// 3.0.0.
 			Self::Sc(sc) => write!(f, "SCOPE {sc}"),
 			Self::Root => f.write_str("ROOT"),
 		}

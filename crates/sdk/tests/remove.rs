@@ -421,7 +421,8 @@ async fn permissions_checks_remove_ns() {
 		("check", "INFO FOR ROOT"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check1 = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
 	let check2 = "{ accesses: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
 	let check_results = [vec![check1], vec![check2]];
@@ -462,7 +463,8 @@ async fn permissions_checks_remove_db() {
 		("check", "INFO FOR NS"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
 		vec!["{ accesses: {  }, databases: { DB: 'DEFINE DATABASE DB' }, users: {  } }"],
@@ -504,7 +506,8 @@ async fn permissions_checks_remove_function() {
 		("check", "INFO FOR DB"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec![
 			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
@@ -550,7 +553,8 @@ async fn permissions_checks_remove_analyzer() {
 		("check", "INFO FOR DB"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec![
 			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
@@ -596,7 +600,8 @@ async fn permissions_checks_remove_root_access() {
 		("check", "INFO FOR ROOT"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check1 = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
 	let check2 = r#"{ accesses: { access: "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }"#;
 	let check_results = [vec![check1], vec![check2]];
@@ -637,7 +642,8 @@ async fn permissions_checks_remove_ns_access() {
 		("check", "INFO FOR NS"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
 		vec![
@@ -681,7 +687,8 @@ async fn permissions_checks_remove_db_access() {
 		("check", "INFO FOR DB"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec![
 			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
@@ -727,7 +734,8 @@ async fn permissions_checks_remove_root_user() {
 		("check", "INFO FOR ROOT"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check1 = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
 	let check2 = r#"{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }"#;
 	let check_results = [vec![check1], vec![check2]];
@@ -768,7 +776,8 @@ async fn permissions_checks_remove_ns_user() {
 		("check", "INFO FOR NS"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
 		vec![
@@ -812,7 +821,8 @@ async fn permissions_checks_remove_db_user() {
 		("check", "INFO FOR DB"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec![
 			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
@@ -858,7 +868,8 @@ async fn permissions_checks_remove_param() {
 		("check", "INFO FOR DB"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec![
 			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
@@ -904,7 +915,8 @@ async fn permissions_checks_remove_table() {
 		("check", "INFO FOR DB"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec![
 			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
@@ -950,7 +962,8 @@ async fn permissions_checks_remove_event() {
 		("check", "INFO FOR TABLE TB"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
 		vec![
@@ -994,7 +1007,8 @@ async fn permissions_checks_remove_field() {
 		("check", "INFO FOR TABLE TB"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
 		vec![
@@ -1038,7 +1052,8 @@ async fn permissions_checks_remove_index() {
 		("check", "INFO FOR TABLE TB"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
 		vec![

@@ -1,3 +1,4 @@
+use super::FlowResultExt as _;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -14,8 +15,6 @@ use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use std::{fmt, str};
 
-use super::FlowResultExt as _;
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct Param(String);
@@ -23,7 +22,8 @@ pub struct Param(String);
 impl Param {
 	/// Create a new identifier
 	///
-	/// This function checks if the string has a null byte, returns None if it has.
+	/// This function checks if the string has a null byte, returns None if it
+	/// has.
 	pub fn new(str: String) -> Option<Self> {
 		if str.contains('\0') {
 			return None;

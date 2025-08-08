@@ -1,7 +1,6 @@
-use uuid::Uuid;
-
 use crate::rpc::{Method, RpcError};
 use crate::val::{Array, Number, Object, Value};
+use uuid::Uuid;
 
 pub static ID: &str = "id";
 pub static METHOD: &str = "method";
@@ -19,7 +18,8 @@ pub struct Request {
 }
 
 impl Request {
-	/// Create a request by extracting the request fields from an surealql object.
+	/// Create a request by extracting the request fields from an surealql
+	/// object.
 	pub fn from_object(mut obj: Object) -> Result<Self, RpcError> {
 		// Fetch the 'id' argument
 

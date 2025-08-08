@@ -1,3 +1,4 @@
+use super::args::Optional;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -10,8 +11,6 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 use std::collections::hash_map::Entry;
 use std::collections::{BinaryHeap, HashMap};
-
-use super::args::Optional;
 
 pub async fn analyze(
 	(stk, ctx, opt): (&mut Stk, &Context, Option<&Options>),
@@ -65,16 +64,19 @@ pub async fn offsets(
 	Ok(Value::None)
 }
 
-/// Internal structure for storing documents during RRF (Reciprocal Rank Fusion) processing.
+/// Internal structure for storing documents during RRF (Reciprocal Rank Fusion)
+/// processing.
 ///
 /// This tuple struct contains:
 /// - `f64`: The accumulated RRF score for the document
-/// - `Value`: The document ID used to identify the same document across different result lists
-/// - `Vec<Object>`: Collection of original objects from different search results that will be merged
+/// - `Value`: The document ID used to identify the same document across
+///   different result lists
+/// - `Vec<Object>`: Collection of original objects from different search
+///   results that will be merged
 ///
-/// The struct implements comparison traits (`Eq`, `Ord`, `PartialEq`, `PartialOrd`) based solely
-/// on the RRF score (first field) to enable efficient sorting and heap operations during the
-/// top-k selection process.
+/// The struct implements comparison traits (`Eq`, `Ord`, `PartialEq`,
+/// `PartialOrd`) based solely on the RRF score (first field) to enable
+/// efficient sorting and heap operations during the top-k selection process.
 struct RrfDoc(f64, Value, Vec<Object>);
 
 impl PartialEq for RrfDoc {
@@ -97,32 +99,39 @@ impl Ord for RrfDoc {
 	}
 }
 
-/// Implements Reciprocal Rank Fusion (RRF) to combine multiple ranked result lists.
+/// Implements Reciprocal Rank Fusion (RRF) to combine multiple ranked result
+/// lists.
 ///
-/// RRF is a method for combining results from different search algorithms (e.g., vector search
-/// and full-text search) by computing a unified score based on the reciprocal of each document's
-/// rank in each result list. The algorithm uses the formula: `1 / (k + rank)` where `k` is the
-/// RRF constant and `rank` is the 1-based position in the result list.
+/// RRF is a method for combining results from different search algorithms
+/// (e.g., vector search and full-text search) by computing a unified score
+/// based on the reciprocal of each document's rank in each result list. The
+/// algorithm uses the formula: `1 / (k + rank)` where `k` is the RRF constant
+/// and `rank` is the 1-based position in the result list.
 ///
 /// # Parameters
 ///
-/// * `ctx` - The execution context for cancellation checking and transaction management
-/// * `results` - An array of result lists, where each list contains documents with an "id" field
+/// * `ctx` - The execution context for cancellation checking and transaction
+///   management
+/// * `results` - An array of result lists, where each list contains documents
+///   with an "id" field
 /// * `limit` - Maximum number of documents to return (must be ≥ 1)
-/// * `rrf_constant` - Optional RRF constant (k) for score calculation (defaults to 60.0, must be ≥ 0)
+/// * `rrf_constant` - Optional RRF constant (k) for score calculation (defaults
+///   to 60.0, must be ≥ 0)
 ///
 /// # Returns
 ///
-/// Returns a `Value::Array` containing the top `limit` documents sorted by RRF score in descending
-/// order. Each document includes:
-/// - All original fields from the input documents (merged if the same document appears in multiple lists)
+/// Returns a `Value::Array` containing the top `limit` documents sorted by RRF
+/// score in descending order. Each document includes:
+/// - All original fields from the input documents (merged if the same document
+///   appears in multiple lists)
 /// - `id`: The document identifier
 /// - `rrf_score`: The computed RRF score as a float
 ///
 /// # Errors
 ///
 /// * `Error::InvalidArguments` - If `limit` < 1 or `rrf_constant` < 0
-/// * Context cancellation errors if the operation is cancelled during processing
+/// * Context cancellation errors if the operation is cancelled during
+///   processing
 ///
 /// # Example
 ///
@@ -159,19 +168,23 @@ pub async fn rrf(
 		return Ok(Value::Array(Array::new()));
 	}
 
-	// Map to store document IDs with their accumulated RRF scores and original objects
-	// Key: document ID, Value: (accumulated_rrf_score, vector_of_original_objects)
+	// Map to store document IDs with their accumulated RRF scores and original
+	// objects Key: document ID, Value: (accumulated_rrf_score,
+	// vector_of_original_objects)
 	#[expect(clippy::mutable_key_type)]
 	let mut documents: HashMap<Value, (f64, Vec<Object>)> = HashMap::new();
 
-	// Process each result list from the input array (e.g., vector search results, full-text search results)
+	// Process each result list from the input array (e.g., vector search results,
+	// full-text search results)
 	let mut count = 0;
 	for result_list in results.into_iter() {
 		if let Value::Array(array) = result_list {
-			// Process each document in this result list, using enumerate to get 0-based rank
+			// Process each document in this result list, using enumerate to get 0-based
+			// rank
 			for (rank, doc) in array.into_iter().enumerate() {
 				if let Value::Object(mut obj) = doc {
-					// Extract the document ID (required for RRF to identify same documents across lists)
+					// Extract the document ID (required for RRF to identify same documents across
+					// lists)
 					if let Some(id_value) = obj.remove("id") {
 						// Calculate RRF contribution using the standard formula: 1 / (k + rank + 1)
 						// where k is the RRF constant and rank is converted from 0-based to 1-based
@@ -179,7 +192,8 @@ pub async fn rrf(
 
 						// Store or merge the document based on whether we've seen this ID before
 						match documents.entry(id_value) {
-							// First time seeing this document ID - store it with its RRF contribution
+							// First time seeing this document ID - store it with its RRF
+							// contribution
 							Entry::Vacant(entry) => {
 								entry.insert((rrf_contribution, vec![obj]));
 							}
@@ -202,8 +216,9 @@ pub async fn rrf(
 		}
 	}
 
-	// Use a min-heap (BinaryHeap) to efficiently maintain only the top `limit` documents
-	// This avoids sorting all documents when we only need the top-k results
+	// Use a min-heap (BinaryHeap) to efficiently maintain only the top `limit`
+	// documents This avoids sorting all documents when we only need the top-k
+	// results
 	let mut scored_docs = BinaryHeap::with_capacity(limit);
 	for (id, (score, objects)) in documents {
 		if scored_docs.len() < limit {
@@ -222,17 +237,20 @@ pub async fn rrf(
 		count += 1;
 	}
 
-	// Extract the top `limit` results from the heap and build the final result array
-	// Note: BinaryHeap.pop() returns documents in descending order by RRF score (highest first)
+	// Extract the top `limit` results from the heap and build the final result
+	// array Note: BinaryHeap.pop() returns documents in descending order by RRF
+	// score (highest first)
 	let mut result_array = Array::new();
 	while let Some(doc) = scored_docs.pop() {
 		// Merge all objects from the same document ID across different result lists
-		// This combines fields like 'distance' from vector search and 'ft_score' from full-text search
+		// This combines fields like 'distance' from vector search and 'ft_score' from
+		// full-text search
 		let mut obj = Object::default();
 		for mut o in doc.2 {
 			obj.append(&mut o.0);
 		}
-		// Add the document ID back (was removed during processing) and the computed RRF score
+		// Add the document ID back (was removed during processing) and the computed RRF
+		// score
 		obj.insert("id".to_string(), doc.1);
 		obj.insert("rrf_score".to_string(), Value::Number(Number::Float(doc.0)));
 		result_array.push(Value::Object(obj));
@@ -252,24 +270,31 @@ enum LinearNorm {
 
 /// Implements weighted linear combination to fuse multiple ranked result lists.
 ///
-/// Linear combination is a method for combining results from different search algorithms (e.g., vector search
-/// and full-text search) by computing a unified score based on weighted linear combination of normalized scores.
-/// The algorithm first normalizes scores from each result list using either MinMax or Z-score normalization,
-/// then computes a weighted sum: `weight₁ × norm_score₁ + weight₂ × norm_score₂ + ...`
+/// Linear combination is a method for combining results from different search
+/// algorithms (e.g., vector search and full-text search) by computing a unified
+/// score based on weighted linear combination of normalized scores.
+/// The algorithm first normalizes scores from each result list using either
+/// MinMax or Z-score normalization, then computes a weighted sum: `weight₁ ×
+/// norm_score₁ + weight₂ × norm_score₂ + ...`
 ///
 /// # Parameters
 ///
-/// * `ctx` - The execution context for cancellation checking and transaction management
-/// * `results` - An array of result lists, where each list contains documents with an "id" field
-/// * `weights` - An array of numeric weights corresponding to each result list (must have same length as results)
+/// * `ctx` - The execution context for cancellation checking and transaction
+///   management
+/// * `results` - An array of result lists, where each list contains documents
+///   with an "id" field
+/// * `weights` - An array of numeric weights corresponding to each result list
+///   (must have same length as results)
 /// * `limit` - Maximum number of documents to return (must be ≥ 1)
-/// * `norm` - Normalization method: "minmax" for MinMax normalization or "zscore" for Z-score normalization
+/// * `norm` - Normalization method: "minmax" for MinMax normalization or
+///   "zscore" for Z-score normalization
 ///
 /// # Returns
 ///
-/// Returns a `Value::Array` containing the top `limit` documents sorted by linear score in descending
-/// order. Each document includes:
-/// - All original fields from the input documents (merged if the same document appears in multiple lists)
+/// Returns a `Value::Array` containing the top `limit` documents sorted by
+/// linear score in descending order. Each document includes:
+/// - All original fields from the input documents (merged if the same document
+///   appears in multiple lists)
 /// - `id`: The document identifier
 /// - `linear_score`: The computed weighted linear combination score as a float
 ///
@@ -280,19 +305,23 @@ enum LinearNorm {
 ///   - `results` and `weights` arrays have different lengths
 ///   - Any weight is not a numeric value
 ///   - `norm` is not "minmax" or "zscore"
-/// * Context cancellation errors if the operation is cancelled during processing
+/// * Context cancellation errors if the operation is cancelled during
+///   processing
 ///
 /// # Score Extraction
 ///
-/// The function automatically extracts scores from documents using the following priority:
-/// 1. `distance` field - converted using `1.0 / (1.0 + distance)` (lower distance = higher score)
+/// The function automatically extracts scores from documents using the
+/// following priority:
+/// 1. `distance` field - converted using `1.0 / (1.0 + distance)` (lower
+///    distance = higher score)
 /// 2. `ft_score` field - used directly (full-text search scores)
 /// 3. `score` field - used directly (generic scores)
 /// 4. Rank-based fallback - `1.0 / (1.0 + rank)` if no score field is found
 ///
 /// # Normalization Methods
 ///
-/// * **MinMax**: Scales scores to [0,1] range using `(score - min) / (max - min)`
+/// * **MinMax**: Scales scores to [0,1] range using `(score - min) / (max -
+///   min)`
 /// * **Z-score**: Standardizes scores using `(score - mean) / std_dev`
 ///
 /// # Example
@@ -349,8 +378,9 @@ pub async fn linear(
 
 	let results_len = results.len();
 
-	// Map to store document IDs with their scores from each result list and original objects
-	// Key: document ID, Value: (scores_vector, vector_of_original_objects)
+	// Map to store document IDs with their scores from each result list and
+	// original objects Key: document ID, Value: (scores_vector,
+	// vector_of_original_objects)
 	#[expect(clippy::mutable_key_type)]
 	let mut documents: HashMap<Value, (Vec<f64>, Vec<Object>)> = HashMap::new();
 
@@ -371,7 +401,8 @@ pub async fn linear(
 						} else if let Some(Value::Number(n)) = obj.get("score") {
 							n.as_float()
 						} else {
-							// If no score field found, use rank-based scoring (higher rank = lower score)
+							// If no score field found, use rank-based scoring (higher rank = lower
+							// score)
 							1.0 / (1.0 + count as f64)
 						};
 

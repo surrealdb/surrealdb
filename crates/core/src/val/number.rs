@@ -861,8 +861,8 @@ impl Ord for Number {
 							// less than 1 so we know this will always be less than SAFE_MULTIPLIER.
 							match r.to_i64() {
 								Some(ref right) => match (l as i64).cmp(right) {
-									// If the integer parts are equal, we need to check the remaining
-									// fractional parts.
+									// If the integer parts are equal, we need to check the
+									// remaining fractional parts.
 									Ordering::Equal => {
 										// Drop the integer parts we already compared.
 										l = l.fract();
@@ -872,24 +872,25 @@ impl Ord for Number {
 										compare_fractions!(l, r);
 									}
 									ordering => {
-										// If the integer parts are not equal then we already know the
-										// correct ordering.
+										// If the integer parts are not equal then we already know
+										// the correct ordering.
 										return ordering;
 									}
 								},
-								// This is technically unreachable. Reaching this part likely indicates
-								// a bug in `rust-decimal`'s `to_f64`'s implementation.
+								// This is technically unreachable. Reaching this part likely
+								// indicates a bug in `rust-decimal`'s `to_f64`'s
+								// implementation.
 								None => {
-									// We will assume the decimal is bigger or smaller depending on its
-									// sign.
+									// We will assume the decimal is bigger or smaller depending on
+									// its sign.
 									return greater!(w).reverse();
 								}
 							}
 						}
-						// After our iterations, if we still haven't exhausted both fractions we will
-						// just treat them as equal. It should be impossible to reach this point after
-						// at least 6 iterations. We could use an infinite loop instead but this way
-						// we make sure the loop always exits.
+						// After our iterations, if we still haven't exhausted both fractions we
+						// will just treat them as equal. It should be impossible to reach
+						// this point after at least 6 iterations. We could use an infinite
+						// loop instead but this way we make sure the loop always exits.
 						Ordering::Equal
 					}
 					// If the integer parts are not equal then we already know the correct ordering.
@@ -1242,9 +1243,10 @@ use std::str::FromStr;
 pub trait DecimalExt {
 	/// Converts a string to a Decimal, normalizing it in the process.
 	///
-	/// This method is a convenience wrapper around `rust_decimal::Decimal::from_str`
-	/// which can parse a string into a Decimal and normalize it. If the value has
-	/// higher precision than the Decimal type can handle, it will be rounded to the
+	/// This method is a convenience wrapper around
+	/// `rust_decimal::Decimal::from_str` which can parse a string into a
+	/// Decimal and normalize it. If the value has higher precision than the
+	/// Decimal type can handle, it will be rounded to the
 	/// nearest representable value.
 	fn from_str_normalized(s: &str) -> Result<Self, rust_decimal::Error>
 	where
@@ -1252,9 +1254,10 @@ pub trait DecimalExt {
 
 	/// Converts a string to a Decimal, normalizing it in the process.
 	///
-	/// This method is a convenience wrapper around `rust_decimal::Decimal::from_str_exact`
-	/// which can parse a string into a Decimal and normalize it. If the value has
-	/// higher precision than the Decimal type can handle an Underflow error will be returned.
+	/// This method is a convenience wrapper around
+	/// `rust_decimal::Decimal::from_str_exact` which can parse a string into a
+	/// Decimal and normalize it. If the value has higher precision than the
+	/// Decimal type can handle an Underflow error will be returned.
 	fn from_str_exact_normalized(s: &str) -> Result<Self, rust_decimal::Error>
 	where
 		Self: Sized;
@@ -1275,12 +1278,11 @@ impl DecimalExt for Decimal {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use rust_decimal::prelude::ToPrimitive;
-	use std::cmp::Ordering;
-
 	use rand::seq::SliceRandom;
 	use rand::{Rng, thread_rng};
 	use rust_decimal::Decimal;
+	use rust_decimal::prelude::ToPrimitive;
+	use std::cmp::Ordering;
 
 	#[test]
 	fn test_decimal_ext_from_str_normalized() {

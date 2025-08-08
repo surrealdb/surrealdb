@@ -35,7 +35,8 @@ impl ToOwned for StrandRef {
 	}
 }
 
-/// Fast way of removing null bytes in place without having to realloc the string.
+/// Fast way of removing null bytes in place without having to realloc the
+/// string.
 fn remove_null_bytes(s: String) -> String {
 	let mut bytes = s.into_bytes();
 	let mut write = 0;
@@ -82,7 +83,8 @@ impl Strand {
 	/// Create a new strand, without checking the string.
 	///
 	/// # Safety
-	/// Caller must ensure that string handed as an argument does not contain any null bytes.
+	/// Caller must ensure that string handed as an argument does not contain
+	/// any null bytes.
 	pub unsafe fn new_unchecked(s: String) -> Strand {
 		// Check in debug mode if the variants
 		debug_assert!(!s.contains('\0'));
@@ -139,7 +141,8 @@ impl Display for Strand {
 	}
 }
 
-// TODO: Dubious add implementation, concatination is not really an addition in rust.
+// TODO: Dubious add implementation, concatination is not really an addition in
+// rust.
 impl ops::Add for Strand {
 	type Output = Self;
 	fn add(mut self, other: Self) -> Self {

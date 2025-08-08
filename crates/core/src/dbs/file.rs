@@ -120,8 +120,8 @@ impl FileCollector {
 					// sampling.
 					// This implementation is taken from the IteratorRandom::choose_multiple. It is
 					// emperically tested to produce n values uniformly sampled from the iterator.
-					// TODO (DelSkayn): Figure exactly out why this is guarenteed to produce a uniform
-					// sampling.
+					// TODO (DelSkayn): Figure exactly out why this is guarenteed to produce a
+					// uniform sampling.
 					for (i, v) in iter.enumerate() {
 						let v = v?;
 						// pick an index to insert the value in, swapping existing values if it is
@@ -270,7 +270,8 @@ impl FileReader {
 	fn read_usize<R: Read>(reader: &mut R) -> Result<usize, io::Error> {
 		let mut buf = vec![0u8; FileCollector::USIZE_SIZE];
 		reader.read_exact(&mut buf)?;
-		// Safe to call unwrap because we know the slice length matches the expected length
+		// Safe to call unwrap because we know the slice length matches the expected
+		// length
 		let u = usize::from_be_bytes(buf.try_into().unwrap());
 		Ok(u)
 	}

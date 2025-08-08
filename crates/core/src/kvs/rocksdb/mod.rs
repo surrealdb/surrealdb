@@ -2,6 +2,7 @@
 
 mod cnf;
 
+use super::savepoint::SavePoints;
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::{Check, Key, Val};
@@ -15,8 +16,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-
-use super::savepoint::SavePoints;
 
 const TARGET: &str = "surrealdb::core::kvs::rocksdb";
 

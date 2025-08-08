@@ -1,6 +1,3 @@
-use std::cell::RefCell;
-use std::time::{Duration, Instant};
-
 use super::modules::surrealdb::query::QueryContext;
 use super::modules::{loader, resolver};
 use super::{classes, fetch, globals, modules};
@@ -13,11 +10,14 @@ use crate::val::Value;
 use anyhow::Result;
 use js::prelude::*;
 use js::{CatchResultExt, Ctx, Function, Module, Promise, async_with};
+use std::cell::RefCell;
+use std::time::{Duration, Instant};
 
 /// Insert query data into the context,
 ///
 /// # Safety
-/// Caller must ensure that the runtime from which `Ctx` originates cannot outlife 'a.
+/// Caller must ensure that the runtime from which `Ctx` originates cannot
+/// outlife 'a.
 pub unsafe fn create_query_data<'a>(
 	context: &'a Context,
 	opt: &'a Options,

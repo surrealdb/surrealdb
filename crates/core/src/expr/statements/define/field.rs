@@ -1,3 +1,4 @@
+use super::DefineKind;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
@@ -13,14 +14,11 @@ use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Transaction, impl_kv_value_revisioned};
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail, ensure};
-
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use std::sync::Arc;
 use uuid::Uuid;
-
-use super::DefineKind;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -38,7 +36,8 @@ pub struct DefineFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
 	/// Whether the field is marked as flexible.
-	/// Flexible allows the field to be schemaless even if the table is marked as schemafull.
+	/// Flexible allows the field to be schemaless even if the table is marked
+	/// as schemafull.
 	pub flex: bool,
 	pub field_kind: Option<Kind>,
 	pub readonly: bool,
@@ -100,7 +99,6 @@ impl DefineFieldStatement {
 			&key,
 			&DefineFieldStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
-				//
 				kind: DefineKind::Default,
 				..self.clone()
 			},

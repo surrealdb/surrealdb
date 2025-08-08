@@ -1,6 +1,5 @@
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::{Ident, Timeout};
-
 use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

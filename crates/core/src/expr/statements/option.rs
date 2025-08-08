@@ -1,5 +1,4 @@
 use crate::expr::ident::Ident;
-
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;

@@ -1,5 +1,3 @@
-use std::ops::Deref;
-
 use super::AppState;
 use super::error::ResponseError;
 use super::headers::ContentType;
@@ -12,6 +10,7 @@ use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use http::StatusCode;
+use std::ops::Deref;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::iam::Action::View;

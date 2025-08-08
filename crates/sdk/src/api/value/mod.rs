@@ -25,8 +25,8 @@ pub fn to_value<T: Serialize + 'static>(value: T) -> Result<Value> {
 	convert::to_value(value).map(Value)
 }
 
-// Keeping bytes implementation minimal since it might be a good idea to use bytes crate here
-// instead of a plain Vec<u8>.
+// Keeping bytes implementation minimal since it might be a good idea to use
+// bytes crate here instead of a plain Vec<u8>.
 #[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[revisioned(revision = 1)]
 pub struct Bytes(Vec<u8>);
@@ -319,8 +319,8 @@ impl Value {
 	#[expect(dead_code)]
 	pub(crate) fn core_to_array(v: Vec<val::Value>) -> Vec<Value> {
 		unsafe {
-			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
+			// SAFETY: Because Value is `repr(transparent)` transmuting between value and
+			// corevalue is safe.
 			std::mem::transmute::<Vec<val::Value>, Vec<Value>>(v)
 		}
 	}
@@ -328,8 +328,8 @@ impl Value {
 	#[expect(dead_code)]
 	pub(crate) fn core_to_array_ref(v: &Vec<val::Value>) -> &Vec<Value> {
 		unsafe {
-			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
+			// SAFETY: Because Value is `repr(transparent)` transmuting between value and
+			// corevalue is safe.
 			std::mem::transmute::<&Vec<val::Value>, &Vec<Value>>(v)
 		}
 	}
@@ -337,16 +337,16 @@ impl Value {
 	#[expect(dead_code)]
 	pub(crate) fn core_to_array_mut(v: &mut Vec<val::Value>) -> &mut Vec<Value> {
 		unsafe {
-			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
+			// SAFETY: Because Value is `repr(transparent)` transmuting between value and
+			// corevalue is safe.
 			std::mem::transmute::<&mut Vec<val::Value>, &mut Vec<Value>>(v)
 		}
 	}
 
 	pub(crate) fn array_to_core(v: Vec<Value>) -> Vec<val::Value> {
 		unsafe {
-			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
+			// SAFETY: Because Value is `repr(transparent)` transmuting between value and
+			// corevalue is safe.
 			std::mem::transmute::<Vec<Value>, Vec<val::Value>>(v)
 		}
 	}
@@ -354,8 +354,8 @@ impl Value {
 	#[expect(dead_code)]
 	pub(crate) fn array_to_core_ref(v: &Vec<Value>) -> &Vec<val::Value> {
 		unsafe {
-			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
+			// SAFETY: Because Value is `repr(transparent)` transmuting between value and
+			// corevalue is safe.
 			std::mem::transmute::<&Vec<Value>, &Vec<val::Value>>(v)
 		}
 	}
@@ -363,8 +363,8 @@ impl Value {
 	#[expect(dead_code)]
 	pub(crate) fn array_to_core_mut(v: &mut Vec<Value>) -> &mut Vec<val::Value> {
 		unsafe {
-			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
+			// SAFETY: Because Value is `repr(transparent)` transmuting between value and
+			// corevalue is safe.
 			std::mem::transmute::<&mut Vec<Value>, &mut Vec<val::Value>>(v)
 		}
 	}
@@ -465,8 +465,10 @@ impl Action {
 
 /// A live query notification
 ///
-/// Live queries return a stream of notifications. The notification contains an `action` that triggered the change in the database record and `data` itself.
-/// For deletions the data is the record before it was deleted. For everything else, it's the newly created record or updated record depending on whether
+/// Live queries return a stream of notifications. The notification contains an
+/// `action` that triggered the change in the database record and `data` itself.
+/// For deletions the data is the record before it was deleted. For everything
+/// else, it's the newly created record or updated record depending on whether
 /// the action is create or update.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]

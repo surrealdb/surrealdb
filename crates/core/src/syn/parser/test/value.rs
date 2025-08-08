@@ -1,6 +1,3 @@
-use reblessive::Stack;
-use rust_decimal::Decimal;
-
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{
 	BinaryOperator, Constant, Expr, Ident, Idiom, Literal, Part, RecordIdKeyLit, RecordIdLit,
@@ -8,6 +5,8 @@ use crate::sql::{
 use crate::syn::parser::{Parser, ParserSettings};
 use crate::syn::{self};
 use crate::val::Geometry;
+use reblessive::Stack;
+use rust_decimal::Decimal;
 
 #[test]
 fn parse_index_expression() {

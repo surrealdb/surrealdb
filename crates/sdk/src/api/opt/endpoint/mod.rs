@@ -16,11 +16,10 @@ mod surrealkv;
 #[cfg(feature = "kv-tikv")]
 mod tikv;
 
+use super::Config;
 use crate::api::err::Error;
 use crate::api::{Connection, Result};
 use url::Url;
-
-use super::Config;
 
 /// A server address used to connect to the server
 #[derive(Debug, Clone)]

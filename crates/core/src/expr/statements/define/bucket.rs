@@ -1,3 +1,4 @@
+use super::{CursorDoc, DefineKind};
 use crate::buc::{self, BucketConnectionKey};
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -12,8 +13,6 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
-
-use super::{CursorDoc, DefineKind};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]

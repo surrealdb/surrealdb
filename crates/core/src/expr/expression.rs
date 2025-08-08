@@ -1,3 +1,4 @@
+use super::SleepStatement;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -22,8 +23,6 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Bound;
-
-use super::SleepStatement;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
@@ -198,7 +197,8 @@ impl Expr {
 		}
 	}
 
-	/// Updates the `"parent"` doc field for statements with a meaning full document.
+	/// Updates the `"parent"` doc field for statements with a meaning full
+	/// document.
 	async fn update_parent_doc<F, R>(ctx: &Context, doc: Option<&CursorDoc>, f: F) -> R
 	where
 		F: AsyncFnOnce(&Context, Option<&CursorDoc>) -> R,
@@ -233,11 +233,12 @@ impl Expr {
 			Expr::Idiom(idiom) => idiom.compute(stk, ctx, &opt, doc).await,
 			Expr::Table(ident) => Ok(Value::Table(ident.clone().into())),
 			Expr::Mock(mock) => {
-				// NOTE(value pr): This is a breaking change but makes the most sense without having mock be part
-				// of the Value type.
-				// Mock is mostly used within `CREATE |thing:20|` to create a bunch of entries at
-				// one. Here it behaves similar to `CREATE ([thing:1,thing:2,thing:3...])` so when
-				// we encounted mock outside of create we return the array here instead.
+				// NOTE(value pr): This is a breaking change but makes the most sense without
+				// having mock be part of the Value type.
+				// Mock is mostly used within `CREATE |thing:20|` to create a bunch of entries
+				// at one. Here it behaves similar to `CREATE
+				// ([thing:1,thing:2,thing:3...])` so when we encounted mock outside of
+				// create we return the array here instead.
 				//
 				let record_ids = mock.clone().into_iter().map(Value::RecordId).collect();
 				Ok(Value::Array(Array(record_ids)))
@@ -341,7 +342,8 @@ impl Expr {
 				foreach_statement.compute(stk, ctx, &opt, doc).await
 			}
 			Expr::Let(_) => {
-				//TODO: This error needs to be improved or it needs to be rejected in the parser.
+				//TODO: This error needs to be improved or it needs to be rejected in the
+				// parser.
 				Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
 					"Set statement outside of block",
 				))))
@@ -440,10 +442,11 @@ impl Expr {
 		doc: Option<&CursorDoc>,
 		expr: &Expr,
 	) -> FlowResult<Value> {
-		// TODO: The structure here is somewhat convoluted, because knn needs to have access to the
-		// expression itself instead of just the op and left/right expressions we need to pass in
-		// the parent expression when encountering a binary expression and then match again here.
-		// Ideally knn should be able to be called more naturally.
+		// TODO: The structure here is somewhat convoluted, because knn needs to have
+		// access to the expression itself instead of just the op and left/right
+		// expressions we need to pass in the parent expression when encountering a
+		// binary expression and then match again here. Ideally knn should be able to
+		// be called more naturally.
 		let Expr::Binary {
 			left,
 			op,

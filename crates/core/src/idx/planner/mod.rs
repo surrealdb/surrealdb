@@ -23,8 +23,8 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::sync::atomic::{self, AtomicU8};
 
-/// The goal of this structure is to cache parameters so they can be easily passed
-/// from one function to the other, so we don't pass too many arguments.
+/// The goal of this structure is to cache parameters so they can be easily
+/// passed from one function to the other, so we don't pass too many arguments.
 /// It also caches evaluated fields (like is_keys_only)
 pub(crate) struct StatementContext<'a> {
 	pub(crate) ctx: &'a Context,
@@ -199,8 +199,8 @@ impl<'a> StatementContext<'a> {
 
 	/// Determines the scan direction.
 	/// This is used for Table and Range iterators.
-	/// The direction is reversed if the first element of order is ID descending.
-	/// Typically: `ORDER BY id DESC`
+	/// The direction is reversed if the first element of order is ID
+	/// descending. Typically: `ORDER BY id DESC`
 	pub(crate) fn check_scan_direction(&self) -> ScanDirection {
 		#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 		if let Some(Ordering::Order(o)) = self.order {

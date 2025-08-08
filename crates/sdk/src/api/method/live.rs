@@ -19,11 +19,9 @@ use surrealdb_core::expr::{
 	BinaryOperator, Cond, Expr, Fields, Ident, Idiom, Literal, LiveStatement, TopLevelExpr,
 };
 use surrealdb_core::val;
-use uuid::Uuid;
-
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
-
+use uuid::Uuid;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 

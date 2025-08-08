@@ -1,16 +1,16 @@
-use std::collections::HashMap;
-
 use crate::cf::{TableMutation, TableMutations};
 use crate::doc::CursorValue;
 use crate::expr::statements::DefineTableStatement;
 use crate::kvs::{KVKey, Key};
 use crate::val::RecordId;
 use anyhow::Result;
+use std::collections::HashMap;
 
-// PreparedWrite is a tuple of (versionstamp key, key prefix, key suffix, serialized table mutations).
-// The versionstamp key is the key that contains the current versionstamp and might be used by the
-// specific transaction implementation to make the versionstamp unique and monotonic.
-// The key prefix and key suffix are used to construct the key for the table mutations.
+// PreparedWrite is a tuple of (versionstamp key, key prefix, key suffix,
+// serialized table mutations). The versionstamp key is the key that contains
+// the current versionstamp and might be used by the specific transaction
+// implementation to make the versionstamp unique and monotonic. The key prefix
+// and key suffix are used to construct the key for the table mutations.
 // The consumer of this library should write KV pairs with the following format:
 // key = key_prefix + versionstamp + key_suffix
 // value = serialized table mutations
@@ -92,7 +92,8 @@ impl Writer {
 							TableMutation::Set(id, current.into_owned())
 						} else {
 							// We intentionally record the patches in reverse (current -> previous)
-							// because we cannot otherwise resolve operations such as "replace" and "remove".
+							// because we cannot otherwise resolve operations such as "replace" and
+							// "remove".
 							let patches_to_create_previous = current.diff(&previous);
 							TableMutation::SetWithDiff(
 								id,
@@ -117,7 +118,8 @@ impl Writer {
 	}
 
 	// get returns all the mutations buffered for this transaction,
-	// that are to be written onto the key composed of the specified prefix + the current timestamp + the specified suffix.
+	// that are to be written onto the key composed of the specified prefix + the
+	// current timestamp + the specified suffix.
 	pub(crate) fn get(&self) -> Result<Vec<PreparedWrite>> {
 		let mut r = Vec::<(Vec<u8>, Vec<u8>, Vec<u8>, crate::kvs::Val)>::new();
 		// Get the current timestamp
@@ -143,8 +145,6 @@ impl Writer {
 
 #[cfg(test)]
 mod tests {
-	use std::time::Duration;
-
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
 	use crate::expr::changefeed::ChangeFeed;
 	use crate::expr::statements::show::ShowSince;
@@ -156,6 +156,7 @@ mod tests {
 	use crate::kvs::{Datastore, Transaction};
 	use crate::val::{Datetime, RecordId, RecordIdKey, Value};
 	use crate::vs::VersionStamp;
+	use std::time::Duration;
 
 	const DONT_STORE_PREVIOUS: bool = false;
 
@@ -386,7 +387,8 @@ mod tests {
 		assert_eq!(r.len(), 1);
 		assert!(r[0].0 >= vs2, "{:?}", r);
 
-		// And scanning with previous offset includes both values (without table definitions)
+		// And scanning with previous offset includes both values (without table
+		// definitions)
 		let r = change_feed_vs(ds.transaction(Write, Optimistic).await.unwrap(), &vs1).await;
 		assert_eq!(r.len(), 2);
 	}
@@ -452,8 +454,8 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 
 		//
-		// Create the ns, db, and tb to let the GC and the timestamp-to-versionstamp conversion
-		// work.
+		// Create the ns, db, and tb to let the GC and the timestamp-to-versionstamp
+		// conversion work.
 		//
 
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();

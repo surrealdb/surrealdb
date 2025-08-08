@@ -1,8 +1,7 @@
+use js::{Class, Ctx, Result};
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
-
-use js::{Class, Ctx, Result};
 
 mod body;
 mod classes;

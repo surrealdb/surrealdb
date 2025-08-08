@@ -47,8 +47,8 @@ pub fn sha512((arg,): (String,)) -> Result<Value> {
 /// Allowed to cost this much more than default setting for each hash function.
 const COST_ALLOWANCE: u32 = 4;
 
-/// Like verify_password, but takes a closure to determine whether the cost of performing the
-/// operation is not too high.
+/// Like verify_password, but takes a closure to determine whether the cost of
+/// performing the operation is not too high.
 macro_rules! bounded_verify_password {
 	($algo: ident, $instance: expr_2021, $password: expr_2021, $hash: expr_2021, $bound: expr_2021) => {
 		if let (Some(salt), Some(expected_output)) = (&$hash.salt, &$hash.hash) {
@@ -128,13 +128,14 @@ pub mod bcrypt {
 			Ok(parts) => parts,
 			Err(_) => return Ok(Value::Bool(false)),
 		};
-		// Note: Bcrypt cost is exponential, so add the cost allowance as opposed to multiplying.
+		// Note: Bcrypt cost is exponential, so add the cost allowance as opposed to
+		// multiplying.
 		Ok(if parts.get_cost() > bcrypt::DEFAULT_COST.saturating_add(COST_ALLOWANCE) {
 			// Too expensive to compute.
 			Value::Bool(false)
 		} else {
-			// FIXME: If base64 dependency is added, can avoid parsing the HashParts twice, once
-			// above and once in verity, by using bcrypt::bcrypt.
+			// FIXME: If base64 dependency is added, can avoid parsing the HashParts twice,
+			// once above and once in verity, by using bcrypt::bcrypt.
 			bcrypt::verify(pass, &hash).unwrap_or(false).into()
 		})
 	}

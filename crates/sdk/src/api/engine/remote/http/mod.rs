@@ -12,17 +12,16 @@ use reqwest::RequestBuilder;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
-use surrealdb_core::{rpc, val};
-use url::Url;
-
 #[cfg(not(target_family = "wasm"))]
 use std::path::PathBuf;
+use surrealdb_core::{rpc, val};
 #[cfg(not(target_family = "wasm"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_family = "wasm"))]
 use tokio::io;
 #[cfg(not(target_family = "wasm"))]
 use tokio_util::compat::FuturesAsyncReadCompatExt;
+use url::Url;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local;
 
@@ -47,7 +46,8 @@ pub struct Https;
 pub struct Client(());
 
 impl Surreal<Client> {
-	/// Connects to a specific database endpoint, saving the connection on the static client
+	/// Connects to a specific database endpoint, saving the connection on the
+	/// static client
 	///
 	/// # Examples
 	///

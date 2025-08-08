@@ -1,12 +1,10 @@
-use revision::revisioned;
-use std::ops::Deref;
-use std::str::FromStr;
-
-use serde::{Deserialize, Serialize};
-
 use super::{Level, Resource, ResourceKind};
 use crate::expr::statements::{DefineAccessStatement, DefineUserStatement};
 use crate::iam::{Error, Role};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use std::ops::Deref;
+use std::str::FromStr;
 
 //
 // User

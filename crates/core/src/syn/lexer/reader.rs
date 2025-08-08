@@ -1,7 +1,6 @@
-use thiserror::Error;
-
 use crate::syn::error::SyntaxError;
 use crate::syn::token::Span;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum CharError {

@@ -1,5 +1,3 @@
-use reblessive::Stk;
-
 use crate::api::method::Method;
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::JwtAccessVerify;
@@ -30,6 +28,7 @@ use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Token, TokenKind, t};
 use crate::val::{Duration, Strand};
+use reblessive::Stk;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_define_stmt(
@@ -209,7 +208,9 @@ impl Parser<'_> {
 			name,
 			base,
 			// Safety: "Viewer" does not contain a null byte
-			roles: vec![unsafe { Ident::new_unchecked("Viewer".to_owned()) }], // New users get the viewer role by default
+			roles: vec![unsafe { Ident::new_unchecked("Viewer".to_owned()) }], /* New users get
+			                                                                    * the viewer role
+			                                                                    * by default */
 			// TODO: Move out of the parser
 			token_duration: Some(Duration::from_secs(3600)), // defaults to 1 hour.
 			..DefineUserStatement::default()
@@ -245,8 +246,9 @@ impl Parser<'_> {
 						let role = self.next_token_value::<Ident>()?;
 						// NOTE(gguillemas): This hardcoded list is a temporary fix in order
 						// to avoid making breaking changes to the DefineUserStatement structure
-						// while still providing parsing feedback to users referencing unexistent roles.
-						// This list should be removed once arbitrary roles can be defined by users.
+						// while still providing parsing feedback to users referencing unexistent
+						// roles. This list should be removed once arbitrary roles can be
+						// defined by users.
 						if !matches!(role.to_lowercase().as_str(), "viewer" | "editor" | "owner") {
 							unexpected!(self, token, "an existent role");
 						}
@@ -269,8 +271,9 @@ impl Parser<'_> {
 								let peek = self.peek();
 								match peek.kind {
 									t!("NONE") => {
-										// Currently, SurrealDB does not accept tokens without expiration.
-										// For this reason, some token duration must be set.
+										// Currently, SurrealDB does not accept tokens without
+										// expiration. For this reason, some token
+										// duration must be set.
 										unexpected!(self, peek, "a token duration");
 									}
 									_ => res.token_duration = Some(self.next_token_value()?),
@@ -382,7 +385,8 @@ impl Parser<'_> {
 										}
 									}
 									t!("REFRESH") => {
-										// TODO(gguillemas): Remove this once bearer access is no longer experimental.
+										// TODO(gguillemas): Remove this once bearer access is no
+										// longer experimental.
 										if !self.settings.bearer_access_enabled {
 											unexpected!(
 												self,
@@ -412,7 +416,8 @@ impl Parser<'_> {
 							res.access_type = AccessType::Record(ac);
 						}
 						t!("BEARER") => {
-							// TODO(gguillemas): Remove this once bearer access is no longer experimental.
+							// TODO(gguillemas): Remove this once bearer access is no longer
+							// experimental.
 							if !self.settings.bearer_access_enabled {
 								unexpected!(
 									self,
@@ -477,10 +482,12 @@ impl Parser<'_> {
 								let peek = self.peek();
 								match peek.kind {
 									t!("NONE") => {
-										// Currently, SurrealDB does not accept tokens without expiration.
-										// For this reason, some token duration must be set.
-										// In the future, allowing issuing tokens without expiration may be useful.
-										// Tokens issued by access methods can be consumed by third parties that support it.
+										// Currently, SurrealDB does not accept tokens without
+										// expiration. For this reason, some token
+										// duration must be set. In the future, allowing
+										// issuing tokens without expiration may be useful.
+										// Tokens issued by access methods can be consumed by third
+										// parties that support it.
 										unexpected!(self, peek, "a token duration");
 									}
 									_ => res.duration.token = Some(self.next_token_value()?),
@@ -1605,12 +1612,14 @@ impl Parser<'_> {
 								// Currently, issuer and verifier must use the same algorithm.
 								iss.alg = alg;
 
-								// If the algorithm is symmetric, the issuer and verifier keys are the same.
-								// For asymmetric algorithms, the key needs to be explicitly defined.
+								// If the algorithm is symmetric, the issuer and verifier keys are
+								// the same. For asymmetric algorithms, the key needs to be
+								// explicitly defined.
 								if alg.is_symmetric() {
 									iss.key = key;
-									// Since all the issuer data is known, it can already be assigned.
-									// Cloning allows updating the original with any explicit issuer data.
+									// Since all the issuer data is known, it can already be
+									// assigned. Cloning allows updating the original with
+									// any explicit issuer data.
 									res.issue = Some(iss.clone());
 								}
 							}
@@ -1640,7 +1649,8 @@ impl Parser<'_> {
 						let next = self.next();
 						match next.kind {
 							TokenKind::Algorithm(alg) => {
-								// If an algorithm is already defined, a different value is not expected.
+								// If an algorithm is already defined, a different value is not
+								// expected.
 								if let JwtAccessVerify::Key(ref ver) = res.verify {
 									if alg != ver.alg {
 										unexpected!(
@@ -1658,7 +1668,8 @@ impl Parser<'_> {
 					t!("KEY") => {
 						self.pop_peek();
 						let key = self.next_token_value::<Strand>()?.into_string();
-						// If the algorithm is symmetric and a key is already defined, a different key is not expected.
+						// If the algorithm is symmetric and a key is already defined, a different
+						// key is not expected.
 						if let JwtAccessVerify::Key(ref ver) = res.verify {
 							if ver.alg.is_symmetric() && key != ver.key {
 								unexpected!(self, peek, "a symmetric key or no key");

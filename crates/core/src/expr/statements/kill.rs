@@ -5,7 +5,6 @@ use crate::err::Error;
 use crate::expr::{Expr, FlowResultExt as _};
 use crate::val::{Uuid, Value};
 use anyhow::{Result, bail};
-
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

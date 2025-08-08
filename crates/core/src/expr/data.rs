@@ -1,3 +1,4 @@
+use super::FlowResultExt as _;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::fmt::Fmt;
@@ -7,8 +8,6 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
-
-use super::FlowResultExt as _;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -46,7 +45,8 @@ impl Default for Data {
 }
 
 impl Data {
-	/// THIS FUNCTION IS BROKEN, DON'T USE IT ANYWHERE WHERE IT ISN'T ALREADY BEING USED.
+	/// THIS FUNCTION IS BROKEN, DON'T USE IT ANYWHERE WHERE IT ISN'T ALREADY
+	/// BEING USED.
 	///
 	/// See [`Data::pick`] for why it is broken.
 	///
@@ -55,16 +55,19 @@ impl Data {
 		self.pick(stk, ctx, opt, "id").await
 	}
 
-	/// THIS FUNCTION IS BROKEN, DON'T USE IT ANYWHERE WHERE IT ISN'T ALREADY BEING USED.
+	/// THIS FUNCTION IS BROKEN, DON'T USE IT ANYWHERE WHERE IT ISN'T ALREADY
+	/// BEING USED.
 	///
 	/// Fetch a field path value if one is specified
 	///
-	/// This function computes the expression it has again. This is a mistake. I causes issues with
-	/// subqueries where queries are executed twice if they are in a field picked by this method.
+	/// This function computes the expression it has again. This is a mistake. I
+	/// causes issues with subqueries where queries are executed twice if they
+	/// are in a field picked by this method.
 	///
-	/// Take `CREATE foo SET id = (CREATE bar:1)`. This query will complain about br:1 being
-	/// created twice, because it is. the subquery create is being computed twice. This issue
-	/// cannot be fixed without a proper and major restructuring of the executor.
+	/// Take `CREATE foo SET id = (CREATE bar:1)`. This query will complain
+	/// about br:1 being created twice, because it is. the subquery create is
+	/// being computed twice. This issue cannot be fixed without a proper and
+	/// major restructuring of the executor.
 	pub(crate) async fn pick(
 		&self,
 		stk: &mut Stk,
@@ -80,8 +83,8 @@ impl Data {
 							.run(|stk| v.compute(stk, ctx, opt, None))
 							.await
 							.catch_return()?
-							// Bad unwrap but this function should be removed anyway and it works with
-							// the current calls.
+							// Bad unwrap but this function should be removed anyway and it works
+							// with the current calls.
 							.pick(&[Part::field(path.to_owned()).unwrap()]))
 					}
 					Expr::Literal(Literal::Object(x)) => {
