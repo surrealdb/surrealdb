@@ -17,10 +17,10 @@ impl Parser<'_> {
 				}
 
 				// This is a bit of an annoying special case.
-				// The problem is that `+` and `-` can be an prefix operator and a the start
+				// The problem is that `+` and `-` can be a prefix operator and at the start
 				// of a number token.
 				// To figure out which it is we need to peek the next whitespace token,
-				// This eats the digits that the lexer needs to lex the number. So we we need
+				// This eats the digits that the lexer needs to lex the number. So we need
 				// to backup before the digits token was consumed, clear the digits token from
 				// the token buffer so it isn't popped after parsing the number and then lex the
 				// number.
