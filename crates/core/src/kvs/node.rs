@@ -2,10 +2,9 @@ use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::expr::statements::LiveStatement;
-use crate::kvs::Datastore;
-use crate::kvs::Live;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
+use crate::kvs::{Datastore, Live};
 use anyhow::Result;
 use std::time::Duration;
 

@@ -1,13 +1,11 @@
 //! Stores a graph edge pointer
-use crate::expr::id::Id;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-
+use crate::val::RecordIdKey;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct Prefix<'a> {
 	__: u8,
 	_a: u8,
@@ -17,7 +15,7 @@ struct Prefix<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: Id,
+	pub id: RecordIdKey,
 }
 
 impl KVKey for Prefix<'_> {
@@ -25,7 +23,7 @@ impl KVKey for Prefix<'_> {
 }
 
 impl<'a> Prefix<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id) -> Self {
+	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -35,12 +33,12 @@ impl<'a> Prefix<'a> {
 			_c: b'*',
 			tb,
 			_d: b'&',
-			id: id.to_owned(),
+			id: id.clone(),
 		}
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct PrefixFt<'a> {
 	__: u8,
 	_a: u8,
@@ -50,7 +48,7 @@ struct PrefixFt<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: Id,
+	pub id: RecordIdKey,
 	pub ft: &'a str,
 }
 
@@ -58,8 +56,11 @@ impl KVKey for PrefixFt<'_> {
 	type ValueType = Vec<u8>;
 }
 
+// Code here is used in references which is temporarly disabled
+#[allow(dead_code)]
 impl<'a> PrefixFt<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id, ft: &'a str) -> Self {
+	#[allow(dead_code)]
+	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &RecordIdKey, ft: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -69,13 +70,13 @@ impl<'a> PrefixFt<'a> {
 			_c: b'*',
 			tb,
 			_d: b'&',
-			id: id.to_owned(),
+			id: id.clone(),
 			ft,
 		}
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct PrefixFf<'a> {
 	__: u8,
 	_a: u8,
@@ -85,7 +86,7 @@ struct PrefixFf<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: Id,
+	pub id: RecordIdKey,
 	pub ft: &'a str,
 	pub ff: &'a str,
 }
@@ -94,8 +95,18 @@ impl KVKey for PrefixFf<'_> {
 	type ValueType = Vec<u8>;
 }
 
+// Code here is used in references which is temporarly removed
+#[allow(dead_code)]
 impl<'a> PrefixFf<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id, ft: &'a str, ff: &'a str) -> Self {
+	#[allow(dead_code)]
+	fn new(
+		ns: &'a str,
+		db: &'a str,
+		tb: &'a str,
+		id: &RecordIdKey,
+		ft: &'a str,
+		ff: &'a str,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -105,7 +116,7 @@ impl<'a> PrefixFf<'a> {
 			_c: b'*',
 			tb,
 			_d: b'&',
-			id: id.to_owned(),
+			id: id.clone(),
 			ft,
 			ff,
 		}
@@ -117,7 +128,7 @@ impl<'a> PrefixFf<'a> {
 // - all references for a given record, filtered by a origin table
 // - all references for a given record, filtered by a origin table and an origin field
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Ref<'a> {
 	__: u8,
 	_a: u8,
@@ -127,10 +138,10 @@ pub(crate) struct Ref<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: Id,
+	pub id: RecordIdKey,
 	pub ft: &'a str,
 	pub ff: &'a str,
-	pub fk: Id,
+	pub fk: RecordIdKey,
 }
 
 impl KVKey for Ref<'_> {
@@ -147,45 +158,65 @@ pub fn new<'a>(
 	ns: &'a str,
 	db: &'a str,
 	tb: &'a str,
-	id: &Id,
+	id: &RecordIdKey,
 	ft: &'a str,
 	ff: &'a str,
-	fk: &Id,
+	fk: &RecordIdKey,
 ) -> Ref<'a> {
 	Ref::new(ns, db, tb, id.to_owned(), ft, ff, fk.to_owned())
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>> {
+pub fn prefix(ns: &str, db: &str, tb: &str, id: &RecordIdKey) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>> {
+pub fn suffix(ns: &str, db: &str, tb: &str, id: &RecordIdKey) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
 
-pub fn ftprefix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str) -> Result<Vec<u8>> {
+// All these functions are related to record references which were temporarly deleted during the
+// value inversion PR.
+#[allow(dead_code)]
+pub fn ftprefix(ns: &str, db: &str, tb: &str, id: &RecordIdKey, ft: &str) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str) -> Result<Vec<u8>> {
+#[allow(dead_code)]
+pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &RecordIdKey, ft: &str) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
 
-pub fn ffprefix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str, ff: &str) -> Result<Vec<u8>> {
+#[allow(dead_code)]
+pub fn ffprefix(
+	ns: &str,
+	db: &str,
+	tb: &str,
+	id: &RecordIdKey,
+	ft: &str,
+	ff: &str,
+) -> Result<Vec<u8>> {
 	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn ffsuffix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str, ff: &str) -> Result<Vec<u8>> {
+#[allow(dead_code)]
+pub fn ffsuffix(
+	ns: &str,
+	db: &str,
+	tb: &str,
+	id: &RecordIdKey,
+	ft: &str,
+	ff: &str,
+) -> Result<Vec<u8>> {
 	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
@@ -202,10 +233,10 @@ impl<'a> Ref<'a> {
 		ns: &'a str,
 		db: &'a str,
 		tb: &'a str,
-		id: Id,
+		id: RecordIdKey,
 		ft: &'a str,
 		ff: &'a str,
-		fk: Id,
+		fk: RecordIdKey,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -235,10 +266,10 @@ mod tests {
 			"testns",
 			"testdb",
 			"testtb",
-			"testid".into(),
+			RecordIdKey::String("testid".to_owned()),
 			"othertb",
 			"test.*",
-			"otherid".into(),
+			RecordIdKey::String("otherid".to_owned()),
 		);
 		let enc = Ref::encode_key(&val).unwrap();
 		assert_eq!(

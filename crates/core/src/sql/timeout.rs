@@ -1,13 +1,9 @@
-use crate::sql::duration::Duration;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use crate::val::Duration;
 use std::fmt;
 use std::ops::Deref;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Timeout(pub Duration);
 
 impl Deref for Timeout {
@@ -25,12 +21,12 @@ impl fmt::Display for Timeout {
 
 impl From<Timeout> for crate::expr::Timeout {
 	fn from(v: Timeout) -> Self {
-		Self(v.0.into())
+		Self(v.0)
 	}
 }
 
 impl From<crate::expr::Timeout> for Timeout {
 	fn from(v: crate::expr::Timeout) -> Self {
-		Self(v.0.into())
+		Self(v.0)
 	}
 }

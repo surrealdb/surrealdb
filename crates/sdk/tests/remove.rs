@@ -1,9 +1,8 @@
-mod parse;
-use parse::Parse;
-
 mod helpers;
 use helpers::*;
 use surrealdb_core::iam::Level;
+use surrealdb_core::syn;
+use surrealdb_core::val::Value;
 
 #[macro_use]
 mod util;
@@ -11,7 +10,6 @@ mod util;
 use std::collections::HashMap;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::expr::Value;
 use surrealdb::iam::Role;
 
 #[tokio::test]
@@ -33,7 +31,7 @@ async fn remove_statement_table() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"{
 			accesses: {},
 			analyzers: {},
@@ -47,7 +45,8 @@ async fn remove_statement_table() -> Result<()> {
 			tables: {},
 			users: {}
 		}",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -167,7 +166,7 @@ async fn remove_statement_analyzer() -> Result<()> {
 	tmp.unwrap();
 	// Check infos output
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"{
 			accesses: {},
 			analyzers: {},
@@ -181,7 +180,8 @@ async fn remove_statement_analyzer() -> Result<()> {
 			tables: {},
 			users: {}
 		}",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -209,7 +209,7 @@ async fn remove_statement_index() -> Result<()> {
 	}
 	// Check infos output
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"{
 			events: {},
 			fields: {},
@@ -217,7 +217,8 @@ async fn remove_statement_index() -> Result<()> {
 			tables: {},
 			lives: {},
 		}",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -509,7 +510,7 @@ async fn permissions_checks_remove_function() {
 			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
 		],
 		vec![
-			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; } PERMISSIONS FULL\" }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello' } PERMISSIONS FULL\" }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
 		],
 	];
 
@@ -953,7 +954,7 @@ async fn permissions_checks_remove_event() {
 	let check_results = [
 		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
 		vec![
-			"{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN (RETURN 'foo')\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }",
+			"{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN RETURN 'foo'\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }",
 		],
 	];
 

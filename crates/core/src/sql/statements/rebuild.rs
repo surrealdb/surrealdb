@@ -1,14 +1,10 @@
 use crate::sql::ident::Ident;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum RebuildStatement {
 	Index(RebuildIndexStatement),
 }
@@ -37,10 +33,8 @@ impl From<crate::expr::statements::rebuild::RebuildStatement> for RebuildStateme
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct RebuildIndexStatement {
 	pub name: Ident,
 	pub what: Ident,

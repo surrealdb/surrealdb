@@ -4,7 +4,6 @@ use crate::fnc::script::modules::impl_module_def;
 mod from;
 mod is;
 
-#[non_exhaustive]
 pub struct Package;
 
 impl_module_def!(

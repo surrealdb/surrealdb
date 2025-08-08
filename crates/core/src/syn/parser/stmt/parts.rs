@@ -2,24 +2,18 @@
 
 use reblessive::Stk;
 
+use crate::sql::changefeed::ChangeFeed;
+use crate::sql::index::{Distance, VectorType};
 use crate::sql::reference::{Reference, ReferenceDeleteStrategy};
-use crate::sql::{Explain, Fetch, With};
-use crate::syn::error::bail;
-use crate::{
-	sql::{
-		Base, Cond, Data, Duration, Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Output,
-		Permission, Permissions, SqlValue, Tables, Timeout, View,
-		changefeed::ChangeFeed,
-		index::{Distance, VectorType},
-	},
-	syn::{
-		parser::{
-			ParseResult, Parser,
-			mac::{expected, unexpected},
-		},
-		token::{DistanceKind, Span, TokenKind, VectorTypeKind, t},
-	},
+use crate::sql::{
+	Base, Cond, Data, Explain, Expr, Fetch, Fetchs, Field, Fields, Group, Groups, Ident, Idiom,
+	Output, Permission, Permissions, Timeout, View, With,
 };
+use crate::syn::error::bail;
+use crate::syn::parser::mac::{expected, unexpected};
+use crate::syn::parser::{ParseResult, Parser};
+use crate::syn::token::{DistanceKind, Span, TokenKind, VectorTypeKind, t};
+use crate::val::Duration;
 
 pub(crate) enum MissingKind {
 	Split,
@@ -30,16 +24,14 @@ pub(crate) enum MissingKind {
 impl Parser<'_> {
 	/// Parses a data production if the next token is a data keyword.
 	/// Otherwise returns None
-	pub async fn try_parse_data(&mut self, ctx: &mut Stk) -> ParseResult<Option<Data>> {
+	pub async fn try_parse_data(&mut self, stk: &mut Stk) -> ParseResult<Option<Data>> {
 		let res = match self.peek().kind {
 			t!("SET") => {
 				self.pop_peek();
 				let mut set_list = Vec::new();
 				loop {
-					let idiom = self.parse_plain_idiom(ctx).await?;
-					let operator = self.parse_assigner()?;
-					let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
-					set_list.push((idiom, operator, value));
+					let assignment = self.parse_assignment(stk).await?;
+					set_list.push(assignment);
 					if !self.eat(t!(",")) {
 						break;
 					}
@@ -48,24 +40,24 @@ impl Parser<'_> {
 			}
 			t!("UNSET") => {
 				self.pop_peek();
-				let idiom_list = self.parse_idiom_list(ctx).await?;
+				let idiom_list = self.parse_idiom_list(stk).await?;
 				Data::UnsetExpression(idiom_list)
 			}
 			t!("PATCH") => {
 				self.pop_peek();
-				Data::PatchExpression(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
+				Data::PatchExpression(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
 			}
 			t!("MERGE") => {
 				self.pop_peek();
-				Data::MergeExpression(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
+				Data::MergeExpression(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
 			}
 			t!("REPLACE") => {
 				self.pop_peek();
-				Data::ReplaceExpression(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
+				Data::ReplaceExpression(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
 			}
 			t!("CONTENT") => {
 				self.pop_peek();
-				Data::ContentExpression(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
+				Data::ContentExpression(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
 			}
 			_ => return Ok(None),
 		};
@@ -137,27 +129,33 @@ impl Parser<'_> {
 		ctx: &mut Stk,
 	) -> ParseResult<Vec<Fetch>> {
 		match self.peek().kind {
-			t!("$param") => Ok(vec![SqlValue::Param(self.next_token_value()?).into()]),
+			t!("$param") => Ok(vec![Fetch(Expr::Param(self.next_token_value()?))]),
 			t!("TYPE") => {
 				let fields = self.parse_fields(ctx).await?;
-				let fetches = fields
-					.0
-					.into_iter()
-					.filter_map(|f| {
-						if let Field::Single {
+
+				let fetches = match fields {
+					Fields::Value(field) => match *field {
+						Field::All => Vec::new(),
+						Field::Single {
 							expr,
 							..
-						} = f
-						{
-							Some(expr.into())
-						} else {
-							None
-						}
-					})
-					.collect();
+						} => vec![Fetch(expr)],
+					},
+					Fields::Select(fields) => fields
+						.into_iter()
+						.filter_map(|f| match f {
+							Field::All => None,
+							Field::Single {
+								expr,
+								..
+							} => Some(Fetch(expr)),
+						})
+						.collect(),
+				};
+
 				Ok(fetches)
 			}
-			_ => Ok(vec![SqlValue::Idiom(self.parse_plain_idiom(ctx).await?).into()]),
+			_ => Ok(vec![Fetch(Expr::Idiom(self.parse_plain_idiom(ctx).await?))]),
 		}
 	}
 
@@ -165,51 +163,85 @@ impl Parser<'_> {
 		if !self.eat(t!("WHERE")) {
 			return Ok(None);
 		}
-		let v = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+		let v = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
 		Ok(Some(Cond(v)))
 	}
 
-	pub(crate) fn check_idiom<'a>(
+	/// Move this out of the parser.
+	pub(crate) fn check_idiom(
 		kind: MissingKind,
-		fields: &'a Fields,
+		fields: &Fields,
 		field_span: Span,
 		idiom: &Idiom,
 		idiom_span: Span,
-	) -> ParseResult<&'a Field> {
-		let mut found = None;
-		for field in fields.iter() {
-			let Field::Single {
-				expr,
-				alias,
-			} = field
-			else {
-				unreachable!()
-			};
+	) -> ParseResult<()> {
+		let mut found = false;
+		match fields {
+			Fields::Value(field) => {
+				let Field::Single {
+					ref expr,
+					ref alias,
+				} = **field
+				else {
+					unreachable!()
+				};
 
-			if let Some(alias) = alias {
-				if idiom == alias {
-					found = Some(field);
-					break;
-				}
-			}
-
-			match expr {
-				SqlValue::Idiom(x) => {
-					if idiom == x {
-						found = Some(field);
-						break;
+				if let Some(alias) = alias {
+					if idiom == alias {
+						found = true;
 					}
 				}
-				v => {
-					if *idiom == v.to_idiom() {
-						found = Some(field);
-						break;
+
+				match expr {
+					Expr::Idiom(x) => {
+						if idiom == x {
+							found = true;
+						}
+					}
+					v => {
+						if *idiom == v.to_idiom() {
+							found = true;
+						}
+					}
+				}
+			}
+			Fields::Select(fields) => {
+				for field in fields.iter() {
+					let Field::Single {
+						expr,
+						alias,
+					} = field
+					else {
+						// All is in the idiom so assume that the field is present.
+						return Ok(());
+					};
+
+					if let Some(alias) = alias {
+						if idiom == alias {
+							found = true;
+							break;
+						}
+					}
+
+					match expr {
+						Expr::Idiom(x) => {
+							if idiom == x {
+								found = true;
+								break;
+							}
+						}
+						v => {
+							if *idiom == v.to_idiom() {
+								found = true;
+								break;
+							}
+						}
 					}
 				}
 			}
 		}
 
-		let Some(found) = found else {
+		if !found {
 			match kind {
 				MissingKind::Split => {
 					bail!(
@@ -234,8 +266,7 @@ impl Parser<'_> {
 				}
 			};
 		};
-
-		Ok(found)
+		Ok(())
 	}
 
 	pub async fn try_parse_group(
@@ -254,7 +285,7 @@ impl Parser<'_> {
 
 		self.eat(t!("BY"));
 
-		let has_all = fields.contains(&Field::All);
+		let has_all = fields.contains_all();
 
 		let before = self.peek().span;
 		let group = self.parse_basic_idiom(ctx).await?;
@@ -383,7 +414,9 @@ impl Parser<'_> {
 		match next.kind {
 			t!("NONE") => Ok(Permission::None),
 			t!("FULL") => Ok(Permission::Full),
-			t!("WHERE") => Ok(Permission::Specific(self.parse_value_field(stk).await?)),
+			t!("WHERE") => {
+				Ok(Permission::Specific(stk.run(|stk| self.parse_expr_field(stk)).await?))
+			}
 			_ => unexpected!(self, next, "'NONE', 'FULL', or 'WHERE'"),
 		}
 	}
@@ -451,7 +484,7 @@ impl Parser<'_> {
 				t!("IGNORE") => ReferenceDeleteStrategy::Ignore,
 				t!("UNSET") => ReferenceDeleteStrategy::Unset,
 				t!("THEN") => ReferenceDeleteStrategy::Custom(
-					ctx.run(|ctx| self.parse_value_field(ctx)).await?,
+					ctx.run(|ctx| self.parse_expr_field(ctx)).await?,
 				),
 				_ => {
 					unexpected!(self, next, "`REJECT`, `CASCASE`, `IGNORE`, `UNSET` or `THEN`")
@@ -487,7 +520,7 @@ impl Parser<'_> {
 
 		Ok(View {
 			expr: fields,
-			what: Tables(from),
+			what: from,
 			cond,
 			group,
 		})
@@ -534,13 +567,14 @@ impl Parser<'_> {
 	pub fn parse_custom_function_name(&mut self) -> ParseResult<Ident> {
 		expected!(self, t!("fn"));
 		expected!(self, t!("::"));
-		let mut name = self.next_token_value::<Ident>()?;
+		let mut name = self.next_token_value::<Ident>()?.into_string();
 		while self.eat(t!("::")) {
-			let part = self.next_token_value::<Ident>()?;
-			name.0.push_str("::");
-			name.0.push_str(part.0.as_str());
+			let part = self.next_token_value::<Ident>()?.into_string();
+			name.push_str("::");
+			name.push_str(part.as_str());
 		}
-		Ok(name)
+		// Safety: Parser guarentees no null bytes.
+		Ok(unsafe { Ident::new_unchecked(name) })
 	}
 	pub(super) fn try_parse_explain(&mut self) -> ParseResult<Option<Explain>> {
 		Ok(self.eat(t!("EXPLAIN")).then(|| Explain(self.eat(t!("FULL")))))
@@ -558,9 +592,9 @@ impl Parser<'_> {
 				With::NoIndex
 			}
 			t!("INDEX") => {
-				let mut index = vec![self.next_token_value::<Ident>()?.0];
+				let mut index = vec![self.next_token_value::<Ident>()?.into_string()];
 				while self.eat(t!(",")) {
-					index.push(self.next_token_value::<Ident>()?.0);
+					index.push(self.next_token_value::<Ident>()?.into_string());
 				}
 				With::Index(index)
 			}

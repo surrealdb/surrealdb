@@ -1,8 +1,7 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Statement;
+use crate::dbs::{Options, Statement};
 use crate::doc::Document;
-use crate::expr::value::Value;
+use crate::val::Value;
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
@@ -18,15 +17,13 @@ impl Document {
 		// Check if table has correct relation status
 		self.check_table_type(ctx, opt, stm).await?;
 		// Check whether current record exists
-		match self.current.doc.as_ref().is_some() {
-			// We attempted to RELATE a document with an ID,
-			// and this ID already exists in the database,
-			// so we need to update the record instead.
-			true => self.relate_update(stk, ctx, opt, stm).await,
-			// We attempted to RELATE a document with an ID,
-			// which does not exist in the database, or we
-			// are creating a new record with a new ID.
-			false => self.relate_create(stk, ctx, opt, stm).await,
+		if self.current.doc.as_ref().is_nullish() {
+			// If the current document is null, it doesn't exist yet so we need to create a new
+			// relation.
+			self.relate_create(stk, ctx, opt, stm).await
+		} else {
+			// If the doc is some the relation does exist and we should update instead.
+			self.relate_update(stk, ctx, opt, stm).await
 		}
 	}
 	/// Attempt to run a RELATE clause

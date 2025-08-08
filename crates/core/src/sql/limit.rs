@@ -1,13 +1,9 @@
-use crate::sql::value::SqlValue;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use crate::sql::Expr;
 use std::fmt;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct Limit(pub SqlValue);
+pub struct Limit(pub Expr);
 
 impl fmt::Display for Limit {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

@@ -7,7 +7,6 @@ pub(crate) trait Categorise {
 }
 
 #[derive(Debug, Copy, Clone)]
-#[non_exhaustive]
 #[expect(unused)]
 pub enum Category {
 	/// crate::key::storage::version         /sv

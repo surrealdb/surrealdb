@@ -1,7 +1,5 @@
-use js::{
-	Result,
-	module::{Declarations, Exports, ModuleDef},
-};
+use js::Result;
+use js::module::{Declarations, Exports, ModuleDef};
 
 /// Get the target system architecture
 #[js::function]
@@ -14,7 +12,6 @@ pub fn platform() -> &'static str {
 	crate::env::os()
 }
 
-#[non_exhaustive]
 pub struct Package;
 
 impl ModuleDef for Package {

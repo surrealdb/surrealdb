@@ -1,26 +1,22 @@
 use super::MlExportConfig;
-use crate::{Result, opt::Resource};
+use crate::Result;
+use crate::opt::Resource;
 use async_channel::Sender;
 use bincode::Options;
 use revision::Revisioned;
-use serde::{Serialize, ser::SerializeMap as _};
+use serde::Serialize;
+use serde::ser::SerializeMap as _;
 use std::borrow::Cow;
 use std::io::Read;
 use std::path::PathBuf;
-use surrealdb_core::dbs::Notification;
-#[allow(unused_imports)]
-use surrealdb_core::expr::{
-	Array as CoreArray, Object as CoreObject, Query as CoreQuery, Value as CoreValue,
-};
 use surrealdb_core::kvs::export::Config as DbExportConfig;
 #[allow(unused_imports)]
-use surrealdb_core::sql::{
-	Object as CoreSqlObject, Query as CoreSqlQuery, SqlValue as CoreSqlValue,
-};
+use surrealdb_core::val::{Array as CoreArray, Object as CoreObject, Value as CoreValue};
+use surrealdb_core::{dbs::Notification, expr::LogicalPlan};
 use uuid::Uuid;
 
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-use surrealdb_core::expr::Table as CoreTable;
+use surrealdb_core::val::Table as CoreTable;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -87,7 +83,7 @@ pub(crate) enum Command {
 	},
 	Query {
 		txn: Option<Uuid>,
-		query: CoreSqlQuery,
+		query: LogicalPlan,
 		variables: CoreObject,
 	},
 	RawQuery {
@@ -143,22 +139,32 @@ pub(crate) enum Command {
 impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
-		use crate::api::engine::resource_to_sql_values;
-		use surrealdb_core::sql::{
-			Data, Output,
-			statements::{UpdateStatement, UpsertStatement},
+		use surrealdb_core::{
+			expr::{Data, Output, UpdateStatement, UpsertStatement},
+			val::{self, Strand},
 		};
+
+		use crate::engine::resource_to_exprs;
 
 		let res = match self {
 			Command::Use {
 				namespace,
 				database,
-			} => RouterRequest {
-				id,
-				method: "use",
-				params: Some(vec![CoreValue::from(namespace), CoreValue::from(database)].into()),
-				transaction: None,
-			},
+			} => {
+				// TODO: Null byte validity
+				let namespace = namespace
+					.map(|n| unsafe { Strand::new_unchecked(n) }.into())
+					.unwrap_or(CoreValue::None);
+				let database = database
+					.map(|d| unsafe { Strand::new_unchecked(d) }.into())
+					.unwrap_or(CoreValue::None);
+				RouterRequest {
+					id,
+					method: "use",
+					params: Some(vec![namespace, database].into()),
+					transaction: None,
+				}
+			}
 			Command::Signup {
 				credentials,
 			} => RouterRequest {
@@ -250,8 +256,8 @@ impl Command {
 			} => {
 				let table = match what {
 					Some(w) => {
-						let mut table = CoreTable::default();
-						table.0.clone_from(&w);
+						// TODO: Null byte validity
+						let table = unsafe { CoreTable::new_unchecked(w) };
 						CoreValue::from(table)
 					}
 					None => CoreValue::None,
@@ -273,9 +279,9 @@ impl Command {
 			} => {
 				let table = match what {
 					Some(w) => {
-						let mut tmp = CoreTable::default();
-						tmp.0.clone_from(&w);
-						CoreValue::from(tmp)
+						// TODO: Null byte validity
+						let table = unsafe { CoreTable::new_unchecked(w) };
+						CoreValue::from(table)
 					}
 					None => CoreValue::None,
 				};
@@ -296,22 +302,37 @@ impl Command {
 				..
 			} => {
 				let query = if upsert {
-					let mut stmt = UpsertStatement::default();
-					stmt.what = resource_to_sql_values(what);
-					stmt.data = data.map(|d| Data::PatchExpression(d.into()));
-					stmt.output = Some(Output::After);
-					CoreSqlQuery::from(stmt)
+					let expr = UpsertStatement {
+						only: false,
+						what: resource_to_exprs(what),
+						with: None,
+						data: data.map(|x| Data::PatchExpression(x.into_literal())),
+						cond: None,
+						output: Some(Output::After),
+						timeout: None,
+						parallel: false,
+						explain: None,
+					};
+					expr.to_string()
 				} else {
-					let mut stmt = UpdateStatement::default();
-					stmt.what = resource_to_sql_values(what);
-					stmt.data = data.map(|d| Data::PatchExpression(d.into()));
-					stmt.output = Some(Output::After);
-					CoreSqlQuery::from(stmt)
+					let expr = UpdateStatement {
+						only: false,
+						what: resource_to_exprs(what),
+						with: None,
+						data: data.map(|x| Data::PatchExpression(x.into_literal())),
+						cond: None,
+						output: Some(Output::After),
+						timeout: None,
+						parallel: false,
+						explain: None,
+					};
+					expr.to_string()
 				};
+				//TODO: Null byte validity
+				let query = unsafe { Strand::new_unchecked(query) };
 
-				let variables = CoreSqlObject::default();
-				let params: Vec<CoreValue> =
-					vec![CoreSqlValue::from(query).into(), CoreSqlValue::from(variables).into()];
+				let variables = val::Object::default();
+				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
 
 				RouterRequest {
 					id,
@@ -328,22 +349,37 @@ impl Command {
 				..
 			} => {
 				let query = if upsert {
-					let mut stmt = UpsertStatement::default();
-					stmt.what = resource_to_sql_values(what);
-					stmt.data = data.map(|d| Data::MergeExpression(d.into()));
-					stmt.output = Some(Output::After);
-					CoreSqlQuery::from(stmt)
+					let expr = UpsertStatement {
+						only: false,
+						what: resource_to_exprs(what),
+						with: None,
+						data: data.map(|x| Data::MergeExpression(x.into_literal())),
+						cond: None,
+						output: Some(Output::After),
+						timeout: None,
+						parallel: false,
+						explain: None,
+					};
+					expr.to_string()
 				} else {
-					let mut stmt = UpdateStatement::default();
-					stmt.what = resource_to_sql_values(what);
-					stmt.data = data.map(|d| Data::MergeExpression(d.into()));
-					stmt.output = Some(Output::After);
-					CoreSqlQuery::from(stmt)
+					let expr = UpdateStatement {
+						only: false,
+						what: resource_to_exprs(what),
+						with: None,
+						data: data.map(|x| Data::MergeExpression(x.into_literal())),
+						cond: None,
+						output: Some(Output::After),
+						timeout: None,
+						parallel: false,
+						explain: None,
+					};
+					expr.to_string()
 				};
+				//TODO: Null byte validity
+				let query = unsafe { Strand::new_unchecked(query) };
 
-				let variables = CoreSqlObject::default();
-				let params: Vec<CoreValue> =
-					vec![CoreSqlValue::from(query).into(), CoreSqlValue::from(variables).into()];
+				let variables = val::Object::default();
+				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
 
 				RouterRequest {
 					id,
@@ -377,7 +413,9 @@ impl Command {
 				query,
 				variables,
 			} => {
-				let params: Vec<CoreValue> = vec![CoreQuery::from(query).into(), variables.into()];
+				// TODO: Null byte validity
+				let query = unsafe { Strand::new_unchecked(query.to_string()) };
+				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
 				RouterRequest {
 					id,
 					method: "query",
@@ -453,22 +491,27 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "kill",
-				params: Some(CoreValue::from(vec![CoreValue::from(uuid)])),
+				params: Some(CoreValue::from(vec![CoreValue::from(val::Uuid(uuid))])),
 				transaction: None,
 			},
 			Command::Run {
 				name,
 				version,
 				args,
-			} => RouterRequest {
-				id,
-				method: "run",
-				params: Some(
-					vec![CoreValue::from(name), CoreValue::from(version), CoreValue::Array(args)]
-						.into(),
-				),
-				transaction: None,
-			},
+			} => {
+				// TODO: Null byte validity
+				let version = version
+					.map(|x| unsafe { Strand::new_unchecked(x) }.into())
+					.unwrap_or(CoreValue::None);
+				RouterRequest {
+					id,
+					method: "run",
+					params: Some(
+						vec![CoreValue::from(name), version, CoreValue::Array(args)].into(),
+					),
+					transaction: None,
+				}
+			}
 		};
 		Some(res)
 	}
@@ -519,27 +562,6 @@ pub(crate) struct RouterRequest {
 	params: Option<CoreValue>,
 	#[allow(dead_code)]
 	transaction: Option<Uuid>,
-}
-
-#[cfg(feature = "protocol-ws")]
-fn stringify_queries(value: CoreValue) -> CoreValue {
-	match value {
-		CoreValue::Query(query) => CoreValue::Strand(query.to_string().into()),
-		CoreValue::Array(array) => CoreValue::Array(CoreArray::from(
-			array.0.into_iter().map(stringify_queries).collect::<Vec<_>>(),
-		)),
-		_ => value,
-	}
-}
-
-impl RouterRequest {
-	#[cfg(feature = "protocol-ws")]
-	pub(crate) fn stringify_queries(self) -> Self {
-		Self {
-			params: self.params.map(stringify_queries),
-			..self
-		}
-	}
 }
 
 impl Serialize for RouterRequest {
@@ -650,7 +672,7 @@ impl Serialize for RouterRequest {
 
 impl Revisioned for RouterRequest {
 	fn revision() -> u16 {
-		2
+		1
 	}
 
 	fn serialize_revisioned<W: std::io::Write>(
@@ -658,7 +680,7 @@ impl Revisioned for RouterRequest {
 		w: &mut W,
 	) -> std::result::Result<(), revision::Error> {
 		// version
-		Revisioned::serialize_revisioned(&2u32, w)?;
+		Revisioned::serialize_revisioned(&1u32, w)?;
 		// object variant
 		Revisioned::serialize_revisioned(&9u32, w)?;
 		// object wrapper version
@@ -682,7 +704,7 @@ impl Revisioned for RouterRequest {
 				.map_err(|err| revision::Error::Serialize(err.to_string()))?;
 
 			// the Value version
-			2u16.serialize_revisioned(w)?;
+			1u16.serialize_revisioned(w)?;
 
 			// the Value::Number variant
 			3u16.serialize_revisioned(w)?;
@@ -701,7 +723,7 @@ impl Revisioned for RouterRequest {
 			.map_err(|err| revision::Error::Serialize(err.to_string()))?;
 
 		// the Value version
-		2u16.serialize_revisioned(w)?;
+		1u16.serialize_revisioned(w)?;
 
 		// the Value::Strand variant
 		4u16.serialize_revisioned(w)?;
@@ -727,7 +749,7 @@ impl Revisioned for RouterRequest {
 				.map_err(|err| revision::Error::Serialize(err.to_string()))?;
 
 			// the Value version
-			2u16.serialize_revisioned(w)?;
+			1u16.serialize_revisioned(w)?;
 
 			// the Value::Uuid variant
 			7u16.serialize_revisioned(w)?;
@@ -754,7 +776,7 @@ mod test {
 	use std::io::Cursor;
 
 	use revision::Revisioned;
-	use surrealdb_core::expr::{Number, Value};
+	use surrealdb_core::val::{Number, Value};
 	use uuid::Uuid;
 
 	use super::RouterRequest;
@@ -780,7 +802,7 @@ mod test {
 		let Some(Value::Strand(x)) = obj.get("method") else {
 			panic!("invalid method field: {}", obj)
 		};
-		assert_eq!(x.0, req.method);
+		assert_eq!(x.as_str(), req.method);
 
 		assert_eq!(obj.get("params").cloned(), req.params);
 	}
@@ -798,16 +820,8 @@ mod test {
 
 		assert_converts(
 			&request,
-			|i| bincode::serialize(i).unwrap(),
-			|b| bincode::deserialize(&b).unwrap(),
-		);
-
-		println!("test convert json");
-
-		assert_converts(
-			&request,
-			|i| serde_json::to_string(i).unwrap(),
-			|b| serde_json::from_str(&b).unwrap(),
+			|i| surrealdb_core::rpc::format::bincode::encode(i).unwrap(),
+			|b| surrealdb_core::rpc::format::bincode::decode(&b).unwrap(),
 		);
 
 		println!("test convert revisioned");

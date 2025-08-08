@@ -1,8 +1,8 @@
 use crate::ctx::Context;
 use crate::dbs::result::Results;
 use crate::dbs::{Iterable, Statement};
-use crate::expr::{Object, Value};
 use crate::idx::planner::RecordStrategy;
+use crate::val::{Object, Strand, Value};
 use std::collections::HashMap;
 
 pub(super) struct Plan {
@@ -108,7 +108,7 @@ impl ExplainItem {
 			},
 			Iterable::Yield(t) => Self {
 				name: "Iterate Yield".into(),
-				details: vec![("table", Value::from(t.0.clone()))],
+				details: vec![("table", Value::from(t.clone().into_strand()))],
 			},
 			Iterable::Thing(t) => Self {
 				name: "Iterate Thing".into(),
@@ -118,9 +118,12 @@ impl ExplainItem {
 				name: "Iterate Defer".into(),
 				details: vec![("thing", Value::Thing(t.clone()))],
 			},
-			Iterable::Edges(e) => Self {
+			Iterable::Edges {
+				from,
+				..
+			} => Self {
 				name: "Iterate Edges".into(),
-				details: vec![("from", Value::Thing(e.from.clone()))],
+				details: vec![("from", Value::Thing(from.clone()))],
 			},
 			Iterable::Table(t, rs, sc) => Self {
 				name: match rs {
@@ -130,7 +133,7 @@ impl ExplainItem {
 				}
 				.into(),
 				details: vec![
-					("table", Value::from(t.0.clone())),
+					("table", Value::from(t.clone().into_strand())),
 					("direction", sc.to_string().into()),
 				],
 			},
@@ -142,8 +145,9 @@ impl ExplainItem {
 				}
 				.into(),
 				details: vec![
-					("table", tb.to_owned().into()),
-					("range", r.to_owned().into()),
+					//TODO: Properly handle possible null byte.
+					("table", Value::Strand(Strand::new(tb.to_owned()).unwrap())),
+					("range", Value::Range(Box::new(r.clone().into_value_range()))),
 					("direction", sc.to_string().into()),
 				],
 			},
@@ -169,9 +173,9 @@ impl ExplainItem {
 				],
 			},
 			Iterable::Index(t, ir, rs) => {
-				let mut details = vec![("table", Value::from(t.0.clone()))];
+				let mut details = vec![("table", Value::Strand(t.clone().into_strand()))];
 				if let Some(qp) = ctx.get_query_planner() {
-					if let Some(exe) = qp.get_query_executor(&t.0) {
+					if let Some(exe) = qp.get_query_executor(t.as_str()) {
 						details.push(("plan", exe.explain(*ir)));
 					}
 				}
