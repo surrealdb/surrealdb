@@ -276,8 +276,7 @@ impl Datastore {
 		Self::new_with_options(
 			path,
 			DatastoreOptions {
-				clock: None,
-				tls: None,
+				..Default::default()
 			},
 		)
 		.await

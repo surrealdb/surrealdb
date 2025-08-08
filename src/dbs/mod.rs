@@ -545,6 +545,7 @@ pub async fn init(
 		&opt.path,
 		DatastoreOptions {
 			tls: opt.tls.clone(),
+			..Default::default()
 		},
 	)
 	.await?
