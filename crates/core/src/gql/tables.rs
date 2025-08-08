@@ -411,7 +411,7 @@ fn make_table_field_resolver(
 
 				let val = gtx.get_record_field(rid.clone(), fd_name.as_str()).await?;
 
-				let out = match val {
+				match val {
 					SqlValue::Thing(rid) if fd_name != "id" => {
 						let mut tmp = field_val_erase_owned((gtx.clone(), rid.clone()));
 						match field_kind {
@@ -432,8 +432,7 @@ fn make_table_field_resolver(
 							.map_err(|_| "SQL to GQL translation failed")?;
 						Ok(Some(FieldValue::value(out)))
 					}
-				};
-				out
+				}
 			}
 		})
 	}
@@ -452,6 +451,7 @@ fn filter_id() -> InputObject {
 	filter_impl!(filter, ty, "ne");
 	filter
 }
+#[allow(clippy::result_large_err)]
 fn filter_from_type(
 	kind: Kind,
 	filter_name: String,
@@ -502,6 +502,7 @@ fn filter_from_type(
 	Ok(filter)
 }
 
+#[allow(clippy::result_large_err)]
 fn cond_from_filter(
 	filter: &IndexMap<Name, GqlValue>,
 	fds: &[DefineFieldStatement],
@@ -509,6 +510,7 @@ fn cond_from_filter(
 	val_from_filter(filter, fds).map(IntoExt::intox)
 }
 
+#[allow(clippy::result_large_err)]
 fn val_from_filter(
 	filter: &IndexMap<Name, GqlValue>,
 	fds: &[DefineFieldStatement],
@@ -519,16 +521,15 @@ fn val_from_filter(
 
 	let (k, v) = filter.iter().next().unwrap();
 
-	let cond = match k.as_str().to_lowercase().as_str() {
+	match k.as_str().to_lowercase().as_str() {
 		"or" => aggregate(v, AggregateOp::Or, fds),
 		"and" => aggregate(v, AggregateOp::And, fds),
 		"not" => negate(v, fds),
 		_ => binop(k.as_str(), v, fds),
-	};
-
-	cond
+	}
 }
 
+#[allow(clippy::result_large_err)]
 fn parse_op(name: impl AsRef<str>) -> Result<expr::Operator, GqlError> {
 	match name.as_ref() {
 		"eq" => Ok(expr::Operator::Equal),
@@ -537,6 +538,7 @@ fn parse_op(name: impl AsRef<str>) -> Result<expr::Operator, GqlError> {
 	}
 }
 
+#[allow(clippy::result_large_err)]
 fn negate(filter: &GqlValue, fds: &[DefineFieldStatement]) -> Result<SqlValue, GqlError> {
 	let obj = filter.as_object().ok_or(resolver_error("Value of NOT must be object"))?;
 	let inner_cond = val_from_filter(obj, fds)?;
@@ -553,6 +555,7 @@ enum AggregateOp {
 	Or,
 }
 
+#[allow(clippy::result_large_err)]
 fn aggregate(
 	filter: &GqlValue,
 	op: AggregateOp,
@@ -592,6 +595,7 @@ fn aggregate(
 	Ok(cond)
 }
 
+#[allow(clippy::result_large_err)]
 fn binop(
 	field_name: &str,
 	val: &GqlValue,
