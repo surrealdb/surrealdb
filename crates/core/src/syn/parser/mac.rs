@@ -1,10 +1,10 @@
 /// A macro for returning an error when a unexpected token was found.
 ///
-/// This macro handles a variety of situations, including errors related to invalid tokens and
-/// unexpected `EOF` or whitespace.
+/// This macro handles a variety of situations, including errors related to
+/// invalid tokens and unexpected `EOF` or whitespace.
 ///
-/// This macro takes a reference to the parser, the token which was unexpected and a expression
-/// which explains what should be expected instead.
+/// This macro takes a reference to the parser, the token which was unexpected
+/// and a expression which explains what should be expected instead.
 ///
 /// This macro attaches the span from the token as an error span to the error.
 macro_rules! unexpected {
@@ -29,8 +29,8 @@ macro_rules! unexpected {
 
 }
 
-/// A macro for asserting that the next token should be of the given type, returns the token if
-/// this is the case otherwise it returns an error.
+/// A macro for asserting that the next token should be of the given type,
+/// returns the token if this is the case otherwise it returns an error.
 macro_rules! expected {
 	($parser:expr_2021, $($kind:tt)*) => {{
 		let token: crate::syn::token::Token = $parser.next();
@@ -42,9 +42,9 @@ macro_rules! expected {
 	}};
 }
 
-/// Pops the last token, checks if it is the desired glue value and then returns the value.
-/// This will panic if the token was not correct or the value was already eat, both of which the
-/// parser should make sure to uphold.
+/// Pops the last token, checks if it is the desired glue value and then returns
+/// the value. This will panic if the token was not correct or the value was
+/// already eat, both of which the parser should make sure to uphold.
 macro_rules! pop_glued {
 	($parser:expr_2021, $variant:ident) => {{
 		let token = $parser.pop_peek();
@@ -61,7 +61,8 @@ macro_rules! pop_glued {
 	}};
 }
 
-/// A macro for indicating that the parser encountered an token which it didn't expect.
+/// A macro for indicating that the parser encountered an token which it didn't
+/// expect.
 macro_rules! expected_whitespace {
 	($parser:expr_2021, $($kind:tt)*) => {{
 		let token: crate::syn::token::Token = $parser.next_whitespace();

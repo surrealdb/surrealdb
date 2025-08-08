@@ -2,7 +2,8 @@ mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb_core::{strand, syn, val::Value};
+use surrealdb_core::val::Value;
+use surrealdb_core::{strand, syn};
 
 #[tokio::test]
 async fn return_subquery_only() -> Result<()> {

@@ -1,3 +1,4 @@
+use super::Datetime;
 use crate::expr::escape::QuoteStr;
 use crate::val::Strand;
 use revision::revisioned;
@@ -6,8 +7,6 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 use std::str::FromStr;
-
-use super::Datetime;
 
 #[revisioned(revision = 1)]
 #[derive(

@@ -1,9 +1,8 @@
+use super::fmt::{is_pretty, pretty_indent};
 use crate::sql::fmt::Fmt;
 use crate::sql::{Expr, Graph, Ident, Idiom};
 use std::fmt;
 use std::fmt::Write;
-
-use super::fmt::{is_pretty, pretty_indent};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

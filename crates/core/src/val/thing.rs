@@ -201,14 +201,16 @@ impl RecordIdKey {
 	///
 	/// Returns None if the value cannot be converted.
 	pub fn from_value(value: Value) -> Option<Self> {
-		// NOTE: This method dictates how coversion between values and record id keys behave. This
-		// method is reimplementing previous (before expr inversion pr) behavior but I am not sure
-		// if it is the right one, float and decimal generaly implicitly convert to other number
-		// types but here they are rejected.
+		// NOTE: This method dictates how coversion between values and record id keys
+		// behave. This method is reimplementing previous (before expr inversion pr)
+		// behavior but I am not sure if it is the right one, float and decimal
+		// generaly implicitly convert to other number types but here they are
+		// rejected.
 		match value {
 			Value::Number(Number::Int(i)) => Some(RecordIdKey::Number(i)),
 			Value::Strand(strand) => Some(RecordIdKey::String(strand.into_string())),
-			// NOTE: This was previously (before expr inversion pr) also rejected in this conversion, a bug I assume.
+			// NOTE: This was previously (before expr inversion pr) also rejected in this
+			// conversion, a bug I assume.
 			Value::Uuid(uuid) => Some(RecordIdKey::Uuid(uuid)),
 			Value::Array(array) => Some(RecordIdKey::Array(array)),
 			Value::Object(object) => Some(RecordIdKey::Object(object)),

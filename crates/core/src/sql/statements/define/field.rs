@@ -1,11 +1,9 @@
+use super::DefineKind;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
 use crate::sql::{Expr, Ident, Idiom, Kind, Permissions};
 use crate::val::Strand;
-
 use std::fmt::{self, Display, Write};
-
-use super::DefineKind;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -51,7 +49,8 @@ pub struct DefineFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
 	/// Whether the field is marked as flexible.
-	/// Flexible allows the field to be schemaless even if the table is marked as schemafull.
+	/// Flexible allows the field to be schemaless even if the table is marked
+	/// as schemafull.
 	pub flex: bool,
 	pub field_kind: Option<Kind>,
 	pub readonly: bool,

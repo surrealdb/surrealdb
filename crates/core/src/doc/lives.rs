@@ -1,3 +1,4 @@
+use super::IgnoreError;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Action, Notification, Options, Statement};
 use crate::doc::{CursorDoc, Document};
@@ -9,8 +10,6 @@ use crate::val::Value;
 use anyhow::Result;
 use reblessive::tree::Stk;
 use std::sync::Arc;
-
-use super::IgnoreError;
 
 impl Document {
 	/// Processes any LIVE SELECT statements which

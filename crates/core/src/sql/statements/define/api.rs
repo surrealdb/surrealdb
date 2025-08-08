@@ -1,11 +1,10 @@
+use super::DefineKind;
+use super::config::api::ApiConfig;
 use crate::api::method::Method;
 use crate::sql::Expr;
 use crate::sql::fmt::{Fmt, pretty_indent};
 use crate::val::Strand;
 use std::fmt::{self, Display};
-
-use super::DefineKind;
-use super::config::api::ApiConfig;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

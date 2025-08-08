@@ -1,7 +1,5 @@
-use revision::revisioned;
-
 use super::Level;
-
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 5)]
@@ -81,7 +79,8 @@ impl std::fmt::Display for ConfigKind {
 }
 
 impl ResourceKind {
-	// Helpers for building default resources for specific levels. Useful for authorization checks.
+	// Helpers for building default resources for specific levels. Useful for
+	// authorization checks.
 	pub fn on_level(self, level: Level) -> Resource {
 		Resource::new("".into(), self, level)
 	}

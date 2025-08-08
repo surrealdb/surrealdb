@@ -1,11 +1,10 @@
 //! Headers class implementation
 
-use std::str::FromStr;
-
 use js::class::Trace;
 use js::prelude::{Coerced, List};
 use js::{Array, Ctx, Exception, JsLifetime, Result, Value};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use std::str::FromStr;
 
 #[derive(Clone, Trace, JsLifetime)]
 #[js::class]
@@ -114,7 +113,8 @@ impl Headers {
 
 	// Returns all header keys contained in the header set
 	pub fn keys(&self) -> Vec<String> {
-		// TODO: Incorrect, should return an iterator but iterators are not supported yet by quickjs
+		// TODO: Incorrect, should return an iterator but iterators are not supported
+		// yet by quickjs
 		self.inner.keys().map(|v| v.as_str().to_owned()).collect::<Vec<String>>()
 	}
 
@@ -223,8 +223,8 @@ impl Headers {
 
 	fn append_inner(&mut self, ctx: &Ctx<'_>, key: &str, val: &str) -> Result<()> {
 		// Unsure what to do exactly here.
-		// Spec dictates normalizing string before adding it as a header value, i.e. removing
-		// any leading and trailing whitespace:
+		// Spec dictates normalizing string before adding it as a header value, i.e.
+		// removing any leading and trailing whitespace:
 		// [`https://fetch.spec.whatwg.org/#concept-header-value-normalize`]
 		// But non of the platforms I tested, normalize, instead they throw an error
 		// with `Invalid header value`. I'll chose to just do what the platforms do.

@@ -137,7 +137,8 @@ impl DoublePriorityQueue {
 }
 
 /// Treats f64 as a sortable data type.
-/// It provides an implementation so it can be used as a key in a BTreeMap or BTreeSet.
+/// It provides an implementation so it can be used as a key in a BTreeMap or
+/// BTreeSet.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct FloatKey(f64);
 
@@ -173,10 +174,10 @@ impl Ord for FloatKey {
 }
 
 /// Ids64 is a collection able to store u64 identifiers in an optimised way.
-/// The enumerations are optimised in a way that, depending on the number of identifiers,
-/// the most memory efficient variant is used.
-/// When identifiers are added or removed, the method returned the most appropriate
-/// variant (if required).
+/// The enumerations are optimised in a way that, depending on the number of
+/// identifiers, the most memory efficient variant is used.
+/// When identifiers are added or removed, the method returned the most
+/// appropriate variant (if required).
 #[derive(Debug, Clone, PartialEq)]
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize)]
@@ -958,8 +959,8 @@ pub(super) mod tests {
 
 	#[test]
 	#[ignore]
-	// In HNSW we are maintaining a candidate list that requires both to know the first element
-	// and the last element of a set.
+	// In HNSW we are maintaining a candidate list that requires both to know the
+	// first element and the last element of a set.
 	// There is two possible options.
 	// 1. Using a BTreeSet that provide first() and last() methods.
 	// 2. Maintaining two BinaryHeap. One providing the min, and the other the max.

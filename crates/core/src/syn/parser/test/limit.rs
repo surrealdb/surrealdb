@@ -1,6 +1,5 @@
-use reblessive::Stack;
-
 use crate::syn::parser::{Parser, ParserSettings};
+use reblessive::Stack;
 
 #[test]
 fn object_depth() {

@@ -1,3 +1,4 @@
+use super::args::{Optional, Rest};
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -13,8 +14,6 @@ use rand::prelude::SliceRandom;
 use reblessive::tree::Stk;
 use std::cmp::Ordering;
 use std::mem::size_of_val;
-
-use super::args::{Optional, Rest};
 
 /// Returns an error if an array of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {

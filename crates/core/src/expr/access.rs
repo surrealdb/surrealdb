@@ -11,8 +11,9 @@ use std::str;
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
-// Durations representing the expiration of different elements of the access method
-// In this context, the None variant represents that the element does not expire
+// Durations representing the expiration of different elements of the access
+// method In this context, the None variant represents that the element does not
+// expire
 pub struct AccessDuration {
 	// Duration after which the grants generated with the access method expire
 	// For access methods whose grants are tokens, this value is irrelevant

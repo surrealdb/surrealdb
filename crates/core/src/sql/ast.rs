@@ -1,5 +1,3 @@
-use std::fmt::{self, Display};
-
 use crate::expr;
 use crate::sql::Expr;
 use crate::sql::fmt::{Fmt, Pretty};
@@ -7,6 +5,7 @@ use crate::sql::statements::{
 	AccessStatement, AnalyzeStatement, KillStatement, LiveStatement, OptionStatement,
 	ShowStatement, UseStatement,
 };
+use std::fmt::{self, Display};
 
 #[derive(Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

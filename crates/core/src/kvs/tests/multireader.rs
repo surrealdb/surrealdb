@@ -1,11 +1,10 @@
 use super::CreateDs;
-use std::sync::Arc;
-use uuid::Uuid;
-
 use crate::dbs::node::Timestamp;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::kvs::clock::{FakeClock, SizedClock};
+use std::sync::Arc;
+use uuid::Uuid;
 
 pub async fn multireader(new_ds: impl CreateDs) {
 	// Create a new datastore

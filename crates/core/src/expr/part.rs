@@ -39,7 +39,8 @@ pub enum Part {
 }
 
 impl Part {
-	/// Returns a part which is equivalent to `.bla` if called with string `bla`.
+	/// Returns a part which is equivalent to `.bla` if called with string
+	/// `bla`.
 	pub fn field(field: String) -> Option<Self> {
 		Some(Part::Field(Ident::new(field)?))
 	}
@@ -53,14 +54,14 @@ impl Part {
 		matches!(self, Part::Value(Expr::Literal(Literal::Integer(_))) | Part::First | Part::Last)
 	}
 
-	/// Returns the idex if this part would have been `Part::Index(x)` before that field was
-	/// removed.
+	/// Returns the idex if this part would have been `Part::Index(x)` before
+	/// that field was removed.
 	///
-	/// TODO: Remove this method once we work out the kinks with removing `Part::Index(x)` and only
-	/// having `Part::Value(x)`
+	/// TODO: Remove this method once we work out the kinks with removing
+	/// `Part::Index(x)` and only having `Part::Value(x)`
 	///
-	/// Already marked as deprecated for the full release to remind that this behavior should be
-	/// fixed.
+	/// Already marked as deprecated for the full release to remind that this
+	/// behavior should be fixed.
 	#[deprecated(since = "3.0.0")]
 	pub(crate) fn as_old_index(&self) -> Option<usize> {
 		match self {

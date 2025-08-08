@@ -109,7 +109,8 @@ impl AccessType {
 		match self {
 			// The JWT access method cannot issue stateful grants.
 			AccessType::Jwt(_) => false,
-			// The record access method can be used to issue grants if defined with bearer AKA refresh.
+			// The record access method can be used to issue grants if defined with bearer AKA
+			// refresh.
 			AccessType::Record(ac) => ac.bearer.is_some(),
 			AccessType::Bearer(_) => true,
 		}

@@ -4,7 +4,6 @@ use crate::expr::statements::{
 	AccessStatement, AnalyzeStatement, KillStatement, LiveStatement, OptionStatement,
 	ShowStatement, UseStatement,
 };
-
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug)]

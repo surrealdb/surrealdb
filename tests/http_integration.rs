@@ -2,17 +2,15 @@
 mod common;
 
 mod http_integration {
-	use std::time::Duration;
-
+	use super::common::{self, PASS, StartServerArguments, USER};
 	use http::header::HeaderValue;
 	use http::{Method, header};
 	use reqwest::Client;
 	use serde_json::json;
+	use std::time::Duration;
 	use surrealdb::headers::{AUTH_DB, AUTH_NS};
 	use test_log::test;
 	use ulid::Ulid;
-
-	use super::common::{self, PASS, StartServerArguments, USER};
 
 	#[test(tokio::test)]
 	async fn basic_auth() -> Result<(), Box<dyn std::error::Error>> {
@@ -55,7 +53,8 @@ mod http_integration {
 			assert!(body.contains(r#"[{"result":[{"id":"foo:"#), "body: {body}");
 		}
 
-		// Prepare users with identical credentials on ROOT, NAMESPACE and DATABASE levels
+		// Prepare users with identical credentials on ROOT, NAMESPACE and DATABASE
+		// levels
 		{
 			let res =
 				client.post(url).basic_auth(USER, Some(PASS))
@@ -743,7 +742,8 @@ mod http_integration {
 			assert_eq!(res.status(), 401, "body: {}", res.text().await?);
 		}
 
-		// Signin with valid ROOT credentials without specifying NS nor DB and get the token
+		// Signin with valid ROOT credentials without specifying NS nor DB and get the
+		// token
 		{
 			let req_body = serde_json::to_string(
 				json!({

@@ -1,15 +1,13 @@
-use std::fmt::{self, Display, Formatter};
-use std::ops::Deref;
-use std::str::FromStr;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-
 use crate::err::Error;
 use crate::expr::Kind;
 use crate::expr::fmt::{Fmt, fmt_separated_by};
 use crate::syn;
 use crate::val::{Array, Object, Strand, Value};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use std::fmt::{self, Display, Formatter};
+use std::ops::Deref;
+use std::str::FromStr;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -17,8 +15,9 @@ pub struct Path(pub Vec<Segment>);
 
 impl<'a> Path {
 	/// Attempts to fit a passed URL into a already parsed Path Segments.
-	/// A segment can be fixed, be a dynamic variable or a collect the rest of the url
-	/// Considering path the parsed path of an API, and url the current subject, this method:
+	/// A segment can be fixed, be a dynamic variable or a collect the rest of
+	/// the url Considering path the parsed path of an API, and url the current
+	/// subject, this method:
 	///  - iterates over each path segment (divided by `/`)
 	///  - attempts to to match against url segment
 	///  - extracting variables where instructed by the path segment
@@ -101,7 +100,8 @@ impl FromStr for Path {
 						continue 'segment;
 					}
 
-					// We allow the first character to be an escape character to ignore potential otherwise instruction characters
+					// We allow the first character to be an escape character to ignore potential
+					// otherwise instruction characters
 					'\\' if scratch.is_empty() => {
 						chars.next();
 						if let Some(x @ ':' | x @ '*') = chars.next() {

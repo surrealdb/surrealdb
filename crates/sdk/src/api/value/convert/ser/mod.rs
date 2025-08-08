@@ -1,18 +1,18 @@
 mod r#enum;
 mod r#struct;
 
-use std::borrow::Cow;
-
 use crate::error::Api;
 use anyhow::Result;
 use castaway::match_type;
 use serde::ser::Serialize;
 use serde_content::{Number, Serializer, Unexpected, Value as Content};
+use std::borrow::Cow;
 use surrealdb_core::val;
 
 //type Content = serde_content::Value<'static>;
 
-/// Convert a `T` into `surrealdb::expr::Value` which is an enum that can represent any valid SQL data.
+/// Convert a `T` into `surrealdb::expr::Value` which is an enum that can
+/// represent any valid SQL data.
 pub fn to_value<T>(value: T) -> Result<val::Value>
 where
 	T: Serialize + 'static,
@@ -115,9 +115,8 @@ mod tests {
 	use ::serde::Serialize;
 	use std::collections::BTreeMap;
 	use std::ops::Bound;
-	use surrealdb_core::map;
-	use surrealdb_core::syn;
 	use surrealdb_core::val::Regex;
+	use surrealdb_core::{map, syn};
 
 	#[test]
 	fn value_none() {

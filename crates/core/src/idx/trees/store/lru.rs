@@ -208,7 +208,8 @@ where
 		self.map.len()
 	}
 
-	/// Make a copy of this cache containing every entry for which the specified filter returns true.
+	/// Make a copy of this cache containing every entry for which the specified
+	/// filter returns true.
 	fn duplicate<F>(&self, filter: F) -> Self
 	where
 		F: Fn(&CacheKey) -> bool,

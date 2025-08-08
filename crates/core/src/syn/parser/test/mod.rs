@@ -1,6 +1,5 @@
-use crate::{sql, syn};
-
 use super::Parser;
+use crate::{sql, syn};
 
 mod json;
 mod limit;

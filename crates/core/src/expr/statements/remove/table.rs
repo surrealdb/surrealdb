@@ -4,7 +4,6 @@ use crate::err::Error;
 use crate::expr::statements::define::DefineTableStatement;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
-
 use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

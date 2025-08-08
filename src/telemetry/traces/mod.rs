@@ -10,7 +10,8 @@ use opentelemetry_sdk::trace::{Config, TracerProvider};
 use tracing::Subscriber;
 use tracing_subscriber::Layer;
 
-// Returns a tracer provider based on the SURREAL_TELEMETRY_PROVIDER environment variable
+// Returns a tracer provider based on the SURREAL_TELEMETRY_PROVIDER environment
+// variable
 pub fn new<S>(filter: CustomFilter) -> Result<Option<Box<dyn Layer<S> + Send + Sync>>>
 where
 	S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,

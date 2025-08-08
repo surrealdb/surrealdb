@@ -1,3 +1,4 @@
+use super::args::Optional;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -12,8 +13,6 @@ use anyhow::{Result, bail, ensure};
 use geo::Point;
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
-
-use super::args::Optional;
 
 pub fn array((val,): (Value,)) -> Result<Value> {
 	Ok(val.cast_to::<Array>()?.into())

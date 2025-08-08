@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 // Represents cluster information.
-// In the future, this could also include broadcast addresses and other information.
+// In the future, this could also include broadcast addresses and other
+// information.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Nd {
 	__: u8,

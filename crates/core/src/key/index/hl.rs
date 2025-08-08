@@ -1,6 +1,5 @@
 //! Store and chunked layers of an HNSW index
 use crate::kvs::KVKey;
-
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 

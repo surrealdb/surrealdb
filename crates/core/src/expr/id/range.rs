@@ -80,7 +80,8 @@ impl RecordIdKeyRangeLit {
 			Bound::Unbounded => Bound::Unbounded,
 		};
 
-		// The TryFrom implementation ensures that the bounds do not contain an `Id::Range` value
+		// The TryFrom implementation ensures that the bounds do not contain an
+		// `Id::Range` value
 		Ok(RecordIdKeyRange {
 			start,
 			end,

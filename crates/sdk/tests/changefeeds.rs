@@ -1,6 +1,5 @@
-use chrono::DateTime;
-
 use anyhow::anyhow;
+use chrono::DateTime;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;

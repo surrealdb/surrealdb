@@ -2,7 +2,8 @@ use std::time::Duration;
 
 /// Configuration for the engine behaviour
 ///
-/// The defaults are optimal so please only modify these if you know deliberately why you are modifying them.
+/// The defaults are optimal so please only modify these if you know
+/// deliberately why you are modifying them.
 #[derive(Clone, Copy, Debug)]
 pub struct EngineOptions {
 	/// Interval for refreshing node membership information
@@ -17,8 +18,8 @@ pub struct EngineOptions {
 	///
 	/// The index compaction thread runs at this interval to process indexes
 	/// that have been marked for compaction. Compaction helps optimize index
-	/// performance, particularly for full-text indexes, by consolidating changes
-	/// and removing unnecessary data.
+	/// performance, particularly for full-text indexes, by consolidating
+	/// changes and removing unnecessary data.
 	///
 	/// Default: 5 seconds
 	pub index_compaction_interval: Duration,

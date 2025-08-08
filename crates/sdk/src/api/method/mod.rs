@@ -46,6 +46,7 @@ mod version;
 #[cfg(test)]
 mod tests;
 
+use super::opt::{CreateResource, IntoResource};
 pub use authenticate::Authenticate;
 pub use begin::Begin;
 pub use cancel::Cancel;
@@ -78,9 +79,8 @@ pub use use_db::UseDb;
 pub use use_ns::UseNs;
 pub use version::Version;
 
-use super::opt::{CreateResource, IntoResource};
-
-/// A alias for an often used type of future returned by async methods in this library.
+/// A alias for an often used type of future returned by async methods in this
+/// library.
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
 
 /// Query statistics
@@ -113,10 +113,11 @@ where
 {
 	/// Initialises a new unconnected instance of the client
 	///
-	/// This makes it easy to create a static singleton of the client. The static singleton
-	/// pattern in the example below ensures that a single database instance is available
-	/// across very large or complicated applications. With the singleton, only one connection
-	/// to the database is instantiated, and the database connection does not have to be shared
+	/// This makes it easy to create a static singleton of the client. The
+	/// static singleton pattern in the example below ensures that a single
+	/// database instance is available across very large or complicated
+	/// applications. With the singleton, only one connection to the database
+	/// is instantiated, and the database connection does not have to be shared
 	/// across components or controllers.
 	///
 	/// # Examples
@@ -1276,7 +1277,6 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	///
 	pub fn run<R>(&self, function: impl IntoFn) -> Run<C, R> {
 		Run {
 			client: Cow::Borrowed(self),
@@ -1323,7 +1323,8 @@ where
 	///
 	/// # Support
 	///
-	/// Currently only supported by HTTP and the local engines. *Not* supported on WebAssembly.
+	/// Currently only supported by HTTP and the local engines. *Not* supported
+	/// on WebAssembly.
 	///
 	/// # Examples
 	///
@@ -1368,7 +1369,8 @@ where
 	///
 	/// # Support
 	///
-	/// Currently only supported by HTTP and the local engines. *Not* supported on WebAssembly.
+	/// Currently only supported by HTTP and the local engines. *Not* supported
+	/// on WebAssembly.
 	///
 	/// # Examples
 	///

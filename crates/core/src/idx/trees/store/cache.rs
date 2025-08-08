@@ -221,8 +221,9 @@ where
 		}
 	}
 
-	/// Creates a copy of the cache, with a generation number incremented by one.
-	/// The new cache does not contain the NodeID contained in `updated` and `removed`.
+	/// Creates a copy of the cache, with a generation number incremented by
+	/// one. The new cache does not contain the NodeID contained in `updated`
+	/// and `removed`.
 	pub(super) async fn next_generation(
 		&self,
 		updated: &HashSet<NodeId>,

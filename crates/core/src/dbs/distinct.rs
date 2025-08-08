@@ -4,7 +4,8 @@ use crate::kvs::Key;
 use radix_trie::Trie;
 use std::default::Default;
 
-// TODO: This is currently processed in memory. In the future is should be on disk (mmap?)
+// TODO: This is currently processed in memory. In the future is should be on
+// disk (mmap?)
 type Distinct = Trie<Key, bool>;
 
 #[derive(Default)]

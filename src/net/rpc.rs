@@ -1,6 +1,3 @@
-use std::ops::Deref;
-use std::sync::Arc;
-
 use super::AppState;
 use super::error::ResponseError;
 use super::headers::{Accept, ContentType, SurrealId};
@@ -22,6 +19,8 @@ use axum_extra::headers::Header;
 use bytes::Bytes;
 use http::HeaderMap;
 use http::header::SEC_WEBSOCKET_PROTOCOL;
+use std::ops::Deref;
+use std::sync::Arc;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::kvs::Datastore;

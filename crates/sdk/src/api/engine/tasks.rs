@@ -8,10 +8,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::options::EngineOptions;
-use tokio_util::sync::CancellationToken;
-
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
+use tokio_util::sync::CancellationToken;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
@@ -37,12 +36,13 @@ impl Tasks {
 	}
 }
 
-// The init starts a long-running thread for periodically calling Datastore.tick.
-// Datastore.tick is responsible for running garbage collection and other
-// background tasks.
+// The init starts a long-running thread for periodically calling
+// Datastore.tick. Datastore.tick is responsible for running garbage collection
+// and other background tasks.
 //
-// This function needs to be called before after the dbs::init and before the net::init functions.
-// It needs to be before net::init because the net::init function blocks until the web server stops.
+// This function needs to be called before after the dbs::init and before the
+// net::init functions. It needs to be before net::init because the net::init
+// function blocks until the web server stops.
 pub fn init(dbs: Arc<Datastore>, canceller: CancellationToken, opts: &EngineOptions) -> Tasks {
 	let task1 = spawn_task_node_membership_refresh(dbs.clone(), canceller.clone(), opts);
 	let task2 = spawn_task_node_membership_check(dbs.clone(), canceller.clone(), opts);
@@ -178,17 +178,18 @@ fn spawn_task_changefeed_cleanup(
 
 /// Spawns a background task for index compaction
 ///
-/// This function creates a background task that periodically runs the index compaction
-/// process. The compaction process optimizes indexes (particularly full-text indexes)
-/// by consolidating changes and removing unnecessary data, which helps maintain
-/// query performance over time.
+/// This function creates a background task that periodically runs the index
+/// compaction process. The compaction process optimizes indexes (particularly
+/// full-text indexes) by consolidating changes and removing unnecessary data,
+/// which helps maintain query performance over time.
 ///
 /// The task runs at the interval specified by `opts.index_compaction_interval`.
 ///
 /// # Arguments
 ///
 /// * `dbs` - The datastore instance
-/// * `canceller` - Token used to cancel the task when the engine is shutting down
+/// * `canceller` - Token used to cancel the task when the engine is shutting
+///   down
 /// * `opts` - Engine options containing the compaction interval
 ///
 /// # Returns

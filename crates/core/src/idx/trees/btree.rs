@@ -656,7 +656,8 @@ where
 
 		// CLRS: 2c
 		// Merge children
-		// The payload is set to 0. The payload does not matter, as the key will be deleted after anyway.
+		// The payload is set to 0. The payload does not matter, as the key will be
+		// deleted after anyway.
 		#[cfg(debug_assertions)]
 		{
 			left_node.n.check();
@@ -1007,18 +1008,15 @@ where
 
 #[cfg(test)]
 mod tests {
-	use std::{cmp::Ordering, collections::BTreeMap, sync::Arc};
-
-	use crate::{
-		idx::trees::{
-			bkeys::{FstKeys, TrieKeys},
-			store::TreeNodeProvider,
-		},
-		kvs::{Datastore, LockType, TransactionType},
-	};
-
 	use super::*;
-	use rand::{seq::SliceRandom, thread_rng};
+	use crate::idx::trees::bkeys::{FstKeys, TrieKeys};
+	use crate::idx::trees::store::TreeNodeProvider;
+	use crate::kvs::{Datastore, LockType, TransactionType};
+	use rand::seq::SliceRandom;
+	use rand::thread_rng;
+	use std::cmp::Ordering;
+	use std::collections::BTreeMap;
+	use std::sync::Arc;
 	use test_log::test;
 
 	#[test]

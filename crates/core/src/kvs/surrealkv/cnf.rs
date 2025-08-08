@@ -5,7 +5,8 @@ use sysinfo::System;
 /// Should we sync writes to disk before acknowledgement
 pub(super) static SYNC_DATA: LazyLock<bool> = lazy_env_parse!("SURREAL_SYNC_DATA", bool, false);
 
-/// The size to store values in the tree, or a separate log file (default: 64 bytes)
+/// The size to store values in the tree, or a separate log file (default: 64
+/// bytes)
 pub(super) static SURREALKV_MAX_VALUE_THRESHOLD: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_SURREALKV_MAX_VALUE_THRESHOLD", usize, 64);
 

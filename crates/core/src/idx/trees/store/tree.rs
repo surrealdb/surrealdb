@@ -104,7 +104,8 @@ where
 		if self.updated.is_empty() && self.removed.is_empty() {
 			return Ok(None);
 		}
-		// Create a new cache hydrated with non-updated and non-removed previous cache entries.
+		// Create a new cache hydrated with non-updated and non-removed previous cache
+		// entries.
 		let new_cache = self.cache.next_generation(&self.updated, &self.removed).await;
 
 		let updated = mem::take(&mut self.updated);

@@ -16,10 +16,8 @@
 
 use crate::idx::docids::DocId;
 use crate::idx::ft::fulltext::TermDocument;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
@@ -111,7 +109,8 @@ impl<'a> Td<'a> {
 	/// * `tb` - Table identifier
 	/// * `ix` - Index identifier
 	/// * `term` - The term being indexed
-	/// * `id` - Optional document ID (Some for specific document, None for term prefix)
+	/// * `id` - Optional document ID (Some for specific document, None for term
+	///   prefix)
 	pub(crate) fn new(
 		ns: &'a str,
 		db: &'a str,

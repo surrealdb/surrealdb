@@ -1,3 +1,9 @@
+use super::AppState;
+use super::client_ip::ExtractClientIP;
+use super::headers::{
+	SurrealAuthDatabase, SurrealAuthNamespace, SurrealDatabase, SurrealId, SurrealNamespace,
+	parse_typed_header,
+};
 use crate::net::error::Error as NetError;
 use anyhow::{Result, bail};
 use axum::body::Body;
@@ -14,18 +20,13 @@ use surrealdb::iam::verify::{basic, token};
 use tower_http::auth::AsyncAuthorizeRequest;
 use uuid::Uuid;
 
-use super::AppState;
-use super::client_ip::ExtractClientIP;
-use super::headers::{
-	SurrealAuthDatabase, SurrealAuthNamespace, SurrealDatabase, SurrealId, SurrealNamespace,
-	parse_typed_header,
-};
-
 ///
-/// SurrealAuth is a tower layer that implements the AsyncAuthorizeRequest trait.
-/// It is used to authorize requests to SurrealDB using Basic or Token authentication.
+/// SurrealAuth is a tower layer that implements the AsyncAuthorizeRequest
+/// trait. It is used to authorize requests to SurrealDB using Basic or Token
+/// authentication.
 ///
-/// It has to be used in conjunction with the tower_http::auth::RequireAuthorizationLayer layer:
+/// It has to be used in conjunction with the
+/// tower_http::auth::RequireAuthorizationLayer layer:
 ///
 /// ```rust
 /// use tower_http::auth::RequireAuthorizationLayer;

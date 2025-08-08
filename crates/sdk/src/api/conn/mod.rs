@@ -3,8 +3,7 @@ use crate::api::method::BoxFuture;
 use crate::api::method::query::Response;
 use crate::api::opt::Endpoint;
 use crate::api::{ExtraFeatures, Result, Surreal};
-use crate::value;
-use crate::{Value, api};
+use crate::{Value, api, value};
 use async_channel::{Receiver, Sender};
 use serde::de::DeserializeOwned;
 use std::collections::HashSet;
@@ -12,11 +11,10 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use surrealdb_core::val::Value as CoreValue;
 
 mod cmd;
+use super::opt::Config;
 pub(crate) use cmd::Command;
 #[cfg(feature = "protocol-http")]
 pub(crate) use cmd::RouterRequest;
-
-use super::opt::Config;
 
 #[derive(Debug)]
 #[allow(dead_code, reason = "Used by the embedded and remote connections.")]

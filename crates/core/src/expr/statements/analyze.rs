@@ -11,7 +11,6 @@ use crate::idx::trees::mtree::MTreeIndex;
 use crate::kvs::TransactionType;
 use crate::val::Value;
 use anyhow::{Result, bail};
-
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;

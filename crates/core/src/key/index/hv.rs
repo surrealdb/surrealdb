@@ -2,7 +2,6 @@
 use crate::idx::trees::hnsw::docs::ElementDocs;
 use crate::idx::trees::vector::SerializedVector;
 use crate::kvs::KVKey;
-
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::sync::Arc;

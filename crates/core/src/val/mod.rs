@@ -310,11 +310,12 @@ impl Value {
 	/// Returns the surql representation of the kind of the value as a string.
 	///
 	/// # Warning
-	/// This function is not fully implement for all variants, make sure you don't accidentally use
-	/// it where it can return an invalid value.
+	/// This function is not fully implement for all variants, make sure you
+	/// don't accidentally use it where it can return an invalid value.
 	pub fn kind_of(&self) -> &'static str {
-		// TODO: Look at this function, there are a whole bunch of options for which this returns
-		// "incorrect type" which might sneak into the results where it shouldn.t
+		// TODO: Look at this function, there are a whole bunch of options for which
+		// this returns "incorrect type" which might sneak into the results where it
+		// shouldn.t
 		match self {
 			Self::None => "none",
 			Self::Null => "null",
@@ -573,7 +574,8 @@ impl Value {
 		}
 	}
 
-	/// Compare this Value to another Value lexicographically and using natural numerical comparison
+	/// Compare this Value to another Value lexicographically and using natural
+	/// numerical comparison
 	pub fn natural_lexical_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
 			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_lexical_cmp(a, b)),
@@ -1025,9 +1027,8 @@ impl FromIterator<(String, Value)> for Value {
 
 #[cfg(test)]
 mod tests {
-	use crate::syn;
-
 	use super::*;
+	use crate::syn;
 	use chrono::TimeZone;
 
 	#[test]
