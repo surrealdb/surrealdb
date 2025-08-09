@@ -262,7 +262,7 @@ impl ToFlatbuffers for Kind {
 			}
 			Self::File(buckets) => {
 				let bucket_offsets: Vec<_> =
-					buckets.iter().map(|b| builder.create_string(&b.as_str())).collect();
+					buckets.iter().map(|b| builder.create_string(b.as_str())).collect();
 				let buckets = builder.create_vector(&bucket_offsets);
 
 				proto_fb::KindArgs {
@@ -408,8 +408,8 @@ impl FromFlatbuffers for Kind {
 							let Some(name) = t.name() else {
 								return Err(anyhow::anyhow!("Missing table name"));
 							};
-							Ok(Ident::new(name.to_string())
-								.ok_or_else(|| anyhow::anyhow!("Invalid table name"))?)
+							Ident::new(name.to_string())
+								.ok_or_else(|| anyhow::anyhow!("Invalid table name"))
 						})
 						.collect::<anyhow::Result<Vec<_>>>()?
 				} else {
