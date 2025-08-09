@@ -1,6 +1,6 @@
 use crate::expr::{Ident, Kind, kind::KindLiteral};
-use crate::val::{Duration, Strand, Table};
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
+use crate::val::{Duration, Strand, Table};
 use rust_decimal::Decimal;
 use std::collections::BTreeMap;
 use surrealdb_protocol::fb::v1 as proto_fb;
@@ -118,8 +118,10 @@ impl ToFlatbuffers for Kind {
 				),
 			},
 			Self::Record(tables) => {
-				let table_offsets: Vec<_> =
-					tables.iter().map(|t| Table::from(t.clone()).to_fb(builder)).collect::<anyhow::Result<Vec<_>>>()?;
+				let table_offsets: Vec<_> = tables
+					.iter()
+					.map(|t| Table::from(t.clone()).to_fb(builder))
+					.collect::<anyhow::Result<Vec<_>>>()?;
 				let tables = builder.create_vector(&table_offsets);
 				proto_fb::KindArgs {
 					kind_type: proto_fb::KindType::Record,
@@ -320,7 +322,7 @@ impl ToFlatbuffers for KindLiteral {
 						.as_union_value(),
 					),
 				}
-			},
+			}
 			Self::Integer(i) => proto_fb::LiteralKindArgs {
 				literal_type: proto_fb::LiteralType::Int64,
 				literal: Some(
@@ -406,7 +408,8 @@ impl FromFlatbuffers for Kind {
 							let Some(name) = t.name() else {
 								return Err(anyhow::anyhow!("Missing table name"));
 							};
-							Ok(Ident::new(name.to_string()).ok_or_else(|| anyhow::anyhow!("Invalid table name"))?)
+							Ok(Ident::new(name.to_string())
+								.ok_or_else(|| anyhow::anyhow!("Invalid table name"))?)
 						})
 						.collect::<anyhow::Result<Vec<_>>>()?
 				} else {

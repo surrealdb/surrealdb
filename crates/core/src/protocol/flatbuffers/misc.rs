@@ -1,6 +1,6 @@
-use crate::val::Table;
-use crate::val::File;
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
+use crate::val::File;
+use crate::val::Table;
 
 use surrealdb_protocol::fb::v1 as proto_fb;
 

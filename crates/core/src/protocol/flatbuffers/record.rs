@@ -1,5 +1,5 @@
-use crate::val::{RecordIdKey, RecordIdKeyRange, RecordId};
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
+use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
 use std::ops::Bound;
 
 use surrealdb_protocol::fb::v1::{self as proto_fb, RecordIdKeyBound};
@@ -30,7 +30,9 @@ impl FromFlatbuffers for RecordId {
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		let table = input.table().ok_or_else(|| anyhow::anyhow!("Missing table in RecordId"))?;
-		let key = RecordIdKey::from_fb(input.id().ok_or_else(|| anyhow::anyhow!("Missing id in RecordId"))?)?;
+		let key = RecordIdKey::from_fb(
+			input.id().ok_or_else(|| anyhow::anyhow!("Missing id in RecordId"))?,
+		)?;
 		Ok(RecordId {
 			table: table.to_string(),
 			key,

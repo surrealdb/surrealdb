@@ -1,5 +1,5 @@
-use crate::val::Geometry;
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
+use crate::val::Geometry;
 use anyhow::Context;
 use surrealdb_protocol::fb::v1 as proto_fb;
 

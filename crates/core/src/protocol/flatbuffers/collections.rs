@@ -1,6 +1,6 @@
 use crate::expr::Kind;
-use crate::val::{Array, Object, Value};
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
+use crate::val::{Array, Object, Value};
 use anyhow::Context;
 use std::collections::BTreeMap;
 

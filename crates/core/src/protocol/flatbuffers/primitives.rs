@@ -1,5 +1,5 @@
-use crate::val::{Bytes, Duration, Uuid, Strand};
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
+use crate::val::{Bytes, Duration, Strand, Uuid};
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
