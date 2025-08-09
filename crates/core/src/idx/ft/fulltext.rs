@@ -10,8 +10,9 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::index::FullTextParams;
+use crate::expr::operator::BooleanOperator;
 use crate::expr::statements::DefineAnalyzerStatement;
-use crate::expr::{BooleanOperation, Idiom, Scoring, Thing, Value};
+use crate::expr::{Idiom, Scoring};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::docids::seqdocids::SeqDocIds;
@@ -27,6 +28,7 @@ use crate::idx::trees::store::IndexStores;
 use crate::key::index::tt::Tt;
 use crate::kvs::Transaction;
 use crate::kvs::impl_kv_value_revisioned;
+use crate::val::{RecordId, Value};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -158,7 +160,7 @@ impl FullTextIndex {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		rid: &Thing,
+		rid: &RecordId,
 		content: Vec<Value>,
 		require_compaction: &mut bool,
 	) -> Result<Option<DocId>> {
@@ -222,14 +224,14 @@ impl FullTextIndex {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		rid: &Thing,
+		rid: &RecordId,
 		content: Vec<Value>,
 		require_compaction: &mut bool,
 	) -> Result<()> {
 		let tx = ctx.tx();
 		let nid = opt.id()?;
 		// Get the doc id (if it exists)
-		let id = self.doc_ids.resolve_doc_id(ctx, rid.id.clone()).await?;
+		let id = self.doc_ids.resolve_doc_id(ctx, rid.key.clone()).await?;
 		// Collect the tokens.
 		let tokens =
 			self.analyzer.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;
@@ -485,12 +487,12 @@ impl FullTextIndex {
 	pub(in crate::idx) fn new_hits_iterator(
 		&self,
 		qt: &QueryTerms,
-		bo: BooleanOperation,
+		bo: BooleanOperator,
 	) -> Option<FullTextHitsIterator> {
 		// Execute the operation depending on the operator
 		let hits = match bo {
-			BooleanOperation::And => Self::intersection_operation(&qt.docs),
-			BooleanOperation::Or => Self::union_operation(&qt.docs),
+			BooleanOperator::And => Self::intersection_operation(&qt.docs),
+			BooleanOperator::Or => Self::union_operation(&qt.docs),
 		};
 
 		// Create and return an iterator if we have matching documents
@@ -565,12 +567,12 @@ impl FullTextIndex {
 	pub(in crate::idx) async fn get_doc_id(
 		&self,
 		tx: &Transaction,
-		rid: &Thing,
+		rid: &RecordId,
 	) -> Result<Option<DocId>> {
-		if !rid.tb.eq(self.ikb.table()) {
+		if rid.table != self.ikb.table() {
 			return Ok(None);
 		}
-		self.doc_ids.get_doc_id(tx, &rid.id).await
+		self.doc_ids.get_doc_id(tx, &rid.key).await
 	}
 	pub(in crate::idx) async fn new_scorer(&self, ctx: &Context) -> Result<Option<Scorer>> {
 		if let Some(bm25) = &self.bm25 {
@@ -661,7 +663,7 @@ impl FullTextIndex {
 	pub(in crate::idx) async fn highlight(
 		&self,
 		tx: &Transaction,
-		thg: &Thing,
+		thg: &RecordId,
 		qt: &QueryTerms,
 		hlp: HighlightParams,
 		idiom: &Idiom,
@@ -695,7 +697,7 @@ impl FullTextIndex {
 	pub(in crate::idx) async fn read_offsets(
 		&self,
 		tx: &Transaction,
-		thg: &Thing,
+		thg: &RecordId,
 		qt: &QueryTerms,
 		partial: bool,
 	) -> Result<Value> {
@@ -749,12 +751,12 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 	///
 	/// This method retrieves the next document ID from the bitmap and resolves it to a Thing.
 	/// It returns None when there are no more hits.
-	async fn next(&mut self, tx: &Transaction) -> Result<Option<(Thing, DocId)>> {
+	async fn next(&mut self, tx: &Transaction) -> Result<Option<(RecordId, DocId)>> {
 		for doc_id in self.iter.by_ref() {
-			if let Some(id) = SeqDocIds::get_id(&self.ikb, tx, doc_id).await? {
-				let rid = Thing {
-					tb: self.ikb.table().to_string(),
-					id,
+			if let Some(key) = SeqDocIds::get_id(&self.ikb, tx, doc_id).await? {
+				let rid = RecordId {
+					table: self.ikb.table().to_string(),
+					key,
 				};
 				return Ok(Some((rid, doc_id)));
 			}
@@ -875,12 +877,13 @@ mod tests {
 	use crate::dbs::Options;
 	use crate::expr::index::FullTextParams;
 	use crate::expr::statements::DefineAnalyzerStatement;
-	use crate::expr::{Array, Thing, Value};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::offset::Offset;
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
-	use crate::sql::{Statement, statements::DefineStatement};
+	use crate::sql::Expr;
+	use crate::sql::statements::DefineStatement;
 	use crate::syn;
+	use crate::val::{Array, RecordId, Value};
 	use reblessive::tree::Stk;
 	use std::sync::Arc;
 	use std::time::{Duration, Instant};
@@ -905,8 +908,11 @@ mod tests {
 		async fn new() -> Self {
 			let ds = Arc::new(Datastore::new("memory").await.unwrap());
 			let ctx = ds.setup_ctx().unwrap().freeze();
-			let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-			let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
+			let q = syn::expr("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+			let Expr::Define(q) = q else {
+				panic!()
+			};
+			let DefineStatement::Analyzer(az) = *q else {
 				panic!()
 			};
 			let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
@@ -975,7 +981,7 @@ mod tests {
 			Arc::new(self.ds.transaction(tt, Optimistic).await.unwrap())
 		}
 
-		async fn remove_insert_task(&self, stk: &mut Stk, rid: &Thing) {
+		async fn remove_insert_task(&self, stk: &mut Stk, rid: &RecordId) {
 			let mut ctx = MutableContext::new(&self.ctx);
 			let tx = self.new_tx(TransactionType::Write).await;
 			ctx.set_transaction(tx.clone());
@@ -1013,7 +1019,7 @@ mod tests {
 		}
 	}
 
-	async fn concurrent_doc_update(test: TestContext, rid: Arc<Thing>, mut count: usize) {
+	async fn concurrent_doc_update(test: TestContext, rid: Arc<RecordId>, mut count: usize) {
 		let mut stack = reblessive::TreeStack::new();
 		while count > 0 && test.start.elapsed().as_millis() < 3000 {
 			stack.enter(|stk| test.remove_insert_task(stk, &rid)).finish().await;
@@ -1021,7 +1027,7 @@ mod tests {
 		}
 	}
 
-	async fn concurrent_search(test: TestContext, doc_ids: Vec<Arc<Thing>>) {
+	async fn concurrent_search(test: TestContext, doc_ids: Vec<Arc<RecordId>>) {
 		while test.start.elapsed().as_millis() < 3500 {
 			let tx = test.new_tx(TransactionType::Read).await;
 			let expected = {
@@ -1086,8 +1092,10 @@ mod tests {
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn concurrent_test() {
-		let doc1: Arc<Thing> = Arc::new(("t", "doc1").into());
-		let doc2: Arc<Thing> = Arc::new(("t", "doc2").into());
+		let doc1: Arc<RecordId> =
+			Arc::new(RecordId::new("t".to_owned(), strand!("doc1").to_owned()));
+		let doc2: Arc<RecordId> =
+			Arc::new(RecordId::new("t".to_owned(), strand!("doc2").to_owned()));
 
 		let test = TestContext::new().await;
 		// Ensure the documents are pre-existing

@@ -1,28 +1,10 @@
-use crate::expr::{Id, IdRange, Table, Thing};
+use crate::val::{RecordIdKey, RecordIdKeyRange, RecordId};
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use std::ops::Bound;
 
 use surrealdb_protocol::fb::v1::{self as proto_fb, RecordIdKeyBound};
 
-impl ToFlatbuffers for Table {
-	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::TableName<'bldr>>;
-
-	#[inline]
-	fn to_fb<'bldr>(
-		&self,
-		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> anyhow::Result<Self::Output<'bldr>> {
-		let name = builder.create_string(self.as_str());
-		Ok(proto_fb::TableName::create(
-			builder,
-			&proto_fb::TableNameArgs {
-				name: Some(name),
-			},
-		))
-	}
-}
-
-impl ToFlatbuffers for Thing {
+impl ToFlatbuffers for RecordId {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::RecordId<'bldr>>;
 
 	#[inline]
@@ -30,8 +12,8 @@ impl ToFlatbuffers for Thing {
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> anyhow::Result<Self::Output<'bldr>> {
-		let table = builder.create_string(&self.tb);
-		let id = self.id.to_fb(builder)?;
+		let table = builder.create_string(&self.table);
+		let id = self.key.to_fb(builder)?;
 		Ok(proto_fb::RecordId::create(
 			builder,
 			&proto_fb::RecordIdArgs {
@@ -42,21 +24,21 @@ impl ToFlatbuffers for Thing {
 	}
 }
 
-impl FromFlatbuffers for Thing {
+impl FromFlatbuffers for RecordId {
 	type Input<'a> = proto_fb::RecordId<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		let table = input.table().ok_or_else(|| anyhow::anyhow!("Missing table in RecordId"))?;
-		let id = Id::from_fb(input.id().ok_or_else(|| anyhow::anyhow!("Missing id in RecordId"))?)?;
-		Ok(Thing {
-			tb: table.to_string(),
-			id,
+		let key = RecordIdKey::from_fb(input.id().ok_or_else(|| anyhow::anyhow!("Missing id in RecordId"))?)?;
+		Ok(RecordId {
+			table: table.to_string(),
+			key,
 		})
 	}
 }
 
-impl ToFlatbuffers for Id {
+impl ToFlatbuffers for RecordIdKey {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::RecordIdKey<'bldr>>;
 
 	#[inline]
@@ -65,7 +47,7 @@ impl ToFlatbuffers for Id {
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> anyhow::Result<Self::Output<'bldr>> {
 		match self {
-			Id::Number(n) => {
+			RecordIdKey::Number(n) => {
 				let id = n.to_fb(builder)?.as_union_value();
 				Ok(proto_fb::RecordIdKey::create(
 					builder,
@@ -75,7 +57,7 @@ impl ToFlatbuffers for Id {
 					},
 				))
 			}
-			Id::String(s) => {
+			RecordIdKey::String(s) => {
 				let id = s.to_fb(builder)?.as_union_value();
 				Ok(proto_fb::RecordIdKey::create(
 					builder,
@@ -85,7 +67,7 @@ impl ToFlatbuffers for Id {
 					},
 				))
 			}
-			Id::Uuid(uuid) => {
+			RecordIdKey::Uuid(uuid) => {
 				let id = uuid.to_fb(builder)?.as_union_value();
 				Ok(proto_fb::RecordIdKey::create(
 					builder,
@@ -95,7 +77,7 @@ impl ToFlatbuffers for Id {
 					},
 				))
 			}
-			Id::Array(arr) => {
+			RecordIdKey::Array(arr) => {
 				let id = arr.to_fb(builder)?.as_union_value();
 				Ok(proto_fb::RecordIdKey::create(
 					builder,
@@ -105,7 +87,7 @@ impl ToFlatbuffers for Id {
 					},
 				))
 			}
-			Id::Range(range) => {
+			RecordIdKey::Range(range) => {
 				let id = range.to_fb(builder)?.as_union_value();
 				Ok(proto_fb::RecordIdKey::create(
 					builder,
@@ -123,54 +105,54 @@ impl ToFlatbuffers for Id {
 	}
 }
 
-impl FromFlatbuffers for Id {
+impl FromFlatbuffers for RecordIdKey {
 	type Input<'a> = proto_fb::RecordIdKey<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		match input.id_type() {
 			proto_fb::RecordIdKeyType::Int64 => {
-				let id_value =
+				let key_value =
 					input.id_as_int_64().ok_or_else(|| anyhow::anyhow!("Expected Int64 Id"))?;
-				Ok(Id::Number(id_value.value()))
+				Ok(RecordIdKey::Number(key_value.value()))
 			}
 			proto_fb::RecordIdKeyType::String => {
-				let id_value =
+				let key_value =
 					input.id_as_string().ok_or_else(|| anyhow::anyhow!("Expected String Id"))?;
-				Ok(Id::String(
-					id_value
+				Ok(RecordIdKey::String(
+					key_value
 						.value()
 						.ok_or_else(|| anyhow::anyhow!("Missing String value"))?
 						.to_string(),
 				))
 			}
 			proto_fb::RecordIdKeyType::Uuid => {
-				let id_value =
+				let key_value =
 					input.id_as_uuid().ok_or_else(|| anyhow::anyhow!("Expected Uuid Id"))?;
-				let uuid = crate::expr::Uuid::from_fb(id_value)?;
-				Ok(Id::Uuid(uuid))
+				let uuid = crate::val::Uuid::from_fb(key_value)?;
+				Ok(RecordIdKey::Uuid(uuid))
 			}
 			proto_fb::RecordIdKeyType::Array => {
-				let id_value =
+				let key_value =
 					input.id_as_array().ok_or_else(|| anyhow::anyhow!("Expected Array Id"))?;
-				let array = crate::expr::Array::from_fb(id_value)?;
-				Ok(Id::Array(array))
+				let array = crate::val::Array::from_fb(key_value)?;
+				Ok(RecordIdKey::Array(array))
 			}
 			proto_fb::RecordIdKeyType::Range => {
-				let id_value =
+				let key_value =
 					input.id_as_range().ok_or_else(|| anyhow::anyhow!("Expected Range Id"))?;
-				let range = IdRange::from_fb(id_value)?;
-				Ok(Id::Range(Box::new(range)))
+				let range = RecordIdKeyRange::from_fb(key_value)?;
+				Ok(RecordIdKey::Range(Box::new(range)))
 			}
 			_ => Err(anyhow::anyhow!(
-				"Unsupported Id type for FlatBuffers deserialization: {:?}",
+				"Unsupported RecordIdKey type for FlatBuffers deserialization: {:?}",
 				input.id_type()
 			)),
 		}
 	}
 }
 
-impl ToFlatbuffers for IdRange {
+impl ToFlatbuffers for RecordIdKeyRange {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::RecordIdKeyRange<'bldr>>;
 
 	#[inline]
@@ -178,7 +160,7 @@ impl ToFlatbuffers for IdRange {
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> anyhow::Result<Self::Output<'bldr>> {
-		let (start_type, start) = self.beg.to_fb(builder)?;
+		let (start_type, start) = self.start.to_fb(builder)?;
 		let (end_type, end) = self.end.to_fb(builder)?;
 		Ok(proto_fb::RecordIdKeyRange::create(
 			builder,
@@ -192,12 +174,12 @@ impl ToFlatbuffers for IdRange {
 	}
 }
 
-impl FromFlatbuffers for IdRange {
+impl FromFlatbuffers for RecordIdKeyRange {
 	type Input<'bldr> = proto_fb::RecordIdKeyRange<'bldr>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
-		let beg = match input.start_type() {
+		let start = match input.start_type() {
 			RecordIdKeyBound::Unbounded => {
 				input
 					.start_as_unbounded()
@@ -208,13 +190,13 @@ impl FromFlatbuffers for IdRange {
 				let start = input
 					.start_as_inclusive()
 					.ok_or_else(|| anyhow::anyhow!("Missing start in IdRange"))?;
-				Bound::Included(Id::from_fb(start)?)
+				Bound::Included(RecordIdKey::from_fb(start)?)
 			}
 			RecordIdKeyBound::Exclusive => {
 				let start = input
 					.start_as_exclusive()
 					.ok_or_else(|| anyhow::anyhow!("Missing start in IdRange"))?;
-				Bound::Excluded(Id::from_fb(start)?)
+				Bound::Excluded(RecordIdKey::from_fb(start)?)
 			}
 			_ => return Err(anyhow::anyhow!("Invalid start type in IdRange")),
 		};
@@ -230,25 +212,25 @@ impl FromFlatbuffers for IdRange {
 				let end = input
 					.end_as_inclusive()
 					.ok_or_else(|| anyhow::anyhow!("Missing end in IdRange"))?;
-				Bound::Included(Id::from_fb(end)?)
+				Bound::Included(RecordIdKey::from_fb(end)?)
 			}
 			RecordIdKeyBound::Exclusive => {
 				let end = input
 					.end_as_exclusive()
 					.ok_or_else(|| anyhow::anyhow!("Missing end in IdRange"))?;
-				Bound::Excluded(Id::from_fb(end)?)
+				Bound::Excluded(RecordIdKey::from_fb(end)?)
 			}
 			_ => return Err(anyhow::anyhow!("Invalid end type in IdRange")),
 		};
 
-		Ok(IdRange {
-			beg,
+		Ok(RecordIdKeyRange {
+			start,
 			end,
 		})
 	}
 }
 
-impl ToFlatbuffers for Bound<Id> {
+impl ToFlatbuffers for Bound<RecordIdKey> {
 	type Output<'bldr> =
 		(proto_fb::RecordIdKeyBound, Option<flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>>);
 

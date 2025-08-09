@@ -1,11 +1,12 @@
 //! Module for rendering errors onto source code.
 
-use std::{cmp::Ordering, fmt, ops::Range};
+use std::cmp::Ordering;
+use std::fmt;
+use std::ops::Range;
 
 use super::{Location, MessageKind};
 
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub struct RenderedError {
 	pub errors: Vec<String>,
 	pub snippets: Vec<Snippet>,
@@ -238,10 +239,8 @@ impl fmt::Display for Snippet {
 #[cfg(test)]
 mod test {
 	use super::{RenderedError, Snippet, Truncation};
-	use crate::syn::{
-		error::{Location, MessageKind},
-		token::Span,
-	};
+	use crate::syn::error::{Location, MessageKind};
+	use crate::syn::token::Span;
 
 	#[test]
 	fn truncate_whitespace() {

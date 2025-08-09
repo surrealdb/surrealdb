@@ -1,10 +1,7 @@
 use crate::api::Result;
-use crate::api::engine::local::Db;
-use crate::api::engine::local::IndxDb;
-use crate::api::opt::Config;
-use crate::api::opt::Endpoint;
-use crate::api::opt::IntoEndpoint;
+use crate::api::engine::local::{Db, IndxDb};
 use crate::api::opt::endpoint::into_endpoint;
+use crate::api::opt::{Config, Endpoint, IntoEndpoint};
 use url::Url;
 
 macro_rules! endpoints {

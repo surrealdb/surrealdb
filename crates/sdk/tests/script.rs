@@ -1,18 +1,14 @@
 #![cfg(feature = "scripting")]
 
-mod parse;
-use std::time::Duration;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use parse::Parse;
 mod helpers;
 use helpers::new_ds;
 use rust_decimal::Decimal;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::expr::Geometry;
-use surrealdb::expr::Number;
-use surrealdb_core::expr::Value;
+use surrealdb_core::syn;
+use surrealdb_core::val::{Geometry, Number, Value};
 
 #[tokio::test]
 async fn script_function_error() -> Result<()> {
@@ -59,7 +55,8 @@ async fn script_function_simple() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(r#"[{ bio: "Line 1\nLine 2", id: person:test, scores: [66, 84, 73] }]"#);
+	let val = syn::value(r#"[{ bio: "Line 1\nLine 2", id: person:test, scores: [66, 84, 73] }]"#)
+		.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -88,7 +85,7 @@ async fn script_function_context() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: film:test,
@@ -101,7 +98,8 @@ async fn script_function_context() -> Result<()> {
 				]
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -128,14 +126,15 @@ async fn script_function_arguments() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: article:test,
 				summary: 'SurrealDB is awesome, advanced, cool',
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -171,7 +170,7 @@ async fn script_function_types() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: article:test,
@@ -182,7 +181,8 @@ async fn script_function_types() -> Result<()> {
 				identifier: u'03412258-988f-47cd-82db-549902cdaffe',
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -229,13 +229,14 @@ async fn script_query_from_script_select() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				number: 1
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 
 	// indirect query
@@ -249,13 +250,14 @@ async fn script_query_from_script_select() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				number: 2
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 
 	Ok(())
@@ -273,13 +275,14 @@ async fn script_query_from_script() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		r#"{
 				id: article:test,
 				name: "The daily news",
 				issue_number: 3.0
 		}"#,
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 
 	let sql = r#"
@@ -288,13 +291,14 @@ async fn script_query_from_script() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		r#"[{
 				id: article:test,
 				name: "The daily news",
 				issue_number: 3.0
 		}]"#,
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -312,7 +316,7 @@ async fn script_value_function_params() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	let tmp = res.remove(1).result?;
-	let val = Value::parse(r#""The daily news""#);
+	let val = syn::value(r#""The daily news""#).unwrap();
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -327,7 +331,7 @@ async fn script_value_function_inline_values() -> Result<()> {
 			if(await surrealdb.value(`"some string"`) !== "some string"){
 				throw new Error(2)
 			}
-			if(await surrealdb.value(`<future>{ math::floor(13.746189) }`) !== 13){
+			if(await surrealdb.value(`math::floor(13.746189)`) !== 13){
 				throw new Error(3)
 			}
 		}

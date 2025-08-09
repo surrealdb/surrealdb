@@ -1,8 +1,7 @@
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
-use crate::expr::Regex;
-use crate::expr::value::Value;
 use crate::fnc::util::string;
+use crate::val::{Regex, Strand, Value};
 use anyhow::{Result, ensure};
 
 use super::args::{Any, Cast, Optional};
@@ -20,7 +19,7 @@ fn limit(name: &str, n: usize) -> Result<()> {
 }
 
 pub fn concat(Any(args): Any) -> Result<Value> {
-	let strings = args.into_iter().map(Value::as_string).collect::<Vec<_>>();
+	let strings = args.into_iter().map(Value::as_raw_string).collect::<Vec<_>>();
 	limit("string::concat", strings.iter().map(String::len).sum::<usize>())?;
 	Ok(strings.concat().into())
 }
@@ -34,7 +33,7 @@ pub fn ends_with((val, chr): (String, String)) -> Result<Value> {
 }
 
 pub fn join(Any(args): Any) -> Result<Value> {
-	let mut args = args.into_iter().map(Value::as_string);
+	let mut args = args.into_iter().map(Value::as_raw_string);
 	let chr = args.next().ok_or_else(|| Error::InvalidArguments {
 		name: String::from("string::join"),
 		message: String::from("Expected at least one argument"),
@@ -81,11 +80,12 @@ pub fn replace((val, search, replace): (String, Value, String)) -> Result<Value>
 				let increase = replace.len() - search.len();
 				limit(
 					"string::replace",
-					val.len()
-						.saturating_add(val.matches(&search.0).count().saturating_mul(increase)),
+					val.len().saturating_add(
+						val.matches(search.as_str()).count().saturating_mul(increase),
+					),
 				)?;
 			}
-			Ok(val.replace(&search.0, &replace).into())
+			Ok(val.replace(search.as_str(), &replace).into())
 		}
 		Value::Regex(search) => {
 			let mut new_val = String::with_capacity(val.len());
@@ -163,7 +163,12 @@ pub fn slug((string,): (String,)) -> Result<Value> {
 }
 
 pub fn split((val, chr): (String, String)) -> Result<Value> {
-	Ok(val.split(&chr).collect::<Vec<&str>>().into())
+	// TODO: Null byte validity
+	Ok(val
+		.split(&chr)
+		.map(|x| Value::from(Strand::new(x.to_owned()).unwrap()))
+		.collect::<Vec<_>>()
+		.into())
 }
 
 pub fn starts_with((val, chr): (String, String)) -> Result<Value> {
@@ -179,13 +184,17 @@ pub fn uppercase((string,): (String,)) -> Result<Value> {
 }
 
 pub fn words((string,): (String,)) -> Result<Value> {
-	Ok(string.split_whitespace().collect::<Vec<&str>>().into())
+	Ok(string
+		.split_whitespace()
+		.map(|v| Value::from(Strand::new(v.to_owned()).unwrap()))
+		.collect::<Vec<_>>()
+		.into())
 }
 
 pub mod distance {
 
 	use crate::err::Error;
-	use crate::expr::Value;
+	use crate::val::Value;
 	use anyhow::Result;
 
 	use strsim;
@@ -237,7 +246,7 @@ pub mod distance {
 }
 
 pub mod html {
-	use crate::expr::value::Value;
+	use crate::val::Value;
 	use anyhow::Result;
 
 	pub fn encode((arg,): (String,)) -> Result<Value> {
@@ -251,9 +260,9 @@ pub mod html {
 
 pub mod is {
 	use crate::err::Error;
-	use crate::expr::value::Value;
-	use crate::expr::{Datetime, Thing};
 	use crate::fnc::args::Optional;
+	use crate::syn;
+	use crate::val::{Datetime, Value};
 	use anyhow::{Result, bail};
 	use chrono::NaiveDateTime;
 	use regex::Regex;
@@ -360,10 +369,10 @@ pub mod is {
 	}
 
 	pub fn record((arg, Optional(tb)): (String, Optional<Value>)) -> Result<Value> {
-		let res = match Thing::try_from(arg) {
+		let res = match syn::thing(&arg) {
 			Ok(t) => match tb {
-				Some(Value::Strand(tb)) => t.tb == *tb,
-				Some(Value::Table(tb)) => t.tb == tb.0,
+				Some(Value::Strand(tb)) => t.table.as_str() == tb.as_str(),
+				Some(Value::Table(tb)) => t.table.as_str() == tb.as_str(),
 				Some(_) => {
 					bail!(Error::InvalidArguments {
 						name: "string::is::record()".into(),
@@ -382,12 +391,10 @@ pub mod is {
 }
 
 pub mod similarity {
-
-	use std::sync::LazyLock;
-
-	use crate::expr::Value;
+	use crate::val::Value;
 	use anyhow::Result;
 	use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
+	use std::sync::LazyLock;
 	static MATCHER: LazyLock<SkimMatcherV2> =
 		LazyLock::new(|| SkimMatcherV2::default().ignore_case());
 
@@ -423,7 +430,7 @@ pub mod similarity {
 pub mod semver {
 
 	use crate::err::Error;
-	use crate::expr::Value;
+	use crate::val::Value;
 	use anyhow::Result;
 	use semver::Version;
 
@@ -467,8 +474,8 @@ pub mod semver {
 	}
 
 	pub mod inc {
-		use crate::expr::Value;
 		use crate::fnc::string::semver::parse_version;
+		use crate::val::Value;
 		use anyhow::Result;
 
 		pub fn major((version,): (String,)) -> Result<Value> {
@@ -503,8 +510,8 @@ pub mod semver {
 	}
 
 	pub mod set {
-		use crate::expr::Value;
 		use crate::fnc::string::semver::parse_version;
+		use crate::val::Value;
 		use anyhow::Result;
 
 		pub fn major((version, value): (String, i64)) -> Result<Value> {
@@ -546,10 +553,8 @@ pub mod semver {
 #[cfg(test)]
 mod tests {
 	use super::{matches, replace, slice};
-	use crate::{
-		expr::Value,
-		fnc::args::{Cast, Optional},
-	};
+	use crate::fnc::args::{Cast, Optional};
+	use crate::val::Value;
 
 	#[test]
 	fn string_slice() {

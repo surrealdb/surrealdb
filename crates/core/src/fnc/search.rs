@@ -2,11 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Array, Value};
-use crate::expr::{Number, Object};
 use crate::fnc::get_execution_context;
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::highlighter::HighlightParams;
+use crate::val::{Array, Number, Object, Value};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use std::collections::hash_map::Entry;
@@ -22,7 +21,7 @@ pub async fn analyze(
 		let (ns, db) = opt.ns_db()?;
 		let az = ctx.tx().get_db_analyzer(ns, db, &az).await?;
 		let az = Analyzer::new(ctx.get_index_stores(), az)?;
-		az.analyze(stk, ctx, opt, val.0).await
+		az.analyze(stk, ctx, opt, val.into_string()).await
 	} else {
 		Ok(Value::None)
 	}

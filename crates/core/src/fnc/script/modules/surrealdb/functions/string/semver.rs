@@ -3,7 +3,6 @@ use crate::fnc::script::modules::impl_module_def;
 
 mod inc;
 mod set;
-#[non_exhaustive]
 pub struct Package;
 
 impl_module_def!(

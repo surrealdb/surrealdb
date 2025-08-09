@@ -1,4 +1,5 @@
-use crate::expr::{Duration, Ident, Kind, Literal, Number, Strand, Table};
+use crate::expr::{Ident, Kind, kind::KindLiteral};
+use crate::val::{Duration, Strand, Table};
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use rust_decimal::Decimal;
 use std::collections::BTreeMap;
@@ -118,7 +119,7 @@ impl ToFlatbuffers for Kind {
 			},
 			Self::Record(tables) => {
 				let table_offsets: Vec<_> =
-					tables.iter().map(|t| t.to_fb(builder)).collect::<anyhow::Result<Vec<_>>>()?;
+					tables.iter().map(|t| Table::from(t.clone()).to_fb(builder)).collect::<anyhow::Result<Vec<_>>>()?;
 				let tables = builder.create_vector(&table_offsets);
 				proto_fb::KindArgs {
 					kind_type: proto_fb::KindType::Record,
@@ -259,7 +260,7 @@ impl ToFlatbuffers for Kind {
 			}
 			Self::File(buckets) => {
 				let bucket_offsets: Vec<_> =
-					buckets.iter().map(|b| builder.create_string(&b.0)).collect();
+					buckets.iter().map(|b| builder.create_string(&b.as_str())).collect();
 				let buckets = builder.create_vector(&bucket_offsets);
 
 				proto_fb::KindArgs {
@@ -285,7 +286,7 @@ impl ToFlatbuffers for Kind {
 	}
 }
 
-impl ToFlatbuffers for Literal {
+impl ToFlatbuffers for KindLiteral {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::LiteralKind<'bldr>>;
 
 	fn to_fb<'bldr>(
@@ -319,36 +320,34 @@ impl ToFlatbuffers for Literal {
 						.as_union_value(),
 					),
 				}
-			}
-			Self::Number(number) => match number {
-				Number::Int(i) => proto_fb::LiteralKindArgs {
-					literal_type: proto_fb::LiteralType::Int64,
-					literal: Some(
-						proto_fb::Int64Value::create(
-							builder,
-							&proto_fb::Int64ValueArgs {
-								value: *i,
-							},
-						)
-						.as_union_value(),
-					),
-				},
-				Number::Float(f) => proto_fb::LiteralKindArgs {
-					literal_type: proto_fb::LiteralType::Float64,
-					literal: Some(
-						proto_fb::Float64Value::create(
-							builder,
-							&proto_fb::Float64ValueArgs {
-								value: *f,
-							},
-						)
-						.as_union_value(),
-					),
-				},
-				Number::Decimal(d) => proto_fb::LiteralKindArgs {
-					literal_type: proto_fb::LiteralType::Decimal,
-					literal: Some(d.to_fb(builder)?.as_union_value()),
-				},
+			},
+			Self::Integer(i) => proto_fb::LiteralKindArgs {
+				literal_type: proto_fb::LiteralType::Int64,
+				literal: Some(
+					proto_fb::Int64Value::create(
+						builder,
+						&proto_fb::Int64ValueArgs {
+							value: *i,
+						},
+					)
+					.as_union_value(),
+				),
+			},
+			Self::Float(f) => proto_fb::LiteralKindArgs {
+				literal_type: proto_fb::LiteralType::Float64,
+				literal: Some(
+					proto_fb::Float64Value::create(
+						builder,
+						&proto_fb::Float64ValueArgs {
+							value: *f,
+						},
+					)
+					.as_union_value(),
+				),
+			},
+			Self::Decimal(d) => proto_fb::LiteralKindArgs {
+				literal_type: proto_fb::LiteralType::Decimal,
+				literal: Some(d.to_fb(builder)?.as_union_value()),
 			},
 			Self::Duration(duration) => proto_fb::LiteralKindArgs {
 				literal_type: proto_fb::LiteralType::Duration,
@@ -368,27 +367,6 @@ impl ToFlatbuffers for Literal {
 				literal_type: proto_fb::LiteralType::Object,
 				literal: Some(object.to_fb(builder)?.as_union_value()),
 			},
-			Self::DiscriminatedObject(discriminant_key, variants) => {
-				let discriminant_key = builder.create_string(discriminant_key);
-				let variant_offsets: Vec<_> = variants
-					.iter()
-					.map(|map| map.to_fb(builder))
-					.collect::<anyhow::Result<Vec<_>>>()?;
-
-				let variants_vector = builder.create_vector(&variant_offsets);
-				let literal_discriminated_object = proto_fb::LiteralDiscriminatedObject::create(
-					builder,
-					&proto_fb::LiteralDiscriminatedObjectArgs {
-						discriminant_key: Some(discriminant_key),
-						variants: Some(variants_vector),
-					},
-				);
-
-				proto_fb::LiteralKindArgs {
-					literal_type: proto_fb::LiteralType::DiscriminatedObject,
-					literal: Some(literal_discriminated_object.as_union_value()),
-				}
-			}
 		};
 
 		Ok(proto_fb::LiteralKind::create(builder, &args))
@@ -428,7 +406,7 @@ impl FromFlatbuffers for Kind {
 							let Some(name) = t.name() else {
 								return Err(anyhow::anyhow!("Missing table name"));
 							};
-							Ok(Table::from(name))
+							Ok(Ident::new(name.to_string()).ok_or_else(|| anyhow::anyhow!("Invalid table name"))?)
 						})
 						.collect::<anyhow::Result<Vec<_>>>()?
 				} else {
@@ -499,7 +477,13 @@ impl FromFlatbuffers for Kind {
 					return Err(anyhow::anyhow!("Missing file kind"));
 				};
 				let buckets = if let Some(buckets) = file.buckets() {
-					buckets.iter().map(|b| Ident::from(b.to_string())).collect()
+					buckets
+						.iter()
+						.map(|b| -> anyhow::Result<_> {
+							Ident::new(b.to_string())
+								.ok_or_else(|| anyhow::anyhow!("Invalid bucket name"))
+						})
+						.collect::<anyhow::Result<Vec<_>>>()?
 				} else {
 					Vec::new()
 				};
@@ -509,7 +493,7 @@ impl FromFlatbuffers for Kind {
 				let Some(literal) = input.kind_as_literal() else {
 					return Err(anyhow::anyhow!("Missing literal kind"));
 				};
-				Ok(Kind::Literal(Literal::from_fb(literal)?))
+				Ok(Kind::Literal(KindLiteral::from_fb(literal)?))
 			}
 			KindType::Range => Ok(Kind::Range),
 			KindType::Option => {
@@ -527,7 +511,7 @@ impl FromFlatbuffers for Kind {
 	}
 }
 
-impl FromFlatbuffers for Literal {
+impl FromFlatbuffers for KindLiteral {
 	type Input<'a> = proto_fb::LiteralKind<'a>;
 
 	#[inline]
@@ -541,7 +525,7 @@ impl FromFlatbuffers for Literal {
 				let Some(bool_val) = input.literal_as_bool() else {
 					return Err(anyhow::anyhow!("Missing bool value"));
 				};
-				Ok(Literal::Bool(bool_val.value()))
+				Ok(KindLiteral::Bool(bool_val.value()))
 			}
 			LiteralType::String => {
 				let Some(string_val) = input.literal_as_string() else {
@@ -550,31 +534,31 @@ impl FromFlatbuffers for Literal {
 				let Some(value) = string_val.value() else {
 					return Err(anyhow::anyhow!("Missing string content"));
 				};
-				Ok(Literal::String(Strand::from(value)))
+				Ok(KindLiteral::String(Strand::from(value)))
 			}
 			LiteralType::Int64 => {
 				let Some(int_val) = input.literal_as_int_64() else {
 					return Err(anyhow::anyhow!("Missing int64 value"));
 				};
-				Ok(Literal::Number(Number::Int(int_val.value())))
+				Ok(KindLiteral::Integer(int_val.value()))
 			}
 			LiteralType::Float64 => {
 				let Some(float_val) = input.literal_as_float_64() else {
 					return Err(anyhow::anyhow!("Missing float64 value"));
 				};
-				Ok(Literal::Number(Number::Float(float_val.value())))
+				Ok(KindLiteral::Float(float_val.value()))
 			}
 			LiteralType::Decimal => {
 				let Some(decimal) = input.literal_as_decimal() else {
 					return Err(anyhow::anyhow!("Missing decimal value"));
 				};
-				Ok(Literal::Number(Number::Decimal(Decimal::from_fb(decimal)?)))
+				Ok(KindLiteral::Decimal(Decimal::from_fb(decimal)?))
 			}
 			LiteralType::Duration => {
 				let Some(duration_val) = input.literal_as_duration() else {
 					return Err(anyhow::anyhow!("Missing duration value"));
 				};
-				Ok(Literal::Duration(Duration::from_fb(duration_val)?))
+				Ok(KindLiteral::Duration(Duration::from_fb(duration_val)?))
 			}
 			LiteralType::Array => {
 				let Some(array_val) = input.literal_as_array() else {
@@ -585,31 +569,14 @@ impl FromFlatbuffers for Literal {
 				} else {
 					Vec::new()
 				};
-				Ok(Literal::Array(items))
+				Ok(KindLiteral::Array(items))
 			}
 			LiteralType::Object => {
 				let Some(object_val) = input.literal_as_object() else {
 					return Err(anyhow::anyhow!("Missing object value"));
 				};
 				let map = BTreeMap::<String, Kind>::from_fb(object_val)?;
-				Ok(Literal::Object(map))
-			}
-			LiteralType::DiscriminatedObject => {
-				let Some(disc_obj) = input.literal_as_discriminated_object() else {
-					return Err(anyhow::anyhow!("Missing discriminated object"));
-				};
-				let Some(discriminant_key) = disc_obj.discriminant_key() else {
-					return Err(anyhow::anyhow!("Missing discriminant key"));
-				};
-				let variants = if let Some(variants) = disc_obj.variants() {
-					variants
-						.iter()
-						.map(BTreeMap::<String, Kind>::from_fb)
-						.collect::<anyhow::Result<Vec<_>>>()?
-				} else {
-					Vec::new()
-				};
-				Ok(Literal::DiscriminatedObject(discriminant_key.to_string(), variants))
+				Ok(KindLiteral::Object(map))
 			}
 			_ => Err(anyhow::anyhow!("Unknown literal type")),
 		}

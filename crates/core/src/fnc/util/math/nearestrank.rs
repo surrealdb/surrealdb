@@ -1,4 +1,4 @@
-use crate::expr::number::{Number, Sorted};
+use crate::val::{Number, number::Sorted};
 
 pub trait Nearestrank {
 	/// Pull the closest extant record from the dataset at the %-th percentile

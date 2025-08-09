@@ -1,4 +1,4 @@
-use crate::expr::{Object, Uuid, Value};
+use crate::val::{Object, Uuid, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};
@@ -6,7 +6,6 @@ use std::fmt::{self, Debug, Display};
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
-#[non_exhaustive]
 pub enum Action {
 	Create,
 	Update,
@@ -28,7 +27,6 @@ impl Display for Action {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[non_exhaustive]
 pub struct Notification {
 	/// The id of the LIVE query to which this notification belongs
 	pub id: Uuid,

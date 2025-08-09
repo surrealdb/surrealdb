@@ -1,4 +1,5 @@
-use crate::expr::{Array, Kind, Object, Value};
+use crate::expr::Kind;
+use crate::val::{Array, Object, Value};
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use anyhow::Context;
 use std::collections::BTreeMap;

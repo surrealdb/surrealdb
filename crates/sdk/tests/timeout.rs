@@ -1,5 +1,4 @@
 mod helpers;
-mod parse;
 use std::time::{Duration, Instant};
 
 use helpers::{Test, new_ds};

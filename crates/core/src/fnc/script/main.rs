@@ -1,26 +1,18 @@
 use std::cell::RefCell;
-use std::time::Duration;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use super::classes;
-use super::fetch;
-use super::globals;
-use super::modules;
-use super::modules::loader;
-use super::modules::resolver;
 use super::modules::surrealdb::query::QueryContext;
-use crate::cnf::SCRIPTING_MAX_MEMORY_LIMIT;
-use crate::cnf::SCRIPTING_MAX_STACK_SIZE;
+use super::modules::{loader, resolver};
+use super::{classes, fetch, globals, modules};
+use crate::cnf::{SCRIPTING_MAX_MEMORY_LIMIT, SCRIPTING_MAX_STACK_SIZE};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::value::Value;
+use crate::val::Value;
 use anyhow::Result;
-use js::CatchResultExt;
-use js::async_with;
 use js::prelude::*;
-use js::{Ctx, Function, Module, Promise};
+use js::{CatchResultExt, Ctx, Function, Module, Promise, async_with};
 
 /// Insert query data into the context,
 ///

@@ -1,6 +1,3 @@
-use crate::api::ExtraFeatures;
-use crate::api::Surreal;
-use crate::api::conn;
 use crate::api::conn::Router;
 #[allow(unused_imports, reason = "Used by the DB engines.")]
 use crate::api::engine;
@@ -8,6 +5,7 @@ use crate::api::engine::any::Any;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::{Endpoint, EndpointKind};
+use crate::api::{ExtraFeatures, Surreal, conn};
 use crate::error::Db as DbError;
 use crate::opt::WaitFor;
 use anyhow::{Result, bail};

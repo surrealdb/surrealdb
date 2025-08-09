@@ -16,7 +16,6 @@ pub trait Target<Item: ?Sized = Self> {
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-#[non_exhaustive]
 pub struct FuncTarget(pub String, pub Option<String>);
 
 impl fmt::Display for FuncTarget {
@@ -112,7 +111,6 @@ impl std::str::FromStr for FuncTarget {
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-#[non_exhaustive]
 pub enum ExperimentalTarget {
 	RecordReferences,
 	GraphQL,
@@ -183,7 +181,6 @@ impl std::str::FromStr for ExperimentalTarget {
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-#[non_exhaustive]
 pub enum NetTarget {
 	Host(url::Host<String>, Option<u16>),
 	IPNet(IpNet),
@@ -365,7 +362,6 @@ impl std::str::FromStr for MethodTarget {
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-#[non_exhaustive]
 pub enum RouteTarget {
 	Health,
 	Export,
@@ -443,7 +439,6 @@ impl std::str::FromStr for RouteTarget {
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-#[non_exhaustive]
 pub enum ArbitraryQueryTarget {
 	Guest,
 	Record,
@@ -524,7 +519,6 @@ impl std::str::FromStr for ArbitraryQueryTarget {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[non_exhaustive]
 pub enum Targets<T: Hash + Eq + PartialEq> {
 	None,
 	Some(HashSet<T>),
@@ -568,7 +562,6 @@ impl<T: Target + Hash + Eq + PartialEq + fmt::Display> fmt::Display for Targets<
 }
 
 #[derive(Debug, Clone)]
-#[non_exhaustive]
 pub struct Capabilities {
 	scripting: bool,
 	guest_access: bool,

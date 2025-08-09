@@ -7,7 +7,6 @@ use std::fmt::{Debug, Display};
 use std::mem;
 use std::sync::Arc;
 
-#[non_exhaustive]
 pub struct TreeWrite<N>
 where
 	N: TreeNode + Debug + Clone,
@@ -144,7 +143,6 @@ where
 	}
 }
 
-#[non_exhaustive]
 pub struct TreeRead<N>
 where
 	N: TreeNode + Debug + Clone,

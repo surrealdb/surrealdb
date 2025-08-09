@@ -1,11 +1,11 @@
-use js::{Ctx, prelude::Rest};
+use js::Ctx;
+use js::prelude::Rest;
 
 use super::run;
-use crate::expr::value::Value;
+use crate::val::Value;
 
 mod uuid;
 
-#[non_exhaustive]
 pub struct Package;
 
 impl js::module::ModuleDef for Package {

@@ -1,7 +1,6 @@
 use axum_extra::headers;
 use axum_extra::headers::Header;
-use http::HeaderName;
-use http::HeaderValue;
+use http::{HeaderName, HeaderValue};
 use surrealdb::headers::AUTH_DB;
 
 /// Typed header implementation for the `surreal-auth-db` header.

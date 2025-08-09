@@ -1,8 +1,8 @@
-use crate::expr::{
-	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Strand, Thing, Uuid, Value,
+use crate::val::{
+	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Strand, RecordId, Uuid, Value,
 };
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use surrealdb_protocol::fb::v1 as proto_fb;
@@ -28,15 +28,15 @@ impl ToFlatbuffers for Value {
 				value: Some(b.to_fb(builder)?.as_union_value()),
 			},
 			Self::Number(n) => match n {
-				crate::expr::Number::Int(i) => proto_fb::ValueArgs {
+				crate::val::Number::Int(i) => proto_fb::ValueArgs {
 					value_type: proto_fb::ValueType::Int64,
 					value: Some(i.to_fb(builder)?.as_union_value()),
 				},
-				crate::expr::Number::Float(f) => proto_fb::ValueArgs {
+				crate::val::Number::Float(f) => proto_fb::ValueArgs {
 					value_type: proto_fb::ValueType::Float64,
 					value: Some(f.to_fb(builder)?.as_union_value()),
 				},
-				crate::expr::Number::Decimal(d) => proto_fb::ValueArgs {
+				crate::val::Number::Decimal(d) => proto_fb::ValueArgs {
 					value_type: proto_fb::ValueType::Decimal,
 					value: Some(d.to_fb(builder)?.as_union_value()),
 				},
@@ -117,7 +117,7 @@ impl FromFlatbuffers for Value {
 					.value()
 					.expect("String value is guaranteed to be present")
 					.to_string();
-				Ok(Value::Strand(Strand(value)))
+				Ok(Value::Strand(Strand::new(value).context("Strand contained null byte")?))
 			}
 			proto_fb::ValueType::Bytes => {
 				let bytes_value = input.value_as_bytes().expect("Guaranteed to be Bytes");
@@ -126,7 +126,7 @@ impl FromFlatbuffers for Value {
 			proto_fb::ValueType::RecordId => {
 				let record_id_value =
 					input.value_as_record_id().expect("Guaranteed to be a RecordId");
-				let thing = Thing::from_fb(record_id_value)?;
+				let thing = RecordId::from_fb(record_id_value)?;
 				Ok(Value::Thing(thing))
 			}
 			proto_fb::ValueType::Duration => {

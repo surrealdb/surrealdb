@@ -1,16 +1,10 @@
 use crate::sql::Ident;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct RemoveFunctionStatement {
 	pub name: Ident,
-	#[revision(start = 2)]
 	pub if_exists: bool,
 }
 
@@ -21,7 +15,7 @@ impl Display for RemoveFunctionStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " fn::{}", self.name.0)?;
+		write!(f, " fn::{}", &*self.name)?;
 		Ok(())
 	}
 }
