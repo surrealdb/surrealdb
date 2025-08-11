@@ -8,7 +8,7 @@ value = "'OK'"
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { from: { direction: 'forward', inclusive: false, value: 0 }, index: 'index', to: { inclusive: false, value: 2 } }, table: 'test' }, operation: 'Iterate Index' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
+value = "[{ detail: { plan: { direction: 'forward', from: { inclusive: false, value: 0 }, index: 'index', to: { inclusive: false, value: 2 } }, table: 'test' }, operation: 'Iterate Index' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
 
 [[test.results]]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }]"
