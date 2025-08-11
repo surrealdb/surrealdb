@@ -21,9 +21,13 @@ BENCH_FEATURES = { value = "protocol-ws,kv-mem,kv-rocksdb,kv-surrealkv", conditi
 SURREAL_SCRIPTING_MAX_TIME_LIMIT = { value = "500", condition = { env_not_set = [
     "SURREAL_SCRIPTING_MAX_TIME_LIMIT",
 ] } }
+NIGHTLY_RUST_VERSION = { script = ["cat ${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/rust-toolchain.nightly"], condition = { env_not_set = [
+    "NIGHTLY_RUST_VERSION",
+] } }
 
 [tasks.ci-format]
 category = "CI - CHECK"
+toolchain = "${NIGHTLY_RUST_VERSION}"
 command = "cargo"
 args = ["fmt", "--all", "--check"]
 
