@@ -16,6 +16,10 @@ impl ToFlatbuffers for Value {
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> anyhow::Result<Self::Output<'bldr>> {
 		let args = match self {
+			Self::None => proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::NONE,
+				value: None,
+			},
 			Self::Null => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::Null,
 				value: Some(
@@ -97,6 +101,7 @@ impl FromFlatbuffers for Value {
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		match input.value_type() {
+			proto_fb::ValueType::NONE => Ok(Value::None),
 			proto_fb::ValueType::Null => Ok(Value::Null),
 			proto_fb::ValueType::Bool => {
 				Ok(Value::Bool(input.value_as_bool().expect("Guaranteed to be a Bool").value()))
@@ -172,5 +177,63 @@ impl FromFlatbuffers for Value {
 				input.value_type()
 			)),
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::val::*;
+	use chrono::{DateTime, Utc};
+	use rstest::rstest;
+	use rust_decimal::Decimal;
+	use std::collections::BTreeMap;
+	use surrealdb_protocol::fb::v1 as proto_fb;
+
+	#[rstest]
+	#[case::none(Value::None)]
+	#[case::null(Value::Null)]
+	#[case::bool(Value::Bool(true))]
+	#[case::bool(Value::Bool(false))]
+	#[case::int(Value::Number(Number::Int(42)))]
+	#[case::int(Value::Number(Number::Int(i64::MIN)))]
+	#[case::int(Value::Number(Number::Int(i64::MAX)))]
+	#[case::float(Value::Number(Number::Float(1.23)))]
+	#[case::float(Value::Number(Number::Float(f64::MIN)))]
+	#[case::float(Value::Number(Number::Float(f64::MAX)))]
+	#[case::float(Value::Number(Number::Float(f64::NAN)))]
+	#[case::float(Value::Number(Number::Float(f64::INFINITY)))]
+	#[case::float(Value::Number(Number::Float(f64::NEG_INFINITY)))]
+	#[case::decimal(Value::Number(Number::Decimal(Decimal::new(123, 2))))]
+	#[case::duration(Value::Duration(Duration::new(1, 0)))]
+	#[case::datetime(Value::Datetime(Datetime(DateTime::<Utc>::from_timestamp(1_000_000_000, 0).unwrap())))]
+	#[case::uuid(Value::Uuid(Uuid::new_v4()))]
+	#[case::string(Value::Strand(Strand::new("Hello, World!".to_string()).unwrap()))]
+	#[case::bytes(Value::Bytes(Bytes(vec![1, 2, 3, 4, 5])))]
+	#[case::thing(Value::Thing(RecordId{ table: "test_table".to_string(), key: RecordIdKey::Number(42) }))] // Example Thing
+	#[case::object(Value::Object(Object(BTreeMap::from([("key".to_string(), Value::Strand(Strand::new("value".to_owned()).unwrap()))]))))]
+	#[case::array(Value::Array(Array(vec![Value::Number(Number::Int(1)), Value::Number(Number::Float(2.0))])))]
+	#[case::geometry::point(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))))]
+	#[case::geometry::line(Value::Geometry(Geometry::Line(geo::LineString(vec![geo::Coord { x: 1.0, y: 2.0 }, geo::Coord { x: 3.0, y: 4.0 }]))))]
+	#[case::geometry::polygon(Value::Geometry(Geometry::Polygon(geo::Polygon::new(
+		geo::LineString(vec![geo::Coord { x: 0.0, y: 0.0 }, geo::Coord { x: 1.0, y: 1.0 }, geo::Coord { x: 0.0, y: 1.0 }]),
+		vec![geo::LineString(vec![geo::Coord { x: 0.5, y: 0.5 }, geo::Coord { x: 0.75, y: 0.75 }])]
+	))))]
+	#[case::geometry::multipoint(Value::Geometry(Geometry::MultiPoint(geo::MultiPoint(vec![geo::Point::new(1.0, 2.0), geo::Point::new(3.0, 4.0)]))))]
+	#[case::geometry::multiline(Value::Geometry(Geometry::MultiLine(geo::MultiLineString(vec![geo::LineString(vec![geo::Coord { x: 1.0, y: 2.0 }, geo::Coord { x: 3.0, y: 4.0 }])] ))))]
+	#[case::geometry::multipolygon(Value::Geometry(Geometry::MultiPolygon(geo::MultiPolygon(vec![geo::Polygon::new(
+		geo::LineString(vec![geo::Coord { x: 0.0, y: 0.0 }, geo::Coord { x: 1.0, y: 1.0 }, geo::Coord { x: 0.0, y: 1.0 }]),
+		vec![geo::LineString(vec![geo::Coord { x: 0.5, y: 0.5 }, geo::Coord { x: 0.75, y: 0.75 }])]
+	)]))))]
+	#[case::file(Value::File(File { bucket: "test_bucket".to_string(), key: "test_key".to_string() }))]
+	fn test_flatbuffers_roundtrip_value(#[case] input: Value) {
+		let mut builder = flatbuffers::FlatBufferBuilder::new();
+		let input_fb = input.to_fb(&mut builder).expect("Failed to convert to FlatBuffer");
+		builder.finish_minimal(input_fb);
+		let buf = builder.finished_data();
+		let value_fb =
+			flatbuffers::root::<proto_fb::Value>(buf).expect("Failed to read FlatBuffer");
+		let value = Value::from_fb(value_fb).expect("Failed to convert from FlatBuffer");
+		assert_eq!(input, value, "Roundtrip conversion failed for input: {:?}", input);
 	}
 }

@@ -155,10 +155,18 @@ impl ToFlatbuffers for Kind {
 				}
 			}
 			Self::Option(kind) => {
-				let kind = kind.to_fb(builder)?.as_union_value();
+				let inner = kind.to_fb(builder)?;
 				proto_fb::KindArgs {
 					kind_type: proto_fb::KindType::Option,
-					kind: Some(kind),
+					kind: Some(
+						proto_fb::OptionKind::create(
+							builder,
+							&proto_fb::OptionKindArgs {
+								inner: Some(inner),
+							},
+						)
+						.as_union_value(),
+					),
 				}
 			}
 			Self::Either(kinds) => {
@@ -360,9 +368,16 @@ impl ToFlatbuffers for KindLiteral {
 					.iter()
 					.map(|item| item.to_fb(builder))
 					.collect::<anyhow::Result<Vec<_>>>()?;
+				let kinds_vector = builder.create_vector(&array_items);
+				let literal_array = proto_fb::LiteralArray::create(
+					builder,
+					&proto_fb::LiteralArrayArgs {
+						kinds: Some(kinds_vector),
+					},
+				);
 				proto_fb::LiteralKindArgs {
 					literal_type: proto_fb::LiteralType::Array,
-					literal: Some(builder.create_vector(&array_items).as_union_value()),
+					literal: Some(literal_array.as_union_value()),
 				}
 			}
 			Self::Object(object) => proto_fb::LiteralKindArgs {
@@ -397,6 +412,8 @@ impl FromFlatbuffers for Kind {
 			KindType::Datetime => Ok(Kind::Datetime),
 			KindType::Uuid => Ok(Kind::Uuid),
 			KindType::Bytes => Ok(Kind::Bytes),
+			KindType::Point => Ok(Kind::Point),
+			KindType::Object => Ok(Kind::Object),
 			KindType::Record => {
 				let Some(record) = input.kind_as_record() else {
 					return Err(anyhow::anyhow!("Missing record kind"));
@@ -583,5 +600,74 @@ impl FromFlatbuffers for KindLiteral {
 			}
 			_ => Err(anyhow::anyhow!("Unknown literal type")),
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::expr::Ident;
+	use crate::expr::Kind;
+	use crate::expr::KindLiteral;
+	use crate::val::Duration;
+	use crate::val::Strand;
+	use rstest::rstest;
+	use rust_decimal::Decimal;
+	use std::collections::BTreeMap;
+	use surrealdb_protocol::fb::v1 as proto_fb;
+
+	#[rstest]
+	#[case::any(Kind::Any)]
+	#[case::null(Kind::Null)]
+	#[case::bool(Kind::Bool)]
+	#[case::bytes(Kind::Bytes)]
+	#[case::datetime(Kind::Datetime)]
+	#[case::decimal(Kind::Decimal)]
+	#[case::duration(Kind::Duration)]
+	#[case::float(Kind::Float)]
+	#[case::int(Kind::Int)]
+	#[case::number(Kind::Number)]
+	#[case::object(Kind::Object)]
+	#[case::point(Kind::Point)]
+	#[case::string(Kind::String)]
+	#[case::uuid(Kind::Uuid)]
+	#[case::regex(Kind::Regex)]
+	#[case::range(Kind::Range)]
+	#[case::record(Kind::Record(vec![Ident::new("test_table".to_string()).unwrap()]))]
+	#[case::geometry(Kind::Geometry(vec!["point".to_string(), "polygon".to_string()]))]
+	#[case::option(Kind::Option(Box::new(Kind::String)))]
+	#[case::either(Kind::Either(vec![Kind::String, Kind::Number]))]
+	#[case::set(Kind::Set(Box::new(Kind::String), Some(10)))]
+	#[case::array(Kind::Array(Box::new(Kind::String), Some(5)))]
+	#[case::function(Kind::Function(Some(vec![Kind::String, Kind::Number]), Some(Box::new(Kind::Bool))))]
+	#[case::file(Kind::File(vec![Ident::new("bucket1".to_string()).unwrap(), Ident::new("bucket2".to_string()).unwrap()]))]
+	// KindLiteral variants
+	#[case::literal_bool(Kind::Literal(KindLiteral::Bool(true)))]
+	#[case::literal_bool_false(Kind::Literal(KindLiteral::Bool(false)))]
+	#[case::literal_string(Kind::Literal(KindLiteral::String(Strand::new("test_string".to_string()).unwrap())))]
+	#[case::literal_integer(Kind::Literal(KindLiteral::Integer(42)))]
+	#[case::literal_integer_min(Kind::Literal(KindLiteral::Integer(i64::MIN)))]
+	#[case::literal_integer_max(Kind::Literal(KindLiteral::Integer(i64::MAX)))]
+	#[case::literal_float(Kind::Literal(KindLiteral::Float(3.14159)))]
+	#[case::literal_float_nan(Kind::Literal(KindLiteral::Float(f64::NAN)))]
+	#[case::literal_float_infinity(Kind::Literal(KindLiteral::Float(f64::INFINITY)))]
+	#[case::literal_float_neg_infinity(Kind::Literal(KindLiteral::Float(f64::NEG_INFINITY)))]
+	#[case::literal_decimal(Kind::Literal(KindLiteral::Decimal(Decimal::new(123, 2))))]
+	#[case::literal_duration(Kind::Literal(KindLiteral::Duration(Duration::new(1, 0))))]
+	#[case::literal_array(Kind::Literal(KindLiteral::Array(vec![Kind::String, Kind::Number])))]
+	#[case::literal_array_empty(Kind::Literal(KindLiteral::Array(vec![])))]
+	#[case::literal_object(Kind::Literal(KindLiteral::Object(BTreeMap::from([
+		("key1".to_string(), Kind::String),
+		("key2".to_string(), Kind::Number)
+	]))))]
+	#[case::literal_object_empty(Kind::Literal(KindLiteral::Object(BTreeMap::new())))]
+	fn test_flatbuffers_roundtrip_kind(#[case] input: Kind) {
+		let mut builder = flatbuffers::FlatBufferBuilder::new();
+		let input_fb = input.to_fb(&mut builder).expect("Failed to convert to FlatBuffer");
+		builder.finish_minimal(input_fb);
+		let buf = builder.finished_data();
+		let kind_fb = flatbuffers::root::<proto_fb::Kind>(buf).expect("Failed to read FlatBuffer");
+		let kind = Kind::from_fb(kind_fb).expect("Failed to convert from FlatBuffer");
+		assert_eq!(input, kind, "Roundtrip conversion failed for input: {:?}", input);
 	}
 }
