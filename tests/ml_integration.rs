@@ -10,7 +10,7 @@ mod ml_integration {
 	use http::{StatusCode, header};
 	use reqwest::Body;
 	use serde::{Deserialize, Serialize};
-	use surrealdb::ml::storage::stream_adapter::StreamAdapter;
+	use surrealdb_core::ml::storage::stream_adapter::StreamAdapter;
 	use test_log::test;
 	use ulid::Ulid;
 

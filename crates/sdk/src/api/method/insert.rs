@@ -4,7 +4,6 @@ use std::marker::PhantomData;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use surrealdb_core::val;
 use uuid::Uuid;
 
 use super::insert_relation::InsertRelation;
@@ -15,6 +14,7 @@ use crate::api::err::Error;
 use crate::api::method::{BoxFuture, Content};
 use crate::api::opt::Resource;
 use crate::api::{self, Connection, Result};
+use crate::core::val;
 use crate::method::OnceLockExt;
 use crate::{Surreal, Value};
 

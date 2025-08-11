@@ -30,6 +30,8 @@ mod telemetry;
 use std::future::Future;
 use std::process::ExitCode;
 
+use surrealdb_core as core;
+
 fn main() -> ExitCode {
 	// Initiate the command line
 	with_enough_stack(cli::init())
@@ -46,7 +48,7 @@ fn with_enough_stack<T>(fut: impl Future<Output = T> + Send) -> T {
 		.thread_stack_size(*cnf::RUNTIME_STACK_SIZE)
 		.thread_name("surrealdb-worker");
 	#[cfg(feature = "allocation-tracking")]
-	b.on_thread_stop(|| surrealdb_core::mem::ALLOC.stop_tracking());
+	b.on_thread_stop(|| crate::core::mem::ALLOC.stop_tracking());
 	// Build the runtime
 	b.build().unwrap().block_on(fut)
 }

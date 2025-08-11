@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::mem;
 
-use surrealdb_core::dbs::capabilities::{
+use crate::core::dbs::capabilities::{
 	Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, ParseFuncTargetError,
 	ParseNetTargetError, Targets,
 };

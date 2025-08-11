@@ -1,9 +1,9 @@
 use async_channel::Receiver;
-use surrealdb_core::val;
 
 use super::types::User;
 use crate::api::conn::{Command, DbResponse, Route};
 use crate::api::{self, Response as QueryResponse};
+use crate::core::val;
 use crate::opt::Resource;
 
 pub(super) fn mock(route_rx: Receiver<Route>) {

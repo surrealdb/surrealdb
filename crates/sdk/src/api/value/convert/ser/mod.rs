@@ -7,8 +7,8 @@ use anyhow::Result;
 use castaway::match_type;
 use serde::ser::Serialize;
 use serde_content::{Number, Serializer, Unexpected, Value as Content};
-use surrealdb_core::val;
 
+use crate::core::val;
 use crate::error::Api;
 
 //type Content = serde_content::Value<'static>;
@@ -117,10 +117,10 @@ mod tests {
 	use std::ops::Bound;
 
 	use ::serde::Serialize;
-	use surrealdb_core::val::Regex;
-	use surrealdb_core::{map, syn};
 
 	use super::*;
+	use crate::core::val::Regex;
+	use crate::core::{map, syn};
 
 	#[test]
 	fn value_none() {

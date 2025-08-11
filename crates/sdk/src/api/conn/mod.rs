@@ -3,13 +3,13 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use async_channel::{Receiver, Sender};
 use serde::de::DeserializeOwned;
-use surrealdb_core::val::Value as CoreValue;
 
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::method::query::Response;
 use crate::api::opt::Endpoint;
 use crate::api::{ExtraFeatures, Result, Surreal};
+use crate::core::val::Value as CoreValue;
 use crate::{Value, api, value};
 
 mod cmd;

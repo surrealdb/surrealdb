@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use criterion::Bencher;
 use criterion::measurement::WallTime;
-use surrealdb::dbs::Session;
-use surrealdb::kvs::Datastore;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::kvs::Datastore;
 
 mod create;
 pub(super) use create::*;

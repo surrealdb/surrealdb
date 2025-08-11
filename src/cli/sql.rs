@@ -6,19 +6,19 @@ use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
 use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
-use surrealdb::dbs::Capabilities as CoreCapabilities;
 use surrealdb::engine::any::{self, connect};
 use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::Config;
 use surrealdb::{Notification, Response, Value};
-use surrealdb_core::sql::{Expr, Param, TopLevelExpr};
-use surrealdb_core::val;
 
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
 use crate::cli::abstraction::{
 	AuthArguments, DatabaseConnectionArguments, LevelSelectionArguments,
 };
 use crate::cnf::PKG_VERSION;
+use crate::core::dbs::Capabilities as CoreCapabilities;
+use crate::core::sql::{Expr, Param, TopLevelExpr};
+use crate::core::val;
 use crate::dbs::DbsCapabilities;
 
 #[derive(Args, Debug)]
@@ -195,7 +195,7 @@ pub async fn init(
 			continue;
 		}
 		// Complete the request
-		match surrealdb_core::syn::parse_with_capabilities(&line, &capabilities) {
+		match crate::core::syn::parse_with_capabilities(&line, &capabilities) {
 			Ok(mut query) => {
 				let mut namespace = None;
 				let mut database = None;
@@ -448,7 +448,7 @@ impl Validator for InputValidator<'_> {
 		} else if input.is_empty() {
 			Valid(None) // Ignore empty lines
 		} else {
-			match surrealdb::syn::parse_with_capabilities(input, self.capabilities) {
+			match crate::core::syn::parse_with_capabilities(input, self.capabilities) {
 				Err(e) => Invalid(Some(format!(" --< {e}"))),
 				_ => Valid(None),
 			}

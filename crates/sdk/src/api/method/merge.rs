@@ -55,7 +55,7 @@ macro_rules! into_future {
 			let content = crate::api::value::to_core_value(content);
 			Box::pin(async move {
 				let content = match content? {
-					surrealdb_core::val::Value::None | surrealdb_core::val::Value::Null => None,
+					crate::core::val::Value::None | surrealdb_core::val::Value::Null => None,
 					data => {
 						validate_data(
 							&data,

@@ -5,17 +5,17 @@ use anyhow::bail;
 use futures::future::Either;
 use futures::stream::select_all;
 use serde::de::DeserializeOwned;
-use surrealdb_core::expr::{
-	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, Expr, IfelseStatement,
-	InfoStatement, InsertStatement, KillStatement, LiveStatement, OptionStatement, OutputStatement,
-	RelateStatement, RemoveStatement, SelectStatement, TopLevelExpr, UpdateStatement, UseStatement,
-};
-use surrealdb_core::sql::Ast;
-use surrealdb_core::val;
 
 use super::Raw;
 use crate::api::err::Error;
 use crate::api::{OnceLockExt, Response as QueryResponse, Result};
+use crate::core::expr::{
+	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, Expr, IfelseStatement,
+	InfoStatement, InsertStatement, KillStatement, LiveStatement, OptionStatement, OutputStatement,
+	RelateStatement, RemoveStatement, SelectStatement, TopLevelExpr, UpdateStatement, UseStatement,
+};
+use crate::core::sql::Ast;
+use crate::core::val;
 use crate::method::query::ValidQuery;
 use crate::method::{self, Stats, Stream};
 use crate::value::Notification;
@@ -273,7 +273,7 @@ impl into_query::Sealed for &str {
 	fn into_query<C: Connection>(self, conn: &Surreal<C>) -> Query {
 		let query = conn.inner.router.extract().and_then(|router| {
 			let capabilities = &router.config.capabilities;
-			surrealdb_core::syn::parse_with_capabilities(self, capabilities)
+			crate::core::syn::parse_with_capabilities(self, capabilities)
 		});
 
 		Query(query.map(|x| ValidQuery::Normal {

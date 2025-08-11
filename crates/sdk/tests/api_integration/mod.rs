@@ -231,7 +231,8 @@ mod mem {
 	use surrealdb::opt::auth::Root;
 	use surrealdb::opt::capabilities::{Capabilities, ExperimentalFeature};
 	use surrealdb::opt::{Config, Resource};
-	use surrealdb::{RecordIdKey, Surreal, iam};
+	use surrealdb::{RecordIdKey, Surreal};
+	use surrealdb_core::iam;
 	use tokio::sync::{Semaphore, SemaphorePermit};
 
 	use super::{ROOT_PASS, ROOT_USER};

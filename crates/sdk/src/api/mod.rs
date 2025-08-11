@@ -76,7 +76,7 @@ macro_rules! impl_serialize_wrapper {
 	($ty:ty) => {
 		impl ::revision::Revisioned for $ty {
 			fn revision() -> u16 {
-				surrealdb_core::val::Value::revision()
+				crate::core::val::Value::revision()
 			}
 
 			fn serialize_revisioned<W: std::io::Write>(

@@ -3,10 +3,9 @@ use std::collections::HashMap;
 
 use helpers::*;
 use regex::Regex;
-use surrealdb::dbs::capabilities::ExperimentalTarget;
-use surrealdb::dbs::{Capabilities, Session};
-use surrealdb::iam::Role;
-use surrealdb_core::iam::Level;
+use surrealdb_core::dbs::capabilities::ExperimentalTarget;
+use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_core::iam::{Level, Role};
 
 #[tokio::test]
 async fn info_for_root() {

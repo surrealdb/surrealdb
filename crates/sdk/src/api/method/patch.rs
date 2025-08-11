@@ -58,7 +58,7 @@ macro_rules! into_future {
 					let value = crate::api::value::to_core_value(content)?;
 					vec.push(value);
 				}
-				let patches = surrealdb_core::val::Value::from(vec);
+				let patches = crate::core::val::Value::from(vec);
 				let router = client.inner.router.extract()?;
 				let cmd = Command::Patch {
 					txn,

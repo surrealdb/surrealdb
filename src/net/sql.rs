@@ -7,10 +7,6 @@ use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use surrealdb::dbs::Session;
-use surrealdb::dbs::capabilities::RouteTarget;
-use surrealdb_core::dbs::Variables;
-use surrealdb_core::val::Value;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::AppState;
@@ -18,6 +14,9 @@ use super::error::ResponseError;
 use super::headers::Accept;
 use super::output::Output;
 use crate::cnf::HTTP_MAX_SQL_BODY_SIZE;
+use crate::core::dbs::capabilities::RouteTarget;
+use crate::core::dbs::{Session, Variables};
+use crate::core::val::Value;
 use crate::net::error::Error as NetError;
 use crate::net::input::bytes_to_utf8;
 use crate::net::params::Params;
@@ -94,7 +93,7 @@ async fn handle_socket(state: AppState, ws: WebSocket, session: Session) {
 				// Execute the received sql query
 				let _ = match db.execute(sql, &session, None).await {
 					// Convert the response to JSON
-					Ok(v) => match surrealdb_core::rpc::format::json::encode_str(Value::from(
+					Ok(v) => match crate::core::rpc::format::json::encode_str(Value::from(
 						v.into_iter().map(|x| x.into_value()).collect::<Vec<_>>(),
 					)) {
 						// Send the JSON response to the client

@@ -2,10 +2,9 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
-use surrealdb::dbs::Session;
-use surrealdb::kvs::Datastore;
-use surrealdb_core::dbs::Capabilities;
 use surrealdb_core::dbs::capabilities::{FuncTarget, Targets};
+use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_core::kvs::Datastore;
 use surrealdb_core::val::{Array, Number, Object, Value};
 use tokio::runtime::Runtime;
 

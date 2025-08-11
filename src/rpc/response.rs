@@ -4,12 +4,12 @@ use axum::extract::ws::Message;
 use opentelemetry::Context as TelemetryContext;
 use revision::revisioned;
 use serde::Serialize;
-use surrealdb::rpc::Data;
-use surrealdb::rpc::format::Format;
-use surrealdb_core::val::Value;
 use tokio::sync::mpsc::Sender;
 use tracing::Span;
 
+use crate::core::rpc::Data;
+use crate::core::rpc::format::Format;
+use crate::core::val::Value;
 use crate::rpc::failure::Failure;
 use crate::rpc::format::WsFormat;
 use crate::telemetry::metrics::ws::record_rpc;

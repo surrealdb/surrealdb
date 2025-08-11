@@ -9,14 +9,6 @@ use futures::stream::FuturesUnordered;
 use futures::{Sink, SinkExt, StreamExt};
 use opentelemetry::Context as TelemetryContext;
 use opentelemetry::trace::FutureExt;
-use surrealdb::dbs::Session;
-//use surrealdb::gql::{Pessimistic, SchemaCache};
-use surrealdb::kvs::Datastore;
-use surrealdb::mem::ALLOC;
-use surrealdb::rpc::format::Format;
-use surrealdb::rpc::{Data, Method, RpcContext};
-use surrealdb_core::rpc::{RpcProtocolV1, RpcProtocolV2};
-use surrealdb_core::val::{self, Array, Strand, Value};
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::task::JoinSet;
@@ -29,6 +21,13 @@ use crate::cnf::{
 	PKG_NAME, PKG_VERSION, WEBSOCKET_PING_FREQUENCY, WEBSOCKET_RESPONSE_BUFFER_SIZE,
 	WEBSOCKET_RESPONSE_CHANNEL_SIZE, WEBSOCKET_RESPONSE_FLUSH_PERIOD,
 };
+use crate::core::dbs::Session;
+//use surrealdb::gql::{Pessimistic, SchemaCache};
+use crate::core::kvs::Datastore;
+use crate::core::mem::ALLOC;
+use crate::core::rpc::format::Format;
+use crate::core::rpc::{Data, Method, RpcContext, RpcProtocolV1, RpcProtocolV2};
+use crate::core::val::{self, Array, Strand, Value};
 use crate::rpc::CONN_CLOSED_ERR;
 use crate::rpc::failure::Failure;
 use crate::rpc::format::WsFormat;

@@ -3,12 +3,12 @@ use clap::Args;
 use futures_util::StreamExt;
 use surrealdb::Connection;
 use surrealdb::engine::any::{self, connect};
-use surrealdb::kvs::export::TableConfig;
 use surrealdb::method::{Export, ExportConfig};
 use tokio::io::{self, AsyncWriteExt};
 
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
 use crate::cli::abstraction::{AuthArguments, DatabaseSelectionArguments};
+use crate::core::kvs::export::TableConfig;
 
 #[derive(Args, Debug)]
 pub struct DatabaseConnectionArguments {

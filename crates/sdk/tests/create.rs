@@ -4,8 +4,8 @@ use surrealdb_core::{strand, syn};
 mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::iam::Role;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::iam::Role;
 
 use crate::helpers::skip_ok;
 

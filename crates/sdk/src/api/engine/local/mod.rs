@@ -167,28 +167,6 @@ use futures::StreamExt;
 #[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
 use indexmap::IndexMap;
-use surrealdb_core::dbs::{Notification, Response, Session, Variables};
-#[cfg(not(target_family = "wasm"))]
-use surrealdb_core::err::Error as CoreError;
-#[cfg(feature = "ml")]
-use surrealdb_core::expr::Model;
-use surrealdb_core::expr::statements::DeleteStatement;
-use surrealdb_core::expr::{
-	CreateStatement, Data, Expr, Fields, Function, Ident, InsertStatement, KillStatement, Literal,
-	LogicalPlan, Output, SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
-};
-use surrealdb_core::iam;
-use surrealdb_core::kvs::Datastore;
-#[cfg(not(target_family = "wasm"))]
-use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::val::{self, Strand};
-#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-use surrealdb_core::{
-	expr::statements::{DefineModelStatement, DefineStatement},
-	iam::{Action, ResourceKind, check::check_ns_db},
-	kvs::{LockType, TransactionType},
-	ml::storage::surml_file::SurMlFile,
-};
 use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
 use tokio::{
@@ -206,6 +184,28 @@ use crate::api::conn::MlExportConfig;
 use crate::api::conn::{Command, DbResponse, RequestData};
 use crate::api::err::Error;
 use crate::api::{Connect, Response as QueryResponse, Surreal};
+use crate::core::dbs::{Notification, Response, Session, Variables};
+#[cfg(not(target_family = "wasm"))]
+use crate::core::err::Error as CoreError;
+#[cfg(feature = "ml")]
+use crate::core::expr::Model;
+use crate::core::expr::statements::DeleteStatement;
+use crate::core::expr::{
+	CreateStatement, Data, Expr, Fields, Function, Ident, InsertStatement, KillStatement, Literal,
+	LogicalPlan, Output, SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
+};
+use crate::core::iam;
+use crate::core::kvs::Datastore;
+#[cfg(not(target_family = "wasm"))]
+use crate::core::kvs::export::Config as DbExportConfig;
+use crate::core::val::{self, Strand};
+#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
+use crate::core::{
+	expr::statements::{DefineModelStatement, DefineStatement},
+	iam::{Action, ResourceKind, check::check_ns_db},
+	kvs::{LockType, TransactionType},
+	ml::storage::surml_file::SurMlFile,
+};
 use crate::method::Stats;
 use crate::opt::IntoEndpoint;
 
@@ -524,7 +524,7 @@ async fn export_file(
 	};
 
 	if let Err(error) = res {
-		if let Some(surrealdb_core::err::Error::Channel(message)) = error.downcast_ref() {
+		if let Some(crate::core::err::Error::Channel(message)) = error.downcast_ref() {
 			// This is not really an error. Just logging it for improved visibility.
 			trace!("{message}");
 			return Ok(());
@@ -554,7 +554,7 @@ async fn export_ml(
 	// Attempt to get the model definition
 	let info = tx.get_db_model(&nsv, &dbv, &name, &version).await?;
 	// Export the file data in to the store
-	let mut data = crate::obs::stream(info.hash.clone()).await?;
+	let mut data = crate::core::obs::stream(info.hash.clone()).await?;
 	// Process all stream values
 	while let Some(Ok(bytes)) = data.next().await {
 		if chn.send(bytes.to_vec()).await.is_err() {
@@ -1212,9 +1212,9 @@ async fn router(
 			// Convert the file back in to raw bytes
 			let data = file.to_bytes();
 			// Calculate the hash of the model file
-			let hash = crate::obs::hash(&data);
+			let hash = crate::core::obs::hash(&data);
 			// Insert the file data in to the store
-			crate::obs::put(&hash, data).await?;
+			crate::core::obs::put(&hash, data).await?;
 			// Insert the model in to the database
 			let model = DefineModelStatement {
 				name: Ident::new(file.header.name.to_string()).unwrap(),
@@ -1240,13 +1240,13 @@ async fn router(
 		}
 		Command::Health => Ok(DbResponse::Other(val::Value::None)),
 		Command::Version => {
-			Ok(DbResponse::Other(val::Value::from(surrealdb_core::env::VERSION.to_string())))
+			Ok(DbResponse::Other(val::Value::from(crate::core::env::VERSION.to_string())))
 		}
 		Command::Set {
 			key,
 			value,
 		} => {
-			surrealdb_core::rpc::check_protected_param(&key)?;
+			crate::core::rpc::check_protected_param(&key)?;
 			// Need to compute because certain keys might not be allowed to be set and those
 			// should be rejected by an error.
 			match value {
@@ -1306,7 +1306,7 @@ async fn router(
 
 			let args = args.into_iter().map(|x| x.into_literal()).collect();
 
-			let plan = Expr::FunctionCall(Box::new(surrealdb_core::expr::FunctionCall {
+			let plan = Expr::FunctionCall(Box::new(crate::core::expr::FunctionCall {
 				receiver: func,
 				arguments: args,
 			}));

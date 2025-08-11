@@ -1,10 +1,9 @@
 mod helpers;
 use anyhow::Result;
 use helpers::{new_ds, skip_ok};
-use surrealdb::dbs::Session;
-use surrealdb::syn;
-use surrealdb_core::strand;
+use surrealdb_core::dbs::Session;
 use surrealdb_core::val::RecordId;
+use surrealdb_core::{strand, syn};
 
 #[tokio::test]
 async fn live_permissions() -> Result<()> {

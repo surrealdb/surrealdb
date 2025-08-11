@@ -9,11 +9,10 @@ use std::thread::Builder;
 use anyhow::ensure;
 use regex::Regex;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::dbs::capabilities::Capabilities;
-use surrealdb::iam::{Auth, Level, Role};
-use surrealdb::kvs::Datastore;
-use surrealdb_core::dbs::Response;
+use surrealdb_core::dbs::capabilities::Capabilities;
+use surrealdb_core::dbs::{Response, Session};
+use surrealdb_core::iam::{Auth, Level, Role};
+use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn;
 use surrealdb_core::val::{Number, Value};
 

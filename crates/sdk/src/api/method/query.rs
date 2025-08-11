@@ -11,8 +11,6 @@ use futures::stream::SelectAll;
 use indexmap::IndexMap;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use surrealdb_core::expr::{LogicalPlan, TopLevelExpr};
-use surrealdb_core::val;
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -21,6 +19,8 @@ use crate::api::conn::Command;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::{self, Connection, ExtraFeatures, Result, opt};
+use crate::core::expr::{LogicalPlan, TopLevelExpr};
+use crate::core::val;
 use crate::method::{OnceLockExt, Stats, WithStats};
 use crate::value::Notification;
 use crate::{Surreal, Value};

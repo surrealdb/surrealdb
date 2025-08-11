@@ -4,8 +4,8 @@ use surrealdb_core::val::{Array, Value};
 mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::iam::Role;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::iam::Role;
 
 use crate::helpers::Test;
 

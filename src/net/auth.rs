@@ -8,8 +8,6 @@ use futures_util::future::BoxFuture;
 use http::StatusCode;
 use http::request::Parts;
 use hyper::{Request, Response};
-use surrealdb::dbs::Session;
-use surrealdb::iam::verify::{basic, token};
 use tower_http::auth::AsyncAuthorizeRequest;
 use uuid::Uuid;
 
@@ -19,6 +17,8 @@ use super::headers::{
 	SurrealAuthDatabase, SurrealAuthNamespace, SurrealDatabase, SurrealId, SurrealNamespace,
 	parse_typed_header,
 };
+use crate::core::dbs::Session;
+use crate::core::iam::verify::{basic, token};
 use crate::net::error::Error as NetError;
 
 ///

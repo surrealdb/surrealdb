@@ -22,10 +22,6 @@ compile_error!("The `ml` feature is not supported on Wasm.");
 #[macro_use]
 extern crate tracing;
 
-#[doc(hidden)]
-pub use surrealdb_core::*;
-
-#[expect(hidden_glob_reexports)]
 mod api;
 
 #[doc(hidden)]
@@ -36,9 +32,8 @@ pub mod channel {
 
 /// Different error types for embedded and remote databases
 pub mod error {
-	pub use surrealdb_core::err::Error as Db;
-
 	pub use crate::api::err::Error as Api;
+	pub use crate::core::err::Error as Db;
 }
 
 #[cfg(feature = "protocol-http")]
@@ -55,3 +50,6 @@ pub use crate::api::{
 /// A specialized `Result` type
 pub type Result<T> = anyhow::Result<T>;
 pub use anyhow::Error;
+// Re-exporting core so it can be imported as `crate::core` so it's not grouped with third
+// party crates.
+use surrealdb_core as core;

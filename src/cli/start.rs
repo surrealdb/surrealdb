@@ -8,13 +8,13 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::{any, tasks};
-use surrealdb::options::EngineOptions;
-#[cfg(feature = "ml")]
-use surrealdb_core::ml::execution::session::set_environment;
 use tokio_util::sync::CancellationToken;
 
 use super::config::{CF, Config};
 use crate::cnf::LOGO;
+#[cfg(feature = "ml")]
+use crate::core::ml::execution::session::set_environment;
+use crate::core::options::EngineOptions;
 use crate::dbs::StartCommandDbsOptions;
 use crate::net::client_ip::ClientIp;
 use crate::net::{self};

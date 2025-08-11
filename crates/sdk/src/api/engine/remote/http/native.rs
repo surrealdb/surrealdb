@@ -5,7 +5,6 @@ use async_channel::Receiver;
 use indexmap::IndexMap;
 use reqwest::ClientBuilder;
 use reqwest::header::HeaderMap;
-use surrealdb_core::cnf::SURREALDB_USER_AGENT;
 use tokio::sync::watch;
 use url::Url;
 
@@ -16,6 +15,7 @@ use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
 use crate::api::{ExtraFeatures, Result, Surreal, conn};
+use crate::core::cnf::SURREALDB_USER_AGENT;
 use crate::opt::WaitFor;
 
 impl crate::api::Connection for Client {}

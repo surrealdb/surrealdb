@@ -1,12 +1,11 @@
 use std::borrow::Cow;
 use std::future::IntoFuture;
 
-use surrealdb_core::val;
-
 use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Result};
+use crate::core::val;
 use crate::method::OnceLockExt;
 
 /// A set future

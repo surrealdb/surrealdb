@@ -7,11 +7,11 @@ use chrono::{DateTime, Utc};
 use revision::revisioned;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use surrealdb_core::dbs::Action as CoreAction;
-use surrealdb_core::{syn, val};
 use uuid::Uuid;
 
 use crate::Result;
+use crate::core::dbs::Action as CoreAction;
+use crate::core::{syn, val};
 use crate::error::Api as ApiError;
 
 mod convert;
@@ -221,7 +221,7 @@ impl FromStr for Value {
 	type Err = anyhow::Error;
 
 	fn from_str(s: &str) -> Result<Self> {
-		Ok(Value::from_inner(surrealdb_core::syn::value(s)?))
+		Ok(Value::from_inner(crate::core::syn::value(s)?))
 	}
 }
 

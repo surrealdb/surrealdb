@@ -7,11 +7,11 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use serde::Serialize;
-use surrealdb_core::val;
 
 use crate::api::opt::auth::{Credentials, Jwt};
 use crate::api::opt::{IntoEndpoint, auth};
 use crate::api::{Connect, Connection, OnceLockExt, Surreal, opt};
+use crate::core::val;
 use crate::opt::{IntoExportDestination, WaitFor};
 
 pub(crate) mod live;

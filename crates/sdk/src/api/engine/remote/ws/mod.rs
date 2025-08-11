@@ -11,13 +11,13 @@ use std::time::Duration;
 
 use async_channel::Sender;
 use indexmap::IndexMap;
-use surrealdb_core::dbs::Notification;
-use surrealdb_core::val::Value as CoreValue;
 use trice::Instant;
 use uuid::Uuid;
 
 use crate::api::conn::{Command, DbResponse};
 use crate::api::{Connect, Result, Surreal};
+use crate::core::dbs::Notification;
+use crate::core::val::Value as CoreValue;
 use crate::opt::IntoEndpoint;
 
 pub(crate) const PATH: &str = "rpc";

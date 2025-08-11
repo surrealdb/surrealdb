@@ -5,11 +5,11 @@ use std::marker::PhantomData;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_content::{Serializer, Value as Content};
-use surrealdb_core::val;
 
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Result};
+use crate::core::val;
 use crate::method::OnceLockExt;
 use crate::{Surreal, api};
 

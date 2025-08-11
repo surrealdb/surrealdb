@@ -10,8 +10,8 @@ mod util;
 use std::collections::HashMap;
 
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::iam::Role;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::iam::Role;
 
 #[tokio::test]
 async fn remove_statement_table() -> Result<()> {

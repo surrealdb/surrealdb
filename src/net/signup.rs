@@ -5,10 +5,6 @@ use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use serde::Serialize;
-use surrealdb::dbs::Session;
-use surrealdb::dbs::capabilities::RouteTarget;
-use surrealdb_core::syn;
-use surrealdb_core::val::Value;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::AppState;
@@ -16,6 +12,10 @@ use super::error::ResponseError;
 use super::headers::Accept;
 use super::output::Output;
 use crate::cnf::HTTP_MAX_SIGNIN_BODY_SIZE;
+use crate::core::dbs::Session;
+use crate::core::dbs::capabilities::RouteTarget;
+use crate::core::syn;
+use crate::core::val::Value;
 use crate::net::error::Error as NetError;
 use crate::net::input::bytes_to_utf8;
 
@@ -67,7 +67,7 @@ async fn handler(
 	match syn::json(data) {
 		// The provided value was an object
 		Ok(Value::Object(vars)) => {
-			match surrealdb::iam::signup::signup(kvs, &mut session, vars).await {
+			match crate::core::iam::signup::signup(kvs, &mut session, vars).await {
 				// Authentication was successful
 				Ok(v) => match accept.as_deref() {
 					// Simple serialization

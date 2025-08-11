@@ -1,8 +1,8 @@
 mod helpers;
 use helpers::{new_ds, skip_ok};
 use surrealdb::Result;
-use surrealdb::dbs::{Response, Session};
-use surrealdb::kvs::Datastore;
+use surrealdb_core::dbs::{Response, Session};
+use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn;
 use surrealdb_core::val::Value;
 

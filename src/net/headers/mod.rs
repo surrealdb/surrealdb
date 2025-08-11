@@ -3,11 +3,11 @@ use axum_extra::headers::Header;
 use axum_extra::typed_header::{TypedHeaderRejection, TypedHeaderRejectionReason};
 use http::HeaderValue;
 use http::header::SERVER;
-use surrealdb::cnf::SERVER_NAME;
 use surrealdb::headers::VERSION;
 use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::cnf::{PKG_NAME, PKG_VERSION};
+use crate::core::cnf::SERVER_NAME;
 use crate::net::error::Error;
 
 mod accept;

@@ -1,6 +1,6 @@
 mod helpers;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
+use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
 
 use crate::helpers::{Test, new_ds, skip_ok};
