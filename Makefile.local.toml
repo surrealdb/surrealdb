@@ -2,8 +2,8 @@
 RUSTFLAGS = { value = "-D warnings --cfg tokio_unstable", condition = { env_not_set = [
     "RUSTFLAGS",
 ] } }
-NIGHTLY_RUST_VERSION = { script = ["cat ${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/rust-toolchain.nightly"], condition = { env_not_set = [
-    "NIGHTLY_RUST_VERSION",
+SURREAL_NIGHTLY_RUST_TOOLCHAIN = { script = ["cat ${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/rust-toolchain.nightly"], condition = { env_not_set = [
+    "SURREAL_NIGHTLY_RUST_TOOLCHAIN",
 ] } }
 
 # Setup
@@ -44,13 +44,13 @@ args = ["test", "--profile", "make", "--workspace", "--no-fail-fast"]
 # Format
 [tasks.cargo-fmt]
 category = "LOCAL USAGE"
-toolchain = "${NIGHTLY_RUST_VERSION}"
+toolchain = "${SURREAL_NIGHTLY_RUST_TOOLCHAIN}"
 command = "cargo"
 args = ["fmt", "--all", "--check"]
 
 [tasks.fmt]
 category = "LOCAL USAGE"
-toolchain = "${NIGHTLY_RUST_VERSION}"
+toolchain = "${SURREAL_NIGHTLY_RUST_TOOLCHAIN}"
 command = "cargo"
 args = ["fmt", "--all"]
 
