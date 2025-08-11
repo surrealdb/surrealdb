@@ -1,6 +1,7 @@
+use http::HeaderMap;
+
 use crate::expr::Bytesize;
 use crate::val::Duration;
-use http::HeaderMap;
 
 #[derive(Default, Debug)]
 pub struct InvocationContext {

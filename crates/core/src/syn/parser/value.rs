@@ -1,3 +1,9 @@
+use std::cmp::Ordering;
+use std::collections::BTreeMap;
+use std::ops::Bound;
+
+use reblessive::Stk;
+
 use super::{ParseResult, Parser};
 use crate::sql::Ident;
 use crate::syn::error::bail;
@@ -8,10 +14,6 @@ use crate::syn::token::{Glued, Span, TokenKind, t};
 use crate::val::{
 	self, Array, Duration, Geometry, Number, Object, Range, RecordId, RecordIdKey, Strand, Value,
 };
-use reblessive::Stk;
-use std::cmp::Ordering;
-use std::collections::BTreeMap;
-use std::ops::Bound;
 
 trait ValueParseFunc {
 	async fn parse(parser: &mut Parser<'_>, ctx: &mut Stk) -> ParseResult<Value>;

@@ -1,5 +1,6 @@
-use crate::sql::Expr;
 use std::fmt;
+
+use crate::sql::Expr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

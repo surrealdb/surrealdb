@@ -1,15 +1,17 @@
-use crate::iam::{Auth, Level};
-use crate::rpc::Method;
-use ipnet::IpNet;
 use std::collections::HashSet;
 use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
 #[cfg(all(target_family = "wasm", feature = "http"))]
 use std::net::ToSocketAddrs;
+
+use ipnet::IpNet;
 #[cfg(all(not(target_family = "wasm"), feature = "http"))]
 use tokio::net::lookup_host;
 use url::Url;
+
+use crate::iam::{Auth, Level};
+use crate::rpc::Method;
 
 pub trait Target<Item: ?Sized = Self> {
 	fn matches(&self, elem: &Item) -> bool;
@@ -837,9 +839,11 @@ impl Capabilities {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use std::str::FromStr;
+
 	use test_log::test;
+
+	use super::*;
 
 	#[test]
 	fn test_invalid_func_target() {

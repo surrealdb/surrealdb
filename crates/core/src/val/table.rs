@@ -1,11 +1,12 @@
 use std::fmt;
 use std::ops::Deref;
 
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::expr::Ident;
 use crate::expr::escape::EscapeIdent;
 use crate::val::Strand;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 /// A value type referencing a specific table.
 #[revisioned(revision = 1)]

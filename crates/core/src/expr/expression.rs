@@ -1,3 +1,10 @@
+use std::fmt;
+use std::ops::Bound;
+
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use super::SleepStatement;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
@@ -18,11 +25,6 @@ use crate::expr::{
 };
 use crate::fnc;
 use crate::val::{Array, Closure, Range, Strand, Value};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::ops::Bound;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]

@@ -1,3 +1,22 @@
+use core::fmt;
+use std::fmt::Display;
+use std::io::Error as IoError;
+use std::string::FromUtf8Error;
+
+use base64::DecodeError as Base64Error;
+use bincode::Error as BincodeError;
+#[cfg(storage)]
+use ext_sort::SortError;
+use fst::Error as FstError;
+use http::header::{InvalidHeaderName, InvalidHeaderValue, ToStrError};
+use jsonwebtoken::errors::Error as JWTError;
+use object_store::Error as ObjectStoreError;
+use revision::Error as RevisionError;
+use serde::Serialize;
+use storekey::decode::Error as DecodeError;
+use storekey::encode::Error as EncodeError;
+use thiserror::Error;
+
 use crate::api::err::ApiError;
 use crate::buc::BucketOperation;
 use crate::expr::index::Distance;
@@ -9,23 +28,6 @@ use crate::idx::trees::vector::SharedVector;
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::val::{CastError, CoerceError, RecordId, Value};
 use crate::vs::VersionStampError;
-use base64::DecodeError as Base64Error;
-use bincode::Error as BincodeError;
-use core::fmt;
-#[cfg(storage)]
-use ext_sort::SortError;
-use fst::Error as FstError;
-use http::header::{InvalidHeaderName, InvalidHeaderValue, ToStrError};
-use jsonwebtoken::errors::Error as JWTError;
-use object_store::Error as ObjectStoreError;
-use revision::Error as RevisionError;
-use serde::Serialize;
-use std::fmt::Display;
-use std::io::Error as IoError;
-use std::string::FromUtf8Error;
-use storekey::decode::Error as DecodeError;
-use storekey::encode::Error as EncodeError;
-use thiserror::Error;
 
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]

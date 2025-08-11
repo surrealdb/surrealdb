@@ -1,5 +1,7 @@
 //! This module defines the pratt parser for operators.
 
+use reblessive::Stk;
+
 use super::enter_query_recursion;
 use super::mac::unexpected;
 use crate::sql::operator::{BindingPower, BooleanOperator, MatchesOperator, NearestNeighbor};
@@ -10,7 +12,6 @@ use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{self, Glued, Token, TokenKind, t};
 use crate::val;
-use reblessive::Stk;
 
 impl Parser<'_> {
 	/// Parse a generic expression without triggering the query depth and

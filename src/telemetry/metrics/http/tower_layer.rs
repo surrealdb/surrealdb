@@ -1,16 +1,18 @@
-use crate::cnf::TELEMETRY_NAMESPACE;
+use std::cell::Cell;
+use std::fmt;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
+
 use axum::extract::MatchedPath;
 use futures::Future;
 use http::{Request, Response, StatusCode, Version};
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::MetricsError;
 use pin_project_lite::pin_project;
-use std::cell::Cell;
-use std::fmt;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
 use tower::{Layer, Service};
+
+use crate::cnf::TELEMETRY_NAMESPACE;
 
 #[derive(Clone, Default)]
 pub struct HttpMetricsLayer;

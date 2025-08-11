@@ -1,3 +1,18 @@
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::fmt::{self, Debug};
+#[cfg(storage)]
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
+use anyhow::{Result, bail};
+use async_channel::Sender;
+use trice::Instant;
+#[cfg(feature = "http")]
+use url::Url;
+
 use crate::buc::store::ObjectStore;
 use crate::buc::{self, BucketConnectionKey, BucketConnections};
 use crate::cnf::PROTECTED_PARAM_NAMES;
@@ -17,19 +32,6 @@ use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::sequences::Sequences;
 use crate::mem::ALLOC;
 use crate::val::Value;
-use anyhow::{Result, bail};
-use async_channel::Sender;
-use std::borrow::Cow;
-use std::collections::HashMap;
-use std::fmt::{self, Debug};
-#[cfg(storage)]
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
-use trice::Instant;
-#[cfg(feature = "http")]
-use url::Url;
 
 pub type Context = Arc<MutableContext>;
 
@@ -657,15 +659,17 @@ impl MutableContext {
 #[cfg(test)]
 mod tests {
 	#[cfg(feature = "http")]
+	use std::str::FromStr;
+
+	#[cfg(feature = "http")]
+	use url::Url;
+
+	#[cfg(feature = "http")]
 	use crate::ctx::MutableContext;
 	#[cfg(feature = "http")]
 	use crate::dbs::Capabilities;
 	#[cfg(feature = "http")]
 	use crate::dbs::capabilities::{NetTarget, Targets};
-	#[cfg(feature = "http")]
-	use std::str::FromStr;
-	#[cfg(feature = "http")]
-	use url::Url;
 
 	#[cfg(feature = "http")]
 	#[tokio::test]

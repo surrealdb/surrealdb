@@ -1,10 +1,12 @@
-use super::{Content, object_from_content_struct, value_from_content};
+use std::collections::BTreeMap;
+
 use anyhow::Result;
 use serde::Deserialize;
 use serde::de::IntoDeserializer;
 use serde_content::{Data, Expected, Unexpected};
-use std::collections::BTreeMap;
 use surrealdb_core::val::{self, Object, Strand, Value};
+
+use super::{Content, object_from_content_struct, value_from_content};
 
 pub(super) fn to_value(content: Content) -> Result<Value> {
 	match content {

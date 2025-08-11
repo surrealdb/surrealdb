@@ -1,13 +1,15 @@
+use std::cmp::Ordering;
+use std::fmt;
+use std::ops::Bound;
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use super::value::CoerceErrorExt;
 use crate::expr::kind::HasKind;
 use crate::expr::{self};
 use crate::val::value::{Coerce, CoerceError};
 use crate::val::{Array, Number, Value};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::fmt;
-use std::ops::Bound;
 
 /// A range of surrealql values,
 ///

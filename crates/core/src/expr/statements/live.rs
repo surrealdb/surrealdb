@@ -1,3 +1,10 @@
+use std::fmt;
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -7,11 +14,6 @@ use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _, Literal};
 use crate::iam::Auth;
 use crate::kvs::{Live, impl_kv_value_revisioned};
 use crate::val::{Uuid, Value};
-use anyhow::{Result, bail};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -160,6 +162,8 @@ impl InfoStructure for LiveStatement {
 
 #[cfg(test)]
 mod tests {
+	use anyhow::Result;
+
 	use crate::dbs::{Action, Capabilities, Notification, Session};
 	use crate::expr::Value;
 	use crate::kvs::Datastore;
@@ -167,7 +171,6 @@ mod tests {
 	use crate::kvs::TransactionType::Write;
 	use crate::syn;
 	use crate::val::{RecordId, RecordIdKey};
-	use anyhow::Result;
 
 	pub async fn new_ds() -> Result<Datastore> {
 		Ok(Datastore::new("memory")

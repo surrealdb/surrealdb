@@ -1,9 +1,10 @@
+use reblessive::Stk;
+
 use super::{ParseResult, Parser};
 use crate::sql::{Expr, Function, FunctionCall, Ident, Model};
 use crate::syn::error::syntax_error;
 use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
 use crate::syn::token::{TokenKind, t};
-use reblessive::Stk;
 
 impl Parser<'_> {
 	/// Parse a custom function function call

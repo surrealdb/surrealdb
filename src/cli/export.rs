@@ -1,5 +1,3 @@
-use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
-use crate::cli::abstraction::{AuthArguments, DatabaseSelectionArguments};
 use anyhow::Result;
 use clap::Args;
 use futures_util::StreamExt;
@@ -8,6 +6,9 @@ use surrealdb::engine::any::{self, connect};
 use surrealdb::kvs::export::TableConfig;
 use surrealdb::method::{Export, ExportConfig};
 use tokio::io::{self, AsyncWriteExt};
+
+use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
+use crate::cli::abstraction::{AuthArguments, DatabaseSelectionArguments};
 
 #[derive(Args, Debug)]
 pub struct DatabaseConnectionArguments {

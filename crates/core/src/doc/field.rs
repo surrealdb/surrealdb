@@ -1,3 +1,8 @@
+use std::sync::Arc;
+
+use anyhow::{Result, bail, ensure};
+use reblessive::tree::Stk;
+
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Options, Statement};
@@ -14,9 +19,6 @@ use crate::iam::Action;
 use crate::val::value::CoerceError;
 use crate::val::value::every::ArrayBehaviour;
 use crate::val::{RecordId, Value};
-use anyhow::{Result, bail, ensure};
-use reblessive::tree::Stk;
-use std::sync::Arc;
 
 /// Removes `NONE` values recursively from objects, but not when `NONE` is a
 /// direct child of an array

@@ -11,13 +11,14 @@ mod graphql_integration {
 		};
 	}
 
-	use super::common;
-	use crate::common::{PASS, USER};
 	use http::header;
 	use reqwest::Client;
 	use serde_json::json;
 	use test_log::test;
 	use ulid::Ulid;
+
+	use super::common;
+	use crate::common::{PASS, USER};
 
 	#[test(tokio::test)]
 	async fn basic() -> Result<(), Box<dyn std::error::Error>> {

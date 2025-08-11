@@ -1,7 +1,8 @@
 mod helpers;
-use helpers::*;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
+
+use helpers::*;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;

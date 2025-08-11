@@ -1,12 +1,14 @@
+use std::borrow::Cow;
+use std::future::IntoFuture;
+use std::marker::PhantomData;
+
+use serde::de::DeserializeOwned;
+
 use super::BoxFuture;
 use crate::api::conn::Command;
 use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
 use crate::{Surreal, Value};
-use serde::de::DeserializeOwned;
-use std::borrow::Cow;
-use std::future::IntoFuture;
-use std::marker::PhantomData;
 
 /// An Insert Relation future
 #[derive(Debug)]

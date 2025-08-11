@@ -1,3 +1,12 @@
+use std::borrow::Cow;
+use std::ops::{Bound, Range};
+use std::sync::Arc;
+use std::vec;
+
+use anyhow::{Result, bail};
+use futures::StreamExt;
+use reblessive::tree::Stk;
+
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
@@ -12,13 +21,6 @@ use crate::key::{graph, thing};
 use crate::kvs::{KVKey, Key, Transaction, Val};
 use crate::syn;
 use crate::val::{RecordId, RecordIdKeyRange, Value};
-use anyhow::{Result, bail};
-use futures::StreamExt;
-use reblessive::tree::Stk;
-use std::borrow::Cow;
-use std::ops::{Bound, Range};
-use std::sync::Arc;
-use std::vec;
 
 impl Iterable {
 	pub(super) async fn iterate(

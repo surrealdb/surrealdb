@@ -1,7 +1,8 @@
+use std::fmt::{self, Display};
+
 use super::DefineKind;
 use crate::sql::Ident;
 use crate::val::Strand;
-use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

@@ -1,19 +1,13 @@
 //! HTTP engine
-use crate::api;
-use crate::api::conn::{Command, DbResponse, RequestData, RouterRequest};
-use crate::api::err::Error;
-use crate::api::{Connect, Result, Surreal};
-use crate::engine::remote::Response;
-use crate::headers::{AUTH_DB, AUTH_NS, DB, NS};
-use crate::opt::IntoEndpoint;
+use std::marker::PhantomData;
+#[cfg(not(target_family = "wasm"))]
+use std::path::PathBuf;
+
 use futures::TryStreamExt;
 use indexmap::IndexMap;
 use reqwest::RequestBuilder;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
-use std::marker::PhantomData;
-#[cfg(not(target_family = "wasm"))]
-use std::path::PathBuf;
 use surrealdb_core::{rpc, val};
 #[cfg(not(target_family = "wasm"))]
 use tokio::fs::OpenOptions;
@@ -24,6 +18,14 @@ use tokio_util::compat::FuturesAsyncReadCompatExt;
 use url::Url;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local;
+
+use crate::api;
+use crate::api::conn::{Command, DbResponse, RequestData, RouterRequest};
+use crate::api::err::Error;
+use crate::api::{Connect, Result, Surreal};
+use crate::engine::remote::Response;
+use crate::headers::{AUTH_DB, AUTH_NS, DB, NS};
+use crate::opt::IntoEndpoint;
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod native;

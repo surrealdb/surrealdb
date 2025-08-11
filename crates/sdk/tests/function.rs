@@ -1,5 +1,4 @@
 mod helpers;
-use crate::helpers::Test;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
@@ -7,6 +6,8 @@ use surrealdb::err::Error;
 use surrealdb_core::sql::{Expr, FunctionCall};
 use surrealdb_core::val::{Array, Number, Table, Value};
 use surrealdb_core::{sql, strand, syn};
+
+use crate::helpers::Test;
 
 async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<()> {
 	Test::new(sql).await?.expect_vals(desired_responses)?;

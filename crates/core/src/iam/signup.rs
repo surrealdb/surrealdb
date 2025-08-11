@@ -1,3 +1,12 @@
+use std::sync::Arc;
+
+use anyhow::{Result, bail};
+use chrono::Utc;
+use jsonwebtoken::{Header, encode};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
 use super::access::{authenticate_record, create_refresh_token_record};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::capabilities::ExperimentalTarget;
@@ -11,13 +20,6 @@ use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::val::{Object, Value};
-use anyhow::{Result, bail};
-use chrono::Utc;
-use jsonwebtoken::{Header, encode};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use uuid::Uuid;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -208,11 +210,13 @@ pub async fn db_access(
 
 #[cfg(test)]
 mod tests {
+	use std::collections::HashMap;
+
+	use chrono::Duration;
+
 	use super::*;
 	use crate::dbs::Capabilities;
 	use crate::iam::Role;
-	use chrono::Duration;
-	use std::collections::HashMap;
 
 	#[tokio::test]
 	async fn test_record_signup() {

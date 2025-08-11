@@ -1,3 +1,11 @@
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use anyhow::Result;
+use http::HeaderMap;
+use reblessive::TreeStack;
+use reblessive::tree::Stk;
+
 use super::body::ApiBody;
 use super::context::InvocationContext;
 use super::convert;
@@ -10,12 +18,6 @@ use crate::expr::FlowResultExt as _;
 use crate::expr::statements::define::ApiDefinition;
 use crate::kvs::{Datastore, Transaction};
 use crate::val::{Object, Value};
-use anyhow::Result;
-use http::HeaderMap;
-use reblessive::TreeStack;
-use reblessive::tree::Stk;
-use std::collections::BTreeMap;
-use std::sync::Arc;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ApiInvocation {

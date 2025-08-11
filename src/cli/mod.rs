@@ -17,11 +17,10 @@ pub(crate) mod validator;
 mod version;
 mod version_client;
 
-use crate::cli::version_client::VersionClient;
-#[cfg(debug_assertions)]
-use crate::cnf::DEBUG_BUILD_WARNING;
-use crate::cnf::{LOGO, PKG_VERSION};
-use crate::env::RELEASE;
+use std::ops::Deref;
+use std::process::ExitCode;
+use std::time::Duration;
+
 use clap::{Parser, Subcommand, ValueEnum};
 pub use config::CF;
 use export::ExportCommandArguments;
@@ -32,13 +31,16 @@ use ml::MlCommand;
 use semver::Version;
 use sql::SqlCommandArguments;
 use start::StartCommandArguments;
-use std::ops::Deref;
-use std::process::ExitCode;
-use std::time::Duration;
 use upgrade::UpgradeCommandArguments;
 use validate::ValidateCommandArguments;
 use validator::parser::tracing::{CustomFilter, CustomFilterParser};
 use version::VersionCommandArguments;
+
+use crate::cli::version_client::VersionClient;
+#[cfg(debug_assertions)]
+use crate::cnf::DEBUG_BUILD_WARNING;
+use crate::cnf::{LOGO, PKG_VERSION};
+use crate::env::RELEASE;
 
 const INFO: &str = "
 To get started using SurrealDB, and for guides on connecting to and building applications
@@ -261,8 +263,9 @@ pub async fn init() -> ExitCode {
 	#[cfg(feature = "performance-profiler")]
 	if let Ok(report) = guard.report().build() {
 		// Import necessary traits
-		use pprof::protos::Message;
 		use std::io::Write;
+
+		use pprof::protos::Message;
 		// Output a flamegraph
 		let file = std::fs::File::create("flamegraph.svg").unwrap();
 		report.flamegraph(file).unwrap();

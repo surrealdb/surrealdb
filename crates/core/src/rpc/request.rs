@@ -1,6 +1,7 @@
+use uuid::Uuid;
+
 use crate::rpc::{Method, RpcError};
 use crate::val::{Array, Number, Object, Value};
-use uuid::Uuid;
 
 pub static ID: &str = "id";
 pub static METHOD: &str = "method";

@@ -1,5 +1,14 @@
 //! Contains the actual fetch function.
 
+use std::sync::Arc;
+
+use futures::TryStreamExt;
+use js::function::Opt;
+use js::{Class, Ctx, Exception, Result, Value};
+use reqwest::header::{CONTENT_TYPE, HeaderValue};
+use reqwest::{Body as ReqBody, redirect};
+use tokio::runtime::Handle;
+
 use super::classes::Headers;
 use crate::fnc::http::resolver::FilteringResolver;
 use crate::fnc::script::fetch::RequestError;
@@ -8,13 +17,6 @@ use crate::fnc::script::fetch::classes::{
 	self, Request, RequestInit, Response, ResponseInit, ResponseType,
 };
 use crate::fnc::script::modules::surrealdb::query::QueryContext;
-use futures::TryStreamExt;
-use js::function::Opt;
-use js::{Class, Ctx, Exception, Result, Value};
-use reqwest::header::{CONTENT_TYPE, HeaderValue};
-use reqwest::{Body as ReqBody, redirect};
-use std::sync::Arc;
-use tokio::runtime::Handle;
 
 #[js::function]
 pub async fn fetch<'js>(

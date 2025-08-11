@@ -1,9 +1,11 @@
-use crate::err::Error;
-use crate::val::{Object, Value};
-use anyhow::Result;
-use http::HeaderMap;
 use std::collections::BTreeMap;
 use std::mem;
+
+use anyhow::Result;
+use http::HeaderMap;
+
+use crate::err::Error;
+use crate::val::{Object, Value};
 
 pub(crate) fn headermap_to_object(headers: HeaderMap) -> Result<Object> {
 	let mut next_key = None;

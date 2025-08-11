@@ -1,8 +1,8 @@
-use crate::err::Error;
-use crate::expr::index::{Distance, VectorType};
-use crate::fnc::util::math::ToFloat;
-use crate::kvs::KVValue;
-use crate::val::{Number, Value};
+use std::cmp::PartialEq;
+use std::hash::{Hash, Hasher};
+use std::ops::{Add, Deref, Div, Sub};
+use std::sync::Arc;
+
 use ahash::{AHasher, HashSet};
 use anyhow::{Result, ensure};
 use linfa_linalg::norm::Norm;
@@ -12,10 +12,12 @@ use num_traits::Zero;
 use revision::{Revisioned, revisioned};
 use rust_decimal::prelude::FromPrimitive;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::cmp::PartialEq;
-use std::hash::{Hash, Hasher};
-use std::ops::{Add, Deref, Div, Sub};
-use std::sync::Arc;
+
+use crate::err::Error;
+use crate::expr::index::{Distance, VectorType};
+use crate::fnc::util::math::ToFloat;
+use crate::kvs::KVValue;
+use crate::val::{Number, Value};
 
 /// In the context of a Symmetric MTree index, the term object refers to a
 /// vector, representing the indexed item.

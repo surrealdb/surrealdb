@@ -1,3 +1,10 @@
+use std::fmt;
+
+use futures::future::try_join_all;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use super::{ControlFlow, FlowResult, FlowResultExt as _, Kind};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
@@ -7,11 +14,6 @@ use crate::expr::fmt::Fmt;
 use crate::expr::{Expr, Ident, Idiom, Model, Permission, Script, Value};
 use crate::fnc;
 use crate::iam::Action;
-use futures::future::try_join_all;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]

@@ -1,3 +1,10 @@
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::{self};
+use std::hash::BuildHasher;
+
+use geo::Point;
+use rust_decimal::Decimal;
+
 use crate::expr::kind::{HasKind, KindLiteral};
 use crate::expr::{Ident, Kind};
 use crate::val::array::Uniq;
@@ -5,11 +12,6 @@ use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range,
 	RecordId, Regex, Strand, Uuid, Value,
 };
-use geo::Point;
-use rust_decimal::Decimal;
-use std::collections::{BTreeMap, HashMap};
-use std::fmt::{self};
-use std::hash::BuildHasher;
 
 #[derive(Clone, Debug)]
 pub enum CoerceError {

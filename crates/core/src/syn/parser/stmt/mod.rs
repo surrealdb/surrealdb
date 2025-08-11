@@ -1,3 +1,5 @@
+use reblessive::Stk;
+
 use super::mac::expected;
 use super::{ParseResult, Parser};
 use crate::sql::data::Assignment;
@@ -17,7 +19,6 @@ use crate::syn::lexer::compound;
 use crate::syn::parser::mac::unexpected;
 use crate::syn::token::{Glued, TokenKind, t};
 use crate::val::Duration;
-use reblessive::Stk;
 
 mod alter;
 mod create;

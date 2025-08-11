@@ -1,15 +1,17 @@
 #![cfg(feature = "kv-mem")]
 
+use std::ops::Range;
+#[cfg(not(target_family = "wasm"))]
+use std::sync::OnceLock;
+
+use anyhow::{Result, bail, ensure};
+use surrealkv::{Options, Store, Transaction as Tx};
+
 use super::Check;
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::SavePoints;
 use crate::kvs::{Key, Val, Version};
-use anyhow::{Result, bail, ensure};
-use std::ops::Range;
-#[cfg(not(target_family = "wasm"))]
-use std::sync::OnceLock;
-use surrealkv::{Options, Store, Transaction as Tx};
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) static SKV_COMMIT_POOL: OnceLock<affinitypool::Threadpool> = OnceLock::new();

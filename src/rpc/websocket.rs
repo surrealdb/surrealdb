@@ -1,25 +1,14 @@
-use super::RpcState;
-use crate::cnf::{
-	PKG_NAME, PKG_VERSION, WEBSOCKET_PING_FREQUENCY, WEBSOCKET_RESPONSE_BUFFER_SIZE,
-	WEBSOCKET_RESPONSE_CHANNEL_SIZE, WEBSOCKET_RESPONSE_FLUSH_PERIOD,
-};
-use crate::rpc::CONN_CLOSED_ERR;
-use crate::rpc::failure::Failure;
-use crate::rpc::format::WsFormat;
-use crate::rpc::response::{IntoRpcResponse, failure};
-use crate::telemetry;
-use crate::telemetry::metrics::ws::RequestContext;
-use crate::telemetry::traces::rpc::span_for_request;
+use core::fmt;
+use std::sync::Arc;
+use std::time::Duration;
+
 use arc_swap::ArcSwap;
 use axum::extract::ws::close_code::AGAIN;
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
-use core::fmt;
 use futures::stream::FuturesUnordered;
 use futures::{Sink, SinkExt, StreamExt};
 use opentelemetry::Context as TelemetryContext;
 use opentelemetry::trace::FutureExt;
-use std::sync::Arc;
-use std::time::Duration;
 use surrealdb::dbs::Session;
 //use surrealdb::gql::{Pessimistic, SchemaCache};
 use surrealdb::kvs::Datastore;
@@ -34,6 +23,19 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, Span};
 use uuid::Uuid;
+
+use super::RpcState;
+use crate::cnf::{
+	PKG_NAME, PKG_VERSION, WEBSOCKET_PING_FREQUENCY, WEBSOCKET_RESPONSE_BUFFER_SIZE,
+	WEBSOCKET_RESPONSE_CHANNEL_SIZE, WEBSOCKET_RESPONSE_FLUSH_PERIOD,
+};
+use crate::rpc::CONN_CLOSED_ERR;
+use crate::rpc::failure::Failure;
+use crate::rpc::format::WsFormat;
+use crate::rpc::response::{IntoRpcResponse, failure};
+use crate::telemetry;
+use crate::telemetry::metrics::ws::RequestContext;
+use crate::telemetry::traces::rpc::span_for_request;
 
 /// An error string sent when the server is out of memory
 const SERVER_OVERLOADED: &str = "The server is unable to handle the request";

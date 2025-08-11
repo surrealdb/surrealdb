@@ -1,3 +1,10 @@
+use std::fmt;
+use std::ops::Bound;
+use std::str::FromStr as _;
+
+use geo::Point;
+use rust_decimal::Decimal;
+
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::expr::kind::{HasKind, KindLiteral};
 use crate::expr::{Ident, Kind};
@@ -7,11 +14,6 @@ use crate::val::{
 	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Null, Number, Object,
 	Range, RecordId, Regex, Strand, Uuid, Value,
 };
-use geo::Point;
-use rust_decimal::Decimal;
-use std::fmt;
-use std::ops::Bound;
-use std::str::FromStr as _;
 
 #[derive(Clone, Debug)]
 pub enum CastError {

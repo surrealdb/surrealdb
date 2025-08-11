@@ -1,7 +1,3 @@
-use super::args::{Any, Args, Arity, FromArg, Optional};
-use crate::cnf::ID_CHARS;
-use crate::err::Error;
-use crate::val::{Datetime, Duration, Number, Uuid, Value};
 use anyhow::{Result, bail, ensure};
 use chrono::{TimeZone, Utc};
 use nanoid::nanoid;
@@ -9,6 +5,11 @@ use rand::Rng;
 use rand::distributions::{Alphanumeric, DistString};
 use rand::prelude::IteratorRandom;
 use ulid::Ulid;
+
+use super::args::{Any, Args, Arity, FromArg, Optional};
+use crate::cnf::ID_CHARS;
+use crate::err::Error;
+use crate::val::{Datetime, Duration, Number, Uuid, Value};
 
 pub fn rand(_: ()) -> Result<Value> {
 	Ok(rand::random::<f64>().into())
@@ -301,9 +302,10 @@ pub fn uuid((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value> {
 
 pub mod uuid {
 
+	use anyhow::Result;
+
 	use crate::fnc::args::Optional;
 	use crate::val::{Datetime, Uuid, Value};
-	use anyhow::Result;
 
 	pub fn v4(_: ()) -> Result<Value> {
 		Ok(Uuid::new_v4().into())

@@ -1,3 +1,6 @@
+use anyhow::Result;
+use reblessive;
+
 use crate::cnf::INSECURE_FORWARD_ACCESS_ERRORS;
 use crate::ctx::MutableContext;
 use crate::dbs::Session;
@@ -8,8 +11,6 @@ use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::val::{RecordId, Value};
-use anyhow::Result;
-use reblessive;
 
 // Execute the AUTHENTICATE clause for a record access method
 pub async fn authenticate_record(

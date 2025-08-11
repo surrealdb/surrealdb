@@ -1,5 +1,6 @@
-use super::Key;
 use std::ops::Range;
+
+use super::Key;
 
 /// A batch scan result returned from the [`Transaction::batch`] or
 /// [`Transactor::batch`] functions.

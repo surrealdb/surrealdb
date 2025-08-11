@@ -148,23 +148,6 @@
 //! }
 //! ```
 
-use super::resource_to_exprs;
-use crate::Result;
-#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-use crate::api::conn::MlExportConfig;
-use crate::api::conn::{Command, DbResponse, RequestData};
-use crate::api::err::Error;
-use crate::api::{Connect, Response as QueryResponse, Surreal};
-use crate::method::Stats;
-use crate::opt::IntoEndpoint;
-#[cfg(not(target_family = "wasm"))]
-use anyhow::bail;
-use async_channel::Sender;
-#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-use futures::StreamExt;
-#[cfg(not(target_family = "wasm"))]
-use futures::stream::poll_fn;
-use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::mem;
@@ -175,6 +158,15 @@ use std::sync::Arc;
 use std::task::{Poll, ready};
 #[cfg(not(target_family = "wasm"))]
 use std::{future::Future, path::PathBuf};
+
+#[cfg(not(target_family = "wasm"))]
+use anyhow::bail;
+use async_channel::Sender;
+#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
+use futures::StreamExt;
+#[cfg(not(target_family = "wasm"))]
+use futures::stream::poll_fn;
+use indexmap::IndexMap;
 use surrealdb_core::dbs::{Notification, Response, Session, Variables};
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::err::Error as CoreError;
@@ -206,6 +198,16 @@ use tokio::{
 #[cfg(not(target_family = "wasm"))]
 use tokio_util::bytes::BytesMut;
 use uuid::Uuid;
+
+use super::resource_to_exprs;
+use crate::Result;
+#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
+use crate::api::conn::MlExportConfig;
+use crate::api::conn::{Command, DbResponse, RequestData};
+use crate::api::err::Error;
+use crate::api::{Connect, Response as QueryResponse, Surreal};
+use crate::method::Stats;
+use crate::opt::IntoEndpoint;
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod native;

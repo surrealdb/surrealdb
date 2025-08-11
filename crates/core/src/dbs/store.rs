@@ -1,18 +1,20 @@
+use std::cmp::{Ordering, Reverse};
+use std::collections::BinaryHeap;
+use std::mem;
+use std::sync::Arc;
+
+use rand::prelude::SliceRandom;
+use rand::{Rng, thread_rng};
+#[cfg(not(target_family = "wasm"))]
+use rayon::prelude::ParallelSliceMut;
+#[cfg(not(target_family = "wasm"))]
+use tokio::task::spawn_blocking;
+
 use crate::dbs::plan::Explanation;
 #[cfg(not(target_family = "wasm"))]
 use crate::err::Error;
 use crate::expr::order::OrderList;
 use crate::val::Value;
-use rand::prelude::SliceRandom;
-use rand::{Rng, thread_rng};
-#[cfg(not(target_family = "wasm"))]
-use rayon::prelude::ParallelSliceMut;
-use std::cmp::{Ordering, Reverse};
-use std::collections::BinaryHeap;
-use std::mem;
-use std::sync::Arc;
-#[cfg(not(target_family = "wasm"))]
-use tokio::task::spawn_blocking;
 
 #[derive(Default)]
 pub(super) struct MemoryCollector(Vec<Value>);

@@ -1,9 +1,10 @@
+use std::error::Error as StdError;
+
 use axum::Json;
 use axum::response::{IntoResponse, Response};
 use http::{HeaderName, StatusCode};
 use opentelemetry::global::Error as OpentelemetryError;
 use serde::{Serialize, Serializer};
-use std::error::Error as StdError;
 use surrealdb_core::api::err::ApiError;
 use thiserror::Error;
 

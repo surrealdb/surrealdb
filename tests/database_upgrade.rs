@@ -7,9 +7,9 @@ mod common;
 
 #[cfg(all(docker, feature = "storage-rocksdb"))]
 mod database_upgrade {
-	use super::common::docker::DockerContainer;
 	use std::net::Ipv4Addr;
 	use std::time::Duration;
+
 	use surrealdb::engine::any::{Any, connect};
 	use surrealdb::opt::auth::Root;
 	use surrealdb::{Connection, Surreal, Value};
@@ -18,6 +18,8 @@ mod database_upgrade {
 	use tokio::time::{sleep, timeout};
 	use tracing::{error, info};
 	use ulid::Ulid;
+
+	use super::common::docker::DockerContainer;
 
 	const NS: &str = "test";
 	const DB: &str = "test";

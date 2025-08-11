@@ -1,8 +1,10 @@
-use crate::kvs::KVKey;
-use anyhow::Result;
-use revision::Revisioned;
 use std::ops::Range;
 use std::sync::Arc;
+
+use anyhow::Result;
+use revision::Revisioned;
+
+use crate::kvs::KVKey;
 
 /// Advances a key to the next value,
 /// can be used to skip over a certain key.

@@ -1,20 +1,22 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
-use crate::err::Error;
-use crate::expr::fmt::Pretty;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{self, Ident, Kind};
-use crate::kvs::impl_kv_value_revisioned;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::{self, Write};
+use std::ops::Bound;
+
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use geo::Point;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
-use std::fmt::{self, Write};
-use std::ops::Bound;
+
+use crate::err::Error;
+use crate::expr::fmt::Pretty;
+use crate::expr::statements::info::InfoStructure;
+use crate::expr::{self, Ident, Kind};
+use crate::kvs::impl_kv_value_revisioned;
 
 pub mod array;
 pub mod bytes;
@@ -1027,9 +1029,10 @@ impl FromIterator<(String, Value)> for Value {
 
 #[cfg(test)]
 mod tests {
+	use chrono::TimeZone;
+
 	use super::*;
 	use crate::syn;
-	use chrono::TimeZone;
 
 	#[test]
 	fn check_none() {

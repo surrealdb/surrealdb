@@ -1,9 +1,10 @@
 mod helpers;
-use crate::helpers::Test;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb_core::syn;
+
+use crate::helpers::Test;
 
 #[tokio::test]
 async fn strict_typing_inline() -> Result<()> {

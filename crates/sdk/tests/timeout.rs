@@ -1,6 +1,7 @@
 mod helpers;
-use helpers::{Test, new_ds};
 use std::time::{Duration, Instant};
+
+use helpers::{Test, new_ds};
 use surrealdb::Result;
 use surrealdb_core::dbs::Session;
 

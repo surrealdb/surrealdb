@@ -1,10 +1,12 @@
+use std::sync::Arc;
+
+use tokio::sync::Semaphore;
+use uuid::Uuid;
+
 use super::{Data, Method, RpcError, RpcProtocolV1, RpcProtocolV2};
 use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::val::Array;
-use std::sync::Arc;
-use tokio::sync::Semaphore;
-use uuid::Uuid;
 
 //#[cfg(not(target_family = "wasm"))]
 //use crate::gql::SchemaCache;

@@ -1,14 +1,16 @@
+use std::borrow::Cow;
+use std::future::IntoFuture;
+use std::marker::PhantomData;
+
+use serde::de::DeserializeOwned;
+use serde_content::Value as Content;
+
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Result};
 use crate::error::Api;
 use crate::method::OnceLockExt;
 use crate::{Surreal, api};
-use serde::de::DeserializeOwned;
-use serde_content::Value as Content;
-use std::borrow::Cow;
-use std::future::IntoFuture;
-use std::marker::PhantomData;
 
 /// A signin future
 #[derive(Debug)]

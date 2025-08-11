@@ -1,11 +1,13 @@
-use crate::syn;
+use std::collections::BTreeMap;
+use std::iter::once;
+use std::ops::Bound;
+
 use ciborium::Value as CborValue;
 use geo::{LineString, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use rust_decimal::Decimal;
-use std::collections::BTreeMap;
-use std::iter::once;
-use std::ops::Bound;
+
+use crate::syn;
 
 use crate::val::{
 	self, Array, DecimalExt, Geometry, Number, Object, Range, RecordIdKey, RecordIdKeyRange, Table,

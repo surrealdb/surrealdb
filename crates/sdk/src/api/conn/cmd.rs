@@ -1,14 +1,12 @@
-use super::MlExportConfig;
-use crate::Result;
-use crate::opt::Resource;
+use std::borrow::Cow;
+use std::io::Read;
+use std::path::PathBuf;
+
 use async_channel::Sender;
 use bincode::Options;
 use revision::Revisioned;
 use serde::Serialize;
 use serde::ser::SerializeMap as _;
-use std::borrow::Cow;
-use std::io::Read;
-use std::path::PathBuf;
 use surrealdb_core::dbs::Notification;
 use surrealdb_core::expr::LogicalPlan;
 use surrealdb_core::kvs::export::Config as DbExportConfig;
@@ -17,6 +15,10 @@ use surrealdb_core::val::Table as CoreTable;
 #[allow(unused_imports)]
 use surrealdb_core::val::{Array as CoreArray, Object as CoreObject, Value as CoreValue};
 use uuid::Uuid;
+
+use super::MlExportConfig;
+use crate::Result;
+use crate::opt::Resource;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -139,9 +141,10 @@ pub(crate) enum Command {
 impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
-		use crate::engine::resource_to_exprs;
 		use surrealdb_core::expr::{Data, Output, UpdateStatement, UpsertStatement};
 		use surrealdb_core::val::{self, Strand};
+
+		use crate::engine::resource_to_exprs;
 
 		let res = match self {
 			Command::Use {
@@ -771,11 +774,13 @@ impl Revisioned for RouterRequest {
 
 #[cfg(test)]
 mod test {
-	use super::RouterRequest;
-	use revision::Revisioned;
 	use std::io::Cursor;
+
+	use revision::Revisioned;
 	use surrealdb_core::val::{Number, Value};
 	use uuid::Uuid;
+
+	use super::RouterRequest;
 
 	fn assert_converts<S, D, I>(req: &RouterRequest, s: S, d: D)
 	where

@@ -1,9 +1,10 @@
-use crate::sdb_benches::sdk::Record;
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
 use surrealdb_core::val::RecordIdKey;
 use tokio::runtime::Runtime;
 use tokio::task::JoinSet;
+
+use crate::sdb_benches::sdk::Record;
 
 pub struct Create {
 	runtime: &'static Runtime,

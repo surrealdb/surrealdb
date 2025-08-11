@@ -1,15 +1,17 @@
+use std::cmp::Ordering;
+use std::fmt;
+use std::ops::Bound;
+
+use nanoid::nanoid;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use ulid::Ulid;
+
 use crate::cnf::ID_CHARS;
 use crate::expr::escape::EscapeRid;
 use crate::expr::{self, Ident};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, Number, Object, Range, Strand, Uuid, Value};
-use nanoid::nanoid;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::fmt;
-use std::ops::Bound;
-use ulid::Ulid;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]

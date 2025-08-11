@@ -1,7 +1,9 @@
 //! Store and chunked layers of an HNSW index
-use crate::kvs::KVKey;
-use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+
+use serde::{Deserialize, Serialize};
+
+use crate::kvs::KVKey;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Hl<'a> {

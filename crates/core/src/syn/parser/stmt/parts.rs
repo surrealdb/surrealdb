@@ -1,5 +1,7 @@
 //! Contains parsing code for smaller common parts of statements.
 
+use reblessive::Stk;
+
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::index::{Distance, VectorType};
 use crate::sql::reference::{Reference, ReferenceDeleteStrategy};
@@ -12,7 +14,6 @@ use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{DistanceKind, Span, TokenKind, VectorTypeKind, t};
 use crate::val::Duration;
-use reblessive::Stk;
 
 pub(crate) enum MissingKind {
 	Split,

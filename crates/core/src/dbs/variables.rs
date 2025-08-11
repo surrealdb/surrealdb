@@ -1,6 +1,8 @@
-use crate::val::{Object, Value};
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+
+use crate::val::{Object, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[repr(transparent)]

@@ -1,3 +1,8 @@
+use std::cmp::Ordering;
+use std::ops::Bound;
+
+use reblessive::Stk;
+
 use super::{ParseResult, Parser};
 use crate::sql::graph::GraphSubject;
 use crate::sql::{Ident, Param, RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit};
@@ -6,9 +11,6 @@ use crate::syn::lexer::compound;
 use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
 use crate::syn::token::{Glued, TokenKind, t};
 use crate::val::Strand;
-use reblessive::Stk;
-use std::cmp::Ordering;
-use std::ops::Bound;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_record_string(
@@ -353,11 +355,12 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
+	use reblessive::Stack;
+
 	use super::*;
 	use crate::sql::{Expr, Literal};
 	use crate::syn::parser::ParserSettings;
 	use crate::{sql, syn};
-	use reblessive::Stack;
 
 	fn thing(i: &str) -> ParseResult<RecordIdLit> {
 		let mut parser = Parser::new(i.as_bytes());

@@ -1,3 +1,12 @@
+use std::collections::BTreeMap;
+use std::fmt::{self, Write as _};
+use std::hash::{Hash, Hasher};
+
+use reblessive::tree::Stk;
+use revision::revisioned;
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -8,13 +17,6 @@ use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, Regex,
 	Strand, Uuid, Value,
 };
-use reblessive::tree::Stk;
-use revision::revisioned;
-use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::fmt::{self, Write as _};
-use std::hash::{Hash, Hasher};
 
 /// A literal value, should be computed to get an actual value.
 ///

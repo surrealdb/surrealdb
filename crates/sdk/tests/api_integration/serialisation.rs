@@ -1,7 +1,8 @@
-use super::CreateDb;
-use crate::api_integration::NS;
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
+
+use super::CreateDb;
+use crate::api_integration::NS;
 
 pub async fn serialise_uuid(new_db: impl CreateDb) {
 	use uuid::Uuid;

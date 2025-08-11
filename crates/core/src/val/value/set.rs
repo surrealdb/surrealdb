@@ -1,12 +1,14 @@
+use std::collections::btree_map::Entry;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::exe::try_join_all_buffered;
 use crate::expr::part::Part;
 use crate::expr::{Expr, FlowResultExt as _, Literal};
 use crate::val::{Object, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::collections::btree_map::Entry;
 
 impl Value {
 	/// Asynchronous method for setting a field on a `Value`

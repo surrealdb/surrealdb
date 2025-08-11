@@ -1,15 +1,17 @@
+use std::borrow::Cow;
+use std::future::IntoFuture;
+use std::marker::PhantomData;
+
+use serde::de::DeserializeOwned;
+use serde_content::Value as Content;
+use uuid::Uuid;
+
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::{PatchOp, Resource};
 use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
 use crate::{Surreal, Value};
-use serde::de::DeserializeOwned;
-use serde_content::Value as Content;
-use std::borrow::Cow;
-use std::future::IntoFuture;
-use std::marker::PhantomData;
-use uuid::Uuid;
 
 /// A patch future
 #[derive(Debug)]

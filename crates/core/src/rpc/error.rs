@@ -1,5 +1,6 @@
-use crate::err;
 use thiserror::Error;
+
+use crate::err;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]

@@ -1,10 +1,12 @@
+use std::str;
+
+use anyhow::Result;
+
 use crate::key::change;
 use crate::key::debug::Sprintable;
 use crate::kvs::Transaction;
 use crate::kvs::tasklease::LeaseHandler;
 use crate::vs::VersionStamp;
-use anyhow::Result;
-use std::str;
 
 // gc_all_at deletes all change feed entries that become stale at the given
 // timestamp.

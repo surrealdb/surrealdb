@@ -1,3 +1,9 @@
+use std::mem;
+use std::num::ParseIntError;
+use std::str::FromStr;
+
+use rust_decimal::Decimal;
+
 use super::TokenValue;
 use crate::syn::error::{bail, syntax_error};
 use crate::syn::lexer::compound::{self, NumberKind, Numeric};
@@ -5,10 +11,6 @@ use crate::syn::parser::mac::unexpected;
 use crate::syn::parser::{GluedValue, ParseResult, Parser};
 use crate::syn::token::{self, TokenKind, t};
 use crate::val::DecimalExt as _;
-use rust_decimal::Decimal;
-use std::mem;
-use std::num::ParseIntError;
-use std::str::FromStr;
 
 /// Generic integer parsing method,
 /// works for all unsigned integers.

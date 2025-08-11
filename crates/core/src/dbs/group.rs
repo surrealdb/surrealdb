@@ -1,3 +1,9 @@
+use std::borrow::Cow;
+use std::collections::{BTreeMap, HashMap};
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::plan::Explanation;
 use crate::dbs::store::MemoryCollector;
@@ -5,10 +11,6 @@ use crate::dbs::{Options, Statement};
 use crate::expr::{Expr, Field, FlowResultExt as _, Function, FunctionCall, Idiom};
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Array, TryAdd, TryFloatDiv, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
 
 pub(super) struct GroupsCollector {
 	base: Vec<Aggregator>,

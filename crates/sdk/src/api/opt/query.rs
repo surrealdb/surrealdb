@@ -1,16 +1,10 @@
-use super::Raw;
-use crate::api::err::Error;
-use crate::api::{OnceLockExt, Response as QueryResponse, Result};
-use crate::method::query::ValidQuery;
-use crate::method::{self, Stats, Stream};
-use crate::value::Notification;
-use crate::{Connection, Surreal, Value, api};
+use std::marker::PhantomData;
+use std::mem;
+
 use anyhow::bail;
 use futures::future::Either;
 use futures::stream::select_all;
 use serde::de::DeserializeOwned;
-use std::marker::PhantomData;
-use std::mem;
 use surrealdb_core::expr::{
 	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, Expr, IfelseStatement,
 	InfoStatement, InsertStatement, KillStatement, LiveStatement, OptionStatement, OutputStatement,
@@ -18,6 +12,14 @@ use surrealdb_core::expr::{
 };
 use surrealdb_core::sql::Ast;
 use surrealdb_core::val;
+
+use super::Raw;
+use crate::api::err::Error;
+use crate::api::{OnceLockExt, Response as QueryResponse, Result};
+use crate::method::query::ValidQuery;
+use crate::method::{self, Stats, Stream};
+use crate::value::Notification;
+use crate::{Connection, Surreal, Value, api};
 
 pub struct Query(pub(crate) Result<ValidQuery>);
 /// A trait for converting inputs into SQL statements

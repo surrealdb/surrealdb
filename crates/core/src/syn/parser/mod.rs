@@ -63,6 +63,9 @@
 //! leading token of a compound token it will result in the 'default' compound
 //! token.
 
+use bytes::BytesMut;
+use reblessive::{Stack, Stk};
+
 use self::token_buffer::TokenBuffer;
 use crate::sql;
 use crate::syn::error::{SyntaxError, bail};
@@ -70,8 +73,6 @@ use crate::syn::lexer::Lexer;
 use crate::syn::lexer::compound::NumberKind;
 use crate::syn::token::{Span, Token, TokenKind, t};
 use crate::val::{Bytes, Datetime, Duration, File, Strand, Uuid};
-use bytes::BytesMut;
-use reblessive::{Stack, Stk};
 
 mod basic;
 mod builtin;
@@ -89,8 +90,9 @@ mod token;
 mod token_buffer;
 mod value;
 
-use super::error::{RenderedError, syntax_error};
 pub(crate) use mac::{enter_object_recursion, enter_query_recursion, unexpected};
+
+use super::error::{RenderedError, syntax_error};
 
 #[cfg(test)]
 pub mod test;

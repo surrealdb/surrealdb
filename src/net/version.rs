@@ -1,10 +1,11 @@
-use super::AppState;
-use crate::cnf::{PKG_NAME, PKG_VERSION};
-use crate::net::error::Error as NetError;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Extension, Router};
 use surrealdb::dbs::capabilities::RouteTarget;
+
+use super::AppState;
+use crate::cnf::{PKG_NAME, PKG_VERSION};
+use crate::net::error::Error as NetError;
 
 pub(super) fn router<S>() -> Router<S>
 where

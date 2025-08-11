@@ -1,10 +1,10 @@
-use crate::cli::CF;
-use anyhow::Result;
-use clap::Args;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+
+use anyhow::Result;
+use clap::Args;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::{
 	ArbitraryQueryTarget, Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
@@ -12,6 +12,8 @@ use surrealdb::dbs::capabilities::{
 };
 use surrealdb::kvs::Datastore;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
+
+use crate::cli::CF;
 
 const TARGET: &str = "surreal::dbs";
 
@@ -642,8 +644,8 @@ pub async fn fix(path: String) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use std::str::FromStr;
+
 	use surrealdb::iam::verify::verify_root_creds;
 	use surrealdb::kvs::LockType::*;
 	use surrealdb::kvs::TransactionType::*;
@@ -651,6 +653,8 @@ mod tests {
 	use test_log::test;
 	use wiremock::matchers::{method, path};
 	use wiremock::{Mock, MockServer, ResponseTemplate};
+
+	use super::*;
 
 	#[test(tokio::test)]
 	async fn test_setup_superuser() {

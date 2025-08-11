@@ -1,9 +1,11 @@
 pub(super) mod tower_layer;
 
-use self::tower_layer::HttpCallMetricTracker;
+use std::sync::LazyLock;
+
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram, Meter, MetricsError, UpDownCounter};
-use std::sync::LazyLock;
+
+use self::tower_layer::HttpCallMetricTracker;
 
 static METER: LazyLock<Meter> = LazyLock::new(|| global::meter("surrealdb.http"));
 

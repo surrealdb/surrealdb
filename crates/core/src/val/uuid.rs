@@ -1,12 +1,14 @@
-use super::Datetime;
-use crate::expr::escape::QuoteStr;
-use crate::val::Strand;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 use std::str::FromStr;
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::Datetime;
+use crate::expr::escape::QuoteStr;
+use crate::val::Strand;
 
 #[revisioned(revision = 1)]
 #[derive(

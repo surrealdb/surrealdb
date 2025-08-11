@@ -1,9 +1,10 @@
 #![cfg(feature = "kv-surrealkv")]
 
-use super::CreateDb;
-use crate::api_integration::NS;
 use surrealdb::Value;
 use ulid::Ulid;
+
+use super::CreateDb;
+use crate::api_integration::NS;
 
 pub async fn select_with_version(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;

@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use uuid::Uuid;
+
 use super::CreateDs;
 use crate::dbs::Session;
 use crate::dbs::node::Timestamp;
@@ -5,8 +9,6 @@ use crate::kvs::KVKey;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::kvs::clock::{FakeClock, SizedClock};
-use std::sync::Arc;
-use uuid::Uuid;
 
 // Timestamp to versionstamp tests
 // This translation mechanism is currently used by the garbage collector to

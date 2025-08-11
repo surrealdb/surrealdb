@@ -11,14 +11,13 @@
 // Tests for running live queries
 // Supported by the storage engines and the WS protocol
 
-use super::{CreateDb, NS};
-use crate::api_integration::ApiRecordId;
+use std::sync::Arc;
+use std::time::Duration;
+
 use anyhow::Result;
 use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::sync::Arc;
-use std::time::Duration;
 use surrealdb::method::QueryStream;
 use surrealdb::opt::Resource;
 use surrealdb::{Action, Notification, RecordId, Value};
@@ -26,6 +25,9 @@ use surrealdb_core::val;
 use tokio::sync::RwLock;
 use tracing::info;
 use ulid::Ulid;
+
+use super::{CreateDb, NS};
+use crate::api_integration::ApiRecordId;
 
 const LQ_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_NOTIFICATIONS: usize = 100;

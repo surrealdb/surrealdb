@@ -1,9 +1,3 @@
-use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
-use crate::cli::abstraction::{
-	AuthArguments, DatabaseConnectionArguments, LevelSelectionArguments,
-};
-use crate::cnf::PKG_VERSION;
-use crate::dbs::DbsCapabilities;
 use anyhow::{Result, anyhow};
 use clap::Args;
 use futures::StreamExt;
@@ -19,6 +13,13 @@ use surrealdb::opt::Config;
 use surrealdb::{Notification, Response, Value};
 use surrealdb_core::sql::{Expr, Param, TopLevelExpr};
 use surrealdb_core::val;
+
+use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
+use crate::cli::abstraction::{
+	AuthArguments, DatabaseConnectionArguments, LevelSelectionArguments,
+};
+use crate::cnf::PKG_VERSION;
+use crate::dbs::DbsCapabilities;
 
 #[derive(Args, Debug)]
 pub struct SqlCommandArguments {

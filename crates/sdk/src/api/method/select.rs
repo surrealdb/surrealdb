@@ -1,3 +1,10 @@
+use std::borrow::Cow;
+use std::future::IntoFuture;
+use std::marker::PhantomData;
+
+use serde::de::DeserializeOwned;
+use uuid::Uuid;
+
 use super::transaction::WithTransaction;
 use crate::api::conn::Command;
 use crate::api::method::{BoxFuture, OnceLockExt};
@@ -6,11 +13,6 @@ use crate::api::{Connection, Result};
 use crate::method::Live;
 use crate::opt::KeyRange;
 use crate::{Surreal, Value};
-use serde::de::DeserializeOwned;
-use std::borrow::Cow;
-use std::future::IntoFuture;
-use std::marker::PhantomData;
-use uuid::Uuid;
 
 /// A select future
 #[derive(Debug)]

@@ -34,11 +34,13 @@
 //!   contention
 //! - **Scalability**: Multiple nodes can index documents concurrently
 //! - **Consistency**: Ensures unique document IDs across the entire cluster
+use std::ops::Range;
+
+use serde::{Deserialize, Serialize};
+
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::kvs::sequences::BatchValue;
-use serde::{Deserialize, Serialize};
-use std::ops::Range;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Ib<'a> {

@@ -1,10 +1,3 @@
-use super::AppState;
-use super::client_ip::ExtractClientIP;
-use super::headers::{
-	SurrealAuthDatabase, SurrealAuthNamespace, SurrealDatabase, SurrealId, SurrealNamespace,
-	parse_typed_header,
-};
-use crate::net::error::Error as NetError;
 use anyhow::{Result, bail};
 use axum::body::Body;
 use axum::{Extension, RequestPartsExt};
@@ -19,6 +12,14 @@ use surrealdb::dbs::Session;
 use surrealdb::iam::verify::{basic, token};
 use tower_http::auth::AsyncAuthorizeRequest;
 use uuid::Uuid;
+
+use super::AppState;
+use super::client_ip::ExtractClientIP;
+use super::headers::{
+	SurrealAuthDatabase, SurrealAuthNamespace, SurrealDatabase, SurrealId, SurrealNamespace,
+	parse_typed_header,
+};
+use crate::net::error::Error as NetError;
 
 ///
 /// SurrealAuth is a tower layer that implements the AsyncAuthorizeRequest

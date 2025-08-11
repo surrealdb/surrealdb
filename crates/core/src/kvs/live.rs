@@ -1,6 +1,7 @@
-use crate::kvs::impl_kv_value_revisioned;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+
+use crate::kvs::impl_kv_value_revisioned;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

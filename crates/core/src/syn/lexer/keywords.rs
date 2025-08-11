@@ -1,8 +1,9 @@
+use phf::{phf_map, phf_set};
+use unicase::UniCase;
+
 use crate::sql::Algorithm;
 use crate::sql::language::Language;
 use crate::syn::token::{DistanceKind, Keyword, TokenKind, VectorTypeKind};
-use phf::{phf_map, phf_set};
-use unicase::UniCase;
 
 /// A set of keywords which might in some contexts are dissallowed as an
 /// identifier.

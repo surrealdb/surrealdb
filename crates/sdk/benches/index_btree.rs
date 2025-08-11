@@ -1,8 +1,9 @@
+use std::fmt::Debug;
+use std::time::Duration;
+
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
-use std::fmt::Debug;
-use std::time::Duration;
 use surrealdb::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
 use surrealdb::idx::trees::btree::{BState, BTree, Payload};
 use surrealdb::idx::trees::store::cache::TreeCache;

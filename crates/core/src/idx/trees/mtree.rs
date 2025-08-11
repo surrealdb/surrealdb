@@ -1,3 +1,17 @@
+use std::collections::hash_map::Entry;
+use std::collections::{BinaryHeap, VecDeque};
+use std::fmt::{Debug, Display, Formatter};
+use std::io::Cursor;
+use std::sync::Arc;
+
+use ahash::{HashMap, HashMapExt, HashSet};
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::{Revisioned, revisioned};
+use roaring::RoaringTreemap;
+use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
+
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::expr::index::{Distance, MTreeParams, VectorType};
@@ -12,18 +26,6 @@ use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider, T
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val};
 use crate::val::{Number, Object, RecordId, Value};
-use ahash::{HashMap, HashMapExt, HashSet};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use revision::{Revisioned, revisioned};
-use roaring::RoaringTreemap;
-use serde::{Deserialize, Serialize};
-use std::collections::hash_map::Entry;
-use std::collections::{BinaryHeap, VecDeque};
-use std::fmt::{Debug, Display, Formatter};
-use std::io::Cursor;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub struct MTreeIndex {
 	ikb: IndexKeyBase,
@@ -1475,6 +1477,13 @@ impl KVValue for MState {
 
 #[cfg(test)]
 mod tests {
+	use std::collections::VecDeque;
+
+	use ahash::{HashMap, HashMapExt, HashSet};
+	use anyhow::Result;
+	use reblessive::tree::Stk;
+	use test_log::test;
+
 	use crate::ctx::{Context, MutableContext};
 	use crate::expr::index::{Distance, VectorType};
 	use crate::idx::IndexKeyBase;
@@ -1487,11 +1496,6 @@ mod tests {
 	use crate::idx::trees::vector::SharedVector;
 	use crate::kvs::LockType::*;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
-	use ahash::{HashMap, HashMapExt, HashSet};
-	use anyhow::Result;
-	use reblessive::tree::Stk;
-	use std::collections::VecDeque;
-	use test_log::test;
 
 	async fn new_operation(
 		ds: &Datastore,

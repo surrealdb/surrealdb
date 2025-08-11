@@ -1,3 +1,5 @@
+use reblessive::Stk;
+
 use super::basic::NumberToken;
 use super::mac::pop_glued;
 use super::{ParseResult, Parser};
@@ -11,7 +13,6 @@ use crate::syn::parser::enter_object_recursion;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::token::{Glued, Span, TokenKind, t};
 use crate::val::{Duration, Strand};
-use reblessive::Stk;
 
 impl Parser<'_> {
 	pub(super) fn parse_number_like_prime(&mut self) -> ParseResult<Expr> {

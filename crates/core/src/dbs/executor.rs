@@ -1,3 +1,18 @@
+use std::fmt::Display;
+use std::pin::{Pin, pin};
+use std::sync::Arc;
+use std::time::Duration;
+
+use anyhow::{Result, anyhow, bail};
+use futures::{Stream, StreamExt, stream};
+use reblessive::TreeStack;
+#[cfg(not(target_family = "wasm"))]
+use tokio::spawn;
+use tracing::{instrument, warn};
+use trice::Instant;
+#[cfg(target_family = "wasm")]
+use wasm_bindgen_futures::spawn_local as spawn;
+
 use crate::ctx::Context;
 use crate::ctx::reason::Reason;
 use crate::dbs::response::Response;
@@ -12,19 +27,6 @@ use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 use crate::sql::{self, Ast};
 use crate::val::Value;
 use crate::{err, expr};
-use anyhow::{Result, anyhow, bail};
-use futures::{Stream, StreamExt, stream};
-use reblessive::TreeStack;
-use std::fmt::Display;
-use std::pin::{Pin, pin};
-use std::sync::Arc;
-use std::time::Duration;
-#[cfg(not(target_family = "wasm"))]
-use tokio::spawn;
-use tracing::{instrument, warn};
-use trice::Instant;
-#[cfg(target_family = "wasm")]
-use wasm_bindgen_futures::spawn_local as spawn;
 
 const TARGET: &str = "surrealdb::core::dbs";
 

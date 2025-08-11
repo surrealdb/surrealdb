@@ -1,3 +1,6 @@
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::{Force, Options, Statement};
 use crate::doc::{CursorDoc, Document};
@@ -14,8 +17,6 @@ use crate::key;
 use crate::kvs::ConsumeResult;
 use crate::kvs::TransactionType;
 use crate::val::{Array, RecordId, Value};
-use anyhow::{Result, bail};
-use reblessive::tree::Stk;
 
 impl Document {
 	pub(super) async fn store_index_data(

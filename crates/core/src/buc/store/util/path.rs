@@ -1,7 +1,8 @@
-use crate::val::Value;
 use core::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
+
+use crate::val::Value;
 
 /// Path represents a normalized file path in the object store.
 #[derive(Clone, Debug)]

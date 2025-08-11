@@ -1,10 +1,12 @@
+use std::sync::Arc;
+
+use uuid::Uuid;
+
 use super::CreateDs;
 use crate::dbs::node::Timestamp;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::kvs::clock::{FakeClock, SizedClock};
-use std::sync::Arc;
-use uuid::Uuid;
 
 pub async fn multiwriter_different_keys(new_ds: impl CreateDs) {
 	// Create a new datastore

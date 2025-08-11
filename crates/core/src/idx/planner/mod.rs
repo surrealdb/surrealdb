@@ -6,6 +6,13 @@ pub(crate) mod plan;
 pub(in crate::idx) mod rewriter;
 pub(in crate::idx) mod tree;
 
+use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
+use std::sync::atomic::{self, AtomicU8};
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::err::Error;
@@ -17,11 +24,6 @@ use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::knn::KnnBruteForceResults;
 use crate::idx::planner::plan::{Plan, PlanBuilder, PlanBuilderParameters};
 use crate::idx::planner::tree::Tree;
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
-use std::sync::atomic::{self, AtomicU8};
 
 /// The goal of this structure is to cache parameters so they can be easily
 /// passed from one function to the other, so we don't pass too many arguments.

@@ -1,12 +1,13 @@
 #![cfg(test)]
 
-use anyhow::ensure;
-use regex::Regex;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
 use std::sync::Arc;
 use std::thread::Builder;
+
+use anyhow::ensure;
+use regex::Regex;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::Capabilities;

@@ -1,14 +1,15 @@
 pub mod rpc;
 
-use crate::cli::validator::parser::tracing::CustomFilter;
-use crate::cnf::{TELEMETRY_DISABLE_TRACING, TELEMETRY_PROVIDER};
-use crate::telemetry::OTEL_DEFAULT_RESOURCE;
 use anyhow::Result;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_sdk::trace::{Config, TracerProvider};
 use tracing::Subscriber;
 use tracing_subscriber::Layer;
+
+use crate::cli::validator::parser::tracing::CustomFilter;
+use crate::cnf::{TELEMETRY_DISABLE_TRACING, TELEMETRY_PROVIDER};
+use crate::telemetry::OTEL_DEFAULT_RESOURCE;
 
 // Returns a tracer provider based on the SURREAL_TELEMETRY_PROVIDER environment
 // variable

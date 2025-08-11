@@ -8,6 +8,7 @@ use surrealdb_core::val::Value;
 mod util;
 
 use std::collections::HashMap;
+
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::iam::Role;

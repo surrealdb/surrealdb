@@ -1,11 +1,13 @@
-use super::classes::Blob;
-use crate::fnc::script::fetch::RequestError;
-use crate::fnc::script::fetch::stream::ReadableStream;
+use std::cell::{Cell, RefCell};
+use std::result::Result as StdResult;
+
 use bytes::{Bytes, BytesMut};
 use futures::{Stream, TryStreamExt, future};
 use js::{ArrayBuffer, Class, Ctx, Error, Exception, FromJs, Result, Type, TypedArray, Value};
-use std::cell::{Cell, RefCell};
-use std::result::Result as StdResult;
+
+use super::classes::Blob;
+use crate::fnc::script::fetch::RequestError;
+use crate::fnc::script::fetch::stream::ReadableStream;
 
 pub type StreamItem = StdResult<Bytes, RequestError>;
 

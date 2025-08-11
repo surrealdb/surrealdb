@@ -4,6 +4,12 @@ pub(crate) mod index;
 pub mod planner;
 pub mod trees;
 
+use std::ops::Range;
+use std::sync::Arc;
+
+use anyhow::Result;
+use uuid::Uuid;
+
 use crate::idx::docids::DocId;
 use crate::idx::ft::search::terms::TermId;
 use crate::idx::trees::hnsw::ElementId;
@@ -42,10 +48,6 @@ use crate::key::index::vm::{Vm, VmRoot};
 use crate::key::root::ic::Ic;
 use crate::kvs::Key;
 use crate::val::RecordIdKey;
-use anyhow::Result;
-use std::ops::Range;
-use std::sync::Arc;
-use uuid::Uuid;
 
 #[derive(Debug, Clone, Default, Hash, PartialEq, Eq)]
 pub struct IndexKeyBase(Arc<Inner>);

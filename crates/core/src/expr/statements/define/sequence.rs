@@ -1,3 +1,9 @@
+use std::fmt::{self, Display};
+
+use anyhow::{Result, bail};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use super::DefineKind;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -8,10 +14,6 @@ use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
 use crate::kvs::impl_kv_value_revisioned;
-use anyhow::{Result, bail};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]

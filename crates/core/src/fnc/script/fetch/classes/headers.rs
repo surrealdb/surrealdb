@@ -1,10 +1,11 @@
 //! Headers class implementation
 
+use std::str::FromStr;
+
 use js::class::Trace;
 use js::prelude::{Coerced, List};
 use js::{Array, Ctx, Exception, JsLifetime, Result, Value};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use std::str::FromStr;
 
 #[derive(Clone, Trace, JsLifetime)]
 #[js::class]
@@ -256,8 +257,9 @@ impl Headers {
 
 #[cfg(test)]
 mod test {
-	use crate::fnc::script::fetch::test::create_test_context;
 	use js::CatchResultExt;
+
+	use crate::fnc::script::fetch::test::create_test_context;
 
 	#[tokio::test]
 	async fn basic_headers_use() {

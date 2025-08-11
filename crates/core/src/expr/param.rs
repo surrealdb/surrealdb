@@ -1,3 +1,11 @@
+use std::ops::Deref;
+use std::{fmt, str};
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use super::FlowResultExt as _;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -8,12 +16,6 @@ use crate::expr::escape::EscapeKwFreeIdent;
 use crate::expr::ident::Ident;
 use crate::iam::Action;
 use crate::val::{Strand, Value};
-use anyhow::{Result, bail};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::ops::Deref;
-use std::{fmt, str};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]

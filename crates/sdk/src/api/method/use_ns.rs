@@ -1,10 +1,11 @@
+use std::borrow::Cow;
+use std::future::IntoFuture;
+
 use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::method::{BoxFuture, UseDb};
 use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
-use std::borrow::Cow;
-use std::future::IntoFuture;
 
 /// Stores the namespace to use
 #[derive(Debug)]

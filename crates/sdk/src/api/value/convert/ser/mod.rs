@@ -1,13 +1,15 @@
 mod r#enum;
 mod r#struct;
 
-use crate::error::Api;
+use std::borrow::Cow;
+
 use anyhow::Result;
 use castaway::match_type;
 use serde::ser::Serialize;
 use serde_content::{Number, Serializer, Unexpected, Value as Content};
-use std::borrow::Cow;
 use surrealdb_core::val;
+
+use crate::error::Api;
 
 //type Content = serde_content::Value<'static>;
 
@@ -111,12 +113,14 @@ fn object_from_content_struct(map: Vec<(Cow<'static, str>, Content)>) -> Result<
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use ::serde::Serialize;
 	use std::collections::BTreeMap;
 	use std::ops::Bound;
+
+	use ::serde::Serialize;
 	use surrealdb_core::val::Regex;
 	use surrealdb_core::{map, syn};
+
+	use super::*;
 
 	#[test]
 	fn value_none() {

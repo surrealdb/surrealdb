@@ -9,10 +9,11 @@
 //! index that needs to be compacted. The compaction thread processes these
 //! entries at regular intervals defined by the `index_compaction_interval`
 //! configuration option.
-use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
 
 /// Represents an entry in the index compaction queue
 ///

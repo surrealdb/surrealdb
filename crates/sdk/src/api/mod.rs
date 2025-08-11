@@ -1,15 +1,17 @@
 //! Functionality for connecting to local and remote databases
 
-use crate::Result;
-use anyhow::ensure;
-use method::BoxFuture;
-use semver::{BuildMetadata, Version, VersionReq};
 use std::fmt;
 use std::fmt::Debug;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::sync::{Arc, OnceLock};
+
+use anyhow::ensure;
+use method::BoxFuture;
+use semver::{BuildMetadata, Version, VersionReq};
 use tokio::sync::watch;
+
+use crate::Result;
 
 macro_rules! transparent_wrapper{
 	(
@@ -124,10 +126,11 @@ pub mod value;
 
 mod conn;
 
+pub use method::query::Response;
+
 use self::conn::Router;
 use self::err::Error;
 use self::opt::{Endpoint, EndpointKind, WaitFor};
-pub use method::query::Response;
 
 // Channel for waiters
 type Waiter = (watch::Sender<Option<WaitFor>>, watch::Receiver<Option<WaitFor>>);

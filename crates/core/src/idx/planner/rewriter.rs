@@ -1,3 +1,5 @@
+use std::ops::Bound;
+
 use crate::expr::literal::ObjectEntry;
 use crate::expr::part::DestructurePart;
 use crate::expr::{
@@ -5,7 +7,6 @@ use crate::expr::{
 	RecordIdLit,
 };
 use crate::idx::planner::executor::KnnExpressions;
-use std::ops::Bound;
 
 pub(super) struct KnnConditionRewriter<'a>(&'a KnnExpressions);
 

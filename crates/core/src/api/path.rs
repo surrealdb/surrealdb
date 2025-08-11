@@ -1,13 +1,15 @@
+use std::fmt::{self, Display, Formatter};
+use std::ops::Deref;
+use std::str::FromStr;
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::err::Error;
 use crate::expr::Kind;
 use crate::expr::fmt::{Fmt, fmt_separated_by};
 use crate::syn;
 use crate::val::{Array, Object, Strand, Value};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
-use std::ops::Deref;
-use std::str::FromStr;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]

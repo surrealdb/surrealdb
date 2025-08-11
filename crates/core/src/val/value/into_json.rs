@@ -1,7 +1,8 @@
-use crate::val::{Geometry, Number, Value};
 use chrono::SecondsFormat;
 use geo::{LineString, Point, Polygon};
 use serde_json::{Map, Number as JsonNumber, Value as JsonValue, json};
+
+use crate::val::{Geometry, Number, Value};
 
 impl Value {
 	/// Converts the value into a json representation of the value.
@@ -144,15 +145,17 @@ fn polygon_into_json_value(polygon: Polygon) -> JsonValue {
 
 #[cfg(test)]
 mod tests {
-	use crate::val::{self, RecordId, RecordIdKey, Value};
+	use std::collections::BTreeMap;
+	use std::time::Duration;
+
 	use chrono::{DateTime, Utc};
 	use geo::{MultiLineString, MultiPoint, MultiPolygon, line_string, point, polygon};
 	use rstest::rstest;
 	use rust_decimal::Decimal;
 	use serde_json::{Value as Json, json};
-	use std::collections::BTreeMap;
-	use std::time::Duration;
 	use uuid::Uuid;
+
+	use crate::val::{self, RecordId, RecordIdKey, Value};
 
 	#[rstest]
 	#[case::none(Value::None, json!(null), Value::Null)]

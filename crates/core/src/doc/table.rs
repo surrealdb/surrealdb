@@ -1,3 +1,8 @@
+use anyhow::{Result, bail};
+use futures::future::try_join_all;
+use reblessive::tree::Stk;
+use rust_decimal::Decimal;
+
 use crate::ctx::Context;
 use crate::dbs::{Force, Options, Statement};
 use crate::doc::{CursorDoc, Document};
@@ -13,10 +18,6 @@ use crate::expr::{
 	FunctionCall, Groups, Idiom, Literal, Part, View,
 };
 use crate::val::{Array, RecordId, RecordIdKey, Value};
-use anyhow::{Result, bail};
-use futures::future::try_join_all;
-use reblessive::tree::Stk;
-use rust_decimal::Decimal;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Action {

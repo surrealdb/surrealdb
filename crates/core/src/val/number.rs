@@ -1,17 +1,19 @@
-use crate::err::Error;
-use crate::fnc::util::math::ToFloat;
-use crate::val::{Strand, TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
-use anyhow::{Result, bail};
-use fastnum::D128;
-use revision::revisioned;
-use rust_decimal::prelude::*;
-use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::f64::consts::PI;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::hash;
 use std::iter::{Product, Sum};
 use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
+
+use anyhow::{Result, bail};
+use fastnum::D128;
+use revision::revisioned;
+use rust_decimal::prelude::*;
+use serde::{Deserialize, Serialize};
+
+use crate::err::Error;
+use crate::fnc::util::math::ToFloat;
+use crate::val::{Strand, TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug)]
@@ -380,44 +382,52 @@ impl Number {
 
 	/// Converts this Number to a lexicographically-ordered byte buffer.
 	///
-	/// This method serializes the Number into a byte representation that preserves
-	/// numeric ordering when compared lexicographically. This is essential for
-	/// database indexing where byte-level comparison must match numeric comparison.
+	/// This method serializes the Number into a byte representation that
+	/// preserves numeric ordering when compared lexicographically. This is
+	/// essential for database indexing where byte-level comparison must match
+	/// numeric comparison.
 	///
 	/// # Ordering Guarantees
 	///
 	/// If `a < b` numerically, then `a.as_decimal_buf() < b.as_decimal_buf()`
 	/// lexicographically (byte-wise comparison).
-	/// Equal numerics across different variants are ordered by their trailing type marker
-	/// (Int < Float < Decimal) to establish a total ordering.
+	/// Equal numerics across different variants are ordered by their trailing
+	/// type marker (Int < Float < Decimal) to establish a total ordering.
 	///
 	/// # Format
 	///
 	/// The returned buffer consists of:
-	/// - Variable-length lexicographic encoding of the numeric value (see DecimalLexEncoder)
-	/// - Single-byte type marker suffix to distinguish the original Number variant
+	/// - Variable-length lexicographic encoding of the numeric value (see
+	///   DecimalLexEncoder)
+	/// - Single-byte type marker suffix to distinguish the original Number
+	///   variant
 	///
-	/// The mantissa encoding always contains an explicit terminator nibble/byte, ensuring
-	/// a trailing type marker cannot be misinterpreted as additional digits.
+	/// The mantissa encoding always contains an explicit terminator
+	/// nibble/byte, ensuring a trailing type marker cannot be misinterpreted
+	/// as additional digits.
 	///
 	/// # Special Value Handling (Float)
 	///
-	/// The following fixed encodings are used to place special float values at the extremes:
-	/// - **Positive Infinity**: `[0xFF, 0xFF, NUMBER_MARKER_FLOAT_INFINITE_POSITIVE]` (largest)
-	/// - **Negative Infinity**: `[0x00, 0x00, NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE]` (smallest)
-	/// - **NaN**: `[0xFF, 0xFF, NUMBER_MARKER_FLOAT_NAN]` (treated as larger than all other values)
+	/// The following fixed encodings are used to place special float values at
+	/// the extremes:
+	/// - **Positive Infinity**: `[0xFF, 0xFF,
+	///   NUMBER_MARKER_FLOAT_INFINITE_POSITIVE]` (largest)
+	/// - **Negative Infinity**: `[0x00, 0x00,
+	///   NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE]` (smallest)
+	/// - **NaN**: `[0xFF, 0xFF, NUMBER_MARKER_FLOAT_NAN]` (treated as larger
+	///   than all other values)
 	///
 	/// # Returns
 	///
 	/// - `Ok(Vec<u8>)`: Lexicographically-ordered byte buffer
 	/// - `Err(Error)`: If Decimal conversion fails (for Decimal variant)
-	///
 	pub fn as_decimal_buf(&self) -> Result<Vec<u8>> {
 		match self {
 			Self::Int(v) => {
 				// Convert integer to decimal for consistent encoding across all numeric types
 				let mut b = DecimalLexEncoder::encode(D128::from(*v));
-				// Append type marker to preserve original Number variant for round-trip conversion
+				// Append type marker to preserve original Number variant for round-trip
+				// conversion
 				b.push(Self::NUMBER_MARKER_INT);
 				Ok(b)
 			}
@@ -459,13 +469,14 @@ impl Number {
 
 	/// Reconstructs a Number from a lexicographically-ordered byte buffer.
 	///
-	/// This method deserializes a byte buffer created by `as_decimal_buf()` back into
-	/// the original Number, preserving both the numeric value and the original type
-	/// variant (Int, Float, or Decimal).
+	/// This method deserializes a byte buffer created by `as_decimal_buf()`
+	/// back into the original Number, preserving both the numeric value and
+	/// the original type variant (Int, Float, or Decimal).
 	///
 	/// # Parameters
 	///
-	/// - `b`: Byte slice containing the lexicographically-encoded number with trailing type marker
+	/// - `b`: Byte slice containing the lexicographically-encoded number with
+	///   trailing type marker
 	///
 	/// # Buffer Format
 	///
@@ -475,7 +486,8 @@ impl Number {
 	///
 	/// # Type Reconstruction
 	///
-	/// The method examines the last byte (type marker) to determine how to decode:
+	/// The method examines the last byte (type marker) to determine how to
+	/// decode:
 	/// - `NUMBER_MARKER_INT`: Decode as decimal, convert to i64
 	/// - `NUMBER_MARKER_FLOAT`: Decode as decimal, convert to f64
 	/// - `NUMBER_MARKER_DECIMAL`: Decode directly as Decimal
@@ -483,21 +495,24 @@ impl Number {
 	/// - `NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE`: Return f64::NEG_INFINITY
 	/// - `NUMBER_MARKER_FLOAT_NAN`: Return f64::NAN
 	///
-	/// It is safe to pass the whole buffer (including the trailing marker) to the decimal
-	/// decoder because the mantissa encoding always includes an internal terminator nibble/byte.
-	/// The decoder will stop before reaching the marker.
+	/// It is safe to pass the whole buffer (including the trailing marker) to
+	/// the decimal decoder because the mantissa encoding always includes an
+	/// internal terminator nibble/byte. The decoder will stop before reaching
+	/// the marker.
 	///
 	/// # Returns
 	///
-	/// - `Ok(Number)`: Successfully reconstructed Number with original type and value
-	/// - `Err(Error)`: If buffer is empty, has unknown marker, or decoding fails
+	/// - `Ok(Number)`: Successfully reconstructed Number with original type and
+	///   value
+	/// - `Err(Error)`: If buffer is empty, has unknown marker, or decoding
+	///   fails
 	///
 	/// # Errors
 	///
 	/// - **Empty buffer**: Input slice has no bytes
 	/// - **Unknown marker**: Last byte is not a recognized type marker
-	/// - **Decode failure**: Lexicographic decoding fails or type conversion fails
-	///
+	/// - **Decode failure**: Lexicographic decoding fails or type conversion
+	///   fails
 	pub fn from_decimal_buf(b: &[u8]) -> Result<Self> {
 		// Examine the type marker (last byte) to determine decoding strategy
 		match b.last().copied() {
@@ -1235,9 +1250,11 @@ impl ToFloat for Number {
 	}
 }
 
-use crate::expr::decimal::DecimalLexEncoder;
-use rust_decimal::Decimal;
 use std::str::FromStr;
+
+use rust_decimal::Decimal;
+
+use crate::expr::decimal::DecimalLexEncoder;
 
 /// A trait to extend the Decimal type with additional functionality.
 pub trait DecimalExt {
@@ -1277,12 +1294,14 @@ impl DecimalExt for Decimal {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+	use std::cmp::Ordering;
+
 	use rand::seq::SliceRandom;
 	use rand::{Rng, thread_rng};
 	use rust_decimal::Decimal;
 	use rust_decimal::prelude::ToPrimitive;
-	use std::cmp::Ordering;
+
+	use super::*;
 
 	#[test]
 	fn test_decimal_ext_from_str_normalized() {

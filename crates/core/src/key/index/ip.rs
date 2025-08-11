@@ -1,9 +1,11 @@
 //! Stores the previous value of record for concurrent index building
+use std::fmt::Debug;
+
+use serde::{Deserialize, Serialize};
+
 use crate::kvs::KVKey;
 use crate::kvs::index::PrimaryAppending;
 use crate::val::RecordIdKey;
-use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Ip<'a> {

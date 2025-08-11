@@ -1,8 +1,9 @@
 //! The type definitions for the computation format of the surreaql executor.
 
+use anyhow::Result;
+
 use crate::err::Error;
 use crate::val::Value;
-use anyhow::Result;
 
 pub(crate) mod access;
 pub(crate) mod access_type;

@@ -1,5 +1,3 @@
-use rand::{Rng, thread_rng};
-use rcgen::CertifiedKey;
 use std::collections::HashMap;
 use std::collections::btree_set::Iter;
 use std::error::Error;
@@ -7,6 +5,9 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::{env, fs};
+
+use rand::{Rng, thread_rng};
+use rcgen::CertifiedKey;
 use tokio::time;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info};

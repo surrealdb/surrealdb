@@ -7,9 +7,10 @@ mod keyword;
 pub use keyword::Keyword;
 pub(crate) use keyword::keyword_t;
 mod mac;
+pub(crate) use mac::t;
+
 use crate::sql::Algorithm;
 use crate::sql::language::Language;
-pub(crate) use mac::t;
 
 /// A location in the source passed to the lexer.
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]

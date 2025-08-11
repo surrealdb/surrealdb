@@ -1,6 +1,7 @@
-use crate::Value;
 use revision::revisioned;
 use serde::Deserialize;
+
+use crate::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Deserialize)]

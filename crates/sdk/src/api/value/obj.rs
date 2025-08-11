@@ -1,8 +1,10 @@
-use super::Value;
 use std::borrow::Borrow;
 use std::collections::btree_map::{IntoIter as BIntoIter, Iter as BIter, IterMut as BIterMut};
 use std::iter::FusedIterator;
+
 use surrealdb_core::val;
+
+use super::Value;
 
 transparent_wrapper! {
 	#[derive(Clone, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]

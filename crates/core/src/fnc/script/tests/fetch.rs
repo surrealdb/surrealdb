@@ -1,10 +1,12 @@
+use std::str::FromStr;
+
+use wiremock::matchers::{body_string, header, method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
 use crate::dbs::capabilities::{NetTarget, Targets};
 use crate::dbs::{Capabilities, Session};
 use crate::kvs::Datastore;
 use crate::syn;
-use std::str::FromStr;
-use wiremock::matchers::{body_string, header, method, path};
-use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[tokio::test]
 async fn test_fetch_get() {

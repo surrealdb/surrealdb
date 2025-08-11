@@ -1,10 +1,12 @@
-use super::error::ResponseError;
-use anyhow::Context as _;
-use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::str::FromStr;
+
+use anyhow::Context as _;
+use serde::Deserialize;
 use surrealdb_core::val::Value;
+
+use super::error::ResponseError;
 
 #[derive(Debug, Clone)]
 pub struct Param(pub String);

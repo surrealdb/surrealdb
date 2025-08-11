@@ -1,3 +1,14 @@
+use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use roaring::RoaringTreemap;
+use roaring::treemap::IntoIter;
+use uuid::Uuid;
+
 /// This module implements a concurrent full-text search index.
 ///
 /// The full-text index allows for efficient text search operations with support
@@ -29,15 +40,6 @@ use crate::idx::trees::store::IndexStores;
 use crate::key::index::tt::Tt;
 use crate::kvs::{Transaction, impl_kv_value_revisioned};
 use crate::val::{RecordId, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use roaring::RoaringTreemap;
-use roaring::treemap::IntoIter;
-use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use uuid::Uuid;
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Default, PartialEq)]
@@ -889,6 +891,14 @@ impl Scorer {
 
 #[cfg(test)]
 mod tests {
+	use std::sync::Arc;
+	use std::time::{Duration, Instant};
+
+	use reblessive::tree::Stk;
+	use test_log::test;
+	use tokio::time::sleep;
+	use uuid::Uuid;
+
 	use super::{FullTextIndex, TermDocument};
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
@@ -902,12 +912,6 @@ mod tests {
 	use crate::sql::statements::DefineStatement;
 	use crate::syn;
 	use crate::val::{Array, RecordId, Value};
-	use reblessive::tree::Stk;
-	use std::sync::Arc;
-	use std::time::{Duration, Instant};
-	use test_log::test;
-	use tokio::time::sleep;
-	use uuid::Uuid;
 
 	#[derive(Clone)]
 	struct TestContext {

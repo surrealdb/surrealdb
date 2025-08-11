@@ -1,14 +1,15 @@
 //! Executes functions from SQL. If there is an SQL function it will be defined
 //! in this module.
 
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::val::{RecordId, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
 pub mod api;
 pub mod args;
 pub mod array;
@@ -1580,10 +1581,11 @@ fn idiom_name_to_normal(kind: &str, name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+	use regex::Regex;
+
 	use crate::dbs::Capabilities;
 	use crate::dbs::capabilities::ExperimentalTarget;
 	use crate::sql::{Expr, Function};
-	use regex::Regex;
 
 	#[tokio::test]
 	async fn implementations_are_present() {

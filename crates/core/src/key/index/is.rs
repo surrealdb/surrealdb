@@ -22,11 +22,12 @@
 //! - `tb`: Table identifier
 //! - `ix`: Index identifier
 //! - `nid`: Node UUID (16 bytes, compact serialized)
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::kvs::sequences::SequenceState;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Is<'a> {

@@ -1,6 +1,10 @@
+use std::fmt;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+
+use crate::expr::Ident;
+use crate::expr::escape::EscapeIdent;
 
 use crate::expr::Ident;
 use crate::expr::escape::EscapeIdent;

@@ -2,17 +2,19 @@
 
 mod cnf;
 
+use std::ops::Range;
+use std::sync::{Arc, LazyLock};
+
+use anyhow::{Result, bail, ensure};
+use foundationdb::options::{DatabaseOption, MutationType};
+use foundationdb::{Database, RangeOption, Transaction as Tx};
+use futures::StreamExt;
+
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare};
 use crate::kvs::{Check, Key, Val};
 use crate::vs::VersionStamp;
-use anyhow::{Result, bail, ensure};
-use foundationdb::options::{DatabaseOption, MutationType};
-use foundationdb::{Database, RangeOption, Transaction as Tx};
-use futures::StreamExt;
-use std::ops::Range;
-use std::sync::{Arc, LazyLock};
 
 const TARGET: &str = "surrealdb::core::kvs::fdb";
 

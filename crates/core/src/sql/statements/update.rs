@@ -1,6 +1,7 @@
+use std::fmt;
+
 use crate::sql::fmt::Fmt;
 use crate::sql::{Cond, Data, Explain, Expr, Output, Timeout, With};
-use std::fmt;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

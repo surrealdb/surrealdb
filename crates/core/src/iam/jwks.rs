@@ -1,6 +1,7 @@
-use crate::dbs::capabilities::NetTarget;
-use crate::err::Error;
-use crate::kvs::Datastore;
+use std::collections::HashMap;
+use std::str::FromStr;
+use std::sync::{Arc, LazyLock};
+
 use anyhow::{Result, bail};
 use chrono::{DateTime, Duration, Utc};
 use jsonwebtoken::Algorithm::*;
@@ -10,10 +11,11 @@ use jsonwebtoken::{DecodingKey, Validation};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-use std::str::FromStr;
-use std::sync::{Arc, LazyLock};
 use tokio::sync::RwLock;
+
+use crate::dbs::capabilities::NetTarget;
+use crate::err::Error;
+use crate::kvs::Datastore;
 
 pub(crate) type JwksCache = HashMap<String, JwksCacheEntry>;
 #[derive(Clone, Serialize, Deserialize)]
@@ -373,12 +375,13 @@ fn cache_key_from_url(url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
 	use rand::Rng;
 	use rand::distributions::Alphanumeric;
 	use wiremock::matchers::{header, method, path};
 	use wiremock::{Mock, MockServer, ResponseTemplate};
+
+	use super::*;
+	use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
 
 	// Use unique path to prevent accidental cache reuse
 	fn random_path() -> String {

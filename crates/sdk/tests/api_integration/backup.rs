@@ -11,11 +11,12 @@
 // Tests for exporting and importing data
 // Supported by the storage engines and the HTTP protocol
 
-use super::{ApiRecordId, CreateDb, NS, Record};
 use futures::StreamExt as _;
 use surrealdb::Value;
 use tokio::fs::remove_file;
 use ulid::Ulid;
+
+use super::{ApiRecordId, CreateDb, NS, Record};
 
 pub async fn export_import(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;

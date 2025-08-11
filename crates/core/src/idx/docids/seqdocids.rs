@@ -1,12 +1,14 @@
+use std::sync::Arc;
+
+use anyhow::Result;
+use uuid::Uuid;
+
 use crate::ctx::Context;
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::{DocId, Resolved};
 use crate::kvs::Transaction;
 use crate::kvs::sequences::SequenceDomain;
 use crate::val::RecordIdKey;
-use anyhow::Result;
-use std::sync::Arc;
-use uuid::Uuid;
 
 /// Sequence-based DocIds store for concurrent full-text search
 ///
@@ -158,6 +160,8 @@ impl SeqDocIds {
 
 #[cfg(test)]
 mod tests {
+	use uuid::Uuid;
+
 	use crate::ctx::Context;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::seqdocids::SeqDocIds;
@@ -167,7 +171,6 @@ mod tests {
 	use crate::kvs::TransactionType::{Read, Write};
 	use crate::kvs::{Datastore, TransactionType};
 	use crate::val::{RecordIdKey, Strand};
-	use uuid::Uuid;
 
 	const TEST_NS: &str = "test_ns";
 	const TEST_DB: &str = "test_db";

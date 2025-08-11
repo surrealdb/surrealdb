@@ -1,8 +1,10 @@
+use std::ops::{self, Bound};
+
+use surrealdb_core::val;
+
 use crate::api::Result;
 use crate::api::err::Error;
 use crate::{Object, RecordId, RecordIdKey, Value};
-use std::ops::{self, Bound};
-use surrealdb_core::val;
 
 /// A wrapper type to assert that you ment to use a string as a table name.
 ///

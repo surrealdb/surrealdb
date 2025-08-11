@@ -1,12 +1,13 @@
+use phf::phf_map;
+use reblessive::Stk;
+use unicase::UniCase;
+
 use super::{ParseResult, Parser};
 use crate::sql::{Constant, Expr, Function, FunctionCall};
 use crate::syn::error::{MessageKind, bail};
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{SyntaxError, unexpected};
 use crate::syn::token::{Span, t};
-use phf::phf_map;
-use reblessive::Stk;
-use unicase::UniCase;
 
 /// The kind of a parsed path.
 pub enum PathKind {

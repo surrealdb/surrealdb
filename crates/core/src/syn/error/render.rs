@@ -1,9 +1,10 @@
 //! Module for rendering errors onto source code.
 
-use super::{Location, MessageKind};
 use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Range;
+
+use super::{Location, MessageKind};
 
 #[derive(Clone, Debug)]
 pub struct RenderedError {

@@ -1,7 +1,8 @@
-use super::super::run;
-use crate::val::Value;
 use js::Ctx;
 use js::prelude::Rest;
+
+use super::super::run;
+use crate::val::Value;
 
 pub struct Package;
 

@@ -1,8 +1,6 @@
 #![cfg(feature = "allocator")]
 
 #[cfg(feature = "allocation-tracking")]
-use parking_lot::Mutex;
-#[cfg(feature = "allocation-tracking")]
 use std::alloc::handle_alloc_error;
 use std::alloc::{GlobalAlloc, Layout, System};
 #[cfg(feature = "allocation-tracking")]
@@ -11,6 +9,9 @@ use std::cell::RefCell;
 use std::ptr::null_mut;
 #[cfg(feature = "allocation-tracking")]
 use std::sync::atomic::{AtomicIsize, AtomicPtr, Ordering};
+
+#[cfg(feature = "allocation-tracking")]
+use parking_lot::Mutex;
 
 /// This structure implements a wrapper around the
 /// system allocator, or around a user-specified

@@ -1,3 +1,5 @@
+use reblessive::Stk;
+
 use crate::api::method::Method;
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::JwtAccessVerify;
@@ -28,7 +30,6 @@ use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Token, TokenKind, t};
 use crate::val::{Duration, Strand};
-use reblessive::Stk;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_define_stmt(

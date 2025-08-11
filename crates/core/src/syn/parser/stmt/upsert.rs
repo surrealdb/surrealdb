@@ -1,7 +1,8 @@
+use reblessive::Stk;
+
 use crate::sql::statements::UpsertStatement;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::t;
-use reblessive::Stk;
 
 impl Parser<'_> {
 	pub async fn parse_upsert_stmt(&mut self, stk: &mut Stk) -> ParseResult<UpsertStatement> {

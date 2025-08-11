@@ -1,19 +1,11 @@
-use crate::api::conn::{Command, Router};
-use crate::api::err::Error;
-use crate::api::method::BoxFuture;
-use crate::api::{self, Connection, ExtraFeatures, Result};
-use crate::engine::any::Any;
-use crate::method::{Live, OnceLockExt, Query, Select};
-use crate::opt::Resource;
-use crate::value::Notification;
-use crate::{Action, Surreal, Value};
-use async_channel::Receiver;
-use futures::StreamExt;
-use serde::de::DeserializeOwned;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+
+use async_channel::Receiver;
+use futures::StreamExt;
+use serde::de::DeserializeOwned;
 use surrealdb_core::dbs::{Action as CoreAction, Notification as CoreNotification};
 use surrealdb_core::expr::{
 	BinaryOperator, Cond, Expr, Fields, Ident, Idiom, Literal, LiveStatement, TopLevelExpr,
@@ -24,6 +16,16 @@ use tokio::spawn;
 use uuid::Uuid;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
+
+use crate::api::conn::{Command, Router};
+use crate::api::err::Error;
+use crate::api::method::BoxFuture;
+use crate::api::{self, Connection, ExtraFeatures, Result};
+use crate::engine::any::Any;
+use crate::method::{Live, OnceLockExt, Query, Select};
+use crate::opt::Resource;
+use crate::value::Notification;
+use crate::{Action, Surreal, Value};
 
 fn into_future<C, O>(this: Select<C, O, Live>) -> BoxFuture<Result<Stream<O>>>
 where

@@ -1,10 +1,12 @@
-use crate::dbs::node::Timestamp;
-use crate::val::Duration;
 use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(not(target_family = "wasm"))]
 use std::time::{SystemTime, UNIX_EPOCH};
+
 #[cfg(target_family = "wasm")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
+
+use crate::dbs::node::Timestamp;
+use crate::val::Duration;
 
 // Traits cannot have async and we need sized structs for Clone + Send + Sync
 #[derive(Clone)]

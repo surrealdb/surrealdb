@@ -1,15 +1,17 @@
+use std::collections::HashSet;
+use std::marker::PhantomData;
+use std::sync::OnceLock;
+use std::sync::atomic::AtomicI64;
+
+use tokio::sync::watch;
+use url::Url;
+
 use super::server;
 use crate::api::conn::Router;
 use crate::api::method::BoxFuture;
 use crate::api::opt::endpoint::into_endpoint;
 use crate::api::opt::{Endpoint, IntoEndpoint};
 use crate::api::{Connect, ExtraFeatures, OnceLockExt, Result, Surreal, conn};
-use std::collections::HashSet;
-use std::marker::PhantomData;
-use std::sync::OnceLock;
-use std::sync::atomic::AtomicI64;
-use tokio::sync::watch;
-use url::Url;
 
 #[derive(Debug)]
 pub struct Test;

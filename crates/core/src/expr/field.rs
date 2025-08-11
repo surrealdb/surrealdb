@@ -1,3 +1,12 @@
+use std::borrow::Cow;
+use std::fmt::{self, Display, Formatter, Write};
+use std::slice::Iter;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use super::paths::ID;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -8,13 +17,6 @@ use crate::expr::{Expr, FlowResultExt as _, Function, Idiom, Part};
 use crate::fnc::args::FromArgs;
 use crate::syn;
 use crate::val::{Array, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
-use std::fmt::{self, Display, Formatter, Write};
-use std::slice::Iter;
 
 /// The `foo,bar,*` part of statements like `SELECT foo,bar.* FROM faz`.
 #[revisioned(revision = 1)]

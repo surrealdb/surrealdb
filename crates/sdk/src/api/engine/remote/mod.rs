@@ -102,19 +102,21 @@ pub mod http;
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-ws")))]
 pub mod ws;
 
+use std::time::Duration;
+
+use indexmap::IndexMap;
+use revision::revisioned;
+use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
+use serde::Deserialize;
+use surrealdb_core::val;
+
 use crate::api::conn::DbResponse;
 use crate::api::err::Error;
 use crate::api::method::query::QueryResult;
 use crate::api::{self, Result};
 use crate::dbs::{self, Status};
 use crate::method::Stats;
-use indexmap::IndexMap;
-use revision::revisioned;
-use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
-use serde::Deserialize;
-use std::time::Duration;
-use surrealdb_core::val;
 
 const NANOS_PER_SEC: i64 = 1_000_000_000;
 const NANOS_PER_MILLI: i64 = 1_000_000;

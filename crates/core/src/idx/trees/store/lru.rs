@@ -1,7 +1,8 @@
-use ahash::{HashMap, HashMapExt};
-use futures::future::join_all;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
+
+use ahash::{HashMap, HashMapExt};
+use futures::future::join_all;
 use tokio::sync::Mutex;
 
 pub(super) type CacheKey = u64;
@@ -229,9 +230,10 @@ where
 }
 #[cfg(test)]
 mod tests {
-	use super::ConcurrentLru;
 	use futures::future::join_all;
 	use test_log::test;
+
+	use super::ConcurrentLru;
 
 	#[test(tokio::test)]
 	async fn test_minimal_tree_lru() {

@@ -1,10 +1,11 @@
+use anyhow::{Result, bail};
+
 use crate::err::Error;
 use crate::expr::tokenizer::Tokenizer as SqlTokenizer;
 use crate::idx::ft::Position;
 use crate::idx::ft::analyzer::filter::{Filter, FilterResult, Term};
 use crate::idx::ft::offset::Offset;
 use crate::val::Value;
-use anyhow::{Result, bail};
 
 pub(in crate::idx::ft) struct Tokens {
 	/// The input string

@@ -1,5 +1,10 @@
 //#[cfg(not(target_family = "wasm"))]
 //use async_graphql::BatchRequest;
+use std::mem;
+use std::sync::Arc;
+
+use anyhow::{Result, ensure};
+
 #[cfg(not(target_family = "wasm"))]
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::capabilities::MethodTarget;
@@ -14,9 +19,6 @@ use crate::sql::{
 	SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
 use crate::val::{Array, Object, Strand, Value};
-use anyhow::{Result, ensure};
-use std::mem;
-use std::sync::Arc;
 
 /// utility function converting a `Value::Strand` into a `Expr::Table`
 fn value_to_table(value: Value) -> Expr {

@@ -42,12 +42,14 @@
 //! - **Concurrent Safe**: Works with distributed sequence mechanism to prevent
 //!   ID conflicts
 //! - **Scalable**: Efficient lookups scale with the number of indexed documents
+use std::fmt::Debug;
+
+use serde::{Deserialize, Serialize};
+
 use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::val::RecordIdKey;
-use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Id<'a> {

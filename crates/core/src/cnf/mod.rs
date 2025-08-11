@@ -1,6 +1,7 @@
-use crate::iam::file::extract_allowed_paths;
 use std::path::PathBuf;
 use std::sync::LazyLock;
+
+use crate::iam::file::extract_allowed_paths;
 
 /// The publicly visible name of the server
 pub const SERVER_NAME: &str = "SurrealDB";

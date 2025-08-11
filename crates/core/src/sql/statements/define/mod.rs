@@ -15,6 +15,8 @@ mod sequence;
 mod table;
 pub mod user;
 
+use std::fmt::{self, Display};
+
 pub use access::DefineAccessStatement;
 pub use analyzer::DefineAnalyzerStatement;
 pub use api::{ApiAction, DefineApiStatement};
@@ -29,7 +31,6 @@ pub use model::DefineModelStatement;
 pub use namespace::DefineNamespaceStatement;
 pub use param::DefineParamStatement;
 pub use sequence::DefineSequenceStatement;
-use std::fmt::{self, Display};
 pub use table::DefineTableStatement;
 pub use user::DefineUserStatement;
 

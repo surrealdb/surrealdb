@@ -3,9 +3,11 @@
 //! used directly by applications.
 //! This module might be migrated into the kvs or kvs::tx module in the future.
 
-use crate::kvs::KVValue;
-use revision::Revisioned;
 pub use std::{error, fmt, mem};
+
+use revision::Revisioned;
+
+use crate::kvs::KVValue;
 
 /// Versionstamp is a 10-byte array used to identify a specific version of a
 /// key. The first 8 bytes are significant (the u64), and the remaining 2 bytes

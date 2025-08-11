@@ -1,4 +1,5 @@
-use super::AppState;
+use std::net::SocketAddr;
+
 use axum::extract::{ConnectInfo, FromRef, FromRequestParts, Request};
 use axum::middleware::Next;
 use axum::response::Response;
@@ -6,7 +7,8 @@ use axum::{Extension, RequestPartsExt, async_trait};
 use clap::ValueEnum;
 use http::StatusCode;
 use http::request::Parts;
-use std::net::SocketAddr;
+
+use super::AppState;
 
 // TODO: Support Forwarded, X-Forwarded-For headers.
 // Get inspiration from https://github.com/imbolc/axum-client-ip or simply use it

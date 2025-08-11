@@ -3,9 +3,11 @@
 	expect(dead_code, reason = "This is only used in FoundationDB and TiKV")
 )]
 
-use crate::kvs::{Key, Val};
-use anyhow::Result;
 use std::collections::{HashMap, VecDeque};
+
+use anyhow::Result;
+
+use crate::kvs::{Key, Val};
 
 type SavePoint = HashMap<Key, SavedValue>;
 

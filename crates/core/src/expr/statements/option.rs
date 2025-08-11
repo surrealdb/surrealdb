@@ -1,7 +1,9 @@
-use crate::expr::ident::Ident;
+use std::fmt;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+
+use crate::expr::ident::Ident;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]

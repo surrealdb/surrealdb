@@ -1,8 +1,10 @@
+use std::vec::IntoIter;
+
+use anyhow::{Result, bail};
+
 use crate::err::Error;
 use crate::val::Value;
 use crate::val::value::{Cast as CastTrait, Coerce};
-use anyhow::{Result, bail};
-use std::vec::IntoIter;
 
 /// The number of arguments a function takes.
 #[derive(Debug)]

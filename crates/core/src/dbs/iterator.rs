@@ -1,3 +1,9 @@
+use std::mem;
+use std::sync::Arc;
+
+use anyhow::{Result, bail, ensure};
+use reblessive::tree::Stk;
+
 use crate::ctx::{Canceller, Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
@@ -15,10 +21,6 @@ use crate::idx::planner::{
 	StatementContext,
 };
 use crate::val::{Object, RecordId, RecordIdKey, RecordIdKeyRange, Value};
-use anyhow::{Result, bail, ensure};
-use reblessive::tree::Stk;
-use std::mem;
-use std::sync::Arc;
 
 const TARGET: &str = "surrealdb::core::dbs";
 

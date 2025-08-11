@@ -1,10 +1,11 @@
 mod helpers;
-use crate::helpers::Test;
 use helpers::{new_ds, skip_ok};
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb_core::val::RecordId;
 use surrealdb_core::{strand, syn};
+
+use crate::helpers::Test;
 
 #[tokio::test]
 async fn select_multi_aggregate_composed() -> Result<()> {

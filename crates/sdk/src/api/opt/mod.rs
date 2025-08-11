@@ -1,7 +1,8 @@
 //! The different options and types for use in API functions
 
-use serde::Serialize;
 use std::borrow::Cow;
+
+use serde::Serialize;
 
 pub mod auth;
 pub mod capabilities;

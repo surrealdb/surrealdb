@@ -1,3 +1,12 @@
+use std::collections::BTreeMap;
+use std::fmt::{self, Display, Formatter, Write};
+use std::hash::{Hash, Hasher};
+
+use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+use revision::revisioned;
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
+
 use super::escape::EscapeKey;
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
@@ -6,13 +15,6 @@ use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
 	Regex, Strand, Uuid,
 };
-use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
-use revision::revisioned;
-use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::fmt::{self, Display, Formatter, Write};
-use std::hash::{Hash, Hasher};
 
 /// The kind, or data type, of a value or field.
 #[revisioned(revision = 1)]

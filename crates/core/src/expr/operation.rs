@@ -1,7 +1,9 @@
-use crate::val::{Array, Object, Strand, Value};
+use std::fmt;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+
+use crate::val::{Array, Object, Strand, Value};
 
 #[derive(Debug)]
 pub struct PatchError {

@@ -1,5 +1,10 @@
 #![cfg(not(target_family = "wasm"))]
 
+use std::sync::atomic::AtomicBool;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -13,9 +18,6 @@ use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
 use crate::kvs::TransactionType;
 use crate::val::{Array, RecordId, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::sync::atomic::AtomicBool;
 
 pub(crate) struct IndexOperation<'a> {
 	ctx: &'a Context,

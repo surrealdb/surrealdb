@@ -1,13 +1,15 @@
+use std::fmt;
+use std::fmt::Display;
+use std::str::FromStr;
+
+use anyhow::Result;
+use rand::Rng;
+use rand::distributions::Alphanumeric;
+
 use super::Expr;
 use crate::err::Error;
 use crate::sql::Algorithm;
 use crate::sql::escape::QuoteStr;
-use anyhow::Result;
-use rand::Rng;
-use rand::distributions::Alphanumeric;
-use std::fmt;
-use std::fmt::Display;
-use std::str::FromStr;
 
 pub(crate) fn random_key() -> String {
 	rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()

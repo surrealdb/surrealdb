@@ -1,24 +1,12 @@
-use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
-use crate::api::conn::{self, Command, DbResponse, RequestData, Route, Router};
-use crate::api::engine::remote::Response;
-use crate::api::engine::remote::ws::{Client, PING_INTERVAL};
-use crate::api::err::Error;
-use crate::api::method::BoxFuture;
-use crate::api::opt::Endpoint;
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
-use crate::api::opt::Tls;
-use crate::api::{ExtraFeatures, Result, Surreal};
-use crate::engine::IntervalStream;
-use crate::engine::remote::Data;
-use crate::opt::WaitFor;
+use std::collections::HashSet;
+use std::collections::hash_map::Entry;
+use std::sync::atomic::AtomicI64;
+
 use async_channel::Receiver;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use revision::revisioned;
 use serde::Deserialize;
-use std::collections::HashSet;
-use std::collections::hash_map::Entry;
-use std::sync::atomic::AtomicI64;
 use surrealdb_core::val::Value as CoreValue;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
@@ -32,6 +20,20 @@ use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use trice::Instant;
+
+use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
+use crate::api::conn::{self, Command, DbResponse, RequestData, Route, Router};
+use crate::api::engine::remote::Response;
+use crate::api::engine::remote::ws::{Client, PING_INTERVAL};
+use crate::api::err::Error;
+use crate::api::method::BoxFuture;
+use crate::api::opt::Endpoint;
+#[cfg(any(feature = "native-tls", feature = "rustls"))]
+use crate::api::opt::Tls;
+use crate::api::{ExtraFeatures, Result, Surreal};
+use crate::engine::IntervalStream;
+use crate::engine::remote::Data;
+use crate::opt::WaitFor;
 
 pub(crate) const MAX_MESSAGE_SIZE: usize = 64 << 20; // 64 MiB
 pub(crate) const MAX_FRAME_SIZE: usize = 16 << 20; // 16 MiB
@@ -627,12 +629,13 @@ impl Response {
 
 #[cfg(test)]
 mod tests {
+	use std::io::Write;
+	use std::time::SystemTime;
+
 	use bincode::Options;
 	use flate2::Compression;
 	use flate2::write::GzEncoder;
 	use rand::{Rng, thread_rng};
-	use std::io::Write;
-	use std::time::SystemTime;
 	use surrealdb_core::{rpc, val};
 
 	#[test_log::test]

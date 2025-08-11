@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use reblessive::tree::Stk;
+
 use super::IgnoreError;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Statement};
@@ -9,8 +13,6 @@ use crate::expr::permission::Permission;
 use crate::expr::{FlowResultExt as _, Operation};
 use crate::iam::Action;
 use crate::val::Value;
-use reblessive::tree::Stk;
-use std::sync::Arc;
 
 impl Document {
 	/// Evaluates a doc that has been modified so that it can be further

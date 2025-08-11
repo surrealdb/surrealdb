@@ -1,5 +1,6 @@
-use crate::syn::token::Span;
 use std::fmt::Display;
+
+use crate::syn::token::Span;
 
 mod location;
 mod mac;

@@ -1,3 +1,5 @@
+use reblessive::Stk;
+
 use super::basic::NumberToken;
 use super::mac::{expected, unexpected};
 use super::{ParseResult, Parser};
@@ -6,7 +8,6 @@ use crate::sql::{Dir, Expr, Field, Fields, Graph, Ident, Idiom, Literal, Param, 
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::{self, Numeric};
 use crate::syn::token::{Glued, Span, TokenKind, t};
-use reblessive::Stk;
 
 impl Parser<'_> {
 	pub(super) fn peek_continues_idiom(&mut self) -> bool {

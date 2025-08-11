@@ -15,11 +15,12 @@
 //! - Enabling proper ranking of search results based on term frequency and
 //!   document length
 //! - Providing document-specific statistics for the full-text search engine
+use serde::{Deserialize, Serialize};
+
 use crate::idx::docids::DocId;
 use crate::idx::ft::DocLength;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Dl<'a> {

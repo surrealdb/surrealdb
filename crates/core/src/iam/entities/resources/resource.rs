@@ -1,6 +1,7 @@
-use super::Level;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+
+use super::Level;
 
 #[revisioned(revision = 5)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]

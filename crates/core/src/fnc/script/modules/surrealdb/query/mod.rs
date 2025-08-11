@@ -1,17 +1,20 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::expr::FlowResultExt as _;
+use std::cell::RefCell;
+
 use js::class::{JsClass, OwnedBorrow, Readable, Trace};
 use js::prelude::{Coerced, Opt};
 use js::{Ctx, Exception, FromJs, JsLifetime, Promise, Result, Value};
 use reblessive::tree::Stk;
-use std::cell::RefCell;
+
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::expr::FlowResultExt as _;
 
 mod classes;
 
-use crate::ctx::MutableContext;
 pub use classes::Query;
+
+use crate::ctx::MutableContext;
 
 /// A class to carry the data to run subqueries.
 #[derive(js::JsLifetime)]

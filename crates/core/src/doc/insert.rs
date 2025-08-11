@@ -1,3 +1,6 @@
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use super::IgnoreError;
 use crate::ctx::Context;
 use crate::dbs::{Options, Statement};
@@ -6,8 +9,6 @@ use crate::err;
 use crate::err::Error;
 use crate::expr::statements::InsertStatement;
 use crate::val::Value;
-use anyhow::Result;
-use reblessive::tree::Stk;
 
 impl Document {
 	pub(super) async fn insert(

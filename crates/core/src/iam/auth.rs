@@ -1,8 +1,9 @@
-use super::{Action, Actor, Error, Level, Resource, Role, is_allowed};
-use crate::expr::statements::{DefineAccessStatement, DefineUserStatement};
 use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+
+use super::{Action, Actor, Error, Level, Resource, Role, is_allowed};
+use crate::expr::statements::{DefineAccessStatement, DefineUserStatement};
 
 /// Specifies the current authentication for the datastore execution context.
 #[revisioned(revision = 1)]

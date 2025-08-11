@@ -1,10 +1,12 @@
+use std::collections::HashMap;
+
+use anyhow::Result;
+
 use crate::cf::{TableMutation, TableMutations};
 use crate::doc::CursorValue;
 use crate::expr::statements::DefineTableStatement;
 use crate::kvs::{KVKey, Key};
 use crate::val::RecordId;
-use anyhow::Result;
-use std::collections::HashMap;
 
 // PreparedWrite is a tuple of (versionstamp key, key prefix, key suffix,
 // serialized table mutations). The versionstamp key is the key that contains
@@ -145,6 +147,8 @@ impl Writer {
 
 #[cfg(test)]
 mod tests {
+	use std::time::Duration;
+
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
 	use crate::expr::changefeed::ChangeFeed;
 	use crate::expr::statements::show::ShowSince;
@@ -156,7 +160,6 @@ mod tests {
 	use crate::kvs::{Datastore, Transaction};
 	use crate::val::{Datetime, RecordId, RecordIdKey, Value};
 	use crate::vs::VersionStamp;
-	use std::time::Duration;
 
 	const DONT_STORE_PREVIOUS: bool = false;
 

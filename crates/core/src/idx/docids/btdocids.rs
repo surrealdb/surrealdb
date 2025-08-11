@@ -1,3 +1,7 @@
+use revision::{Revisioned, revisioned};
+use roaring::RoaringTreemap;
+use serde::{Deserialize, Serialize};
+
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::{DocId, Resolved};
@@ -6,9 +10,6 @@ use crate::idx::trees::btree::{BState, BState1, BState1skip, BStatistics, BTree,
 use crate::idx::trees::store::TreeNodeProvider;
 use crate::kvs::{KVValue, Key, Transaction, TransactionType};
 use crate::val::RecordId;
-use revision::{Revisioned, revisioned};
-use roaring::RoaringTreemap;
-use serde::{Deserialize, Serialize};
 
 /// BTree based DocIds store
 pub(crate) struct BTreeDocIds {

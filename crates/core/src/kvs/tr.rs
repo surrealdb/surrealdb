@@ -1,3 +1,10 @@
+use std::fmt;
+use std::fmt::Debug;
+use std::ops::Range;
+
+use anyhow::Result;
+use expr::statements::DefineTableStatement;
+
 #[allow(unused_imports, reason = "Not used when none of the storage backends are enabled.")]
 use super::api::Transaction;
 use super::{Key, Val, Version};
@@ -12,11 +19,6 @@ use crate::kvs::stash::Stash;
 use crate::val::RecordId;
 use crate::vs::VersionStamp;
 use crate::{cf, expr};
-use anyhow::Result;
-use expr::statements::DefineTableStatement;
-use std::fmt;
-use std::fmt::Debug;
-use std::ops::Range;
 
 const TARGET: &str = "surrealdb::core::kvs::tr";
 

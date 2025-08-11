@@ -1,9 +1,11 @@
-use crate::val::{Datetime, Duration, Value};
+use std::fmt;
+
 use anyhow::Result;
 use chrono::{TimeZone, Utc};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+
+use crate::val::{Datetime, Duration, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

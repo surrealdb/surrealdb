@@ -1,10 +1,11 @@
-use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
-use crate::cli::abstraction::{AuthArguments, DatabaseSelectionArguments};
 use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::any::{self, connect};
 use surrealdb::opt::Config;
 use surrealdb::opt::capabilities::Capabilities;
+
+use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
+use crate::cli::abstraction::{AuthArguments, DatabaseSelectionArguments};
 
 #[derive(Args, Debug)]
 pub struct DatabaseConnectionArguments {

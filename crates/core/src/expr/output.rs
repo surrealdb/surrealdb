@@ -1,7 +1,9 @@
-use crate::expr::field::Fields;
+use std::fmt::{self, Display};
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+
+use crate::expr::field::Fields;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]

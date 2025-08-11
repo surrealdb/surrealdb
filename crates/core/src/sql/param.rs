@@ -1,7 +1,8 @@
+use std::fmt;
+
 use crate::sql::Ident;
 use crate::sql::escape::EscapeIdent;
 use crate::val::Strand;
-use std::fmt;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

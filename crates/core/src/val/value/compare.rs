@@ -1,6 +1,7 @@
+use std::cmp::Ordering;
+
 use crate::expr::part::{Next, Part};
 use crate::val::Value;
-use std::cmp::Ordering;
 
 impl Value {
 	pub(crate) fn compare(

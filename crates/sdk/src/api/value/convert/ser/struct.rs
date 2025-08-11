@@ -1,9 +1,10 @@
-use super::{Content, array_from_content, object_from_content_struct, value_from_content};
-use crate::val::{self, Value};
 use anyhow::Result;
 use serde::Deserialize;
 use serde::de::IntoDeserializer;
 use serde_content::{Data, Expected, Unexpected};
+
+use super::{Content, array_from_content, object_from_content_struct, value_from_content};
+use crate::val::{self, Value};
 
 pub(super) fn to_value(content: Content) -> Result<Value> {
 	match content {

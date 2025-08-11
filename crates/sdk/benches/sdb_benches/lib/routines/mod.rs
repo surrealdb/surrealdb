@@ -1,6 +1,7 @@
+use std::sync::Arc;
+
 use criterion::Bencher;
 use criterion::measurement::WallTime;
-use std::sync::Arc;
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 

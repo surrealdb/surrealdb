@@ -1,16 +1,18 @@
-use crate::idx::docids::DocId;
-use crate::idx::trees::dynamicset::DynamicSet;
-use crate::idx::trees::hnsw::ElementId;
-use crate::idx::trees::store::NodeId;
+use std::cmp::{Ordering, Reverse};
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, VecDeque};
+
 #[cfg(debug_assertions)]
 use ahash::HashMap;
 use ahash::{HashSet, HashSetExt};
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
-use std::cmp::{Ordering, Reverse};
-use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, VecDeque};
+
+use crate::idx::docids::DocId;
+use crate::idx::trees::dynamicset::DynamicSet;
+use crate::idx::trees::hnsw::ElementId;
+use crate::idx::trees::store::NodeId;
 
 #[derive(Debug, Clone, Copy, Ord, Eq, PartialEq, PartialOrd)]
 pub(super) struct PriorityNode(Reverse<FloatKey>, NodeId);
@@ -615,12 +617,12 @@ pub struct KnnResult {
 
 #[cfg(test)]
 pub(super) mod tests {
-	use crate::expr::index::{Distance, VectorType};
-	use crate::idx::docids::DocId;
-	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
-	use crate::idx::trees::vector::{SharedVector, Vector};
-	use crate::syn::{self};
-	use crate::val::{Number, Value};
+	use std::cmp::Reverse;
+	use std::collections::{BTreeSet, BinaryHeap, VecDeque};
+	use std::fs::File;
+	use std::io::{BufRead, BufReader};
+	use std::time::SystemTime;
+
 	#[cfg(debug_assertions)]
 	use ahash::HashMap;
 	use ahash::HashSet;
@@ -630,12 +632,14 @@ pub(super) mod tests {
 	use rand::{Rng, SeedableRng};
 	use roaring::RoaringTreemap;
 	use rust_decimal::prelude::Zero;
-	use std::cmp::Reverse;
-	use std::collections::{BTreeSet, BinaryHeap, VecDeque};
-	use std::fs::File;
-	use std::io::{BufRead, BufReader};
-	use std::time::SystemTime;
 	use test_log::test;
+
+	use crate::expr::index::{Distance, VectorType};
+	use crate::idx::docids::DocId;
+	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
+	use crate::idx::trees::vector::{SharedVector, Vector};
+	use crate::syn::{self};
+	use crate::val::{Number, Value};
 
 	pub(crate) fn get_seed_rnd() -> SmallRng {
 		let seed: u64 = std::env::var("TEST_SEED")

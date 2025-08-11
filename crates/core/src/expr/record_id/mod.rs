@@ -1,13 +1,15 @@
+use std::fmt;
+
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::FlowResult;
 use crate::expr::escape::EscapeRid;
 use crate::val::RecordId;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
 
 pub mod key;
 pub use key::{RecordIdKeyGen, RecordIdKeyLit};

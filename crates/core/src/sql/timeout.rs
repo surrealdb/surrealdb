@@ -1,6 +1,7 @@
-use crate::val::Duration;
 use std::fmt;
 use std::ops::Deref;
+
+use crate::val::Duration;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

@@ -22,13 +22,14 @@ mod ws_integration {
 	}
 }
 
+use std::future::Future;
+use std::pin::Pin;
+use std::time::Duration;
+
 use assert_fs::TempDir;
 use common::{DB, Format, NS, PASS, Socket, StartServerArguments, USER};
 use http::header::{HeaderMap, HeaderValue};
 use serde_json::json;
-use std::future::Future;
-use std::pin::Pin;
-use std::time::Duration;
 
 const HDR_SURREAL: &str = "surreal-id";
 const HDR_REQUEST: &str = "x-request-id";

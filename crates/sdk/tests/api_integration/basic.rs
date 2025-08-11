@@ -1,12 +1,11 @@
 // Tests common to all protocols and storage engines
 
-use super::{AuthParams, CreateDb};
-use crate::api_integration::{ApiRecordId, NS, Record, RecordBuf, RecordName};
-use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::borrow::Cow;
 use std::ops::Bound;
 use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use surrealdb::error::{Api as ApiError, Db as DbError};
 use surrealdb::opt::auth::{Database, Namespace, Record as RecordAccess};
 use surrealdb::opt::{PatchOp, PatchOps, Raw, Resource};
@@ -14,6 +13,9 @@ use surrealdb::{RecordId, Response, Value};
 use surrealdb_core::expr::TopLevelExpr;
 use surrealdb_core::{syn, val};
 use ulid::Ulid;
+
+use super::{AuthParams, CreateDb};
+use crate::api_integration::{ApiRecordId, NS, Record, RecordBuf, RecordName};
 
 pub async fn connect(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;

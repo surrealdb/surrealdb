@@ -1,6 +1,7 @@
+use std::fmt::{self, Display, Formatter};
+
 use crate::sql::escape::EscapeIdent;
 use crate::val::Duration;
-use std::fmt::{self, Display, Formatter};
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

@@ -1,3 +1,18 @@
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
+use std::task::Poll;
+
+use async_channel::{Receiver, Sender};
+use futures::StreamExt;
+use futures::stream::poll_fn;
+use surrealdb_core::dbs::{Session, Variables};
+use surrealdb_core::iam::Level;
+use surrealdb_core::kvs::Datastore;
+use surrealdb_core::options::EngineOptions;
+use tokio::sync::{RwLock, watch};
+use tokio_util::sync::CancellationToken;
+
 use crate::api::conn::{self, Route, Router};
 use crate::api::engine::local::Db;
 use crate::api::method::BoxFuture;
@@ -6,19 +21,6 @@ use crate::api::{ExtraFeatures, Result, Surreal};
 use crate::engine::tasks;
 use crate::opt::WaitFor;
 use crate::opt::auth::Root;
-use async_channel::{Receiver, Sender};
-use futures::StreamExt;
-use futures::stream::poll_fn;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use std::sync::atomic::AtomicI64;
-use std::task::Poll;
-use surrealdb_core::dbs::{Session, Variables};
-use surrealdb_core::iam::Level;
-use surrealdb_core::kvs::Datastore;
-use surrealdb_core::options::EngineOptions;
-use tokio::sync::{RwLock, watch};
-use tokio_util::sync::CancellationToken;
 
 impl crate::api::Connection for Db {}
 impl conn::Sealed for Db {

@@ -1,5 +1,6 @@
-use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use std::time::Duration;
+
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 use surrealdb_core::val::Value;

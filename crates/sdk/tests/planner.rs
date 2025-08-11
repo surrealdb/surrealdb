@@ -1,11 +1,12 @@
 mod helpers;
-use crate::helpers::Test;
 use helpers::{new_ds, skip_ok};
 use surrealdb::Result;
 use surrealdb::dbs::{Response, Session};
 use surrealdb::kvs::Datastore;
 use surrealdb_core::syn;
 use surrealdb_core::val::Value;
+
+use crate::helpers::Test;
 
 #[tokio::test]
 async fn select_where_iterate_three_multi_index() -> Result<()> {

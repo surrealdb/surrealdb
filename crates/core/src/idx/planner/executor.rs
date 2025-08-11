@@ -1,3 +1,13 @@
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
+
+use anyhow::{Result, bail, ensure};
+use num_traits::{FromPrimitive, ToPrimitive};
+use reblessive::tree::Stk;
+use rust_decimal::Decimal;
+use tokio::sync::RwLock;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -36,14 +46,6 @@ use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::kvs::TransactionType;
 use crate::val::{Array, Number, Object, RecordId, Value};
-use anyhow::{Result, bail, ensure};
-use num_traits::{FromPrimitive, ToPrimitive};
-use reblessive::tree::Stk;
-use rust_decimal::Decimal;
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub(super) type KnnBruteForceEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Distance);
 

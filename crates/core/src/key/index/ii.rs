@@ -1,9 +1,10 @@
 //! Stores doc keys for doc_ids
+use serde::{Deserialize, Serialize};
+
 use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::val::RecordIdKey;
-use serde::{Deserialize, Serialize};
 
 /// Id inverted. DocId -> Id
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

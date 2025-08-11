@@ -1,3 +1,11 @@
+use std::str::{self, FromStr};
+use std::sync::{Arc, LazyLock};
+
+use anyhow::{Result, bail};
+use argon2::{Argon2, PasswordHash, PasswordVerifier};
+use chrono::Utc;
+use jsonwebtoken::{DecodingKey, Validation, decode};
+
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::expr::Algorithm;
@@ -14,12 +22,6 @@ use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::syn;
 use crate::val::Value;
-use anyhow::{Result, bail};
-use argon2::{Argon2, PasswordHash, PasswordVerifier};
-use chrono::Utc;
-use jsonwebtoken::{DecodingKey, Validation, decode};
-use std::str::{self, FromStr};
-use std::sync::{Arc, LazyLock};
 
 fn config(alg: Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation)> {
 	let (dec, mut val) = match alg {
@@ -703,14 +705,15 @@ fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Resu
 
 #[cfg(test)]
 mod tests {
+	use argon2::password_hash::{PasswordHasher, SaltString};
+	use chrono::Duration;
+	use jsonwebtoken::{EncodingKey, encode};
+
 	use super::*;
 	use crate::iam::token::{Audience, HEADER};
 	use crate::sql::statements::define::DefineKind;
 	use crate::sql::statements::define::user::PassType;
 	use crate::sql::{Ast, Ident};
-	use argon2::password_hash::{PasswordHasher, SaltString};
-	use chrono::Duration;
-	use jsonwebtoken::{EncodingKey, encode};
 
 	struct TestLevel {
 		level: &'static str,
@@ -1359,7 +1362,6 @@ mod tests {
 	#[cfg(feature = "jwks")]
 	#[tokio::test]
 	async fn test_token_record_jwks() {
-		use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
 		use base64::Engine;
 		use base64::engine::general_purpose::STANDARD_NO_PAD;
 		use jsonwebtoken::jwk::{Jwk, JwkSet};
@@ -1367,6 +1369,8 @@ mod tests {
 		use rand::distributions::Alphanumeric;
 		use wiremock::matchers::{method, path};
 		use wiremock::{Mock, MockServer, ResponseTemplate};
+
+		use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
 
 		// Use unique path to prevent accidental cache reuse
 		fn random_path() -> String {

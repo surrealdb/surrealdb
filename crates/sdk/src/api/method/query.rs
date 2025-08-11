@@ -1,3 +1,20 @@
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::future::IntoFuture;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+use anyhow::bail;
+use futures::StreamExt;
+use futures::future::Either;
+use futures::stream::SelectAll;
+use indexmap::IndexMap;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use surrealdb_core::expr::{LogicalPlan, TopLevelExpr};
+use surrealdb_core::val;
+use uuid::Uuid;
+
 use super::transaction::WithTransaction;
 use super::{Stream, live};
 use crate::api::conn::Command;
@@ -7,21 +24,6 @@ use crate::api::{self, Connection, ExtraFeatures, Result, opt};
 use crate::method::{OnceLockExt, Stats, WithStats};
 use crate::value::Notification;
 use crate::{Surreal, Value};
-use anyhow::bail;
-use futures::StreamExt;
-use futures::future::Either;
-use futures::stream::SelectAll;
-use indexmap::IndexMap;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-use std::borrow::Cow;
-use std::collections::HashMap;
-use std::future::IntoFuture;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use surrealdb_core::expr::{LogicalPlan, TopLevelExpr};
-use surrealdb_core::val;
-use uuid::Uuid;
 
 /// A query future
 #[derive(Debug)]
@@ -739,9 +741,10 @@ impl WithStats<Response> {
 
 #[cfg(test)]
 mod tests {
+	use serde::Deserialize;
+
 	use super::*;
 	use crate::value::to_value;
-	use serde::Deserialize;
 
 	#[derive(Debug, Clone, Serialize, Deserialize)]
 	struct Summary {

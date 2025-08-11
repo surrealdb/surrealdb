@@ -1,10 +1,11 @@
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::expr::FlowResultExt as _;
 use crate::val::Value;
-use anyhow::Result;
-use reblessive::tree::Stk;
 
 impl Document {
 	/// Processes any DEFINE EVENT clauses which

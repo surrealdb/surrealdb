@@ -1,3 +1,10 @@
+use std::fmt;
+
+use anyhow::{Result, bail, ensure};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
@@ -6,11 +13,6 @@ use crate::expr::paths::{IN, OUT};
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Datetime, RecordId, Table};
-use anyhow::{Result, bail, ensure};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]

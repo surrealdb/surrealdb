@@ -1,18 +1,20 @@
 #![allow(clippy::derived_hash_with_manual_eq)]
 
-use super::Object;
-use crate::expr::fmt::Fmt;
-use crate::val::{Array, Value};
+use std::cmp::Ordering;
+use std::collections::BTreeMap;
+use std::iter::once;
+use std::{fmt, hash};
+
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
 use geo::{Coord, LineString, LinesIter, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::collections::BTreeMap;
-use std::iter::once;
-use std::{fmt, hash};
+
+use super::Object;
+use crate::expr::fmt::Fmt;
+use crate::val::{Array, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

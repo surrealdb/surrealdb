@@ -1,3 +1,26 @@
+use std::ops::Deref;
+use std::sync::Arc;
+
+use axum::extract::ws::{WebSocket, WebSocketUpgrade};
+use axum::extract::{DefaultBodyLimit, State};
+use axum::response::IntoResponse;
+use axum::routing::options;
+use axum::{Extension, Router};
+use axum_extra::TypedHeader;
+use axum_extra::headers::Header;
+use bytes::Bytes;
+use http::HeaderMap;
+use http::header::SEC_WEBSOCKET_PROTOCOL;
+use surrealdb::dbs::Session;
+use surrealdb::dbs::capabilities::RouteTarget;
+use surrealdb::kvs::Datastore;
+use surrealdb::mem::ALLOC;
+use surrealdb::rpc::RpcContext;
+use surrealdb::rpc::format::{Format, PROTOCOLS};
+use tower_http::limit::RequestBodyLimitLayer;
+use tower_http::request_id::RequestId;
+use uuid::Uuid;
+
 use super::AppState;
 use super::error::ResponseError;
 use super::headers::{Accept, ContentType, SurrealId};
@@ -9,27 +32,6 @@ use crate::rpc::format::HttpFormat;
 use crate::rpc::http::Http;
 use crate::rpc::response::IntoRpcResponse;
 use crate::rpc::websocket::Websocket;
-use axum::extract::ws::{WebSocket, WebSocketUpgrade};
-use axum::extract::{DefaultBodyLimit, State};
-use axum::response::IntoResponse;
-use axum::routing::options;
-use axum::{Extension, Router};
-use axum_extra::TypedHeader;
-use axum_extra::headers::Header;
-use bytes::Bytes;
-use http::HeaderMap;
-use http::header::SEC_WEBSOCKET_PROTOCOL;
-use std::ops::Deref;
-use std::sync::Arc;
-use surrealdb::dbs::Session;
-use surrealdb::dbs::capabilities::RouteTarget;
-use surrealdb::kvs::Datastore;
-use surrealdb::mem::ALLOC;
-use surrealdb::rpc::RpcContext;
-use surrealdb::rpc::format::{Format, PROTOCOLS};
-use tower_http::limit::RequestBodyLimitLayer;
-use tower_http::request_id::RequestId;
-use uuid::Uuid;
 
 pub(super) fn router() -> Router<Arc<RpcState>> {
 	Router::new()

@@ -1,14 +1,16 @@
-use crate::err::Error;
-use crate::expr::Expr;
-use crate::expr::fmt::{Fmt, Pretty, pretty_indent};
-use crate::val::Value;
-use anyhow::{Result, ensure};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops;
 use std::ops::{Deref, DerefMut};
+
+use anyhow::{Result, ensure};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use crate::err::Error;
+use crate::expr::Expr;
+use crate::expr::fmt::{Fmt, Pretty, pretty_indent};
+use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

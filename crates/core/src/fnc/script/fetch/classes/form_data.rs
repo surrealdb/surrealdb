@@ -1,13 +1,15 @@
 //! FormData class implementation
 
-use crate::fnc::script::fetch::classes::Blob;
+use std::collections::HashMap;
+use std::string::String as StdString;
+
 use js::class::{Class, Trace};
 use js::function::{Opt, Rest};
 use js::prelude::Coerced;
 use js::{Ctx, Exception, FromJs, JsLifetime, Result, String, Value};
 use reqwest::multipart::{Form, Part};
-use std::collections::HashMap;
-use std::string::String as StdString;
+
+use crate::fnc::script::fetch::classes::Blob;
 
 #[derive(Clone, JsLifetime)]
 pub enum FormDataValue<'js> {

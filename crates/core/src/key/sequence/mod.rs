@@ -2,10 +2,12 @@
 pub mod ba;
 pub mod st;
 
-use crate::kvs::KVKey;
+use std::ops::Range;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::ops::Range;
+
+use crate::kvs::KVKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Prefix<'a> {

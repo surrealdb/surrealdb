@@ -1,8 +1,5 @@
 //! Request class implementation
 
-use super::{Blob, Headers};
-use crate::fnc::script::fetch::RequestError;
-use crate::fnc::script::fetch::body::Body;
 use bytes::Bytes;
 use js::class::Trace;
 use js::function::Opt;
@@ -10,6 +7,10 @@ use js::prelude::Coerced;
 use js::{Class, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value};
 use reqwest::header::HeaderName;
 use reqwest::{Method, Url};
+
+use super::{Blob, Headers};
+use crate::fnc::script::fetch::RequestError;
+use crate::fnc::script::fetch::body::Body;
 
 #[derive(Clone, Copy, Eq, PartialEq, JsLifetime)]
 pub enum RequestMode {
@@ -538,9 +539,10 @@ impl<'js> Request<'js> {
 
 #[cfg(test)]
 mod test {
-	use crate::fnc::script::fetch::test::create_test_context;
 	use js::CatchResultExt;
 	use js::promise::Promise;
+
+	use crate::fnc::script::fetch::test::create_test_context;
 
 	#[tokio::test]
 	async fn basic_request_use() {

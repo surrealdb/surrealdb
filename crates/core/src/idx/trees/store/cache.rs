@@ -1,3 +1,12 @@
+use std::cmp::Ordering;
+use std::fmt::{Debug, Display};
+use std::sync::Arc;
+
+use ahash::{HashMap, HashSet};
+use anyhow::Result;
+use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
+
 use crate::idx::trees::bkeys::{FstKeys, TrieKeys};
 use crate::idx::trees::btree::{BTreeNode, BTreeStore};
 use crate::idx::trees::mtree::{MTreeNode, MTreeStore};
@@ -6,13 +15,6 @@ use crate::idx::trees::store::{
 	NodeId, StoreGeneration, StoredNode, TreeNode, TreeNodeProvider, TreeStore,
 };
 use crate::kvs::{Key, Transaction, TransactionType};
-use ahash::{HashMap, HashSet};
-use anyhow::Result;
-use dashmap::DashMap;
-use dashmap::mapref::entry::Entry;
-use std::cmp::Ordering;
-use std::fmt::{Debug, Display};
-use std::sync::Arc;
 
 #[derive(Default)]
 pub(crate) struct IndexTreeCaches {

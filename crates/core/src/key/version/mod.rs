@@ -1,8 +1,10 @@
 //! Stores a record document
+use std::ops::Range;
+
+use serde::{Deserialize, Serialize};
+
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-use serde::{Deserialize, Serialize};
-use std::ops::Range;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Version {

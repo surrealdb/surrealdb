@@ -1,3 +1,7 @@
+use anyhow::Result;
+use futures::future::try_join_all;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 //use crate::expr::edges::Edges;
@@ -6,9 +10,6 @@ use crate::expr::part::Next;
 use crate::expr::statements::select::SelectStatement;
 use crate::expr::{Expr, FlowResultExt as _, Graph, Idiom, Literal, Part};
 use crate::val::Value;
-use anyhow::Result;
-use futures::future::try_join_all;
-use reblessive::tree::Stk;
 
 impl Value {
 	pub(crate) async fn fetch(

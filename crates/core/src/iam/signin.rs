@@ -1,3 +1,16 @@
+use std::str::FromStr;
+use std::sync::Arc;
+
+use anyhow::{Result, bail, ensure};
+use chrono::Utc;
+use jsonwebtoken::{EncodingKey, Header, encode};
+use md5::Digest;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+use subtle::ConstantTimeEq;
+use uuid::Uuid;
+
 use super::access::{
 	authenticate_generic, authenticate_record, create_refresh_token_record,
 	revoke_refresh_token_record,
@@ -18,17 +31,6 @@ use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::val::{Datetime, Object, Value};
-use anyhow::{Result, bail, ensure};
-use chrono::Utc;
-use jsonwebtoken::{EncodingKey, Header, encode};
-use md5::Digest;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use sha2::Sha256;
-use std::str::FromStr;
-use std::sync::Arc;
-use subtle::ConstantTimeEq;
-use uuid::Uuid;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -806,16 +808,18 @@ pub fn verify_grant_bearer(
 
 #[cfg(test)]
 mod tests {
+	use std::collections::HashMap;
+
+	use chrono::Duration;
+	use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
+	use regex::Regex;
+
 	use super::*;
 	use crate::dbs::Capabilities;
 	use crate::iam::Role;
 	use crate::sql::statements::define::DefineKind;
 	use crate::sql::statements::define::user::PassType;
 	use crate::sql::{Ast, Expr, Ident, TopLevelExpr};
-	use chrono::Duration;
-	use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
-	use regex::Regex;
-	use std::collections::HashMap;
 
 	struct TestLevel {
 		level: &'static str,

@@ -1,3 +1,6 @@
+use chrono::offset::TimeZone;
+use chrono::{NaiveDate, Offset, Utc};
+
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::{
 	AccessType, BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess, JwtAccessIssue,
@@ -40,8 +43,6 @@ use crate::sql::{
 use crate::syn::parser::ParserSettings;
 use crate::syn::{self};
 use crate::val::{Datetime, Duration, Number, Strand, Uuid};
-use chrono::offset::TimeZone;
-use chrono::{NaiveDate, Offset, Utc};
 
 fn ident_field(name: &str) -> Expr {
 	Expr::Idiom(Idiom(vec![Part::Field(Ident::new(name.to_string()).unwrap())]))

@@ -1,3 +1,28 @@
+use std::fmt;
+#[cfg(storage)]
+use std::path::PathBuf;
+use std::pin::pin;
+use std::sync::Arc;
+use std::task::{Poll, ready};
+use std::time::Duration;
+#[cfg(not(target_family = "wasm"))]
+use std::time::{SystemTime, UNIX_EPOCH};
+
+#[allow(unused_imports)]
+use anyhow::bail;
+use anyhow::{Result, ensure};
+use async_channel::{Receiver, Sender};
+use bytes::{Bytes, BytesMut};
+use dashmap::DashMap;
+use futures::{Future, Stream};
+use reblessive::TreeStack;
+#[cfg(feature = "jwks")]
+use tokio::sync::RwLock;
+use tracing::{instrument, trace};
+use uuid::Uuid;
+#[cfg(target_family = "wasm")]
+use wasmtimer::std::{SystemTime, UNIX_EPOCH};
+
 use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
@@ -36,29 +61,6 @@ use crate::sql::Ast;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use crate::val::{Strand, Value};
 use crate::{cf, syn};
-#[allow(unused_imports)]
-use anyhow::bail;
-use anyhow::{Result, ensure};
-use async_channel::{Receiver, Sender};
-use bytes::{Bytes, BytesMut};
-use dashmap::DashMap;
-use futures::{Future, Stream};
-use reblessive::TreeStack;
-use std::fmt;
-#[cfg(storage)]
-use std::path::PathBuf;
-use std::pin::pin;
-use std::sync::Arc;
-use std::task::{Poll, ready};
-use std::time::Duration;
-#[cfg(not(target_family = "wasm"))]
-use std::time::{SystemTime, UNIX_EPOCH};
-#[cfg(feature = "jwks")]
-use tokio::sync::RwLock;
-use tracing::{instrument, trace};
-use uuid::Uuid;
-#[cfg(target_family = "wasm")]
-use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
 
@@ -1393,10 +1395,11 @@ mod test {
 
 	#[tokio::test]
 	pub async fn very_deep_query() -> Result<()> {
+		use reblessive::{Stack, Stk};
+
 		use crate::expr::{BinaryOperator, Expr, Literal};
 		use crate::kvs::Datastore;
 		use crate::val::{Number, Value};
-		use reblessive::{Stack, Stk};
 
 		// build query manually to bypass query limits.
 		let mut stack = Stack::new();

@@ -1,6 +1,7 @@
-use crate::val::Duration;
 use std::fmt::{self, Display, Formatter};
 use std::time;
+
+use crate::val::Duration;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct ChangeFeed {

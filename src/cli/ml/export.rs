@@ -1,12 +1,13 @@
-use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
-use crate::cli::abstraction::{
-	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments,
-};
 use anyhow::{Result, bail};
 use clap::Args;
 use futures_util::StreamExt;
 use surrealdb::engine::any::{self, connect};
 use tokio::io::{self, AsyncWriteExt};
+
+use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
+use crate::cli::abstraction::{
+	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments,
+};
 
 #[derive(Args, Debug)]
 pub struct ModelArguments {

@@ -1,8 +1,3 @@
-use crate::cnf::SURREALDB_USER_AGENT;
-use crate::ctx::Context;
-use crate::err::Error;
-use crate::syn;
-use crate::val::{Bytes, Object, Strand, Value};
 use anyhow::{Context as _, Result, bail};
 use reqwest::header::CONTENT_TYPE;
 #[cfg(not(target_family = "wasm"))]
@@ -13,6 +8,12 @@ use reqwest::{Client, Method, RequestBuilder, Response};
 #[cfg(not(target_family = "wasm"))]
 use tokio::runtime::Handle;
 use url::Url;
+
+use crate::cnf::SURREALDB_USER_AGENT;
+use crate::ctx::Context;
+use crate::err::Error;
+use crate::syn;
+use crate::val::{Bytes, Object, Strand, Value};
 
 pub(crate) fn uri_is_valid(uri: &str) -> bool {
 	reqwest::Url::parse(uri).is_ok()

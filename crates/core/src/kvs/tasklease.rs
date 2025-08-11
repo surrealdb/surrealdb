@@ -1,7 +1,3 @@
-use crate::err::Error;
-use crate::key::root::tl::Tl;
-use crate::kvs::ds::TransactionFactory;
-use crate::kvs::{LockType, TransactionType, impl_kv_value_revisioned};
 use anyhow::{Result, bail};
 use chrono::{DateTime, Duration, Utc};
 use rand::{Rng, thread_rng};
@@ -10,6 +6,11 @@ use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 use tracing::trace;
 use uuid::Uuid;
+
+use crate::err::Error;
+use crate::key::root::tl::Tl;
+use crate::kvs::ds::TransactionFactory;
+use crate::kvs::{LockType, TransactionType, impl_kv_value_revisioned};
 
 #[derive(Debug)]
 pub(crate) enum TaskLeaseType {
@@ -207,17 +208,19 @@ impl LeaseHandler {
 #[cfg(test)]
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-mem"))]
 mod tests {
+	use std::sync::Arc;
+	use std::time::{Duration, Instant};
+
+	#[cfg(feature = "kv-mem")]
+	use chrono::Utc;
+	#[cfg(feature = "kv-rocksdb")]
+	use temp_dir::TempDir;
+	use uuid::Uuid;
+
 	use crate::dbs::node::Timestamp;
 	use crate::kvs::clock::{FakeClock, SizedClock};
 	use crate::kvs::ds::{DatastoreFlavor, TransactionFactory};
 	use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
-	#[cfg(feature = "kv-mem")]
-	use chrono::Utc;
-	use std::sync::Arc;
-	use std::time::{Duration, Instant};
-	#[cfg(feature = "kv-rocksdb")]
-	use temp_dir::TempDir;
-	use uuid::Uuid;
 
 	/// Tracks the results of lease acquisition attempts by a node.
 	///

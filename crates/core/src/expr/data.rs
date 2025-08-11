@@ -1,13 +1,15 @@
+use std::fmt::{self, Display, Formatter};
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use super::FlowResultExt as _;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::fmt::Fmt;
 use crate::expr::{AssignOperator, Expr, Idiom, Literal, Part, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]

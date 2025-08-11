@@ -1,6 +1,11 @@
 //! This module defines the API for a transaction in a key-value store.
 #![warn(clippy::missing_docs_in_private_items)]
 
+use std::ops::Range;
+
+use anyhow::{Result, ensure};
+use async_trait::async_trait;
+
 use super::tr::Check;
 use super::util;
 use crate::cnf::{COUNT_BATCH_SIZE, NORMAL_FETCH_SIZE};
@@ -10,9 +15,6 @@ use crate::kvs::batch::Batch;
 use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare, SavedValue};
 use crate::kvs::{Key, Val, Version};
 use crate::vs::VersionStamp;
-use anyhow::{Result, ensure};
-use async_trait::async_trait;
-use std::ops::Range;
 
 mod requirements {
 	//! This module defines the trait requirements for a transaction.

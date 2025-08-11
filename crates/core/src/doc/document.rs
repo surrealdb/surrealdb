@@ -1,3 +1,11 @@
+use std::fmt::{Debug, Formatter};
+use std::mem;
+use std::ops::Deref;
+use std::sync::Arc;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Workable};
 use crate::err::Error;
@@ -13,12 +21,6 @@ use crate::idx::planner::RecordStrategy;
 use crate::idx::planner::iterators::IteratorRecord;
 use crate::kvs::cache;
 use crate::val::{RecordId, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::fmt::{Debug, Formatter};
-use std::mem;
-use std::ops::Deref;
-use std::sync::Arc;
 
 pub(crate) struct Document {
 	/// The record id of this document

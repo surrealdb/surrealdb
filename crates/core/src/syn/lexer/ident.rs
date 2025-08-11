@@ -1,10 +1,12 @@
+use std::mem;
+
+use unicase::UniCase;
+
 use super::unicode::{chars, is_identifier_continue};
 use crate::syn::error::{SyntaxError, syntax_error};
 use crate::syn::lexer::Lexer;
 use crate::syn::lexer::keywords::KEYWORDS;
 use crate::syn::token::{Token, TokenKind};
-use std::mem;
-use unicase::UniCase;
 
 impl Lexer<'_> {
 	/// Lex a parameter in the form of `$[a-zA-Z0-9_]*`

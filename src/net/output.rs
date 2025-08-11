@@ -1,10 +1,11 @@
-use super::headers::Accept;
 use axum::response::{IntoResponse, Response};
 use bincode::Options;
 use http::StatusCode;
 use http::header::{CONTENT_TYPE, HeaderValue};
 use serde::Serialize;
 use surrealdb_core::val;
+
+use super::headers::Accept;
 
 pub enum Output {
 	None,

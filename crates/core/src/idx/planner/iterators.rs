@@ -1,3 +1,12 @@
+use std::borrow::Cow;
+use std::collections::VecDeque;
+use std::ops::Range;
+use std::sync::Arc;
+
+use anyhow::Result;
+use radix_trie::Trie;
+use rust_decimal::Decimal;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::Ident;
@@ -10,13 +19,6 @@ use crate::idx::planner::tree::IndexReference;
 use crate::key::index::Index;
 use crate::kvs::{KVKey, Key, Transaction, Val};
 use crate::val::{Array, Number, RecordId, Value};
-use anyhow::Result;
-use radix_trie::Trie;
-use rust_decimal::Decimal;
-use std::borrow::Cow;
-use std::collections::VecDeque;
-use std::ops::Range;
-use std::sync::Arc;
 
 pub(crate) type IteratorRef = usize;
 

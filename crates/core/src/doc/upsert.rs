@@ -1,11 +1,12 @@
+use anyhow::anyhow;
+use reblessive::tree::Stk;
+
 use super::IgnoreError;
 use crate::ctx::Context;
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::val::Value;
-use anyhow::anyhow;
-use reblessive::tree::Stk;
 
 impl Document {
 	pub(super) async fn upsert(

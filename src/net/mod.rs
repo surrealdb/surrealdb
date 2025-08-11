@@ -21,11 +21,11 @@ mod sync;
 mod tracer;
 mod version;
 
-use crate::cli::CF;
-use crate::cnf;
-use crate::net::signals::graceful_shutdown;
-use crate::rpc::{RpcState, notifications};
-use crate::telemetry::metrics::HttpMetricsLayer;
+use std::io;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
 use anyhow::Result;
 use axum::response::Redirect;
 use axum::routing::get;
@@ -33,10 +33,6 @@ use axum::{Router, middleware};
 use axum_server::Handle;
 use axum_server::tls_rustls::RustlsConfig;
 use http::header;
-use std::io;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::Duration;
 use surrealdb::dbs::capabilities::ExperimentalTarget;
 use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
 use surrealdb::kvs::Datastore;
@@ -55,6 +51,12 @@ use tower_http::sensitive_headers::{
 	SetSensitiveRequestHeadersLayer, SetSensitiveResponseHeadersLayer,
 };
 use tower_http::trace::TraceLayer;
+
+use crate::cli::CF;
+use crate::cnf;
+use crate::net::signals::graceful_shutdown;
+use crate::rpc::{RpcState, notifications};
+use crate::telemetry::metrics::HttpMetricsLayer;
 
 const LOG: &str = "surrealdb::net";
 

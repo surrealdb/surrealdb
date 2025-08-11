@@ -1,8 +1,9 @@
+use anyhow::Result;
+use revision::revisioned;
+
 use crate::err::Error;
 use crate::idx::ft::Position;
 use crate::kvs::KVValue;
-use anyhow::Result;
-use revision::revisioned;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq)]

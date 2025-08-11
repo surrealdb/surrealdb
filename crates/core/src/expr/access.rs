@@ -1,13 +1,15 @@
+use std::fmt::{self, Display, Formatter};
+use std::ops::Deref;
+use std::str;
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::expr::Ident;
 use crate::expr::escape::EscapeIdent;
 use crate::expr::fmt::Fmt;
 use crate::val::strand::no_nul_bytes;
 use crate::val::{Duration, RecordId, RecordIdKey};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
-use std::ops::Deref;
-use std::str;
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]

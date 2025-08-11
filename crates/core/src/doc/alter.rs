@@ -1,3 +1,8 @@
+use std::sync::Arc;
+
+use anyhow::{Result, bail, ensure};
+use reblessive::tree::Stk;
+
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Statement, Workable};
 use crate::doc::Document;
@@ -7,9 +12,6 @@ use crate::expr::data::Data;
 use crate::expr::paths::{EDGE, ID, IN, OUT};
 use crate::expr::{AssignOperator, FlowResultExt};
 use crate::val::{RecordId, Value};
-use anyhow::{Result, bail, ensure};
-use reblessive::tree::Stk;
-use std::sync::Arc;
 
 impl Document {
 	/// Generate a record ID for CREATE, UPSERT, and UPDATE statements

@@ -1,22 +1,24 @@
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+
+#[cfg(feature = "ml")]
+use anyhow::Context;
+use anyhow::Result;
+use clap::Args;
+use surrealdb::engine::{any, tasks};
+use surrealdb::options::EngineOptions;
+#[cfg(feature = "ml")]
+use surrealdb_core::ml::execution::session::set_environment;
+use tokio_util::sync::CancellationToken;
+
 use super::config::{CF, Config};
 use crate::cnf::LOGO;
 use crate::dbs::StartCommandDbsOptions;
 use crate::net::client_ip::ClientIp;
 use crate::net::{self};
 use crate::{dbs, env};
-#[cfg(feature = "ml")]
-use anyhow::Context;
-use anyhow::Result;
-use clap::Args;
-use std::net::SocketAddr;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
-use surrealdb::engine::{any, tasks};
-use surrealdb::options::EngineOptions;
-#[cfg(feature = "ml")]
-use surrealdb_core::ml::execution::session::set_environment;
-use tokio_util::sync::CancellationToken;
 
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {

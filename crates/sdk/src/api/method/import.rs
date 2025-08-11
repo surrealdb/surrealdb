@@ -1,12 +1,13 @@
+use std::borrow::Cow;
+use std::future::IntoFuture;
+use std::marker::PhantomData;
+use std::path::PathBuf;
+
 use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Error, ExtraFeatures, Result};
 use crate::method::{Model, OnceLockExt};
-use std::borrow::Cow;
-use std::future::IntoFuture;
-use std::marker::PhantomData;
-use std::path::PathBuf;
 
 /// An database import future
 #[derive(Debug)]

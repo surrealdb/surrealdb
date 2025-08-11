@@ -1,15 +1,17 @@
-use crate::err::Error;
-use crate::expr::escape::QuoteStr;
-use crate::val::TryAdd;
-use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::fmt::{self, Display, Formatter};
 use std::ops::{
 	Deref, {self},
 };
 use std::str;
+
+use anyhow::Result;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use crate::err::Error;
+use crate::expr::escape::QuoteStr;
+use crate::val::TryAdd;
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Debug)]
 #[repr(transparent)]
@@ -168,9 +170,10 @@ impl TryAdd for Strand {
 
 // serde(with = no_nul_bytes) will (de)serialize with no NUL bytes.
 pub(crate) mod no_nul_bytes {
+	use std::fmt;
+
 	use serde::de::{self, Visitor};
 	use serde::{Deserializer, Serializer};
-	use std::fmt;
 
 	pub(crate) fn serialize<S>(s: &str, serializer: S) -> Result<S::Ok, S::Error>
 	where

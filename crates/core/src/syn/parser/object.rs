@@ -1,3 +1,5 @@
+use reblessive::Stk;
+
 use super::mac::unexpected;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{Block, Expr, Literal};
@@ -6,7 +8,6 @@ use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser, enter_object_recursion};
 use crate::syn::token::{Glued, Span, TokenKind, t};
 use crate::val::Strand;
-use reblessive::Stk;
 
 impl Parser<'_> {
 	/// Parse an production which starts with an `{`

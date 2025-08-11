@@ -5,6 +5,13 @@ mod heuristic;
 pub mod index;
 mod layer;
 
+use anyhow::Result;
+use rand::prelude::SmallRng;
+use rand::{Rng, SeedableRng};
+use reblessive::tree::Stk;
+use revision::{Revisioned, revisioned};
+use serde::{Deserialize, Serialize};
+
 use crate::expr::index::HnswParams;
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
@@ -17,12 +24,6 @@ use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 use crate::kvs::{KVValue, Transaction};
-use anyhow::Result;
-use rand::prelude::SmallRng;
-use rand::{Rng, SeedableRng};
-use reblessive::tree::Stk;
-use revision::{Revisioned, revisioned};
-use serde::{Deserialize, Serialize};
 
 struct HnswSearch {
 	pt: SharedVector,
@@ -432,6 +433,17 @@ where
 
 #[cfg(test)]
 mod tests {
+	use std::collections::hash_map::Entry;
+	use std::ops::Deref;
+	use std::sync::Arc;
+
+	use ahash::{HashMap, HashSet};
+	use anyhow::Result;
+	use ndarray::Array1;
+	use reblessive::tree::Stk;
+	use roaring::RoaringTreemap;
+	use test_log::test;
+
 	use crate::ctx::{Context, MutableContext};
 	use crate::expr::index::{Distance, HnswParams, VectorType};
 	use crate::idx::IndexKeyBase;
@@ -446,15 +458,6 @@ mod tests {
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
 	use crate::val::{RecordIdKey, Value};
-	use ahash::{HashMap, HashSet};
-	use anyhow::Result;
-	use ndarray::Array1;
-	use reblessive::tree::Stk;
-	use roaring::RoaringTreemap;
-	use std::collections::hash_map::Entry;
-	use std::ops::Deref;
-	use std::sync::Arc;
-	use test_log::test;
 
 	async fn insert_collection_hnsw(
 		tx: &Transaction,

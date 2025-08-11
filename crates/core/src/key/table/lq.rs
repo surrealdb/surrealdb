@@ -1,10 +1,11 @@
 //! Stores a LIVE SELECT query definition on the table
-use crate::expr::LiveStatement;
-use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::expr::LiveStatement;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
 
 /// Lv is used to track a live query and is cluster independent, i.e. it is tied
 /// with a ns/db/tb combo without the cl. The live statement includes the node

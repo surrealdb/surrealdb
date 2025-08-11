@@ -1,3 +1,11 @@
+use std::borrow::Cow;
+use std::future::IntoFuture;
+use std::marker::PhantomData;
+
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use uuid::Uuid;
+
 use super::validate_data;
 use crate::Surreal;
 use crate::api::conn::Command;
@@ -6,12 +14,6 @@ use crate::api::opt::Resource;
 use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
 use crate::value::Value;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-use std::borrow::Cow;
-use std::future::IntoFuture;
-use std::marker::PhantomData;
-use uuid::Uuid;
 
 /// A merge future
 #[derive(Debug)]

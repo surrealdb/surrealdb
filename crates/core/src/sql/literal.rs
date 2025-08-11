@@ -1,11 +1,13 @@
+use std::fmt::{self, Write as _};
+
+//use async_graphql::dynamic::Object;
+use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+use rust_decimal::Decimal;
+
 use crate::sql::escape::EscapeKey;
 use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::sql::{Closure, Expr, RecordIdLit};
 use crate::val::{Bytes, Datetime, Duration, File, Geometry, Regex, Strand, Uuid};
-//use async_graphql::dynamic::Object;
-use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
-use rust_decimal::Decimal;
-use std::fmt::{self, Write as _};
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

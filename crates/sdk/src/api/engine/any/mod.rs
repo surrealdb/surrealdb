@@ -157,12 +157,14 @@ mod native;
 #[cfg(target_family = "wasm")]
 mod wasm;
 
+use std::marker::PhantomData;
+
+use url::Url;
+
 use crate::api::err::Error;
 use crate::api::opt::{Config, Endpoint};
 use crate::api::{Connect, Result, Surreal};
 use crate::opt::path_to_string;
-use std::marker::PhantomData;
-use url::Url;
 
 /// A trait for converting inputs to a server address object
 pub trait IntoEndpoint: into_endpoint::Sealed {}
@@ -330,11 +332,12 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests {
 
+	use surrealdb_core::val;
+
 	use super::*;
 	use crate::Value;
 	use crate::opt::auth::Root;
 	use crate::opt::capabilities::Capabilities;
-	use surrealdb_core::val;
 
 	#[tokio::test]
 	async fn local_engine_without_auth() {

@@ -1,20 +1,22 @@
-use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
-use crate::dbs::plan::Explanation;
-use crate::err::Error;
-use crate::expr::order::Ordering;
-use crate::val::Value;
+use std::fs::{File, OpenOptions};
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Take, Write};
+use std::path::{Path, PathBuf};
+use std::{fs, io, mem};
+
 use anyhow::Result;
 use ext_sort::{ExternalChunk, ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder};
 use rand::Rng as _;
 use rand::seq::SliceRandom as _;
 use revision::Revisioned;
-use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Take, Write};
-use std::path::{Path, PathBuf};
-use std::{fs, io, mem};
 use tempfile::{Builder, TempDir};
 #[cfg(not(target_family = "wasm"))]
 use tokio::task::spawn_blocking;
+
+use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
+use crate::dbs::plan::Explanation;
+use crate::err::Error;
+use crate::expr::order::Ordering;
+use crate::val::Value;
 
 pub(super) struct FileCollector {
 	dir: TempDir,

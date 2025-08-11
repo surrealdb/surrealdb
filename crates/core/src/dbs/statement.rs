@@ -1,3 +1,8 @@
+use std::borrow::Cow;
+use std::fmt;
+
+use anyhow::Result;
+
 use crate::ctx::{Context, MutableContext};
 use crate::err::Error;
 use crate::expr::cond::Cond;
@@ -24,9 +29,6 @@ use crate::expr::statements::update::UpdateStatement;
 use crate::expr::statements::upsert::UpsertStatement;
 use crate::expr::{Explain, Permission, Timeout, With};
 use crate::idx::planner::QueryPlanner;
-use anyhow::Result;
-use std::borrow::Cow;
-use std::fmt;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Statement<'a> {

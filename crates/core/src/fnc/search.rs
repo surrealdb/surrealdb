@@ -1,3 +1,9 @@
+use std::collections::hash_map::Entry;
+use std::collections::{BinaryHeap, HashMap};
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use super::args::Optional;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -7,10 +13,6 @@ use crate::fnc::get_execution_context;
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::highlighter::HighlightParams;
 use crate::val::{Array, Number, Object, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::collections::hash_map::Entry;
-use std::collections::{BinaryHeap, HashMap};
 
 pub async fn analyze(
 	(stk, ctx, opt): (&mut Stk, &Context, Option<&Options>),

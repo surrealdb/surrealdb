@@ -13,6 +13,8 @@ mod sequence;
 mod table;
 mod user;
 
+use std::fmt::{self, Display, Formatter};
+
 pub use access::RemoveAccessStatement;
 pub use analyzer::RemoveAnalyzerStatement;
 pub use bucket::RemoveBucketStatement;
@@ -25,7 +27,6 @@ pub use model::RemoveModelStatement;
 pub use namespace::RemoveNamespaceStatement;
 pub use param::RemoveParamStatement;
 pub use sequence::RemoveSequenceStatement;
-use std::fmt::{self, Display, Formatter};
 pub use table::RemoveTableStatement;
 pub use user::RemoveUserStatement;
 

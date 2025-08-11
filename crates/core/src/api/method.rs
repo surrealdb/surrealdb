@@ -1,9 +1,11 @@
+use std::fmt::{self, Display};
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::val::Value;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

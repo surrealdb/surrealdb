@@ -1,10 +1,12 @@
+use std::collections::BTreeMap;
+use std::fmt::{self, Display, Formatter, Write};
+
+use rust_decimal::Decimal;
+
 use super::escape::EscapeKey;
 use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::sql::{Ident, Idiom};
 use crate::val::{Duration, Strand};
-use rust_decimal::Decimal;
-use std::collections::BTreeMap;
-use std::fmt::{self, Display, Formatter, Write};
 
 /// The kind, or data type, of a value or field.
 #[derive(Clone, Debug, PartialEq, Eq)]

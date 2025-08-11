@@ -14,12 +14,13 @@
 //! - Supporting term-based document retrieval
 //! - Enabling efficient text search operations
 
+use roaring::RoaringTreemap;
+use serde::{Deserialize, Serialize};
+
 use crate::idx::docids::DocId;
 use crate::idx::ft::fulltext::TermDocument;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-use roaring::RoaringTreemap;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct TdRoot<'a> {

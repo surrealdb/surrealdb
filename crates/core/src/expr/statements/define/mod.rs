@@ -15,10 +15,8 @@ mod sequence;
 mod table;
 mod user;
 
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::val::Value;
+use std::fmt::{self, Display};
+
 pub use access::DefineAccessStatement;
 pub use analyzer::DefineAnalyzerStatement;
 use anyhow::Result;
@@ -37,9 +35,13 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 pub use sequence::DefineSequenceStatement;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
 pub use table::DefineTableStatement;
 pub use user::DefineUserStatement;
+
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

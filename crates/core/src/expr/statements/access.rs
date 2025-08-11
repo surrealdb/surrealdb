@@ -1,3 +1,14 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+
+use anyhow::{Result, bail, ensure};
+use md5::Digest;
+use rand::Rng;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -9,15 +20,6 @@ use crate::expr::{
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, Datetime, Duration, Object, RecordId, Strand, Uuid, Value};
-use anyhow::{Result, bail, ensure};
-use md5::Digest;
-use rand::Rng;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use sha2::Sha256;
-use std::fmt;
-use std::fmt::{Display, Formatter};
 
 // Keys and their identifiers are generated randomly from a 62-character pool.
 pub static GRANT_BEARER_CHARACTER_POOL: &[u8] =

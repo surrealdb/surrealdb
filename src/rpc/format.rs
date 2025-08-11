@@ -1,6 +1,3 @@
-use crate::net::headers::{Accept, ContentType};
-use crate::rpc::failure::Failure;
-use crate::rpc::response::Response;
 use axum::extract::ws::Message;
 use axum::response::Response as AxumResponse;
 use bytes::Bytes;
@@ -9,6 +6,10 @@ use surrealdb::rpc::RpcError;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::request::Request;
 use surrealdb_core::val;
+
+use crate::net::headers::{Accept, ContentType};
+use crate::rpc::failure::Failure;
+use crate::rpc::response::Response;
 
 impl From<&Accept> for Format {
 	fn from(value: &Accept) -> Self {

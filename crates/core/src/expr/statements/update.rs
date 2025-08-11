@@ -1,3 +1,10 @@
+use std::fmt;
+
+use anyhow::{Result, ensure};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
@@ -6,11 +13,6 @@ use crate::expr::fmt::Fmt;
 use crate::expr::{Cond, Data, Explain, Expr, Output, Timeout, With};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
-use anyhow::{Result, ensure};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Default, Serialize, Deserialize, Hash)]

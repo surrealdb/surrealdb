@@ -1,5 +1,6 @@
-use crate::err::Error;
 use std::{fmt, io};
+
+use crate::err::Error;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum Reason {

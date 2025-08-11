@@ -1,11 +1,12 @@
+use std::borrow::Cow;
+use std::future::IntoFuture;
+
 use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
-use std::borrow::Cow;
-use std::future::IntoFuture;
 
 /// A version future
 #[derive(Debug)]

@@ -1,10 +1,11 @@
-use super::AppState;
-use crate::net::error::Error as NetError;
 use axum::routing::get;
 use axum::{Extension, Router};
 use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::kvs::LockType::*;
 use surrealdb::kvs::TransactionType::*;
+
+use super::AppState;
+use crate::net::error::Error as NetError;
 
 pub(super) fn router<S>() -> Router<S>
 where

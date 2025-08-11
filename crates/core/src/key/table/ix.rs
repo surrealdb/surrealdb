@@ -1,9 +1,10 @@
 //! Stores a DEFINE INDEX config definition
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+
 use crate::expr::DefineIndexStatement;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub(crate) struct Ix<'a> {

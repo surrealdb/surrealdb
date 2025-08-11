@@ -1,15 +1,17 @@
+use std::future::Future;
+use std::path::{Path as OsPath, PathBuf};
+use std::pin::Pin;
+
+use bytes::Bytes;
+use path_clean::PathClean;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
+use url::Url;
+
 use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 use crate::cnf::BUCKET_FOLDER_ALLOWLIST;
 use crate::err::Error;
 use crate::val::Datetime;
-use bytes::Bytes;
-use path_clean::PathClean;
-use std::future::Future;
-use std::path::{Path as OsPath, PathBuf};
-use std::pin::Pin;
-use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
-use url::Url;
 
 /// Options for configuring the FileStore
 #[derive(Clone, Debug)]

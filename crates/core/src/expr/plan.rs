@@ -1,10 +1,11 @@
+use std::fmt::{self, Display, Formatter};
+
 use crate::expr::Expr;
 use crate::expr::fmt::Fmt;
 use crate::expr::statements::{
 	AccessStatement, AnalyzeStatement, KillStatement, LiveStatement, OptionStatement,
 	ShowStatement, UseStatement,
 };
-use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug)]
 pub struct LogicalPlan {

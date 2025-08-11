@@ -1,7 +1,9 @@
-use crate::cnf::PKG_VERSION;
-use anyhow::Result;
 use std::sync::LazyLock;
+
+use anyhow::Result;
 use surrealdb::env::{arch, os};
+
+use crate::cnf::PKG_VERSION;
 
 /// Stores the current release identifier
 pub static RELEASE: LazyLock<String> =

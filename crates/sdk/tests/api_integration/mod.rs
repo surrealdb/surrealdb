@@ -1,5 +1,6 @@
-use serde::{Deserialize, Serialize};
 use std::future::Future;
+
+use serde::{Deserialize, Serialize};
 use surrealdb::{Connection, RecordId, Surreal};
 use tokio::sync::SemaphorePermit;
 
@@ -105,15 +106,17 @@ where
 
 #[cfg(feature = "protocol-ws")]
 mod ws {
-	use super::{ROOT_PASS, ROOT_USER};
-	use crate::api_integration::ws;
-	use futures::poll;
 	use std::pin::pin;
 	use std::task::Poll;
+
+	use futures::poll;
 	use surrealdb::Surreal;
 	use surrealdb::engine::remote::ws::{Client, Ws};
 	use surrealdb::opt::auth::Root;
 	use tokio::sync::{Semaphore, SemaphorePermit};
+
+	use super::{ROOT_PASS, ROOT_USER};
+	use crate::api_integration::ws;
 
 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
@@ -190,11 +193,12 @@ mod ws {
 #[cfg(feature = "protocol-http")]
 mod http {
 
-	use super::{ROOT_PASS, ROOT_USER};
 	use surrealdb::Surreal;
 	use surrealdb::engine::remote::http::{Client, Http};
 	use surrealdb::opt::auth::Root;
 	use tokio::sync::{Semaphore, SemaphorePermit};
+
+	use super::{ROOT_PASS, ROOT_USER};
 
 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
@@ -222,8 +226,6 @@ mod http {
 
 #[cfg(feature = "kv-mem")]
 mod mem {
-	use super::{ROOT_PASS, ROOT_USER};
-	use crate::api_integration::ApiRecordId;
 	use surrealdb::engine::local::{Db, Mem};
 	use surrealdb::error::Db as DbError;
 	use surrealdb::opt::auth::Root;
@@ -231,6 +233,9 @@ mod mem {
 	use surrealdb::opt::{Config, Resource};
 	use surrealdb::{RecordIdKey, Surreal, iam};
 	use tokio::sync::{Semaphore, SemaphorePermit};
+
+	use super::{ROOT_PASS, ROOT_USER};
+	use crate::api_integration::ApiRecordId;
 
 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
@@ -337,7 +342,6 @@ mod mem {
 
 #[cfg(feature = "kv-rocksdb")]
 mod rocksdb {
-	use super::{ROOT_PASS, ROOT_USER, TEMP_DIR};
 	use surrealdb::Surreal;
 	use surrealdb::engine::local::{Db, RocksDb};
 	use surrealdb::opt::Config;
@@ -345,6 +349,8 @@ mod rocksdb {
 	use surrealdb::opt::capabilities::Capabilities;
 	use tokio::sync::{Semaphore, SemaphorePermit};
 	use ulid::Ulid;
+
+	use super::{ROOT_PASS, ROOT_USER, TEMP_DIR};
 
 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
@@ -383,13 +389,14 @@ mod rocksdb {
 
 #[cfg(feature = "kv-tikv")]
 mod tikv {
-	use super::{ROOT_PASS, ROOT_USER};
 	use surrealdb::Surreal;
 	use surrealdb::engine::local::{Db, TiKv};
 	use surrealdb::opt::Config;
 	use surrealdb::opt::auth::Root;
 	use surrealdb::opt::capabilities::Capabilities;
 	use tokio::sync::{Semaphore, SemaphorePermit};
+
+	use super::{ROOT_PASS, ROOT_USER};
 
 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
@@ -417,13 +424,14 @@ mod tikv {
 
 #[cfg(any(feature = "kv-fdb-7_1", feature = "kv-fdb-7_3"))]
 mod fdb {
-	use super::{ROOT_PASS, ROOT_USER};
 	use surrealdb::Surreal;
 	use surrealdb::engine::local::{Db, FDb};
 	use surrealdb::opt::Config;
 	use surrealdb::opt::auth::Root;
 	use surrealdb::opt::capabilities::Capabilities;
 	use tokio::sync::{Semaphore, SemaphorePermit};
+
+	use super::{ROOT_PASS, ROOT_USER};
 
 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
@@ -446,7 +454,6 @@ mod fdb {
 
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv {
-	use super::{ROOT_PASS, ROOT_USER, TEMP_DIR};
 	use surrealdb::Surreal;
 	use surrealdb::engine::local::{Db, SurrealKv};
 	use surrealdb::opt::Config;
@@ -454,6 +461,8 @@ mod surrealkv {
 	use surrealdb::opt::capabilities::Capabilities;
 	use tokio::sync::{Semaphore, SemaphorePermit};
 	use ulid::Ulid;
+
+	use super::{ROOT_PASS, ROOT_USER, TEMP_DIR};
 
 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
@@ -494,7 +503,6 @@ mod surrealkv {
 
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv_versioned {
-	use super::{ROOT_PASS, ROOT_USER, TEMP_DIR};
 	use surrealdb::Surreal;
 	use surrealdb::engine::local::{Db, SurrealKv};
 	use surrealdb::opt::Config;
@@ -502,6 +510,8 @@ mod surrealkv_versioned {
 	use surrealdb::opt::capabilities::Capabilities;
 	use tokio::sync::{Semaphore, SemaphorePermit};
 	use ulid::Ulid;
+
+	use super::{ROOT_PASS, ROOT_USER, TEMP_DIR};
 
 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
@@ -542,11 +552,12 @@ mod surrealkv_versioned {
 
 #[cfg(feature = "protocol-http")]
 mod any {
-	use super::{ROOT_PASS, ROOT_USER};
 	use surrealdb::Surreal;
 	use surrealdb::engine::any::Any;
 	use surrealdb::opt::auth::Root;
 	use tokio::sync::{Semaphore, SemaphorePermit};
+
+	use super::{ROOT_PASS, ROOT_USER};
 
 	static PERMITS: Semaphore = Semaphore::const_new(1);
 

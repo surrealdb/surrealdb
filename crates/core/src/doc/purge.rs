@@ -1,3 +1,7 @@
+use anyhow::{Result, bail};
+use futures::StreamExt;
+use reblessive::tree::Stk;
+
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Options, Statement};
@@ -13,9 +17,6 @@ use crate::expr::{AssignOperator, Data, Expr, FlowResultExt as _, Graph, Idiom, 
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
 use crate::val::{RecordId, Value};
-use anyhow::{Result, bail};
-use futures::StreamExt;
-use reblessive::tree::Stk;
 
 impl Document {
 	pub(super) async fn purge(

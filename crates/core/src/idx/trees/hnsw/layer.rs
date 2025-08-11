@@ -1,3 +1,11 @@
+use std::mem;
+
+use ahash::HashSet;
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
@@ -9,12 +17,6 @@ use crate::idx::trees::hnsw::{ElementId, HnswElements};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
 use crate::kvs::Transaction;
-use ahash::HashSet;
-use anyhow::Result;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::mem;
 
 #[revisioned(revision = 1)]
 #[derive(Default, Debug, Serialize, Deserialize)]

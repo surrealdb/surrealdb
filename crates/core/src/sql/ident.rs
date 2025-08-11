@@ -1,7 +1,8 @@
-use crate::sql::escape::EscapeIdent;
-use crate::val::Strand;
 use std::fmt::{self};
 use std::ops::Deref;
+
+use crate::sql::escape::EscapeIdent;
+use crate::val::Strand;
 
 /// An identifier.
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash)]

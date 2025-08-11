@@ -1,10 +1,11 @@
 mod helpers;
-use crate::helpers::Test;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb_core::val::{Array, RecordId};
 use surrealdb_core::{strand, syn};
+
+use crate::helpers::Test;
 
 #[tokio::test]
 async fn field_definition_value_reference() -> Result<()> {

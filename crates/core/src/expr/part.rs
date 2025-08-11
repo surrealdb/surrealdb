@@ -1,3 +1,11 @@
+use std::fmt::Write;
+use std::{fmt, str};
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::cnf::IDIOM_RECURSION_LIMIT;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -10,12 +18,6 @@ use crate::expr::idiom::recursion::{
 };
 use crate::expr::{Expr, FlowResultExt as _, Graph, Ident, Idiom, Literal, Value};
 use crate::val::{Array, RecordId};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::Write;
-use std::{fmt, str};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]

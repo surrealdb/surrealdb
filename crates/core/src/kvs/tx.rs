@@ -1,3 +1,12 @@
+use std::fmt::Debug;
+use std::ops::Range;
+use std::sync::Arc;
+
+use anyhow::{Result, bail};
+use futures::lock::{Mutex, MutexGuard};
+use futures::stream::Stream;
+use uuid::Uuid;
+
 use super::batch::Batch;
 use super::tr::Check;
 use super::{Key, Val, Version, util};
@@ -22,13 +31,6 @@ use crate::kvs::key::KVKey;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::{Transactor, cache};
 use crate::val::{RecordId, RecordIdKey, Value};
-use anyhow::{Result, bail};
-use futures::lock::{Mutex, MutexGuard};
-use futures::stream::Stream;
-use std::fmt::Debug;
-use std::ops::Range;
-use std::sync::Arc;
-use uuid::Uuid;
 
 pub struct Transaction {
 	/// Is this is a local datastore transaction?

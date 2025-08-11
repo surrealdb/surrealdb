@@ -9,9 +9,10 @@ mod unicode;
 #[cfg(test)]
 mod test;
 
+pub use reader::{BytesReader, CharError};
+
 use crate::syn::error::{SyntaxError, bail};
 use crate::syn::token::{Span, Token, TokenKind};
-pub use reader::{BytesReader, CharError};
 
 /// The SurrealQL lexer.
 /// Takes a slice of bytes and turns it into tokens. The lexer is designed with

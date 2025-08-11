@@ -1,14 +1,13 @@
-use super::format::Format;
-use crate::common::error::TestError;
+use std::collections::HashMap;
+use std::error::Error;
+use std::result::Result as StdResult;
+use std::time::Duration;
+
 use futures::channel::oneshot::channel;
 use futures_util::{SinkExt, TryStreamExt};
 use http::header::{HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::HashMap;
-use std::error::Error;
-use std::result::Result as StdResult;
-use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
@@ -18,6 +17,9 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tracing::{debug, error};
+
+use super::format::Format;
+use crate::common::error::TestError;
 
 type Result<T> = StdResult<T, Box<dyn Error>>;
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;

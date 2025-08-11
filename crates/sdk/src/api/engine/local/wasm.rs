@@ -1,3 +1,16 @@
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
+use std::task::Poll;
+
+use async_channel::{Receiver, Sender};
+use futures::stream::poll_fn;
+use futures::{FutureExt, StreamExt};
+use surrealdb_core::dbs::Variables;
+use tokio::sync::{RwLock, watch};
+use tokio_util::sync::CancellationToken;
+use wasm_bindgen_futures::spawn_local;
+
 use crate::api::conn::{Route, Router};
 use crate::api::engine::local::Db;
 use crate::api::method::BoxFuture;
@@ -10,17 +23,6 @@ use crate::kvs::Datastore;
 use crate::opt::WaitFor;
 use crate::opt::auth::Root;
 use crate::options::EngineOptions;
-use async_channel::{Receiver, Sender};
-use futures::stream::poll_fn;
-use futures::{FutureExt, StreamExt};
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use std::sync::atomic::AtomicI64;
-use std::task::Poll;
-use surrealdb_core::dbs::Variables;
-use tokio::sync::{RwLock, watch};
-use tokio_util::sync::CancellationToken;
-use wasm_bindgen_futures::spawn_local;
 
 impl crate::api::Connection for Db {}
 impl conn::Sealed for Db {

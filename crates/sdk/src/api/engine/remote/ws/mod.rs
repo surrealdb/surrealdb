@@ -5,18 +5,20 @@ pub(crate) mod native;
 #[cfg(target_family = "wasm")]
 pub(crate) mod wasm;
 
-use crate::api::conn::{Command, DbResponse};
-use crate::api::{Connect, Result, Surreal};
-use crate::opt::IntoEndpoint;
-use async_channel::Sender;
-use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::time::Duration;
+
+use async_channel::Sender;
+use indexmap::IndexMap;
 use surrealdb_core::dbs::Notification;
 use surrealdb_core::val::Value as CoreValue;
 use trice::Instant;
 use uuid::Uuid;
+
+use crate::api::conn::{Command, DbResponse};
+use crate::api::{Connect, Result, Surreal};
+use crate::opt::IntoEndpoint;
 
 pub(crate) const PATH: &str = "rpc";
 const PING_INTERVAL: Duration = Duration::from_secs(5);

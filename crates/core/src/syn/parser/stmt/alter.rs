@@ -1,3 +1,5 @@
+use reblessive::Stk;
+
 use crate::sql::TableType;
 use crate::sql::statements::alter::field::AlterDefault;
 use crate::sql::statements::alter::{AlterFieldStatement, AlterKind, AlterSequenceStatement};
@@ -6,7 +8,6 @@ use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::t;
-use reblessive::Stk;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_alter_stmt(&mut self, ctx: &mut Stk) -> ParseResult<AlterStatement> {

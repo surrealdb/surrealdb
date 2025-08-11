@@ -1,3 +1,10 @@
+use std::fmt::{self, Display, Formatter, Write};
+use std::ops::Deref;
+
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use super::FlowResult;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
@@ -6,11 +13,6 @@ use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Value};
 use crate::val::Strand;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter, Write};
-use std::ops::Deref;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]

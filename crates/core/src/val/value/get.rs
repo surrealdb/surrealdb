@@ -1,3 +1,9 @@
+use std::collections::BTreeMap;
+use std::ops::Deref;
+
+use futures::future::try_join_all;
+use reblessive::tree::Stk;
+
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -11,10 +17,6 @@ use crate::expr::statements::select::SelectStatement;
 use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Graph, Idiom, Literal};
 use crate::fnc::idiom;
 use crate::val::{RecordId, RecordIdKey, Value};
-use futures::future::try_join_all;
-use reblessive::tree::Stk;
-use std::collections::BTreeMap;
-use std::ops::Deref;
 
 impl Value {
 	/// Asynchronous method for getting a local or remote field from a `Value`

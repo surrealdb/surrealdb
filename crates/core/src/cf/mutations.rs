@@ -1,12 +1,14 @@
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::{self, Display, Formatter};
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::expr::Operation;
 use crate::expr::statements::DefineTableStatement;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, Object, RecordId, Value};
 use crate::vs::VersionStamp;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
-use std::fmt::{self, Display, Formatter};
 
 // Mutation is a single mutation to a table.
 #[revisioned(revision = 1)]
@@ -204,9 +206,10 @@ impl Default for WriteMutationSet {
 
 #[cfg(test)]
 mod tests {
+	use std::collections::HashMap;
+
 	use super::*;
 	use crate::expr::Ident;
-	use std::collections::HashMap;
 
 	#[test]
 	fn serialization() {

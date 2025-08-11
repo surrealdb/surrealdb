@@ -1,3 +1,14 @@
+#[cfg(not(target_family = "wasm"))]
+use std::fmt::Display;
+
+#[cfg(not(target_family = "wasm"))]
+use bytes::Bytes;
+#[cfg(not(target_family = "wasm"))]
+use futures::Stream;
+#[cfg(not(target_family = "wasm"))]
+use futures::StreamExt;
+use http::header::CONTENT_TYPE;
+
 use super::context::InvocationContext;
 use super::err::ApiError;
 use super::invocation::ApiInvocation;
@@ -6,15 +17,6 @@ use crate::expr::Bytesize;
 use crate::rpc::format::{cbor, json, revision};
 use crate::val;
 use crate::val::Value;
-#[cfg(not(target_family = "wasm"))]
-use bytes::Bytes;
-#[cfg(not(target_family = "wasm"))]
-use futures::Stream;
-#[cfg(not(target_family = "wasm"))]
-use futures::StreamExt;
-use http::header::CONTENT_TYPE;
-#[cfg(not(target_family = "wasm"))]
-use std::fmt::Display;
 
 pub enum ApiBody {
 	#[cfg(not(target_family = "wasm"))]

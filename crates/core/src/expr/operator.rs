@@ -1,10 +1,12 @@
+use std::fmt;
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::expr::fmt::Fmt;
 use crate::expr::index::Distance;
 use crate::expr::{Expr, Ident, Kind};
 use crate::idx::ft::MatchRef;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]

@@ -1,7 +1,8 @@
+use uuid::Uuid;
+
 use crate::syn::error::{SyntaxError, bail};
 use crate::syn::lexer::Lexer;
 use crate::syn::token::{Token, t};
-use uuid::Uuid;
 
 pub fn uuid(lexer: &mut Lexer, start: Token) -> Result<Uuid, SyntaxError> {
 	let double = match start.kind {

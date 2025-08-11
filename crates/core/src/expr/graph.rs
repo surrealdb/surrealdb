@@ -1,3 +1,11 @@
+use std::fmt::{self, Display, Formatter, Write};
+use std::ops::Bound;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -7,12 +15,6 @@ use crate::expr::start::Start;
 use crate::expr::{Cond, Dir, Fields, Groups, Ident, Idiom, Limit, RecordIdKeyRangeLit, Splits};
 use crate::kvs::KVKey;
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter, Write};
-use std::ops::Bound;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]

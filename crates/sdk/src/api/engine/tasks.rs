@@ -1,11 +1,10 @@
-use crate::engine::IntervalStream;
-use crate::err::Error;
 #[cfg(not(target_family = "wasm"))]
 use core::future::Future;
-use futures::StreamExt;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
+
+use futures::StreamExt;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::options::EngineOptions;
 #[cfg(not(target_family = "wasm"))]
@@ -13,6 +12,9 @@ use tokio::spawn;
 use tokio_util::sync::CancellationToken;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
+
+use crate::engine::IntervalStream;
+use crate::err::Error;
 
 #[cfg(not(target_family = "wasm"))]
 type Task = Pin<Box<dyn Future<Output = Result<(), tokio::task::JoinError>> + Send + 'static>>;
@@ -242,12 +244,14 @@ async fn interval_ticker(interval: Duration) -> IntervalStream {
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod test {
-	use crate::engine::tasks;
 	use std::sync::Arc;
 	use std::time::Duration;
+
 	use surrealdb_core::kvs::Datastore;
 	use surrealdb_core::options::EngineOptions;
 	use tokio_util::sync::CancellationToken;
+
+	use crate::engine::tasks;
 
 	#[test_log::test(tokio::test)]
 	pub async fn tasks_complete() {

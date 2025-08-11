@@ -1,7 +1,8 @@
-use async_channel::Receiver;
-use futures::{Stream, StreamExt};
 use std::future::Future;
 use std::pin::Pin;
+
+use async_channel::Receiver;
+use futures::{Stream, StreamExt};
 
 /// A newtype struct over receiver implementing the [`Stream`] trait.
 pub struct ChannelStream<R>(Pin<Box<Receiver<R>>>);

@@ -1,9 +1,10 @@
+use reblessive::Stk;
+
 use crate::sql::statements::RelateStatement;
 use crate::sql::{Expr, Literal};
 use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::t;
-use reblessive::Stk;
 
 impl Parser<'_> {
 	pub async fn parse_relate_stmt(&mut self, stk: &mut Stk) -> ParseResult<RelateStatement> {

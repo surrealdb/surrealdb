@@ -1,15 +1,17 @@
+use std::fmt;
+use std::fmt::Display;
+use std::str::FromStr;
+
+use anyhow::Result;
+use revision::{Error as RevisionError, revisioned};
+use serde::{Deserialize, Serialize};
+
 use super::Value;
 use crate::err::Error;
 use crate::expr::escape::QuoteStr;
 use crate::expr::statements::DefineAccessStatement;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Algorithm, Expr};
-use anyhow::Result;
-use revision::{Error as RevisionError, revisioned};
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::fmt::Display;
-use std::str::FromStr;
 
 /// The type of access methods available
 #[revisioned(revision = 1)]
