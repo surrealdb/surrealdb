@@ -65,4 +65,3 @@ impl FromFlatbuffers for Table {
 		Table::new(name.to_string()).ok_or_else(|| anyhow::anyhow!("Invalid table name"))
 	}
 }
-
