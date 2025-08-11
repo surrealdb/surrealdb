@@ -61,7 +61,7 @@ impl PlanBuilder {
 
 		// If all boolean operators are AND, we can use the single index plan
 		if p.all_and {
- 			// We first try the largest compound index
+			// We first try the largest compound index
 			let mut compound_index = None;
 			for (ixr, vals) in p.compound_indexes {
 				if let Some((cols, io)) = b.check_compound_index(ixr, vals) {
