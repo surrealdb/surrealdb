@@ -1,5 +1,7 @@
 use std::fmt::{Display, Formatter};
 
+use serde::{Deserialize, Serialize};
+
 use revision::{Revisioned, revisioned};
 
 use crate::expr::statements::info::InfoStructure;
@@ -8,9 +10,7 @@ use crate::sql::statements::DefineNamespaceStatement;
 use crate::sql::{Ident, ToSql};
 use crate::val::Value;
 
-#[derive(
-	Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[repr(transparent)]
 pub struct NamespaceId(pub u32);
@@ -49,7 +49,7 @@ impl From<u32> for NamespaceId {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct NamespaceDefinition {
 	pub namespace_id: NamespaceId,
 	pub name: String,
@@ -60,8 +60,7 @@ impl_kv_value_revisioned!(NamespaceDefinition);
 impl NamespaceDefinition {
 	fn to_sql_definition(&self) -> DefineNamespaceStatement {
 		DefineNamespaceStatement {
-			// SAFETY: we know the name is valid because it was validated when the namespace was
-			// created.
+			// SAFETY: we know the name is valid because it was validated when the namespace was created.
 			name: unsafe { Ident::new_unchecked(self.name.clone()) },
 			comment: self.comment.clone().map(|v| v.into()),
 			..Default::default()

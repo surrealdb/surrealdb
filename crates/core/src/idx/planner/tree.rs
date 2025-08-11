@@ -1,19 +1,10 @@
-use std::collections::HashMap;
-use std::hash::Hash;
-use std::ops::Deref;
-use std::sync::Arc;
-
-use anyhow::Result;
-use reblessive::tree::Stk;
-
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{self, DatabaseId, NamespaceId};
+use crate::expr::FlowResultExt as _;
 use crate::expr::index::Index;
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
-use crate::expr::statements::{DefineFieldStatement, DefineIndexStatement};
-use crate::expr::{
-	BinaryOperator, Cond, Expr, FlowResultExt as _, Ident, Idiom, Kind, Literal, Order, Part, With,
-};
+use crate::expr::statements::DefineIndexStatement;
+use crate::expr::{BinaryOperator, Cond, Expr, Ident, Idiom, Kind, Literal, Order, Part, With};
 use crate::idx::planner::StatementContext;
 use crate::idx::planner::executor::{
 	KnnBruteForceExpression, KnnBruteForceExpressions, KnnExpressions,
@@ -22,6 +13,12 @@ use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::idx::planner::rewriter::KnnConditionRewriter;
 use crate::kvs::Transaction;
 use crate::val::{Array, Number, Value};
+use anyhow::Result;
+use reblessive::tree::Stk;
+use std::collections::HashMap;
+use std::hash::Hash;
+use std::ops::Deref;
+use std::sync::Arc;
 
 pub(super) struct Tree {
 	pub(super) root: Option<Node>,
@@ -136,7 +133,7 @@ impl<'a> TreeBuilder<'a> {
 		if self.schemas.contains_key(table) {
 			return Ok(());
 		}
-		let (ns, db) = self.ctx.ctx.expect_ns_db_ids(self.ctx.opt).await?;
+		let (ns, db) = self.ctx.ctx.get_ns_db_ids_ro(self.ctx.opt).await?;
 		let l = SchemaCache::new(ns, db, table, tx).await?;
 		self.schemas.insert(table.clone(), l);
 		Ok(())
@@ -185,8 +182,7 @@ impl<'a> TreeBuilder<'a> {
 				self.check_boolean_operator(group, op);
 				let left_node = stk.run(|stk| self.eval_value(stk, group, left)).await?;
 				let right_node = stk.run(|stk| self.eval_value(stk, group, right)).await?;
-				// If both values are computable, then we can delegate the computation to the
-				// parent
+				// If both values are computable, then we can delegate the computation to the parent
 				if left_node == Node::Computable && right_node == Node::Computable {
 					return Ok(Node::Computable);
 				}
@@ -363,7 +359,7 @@ impl<'a> TreeBuilder<'a> {
 	async fn resolve_record_field(
 		&mut self,
 		tx: &Transaction,
-		fields: &[DefineFieldStatement],
+		fields: &[catalog::FieldDefinition],
 		idiom: &Arc<Idiom>,
 	) -> Result<Option<RecordOptions>> {
 		for field in fields.iter() {
@@ -718,7 +714,7 @@ impl Deref for IndexReference {
 #[derive(Clone)]
 struct SchemaCache {
 	indexes: Arc<[DefineIndexStatement]>,
-	fields: Arc<[DefineFieldStatement]>,
+	fields: Arc<[catalog::FieldDefinition]>,
 }
 
 impl SchemaCache {

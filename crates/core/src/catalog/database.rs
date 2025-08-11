@@ -1,20 +1,18 @@
 use std::fmt::{Display, Formatter};
 
-use revision::{Revisioned, revisioned};
+use revision::{revisioned, Revisioned};
+use serde::{Deserialize, Serialize};
 
 use crate::catalog::NamespaceId;
-use crate::expr::ChangeFeed;
 use crate::expr::statements::info::InfoStructure;
+use crate::expr::ChangeFeed;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::define::DefineDatabaseStatement;
 use crate::sql::{Ident, ToSql};
 use crate::val::Value;
 
-#[derive(
-	Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[repr(transparent)]
 pub struct DatabaseId(pub u32);
 
 impl_kv_value_revisioned!(DatabaseId);
@@ -51,7 +49,7 @@ impl From<u32> for DatabaseId {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct DatabaseDefinition {
 	pub namespace_id: NamespaceId,
 	pub database_id: DatabaseId,
@@ -64,8 +62,7 @@ impl_kv_value_revisioned!(DatabaseDefinition);
 impl DatabaseDefinition {
 	pub fn to_sql_definition(&self) -> DefineDatabaseStatement {
 		DefineDatabaseStatement {
-			// SAFETY: we know the name is valid because it was validated when the database was
-			// created.
+			// SAFETY: we know the name is valid because it was validated when the database was created.
 			name: unsafe { Ident::new_unchecked(self.name.clone()) },
 			comment: self.comment.clone().map(|v| v.into()),
 			changefeed: self.changefeed.map(|v| v.into()),

@@ -523,7 +523,7 @@ impl Transactor {
 	}
 
 	/// Insert or update a key in the datastore.
-	pub async fn set_versionstamp<K>(
+	pub(crate) async fn set_versionstamp<K>(
 		&mut self,
 		ts_key: K,
 		prefix: K,

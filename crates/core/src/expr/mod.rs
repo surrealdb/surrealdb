@@ -61,7 +61,6 @@ pub(crate) mod decimal;
 pub mod index;
 pub mod statements;
 
-pub use self::access::{Access, Accesses};
 pub use self::access_type::{AccessType, JwtAccess, RecordAccess};
 pub use self::algorithm::Algorithm;
 pub use self::base::Base;

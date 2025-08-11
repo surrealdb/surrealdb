@@ -3,18 +3,16 @@ mod r#struct;
 
 use std::borrow::Cow;
 
+use crate::error::Api;
 use anyhow::Result;
 use castaway::match_type;
 use serde::ser::Serialize;
 use serde_content::{Number, Serializer, Unexpected, Value as Content};
-
-use crate::core::val;
-use crate::error::Api;
+use surrealdb_core::val;
 
 //type Content = serde_content::Value<'static>;
 
-/// Convert a `T` into `surrealdb::expr::Value` which is an enum that can
-/// represent any valid SQL data.
+/// Convert a `T` into `surrealdb::expr::Value` which is an enum that can represent any valid SQL data.
 pub fn to_value<T>(value: T) -> Result<val::Value>
 where
 	T: Serialize + 'static,
@@ -113,14 +111,12 @@ fn object_from_content_struct(map: Vec<(Cow<'static, str>, Content)>) -> Result<
 
 #[cfg(test)]
 mod tests {
+	use super::*;
+	use ::serde::Serialize;
 	use std::collections::BTreeMap;
 	use std::ops::Bound;
-
-	use ::serde::Serialize;
-
-	use super::*;
-	use crate::core::val::Regex;
-	use crate::core::{map, syn};
+	use surrealdb_core::val::Regex;
+	use surrealdb_core::{map, syn};
 
 	#[test]
 	fn value_none() {
@@ -202,7 +198,7 @@ mod tests {
 
 	#[test]
 	fn datetime() {
-		let datetime = val::Datetime::default();
+		let datetime = val::Datetime::now();
 		let value = to_value(datetime.clone()).unwrap();
 		let expected = val::Value::Datetime(datetime);
 		assert_eq!(value, expected);
@@ -267,7 +263,7 @@ mod tests {
 	fn thing() {
 		let record_id = syn::record_id("foo:bar").unwrap();
 		let value = to_value(record_id.clone()).unwrap();
-		let expected = val::Value::RecordId(record_id);
+		let expected = val::Value::Thing(record_id);
 		assert_eq!(value, expected);
 		assert_eq!(expected.clone(), to_value(expected).unwrap());
 	}

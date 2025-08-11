@@ -1,11 +1,9 @@
 //! Stores a DEFINE ACCESS ON NAMESPACE configuration
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
-
-use crate::catalog::NamespaceId;
-use crate::expr::statements::define::DefineAccessStatement;
+use crate::catalog::{AccessDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Ac<'a> {
@@ -19,7 +17,7 @@ pub(crate) struct Ac<'a> {
 }
 
 impl KVKey for Ac<'_> {
-	type ValueType = DefineAccessStatement;
+	type ValueType = AccessDefinition;
 }
 
 pub fn new(ns: NamespaceId, ac: &str) -> Ac<'_> {

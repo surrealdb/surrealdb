@@ -114,7 +114,7 @@ mod test {
 		assert_eq!("$surrealdb::private::Object", val_to_serde_name(val::Object::default()));
 		assert_eq!("$surrealdb::private::Array", val_to_serde_name(val::Array::default()));
 		assert_eq!("$surrealdb::private::Uuid", val_to_serde_name(val::Uuid::default()));
-		assert_eq!("$surrealdb::private::Datetime", val_to_serde_name(val::Datetime::default()));
+		assert_eq!("$surrealdb::private::Datetime", val_to_serde_name(val::Datetime::now()));
 		assert_eq!("$surrealdb::private::Duration", val_to_serde_name(val::Duration::default()));
 		assert_eq!(
 			"$surrealdb::private::Closure",

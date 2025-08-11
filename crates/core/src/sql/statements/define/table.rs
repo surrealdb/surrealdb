@@ -1,12 +1,11 @@
-use std::fmt::{self, Display, Write};
-
-use uuid::Uuid;
-
-use super::DefineKind;
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::{Ident, Kind, Permissions, TableType, View};
+
+use crate::sql::{Ident, Kind, Permissions, TableType, ToSql, View};
 use crate::val::Strand;
+use std::fmt::{self, Display, Write};
+
+use super::DefineKind;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -31,7 +30,7 @@ impl Display for DefineTableStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", self.name.to_sql())?;
 		write!(f, " TYPE")?;
 		match &self.table_type {
 			TableType::Normal => {
@@ -75,7 +74,7 @@ impl Display for DefineTableStatement {
 			" SCHEMALESS"
 		})?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		if let Some(ref v) = self.view {
 			write!(f, " {v}")?
@@ -107,10 +106,6 @@ impl From<DefineTableStatement> for crate::expr::statements::DefineTableStatemen
 			changefeed: v.changefeed.map(Into::into),
 			comment: v.comment,
 			table_type: v.table_type.into(),
-			cache_fields_ts: Uuid::nil(),
-			cache_events_ts: Uuid::nil(),
-			cache_tables_ts: Uuid::nil(),
-			cache_indexes_ts: Uuid::nil(),
 		}
 	}
 }

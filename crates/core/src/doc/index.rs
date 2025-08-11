@@ -1,6 +1,3 @@
-use anyhow::{Result, bail};
-use reblessive::tree::Stk;
-
 use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::{Force, Options, Statement};
@@ -18,6 +15,8 @@ use crate::key;
 use crate::kvs::ConsumeResult;
 use crate::kvs::TransactionType;
 use crate::val::{Array, RecordId, Value};
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
 
 impl Document {
 	pub(super) async fn store_index_data(
@@ -82,9 +81,8 @@ impl Document {
 		#[cfg(not(target_family = "wasm"))]
 		let (o, n) = if let Some(ib) = ctx.get_index_builder() {
 			match ib.consume(db, ctx, ix, o, n, rid).await? {
-				// The index builder consumed the value, which means it is currently building the
-				// index asynchronously, we don't index the document and let the index builder
-				// do it later.
+				// The index builder consumed the value, which means it is currently building the index asynchronously,
+				// we don't index the document and let the index builder do it later.
 				ConsumeResult::Enqueued => return Ok(()),
 				// The index builder is done, the index has been built; we can proceed normally
 				ConsumeResult::Ignored(o, n) => (o, n),
@@ -108,11 +106,10 @@ impl Document {
 		Ok(())
 	}
 
-	/// Extract from the given document, the values required by the index and
-	/// put then in an array. Eg. IF the index is composed of the columns
-	/// `name` and `instrument` Given this doc: { "id": 1,
-	/// "instrument":"piano", "name":"Tobie" } It will return: ["Tobie",
-	/// "piano"]
+	/// Extract from the given document, the values required by the index and put then in an array.
+	/// Eg. IF the index is composed of the columns `name` and `instrument`
+	/// Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie" }
+	/// It will return: ["Tobie", "piano"]
 	pub(crate) async fn build_opt_values(
 		stk: &mut Stk,
 		ctx: &Context,
@@ -132,10 +129,10 @@ impl Document {
 	}
 }
 
-/// Extract from the given document, the values required by the index and put
-/// then in an array. Eg. IF the index is composed of the columns `name` and
-/// `instrument` Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie"
-/// } It will return: ["Tobie", "piano"]
+/// Extract from the given document, the values required by the index and put then in an array.
+/// Eg. IF the index is composed of the columns `name` and `instrument`
+/// Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie" }
+/// It will return: ["Tobie", "piano"]
 struct Indexable(Vec<(Value, bool)>);
 
 impl Indexable {
@@ -304,11 +301,11 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
-	fn get_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
+	fn get_unique_index_key(&'_ self, v: &'a Array) -> Result<key::index::Index<'_>> {
 		Ok(key::index::Index::new(self.ns, self.db, &self.ix.what, &self.ix.name, v, None))
 	}
 
-	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
+	fn get_non_unique_index_key(&'_ self, v: &'a Array) -> Result<key::index::Index<'_>> {
 		Ok(key::index::Index::new(
 			self.ns,
 			self.db,

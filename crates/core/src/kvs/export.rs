@@ -10,6 +10,7 @@ use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
 use crate::expr::paths::{EDGE, IN, OUT};
+use crate::expr::{Base, DefineAccessStatement};
 use crate::key::thing;
 use crate::sql::ToSql;
 use crate::val::{RecordId, Strand, Value};
@@ -248,42 +249,47 @@ impl Transaction {
 		db: DatabaseId,
 	) -> Result<()> {
 		// Output OPTIONS
-		self.export_section("OPTION", vec!["OPTION IMPORT"], chn).await?;
+		self.export_section("OPTION", ["OPTION IMPORT"].iter(), chn).await?;
 
 		// Output USERS
 		if cfg.users {
 			let users = self.all_db_users(ns, db).await?;
-			self.export_section("USERS", users.to_vec(), chn).await?;
+			self.export_section("USERS", users.iter(), chn).await?;
 		}
 
 		// Output ACCESSES
 		if cfg.accesses {
 			let accesses = self.all_db_accesses(ns, db).await?;
-			self.export_section("ACCESSES", accesses.to_vec(), chn).await?;
+			self.export_section(
+				"ACCESSES",
+				accesses.iter().map(|x| DefineAccessStatement::from_definition(Base::Db, x)),
+				chn,
+			)
+			.await?;
 		}
 
 		// Output PARAMS
 		if cfg.params {
 			let params = self.all_db_params(ns, db).await?;
-			self.export_section("PARAMS", params.to_vec(), chn).await?;
+			self.export_section("PARAMS", params.iter(), chn).await?;
 		}
 
 		// Output FUNCTIONS
 		if cfg.functions {
 			let functions = self.all_db_functions(ns, db).await?;
-			self.export_section("FUNCTIONS", functions.to_vec(), chn).await?;
+			self.export_section("FUNCTIONS", functions.iter(), chn).await?;
 		}
 
 		// Output ANALYZERS
 		if cfg.analyzers {
 			let analyzers = self.all_db_analyzers(ns, db).await?;
-			self.export_section("ANALYZERS", analyzers.to_vec(), chn).await?;
+			self.export_section("ANALYZERS", analyzers.iter(), chn).await?;
 		}
 
 		// Output SEQUENCES
 		if cfg.sequences {
 			let sequences = self.all_db_sequences(ns, db).await?;
-			self.export_section("SEQUENCES", sequences.to_vec(), chn).await?;
+			self.export_section("SEQUENCES", sequences.iter(), chn).await?;
 		}
 
 		Ok(())
@@ -292,10 +298,10 @@ impl Transaction {
 	async fn export_section<T: ToString>(
 		&self,
 		title: &str,
-		items: Vec<T>,
+		items: impl ExactSizeIterator<Item = T>,
 		chn: &Sender<Vec<u8>>,
 	) -> Result<()> {
-		if items.is_empty() {
+		if items.len() == 0 {
 			return Ok(());
 		}
 

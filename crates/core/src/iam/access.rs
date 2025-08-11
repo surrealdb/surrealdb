@@ -1,6 +1,4 @@
-use anyhow::Result;
-use reblessive;
-
+use crate::catalog;
 use crate::cnf::INSECURE_FORWARD_ACCESS_ERRORS;
 use crate::ctx::MutableContext;
 use crate::dbs::Session;
@@ -11,6 +9,8 @@ use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::val::{RecordId, Value};
+use anyhow::Result;
+use reblessive;
 
 // Execute the AUTHENTICATE clause for a record access method
 pub async fn authenticate_record(
@@ -20,8 +20,7 @@ pub async fn authenticate_record(
 ) -> Result<RecordId> {
 	match kvs.evaluate(authenticate, session, None).await {
 		Ok(val) => match val.record() {
-			// If the AUTHENTICATE clause returns a record, authentication continues with that
-			// record
+			// If the AUTHENTICATE clause returns a record, authentication continues with that record
 			Some(id) => Ok(id),
 			// If the AUTHENTICATE clause returns anything else, authentication fails generically
 			_ => {
@@ -31,8 +30,7 @@ pub async fn authenticate_record(
 		},
 		Err(e) => {
 			match e.downcast_ref() {
-				// If the AUTHENTICATE clause throws a specific error, authentication fails with
-				// that error
+				// If the AUTHENTICATE clause throws a specific error, authentication fails with that error
 				Some(Error::Thrown(_)) => Err(e),
 				// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
 				// This allows clients to handle these errors, which may be retryable
@@ -67,8 +65,7 @@ pub async fn authenticate_generic(
 			match val {
 				// If the AUTHENTICATE clause returns nothing, authentication continues
 				Value::None => Ok(()),
-				// If the AUTHENTICATE clause returns anything else, authentication fails
-				// generically
+				// If the AUTHENTICATE clause returns anything else, authentication fails generically
 				_ => {
 					debug!("Authentication attempt as system user rejected by AUTHENTICATE clause");
 					Err(anyhow::Error::new(Error::InvalidAuth))
@@ -77,8 +74,7 @@ pub async fn authenticate_generic(
 		}
 		Err(e) => {
 			match e.downcast_ref() {
-				// If the AUTHENTICATE clause throws a specific error, authentication fails with
-				// that error
+				// If the AUTHENTICATE clause throws a specific error, authentication fails with that error
 				Some(Error::Thrown(_)) => Err(e),
 				// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
 				// This allows clients to handle these errors, which may be retryable
@@ -118,17 +114,16 @@ pub async fn create_refresh_token_record(
 	ctx.set_transaction(tx.clone());
 	let ctx = ctx.freeze();
 	// Create a bearer grant to act as the refresh token
-	let grant =
-		access::create_grant(ac, Some(Base::Db), access::SubjectStore::Record(rid), &ctx, &opt)
-			.await
-			.map_err(|e| {
-				warn!("Unexpected error when attempting to create a refresh token: {e}");
-				Error::UnexpectedAuth
-			})?;
+	let grant = access::create_grant(ac, Some(Base::Db), catalog::Subject::Record(rid), &ctx, &opt)
+		.await
+		.map_err(|e| {
+			warn!("Unexpected error when attempting to create a refresh token: {e}");
+			Error::UnexpectedAuth
+		})?;
 	tx.commit().await?;
 	// Return the key string from the bearer grant
 	match grant.grant {
-		access::Grant::Bearer(bearer) => Ok(bearer.key.into_string()),
+		catalog::Grant::Bearer(bearer) => Ok(bearer.key),
 		_ => Err(anyhow::Error::new(Error::AccessMethodMismatch)),
 	}
 }

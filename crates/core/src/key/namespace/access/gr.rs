@@ -1,11 +1,10 @@
 //! Stores a grant associated with an access method
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
-
+use crate::catalog;
 use crate::catalog::NamespaceId;
-use crate::expr::statements::access::AccessGrantStore;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Gr<'a> {
@@ -21,7 +20,7 @@ pub(crate) struct Gr<'a> {
 }
 
 impl KVKey for Gr<'_> {
-	type ValueType = AccessGrantStore;
+	type ValueType = catalog::AccessGrant;
 }
 
 pub fn new<'a>(ns: NamespaceId, ac: &'a str, gr: &'a str) -> Gr<'a> {

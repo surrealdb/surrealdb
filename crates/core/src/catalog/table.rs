@@ -1,19 +1,18 @@
-use revision::{Revisioned, revisioned};
-use uuid::Uuid;
-
-use crate::catalog::{DatabaseId, NamespaceId, ViewDefinition};
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{ChangeFeed, Kind, Permissions};
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::{Ident, ToSql};
+use revision::{Revisioned, revisioned};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::catalog::ViewDefinition;
+use crate::expr::statements::info::InfoStructure;
+use crate::expr::{ChangeFeed, Kind, Permissions};
 use crate::val::Value;
 
-#[derive(
-	Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[repr(transparent)]
 pub struct TableId(pub u32);
 
 impl_kv_value_revisioned!(TableId);
@@ -38,7 +37,7 @@ impl Revisioned for TableId {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct TableDefinition {
 	pub namespace_id: NamespaceId,
 	pub database_id: DatabaseId,
@@ -81,7 +80,7 @@ impl TableDefinition {
 			drop: false,
 			schemafull: false,
 			view: None,
-			permissions: Permissions::none(),
+			permissions: Permissions::default(),
 			changefeed: None,
 			comment: None,
 			table_type: TableType::default(),
@@ -109,8 +108,7 @@ impl TableDefinition {
 	fn to_sql_definition(&self) -> DefineTableStatement {
 		DefineTableStatement {
 			id: Some(self.table_id.0),
-			// SAFETY: we know the name is valid because it was validated when the table was
-			// created.
+			// SAFETY: we know the name is valid because it was validated when the table was created.
 			name: unsafe { Ident::new_unchecked(self.name.clone()) },
 			drop: self.drop,
 			full: self.schemafull,
@@ -147,7 +145,7 @@ impl InfoStructure for TableDefinition {
 
 /// The type of records stored by a table
 #[revisioned(revision = 1)]
-#[derive(Debug, Default, Hash, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
 pub enum TableType {
 	#[default]
 	Any,
@@ -200,7 +198,7 @@ impl InfoStructure for TableType {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Hash, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
 pub struct Relation {
 	pub from: Option<Kind>,
 	pub to: Option<Kind>,

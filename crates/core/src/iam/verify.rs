@@ -1,76 +1,72 @@
-use std::str::{self, FromStr};
-use std::sync::{Arc, LazyLock};
-
-use anyhow::{Result, bail};
-use argon2::{Argon2, PasswordHash, PasswordVerifier};
-use chrono::Utc;
-use jsonwebtoken::{DecodingKey, Validation, decode};
-
 use crate::dbs::Session;
 use crate::err::Error;
-use crate::expr::Algorithm;
-use crate::expr::access_type::{AccessType, Jwt, JwtAccessVerify};
 use crate::expr::statements::DefineUserStatement;
 use crate::iam::access::{authenticate_generic, authenticate_record};
 use crate::iam::issue::expiration;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks;
 use crate::iam::token::Claims;
-use crate::iam::{Actor, Auth, Level, Role};
+use crate::iam::{self, Actor, Auth, Level, Role};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::syn;
 use crate::val::Value;
+use crate::{catalog, syn};
+use anyhow::{Result, bail};
+use argon2::{Argon2, PasswordHash, PasswordVerifier};
+use chrono::Utc;
+use jsonwebtoken::{DecodingKey, Validation, decode};
+use std::str::{self, FromStr};
+use std::sync::{Arc, LazyLock};
 
-fn config(alg: Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation)> {
+/// Returns the decoding key as wel as the method by which to verify the key against
+fn decode_key(alg: catalog::Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation)> {
 	let (dec, mut val) = match alg {
-		Algorithm::Hs256 => {
+		catalog::Algorithm::Hs256 => {
 			(DecodingKey::from_secret(key), Validation::new(jsonwebtoken::Algorithm::HS256))
 		}
-		Algorithm::Hs384 => {
+		catalog::Algorithm::Hs384 => {
 			(DecodingKey::from_secret(key), Validation::new(jsonwebtoken::Algorithm::HS384))
 		}
-		Algorithm::Hs512 => {
+		catalog::Algorithm::Hs512 => {
 			(DecodingKey::from_secret(key), Validation::new(jsonwebtoken::Algorithm::HS512))
 		}
-		Algorithm::EdDSA => {
+		catalog::Algorithm::EdDSA => {
 			(DecodingKey::from_ed_pem(key)?, Validation::new(jsonwebtoken::Algorithm::EdDSA))
 		}
-		Algorithm::Es256 => {
+		catalog::Algorithm::Es256 => {
 			(DecodingKey::from_ec_pem(key)?, Validation::new(jsonwebtoken::Algorithm::ES256))
 		}
-		Algorithm::Es384 => {
+		catalog::Algorithm::Es384 => {
 			(DecodingKey::from_ec_pem(key)?, Validation::new(jsonwebtoken::Algorithm::ES384))
 		}
-		Algorithm::Es512 => {
+		catalog::Algorithm::Es512 => {
 			(DecodingKey::from_ec_pem(key)?, Validation::new(jsonwebtoken::Algorithm::ES384))
 		}
-		Algorithm::Ps256 => {
+		catalog::Algorithm::Ps256 => {
 			(DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::PS256))
 		}
-		Algorithm::Ps384 => {
+		catalog::Algorithm::Ps384 => {
 			(DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::PS384))
 		}
-		Algorithm::Ps512 => {
+		catalog::Algorithm::Ps512 => {
 			(DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::PS512))
 		}
-		Algorithm::Rs256 => {
+		catalog::Algorithm::Rs256 => {
 			(DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::RS256))
 		}
-		Algorithm::Rs384 => {
+		catalog::Algorithm::Rs384 => {
 			(DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::RS384))
 		}
-		Algorithm::Rs512 => {
+		catalog::Algorithm::Rs512 => {
 			(DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::RS512))
 		}
 	};
 
-	// TODO(gguillemas): This keeps the existing behavior as of SurrealDB
-	// 2.0.0-alpha.9. Up to that point, a fork of the "jsonwebtoken" crate in
-	// version 8.3.0 was being used. Now that the audience claim is validated by
-	// default, we could allow users to leverage this. This will most likely
-	// involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
+	// TODO(gguillemas): This keeps the existing behavior as of SurrealDB 2.0.0-alpha.9.
+	// Up to that point, a fork of the "jsonwebtoken" crate in version 8.3.0 was being used.
+	// Now that the audience claim is validated by default, we could allow users to leverage this.
+	// This will most likely involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
 	val.validate_aud = false;
 
 	Ok((dec, val))
@@ -103,7 +99,7 @@ pub async fn basic(
 		(Some(ns), Some(db)) => match verify_db_creds(kvs, ns, db, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as database user '{}'", user);
-				session.exp = expiration(u.duration.session)?;
+				session.exp = expiration(u.duration.session.map(|x| x.0))?;
 				session.au = Arc::new(
 					(&u, Level::Database(ns.to_owned(), db.to_owned()))
 						.try_into()
@@ -117,7 +113,7 @@ pub async fn basic(
 		(Some(ns), None) => match verify_ns_creds(kvs, ns, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as namespace user '{}'", user);
-				session.exp = expiration(u.duration.session)?;
+				session.exp = expiration(u.duration.session.map(|x| x.0))?;
 				session.au = Arc::new(
 					(&u, Level::Namespace(ns.to_owned())).try_into().map_err(Error::from)?,
 				);
@@ -129,7 +125,7 @@ pub async fn basic(
 		(None, None) => match verify_root_creds(kvs, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as root user '{}'", user);
-				session.exp = expiration(u.duration.session)?;
+				session.exp = expiration(u.duration.session.map(|x| x.0))?;
 				session.au = Arc::new((&u, Level::Root).try_into().map_err(Error::from)?);
 				Ok(())
 			}
@@ -204,8 +200,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
 			let cf = match &de.access_type {
-				AccessType::Record(at) => match &at.jwt.verify {
-					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
+				catalog::AccessType::Record(at) => match &at.jwt.verify {
+					catalog::JwtAccessVerify::Key(key) => {
+						iam::verify::decode_key(key.alg, key.key.as_bytes())
+					}
 					#[cfg(feature = "jwks")]
 					JwtAccessVerify::Jwks(jwks) => {
 						if let Some(kid) = token_data.header.kid {
@@ -239,7 +237,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.db = Some(db.to_owned());
 			session.ac = Some(ac.to_owned());
 			session.rd = Some(Value::from(rid.clone()));
-			session.exp = expiration(de.duration.session)?;
+			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_string(),
 				Default::default(),
@@ -286,11 +284,17 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Obtain the configuration to verify the token based on the access method
 			match &de.access_type {
 				// If the access type is Jwt or Bearer, this is database access
-				AccessType::Jwt(_) | AccessType::Bearer(_) => {
-					let cf = match &de.access_type.jwt().verify {
-						JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
+				catalog::AccessType::Jwt(jwt)
+				| catalog::AccessType::Bearer(catalog::BearerAccess {
+					jwt,
+					..
+				}) => {
+					let cf = match &jwt.verify {
+						catalog::JwtAccessVerify::Key(key) => {
+							decode_key(key.alg, key.key.as_bytes())
+						}
 						#[cfg(feature = "jwks")]
-						JwtAccessVerify::Jwks(jwks) => {
+						catalog::JwtAccessVerify::Jwks(jwks) => {
 							if let Some(kid) = token_data.header.kid {
 								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 							} else {
@@ -334,7 +338,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					session.ns = Some(ns.to_owned());
 					session.db = Some(db.to_owned());
 					session.ac = Some(ac.to_owned());
-					session.exp = expiration(de.duration.session)?;
+					session.exp = expiration(de.session_duration)?;
 					session.au = Arc::new(Auth::new(Actor::new(
 						de.name.to_string(),
 						roles,
@@ -342,16 +346,17 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					)));
 				}
 				// If the access type is Record, this is record access
-				// Record access without an "id" claim is only possible if there is an AUTHENTICATE
-				// clause The clause can make up for the missing "id" claim by resolving other
-				// claims to a specific record
-				AccessType::Record(at) => match &de.authenticate {
+				// Record access without an "id" claim is only possible if there is an AUTHENTICATE clause
+				// The clause can make up for the missing "id" claim by resolving other claims to a specific record
+				catalog::AccessType::Record(at) => match &de.authenticate {
 					Some(au) => {
 						trace!("Access method `{}` is record access with AUTHENTICATE clause", ac);
 						let cf = match &at.jwt.verify {
-							JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
+							catalog::JwtAccessVerify::Key(key) => {
+								decode_key(key.alg, key.key.as_bytes())
+							}
 							#[cfg(feature = "jwks")]
-							JwtAccessVerify::Jwks(jwks) => {
+							catalog::JwtAccessVerify::Jwks(jwks) => {
 								if let Some(kid) = token_data.header.kid {
 									jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 								} else {
@@ -381,7 +386,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						session.db = Some(db.to_owned());
 						session.ac = Some(ac.to_owned());
 						session.rd = Some(Value::from(rid.clone()));
-						session.exp = expiration(de.duration.session)?;
+						session.exp = expiration(de.session_duration)?;
 						session.au = Arc::new(Auth::new(Actor::new(
 							rid.to_string(),
 							Default::default(),
@@ -428,7 +433,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Check the algorithm
-			let cf = config(Algorithm::Hs512, de.code.as_bytes())?;
+			let cf = decode_key(catalog::Algorithm::Hs512, de.code.as_bytes())?;
 			// Verify the token
 			verify_token(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -437,7 +442,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
-			session.exp = expiration(de.duration.session)?;
+			session.exp = expiration(de.duration.session.map(|x| x.0))?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles
@@ -483,10 +488,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 
 			// Obtain the configuration to verify the token based on the access method
 			let cf = match &de.access_type {
-				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.access_type.jwt().verify {
-					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
+				catalog::AccessType::Jwt(jwt)
+				| catalog::AccessType::Bearer(catalog::BearerAccess {
+					jwt,
+					..
+				}) => match &jwt.verify {
+					catalog::JwtAccessVerify::Key(key) => decode_key(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
-					JwtAccessVerify::Jwks(jwks) => {
+					catalog::JwtAccessVerify::Jwks(jwks) => {
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
@@ -529,7 +538,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
 			session.ac = Some(ac.to_owned());
-			session.exp = expiration(de.duration.session)?;
+			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				de.name.to_string(),
 				roles,
@@ -568,7 +577,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Check the algorithm
-			let cf = config(Algorithm::Hs512, de.code.as_bytes())?;
+			let cf = decode_key(catalog::Algorithm::Hs512, de.code.as_bytes())?;
 			// Verify the token
 			verify_token(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -576,7 +585,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
-			session.exp = expiration(de.duration.session)?;
+			session.exp = expiration(de.duration.session.map(|x| x.0))?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles
@@ -611,10 +620,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 
 			// Obtain the configuration to verify the token based on the access method
 			let cf = match &de.access_type {
-				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.access_type.jwt().verify {
-					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
+				catalog::AccessType::Jwt(jwt)
+				| catalog::AccessType::Bearer(catalog::BearerAccess {
+					jwt,
+					..
+				}) => match &jwt.verify {
+					catalog::JwtAccessVerify::Key(key) => decode_key(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
-					JwtAccessVerify::Jwks(jwks) => {
+					catalog::JwtAccessVerify::Jwks(jwks) => {
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
@@ -656,7 +669,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Set the session
 			session.tk = Some(value);
 			session.ac = Some(ac.to_owned());
-			session.exp = expiration(de.duration.session)?;
+			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(de.name.to_string(), roles, Level::Root)));
 			Ok(())
 		}
@@ -677,14 +690,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Check the algorithm
-			let cf = config(Algorithm::Hs512, de.code.as_bytes())?;
+			let cf = decode_key(catalog::Algorithm::Hs512, de.code.as_bytes())?;
 			// Verify the token
 			verify_token(token, &cf.0, &cf.1)?;
 			// Log the success
 			debug!("Authenticated to root level with user `{}` using token", id);
 			// Set the session
 			session.tk = Some(value);
-			session.exp = expiration(de.duration.session)?;
+			session.exp = expiration(de.duration.session.map(|x| x.0))?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles
@@ -826,15 +839,14 @@ fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Resu
 
 #[cfg(test)]
 mod tests {
-	use argon2::password_hash::{PasswordHasher, SaltString};
-	use chrono::Duration;
-	use jsonwebtoken::{EncodingKey, encode};
-
 	use super::*;
 	use crate::iam::token::{Audience, HEADER};
 	use crate::sql::statements::define::DefineKind;
 	use crate::sql::statements::define::user::PassType;
 	use crate::sql::{Ast, Ident};
+	use argon2::password_hash::{PasswordHasher, SaltString};
+	use chrono::Duration;
+	use jsonwebtoken::{EncodingKey, encode};
 
 	struct TestLevel {
 		level: &'static str,
@@ -1037,8 +1049,7 @@ mod tests {
 				)))],
 			};
 
-			// Use pre-parsed definition, which bypasses the existent role check during
-			// parsing.
+			// Use pre-parsed definition, which bypasses the existent role check during parsing.
 			ds.process(ast, &sess, None).await.unwrap();
 
 			let mut sess = Session {
@@ -1447,8 +1458,7 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Session expiration has been set explicitly
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some
-			// margin
+			// Expiration should match the current time plus session duration with some margin
 			let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -1483,6 +1493,7 @@ mod tests {
 	#[cfg(feature = "jwks")]
 	#[tokio::test]
 	async fn test_token_record_jwks() {
+		use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
 		use base64::Engine;
 		use base64::engine::general_purpose::STANDARD_NO_PAD;
 		use jsonwebtoken::jwk::{Jwk, JwkSet};
@@ -1490,8 +1501,6 @@ mod tests {
 		use rand::distributions::Alphanumeric;
 		use wiremock::matchers::{method, path};
 		use wiremock::{Mock, MockServer, ResponseTemplate};
-
-		use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
 
 		// Use unique path to prevent accidental cache reuse
 		fn random_path() -> String {
@@ -1996,8 +2005,7 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some
-			// margin
+			// Expiration should match the current time plus session duration with some margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -2078,8 +2086,7 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some
-			// margin
+			// Expiration should match the current time plus session duration with some margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(

@@ -1,14 +1,10 @@
+use crate::catalog::{self, TableDefinition};
+use crate::err::Error;
+use crate::expr::statements::{DefineEventStatement, DefineIndexStatement, LiveStatement};
+use anyhow::Result;
 use std::any::Any;
 use std::sync::Arc;
-
-use anyhow::Result;
 use uuid::Uuid;
-
-use crate::catalog::TableDefinition;
-use crate::err::Error;
-use crate::expr::statements::{
-	DefineEventStatement, DefineFieldStatement, DefineIndexStatement, LiveStatement,
-};
 
 #[derive(Clone, Debug)]
 pub(crate) enum Entry {
@@ -17,7 +13,7 @@ pub(crate) enum Entry {
 	/// A slice of DefineEventStatement specified on a table.
 	Evs(Arc<[DefineEventStatement]>),
 	/// A slice of DefineFieldStatement specified on a table.
-	Fds(Arc<[DefineFieldStatement]>),
+	Fds(Arc<[catalog::FieldDefinition]>),
 	/// A slice of TableDefinition specified on a table.
 	Fts(Arc<[TableDefinition]>),
 	/// A slice of DefineIndexStatement specified on a table.
@@ -50,7 +46,7 @@ impl Entry {
 	}
 	/// Converts this cache entry into a slice of [`DefineFieldStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Fds`].
-	pub(crate) fn try_into_fds(self) -> Result<Arc<[DefineFieldStatement]>> {
+	pub(crate) fn try_into_fds(self) -> Result<Arc<[catalog::FieldDefinition]>> {
 		match self {
 			Entry::Fds(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Fds"),
