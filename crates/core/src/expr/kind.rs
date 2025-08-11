@@ -721,7 +721,7 @@ impl KindLiteral {
 impl Display for KindLiteral {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			KindLiteral::String(s) => write!(f, "{}", s.to_sql()),
+			KindLiteral::String(s) => write!(f, "{s}"),
 			KindLiteral::Integer(n) => write!(f, "{}", n),
 			KindLiteral::Float(n) => write!(f, "{}f", n),
 			KindLiteral::Decimal(n) => write!(f, "{}dec", n),

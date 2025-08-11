@@ -430,7 +430,7 @@ impl Display for DefineFieldStatement {
 			write!(f, " REFERENCE {v}")?
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+			write!(f, " COMMENT {v}")?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

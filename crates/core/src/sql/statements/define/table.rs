@@ -75,7 +75,7 @@ impl Display for DefineTableStatement {
 			" SCHEMALESS"
 		})?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+			write!(f, " COMMENT {v}")?
 		}
 		if let Some(ref v) = self.view {
 			write!(f, " {v}")?

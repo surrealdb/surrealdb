@@ -8,7 +8,6 @@ use crate::expr::tokenizer::Tokenizer;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::val::{Array, Strand};
 use anyhow::{Result, bail};
 
@@ -94,7 +93,7 @@ impl Display for DefineAnalyzerStatement {
 			write!(f, " FILTERS {}", tokens.join(","))?;
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
 	}

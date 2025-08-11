@@ -1,7 +1,7 @@
 use super::DefineKind;
 use crate::sql::escape::QuoteStr;
 use crate::sql::fmt::Fmt;
-use crate::sql::{Base, Ident, ToSql};
+use crate::sql::{Base, Ident};
 use crate::val::{Duration, Strand};
 use argon2::{
 	Argon2,
@@ -80,7 +80,7 @@ impl Display for DefineUserStatement {
 			}
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
 	}

@@ -7,7 +7,6 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::sql::fmt::Fmt;
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
@@ -116,7 +115,7 @@ impl Display for DefineEventStatement {
 			Fmt::comma_separated(self.then.iter())
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
 	}

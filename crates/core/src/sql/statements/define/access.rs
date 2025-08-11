@@ -1,5 +1,5 @@
 use crate::sql::access::AccessDuration;
-use crate::sql::{AccessType, Base, Expr, Ident, ToSql};
+use crate::sql::{AccessType, Base, Expr, Ident};
 use crate::val::Strand;
 
 use std::fmt::{self, Display};
@@ -69,7 +69,7 @@ impl Display for DefineAccessStatement {
 			}
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
 	}

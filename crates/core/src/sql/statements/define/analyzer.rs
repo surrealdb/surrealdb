@@ -1,6 +1,6 @@
+use crate::sql::Ident;
 use crate::sql::filter::Filter;
 use crate::sql::tokenizer::Tokenizer;
-use crate::sql::{Ident, ToSql};
 use crate::val::Strand;
 
 use std::fmt::{self, Display};
@@ -39,7 +39,7 @@ impl Display for DefineAnalyzerStatement {
 			write!(f, " FILTERS {}", tokens.join(","))?;
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
 	}

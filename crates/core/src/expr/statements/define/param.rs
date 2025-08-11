@@ -114,7 +114,7 @@ impl Display for DefineParamStore {
 		write!(f, "DEFINE PARAM")?;
 		write!(f, " ${} VALUE {}", self.name.to_sql(), self.value)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+			write!(f, " COMMENT {v}")?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

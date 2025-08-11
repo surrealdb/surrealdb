@@ -1,6 +1,6 @@
 use crate::sql::fmt::{is_pretty, pretty_indent};
 
-use crate::sql::{Expr, Ident, Permission, ToSql};
+use crate::sql::{Expr, Ident, Permission};
 use crate::val::Strand;
 use std::fmt::{self, Display, Write};
 
@@ -26,7 +26,7 @@ impl Display for DefineParamStatement {
 		}
 		write!(f, " ${} VALUE {}", self.name, self.value)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+			write!(f, " COMMENT {v}")?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

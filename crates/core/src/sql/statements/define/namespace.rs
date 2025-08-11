@@ -1,5 +1,5 @@
 use super::DefineKind;
-use crate::sql::{Ident, ToSql};
+use crate::sql::Ident;
 use crate::val::Strand;
 use std::fmt::{self, Display};
 
@@ -22,7 +22,7 @@ impl Display for DefineNamespaceStatement {
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
 	}

@@ -1,5 +1,5 @@
+use crate::sql::Ident;
 use crate::sql::changefeed::ChangeFeed;
-use crate::sql::{Ident, ToSql};
 use crate::val::Strand;
 
 use std::fmt::{self, Display};
@@ -26,7 +26,7 @@ impl Display for DefineDatabaseStatement {
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+			write!(f, " COMMENT {v}")?
 		}
 		if let Some(ref v) = self.changefeed {
 			write!(f, " {v}")?;
@@ -45,7 +45,7 @@ impl crate::sql::ToSql for DefineDatabaseStatement {
 		}
 		out.push_str(&format!(" {}", self.name));
 		if let Some(ref v) = self.comment {
-			out.push_str(&format!(" COMMENT {}", v.to_sql()));
+			out.push_str(&format!(" COMMENT {v}"));
 		}
 		if let Some(ref v) = self.changefeed {
 			out.push_str(&format!(" {v}"));

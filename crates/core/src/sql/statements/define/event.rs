@@ -1,5 +1,5 @@
 use crate::sql::fmt::Fmt;
-use crate::sql::{Expr, Ident, ToSql};
+use crate::sql::{Expr, Ident};
 use crate::val::Strand;
 use std::fmt::{self, Display};
 
@@ -33,7 +33,7 @@ impl Display for DefineEventStatement {
 			Fmt::comma_separated(&self.then)
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
 	}

@@ -82,7 +82,7 @@ impl AlterTableStatement {
 		}
 
 		match self.comment {
-			AlterKind::Set(ref x) => dt.comment = Some(x.to_string()),
+			AlterKind::Set(ref x) => dt.comment = Some(x.clone().into_string()),
 
 			AlterKind::Drop => dt.comment = None,
 			AlterKind::None => {}

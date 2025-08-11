@@ -6,7 +6,6 @@ use crate::err::Error;
 use crate::expr::{Base, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
@@ -62,7 +61,7 @@ impl DefineNamespaceStatement {
 		let ns_def = NamespaceDefinition {
 			namespace_id,
 			name: self.name.to_string(),
-			comment: self.comment.clone().map(|c| c.to_string()),
+			comment: self.comment.clone().map(|c| c.into_string()),
 		};
 		txn.set(&catalog_key, &ns_def, None).await?;
 
@@ -85,7 +84,7 @@ impl Display for DefineNamespaceStatement {
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
 	}

@@ -5,7 +5,6 @@ use crate::expr::fmt::Pretty;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{self, Ident, Kind};
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use geo::Point;
@@ -629,7 +628,7 @@ impl fmt::Display for Value {
 			Value::Object(v) => write!(f, "{v}"),
 			Value::Range(v) => write!(f, "{v}"),
 			Value::Regex(v) => write!(f, "{v}"),
-			Value::Strand(v) => write!(f, "{}", v.to_sql()),
+			Value::Strand(v) => write!(f, "{v}"),
 			Value::Thing(v) => write!(f, "{v}"),
 			Value::Uuid(v) => write!(f, "{v}"),
 			Value::Closure(v) => write!(f, "{v}"),

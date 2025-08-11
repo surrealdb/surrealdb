@@ -4,7 +4,6 @@ use crate::doc::CursorDoc;
 use crate::expr::escape::EscapeKey;
 use crate::expr::fmt::{Pretty, is_pretty, pretty_indent};
 use crate::expr::{Expr, FlowResult, RecordIdLit, fmt::Fmt};
-use crate::sql::ToSql;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, Regex,
 	Strand, Uuid, Value,
@@ -202,7 +201,7 @@ impl fmt::Display for Literal {
 			}
 			Literal::Integer(x) => write!(f, "{x}"),
 			Literal::Decimal(d) => write!(f, "{d}dec"),
-			Literal::Strand(strand) => write!(f, "{}", strand.to_sql()),
+			Literal::Strand(strand) => write!(f, "{strand}"),
 			Literal::Bytes(bytes) => write!(f, "{bytes}"),
 			Literal::Regex(regex) => write!(f, "{regex}"),
 			Literal::RecordId(record_id_lit) => write!(f, "{record_id_lit}"),

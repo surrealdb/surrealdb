@@ -1,6 +1,6 @@
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
-use crate::sql::{Expr, Ident, Idiom, Kind, Permissions, ToSql};
+use crate::sql::{Expr, Ident, Idiom, Kind, Permissions};
 use crate::val::Strand;
 
 use std::fmt::{self, Display, Write};
@@ -102,7 +102,7 @@ impl Display for DefineFieldStatement {
 			write!(f, " REFERENCE {v}")?
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+			write!(f, " COMMENT {v}")?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

@@ -1,7 +1,7 @@
 use super::DefineKind;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 
-use crate::sql::{Block, Ident, Kind, Permission, ToSql};
+use crate::sql::{Block, Ident, Kind, Permission};
 use crate::val::Strand;
 use std::fmt::{self, Display, Write};
 
@@ -38,7 +38,7 @@ impl fmt::Display for DefineFunctionStatement {
 		}
 		Display::fmt(&self.block, f)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+			write!(f, " COMMENT {v}")?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

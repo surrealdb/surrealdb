@@ -7,7 +7,6 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Block, Ident, Kind, Permission};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
@@ -105,7 +104,7 @@ impl fmt::Display for DefineFunctionStatement {
 		}
 		Display::fmt(&self.block, f)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+			write!(f, " COMMENT {v}")?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
