@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::expr::escape::EscapeKey;
 use crate::expr::fmt::{Pretty, is_pretty, pretty_indent};
 use crate::expr::{Expr, FlowResult, RecordIdLit, fmt::Fmt};
+use crate::sql::ToSql;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, Regex,
 	Strand, Uuid, Value,
@@ -15,7 +16,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
 use std::hash::{Hash, Hasher};
-use crate::sql::ToSql;
 
 /// A literal value, should be computed to get an actual value.
 ///
