@@ -1,6 +1,7 @@
 /**
 [env]
 imports = ["access/record/basic_access_import.surql"]
+clean = true
 
 signup = """{
 	ns: "test",

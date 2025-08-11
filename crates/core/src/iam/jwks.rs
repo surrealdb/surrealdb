@@ -3,17 +3,16 @@ use crate::err::Error;
 use crate::kvs::Datastore;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Duration, Utc};
-use jsonwebtoken::jwk::{
-	AlgorithmParameters::*, Jwk, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse,
-};
-use jsonwebtoken::{Algorithm::*, DecodingKey, Validation};
+use jsonwebtoken::Algorithm::*;
+use jsonwebtoken::jwk::AlgorithmParameters::*;
+use jsonwebtoken::jwk::{Jwk, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse};
+use jsonwebtoken::{DecodingKey, Validation};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::sync::Arc;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use tokio::sync::RwLock;
 
 pub(crate) type JwksCache = HashMap<String, JwksCacheEntry>;
@@ -369,7 +368,8 @@ fn cache_key_from_url(url: &str) -> String {
 mod tests {
 	use super::*;
 	use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
-	use rand::{Rng, distributions::Alphanumeric};
+	use rand::Rng;
+	use rand::distributions::Alphanumeric;
 	use wiremock::matchers::{header, method, path};
 	use wiremock::{Mock, MockServer, ResponseTemplate};
 

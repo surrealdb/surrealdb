@@ -5,7 +5,6 @@ use std::ops::Range;
 ///
 /// Locations are 1 indexed, the first character on the first line being on line 1 column 1.
 #[derive(Clone, Copy, Debug)]
-#[non_exhaustive]
 pub struct Location {
 	pub line: usize,
 	/// In chars.

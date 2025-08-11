@@ -1,33 +1,30 @@
-use super::DefineFieldStatement;
+use super::{DefineFieldStatement, DefineKind};
 use crate::ctx::Context;
 use crate::dbs::{Force, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::changefeed::ChangeFeed;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::paths::{IN, OUT};
+use crate::expr::statements::UpdateStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{
-	Base, Ident, Output, Permissions, Strand, Value, Values, View, changefeed::ChangeFeed,
-	statements::UpdateStatement,
-};
-use crate::expr::{Idiom, Kind, TableType};
+use crate::expr::{Base, Expr, Ident, Idiom, Kind, Output, Permissions, TableType, View};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Transaction, impl_kv_value_revisioned};
+use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
-use revision::Error as RevisionError;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[revisioned(revision = 6)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct DefineTableStatement {
+	pub kind: DefineKind,
 	pub id: Option<u32>,
 	pub name: Ident,
 	pub drop: bool,
@@ -36,28 +33,15 @@ pub struct DefineTableStatement {
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
 	pub comment: Option<Strand>,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub kind: TableType,
-	/// Should we overwrite the field definition if it already exists
-	#[revision(start = 4)]
-	pub overwrite: bool,
+	pub table_type: TableType,
 	/// The last time that a DEFINE FIELD was added to this table
-	#[revision(start = 5)]
 	pub cache_fields_ts: Uuid,
 	/// The last time that a DEFINE EVENT was added to this table
-	#[revision(start = 5)]
 	pub cache_events_ts: Uuid,
 	/// The last time that a DEFINE TABLE was added to this table
-	#[revision(start = 5)]
 	pub cache_tables_ts: Uuid,
 	/// The last time that a DEFINE INDEX was added to this table
-	#[revision(start = 5)]
 	pub cache_indexes_ts: Uuid,
-	/// The last time that a LIVE query was added to this table
-	#[revision(start = 5, end = 6, convert_fn = "convert_cache_ts")]
-	pub cache_lives_ts: Uuid,
 }
 
 impl_kv_value_revisioned!(DefineTableStatement);
@@ -78,12 +62,16 @@ impl DefineTableStatement {
 		let txn = ctx.tx();
 		// Check if the definition exists
 		if txn.get_tb(ns, db, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::TbAlreadyExists {
-					name: self.name.to_string(),
-				});
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::TbAlreadyExists {
+							name: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 		}
 		// Process the statement
@@ -99,8 +87,7 @@ impl DefineTableStatement {
 				_ => None,
 			},
 			// Don't persist the `IF NOT EXISTS` clause to the schema
-			if_not_exists: false,
-			overwrite: false,
+			kind: DefineKind::Default,
 			..self.clone()
 		};
 		// Make sure we are refreshing the caches
@@ -117,7 +104,7 @@ impl DefineTableStatement {
 			cache.clear_tb(ns, db, &self.name);
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Record definition change
 		if dt.changefeed.is_some() {
 			txn.lock().await.record_table_change(ns, db, &self.name, &dt);
@@ -130,7 +117,7 @@ impl DefineTableStatement {
 			let key = crate::key::table::all::new(ns, db, &self.name);
 			txn.delp(&key).await?;
 			// Process each foreign table
-			for ft in view.what.0.iter() {
+			for ft in view.what.iter() {
 				// Save the view config
 				let key = crate::key::table::ft::new(ns, db, ft, &self.name);
 				txn.set(&key, self, None).await?;
@@ -151,10 +138,10 @@ impl DefineTableStatement {
 					cache.clear_tb(ns, db, ft);
 				}
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 				// Process the view data
 				let stm = UpdateStatement {
-					what: Values(vec![Value::Table(ft.clone())]),
+					what: vec![Expr::Table(ft.clone())],
 					output: Some(Output::None),
 					..UpdateStatement::default()
 				};
@@ -166,28 +153,24 @@ impl DefineTableStatement {
 			cache.clear_tb(ns, db, &self.name);
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-
-	fn convert_cache_ts(&self, _revision: u16, _value: Uuid) -> Result<(), RevisionError> {
-		Ok(())
 	}
 }
 
 impl DefineTableStatement {
 	/// Checks if this is a TYPE RELATION table
 	pub fn is_relation(&self) -> bool {
-		matches!(self.kind, TableType::Relation(_))
+		matches!(self.table_type, TableType::Relation(_))
 	}
 	/// Checks if this table allows graph edges / relations
 	pub fn allows_relation(&self) -> bool {
-		matches!(self.kind, TableType::Relation(_) | TableType::Any)
+		matches!(self.table_type, TableType::Relation(_) | TableType::Any)
 	}
 	/// Checks if this table allows normal records / documents
 	pub fn allows_normal(&self) -> bool {
-		matches!(self.kind, TableType::Normal | TableType::Any)
+		matches!(self.table_type, TableType::Normal | TableType::Any)
 	}
 	/// Used to add relational fields to existing table records
 	pub async fn add_in_out_fields(
@@ -197,7 +180,7 @@ impl DefineTableStatement {
 		tb: &mut DefineTableStatement,
 	) -> Result<()> {
 		// Add table relational fields
-		if let TableType::Relation(rel) = &tb.kind {
+		if let TableType::Relation(rel) = &tb.table_type {
 			// Set the `in` field as a DEFINE FIELD definition
 			{
 				let key = crate::key::table::fd::new(ns, db, &tb.name, "in");
@@ -207,7 +190,7 @@ impl DefineTableStatement {
 					&DefineFieldStatement {
 						name: Idiom::from(IN.to_vec()),
 						what: tb.name.clone(),
-						kind: Some(val),
+						field_kind: Some(val),
 						..Default::default()
 					},
 					None,
@@ -223,7 +206,7 @@ impl DefineTableStatement {
 					&DefineFieldStatement {
 						name: Idiom::from(OUT.to_vec()),
 						what: tb.name.clone(),
-						kind: Some(val),
+						field_kind: Some(val),
 						..Default::default()
 					},
 					None,
@@ -240,33 +223,36 @@ impl DefineTableStatement {
 impl Display for DefineTableStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE TABLE")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {}", self.name)?;
 		write!(f, " TYPE")?;
-		match &self.kind {
+		match &self.table_type {
 			TableType::Normal => {
 				f.write_str(" NORMAL")?;
 			}
 			TableType::Relation(rel) => {
 				f.write_str(" RELATION")?;
 				if let Some(Kind::Record(kind)) = &rel.from {
-					write!(
-						f,
-						" IN {}",
-						kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
-					)?;
+					write!(f, " IN ",)?;
+					for (idx, k) in kind.iter().enumerate() {
+						if idx != 0 {
+							write!(f, " | ")?;
+						}
+						k.fmt(f)?;
+					}
 				}
 				if let Some(Kind::Record(kind)) = &rel.to {
-					write!(
-						f,
-						" OUT {}",
-						kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
-					)?;
+					write!(f, " OUT ",)?;
+					for (idx, k) in kind.iter().enumerate() {
+						if idx != 0 {
+							write!(f, " | ")?;
+						}
+						k.fmt(f)?;
+					}
 				}
 				if rel.enforced {
 					write!(f, " ENFORCED")?;
@@ -310,7 +296,7 @@ impl InfoStructure for DefineTableStatement {
 			"name".to_string() => self.name.structure(),
 			"drop".to_string() => self.drop.into(),
 			"full".to_string() => self.full.into(),
-			"kind".to_string() => self.kind.structure(),
+			"kind".to_string() => self.table_type.structure(),
 			"view".to_string(), if let Some(v) = self.view => v.structure(),
 			"changefeed".to_string(), if let Some(v) = self.changefeed => v.structure(),
 			"permissions".to_string() => self.permissions.structure(),

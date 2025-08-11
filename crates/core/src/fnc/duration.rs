@@ -1,5 +1,4 @@
-use crate::expr::duration::Duration;
-use crate::expr::value::Value;
+use crate::val::{Duration, Value};
 use anyhow::Result;
 
 pub fn days((val,): (Duration,)) -> Result<Value> {
@@ -41,8 +40,7 @@ pub fn years((val,): (Duration,)) -> Result<Value> {
 pub mod from {
 
 	use crate::err::Error;
-	use crate::expr::duration::Duration;
-	use crate::expr::value::Value;
+	use crate::val::{Duration, Value};
 	use anyhow::Result;
 
 	pub fn days((val,): (i64,)) -> Result<Value> {

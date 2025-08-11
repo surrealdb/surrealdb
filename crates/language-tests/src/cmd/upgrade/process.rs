@@ -5,7 +5,7 @@ use revision::revisioned;
 use std::{future::Future, path::Path, process::Stdio, time::Duration};
 use surrealdb_core::{
 	dbs::{self, Status},
-	expr::Value,
+	val::Value,
 };
 use tokio::{
 	io::AsyncReadExt,

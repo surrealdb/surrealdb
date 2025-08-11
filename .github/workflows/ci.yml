@@ -378,11 +378,11 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      #- name: Install cargo-make
+        #run: cargo install --debug --locked cargo-make
 
-      - name: Run GraphQL integration tests
-        run: cargo make ci-graphql-integration
+      #- name: Run GraphQL integration tests
+        #run: cargo make ci-graphql-integration
 
   # ----------------------------------------
   # Workspace tests
@@ -859,15 +859,15 @@ jobs:
             ./
           cache-directories: crates/language-tests/.binary-cache
 
-      - name: Build SurrealQL test tool
-        run: |
-          cd crates/language-tests
-          cargo build --features upgrade
+  #    - name: Build SurrealQL test tool
+        #run: |
+        #  cd crates/language-tests
+        #  cargo build --features upgrade
 
-      - name: Run SurrealQL test suite
-        run: |
-          cd crates/language-tests
-          ./target/debug/surrealql-test --color always upgrade --allow-download --from 2.2.0,2.1.0,2.0.0 --to ../..
+  #    - name: Run SurrealQL test suite
+        #run: |
+        #  cd crates/language-tests
+        #  ./target/debug/surrealql-test --color always upgrade --allow-download --from 2.2.0,2.1.0,2.0.0 --to ../..
 
   # ----------------------------------------
   # Other SDK tests

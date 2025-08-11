@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
 use surrealdb::dbs::Session;
-use surrealdb::{kvs::Datastore, sql::Id};
-use tokio::{runtime::Runtime, task::JoinSet};
+use surrealdb::kvs::Datastore;
+use surrealdb_core::val::RecordIdKey;
+use tokio::runtime::Runtime;
+use tokio::task::JoinSet;
 
 pub struct Create {
 	runtime: &'static Runtime,
@@ -13,7 +15,7 @@ impl Create {
 	pub fn new(runtime: &'static Runtime) -> Self {
 		Self {
 			runtime,
-			table_name: format!("table_{}", Id::rand().to_raw()),
+			table_name: format!("table_{}", RecordIdKey::rand()),
 		}
 	}
 }
@@ -43,8 +45,12 @@ impl super::Routine for Create {
 					async move {
 						let mut res = criterion::black_box(
 							ds.execute(
-								format!("CREATE {} SET field = '{}'", &table_name, Id::rand())
-									.as_str(),
+								format!(
+									"CREATE {} SET field = '{}'",
+									&table_name,
+									RecordIdKey::rand()
+								)
+								.as_str(),
 								&session,
 								None,
 							)
@@ -55,7 +61,7 @@ impl super::Routine for Create {
 							.remove(0)
 							.output()
 							.expect("[setup] the create operation returned no value");
-						if res.is_none_or_null() {
+						if res.is_nullish() {
 							panic!("[setup] Record not found");
 						}
 					},

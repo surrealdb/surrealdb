@@ -1,4 +1,4 @@
-mod field;
+pub mod field;
 mod sequence;
 mod table;
 
@@ -6,19 +6,48 @@ pub use field::AlterFieldStatement;
 pub use sequence::AlterSequenceStatement;
 pub use table::AlterTableStatement;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+pub enum AlterKind<T> {
+	#[default]
+	None,
+	Set(T),
+	Drop,
+}
+
+impl<A, B> From<AlterKind<A>> for crate::expr::statements::alter::AlterKind<B>
+where
+	B: From<A>,
+{
+	fn from(value: AlterKind<A>) -> Self {
+		match value {
+			AlterKind::Set(a) => crate::expr::statements::alter::AlterKind::Set(a.into()),
+			AlterKind::Drop => crate::expr::statements::alter::AlterKind::Drop,
+			AlterKind::None => crate::expr::statements::alter::AlterKind::None,
+		}
+	}
+}
+
+impl<A, B> From<crate::expr::statements::alter::AlterKind<A>> for AlterKind<B>
+where
+	B: From<A>,
+{
+	fn from(value: crate::expr::statements::alter::AlterKind<A>) -> Self {
+		match value {
+			crate::expr::statements::alter::AlterKind::Set(a) => AlterKind::Set(a.into()),
+			crate::expr::statements::alter::AlterKind::Drop => AlterKind::Drop,
+			crate::expr::statements::alter::AlterKind::None => AlterKind::None,
+		}
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum AlterStatement {
 	Table(AlterTableStatement),
-	#[revision(start = 2)]
 	Sequence(AlterSequenceStatement),
-	#[revision(start = 3)]
 	Field(AlterFieldStatement),
 }
 
@@ -49,43 +78,5 @@ impl From<crate::expr::statements::AlterStatement> for AlterStatement {
 			crate::expr::statements::AlterStatement::Sequence(v) => Self::Sequence(v.into()),
 			crate::expr::statements::AlterStatement::Field(v) => Self::Field(v.into()),
 		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-	use crate::sql::{Ident, Idiom};
-
-	#[test]
-	fn check_alter_serialize_table() {
-		let stm = AlterStatement::Table(AlterTableStatement {
-			name: Ident::from("test"),
-			..Default::default()
-		});
-		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();
-		assert_eq!(15, enc.len());
-	}
-
-	#[test]
-	fn check_alter_serialize_sequence() {
-		let stm = AlterStatement::Sequence(AlterSequenceStatement {
-			name: Ident::from("test"),
-			..Default::default()
-		});
-		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();
-		assert_eq!(11, enc.len());
-	}
-
-	#[test]
-	fn check_alter_serialize_field() {
-		let stm = AlterStatement::Field(AlterFieldStatement {
-			name: Idiom::from("test"),
-			what: Ident::from("test"),
-			..Default::default()
-		});
-		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();
-		assert_eq!(30, enc.len());
 	}
 }

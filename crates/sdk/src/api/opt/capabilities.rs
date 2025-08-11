@@ -1,6 +1,7 @@
 //! The capabilities that can be enabled for a database instance
 
-use std::{collections::HashSet, mem};
+use std::collections::HashSet;
+use std::mem;
 
 use surrealdb_core::dbs::capabilities::{
 	Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, ParseFuncTargetError,
@@ -262,7 +263,6 @@ impl Capabilities {
 			Targets::Some(x) => {
 				x.insert(target);
 			}
-			_ => unreachable!(),
 		}
 		Ok(self)
 	}
@@ -301,7 +301,6 @@ impl Capabilities {
 			Targets::Some(x) => {
 				x.insert(target);
 			}
-			_ => unreachable!(),
 		}
 		Ok(self)
 	}
@@ -388,7 +387,6 @@ impl Capabilities {
 			Targets::Some(x) => {
 				x.insert(target);
 			}
-			_ => unreachable!(),
 		}
 		Ok(self)
 	}
@@ -427,7 +425,6 @@ impl Capabilities {
 			Targets::Some(x) => {
 				x.insert(target);
 			}
-			_ => unreachable!(),
 		}
 		Ok(self)
 	}
@@ -459,7 +456,6 @@ impl Capabilities {
 			Targets::Some(set) => {
 				set.extend(features);
 			}
-			_ => unreachable!(),
 		}
 		self
 	}
@@ -488,7 +484,6 @@ impl Capabilities {
 			Targets::Some(set) => {
 				set.insert(feature);
 			}
-			_ => unreachable!(),
 		}
 		self
 	}
@@ -541,7 +536,6 @@ impl Capabilities {
 			Targets::Some(set) => {
 				set.extend(features);
 			}
-			_ => unreachable!(),
 		}
 		self
 	}
@@ -570,7 +564,6 @@ impl Capabilities {
 			Targets::Some(set) => {
 				set.insert(feature);
 			}
-			_ => unreachable!(),
 		}
 		self
 	}

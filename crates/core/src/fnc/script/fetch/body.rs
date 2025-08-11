@@ -1,25 +1,22 @@
-use crate::fnc::script::fetch::{RequestError, stream::ReadableStream};
+use crate::fnc::script::fetch::RequestError;
+use crate::fnc::script::fetch::stream::ReadableStream;
 use bytes::{Bytes, BytesMut};
 use futures::{Stream, TryStreamExt, future};
 use js::{ArrayBuffer, Class, Ctx, Error, Exception, FromJs, Result, Type, TypedArray, Value};
-use std::{
-	cell::{Cell, RefCell},
-	result::Result as StdResult,
-};
+use std::cell::{Cell, RefCell};
+use std::result::Result as StdResult;
 
 use super::classes::Blob;
 
 pub type StreamItem = StdResult<Bytes, RequestError>;
 
 #[derive(Clone)]
-#[non_exhaustive]
 pub enum BodyKind {
 	Buffer,
 	String,
 	Blob(String),
 }
 
-#[non_exhaustive]
 pub enum BodyData {
 	Buffer(Bytes),
 	Stream(RefCell<ReadableStream<StreamItem>>),
@@ -30,7 +27,6 @@ pub enum BodyData {
 /// A struct representing the body mixin.
 ///
 /// Implements [`FromJs`] for conversion from `Blob`, `ArrayBuffer`, any `TypedBuffer` and `String`.
-#[non_exhaustive]
 pub struct Body {
 	/// The type of body
 	pub kind: BodyKind,

@@ -1,18 +1,18 @@
-use crate::expr::{Array, IdRange, Object, id::Gen, id::Id as NewId};
+use crate::expr::{RecordIdKeyRangeLit, id::Gen, id::RecordIdKeyLit as NewId};
+use crate::val::{Array, Object};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Id {
 	Number(i64),
 	String(String),
 	Array(Array),
 	Object(Object),
 	Generate(Gen),
-	Range(Box<IdRange>),
+	Range(Box<RecordIdKeyRangeLit>),
 }
 
 impl Id {
@@ -56,14 +56,13 @@ pub mod key {
 	use serde::{Deserialize, Serialize};
 
 	use crate::{
-		expr::{Dir, Value, id::Id as NewId},
+		expr::{Dir, id::RecordIdKeyLit as NewId},
 		kvs::KVKey,
 	};
 
 	use super::Id;
 
 	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-	#[non_exhaustive]
 	pub struct Graph<'a> {
 		__: u8,
 		_a: u8,
@@ -125,7 +124,6 @@ pub mod key {
 	}
 
 	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-	#[non_exhaustive]
 	pub struct Thing<'a> {
 		__: u8,
 		_a: u8,

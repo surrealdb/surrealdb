@@ -1,17 +1,12 @@
 use crate::sql::Ident;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct RemoveIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
-	#[revision(start = 2)]
 	pub if_exists: bool,
 }
 

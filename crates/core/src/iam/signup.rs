@@ -4,13 +4,13 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Session, Variables};
 use crate::err::Error;
 use crate::expr::AccessType;
-use crate::expr::Object;
-use crate::expr::Value;
-use crate::iam::Auth;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::Claims;
-use crate::iam::{Actor, Level};
-use crate::kvs::{Datastore, LockType::*, TransactionType::*};
+use crate::iam::{Actor, Auth, Level};
+use crate::kvs::Datastore;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
+use crate::val::{Object, Value};
 use anyhow::{Result, bail};
 use chrono::Utc;
 use jsonwebtoken::{Header, encode};
@@ -22,7 +22,6 @@ use uuid::Uuid;
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct SignupData {
 	pub token: Option<String>,
 	pub refresh: Option<String>,
@@ -42,8 +41,6 @@ impl From<SignupData> for Value {
 }
 
 pub async fn signup(kvs: &Datastore, session: &mut Session, vars: Object) -> Result<SignupData> {
-	// Check vars contains only computed values
-	vars.validate_computed()?;
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
@@ -85,7 +82,7 @@ pub async fn db_access(
 
 	// Check the access method type
 	// Currently, only the record access method supports signup
-	let AccessType::Record(ref at) = av.kind else {
+	let AccessType::Record(ref at) = av.access_type else {
 		bail!(Error::AccessMethodMismatch)
 	};
 
@@ -123,7 +120,7 @@ pub async fn db_access(
 				ns: Some(ns.clone()),
 				db: Some(db.clone()),
 				ac: Some(ac.clone()),
-				id: Some(rid.to_raw()),
+				id: Some(rid.to_string()),
 				..Claims::default()
 			};
 			// AUTHENTICATE clause
@@ -131,7 +128,7 @@ pub async fn db_access(
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 				sess.rd = Some(rid.clone().into());
-				sess.tk = Some((&claims).into());
+				sess.tk = Some(claims.clone().into_claims_object().into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
 				rid = authenticate_record(kvs, &sess, au).await?;
@@ -166,7 +163,7 @@ pub async fn db_access(
 			// Create the authentication token
 			let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
 			// Set the authentication on the session
-			session.tk = Some((&claims).into());
+			session.tk = Some(claims.into_claims_object().into());
 			session.ns = Some(ns.clone());
 			session.db = Some(db.clone());
 			session.ac = Some(ac.clone());
@@ -212,7 +209,8 @@ pub async fn db_access(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{dbs::Capabilities, iam::Role};
+	use crate::dbs::Capabilities;
+	use crate::iam::Role;
 	use chrono::Duration;
 	use std::collections::HashMap;
 

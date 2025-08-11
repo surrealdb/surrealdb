@@ -1,238 +1,100 @@
-use super::{FlowResultExt as _, Range};
-use crate::cnf::ID_CHARS;
+use super::FlowResultExt as _;
+use super::escape::EscapeKey;
+use super::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::{Array, Number, Object, Strand, Thing, Uuid, Value, escape::EscapeRid};
-use crate::kvs::impl_kv_value_revisioned;
+use crate::expr::Expr;
+use crate::expr::escape::EscapeRid;
+use crate::expr::literal::ObjectEntry;
+use crate::val::{Array, Object, RecordIdKey, Strand, Uuid};
+
 use anyhow::Result;
-use nanoid::nanoid;
-use range::IdRange;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::fmt::{self, Display, Formatter};
-use std::ops::{Bound, Deref};
-use ulid::Ulid;
+use std::fmt::{self, Display, Formatter, Write as _};
 
 pub mod range;
+pub use range::RecordIdKeyRangeLit;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Gen {
 	Rand,
 	Ulid,
 	Uuid,
 }
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub enum Id {
-	Number(i64),
-	String(String),
-	#[revision(start = 2)]
-	Uuid(Uuid),
-	Array(Array),
-	Object(Object),
-	Generate(Gen),
-	Range(Box<IdRange>),
-}
-
-impl_kv_value_revisioned!(Id);
-
-impl From<i64> for Id {
-	fn from(v: i64) -> Self {
-		Self::Number(v)
-	}
-}
-
-impl From<i32> for Id {
-	fn from(v: i32) -> Self {
-		Self::Number(v as i64)
-	}
-}
-
-impl From<u64> for Id {
-	fn from(v: u64) -> Self {
-		Self::Number(v as i64)
-	}
-}
-
-impl From<String> for Id {
-	fn from(v: String) -> Self {
-		Self::String(v)
-	}
-}
-
-impl From<Array> for Id {
-	fn from(v: Array) -> Self {
-		Self::Array(v)
-	}
-}
-
-impl From<Object> for Id {
-	fn from(v: Object) -> Self {
-		Self::Object(v)
-	}
-}
-
-impl From<Uuid> for Id {
-	fn from(v: Uuid) -> Self {
-		Self::Uuid(v)
-	}
-}
-
-impl From<Strand> for Id {
-	fn from(v: Strand) -> Self {
-		Self::String(v.as_string())
-	}
-}
-
-impl From<&str> for Id {
-	fn from(v: &str) -> Self {
-		Self::String(v.to_owned())
-	}
-}
-
-impl From<&String> for Id {
-	fn from(v: &String) -> Self {
-		Self::String(v.to_owned())
-	}
-}
-
-impl From<Vec<&str>> for Id {
-	fn from(v: Vec<&str>) -> Self {
-		Self::Array(v.into())
-	}
-}
-
-impl From<Vec<String>> for Id {
-	fn from(v: Vec<String>) -> Self {
-		Self::Array(v.into())
-	}
-}
-
-impl From<Vec<Value>> for Id {
-	fn from(v: Vec<Value>) -> Self {
-		Self::Array(v.into())
-	}
-}
-
-impl From<BTreeMap<String, Value>> for Id {
-	fn from(v: BTreeMap<String, Value>) -> Self {
-		Self::Object(v.into())
-	}
-}
-
-impl From<Number> for Id {
-	fn from(v: Number) -> Self {
-		match v {
-			Number::Int(v) => v.into(),
-			Number::Float(v) => v.to_string().into(),
-			Number::Decimal(v) => v.to_string().into(),
+impl Gen {
+	pub fn compute(&self) -> RecordIdKey {
+		match self {
+			Gen::Rand => RecordIdKey::rand(),
+			Gen::Ulid => RecordIdKey::ulid(),
+			Gen::Uuid => RecordIdKey::uuid(),
 		}
 	}
 }
 
-impl From<IdRange> for Id {
-	fn from(v: IdRange) -> Self {
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+pub enum RecordIdKeyLit {
+	Number(i64),
+	String(Strand),
+	Uuid(Uuid),
+	Array(Vec<Expr>),
+	Object(Vec<ObjectEntry>),
+	Generate(Gen),
+	Range(Box<RecordIdKeyRangeLit>),
+}
+
+impl From<RecordIdKeyRangeLit> for RecordIdKeyLit {
+	fn from(v: RecordIdKeyRangeLit) -> Self {
 		Self::Range(Box::new(v))
 	}
 }
 
-impl TryFrom<(Bound<Id>, Bound<Id>)> for Id {
-	type Error = anyhow::Error;
-	fn try_from(v: (Bound<Id>, Bound<Id>)) -> Result<Self, Self::Error> {
-		v.try_into().map(|x| Id::Range(Box::new(x)))
-	}
-}
-
-impl TryFrom<Range> for Id {
-	type Error = anyhow::Error;
-	fn try_from(v: Range) -> Result<Self, Self::Error> {
-		v.try_into().map(|x| Id::Range(Box::new(x)))
-	}
-}
-
-impl TryFrom<Value> for Id {
-	type Error = anyhow::Error;
-	fn try_from(v: Value) -> Result<Self, Self::Error> {
-		match v {
-			Value::Number(Number::Int(v)) => Ok(v.into()),
-			Value::Strand(v) => Ok(v.into()),
-			Value::Array(v) => Ok(v.into()),
-			Value::Object(v) => Ok(v.into()),
-			Value::Range(v) => v.deref().to_owned().try_into(),
-			v => Err(anyhow::Error::new(Error::IdInvalid {
-				value: v.kindof().to_string(),
-			})),
-		}
-	}
-}
-
-impl From<Thing> for Id {
-	fn from(v: Thing) -> Self {
-		v.id
-	}
-}
-
-impl Id {
-	/// Generate a new random ID
-	pub fn rand() -> Self {
-		Self::String(nanoid!(20, &ID_CHARS))
-	}
-	/// Generate a new random ULID
-	pub fn ulid() -> Self {
-		Self::String(Ulid::new().to_string())
-	}
-	/// Generate a new random UUID
-	pub fn uuid() -> Self {
-		Self::Uuid(Uuid::new_v7())
-	}
-	/// Check if this Id matches a value
-	pub fn is(&self, val: &Value) -> bool {
-		match (self, val) {
-			(Self::Number(i), Value::Number(Number::Int(j))) if *i == *j => true,
-			(Self::String(i), Value::Strand(j)) if *i == j.0 => true,
-			(Self::Uuid(i), Value::Uuid(j)) if i == j => true,
-			(Self::Array(i), Value::Array(j)) if i == j => true,
-			(Self::Object(i), Value::Object(j)) if i == j => true,
-			(i, Value::Thing(t)) if i == &t.id => true,
-			_ => false,
-		}
-	}
-	/// Convert the Id to a raw String
-	pub fn to_raw(&self) -> String {
-		match self {
-			Self::Number(v) => v.to_string(),
-			Self::String(v) => v.to_string(),
-			Self::Uuid(v) => v.to_string(),
-			Self::Array(v) => v.to_string(),
-			Self::Object(v) => v.to_string(),
-			Self::Generate(v) => match v {
-				Gen::Rand => "rand()".to_string(),
-				Gen::Ulid => "ulid()".to_string(),
-				Gen::Uuid => "uuid()".to_string(),
-			},
-			Self::Range(v) => v.to_string(),
-		}
-	}
-}
-
-impl Display for Id {
+impl Display for RecordIdKeyLit {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Number(v) => Display::fmt(v, f),
 			Self::String(v) => EscapeRid(v).fmt(f),
 			Self::Uuid(v) => Display::fmt(v, f),
-			Self::Array(v) => Display::fmt(v, f),
-			Self::Object(v) => Display::fmt(v, f),
+			Self::Array(v) => {
+				let mut f = Pretty::from(f);
+				f.write_char('[')?;
+				if !v.is_empty() {
+					let indent = pretty_indent();
+					write!(f, "{}", Fmt::pretty_comma_separated(v.iter()))?;
+					drop(indent);
+				}
+				f.write_char(']')
+			}
+			Self::Object(v) => {
+				let mut f = Pretty::from(f);
+				if is_pretty() {
+					f.write_char('{')?;
+				} else {
+					f.write_str("{ ")?;
+				}
+				if !v.is_empty() {
+					let indent = pretty_indent();
+					write!(
+						f,
+						"{}",
+						Fmt::pretty_comma_separated(v.iter().map(|args| Fmt::new(
+							args,
+							|entry, f| write!(f, "{}: {}", EscapeKey(&entry.key), &entry.value)
+						)),)
+					)?;
+					drop(indent);
+				}
+				if is_pretty() {
+					f.write_char('}')
+				} else {
+					f.write_str(" }")
+				}
+			}
 			Self::Generate(v) => match v {
 				Gen::Rand => Display::fmt("rand()", f),
 				Gen::Ulid => Display::fmt("ulid()", f),
@@ -243,7 +105,19 @@ impl Display for Id {
 	}
 }
 
-impl Id {
+impl RecordIdKeyLit {
+	pub(crate) fn is_static(&self) -> bool {
+		match self {
+			RecordIdKeyLit::Number(_)
+			| RecordIdKeyLit::String(_)
+			| RecordIdKeyLit::Uuid(_)
+			| RecordIdKeyLit::Generate(_) => true,
+			RecordIdKeyLit::Range(record_id_key_range_lit) => record_id_key_range_lit.is_static(),
+			RecordIdKeyLit::Array(exprs) => exprs.iter().all(|x| x.is_static()),
+			RecordIdKeyLit::Object(items) => items.iter().all(|x| x.value.is_static()),
+		}
+	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -251,25 +125,35 @@ impl Id {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Id> {
+	) -> Result<RecordIdKey> {
 		match self {
-			Id::Number(v) => Ok(Id::Number(*v)),
-			Id::String(v) => Ok(Id::String(v.clone())),
-			Id::Uuid(v) => Ok(Id::Uuid(*v)),
-			Id::Array(v) => match v.compute(stk, ctx, opt, doc).await.catch_return()? {
-				Value::Array(v) => Ok(Id::Array(v)),
-				v => fail!("Expected a Value::Array but found {v:?}"),
-			},
-			Id::Object(v) => match v.compute(stk, ctx, opt, doc).await.catch_return()? {
-				Value::Object(v) => Ok(Id::Object(v)),
-				v => fail!("Expected a Value::Object but found {v:?}"),
-			},
-			Id::Generate(v) => match v {
-				Gen::Rand => Ok(Self::rand()),
-				Gen::Ulid => Ok(Self::ulid()),
-				Gen::Uuid => Ok(Self::uuid()),
-			},
-			Id::Range(v) => Ok(Id::Range(Box::new(v.compute(stk, ctx, opt, doc).await?))),
+			RecordIdKeyLit::Number(v) => Ok(RecordIdKey::Number(*v)),
+			RecordIdKeyLit::String(v) => Ok(RecordIdKey::String(v.clone().into_string())),
+			RecordIdKeyLit::Uuid(v) => Ok(RecordIdKey::Uuid(*v)),
+			RecordIdKeyLit::Array(v) => {
+				let mut res = Vec::new();
+				for v in v.iter() {
+					let v = stk.run(|stk| v.compute(stk, ctx, opt, doc)).await.catch_return()?;
+					res.push(v);
+				}
+				Ok(RecordIdKey::Array(Array(res)))
+			}
+			RecordIdKeyLit::Object(v) => {
+				let mut res = Object::default();
+				for entry in v.iter() {
+					let v = stk
+						.run(|stk| entry.value.compute(stk, ctx, opt, doc))
+						.await
+						.catch_return()?;
+					res.insert(entry.key.clone(), v);
+				}
+				Ok(RecordIdKey::Object(res))
+			}
+			RecordIdKeyLit::Generate(v) => Ok(v.compute()),
+			RecordIdKeyLit::Range(v) => {
+				let range = v.compute(stk, ctx, opt, doc).await?;
+				Ok(RecordIdKey::Range(Box::new(range)))
+			}
 		}
 	}
 }

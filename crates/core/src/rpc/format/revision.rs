@@ -1,20 +1,9 @@
-use crate::rpc::RpcError;
-use crate::rpc::format::ResTrait;
-use crate::rpc::request::Request;
-use crate::sql::SqlValue;
 use revision::Revisioned;
 
-pub fn parse_value(val: Vec<u8>) -> Result<SqlValue, RpcError> {
-	SqlValue::deserialize_revisioned(&mut val.as_slice()).map_err(|_| RpcError::ParseError)
+pub fn decode<D: Revisioned>(val: &[u8]) -> Result<D, String> {
+	revision::from_slice(val).map_err(|e| e.to_string())
 }
 
-pub fn req(val: Vec<u8>) -> Result<Request, RpcError> {
-	parse_value(val)?.try_into()
-}
-
-pub fn res(res: impl ResTrait) -> Result<Vec<u8>, RpcError> {
-	// Serialize the response with full internal type information
-	let mut buf = Vec::new();
-	res.serialize_revisioned(&mut buf).unwrap();
-	Ok(buf)
+pub fn encode<S: Revisioned>(val: &S) -> Result<Vec<u8>, String> {
+	revision::to_vec(val).map_err(|e| e.to_string())
 }

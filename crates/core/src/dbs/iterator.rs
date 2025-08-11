@@ -1,25 +1,20 @@
-use crate::ctx::Context;
-use crate::ctx::{Canceller, MutableContext};
-use crate::dbs::Options;
-use crate::dbs::Statement;
+use crate::ctx::{Canceller, Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
 use crate::dbs::result::Results;
-use crate::doc::{Document, IgnoreError};
+use crate::dbs::{Options, Statement};
+use crate::doc::{CursorDoc, Document, IgnoreError};
 use crate::err::Error;
-use crate::expr::array::Array;
-use crate::expr::edges::Edges;
-use crate::expr::mock::Mock;
-use crate::expr::object::Object;
-use crate::expr::table::Table;
-use crate::expr::thing::Thing;
-use crate::expr::value::Value;
-use crate::expr::{Fields, Id, IdRange};
+use crate::expr::graph::ComputedGraphSubject;
+use crate::expr::{
+	self, ControlFlow, Dir, Expr, Fields, FlowResultExt, Graph, Ident, Literal, Mock, Part,
+};
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
 	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
 	StatementContext,
 };
+use crate::val::{Object, RecordId, RecordIdKey, RecordIdKeyRange, Value};
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use std::mem;
@@ -27,7 +22,7 @@ use std::sync::Arc;
 
 const TARGET: &str = "surrealdb::core::dbs";
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) enum Iterable {
 	/// Any [Value] which does not exist in storage. This
 	/// could be the result of a query, an arbitrary
@@ -37,47 +32,54 @@ pub(crate) enum Iterable {
 	/// data from storage. This is used in CREATE statements
 	/// where we attempt to write data without first checking
 	/// if the record exists, throwing an error on failure.
-	Defer(Thing),
+	Defer(RecordId),
 	/// An iterable whose Record ID needs to be generated
 	/// before processing. This is used in CREATE statements
 	/// when generating a new id, or generating an id based
 	/// on the id field which is specified within the data.
-	Yield(Table),
+	Yield(Ident),
 	/// An iterable which needs to fetch the data of a
 	/// specific record before processing the document.
-	Thing(Thing),
+	Thing(RecordId),
 	/// An iterable which needs to fetch the related edges
 	/// of a record before processing each document.
-	Edges(Edges),
+	Edges {
+		dir: Dir,
+		from: RecordId,
+		what: Vec<ComputedGraphSubject>,
+	},
 	/// An iterable which needs to iterate over the records
 	/// in a table before processing each document.
-	Table(Table, RecordStrategy, ScanDirection),
+	Table(Ident, RecordStrategy, ScanDirection),
 	/// An iterable which fetches a specific range of records
 	/// from storage, used in range and time-series scenarios.
-	Range(String, IdRange, RecordStrategy, ScanDirection),
+	Range(String, RecordIdKeyRange, RecordStrategy, ScanDirection),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in INSERT statements, where each value
 	/// passed in to the iterable is unique for each record.
-	Mergeable(Thing, Value),
+	Mergeable(RecordId, Value),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in RELATE statements. The optional value
 	/// is used in INSERT RELATION statements, where each value
 	/// passed in to the iterable is unique for each record.
-	Relatable(Thing, Thing, Thing, Option<Value>),
+	///
+	/// The first field is the rid from which we create, the second is the rid which is the
+	/// relation itself and the third is the target of the relation
+	Relatable(RecordId, RecordId, RecordId, Option<Value>),
 	/// An iterable which iterates over an index range for a
 	/// table, which then fetches the corresponding records
 	/// which are matched within the index.
 	/// When the 3rd argument is true, we iterate over keys only.
-	Index(Table, IteratorRef, RecordStrategy),
+	Index(Ident, IteratorRef, RecordStrategy),
 }
 
 #[derive(Debug)]
 pub(crate) enum Operable {
 	Value(Arc<Value>),
 	Insert(Arc<Value>, Arc<Value>),
-	Relate(Thing, Arc<Value>, Thing, Option<Arc<Value>>),
+	Relate(RecordId, Arc<Value>, RecordId, Option<Arc<Value>>),
 	Count(usize),
 }
 
@@ -85,7 +87,7 @@ pub(crate) enum Operable {
 pub(crate) enum Workable {
 	Normal,
 	Insert(Arc<Value>),
-	Relate(Thing, Thing, Option<Arc<Value>>),
+	Relate(RecordId, RecordId, Option<Arc<Value>>),
 }
 
 #[derive(Debug)]
@@ -93,9 +95,9 @@ pub(crate) struct Processed {
 	/// Whether this document only fetched keys or just count
 	pub(crate) rs: RecordStrategy,
 	/// Whether this document needs to have an ID generated
-	pub(crate) generate: Option<Table>,
+	pub(crate) generate: Option<Ident>,
 	/// The record id for this document that should be processed
-	pub(crate) rid: Option<Arc<Thing>>,
+	pub(crate) rid: Option<Arc<RecordId>>,
 	/// The record data for this document that should be processed
 	pub(crate) val: Operable,
 	/// The record iterator for this document, used in index scans
@@ -152,27 +154,65 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn prepare(
 		&mut self,
 		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
 		planner: &mut QueryPlanner,
-		ctx: &StatementContext<'_>,
-		val: Value,
+		stm_ctx: &StatementContext<'_>,
+		val: &Expr,
 	) -> Result<()> {
 		// Match the values
 		match val {
-			Value::Mock(v) => self.prepare_mock(ctx, v).await?,
-			Value::Table(v) => self.prepare_table(stk, planner, ctx, v).await?,
-			Value::Edges(v) => self.prepare_edges(ctx.stm, *v)?,
-			Value::Object(v) if !ctx.stm.is_select() => self.prepare_object(ctx.stm, v)?,
-			Value::Array(v) => self.prepare_array(stk, planner, ctx, v).await?,
-			Value::Thing(v) => self.prepare_thing(planner, ctx, v).await?,
-			v if ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
-			v => {
-				bail!(Error::InvalidStatementTarget {
-					value: v.to_string(),
-				})
+			Expr::Mock(v) => self.prepare_mock(stm_ctx, v).await?,
+			Expr::Table(v) => self.prepare_table(stk, planner, stm_ctx, v.clone()).await?,
+			Expr::Idiom(x) => {
+				// TODO: This needs to be structured better.
+				// match against what previously would be an edge.
+				if x.len() != 2 {
+					return self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, val).await;
+				}
+
+				let Part::Start(Expr::Literal(Literal::RecordId(ref from))) = x[0] else {
+					return self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, val).await;
+				};
+
+				let Part::Graph(ref graph) = x[1] else {
+					return self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, val).await;
+				};
+
+				if graph.alias.is_none()
+					&& graph.cond.is_none()
+					&& graph.group.is_none()
+					&& graph.limit.is_none()
+					&& graph.order.is_none()
+					&& graph.split.is_none()
+					&& graph.start.is_none()
+					&& graph.expr.is_none()
+				{
+					// TODO: Do we support `RETURN a:b` here? What do we do when it is not of the
+					// right type?
+					let from = match from.compute(stk, ctx, opt, doc).await {
+						Ok(x) => x,
+						Err(ControlFlow::Err(e)) => return Err(e),
+						Err(_) => bail!(Error::InvalidControlFlow),
+						//
+					};
+					let mut what = Vec::new();
+					for s in graph.what.iter() {
+						what.push(s.compute(stk, ctx, opt, doc).await?);
+					}
+					// idiom matches the Edges pattern.
+					self.prepare_edges(stm_ctx.stm, from, graph.dir.clone(), what)?;
+				}
 			}
+			Expr::Literal(Literal::Array(array)) => {
+				self.prepare_array(stk, ctx, opt, doc, planner, stm_ctx, array).await?
+			}
+			x => self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, x).await?,
 		};
 		// All ingested ok
 		Ok(())
@@ -184,23 +224,21 @@ impl Iterator {
 		stk: &mut Stk,
 		planner: &mut QueryPlanner,
 		ctx: &StatementContext<'_>,
-		v: Table,
+		table: Ident,
 	) -> Result<()> {
 		// We add the iterable only if we have a permission
-		let p = planner.check_table_permission(ctx, &v).await?;
+		let p = planner.check_table_permission(ctx, &table).await?;
 		if matches!(p, GrantedPermission::None) {
 			return Ok(());
 		}
 		// Add the record to the iterator
-		match ctx.stm.is_deferable() {
-			true => self.ingest(Iterable::Yield(v)),
-			false => match ctx.stm.is_guaranteed() {
-				false => planner.add_iterables(stk, ctx, v, p, self).await?,
-				true => {
-					self.guaranteed = Some(Iterable::Yield(v.clone()));
-					planner.add_iterables(stk, ctx, v, p, self).await?;
-				}
-			},
+		if ctx.stm.is_deferable() {
+			self.ingest(Iterable::Yield(table))
+		} else {
+			if ctx.stm.is_guaranteed() {
+				self.guaranteed = Some(Iterable::Yield(table.clone()));
+			}
+			planner.add_iterables(stk, ctx, table, p, self).await?;
 		}
 		// All ingested ok
 		Ok(())
@@ -211,13 +249,13 @@ impl Iterator {
 		&mut self,
 		planner: &mut QueryPlanner,
 		ctx: &StatementContext<'_>,
-		v: Thing,
+		v: RecordId,
 	) -> Result<()> {
-		if v.is_range() {
+		if v.key.is_range() {
 			return self.prepare_range(planner, ctx, v).await;
 		}
 		// We add the iterable only if we have a permission
-		if matches!(planner.check_table_permission(ctx, &v.tb).await?, GrantedPermission::None) {
+		if matches!(planner.check_table_permission(ctx, &v.table).await?, GrantedPermission::None) {
 			return Ok(());
 		}
 		// Add the record to the iterator
@@ -230,13 +268,18 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) async fn prepare_mock(&mut self, ctx: &StatementContext<'_>, v: Mock) -> Result<()> {
+	pub(crate) async fn prepare_mock(
+		&mut self,
+		ctx: &StatementContext<'_>,
+		v: &Mock,
+	) -> Result<()> {
 		ensure!(!ctx.stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
 		// Add the records to the iterator
-		for (count, v) in v.into_iter().enumerate() {
-			match ctx.stm.is_deferable() {
-				true => self.ingest(Iterable::Defer(v)),
-				false => self.ingest(Iterable::Thing(v)),
+		for (count, v) in v.clone().into_iter().enumerate() {
+			if ctx.stm.is_deferable() {
+				self.ingest(Iterable::Defer(v))
+			} else {
+				self.ingest(Iterable::Thing(v))
 			}
 			// Check if the context is finished
 			if ctx.ctx.is_done(count % 100 == 0).await? {
@@ -248,17 +291,36 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) fn prepare_edges(&mut self, stm: &Statement<'_>, v: Edges) -> Result<()> {
+	pub(crate) fn prepare_edges(
+		&mut self,
+		stm: &Statement<'_>,
+		from: RecordId,
+		dir: Dir,
+		what: Vec<ComputedGraphSubject>,
+	) -> Result<()> {
 		ensure!(!stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
 		// Check if this is a create statement
-		ensure!(
-			!stm.is_create(),
-			Error::InvalidStatementTarget {
-				value: v.to_string(),
-			}
-		);
+		if stm.is_create() {
+			// recreate the expression for the error.
+			let value = expr::Idiom(vec![
+				expr::Part::Start(Expr::Literal(Literal::RecordId(from.into_literal()))),
+				expr::Part::Graph(Graph {
+					dir,
+					what: what.into_iter().map(|x| x.into_literal()).collect(),
+					..Default::default()
+				}),
+			])
+			.to_string();
+			bail!(Error::InvalidStatementTarget {
+				value,
+			})
+		}
 		// Add the record to the iterator
-		self.ingest(Iterable::Edges(v));
+		self.ingest(Iterable::Edges {
+			from,
+			dir,
+			what,
+		});
 		// All ingested ok
 		Ok(())
 	}
@@ -268,10 +330,10 @@ impl Iterator {
 		&mut self,
 		planner: &mut QueryPlanner,
 		ctx: &StatementContext<'_>,
-		v: Thing,
+		v: RecordId,
 	) -> Result<()> {
 		// We add the iterable only if we have a permission
-		let p = planner.check_table_permission(ctx, &v.tb).await?;
+		let p = planner.check_table_permission(ctx, &v.table).await?;
 		if matches!(p, GrantedPermission::None) {
 			return Ok(());
 		}
@@ -286,7 +348,7 @@ impl Iterator {
 		let rs = ctx.check_record_strategy(false, p)?;
 		let sc = ctx.check_scan_direction();
 		// Add the record to the iterator
-		if let (tb, Id::Range(v)) = (v.tb, v.id) {
+		if let (tb, RecordIdKey::Range(v)) = (v.table, v.key) {
 			self.ingest(Iterable::Range(tb, *v, rs, sc));
 		}
 		// All ingested ok
@@ -298,10 +360,13 @@ impl Iterator {
 		// Add the record to the iterator
 		match v.rid() {
 			// This object has an 'id' field
-			Some(v) => match stm.is_deferable() {
-				true => self.ingest(Iterable::Defer(v)),
-				false => self.ingest(Iterable::Thing(v)),
-			},
+			Some(v) => {
+				if stm.is_deferable() {
+					self.ingest(Iterable::Defer(v))
+				} else {
+					self.ingest(Iterable::Thing(v))
+				}
+			}
 			// This object has no 'id' field
 			None => {
 				bail!(Error::InvalidStatementTarget {
@@ -313,29 +378,101 @@ impl Iterator {
 		Ok(())
 	}
 
+	#[allow(clippy::too_many_arguments)]
+	async fn prepare_computed(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+		planner: &mut QueryPlanner,
+		stm_ctx: &StatementContext<'_>,
+		expr: &Expr,
+	) -> Result<()> {
+		let v = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await.catch_return()?;
+		match v {
+			Value::Object(o) if !stm_ctx.stm.is_select() => {
+				self.prepare_object(stm_ctx.stm, o)?;
+			}
+			Value::Table(v) => self.prepare_table(stk, planner, stm_ctx, v.into()).await?,
+			Value::Thing(v) => self.prepare_thing(planner, stm_ctx, v).await?,
+			Value::Array(a) => a.into_iter().for_each(|x| self.ingest(Iterable::Value(x))),
+			v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
+			v => {
+				bail!(Error::InvalidStatementTarget {
+					value: v.to_string(),
+				})
+			}
+		}
+		Ok(())
+	}
+
 	/// Prepares a value for processing
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn prepare_array(
 		&mut self,
 		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
 		planner: &mut QueryPlanner,
-		ctx: &StatementContext<'_>,
-		v: Array,
+		stm_ctx: &StatementContext<'_>,
+		v: &[Expr],
 	) -> Result<()> {
-		ensure!(!ctx.stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
+		ensure!(!stm_ctx.stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
 		// Add the records to the iterator
 		for v in v {
 			match v {
-				Value::Mock(v) => self.prepare_mock(ctx, v).await?,
-				Value::Table(v) => self.prepare_table(stk, planner, ctx, v).await?,
-				Value::Edges(v) => self.prepare_edges(ctx.stm, *v)?,
-				Value::Object(v) if !ctx.stm.is_select() => self.prepare_object(ctx.stm, v)?,
-				Value::Thing(v) => self.prepare_thing(planner, ctx, v).await?,
-				_ if ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
-				_ => {
-					bail!(Error::InvalidStatementTarget {
-						value: v.to_string(),
-					})
+				Expr::Mock(v) => self.prepare_mock(stm_ctx, v).await?,
+				Expr::Table(v) => self.prepare_table(stk, planner, stm_ctx, v.clone()).await?,
+				Expr::Idiom(x) => {
+					// match against what previously would be an edge.
+					if x.len() != 2 {
+						return self
+							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
+							.await;
+					}
+
+					let Part::Start(Expr::Literal(Literal::RecordId(ref from))) = x[0] else {
+						return self
+							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
+							.await;
+					};
+
+					let Part::Graph(ref graph) = x[0] else {
+						return self
+							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
+							.await;
+					};
+
+					if graph.alias.is_none()
+						&& graph.cond.is_none()
+						&& graph.group.is_none()
+						&& graph.limit.is_none()
+						&& graph.order.is_none()
+						&& graph.split.is_none()
+						&& graph.start.is_none()
+						&& graph.expr.is_none()
+					{
+						// TODO: Do we support `RETURN a:b` here? What do we do when it is not of the
+						// right type?
+						let from = match from.compute(stk, ctx, opt, doc).await {
+							Ok(x) => x,
+							Err(ControlFlow::Err(e)) => return Err(e),
+							Err(_) => bail!(Error::InvalidControlFlow),
+							//
+						};
+						let mut what = Vec::new();
+						for s in graph.what.iter() {
+							what.push(s.compute(stk, ctx, opt, doc).await?);
+						}
+						// idiom matches the Edges pattern.
+						return self.prepare_edges(stm_ctx.stm, from, graph.dir.clone(), what);
+					}
+
+					self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v).await?
 				}
+				v => self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v).await?,
 			}
 		}
 		// All ingested ok
@@ -369,6 +506,7 @@ impl Iterator {
 			self.start,
 			self.limit,
 		)?;
+
 		// Extract the expected behaviour depending on the presence of EXPLAIN with or without FULL
 		let mut plan = Plan::new(ctx, stm, &self.entries, &self.results);
 		// Check if we actually need to process and iterate over the results
@@ -559,7 +697,7 @@ impl Iterator {
 			if let Some(Iterable::Index(t, irf, _)) = self.entries.first() {
 				if let Some(qp) = ctx.get_query_planner() {
 					if let Some(exe) = qp.get_query_executor(t) {
-						if exe.is_iterator_condition(*irf, cond) {
+						if exe.is_iterator_expression(*irf, &cond.0) {
 							return true;
 						}
 					}

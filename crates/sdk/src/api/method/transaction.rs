@@ -1,17 +1,6 @@
-use crate::api::Connection;
-use crate::api::Surreal;
-use crate::api::method::Cancel;
-use crate::api::method::Commit;
-use crate::api::method::Create;
-use crate::api::method::Delete;
-use crate::api::method::Insert;
-use crate::api::method::Query;
-use crate::api::method::Select;
-use crate::api::method::Update;
-use crate::api::method::Upsert;
-use crate::opt::CreateResource;
-use crate::opt::IntoQuery;
-use crate::opt::IntoResource;
+use crate::api::method::{Cancel, Commit, Create, Delete, Insert, Query, Select, Update, Upsert};
+use crate::api::{Connection, Surreal};
+use crate::opt::{CreateResource, IntoQuery, IntoResource};
 use uuid::Uuid;
 
 /// An ongoing transaction

@@ -1,8 +1,5 @@
 #[allow(unused_imports, reason = "Used by the DB engines.")]
 use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::api::Surreal;
-use crate::api::conn;
 use crate::api::conn::Router;
 #[allow(unused_imports, reason = "Used by the DB engines.")]
 use crate::api::engine;
@@ -15,6 +12,7 @@ use crate::api::method::BoxFuture;
 #[cfg(feature = "protocol-http")]
 use crate::api::opt::Tls;
 use crate::api::opt::{Endpoint, EndpointKind};
+use crate::api::{Result, Surreal, conn};
 use crate::opt::WaitFor;
 #[allow(unused_imports, reason = "Used when a DB engine is disabled.")]
 use anyhow::bail;

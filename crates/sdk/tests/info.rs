@@ -682,7 +682,7 @@ async fn access_info_redacted_structure() {
 #[tokio::test]
 async fn function_info_structure() {
 	let sql = r#"
-        DEFINE FUNCTION fn::example($name: string) -> string { RETURN "Hello, " + $name + "!"; };
+        DEFINE FUNCTION fn::example($name: string) -> string { RETURN "Hello, " + $name + "!" };
         INFO FOR DB STRUCTURE;
     "#;
 	let dbs = new_ds().await.unwrap();
@@ -695,7 +695,7 @@ async fn function_info_structure() {
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 	let out_expected =
-        r#"{ accesses: [], analyzers: [], apis: [], buckets: [], configs: [], functions: [{ args: [['name', 'string']], block: "{ RETURN 'Hello, ' + $name + '!'; }", name: 'example', permissions: true, returns: 'string' }], models: [], params: [], sequences: [], tables: [], users: [] }"#.to_string();
+        r#"{ accesses: [], analyzers: [], apis: [], buckets: [], configs: [], functions: [{ args: [['name', 'string']], block: "{ RETURN 'Hello, ' + $name + '!' }", name: 'example', permissions: true, returns: 'string' }], models: [], params: [], sequences: [], tables: [], users: [] }"#.to_string();
 	let out_str = out.unwrap().to_string();
 	assert_eq!(
 		out_str, out_expected,

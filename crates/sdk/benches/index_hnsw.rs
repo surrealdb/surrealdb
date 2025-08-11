@@ -8,13 +8,14 @@ use std::time::Duration;
 use surrealdb::expr::index::Distance;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::expr::index::{HnswParams, VectorType};
-use surrealdb_core::expr::{Array, Id, Number, Thing, Value, value};
 use surrealdb_core::idx::IndexKeyBase;
 use surrealdb_core::idx::planner::checker::{HnswChecker, HnswConditionChecker};
 use surrealdb_core::idx::trees::hnsw::index::HnswIndex;
 use surrealdb_core::kvs::LockType::Optimistic;
 use surrealdb_core::kvs::TransactionType::{Read, Write};
 use surrealdb_core::kvs::{Datastore, Transaction};
+use surrealdb_core::syn;
+use surrealdb_core::val::{Array, Number, RecordId, RecordIdKey, Value};
 use tokio::runtime::{Builder, Runtime};
 
 const EF_CONSTRUCTION: u16 = 150;
@@ -33,7 +34,7 @@ fn bench_hnsw_no_db(c: &mut Criterion) {
 	const GROUP_NAME: &str = "hnsw_no_db";
 
 	let samples = new_vectors_from_file(INGESTING_SOURCE);
-	let samples: Vec<(Thing, Vec<Value>)> =
+	let samples: Vec<(RecordId, Vec<Value>)> =
 		samples.into_iter().map(|(r, a)| (r, vec![Value::Array(a)])).collect();
 
 	// Indexing benchmark group
@@ -158,7 +159,7 @@ fn get_group<'a>(
 	group
 }
 
-fn new_vectors_from_file(path: &str) -> Vec<(Thing, Array)> {
+fn new_vectors_from_file(path: &str) -> Vec<(RecordId, Array)> {
 	// Open the gzip file
 	let file = File::open(path).unwrap();
 
@@ -172,9 +173,9 @@ fn new_vectors_from_file(path: &str) -> Vec<(Thing, Array)> {
 	// Iterate over each line in the file
 	for (i, line_result) in reader.lines().enumerate() {
 		let line = line_result.unwrap();
-		let value = value(&line).unwrap();
+		let value = syn::value(&line).unwrap();
 		if let Value::Array(a) = value {
-			res.push((Thing::from(("e", Id::from(i as i64))), a));
+			res.push((RecordId::new("e".to_owned(), RecordIdKey::from(i as i64)), a));
 		} else {
 			panic!("Wrong value");
 		}
@@ -220,12 +221,12 @@ async fn hnsw(tx: &Transaction) -> HnswIndex {
 	HnswIndex::new(tx, IndexKeyBase::default(), "test".to_string(), &p).await.unwrap()
 }
 
-async fn insert_objects(samples: &[(Thing, Vec<Value>)]) -> (Datastore, HnswIndex) {
+async fn insert_objects(samples: &[(RecordId, Vec<Value>)]) -> (Datastore, HnswIndex) {
 	let ds = Datastore::new("memory").await.unwrap();
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	let mut h = hnsw(&tx).await;
 	for (thg, content) in samples {
-		h.index_document(&tx, &thg.id, content).await.unwrap();
+		h.index_document(&tx, &thg.key, content).await.unwrap();
 	}
 	tx.commit().await.unwrap();
 	(ds, h)

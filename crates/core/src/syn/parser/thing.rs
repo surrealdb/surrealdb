@@ -1,28 +1,25 @@
 use reblessive::Stk;
 
 use super::{ParseResult, Parser};
-use crate::{
-	sql::{
-		Id, Ident, Param, Range, Thing,
-		graph::GraphSubject,
-		id::{Gen, range::IdRange},
-	},
-	syn::{
-		error::bail,
-		lexer::compound,
-		parser::mac::{expected, expected_whitespace, unexpected},
-		token::{Glued, TokenKind, t},
-	},
-};
-use std::{cmp::Ordering, ops::Bound};
+use crate::sql::graph::GraphSubject;
+use crate::sql::id::Gen;
+use crate::sql::id::range::RecordIdKeyRangeLit;
+use crate::sql::{Ident, Param, RecordIdKeyLit, RecordIdLit};
+use crate::syn::error::bail;
+use crate::syn::lexer::compound;
+use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
+use crate::syn::token::{Glued, TokenKind, t};
+use crate::val::Strand;
+use std::cmp::Ordering;
+use std::ops::Bound;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_record_string(
 		&mut self,
 		ctx: &mut Stk,
 		double: bool,
-	) -> ParseResult<Thing> {
-		let thing = self.parse_thing(ctx).await?;
+	) -> ParseResult<RecordIdLit> {
+		let thing = self.parse_record_id(ctx).await?;
 
 		if double {
 			expected_whitespace!(self, t!("\""));
@@ -32,29 +29,29 @@ impl Parser<'_> {
 		Ok(thing)
 	}
 
-	pub(crate) async fn parse_thing_or_range(
+	pub(crate) async fn parse_record_id_or_range(
 		&mut self,
 		stk: &mut Stk,
-		ident: String,
-	) -> ParseResult<Thing> {
+		ident: Ident,
+	) -> ParseResult<RecordIdLit> {
 		expected_whitespace!(self, t!(":"));
 
 		// If self starts with a range operator self is a range with no start bound
 		if self.eat_whitespace(t!("..")) {
 			// Check for inclusive
 			let end = if self.eat_whitespace(t!("=")) {
-				let id = stk.run(|stk| self.parse_id(stk)).await?;
+				let id = stk.run(|stk| self.parse_record_id_key(stk)).await?;
 				Bound::Included(id)
 			} else if Self::kind_starts_record_id_key(self.peek_whitespace().kind) {
-				let id = stk.run(|stk| self.parse_id(stk)).await?;
+				let id = stk.run(|stk| self.parse_record_id_key(stk)).await?;
 				Bound::Excluded(id)
 			} else {
 				Bound::Unbounded
 			};
-			return Ok(Thing {
-				tb: ident,
-				id: Id::Range(Box::new(IdRange {
-					beg: Bound::Unbounded,
+			return Ok(RecordIdLit {
+				tb: ident.into_string(),
+				id: RecordIdKeyLit::Range(Box::new(RecordIdKeyRangeLit {
+					start: Bound::Unbounded,
 					end,
 				})),
 			});
@@ -62,7 +59,7 @@ impl Parser<'_> {
 
 		// Didn't eat range yet so we need to parse the id.
 		let beg = if Self::kind_starts_record_id_key(self.peek_whitespace().kind) {
-			let v = stk.run(|stk| self.parse_id(stk)).await?;
+			let v = stk.run(|stk| self.parse_record_id_key(stk)).await?;
 
 			// check for exclusive
 			if self.eat_whitespace(t!(">")) {
@@ -78,18 +75,18 @@ impl Parser<'_> {
 		// If we already ate the exclusive it must be a range.
 		if self.eat_whitespace(t!("..")) {
 			let end = if self.eat_whitespace(t!("=")) {
-				let id = stk.run(|stk| self.parse_id(stk)).await?;
+				let id = stk.run(|stk| self.parse_record_id_key(stk)).await?;
 				Bound::Included(id)
 			} else if Self::kind_starts_record_id_key(self.peek_whitespace().kind) {
-				let id = stk.run(|stk| self.parse_id(stk)).await?;
+				let id = stk.run(|stk| self.parse_record_id_key(stk)).await?;
 				Bound::Excluded(id)
 			} else {
 				Bound::Unbounded
 			};
-			Ok(Thing {
-				tb: ident,
-				id: Id::Range(Box::new(IdRange {
-					beg,
+			Ok(RecordIdLit {
+				tb: ident.into_string(),
+				id: RecordIdKeyLit::Range(Box::new(RecordIdKeyRangeLit {
+					start: beg,
 					end,
 				})),
 			})
@@ -113,16 +110,19 @@ impl Parser<'_> {
 				// We previously converted the `Id` value to `Value` so it's safe to unwrap here.
 				Bound::Included(v) => v,
 			};
-			Ok(Thing {
-				tb: ident,
+			Ok(RecordIdLit {
+				tb: ident.into_string(),
 				id,
 			})
 		}
 	}
 
-	pub(crate) async fn parse_id_range(&mut self, stk: &mut Stk) -> ParseResult<IdRange> {
+	pub(crate) async fn parse_id_range(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<RecordIdKeyRangeLit> {
 		let beg = if Self::kind_starts_record_id_key(self.peek_whitespace().kind) {
-			let v = stk.run(|stk| self.parse_id(stk)).await?;
+			let v = stk.run(|stk| self.parse_record_id_key(stk)).await?;
 
 			// check for exclusive
 			if self.eat_whitespace(t!(">")) {
@@ -137,17 +137,17 @@ impl Parser<'_> {
 		expected!(self, t!(".."));
 
 		let end = if self.eat_whitespace(t!("=")) {
-			let id = stk.run(|stk| self.parse_id(stk)).await?;
+			let id = stk.run(|stk| self.parse_record_id_key(stk)).await?;
 			Bound::Included(id)
 		} else if Self::kind_starts_record_id_key(self.peek_whitespace().kind) {
-			let id = stk.run(|stk| self.parse_id(stk)).await?;
+			let id = stk.run(|stk| self.parse_record_id_key(stk)).await?;
 			Bound::Excluded(id)
 		} else {
 			Bound::Unbounded
 		};
 
-		Ok(IdRange {
-			beg,
+		Ok(RecordIdKeyRangeLit {
+			start: beg,
 			end,
 		})
 	}
@@ -162,83 +162,52 @@ impl Parser<'_> {
 		}
 	}
 
-	/// Parse an range
-	pub(crate) async fn parse_range(&mut self, ctx: &mut Stk) -> ParseResult<Range> {
-		// Check for beginning id
-		let beg = if Self::kind_is_identifier(self.peek_whitespace().kind) {
-			let v = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
-
-			if self.eat_whitespace(t!(">")) {
-				Bound::Excluded(v)
-			} else {
-				Bound::Included(v)
-			}
-		} else {
-			Bound::Unbounded
-		};
-
-		expected_whitespace!(self, t!(".."));
-
-		let inclusive = self.eat_whitespace(t!("="));
-
-		// parse ending id.
-		let end = if Self::kind_is_identifier(self.peek_whitespace().kind) {
-			let v = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
-			if inclusive {
-				Bound::Included(v)
-			} else {
-				Bound::Excluded(v)
-			}
-		} else {
-			Bound::Unbounded
-		};
-
-		Ok(Range {
-			beg,
-			end,
-		})
+	pub(crate) async fn parse_thing_with_range(
+		&mut self,
+		ctx: &mut Stk,
+	) -> ParseResult<RecordIdLit> {
+		let ident = self.next_token_value::<Ident>()?;
+		self.parse_record_id_or_range(ctx, ident).await
 	}
 
-	pub(crate) async fn parse_thing_with_range(&mut self, ctx: &mut Stk) -> ParseResult<Thing> {
-		let ident = self.next_token_value::<Ident>()?.0;
-		self.parse_thing_or_range(ctx, ident).await
+	pub(crate) async fn parse_record_id(&mut self, ctx: &mut Stk) -> ParseResult<RecordIdLit> {
+		let ident = self.next_token_value::<Ident>()?.into_string();
+		self.parse_record_id_from_ident(ctx, ident).await
 	}
 
-	pub(crate) async fn parse_thing(&mut self, ctx: &mut Stk) -> ParseResult<Thing> {
-		let ident = self.next_token_value::<Ident>()?.0;
-		self.parse_thing_from_ident(ctx, ident).await
-	}
-
-	pub(crate) async fn parse_thing_from_ident(
+	pub(crate) async fn parse_record_id_from_ident(
 		&mut self,
 		ctx: &mut Stk,
 		ident: String,
-	) -> ParseResult<Thing> {
+	) -> ParseResult<RecordIdLit> {
 		expected!(self, t!(":"));
 
-		let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
+		let id = ctx.run(|ctx| self.parse_record_id_key(ctx)).await?;
 
-		Ok(Thing {
+		Ok(RecordIdLit {
 			tb: ident,
 			id,
 		})
 	}
 
-	pub(crate) async fn parse_id(&mut self, stk: &mut Stk) -> ParseResult<Id> {
+	pub(crate) async fn parse_record_id_key(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<RecordIdKeyLit> {
 		let token = self.peek_whitespace();
 		match token.kind {
-			t!("u'") | t!("u\"") => Ok(Id::Uuid(self.next_token_value()?)),
+			t!("u'") | t!("u\"") => Ok(RecordIdKeyLit::Uuid(self.next_token_value()?)),
 			t!("{") => {
 				self.pop_peek();
 				// object record id
 				let object = self.parse_object(stk, token.span).await?;
-				Ok(Id::Object(object))
+				Ok(RecordIdKeyLit::Object(object))
 			}
 			t!("[") => {
 				self.pop_peek();
 				// array record id
 				let array = self.parse_array(stk, token.span).await?;
-				Ok(Id::Array(array))
+				Ok(RecordIdKeyLit::Array(array))
 			}
 			t!("+") => {
 				self.pop_peek();
@@ -266,9 +235,12 @@ impl Parser<'_> {
 
 				let digits_str = self.lexer.span_str(digits_token.span);
 				if let Ok(number) = digits_str.parse() {
-					Ok(Id::Number(number))
+					Ok(RecordIdKeyLit::Number(number))
 				} else {
-					Ok(Id::String(digits_str.to_owned()))
+					// Safety: Parser guarentees no null bytes present in string.
+					Ok(RecordIdKeyLit::String(unsafe {
+						Strand::new_unchecked(digits_str.to_owned())
+					}))
 				}
 			}
 			t!("-") => {
@@ -278,22 +250,27 @@ impl Parser<'_> {
 					// Parse to u64 and check if the value is equal to `-i64::MIN` via u64 as
 					// `-i64::MIN` doesn't fit in an i64
 					match number.value.cmp(&((i64::MAX as u64) + 1)) {
-						Ordering::Less => Ok(Id::Number(-(number.value as i64))),
-						Ordering::Equal => Ok(Id::Number(i64::MIN)),
-						Ordering::Greater => {
-							Ok(Id::String(format!("-{}", self.lexer.span_str(number.span))))
-						}
+						Ordering::Less => Ok(RecordIdKeyLit::Number(-(number.value as i64))),
+						Ordering::Equal => Ok(RecordIdKeyLit::Number(i64::MIN)),
+						// Safety: Parser guarentees no null bytes present in string.
+						Ordering::Greater => Ok(RecordIdKeyLit::String(unsafe {
+							Strand::new_unchecked(format!("-{}", self.lexer.span_str(number.span)))
+						})),
 					}
 				} else {
-					Ok(Id::String(format!("-{}", self.lexer.span_str(token.span))))
+					// Safety: Parser guarentees no null bytes present in string.
+					let strand = unsafe {
+						Strand::new_unchecked(format!("-{}", self.lexer.span_str(token.span)))
+					};
+					Ok(RecordIdKeyLit::String(strand))
 				}
 			}
 			TokenKind::Digits => {
 				if self.settings.flexible_record_id {
 					let next = self.peek_whitespace1();
 					if Self::kind_is_identifier(next.kind) {
-						let ident = self.parse_flexible_ident()?.0;
-						return Ok(Id::String(ident));
+						let ident = self.parse_flexible_ident()?;
+						return Ok(RecordIdKeyLit::String(ident.into_strand()));
 					}
 				}
 
@@ -301,9 +278,12 @@ impl Parser<'_> {
 
 				let digits_str = self.lexer.span_str(token.span);
 				if let Ok(number) = digits_str.parse::<i64>() {
-					Ok(Id::Number(number))
+					Ok(RecordIdKeyLit::Number(number))
 				} else {
-					Ok(Id::String(digits_str.to_owned()))
+					// Safety: Parser guarentees no null bytes present in string.
+					Ok(RecordIdKeyLit::String(unsafe {
+						Strand::new_unchecked(digits_str.to_owned())
+					}))
 				}
 			}
 			TokenKind::Glued(Glued::Duration) if self.settings.flexible_record_id => {
@@ -313,7 +293,9 @@ impl Parser<'_> {
 				}
 				// Should be valid utf-8 as it was already parsed by the lexer
 				let text = String::from_utf8(slice.to_vec()).unwrap();
-				Ok(Id::String(text))
+				// Safety: Parser guarentees no null bytes present in string.
+				let text = unsafe { Strand::new_unchecked(text) };
+				Ok(RecordIdKeyLit::String(text))
 			}
 			TokenKind::Glued(_) => {
 				// If we glue before a parsing a record id, for example 123s456z would return an error as it is
@@ -327,39 +309,45 @@ impl Parser<'_> {
 				let token = self.pop_peek();
 				if self.eat(t!("(")) {
 					expected!(self, t!(")"));
-					Ok(Id::Generate(Gen::Ulid))
+					Ok(RecordIdKeyLit::Generate(Gen::Ulid))
 				} else {
 					let slice = self.lexer.span_str(token.span);
-					Ok(Id::String(slice.to_string()))
+					// Safety: Parser guarentees no null bytes present in string.
+					let text = unsafe { Strand::new_unchecked(slice.to_owned()) };
+					Ok(RecordIdKeyLit::String(text))
 				}
 			}
 			t!("UUID") => {
 				let token = self.pop_peek();
 				if self.eat(t!("(")) {
 					expected!(self, t!(")"));
-					Ok(Id::Generate(Gen::Uuid))
+					Ok(RecordIdKeyLit::Generate(Gen::Uuid))
 				} else {
 					let slice = self.lexer.span_str(token.span);
-					Ok(Id::String(slice.to_string()))
+					// Safety: Parser guarentees no null bytes present in string.
+					let text = unsafe { Strand::new_unchecked(slice.to_owned()) };
+					Ok(RecordIdKeyLit::String(text))
 				}
 			}
 			t!("RAND") => {
 				let token = self.pop_peek();
 				if self.eat(t!("(")) {
 					expected!(self, t!(")"));
-					Ok(Id::Generate(Gen::Rand))
+					Ok(RecordIdKeyLit::Generate(Gen::Rand))
 				} else {
 					let slice = self.lexer.span_str(token.span);
-					Ok(Id::String(slice.to_string()))
+					// Safety: Parser guarentees no null bytes present in string.
+					let text = unsafe { Strand::new_unchecked(slice.to_owned()) };
+					Ok(RecordIdKeyLit::String(text))
 				}
 			}
 			_ => {
 				let ident = if self.settings.flexible_record_id {
-					self.parse_flexible_ident()?.0
+					self.parse_flexible_ident()?
 				} else {
-					self.next_token_value::<Ident>()?.0
+					self.next_token_value::<Ident>()?
 				};
-				Ok(Id::String(ident))
+				Ok(RecordIdKeyLit::String(ident.into_strand()))
 			}
 		}
 	}
@@ -370,16 +358,14 @@ mod tests {
 	use reblessive::Stack;
 
 	use super::*;
-	use crate::sql::SqlValue;
-	use crate::sql::array::Array;
-	use crate::sql::object::Object;
-	use crate::syn::Parse as _;
+	use crate::sql::{Expr, Literal};
 	use crate::syn::parser::ParserSettings;
+	use crate::{sql, syn};
 
-	fn thing(i: &str) -> ParseResult<Thing> {
+	fn thing(i: &str) -> ParseResult<RecordIdLit> {
 		let mut parser = Parser::new(i.as_bytes());
 		let mut stack = Stack::new();
-		stack.enter(|ctx| async move { parser.parse_thing(ctx).await }).finish()
+		stack.enter(|ctx| async move { parser.parse_record_id(ctx).await }).finish()
 	}
 
 	#[test]
@@ -390,9 +376,9 @@ mod tests {
 		assert_eq!("test:id", format!("{}", out));
 		assert_eq!(
 			out,
-			Thing {
+			RecordIdLit {
 				tb: String::from("test"),
-				id: Id::from("id"),
+				id: RecordIdKeyLit::String(strand!("id").to_owned()),
 			}
 		);
 	}
@@ -405,9 +391,9 @@ mod tests {
 		assert_eq!("test:1", format!("{}", out));
 		assert_eq!(
 			out,
-			Thing {
+			RecordIdLit {
 				tb: String::from("test"),
-				id: Id::from(1),
+				id: RecordIdKeyLit::Number(1),
 			}
 		);
 	}
@@ -419,9 +405,9 @@ mod tests {
 		let out = res.unwrap();
 		assert_eq!(
 			out,
-			Thing {
+			RecordIdLit {
 				tb: String::from("test"),
-				id: Id::from(i64::MIN),
+				id: RecordIdKeyLit::Number(i64::MIN),
 			}
 		);
 	}
@@ -433,9 +419,9 @@ mod tests {
 		let out = res.unwrap();
 		assert_eq!(
 			out,
-			Thing {
+			RecordIdLit {
 				tb: String::from("test"),
-				id: Id::from(i64::MAX),
+				id: RecordIdKeyLit::Number(i64::MAX),
 			}
 		);
 	}
@@ -448,9 +434,9 @@ mod tests {
 		let out = res.unwrap();
 		assert_eq!(
 			out,
-			Thing {
+			RecordIdLit {
 				tb: String::from("test"),
-				id: Id::from(max_str),
+				id: RecordIdKeyLit::String(Strand::new(max_str).unwrap()),
 			}
 		);
 	}
@@ -463,9 +449,9 @@ mod tests {
 		let out = res.unwrap();
 		assert_eq!(
 			out,
-			Thing {
+			RecordIdLit {
 				tb: String::from("test"),
-				id: Id::from(min_str),
+				id: RecordIdKeyLit::String(Strand::new(min_str).unwrap()),
 			}
 		);
 	}
@@ -473,30 +459,30 @@ mod tests {
 	#[test]
 	fn thing_string() {
 		let sql = "r'test:001'";
-		let res = SqlValue::parse(sql);
-		let SqlValue::Thing(out) = res else {
+		let res = syn::expr(sql).unwrap();
+		let sql::Expr::Literal(sql::Literal::RecordId(out)) = res else {
 			panic!()
 		};
 		assert_eq!("test:1", format!("{}", out));
 		assert_eq!(
 			out,
-			Thing {
+			RecordIdLit {
 				tb: String::from("test"),
-				id: Id::from(1),
+				id: RecordIdKeyLit::Number(1),
 			}
 		);
 
 		let sql = "r'test:001'";
-		let res = SqlValue::parse(sql);
-		let SqlValue::Thing(out) = res else {
+		let res = syn::expr(sql).unwrap();
+		let sql::Expr::Literal(sql::Literal::RecordId(out)) = res else {
 			panic!()
 		};
 		assert_eq!("test:1", format!("{}", out));
 		assert_eq!(
 			out,
-			Thing {
+			RecordIdLit {
 				tb: String::from("test"),
-				id: Id::from(1),
+				id: RecordIdKeyLit::Number(1),
 			}
 		);
 	}
@@ -509,9 +495,9 @@ mod tests {
 		assert_eq!("test:id", format!("{}", out));
 		assert_eq!(
 			out,
-			Thing {
+			RecordIdLit {
 				tb: String::from("test"),
-				id: Id::from("id"),
+				id: RecordIdKeyLit::String(strand!("id").to_owned()),
 			}
 		);
 	}
@@ -524,9 +510,9 @@ mod tests {
 		assert_eq!("test:id", format!("{}", out));
 		assert_eq!(
 			out,
-			Thing {
+			RecordIdLit {
 				tb: String::from("test"),
-				id: Id::from("id"),
+				id: RecordIdKeyLit::String(strand!("id").to_owned()),
 			}
 		);
 	}
@@ -539,12 +525,18 @@ mod tests {
 		assert_eq!("test:{ location: 'GBR', year: 2022 }", format!("{}", out));
 		assert_eq!(
 			out,
-			Thing {
+			RecordIdLit {
 				tb: String::from("test"),
-				id: Id::from(Object::from(map! {
-					"location".to_string() => SqlValue::from("GBR"),
-					"year".to_string() => SqlValue::from(2022),
-				})),
+				id: RecordIdKeyLit::Object(vec![
+					sql::literal::ObjectEntry {
+						key: "location".to_string(),
+						value: sql::Expr::Literal(sql::Literal::Strand(strand!("GBR").to_owned()))
+					},
+					sql::literal::ObjectEntry {
+						key: "year".to_string(),
+						value: sql::Expr::Literal(sql::Literal::Integer(2022)),
+					},
+				])
 			}
 		);
 	}
@@ -557,9 +549,12 @@ mod tests {
 		assert_eq!("test:['GBR', 2022]", format!("{}", out));
 		assert_eq!(
 			out,
-			Thing {
+			RecordIdLit {
 				tb: String::from("test"),
-				id: Id::from(Array::from(vec![SqlValue::from("GBR"), SqlValue::from(2022)])),
+				id: RecordIdKeyLit::Array(vec![
+					sql::Expr::Literal(sql::Literal::Strand(strand!("GBR").to_owned())),
+					sql::Expr::Literal(sql::Literal::Integer(2022)),
+				])
 			}
 		);
 	}
@@ -579,26 +574,24 @@ mod tests {
 			);
 			let mut stack = Stack::new();
 			let r = stack
-				.enter(|ctx| async move { parser.parse_thing(ctx).await })
+				.enter(|ctx| async move { parser.parse_record_id(ctx).await })
 				.finish()
 				.unwrap_or_else(|_| panic!("failed on {}", ident))
 				.id;
-			assert_eq!(r, Id::from(ident.to_string()),);
+			assert_eq!(r, RecordIdKeyLit::String(Strand::new(ident.to_string()).unwrap()),);
 
 			let mut parser = Parser::new(thing.as_bytes());
 			let r = stack
-				.enter(|ctx| async move { parser.parse_query(ctx).await })
+				.enter(|ctx| async move { parser.parse_expr_inherit(ctx).await })
 				.finish()
 				.unwrap_or_else(|_| panic!("failed on {}", ident));
 
 			assert_eq!(
 				r,
-				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::SqlValue::Thing(
-					sql::Thing {
-						tb: "t".to_string(),
-						id: Id::from(ident.to_string())
-					}
-				))]))
+				Expr::Literal(Literal::RecordId(sql::RecordIdLit {
+					tb: "t".to_string(),
+					id: RecordIdKeyLit::String(Strand::new(ident.to_string()).unwrap())
+				}))
 			)
 		}
 

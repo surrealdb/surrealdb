@@ -11,10 +11,8 @@ mod test;
 
 pub use reader::{BytesReader, CharError};
 
-use crate::syn::{
-	error::{SyntaxError, bail},
-	token::{Span, Token, TokenKind},
-};
+use crate::syn::error::{SyntaxError, bail};
+use crate::syn::token::{Span, Token, TokenKind};
 
 /// The SurrealQL lexer.
 /// Takes a slice of bytes and turns it into tokens. The lexer is designed with possible invalid utf-8
@@ -28,7 +26,6 @@ use crate::syn::{
 /// Note that SurrealQL syntax cannot be lexed in advance. For example, record strings and regexes,
 /// both cannot be parsed correctly without knowledge of previous tokens as they are both ambigious
 /// with other tokens.
-#[non_exhaustive]
 pub struct Lexer<'a> {
 	/// The reader for reading the source bytes.
 	pub(super) reader: BytesReader<'a>,
