@@ -44,7 +44,7 @@ pub fn ceil((val, duration): (Datetime, Duration)) -> Result<Value> {
 pub fn day((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.day().into(),
-		None => Datetime::default().day().into(),
+		None => Datetime::now().day().into(),
 	})
 }
 
@@ -123,7 +123,7 @@ pub fn group((val, group): (Datetime, String)) -> Result<Value> {
 pub fn hour((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.hour().into(),
-		None => Datetime::default().hour().into(),
+		None => Datetime::now().hour().into(),
 	})
 }
 
@@ -144,40 +144,40 @@ pub fn min((array,): (Vec<Datetime>,)) -> Result<Value> {
 pub fn minute((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.minute().into(),
-		None => Datetime::default().minute().into(),
+		None => Datetime::now().minute().into(),
 	})
 }
 
 pub fn month((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.month().into(),
-		None => Datetime::default().month().into(),
+		None => Datetime::now().month().into(),
 	})
 }
 
 pub fn nano((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.timestamp_nanos_opt().unwrap_or_default().into(),
-		None => Datetime::default().timestamp_nanos_opt().unwrap_or_default().into(),
+		None => Datetime::now().timestamp_nanos_opt().unwrap_or_default().into(),
 	})
 }
 
 pub fn millis((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.timestamp_millis().into(),
-		None => Datetime::default().timestamp_millis().into(),
+		None => Datetime::now().timestamp_millis().into(),
 	})
 }
 
 pub fn micros((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.timestamp_micros().into(),
-		None => Datetime::default().timestamp_micros().into(),
+		None => Datetime::now().timestamp_micros().into(),
 	})
 }
 
 pub fn now(_: ()) -> Result<Value> {
-	Ok(Datetime::default().into())
+	Ok(Datetime::now().into())
 }
 
 pub fn round((val, duration): (Datetime, Duration)) -> Result<Value> {
@@ -209,7 +209,7 @@ pub fn round((val, duration): (Datetime, Duration)) -> Result<Value> {
 pub fn second((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.second().into(),
-		None => Datetime::default().second().into(),
+		None => Datetime::now().second().into(),
 	})
 }
 
@@ -220,35 +220,35 @@ pub fn timezone(_: ()) -> Result<Value> {
 pub fn unix((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.timestamp().into(),
-		None => Datetime::default().timestamp().into(),
+		None => Datetime::now().timestamp().into(),
 	})
 }
 
 pub fn wday((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.weekday().number_from_monday().into(),
-		None => Datetime::default().weekday().number_from_monday().into(),
+		None => Datetime::now().weekday().number_from_monday().into(),
 	})
 }
 
 pub fn week((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.iso_week().week().into(),
-		None => Datetime::default().iso_week().week().into(),
+		None => Datetime::now().iso_week().week().into(),
 	})
 }
 
 pub fn yday((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.ordinal().into(),
-		None => Datetime::default().ordinal().into(),
+		None => Datetime::now().ordinal().into(),
 	})
 }
 
 pub fn year((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.year().into(),
-		None => Datetime::default().year().into(),
+		None => Datetime::now().year().into(),
 	})
 }
 
@@ -260,7 +260,7 @@ pub mod is {
 	pub fn leap_year((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 		Ok(match val {
 			Some(v) => v.naive_utc().date().leap_year().into(),
-			None => Datetime::default().naive_utc().date().leap_year().into(),
+			None => Datetime::now().naive_utc().date().leap_year().into(),
 		})
 	}
 }

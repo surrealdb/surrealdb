@@ -115,9 +115,8 @@ mod tests {
 	use ::serde::Serialize;
 	use std::collections::BTreeMap;
 	use std::ops::Bound;
-	use surrealdb_core::map;
-	use surrealdb_core::syn;
 	use surrealdb_core::val::Regex;
+	use surrealdb_core::{map, syn};
 
 	#[test]
 	fn value_none() {
@@ -199,7 +198,7 @@ mod tests {
 
 	#[test]
 	fn datetime() {
-		let datetime = val::Datetime::default();
+		let datetime = val::Datetime::now();
 		let value = to_value(datetime.clone()).unwrap();
 		let expected = val::Value::Datetime(datetime);
 		assert_eq!(value, expected);

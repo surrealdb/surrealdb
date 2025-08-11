@@ -61,7 +61,6 @@ pub(crate) mod decimal;
 pub mod index;
 pub mod statements;
 
-pub use self::access::{Access, Accesses};
 pub use self::access_type::{AccessType, JwtAccess, RecordAccess};
 pub use self::algorithm::Algorithm;
 pub use self::base::Base;
@@ -86,8 +85,7 @@ pub use self::id::range::RecordIdKeyRangeLit;
 pub use self::ident::Ident;
 pub use self::idiom::{Idiom, Idioms};
 pub use self::index::Index;
-pub use self::kind::Kind;
-pub use self::kind::KindLiteral;
+pub use self::kind::{Kind, KindLiteral};
 pub use self::limit::Limit;
 pub use self::literal::Literal;
 pub use self::mock::Mock;

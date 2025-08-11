@@ -4,7 +4,6 @@ use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::{Ident, Kind, Permissions, TableType, ToSql, View};
 use crate::val::Strand;
 use std::fmt::{self, Display, Write};
-use uuid::Uuid;
 
 use super::DefineKind;
 
@@ -107,10 +106,6 @@ impl From<DefineTableStatement> for crate::expr::statements::DefineTableStatemen
 			changefeed: v.changefeed.map(Into::into),
 			comment: v.comment,
 			table_type: v.table_type.into(),
-			cache_fields_ts: Uuid::nil(),
-			cache_events_ts: Uuid::nil(),
-			cache_tables_ts: Uuid::nil(),
-			cache_indexes_ts: Uuid::nil(),
 		}
 	}
 }

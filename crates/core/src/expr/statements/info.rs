@@ -2,12 +2,12 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Expr, FlowResultExt, Ident};
+use crate::expr::{Base, DefineAccessStatement, Expr, FlowResultExt, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ToSql;
 use crate::sys::INFORMATION;
 use crate::val::{Datetime, Object, Value};
-use anyhow::{Result, bail};
+use anyhow::Result;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -51,7 +51,7 @@ impl InfoStatement {
 				// Create the result set
 				if *structured {
 					let object = map! {
-						"accesses".to_string() => process(txn.all_root_accesses().await?.iter().map(|v| v.redacted()).collect()),
+						"accesses".to_string() => process(txn.all_root_accesses().await?),
 						"namespaces".to_string() => process(txn.all_ns().await?),
 						"nodes".to_string() => process(txn.all_nodes().await?),
 						"system".to_string() => system().await,
@@ -62,8 +62,9 @@ impl InfoStatement {
 					let object = map! {
 						"accesses".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_root_accesses().await?.iter().map(|v| v.redacted()) {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+							for v in txn.all_root_accesses().await?.iter() {
+								let def = DefineAccessStatement::from_definition(Base::Root, v);
+								out.insert(def.name.into_raw_string(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -103,7 +104,7 @@ impl InfoStatement {
 				// Create the result set
 				if *structured {
 					let object = map! {
-						"accesses".to_string() => process(txn.all_ns_accesses(ns).await?.iter().map(|v| v.redacted()).collect()),
+						"accesses".to_string() => process(txn.all_ns_accesses(ns).await?),
 						"databases".to_string() => process(txn.all_db(ns).await?),
 						"users".to_string() => process(txn.all_ns_users(ns).await?),
 					};
@@ -112,8 +113,9 @@ impl InfoStatement {
 					let object = map! {
 						"accesses".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_ns_accesses(ns).await?.iter().map(|v| v.redacted()) {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+							for v in txn.all_ns_accesses(ns).await?.iter() {
+								let def = DefineAccessStatement::from_definition(Base::Ns, v);
+								out.insert(def.name.into_raw_string(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -156,7 +158,7 @@ impl InfoStatement {
 				// Create the result set
 				let res = if *structured {
 					let object = map! {
-						"accesses".to_string() => process(txn.all_db_accesses(ns, db).await?.iter().map(|v| v.redacted()).collect()),
+						"accesses".to_string() => process(txn.all_db_accesses(ns, db).await?),
 						"apis".to_string() => process(txn.all_db_apis(ns, db).await?),
 						"analyzers".to_string() => process(txn.all_db_analyzers(ns, db).await?),
 						"buckets".to_string() => process(txn.all_db_buckets(ns, db).await?),
@@ -173,8 +175,9 @@ impl InfoStatement {
 					let object = map! {
 						"accesses".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_db_accesses(ns, db).await?.iter().map(|v| v.redacted()) {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+							for v in txn.all_db_accesses(ns, db).await?.iter() {
+								let def = DefineAccessStatement::from_definition(Base::Db, v);
+								out.insert(def.name.into_raw_string(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -362,7 +365,6 @@ impl InfoStatement {
 								db: db.to_string(),
 							})?
 					}
-					_ => bail!(Error::InvalidLevel(base.to_string())),
 				};
 				// Ok all good
 				Ok(if *structured {

@@ -69,7 +69,6 @@ async fn access_bearer_operations() {
 			Base::Root => Session::owner(),
 			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
 			Base::Db => Session::owner().with_ns(level.ns.unwrap()).with_db(level.db.unwrap()),
-			_ => panic!("Invalid base"),
 		};
 		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 		assert_eq!(res.len(), 15);
@@ -235,7 +234,6 @@ async fn access_bearer_grant() {
 			Base::Root => Session::owner(),
 			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
 			Base::Db => Session::owner().with_ns(level.ns.unwrap()).with_db(level.db.unwrap()),
-			_ => panic!("Invalid base"),
 		};
 		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 		assert_eq!(res.len(), 8);
@@ -388,7 +386,6 @@ async fn access_bearer_revoke() {
 			Base::Root => Session::owner(),
 			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
 			Base::Db => Session::owner().with_ns(level.ns.unwrap()).with_db(level.db.unwrap()),
-			_ => panic!("Invalid base"),
 		};
 		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 		// Consume the results of the setup statements
@@ -530,7 +527,6 @@ async fn access_bearer_show() {
 			Base::Root => Session::owner(),
 			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
 			Base::Db => Session::owner().with_ns(level.ns.unwrap()).with_db(level.db.unwrap()),
-			_ => panic!("Invalid base"),
 		};
 		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 		// Consume the results of the setup statements
@@ -695,7 +691,6 @@ async fn access_bearer_purge() {
 			Base::Root => Session::owner(),
 			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
 			Base::Db => Session::owner().with_ns(level.ns.unwrap()).with_db(level.db.unwrap()),
-			_ => panic!("Invalid base"),
 		};
 		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 		// Consume the results of the setup statements
@@ -834,7 +829,6 @@ async fn permissions_access_grant() {
 					false,
 					"owner at namespace level should not be able to issue a grant on its namespace",
 				),
-				_ => panic!("Invalid base"),
 			},
 			(
 				(level_ns.clone(), Role::Owner),
@@ -886,7 +880,6 @@ async fn permissions_access_grant() {
 					false,
 					"owner at database level should not be able to issue a grant on its database",
 				),
-				_ => panic!("Invalid base"),
 			},
 			(
 				(level_db.clone(), Role::Owner),
@@ -955,7 +948,6 @@ async fn permissions_access_grant() {
 				)
 				.with_ns("NS")
 				.with_db("DB"),
-				_ => panic!("Invalid base"),
 			};
 			let statement_setup = format!(
 				"DEFINE ACCESS api ON {base} TYPE BEARER FOR USER; DEFINE USER tobie ON {base} ROLES OWNER"

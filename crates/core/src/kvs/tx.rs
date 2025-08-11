@@ -1,19 +1,18 @@
 use super::batch::Batch;
 use super::tr::Check;
 use super::{Key, Val, Version, util};
+use crate::catalog;
 use crate::catalog::{
 	DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId, TableDefinition,
 };
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
-use crate::expr::statements::access::AccessGrantStore;
 use crate::expr::statements::define::config::ConfigStore;
 use crate::expr::statements::define::{ApiDefinition, BucketDefinition, DefineSequenceStatement};
 use crate::expr::statements::{
-	DefineAccessStatement, DefineAnalyzerStatement, DefineEventStatement, DefineFieldStatement,
-	DefineFunctionStatement, DefineIndexStatement, DefineModelStatement, DefineParamStore,
-	DefineUserStatement, LiveStatement,
+	DefineAnalyzerStatement, DefineEventStatement, DefineFunctionStatement, DefineIndexStatement,
+	DefineModelStatement, DefineParamStore, DefineUserStatement, LiveStatement,
 };
 use crate::idx::planner::ScanDirection;
 use crate::idx::trees::store::cache::IndexTreeCaches;
@@ -480,7 +479,7 @@ impl Transaction {
 
 	/// Retrieve all ROOT level accesses in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_root_accesses(&self) -> Result<Arc<[DefineAccessStatement]>> {
+	pub async fn all_root_accesses(&self) -> Result<Arc<[catalog::AccessDefinition]>> {
 		let qey = cache::tx::Lookup::Ras;
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_ras(),
@@ -498,7 +497,7 @@ impl Transaction {
 
 	/// Retrieve all root access grants in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_root_access_grants(&self, ra: &str) -> Result<Arc<[AccessGrantStore]>> {
+	pub async fn all_root_access_grants(&self, ra: &str) -> Result<Arc<[catalog::AccessGrant]>> {
 		let qey = cache::tx::Lookup::Rgs(ra);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_rag(),
@@ -552,7 +551,10 @@ impl Transaction {
 
 	/// Retrieve all namespace access definitions for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_ns_accesses(&self, ns: NamespaceId) -> Result<Arc<[DefineAccessStatement]>> {
+	pub async fn all_ns_accesses(
+		&self,
+		ns: NamespaceId,
+	) -> Result<Arc<[catalog::AccessDefinition]>> {
 		let qey = cache::tx::Lookup::Nas(ns);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_nas(),
@@ -574,7 +576,7 @@ impl Transaction {
 		&self,
 		ns: NamespaceId,
 		na: &str,
-	) -> Result<Arc<[AccessGrantStore]>> {
+	) -> Result<Arc<[catalog::AccessGrant]>> {
 		let qey = cache::tx::Lookup::Ngs(ns, na);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_nag(),
@@ -636,7 +638,7 @@ impl Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-	) -> Result<Arc<[DefineAccessStatement]>> {
+	) -> Result<Arc<[catalog::AccessDefinition]>> {
 		let qey = cache::tx::Lookup::Das(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_das(),
@@ -659,7 +661,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		da: &str,
-	) -> Result<Arc<[AccessGrantStore]>> {
+	) -> Result<Arc<[catalog::AccessGrant]>> {
 		let qey = cache::tx::Lookup::Dgs(ns, db, da);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_dag(),
@@ -906,7 +908,7 @@ impl Transaction {
 		db: DatabaseId,
 		tb: &str,
 		version: Option<u64>,
-	) -> Result<Arc<[DefineFieldStatement]>> {
+	) -> Result<Arc<[catalog::FieldDefinition]>> {
 		let qey = cache::tx::Lookup::Fds(ns, db, tb);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_fds(),
@@ -1040,7 +1042,10 @@ impl Transaction {
 
 	/// Retrieve a specific root access definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_root_access(&self, ra: &str) -> Result<Option<Arc<DefineAccessStatement>>> {
+	pub async fn get_root_access(
+		&self,
+		ra: &str,
+	) -> Result<Option<Arc<catalog::AccessDefinition>>> {
 		let qey = cache::tx::Lookup::Ra(ra);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Some),
@@ -1057,7 +1062,7 @@ impl Transaction {
 		}
 	}
 
-	pub async fn expect_root_access(&self, ra: &str) -> Result<Arc<DefineAccessStatement>> {
+	pub async fn expect_root_access(&self, ra: &str) -> Result<Arc<catalog::AccessDefinition>> {
 		match self.get_root_access(ra).await? {
 			Some(val) => Ok(val),
 			None => anyhow::bail!(Error::AccessRootNotFound {
@@ -1072,7 +1077,7 @@ impl Transaction {
 		&self,
 		ac: &str,
 		gr: &str,
-	) -> Result<Option<Arc<AccessGrantStore>>> {
+	) -> Result<Option<Arc<catalog::AccessGrant>>> {
 		let qey = cache::tx::Lookup::Rg(ac, gr);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Some),
@@ -1236,7 +1241,7 @@ impl Transaction {
 		&self,
 		ns: NamespaceId,
 		na: &str,
-	) -> Result<Option<Arc<DefineAccessStatement>>> {
+	) -> Result<Option<Arc<catalog::AccessDefinition>>> {
 		let qey = cache::tx::Lookup::Na(ns, na);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Some),
@@ -1260,7 +1265,7 @@ impl Transaction {
 		ns: NamespaceId,
 		ac: &str,
 		gr: &str,
-	) -> Result<Option<Arc<AccessGrantStore>>> {
+	) -> Result<Option<Arc<catalog::AccessGrant>>> {
 		let qey = cache::tx::Lookup::Ng(ns, ac, gr);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Some),
@@ -1378,7 +1383,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		da: &str,
-	) -> Result<Option<Arc<DefineAccessStatement>>> {
+	) -> Result<Option<Arc<catalog::AccessDefinition>>> {
 		let qey = cache::tx::Lookup::Da(ns, db, da);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Some),
@@ -1403,7 +1408,7 @@ impl Transaction {
 		db: DatabaseId,
 		ac: &str,
 		gr: &str,
-	) -> Result<Option<Arc<AccessGrantStore>>> {
+	) -> Result<Option<Arc<catalog::AccessGrant>>> {
 		let qey = cache::tx::Lookup::Dg(ns, db, ac, gr);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Some),
@@ -1730,7 +1735,7 @@ impl Transaction {
 		db: DatabaseId,
 		tb: &str,
 		fd: &str,
-	) -> Result<Option<Arc<DefineFieldStatement>>> {
+	) -> Result<Option<Arc<catalog::FieldDefinition>>> {
 		let qey = cache::tx::Lookup::Fd(ns, db, tb, fd);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Some),

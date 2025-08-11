@@ -9,8 +9,7 @@ use std::fmt;
 use std::ops::{Deref, Index};
 use std::str::FromStr;
 use surrealdb_core::dbs::Action as CoreAction;
-use surrealdb_core::syn;
-use surrealdb_core::val;
+use surrealdb_core::{syn, val};
 use uuid::Uuid;
 
 mod convert;
@@ -73,10 +72,16 @@ impl From<Vec<u8>> for Bytes {
 }
 
 transparent_wrapper!(
-	#[derive(Clone, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
+	#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 	pub struct Datetime(val::Datetime)
 );
 impl_serialize_wrapper!(Datetime);
+
+impl Datetime {
+	pub fn now() -> Self {
+		Datetime(val::Datetime::now())
+	}
+}
 
 impl From<DateTime<Utc>> for Datetime {
 	fn from(v: DateTime<Utc>) -> Self {

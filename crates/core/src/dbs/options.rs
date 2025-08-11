@@ -356,11 +356,6 @@ impl Options {
 				let (ns, db) = self.ns_db()?;
 				res.on_db(ns, db)
 			}
-			// TODO(gguillemas): This variant is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
-			Base::Sc(_) => {
-				// We should not get here, the scope base is only used in parsing for backward compatibility.
-				bail!(Error::InvalidAuth);
-			}
 		};
 
 		// If auth is disabled, allow all actions for anonymous users

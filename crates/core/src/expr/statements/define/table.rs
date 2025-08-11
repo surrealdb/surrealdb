@@ -1,5 +1,5 @@
-use super::{DefineFieldStatement, DefineKind};
-use crate::catalog::{DatabaseId, NamespaceId, TableDefinition, TableType};
+use super::DefineKind;
+use crate::catalog::{DatabaseId, FieldDefinition, NamespaceId, TableDefinition, TableType};
 use crate::ctx::Context;
 use crate::dbs::{Force, Options};
 use crate::doc::CursorDoc;
@@ -36,14 +36,6 @@ pub struct DefineTableStatement {
 	pub changefeed: Option<ChangeFeed>,
 	pub comment: Option<Strand>,
 	pub table_type: TableType,
-	/// The last time that a DEFINE FIELD was added to this table
-	pub cache_fields_ts: Uuid,
-	/// The last time that a DEFINE EVENT was added to this table
-	pub cache_events_ts: Uuid,
-	/// The last time that a DEFINE TABLE was added to this table
-	pub cache_tables_ts: Uuid,
-	/// The last time that a DEFINE INDEX was added to this table
-	pub cache_indexes_ts: Uuid,
 }
 
 impl_kv_value_revisioned!(DefineTableStatement);
@@ -212,9 +204,9 @@ impl DefineTableStatement {
 				let val = rel.from.clone().unwrap_or(Kind::Record(vec![]));
 				txn.set(
 					&key,
-					&DefineFieldStatement {
+					&FieldDefinition {
 						name: Idiom::from(IN.to_vec()),
-						what: Ident::new(tb.name.clone()).expect("Table name to be valid"),
+						what: tb.name.clone(),
 						field_kind: Some(val),
 						..Default::default()
 					},
@@ -228,9 +220,9 @@ impl DefineTableStatement {
 				let val = rel.to.clone().unwrap_or(Kind::Record(vec![]));
 				txn.set(
 					&key,
-					&DefineFieldStatement {
+					&FieldDefinition {
 						name: Idiom::from(OUT.to_vec()),
-						what: Ident::new(tb.name.clone()).expect("Table name to be valid"),
+						what: tb.name.clone(),
 						field_kind: Some(val),
 						..Default::default()
 					},

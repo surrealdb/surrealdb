@@ -5,7 +5,7 @@ use roaring::{RoaringBitmap, RoaringTreemap};
 use std::fmt::Debug;
 
 /// KVKey is a trait that defines a key for the key-value store.
-pub trait KVKey: serde::Serialize + Debug + Sized {
+pub(crate) trait KVKey: serde::Serialize + Debug + Sized {
 	/// The associated value type for this key.
 	type ValueType: KVValue;
 

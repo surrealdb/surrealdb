@@ -48,8 +48,7 @@ pub(crate) mod tasklease;
 mod tests;
 mod util;
 
-pub(crate) use key::impl_kv_value_revisioned;
-pub use key::{KVKey, KVValue};
+pub(crate) use key::{KVKey, KVValue, impl_kv_value_revisioned};
 
 pub use ds::Datastore;
 pub use live::Live;

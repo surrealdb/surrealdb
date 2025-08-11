@@ -1,4 +1,6 @@
-use crate::catalog::{DatabaseId, NamespaceId, Relation, TableDefinition, TableType};
+use crate::catalog::{
+	self, DatabaseId, FieldDefinition, NamespaceId, Relation, TableDefinition, TableType,
+};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
@@ -14,7 +16,6 @@ use crate::kvs::{Transaction, impl_kv_value_revisioned};
 use crate::sql::ToSql;
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail, ensure};
-
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
@@ -98,19 +99,27 @@ impl DefineFieldStatement {
 			txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?
 		};
 
+		let definition = FieldDefinition {
+			name: self.name.clone(),
+			what: self.what.clone().into_string(),
+			flex: self.flex,
+			field_kind: self.field_kind.clone(),
+			readonly: self.readonly,
+			value: self.value.clone(),
+			assert: self.assert.clone(),
+			default: match &self.default {
+				DefineDefault::None => catalog::DefineDefault::None,
+				DefineDefault::Always(expr) => catalog::DefineDefault::Always(expr.clone()),
+				DefineDefault::Set(expr) => catalog::DefineDefault::Set(expr.clone()),
+			},
+			reference: self.reference.clone(),
+			permissions: self.permissions.clone(),
+			comment: self.comment.clone().map(|x| x.into_string()),
+		};
+
 		// Process the statement
 		let key = crate::key::table::fd::new(ns, db, &tb.name, &fd);
-		txn.set(
-			&key,
-			&DefineFieldStatement {
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				//
-				kind: DefineKind::Default,
-				..self.clone()
-			},
-			None,
-		)
-		.await?;
+		txn.set(&key, &definition, None).await?;
 
 		// Refresh the table cache
 		let tb_def = TableDefinition {
@@ -236,20 +245,18 @@ impl DefineFieldStatement {
 				let val = if let Some(existing) =
 					fields.as_ref().and_then(|x| x.iter().find(|x| x.name == name))
 				{
-					DefineFieldStatement {
+					FieldDefinition {
 						field_kind: Some(cur_kind),
-						reference: self.reference.clone(),
-						kind: DefineKind::Default,
+						//reference: self.reference.clone(),
 						..existing.clone()
 					}
 				} else {
-					DefineFieldStatement {
+					FieldDefinition {
 						name: name.clone(),
-						what: self.what.clone(),
+						what: self.what.clone().into_string(),
 						flex: self.flex,
 						field_kind: Some(cur_kind),
-						kind: DefineKind::Default,
-						reference: self.reference.clone(),
+						//reference: self.reference.clone(),
 						..Default::default()
 					}
 				};

@@ -1,6 +1,4 @@
-use crate::catalog::DatabaseDefinition;
-use crate::catalog::DatabaseId;
-use crate::catalog::NamespaceId;
+use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::{Force, Options, Statement};
 use crate::doc::{CursorDoc, Document};
@@ -303,11 +301,11 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
-	fn get_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
+	fn get_unique_index_key(&'_ self, v: &'a Array) -> Result<key::index::Index<'_>> {
 		Ok(key::index::Index::new(self.ns, self.db, &self.ix.what, &self.ix.name, v, None))
 	}
 
-	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
+	fn get_non_unique_index_key(&'_ self, v: &'a Array) -> Result<key::index::Index<'_>> {
 		Ok(key::index::Index::new(
 			self.ns,
 			self.db,

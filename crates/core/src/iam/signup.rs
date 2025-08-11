@@ -1,12 +1,13 @@
 use super::access::{authenticate_record, create_refresh_token_record};
+use crate::catalog;
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Session, Variables};
 use crate::err::Error;
-use crate::expr::AccessType;
+use crate::expr::Ident;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::Claims;
-use crate::iam::{Actor, Auth, Level};
+use crate::iam::{Actor, Auth, Level, algorithm_to_jwt_algorithm};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
@@ -91,7 +92,7 @@ pub async fn db_access(
 
 	// Check the access method type
 	// Currently, only the record access method supports signup
-	let AccessType::Record(ref at) = av.access_type else {
+	let catalog::AccessType::Record(ref at) = av.access_type else {
 		bail!(Error::AccessMethodMismatch)
 	};
 
@@ -124,7 +125,7 @@ pub async fn db_access(
 				iss: Some(SERVER_NAME.to_owned()),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
-				exp: expiration(av.duration.token)?,
+				exp: expiration(av.token_duration)?,
 				jti: Some(Uuid::new_v4().to_string()),
 				ns: Some(ns.clone()),
 				db: Some(db.clone()),
@@ -156,7 +157,7 @@ pub async fn db_access(
 						Some(
 							create_refresh_token_record(
 								kvs,
-								av.name.clone(),
+								Ident::new(av.name.clone()).unwrap(),
 								&ns,
 								&db,
 								rid.clone(),
@@ -170,14 +171,14 @@ pub async fn db_access(
 			// Log the authenticated access method info
 			trace!("Signing up with access method `{}`", ac);
 			// Create the authentication token
-			let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
+			let enc = encode(&Header::new(algorithm_to_jwt_algorithm(iss.alg)), &claims, &key);
 			// Set the authentication on the session
 			session.tk = Some(claims.into_claims_object().into());
 			session.ns = Some(ns.clone());
 			session.db = Some(db.clone());
 			session.ac = Some(ac.clone());
 			session.rd = Some(Value::from(rid.clone()));
-			session.exp = expiration(av.duration.session)?;
+			session.exp = expiration(av.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_string(),
 				Default::default(),

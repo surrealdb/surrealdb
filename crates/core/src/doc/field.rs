@@ -1,3 +1,4 @@
+use crate::catalog::{self, FieldDefinition};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Options, Statement};
@@ -7,8 +8,6 @@ use crate::expr::data::Data;
 use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
 use crate::expr::kind::Kind;
 use crate::expr::permission::Permission;
-use crate::expr::statements::DefineFieldStatement;
-use crate::expr::statements::define::DefineDefault;
 use crate::expr::{FlowResultExt as _, Part};
 use crate::iam::Action;
 use crate::val::value::CoerceError;
@@ -347,7 +346,7 @@ struct FieldEditContext<'a> {
 	/// The mutable request context
 	context: Option<MutableContext>,
 	/// The defined field statement
-	def: &'a DefineFieldStatement,
+	def: &'a FieldDefinition,
 	/// The current request stack
 	stk: &'a mut Stk,
 	/// The current request context
@@ -427,12 +426,12 @@ impl FieldEditContext<'_> {
 			return Ok(val);
 		}
 		// The document is not being created
-		if !self.doc.is_new() && !matches!(self.def.default, DefineDefault::Always(_)) {
+		if !self.doc.is_new() && !matches!(self.def.default, catalog::DefineDefault::Always(_)) {
 			return Ok(val);
 		}
 		// Get the default value
 		let def = match &self.def.default {
-			DefineDefault::Set(v) | DefineDefault::Always(v) => Some(v),
+			catalog::DefineDefault::Set(v) | catalog::DefineDefault::Always(v) => Some(v),
 			_ => match &self.def.value {
 				// The VALUE clause doesn't
 				Some(v) if v.is_static() => Some(v),
@@ -658,7 +657,7 @@ impl FieldEditContext<'_> {
 			// If the value has not changed, there is no need to update any references
 			let action = if val == old {
 				RefAction::Ignore
-			// Check if the old value was a record id
+				// Check if the old value was a record id
 			} else if let Value::Thing(thing) = old {
 				// We need to check if this reference is contained in an array
 				let others = self
@@ -697,7 +696,7 @@ impl FieldEditContext<'_> {
 						})
 						.collect()
 
-				// If the new value is not an array, then all record ids in the old array are removed
+					// If the new value is not an array, then all record ids in the old array are removed
 				} else {
 					oldarr
 						.iter()
@@ -712,7 +711,7 @@ impl FieldEditContext<'_> {
 				};
 
 				RefAction::Delete(removed, self.def.name.clone().push(Part::All).to_string())
-			// We found a new reference, let's create the link
+				// We found a new reference, let's create the link
 			} else if let Value::Thing(thing) = val {
 				RefAction::Set(thing)
 			} else {
@@ -769,7 +768,6 @@ impl FieldEditContext<'_> {
 	}
 
 	// Process any `TYPE reference` clause for the field definition
-	/*
 	async fn process_refs_type(&mut self) -> Result<Option<Refs>> {
 		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(None);
@@ -808,5 +806,4 @@ impl FieldEditContext<'_> {
 
 		Ok(Some(refs))
 	}
-	*/
 }

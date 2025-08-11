@@ -1,10 +1,8 @@
-use crate::catalog::{DatabaseDefinition, TableDefinition};
+use crate::catalog::{self, DatabaseDefinition, TableDefinition};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Workable};
 use crate::expr::permission::Permission;
-use crate::expr::statements::define::{
-	DefineEventStatement, DefineFieldStatement, DefineIndexStatement,
-};
+use crate::expr::statements::define::{DefineEventStatement, DefineIndexStatement};
 use crate::expr::statements::live::LiveStatement;
 use crate::expr::{Base, FlowResultExt as _, Ident};
 use crate::iam::{Action, ResourceKind};
@@ -510,7 +508,11 @@ impl Document {
 	}
 
 	/// Get the fields for this document
-	pub async fn fd(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineFieldStatement]>> {
+	pub async fn fd(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Arc<[catalog::FieldDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 		// Get the document table
@@ -523,16 +525,14 @@ impl Document {
 				let key = cache::ds::Lookup::Fds(ns, db, &tb.name, tb.cache_fields_ts);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_fds(),
 					None => {
 						let val = ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await?;
-						let val = cache::ds::Entry::Fds(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Fds(val.clone()));
+						Ok(val)
 					}
 				}
 			}
-			.try_into_fds(),
 			// No cache is present on the context
 			None => ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await,
 		}

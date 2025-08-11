@@ -4,12 +4,11 @@ use serde::{Deserialize, Serialize};
 
 use revision::{Revisioned, revisioned};
 
-use crate::{
-	expr::statements::info::InfoStructure,
-	kvs::impl_kv_value_revisioned,
-	sql::{Ident, ToSql, statements::DefineNamespaceStatement},
-	val::Value,
-};
+use crate::expr::statements::info::InfoStructure;
+use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::statements::DefineNamespaceStatement;
+use crate::sql::{Ident, ToSql};
+use crate::val::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -51,7 +50,6 @@ impl From<u32> for NamespaceId {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[non_exhaustive]
 pub struct NamespaceDefinition {
 	pub namespace_id: NamespaceId,
 	pub name: String,

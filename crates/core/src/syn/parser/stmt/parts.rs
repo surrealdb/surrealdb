@@ -428,25 +428,14 @@ impl Parser<'_> {
 	///
 	/// # Parser state
 	/// Expects the next keyword to be a base.
-	pub fn parse_base(&mut self, scope_allowed: bool) -> ParseResult<Base> {
+	pub fn parse_base(&mut self) -> ParseResult<Base> {
 		let next = self.next();
 		match next.kind {
 			t!("NAMESPACE") => Ok(Base::Ns),
 			t!("DATABASE") => Ok(Base::Db),
 			t!("ROOT") => Ok(Base::Root),
-			t!("SCOPE") => {
-				if !scope_allowed {
-					unexpected!(self, next, "a scope is not allowed here");
-				}
-				let name = self.next_token_value()?;
-				Ok(Base::Sc(name))
-			}
 			_ => {
-				if scope_allowed {
-					unexpected!(self, next, "'NAMEPSPACE', 'DATABASE', 'ROOT' or 'SCOPE'")
-				} else {
-					unexpected!(self, next, "'NAMEPSPACE', 'DATABASE' or 'ROOT'")
-				}
+				unexpected!(self, next, "'NAMEPSPACE', 'DATABASE' or 'ROOT'")
 			}
 		}
 	}

@@ -184,20 +184,8 @@ impl Display for ChangeSet {
 
 // WriteMutationSet is a set of mutations to be to a table at the specific timestamp.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, Default)]
 pub struct WriteMutationSet(pub Vec<TableMutations>);
-
-impl WriteMutationSet {
-	pub fn new() -> Self {
-		Self(Vec::new())
-	}
-}
-
-impl Default for WriteMutationSet {
-	fn default() -> Self {
-		Self::new()
-	}
-}
 
 #[cfg(test)]
 mod tests {

@@ -1,21 +1,18 @@
-use crate::{
-	catalog::{DatabaseId, NamespaceId},
-	kvs::impl_kv_value_revisioned,
-	sql::{Ident, ToSql, statements::DefineTableStatement},
-};
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::statements::DefineTableStatement;
+use crate::sql::{Ident, ToSql};
 use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{
-	catalog::ViewDefinition,
-	expr::{ChangeFeed, Kind, Permissions, statements::info::InfoStructure},
-	val::Value,
-};
+use crate::catalog::ViewDefinition;
+use crate::expr::statements::info::InfoStructure;
+use crate::expr::{ChangeFeed, Kind, Permissions};
+use crate::val::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[repr(transparent)]
 pub struct TableId(pub u32);
 
 impl_kv_value_revisioned!(TableId);
@@ -41,7 +38,6 @@ impl Revisioned for TableId {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[non_exhaustive]
 pub struct TableDefinition {
 	pub namespace_id: NamespaceId,
 	pub database_id: DatabaseId,
@@ -150,7 +146,6 @@ impl InfoStructure for TableDefinition {
 /// The type of records stored by a table
 #[revisioned(revision = 1)]
 #[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
-#[non_exhaustive]
 pub enum TableType {
 	#[default]
 	Any,
@@ -204,7 +199,6 @@ impl InfoStructure for TableType {
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
-#[non_exhaustive]
 pub struct Relation {
 	pub from: Option<Kind>,
 	pub to: Option<Kind>,

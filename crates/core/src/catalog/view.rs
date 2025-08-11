@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[non_exhaustive]
 pub struct ViewDefinition {
 	pub expr: Fields,
 	pub what: Vec<String>,

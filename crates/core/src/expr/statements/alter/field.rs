@@ -1,10 +1,9 @@
-use crate::catalog::TableDefinition;
+use crate::catalog::{self, TableDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::reference::Reference;
-use crate::expr::statements::define::DefineDefault;
 use crate::expr::{Base, Expr, Ident, Idiom, Kind, Permissions};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
@@ -108,9 +107,11 @@ impl AlterFieldStatement {
 
 		match self.default {
 			AlterDefault::None => {}
-			AlterDefault::Drop => df.default = DefineDefault::None,
-			AlterDefault::Always(ref expr) => df.default = DefineDefault::Always(expr.clone()),
-			AlterDefault::Set(ref expr) => df.default = DefineDefault::Set(expr.clone()),
+			AlterDefault::Drop => df.default = catalog::DefineDefault::None,
+			AlterDefault::Always(ref expr) => {
+				df.default = catalog::DefineDefault::Always(expr.clone())
+			}
+			AlterDefault::Set(ref expr) => df.default = catalog::DefineDefault::Set(expr.clone()),
 		}
 
 		if let Some(permissions) = &self.permissions {
@@ -118,11 +119,12 @@ impl AlterFieldStatement {
 		}
 
 		match self.comment {
-			AlterKind::Set(ref k) => df.comment = Some(k.clone()),
+			AlterKind::Set(ref k) => df.comment = Some(k.clone().into_string()),
 			AlterKind::Drop => df.comment = None,
 			AlterKind::None => {}
 		}
 
+		/*
 		match self.reference {
 			AlterKind::Set(ref k) => {
 				df.reference = Some(k.clone());
@@ -130,9 +132,10 @@ impl AlterFieldStatement {
 			AlterKind::Drop => df.reference = None,
 			AlterKind::None => {}
 		}
+		*/
 
 		// Validate reference options
-		df.validate_reference_options(ctx)?;
+		//df.validate_reference_options(ctx)?;
 
 		// Correct reference type
 		/*
@@ -141,7 +144,7 @@ impl AlterFieldStatement {
 		}*/
 
 		// Disallow mismatched types
-		df.disallow_mismatched_types(ctx, ns, db).await?;
+		//df.disallow_mismatched_types(ctx, ns, db).await?;
 
 		// Set the table definition
 		let key = crate::key::table::fd::new(ns, db, &self.what, &name);
@@ -166,7 +169,7 @@ impl AlterFieldStatement {
 		// Clear the cache
 		txn.clear_cache();
 		// Process possible recursive defitions
-		df.process_recursive_definitions(ns, db, txn.clone()).await?;
+		//df.process_recursive_definitions(ns, db, txn.clone()).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

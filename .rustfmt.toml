@@ -10,7 +10,7 @@ use_small_heuristics = "Off"
 # Unstable options we would like to use in future
 # -----------------------------------
 
-#imports_granularity = "Module"
+imports_granularity = "Module"
 #blank_lines_lower_bound = 1
 #group_imports = "One"
 #indent_style = "Block"

@@ -1,12 +1,11 @@
+use crate::catalog;
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition, TableDefinition};
 use crate::dbs::node::Node;
-use crate::expr::statements::access::AccessGrantStore;
 use crate::expr::statements::define::config::ConfigStore;
 use crate::expr::statements::define::{ApiDefinition, BucketDefinition, DefineSequenceStatement};
 use crate::expr::statements::{
-	DefineAccessStatement, DefineAnalyzerStatement, DefineEventStatement, DefineFieldStatement,
-	DefineFunctionStatement, DefineIndexStatement, DefineModelStatement, DefineParamStore,
-	DefineUserStatement, LiveStatement,
+	DefineAnalyzerStatement, DefineEventStatement, DefineFunctionStatement, DefineIndexStatement,
+	DefineModelStatement, DefineParamStore, DefineUserStatement, LiveStatement,
 };
 use crate::val::Value;
 use anyhow::Result;
@@ -24,17 +23,17 @@ pub(crate) enum Entry {
 	/// A slice of DefineUserStatement specified at the root.
 	Rus(Arc<[DefineUserStatement]>),
 	/// A slice of DefineAccessStatement specified at the root.
-	Ras(Arc<[DefineAccessStatement]>),
+	Ras(Arc<[catalog::AccessDefinition]>),
 	/// A slice of AccessGrant specified at the root.
-	Rag(Arc<[AccessGrantStore]>),
+	Rag(Arc<[catalog::AccessGrant]>),
 	/// A slice of NamespaceDefinition specified on a namespace.
 	Nss(Arc<[NamespaceDefinition]>),
 	/// A slice of DefineUserStatement specified on a namespace.
 	Nus(Arc<[DefineUserStatement]>),
 	/// A slice of DefineAccessStatement specified on a namespace.
-	Nas(Arc<[DefineAccessStatement]>),
+	Nas(Arc<[catalog::AccessDefinition]>),
 	/// A slice of AccessGrant specified at on a namespace.
-	Nag(Arc<[AccessGrantStore]>),
+	Nag(Arc<[catalog::AccessGrant]>),
 	/// A slice of DatabaseDefinition specified on a namespace.
 	Dbs(Arc<[DatabaseDefinition]>),
 	/// A slice of ApiDefinition specified on a namespace.
@@ -44,9 +43,9 @@ pub(crate) enum Entry {
 	/// A slice of DefineBucketStatement specified on a database.
 	Bus(Arc<[BucketDefinition]>),
 	/// A slice of DefineAccessStatement specified on a database.
-	Das(Arc<[DefineAccessStatement]>),
+	Das(Arc<[catalog::AccessDefinition]>),
 	/// A slice of AccessGrant specified at on a database.
-	Dag(Arc<[AccessGrantStore]>),
+	Dag(Arc<[catalog::AccessGrant]>),
 	/// A slice of DefineUserStatement specified on a database.
 	Dus(Arc<[DefineUserStatement]>),
 	/// A slice of DefineFunctionStatement specified on a database.
@@ -64,7 +63,7 @@ pub(crate) enum Entry {
 	/// A slice of DefineEventStatement specified on a table.
 	Evs(Arc<[DefineEventStatement]>),
 	/// A slice of DefineFieldStatement specified on a table.
-	Fds(Arc<[DefineFieldStatement]>),
+	Fds(Arc<[catalog::FieldDefinition]>),
 	/// A slice of TableDefinition specified on a table.
 	Fts(Arc<[TableDefinition]>),
 	/// A slice of DefineIndexStatement specified on a table.
@@ -103,9 +102,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Rus"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`DefineAccessStatement`].
+	/// Converts this cache entry into a slice of [`catalog::AccessDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Ras`].
-	pub(crate) fn try_into_ras(self) -> Result<Arc<[DefineAccessStatement]>> {
+	pub(crate) fn try_into_ras(self) -> Result<Arc<[catalog::AccessDefinition]>> {
 		match self {
 			Entry::Ras(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Ras"),
@@ -113,7 +112,7 @@ impl Entry {
 	}
 	/// Converts this cache entry into a slice of [`AccessGrantStore`].
 	/// This panics if called on a cache entry that is not an [`Entry::Rag`].
-	pub(crate) fn try_into_rag(self) -> Result<Arc<[AccessGrantStore]>> {
+	pub(crate) fn try_into_rag(self) -> Result<Arc<[catalog::AccessGrant]>> {
 		match self {
 			Entry::Rag(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Rag"),
@@ -127,9 +126,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Nss"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`DefineAccessStatement`].
+	/// Converts this cache entry into a slice of [`catalog::AccessDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Nas`].
-	pub(crate) fn try_into_nas(self) -> Result<Arc<[DefineAccessStatement]>> {
+	pub(crate) fn try_into_nas(self) -> Result<Arc<[catalog::AccessDefinition]>> {
 		match self {
 			Entry::Nas(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Nas"),
@@ -137,7 +136,7 @@ impl Entry {
 	}
 	/// Converts this cache entry into a slice of [`AccessGrantStore`].
 	/// This panics if called on a cache entry that is not an [`Entry::Nag`].
-	pub(crate) fn try_into_nag(self) -> Result<Arc<[AccessGrantStore]>> {
+	pub(crate) fn try_into_nag(self) -> Result<Arc<[catalog::AccessGrant]>> {
 		match self {
 			Entry::Nag(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Nag"),
@@ -159,9 +158,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Dbs"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`DefineAccessStatement`].
+	/// Converts this cache entry into a slice of [`catalog::AccessDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Das`].
-	pub(crate) fn try_into_das(self) -> Result<Arc<[DefineAccessStatement]>> {
+	pub(crate) fn try_into_das(self) -> Result<Arc<[catalog::AccessDefinition]>> {
 		match self {
 			Entry::Das(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Das"),
@@ -169,7 +168,7 @@ impl Entry {
 	}
 	/// Converts this cache entry into a slice of [`AccessGrantStore`].
 	/// This panics if called on a cache entry that is not an [`Entry::Dag`].
-	pub(crate) fn try_into_dag(self) -> Result<Arc<[AccessGrantStore]>> {
+	pub(crate) fn try_into_dag(self) -> Result<Arc<[catalog::AccessGrant]>> {
 		match self {
 			Entry::Dag(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Dag"),
@@ -266,7 +265,7 @@ impl Entry {
 	}
 	/// Converts this cache entry into a slice of [`DefineFieldStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Fds`].
-	pub(crate) fn try_into_fds(self) -> Result<Arc<[DefineFieldStatement]>> {
+	pub(crate) fn try_into_fds(self) -> Result<Arc<[catalog::FieldDefinition]>> {
 		match self {
 			Entry::Fds(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Fds"),

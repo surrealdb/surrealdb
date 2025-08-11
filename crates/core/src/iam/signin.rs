@@ -4,17 +4,17 @@ use super::access::{
 };
 use super::verify::{verify_db_creds, verify_ns_creds, verify_root_creds};
 use super::{Actor, Level, Role};
+use crate::catalog;
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Session, Variables};
 use crate::err::Error;
-use crate::expr::statements::access::AccessGrantStore;
-use crate::expr::statements::{DefineAccessStatement, access};
-use crate::expr::{AccessType, access_type};
-use crate::iam::Auth;
+use crate::expr::statements::access;
+use crate::expr::{Ident, access_type};
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, HEADER};
+use crate::iam::{self, Auth, algorithm_to_jwt_algorithm};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
@@ -23,27 +23,24 @@ use anyhow::{Result, bail, ensure};
 use chrono::Utc;
 use jsonwebtoken::{EncodingKey, Header, encode};
 use md5::Digest;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::str::FromStr;
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SigninData {
 	pub token: String,
 	pub refresh: Option<String>,
 }
 
-impl From<SigninData> for Value {
-	fn from(v: SigninData) -> Value {
+impl SigninData {
+	/// Returns the signin data as a surrealql struct.
+	fn into_value(self) -> Value {
 		let mut out = Object::default();
-		out.insert("token".to_string(), v.token.into());
-		if let Some(refresh) = v.refresh {
+		out.insert("token".to_string(), self.token.into());
+		if let Some(refresh) = self.refresh {
 			out.insert("refresh".to_string(), refresh.into());
 		}
 		out.into()
@@ -161,7 +158,7 @@ pub async fn db_access(
 			// The JWT access method is the one that is internal to SurrealDB
 			// The equivalent of signing in with JWT is to authenticate it
 			match av.access_type.clone() {
-				AccessType::Record(at) => {
+				catalog::AccessType::Record(at) => {
 					// Check if the record access method supports issuing tokens
 					let iss = match &at.jwt.issue {
 						Some(iss) => iss.clone(),
@@ -201,13 +198,13 @@ pub async fn db_access(
 										// There is a record returned
 										Some(mut rid) => {
 											// Create the authentication key
-											let key = config(iss.alg, &iss.key)?;
+											let key = iam::issue::config(iss.alg, &iss.key)?;
 											// Create the authentication claim
 											let claims = Claims {
 												iss: Some(SERVER_NAME.to_owned()),
 												iat: Some(Utc::now().timestamp()),
 												nbf: Some(Utc::now().timestamp()),
-												exp: expiration(av.duration.token)?,
+												exp: iam::issue::expiration(av.token_duration)?,
 												jti: Some(Uuid::new_v4().to_string()),
 												ns: Some(ns.clone()),
 												db: Some(db.clone()),
@@ -243,7 +240,8 @@ pub async fn db_access(
 														Some(
 															create_refresh_token_record(
 																kvs,
-																av.name.clone(),
+																Ident::new(av.name.clone())
+																	.unwrap(),
 																&ns,
 																&db,
 																rid.clone(),
@@ -260,15 +258,19 @@ pub async fn db_access(
 												ac
 											);
 											// Create the authentication token
-											let enc =
-												encode(&Header::new(iss.alg.into()), &claims, &key);
+											let enc = encode(
+												&Header::new(algorithm_to_jwt_algorithm(iss.alg)),
+												&claims,
+												&key,
+											);
 											// Set the authentication on the session
 											session.tk = Some(claims.into_claims_object().into());
 											session.ns = Some(ns.clone());
 											session.db = Some(db.clone());
 											session.ac = Some(ac.clone());
 											session.rd = Some(Value::from(rid.clone()));
-											session.exp = expiration(av.duration.session)?;
+											session.exp =
+												iam::issue::expiration(av.session_duration)?;
 											session.au = Arc::new(Auth::new(Actor::new(
 												rid.to_string(),
 												Default::default(),
@@ -317,7 +319,7 @@ pub async fn db_access(
 						_ => Err(anyhow::Error::new(Error::AccessRecordNoSignin)),
 					}
 				}
-				AccessType::Bearer(at) => {
+				catalog::AccessType::Bearer(at) => {
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
 						Some(key) => key.to_raw_string(),
@@ -351,7 +353,7 @@ pub async fn db_user(
 				iss: Some(SERVER_NAME.to_owned()),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
-				exp: expiration(u.duration.token)?,
+				exp: expiration(u.duration.token.map(|x| x.0))?,
 				jti: Some(Uuid::new_v4().to_string()),
 				ns: Some(ns.clone()),
 				db: Some(db.clone()),
@@ -366,7 +368,7 @@ pub async fn db_user(
 			session.tk = Some(val.into_claims_object().into());
 			session.ns = Some(ns.clone());
 			session.db = Some(db.clone());
-			session.exp = expiration(u.duration.session)?;
+			session.exp = expiration(u.duration.session.map(|x| x.0))?;
 			session.au = Arc::new(
 				(&u, Level::Database(ns.clone(), db.clone())).try_into().map_err(Error::from)?,
 			);
@@ -409,7 +411,7 @@ pub async fn ns_access(
 		Ok(Some(av)) => {
 			// Check the access method type
 			match av.access_type.clone() {
-				AccessType::Bearer(at) => {
+				catalog::AccessType::Bearer(at) => {
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
 						Some(key) => key.to_raw_string(),
@@ -442,7 +444,7 @@ pub async fn ns_user(
 				iss: Some(SERVER_NAME.to_owned()),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
-				exp: expiration(u.duration.token)?,
+				exp: expiration(u.duration.token.map(|x| x.0))?,
 				jti: Some(Uuid::new_v4().to_string()),
 				ns: Some(ns.clone()),
 				id: Some(user),
@@ -455,7 +457,7 @@ pub async fn ns_user(
 			// Set the authentication on the session
 			session.tk = Some(val.into_claims_object().into());
 			session.ns = Some(ns.clone());
-			session.exp = expiration(u.duration.session)?;
+			session.exp = expiration(u.duration.session.map(|x| x.0))?;
 			session.au =
 				Arc::new((&u, Level::Namespace(ns.clone())).try_into().map_err(Error::from)?);
 			// Check the authentication token
@@ -493,7 +495,7 @@ pub async fn root_user(
 				iss: Some(SERVER_NAME.to_owned()),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
-				exp: expiration(u.duration.token)?,
+				exp: expiration(u.duration.token.map(|x| x.0))?,
 				jti: Some(Uuid::new_v4().to_string()),
 				id: Some(user),
 				..Claims::default()
@@ -504,7 +506,7 @@ pub async fn root_user(
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
 			session.tk = Some(val.into_claims_object().into());
-			session.exp = expiration(u.duration.session)?;
+			session.exp = expiration(u.duration.session.map(|x| x.0))?;
 			session.au = Arc::new((&u, Level::Root).try_into().map_err(Error::from)?);
 			// Check the authentication token
 			match enc {
@@ -541,7 +543,7 @@ pub async fn root_access(
 		Ok(Some(av)) => {
 			// Check the access method type
 			match av.access_type.clone() {
-				AccessType::Bearer(at) => {
+				catalog::AccessType::Bearer(at) => {
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
 						Some(key) => key.to_raw_string(),
@@ -563,8 +565,8 @@ pub async fn signin_bearer(
 	session: &mut Session,
 	ns: Option<&NamespaceDefinition>,
 	db: Option<&DatabaseDefinition>,
-	av: Arc<DefineAccessStatement>,
-	at: &access_type::BearerAccess,
+	av: Arc<catalog::AccessDefinition>,
+	at: &catalog::BearerAccess,
 	key: String,
 ) -> Result<SigninData> {
 	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
@@ -597,7 +599,7 @@ pub async fn signin_bearer(
 	// Authenticate bearer key against stored grant.
 	verify_grant_bearer(&gr, key)?;
 	// If the subject of the grant is a system user, get their roles.
-	let roles = if let access::SubjectStore::User(user) = &gr.subject {
+	let roles = if let catalog::Subject::User(user) = &gr.subject {
 		// Create a new readonly transaction.
 		let tx = kvs.transaction(Read, Optimistic).await?;
 		// Fetch the specified user from storage.
@@ -650,18 +652,18 @@ pub async fn signin_bearer(
 		iss: Some(SERVER_NAME.to_owned()),
 		iat: Some(Utc::now().timestamp()),
 		nbf: Some(Utc::now().timestamp()),
-		exp: expiration(av.duration.token)?,
+		exp: expiration(av.token_duration)?,
 		jti: Some(Uuid::new_v4().to_string()),
 		ns: ns.map(|ns| ns.name.clone()),
 		db: db.map(|db| db.name.clone()),
 		ac: Some(av.name.to_string()),
 		id: match &gr.subject {
-			access::SubjectStore::User(user) => Some(user.into_raw_string()),
-			access::SubjectStore::Record(rid) => Some(rid.to_string()),
+			catalog::Subject::User(user) => Some(user.clone()),
+			catalog::Subject::Record(rid) => Some(rid.to_string()),
 		},
 		roles: match &gr.subject {
-			access::SubjectStore::User(_) => Some(roles.iter().map(|v| v.to_string()).collect()),
-			access::SubjectStore::Record(_) => Default::default(),
+			catalog::Subject::User(_) => Some(roles.iter().map(|v| v.to_string()).collect()),
+			catalog::Subject::Record(_) => Default::default(),
 		},
 		..Claims::default()
 	};
@@ -681,15 +683,15 @@ pub async fn signin_bearer(
 	}
 	// If the bearer grant is a refresh token.
 	let refresh = match at.kind {
-		access_type::BearerAccessType::Refresh => {
+		catalog::BearerAccessType::Refresh => {
 			match &gr.subject {
-				access::SubjectStore::Record(rid) => {
+				catalog::Subject::Record(rid) => {
 					if let (Some(ns), Some(db)) = (&ns, &db) {
 						// Revoke the used refresh token.
 						revoke_refresh_token_record(
 							kvs,
-							gr.id.clone(),
-							gr.ac.clone(),
+							Ident::new(gr.id.clone()).unwrap(),
+							Ident::new(gr.ac.clone()).unwrap(),
 							&ns.name,
 							&db.name,
 						)
@@ -697,7 +699,7 @@ pub async fn signin_bearer(
 						// Create a new refresh token to replace it.
 						let refresh = create_refresh_token_record(
 							kvs,
-							gr.ac.clone(),
+							Ident::new(gr.ac.clone()).unwrap(),
 							&ns.name,
 							&db.name,
 							rid.clone(),
@@ -711,7 +713,7 @@ pub async fn signin_bearer(
 						bail!(Error::InvalidAuth);
 					}
 				}
-				access::SubjectStore::User(_) => {
+				catalog::Subject::User(_) => {
 					debug!(
 						"Invalid attempt to authenticatea as a system user with a refresh token"
 					);
@@ -724,15 +726,15 @@ pub async fn signin_bearer(
 	// Log the authenticated access method information.
 	trace!("Signing in to database with bearer access method `{}`", av.name);
 	// Create the authentication token.
-	let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
+	let enc = encode(&Header::new(algorithm_to_jwt_algorithm(iss.alg)), &claims, &key);
 	// Set the authentication on the session.
 	session.tk = Some(claims.into_claims_object().into());
 	session.ns.clone_from(&ns.map(|ns| ns.name.clone()));
 	session.db.clone_from(&db.map(|db| db.name.clone()));
 	session.ac = Some(av.name.to_string());
-	session.exp = expiration(av.duration.session)?;
+	session.exp = expiration(av.session_duration)?;
 	match &gr.subject {
-		access::SubjectStore::User(user) => {
+		catalog::Subject::User(user) => {
 			session.au = Arc::new(Auth::new(Actor::new(
 				user.to_string(),
 				roles
@@ -748,7 +750,7 @@ pub async fn signin_bearer(
 				},
 			)));
 		}
-		access::SubjectStore::Record(rid) => {
+		catalog::Subject::Record(rid) => {
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_string(),
 				Default::default(),
@@ -792,14 +794,14 @@ pub fn validate_grant_bearer(key: &str) -> Result<String> {
 }
 
 pub fn verify_grant_bearer(
-	gr: &Arc<AccessGrantStore>,
+	gr: &Arc<catalog::AccessGrant>,
 	key: String,
-) -> Result<&access::GrantBearer> {
+) -> Result<&catalog::GrantBearer> {
 	// Check if the grant is revoked or expired.
 	match (&gr.expiration, &gr.revocation) {
 		(None, None) => {}
 		(Some(exp), None) => {
-			if exp < &Datetime::default() {
+			if exp < &Datetime::now() {
 				// Return opaque error to avoid leaking revocation status.
 				debug!("Bearer access grant `{}` for method `{}` is expired", gr.id, gr.ac);
 				bail!(Error::InvalidAuth);
@@ -813,7 +815,7 @@ pub fn verify_grant_bearer(
 	// Check if the provided key matches the bearer key in the grant.
 	// We use time-constant comparison to prevent timing attacks.
 	match &gr.grant {
-		access::Grant::Bearer(bearer) => {
+		catalog::Grant::Bearer(bearer) => {
 			// Hash provided signin bearer key.
 			let mut hasher = Sha256::new();
 			hasher.update(key);
@@ -838,10 +840,11 @@ pub fn verify_grant_bearer(
 mod tests {
 	use super::*;
 	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::dbs::Capabilities;
 	use crate::iam::Role;
+	use crate::sql::statements::define::DefineKind;
 	use crate::sql::statements::define::user::PassType;
 	use crate::sql::{Ast, Expr, Ident, TopLevelExpr};
-	use crate::{dbs::Capabilities, sql::statements::define::DefineKind};
 	use chrono::Duration;
 	use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 	use regex::Regex;
@@ -1313,7 +1316,7 @@ mod tests {
 				.unwrap()
 				.unwrap();
 			let key = match &grant.grant {
-				access::Grant::Bearer(grant) => grant.key.clone(),
+				catalog::Grant::Bearer(grant) => grant.key.clone(),
 				_ => panic!("Incorrect grant type returned, expected a bearer grant"),
 			};
 			tx.cancel().await.unwrap();
@@ -3249,7 +3252,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				}
 				.unwrap();
 				let key = match &grant.grant {
-					access::Grant::Bearer(grant) => grant.key.clone(),
+					catalog::Grant::Bearer(grant) => grant.key.clone(),
 					_ => panic!("Incorrect grant type returned, expected a bearer grant"),
 				};
 				tx.cancel().await.unwrap();
@@ -4135,7 +4138,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.unwrap()
 				.unwrap();
 			let key = match &grant.grant {
-				access::Grant::Bearer(grant) => grant.key.clone(),
+				catalog::Grant::Bearer(grant) => grant.key.clone(),
 				_ => panic!("Incorrect grant type returned, expected a bearer grant"),
 			};
 			tx.cancel().await.unwrap();

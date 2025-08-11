@@ -1,9 +1,9 @@
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{self, DatabaseId, NamespaceId};
 use crate::expr::FlowResultExt as _;
 use crate::expr::index::Index;
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
-use crate::expr::statements::{DefineFieldStatement, DefineIndexStatement};
+use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{BinaryOperator, Cond, Expr, Ident, Idiom, Kind, Literal, Order, Part, With};
 use crate::idx::planner::StatementContext;
 use crate::idx::planner::executor::{
@@ -359,7 +359,7 @@ impl<'a> TreeBuilder<'a> {
 	async fn resolve_record_field(
 		&mut self,
 		tx: &Transaction,
-		fields: &[DefineFieldStatement],
+		fields: &[catalog::FieldDefinition],
 		idiom: &Arc<Idiom>,
 	) -> Result<Option<RecordOptions>> {
 		for field in fields.iter() {
@@ -714,7 +714,7 @@ impl Deref for IndexReference {
 #[derive(Clone)]
 struct SchemaCache {
 	indexes: Arc<[DefineIndexStatement]>,
-	fields: Arc<[DefineFieldStatement]>,
+	fields: Arc<[catalog::FieldDefinition]>,
 }
 
 impl SchemaCache {
