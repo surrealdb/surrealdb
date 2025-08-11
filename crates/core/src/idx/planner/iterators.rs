@@ -253,6 +253,14 @@ impl IndexEqualThingIterator {
 		})
 	}
 
+	/// Computes the begin and end keys for scanning an equality index.
+	///
+	/// For single-column indexes, uses simple prefix key generation.
+	/// For composite indexes (multiple columns), uses composite key generation
+	/// which handles the ordering and encoding of multiple index values.
+	///
+	/// Returns a tuple of (begin_key, end_key) that defines the scan range
+	/// for finding all records that exactly match the provided array values.
 	fn get_beg_end(
 		ns: &str,
 		db: &str,
@@ -260,11 +268,13 @@ impl IndexEqualThingIterator {
 		a: &Array,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		Ok(if ix.cols.len() == 1 {
+			// Single column index: straightforward key prefix generation
 			(
 				Index::prefix_ids_beg(ns, db, &ix.what, &ix.name, a)?,
 				Index::prefix_ids_end(ns, db, &ix.what, &ix.name, a)?,
 			)
 		} else {
+			// Composite index: handles multiple column values with proper ordering
 			(
 				Index::prefix_ids_composite_beg(ns, db, &ix.what, &ix.name, a)?,
 				Index::prefix_ids_composite_end(ns, db, &ix.what, &ix.name, a)?,
@@ -272,6 +282,14 @@ impl IndexEqualThingIterator {
 		})
 	}
 
+	/// Performs a key-value scan within the specified range and updates the begin key for pagination.
+	///
+	/// This method scans the key-value store between `beg` and `end` keys, returning up to `limit` results.
+	/// After scanning, it updates the `beg` key to continue from where this scan left off, enabling
+	/// efficient pagination through large result sets.
+	///
+	/// The key manipulation (appending 0x00) ensures that the next scan will start after the last
+	/// key returned, avoiding duplicate results while maintaining correct lexicographic ordering.
 	async fn next_scan(
 		tx: &Transaction,
 		beg: &mut Vec<u8>,
@@ -281,9 +299,10 @@ impl IndexEqualThingIterator {
 		let min = beg.clone();
 		let max = end.to_owned();
 		let res = tx.scan(min..max, limit, None).await?;
+		// Update the begin key for the next scan to avoid duplicates and enable pagination
 		if let Some((key, _)) = res.last() {
 			let mut key = key.clone();
-			key.push(0x00);
+			key.push(0x00); // Move to the next possible key lexicographically
 			*beg = key;
 		}
 		Ok(res)
@@ -337,18 +356,26 @@ impl RangeScan {
 		self.beg.clone()..self.end.clone()
 	}
 
+	/// Determines whether a given key should be included in the range scan results.
+	///
+	/// This method implements inclusive/exclusive boundary logic for range scans.
+	/// It tracks whether boundary keys have been encountered and applies the appropriate
+	/// inclusion/exclusion rules based on the range configuration.
+	///
+	/// Returns `false` for keys that should be excluded (boundary keys when the range
+	/// is exclusive at that boundary), `true` for keys that should be included.
 	fn matches(&mut self, k: &Key) -> bool {
-		// We check if we should match the key matching the beginning of the range
+		// Handle beginning boundary: exclude if this is an exclusive range start
 		if !self.beg_excl_match_checked && self.beg.eq(k) {
 			self.beg_excl_match_checked = true;
-			return false;
+			return false; // Exclude the boundary key for exclusive ranges
 		}
-		// We check if we should match the key matching the end of the range
+		// Handle ending boundary: exclude if this is an exclusive range end
 		if !self.end_excl_match_checked && self.end.eq(k) {
 			self.end_excl_match_checked = true;
-			return false;
+			return false; // Exclude the boundary key for exclusive ranges
 		}
-		true
+		true // Include all other keys within the range
 	}
 
 	fn matches_end(&mut self) -> bool {
