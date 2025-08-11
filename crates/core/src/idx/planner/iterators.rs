@@ -627,10 +627,10 @@ impl IndexRangeReverseThingIterator {
 		let range = full_iterator_range();
 		Self::new(irf, ns, db, ix, &range)
 	}
- /// When scanning in reverse, the KV range APIs do not return the inclusive
-/// end key. We compensate by explicitly checking and returning the end key
-/// once per iterator state, decrementing the remaining `limit` accordingly.
-async fn check_batch_ending(
+	/// When scanning in reverse, the KV range APIs do not return the inclusive
+	/// end key. We compensate by explicitly checking and returning the end key
+	/// once per iterator state, decrementing the remaining `limit` accordingly.
+	async fn check_batch_ending(
 		&mut self,
 		tx: &Transaction,
 		limit: &mut u32,

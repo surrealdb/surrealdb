@@ -540,15 +540,15 @@ pub(super) trait Collector {
 				}
 				Iterable::Index(v, irf, rs) => {
 					if let Some(qp) = ctx.get_query_planner() {
- 					if let Some(exe) = qp.get_query_executor(v.as_str()) {
- 						// Attach the table-specific QueryExecutor to the Context to avoid
- 						// per-record lookups in the QueryPlanner during index scans.
- 						// This significantly reduces overhead inside tight iterator loops.
- 						let mut ctx = MutableContext::new(ctx);
- 						ctx.set_query_executor(exe.clone());
- 						let ctx = ctx.freeze();
- 						return self.collect_index_items(&ctx, opt, &v, irf, rs).await;
- 					}
+						if let Some(exe) = qp.get_query_executor(v.as_str()) {
+							// Attach the table-specific QueryExecutor to the Context to avoid
+							// per-record lookups in the QueryPlanner during index scans.
+							// This significantly reduces overhead inside tight iterator loops.
+							let mut ctx = MutableContext::new(ctx);
+							ctx.set_query_executor(exe.clone());
+							let ctx = ctx.freeze();
+							return self.collect_index_items(&ctx, opt, &v, irf, rs).await;
+						}
 					}
 					self.collect_index_items(ctx, opt, &v, irf, rs).await?
 				}
