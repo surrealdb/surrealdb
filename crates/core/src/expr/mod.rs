@@ -56,6 +56,8 @@ pub(crate) mod user;
 pub(crate) mod view;
 pub(crate) mod with;
 
+pub(crate) mod decimal;
+
 pub mod index;
 pub mod statements;
 
@@ -85,6 +87,7 @@ pub use self::ident::Ident;
 pub use self::idiom::{Idiom, Idioms};
 pub use self::index::Index;
 pub use self::kind::Kind;
+pub use self::kind::KindLiteral;
 pub use self::limit::Limit;
 pub use self::literal::Literal;
 pub use self::mock::Mock;
