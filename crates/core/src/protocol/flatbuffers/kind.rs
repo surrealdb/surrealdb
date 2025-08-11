@@ -616,8 +616,6 @@ mod tests {
 	use std::collections::BTreeMap;
 	use surrealdb_protocol::fb::v1 as proto_fb;
 
-	const FLOAT: f64 = 3.14159;
-
 	#[rstest]
 	#[case::any(Kind::Any)]
 	#[case::null(Kind::Null)]
@@ -650,7 +648,7 @@ mod tests {
 	#[case::literal_integer(Kind::Literal(KindLiteral::Integer(42)))]
 	#[case::literal_integer_min(Kind::Literal(KindLiteral::Integer(i64::MIN)))]
 	#[case::literal_integer_max(Kind::Literal(KindLiteral::Integer(i64::MAX)))]
-	#[case::literal_float(Kind::Literal(KindLiteral::Float(FLOAT)))]
+	#[case::literal_float(Kind::Literal(KindLiteral::Float(std::f64::consts::PI)))]
 	#[case::literal_float_nan(Kind::Literal(KindLiteral::Float(f64::NAN)))]
 	#[case::literal_float_infinity(Kind::Literal(KindLiteral::Float(f64::INFINITY)))]
 	#[case::literal_float_neg_infinity(Kind::Literal(KindLiteral::Float(f64::NEG_INFINITY)))]
