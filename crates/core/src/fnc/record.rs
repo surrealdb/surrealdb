@@ -1,20 +1,15 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::expr::FlowResultExt as _;
 use crate::expr::paths::ID;
-use crate::expr::thing::Thing;
-use crate::expr::value::Value;
-use crate::expr::{Array, FlowResultExt as _, Idiom, Kind, Literal, Part, Table};
-use anyhow::{Result, ensure};
+use crate::val::{RecordId, Value};
+use anyhow::Result;
 use reblessive::tree::Stk;
-
-use super::args::Optional;
 
 pub async fn exists(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
-	(arg,): (Thing,),
+	(arg,): (RecordId,),
 ) -> Result<Value> {
 	if let Some(opt) = opt {
 		let v = Value::Thing(arg).get(stk, ctx, opt, doc, ID.as_ref()).await.catch_return()?;
@@ -24,17 +19,18 @@ pub async fn exists(
 	}
 }
 
-pub fn id((arg,): (Thing,)) -> Result<Value> {
-	Ok(arg.id.into())
+pub fn id((arg,): (RecordId,)) -> Result<Value> {
+	Ok(arg.key.into_value())
 }
 
-pub fn tb((arg,): (Thing,)) -> Result<Value> {
-	Ok(arg.tb.into())
+pub fn tb((arg,): (RecordId,)) -> Result<Value> {
+	Ok(arg.table.into())
 }
 
+/*
 pub async fn refs(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
-	(id, Optional(ft), Optional(ff)): (Thing, Optional<String>, Optional<String>),
+	(id, Optional(ft), Optional(ff)): (RecordId, Optional<String>, Optional<String>),
 ) -> Result<Value> {
 	ensure!(
 		ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences),
@@ -79,10 +75,10 @@ async fn correct_refs_field(ctx: &Context, opt: &Options, ft: &Table, ff: Idiom)
 	};
 
 	// Check if the field is an array-like value and thus "containing" references
-	let is_contained = if let Some(kind) = &fd.kind {
+	let is_contained = if let Some(kind) = &fd.field_kind {
 		matches!(
 			kind.get_optional_inner_kind(),
-			Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(Literal::Array(_))
+			Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(KindLiteral::Array(_))
 		)
 	} else {
 		false
@@ -94,4 +90,4 @@ async fn correct_refs_field(ctx: &Context, opt: &Options, ft: &Table, ff: Idiom)
 	} else {
 		Ok(ff)
 	}
-}
+}*/

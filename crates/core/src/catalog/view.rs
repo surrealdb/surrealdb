@@ -1,17 +1,17 @@
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Cond, Fields, Groups, Tables, Value};
-use crate::sql::{ToSql, View};
+use crate::expr::{Cond, Fields, Groups};
+use crate::sql::{Ident, ToSql, View};
+use crate::val::Value;
 use revision::revisioned;
-
 use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct ViewDefinition {
 	pub expr: Fields,
-	pub what: Tables,
+	pub what: Vec<String>,
 	pub cond: Option<Cond>,
 	pub group: Option<Groups>,
 }
@@ -20,7 +20,8 @@ impl ViewDefinition {
 	pub(crate) fn to_sql_definition(&self) -> View {
 		View {
 			expr: self.expr.clone().into(),
-			what: self.what.clone().into(),
+			// SAFETY: we know the names are valid because they were validated when the view was created.
+			what: self.what.clone().into_iter().map(|s| unsafe { Ident::new_unchecked(s) }).collect(),
 			cond: self.cond.clone().map(Into::into),
 			group: self.group.clone().map(Into::into),
 		}
@@ -29,14 +30,7 @@ impl ViewDefinition {
 
 impl ToSql for ViewDefinition {
 	fn to_sql(&self) -> String {
-		let mut out = format!("AS SELECT {} FROM {}", self.expr, self.what);
-		if let Some(ref v) = self.cond {
-			out.push_str(&format!(" {}", v));
-		}
-		if let Some(ref v) = self.group {
-			out.push_str(&format!(" {}", v));
-		}
-		out
+		self.to_sql_definition().to_string()
 	}
 }
 impl InfoStructure for ViewDefinition {

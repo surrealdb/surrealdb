@@ -1,18 +1,16 @@
 //! FormData class implementation
 
-use js::{
-	Ctx, Exception, FromJs, JsLifetime, Result, String, Value,
-	class::{Class, Trace},
-	function::{Opt, Rest},
-	prelude::Coerced,
-};
+use js::class::{Class, Trace};
+use js::function::{Opt, Rest};
+use js::prelude::Coerced;
+use js::{Ctx, Exception, FromJs, JsLifetime, Result, String, Value};
 use reqwest::multipart::{Form, Part};
-use std::{collections::HashMap, string::String as StdString};
+use std::collections::HashMap;
+use std::string::String as StdString;
 
 use crate::fnc::script::fetch::classes::Blob;
 
 #[derive(Clone, JsLifetime)]
-#[non_exhaustive]
 pub enum FormDataValue<'js> {
 	String(String<'js>),
 	Blob {
@@ -46,7 +44,6 @@ impl<'js> FormDataValue<'js> {
 
 #[js::class]
 #[derive(Clone, Trace, JsLifetime)]
-#[non_exhaustive]
 pub struct FormData<'js> {
 	#[qjs(skip_trace)]
 	pub(crate) values: HashMap<StdString, Vec<FormDataValue<'js>>>,

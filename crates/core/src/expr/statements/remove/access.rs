@@ -9,14 +9,11 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct RemoveAccessStatement {
 	pub name: Ident,
 	pub base: Base,
-	#[revision(start = 2)]
 	pub if_exists: bool,
 }
 
@@ -36,7 +33,7 @@ impl RemoveAccessStatement {
 						return Ok(Value::None);
 					} else {
 						return Err(anyhow::Error::new(Error::AccessRootNotFound {
-							ac: self.name.to_raw(),
+							ac: self.name.into_raw_string(),
 						}));
 					}
 				};
@@ -48,7 +45,7 @@ impl RemoveAccessStatement {
 				let key = crate::key::root::access::all::new(&ac.name);
 				txn.delp(&key).await?;
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -63,7 +60,7 @@ impl RemoveAccessStatement {
 					} else {
 						let ns = opt.ns()?;
 						return Err(anyhow::Error::new(Error::AccessNsNotFound {
-							ac: self.name.to_raw(),
+							ac: self.name.into_raw_string(),
 							ns: ns.to_string(),
 						}));
 					}
@@ -76,7 +73,7 @@ impl RemoveAccessStatement {
 				let key = crate::key::namespace::access::all::new(ns, &ac.name);
 				txn.delp(&key).await?;
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -91,7 +88,7 @@ impl RemoveAccessStatement {
 					} else {
 						let (ns, db) = opt.ns_db()?;
 						return Err(anyhow::Error::new(Error::AccessDbNotFound {
-							ac: self.name.to_raw(),
+							ac: self.name.into_raw_string(),
 							ns: ns.to_string(),
 							db: db.to_string(),
 						}));
@@ -104,7 +101,7 @@ impl RemoveAccessStatement {
 				let key = crate::key::database::access::all::new(ns, db, &ac.name);
 				txn.delp(&key).await?;
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 				// Ok all good
 				Ok(Value::None)
 			}

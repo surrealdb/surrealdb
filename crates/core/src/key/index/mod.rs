@@ -33,13 +33,9 @@ pub mod vm;
 
 use crate::catalog::DatabaseId;
 use crate::catalog::NamespaceId;
-use crate::expr;
-use crate::expr::Thing;
-use crate::expr::array::Array;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-
+use crate::val::{Array, RecordId, RecordIdKey};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -129,11 +125,11 @@ pub(crate) struct Index<'a> {
 	pub ix: &'a str,
 	_e: u8,
 	pub fd: Cow<'a, Array>,
-	pub id: Option<Cow<'a, expr::Id>>,
+	pub id: Option<Cow<'a, RecordIdKey>>,
 }
 
 impl KVKey for Index<'_> {
-	type ValueType = Thing;
+	type ValueType = RecordId;
 }
 
 impl Categorise for Index<'_> {
@@ -149,7 +145,7 @@ impl<'a> Index<'a> {
 		tb: &'a str,
 		ix: &'a str,
 		fd: &'a Array,
-		id: Option<&'a expr::Id>,
+		id: Option<&'a RecordIdKey>,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -250,7 +246,7 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let fd = vec!["testfd1", "testfd2"].into();
-		let id = "testid".into();
+		let id = RecordIdKey::String("testid".to_owned());
 		let val = Index::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", &fd, Some(&id));
 		let enc = Index::encode_key(&val).unwrap();
 		assert_eq!(

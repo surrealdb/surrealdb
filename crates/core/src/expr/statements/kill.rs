@@ -1,8 +1,9 @@
+use crate::ctx::Context;
 use crate::dbs::{Action, Notification, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::Value;
-use crate::{ctx::Context, expr::FlowResultExt as _, expr::Uuid};
+use crate::expr::{Expr, FlowResultExt as _};
+use crate::val::{Uuid, Value};
 use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
@@ -11,13 +12,11 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct KillStatement {
 	// Uuid of Live Query
 	// or Param resolving to Uuid of Live Query
-	pub id: Value,
+	pub id: Expr,
 }
 
 impl KillStatement {
@@ -34,7 +33,11 @@ impl KillStatement {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Resolve live query id
-		let lid = match self.id.compute(stk, ctx, opt, None).await.catch_return()?.cast_to::<Uuid>()
+		let lid = match stk
+			.run(|stk| self.id.compute(stk, ctx, opt, None))
+			.await
+			.catch_return()?
+			.cast_to::<Uuid>()
 		{
 			Err(_) => {
 				bail!(Error::KillStatement {
@@ -65,7 +68,7 @@ impl KillStatement {
 					cache.new_live_queries_version(live.ns, live.db, &live.tb);
 				}
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 			}
 			None => {
 				bail!(Error::KillStatement {

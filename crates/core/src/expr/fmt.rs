@@ -278,12 +278,12 @@ impl<W: std::fmt::Write> std::fmt::Write for Pretty<W> {
 
 #[cfg(test)]
 mod tests {
-	use crate::syn::{parse, value};
+	use crate::syn::{expr, parse};
 
 	#[test]
 	fn pretty_query() {
 		let query = parse("SELECT * FROM {foo: [1, 2, 3]};").unwrap();
-		assert_eq!(format!("{}", query), "SELECT * FROM { foo: [1, 2, 3] };");
+		assert_eq!(format!("{query}"), "SELECT * FROM { foo: [1, 2, 3] };");
 		assert_eq!(
 			format!("{:#}", query),
 			"SELECT * FROM {\n\tfoo: [\n\t\t1,\n\t\t2,\n\t\t3\n\t]\n};"
@@ -305,14 +305,14 @@ mod tests {
 
 	#[test]
 	fn pretty_value() {
-		let value = value("{foo: [1, 2, 3]}").unwrap();
+		let value = expr("{foo: [1, 2, 3]}").unwrap();
 		assert_eq!(format!("{}", value), "{ foo: [1, 2, 3] }");
 		assert_eq!(format!("{:#}", value), "{\n\tfoo: [\n\t\t1,\n\t\t2,\n\t\t3\n\t]\n}");
 	}
 
 	#[test]
 	fn pretty_array() {
-		let array = value("[1, 2, 3]").unwrap();
+		let array = expr("[1, 2, 3]").unwrap();
 		assert_eq!(format!("{}", array), "[1, 2, 3]");
 		assert_eq!(format!("{:#}", array), "[\n\t1,\n\t2,\n\t3\n]");
 	}

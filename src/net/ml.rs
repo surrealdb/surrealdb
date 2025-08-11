@@ -1,10 +1,8 @@
 //! This file defines the endpoints for the ML API for importing and exporting SurrealML models.
 
-use axum::{
-	Router,
-	extract::DefaultBodyLimit,
-	routing::{get, post},
-};
+use axum::Router;
+use axum::extract::DefaultBodyLimit;
+use axum::routing::{get, post};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use crate::cnf::HTTP_MAX_ML_BODY_SIZE;
@@ -24,23 +22,25 @@ where
 #[cfg(feature = "ml")]
 mod implementation {
 	use anyhow::Context;
-	use axum::{Extension, body::Body, extract::Path, response::Response};
+	use axum::Extension;
+	use axum::body::Body;
+	use axum::extract::Path;
+	use axum::response::Response;
 	use bytes::Bytes;
 	use futures_util::StreamExt;
 	use http::StatusCode;
-	use surrealdb_core::{
-		dbs::{Session, capabilities::RouteTarget},
-		iam::{Action, ResourceKind, check::check_ns_db},
-		kvs::{LockType, TransactionType},
-		ml::storage::surml_file::SurMlFile,
-		sql::statements::{DefineModelStatement, DefineStatement},
-	};
+	use surrealdb_core::dbs::Session;
+	use surrealdb_core::dbs::capabilities::RouteTarget;
+	use surrealdb_core::expr::statements::{DefineModelStatement, DefineStatement};
+	use surrealdb_core::expr::{Expr, Ident, LogicalPlan, TopLevelExpr};
+	use surrealdb_core::iam::check::check_ns_db;
+	use surrealdb_core::iam::{Action, ResourceKind};
+	use surrealdb_core::kvs::{LockType, TransactionType};
+	use surrealdb_core::ml::storage::surml_file::SurMlFile;
 
-	use crate::net::{
-		AppState,
-		error::{Error as NetError, ResponseError},
-		output::Output,
-	};
+	use crate::net::AppState;
+	use crate::net::error::{Error as NetError, ResponseError};
+	use crate::net::output::Output;
 
 	/// This endpoint allows the user to import a model into the database.
 	pub async fn import(
@@ -89,14 +89,21 @@ mod implementation {
 		// Insert the file data in to the store
 		surrealdb::obs::put(&path, data).await.map_err(ResponseError)?;
 		// Insert the model in to the database
-		let mut model = DefineModelStatement::default();
-		model.name = file.header.name.to_string().into();
-		model.version = file.header.version.to_string();
-		model.comment = Some(file.header.description.to_string().into());
-		model.hash = hash;
-		db.process(DefineStatement::Model(model).into(), &session, None)
-			.await
-			.map_err(ResponseError)?;
+		let model = DefineModelStatement {
+			name: Ident::new(file.header.name.to_string()).unwrap(),
+			version: file.header.version.to_string(),
+			comment: Some(file.header.description.to_string().into()),
+			hash,
+			..Default::default()
+		};
+
+		let q = LogicalPlan {
+			expressions: vec![TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Model(
+				model,
+			))))],
+		};
+
+		db.process_plan(q, &session, None).await.map_err(ResponseError)?;
 		//
 		Ok(Output::None)
 	}
@@ -161,13 +168,14 @@ mod implementation {
 
 #[cfg(not(feature = "ml"))]
 mod implementation {
-	use axum::{Extension, body::Body, extract::Path};
-	use surrealdb_core::dbs::{Session, capabilities::RouteTarget};
+	use axum::Extension;
+	use axum::body::Body;
+	use axum::extract::Path;
+	use surrealdb_core::dbs::Session;
+	use surrealdb_core::dbs::capabilities::RouteTarget;
 
-	use crate::net::{
-		AppState,
-		error::{Error as NetError, ResponseError},
-	};
+	use crate::net::AppState;
+	use crate::net::error::{Error as NetError, ResponseError};
 
 	/// This endpoint allows the user to import a model into the database.
 	pub async fn import(

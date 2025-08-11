@@ -1,14 +1,10 @@
 use crate::sql::Kind;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
 
 /// The type of records stored by a table
-#[revisioned(revision = 1)]
-#[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum TableType {
 	#[default]
 	Any,
@@ -42,7 +38,7 @@ impl Display for TableType {
 	}
 }
 
-impl From<TableType> for crate::catalog::TableKind {
+impl From<TableType> for crate::catalog::TableType {
 	fn from(v: TableType) -> Self {
 		match v {
 			TableType::Any => Self::Any,
@@ -52,24 +48,21 @@ impl From<TableType> for crate::catalog::TableKind {
 	}
 }
 
-impl From<crate::catalog::TableKind> for TableType {
-	fn from(v: crate::catalog::TableKind) -> Self {
+impl From<crate::catalog::TableType> for TableType {
+	fn from(v: crate::catalog::TableType) -> Self {
 		match v {
-			crate::catalog::TableKind::Any => Self::Any,
-			crate::catalog::TableKind::Normal => Self::Normal,
-			crate::catalog::TableKind::Relation(rel) => Self::Relation(rel.into()),
+			crate::catalog::TableType::Any => Self::Any,
+			crate::catalog::TableType::Normal => Self::Normal,
+			crate::catalog::TableType::Relation(rel) => Self::Relation(rel.into()),
 		}
 	}
 }
 
-#[revisioned(revision = 2)]
-#[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Relation {
 	pub from: Option<Kind>,
 	pub to: Option<Kind>,
-	#[revision(start = 2)]
 	pub enforced: bool,
 }
 

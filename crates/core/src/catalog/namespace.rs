@@ -5,9 +5,10 @@ use serde::{Deserialize, Serialize};
 use revision::{Revisioned, revisioned};
 
 use crate::{
-	expr::{Value, statements::info::InfoStructure},
+	expr::{statements::info::InfoStructure},
 	kvs::impl_kv_value_revisioned,
-	sql::{ToSql, statements::DefineNamespaceStatement},
+	sql::{Ident, ToSql, statements::DefineNamespaceStatement},
+	val::Value,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -61,7 +62,8 @@ impl_kv_value_revisioned!(NamespaceDefinition);
 impl NamespaceDefinition {
 	fn to_sql_definition(&self) -> DefineNamespaceStatement {
 		DefineNamespaceStatement {
-			name: self.name.clone().into(),
+			// SAFETY: we know the name is valid because it was validated when the namespace was created.
+			name: unsafe { Ident::new_unchecked(self.name.clone()) },
 			comment: self.comment.clone().map(|v| v.into()),
 			..Default::default()
 		}

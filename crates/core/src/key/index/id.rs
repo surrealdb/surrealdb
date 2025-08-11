@@ -39,6 +39,7 @@ use crate::catalog::NamespaceId;
 use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
+use crate::val::RecordIdKey;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
@@ -56,7 +57,7 @@ pub(crate) struct Id<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub id: crate::expr::Id,
+	pub id: RecordIdKey,
 }
 
 impl KVKey for Id<'_> {
@@ -76,7 +77,7 @@ impl<'a> Id<'a> {
 		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
-		id: crate::expr::Id,
+		id: RecordIdKey,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -107,7 +108,7 @@ mod tests {
 			DatabaseId(2),
 			"testtb",
 			"testix",
-			crate::expr::Id::from("id".to_string()),
+			RecordIdKey::from(strand!("id").to_owned()),
 		);
 		let enc = Id::encode_key(&val).unwrap();
 		assert_eq!(

@@ -42,8 +42,6 @@ pub struct Options {
 	pub(crate) strict: bool,
 	/// Should we process field queries?
 	pub(crate) import: bool,
-	/// Should we process function futures?
-	pub(crate) futures: Futures,
 	/// The data version as nanosecond timestamp
 	pub(crate) version: Option<u64>,
 	/// The channel over which we send notifications
@@ -51,19 +49,11 @@ pub struct Options {
 }
 
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub enum Force {
 	All,
 	None,
 	Table(Arc<[TableDefinition]>),
 	Index(Arc<[DefineIndexStatement]>),
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum Futures {
-	Disabled,
-	Enabled,
-	Never,
 }
 
 impl Default for Options {
@@ -85,7 +75,6 @@ impl Options {
 			force: Force::None,
 			strict: false,
 			import: false,
-			futures: Futures::Disabled,
 			auth_enabled: true,
 			sender: None,
 			auth: Arc::new(Auth::default()),
@@ -180,33 +169,6 @@ impl Options {
 		self.import = import;
 	}
 
-	/// Specify if we should process futures
-	pub fn with_futures(mut self, futures: bool) -> Self {
-		self.set_futures(futures);
-		self
-	}
-
-	pub fn set_futures(&mut self, futures: bool) {
-		self.futures = match self.futures {
-			Futures::Never => Futures::Never,
-			_ => match futures {
-				true => Futures::Enabled,
-				false => Futures::Disabled,
-			},
-		};
-	}
-
-	/// Specify if we should never process futures
-	pub fn with_futures_never(mut self) -> Self {
-		self.set_futures_never();
-		self
-	}
-
-	/// Specify if we should never process futures
-	pub fn set_futures_never(&mut self) {
-		self.futures = Futures::Never;
-	}
-
 	/// Create a new Options object with auth enabled
 	pub fn with_auth_enabled(mut self, auth_enabled: bool) -> Self {
 		self.auth_enabled = auth_enabled;
@@ -281,25 +243,6 @@ impl Options {
 			db: self.db.clone(),
 			force: self.force.clone(),
 			import,
-			..*self
-		}
-	}
-
-	/// Create a new Options object for a subquery
-	pub fn new_with_futures(&self, futures: bool) -> Self {
-		Self {
-			sender: self.sender.clone(),
-			auth: self.auth.clone(),
-			ns: self.ns.clone(),
-			db: self.db.clone(),
-			force: self.force.clone(),
-			futures: match self.futures {
-				Futures::Never => Futures::Never,
-				_ => match futures {
-					true => Futures::Enabled,
-					false => Futures::Disabled,
-				},
-			},
 			..*self
 		}
 	}
@@ -554,22 +497,5 @@ mod tests {
 				.is_allowed(Action::View, ResourceKind::Any, &Base::Db)
 				.unwrap();
 		}
-	}
-
-	#[test]
-	pub fn execute_futures() {
-		let mut opts = Options::default().with_futures(false);
-
-		// Futures should be disabled
-		assert!(matches!(opts.futures, Futures::Disabled));
-
-		// Allow setting to true
-		opts = opts.with_futures(true);
-		assert!(matches!(opts.futures, Futures::Enabled));
-
-		// Set to never and disallow setting to true
-		opts = opts.with_futures_never();
-		opts = opts.with_futures(true);
-		assert!(matches!(opts.futures, Futures::Never));
 	}
 }

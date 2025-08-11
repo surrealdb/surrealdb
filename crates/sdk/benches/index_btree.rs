@@ -7,7 +7,9 @@ use surrealdb::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
 use surrealdb::idx::trees::btree::{BState, BTree, Payload};
 use surrealdb::idx::trees::store::cache::TreeCache;
 use surrealdb::idx::trees::store::{TreeNodeProvider, TreeStore};
-use surrealdb::kvs::{Datastore, Key, LockType::*, TransactionType::*};
+use surrealdb::kvs::LockType::*;
+use surrealdb::kvs::TransactionType::*;
+use surrealdb::kvs::{Datastore, Key};
 use tokio::runtime::Runtime;
 macro_rules! get_key_value {
 	($idx:expr_2021) => {{ (format!("{}", $idx).into(), ($idx * 10) as Payload) }};

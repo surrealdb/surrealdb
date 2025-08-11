@@ -1,15 +1,16 @@
 //! Stores the key prefix for all keys under a table
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::key::database::all::DatabaseRoot;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct TableRoot<'a> {
-	pub db_root: DatabaseRoot,
+	__: u8,
+	_a: u8,
+	pub ns: NamespaceId,
+	_b: u8,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 }
@@ -32,7 +33,11 @@ impl<'a> TableRoot<'a> {
 	#[inline]
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str) -> Self {
 		Self {
-			db_root: DatabaseRoot::new(ns, db),
+			__: b'/',
+			_a: b'*',
+			ns,
+			_b: b'*',
+			db,
 			_c: b'*',
 			tb,
 		}

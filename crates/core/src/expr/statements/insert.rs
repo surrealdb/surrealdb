@@ -2,10 +2,10 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::paths::IN;
-use crate::expr::paths::OUT;
-use crate::expr::{Data, FlowResultExt as _, Id, Output, Table, Thing, Timeout, Value, Version};
+use crate::expr::paths::{IN, OUT};
+use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
 use crate::idx::planner::RecordStrategy;
+use crate::val::{Datetime, RecordId, Table};
 use anyhow::{Result, bail, ensure};
 
 use reblessive::tree::Stk;
@@ -13,12 +13,10 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct InsertStatement {
-	pub into: Option<Value>,
+	pub into: Option<Expr>,
 	pub data: Data,
 	/// Does the statement have the ignore clause.
 	pub ignore: bool,
@@ -26,17 +24,11 @@ pub struct InsertStatement {
 	pub output: Option<Output>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
-	#[revision(start = 2)]
 	pub relation: bool,
-	#[revision(start = 3)]
-	pub version: Option<Version>,
+	pub version: Option<Expr>,
 }
 
 impl InsertStatement {
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		true
-	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -51,11 +43,16 @@ impl InsertStatement {
 		let mut i = Iterator::new();
 		// Propagate the version to the underlying datastore
 		let version = match &self.version {
-			Some(v) => Some(v.compute(stk, ctx, opt, doc).await?),
+			Some(v) => Some(
+				stk.run(|stk| v.compute(stk, ctx, opt, doc))
+					.await
+					.catch_return()?
+					.cast_to::<Datetime>()?
+					.to_version_stamp()?,
+			),
 			_ => None,
 		};
-		// Ensure futures are stored
-		let opt = &opt.new_with_futures(false).with_version(version);
+		let opt = &opt.clone().with_version(version);
 		// Check if there is a timeout
 		let ctx = match self.timeout.as_ref() {
 			Some(timeout) => {
@@ -68,25 +65,29 @@ impl InsertStatement {
 		// Parse the INTO expression
 		let into = match &self.into {
 			None => None,
-			Some(into) => match into.compute(stk, &ctx, opt, doc).await.catch_return()? {
-				Value::Table(into) => Some(into),
-				v => {
-					bail!(Error::InsertStatement {
-						value: v.to_string(),
-					})
+			Some(into) => {
+				match stk.run(|stk| into.compute(stk, &ctx, opt, doc)).await.catch_return()? {
+					Value::Table(into) => Some(into),
+					v => {
+						bail!(Error::InsertStatement {
+							value: v.to_string(),
+						})
+					}
 				}
-			},
+			}
 		};
+
 		// Parse the data expression
 		match &self.data {
 			// Check if this is a traditional statement
 			Data::ValuesExpression(v) => {
 				for v in v {
 					// Create a new empty base object
-					let mut o = Value::base();
+					let mut o = Value::empty_object();
 					// Set each field from the expression
 					for (k, v) in v.iter() {
-						let v = v.compute(stk, &ctx, opt, None).await.catch_return()?;
+						let v =
+							stk.run(|stk| v.compute(stk, &ctx, opt, None)).await.catch_return()?;
 						o.set(stk, &ctx, opt, k, v).await?;
 					}
 					// Specify the new table record id
@@ -97,7 +98,7 @@ impl InsertStatement {
 			}
 			// Check if this is a modern statement
 			Data::SingleExpression(v) => {
-				let v = v.compute(stk, &ctx, opt, doc).await.catch_return()?;
+				let v = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await.catch_return()?;
 				match v {
 					Value::Array(v) => {
 						for v in v {
@@ -166,7 +167,7 @@ impl fmt::Display for InsertStatement {
 			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.version {
-			write!(f, " {v}")?
+			write!(f, "VERSION {v}")?
 		}
 		if let Some(ref v) = self.timeout {
 			write!(f, " {v}")?
@@ -178,44 +179,35 @@ impl fmt::Display for InsertStatement {
 	}
 }
 
-fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable> {
-	match relation {
-		false => Ok(Iterable::Mergeable(id, v)),
-		true => {
-			let f = match v.pick(&*IN) {
-				Value::Thing(v) => v,
-				v => {
-					bail!(Error::InsertStatementIn {
-						value: v.to_string(),
-					})
-				}
-			};
-			let w = match v.pick(&*OUT) {
-				Value::Thing(v) => v,
-				v => {
-					bail!(Error::InsertStatementOut {
-						value: v.to_string(),
-					})
-				}
-			};
-			Ok(Iterable::Relatable(f, id, w, Some(v)))
-		}
+fn iterable(id: RecordId, v: Value, relation: bool) -> Result<Iterable> {
+	if relation {
+		let f = match v.pick(&*IN) {
+			Value::Thing(v) => v,
+			v => {
+				bail!(Error::InsertStatementIn {
+					value: v.to_string(),
+				})
+			}
+		};
+		let w = match v.pick(&*OUT) {
+			Value::Thing(v) => v,
+			v => {
+				bail!(Error::InsertStatementOut {
+					value: v.to_string(),
+				})
+			}
+		};
+		Ok(Iterable::Relatable(f, id, w, Some(v)))
+	} else {
+		Ok(Iterable::Mergeable(id, v))
 	}
 }
 
-fn gen_id(v: &Value, into: &Option<Table>) -> Result<Thing> {
+fn gen_id(v: &Value, into: &Option<Table>) -> Result<RecordId> {
 	match into {
-		Some(into) => v.rid().generate(into, true),
+		Some(into) => v.rid().generate(into.clone().into_strand(), true),
 		None => match v.rid() {
-			Value::Thing(v) => match v {
-				Thing {
-					id: Id::Generate(_),
-					..
-				} => Err(anyhow::Error::new(Error::InsertStatementId {
-					value: v.to_string(),
-				})),
-				v => Ok(v),
-			},
+			Value::Thing(v) => Ok(v),
 			v => Err(anyhow::Error::new(Error::InsertStatementId {
 				value: v.to_string(),
 			})),

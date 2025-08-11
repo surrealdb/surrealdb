@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Live {
 	pub ns: NamespaceId,
 	pub db: DatabaseId,

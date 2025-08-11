@@ -95,7 +95,9 @@ mod tests {
 	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::search::postings::Postings;
-	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType, TransactionType::*};
+	use crate::kvs::LockType::*;
+	use crate::kvs::TransactionType::*;
+	use crate::kvs::{Datastore, Transaction, TransactionType};
 	use test_log::test;
 
 	async fn new_operation(

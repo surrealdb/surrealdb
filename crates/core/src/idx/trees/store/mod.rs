@@ -25,7 +25,6 @@ use std::sync::Arc;
 pub type NodeId = u64;
 pub type StoreGeneration = u64;
 
-#[non_exhaustive]
 #[expect(clippy::large_enum_variant)]
 pub enum TreeStore<N>
 where
@@ -122,7 +121,6 @@ where
 }
 
 #[derive(Clone)]
-#[non_exhaustive]
 pub enum TreeNodeProvider {
 	DocIds(IndexKeyBase),
 	DocLengths(IndexKeyBase),
@@ -169,7 +167,6 @@ impl TreeNodeProvider {
 	}
 }
 
-#[non_exhaustive]
 #[derive(Debug)]
 pub struct StoredNode<N>
 where
@@ -213,7 +210,6 @@ pub trait TreeNode: Debug + Clone + Display {
 }
 
 #[derive(Clone)]
-#[non_exhaustive]
 pub struct IndexStores(Arc<Inner>);
 
 struct Inner {

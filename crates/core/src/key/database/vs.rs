@@ -1,9 +1,8 @@
 //! Stores database versionstamps
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::KVKey;
 
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
 use crate::vs::VersionStamp;
 use serde::{Deserialize, Serialize};
 

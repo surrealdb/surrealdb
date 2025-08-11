@@ -6,14 +6,12 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
-#[cfg(target_family = "wasm")]
-use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
-use crate::expr::{Base, Ident, Idioms, Index, Part, Strand, Value};
-#[cfg(target_family = "wasm")]
-use crate::expr::{Output, Values};
+use crate::expr::{Base, Ident, Idiom, Index, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::fmt::Fmt;
 use crate::sql::ToSql;
+use crate::val::{Array, Strand, Value};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -23,21 +21,22 @@ use std::fmt::{self, Display};
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[revisioned(revision = 4)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[cfg(target_family = "wasm")]
+use crate::expr::Output;
+#[cfg(target_family = "wasm")]
+use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
+
+use super::DefineKind;
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct DefineIndexStatement {
+	pub kind: DefineKind,
 	pub name: Ident,
 	pub what: Ident,
-	pub cols: Idioms,
+	pub cols: Vec<Idiom>,
 	pub index: Index,
 	pub comment: Option<Strand>,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub overwrite: bool,
-	#[revision(start = 4)]
 	pub concurrently: bool,
 }
 
@@ -62,12 +61,16 @@ impl DefineIndexStatement {
 
 		// Check if the definition exists
 		if txn.get_tb_index(tb.namespace_id, tb.database_id, &tb.name, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::IxAlreadyExists {
-					name: self.name.to_string(),
-				});
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::IxAlreadyExists {
+							name: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 			// Clear the index store cache
 			#[cfg(not(target_family = "wasm"))]
@@ -112,8 +115,7 @@ impl DefineIndexStatement {
 			&key,
 			&DefineIndexStatement {
 				// Don't persist the `IF NOT EXISTS`, `OVERWRITE` and `CONCURRENTLY` clause to schema
-				if_not_exists: false,
-				overwrite: false,
+				kind: DefineKind::Default,
 				concurrently: false,
 				..self.clone()
 			},
@@ -139,7 +141,7 @@ impl DefineIndexStatement {
 			cache.clear_tb(tb.namespace_id, tb.database_id, &tb.name);
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Process the index
 		#[cfg(not(target_family = "wasm"))]
 		self.async_index(stk, ctx, opt, doc, !self.concurrently).await?;
@@ -157,6 +159,8 @@ impl DefineIndexStatement {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<()> {
+		use crate::expr::Expr;
+
 		{
 			// Create the remove statement
 			let stm = RemoveIndexStatement {
@@ -172,7 +176,7 @@ impl DefineIndexStatement {
 			let opt = &opt.new_with_force(Force::Index(Arc::new([self.clone()])));
 			// Update the index data
 			let stm = UpdateStatement {
-				what: Values(vec![Value::Table(self.what.clone().into())]),
+				what: vec![Expr::Table(self.what.clone().into())],
 				output: Some(Output::None),
 				..UpdateStatement::default()
 			};
@@ -206,13 +210,18 @@ impl DefineIndexStatement {
 impl Display for DefineIndexStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE INDEX")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
-		}
-		write!(f, " {} ON {} FIELDS {}", self.name, self.what.to_sql(), self.cols)?;
+		write!(
+			f,
+			" {} ON {} FIELDS {}",
+			self.name,
+			self.what.to_sql(),
+			Fmt::comma_separated(self.cols.iter())
+		)?;
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index)?;
 		}
@@ -231,7 +240,7 @@ impl InfoStructure for DefineIndexStatement {
 		Value::from(map! {
 			"name".to_string() => self.name.structure(),
 			"what".to_string() => self.what.structure(),
-			"cols".to_string() => self.cols.structure(),
+			"cols".to_string() => Value::Array(Array(self.cols.into_iter().map(|x| x.structure()).collect())),
 			"index".to_string() => self.index.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})

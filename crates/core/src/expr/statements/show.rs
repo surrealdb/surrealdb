@@ -1,8 +1,9 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Base, Datetime, Table, Value};
+use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
+use crate::val::Datetime;
 use crate::vs::VersionStamp;
 use anyhow::Result;
 
@@ -11,9 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum ShowSince {
 	Timestamp(Datetime),
 	Versionstamp(u64),
@@ -34,11 +33,9 @@ impl ShowSince {
 
 /// A SHOW CHANGES statement for displaying changes made to a table or database.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct ShowStatement {
-	pub table: Option<Table>,
+	pub table: Option<Ident>,
 	pub since: ShowSince,
 	pub limit: Option<u32>,
 }
@@ -61,7 +58,7 @@ impl ShowStatement {
 			&txn,
 			ns,
 			db,
-			self.table.as_deref().map(String::as_str),
+			self.table.as_deref(),
 			self.since.clone(),
 			self.limit,
 		)

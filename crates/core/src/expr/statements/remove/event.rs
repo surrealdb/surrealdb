@@ -11,14 +11,11 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use uuid::Uuid;
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct RemoveEventStatement {
 	pub name: Ident,
 	pub table_name: Ident,
-	#[revision(start = 2)]
 	pub if_exists: bool,
 }
 
@@ -44,7 +41,7 @@ impl RemoveEventStatement {
 			}
 		};
 		// Delete the definition
-		let key = crate::key::table::ev::new(ns, db, &ev.what, &ev.name);
+		let key = crate::key::table::ev::new(ns, db, &ev.target_table, &ev.name);
 		txn.del(&key).await?;
 
 		let Some(tb) = txn.get_tb(ns, db, &self.table_name).await? else {
@@ -70,7 +67,7 @@ impl RemoveEventStatement {
 			cache.clear_tb(ns, db, &self.table_name);
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

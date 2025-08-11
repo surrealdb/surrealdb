@@ -2,13 +2,14 @@ use crate::catalog::DatabaseDefinition;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Cond, FlowResultExt as _, Thing, Value};
+use crate::expr::{Cond, Expr, FlowResultExt as _, Literal};
 use crate::idx::docids::DocId;
 use crate::idx::docids::btdocids::BTreeDocIds;
 use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::knn::Ids64;
 use crate::kvs::Transaction;
+use crate::val::{RecordId, Value};
 use ahash::HashMap;
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -81,7 +82,7 @@ impl<'a> HnswConditionChecker<'a> {
 
 impl<'a> MTreeConditionChecker<'a> {
 	pub fn new_cond(ctx: &'a Context, opt: &'a Options, cond: Arc<Cond>) -> Self {
-		if Cond(Value::Bool(true)).ne(cond.as_ref()) {
+		if Expr::Literal(Literal::Bool(true)) != cond.0 {
 			Self::MTreeCondition(MTreeCondChecker {
 				ctx,
 				opt,
@@ -155,7 +156,7 @@ impl MTreeChecker<'_> {
 }
 
 struct CheckerCacheEntry {
-	record: Option<(Arc<Thing>, Arc<Value>)>,
+	record: Option<(Arc<RecordId>, Arc<Value>)>,
 	truthy: bool,
 }
 
@@ -182,23 +183,23 @@ impl CheckerCacheEntry {
 		db: &DatabaseDefinition,
 		ctx: &Context,
 		opt: &Options,
-		rid: Option<Thing>,
+		rid: Option<RecordId>,
 		cond: &Cond,
 	) -> Result<Self> {
 		if let Some(rid) = rid {
 			let rid = Arc::new(rid);
 			let txn = ctx.tx();
 			let val =
-				txn.get_record(db.namespace_id, db.database_id, &rid.tb, &rid.id, None).await?;
-			if !val.is_none_or_null() {
+				txn.get_record(db.namespace_id, db.database_id, &rid.table, &rid.key, None).await?;
+			if !val.is_nullish() {
 				let (value, truthy) = {
 					let mut cursor_doc = CursorDoc {
 						rid: Some(rid.clone()),
 						ir: None,
 						doc: val.into(),
 					};
-					let truthy = cond
-						.compute(stk, ctx, opt, Some(&cursor_doc))
+					let truthy = stk
+						.run(|stk| cond.0.compute(stk, ctx, opt, Some(&cursor_doc)))
 						.await
 						.catch_return()?
 						.is_truthy();

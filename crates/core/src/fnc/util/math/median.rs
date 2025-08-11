@@ -1,4 +1,4 @@
-use crate::expr::number::{Number, Sorted};
+use crate::val::{Number, number::Sorted};
 
 pub trait Median {
 	fn median(self) -> f64;
@@ -21,7 +21,7 @@ impl Median for Sorted<&Vec<Number>> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::expr::number::Sort;
+	use crate::val::number::Sort;
 
 	#[test]
 	fn test_median() {

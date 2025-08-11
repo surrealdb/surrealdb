@@ -1,21 +1,25 @@
 use crate::dbs::Session;
 use crate::err::Error;
-use crate::expr::Thing;
+use crate::expr::Algorithm;
 use crate::expr::access_type::{AccessType, Jwt, JwtAccessVerify};
-use crate::expr::{Algorithm, Value, statements::DefineUserStatement};
+use crate::expr::statements::DefineUserStatement;
 use crate::iam::access::{authenticate_generic, authenticate_record};
+use crate::iam::issue::expiration;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks;
-use crate::iam::{Actor, Auth, Level, Role, issue::expiration, token::Claims};
-use crate::kvs::{Datastore, LockType::*, TransactionType::*};
+use crate::iam::token::Claims;
+use crate::iam::{Actor, Auth, Level, Role};
+use crate::kvs::Datastore;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
 use crate::syn;
+use crate::val::Value;
 use anyhow::{Result, bail};
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
 use jsonwebtoken::{DecodingKey, Validation, decode};
 use std::str::{self, FromStr};
-use std::sync::Arc;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 fn config(alg: Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation)> {
 	let (dec, mut val) = match alg {
@@ -143,7 +147,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	// Decode the token without verifying
 	let token_data = decode::<Claims>(token, &KEY, &DUD)?;
 	// Convert the token to a SurrealQL object value
-	let value = (&token_data.claims).into();
+	let value = Value::from(token_data.claims.clone().into_claims_object());
 	// Check if the auth token can be used
 	if let Some(nbf) = token_data.claims.nbf {
 		if nbf > Utc::now().timestamp() {
@@ -182,7 +186,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				}
 			};
 			// Parse the record id
-			let mut rid: Thing = syn::thing(id)?.into();
+			let mut rid = syn::record_id(id)?;
 			// Get the database access method
 			let Some(de) = tx.get_db_access(db_def.namespace_id, db_def.database_id, ac).await?
 			else {
@@ -196,7 +200,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
-			let cf = match &de.kind {
+			let cf = match &de.access_type {
 				AccessType::Record(at) => match &at.jwt.verify {
 					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
@@ -219,7 +223,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(ns).with_db(db);
 				sess.rd = Some(rid.clone().into());
-				sess.tk = Some((&token_data.claims).into());
+				sess.tk = Some(token_data.claims.clone().into_claims_object().into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
 				rid = authenticate_record(kvs, &sess, au).await?;
@@ -277,10 +281,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			};
 
 			// Obtain the configuration to verify the token based on the access method
-			match &de.kind {
+			match &de.access_type {
 				// If the access type is Jwt or Bearer, this is database access
 				AccessType::Jwt(_) | AccessType::Bearer(_) => {
-					let cf = match &de.kind.jwt().verify {
+					let cf = match &de.access_type.jwt().verify {
 						JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 						#[cfg(feature = "jwks")]
 						JwtAccessVerify::Jwks(jwks) => {
@@ -301,7 +305,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					if let Some(au) = &de.authenticate {
 						// Setup the system session for executing the clause
 						let mut sess = Session::editor().with_ns(ns).with_db(db);
-						sess.tk = Some((&token_data.claims).into());
+						sess.tk = Some(token_data.claims.clone().into_claims_object().into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
 						authenticate_generic(kvs, &sess, au).await?;
@@ -361,7 +365,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						// AUTHENTICATE clause
 						// Setup the system session for finding the signin record
 						let mut sess = Session::editor().with_ns(ns).with_db(db);
-						sess.tk = Some((&token_data.claims).into());
+						sess.tk = Some(token_data.claims.clone().into_claims_object().into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
 						let rid = authenticate_record(kvs, &sess, au).await?;
@@ -474,8 +478,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			};
 
 			// Obtain the configuration to verify the token based on the access method
-			let cf = match &de.kind {
-				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.kind.jwt().verify {
+			let cf = match &de.access_type {
+				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.access_type.jwt().verify {
 					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
 					JwtAccessVerify::Jwks(jwks) => {
@@ -496,7 +500,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			if let Some(au) = &de.authenticate {
 				// Setup the system session for executing the clause
 				let mut sess = Session::editor().with_ns(ns);
-				sess.tk = Some((&token_data.claims).into());
+				sess.tk = Some(token_data.claims.clone().into_claims_object().into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
 				authenticate_generic(kvs, &sess, au).await?;
@@ -602,8 +606,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			};
 
 			// Obtain the configuration to verify the token based on the access method
-			let cf = match &de.kind {
-				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.kind.jwt().verify {
+			let cf = match &de.access_type {
+				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.access_type.jwt().verify {
 					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
 					JwtAccessVerify::Jwks(jwks) => {
@@ -624,7 +628,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			if let Some(au) = &de.authenticate {
 				// Setup the system session for executing the clause
 				let mut sess = Session::editor();
-				sess.tk = Some((&token_data.claims).into());
+				sess.tk = Some(token_data.claims.clone().into_claims_object().into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
 				authenticate_generic(kvs, &sess, au).await?;
@@ -819,7 +823,13 @@ fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Resu
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::iam::token::{Audience, HEADER};
+	use crate::{
+		iam::token::{Audience, HEADER},
+		sql::{
+			Ast, Ident,
+			statements::define::{DefineKind, user::PassType},
+		},
+	};
 	use argon2::password_hash::{PasswordHasher, SaltString};
 	use chrono::Duration;
 	use jsonwebtoken::{EncodingKey, encode};
@@ -972,11 +982,9 @@ mod tests {
 	#[tokio::test]
 	async fn test_basic_nonexistent_role() {
 		use crate::iam::Error as IamError;
-		use crate::sql::{
-			Base, Statement,
-			statements::{DefineUserStatement, define::DefineStatement},
-			user::UserDuration,
-		};
+		use crate::sql::statements::DefineUserStatement;
+		use crate::sql::statements::define::DefineStatement;
+		use crate::sql::{Base, Expr, TopLevelExpr};
 		let test_levels = vec![
 			TestLevel {
 				level: "ROOT",
@@ -1007,23 +1015,28 @@ mod tests {
 			};
 
 			let user = DefineUserStatement {
+				kind: DefineKind::Default,
 				base,
-				name: "user".into(),
+				name: Ident::new("user".to_string()).unwrap(),
 				// This is the Argon2id hash for "pass" with a random salt.
-				hash: "$argon2id$v=19$m=16,t=2,p=1$VUlHTHVOYjc5d0I1dGE3OQ$sVtmRNH+Xtiijk0uXL2+4w"
-					.to_string(),
-				code: "dummy".to_string(),
-				roles: vec!["nonexistent".into()],
-				duration: UserDuration::default(),
+				pass_type: PassType::Hash(
+					"$argon2id$v=19$m=16,t=2,p=1$VUlHTHVOYjc5d0I1dGE3OQ$sVtmRNH+Xtiijk0uXL2+4w"
+						.to_string(),
+				),
+				roles: vec![Ident::new("nonexistent".to_owned()).unwrap()],
+				token_duration: None,
+				session_duration: None,
 				comment: None,
-				if_not_exists: false,
-				overwrite: false,
+			};
+
+			let ast = Ast {
+				expressions: vec![TopLevelExpr::Expr(Expr::Define(Box::new(
+					DefineStatement::User(user),
+				)))],
 			};
 
 			// Use pre-parsed definition, which bypasses the existent role check during parsing.
-			ds.process(Statement::Define(DefineStatement::User(user)).into(), &sess, None)
-				.await
-				.unwrap();
+			ds.process(ast, &sess, None).await.unwrap();
 
 			let mut sess = Session {
 				ns: level.ns.map(String::from),
@@ -1467,9 +1480,11 @@ mod tests {
 	#[tokio::test]
 	async fn test_token_record_jwks() {
 		use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
-		use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
+		use base64::Engine;
+		use base64::engine::general_purpose::STANDARD_NO_PAD;
 		use jsonwebtoken::jwk::{Jwk, JwkSet};
-		use rand::{Rng, distributions::Alphanumeric};
+		use rand::Rng;
+		use rand::distributions::Alphanumeric;
 		use wiremock::matchers::{method, path};
 		use wiremock::{Mock, MockServer, ResponseTemplate};
 

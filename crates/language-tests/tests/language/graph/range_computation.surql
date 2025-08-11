@@ -20,6 +20,7 @@ LET $num = 10;
     RELATE a:1->edge:[$num - 3]->a:2;
     RELATE a:1->edge:[$num - 2]->a:2;
     RELATE a:1->edge:[$num - 1]->a:2;
+	NONE
 };
 
 // Testing one side with a variable here to ensure computation works

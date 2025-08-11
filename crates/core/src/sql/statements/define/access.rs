@@ -1,67 +1,37 @@
-use crate::sql::{AccessType, Base, Ident, SqlValue, Strand, ToSql, access::AccessDuration};
+use crate::sql::access::AccessDuration;
+use crate::sql::{AccessType, Base, Expr, Ident, ToSql};
+use crate::val::Strand;
 
-use rand::Rng;
-use rand::distributions::Alphanumeric;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 3)]
-#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use super::DefineKind;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct DefineAccessStatement {
+	pub kind: DefineKind,
 	pub name: Ident,
 	pub base: Base,
-	pub kind: AccessType,
-	#[revision(start = 2)]
-	pub authenticate: Option<SqlValue>,
+	pub access_type: AccessType,
+	pub authenticate: Option<Expr>,
 	pub duration: AccessDuration,
 	pub comment: Option<Strand>,
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub overwrite: bool,
-}
-
-impl DefineAccessStatement {
-	/// Generate a random key to be used to sign session tokens
-	/// This key will be used to sign tokens issued with this access method
-	/// This value is used by default in every access method other than JWT
-	pub(crate) fn random_key() -> String {
-		rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()
-	}
-
-	/// Returns a version of the statement where potential secrets are redacted
-	/// This function should be used when displaying the statement to datastore users
-	/// This function should NOT be used when displaying the statement for export purposes
-	pub fn redacted(&self) -> DefineAccessStatement {
-		let mut das = self.clone();
-		das.kind = match das.kind {
-			AccessType::Jwt(ac) => AccessType::Jwt(ac.redacted()),
-			AccessType::Record(mut ac) => {
-				ac.jwt = ac.jwt.redacted();
-				AccessType::Record(ac)
-			}
-			AccessType::Bearer(mut ac) => {
-				ac.jwt = ac.jwt.redacted();
-				AccessType::Bearer(ac)
-			}
-		};
-		das
-	}
 }
 
 impl Display for DefineAccessStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE ACCESS",)?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => {
+				write!(f, " OVERWRITE")?;
+			}
+			DefineKind::IfNotExists => {
+				write!(f, " IF NOT EXISTS")?;
+			}
 		}
 		// The specific access method definition is displayed by AccessType
-		write!(f, " {} ON {} TYPE {}", self.name, self.base, self.kind)?;
+		write!(f, " {} ON {} TYPE {}", self.name, self.base, self.access_type)?;
 		// The additional authentication clause
 		if let Some(ref v) = self.authenticate {
 			write!(f, " AUTHENTICATE {v}")?
@@ -70,7 +40,7 @@ impl Display for DefineAccessStatement {
 		// If default values were not printed, exports would not be forward compatible
 		// None values need to be printed, as they are different from the default values
 		write!(f, " DURATION")?;
-		if self.kind.can_issue_grants() {
+		if self.access_type.can_issue_grants() {
 			write!(
 				f,
 				" FOR GRANT {},",
@@ -80,7 +50,7 @@ impl Display for DefineAccessStatement {
 				}
 			)?;
 		}
-		if self.kind.can_issue_tokens() {
+		if self.access_type.can_issue_tokens() {
 			write!(
 				f,
 				" FOR TOKEN {},",
@@ -108,14 +78,13 @@ impl Display for DefineAccessStatement {
 impl From<DefineAccessStatement> for crate::expr::statements::DefineAccessStatement {
 	fn from(v: DefineAccessStatement) -> Self {
 		crate::expr::statements::DefineAccessStatement {
+			kind: v.kind.into(),
 			name: v.name.into(),
 			base: v.base.into(),
-			kind: v.kind.into(),
+			access_type: v.access_type.into(),
 			authenticate: v.authenticate.map(Into::into),
 			duration: v.duration.into(),
-			comment: v.comment.map(Into::into),
-			if_not_exists: v.if_not_exists,
-			overwrite: v.overwrite,
+			comment: v.comment,
 		}
 	}
 }
@@ -123,14 +92,13 @@ impl From<DefineAccessStatement> for crate::expr::statements::DefineAccessStatem
 impl From<crate::expr::statements::DefineAccessStatement> for DefineAccessStatement {
 	fn from(v: crate::expr::statements::DefineAccessStatement) -> Self {
 		DefineAccessStatement {
+			kind: v.kind.into(),
 			name: v.name.into(),
 			base: v.base.into(),
-			kind: v.kind.into(),
+			access_type: v.access_type.into(),
 			authenticate: v.authenticate.map(Into::into),
 			duration: v.duration.into(),
-			comment: v.comment.map(Into::into),
-			if_not_exists: v.if_not_exists,
-			overwrite: v.overwrite,
+			comment: v.comment,
 		}
 	}
 }

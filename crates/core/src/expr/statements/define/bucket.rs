@@ -1,27 +1,26 @@
 use crate::buc::{self, BucketConnectionKey};
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Base, FlowResultExt, Ident, Permission, Strand, Value};
+use crate::expr::statements::info::InfoStructure;
+use crate::expr::{Base, Expr, FlowResultExt, Ident, Literal, Permission};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
-use crate::{ctx::Context, expr::statements::info::InfoStructure};
+use crate::val::{Object, Strand, Value};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-use super::CursorDoc;
+use super::{CursorDoc, DefineKind};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct DefineBucketStatement {
-	pub if_not_exists: bool,
-	pub overwrite: bool,
+	pub kind: DefineKind,
 	pub name: Ident,
-	pub backend: Option<Value>,
+	pub backend: Option<Expr>,
 	pub permissions: Permission,
 	pub readonly: bool,
 	pub comment: Option<Strand>,
@@ -42,17 +41,28 @@ impl DefineBucketStatement {
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
 		if let Some(bucket) = txn.get_db_bucket(ns, db, &self.name).await? {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::BuAlreadyExists {
-					value: bucket.name.to_string(),
-				});
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::BuAlreadyExists {
+							value: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => {
+					return Ok(Value::None);
+				}
 			}
 		}
 		// Process the backend input
 		let backend = if let Some(ref url) = self.backend {
-			Some(url.compute(stk, ctx, opt, doc).await.catch_return()?.coerce_to::<String>()?)
+			Some(
+				stk.run(|stk| url.compute(stk, ctx, opt, doc))
+					.await
+					.catch_return()?
+					.coerce_to::<String>()?,
+			)
 		} else {
 			None
 		};
@@ -83,7 +93,7 @@ impl DefineBucketStatement {
 		};
 		txn.set(&key, &ap, None).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -92,11 +102,10 @@ impl DefineBucketStatement {
 impl Display for DefineBucketStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE BUCKET")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {}", self.name)?;
 
@@ -120,21 +129,21 @@ impl Display for DefineBucketStatement {
 
 impl InfoStructure for DefineBucketStatement {
 	fn structure(self) -> Value {
-		Value::from(map! {
+		Value::from(Object(map! {
 			"name".to_string() => self.name.structure(),
 			"permissions".to_string() => self.permissions.structure(),
-			"backend".to_string(), if let Some(backend) = self.backend => backend,
+			// TODO: Null byte validity
+			"backend".to_string(), if let Some(backend) = self.backend => Value::Strand(Strand::new(backend.to_string()).unwrap()),
 			"readonly".to_string() => self.readonly.into(),
 			"comment".to_string(), if let Some(comment) = self.comment => comment.into(),
-		})
+		}))
 	}
 }
 
 // Computed bucket definition struct
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct BucketDefinition {
 	pub id: Option<u32>,
 	pub name: Ident,
@@ -148,10 +157,10 @@ impl_kv_value_revisioned!(BucketDefinition);
 impl From<BucketDefinition> for DefineBucketStatement {
 	fn from(value: BucketDefinition) -> Self {
 		DefineBucketStatement {
-			if_not_exists: false,
-			overwrite: false,
+			kind: DefineKind::Default,
 			name: value.name,
-			backend: value.backend.map(|v| v.into()),
+			// TODO: Null byte validity.
+			backend: value.backend.map(|v| Expr::Literal(Literal::Strand(Strand::new(v).unwrap()))),
 			permissions: value.permissions,
 			readonly: value.readonly,
 			comment: value.comment,

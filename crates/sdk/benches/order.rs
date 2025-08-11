@@ -2,7 +2,7 @@ use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_mai
 use std::time::Duration;
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
-use surrealdb_core::expr::Value;
+use surrealdb_core::val::Value;
 use tokio::runtime::{Builder, Runtime};
 
 fn bench_order(c: &mut Criterion) {

@@ -1,11 +1,8 @@
 //! Stores a record document
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::expr::Id;
-use crate::expr::Value;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-
+use crate::val::{RecordIdKey, Value};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -19,14 +16,14 @@ pub(crate) struct ThingKey<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: Id,
+	pub id: RecordIdKey,
 }
 
 impl KVKey for ThingKey<'_> {
 	type ValueType = Value;
 }
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &Id) -> ThingKey<'a> {
+pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &RecordIdKey) -> ThingKey<'a> {
 	ThingKey::new(ns, db, tb, id.to_owned())
 }
 
@@ -49,7 +46,7 @@ impl Categorise for ThingKey<'_> {
 }
 
 impl<'a> ThingKey<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: Id) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -81,7 +78,7 @@ mod tests {
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
-			"testid".into(),
+			RecordIdKey::String("testid".to_owned()),
 		);
 		let enc = ThingKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\0\0\0\x01testid\0");
@@ -90,8 +87,8 @@ mod tests {
 	fn key_complex() {
 		//
 		let id1 = "foo:['test']";
-		let thing = syn::thing(id1).expect("Failed to parse the ID");
-		let id1 = thing.id.into();
+		let thing = syn::record_id(id1).expect("Failed to parse the ID");
+		let id1 = thing.key.into();
 		let val = ThingKey::new(NamespaceId(1), DatabaseId(2), "testtb", id1);
 		let enc = ThingKey::encode_key(&val).unwrap();
 		assert_eq!(
@@ -99,14 +96,11 @@ mod tests {
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\0\0\0\x03\0\0\0\x04test\0\x01"
 		);
 
-		println!("---");
 		let id2 = "foo:[u'f8e238f2-e734-47b8-9a16-476b291bd78a']";
-		let thing = syn::thing(id2).expect("Failed to parse the ID");
-		let id2 = thing.id.into();
+		let record_id = syn::record_id(id2).expect("Failed to parse the ID");
+		let id2 = record_id.key.into();
 		let val = ThingKey::new(NamespaceId(1), DatabaseId(2), "testtb", id2);
 		let enc = ThingKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\0\0\0\x03\0\0\0\x07\0\0\0\0\0\0\0\x10\xf8\xe2\x38\xf2\xe7\x34\x47\xb8\x9a\x16\x47\x6b\x29\x1b\xd7\x8a\x01");
-
-		println!("---");
 	}
 }

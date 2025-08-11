@@ -17,7 +17,7 @@ value = "1"
 value = "1"
 
 [[test.results]]
-value = "[{ id: t:0, v: NONE }, { id: t:1, v: NULL }, { id: t:2, v: true }, { id: t:3, v: 1 }, { id: t:4, v: 1d }, { id: t:5, v: u'ffffffff-ffff-ffff-ffff-ffffffffffff' }, { id: t:6, v: [] }, { id: t:7, v: {  } }, { id: t:8, v: (1, 2) }, { id: t:9, v: a:b }, { id: t:10, v: |a:1..2| }, { id: t:11, v: /a/ }, { id: t:12, v: 1..2 }, { id: t:13, v: |$a: any| {  } }]"
+value = "[{ id: t:0, v: NONE }, { id: t:1, v: NULL }, { id: t:2, v: true }, { id: t:3, v: 1 }, { id: t:4, v: 1d }, { id: t:5, v: u'ffffffff-ffff-ffff-ffff-ffffffffffff' }, { id: t:6, v: [] }, { id: t:7, v: {  } }, { id: t:8, v: (1, 2) }, { id: t:9, v: a:b }, { id: t:10, v: /a/ }, { id: t:11, v: 1..2 }]"
 
 */
 array::min([]);

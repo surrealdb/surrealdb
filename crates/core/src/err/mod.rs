@@ -1,13 +1,13 @@
 use crate::api::err::ApiError;
 use crate::buc::BucketOperation;
-use crate::expr::idiom::Idiom;
 use crate::expr::index::Distance;
-use crate::expr::thing::Thing;
-use crate::expr::value::{CastError, CoerceError, Value};
+use crate::expr::operation::PatchError;
+use crate::expr::{Expr, Idiom};
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
 use crate::syn::error::RenderedError as RenderedParserError;
+use crate::val::{CastError, CoerceError, RecordId, Value};
 use crate::vs::VersionStampError;
 use base64::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
@@ -29,6 +29,7 @@ use thiserror::Error;
 
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
+// kept, non_exhaustive because it is still public in the sdk.
 #[non_exhaustive]
 pub enum Error {
 	/// The database encountered unreachable logic
@@ -122,10 +123,8 @@ pub enum Error {
 	},
 
 	/// There was an error with the provided JSON Patch
-	#[error("The JSON Patch contains invalid operations. {message}")]
-	InvalidPatch {
-		message: String,
-	},
+	#[error("The JSON Patch contains invalid operations. {0}")]
+	InvalidPatch(PatchError),
 
 	/// Given test operation failed for JSON Patch
 	#[error(
@@ -157,7 +156,7 @@ pub enum Error {
 	/// The FETCH clause accepts idioms, strings and fields.
 	#[error("Found {value} on FETCH CLAUSE, but FETCH expects an idiom, a string or fields")]
 	InvalidFetch {
-		value: Value,
+		value: Expr,
 	},
 
 	#[error(
@@ -602,13 +601,13 @@ pub enum Error {
 	/// A database entry for the specified record already exists
 	#[error("Database record `{thing}` already exists")]
 	RecordExists {
-		thing: Thing,
+		thing: RecordId,
 	},
 
 	/// A database index entry for the specified record already exists
 	#[error("Database index `{index}` already contains {value}, with record `{thing}`")]
 	IndexExists {
-		thing: Thing,
+		thing: RecordId,
 		index: String,
 		value: String,
 	},
@@ -844,6 +843,10 @@ pub enum Error {
 	/// Represents a failure in timestamp arithmetic related to database internals
 	#[error("Timestamp arithmetic error: {0}")]
 	TimestampOverflow(String),
+
+	/// Represents a failure in timestamp arithmetic related to database internals
+	#[error("Invalid timestamp '{0}', datetime lies outside of valid timestamp range")]
+	InvalidTimestamp(String),
 
 	/// Internal server error
 	/// This should be used extremely sporadically, since we lose the type of error as a consequence
@@ -1563,11 +1566,5 @@ impl serde::ser::Error for Error {
 		T: Display,
 	{
 		Self::Serialization(msg.to_string())
-	}
-}
-
-impl From<serde_content::Error> for Error {
-	fn from(error: serde_content::Error) -> Self {
-		Self::Serialization(error.to_string())
 	}
 }

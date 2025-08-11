@@ -5,45 +5,51 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Value};
 use crate::iam::{Action, ConfigKind, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
 use anyhow::{Result, bail};
-use api::ApiConfig;
+use api::{ApiConfig, ApiConfigStore};
 use graphql::GraphQLConfig;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct DefineConfigStatement {
+	pub kind: DefineKind,
 	pub inner: ConfigInner,
-	pub if_not_exists: bool,
-	pub overwrite: bool,
 }
 
-impl_kv_value_revisioned!(DefineConfigStatement);
-
+/// The config struct as a computation target.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum ConfigInner {
 	GraphQL(GraphQLConfig),
 	Api(ApiConfig),
 }
 
+/// The config struct as it is stored on disk.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+pub enum ConfigStore {
+	GraphQL(GraphQLConfig),
+	Api(ApiConfigStore),
+}
+impl_kv_value_revisioned!(ConfigStore);
+
 impl DefineConfigStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Config(ConfigKind::GraphQL), &Base::Db)?;
@@ -57,67 +63,58 @@ impl DefineConfigStatement {
 		// Check if the definition exists
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		if txn.get_db_config(ns, db, cg).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::CgAlreadyExists {
-					name: cg.to_string(),
-				});
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::CgAlreadyExists {
+							name: cg.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 		}
 
-		let db = {
-			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_db(ns, db, opt.strict).await?
+		let store = match &self.inner {
+			ConfigInner::GraphQL(g) => ConfigStore::GraphQL(g.clone()),
+			ConfigInner::Api(a) => ConfigStore::Api(a.compute(stk, ctx, opt, doc).await?),
 		};
 
 		// Process the statement
-		let key = crate::key::database::cg::new(db.namespace_id, db.database_id, cg);
-		txn.replace(&key, self).await?;
-
+		let key = crate::key::database::cg::new(ns, db, cg);
+		txn.replace(&key, &store).await?;
 		// Clear the cache
-		txn.clear();
-
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
 }
 
-impl ConfigInner {
+impl ConfigStore {
 	pub fn name(&self) -> String {
-		ConfigKind::from(self).to_string()
+		match self {
+			ConfigStore::GraphQL(_) => ConfigKind::GraphQL.to_string(),
+			ConfigStore::Api(_) => ConfigKind::Api.to_string(),
+		}
 	}
 
 	pub fn try_into_graphql(self) -> Result<GraphQLConfig> {
 		match self {
-			ConfigInner::GraphQL(g) => Ok(g),
+			ConfigStore::GraphQL(g) => Ok(g),
 			c => fail!("found {c} when a graphql config was expected"),
 		}
 	}
 
-	pub fn try_into_api(&self) -> Result<&ApiConfig> {
+	pub fn try_as_api(&self) -> Result<&ApiConfigStore> {
 		match self {
-			ConfigInner::Api(a) => Ok(a),
+			ConfigStore::Api(a) => Ok(a),
 			c => fail!("found {c} when a api config was expected"),
 		}
 	}
 }
 
-impl From<ConfigInner> for ConfigKind {
-	fn from(value: ConfigInner) -> Self {
-		(&value).into()
-	}
-}
-
-impl From<&ConfigInner> for ConfigKind {
-	fn from(value: &ConfigInner) -> Self {
-		match value {
-			ConfigInner::GraphQL(_) => ConfigKind::GraphQL,
-			ConfigInner::Api(_) => ConfigKind::Api,
-		}
-	}
-}
-
+/*
 impl InfoStructure for DefineConfigStatement {
 	fn structure(self) -> Value {
 		match self.inner {
@@ -129,18 +126,29 @@ impl InfoStructure for DefineConfigStatement {
 			)),
 		}
 	}
+}*/
+
+impl InfoStructure for ConfigStore {
+	fn structure(self) -> Value {
+		match self {
+			ConfigStore::GraphQL(v) => Value::from(map!(
+				"graphql" => v.structure()
+			)),
+			ConfigStore::Api(v) => Value::from(map!(
+				"api" => v.structure()
+			)),
+		}
+	}
 }
 
 impl Display for DefineConfigStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE CONFIG")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
-		}
-
 		write!(f, "{}", self.inner)?;
 
 		Ok(())
@@ -152,6 +160,15 @@ impl Display for ConfigInner {
 		match &self {
 			ConfigInner::GraphQL(v) => Display::fmt(v, f),
 			ConfigInner::Api(v) => Display::fmt(v, f),
+		}
+	}
+}
+
+impl Display for ConfigStore {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match &self {
+			ConfigStore::GraphQL(v) => Display::fmt(v, f),
+			ConfigStore::Api(v) => Display::fmt(v, f),
 		}
 	}
 }

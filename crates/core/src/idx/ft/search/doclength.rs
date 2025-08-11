@@ -97,7 +97,8 @@ mod tests {
 	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::search::doclength::DocLengths;
-	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
+	use crate::kvs::LockType::*;
+	use crate::kvs::{Datastore, Transaction, TransactionType};
 
 	async fn doc_length(
 		ds: &Datastore,

@@ -1,7 +1,7 @@
 use crate::{
 	catalog::{DatabaseId, NamespaceId},
 	kvs::impl_kv_value_revisioned,
-	sql::{ToSql, statements::DefineTableStatement},
+	sql::{Ident, ToSql, statements::DefineTableStatement},
 };
 use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
@@ -9,7 +9,8 @@ use uuid::Uuid;
 
 use crate::{
 	catalog::ViewDefinition,
-	expr::{ChangeFeed, Kind, Permissions, Value, statements::info::InfoStructure},
+	expr::{ChangeFeed, Kind, Permissions, statements::info::InfoStructure},
+	val::Value,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -38,7 +39,7 @@ impl Revisioned for TableId {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct TableDefinition {
@@ -53,7 +54,7 @@ pub struct TableDefinition {
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
 	pub comment: Option<String>,
-	pub kind: TableKind,
+	pub table_type: TableType,
 
 	/// The last time that a DEFINE FIELD was added to this table
 	pub cache_fields_ts: Uuid,
@@ -86,7 +87,7 @@ impl TableDefinition {
 			permissions: Permissions::default(),
 			changefeed: None,
 			comment: None,
-			kind: TableKind::default(),
+			table_type: TableType::default(),
 			cache_fields_ts: now,
 			cache_events_ts: now,
 			cache_tables_ts: now,
@@ -101,30 +102,26 @@ impl TableDefinition {
 
 	/// Checks if this table allows normal records / documents
 	pub fn allows_normal(&self) -> bool {
-		matches!(self.kind, TableKind::Normal | TableKind::Any)
+		matches!(self.table_type, TableType::Normal | TableType::Any)
 	}
 	/// Checks if this table allows graph edges / relations
 	pub fn allows_relation(&self) -> bool {
-		matches!(self.kind, TableKind::Relation(_) | TableKind::Any)
+		matches!(self.table_type, TableType::Relation(_) | TableType::Any)
 	}
 
 	fn to_sql_definition(&self) -> DefineTableStatement {
 		DefineTableStatement {
 			id: Some(self.table_id.0),
-			name: self.name.clone().into(),
+			// SAFETY: we know the name is valid because it was validated when the table was created.
+			name: unsafe { Ident::new_unchecked(self.name.clone()) },
 			drop: self.drop,
 			full: self.schemafull,
 			view: self.view.clone().map(|v| v.to_sql_definition()),
 			permissions: self.permissions.clone().into(),
 			changefeed: self.changefeed.map(|v| v.into()),
 			comment: self.comment.clone().map(|v| v.into()),
-			if_not_exists: false,
-			kind: self.kind.clone().into(),
-			overwrite: false,
-			cache_fields_ts: self.cache_fields_ts,
-			cache_events_ts: self.cache_events_ts,
-			cache_tables_ts: self.cache_tables_ts,
-			cache_indexes_ts: self.cache_indexes_ts,
+			table_type: self.table_type.clone().into(),
+			..Default::default()
 		}
 	}
 }
@@ -141,7 +138,7 @@ impl InfoStructure for TableDefinition {
 			"name".to_string() => self.name.into(),
 			"drop".to_string() => self.drop.into(),
 			"schemafull".to_string() => self.schemafull.into(),
-			"kind".to_string() => self.kind.structure(),
+			"kind".to_string() => self.table_type.structure(),
 			"view".to_string(), if let Some(v) = self.view => v.structure(),
 			"changefeed".to_string(), if let Some(v) = self.changefeed => v.structure(),
 			"permissions".to_string() => self.permissions.structure(),
@@ -152,21 +149,21 @@ impl InfoStructure for TableDefinition {
 
 /// The type of records stored by a table
 #[revisioned(revision = 1)]
-#[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub enum TableKind {
+pub enum TableType {
 	#[default]
 	Any,
 	Normal,
 	Relation(Relation),
 }
 
-impl ToSql for TableKind {
+impl ToSql for TableType {
 	fn to_sql(&self) -> String {
 		match self {
-			TableKind::Normal => "NORMAL".to_string(),
-			TableKind::Relation(rel) => {
+			TableType::Normal => "NORMAL".to_string(),
+			TableType::Relation(rel) => {
 				let mut out = "RELATION".to_string();
 				if let Some(kind) = &rel.from {
 					out.push_str(&format!(" IN {}", kind));
@@ -180,12 +177,12 @@ impl ToSql for TableKind {
 
 				out
 			}
-			TableKind::Any => "ANY".to_string(),
+			TableType::Any => "ANY".to_string(),
 		}
 	}
 }
 
-impl InfoStructure for TableKind {
+impl InfoStructure for TableType {
 	fn structure(self) -> Value {
 		match self {
 			Self::Any => Value::from(map! {
@@ -197,9 +194,9 @@ impl InfoStructure for TableKind {
 			Self::Relation(rel) => Value::from(map! {
 				"kind".to_string() => "RELATION".into(),
 				"in".to_string(), if let Some(Kind::Record(tables)) = rel.from =>
-					tables.into_iter().map(|t| t.0).collect::<Vec<_>>().into(),
+					tables.into_iter().map(|t| Value::from(t.into_strand())).collect::<Vec<_>>().into(),
 				"out".to_string(), if let Some(Kind::Record(tables)) = rel.to =>
-					tables.into_iter().map(|t| t.0).collect::<Vec<_>>().into(),
+					tables.into_iter().map(|t| Value::from(t.into_strand())).collect::<Vec<_>>().into(),
 				"enforced".to_string() => rel.enforced.into()
 			}),
 		}
@@ -207,7 +204,7 @@ impl InfoStructure for TableKind {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Relation {

@@ -54,14 +54,12 @@
 //! we encountered a leading token of a compound token it will result in the 'default' compound token.
 
 use self::token_buffer::TokenBuffer;
-use crate::{
-	sql::{self, Bytes, Datetime, Duration, File, Strand, Uuid},
-	syn::{
-		error::{SyntaxError, bail},
-		lexer::{Lexer, compound::NumberKind},
-		token::{Span, Token, TokenKind, t},
-	},
-};
+use crate::sql;
+use crate::syn::error::{SyntaxError, bail};
+use crate::syn::lexer::Lexer;
+use crate::syn::lexer::compound::NumberKind;
+use crate::syn::token::{Span, Token, TokenKind, t};
+use crate::val::{Bytes, Datetime, Duration, File, Strand, Uuid};
 use bytes::BytesMut;
 use reblessive::{Stack, Stk};
 
@@ -71,15 +69,15 @@ mod expression;
 mod function;
 mod glue;
 mod idiom;
-mod json;
 mod kind;
 pub(crate) mod mac;
 mod object;
 mod prime;
 mod stmt;
-mod thing;
+mod record_id;
 mod token;
 mod token_buffer;
+mod value;
 
 pub(crate) use mac::{enter_object_recursion, enter_query_recursion, unexpected};
 
@@ -93,7 +91,6 @@ pub type ParseResult<T> = Result<T, SyntaxError>;
 
 /// A result of trying to parse a possibly partial query.
 #[derive(Debug)]
-#[non_exhaustive]
 pub enum PartialResult<T> {
 	MoreData,
 	/// Parsing the source produced no reasonable value.
@@ -291,6 +288,10 @@ impl<'a> Parser<'a> {
 		self.peek_token_at(1)
 	}
 
+	pub fn peek2(&mut self) -> Token {
+		self.peek_token_at(2)
+	}
+
 	/// Returns the next n'th token without consuming it.
 	/// `peek_token_at(0)` is equivalent to `peek`.
 	pub fn peek_whitespace_token_at(&mut self, at: u8) -> Token {
@@ -303,6 +304,10 @@ impl<'a> Parser<'a> {
 
 	pub fn peek_whitespace1(&mut self) -> Token {
 		self.peek_whitespace_token_at(1)
+	}
+
+	pub fn peek_whitespace2(&mut self) -> Token {
+		self.peek_whitespace_token_at(2)
 	}
 
 	/// Returns the span of the next token if it was already peeked, otherwise returns the token of
@@ -382,14 +387,16 @@ impl<'a> Parser<'a> {
 	/// Parse a full query.
 	///
 	/// This is the primary entry point of the parser.
-	pub async fn parse_query(&mut self, ctx: &mut Stk) -> ParseResult<sql::Query> {
-		let statements = self.parse_stmt_list(ctx).await?;
-		Ok(sql::Query(statements))
+	pub async fn parse_query(&mut self, stk: &mut Stk) -> ParseResult<sql::Ast> {
+		let statements = self.parse_stmt_list(stk).await?;
+		Ok(sql::Ast {
+			expressions: statements,
+		})
 	}
 
 	/// Parse a single statement.
-	pub async fn parse_statement(&mut self, ctx: &mut Stk) -> ParseResult<sql::Statement> {
-		self.parse_stmt(ctx).await
+	pub async fn parse_statement(&mut self, stk: &mut Stk) -> ParseResult<sql::TopLevelExpr> {
+		self.parse_top_level_expr(stk).await
 	}
 }
 
@@ -442,7 +449,7 @@ impl StatementStream {
 	pub fn parse_partial(
 		&mut self,
 		buffer: &mut BytesMut,
-	) -> Result<Option<sql::Statement>, RenderedError> {
+	) -> Result<Option<sql::TopLevelExpr>, RenderedError> {
 		let mut slice = &**buffer;
 		if slice.len() > u32::MAX as usize {
 			// limit slice length.
@@ -523,7 +530,7 @@ impl StatementStream {
 	pub fn parse_complete(
 		&mut self,
 		buffer: &mut BytesMut,
-	) -> Result<Option<sql::Statement>, RenderedError> {
+	) -> Result<Option<sql::TopLevelExpr>, RenderedError> {
 		let mut slice = &**buffer;
 		if slice.len() > u32::MAX as usize {
 			// limit slice length.

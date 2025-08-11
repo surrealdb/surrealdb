@@ -3,18 +3,14 @@
 
 use super::tr::Check;
 use super::util;
-use crate::cnf::COUNT_BATCH_SIZE;
-use crate::cnf::NORMAL_FETCH_SIZE;
+use crate::cnf::{COUNT_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::savepoint::SaveOperation;
-use crate::kvs::savepoint::SavePoints;
-use crate::kvs::savepoint::SavePrepare;
-use crate::kvs::savepoint::SavedValue;
-use crate::kvs::{Key, Val, Version, batch::Batch};
+use crate::kvs::batch::Batch;
+use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare, SavedValue};
+use crate::kvs::{Key, Val, Version};
 use crate::vs::VersionStamp;
-use anyhow::Result;
-use anyhow::ensure;
+use anyhow::{Result, ensure};
 use async_trait::async_trait;
 use std::ops::Range;
 

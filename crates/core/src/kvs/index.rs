@@ -5,7 +5,6 @@ use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{Id, Object, Thing, Value};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
@@ -14,6 +13,7 @@ use crate::kvs::LockType::Optimistic;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{Key, Transaction, TransactionType, Val, impl_kv_value_revisioned};
 use crate::mem::ALLOC;
+use crate::val::{Object, RecordId, RecordIdKey, Value};
 use anyhow::{Result, ensure};
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
@@ -225,7 +225,7 @@ impl IndexBuilder {
 		ix: &DefineIndexStatement,
 		old_values: Option<Vec<Value>>,
 		new_values: Option<Vec<Value>>,
-		rid: &Thing,
+		rid: &RecordId,
 	) -> Result<ConsumeResult> {
 		let key = IndexKey::new(db.namespace_id, db.database_id, &ix.what, &ix.name);
 		if let Some(r) = self.indexes.get(&key) {
@@ -269,7 +269,7 @@ impl IndexBuilder {
 pub(crate) struct Appending {
 	old_values: Option<Vec<Value>>,
 	new_values: Option<Vec<Value>>,
-	id: Id,
+	id: RecordIdKey,
 }
 
 impl_kv_value_revisioned!(Appending);
@@ -369,7 +369,7 @@ impl Building {
 		ctx: &Context,
 		old_values: Option<Vec<Value>>,
 		new_values: Option<Vec<Value>>,
-		rid: &Thing,
+		rid: &RecordId,
 	) -> Result<ConsumeResult> {
 		let mut queue = self.queue.write().await;
 		// Now that the queue is locked, we have the possibility to assess if the asynchronous build is done.
@@ -385,7 +385,7 @@ impl Building {
 		let a = Appending {
 			old_values,
 			new_values,
-			id: rid.id.clone(),
+			id: rid.key.clone(),
 		};
 		// Get the idx of this appended record from the sequence
 		let idx = queue.add_update();
@@ -393,7 +393,7 @@ impl Building {
 		let ia = self.ikb.new_ia_key(idx);
 		tx.set(&ia, &a, None).await?;
 		// Do we already have a primary appending?
-		let ip = self.ikb.new_ip_key(rid.id.clone());
+		let ip = self.ikb.new_ip_key(rid.key.clone());
 		if tx.get(&ip, None).await?.is_none() {
 			// If not, we set it
 			tx.set(&ip, &PrimaryAppending(idx), None).await?;
@@ -424,6 +424,7 @@ impl Building {
 			tx.delp(&key).await?;
 			tx.commit().await?;
 		}
+
 		// First iteration, we index every key
 		let beg = thing::prefix(self.ns, self.db, self.ikb.table())?;
 		let end = thing::suffix(self.ns, self.db, self.ikb.table())?;
@@ -536,12 +537,16 @@ impl Building {
 			let key = thing::ThingKey::decode_key(&k)?;
 			// Parse the value
 			let val: Value = revision::from_slice(&v)?;
-			let rid: Arc<Thing> = Thing::from((key.tb, key.id)).into();
+			let rid: Arc<RecordId> = RecordId {
+				table: key.tb.to_owned(),
+				key: key.id,
+			}
+			.into();
 
 			let opt_values;
 
 			// Do we already have an appended value?
-			let ip = self.ikb.new_ip_key(rid.id.clone());
+			let ip = self.ikb.new_ip_key(rid.key.clone());
 			if let Some(pa) = tx.get(&ip, None).await? {
 				// Then we take the old value of the appending value as the initial indexing value
 				let ia = self.ikb.new_ia_key(pa.0);
@@ -605,21 +610,16 @@ impl Building {
 			let ia = self.ikb.new_ia_key(i);
 			if let Some(a) = tx.get(&ia, None).await? {
 				tx.del(&ia).await?;
-				let rid = Thing::from((self.ikb.table().to_string(), a.id));
-				let mut io = IndexOperation::new(
-					ctx,
-					&self.opt,
-					self.ns,
-					self.db,
-					&self.ix,
-					a.old_values,
-					a.new_values,
-					&rid,
-				);
+				let rid = RecordId {
+					table: self.ikb.table().to_string(),
+					key: a.id,
+				};
+				let mut io =
+					IndexOperation::new(ctx, &self.opt, self.ns, self.db, &self.ix, a.old_values, a.new_values, &rid);
 				stack.enter(|stk| io.compute(stk, &rc)).finish().await?;
 
 				// We can delete the ip record if any
-				let ip = self.ikb.new_ip_key(rid.id);
+				let ip = self.ikb.new_ip_key(rid.key);
 				tx.del(&ip).await?;
 
 				*count += 1;

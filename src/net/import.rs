@@ -3,19 +3,18 @@ use super::error::ResponseError;
 use super::headers::Accept;
 use crate::cnf::HTTP_MAX_IMPORT_BODY_SIZE;
 use crate::net::error::Error as NetError;
-use crate::net::output::{self, Output};
-use axum::Extension;
-use axum::Router;
-use axum::extract::DefaultBodyLimit;
-use axum::extract::Request;
+use crate::net::output::Output;
+use axum::extract::{DefaultBodyLimit, Request};
 use axum::response::IntoResponse;
 use axum::routing::post;
+use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use futures::TryStreamExt;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::iam::Action::Edit;
 use surrealdb::iam::ResourceKind::Any;
+use surrealdb_core::val::Value;
 use tower_http::limit::RequestBodyLimitLayer;
 
 pub(super) fn router<S>() -> Router<S>
@@ -52,15 +51,23 @@ async fn handler(
 			match accept.as_deref() {
 				// Simple serialization
 				Some(Accept::ApplicationJson) => {
-					Ok(Output::json(&output::simplify(res).map_err(ResponseError)?))
+					// TODO(3.0): This code here is using the wrong serialization method which might
+					// result in some values of the code being serialized wrong.
+					//
+					// this will serialize structs differently then they should.
+					let res = res.into_iter().map(|x| x.into_value()).collect::<Value>();
+					Ok(Output::json_value(&res))
 				}
 				Some(Accept::ApplicationCbor) => {
-					Ok(Output::cbor(&output::simplify(res).map_err(ResponseError)?))
+					// TODO(3.0): This code here is using the wrong serialization method which might
+					// result in some values of the code being serialized wrong.
+					let res = res.into_iter().map(|x| x.into_value()).collect::<Value>();
+					Ok(Output::cbor(&res))
 				}
 				// Return nothing
 				Some(Accept::ApplicationOctetStream) => Ok(Output::None),
 				// Internal serialization
-				Some(Accept::Surrealdb) => Ok(Output::full(&res)),
+				Some(Accept::Surrealdb) => Ok(Output::bincode(&res)),
 				// An incorrect content-type was requested
 				_ => Err(NetError::InvalidType.into()),
 			}

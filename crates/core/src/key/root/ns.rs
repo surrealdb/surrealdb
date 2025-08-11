@@ -1,9 +1,7 @@
 //! Stores a DEFINE NAMESPACE config definition
 use crate::catalog::{NamespaceDefinition, NamespaceId};
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

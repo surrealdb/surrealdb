@@ -8,7 +8,7 @@ use serde::Serialize;
 use std::sync::Arc;
 use surrealdb::rpc::Data;
 use surrealdb::rpc::format::Format;
-use surrealdb_core::expr::Value;
+use surrealdb_core::val::Value;
 use tokio::sync::mpsc::Sender;
 use tracing::Span;
 
@@ -23,12 +23,9 @@ impl Response {
 	#[inline]
 	pub fn into_value(self) -> Value {
 		let mut value = match self.result {
-			Ok(val) => match Value::try_from(val) {
-				Ok(v) => map! {"result" => v},
-				Err(e) => map!("error" => Value::from(e.to_string())),
-			},
+			Ok(val) => map! { "result" => val.into_value() },
 			Err(err) => map! {
-				"error" => Value::from(err),
+				"error" => err.into_value(),
 			},
 		};
 		if let Some(id) = self.id {

@@ -1,10 +1,9 @@
 //! Stores a DEFINE PARAM config definition
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::expr::statements::define::DefineParamStatement;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::KVKey;
 
+use crate::expr::DefineParamStore;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -22,7 +21,7 @@ pub(crate) struct Pa<'a> {
 }
 
 impl KVKey for Pa<'_> {
-	type ValueType = DefineParamStatement;
+	type ValueType = DefineParamStore;
 }
 
 pub fn new(ns: NamespaceId, db: DatabaseId, pa: &str) -> Pa<'_> {

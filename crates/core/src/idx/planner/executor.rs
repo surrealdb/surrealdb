@@ -4,11 +4,9 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::index::{Distance, Index};
+use crate::expr::operator::{BooleanOperator, MatchesOperator};
 use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{
-	Array, BooleanOperation, Cond, Expression, FlowResultExt as _, Idiom, Number, Object, Table,
-	Thing, Value,
-};
+use crate::expr::{Cond, Expr, FlowResultExt as _, Ident, Idiom};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::btdocids::BTreeDocIds;
 use crate::idx::ft::MatchRef;
@@ -38,6 +36,7 @@ use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::kvs::TransactionType;
+use crate::val::{Array, Number, Object, RecordId, Value};
 use anyhow::{Result, bail, ensure};
 use num_traits::{FromPrimitive, ToPrimitive};
 use reblessive::tree::Stk;
@@ -67,9 +66,9 @@ impl KnnBruteForceExpression {
 	}
 }
 
-pub(super) type KnnBruteForceExpressions = HashMap<Arc<Expression>, KnnBruteForceExpression>;
+pub(super) type KnnBruteForceExpressions = HashMap<Arc<Expr>, KnnBruteForceExpression>;
 
-pub(super) type KnnExpressions = HashSet<Arc<Expression>>;
+pub(super) type KnnExpressions = HashSet<Arc<Expr>>;
 
 #[derive(Clone)]
 pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
@@ -98,7 +97,7 @@ pub(super) struct InnerQueryExecutor {
 	table: String,
 	ir_map: HashMap<IndexReference, PerIndexReferenceIndex>,
 	mr_entries: HashMap<MatchRef, PerMatchRefEntry>,
-	exp_entries: HashMap<Arc<Expression>, PerExpressionEntry>,
+	exp_entries: HashMap<Arc<Expr>, PerExpressionEntry>,
 	it_entries: Vec<IteratorEntry>,
 	knn_bruteforce_len: usize,
 }
@@ -110,8 +109,8 @@ impl From<InnerQueryExecutor> for QueryExecutor {
 }
 
 pub(super) enum IteratorEntry {
-	Single(Option<Arc<Expression>>, IndexOption),
-	Range(HashSet<Arc<Expression>>, IndexReference, RangeValue, RangeValue),
+	Single(Option<Arc<Expr>>, IndexOption),
+	Range(HashSet<Arc<Expr>>, IndexReference, RangeValue, RangeValue),
 }
 
 impl IteratorEntry {
@@ -120,7 +119,7 @@ impl IteratorEntry {
 			Self::Single(_, io) => io.explain(),
 			Self::Range(_, ir, from, to) => {
 				let mut e = HashMap::default();
-				e.insert("index", Value::from(ir.name.0.clone()));
+				e.insert("index", Value::from(ir.name.clone().into_strand()));
 				e.insert("from", Value::from(from));
 				e.insert("to", Value::from(to));
 				Value::from(Object::from(e))
@@ -137,8 +136,8 @@ impl InnerQueryExecutor {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		table: &Table,
-		ios: Vec<(Arc<Expression>, IndexOption)>,
+		table: &Ident,
+		ios: Vec<(Arc<Expr>, IndexOption)>,
 		kbtes: KnnBruteForceExpressions,
 		knn_condition: Option<Cond>,
 	) -> Result<Self> {
@@ -185,7 +184,14 @@ impl InnerQueryExecutor {
 						}
 					};
 					if let Some(e) = search_entry {
-						if let Matches(_, Some(mr), _) = e.0.index_option.op() {
+						if let Matches(
+							_,
+							MatchesOperator {
+								rf: Some(mr),
+								..
+							},
+						) = e.0.index_option.op()
+						{
 							let mr_entry = PerMatchRefEntry::Search(e.clone());
 							ensure!(
 								mr_entries.insert(*mr, mr_entry).is_none(),
@@ -228,7 +234,14 @@ impl InnerQueryExecutor {
 						}
 					};
 					if let Some(e) = fulltext_entry {
-						if let Matches(_, Some(mr), _) = e.0.io.op() {
+						if let Matches(
+							_,
+							MatchesOperator {
+								rf: Some(mr),
+								..
+							},
+						) = e.0.io.op()
+						{
 							let mr_entry = PerMatchRefEntry::FullText(e.clone());
 							ensure!(
 								mr_entries.insert(*mr, mr_entry).is_none(),
@@ -357,7 +370,7 @@ impl InnerQueryExecutor {
 		}
 
 		Ok(Self {
-			table: table.0.clone(),
+			table: table.clone().into_string(),
 			ir_map,
 			mr_entries,
 			exp_entries,
@@ -379,9 +392,9 @@ impl QueryExecutor {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		thg: &Thing,
+		thg: &RecordId,
 		doc: Option<&CursorDoc>,
-		exp: &Expression,
+		exp: &Expr,
 	) -> Result<Value> {
 		if let Some(IterationStage::Iterate(e)) = ctx.get_iteration_stage() {
 			if let Some(results) = e {
@@ -423,7 +436,7 @@ impl QueryExecutor {
 	}
 
 	/// Returns `true` if the expression is matching the current iterator.
-	pub(crate) fn is_iterator_expression(&self, ir: IteratorRef, exp: &Expression) -> bool {
+	pub(crate) fn is_iterator_expression(&self, ir: IteratorRef, exp: &Expr) -> bool {
 		match self.0.it_entries.get(ir) {
 			Some(IteratorEntry::Single(Some(e), ..)) => exp.eq(e.as_ref()),
 			Some(IteratorEntry::Range(es, ..)) => es.contains(exp),
@@ -1022,7 +1035,7 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>> {
 		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
-			if let Matches(_, _, _) = io.op() {
+			if let Matches(_, _) = io.op() {
 				if let Some(PerIndexReferenceIndex::Search(si)) = self.0.ir_map.get(io.ix_ref()) {
 					if let Some(PerExpressionEntry::Search(se)) = self.0.exp_entries.get(exp) {
 						let hits = si.new_hits_iterator(&se.0.terms_docs)?;
@@ -1041,11 +1054,18 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>> {
 		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
-			if let Matches(_, _, bo) = io.op() {
+			if let Matches(
+				_,
+				MatchesOperator {
+					operator,
+					..
+				},
+			) = io.op()
+			{
 				if let Some(PerIndexReferenceIndex::FullText(fti)) = self.0.ir_map.get(io.ix_ref())
 				{
 					if let Some(PerExpressionEntry::FullText(fte)) = self.0.exp_entries.get(exp) {
-						let hits = fti.new_hits_iterator(&fte.0.qt, bo.clone());
+						let hits = fti.new_hits_iterator(&fte.0.qt, operator.clone());
 						let it = MatchesThingIterator::new(ir, hits);
 						return Ok(Some(ThingIterator::FullTextMatches(it)));
 					}
@@ -1097,15 +1117,15 @@ impl QueryExecutor {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		thg: &Thing,
-		exp: &Expression,
+		thg: &RecordId,
+		exp: &Expr,
 		l: Value,
 		r: Value,
 	) -> Result<bool> {
 		match self.0.exp_entries.get(exp) {
 			Some(PerExpressionEntry::Search(se)) => {
 				let ix = se.0.index_option.ix_ref();
-				if self.0.table.eq(&ix.what.0) {
+				if self.0.table == ix.what.as_str() {
 					return self.search_matches_with_doc_id(ctx, thg, se).await;
 				}
 				if let Some(PerIndexReferenceIndex::Search(si)) = self.0.ir_map.get(ix) {
@@ -1115,7 +1135,7 @@ impl QueryExecutor {
 			Some(PerExpressionEntry::FullText(fte)) => {
 				let ix = fte.0.io.ix_ref();
 				if let Some(PerIndexReferenceIndex::FullText(fti)) = self.0.ir_map.get(ix) {
-					if self.0.table.eq(&ix.what.0) {
+					if self.0.table == ix.what.as_str() {
 						return self.fulltext_matches_with_doc_id(ctx, thg, fti, fte).await;
 					}
 					return self.fulltext_matches_with_value(stk, ctx, opt, fti, fte, l, r).await;
@@ -1132,10 +1152,9 @@ impl QueryExecutor {
 	async fn search_matches_with_doc_id(
 		&self,
 		ctx: &Context,
-		thg: &Thing,
+		thg: &RecordId,
 		se: &SearchEntry,
 	) -> Result<bool> {
-		// TODO ask Emmanuel
 		// If there is no terms, it can't be a match
 		if se.0.terms_docs.is_empty() {
 			return Ok(false);
@@ -1164,7 +1183,7 @@ impl QueryExecutor {
 	async fn fulltext_matches_with_doc_id(
 		&self,
 		ctx: &Context,
-		thg: &Thing,
+		thg: &RecordId,
 		fti: &FullTextIndex,
 		fte: &FullTextEntry,
 	) -> Result<bool> {
@@ -1251,7 +1270,7 @@ impl QueryExecutor {
 	pub(crate) async fn highlight(
 		&self,
 		ctx: &Context,
-		thg: &Thing,
+		thg: &RecordId,
 		hlp: HighlightParams,
 		doc: &Value,
 	) -> Result<Value> {
@@ -1283,7 +1302,7 @@ impl QueryExecutor {
 	pub(crate) async fn offsets(
 		&self,
 		ctx: &Context,
-		thg: &Thing,
+		thg: &RecordId,
 		match_ref: Value,
 		partial: bool,
 	) -> Result<Value> {
@@ -1312,7 +1331,7 @@ impl QueryExecutor {
 		&self,
 		ctx: &Context,
 		match_ref: &Value,
-		rid: &Thing,
+		rid: &RecordId,
 		ir: Option<&Arc<IteratorRecord>>,
 	) -> Result<Value> {
 		if let Some(mre) = self.get_match_ref_entry(match_ref) {
@@ -1378,8 +1397,15 @@ impl SearchEntry {
 		si: &SearchIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>> {
-		if let Matches(qs, _, bo) = io.op() {
-			if !matches!(bo, BooleanOperation::And) {
+		if let Matches(
+			qs,
+			MatchesOperator {
+				operator,
+				..
+			},
+		) = io.op()
+		{
+			if !matches!(operator, BooleanOperator::And) {
 				bail!(Error::Unimplemented(
 					"SEARCH indexes only support AND operations".to_string()
 				))
@@ -1419,7 +1445,7 @@ impl FullTextEntry {
 		fti: &FullTextIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>> {
-		if let Matches(qs, _, _) = io.op() {
+		if let Matches(qs, _) = io.op() {
 			let qt = fti.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
 			let scorer = fti.new_scorer(ctx).await?;
 			Ok(Some(Self(Arc::new(InnerFullTextEntry {

@@ -1,8 +1,7 @@
 //! Stores FullText index states
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::ft::search::SearchIndexState;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
 use serde::{Deserialize, Serialize};

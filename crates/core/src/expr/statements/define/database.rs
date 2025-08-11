@@ -3,30 +3,29 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::changefeed::ChangeFeed;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Strand, Value, changefeed::ChangeFeed};
+use crate::expr::{Base, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::ToSql;
+use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+use super::DefineKind;
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct DefineDatabaseStatement {
+	pub kind: DefineKind,
 	pub id: Option<u32>,
 	pub name: Ident,
 	pub comment: Option<Strand>,
 	pub changefeed: Option<ChangeFeed>,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub overwrite: bool,
 }
 
 impl_kv_value_revisioned!(DefineDatabaseStatement);
@@ -51,12 +50,18 @@ impl DefineDatabaseStatement {
 
 		// Check if the definition exists
 		let database_id = if let Some(db) = txn.get_db_by_name(ns, &self.name).await? {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::DbAlreadyExists {
-					name: self.name.to_string(),
-				});
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::DbAlreadyExists {
+							name: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => {
+					return Ok(Value::None);
+				}
 			}
 
 			db.database_id
@@ -69,8 +74,8 @@ impl DefineDatabaseStatement {
 		let db_def = DatabaseDefinition {
 			namespace_id: nsv.namespace_id,
 			database_id,
-			name: self.name.to_raw(),
-			comment: self.comment.clone().map(|s| s.to_raw()),
+			name: self.name.into_raw_string(),
+			comment: self.comment.clone().map(|s| s.into_string()),
 			changefeed: self.changefeed,
 		};
 		txn.set(&catalog_key, &db_def, None).await?;
@@ -85,8 +90,7 @@ impl DefineDatabaseStatement {
 		}
 
 		// Clear the cache
-		txn.clear();
-
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -95,11 +99,10 @@ impl DefineDatabaseStatement {
 impl Display for DefineDatabaseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE DATABASE")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {

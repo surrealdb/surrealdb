@@ -1,136 +1,88 @@
-use crate::{
-	cnf::IDIOM_RECURSION_LIMIT,
-	ctx::Context,
-	dbs::Options,
-	doc::CursorDoc,
-	err::Error,
-	exe::try_join_all_buffered,
-	expr::{
-		FlowResultExt as _, Graph, Ident, Idiom, Number, Thing, Value, fmt::Fmt,
-		strand::no_nul_bytes,
-	},
-	sql::ToSql,
+use crate::cnf::IDIOM_RECURSION_LIMIT;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::exe::try_join_all_buffered;
+use crate::expr::fmt::{Fmt, is_pretty, pretty_indent};
+use crate::expr::idiom::recursion::{
+	self, Recursion, clean_iteration, compute_idiom_recursion, is_final,
 };
+use crate::expr::{Expr, FlowResultExt as _, Graph, Ident, Idiom, Literal, Value};
+use crate::sql::ToSql;
+use crate::val::{Array, RecordId};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::fmt::Write;
-use std::str;
+use std::{fmt, str};
 
-use super::{
-	fmt::{is_pretty, pretty_indent},
-	value::idiom_recursion::{Recursion, clean_iteration, compute_idiom_recursion, is_final},
-};
-
-#[revisioned(revision = 4)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Part {
 	All,
 	Flatten,
 	Last,
 	First,
 	Field(Ident),
-	Index(Number),
-	Where(Value),
+	Where(Expr),
 	Graph(Graph),
-	Value(Value),
-	Start(Value),
-	Method(#[serde(with = "no_nul_bytes")] String, Vec<Value>),
-	#[revision(start = 2)]
+	Value(Expr),
+	/// TODO: Remove, start and move it out of part to elimite invalid state.
+	Start(Expr),
+	Method(String, Vec<Expr>),
 	Destructure(Vec<DestructurePart>),
 	Optional,
-	#[revision(
-		start = 3,
-		end = 4,
-		convert_fn = "convert_recurse_add_instruction",
-		fields_name = "OldRecurseFields"
-	)]
-	Recurse(Recurse, Option<Idiom>),
-	#[revision(start = 4)]
 	Recurse(Recurse, Option<Idiom>, Option<RecurseInstruction>),
-	#[revision(start = 3)]
 	Doc,
-	#[revision(start = 3)]
 	RepeatRecurse,
 }
 
 impl Part {
-	fn convert_recurse_add_instruction(
-		fields: OldRecurseFields,
-		_revision: u16,
-	) -> Result<Self, revision::Error> {
-		Ok(Part::Recurse(fields.0, fields.1, None))
+	/// Returns a part which is equivalent to `.bla` if called with string `bla`.
+	pub fn field(field: String) -> Option<Self> {
+		Some(Part::Field(Ident::new(field)?))
 	}
-}
 
-impl From<i32> for Part {
-	fn from(v: i32) -> Self {
-		Self::Index(v.into())
+	/// Returns a part which is equivalent to `[1]` if called with integer `1`.
+	pub fn index_int(idx: i64) -> Self {
+		Part::Value(Expr::Literal(Literal::Integer(idx)))
 	}
-}
 
-impl From<isize> for Part {
-	fn from(v: isize) -> Self {
-		Self::Index(v.into())
-	}
-}
-
-impl From<usize> for Part {
-	fn from(v: usize) -> Self {
-		Self::Index(v.into())
-	}
-}
-
-impl From<String> for Part {
-	fn from(v: String) -> Self {
-		Self::Field(v.into())
-	}
-}
-
-impl From<Number> for Part {
-	fn from(v: Number) -> Self {
-		Self::Index(v)
-	}
-}
-
-impl From<Ident> for Part {
-	fn from(v: Ident) -> Self {
-		Self::Field(v)
-	}
-}
-
-impl From<Graph> for Part {
-	fn from(v: Graph) -> Self {
-		Self::Graph(v)
-	}
-}
-
-impl From<&str> for Part {
-	fn from(v: &str) -> Self {
-		match v.parse::<isize>() {
-			Ok(v) => Self::from(v),
-			_ => Self::from(v.to_owned()),
-		}
-	}
-}
-
-impl Part {
 	pub(crate) fn is_index(&self) -> bool {
-		matches!(self, Part::Index(_) | Part::First | Part::Last)
+		matches!(self, Part::Value(Expr::Literal(Literal::Integer(_))) | Part::First | Part::Last)
+	}
+
+	/// Returns the idex if this part would have been `Part::Index(x)` before that field was
+	/// removed.
+	///
+	/// TODO: Remove this method once we work out the kinks with removing `Part::Index(x)` and only
+	/// having `Part::Value(x)`
+	///
+	/// Already marked as deprecated for the full release to remind that this behavior should be
+	/// fixed.
+	#[deprecated(since = "3.0.0")]
+	pub(crate) fn as_old_index(&self) -> Option<usize> {
+		match self {
+			Part::Value(Expr::Literal(l)) => match l {
+				crate::expr::Literal::Integer(i) => Some(*i as usize),
+				crate::expr::Literal::Float(f) => Some(*f as usize),
+				crate::expr::Literal::Decimal(d) => Some(usize::try_from(*d).unwrap_or_default()),
+				_ => None,
+			},
+			_ => None,
+		}
 	}
 
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
+	pub(crate) fn read_only(&self) -> bool {
 		match self {
-			Part::Start(v) => v.writeable(),
-			Part::Where(v) => v.writeable(),
-			Part::Value(v) => v.writeable(),
-			Part::Method(_, v) => v.iter().any(Value::writeable),
-			_ => false,
+			Part::Start(v) => v.read_only(),
+			Part::Where(v) => v.read_only(),
+			Part::Value(v) => v.read_only(),
+			Part::Method(_, v) => v.iter().all(Expr::read_only),
+			_ => true,
 		}
 	}
 	/// Returns a yield if an alias is specified
@@ -197,7 +149,6 @@ impl fmt::Display for Part {
 			Part::Start(v) => write!(f, "{v}"),
 			Part::Field(v) => write!(f, ".{}", v.to_sql()),
 			Part::Flatten => f.write_str("…"),
-			Part::Index(v) => write!(f, "[{v}]"),
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
 			Part::Graph(v) => write!(f, "{v}"),
 			Part::Value(v) => write!(f, "[{v}]"),
@@ -323,13 +274,13 @@ impl<'a> RecursionPlan {
 					.catch_return()?
 				{
 					Value::Object(mut obj) => {
-						obj.insert(field.to_raw(), v);
+						obj.insert(field.into_raw_string(), v);
 						Ok(Value::Object(obj))
 					}
 					Value::None => Ok(Value::None),
 					v => Err(anyhow::Error::new(Error::unreachable(format_args!(
 						"Expected an object or none, found {}.",
-						v.kindof()
+						v.kind_of()
 					)))),
 				}
 			}
@@ -450,9 +401,7 @@ impl<'a> NextMethod<'a> for &'a Idiom {
 // ------------------------------
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum DestructurePart {
 	All(Ident),
 	Field(Ident),
@@ -502,9 +451,7 @@ impl fmt::Display for DestructurePart {
 // ------------------------------
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Recurse {
 	Fixed(u32),
 	Range(Option<u32>, Option<u32>),
@@ -555,9 +502,7 @@ impl fmt::Display for Recurse {
 // ------------------------------
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum RecurseInstruction {
 	Path {
 		// Do we include the starting point in the paths?
@@ -569,125 +514,87 @@ pub enum RecurseInstruction {
 	},
 	Shortest {
 		// What ending node are we looking for?
-		expects: Value,
+		expects: Expr,
 		// Do we include the starting point in the collection?
 		inclusive: bool,
 	},
 }
 
-macro_rules! to_vec_value {
-	(&$v: expr_2021) => {
-		match $v {
+#[allow(clippy::too_many_arguments)]
+async fn walk_paths(
+	stk: &mut Stk,
+	ctx: &Context,
+	opt: &Options,
+	doc: Option<&CursorDoc>,
+	recursion: Recursion<'_>,
+	finished: &mut Vec<Value>,
+	inclusive: bool,
+	expects: Option<&Value>,
+) -> Result<Value> {
+	let mut open: Vec<Value> = vec![];
+	let paths = match recursion.current {
+		Value::Array(v) => &v.0,
+		v => &vec![v.to_owned()],
+	};
+
+	for path in paths.iter() {
+		let path = match path {
 			Value::Array(v) => &v.0,
 			v => &vec![v.to_owned()],
+		};
+		let Some(last) = path.last() else {
+			continue;
+		};
+		let res =
+			stk.run(|stk| last.get(stk, ctx, opt, doc, recursion.path)).await.catch_return()?;
+
+		if recursion::is_final(&res) || &res == last {
+			if expects.is_none()
+				&& (recursion.iterated > 1 || inclusive)
+				&& recursion.iterated >= recursion.min
+			{
+				finished.push(path.to_owned().into());
+			}
+			continue;
 		}
-	};
-	($v: expr_2021) => {
-		match $v {
+
+		let steps = match res {
 			Value::Array(v) => v.0,
 			v => vec![v],
-		}
-	};
-}
+		};
 
-macro_rules! walk_paths {
-	(
-		$stk: ident,
-		$ctx: ident,
-		$opt: ident,
-		$doc: ident,
-		$rec: ident,
-		$finished: ident,
-		$inclusive: ident,
-		$expects: expr_2021
-	) => {{
-		// Collection of paths we will continue processing
-		// in the next iteration
-		let mut open: Vec<Value> = vec![];
-
-		// Obtain an array value to iterate over
-		let paths = to_vec_value!(&$rec.current);
-
-		// Process all paths
-		for path in paths.iter() {
-			// Obtain an array value to iterate over
-			let path = to_vec_value!(&path);
-
-			// We always operate on the last value in the path
-			// If the path is empty, we skip it
-			let Some(last) = path.last() else {
-				continue;
+		let reached_max = recursion.max.is_some_and(|max| recursion.iterated >= max);
+		for step in steps.iter() {
+			let val = if recursion.iterated == 1 && !inclusive {
+				Value::from(vec![step.to_owned()])
+			} else {
+				let mut path = path.to_owned();
+				path.push(step.to_owned());
+				Value::from(path)
 			};
-
-			// Apply the recursed path to the last value
-			let res = $crate::expr::FlowResultExt::catch_return(
-				$stk.run(|stk| last.get(stk, $ctx, $opt, $doc, $rec.path)).await,
-			)?;
-
-			// If we encounter a final value, we add it to the finished collection.
-			// - If expects is some, we are seeking for the shortest path, in which
-			//   case we eliminate the path.
-			// - In case this is the first iteration, and paths are not inclusive of
-			//   the starting point, we eliminate the it.
-			// - If we have not yet reached minimum depth, the path is eliminated aswell.
-			if is_final(&res) || &res == last {
-				if $expects.is_none()
-					&& ($rec.iterated > 1 || *$inclusive)
-					&& $rec.iterated >= $rec.min
-				{
-					$finished.push(path.to_owned().into());
+			if let Some(expects) = expects {
+				if step == expects {
+					let steps = match val {
+						Value::Array(v) => v.0,
+						v => vec![v],
+					};
+					for step in steps {
+						finished.push(step);
+					}
+					return Ok(Value::None);
 				}
-
-				continue;
 			}
-
-			// Obtain an array value to iterate over
-			let steps = to_vec_value!(res);
-
-			// Did we reach the final iteration?
-			let reached_max = $rec.max.is_some_and(|max| $rec.iterated >= max);
-
-			// For every step, prefix it with the current path
-			for step in steps.iter() {
-				// If this is the first iteration, and in case we are not inclusive
-				// of the starting point, we only add the step to the open collection
-				let val = if $rec.iterated == 1 && !*$inclusive {
-					Value::from(vec![step.to_owned()])
-				} else {
-					let mut path = path.to_owned();
-					path.push(step.to_owned());
-					Value::from(path)
-				};
-
-				// If we expect a certain value, let's check if we have reached it
-				// If so, we iterate over the steps and assign them to the finished collection
-				// We then return Value::None, indicating to the recursion loop that we are done
-				if let Some(expects) = $expects {
-					if step == expects {
-						let steps = to_vec_value!(val);
-
-						for step in steps {
-							$finished.push(step);
-						}
-
-						return Ok(Value::None);
-					}
+			if reached_max {
+				if (Option::<&Value>::None).is_none() {
+					finished.push(val);
 				}
-
-				// If we have reached the maximum amount of iterations, and are collecting
-				// individual paths, we assign them to the finished collection
-				if reached_max {
-					if $expects.is_none() {
-						$finished.push(val);
-					}
-				} else {
-					open.push(val);
-				}
+			} else {
+				open.push(val);
 			}
 		}
+	}
 
-		Ok(open.into())
-	}};
+	Ok(Value::Array(Array(open)))
 }
 
 impl RecurseInstruction {
@@ -703,48 +610,38 @@ impl RecurseInstruction {
 		match self {
 			Self::Path {
 				inclusive,
-			} => {
-				walk_paths!(stk, ctx, opt, doc, rec, finished, inclusive, Option::<&Value>::None)
-			}
+			} => walk_paths(stk, ctx, opt, doc, rec, finished, *inclusive, None).await,
 			Self::Shortest {
 				expects,
 				inclusive,
 			} => {
-				let expects: Value = expects
-					.compute(stk, ctx, opt, doc)
+				let expects = stk
+					.run(|stk| expects.compute(stk, ctx, opt, doc))
 					.await
 					.catch_return()?
-					.coerce_to::<Thing>()?
+					.coerce_to::<RecordId>()?
 					.into();
-				walk_paths!(stk, ctx, opt, doc, rec, finished, inclusive, Some(&expects))
+				walk_paths(stk, ctx, opt, doc, rec, finished, *inclusive, Some(&expects)).await
 			}
 			Self::Collect {
 				inclusive,
 			} => {
-				macro_rules! persist {
-					($finished:ident, $subject:expr_2021) => {
-						match $subject {
-							Value::Array(v) => {
-								for v in v.iter() {
-									// Add a unique value to the finished collection
-									if !$finished.contains(v) {
-										$finished.push(v.to_owned());
-									}
-								}
-							}
-							v => {
-								if !$finished.contains(v) {
-									// Add a unique value to the finished collection
-									$finished.push(v.to_owned());
+				// If we are inclusive, we add the starting point to the collection
+				if rec.iterated == 1 && *inclusive {
+					match rec.current {
+						Value::Array(v) => {
+							for v in v.iter() {
+								if !finished.contains(v) {
+									finished.push(v.to_owned());
 								}
 							}
 						}
+						v => {
+							if !finished.contains(v) {
+								finished.push(v.to_owned());
+							}
+						}
 					};
-				}
-
-				// If we are inclusive, we add the starting point to the collection
-				if rec.iterated == 1 && *inclusive {
-					persist!(finished, rec.current);
 				}
 
 				// Apply the recursed path to the current values
@@ -756,7 +653,20 @@ impl RecurseInstruction {
 				let res = clean_iteration(res);
 
 				// Persist any new values from the result
-				persist!(finished, &res);
+				match &res {
+					Value::Array(v) => {
+						for v in v.iter() {
+							if !finished.contains(v) {
+								finished.push(v.to_owned());
+							}
+						}
+					}
+					v => {
+						if !finished.contains(v) {
+							finished.push(v.to_owned());
+						}
+					}
+				};
 
 				// Continue
 				Ok(res)

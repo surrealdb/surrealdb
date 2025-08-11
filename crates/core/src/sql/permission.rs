@@ -1,18 +1,10 @@
-use crate::sql::SqlValue;
-use crate::sql::fmt::is_pretty;
-use crate::sql::fmt::pretty_indent;
-use crate::sql::fmt::pretty_sequence_item;
+use crate::sql::Expr;
+use crate::sql::fmt::{is_pretty, pretty_indent, pretty_sequence_item};
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::Write;
-use std::fmt::{self, Display, Formatter};
-use std::str;
+use std::fmt::{self, Display, Formatter, Write};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Permissions {
 	pub select: Permission,
 	pub create: Permission,
@@ -40,17 +32,42 @@ impl Permissions {
 	}
 
 	pub fn is_none(&self) -> bool {
-		self.select == Permission::None
-			&& self.create == Permission::None
-			&& self.update == Permission::None
-			&& self.delete == Permission::None
+		matches!(self.select, Permission::None)
+			&& matches!(self.create, Permission::None)
+			&& matches!(self.update, Permission::None)
+			&& matches!(self.delete, Permission::None)
 	}
 
 	pub fn is_full(&self) -> bool {
-		self.select == Permission::Full
-			&& self.create == Permission::Full
-			&& self.update == Permission::Full
-			&& self.delete == Permission::Full
+		matches!(self.select, Permission::Full)
+			&& matches!(self.create, Permission::Full)
+			&& matches!(self.update, Permission::Full)
+			&& matches!(self.delete, Permission::Full)
+	}
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+pub enum PermissionKind {
+	Select,
+	Create,
+	Update,
+	Delete,
+}
+
+impl PermissionKind {
+	fn as_str(&self) -> &str {
+		match self {
+			PermissionKind::Select => "select",
+			PermissionKind::Create => "create",
+			PermissionKind::Update => "update",
+			PermissionKind::Delete => "delete",
+		}
+	}
+}
+
+impl Display for PermissionKind {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		f.write_str(self.as_str())
 	}
 }
 
@@ -143,40 +160,13 @@ impl From<crate::expr::Permissions> for Permissions {
 	}
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Debug)]
-pub enum PermissionKind {
-	Select,
-	Create,
-	Update,
-	Delete,
-}
-
-impl PermissionKind {
-	fn as_str(&self) -> &str {
-		match self {
-			PermissionKind::Select => "select",
-			PermissionKind::Create => "create",
-			PermissionKind::Update => "update",
-			PermissionKind::Delete => "delete",
-		}
-	}
-}
-
-impl Display for PermissionKind {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		f.write_str(self.as_str())
-	}
-}
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Permission {
 	None,
 	#[default]
 	Full,
-	Specific(SqlValue),
+	Specific(Expr),
 }
 
 impl Permission {

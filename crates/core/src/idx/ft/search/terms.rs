@@ -209,8 +209,9 @@ mod tests {
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::TermFrequency;
 	use crate::idx::ft::search::terms::{SearchTerms, SearchTermsState};
+	use crate::kvs::LockType::*;
 	use crate::kvs::TransactionType::{Read, Write};
-	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
+	use crate::kvs::{Datastore, Transaction, TransactionType};
 	use rand::{Rng, thread_rng};
 	use std::collections::HashSet;
 	use test_log::test;

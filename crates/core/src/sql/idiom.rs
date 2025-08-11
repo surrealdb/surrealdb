@@ -1,20 +1,14 @@
 use crate::sql::{
-	Part, ToSql,
-	fmt::{Fmt, fmt_separated_by},
+	Ident, Part, ToSql,
 };
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
+use crate::sql::fmt::{Fmt, fmt_separated_by};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
-use std::str;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+// TODO: Remove unnessacry newtype.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Idioms(pub Vec<Idiom>);
 
 impl Deref for Idioms {
@@ -49,47 +43,24 @@ impl From<crate::expr::Idioms> for Idioms {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Idiom")]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Idiom(pub Vec<Part>);
 
-impl Deref for Idiom {
-	type Target = [Part];
-	fn deref(&self) -> &Self::Target {
-		self.0.as_slice()
+impl Idiom {
+	/// Simplifies this Idiom for use in object keys
+	pub(crate) fn simplify(&self) -> Idiom {
+		Idiom(
+			self.0
+				.iter()
+				.filter(|&p| matches!(p, Part::Field(_) | Part::Start(_) | Part::Graph(_)))
+				.cloned()
+				.collect(),
+		)
 	}
-}
 
-impl From<String> for Idiom {
-	fn from(v: String) -> Self {
-		Self(vec![Part::from(v)])
-	}
-}
-
-impl From<&str> for Idiom {
-	fn from(v: &str) -> Self {
-		Self(vec![Part::from(v)])
-	}
-}
-
-impl From<Vec<Part>> for Idiom {
-	fn from(v: Vec<Part>) -> Self {
-		Self(v)
-	}
-}
-
-impl From<&[Part]> for Idiom {
-	fn from(v: &[Part]) -> Self {
-		Self(v.to_vec())
-	}
-}
-
-impl From<Part> for Idiom {
-	fn from(v: Part) -> Self {
-		Self(vec![v])
+	pub fn field(name: Ident) -> Self {
+		Idiom(vec![Part::Field(name)])
 	}
 }
 
@@ -106,6 +77,7 @@ impl From<crate::expr::Idiom> for Idiom {
 }
 
 impl Idiom {
+	/*
 	/// Appends a part to the end of this Idiom
 	pub(crate) fn push(mut self, n: Part) -> Idiom {
 		self.0.push(n);
@@ -124,6 +96,7 @@ impl Idiom {
 			.collect::<Vec<_>>()
 			.into()
 	}
+	*/
 }
 
 impl Display for Idiom {

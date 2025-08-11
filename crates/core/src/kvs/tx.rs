@@ -1,42 +1,30 @@
-use super::Key;
-use super::Val;
-use super::Version;
 use super::batch::Batch;
 use super::tr::Check;
-use super::util;
+use super::{Key, Val, Version, util};
 use crate::catalog::{
 	DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId, TableDefinition,
 };
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
-use crate::expr::Id;
-use crate::expr::Value;
-use crate::expr::statements::AccessGrant;
-use crate::expr::statements::DefineAccessStatement;
-use crate::expr::statements::DefineAnalyzerStatement;
-use crate::expr::statements::DefineEventStatement;
-use crate::expr::statements::DefineFieldStatement;
-use crate::expr::statements::DefineFunctionStatement;
-use crate::expr::statements::DefineIndexStatement;
-use crate::expr::statements::DefineModelStatement;
-use crate::expr::statements::DefineParamStatement;
-use crate::expr::statements::DefineUserStatement;
-use crate::expr::statements::LiveStatement;
-use crate::expr::statements::define::BucketDefinition;
-use crate::expr::statements::define::DefineConfigStatement;
-use crate::expr::statements::define::{ApiDefinition, DefineSequenceStatement};
+use crate::expr::statements::access::AccessGrantStore;
+use crate::expr::statements::define::config::ConfigStore;
+use crate::expr::statements::define::{ApiDefinition, BucketDefinition, DefineSequenceStatement};
+use crate::expr::statements::{
+	DefineAccessStatement, DefineAnalyzerStatement, DefineEventStatement,
+	DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement, DefineParamStore, DefineUserStatement,
+	LiveStatement,
+};
 use crate::idx::planner::ScanDirection;
 use crate::idx::trees::store::cache::IndexTreeCaches;
 use crate::key::database::sq::Sq;
-use crate::kvs::Transactor;
-use crate::kvs::cache;
 use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::key::KVKey;
 use crate::kvs::scanner::Scanner;
+use crate::kvs::{Transactor, cache};
+use crate::val::{RecordId, RecordIdKey, Value};
 use anyhow::Result;
-use futures::lock::Mutex;
-use futures::lock::MutexGuard;
+use futures::lock::{Mutex, MutexGuard};
 use futures::stream::Stream;
 use std::any::Any;
 use std::fmt::Debug;
@@ -44,7 +32,6 @@ use std::ops::Range;
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[non_exhaustive]
 pub struct Transaction {
 	/// Is this is a local datastore transaction?
 	local: bool,
@@ -511,7 +498,7 @@ impl Transaction {
 
 	/// Retrieve all root access grants in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_root_access_grants(&self, ra: &str) -> Result<Arc<[AccessGrant]>> {
+	pub async fn all_root_access_grants(&self, ra: &str) -> Result<Arc<[AccessGrantStore]>> {
 		let qey = cache::tx::Lookup::Rgs(ra);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_rag(),
@@ -587,7 +574,7 @@ impl Transaction {
 		&self,
 		ns: NamespaceId,
 		na: &str,
-	) -> Result<Arc<[AccessGrant]>> {
+	) -> Result<Arc<[AccessGrantStore]>> {
 		let qey = cache::tx::Lookup::Ngs(ns, na);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_nag(),
@@ -672,7 +659,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		da: &str,
-	) -> Result<Arc<[AccessGrant]>> {
+	) -> Result<Arc<[AccessGrantStore]>> {
 		let qey = cache::tx::Lookup::Dgs(ns, db, da);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_dag(),
@@ -805,7 +792,7 @@ impl Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-	) -> Result<Arc<[DefineParamStatement]>> {
+	) -> Result<Arc<[DefineParamStore]>> {
 		let qey = cache::tx::Lookup::Pas(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_pas(),
@@ -849,7 +836,7 @@ impl Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-	) -> Result<Arc<[DefineConfigStatement]>> {
+	) -> Result<Arc<[ConfigStore]>> {
 		let qey = cache::tx::Lookup::Cgs(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_cgs(),
@@ -1085,7 +1072,7 @@ impl Transaction {
 		&self,
 		ac: &str,
 		gr: &str,
-	) -> Result<Option<Arc<AccessGrant>>> {
+	) -> Result<Option<Arc<AccessGrantStore>>> {
 		let qey = cache::tx::Lookup::Rg(ac, gr);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Some),
@@ -1273,7 +1260,7 @@ impl Transaction {
 		ns: NamespaceId,
 		ac: &str,
 		gr: &str,
-	) -> Result<Option<Arc<AccessGrant>>> {
+	) -> Result<Option<Arc<AccessGrantStore>>> {
 		let qey = cache::tx::Lookup::Ng(ns, ac, gr);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Some),
@@ -1416,7 +1403,7 @@ impl Transaction {
 		db: DatabaseId,
 		ac: &str,
 		gr: &str,
-	) -> Result<Option<Arc<AccessGrant>>> {
+	) -> Result<Option<Arc<AccessGrantStore>>> {
 		let qey = cache::tx::Lookup::Dg(ns, db, ac, gr);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Some),
@@ -1599,7 +1586,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		pa: &str,
-	) -> Result<Arc<DefineParamStatement>> {
+	) -> Result<Arc<DefineParamStore>> {
 		let qey = cache::tx::Lookup::Pa(ns, db, pa);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1623,7 +1610,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		cg: &str,
-	) -> Result<Arc<DefineConfigStatement>> {
+	) -> Result<Arc<ConfigStore>> {
 		if let Some(val) = self.get_db_optional_config(ns, db, cg).await? {
 			Ok(val)
 		} else {
@@ -1640,7 +1627,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		cg: &str,
-	) -> Result<Option<Arc<DefineConfigStatement>>> {
+	) -> Result<Option<Arc<ConfigStore>>> {
 		let qey = cache::tx::Lookup::Cg(ns, db, cg);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Option::Some),
@@ -1792,7 +1779,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &str,
-		id: &Id,
+		id: &RecordIdKey,
 		version: Option<u64>,
 	) -> Result<Arc<Value>> {
 		// Cache is not versioned
@@ -1803,37 +1790,42 @@ impl Transaction {
 				// The value exists in the datastore
 				Some(mut val) => {
 					// Inject the id field into the document
-					let rid = crate::expr::Thing::from((tb, id.clone()));
+					let rid = RecordId {
+						table: tb.to_owned(),
+						key: id.clone(),
+					};
 					val.def(&rid);
 					let val = cache::tx::Entry::Val(Arc::new(val));
 					val.try_into_val()
 				}
 				// The value is not in the datastore
 				None => Ok(Arc::new(Value::None)),
-			};
-		}
-
-		// Attempt to fetch the record from the cache
-		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
-		match self.cache.get(&qey) {
-			// The entry is in the cache
-			Some(val) => val.try_into_val(),
-			// The entry is not in the cache
-			None => {
-				// Fetch the record from the datastore
-				let key = crate::key::thing::new(ns, db, tb, id);
-				match self.get(&key, None).await? {
-					// The value exists in the datastore
-					Some(mut val) => {
-						// Inject the id field into the document
-						let rid = crate::expr::Thing::from((tb, id.clone()));
-						val.def(&rid);
-						let val = cache::tx::Entry::Val(Arc::new(val));
-						self.cache.insert(qey, val.clone());
-						val.try_into_val()
+			}
+		} else {
+			let qey = cache::tx::Lookup::Record(ns, db, tb, id);
+			match self.cache.get(&qey) {
+				// The entry is in the cache
+				Some(val) => val.try_into_val(),
+				// The entry is not in the cache
+				None => {
+					// Fetch the record from the datastore
+					let key = crate::key::thing::new(ns, db, tb, id);
+					match self.get(&key, None).await? {
+						// The value exists in the datastore
+						Some(mut val) => {
+							// Inject the id field into the document
+							let rid = RecordId {
+								table: tb.to_owned(),
+								key: id.clone(),
+							};
+							val.def(&rid);
+							let val = cache::tx::Entry::Val(Arc::new(val));
+							self.cache.insert(qey, val.clone());
+							val.try_into_val()
+						}
+						// The value is not in the datastore
+						None => Ok(Arc::new(Value::None)),
 					}
-					// The value is not in the datastore
-					None => Ok(Arc::new(Value::None)),
 				}
 			}
 		}
@@ -1845,7 +1837,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &str,
-		id: &Id,
+		id: &RecordIdKey,
 		val: Value,
 	) -> Result<()> {
 		// Set the value in the datastore
@@ -1864,7 +1856,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &str,
-		id: &Id,
+		id: &RecordIdKey,
 		val: Arc<Value>,
 	) -> Result<()> {
 		// Set the value in the cache
@@ -1880,7 +1872,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &str,
-		id: &Id,
+		id: &RecordIdKey,
 	) -> Result<()> {
 		// Delete the value in the datastore
 		let key = crate::key::thing::new(ns, db, tb, id);
@@ -1932,7 +1924,6 @@ impl Transaction {
 
 	/// Ensures that a table, database, and namespace are all fully defined.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	#[inline(always)]
 	pub async fn ensure_ns_db_tb(
 		&self,
 		ns: &str,
@@ -1943,7 +1934,15 @@ impl Transaction {
 		self.get_or_add_tb_upwards(ns, db, tb, strict, true).await
 	}
 
-	pub async fn check_ns_db_tb(&self, ns: &str, db: &str, tb: &str, strict: bool) -> Result<()> {
+	/// Ensure a specific table (and database, and namespace) exist.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub(crate) async fn check_ns_db_tb(
+		&self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		strict: bool,
+	) -> Result<()> {
 		if !strict {
 			return Ok(());
 		}
@@ -1972,8 +1971,7 @@ impl Transaction {
 
 	/// Clears all keys from the transaction cache.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	#[inline(always)]
-	pub fn clear(&self) {
+	pub fn clear_cache(&self) {
 		self.cache.clear()
 	}
 

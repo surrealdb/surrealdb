@@ -2,32 +2,31 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::filter::Filter;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Array, Base, Ident, Strand, Value, filter::Filter, tokenizer::Tokenizer};
+use crate::expr::tokenizer::Tokenizer;
+use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::ToSql;
+use crate::val::{Array, Strand};
 use anyhow::{Result, bail};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 4)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+use super::DefineKind;
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct DefineAnalyzerStatement {
+	pub kind: DefineKind,
 	pub name: Ident,
-	#[revision(start = 2)]
-	pub function: Option<Ident>,
+	pub function: Option<String>,
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
 	pub comment: Option<Strand>,
-	#[revision(start = 3)]
-	pub if_not_exists: bool,
-	#[revision(start = 4)]
-	pub overwrite: bool,
 }
 
 impl_kv_value_revisioned!(DefineAnalyzerStatement);
@@ -46,26 +45,29 @@ impl DefineAnalyzerStatement {
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
 		if txn.get_db_analyzer(ns, db, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::AzAlreadyExists {
-					name: self.name.to_string(),
-				});
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::AzAlreadyExists {
+							name: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 		}
 		// Process the statement
 		let key = crate::key::database::az::new(ns, db, &self.name);
 		let az = DefineAnalyzerStatement {
 			// Don't persist the `IF NOT EXISTS` clause to schema
-			if_not_exists: false,
-			overwrite: false,
+			kind: DefineKind::Default,
 			..self.clone()
 		};
 		ctx.get_index_stores().mappers().load(&az).await?;
 		txn.set(&key, &az, None).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -74,11 +76,10 @@ impl DefineAnalyzerStatement {
 impl Display for DefineAnalyzerStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE ANALYZER")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " IF NOT EXISTS")?,
+			DefineKind::IfNotExists => write!(f, " OVERWRITE")?,
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref i) = self.function {
@@ -102,8 +103,9 @@ impl Display for DefineAnalyzerStatement {
 impl InfoStructure for DefineAnalyzerStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"function".to_string(), if let Some(v) = self.function => v.structure(),
+			"name".to_string() => Value::from(self.name.clone().into_strand()),
+			// TODO: Null byte validity
+			"function".to_string(), if let Some(v) = self.function => Value::from(Strand::new(v.clone()).unwrap()),
 			"tokenizers".to_string(), if let Some(v) = self.tokenizers =>
 				v.into_iter().map(|v| v.to_string().into()).collect::<Array>().into(),
 			"filters".to_string(), if let Some(v) = self.filters =>

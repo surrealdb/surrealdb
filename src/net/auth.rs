@@ -1,29 +1,24 @@
 use crate::net::error::Error as NetError;
 use anyhow::{Result, bail};
-use axum::RequestPartsExt;
-use axum::{Extension, body::Body};
+use axum::body::Body;
+use axum::{Extension, RequestPartsExt};
 use axum_extra::TypedHeader;
-use axum_extra::headers::{
-	Authorization, Origin,
-	authorization::{Basic, Bearer},
-};
+use axum_extra::headers::authorization::{Basic, Bearer};
+use axum_extra::headers::{Authorization, Origin};
 use futures_util::future::BoxFuture;
-use http::{StatusCode, request::Parts};
+use http::StatusCode;
+use http::request::Parts;
 use hyper::{Request, Response};
-use surrealdb::{
-	dbs::Session,
-	iam::verify::{basic, token},
-};
+use surrealdb::dbs::Session;
+use surrealdb::iam::verify::{basic, token};
 use tower_http::auth::AsyncAuthorizeRequest;
 use uuid::Uuid;
 
-use super::{
-	AppState,
-	client_ip::ExtractClientIP,
-	headers::{
-		SurrealAuthDatabase, SurrealAuthNamespace, SurrealDatabase, SurrealId, SurrealNamespace,
-		parse_typed_header,
-	},
+use super::AppState;
+use super::client_ip::ExtractClientIP;
+use super::headers::{
+	SurrealAuthDatabase, SurrealAuthNamespace, SurrealDatabase, SurrealId, SurrealNamespace,
+	parse_typed_header,
 };
 
 ///
@@ -128,12 +123,14 @@ async fn check_auth(parts: &mut Parts) -> Result<Session> {
 		parts.extract_with_state(&state).await.unwrap_or(ExtractClientIP(None));
 
 	// Create session
-	let mut session = Session::default();
-	session.ip = ip;
-	session.or = or;
-	session.id = id;
-	session.ns = ns;
-	session.db = db;
+	let mut session = Session {
+		ip,
+		or,
+		id,
+		ns,
+		db,
+		..Session::default()
+	};
 
 	// If Basic authentication data was supplied
 	if let Ok(au) = parts.extract::<TypedHeader<Authorization<Basic>>>().await {

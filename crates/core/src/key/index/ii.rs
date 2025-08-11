@@ -1,11 +1,11 @@
 //! Stores doc keys for doc_ids
 use crate::catalog::DatabaseId;
 use crate::catalog::NamespaceId;
-use crate::expr::Id;
 use crate::idx::docids::DocId;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+
+use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
+use crate::val::RecordIdKey;
 
 use serde::{Deserialize, Serialize};
 
@@ -28,7 +28,7 @@ pub(crate) struct Ii<'a> {
 }
 
 impl KVKey for Ii<'_> {
-	type ValueType = Id;
+	type ValueType = RecordIdKey;
 }
 
 impl Categorise for Ii<'_> {

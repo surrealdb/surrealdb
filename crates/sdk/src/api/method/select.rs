@@ -1,14 +1,11 @@
 use super::transaction::WithTransaction;
-use crate::Surreal;
-use crate::Value;
-use crate::api::Connection;
-use crate::api::Result;
 use crate::api::conn::Command;
-use crate::api::method::BoxFuture;
-use crate::api::method::OnceLockExt;
+use crate::api::method::{BoxFuture, OnceLockExt};
 use crate::api::opt::Resource;
+use crate::api::{Connection, Result};
 use crate::method::Live;
 use crate::opt::KeyRange;
+use crate::{Surreal, Value};
 use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;

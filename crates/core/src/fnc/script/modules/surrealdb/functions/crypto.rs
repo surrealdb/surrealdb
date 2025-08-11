@@ -6,7 +6,6 @@ mod bcrypt;
 mod pbkdf2;
 mod scrypt;
 
-#[non_exhaustive]
 pub struct Package;
 
 impl_module_def!(

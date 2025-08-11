@@ -3,10 +3,11 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Cond, Fetchs, Fields, FlowResultExt as _, Uuid, Value};
+use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _, Literal};
 use crate::iam::Auth;
 use crate::kvs::Live;
 use crate::kvs::impl_kv_value_revisioned;
+use crate::val::{Uuid, Value};
 use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
@@ -15,14 +16,12 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct LiveStatement {
 	pub id: Uuid,
 	pub node: Uuid,
 	pub expr: Fields,
-	pub what: Value,
+	pub what: Expr,
 	pub cond: Option<Cond>,
 	pub fetch: Option<Fetchs>,
 	// When a live query is created, we must also store the
@@ -47,17 +46,24 @@ impl LiveStatement {
 			id: Uuid::new_v4(),
 			node: Uuid::new_v4(),
 			expr,
-			..Default::default()
+			what: Expr::Literal(Literal::Null),
+			cond: None,
+			fetch: None,
+			auth: None,
+			session: None,
 		}
 	}
 
-	pub fn new_from_what_expr(expr: Fields, what: Value) -> Self {
+	pub fn new_from_what_expr(expr: Fields, what: Expr) -> Self {
 		LiveStatement {
 			id: Uuid::new_v4(),
 			node: Uuid::new_v4(),
 			what,
 			expr,
-			..Default::default()
+			cond: None,
+			auth: None,
+			session: None,
+			fetch: None,
 		}
 	}
 
@@ -90,7 +96,7 @@ impl LiveStatement {
 		// Get the id
 		let id = stm.id.0;
 		// Process the live query table
-		match stm.what.compute(stk, ctx, opt, doc).await.catch_return()? {
+		match stk.run(|stk| stm.what.compute(stk, ctx, opt, doc)).await.catch_return()? {
 			Value::Table(tb) => {
 				// Store the current Node ID
 				stm.node = nid.into();
@@ -120,7 +126,7 @@ impl LiveStatement {
 					cache.new_live_queries_version(ns, db, &tb);
 				}
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 			}
 			v => {
 				bail!(Error::LiveStatement {
@@ -129,7 +135,7 @@ impl LiveStatement {
 			}
 		};
 		// Return the query id
-		Ok(id.into())
+		Ok(Uuid(id).into())
 	}
 }
 
@@ -151,7 +157,7 @@ impl InfoStructure for LiveStatement {
 		Value::from(map! {
 			"expr".to_string() => self.expr.structure(),
 			"what".to_string() => self.what.structure(),
-			"cond".to_string(), if let Some(v) = self.cond => v.structure(),
+			"cond".to_string(), if let Some(v) = self.cond => v.0.structure(),
 			"fetch".to_string(), if let Some(v) = self.fetch => v.structure(),
 		})
 	}
@@ -161,13 +167,12 @@ impl InfoStructure for LiveStatement {
 mod tests {
 	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::dbs::{Action, Capabilities, Notification, Session};
-	use crate::expr::Thing;
 	use crate::expr::Value;
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
-	use crate::sql::SqlValue;
-	use crate::syn::Parse;
+	use crate::syn;
+	use crate::val::{RecordId, RecordIdKey};
 	use anyhow::Result;
 
 	pub async fn new_ds() -> Result<Datastore> {
@@ -212,13 +217,13 @@ mod tests {
 		let create_statement = format!("CREATE {tb}:test_true SET condition = true");
 		let create_response = &mut dbs.execute(&create_statement, &ses, None).await.unwrap();
 		assert_eq!(create_response.len(), 1);
-		let expected_record: Value = SqlValue::parse(&format!(
+		let expected_record: Value = syn::value(&format!(
 			"[{{
 				id: {tb}:test_true,
 				condition: true,
 			}}]"
 		))
-		.into();
+		.unwrap();
 
 		let tmp = create_response.remove(0).result.unwrap();
 		assert_eq!(tmp, expected_record);
@@ -238,14 +243,17 @@ mod tests {
 			Notification::new(
 				live_id,
 				Action::Create,
-				Value::Thing(Thing::from((tb, "test_true"))),
-				SqlValue::parse(&format!(
+				Value::Thing(RecordId {
+					table: tb.to_owned(),
+					key: RecordIdKey::String("test_true".to_owned())
+				}),
+				syn::value(&format!(
 					"{{
 						id: {tb}:test_true,
 						condition: true,
 					}}"
 				))
-				.into(),
+				.unwrap(),
 			)
 		);
 	}

@@ -1,14 +1,12 @@
 //! Module containing the implementation of the surrealql tokens, lexer, and parser.
 
-use crate::{
-	cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH},
-	dbs::{Capabilities, capabilities::ExperimentalTarget},
-	err::Error,
-	sql::{
-		Block, Datetime, Duration, Fetchs, Fields, Idiom, Kind, Output, Query, Range, SqlValue,
-		Subquery, Thing,
-	},
-};
+use crate::cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH};
+use crate::dbs::Capabilities;
+use crate::dbs::capabilities::ExperimentalTarget;
+use crate::err::Error;
+use crate::sql::{Ast, Block, Expr, Fetchs, Fields, Idiom, Kind, Output, RecordIdLit};
+use crate::val::{Datetime, Duration};
+use crate::val::{RecordId, Value};
 
 pub mod error;
 pub mod lexer;
@@ -25,8 +23,8 @@ mod test;
 
 use anyhow::{Result, bail, ensure};
 use lexer::{Lexer, compound};
-use parser::{Parser, ParserSettings};
-use reblessive::Stack;
+use parser::{ParseResult, Parser, ParserSettings};
+use reblessive::{Stack, Stk};
 use token::t;
 
 const TARGET: &str = "surrealdb::core::syn";
@@ -34,6 +32,42 @@ const TARGET: &str = "surrealdb::core::syn";
 /// Takes a string and returns if it could be a reserved keyword in certain contexts.
 pub fn could_be_reserved_keyword(s: &str) -> bool {
 	lexer::keywords::could_be_reserved(s)
+}
+
+pub fn parse_with<F, R>(input: &[u8], f: F) -> Result<R>
+where
+	F: AsyncFnOnce(&mut Parser, &mut Stk) -> ParseResult<R>,
+{
+	parse_with_settings(input, settings_from_capabilities(&Capabilities::all()), f)
+}
+
+pub fn parse_with_settings<F, R>(input: &[u8], settings: ParserSettings, f: F) -> Result<R>
+where
+	F: for<'a> AsyncFnOnce(&'a mut Parser<'a>, &'a mut Stk) -> ParseResult<R>,
+{
+	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
+	let mut parser = Parser::new_with_settings(input, settings);
+	let mut stack = Stack::new();
+	stack
+		.enter(|stk| f(&mut parser, stk))
+		.finish()
+		.map_err(|e| e.render_on_bytes(input))
+		.map_err(Error::InvalidQuery)
+		.map_err(anyhow::Error::new)
+}
+
+/// Creates the parser settings struct from the global configuration values as wel as the
+/// capabilities  struct.
+pub fn settings_from_capabilities(cap: &Capabilities) -> ParserSettings {
+	ParserSettings {
+		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		references_enabled: cap.allows_experimental(&ExperimentalTarget::RecordReferences),
+		bearer_access_enabled: cap.allows_experimental(&ExperimentalTarget::BearerAccess),
+		define_api_enabled: cap.allows_experimental(&ExperimentalTarget::DefineApi),
+		files_enabled: cap.allows_experimental(&ExperimentalTarget::Files),
+		..Default::default()
+	}
 }
 
 /// Parses a SurrealQL [`Query`]
@@ -47,7 +81,7 @@ pub fn could_be_reserved_keyword(s: &str) -> bool {
 /// If you encounter this limit and believe that it should be increased,
 /// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn parse(input: &str) -> Result<Query> {
+pub fn parse(input: &str) -> Result<Ast> {
 	let capabilities = Capabilities::all();
 	parse_with_capabilities(input, &capabilities)
 }
@@ -63,119 +97,41 @@ pub fn parse(input: &str) -> Result<Query> {
 /// If you encounter this limit and believe that it should be increased,
 /// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn parse_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Query> {
+pub fn parse_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Ast> {
 	trace!(target: TARGET, "Parsing SurrealQL query");
 
-	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
-
-	let mut parser = Parser::new_with_settings(
+	parse_with_settings(
 		input.as_bytes(),
-		ParserSettings {
-			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
-			references_enabled: capabilities
-				.allows_experimental(&ExperimentalTarget::RecordReferences),
-			bearer_access_enabled: capabilities
-				.allows_experimental(&ExperimentalTarget::BearerAccess),
-			define_api_enabled: capabilities.allows_experimental(&ExperimentalTarget::DefineApi),
-			files_enabled: capabilities.allows_experimental(&ExperimentalTarget::Files),
-			..Default::default()
-		},
-	);
-	let mut stack = Stack::new();
-	stack
-		.enter(|stk| parser.parse_query(stk))
-		.finish()
-		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
-		.map_err(anyhow::Error::new)
+		settings_from_capabilities(capabilities),
+		async |parser, stk| parser.parse_query(stk).await,
+	)
 }
 
 /// Parses a SurrealQL [`Value`].
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn value(input: &str) -> Result<SqlValue> {
+pub fn expr(input: &str) -> Result<Expr> {
 	let capabilities = Capabilities::all();
-	value_with_capabilities(input, &capabilities)
+	expr_with_capabilities(input, &capabilities)
 }
 
 /// Parses a SurrealQL [`Value`].
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn value_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<SqlValue> {
+pub fn expr_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Expr> {
 	trace!(target: TARGET, "Parsing SurrealQL value");
 
-	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
-
-	let mut parser = Parser::new_with_settings(
+	parse_with_settings(
 		input.as_bytes(),
-		ParserSettings {
-			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
-			references_enabled: capabilities
-				.allows_experimental(&ExperimentalTarget::RecordReferences),
-			bearer_access_enabled: capabilities
-				.allows_experimental(&ExperimentalTarget::BearerAccess),
-			files_enabled: capabilities.allows_experimental(&ExperimentalTarget::Files),
-			..Default::default()
-		},
-	);
-	let mut stack = Stack::new();
-	stack
-		.enter(|stk| parser.parse_value_field(stk))
-		.finish()
-		.and_then(|e| parser.assert_finished().map(|_| e))
-		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
-		.map_err(anyhow::Error::new)
+		settings_from_capabilities(capabilities),
+		async |parser, stk| parser.parse_expr_field(stk).await,
+	)
 }
 
 /// Parses JSON into an inert SurrealQL [`Value`]
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn json(input: &str) -> Result<SqlValue> {
+pub fn json(input: &str) -> Result<Value> {
 	trace!(target: TARGET, "Parsing inert JSON value");
 
-	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
-
-	let mut parser = Parser::new_with_settings(
-		input.as_bytes(),
-		ParserSettings {
-			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
-			..Default::default()
-		},
-	);
-	let mut stack = Stack::new();
-	stack
-		.enter(|stk| parser.parse_json(stk))
-		.finish()
-		.and_then(|e| parser.assert_finished().map(|_| e))
-		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
-		.map_err(anyhow::Error::new)
-}
-
-/// Parses a SurrealQL Subquery [`Subquery`]
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn subquery(input: &str) -> Result<Subquery> {
-	trace!(target: TARGET, "Parsing SurrealQL subquery");
-
-	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
-
-	let mut parser = Parser::new_with_settings(
-		input.as_bytes(),
-		ParserSettings {
-			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
-			..Default::default()
-		},
-	);
-	let mut stack = Stack::new();
-	stack
-		.enter(|stk| parser.parse_full_subquery(stk))
-		.finish()
-		.and_then(|e| parser.assert_finished().map(|_| e))
-		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
-		.map_err(anyhow::Error::new)
+	parse_with(input.as_bytes(), async |parser, stk| parser.parse_json(stk).await)
 }
 
 /// Parses a SurrealQL [`Idiom`]
@@ -183,25 +139,7 @@ pub fn subquery(input: &str) -> Result<Subquery> {
 pub fn idiom(input: &str) -> Result<Idiom> {
 	trace!(target: TARGET, "Parsing SurrealQL idiom");
 
-	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
-
-	let mut parser = Parser::new_with_settings(
-		input.as_bytes(),
-		ParserSettings {
-			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
-			..Default::default()
-		},
-	);
-	parser.table_as_field = true;
-	let mut stack = Stack::new();
-	stack
-		.enter(|stk| parser.parse_plain_idiom(stk))
-		.finish()
-		.and_then(|e| parser.assert_finished().map(|_| e))
-		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
-		.map_err(anyhow::Error::new)
+	parse_with(input.as_bytes(), async |parser, stk| parser.parse_plain_idiom(stk).await)
 }
 
 /// Parse a datetime without enclosing delimiters from a string.
@@ -238,72 +176,20 @@ pub fn duration(input: &str) -> Result<Duration> {
 		.map_err(anyhow::Error::new)
 }
 
-/// Parse a range.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn range(input: &str) -> Result<Range> {
-	trace!(target: TARGET, "Parsing SurrealQL range");
-
-	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
-
-	let mut parser = Parser::new(input.as_bytes());
-	let mut stack = Stack::new();
-	stack
-		.enter(|stk| parser.parse_range(stk))
-		.finish()
-		.and_then(|e| parser.assert_finished().map(|_| e))
-		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
-		.map_err(anyhow::Error::new)
-}
-
 /// Parse a record id.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn thing(input: &str) -> Result<Thing> {
-	trace!(target: TARGET, "Parsing SurrealQL thing");
+pub fn record_id(input: &str) -> Result<RecordId> {
+	trace!(target: TARGET, "Parsing SurrealQL record id");
 
-	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
-
-	let mut parser = Parser::new_with_settings(
-		input.as_bytes(),
-		ParserSettings {
-			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
-			..Default::default()
-		},
-	);
-	let mut stack = Stack::new();
-	stack
-		.enter(|stk| parser.parse_thing(stk))
-		.finish()
-		.and_then(|e| parser.assert_finished().map(|_| e))
-		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
-		.map_err(anyhow::Error::new)
+	parse_with(input.as_bytes(), async |parser, stk| parser.parse_value_record_id(stk).await)
 }
 
 /// Parse a record id including ranges.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn thing_with_range(input: &str) -> Result<Thing> {
-	trace!(target: TARGET, "Parsing SurrealQL thing");
+pub fn record_id_with_range(input: &str) -> Result<RecordIdLit> {
+	trace!(target: TARGET, "Parsing SurrealQL record id with range");
 
-	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
-
-	let mut parser = Parser::new_with_settings(
-		input.as_bytes(),
-		ParserSettings {
-			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
-			..Default::default()
-		},
-	);
-	let mut stack = Stack::new();
-	stack
-		.enter(|stk| parser.parse_thing_with_range(stk))
-		.finish()
-		.and_then(|e| parser.assert_finished().map(|_| e))
-		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
-		.map_err(anyhow::Error::new)
+	parse_with(input.as_bytes(), async |parser, stk| parser.parse_record_id_with_range(stk).await)
 }
 
 /// Parse a block, expects the value to be wrapped in `{}`.
@@ -311,35 +197,19 @@ pub fn thing_with_range(input: &str) -> Result<Thing> {
 pub fn block(input: &str) -> Result<Block> {
 	trace!(target: TARGET, "Parsing SurrealQL block");
 
-	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
-
-	let mut parser = Parser::new_with_settings(
-		input.as_bytes(),
-		ParserSettings {
-			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
-			..Default::default()
-		},
-	);
-	let mut stack = Stack::new();
-	let token = parser.peek();
-	match token.kind {
-		t!("{") => {
-			let start = parser.pop_peek().span;
-			stack
-				.enter(|stk| parser.parse_block(stk, start))
-				.finish()
-				.and_then(|e| parser.assert_finished().map(|_| e))
-				.map_err(|e| e.render_on(input))
-				.map_err(Error::InvalidQuery)
-				.map_err(anyhow::Error::new)
+	parse_with(input.as_bytes(), async |parser, stk| {
+		let token = parser.peek();
+		match token.kind {
+			t!("{") => {
+				let start = parser.pop_peek().span;
+				parser.parse_block(stk, start).await
+			}
+			found => Err(error::SyntaxError::new(format_args!(
+				"Unexpected token `{found}` expected `{{`"
+			))
+			.with_span(token.span, error::MessageKind::Error)),
 		}
-		found => Err(anyhow::Error::new(Error::InvalidQuery(
-			error::SyntaxError::new(format_args!("Unexpected token `{found}` expected `{{`"))
-				.with_span(token.span, error::MessageKind::Error)
-				.render_on(input),
-		))),
-	}
+	})
 }
 
 /// Parses fields for a SELECT statement
@@ -347,29 +217,11 @@ pub fn block(input: &str) -> Result<Block> {
 pub(crate) fn fields_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Fields> {
 	trace!(target: TARGET, "Parsing select fields");
 
-	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
-
-	let mut parser = Parser::new_with_settings(
+	parse_with_settings(
 		input.as_bytes(),
-		ParserSettings {
-			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
-			references_enabled: capabilities
-				.allows_experimental(&ExperimentalTarget::RecordReferences),
-			bearer_access_enabled: capabilities
-				.allows_experimental(&ExperimentalTarget::BearerAccess),
-			files_enabled: capabilities.allows_experimental(&ExperimentalTarget::Files),
-			..Default::default()
-		},
-	);
-	let mut stack = Stack::new();
-	stack
-		.enter(|stk| parser.parse_fields(stk))
-		.finish()
-		.and_then(|e| parser.assert_finished().map(|_| e))
-		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
-		.map_err(anyhow::Error::new)
+		settings_from_capabilities(capabilities),
+		async |parser, stk| parser.parse_fields(stk).await,
+	)
 }
 
 /// Parses fields for a SELECT statement
@@ -377,29 +229,11 @@ pub(crate) fn fields_with_capabilities(input: &str, capabilities: &Capabilities)
 pub(crate) fn fetchs_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Fetchs> {
 	trace!(target: TARGET, "Parsing fetch fields");
 
-	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
-
-	let mut parser = Parser::new_with_settings(
+	parse_with_settings(
 		input.as_bytes(),
-		ParserSettings {
-			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
-			references_enabled: capabilities
-				.allows_experimental(&ExperimentalTarget::RecordReferences),
-			bearer_access_enabled: capabilities
-				.allows_experimental(&ExperimentalTarget::BearerAccess),
-			files_enabled: capabilities.allows_experimental(&ExperimentalTarget::Files),
-			..Default::default()
-		},
-	);
-	let mut stack = Stack::new();
-	stack
-		.enter(|stk| parser.parse_fetchs(stk))
-		.finish()
-		.and_then(|e| parser.assert_finished().map(|_| e))
-		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
-		.map_err(anyhow::Error::new)
+		settings_from_capabilities(capabilities),
+		async |parser, stk| parser.parse_fetchs(stk).await,
+	)
 }
 
 /// Parses an output for a RETURN clause
@@ -409,79 +243,78 @@ pub(crate) fn output_with_capabilities(input: &str, capabilities: &Capabilities)
 
 	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
-	let mut parser = Parser::new_with_settings(
+	parse_with_settings(
 		input.as_bytes(),
-		ParserSettings {
-			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
-			references_enabled: capabilities
-				.allows_experimental(&ExperimentalTarget::RecordReferences),
-			bearer_access_enabled: capabilities
-				.allows_experimental(&ExperimentalTarget::BearerAccess),
-			files_enabled: capabilities.allows_experimental(&ExperimentalTarget::Files),
-			..Default::default()
-		},
-	);
-	let mut stack = Stack::new();
-	stack
-		.enter(|stk| parser.parse_output(stk))
-		.finish()
-		.and_then(|e| parser.assert_finished().map(|_| e))
-		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
-		.map_err(anyhow::Error::new)
+		settings_from_capabilities(capabilities),
+		async |parser, stk| parser.parse_output(stk).await,
+	)
 }
 
 /// Parses a SurrealQL [`Value`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn value_legacy_strand(input: &str) -> Result<SqlValue> {
+pub fn expr_legacy_strand(input: &str) -> Result<Expr> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
-	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
+	let settings = ParserSettings {
+		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		legacy_strands: true,
+		..Default::default()
+	};
 
-	let mut parser = Parser::new_with_settings(
-		input.as_bytes(),
-		ParserSettings {
-			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
-			legacy_strands: true,
-			..Default::default()
-		},
-	);
-	let mut stack = Stack::new();
-	stack
-		.enter(|stk| parser.parse_value_field(stk))
-		.finish()
-		.and_then(|e| parser.assert_finished().map(|_| e))
-		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
-		.map_err(anyhow::Error::new)
+	parse_with_settings(input.as_bytes(), settings, async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+}
+
+/// Parses a SurrealQL [`Value`] and parses values within strings.
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn value(input: &str) -> Result<Value> {
+	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
+
+	let settings = ParserSettings {
+		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		..Default::default()
+	};
+
+	parse_with_settings(input.as_bytes(), settings, async |parser, stk| {
+		parser.parse_value(stk).await
+	})
+}
+
+/// Parses a SurrealQL [`Value`] and parses values within strings.
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn value_legacy_strand(input: &str) -> Result<Value> {
+	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
+
+	let settings = ParserSettings {
+		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		legacy_strands: true,
+		..Default::default()
+	};
+
+	parse_with_settings(input.as_bytes(), settings, async |parser, stk| {
+		parser.parse_value(stk).await
+	})
 }
 
 /// Parses JSON into an inert SurrealQL [`Value`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn json_legacy_strand(input: &str) -> Result<SqlValue> {
+pub fn json_legacy_strand(input: &str) -> Result<Value> {
 	trace!(target: TARGET, "Parsing inert JSON value, with legacy strings");
 
-	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
+	let settings = ParserSettings {
+		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		legacy_strands: true,
+		..Default::default()
+	};
 
-	let mut parser = Parser::new_with_settings(
-		input.as_bytes(),
-		ParserSettings {
-			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
-			legacy_strands: true,
-			..Default::default()
-		},
-	);
-	let mut stack = Stack::new();
-	stack
-		.enter(|stk| parser.parse_json(stk))
-		.finish()
-		.and_then(|e| parser.assert_finished().map(|_| e))
-		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
-		.map_err(anyhow::Error::new)
+	parse_with_settings(input.as_bytes(), settings, async |parser, stk| {
+		parser.parse_json(stk).await
+	})
 }
 
 /// Parse a kind from a string.
@@ -489,15 +322,5 @@ pub fn json_legacy_strand(input: &str) -> Result<SqlValue> {
 pub fn kind(input: &str) -> Result<Kind> {
 	trace!(target: TARGET, "Parsing SurrealQL duration");
 
-	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
-
-	let mut parser = Parser::new(input.as_bytes());
-	let mut stack = Stack::new();
-	stack
-		.enter(|stk| parser.parse_inner_kind(stk))
-		.finish()
-		.and_then(|e| parser.assert_finished().map(|_| e))
-		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
-		.map_err(anyhow::Error::new)
+	parse_with(input.as_bytes(), async |parser, stk| parser.parse_inner_kind(stk).await)
 }

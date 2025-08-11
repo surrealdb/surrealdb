@@ -1,3 +1,8 @@
+// Temporary allow deprecated until the 3.0
+#![allow(deprecated)]
+// This triggers because we have regex's in or Value type which have a unsafecell inside.
+#![allow(clippy::mutable_key_type)]
+
 //! # Surrealdb Core
 //!
 //! This crate is the internal core library of SurrealDB.
@@ -42,7 +47,7 @@ pub mod dbs;
 pub mod env;
 pub mod err;
 pub mod expr;
-pub mod gql;
+//pub mod gql;
 pub mod iam;
 pub mod idx;
 pub mod kvs;
@@ -54,6 +59,7 @@ pub mod rpc;
 pub mod sql;
 pub mod str;
 pub mod syn;
+pub mod val;
 pub mod vs;
 
 #[cfg(feature = "ml")]
@@ -65,8 +71,5 @@ pub mod ent;
 
 /// Channels for receiving a SurrealQL database export
 pub mod channel {
-	pub use async_channel::Receiver;
-	pub use async_channel::Sender;
-	pub use async_channel::bounded;
-	pub use async_channel::unbounded;
+	pub use async_channel::{Receiver, Sender, bounded, unbounded};
 }

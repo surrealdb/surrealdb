@@ -3,12 +3,10 @@ use crate::catalog::TableDefinition;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
-use crate::expr::Value;
-use crate::expr::paths::EDGE;
-use crate::expr::paths::IN;
-use crate::expr::paths::OUT;
+use crate::expr::paths::{EDGE, IN, OUT};
 use crate::key::thing;
 use crate::sql::ToSql;
+use crate::val::{RecordId, Strand, Value};
 use anyhow::Result;
 use async_channel::Sender;
 use chrono::TimeZone;
@@ -103,7 +101,8 @@ impl From<Config> for Value {
 			"tables" => match config.tables {
 				TableConfig::All => true.into(),
 				TableConfig::None => false.into(),
-				TableConfig::Some(v) => v.into()
+				// TODO: Null byte validity
+				TableConfig::Some(v) => v.into_iter().map(|x| Value::Strand(Strand::new(x).unwrap())).collect::<Vec<_>>().into()
 			},
 		);
 
@@ -156,7 +155,7 @@ impl TryFrom<&Value> for TableConfig {
 				.iter()
 				.cloned()
 				.map(|v| match v {
-					Value::Strand(str) => Ok(str.0),
+					Value::Strand(str) => Ok(str.into_string()),
 					v => Err(anyhow::Error::new(Error::InvalidExportConfig(
 						v.clone(),
 						"a string".into(),
@@ -445,7 +444,10 @@ impl Transaction {
 		version: Option<u64>,
 	) -> String {
 		// Inject the id field into the document before processing.
-		let rid = crate::expr::Thing::from((k.tb, k.id.clone()));
+		let rid = RecordId {
+			table: k.tb.to_owned(),
+			key: k.id.clone(),
+		};
 		v.def(&rid);
 		// Match on the value to determine if it is a graph edge record or a normal record.
 		match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {

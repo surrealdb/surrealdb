@@ -1,20 +1,16 @@
 use reblessive::Stk;
 
-use crate::{
-	sql::{
-		Field, Fields, Idioms, Limit, Order, Split, Splits, SqlValues, Start, Version,
-		order::{OrderList, Ordering},
-		statements::SelectStatement,
-	},
-	syn::{
-		parser::{ParseResult, Parser, mac::expected},
-		token::{Span, t},
-	},
-};
+use crate::sql::order::{OrderList, Ordering};
+use crate::sql::statements::SelectStatement;
+use crate::sql::{Fields, Idioms, Limit, Order, Split, Splits, Start};
+use crate::syn::parser::mac::expected;
+use crate::syn::parser::{ParseResult, Parser};
+use crate::syn::token::{Span, t};
 
 use super::parts::MissingKind;
 
 impl Parser<'_> {
+	/// expects `select` to be eaten.
 	pub(crate) async fn parse_select_stmt(
 		&mut self,
 		stk: &mut Stk,
@@ -33,11 +29,10 @@ impl Parser<'_> {
 
 		let only = self.eat(t!("ONLY"));
 
-		let mut what = vec![stk.run(|ctx| self.parse_value_table(ctx)).await?];
+		let mut what = vec![stk.run(|ctx| self.parse_expr_table(ctx)).await?];
 		while self.eat(t!(",")) {
-			what.push(stk.run(|ctx| self.parse_value_table(ctx)).await?);
+			what.push(stk.run(|ctx| self.parse_expr_table(ctx)).await?);
 		}
-		let what = SqlValues(what);
 
 		let with = self.try_parse_with()?;
 		let cond = self.try_parse_condition(stk).await?;
@@ -54,7 +49,11 @@ impl Parser<'_> {
 			(limit, start)
 		};
 		let fetch = self.try_parse_fetch(stk).await?;
-		let version = self.try_parse_version(stk).await?;
+		let version = if self.eat(t!("VERSION")) {
+			Some(stk.run(|stk| self.parse_expr_field(stk)).await?)
+		} else {
+			None
+		};
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
 		let tempfiles = self.eat(t!("TEMPFILES"));
@@ -83,7 +82,7 @@ impl Parser<'_> {
 
 	pub(crate) async fn try_parse_split(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		fields: &Fields,
 		fields_span: Span,
 	) -> ParseResult<Option<Splits>> {
@@ -93,10 +92,10 @@ impl Parser<'_> {
 
 		self.eat(t!("ON"));
 
-		let has_all = fields.contains(&Field::All);
+		let has_all = fields.contains_all();
 
 		let before = self.peek().span;
-		let split = self.parse_basic_idiom(ctx).await?;
+		let split = self.parse_basic_idiom(stk).await?;
 		let split_span = before.covers(self.last_span());
 		if !has_all {
 			Self::check_idiom(MissingKind::Split, fields, fields_span, &split, split_span)?;
@@ -105,7 +104,7 @@ impl Parser<'_> {
 		let mut res = vec![Split(split)];
 		while self.eat(t!(",")) {
 			let before = self.peek().span;
-			let split = self.parse_basic_idiom(ctx).await?;
+			let split = self.parse_basic_idiom(stk).await?;
 			let split_span = before.covers(self.last_span());
 			if !has_all {
 				Self::check_idiom(MissingKind::Split, fields, fields_span, &split, split_span)?;
@@ -117,7 +116,7 @@ impl Parser<'_> {
 
 	pub(crate) async fn try_parse_orders(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		fields: &Fields,
 		fields_span: Span,
 	) -> ParseResult<Option<Ordering>> {
@@ -134,10 +133,10 @@ impl Parser<'_> {
 			return Ok(Some(Ordering::Random));
 		};
 
-		let has_all = fields.contains(&Field::All);
+		let has_all = fields.contains_all();
 
 		let before = self.recent_span();
-		let order = self.parse_order(ctx).await?;
+		let order = self.parse_order(stk).await?;
 		let order_span = before.covers(self.last_span());
 		if !has_all {
 			Self::check_idiom(MissingKind::Order, fields, fields_span, &order.value, order_span)?;
@@ -146,7 +145,7 @@ impl Parser<'_> {
 		let mut orders = vec![order];
 		while self.eat(t!(",")) {
 			let before = self.recent_span();
-			let order = self.parse_order(ctx).await?;
+			let order = self.parse_order(stk).await?;
 			let order_span = before.covers(self.last_span());
 			if !has_all {
 				Self::check_idiom(
@@ -163,8 +162,8 @@ impl Parser<'_> {
 		Ok(Some(Ordering::Order(OrderList(orders))))
 	}
 
-	async fn parse_order(&mut self, ctx: &mut Stk) -> ParseResult<Order> {
-		let start = self.parse_basic_idiom(ctx).await?;
+	async fn parse_order(&mut self, stk: &mut Stk) -> ParseResult<Order> {
+		let start = self.parse_basic_idiom(stk).await?;
 		let collate = self.eat(t!("COLLATE"));
 		let numeric = self.eat(t!("NUMERIC"));
 		let direction = match self.peek_kind() {
@@ -186,32 +185,21 @@ impl Parser<'_> {
 		})
 	}
 
-	pub(crate) async fn try_parse_limit(&mut self, ctx: &mut Stk) -> ParseResult<Option<Limit>> {
+	pub(crate) async fn try_parse_limit(&mut self, stk: &mut Stk) -> ParseResult<Option<Limit>> {
 		if !self.eat(t!("LIMIT")) {
 			return Ok(None);
 		}
 		self.eat(t!("BY"));
-		let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+		let value = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		Ok(Some(Limit(value)))
 	}
 
-	pub(crate) async fn try_parse_start(&mut self, ctx: &mut Stk) -> ParseResult<Option<Start>> {
+	pub(crate) async fn try_parse_start(&mut self, stk: &mut Stk) -> ParseResult<Option<Start>> {
 		if !self.eat(t!("START")) {
 			return Ok(None);
 		}
 		self.eat(t!("AT"));
-		let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+		let value = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		Ok(Some(Start(value)))
-	}
-
-	pub(crate) async fn try_parse_version(
-		&mut self,
-		ctx: &mut Stk,
-	) -> ParseResult<Option<Version>> {
-		if !self.eat(t!("VERSION")) {
-			return Ok(None);
-		}
-		let time = self.parse_value_inherit(ctx).await?;
-		Ok(Some(Version(time)))
 	}
 }

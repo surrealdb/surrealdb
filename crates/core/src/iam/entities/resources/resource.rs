@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 #[revisioned(revision = 5)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum ResourceKind {
 	#[default]
 	Any,
@@ -40,7 +39,6 @@ pub enum ResourceKind {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum ConfigKind {
 	GraphQL,
 	Api,
@@ -104,7 +102,6 @@ impl ResourceKind {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Resource {
 	id: String,
 	kind: ResourceKind,
