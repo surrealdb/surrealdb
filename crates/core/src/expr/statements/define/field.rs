@@ -44,6 +44,7 @@ pub struct DefineFieldStatement {
 	pub readonly: bool,
 	pub value: Option<Expr>,
 	pub assert: Option<Expr>,
+	pub computed: Option<Expr>,
 	pub default: DefineDefault,
 	pub permissions: Permissions,
 	pub comment: Option<Strand>,
@@ -64,6 +65,8 @@ impl DefineFieldStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Validate reference options
 		self.validate_reference_options(ctx)?;
+		// Validate computed options
+		self.validate_computed_options()?;
 
 		// Get the NS and DB
 		let (ns, db) = opt.ns_db()?;
@@ -269,6 +272,15 @@ impl DefineFieldStatement {
 		Ok(())
 	}
 
+	pub(crate) fn validate_computed_options(&self) -> Result<()> {
+		ensure!(self.value.is_none(), Error::RefsTypeConflict("VALUE".into(), "computed".into()));
+		ensure!(self.assert.is_none(), Error::RefsTypeConflict("ASSERT".into(), "computed".into()));
+		ensure!(matches!(self.default, DefineDefault::None), Error::RefsTypeConflict("DEFAULT".into(), "computed".into()));
+		ensure!(self.flex, Error::RefsTypeConflict("FLEXIBLE".into(), "computed".into()));
+		ensure!(self.readonly, Error::RefsTypeConflict("READONLY".into(), "computed".into()));
+		Ok(())
+	}
+
 	pub(crate) fn validate_reference_options(&self, ctx: &Context) -> Result<()> {
 		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(());
@@ -305,6 +317,8 @@ impl DefineFieldStatement {
 				ensure!(self.value.is_none(), Error::RefsTypeConflict("VALUE".into(), typename));
 
 				ensure!(self.assert.is_none(), Error::RefsTypeConflict("ASSERT".into(), typename));
+
+				ensure!(self.computed.is_none(), Error::RefsTypeConflict("COMPUTED".into(), typename));
 
 				ensure!(!self.flex, Error::RefsTypeConflict("FLEXIBLE".into(), typename));
 
@@ -436,6 +450,9 @@ impl Display for DefineFieldStatement {
 		if let Some(ref v) = self.assert {
 			write!(f, " ASSERT {v}")?
 		}
+		if let Some(ref v) = self.computed {
+			write!(f, " COMPUTED {v}")?
+		}
 		if let Some(ref v) = self.reference {
 			write!(f, " REFERENCE {v}")?
 		}
@@ -466,6 +483,7 @@ impl InfoStructure for DefineFieldStatement {
 			"kind".to_string(), if let Some(v) = self.field_kind => v.structure(),
 			"value".to_string(), if let Some(v) = self.value => v.structure(),
 			"assert".to_string(), if let Some(v) = self.assert => v.structure(),
+			"computed".to_string(), if let Some(v) = self.computed => v.structure(),
 			"default_always".to_string(), if matches!(&self.default, DefineDefault::Always(_) | DefineDefault::Set(_)) => Value::Bool(matches!(self.default,DefineDefault::Always(_))), // Only reported if DEFAULT is also enabled for this field
 			"default".to_string(), if let DefineDefault::Always(v) | DefineDefault::Set(v) = self.default => v.structure(),
 			"reference".to_string(), if let Some(v) = self.reference => v.structure(),
