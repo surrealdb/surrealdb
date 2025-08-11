@@ -150,7 +150,6 @@ where
 	}
 }
 
-#[non_exhaustive]
 pub enum TreeCache<N>
 where
 	N: TreeNode + Debug + Clone + Display,
@@ -240,7 +239,6 @@ where
 	}
 }
 
-#[non_exhaustive]
 pub struct TreeLruCache<N>
 where
 	N: TreeNode + Debug + Clone + Display,
@@ -289,7 +287,6 @@ where
 	}
 }
 
-#[non_exhaustive]
 pub struct TreeFullCache<N>
 where
 	N: TreeNode + Debug + Clone,

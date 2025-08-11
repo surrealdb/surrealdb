@@ -1,6 +1,4 @@
 use crate::err::Error;
-use crate::expr::number::{Number, Sort};
-use crate::expr::value::{TryPow, Value};
 use crate::fnc::util::math::bottom::Bottom;
 use crate::fnc::util::math::deviation::Deviation;
 use crate::fnc::util::math::interquartile::Interquartile;
@@ -14,6 +12,8 @@ use crate::fnc::util::math::spread::Spread;
 use crate::fnc::util::math::top::Top;
 use crate::fnc::util::math::trimean::Trimean;
 use crate::fnc::util::math::variance::Variance;
+use crate::val::number::Sort;
+use crate::val::{Number, TryPow, Value};
 use anyhow::{Result, bail, ensure};
 
 pub fn abs((arg,): (Number,)) -> Result<Value> {
@@ -47,7 +47,7 @@ pub fn bottom((array, c): (Vec<Number>, i64)) -> Result<Value> {
 			message: String::from("The second argument must be an integer greater than 0."),
 		}
 	);
-	Ok(array.bottom(c).into())
+	Ok(array.bottom(c).into_iter().map(Value::from).collect::<Vec<_>>().into())
 }
 
 pub fn ceil((arg,): (Number,)) -> Result<Value> {
@@ -216,7 +216,7 @@ pub fn top((array, c): (Vec<Number>, i64)) -> Result<Value> {
 			message: String::from("The second argument must be an integer greater than 0."),
 		}
 	);
-	Ok(array.top(c).into())
+	Ok(array.top(c).into_iter().map(Value::from).collect::<Vec<_>>().into())
 }
 
 pub fn trimean((mut array,): (Vec<Number>,)) -> Result<Value> {

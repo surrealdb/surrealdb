@@ -4,7 +4,6 @@ pub(crate) mod index;
 pub mod planner;
 pub mod trees;
 
-use crate::expr::Id;
 use crate::idx::docids::DocId;
 use crate::idx::ft::search::terms::TermId;
 use crate::idx::trees::hnsw::ElementId;
@@ -43,13 +42,13 @@ use crate::key::index::td::{Td, TdRoot};
 use crate::key::index::tt::Tt;
 use crate::key::root::ic::Ic;
 use crate::kvs::Key;
+use crate::val::RecordIdKey;
 use anyhow::Result;
 use std::ops::Range;
 use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Default, Hash, PartialEq, Eq)]
-#[non_exhaustive]
 pub struct IndexKeyBase(Arc<Inner>);
 
 #[derive(Debug, Default, Hash, PartialEq, Eq)]
@@ -151,7 +150,7 @@ impl IndexKeyBase {
 		He::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, element_id)
 	}
 
-	fn new_hi_key(&self, id: Id) -> Hi<'_> {
+	fn new_hi_key(&self, id: RecordIdKey) -> Hi<'_> {
 		Hi::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, id)
 	}
 
@@ -183,7 +182,7 @@ impl IndexKeyBase {
 		Ii::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id)
 	}
 
-	fn new_id_key(&self, id: Id) -> IdKey {
+	fn new_id_key(&self, id: RecordIdKey) -> IdKey {
 		IdKey::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, id)
 	}
 
@@ -193,7 +192,7 @@ impl IndexKeyBase {
 	}
 
 	#[cfg(not(target_family = "wasm"))]
-	pub(crate) fn new_ip_key(&self, id: Id) -> Ip {
+	pub(crate) fn new_ip_key(&self, id: RecordIdKey) -> Ip {
 		Ip::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, id)
 	}
 

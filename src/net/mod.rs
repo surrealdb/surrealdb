@@ -47,8 +47,9 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::auth::AsyncRequireAuthorizationLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::request_id::MakeRequestUuid;
-use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
-use tower_http::sensitive_headers::SetSensitiveResponseHeadersLayer;
+use tower_http::sensitive_headers::{
+	SetSensitiveRequestHeadersLayer, SetSensitiveResponseHeadersLayer,
+};
 use tower_http::trace::TraceLayer;
 
 #[cfg(feature = "http-compression")]
@@ -182,8 +183,8 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<()> {
 		.merge(signup::router())
 		.merge(key::router())
 		.merge(ml::router())
-		.merge(api::router())
-		.merge(gql::router(ds.clone()));
+		.merge(api::router());
+	//.merge(gql::router(ds.clone()));
 
 	if ds.get_capabilities().allows_experimental(&ExperimentalTarget::GraphQL) {
 		warn!(

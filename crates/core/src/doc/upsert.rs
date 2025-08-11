@@ -1,9 +1,8 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Statement;
+use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err::Error;
-use crate::expr::value::Value;
+use crate::val::Value;
 use anyhow::anyhow;
 use reblessive::tree::Stk;
 
@@ -89,7 +88,7 @@ impl Document {
 		}
 
 		let (ns, db) = opt.ns_db()?;
-		let val = ctx.tx().get_record(ns, db, &retry.tb, &retry.id, opt.version).await?;
+		let val = ctx.tx().get_record(ns, db, &retry.table, &retry.key, opt.version).await?;
 
 		self.modify_for_update_retry(retry, val);
 

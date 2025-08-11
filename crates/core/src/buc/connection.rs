@@ -1,11 +1,10 @@
-use crate::{
-	cnf::{GLOBAL_BUCKET, GLOBAL_BUCKET_ENFORCED},
-	err::Error,
-};
+use crate::cnf::{GLOBAL_BUCKET, GLOBAL_BUCKET_ENFORCED};
+use crate::err::Error;
 use dashmap::DashMap;
 use std::sync::Arc;
 
-use super::store::{ObjectKey, ObjectStore, prefixed::PrefixedStore};
+use super::store::prefixed::PrefixedStore;
+use super::store::{ObjectKey, ObjectStore};
 
 // Helper type to represent how bucket connections are persisted
 pub(crate) type BucketConnections = DashMap<BucketConnectionKey, Arc<dyn ObjectStore>>;
@@ -44,7 +43,7 @@ pub(crate) async fn connect_global(
 	let global = connect(url, true, false).await?;
 
 	// Create a prefixstore for the specified bucket
-	let key = ObjectKey::from(format!("/{ns}/{db}/{bu}"));
+	let key = ObjectKey::new(format!("/{ns}/{db}/{bu}"));
 	Ok(Arc::new(PrefixedStore::new(global, key)))
 }
 

@@ -1,6 +1,6 @@
 use super::mean::Mean;
-use crate::expr::number::Number;
 use crate::fnc::util::math::ToFloat;
+use crate::val::Number;
 
 pub trait Variance {
 	/// Population Variance of Data
@@ -25,8 +25,7 @@ where
 		1 => 0.0,
 		len => {
 			let len = (len - sample as usize) as f64;
-			let out = v.iter().map(|x| (x.to_float() - mean).powi(2)).sum::<f64>() / len;
-			out
+			v.iter().map(|x| (x.to_float() - mean).powi(2)).sum::<f64>() / len
 		}
 	}
 }

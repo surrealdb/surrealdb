@@ -18,8 +18,7 @@ pub use endpoint::*;
 pub use export::*;
 pub use query::*;
 pub use resource::*;
-use serde_content::Serializer;
-use serde_content::Value as Content;
+use serde_content::{Serializer, Value as Content};
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 pub use tls::*;
 

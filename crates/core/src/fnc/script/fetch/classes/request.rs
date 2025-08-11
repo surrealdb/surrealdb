@@ -1,17 +1,18 @@
 //! Request class implementation
 
-use crate::fnc::script::fetch::{RequestError, body::Body};
+use crate::fnc::script::fetch::RequestError;
+use crate::fnc::script::fetch::body::Body;
 use bytes::Bytes;
-use js::{
-	Class, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value, class::Trace, function::Opt,
-	prelude::Coerced,
-};
-use reqwest::{Method, Url, header::HeaderName};
+use js::class::Trace;
+use js::function::Opt;
+use js::prelude::Coerced;
+use js::{Class, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value};
+use reqwest::header::HeaderName;
+use reqwest::{Method, Url};
 
 use super::{Blob, Headers};
 
 #[derive(Clone, Copy, Eq, PartialEq, JsLifetime)]
-#[non_exhaustive]
 pub enum RequestMode {
 	Navigate,
 	SameOrigin,
@@ -49,7 +50,6 @@ impl<'js> FromJs<'js> for RequestMode {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, JsLifetime)]
-#[non_exhaustive]
 pub enum RequestCredentials {
 	Omit,
 	SameOrigin,
@@ -84,7 +84,6 @@ impl<'js> FromJs<'js> for RequestCredentials {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, JsLifetime)]
-#[non_exhaustive]
 pub enum RequestCache {
 	Default,
 	NoStore,
@@ -128,7 +127,6 @@ impl<'js> FromJs<'js> for RequestCache {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, JsLifetime)]
-#[non_exhaustive]
 pub enum RequestRedirect {
 	Follow,
 	Error,
@@ -163,7 +161,6 @@ impl<'js> FromJs<'js> for RequestRedirect {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, JsLifetime)]
-#[non_exhaustive]
 pub enum ReferrerPolicy {
 	Empty,
 	NoReferrer,
@@ -215,7 +212,6 @@ impl<'js> FromJs<'js> for ReferrerPolicy {
 }
 
 #[derive(JsLifetime)]
-#[non_exhaustive]
 pub struct RequestInit<'js> {
 	pub method: Method,
 	pub headers: Class<'js, Headers>,
@@ -378,7 +374,6 @@ impl<'js> FromJs<'js> for RequestInit<'js> {
 
 #[js::class]
 #[derive(Trace, JsLifetime)]
-#[non_exhaustive]
 pub struct Request<'js> {
 	#[qjs(skip_trace)]
 	pub(crate) url: Url,
@@ -544,7 +539,8 @@ impl<'js> Request<'js> {
 #[cfg(test)]
 mod test {
 	use crate::fnc::script::fetch::test::create_test_context;
-	use js::{CatchResultExt, promise::Promise};
+	use js::CatchResultExt;
+	use js::promise::Promise;
 
 	#[tokio::test]
 	async fn basic_request_use() {

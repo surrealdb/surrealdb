@@ -8,8 +8,7 @@ use crate::cli::validator::parser::tracing::CustomFilter;
 use crate::cnf::ENABLE_TOKIO_CONSOLE;
 use anyhow::Result;
 use anyhow::anyhow;
-use opentelemetry::KeyValue;
-use opentelemetry::global;
+use opentelemetry::{KeyValue, global};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::resource::{
 	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
@@ -18,8 +17,7 @@ use std::net::ToSocketAddrs;
 use std::sync::LazyLock;
 use std::time::Duration;
 use tracing::{Level, Subscriber};
-use tracing_appender::non_blocking::NonBlockingBuilder;
-use tracing_appender::non_blocking::WorkerGuard;
+use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::{LevelFilter, ParseError};
 use tracing_subscriber::prelude::*;
