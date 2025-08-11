@@ -98,7 +98,7 @@ impl PlanBuilder {
 						{
 							(
 								io.ixr == ir,
-								Self::check_range_scan_direction(p.reverse_scan, &io.op()),
+								Self::check_range_scan_direction(p.reverse_scan, io.op()),
 							)
 						}
 					} else {
