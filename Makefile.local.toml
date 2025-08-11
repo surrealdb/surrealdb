@@ -2,9 +2,6 @@
 RUSTFLAGS = { value = "-D warnings --cfg tokio_unstable", condition = { env_not_set = [
     "RUSTFLAGS",
 ] } }
-SURREAL_NIGHTLY_RUST_TOOLCHAIN = { script = ["cat ${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/rust-toolchain.nightly"], condition = { env_not_set = [
-    "SURREAL_NIGHTLY_RUST_TOOLCHAIN",
-] } }
 
 # Setup
 [tasks.cargo-upgrade]
