@@ -12,7 +12,7 @@ use_small_heuristics = "Off"
 
 imports_granularity = "Module"
 #blank_lines_lower_bound = 1
-group_imports = "One"
+group_imports = "StdExternalCrate"
 #indent_style = "Block"
 #match_arm_blocks = true
 #reorder_impl_items = true
