@@ -1,11 +1,10 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Statement;
+use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err;
 use crate::err::Error;
 use crate::expr::statements::InsertStatement;
-use crate::expr::value::Value;
+use crate::val::Value;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
@@ -134,7 +133,7 @@ impl Document {
 		}
 
 		let (ns, db) = opt.ns_db()?;
-		let val = ctx.tx().get_record(ns, db, &retry.tb, &retry.id, opt.version).await?;
+		let val = ctx.tx().get_record(ns, db, &retry.table, &retry.key, opt.version).await?;
 
 		self.modify_for_update_retry(retry, val);
 
@@ -156,7 +155,7 @@ impl Document {
 		self.check_permissions_quick(stk, ctx, opt, stm).await?;
 		self.check_table_type(ctx, opt, stm).await?;
 		self.check_data_fields(stk, ctx, opt, stm).await?;
-		self.process_merge_data(stk, ctx, opt, stm).await?;
+		self.process_merge_data().await?;
 		self.store_edges_data(ctx, opt, stm).await?;
 		self.process_table_fields(stk, ctx, opt, stm).await?;
 		self.cleanup_table_fields(ctx, opt, stm).await?;

@@ -1,5 +1,7 @@
-use criterion::{Bencher, measurement::WallTime};
-use surrealdb::{Surreal, engine::any::Any};
+use criterion::Bencher;
+use criterion::measurement::WallTime;
+use surrealdb::Surreal;
+use surrealdb::engine::any::Any;
 
 mod create;
 pub(super) use create::*;

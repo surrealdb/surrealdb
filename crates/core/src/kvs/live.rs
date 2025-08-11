@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Live {
 	// TODO: optimisation this should probably be a &str
 	/// The namespace in which this LIVE query exists

@@ -1,16 +1,8 @@
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self};
+use crate::sql::Ident;
+use std::fmt;
 
-use super::Ident;
-
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::File";
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
-#[serde(rename = "$surrealdb::private::sql::File")]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct File {
 	pub bucket: String,
 	pub key: String,
@@ -19,17 +11,13 @@ pub struct File {
 impl File {
 	/// Check if this File belongs to a certain bucket type
 	pub fn is_bucket_type(&self, types: &[Ident]) -> bool {
-		types.is_empty() || types.iter().any(|buc| buc.0 == self.bucket)
-	}
-
-	pub fn display_inner(&self) -> String {
-		format!("{}:{}", fmt_inner(&self.bucket, true), fmt_inner(&self.key, false))
+		types.is_empty() || types.iter().any(|buc| **buc == self.bucket)
 	}
 }
 
 impl fmt::Display for File {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "f\"{}\"", self.display_inner())
+		write!(f, "f\"{}:{}\"", fmt_inner(&self.bucket, true), fmt_inner(&self.key, false))
 	}
 }
 
@@ -48,7 +36,7 @@ fn fmt_inner(v: &str, escape_slash: bool) -> String {
 		.collect::<String>()
 }
 
-impl From<File> for crate::expr::File {
+impl From<File> for crate::val::File {
 	fn from(v: File) -> Self {
 		Self {
 			bucket: v.bucket,
@@ -56,8 +44,8 @@ impl From<File> for crate::expr::File {
 		}
 	}
 }
-impl From<crate::expr::File> for File {
-	fn from(v: crate::expr::File) -> Self {
+impl From<crate::val::File> for File {
+	fn from(v: crate::val::File) -> Self {
 		Self {
 			bucket: v.bucket,
 			key: v.key,

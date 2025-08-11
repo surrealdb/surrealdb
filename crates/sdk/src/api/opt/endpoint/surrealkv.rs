@@ -1,14 +1,10 @@
 use crate::Connect;
 use crate::api::Result;
-use crate::api::engine::local::Db;
-use crate::api::engine::local::SurrealKv;
+use crate::api::engine::local::{Db, SurrealKv};
 use crate::api::err::Error;
-use crate::api::opt::Config;
-use crate::api::opt::Endpoint;
-use crate::api::opt::IntoEndpoint;
 use crate::api::opt::endpoint::into_endpoint;
-use std::path::Path;
-use std::path::PathBuf;
+use crate::api::opt::{Config, Endpoint, IntoEndpoint};
+use std::path::{Path, PathBuf};
 use url::Url;
 
 const VERSIONED_SCHEME: &str = "surrealkv+versioned";

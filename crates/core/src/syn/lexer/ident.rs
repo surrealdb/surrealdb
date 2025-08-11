@@ -2,11 +2,10 @@ use std::mem;
 
 use unicase::UniCase;
 
-use crate::syn::{
-	error::{SyntaxError, syntax_error},
-	lexer::{Lexer, keywords::KEYWORDS},
-	token::{Token, TokenKind},
-};
+use crate::syn::error::{SyntaxError, syntax_error};
+use crate::syn::lexer::Lexer;
+use crate::syn::lexer::keywords::KEYWORDS;
+use crate::syn::token::{Token, TokenKind};
 
 use super::unicode::{chars, is_identifier_continue};
 

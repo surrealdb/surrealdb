@@ -1,8 +1,8 @@
-use crate::sql::regex::regex_new;
-use crate::sql::{
-	changefeed::ChangeFeed, datetime::Datetime, duration::Duration, regex::Regex,
-	statements::SleepStatement,
-};
+use crate::sql::changefeed::ChangeFeed;
+use crate::sql::statements::SleepStatement;
+use crate::val::datetime::Datetime;
+use crate::val::duration::Duration;
+use crate::val::regex::{Regex, regex_new};
 use arbitrary::{Arbitrary, Result, Unstructured};
 use regex_syntax::ast::Ast;
 use std::time;

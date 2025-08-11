@@ -1,19 +1,14 @@
-use crate::sql::Number;
 use crate::sql::ident::Ident;
 use crate::sql::scoring::Scoring;
-use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use crate::val::Number;
+
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Index {
 	/// (Basic) non unique
-	#[default]
 	Idx,
 	/// Unique index
 	Uniq,
@@ -21,11 +16,9 @@ pub enum Index {
 	Search(SearchParams),
 	/// M-Tree index for distance-based metrics
 	MTree(MTreeParams),
-	/// HNSW index for distance-based metrics
-	#[revision(start = 2)]
+	/// HNSW index for distance based metrics
 	Hnsw(HnswParams),
 	/// Index with Full-Text search capabilities supporting multiple writers
-	#[revision(start = 3)]
 	FullText(FullTextParams),
 }
 
@@ -55,10 +48,8 @@ impl From<crate::expr::index::Index> for Index {
 	}
 }
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct SearchParams {
 	pub az: Ident,
 	pub hl: bool,
@@ -67,13 +58,9 @@ pub struct SearchParams {
 	pub doc_lengths_order: u32,
 	pub postings_order: u32,
 	pub terms_order: u32,
-	#[revision(start = 2)]
 	pub doc_ids_cache: u32,
-	#[revision(start = 2)]
 	pub doc_lengths_cache: u32,
-	#[revision(start = 2)]
 	pub postings_cache: u32,
-	#[revision(start = 2)]
 	pub terms_cache: u32,
 }
 
@@ -112,10 +99,8 @@ impl From<crate::expr::index::SearchParams> for SearchParams {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct FullTextParams {
 	pub az: Ident,
 	pub hl: bool,
@@ -141,60 +126,16 @@ impl From<crate::expr::index::FullTextParams> for FullTextParams {
 	}
 }
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct MTreeParams {
 	pub dimension: u16,
-	#[revision(start = 1, end = 2, convert_fn = "convert_old_distance")]
-	pub _distance: Distance1, // TODO remove once 1.0 && 1.1 are EOL
-	#[revision(start = 2)]
 	pub distance: Distance,
 	pub vector_type: VectorType,
 	pub capacity: u16,
 	pub doc_ids_order: u32,
-	#[revision(start = 2)]
 	pub doc_ids_cache: u32,
-	#[revision(start = 2)]
 	pub mtree_cache: u32,
-}
-
-impl MTreeParams {
-	pub fn new(
-		dimension: u16,
-		distance: Distance,
-		vector_type: VectorType,
-		capacity: u16,
-		doc_ids_order: u32,
-		doc_ids_cache: u32,
-		mtree_cache: u32,
-	) -> Self {
-		Self {
-			dimension,
-			distance,
-			vector_type,
-			capacity,
-			doc_ids_order,
-			doc_ids_cache,
-			mtree_cache,
-		}
-	}
-
-	fn convert_old_distance(
-		&mut self,
-		_revision: u16,
-		d1: Distance1,
-	) -> Result<(), revision::Error> {
-		self.distance = match d1 {
-			Distance1::Euclidean => Distance::Euclidean,
-			Distance1::Manhattan => Distance::Manhattan,
-			Distance1::Cosine => Distance::Cosine,
-			Distance1::Hamming => Distance::Hamming,
-			Distance1::Minkowski(n) => Distance::Minkowski(n),
-		};
-		Ok(())
-	}
 }
 
 impl From<MTreeParams> for crate::expr::index::MTreeParams {
@@ -225,23 +166,8 @@ impl From<crate::expr::index::MTreeParams> for MTreeParams {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub enum Distance1 {
-	#[default]
-	Euclidean,
-	Manhattan,
-	Cosine,
-	Hamming,
-	Minkowski(Number),
-}
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct HnswParams {
 	pub dimension: u16,
 	pub distance: Distance,
@@ -254,33 +180,6 @@ pub struct HnswParams {
 	pub ml: Number,
 }
 
-impl HnswParams {
-	#[expect(clippy::too_many_arguments)]
-	pub fn new(
-		dimension: u16,
-		distance: Distance,
-		vector_type: VectorType,
-		m: u8,
-		m0: u8,
-		ml: Number,
-		ef_construction: u16,
-		extend_candidates: bool,
-		keep_pruned_connections: bool,
-	) -> Self {
-		Self {
-			dimension,
-			distance,
-			vector_type,
-			m,
-			m0,
-			ef_construction,
-			ml,
-			extend_candidates,
-			keep_pruned_connections,
-		}
-	}
-}
-
 impl From<HnswParams> for crate::expr::index::HnswParams {
 	fn from(v: HnswParams) -> Self {
 		crate::expr::index::HnswParams {
@@ -290,7 +189,7 @@ impl From<HnswParams> for crate::expr::index::HnswParams {
 			m: v.m,
 			m0: v.m0,
 			ef_construction: v.ef_construction,
-			ml: v.ml.into(),
+			ml: v.ml,
 			extend_candidates: v.extend_candidates,
 			keep_pruned_connections: v.keep_pruned_connections,
 		}
@@ -306,17 +205,15 @@ impl From<crate::expr::index::HnswParams> for HnswParams {
 			m: v.m,
 			m0: v.m0,
 			ef_construction: v.ef_construction,
-			ml: v.ml.into(),
+			ml: v.ml,
 			extend_candidates: v.extend_candidates,
 			keep_pruned_connections: v.keep_pruned_connections,
 		}
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Distance {
 	Chebyshev,
 	Cosine,
@@ -353,7 +250,7 @@ impl From<Distance> for crate::expr::index::Distance {
 			Distance::Hamming => crate::expr::index::Distance::Hamming,
 			Distance::Jaccard => crate::expr::index::Distance::Jaccard,
 			Distance::Manhattan => crate::expr::index::Distance::Manhattan,
-			Distance::Minkowski(n) => crate::expr::index::Distance::Minkowski(n.into()),
+			Distance::Minkowski(n) => crate::expr::index::Distance::Minkowski(n),
 			Distance::Pearson => crate::expr::index::Distance::Pearson,
 		}
 	}
@@ -368,16 +265,14 @@ impl From<crate::expr::index::Distance> for Distance {
 			crate::expr::index::Distance::Hamming => Self::Hamming,
 			crate::expr::index::Distance::Jaccard => Self::Jaccard,
 			crate::expr::index::Distance::Manhattan => Self::Manhattan,
-			crate::expr::index::Distance::Minkowski(n) => Self::Minkowski(n.into()),
+			crate::expr::index::Distance::Minkowski(n) => Self::Minkowski(n),
 			crate::expr::index::Distance::Pearson => Self::Pearson,
 		}
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum VectorType {
 	#[default]
 	F64,

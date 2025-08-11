@@ -1,10 +1,9 @@
-mod parse;
-use parse::Parse;
 mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::expr::Value;
+use surrealdb_core::val::Value;
+use surrealdb_core::{strand, syn};
 
 #[tokio::test]
 async fn query_basic() -> Result<()> {
@@ -24,15 +23,15 @@ async fn query_basic() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['Tobie']");
+	let val = syn::value("['Tobie']").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("Tobie");
+	let val = Value::from(strand!("Tobie").to_owned());
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("Tobie");
+	let val = Value::from(strand!("Tobie").to_owned());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -56,7 +55,7 @@ async fn query_basic_with_modification() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[45062]");
+	let val = syn::value("[45062]").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -88,15 +87,15 @@ async fn query_root_function() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("THIS IS A TEST");
+	let val = Value::from(strand!("THIS IS A TEST").to_owned());
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("this is a test");
+	let val = Value::from(strand!("this is a test").to_owned());
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("this-is-a-test");
+	let val = Value::from(strand!("this-is-a-test").to_owned());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -108,38 +107,39 @@ async fn query_root_record() -> Result<()> {
 		UPSERT person:tobie SET name = 'Tobie';
 		UPSERT person:jaime SET name = 'Jaime';
 		RELATE person:tobie->knows->person:jaime SET id = 'test', brother = true;
-		<future> { person:tobie->knows->person.name };
 		person:tobie->knows->person.name;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
+	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: person:tobie,
 				name: 'Tobie'
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: person:jaime,
 				name: 'Jaime'
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: knows:test,
@@ -148,15 +148,12 @@ async fn query_root_record() -> Result<()> {
 				brother: true,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['Jaime']");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("['Jaime']");
+	let val = syn::value("['Jaime']").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

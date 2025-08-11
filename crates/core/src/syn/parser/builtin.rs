@@ -1,18 +1,14 @@
 use super::{ParseResult, Parser};
-use crate::{
-	sql::{Constant, Function, SqlValue},
-	syn::{
-		error::{MessageKind, bail},
-		parser::{SyntaxError, mac::expected, unexpected},
-		token::{Span, t},
-	},
-};
+use crate::sql::{Constant, Expr, Function, FunctionCall};
+use crate::syn::error::{MessageKind, bail};
+use crate::syn::parser::mac::expected;
+use crate::syn::parser::{SyntaxError, unexpected};
+use crate::syn::token::{Span, t};
 use phf::phf_map;
 use reblessive::Stk;
 use unicase::UniCase;
 
 /// The kind of a parsed path.
-#[non_exhaustive]
 pub enum PathKind {
 	Constant(Constant),
 	Function,
@@ -541,11 +537,7 @@ fn find_suggestion(got: &str) -> Option<&'static str> {
 
 impl Parser<'_> {
 	/// Parse a builtin path.
-	pub(super) async fn parse_builtin(
-		&mut self,
-		stk: &mut Stk,
-		start: Span,
-	) -> ParseResult<SqlValue> {
+	pub(super) async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Expr> {
 		let mut last_span = start;
 		while self.eat(t!("::")) {
 			let peek = self.peek();
@@ -560,15 +552,16 @@ impl Parser<'_> {
 		let str = self.lexer.span_str(span);
 
 		match PATHS.get_entry(&UniCase::ascii(str)) {
-			Some((_, PathKind::Constant(x))) => Ok(SqlValue::Constant(x.clone())),
+			Some((_, PathKind::Constant(x))) => Ok(Expr::Constant(x.clone())),
 			Some((k, PathKind::Function)) => {
+				// TODO: Move this out of the parser.
 				if k == &UniCase::ascii("api::invoke") && !self.settings.define_api_enabled {
 					bail!("Cannot use the `api::invoke` method, as the experimental define api capability is not enabled", @span);
 				}
 
 				stk.run(|ctx| self.parse_builtin_function(ctx, k.into_inner().to_owned()))
 					.await
-					.map(|x| SqlValue::Function(Box::new(x)))
+					.map(|x| Expr::FunctionCall(Box::new(x)))
 			}
 			None => {
 				if let Some(suggest) = find_suggestion(str) {
@@ -589,7 +582,7 @@ impl Parser<'_> {
 		&mut self,
 		stk: &mut Stk,
 		name: String,
-	) -> ParseResult<Function> {
+	) -> ParseResult<FunctionCall> {
 		let start = expected!(self, t!("(")).span;
 		let mut args = Vec::new();
 		loop {
@@ -597,7 +590,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let arg = stk.run(|ctx| self.parse_value_inherit(ctx)).await?;
+			let arg = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
 			args.push(arg);
 
 			if !self.eat(t!(",")) {
@@ -605,7 +598,11 @@ impl Parser<'_> {
 				break;
 			}
 		}
-		Ok(Function::Normal(name, args))
+		let receiver = Function::Normal(name);
+		Ok(FunctionCall {
+			receiver,
+			arguments: args,
+		})
 	}
 }
 
