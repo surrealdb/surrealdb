@@ -20,8 +20,8 @@ pub(super) struct PlanBuilder {
 	non_range_indexes: Vec<(Arc<Expr>, IndexOption)>,
 	/// List of indexes allowed in this plan
 	with_indexes: Option<Vec<IndexReference>>,
-	/// Group each possible optimisations local to a SubQuery
-	groups: BTreeMap<GroupRef, Group>, // The order matters because we want the plan to be consistent across repeated queries.
+	/// Group each possible optimization local to a subquery
+	groups: BTreeMap<GroupRef, Group>, // The order matters to keep the plan consistent across repeated queries.
 }
 
 pub(super) struct PlanBuilderParameters {
@@ -61,7 +61,7 @@ impl PlanBuilder {
 
 		// If all boolean operators are AND, we can use the single index plan
 		if p.all_and {
-			// We try first the largest compound indexed
+ 			// We first try the largest compound index
 			let mut compound_index = None;
 			for (ixr, vals) in p.compound_indexes {
 				if let Some((cols, io)) = b.check_compound_index(ixr, vals) {
@@ -76,14 +76,14 @@ impl PlanBuilder {
 				}
 			}
 			if let Some((_, io)) = compound_index {
-				// Evaluate if we can use keys only
+				// Evaluate whether we can use a keys-only record strategy
 				let record_strategy =
 					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
 				// Return the plan
 				return Ok(Plan::SingleIndex(None, io, record_strategy));
 			}
 
-			// We take the "first" range query if one is available
+			// Select the first available range query (deterministic group order)
 			if let Some((_, group)) = b.groups.into_iter().next() {
 				if let Some((ir, rq)) = group.take_first_range() {
 					// Evaluate the record strategy
@@ -109,7 +109,7 @@ impl PlanBuilder {
 				}
 			}
 
-			// Otherwise, we try to find the most interesting (todo: TBD) single index option
+			// Otherwise, pick a non-range single-index option (heuristic)
 			if let Some((e, i)) = b.non_range_indexes.pop() {
 				// Evaluate the record strategy
 				let record_strategy =
@@ -122,14 +122,14 @@ impl PlanBuilder {
 				// Evaluate the record strategy
 				let record_strategy =
 					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
-				// Check it is compatible with the reverse scan capability
+				// Check compatibility with reverse-scan capability
 				if Self::check_order_scan(p.reverse_scan, o.op()) {
 					// Return the plan
 					return Ok(Plan::SingleIndex(None, o.clone(), record_strategy));
 				}
 			}
 		}
-		// If every expression is backed by an index with can use the MultiIndex plan
+		// If every expression is backed by an index we can use the MultiIndex plan
 		else if p.all_expressions_with_index {
 			let mut ranges = Vec::with_capacity(b.groups.len());
 			for (gr, group) in b.groups {
@@ -161,7 +161,7 @@ impl PlanBuilder {
 		Ok(Plan::TableIterator(reason, rs, sc))
 	}
 
-	/// Check if we have an explicit list of index that we should use
+	/// Check if we have an explicit list of indices that we should use
 	fn filter_index_option(&self, io: Option<&IndexOption>) -> Option<IndexOption> {
 		if let Some(io) = io {
 			if !self.allowed_index(io.ix_ref()) {
@@ -204,7 +204,7 @@ impl PlanBuilder {
 		if !self.allowed_index(&ixr) {
 			return None;
 		}
-		// Count continues values (from the left)
+		// Count contiguous values (from the left)
 		let mut cont = 0;
 		for vals in &columns {
 			if vals.is_empty() {
@@ -320,8 +320,8 @@ pub(super) enum Plan {
 		Vec<(IndexReference, UnionRangeQueryBuilder)>,
 		RecordStrategy,
 	),
-	/// Index scan for record matching a given range
-	/// 1. The reference to index
+	/// Index scan for records matching a given range
+	/// 1. The index reference
 	/// 2. The index range
 	/// 3. A record strategy
 	/// 4. The scan direction
@@ -333,7 +333,7 @@ pub(super) enum Plan {
 pub(super) struct IndexOption {
 	/// A reference to the index definition
 	ixr: IndexReference,
-	/// The idiom matching this index and its index
+	/// The idiom matched by this index
 	id: Option<Arc<Idiom>>,
 	/// The position of the idiom in the expression (Left or Right)
 	id_pos: IdiomPosition,

@@ -72,6 +72,9 @@ pub(super) type KnnExpressions = HashSet<Arc<Expr>>;
 #[derive(Clone)]
 pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
 
+/// Concrete index handle stored per IndexReference.
+/// This maps an abstract IndexReference to the actual index implementation
+/// that will be used at execution time.
 enum PerIndexReferenceIndex {
 	Search(SearchIndex),
 	FullText(FullTextIndex),
@@ -79,6 +82,8 @@ enum PerIndexReferenceIndex {
 	Hnsw(SharedHnswIndex),
 }
 
+/// Execution-time entry per expression. Associates a parsed expression with
+/// the prepared execution structure (per index type) used to iterate results.
 enum PerExpressionEntry {
 	Search(SearchEntry),
 	FullText(FullTextEntry),
@@ -87,6 +92,8 @@ enum PerExpressionEntry {
 	KnnBruteForce(KnnBruteForceEntry),
 }
 
+/// Entry keyed by MatchRef for MATCHES queries, decoupling expression identity
+/// from the underlying search/full-text index preparation.
 enum PerMatchRefEntry {
 	Search(SearchEntry),
 	FullText(FullTextEntry),
@@ -98,7 +105,7 @@ pub(super) struct InnerQueryExecutor {
 	mr_entries: HashMap<MatchRef, PerMatchRefEntry>,
 	exp_entries: HashMap<Arc<Expr>, PerExpressionEntry>,
 	it_entries: Vec<IteratorEntry>,
-	knn_bruteforce_len: usize,
+	knn_bruteforce_len: usize, // Count of brute-force KNN expressions aggregated for later merging
 }
 
 impl From<InnerQueryExecutor> for QueryExecutor {

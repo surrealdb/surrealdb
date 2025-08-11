@@ -49,6 +49,8 @@ impl From<IteratorRef> for IteratorRecord {
 	}
 }
 
+/// Abstraction over batch containers used by iterators (Vec or VecDeque),
+/// allowing the same code to accumulate records regardless of concrete type.
 pub(crate) trait IteratorBatch {
 	fn empty() -> Self;
 	fn with_capacity(capacity: usize) -> Self;
@@ -179,6 +181,8 @@ impl ThingIterator {
 	}
 }
 
+/// Iterator output record. Either a key-only result (for index-only scans)
+/// or a key+value pair when values are fetched by the current RecordStrategy.
 pub(crate) enum IndexItemRecord {
 	/// We just collected the key
 	Key(Arc<RecordId>, IteratorRecord),
