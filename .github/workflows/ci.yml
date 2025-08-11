@@ -80,9 +80,16 @@ jobs:
     name: Check format
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
+      - name: Lookup the nightly toolchain
+        id: info
+        run: |
+          set -x
+          echo "rust=$(cat rust-toolchain.nightly)" >> $GITHUB_OUTPUT
+
+      - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
+          toolchain: ${{ steps.info.outputs.rust }}
           components: rustfmt
 
       - name: Checkout sources
