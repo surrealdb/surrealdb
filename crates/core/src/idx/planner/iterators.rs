@@ -108,6 +108,12 @@ impl IteratorBatch for VecDeque<IndexItemRecord> {
 	}
 }
 
+/// High-level iterator over index-backed scans which yields RecordIds (and optionally
+/// pre-fetched Values) depending on the current RecordStrategy.
+///
+/// Each variant encapsulates a concrete scan strategy (equality, range, union, join,
+/// text search, KNN, etc). Iteration is performed in batches to cap per-IO work
+/// and allow cooperative cancellation via Context.
 pub(crate) enum ThingIterator {
 	IndexEqual(IndexEqualThingIterator),
 	IndexRange(IndexRangeThingIterator),
@@ -128,6 +134,11 @@ pub(crate) enum ThingIterator {
 }
 
 impl ThingIterator {
+	/// Fetch the next batch of index items.
+	///
+	/// - `size` is a soft upper bound on how many items to fetch. Concrete iterators may
+	///   return fewer items (e.g., due to range boundaries) or, in rare edge-cases, one extra
+	///   to honor inclusivity semantics when scanning in reverse.
 	pub(crate) async fn next_batch<B: IteratorBatch>(
 		&mut self,
 		ctx: &Context,
@@ -154,6 +165,9 @@ impl ThingIterator {
 		}
 	}
 
+	/// Count up to the next `size` matching items without materializing values.
+	///
+	/// Used for SELECT ... COUNT and for explain paths where only cardinality is required.
 	pub(crate) async fn next_count(
 		&mut self,
 		ctx: &Context,
@@ -613,7 +627,10 @@ impl IndexRangeReverseThingIterator {
 		let range = full_iterator_range();
 		Self::new(irf, ns, db, ix, &range)
 	}
-	async fn check_batch_ending(
+ /// When scanning in reverse, the KV range APIs do not return the inclusive
+/// end key. We compensate by explicitly checking and returning the end key
+/// once per iterator state, decrementing the remaining `limit` accordingly.
+async fn check_batch_ending(
 		&mut self,
 		tx: &Transaction,
 		limit: &mut u32,

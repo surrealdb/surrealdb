@@ -480,8 +480,12 @@ pub(super) trait Collector {
 	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b Ident) -> Cow<'b, Context> {
 		if let Some(qp) = ctx.get_query_planner() {
 			if let Some(exe) = qp.get_query_executor(table.as_str()) {
-				// We set the query executor matching the current table in the Context
-				// Avoiding search in the hashmap of the query planner for each doc
+				// Optimize executor lookup:
+				// - Attach the table-specific QueryExecutor to the Context once, so subsequent
+				//   per-record processing doesn’t need to search the QueryPlanner’s internal
+				//   map on every document.
+				// - This keeps the hot path allocation-free and avoids repeated hash lookups
+				//   inside tight iteration loops.
 				let mut ctx = MutableContext::new(ctx);
 				ctx.set_query_executor(exe.clone());
 				return Cow::Owned(ctx.freeze());
@@ -511,6 +515,8 @@ pub(super) trait Collector {
 					dir,
 					what,
 				} => self.collect_edges(ctx, opt, from, dir, what).await?,
+				// For Table and Range iterables, the RecordStrategy determines whether we
+				// collect only keys, keys+values, or just a count without materializing records.
 				Iterable::Range(tb, v, rs, sc) => match rs {
 					RecordStrategy::Count => self.collect_range_count(ctx, opt, &tb, v).await?,
 					RecordStrategy::KeysOnly => {
@@ -534,14 +540,15 @@ pub(super) trait Collector {
 				}
 				Iterable::Index(v, irf, rs) => {
 					if let Some(qp) = ctx.get_query_planner() {
-						if let Some(exe) = qp.get_query_executor(v.as_str()) {
-							// We set the query executor matching the current table in the Context
-							// Avoiding search in the hashmap of the query planner for each doc
-							let mut ctx = MutableContext::new(ctx);
-							ctx.set_query_executor(exe.clone());
-							let ctx = ctx.freeze();
-							return self.collect_index_items(&ctx, opt, &v, irf, rs).await;
-						}
+ 					if let Some(exe) = qp.get_query_executor(v.as_str()) {
+ 						// Attach the table-specific QueryExecutor to the Context to avoid
+ 						// per-record lookups in the QueryPlanner during index scans.
+ 						// This significantly reduces overhead inside tight iterator loops.
+ 						let mut ctx = MutableContext::new(ctx);
+ 						ctx.set_query_executor(exe.clone());
+ 						let ctx = ctx.freeze();
+ 						return self.collect_index_items(&ctx, opt, &v, irf, rs).await;
+ 					}
 					}
 					self.collect_index_items(ctx, opt, &v, irf, rs).await?
 				}
@@ -567,6 +574,11 @@ pub(super) trait Collector {
 		mut rng: Range<Key>,
 		sc: ScanDirection,
 	) -> Result<Option<Range<Key>>> {
+		// Fast-forward a key range by skipping the first N keys when a START clause is active.
+		//
+		// This method avoids fully materializing or processing records prior to the requested
+		// offset by streaming only keys from the underlying KV store. It updates the iterator’s
+		// internal skipped counter and returns a narrowed range to resume scanning from.
 		let ite = self.iterator();
 		let skippable = ite.skippable();
 		if skippable == 0 {

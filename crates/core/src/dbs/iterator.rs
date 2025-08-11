@@ -731,9 +731,13 @@ impl Iterator {
 	) {
 		if self.check_set_start_limit(ctx, stm) {
 			if let Some(l) = self.limit {
+				// If we have a LIMIT, allow the collector to cancel the iteration once
+				// this many items have been produced. This keeps long scans bounded.
 				self.cancel_on_limit = Some(l);
 			}
-			// Check if we can skip processing the document below "start".
+			// Only skip over the first N records (START/OFFSET) when there are no
+			// specific per-record permission checks. When specific permissions are in play,
+			// each record must be evaluated and cannot be blindly skipped.
 			if !is_specific_permission {
 				let s = self.start.unwrap_or(0) as usize;
 				if s > 0 {

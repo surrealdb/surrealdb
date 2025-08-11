@@ -324,6 +324,11 @@ impl MutableContext {
 		self.query_planner = Some(Arc::new(qp));
 	}
 
+	/// Cache a table-specific QueryExecutor in the Context.
+	///
+	/// This is set by the collector/processor when iterating over a specific table or index
+	/// so that downstream per-record operations can access the executor without repeatedly
+	/// looking it up from the QueryPlanner.
 	pub(crate) fn set_query_executor(&mut self, qe: QueryExecutor) {
 		self.query_executor = Some(qe);
 	}
@@ -364,6 +369,7 @@ impl MutableContext {
 		self.query_planner.as_ref().map(|qp| qp.as_ref())
 	}
 
+	/// Get the cached QueryExecutor (if any) attached by the current iteration context.
 	pub(crate) fn get_query_executor(&self) -> Option<&QueryExecutor> {
 		self.query_executor.as_ref()
 	}
