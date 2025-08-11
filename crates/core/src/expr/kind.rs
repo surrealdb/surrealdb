@@ -2,11 +2,11 @@ use super::escape::EscapeKey;
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Ident, Idiom, Literal, Part, Value};
+use crate::sql::ToSql;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
 	Regex, Strand, Uuid,
 };
-use crate::sql::ToSql;
 
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use revision::revisioned;

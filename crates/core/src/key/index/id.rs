@@ -72,13 +72,7 @@ impl Categorise for Id<'_> {
 
 impl<'a> Id<'a> {
 	#[cfg_attr(target_family = "wasm", allow(dead_code))]
-	pub fn new(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a str,
-		ix: &'a str,
-		id: RecordIdKey,
-	) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, id: RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

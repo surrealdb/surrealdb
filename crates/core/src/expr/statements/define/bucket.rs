@@ -45,7 +45,7 @@ impl DefineBucketStatement {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::BuAlreadyExists {
-							value: self.name.to_string(),
+							value: bucket.name.to_string(),
 						});
 					}
 				}

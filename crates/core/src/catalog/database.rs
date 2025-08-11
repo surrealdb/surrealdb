@@ -8,9 +8,9 @@ use crate::sql::statements::define::DefineDatabaseStatement;
 use crate::{
 	catalog::NamespaceId,
 	expr::{ChangeFeed, statements::info::InfoStructure},
-	val::Value,
 	kvs::impl_kv_value_revisioned,
 	sql::ToSql,
+	val::Value,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

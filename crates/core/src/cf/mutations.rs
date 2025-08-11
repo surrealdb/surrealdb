@@ -202,7 +202,6 @@ impl Default for WriteMutationSet {
 #[cfg(test)]
 mod tests {
 	use crate::catalog::{DatabaseId, NamespaceId, TableId};
-	use crate::expr::Ident;
 
 	use super::*;
 	use std::collections::HashMap;

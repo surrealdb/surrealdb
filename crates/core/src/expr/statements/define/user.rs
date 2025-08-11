@@ -79,7 +79,7 @@ impl DefineUserStatement {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::UserRootAlreadyExists {
-									name: self.name.to_string(),
+									name: user.name.to_string(),
 								});
 							}
 						}
@@ -114,7 +114,7 @@ impl DefineUserStatement {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::UserNsAlreadyExists {
-									name: self.name.to_string(),
+									name: user.name.to_string(),
 									ns: opt.ns()?.into(),
 								});
 							}
@@ -156,7 +156,7 @@ impl DefineUserStatement {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::UserDbAlreadyExists {
-									name: self.name.to_string(),
+									name: user.name.to_string(),
 									ns: opt.ns()?.to_string(),
 									db: opt.db()?.to_string(),
 								});

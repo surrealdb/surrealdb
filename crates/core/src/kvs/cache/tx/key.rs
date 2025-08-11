@@ -1,7 +1,5 @@
 use super::lookup::Lookup;
-use crate::{
-	catalog::{DatabaseId, NamespaceId},
-};
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::val::RecordIdKey;
 use uuid::Uuid;
 

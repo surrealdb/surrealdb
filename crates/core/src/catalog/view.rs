@@ -21,7 +21,12 @@ impl ViewDefinition {
 		View {
 			expr: self.expr.clone().into(),
 			// SAFETY: we know the names are valid because they were validated when the view was created.
-			what: self.what.clone().into_iter().map(|s| unsafe { Ident::new_unchecked(s) }).collect(),
+			what: self
+				.what
+				.clone()
+				.into_iter()
+				.map(|s| unsafe { Ident::new_unchecked(s) })
+				.collect(),
 			cond: self.cond.clone().map(Into::into),
 			group: self.group.clone().map(Into::into),
 		}

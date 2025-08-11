@@ -614,8 +614,16 @@ impl Building {
 					table: self.ikb.table().to_string(),
 					key: a.id,
 				};
-				let mut io =
-					IndexOperation::new(ctx, &self.opt, self.ns, self.db, &self.ix, a.old_values, a.new_values, &rid);
+				let mut io = IndexOperation::new(
+					ctx,
+					&self.opt,
+					self.ns,
+					self.db,
+					&self.ix,
+					a.old_values,
+					a.new_values,
+					&rid,
+				);
 				stack.enter(|stk| io.compute(stk, &rc)).finish().await?;
 
 				// We can delete the ip record if any

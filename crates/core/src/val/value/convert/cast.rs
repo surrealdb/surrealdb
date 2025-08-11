@@ -8,13 +8,13 @@ use rust_decimal::Decimal;
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::expr::kind::{HasKind, KindLiteral};
 use crate::expr::{Ident, Kind};
+use crate::sql::ToSql;
 use crate::syn;
 use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Null, Number, Object,
 	Range, RecordId, Regex, Strand, Uuid, Value,
 };
-use crate::sql::ToSql;
 
 #[derive(Clone, Debug)]
 pub enum CastError {

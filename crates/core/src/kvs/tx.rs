@@ -11,9 +11,9 @@ use crate::expr::statements::access::AccessGrantStore;
 use crate::expr::statements::define::config::ConfigStore;
 use crate::expr::statements::define::{ApiDefinition, BucketDefinition, DefineSequenceStatement};
 use crate::expr::statements::{
-	DefineAccessStatement, DefineAnalyzerStatement, DefineEventStatement,
-	DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement, DefineParamStore, DefineUserStatement,
-	LiveStatement,
+	DefineAccessStatement, DefineAnalyzerStatement, DefineEventStatement, DefineFieldStatement,
+	DefineFunctionStatement, DefineIndexStatement, DefineModelStatement, DefineParamStore,
+	DefineUserStatement, LiveStatement,
 };
 use crate::idx::planner::ScanDirection;
 use crate::idx::trees::store::cache::IndexTreeCaches;
@@ -1800,7 +1800,7 @@ impl Transaction {
 				}
 				// The value is not in the datastore
 				None => Ok(Arc::new(Value::None)),
-			}
+			};
 		} else {
 			let qey = cache::tx::Lookup::Record(ns, db, tb, id);
 			match self.cache.get(&qey) {

@@ -162,7 +162,7 @@ mod tests {
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::{Read, Write};
 	use crate::kvs::{Datastore, TransactionType};
-	use crate::val::{RecordIdKey, Strand};
+	use crate::val::RecordIdKey;
 	use uuid::Uuid;
 
 	const TEST_NS_ID: NamespaceId = NamespaceId(1);

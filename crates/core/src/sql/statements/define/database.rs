@@ -1,5 +1,5 @@
-use crate::sql::{Ident, ToSql};
 use crate::sql::changefeed::ChangeFeed;
+use crate::sql::{Ident, ToSql};
 use crate::val::Strand;
 
 use std::fmt::{self, Display};

@@ -4,9 +4,9 @@ use crate::expr::statements::access::AccessGrantStore;
 use crate::expr::statements::define::config::ConfigStore;
 use crate::expr::statements::define::{ApiDefinition, BucketDefinition, DefineSequenceStatement};
 use crate::expr::statements::{
-	DefineAccessStatement, DefineAnalyzerStatement, DefineEventStatement,
-	DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement, DefineParamStore, DefineUserStatement,
-	LiveStatement,
+	DefineAccessStatement, DefineAnalyzerStatement, DefineEventStatement, DefineFieldStatement,
+	DefineFunctionStatement, DefineIndexStatement, DefineModelStatement, DefineParamStore,
+	DefineUserStatement, LiveStatement,
 };
 use crate::val::Value;
 use anyhow::Result;

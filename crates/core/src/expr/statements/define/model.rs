@@ -48,7 +48,7 @@ impl DefineModelStatement {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::MlAlreadyExists {
-							name: self.name.to_string(),
+							name: model.name.to_string(),
 						});
 					}
 				}

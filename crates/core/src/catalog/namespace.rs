@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use revision::{Revisioned, revisioned};
 
 use crate::{
-	expr::{statements::info::InfoStructure},
+	expr::statements::info::InfoStructure,
 	kvs::impl_kv_value_revisioned,
 	sql::{Ident, ToSql, statements::DefineNamespaceStatement},
 	val::Value,

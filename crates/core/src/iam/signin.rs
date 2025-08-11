@@ -584,7 +584,9 @@ pub async fn signin_bearer(
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access grant from storage
 	let gr = match (&ns, &db) {
-		(Some(ns), Some(db)) => tx.get_db_access_grant(ns.namespace_id, db.database_id, &av.name, &kid).await?,
+		(Some(ns), Some(db)) => {
+			tx.get_db_access_grant(ns.namespace_id, db.database_id, &av.name, &kid).await?
+		}
 		(Some(ns), None) => tx.get_ns_access_grant(ns.namespace_id, &av.name, &kid).await?,
 		(None, None) => tx.get_root_access_grant(&av.name, &kid).await?,
 		(None, Some(_)) => bail!(Error::NsEmpty),
@@ -600,21 +602,39 @@ pub async fn signin_bearer(
 		let tx = kvs.transaction(Read, Optimistic).await?;
 		// Fetch the specified user from storage.
 		let user = match (&ns, &db) {
-			(Some(ns), Some(db)) => tx.get_db_user(ns.namespace_id, db.database_id, &user).await.map_err(|e| {
-				debug!("Error retrieving user for bearer access to database `{}/{}`: {}", ns.name, db.name, e);
-				// Return opaque error to avoid leaking grant subject existence.
-				Error::InvalidAuth
-			})?.ok_or(Error::InvalidAuth)?,
-			(Some(ns), None) => tx.get_ns_user(ns.namespace_id, &user).await.map_err(|e| {
-				debug!("Error retrieving user for bearer access to namespace `{}`: {}", ns.name, e);
-				// Return opaque error to avoid leaking grant subject existence.
-				Error::InvalidAuth
-			})?.ok_or(Error::InvalidAuth)?,
-			(None, None) => tx.get_root_user(&user).await.map_err(|e| {
-				debug!("Error retrieving user for bearer access to root: {e}");
-				// Return opaque error to avoid leaking grant subject existence.
-				Error::InvalidAuth
-			})?.ok_or(Error::InvalidAuth)?,
+			(Some(ns), Some(db)) => tx
+				.get_db_user(ns.namespace_id, db.database_id, user)
+				.await
+				.map_err(|e| {
+					debug!(
+						"Error retrieving user for bearer access to database `{}/{}`: {}",
+						ns.name, db.name, e
+					);
+					// Return opaque error to avoid leaking grant subject existence.
+					Error::InvalidAuth
+				})?
+				.ok_or(Error::InvalidAuth)?,
+			(Some(ns), None) => tx
+				.get_ns_user(ns.namespace_id, user)
+				.await
+				.map_err(|e| {
+					debug!(
+						"Error retrieving user for bearer access to namespace `{}`: {}",
+						ns.name, e
+					);
+					// Return opaque error to avoid leaking grant subject existence.
+					Error::InvalidAuth
+				})?
+				.ok_or(Error::InvalidAuth)?,
+			(None, None) => tx
+				.get_root_user(user)
+				.await
+				.map_err(|e| {
+					debug!("Error retrieving user for bearer access to root: {e}");
+					// Return opaque error to avoid leaking grant subject existence.
+					Error::InvalidAuth
+				})?
+				.ok_or(Error::InvalidAuth)?,
 			(None, Some(_)) => bail!(Error::NsEmpty),
 		};
 		// Ensure that the transaction is cancelled.
@@ -666,12 +686,23 @@ pub async fn signin_bearer(
 				access::SubjectStore::Record(rid) => {
 					if let (Some(ns), Some(db)) = (&ns, &db) {
 						// Revoke the used refresh token.
-						revoke_refresh_token_record(kvs, gr.id.clone(), gr.ac.clone(), &ns.name, &db.name)
-							.await?;
+						revoke_refresh_token_record(
+							kvs,
+							gr.id.clone(),
+							gr.ac.clone(),
+							&ns.name,
+							&db.name,
+						)
+						.await?;
 						// Create a new refresh token to replace it.
-						let refresh =
-							create_refresh_token_record(kvs, gr.ac.clone(), &ns.name, &db.name, rid.clone())
-								.await?;
+						let refresh = create_refresh_token_record(
+							kvs,
+							gr.ac.clone(),
+							&ns.name,
+							&db.name,
+							rid.clone(),
+						)
+						.await?;
 						Some(refresh)
 					} else {
 						debug!(
@@ -807,7 +838,7 @@ pub fn verify_grant_bearer(
 mod tests {
 	use super::*;
 	use crate::catalog::{DatabaseId, NamespaceId};
-use crate::iam::Role;
+	use crate::iam::Role;
 	use crate::sql::statements::define::user::PassType;
 	use crate::sql::{Ast, Expr, Ident, TopLevelExpr};
 	use crate::{dbs::Capabilities, sql::statements::define::DefineKind};
@@ -1276,7 +1307,11 @@ use crate::iam::Role;
 
 			// Get the stored bearer key representing the refresh token
 			let tx = ds.transaction(Read, Optimistic).await.unwrap().enclose();
-			let grant = tx.get_db_access_grant(NamespaceId(0), DatabaseId(0), "user", id).await.unwrap().unwrap();
+			let grant = tx
+				.get_db_access_grant(NamespaceId(0), DatabaseId(0), "user", id)
+				.await
+				.unwrap()
+				.unwrap();
 			let key = match &grant.grant {
 				access::Grant::Bearer(grant) => grant.key.clone(),
 				_ => panic!("Incorrect grant type returned, expected a bearer grant"),
@@ -3197,19 +3232,22 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				let tx = ds.transaction(Read, Optimistic).await.unwrap().enclose();
 				let grant = match level.level {
 					"DB" => {
-						let db = tx.expect_db_by_name(&level.ns.unwrap(), &level.db.unwrap()).await.unwrap();
-						tx
-						.get_db_access_grant(db.namespace_id, db.database_id, "api", &id)
-						.await
-						.unwrap()
-					},
+						let db = tx
+							.expect_db_by_name(level.ns.unwrap(), level.db.unwrap())
+							.await
+							.unwrap();
+						tx.get_db_access_grant(db.namespace_id, db.database_id, "api", &id)
+							.await
+							.unwrap()
+					}
 					"NS" => {
-						let ns = tx.expect_ns_by_name(&level.ns.unwrap()).await.unwrap();
+						let ns = tx.expect_ns_by_name(level.ns.unwrap()).await.unwrap();
 						tx.get_ns_access_grant(ns.namespace_id, "api", &id).await.unwrap()
-					},
+					}
 					"ROOT" => tx.get_root_access_grant("api", &id).await.unwrap(),
 					_ => panic!("Unsupported level"),
-				}.unwrap();
+				}
+				.unwrap();
 				let key = match &grant.grant {
 					access::Grant::Bearer(grant) => grant.key.clone(),
 					_ => panic!("Incorrect grant type returned, expected a bearer grant"),
@@ -4091,7 +4129,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Get the stored bearer grant
 			let tx = ds.transaction(Read, Optimistic).await.unwrap().enclose();
-			let grant = tx.get_db_access_grant(NamespaceId(0), DatabaseId(0), "api", &id).await.unwrap().unwrap();
+			let grant = tx
+				.get_db_access_grant(NamespaceId(0), DatabaseId(0), "api", &id)
+				.await
+				.unwrap()
+				.unwrap();
 			let key = match &grant.grant {
 				access::Grant::Bearer(grant) => grant.key.clone(),
 				_ => panic!("Incorrect grant type returned, expected a bearer grant"),

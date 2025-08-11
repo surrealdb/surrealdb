@@ -2,8 +2,8 @@
 use crate::catalog::DatabaseId;
 use crate::catalog::NamespaceId;
 
-use crate::key::database::all::DatabaseRoot;
 use crate::key::category::{Categorise, Category};
+use crate::key::database::all::DatabaseRoot;
 use crate::kvs::KVKey;
 
 use serde::{Deserialize, Serialize};

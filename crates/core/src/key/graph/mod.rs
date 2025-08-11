@@ -96,7 +96,14 @@ impl KVKey for PrefixFt<'_> {
 }
 
 impl<'a> PrefixFt<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &RecordIdKey, eg: &Dir, ft: &'a str) -> Self {
+	fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a str,
+		id: &RecordIdKey,
+		eg: &Dir,
+		ft: &'a str,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -162,13 +169,25 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey) -> Re
 	Ok(k)
 }
 
-pub fn egprefix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey, eg: &Dir) -> Result<Vec<u8>> {
+pub fn egprefix(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &str,
+	id: &RecordIdKey,
+	eg: &Dir,
+) -> Result<Vec<u8>> {
 	let mut k = PrefixEg::new(ns, db, tb, id, eg).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn egsuffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey, eg: &Dir) -> Result<Vec<u8>> {
+pub fn egsuffix(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &str,
+	id: &RecordIdKey,
+	eg: &Dir,
+) -> Result<Vec<u8>> {
 	let mut k = PrefixEg::new(ns, db, tb, id, eg).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)

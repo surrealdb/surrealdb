@@ -3,8 +3,8 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Statement, Workable};
 use crate::doc::Document;
 use crate::err::Error;
-use crate::expr::paths::{EDGE, IN, OUT};
 use crate::expr::Dir;
+use crate::expr::paths::{EDGE, IN, OUT};
 use crate::val::Value;
 use anyhow::{Result, ensure};
 

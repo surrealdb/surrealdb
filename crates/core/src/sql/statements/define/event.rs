@@ -1,4 +1,3 @@
-
 use crate::sql::fmt::Fmt;
 use crate::sql::{Expr, Ident, ToSql};
 use crate::val::Strand;

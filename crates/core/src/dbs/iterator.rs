@@ -175,15 +175,21 @@ impl Iterator {
 				// TODO: This needs to be structured better.
 				// match against what previously would be an edge.
 				if x.len() != 2 {
-					return self.prepare_computed(db, stk, ctx, opt, doc, planner, stm_ctx, val).await;
+					return self
+						.prepare_computed(db, stk, ctx, opt, doc, planner, stm_ctx, val)
+						.await;
 				}
 
 				let Part::Start(Expr::Literal(Literal::RecordId(ref from))) = x[0] else {
-					return self.prepare_computed(db, stk, ctx, opt, doc, planner, stm_ctx, val).await;
+					return self
+						.prepare_computed(db, stk, ctx, opt, doc, planner, stm_ctx, val)
+						.await;
 				};
 
 				let Part::Graph(ref graph) = x[1] else {
-					return self.prepare_computed(db, stk, ctx, opt, doc, planner, stm_ctx, val).await;
+					return self
+						.prepare_computed(db, stk, ctx, opt, doc, planner, stm_ctx, val)
+						.await;
 				};
 
 				if graph.alias.is_none()

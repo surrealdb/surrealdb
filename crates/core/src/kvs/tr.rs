@@ -1,10 +1,10 @@
 #[allow(unused_imports, reason = "Not used when none of the storage backends are enabled.")]
 use super::api::Transaction;
+use super::{Key, Val, Version};
 use crate::catalog::DatabaseId;
 use crate::catalog::NamespaceId;
 use crate::catalog::TableDefinition;
 use crate::catalog::TableId;
-use super::{Key, Val, Version};
 use crate::cf;
 
 use crate::doc::CursorValue;

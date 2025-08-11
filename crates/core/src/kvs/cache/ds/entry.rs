@@ -1,8 +1,7 @@
 use crate::catalog::TableDefinition;
 use crate::err::Error;
 use crate::expr::statements::{
-	DefineEventStatement, DefineFieldStatement, DefineIndexStatement,
-	LiveStatement,
+	DefineEventStatement, DefineFieldStatement, DefineIndexStatement, LiveStatement,
 };
 use anyhow::Result;
 use std::any::Any;

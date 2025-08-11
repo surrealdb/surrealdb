@@ -113,7 +113,9 @@ impl Collected {
 				w,
 				o,
 			} => Self::process_relatable(ns, db, txn, f, v, w, o, rid_only).await,
-			Self::RecordId(record_id) => Self::process_thing(ns, db, txn, record_id, rid_only).await,
+			Self::RecordId(record_id) => {
+				Self::process_thing(ns, db, txn, record_id, rid_only).await
+			}
 			Self::Yield(table) => Self::process_yield(table).await,
 			Self::Value(value) => Ok(Self::process_value(value)),
 			Self::Defer(key) => Self::process_defer(key).await,
@@ -485,7 +487,7 @@ pub(super) trait Collector {
 					from,
 					dir,
 					what,
-				} => self.collect_edges(ns, db, ctx, opt, from, dir, what).await?,
+				} => self.collect_edges(ns, db, ctx, from, dir, what).await?,
 				Iterable::Range(tb, v, rs, sc) => match rs {
 					RecordStrategy::Count => self.collect_range_count(ns, db, ctx, &tb, v).await?,
 					RecordStrategy::KeysOnly => {
@@ -828,7 +830,6 @@ pub(super) trait Collector {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ctx: &Context,
-		opt: &Options,
 		from: RecordId,
 		dir: Dir,
 		what: Vec<ComputedGraphSubject>,

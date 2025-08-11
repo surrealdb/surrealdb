@@ -1,5 +1,5 @@
-use crate::catalog::{DatabaseId, NamespaceId, TableDefinition, TableType};
 use super::{DefineFieldStatement, DefineKind};
+use crate::catalog::{DatabaseId, NamespaceId, TableDefinition, TableType};
 use crate::ctx::Context;
 use crate::dbs::{Force, Options};
 use crate::doc::CursorDoc;
@@ -9,12 +9,12 @@ use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::UpdateStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::sql::ToSql;
 use crate::expr::{Base, Expr, Ident, Idiom, Kind, Output, Permissions, View};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Transaction, impl_kv_value_revisioned};
+use crate::sql::ToSql;
 use crate::val::{Strand, Value};
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -80,8 +80,6 @@ impl DefineTableStatement {
 		} else {
 			txn.lock().await.get_next_tb_id(ns, db).await?
 		};
-		// Process the statement
-		let key = crate::key::database::tb::new(ns, db, &self.name);
 
 		// Process the statement
 		let cache_ts = Uuid::now_v7();

@@ -5,12 +5,13 @@ use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::data::Assignment;
 use crate::expr::paths::ID;
+use crate::expr::statements::SelectStatement;
 use crate::expr::statements::delete::DeleteStatement;
 use crate::expr::statements::ifelse::IfelseStatement;
 use crate::expr::statements::upsert::UpsertStatement;
-use crate::expr::statements::SelectStatement;
 use crate::expr::{
-	AssignOperator, BinaryOperator, Cond, Data, Expr, Field, Fields, FlowResultExt as _, Function, FunctionCall, Groups, Ident, Idiom, Literal, Part
+	AssignOperator, BinaryOperator, Cond, Data, Expr, Field, Fields, FlowResultExt as _, Function,
+	FunctionCall, Groups, Ident, Idiom, Literal, Part,
 };
 use crate::val::{Array, RecordId, RecordIdKey, Value};
 use anyhow::{Result, bail};
@@ -878,7 +879,12 @@ impl Document {
 		let group_select = Expr::Select(Box::new(SelectStatement {
 			expr: Fields::Select(vec![field.clone()]),
 			cond,
-			what: fdc.view.what.iter().map(|x| Expr::Table(unsafe { Ident::new_unchecked(x.clone()) })).collect(),
+			what: fdc
+				.view
+				.what
+				.iter()
+				.map(|x| Expr::Table(unsafe { Ident::new_unchecked(x.clone()) }))
+				.collect(),
 			group: Some(fdc.groups.clone()),
 			..SelectStatement::default()
 		}));

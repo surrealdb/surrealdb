@@ -1,9 +1,7 @@
-use crate::sql::{
-	Base, Ident, ToSql,
-};
 use super::DefineKind;
 use crate::sql::escape::QuoteStr;
 use crate::sql::fmt::Fmt;
+use crate::sql::{Base, Ident, ToSql};
 use crate::val::{Duration, Strand};
 use argon2::{
 	Argon2,

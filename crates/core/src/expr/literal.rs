@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
 use std::hash::{Hash, Hasher};
+use crate::sql::ToSql;
 
 /// A literal value, should be computed to get an actual value.
 ///
@@ -201,7 +202,7 @@ impl fmt::Display for Literal {
 			}
 			Literal::Integer(x) => write!(f, "{x}"),
 			Literal::Decimal(d) => write!(f, "{d}dec"),
-			Literal::Strand(strand) => write!(f, "{strand}"),
+			Literal::Strand(strand) => write!(f, "{}", strand.to_sql()),
 			Literal::Bytes(bytes) => write!(f, "{bytes}"),
 			Literal::Regex(regex) => write!(f, "{regex}"),
 			Literal::RecordId(record_id_lit) => write!(f, "{record_id_lit}"),

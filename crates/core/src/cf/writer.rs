@@ -152,9 +152,6 @@ mod tests {
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
 	use crate::expr::changefeed::ChangeFeed;
 	use crate::expr::statements::show::ShowSince;
-	use crate::expr::statements::{
-		DefineDatabaseStatement, DefineNamespaceStatement, DefineTableStatement,
-	};
 	use crate::kvs::LockType::*;
 	use crate::kvs::TransactionType::*;
 	use crate::kvs::{Datastore, Transaction};
@@ -456,7 +453,11 @@ mod tests {
 		r
 	}
 
-	async fn record_change_feed_entry(tx: Transaction, tb: &TableDefinition, id: String) -> RecordId {
+	async fn record_change_feed_entry(
+		tx: Transaction,
+		tb: &TableDefinition,
+		id: String,
+	) -> RecordId {
 		let record_id = RecordId {
 			table: tb.name.clone(),
 			key: RecordIdKey::String(id),

@@ -27,10 +27,10 @@ pub mod geometry;
 pub mod number;
 pub mod object;
 pub mod range;
+pub mod record_id;
 pub mod regex;
 pub mod strand;
 pub mod table;
-pub mod record_id;
 pub mod uuid;
 pub mod value;
 
@@ -44,10 +44,10 @@ pub use self::geometry::Geometry;
 pub use self::number::{DecimalExt, Number};
 pub use self::object::Object;
 pub use self::range::Range;
+pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::regex::Regex;
 pub use self::strand::{Strand, StrandRef};
 pub use self::table::Table;
-pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::uuid::Uuid;
 pub use self::value::{CastError, CoerceError};
 

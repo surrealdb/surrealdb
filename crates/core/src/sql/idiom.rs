@@ -1,6 +1,4 @@
-use crate::sql::{
-	Ident, Part, ToSql,
-};
+use crate::sql::{Ident, Part, ToSql};
 
 use crate::sql::fmt::{Fmt, fmt_separated_by};
 use std::fmt::{self, Display, Formatter};
