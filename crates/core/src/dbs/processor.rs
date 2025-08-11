@@ -467,6 +467,14 @@ impl Collector for ConcurrentDistinctCollector<'_> {
 pub(super) trait Collector {
 	async fn collect(&mut self, collected: Collected) -> Result<()>;
 
+	fn max_fetch_size(&mut self) -> u32 {
+		if let Some(l) = self.iterator().start_limit() {
+			*l
+		} else {
+			*NORMAL_FETCH_SIZE
+		}
+	}
+
 	fn iterator(&mut self) -> &mut Iterator;
 
 	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b Ident) -> Cow<'b, Context> {
@@ -938,9 +946,9 @@ pub(super) trait Collector {
 		txn: &Transaction,
 		mut iterator: ThingIterator,
 	) -> Result<()> {
+		let fetch_size = self.max_fetch_size();
 		while !ctx.is_done(true).await? {
-			let records: Vec<IndexItemRecord> =
-				iterator.next_batch(ctx, txn, *NORMAL_FETCH_SIZE).await?;
+			let records: Vec<IndexItemRecord> = iterator.next_batch(ctx, txn, fetch_size).await?;
 			if records.is_empty() {
 				break;
 			}
@@ -960,9 +968,9 @@ pub(super) trait Collector {
 		txn: &Transaction,
 		mut iterator: ThingIterator,
 	) -> Result<()> {
+		let fetch_size = self.max_fetch_size();
 		while !ctx.is_done(true).await? {
-			let records: Vec<IndexItemRecord> =
-				iterator.next_batch(ctx, txn, *NORMAL_FETCH_SIZE).await?;
+			let records: Vec<IndexItemRecord> = iterator.next_batch(ctx, txn, fetch_size).await?;
 			if records.is_empty() {
 				break;
 			}
@@ -983,8 +991,9 @@ pub(super) trait Collector {
 		mut iterator: ThingIterator,
 	) -> Result<()> {
 		let mut total_count = 0;
+		let fetch_size = self.max_fetch_size();
 		while !ctx.is_done(true).await? {
-			let count = iterator.next_count(ctx, txn, *NORMAL_FETCH_SIZE).await?;
+			let count = iterator.next_count(ctx, txn, fetch_size).await?;
 			if count == 0 {
 				break;
 			}

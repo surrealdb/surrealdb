@@ -743,6 +743,10 @@ impl Iterator {
 		}
 	}
 
+	pub(super) fn start_limit(&self) -> Option<&u32> {
+		self.cancel_on_limit.as_ref()
+	}
+
 	/// Return the number of record that should be skipped
 	pub(super) fn skippable(&self) -> usize {
 		self.start_skip.unwrap_or(0)
