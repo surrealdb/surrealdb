@@ -7,7 +7,7 @@ edition = "2024"
 license-file = "LICENSE"
 publish = false
 version = "3.0.0"
-rust-version = "1.85.0"
+rust-version = "1.87.0"
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
 repository = "https://github.com/surrealdb/surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb"
@@ -78,6 +78,7 @@ ciborium = "0.2.1"
 dashmap = "6.1.0"
 deunicode = "1.6.1"
 ext-sort = "^0.1.4"
+fastnum = "0.3.2"
 flatbuffers = { version = "25.2.10", features = ["serde"] }
 fst = "0.4.7"
 futures = "0.3.30"
@@ -119,7 +120,7 @@ reqwest = { version = "0.12.7", default-features = false }
 ring = "0.17.13"
 roaring = "0.10.6"
 rustls = { version = "0.23.12", default-features = false }
-rust_decimal = { version = "1.37.1" }
+rust_decimal = { version = "1.37.2" }
 # Sub dependency of the rustls dependency, should be updated whenever rustls is.
 # Defined so we can enable features on this dependency.
 rustls-pki-types = "1.7.0"
@@ -135,7 +136,7 @@ sha2 = "0.10.8"
 snap = "1.1.0"
 strsim = "0.11.1"
 subtle = "2.6"
-surrealdb-protocol = { version = "0.2.1", default-features = false }
+surrealdb-protocol = { version = "0.3.1", default-features = false }
 sysinfo = "0.33.0"
 tempfile = "3.10.1"
 thiserror = "1.0.63"
