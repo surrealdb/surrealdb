@@ -1138,6 +1138,21 @@ pub(crate) struct UniqueRangeReverseThingIterator {
 
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 impl UniqueRangeReverseThingIterator {
+	pub(super) fn new(
+		irf: IteratorRef,
+		ns: &str,
+		db: &str,
+		ix: &DefineIndexStatement,
+		range: &IteratorRange<'_>,
+	) -> Result<Self> {
+		let r = ReverseRangeScan::new(UniqueRangeThingIterator::range_scan(ns, db, ix, range)?);
+		Ok(Self {
+			irf,
+			r,
+			done: false,
+		})
+	}
+
 	pub(super) fn full_range(
 		irf: IteratorRef,
 		ns: &str,
@@ -1145,12 +1160,7 @@ impl UniqueRangeReverseThingIterator {
 		ix: &DefineIndexStatement,
 	) -> Result<Self> {
 		let r = full_iterator_range();
-		let r = ReverseRangeScan::new(UniqueRangeThingIterator::range_scan(ns, db, ix, &r)?);
-		Ok(Self {
-			irf,
-			r,
-			done: false,
-		})
+		Self::new(irf, ns, db, ix, &r)
 	}
 
 	async fn next_batch<B: IteratorBatch>(

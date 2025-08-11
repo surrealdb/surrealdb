@@ -89,13 +89,23 @@ impl PlanBuilder {
 					// Evaluate the record strategy
 					let record_strategy =
 						ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
-					let is_order = if let Some(io) = p.order_limit {
-						io.ixr == ir
+					let (is_order, sc) = if let Some(io) = p.order_limit {
+						#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
+						{
+							(io.ixr == ir, ScanDirection::Forward)
+						}
+						#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+						{
+							(
+								io.ixr == ir,
+								Self::check_range_scan_direction(p.reverse_scan, &io.op()),
+							)
+						}
 					} else {
-						false
+						(false, ScanDirection::Forward)
 					};
 					// Return the plan
-					return Ok(Plan::SingleIndexRange(ir, rq, record_strategy, is_order));
+					return Ok(Plan::SingleIndexRange(ir, rq, record_strategy, sc, is_order));
 				}
 			}
 
@@ -174,6 +184,14 @@ impl PlanBuilder {
 	/// Check if the ordering is compatible with the datastore transaction capabilities
 	fn check_order_scan(has_reverse_scan: bool, op: &IndexOperator) -> bool {
 		has_reverse_scan || matches!(op, IndexOperator::Order(false))
+	}
+
+	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+	fn check_range_scan_direction(has_reverse_scan: bool, op: &IndexOperator) -> ScanDirection {
+		if has_reverse_scan && matches!(op, IndexOperator::Order(true)) {
+			return ScanDirection::Backward;
+		}
+		ScanDirection::Forward
 	}
 
 	/// Check if a compound index can be used.
@@ -306,8 +324,9 @@ pub(super) enum Plan {
 	/// 1. The reference to index
 	/// 2. The index range
 	/// 3. A record strategy
-	/// 4. True if it matches an order option
-	SingleIndexRange(IndexReference, UnionRangeQueryBuilder, RecordStrategy, bool),
+	/// 4. The scan direction
+	/// 5. True if it matches an order option
+	SingleIndexRange(IndexReference, UnionRangeQueryBuilder, RecordStrategy, ScanDirection, bool),
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
