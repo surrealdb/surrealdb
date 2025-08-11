@@ -57,6 +57,8 @@ pub(crate) mod user;
 pub(crate) mod view;
 pub(crate) mod with;
 
+pub(crate) mod decimal;
+
 pub mod index;
 pub mod statements;
 
