@@ -41,7 +41,6 @@ impl Revisioned for TableId {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct TableDefinition {
 	pub namespace_id: NamespaceId,
@@ -151,7 +150,6 @@ impl InfoStructure for TableDefinition {
 /// The type of records stored by a table
 #[revisioned(revision = 1)]
 #[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum TableType {
 	#[default]
@@ -206,7 +204,6 @@ impl InfoStructure for TableType {
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Relation {
 	pub from: Option<Kind>,
