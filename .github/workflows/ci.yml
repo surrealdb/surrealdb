@@ -84,6 +84,8 @@ jobs:
         id: info
         run: |
           set -x
+          pwd
+          ls
           echo "rust=$(cat rust-toolchain.nightly)" >> $GITHUB_OUTPUT
 
       - name: Install nightly toolchain
