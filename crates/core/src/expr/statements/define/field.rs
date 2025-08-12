@@ -1,52 +1,57 @@
+use std::fmt::{self, Display, Write};
+use std::sync::Arc;
+
+use anyhow::{Result, bail, ensure};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use super::DefineKind;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
+use crate::expr::kind::KindLiteral;
 use crate::expr::reference::Reference;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Idiom, Kind, Permissions, Strand, Value};
-use crate::expr::{Literal, Part};
-use crate::expr::{Relation, TableType};
+use crate::expr::{Base, Expr, Ident, Idiom, Kind, Part, Permissions, Relation, TableType};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::Transaction;
-use anyhow::{Result, bail, ensure};
+use crate::kvs::{Transaction, impl_kv_value_revisioned};
+use crate::val::{Strand, Value};
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
-use std::sync::Arc;
-use uuid::Uuid;
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+pub enum DefineDefault {
+	#[default]
+	None,
+	Always(Expr),
+	Set(Expr),
+}
 
-#[revisioned(revision = 6)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct DefineFieldStatement {
+	pub kind: DefineKind,
 	pub name: Idiom,
 	pub what: Ident,
 	/// Whether the field is marked as flexible.
-	/// Flexible allows the field to be schemaless even if the table is marked as schemafull.
+	/// Flexible allows the field to be schemaless even if the table is marked
+	/// as schemafull.
 	pub flex: bool,
-	pub kind: Option<Kind>,
-	#[revision(start = 2)]
+	pub field_kind: Option<Kind>,
 	pub readonly: bool,
-	pub value: Option<Value>,
-	pub assert: Option<Value>,
-	pub default: Option<Value>,
+	pub value: Option<Expr>,
+	pub assert: Option<Expr>,
+	pub default: DefineDefault,
 	pub permissions: Permissions,
 	pub comment: Option<Strand>,
-	#[revision(start = 3)]
-	pub if_not_exists: bool,
-	#[revision(start = 4)]
-	pub overwrite: bool,
-	#[revision(start = 5)]
 	pub reference: Option<Reference>,
-	#[revision(start = 6)]
-	pub default_always: bool,
 }
+
+impl_kv_value_revisioned!(DefineFieldStatement);
 
 impl DefineFieldStatement {
 	/// Process this type returning a computed simple Value
@@ -60,12 +65,6 @@ impl DefineFieldStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Validate reference options
 		self.validate_reference_options(ctx)?;
-		// Correct reference type
-		let kind = if let Some(kind) = self.get_reference_kind(ctx, opt).await? {
-			Some(kind)
-		} else {
-			self.kind.clone()
-		};
 
 		// Get the NS and DB
 		let (ns, db) = opt.ns_db()?;
@@ -79,12 +78,18 @@ impl DefineFieldStatement {
 		let fd = self.name.to_string();
 		// Check if the definition exists
 		if txn.get_tb_field(ns, db, &self.what, &fd).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::FdAlreadyExists {
-					name: fd,
-				});
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::FdAlreadyExists {
+							name: fd,
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => {
+					return Ok(Value::None);
+				}
 			}
 		}
 		// Process the statement
@@ -93,14 +98,12 @@ impl DefineFieldStatement {
 		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DefineFieldStatement {
+			&key,
+			&DefineFieldStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
-				kind,
+				kind: DefineKind::Default,
 				..self.clone()
-			})?,
+			},
 			None,
 		)
 		.await?;
@@ -108,11 +111,11 @@ impl DefineFieldStatement {
 		let key = crate::key::database::tb::new(ns, db, &self.what);
 		let tb = txn.get_tb(ns, db, &self.what).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DefineTableStatement {
+			&key,
+			&DefineTableStatement {
 				cache_fields_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
-			})?,
+			},
 			None,
 		)
 		.await?;
@@ -121,7 +124,7 @@ impl DefineFieldStatement {
 			cache.clear_tb(ns, db, &self.what);
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Process possible recursive defitions
 		self.process_recursive_definitions(ns, db, txn.clone()).await?;
 		// If this is an `in` field then check relation definitions
@@ -129,32 +132,32 @@ impl DefineFieldStatement {
 			// Get the table definition that this field belongs to
 			let tb = txn.get_tb(ns, db, &self.what).await?;
 			// The table is marked as TYPE RELATION
-			if let TableType::Relation(ref relation) = tb.kind {
+			if let TableType::Relation(ref relation) = tb.table_type {
 				// Check if a field TYPE has been specified
-				if let Some(kind) = self.kind.as_ref() {
+				if let Some(kind) = self.field_kind.as_ref() {
 					// The `in` field must be a record type
 					ensure!(
 						kind.is_record(),
 						Error::Thrown("in field on a relation must be a record".into(),)
 					);
 					// Add the TYPE to the DEFINE TABLE statement
-					if relation.from.as_ref() != self.kind.as_ref() {
+					if relation.from.as_ref() != self.field_kind.as_ref() {
 						let key = crate::key::database::tb::new(ns, db, &self.what);
 						let val = DefineTableStatement {
 							cache_fields_ts: Uuid::now_v7(),
-							kind: TableType::Relation(Relation {
-								from: self.kind.clone(),
+							table_type: TableType::Relation(Relation {
+								from: self.field_kind.clone(),
 								..relation.to_owned()
 							}),
 							..tb.as_ref().to_owned()
 						};
-						txn.set(key, revision::to_vec(&val)?, None).await?;
+						txn.set(&key, &val, None).await?;
 						// Clear the cache
 						if let Some(cache) = ctx.get_cache() {
 							cache.clear_tb(ns, db, &self.what);
 						}
 						// Clear the cache
-						txn.clear();
+						txn.clear_cache();
 					}
 				}
 			}
@@ -164,38 +167,38 @@ impl DefineFieldStatement {
 			// Get the table definition that this field belongs to
 			let tb = txn.get_tb(ns, db, &self.what).await?;
 			// The table is marked as TYPE RELATION
-			if let TableType::Relation(ref relation) = tb.kind {
+			if let TableType::Relation(ref relation) = tb.table_type {
 				// Check if a field TYPE has been specified
-				if let Some(kind) = self.kind.as_ref() {
+				if let Some(kind) = self.field_kind.as_ref() {
 					// The `out` field must be a record type
 					ensure!(
 						kind.is_record(),
 						Error::Thrown("out field on a relation must be a record".into(),)
 					);
 					// Add the TYPE to the DEFINE TABLE statement
-					if relation.from.as_ref() != self.kind.as_ref() {
+					if relation.from.as_ref() != self.field_kind.as_ref() {
 						let key = crate::key::database::tb::new(ns, db, &self.what);
 						let val = DefineTableStatement {
 							cache_fields_ts: Uuid::now_v7(),
-							kind: TableType::Relation(Relation {
-								to: self.kind.clone(),
+							table_type: TableType::Relation(Relation {
+								to: self.field_kind.clone(),
 								..relation.to_owned()
 							}),
 							..tb.as_ref().to_owned()
 						};
-						txn.set(key, revision::to_vec(&val)?, None).await?;
+						txn.set(&key, &val, None).await?;
 						// Clear the cache
 						if let Some(cache) = ctx.get_cache() {
 							cache.clear_tb(ns, db, &self.what);
 						}
 						// Clear the cache
-						txn.clear();
+						txn.clear_cache();
 					}
 				}
 			}
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -209,7 +212,7 @@ impl DefineFieldStatement {
 		// Find all existing field definitions
 		let fields = txn.all_tb_fields(ns, db, &self.what, None).await.ok();
 		// Process possible recursive_definitions
-		if let Some(mut cur_kind) = self.kind.as_ref().and_then(|x| x.inner_kind()) {
+		if let Some(mut cur_kind) = self.field_kind.as_ref().and_then(|x| x.inner_kind()) {
 			let mut name = self.name.clone();
 			loop {
 				// Check if the subtype is an `any` type
@@ -237,10 +240,9 @@ impl DefineFieldStatement {
 					fields.as_ref().and_then(|x| x.iter().find(|x| x.name == name))
 				{
 					DefineFieldStatement {
-						kind: Some(cur_kind),
+						field_kind: Some(cur_kind),
 						reference: self.reference.clone(),
-						if_not_exists: false,
-						overwrite: false,
+						kind: DefineKind::Default,
 						..existing.clone()
 					}
 				} else {
@@ -248,12 +250,13 @@ impl DefineFieldStatement {
 						name: name.clone(),
 						what: self.what.clone(),
 						flex: self.flex,
-						kind: Some(cur_kind),
+						field_kind: Some(cur_kind),
+						kind: DefineKind::Default,
 						reference: self.reference.clone(),
 						..Default::default()
 					}
 				};
-				txn.set(key, revision::to_vec(&val)?, None).await?;
+				txn.set(&key, &val, None).await?;
 				// Process to any sub field
 				if let Some(new_kind) = new_kind {
 					cur_kind = new_kind;
@@ -271,7 +274,7 @@ impl DefineFieldStatement {
 			return Ok(());
 		}
 
-		if let Some(kind) = &self.kind {
+		if let Some(kind) = &self.field_kind {
 			let kinds = match kind {
 				Kind::Either(kinds) => kinds,
 				kind => &vec![kind.to_owned()],
@@ -295,7 +298,7 @@ impl DefineFieldStatement {
 				);
 
 				ensure!(
-					self.default.is_none(),
+					matches!(self.default, DefineDefault::None),
 					Error::RefsTypeConflict("DEFAULT".into(), typename)
 				);
 
@@ -310,29 +313,28 @@ impl DefineFieldStatement {
 
 			// If a reference is defined, the field must be a record
 			if self.reference.is_some() {
-				let kinds = match kind.get_optional_inner_kind() {
-					Kind::Either(kinds) => kinds,
+				let is_record_id = match kind.get_optional_inner_kind() {
+					Kind::Either(kinds) => kinds.iter().all(|k| matches!(k, Kind::Record(_))),
 					Kind::Array(kind, _) | Kind::Set(kind, _) => match kind.as_ref() {
-						Kind::Either(kinds) => kinds,
-						kind => &vec![kind.to_owned()],
+						Kind::Either(kinds) => kinds.iter().all(|k| matches!(k, Kind::Record(_))),
+						Kind::Record(_) => true,
+						_ => false,
 					},
-					Kind::Literal(lit) => match lit {
-						Literal::Array(kinds) => kinds,
-						lit => &vec![Kind::Literal(lit.to_owned())],
-					},
-					kind => &vec![kind.to_owned()],
+					Kind::Literal(KindLiteral::Array(kinds)) => {
+						kinds.iter().all(|k| matches!(k, Kind::Record(_)))
+					}
+					Kind::Record(_) => true,
+					_ => false,
 				};
 
-				ensure!(
-					kinds.iter().all(|k| matches!(k, Kind::Record(_))),
-					Error::ReferenceTypeConflict(kind.to_string())
-				);
+				ensure!(is_record_id, Error::ReferenceTypeConflict(kind.to_string()));
 			}
 		}
 
 		Ok(())
 	}
 
+	/*
 	/// Get the correct reference type if needed.
 	pub(crate) async fn get_reference_kind(
 		&self,
@@ -343,7 +345,7 @@ impl DefineFieldStatement {
 			return Ok(None);
 		}
 
-		if let Some(Kind::References(Some(ft), Some(ff))) = &self.kind {
+		if let Some(Kind::References(Some(ft), Some(ff))) = &self.field_kind {
 			// Obtain the field definition
 			let (ns, db) = opt.ns_db()?;
 			let fd = match ctx.tx().get_tb_field(ns, db, &ft.to_string(), &ff.to_string()).await {
@@ -360,7 +362,7 @@ impl DefineFieldStatement {
 
 			// Check if the field is an array-like value and thus "containing" references
 			let is_array_like = fd
-				.kind
+				.field_kind
 				.as_ref()
 				.map(|kind| kind.get_optional_inner_kind().is_array_like())
 				.unwrap_or_default();
@@ -373,7 +375,7 @@ impl DefineFieldStatement {
 		}
 
 		Ok(None)
-	}
+	}*/
 
 	pub(crate) async fn disallow_mismatched_types(
 		&self,
@@ -383,10 +385,10 @@ impl DefineFieldStatement {
 	) -> Result<()> {
 		let fds = ctx.tx().all_tb_fields(ns, db, &self.what, None).await?;
 
-		if let Some(self_kind) = &self.kind {
+		if let Some(self_kind) = &self.field_kind {
 			for fd in fds.iter() {
 				if self.name.starts_with(&fd.name) && self.name != fd.name {
-					if let Some(fd_kind) = &fd.kind {
+					if let Some(fd_kind) = &fd.field_kind {
 						let path = self.name[fd.name.len()..].to_vec();
 						if !fd_kind.allows_nested_kind(&path, self_kind) {
 							bail!(Error::MismatchedFieldTypes {
@@ -408,26 +410,22 @@ impl DefineFieldStatement {
 impl Display for DefineFieldStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE FIELD")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {} ON {}", self.name, self.what)?;
 		if self.flex {
 			write!(f, " FLEXIBLE")?
 		}
-		if let Some(ref v) = self.kind {
+		if let Some(ref v) = self.field_kind {
 			write!(f, " TYPE {v}")?
 		}
-		if let Some(ref v) = self.default {
-			write!(f, " DEFAULT")?;
-			if self.default_always {
-				write!(f, " ALWAYS")?
-			}
-
-			write!(f, " {v}")?
+		match self.default {
+			DefineDefault::None => {}
+			DefineDefault::Always(ref expr) => write!(f, " DEFAULT ALWAYS {expr}")?,
+			DefineDefault::Set(ref expr) => write!(f, " DEFAULT {expr}")?,
 		}
 		if self.readonly {
 			write!(f, " READONLY")?
@@ -465,11 +463,11 @@ impl InfoStructure for DefineFieldStatement {
 			"name".to_string() => self.name.structure(),
 			"what".to_string() => self.what.structure(),
 			"flex".to_string() => self.flex.into(),
-			"kind".to_string(), if let Some(v) = self.kind => v.structure(),
+			"kind".to_string(), if let Some(v) = self.field_kind => v.structure(),
 			"value".to_string(), if let Some(v) = self.value => v.structure(),
 			"assert".to_string(), if let Some(v) = self.assert => v.structure(),
-			"default_always".to_string(), if self.default.is_some() => self.default_always.into(), // Only reported if DEFAULT is also enabled for this field
-			"default".to_string(), if let Some(v) = self.default => v.structure(),
+			"default_always".to_string(), if matches!(&self.default, DefineDefault::Always(_) | DefineDefault::Set(_)) => Value::Bool(matches!(self.default,DefineDefault::Always(_))), // Only reported if DEFAULT is also enabled for this field
+			"default".to_string(), if let DefineDefault::Always(v) | DefineDefault::Set(v) = self.default => v.structure(),
 			"reference".to_string(), if let Some(v) = self.reference => v.structure(),
 			"readonly".to_string() => self.readonly.into(),
 			"permissions".to_string() => self.permissions.structure(),

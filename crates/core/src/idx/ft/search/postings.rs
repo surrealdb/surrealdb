@@ -1,15 +1,15 @@
+use anyhow::Result;
+
+use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::ft::TermFrequency;
 use crate::idx::ft::search::terms::TermId;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeStore};
 use crate::idx::trees::store::TreeNodeProvider;
-use crate::idx::{IndexKeyBase, VersionedStore};
-use crate::kvs::{Key, Transaction, TransactionType};
-use anyhow::Result;
+use crate::kvs::{KVKey, Transaction, TransactionType};
 
 pub(super) struct Postings {
-	state_key: Key,
 	index_key_base: IndexKeyBase,
 	btree: BTree<TrieKeys>,
 	store: BTreeStore<TrieKeys>,
@@ -23,9 +23,9 @@ impl Postings {
 		tt: TransactionType,
 		cache_size: u32,
 	) -> Result<Self> {
-		let state_key: Key = index_key_base.new_bp_key(None)?;
-		let state: BState = if let Some(val) = tx.get(state_key.clone(), None).await? {
-			VersionedStore::try_from(val)?
+		let state_key = index_key_base.new_bp_root_key();
+		let state: BState = if let Some(val) = tx.get(&state_key, None).await? {
+			val
 		} else {
 			BState::new(order)
 		};
@@ -39,7 +39,6 @@ impl Postings {
 			)
 			.await?;
 		Ok(Self {
-			state_key,
 			index_key_base,
 			btree: BTree::new(state),
 			store,
@@ -53,7 +52,7 @@ impl Postings {
 		doc_id: DocId,
 		term_freq: TermFrequency,
 	) -> Result<()> {
-		let key = self.index_key_base.new_bf_key(term_id, doc_id)?;
+		let key = self.index_key_base.new_bf_key(term_id, doc_id).encode_key()?;
 		self.btree.insert(tx, &mut self.store, key, term_freq).await
 	}
 
@@ -63,7 +62,7 @@ impl Postings {
 		term_id: TermId,
 		doc_id: DocId,
 	) -> Result<Option<TermFrequency>> {
-		let key = self.index_key_base.new_bf_key(term_id, doc_id)?;
+		let key = self.index_key_base.new_bf_key(term_id, doc_id).encode_key()?;
 		self.btree.search(tx, &self.store, &key).await
 	}
 
@@ -73,7 +72,7 @@ impl Postings {
 		term_id: TermId,
 		doc_id: DocId,
 	) -> Result<Option<TermFrequency>> {
-		let key = self.index_key_base.new_bf_key(term_id, doc_id)?;
+		let key = self.index_key_base.new_bf_key(term_id, doc_id).encode_key()?;
 		self.btree.delete(tx, &mut self.store, key).await
 	}
 
@@ -84,7 +83,8 @@ impl Postings {
 	pub(super) async fn finish(&mut self, tx: &Transaction) -> Result<()> {
 		if let Some(new_cache) = self.store.finish(tx).await? {
 			let state = self.btree.inc_generation();
-			tx.set(self.state_key.clone(), VersionedStore::try_into(state)?, None).await?;
+			let state_key = self.index_key_base.new_bp_root_key();
+			tx.set(&state_key, state, None).await?;
 			tx.index_caches().advance_store_btree_trie(new_cache);
 		}
 		Ok(())
@@ -93,10 +93,13 @@ impl Postings {
 
 #[cfg(test)]
 mod tests {
+	use test_log::test;
+
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::search::postings::Postings;
-	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType, TransactionType::*};
-	use test_log::test;
+	use crate::kvs::LockType::*;
+	use crate::kvs::TransactionType::*;
+	use crate::kvs::{Datastore, Transaction, TransactionType};
 
 	async fn new_operation(
 		ds: &Datastore,

@@ -1,12 +1,12 @@
+use std::borrow::Cow;
+use std::future::IntoFuture;
+
 use crate::Surreal;
-use crate::api::Connection;
-use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
+use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
-use std::borrow::Cow;
-use std::future::IntoFuture;
 
 /// A version future
 #[derive(Debug)]
@@ -19,7 +19,8 @@ impl<C> Version<'_, C>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Version<'static, C> {
 		Version {
 			client: Cow::Owned(self.client.into_owned()),

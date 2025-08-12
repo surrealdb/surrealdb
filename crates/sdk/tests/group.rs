@@ -1,439 +1,11 @@
-mod parse;
-use parse::Parse;
 mod helpers;
-use crate::helpers::Test;
-use helpers::new_ds;
-use helpers::skip_ok;
+use helpers::{new_ds, skip_ok};
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::expr::Value;
-use surrealdb_core::expr::Thing;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::val::RecordId;
+use surrealdb_core::{strand, syn};
 
-#[tokio::test]
-async fn select_aggregate() -> Result<()> {
-	let sql = "
-		CREATE temperature:1 SET country = 'GBP', time = d'2020-01-01T08:00:00Z';
-		CREATE temperature:2 SET country = 'GBP', time = d'2020-02-01T08:00:00Z';
-		CREATE temperature:3 SET country = 'GBP', time = d'2020-03-01T08:00:00Z';
-		CREATE temperature:4 SET country = 'GBP', time = d'2021-01-01T08:00:00Z';
-		CREATE temperature:5 SET country = 'GBP', time = d'2021-01-01T08:00:00Z';
-		CREATE temperature:6 SET country = 'EUR', time = d'2021-01-01T08:00:00Z';
-		CREATE temperature:7 SET country = 'USD', time = d'2021-01-01T08:00:00Z';
-		CREATE temperature:8 SET country = 'AUD', time = d'2021-01-01T08:00:00Z';
-		CREATE temperature:9 SET country = 'CHF', time = d'2023-01-01T08:00:00Z';
-		SELECT *, time::year(time) AS year FROM temperature;
-		SELECT count(), time::min(time) as min, time::max(time) as max, time::year(time) AS year, country FROM temperature GROUP BY country, year;
-		SELECT count(), time::min(time) as min, time::max(time) as max, time::year(time) AS year, country FROM temperature GROUP BY country, year EXPLAIN;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 12);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				country: 'GBP',
-				id: temperature:1,
-				time: d'2020-01-01T08:00:00Z'
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				country: 'GBP',
-				id: temperature:2,
-				time: d'2020-02-01T08:00:00Z'
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				country: 'GBP',
-				id: temperature:3,
-				time: d'2020-03-01T08:00:00Z'
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				country: 'GBP',
-				id: temperature:4,
-				time: d'2021-01-01T08:00:00Z'
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				country: 'GBP',
-				id: temperature:5,
-				time: d'2021-01-01T08:00:00Z'
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				country: 'EUR',
-				id: temperature:6,
-				time: d'2021-01-01T08:00:00Z'
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				country: 'USD',
-				id: temperature:7,
-				time: d'2021-01-01T08:00:00Z'
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				country: 'AUD',
-				id: temperature:8,
-				time: d'2021-01-01T08:00:00Z'
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				country: 'CHF',
-				id: temperature:9,
-				time: d'2023-01-01T08:00:00Z'
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				country: 'GBP',
-				id: temperature:1,
-				time: d'2020-01-01T08:00:00Z',
-				year: 2020
-			},
-			{
-				country: 'GBP',
-				id: temperature:2,
-				time: d'2020-02-01T08:00:00Z',
-				year: 2020
-			},
-			{
-				country: 'GBP',
-				id: temperature:3,
-				time: d'2020-03-01T08:00:00Z',
-				year: 2020
-			},
-			{
-				country: 'GBP',
-				id: temperature:4,
-				time: d'2021-01-01T08:00:00Z',
-				year: 2021
-			},
-			{
-				country: 'GBP',
-				id: temperature:5,
-				time: d'2021-01-01T08:00:00Z',
-				year: 2021
-			},
-			{
-				country: 'EUR',
-				id: temperature:6,
-				time: d'2021-01-01T08:00:00Z',
-				year: 2021
-			},
-			{
-				country: 'USD',
-				id: temperature:7,
-				time: d'2021-01-01T08:00:00Z',
-				year: 2021
-			},
-			{
-				country: 'AUD',
-				id: temperature:8,
-				time: d'2021-01-01T08:00:00Z',
-				year: 2021
-			},
-			{
-				country: 'CHF',
-				id: temperature:9,
-				time: d'2023-01-01T08:00:00Z',
-				year: 2023
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-				{
-					count: 1,
-					country: 'AUD',
-					max: d'2021-01-01T08:00:00Z',
-					min: d'2021-01-01T08:00:00Z',
-					year: 2021
-				},
-				{
-					count: 1,
-					country: 'CHF',
-					max: d'2023-01-01T08:00:00Z',
-					min: d'2023-01-01T08:00:00Z',
-					year: 2023
-				},
-				{
-					count: 1,
-					country: 'EUR',
-					max: d'2021-01-01T08:00:00Z',
-					min: d'2021-01-01T08:00:00Z',
-					year: 2021
-				},
-				{
-					count: 3,
-					country: 'GBP',
-					max: d'2020-03-01T08:00:00Z',
-					min: d'2020-01-01T08:00:00Z',
-					year: 2020
-				},
-				{
-					count: 2,
-					country: 'GBP',
-					max: d'2021-01-01T08:00:00Z',
-					min: d'2021-01-01T08:00:00Z',
-					year: 2021
-				},
-				{
-					count: 1,
-					country: 'USD',
-					max: d'2021-01-01T08:00:00Z',
-					min: d'2021-01-01T08:00:00Z',
-					year: 2021
-				}
-			]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-				{
-					detail: {
-						direction: 'forward',
-						table: 'temperature'
-					},
-					operation: 'Iterate Table'
-				},
-				{
-					detail: {
-						idioms: {
-							count: [
-								'count'
-							],
-							country: [
-								'first'
-							],
-							max: [
-								'time::max'
-							],
-							min: [
-								'time::min'
-							],
-							year: [
-								'array'
-							]
-						},
-						type: 'Group'
-					},
-					operation: 'Collector'
-				}
-			]",
-	);
-	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn select_multi_aggregate() -> Result<()> {
-	let sql = "
-		CREATE test:1 SET group = 1, one = 1.7, two = 2.4;
-		CREATE test:2 SET group = 1, one = 4.7, two = 3.9;
-		CREATE test:3 SET group = 2, one = 3.2, two = 9.7;
-		CREATE test:4 SET group = 2, one = 4.4, two = 3.0;
-		SELECT group, math::sum(one) AS one, math::sum(two) AS two, math::min(one) as min FROM test GROUP BY group;
-		SELECT group, math::sum(two) AS two, math::sum(one) AS one, math::max(two) as max, math::mean(one) as mean FROM test GROUP BY group;
-		SELECT group, math::sum(two) AS two, math::sum(one) AS one, math::max(two) as max, math::mean(one) as mean FROM test GROUP BY group EXPLAIN;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 7);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				id: test:1,
-				group: 1,
-				one: 1.7,
-				two: 2.4,
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				id: test:2,
-				group: 1,
-				one: 4.7,
-				two: 3.9,
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				id: test:3,
-				group: 2,
-				one: 3.2,
-				two: 9.7,
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				id: test:4,
-				group: 2,
-				one: 4.4,
-				two: 3.0,
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-				{
-					group: 1,
-					min: 1.7,
-					one: 6.4,
-					two: 6.3
-				},
-				{
-					group: 2,
-					min: 3.2f,
-					one: 7.6000000000000005,
-					two: 12.7
-				}
-			]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-				{
-					group: 1,
-					max: 3.9,
-					mean: 3.2,
-					one: 6.4,
-					two: 6.3
-				},
-				{
-					group: 2,
-					max: 9.7,
-					mean: 3.8000000000000003,
-					one: 7.6000000000000005,
-					two: 12.7
-				}
-			]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-				{
-					detail: {
-						direction: 'forward',
-						table: 'test'
-					},
-					operation: 'Iterate Table'
-				},
-				{
-					detail: {
-						idioms: {
-							group: [
-								'first'
-							],
-							max: [
-								'math::max'
-							],
-							mean: [
-								'math::mean'
-							],
-							one: [
-								'math::sum'
-							],
-							two: [
-								'math::sum'
-							]
-						},
-						type: 'Group'
-					},
-					operation: 'Collector'
-				}
-			]",
-	);
-	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
-	Ok(())
-}
+use crate::helpers::Test;
 
 #[tokio::test]
 async fn select_multi_aggregate_composed() -> Result<()> {
@@ -453,7 +25,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 	assert_eq!(res.len(), 8);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: test:1,
@@ -462,11 +34,12 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 2.4,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: test:2,
@@ -475,11 +48,12 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 3.9,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: test:3,
@@ -488,11 +62,12 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 9.7,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: test:4,
@@ -501,11 +76,12 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 3.0,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				group: 1,
@@ -518,11 +94,12 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 12,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				group: 1,
@@ -535,11 +112,12 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 13,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				group: 1,
@@ -552,11 +130,12 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 13,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 				{
 					detail: {
@@ -583,7 +162,8 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 					operation: 'Collector'
 				}
 			]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	//
 	Ok(())
@@ -606,7 +186,7 @@ async fn select_array_group_group_by() -> Result<()> {
 	skip_ok(res, 4)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		r#"[
                 {
                         "array::group": [
@@ -621,7 +201,8 @@ async fn select_array_group_group_by() -> Result<()> {
                         user: 2
                 }
         ]"#,
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	//
 	Ok(())
@@ -644,7 +225,7 @@ async fn select_array_count_subquery_group_by() -> Result<()> {
 	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		r#"[
 				{
 					detail: {
@@ -665,70 +246,20 @@ async fn select_array_count_subquery_group_by() -> Result<()> {
 					operation: 'Collector'
 				}
 			]"#,
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		r#"[
 					{
 						count: 2
 					}
 				]"#,
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn select_aggregate_mean_update() -> Result<()> {
-	let sql = "
-		CREATE test:a SET a = 3;
-		DEFINE TABLE foo AS SELECT math::mean(a) AS avg FROM test GROUP ALL;
-		UPDATE test:a SET a = 2;
-		SELECT avg FROM foo;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 4);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				id: test:a,
-				a: 3
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("None");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				id: test:a,
-				a: 2
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				avg: 2
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -838,7 +369,12 @@ async fn select_count_group_all_permissions(
 		";
 	let mut t = Test::new_ds_session(
 		t.ds,
-		Session::for_record("test", "test", "test", Thing::from(("table", "baz")).into()),
+		Session::for_record(
+			"test",
+			"test",
+			"test",
+			RecordId::new("table".to_owned(), strand!("baz").to_owned()).into(),
+		),
 		sql,
 	)
 	.await?;
@@ -1051,7 +587,12 @@ async fn select_count_range_keys_only_permissions(
 		";
 	let mut t = Test::new_ds_session(
 		t.ds,
-		Session::for_record("test", "test", "test", Thing::from(("table", "me")).into()),
+		Session::for_record(
+			"test",
+			"test",
+			"test",
+			RecordId::new("table".to_owned(), strand!("me").to_owned()).into(),
+		),
 		sql,
 	)
 	.await?;

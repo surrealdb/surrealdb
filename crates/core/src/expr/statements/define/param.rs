@@ -1,31 +1,51 @@
+use std::fmt::{self, Display, Write};
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::DefineKind;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, FlowResultExt as _, Ident, Permission, Strand, Value};
+use crate::expr::{Base, Expr, FlowResultExt as _, Ident, Permission};
 use crate::iam::{Action, ResourceKind};
-use anyhow::{Result, bail};
+use crate::kvs::impl_kv_value_revisioned;
+use crate::val::{Strand, Value};
 
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
-
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct DefineParamStatement {
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+pub struct DefineParamStore {
 	pub name: Ident,
 	pub value: Value,
 	pub comment: Option<Strand>,
 	pub permissions: Permission,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub overwrite: bool,
+}
+impl_kv_value_revisioned!(DefineParamStore);
+
+impl InfoStructure for DefineParamStore {
+	fn structure(self) -> Value {
+		Value::from(map! {
+			"name".to_string() => self.name.structure(),
+			"value".to_string() => self.value.structure(),
+			"permissions".to_string() => self.permissions.structure(),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+pub struct DefineParamStatement {
+	pub kind: DefineKind,
+	pub name: Ident,
+	pub value: Expr,
+	pub comment: Option<Strand>,
+	pub permissions: Permission,
 }
 
 impl DefineParamStatement {
@@ -40,19 +60,23 @@ impl DefineParamStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
 
-		let value = self.value.compute(stk, ctx, opt, doc).await.catch_return()?;
+		let value = stk.run(|stk| self.value.compute(stk, ctx, opt, doc)).await.catch_return()?;
 
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
 		let (ns, db) = opt.ns_db()?;
 		if txn.get_db_param(ns, db, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::PaAlreadyExists {
-					name: self.name.to_string(),
-				});
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::PaAlreadyExists {
+							name: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 		}
 		// Process the statement
@@ -60,34 +84,28 @@ impl DefineParamStatement {
 		txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DefineParamStatement {
+			&key,
+			&DefineParamStore {
 				// Compute the param
 				value,
 				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
-				..self.clone()
-			})?,
+				name: self.name.clone(),
+				comment: self.comment.clone(),
+				permissions: self.permissions.clone(),
+			},
 			None,
 		)
 		.await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
 }
 
-impl Display for DefineParamStatement {
+impl Display for DefineParamStore {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE PARAM")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
-		}
 		write!(f, " ${} VALUE {}", self.name, self.value)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
@@ -103,13 +121,25 @@ impl Display for DefineParamStatement {
 	}
 }
 
-impl InfoStructure for DefineParamStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"value".to_string() => self.value.structure(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
+impl Display for DefineParamStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "DEFINE PARAM")?;
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+		}
+		write!(f, " ${} VALUE {}", self.name, self.value)?;
+		if let Some(ref v) = self.comment {
+			write!(f, " COMMENT {v}")?
+		}
+		let _indent = if is_pretty() {
+			Some(pretty_indent())
+		} else {
+			f.write_char(' ')?;
+			None
+		};
+		write!(f, "PERMISSIONS {}", self.permissions)?;
+		Ok(())
 	}
 }

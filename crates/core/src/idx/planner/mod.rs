@@ -6,24 +6,27 @@ pub(crate) mod plan;
 pub(in crate::idx) mod rewriter;
 pub(in crate::idx) mod tree;
 
+use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
+use std::sync::atomic::{self, AtomicU8};
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::err::Error;
+use crate::expr::order::Ordering;
 use crate::expr::with::With;
-use crate::expr::{Cond, Fields, Groups, Table, order::Ordering};
+use crate::expr::{Cond, Fields, Groups, Ident};
 use crate::idx::planner::executor::{InnerQueryExecutor, IteratorEntry, QueryExecutor};
 use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::knn::KnnBruteForceResults;
 use crate::idx::planner::plan::{Plan, PlanBuilder, PlanBuilderParameters};
 use crate::idx::planner::tree::Tree;
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
-use std::sync::atomic::{self, AtomicU8};
 
-/// The goal of this structure is to cache parameters so they can be easily passed
-/// from one function to the other, so we don't pass too many arguments.
+/// The goal of this structure is to cache parameters so they can be easily
+/// passed from one function to the other, so we don't pass too many arguments.
 /// It also caches evaluated fields (like is_keys_only)
 pub(crate) struct StatementContext<'a> {
 	pub(crate) ctx: &'a Context,
@@ -198,8 +201,8 @@ impl<'a> StatementContext<'a> {
 
 	/// Determines the scan direction.
 	/// This is used for Table and Range iterators.
-	/// The direction is reversed if the first element of order is ID descending.
-	/// Typically: `ORDER BY id DESC`
+	/// The direction is reversed if the first element of order is ID
+	/// descending. Typically: `ORDER BY id DESC`
 	pub(crate) fn check_scan_direction(&self) -> ScanDirection {
 		#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 		if let Some(Ordering::Order(o)) = self.order {
@@ -264,7 +267,7 @@ impl QueryPlanner {
 		&mut self,
 		stk: &mut Stk,
 		ctx: &StatementContext<'_>,
-		t: Table,
+		t: Ident,
 		gp: GrantedPermission,
 		it: &mut Iterator,
 	) -> Result<()> {
@@ -346,13 +349,13 @@ impl QueryPlanner {
 
 	fn add(
 		&mut self,
-		tb: Table,
+		tb: Ident,
 		irf: Option<IteratorRef>,
 		exe: InnerQueryExecutor,
 		it: &mut Iterator,
 		rs: RecordStrategy,
 	) {
-		self.executors.insert(tb.0.clone(), exe.into());
+		self.executors.insert(tb.clone().into_string(), exe.into());
 		if let Some(irf) = irf {
 			it.ingest(Iterable::Index(tb, irf, rs));
 		}

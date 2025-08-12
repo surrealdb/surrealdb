@@ -1,32 +1,28 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::ident::Ident;
-use crate::expr::value::Value;
+use crate::expr::statements::define::DefineKind;
 use crate::iam::{Action, ResourceKind};
-use anyhow::Result;
-
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::fmt::{Display, Formatter};
+use crate::val::Value;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum RebuildStatement {
 	Index(RebuildIndexStatement),
 }
 
 impl RebuildStatement {
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		true
-	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -50,9 +46,7 @@ impl Display for RebuildStatement {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct RebuildIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -84,9 +78,8 @@ impl RebuildIndexStatement {
 			}
 		};
 		let mut ix = ix.as_ref().clone();
+		ix.kind = DefineKind::Overwrite;
 
-		ix.overwrite = true;
-		ix.if_not_exists = false;
 		// Rebuild the index
 		ix.compute(stk, ctx, opt, doc).await?;
 		// Ok all good

@@ -1,11 +1,13 @@
 //! Store appended records for concurrent index building
-use crate::kvs::impl_key;
-use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
+use serde::{Deserialize, Serialize};
+
+use crate::kvs::KVKey;
+use crate::kvs::index::Appending;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Ia<'a> {
+pub(crate) struct Ia<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -20,10 +22,12 @@ pub struct Ia<'a> {
 	_g: u8,
 	pub i: u32,
 }
-impl_key!(Ia<'a>);
+
+impl KVKey for Ia<'_> {
+	type ValueType = Appending;
+}
 
 impl<'a> Ia<'a> {
-	#[cfg_attr(target_family = "wasm", allow(dead_code))]
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, i: u32) -> Self {
 		Self {
 			__: b'/',
@@ -45,21 +49,17 @@ impl<'a> Ia<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		let val = Ia::new("testns", "testdb", "testtb", "testix", 1);
-		let enc = Ia::encode(&val).unwrap();
+		let enc = Ia::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*testns\0*testdb\0*testtb\0+testix\0!ia\x00\x00\x00\x01",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);
-
-		let dec = Ia::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

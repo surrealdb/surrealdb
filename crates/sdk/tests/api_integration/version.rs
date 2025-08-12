@@ -3,9 +3,8 @@
 use surrealdb::Value;
 use ulid::Ulid;
 
-use crate::api_integration::NS;
-
 use super::CreateDb;
+use crate::api_integration::NS;
 
 pub async fn select_with_version(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
@@ -82,7 +81,8 @@ pub async fn create_with_version(new_db: impl CreateDb) {
 	};
 	assert_eq!(name, "John");
 
-	// SELECT with the VERSION set to the creation timestamp or later should return the record.
+	// SELECT with the VERSION set to the creation timestamp or later should return
+	// the record.
 	let mut response = db
 		.query("SELECT * FROM user:john VERSION d'2024-08-19T08:00:00Z'")
 		.await
@@ -94,7 +94,8 @@ pub async fn create_with_version(new_db: impl CreateDb) {
 	};
 	assert_eq!(name, "John");
 
-	// SELECT with the VERSION set before the creation timestamp should return nothing.
+	// SELECT with the VERSION set before the creation timestamp should return
+	// nothing.
 	let mut response = db
 		.query("SELECT * FROM user:john VERSION d'2024-08-19T07:00:00Z'")
 		.await
@@ -125,7 +126,8 @@ pub async fn insert_with_version(new_db: impl CreateDb) {
 	};
 	assert_eq!(name, "John");
 
-	// SELECT with the VERSION set to the creation timestamp or later should return the record.
+	// SELECT with the VERSION set to the creation timestamp or later should return
+	// the record.
 	let mut response = db
 		.query("SELECT * FROM user:john VERSION d'2024-08-19T08:00:00Z'")
 		.await
@@ -137,7 +139,8 @@ pub async fn insert_with_version(new_db: impl CreateDb) {
 	};
 	assert_eq!(name, "John");
 
-	// SELECT with the VERSION set before the creation timestamp should return nothing.
+	// SELECT with the VERSION set before the creation timestamp should return
+	// nothing.
 	let mut response = db
 		.query("SELECT * FROM user:john VERSION d'2024-08-19T07:00:00Z'")
 		.await

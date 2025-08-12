@@ -1,34 +1,34 @@
+use std::fmt::{self, Display, Write};
+
+use anyhow::{Result, bail};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::DefineKind;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Block, Ident, Kind, Permission, Strand, Value};
+use crate::expr::{Base, Block, Ident, Kind, Permission};
 use crate::iam::{Action, ResourceKind};
-use anyhow::{Result, bail};
+use crate::kvs::impl_kv_value_revisioned;
+use crate::val::{Strand, Value};
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
-
-#[revisioned(revision = 4)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct DefineFunctionStatement {
+	pub kind: DefineKind,
 	pub name: Ident,
 	pub args: Vec<(Ident, Kind)>,
 	pub block: Block,
 	pub comment: Option<Strand>,
 	pub permissions: Permission,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub overwrite: bool,
-	#[revision(start = 4)]
 	pub returns: Option<Kind>,
 }
+
+impl_kv_value_revisioned!(DefineFunctionStatement);
 
 impl DefineFunctionStatement {
 	/// Process this type returning a computed simple Value
@@ -45,12 +45,18 @@ impl DefineFunctionStatement {
 		// Check if the definition exists
 		let (ns, db) = opt.ns_db()?;
 		if txn.get_db_function(ns, db, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::FcAlreadyExists {
-					name: self.name.to_string(),
-				});
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::FcAlreadyExists {
+							name: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => {
+					return Ok(Value::None);
+				}
 			}
 		}
 		// Process the statement
@@ -58,18 +64,17 @@ impl DefineFunctionStatement {
 		txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DefineFunctionStatement {
+			&key,
+			&DefineFunctionStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
+				kind: DefineKind::Default,
 				..self.clone()
-			})?,
+			},
 			None,
 		)
 		.await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -78,13 +83,12 @@ impl DefineFunctionStatement {
 impl fmt::Display for DefineFunctionStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE FUNCTION")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
-		}
-		write!(f, " fn::{}(", self.name.0)?;
+		write!(f, " fn::{}(", &*self.name)?;
 		for (i, (name, kind)) in self.args.iter().enumerate() {
 			if i > 0 {
 				f.write_str(", ")?;

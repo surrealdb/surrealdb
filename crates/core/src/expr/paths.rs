@@ -1,30 +1,34 @@
-use crate::expr::part::Part;
 use std::sync::LazyLock;
+
+use crate::expr::Part;
 
 pub const OBJ_PATH_ACCESS: &str = "ac";
 pub const OBJ_PATH_AUTH: &str = "rd";
 pub const OBJ_PATH_TOKEN: &str = "tk";
 
-pub static ID: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("id")]);
+pub static ID: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::field("id".to_owned()).unwrap()]);
 
-pub static IP: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("ip")]);
+pub static IP: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::field("ip".to_owned()).unwrap()]);
 
-pub static NS: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("ns")]);
+pub static NS: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::field("ns".to_owned()).unwrap()]);
 
-pub static DB: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("db")]);
+pub static DB: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::field("db".to_owned()).unwrap()]);
 
-pub static AC: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from(OBJ_PATH_ACCESS)]);
+pub static AC: LazyLock<[Part; 1]> =
+	LazyLock::new(|| [Part::field(OBJ_PATH_ACCESS.to_owned()).unwrap()]);
 
-pub static RD: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from(OBJ_PATH_AUTH)]);
+pub static RD: LazyLock<[Part; 1]> =
+	LazyLock::new(|| [Part::field(OBJ_PATH_AUTH.to_owned()).unwrap()]);
 
-pub static OR: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("or")]);
+pub static OR: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::field("or".to_owned()).unwrap()]);
 
-pub static TK: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from(OBJ_PATH_TOKEN)]);
+pub static TK: LazyLock<[Part; 1]> =
+	LazyLock::new(|| [Part::field(OBJ_PATH_TOKEN.to_owned()).unwrap()]);
 
-pub static IN: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("in")]);
+pub static IN: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::field("in".to_owned()).unwrap()]);
 
-pub static OUT: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("out")]);
+pub static OUT: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::field("out".to_owned()).unwrap()]);
 
-pub static META: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("__")]);
+pub static META: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::field("__".to_owned()).unwrap()]);
 
-pub static EDGE: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("__")]);
+pub static EDGE: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::field("__".to_owned()).unwrap()]);

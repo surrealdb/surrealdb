@@ -1,16 +1,19 @@
-use crate::expr::{Expression, Number, Thing};
-use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 use std::sync::Arc;
+
+use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use tokio::sync::Mutex;
+
+use crate::expr::Expr;
+use crate::val::{Number, RecordId};
 
 pub(super) struct KnnPriorityList(Arc<Mutex<Inner>>);
 
 struct Inner {
 	knn: usize,
-	docs: HashSet<Arc<Thing>>,
-	priority_list: BTreeMap<Number, HashSet<Arc<Thing>>>,
+	docs: HashSet<Arc<RecordId>>,
+	priority_list: BTreeMap<Number, HashSet<Arc<RecordId>>>,
 }
 impl KnnPriorityList {
 	pub(super) fn new(knn: usize) -> Self {
@@ -21,7 +24,7 @@ impl KnnPriorityList {
 		})))
 	}
 
-	pub(super) async fn add(&self, dist: Number, thing: &Thing) {
+	pub(super) async fn add(&self, dist: Number, thing: &RecordId) {
 		let mut i = self.0.lock().await;
 		if i.check_add(&dist) {
 			i.add(dist, thing);
@@ -29,7 +32,7 @@ impl KnnPriorityList {
 		drop(i);
 	}
 
-	pub(super) async fn build(&self) -> HashMap<Arc<Thing>, Number> {
+	pub(super) async fn build(&self) -> HashMap<Arc<RecordId>, Number> {
 		let l = self.0.lock().await;
 		let r = l.build();
 		drop(l);
@@ -48,7 +51,7 @@ impl Inner {
 		}
 	}
 
-	pub(super) fn add(&mut self, dist: Number, thg: &Thing) {
+	pub(super) fn add(&mut self, dist: Number, thg: &RecordId) {
 		let thg = Arc::new(thg.clone());
 		match self.priority_list.entry(dist) {
 			Entry::Vacant(e) => {
@@ -78,7 +81,7 @@ impl Inner {
 		}
 	}
 
-	fn build(&self) -> HashMap<Arc<Thing>, Number> {
+	fn build(&self) -> HashMap<Arc<RecordId>, Number> {
 		let mut result = HashMap::with_capacity(self.knn);
 		#[cfg(debug_assertions)]
 		debug!("self.priority_list: {:?} - self.docs: {:?}", self.priority_list, self.docs);
@@ -105,8 +108,8 @@ impl Inner {
 }
 
 pub(crate) struct KnnBruteForceResult {
-	exp: HashMap<Arc<Expression>, usize>,
-	res: Vec<HashMap<Arc<Thing>, Number>>,
+	exp: HashMap<Arc<Expr>, usize>,
+	res: Vec<HashMap<Arc<RecordId>, Number>>,
 }
 
 impl KnnBruteForceResult {
@@ -117,7 +120,7 @@ impl KnnBruteForceResult {
 		}
 	}
 
-	pub(super) fn insert(&mut self, e: Arc<Expression>, m: HashMap<Arc<Thing>, Number>) {
+	pub(super) fn insert(&mut self, e: Arc<Expr>, m: HashMap<Arc<RecordId>, Number>) {
 		self.exp.insert(e.clone(), self.res.len());
 		self.res.push(m);
 	}
@@ -132,8 +135,8 @@ impl From<std::collections::HashMap<String, KnnBruteForceResult>> for KnnBruteFo
 	}
 }
 impl KnnBruteForceResults {
-	pub(super) fn contains(&self, exp: &Expression, thg: &Thing) -> bool {
-		if let Some(result) = self.0.get(thg.tb.as_str()) {
+	pub(super) fn contains(&self, exp: &Expr, thg: &RecordId) -> bool {
+		if let Some(result) = self.0.get(thg.table.as_str()) {
 			if let Some(&pos) = result.exp.get(exp) {
 				if let Some(things) = result.res.get(pos) {
 					return things.contains_key(thg);
@@ -143,8 +146,8 @@ impl KnnBruteForceResults {
 		false
 	}
 
-	pub(crate) fn get_dist(&self, pos: usize, thg: &Thing) -> Option<Number> {
-		if let Some(result) = self.0.get(thg.tb.as_str()) {
+	pub(crate) fn get_dist(&self, pos: usize, thg: &RecordId) -> Option<Number> {
+		if let Some(result) = self.0.get(thg.table.as_str()) {
 			if let Some(things) = result.res.get(pos) {
 				return things.get(thg).copied();
 			}

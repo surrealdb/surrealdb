@@ -1,7 +1,8 @@
 //! Sequence Batch Key (`Ib`) for Full-Text Index Document IDs
 //!
-//! The `Ib` key stores sequence batches for full-text index document IDs. It's part of the
-//! distributed sequence mechanism that enables concurrent document ID generation across multiple nodes.
+//! The `Ib` key stores sequence batches for full-text index document IDs. It's
+//! part of the distributed sequence mechanism that enables concurrent document
+//! ID generation across multiple nodes.
 //!
 //! ## Key Structure
 //! ```no_compile
@@ -9,12 +10,15 @@
 //! ```
 //!
 //! ## Purpose
-//! - **Batch Management**: Stores ranges of document IDs that can be allocated by different nodes
-//! - **Concurrency**: Enables multiple nodes to generate unique document IDs without conflicts  
+//! - **Batch Management**: Stores ranges of document IDs that can be allocated
+//!   by different nodes
+//! - **Concurrency**: Enables multiple nodes to generate unique document IDs
+//!   without conflicts
 //! - **Performance**: Reduces contention by pre-allocating ID ranges in batches
 //!
 //! ## Usage in Full-Text Search
-//! The `Ib` key works together with `Id` keys to manage document identification:
+//! The `Ib` key works together with `Id` keys to manage document
+//! identification:
 //! 1. Document IDs are allocated in batches using distributed sequences
 //! 2. Multiple nodes can allocate from different batches simultaneously
 //! 3. This enables lock-free ID generation and reduces database contention
@@ -24,13 +28,19 @@
 //! - **Domain**: Full-text search document ID management
 //!
 //! ## Concurrency Benefits
-//! - **Lock-free ID Generation**: Nodes can allocate IDs from pre-allocated batches
-//! - **Reduced Contention**: Batch-based allocation minimizes database contention
+//! - **Lock-free ID Generation**: Nodes can allocate IDs from pre-allocated
+//!   batches
+//! - **Reduced Contention**: Batch-based allocation minimizes database
+//!   contention
 //! - **Scalability**: Multiple nodes can index documents concurrently
 //! - **Consistency**: Ensures unique document IDs across the entire cluster
-use crate::key::category::{Categorise, Category};
-use crate::kvs::{KeyEncode, impl_key};
+use std::ops::Range;
+
 use serde::{Deserialize, Serialize};
+
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+use crate::kvs::sequences::BatchValue;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Ib<'a> {
@@ -48,7 +58,10 @@ pub(crate) struct Ib<'a> {
 	_g: u8,
 	pub start: i64,
 }
-impl_key!(Ib<'a>);
+
+impl KVKey for Ib<'_> {
+	type ValueType = BatchValue;
+}
 
 impl Categorise for Ib<'_> {
 	fn categorise(&self) -> Category {
@@ -80,10 +93,10 @@ impl<'a> Ib<'a> {
 		db: &'a str,
 		tb: &'a str,
 		ix: &'a str,
-	) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
-		let beg = Self::new(ns, db, tb, ix, i64::MIN).encode()?;
-		let end = Self::new(ns, db, tb, ix, i64::MAX).encode()?;
-		Ok((beg, end))
+	) -> anyhow::Result<Range<Vec<u8>>> {
+		let beg = Self::new(ns, db, tb, ix, i64::MIN).encode_key()?;
+		let end = Self::new(ns, db, tb, ix, i64::MAX).encode_key()?;
+		Ok(beg..end)
 	}
 }
 
@@ -93,10 +106,10 @@ mod tests {
 
 	#[test]
 	fn ib_range() {
-		let (beg, end) = Ib::new_range("testns", "testdb", "testtb", "testix").unwrap();
-		assert_eq!(beg, b"/*testns\0*testdb\0*testtb\0+testix\0!ib\0\0\0\0\0\0\0\0");
+		let ib_range = Ib::new_range("testns", "testdb", "testtb", "testix").unwrap();
+		assert_eq!(ib_range.start, b"/*testns\0*testdb\0*testtb\0+testix\0!ib\0\0\0\0\0\0\0\0");
 		assert_eq!(
-			end,
+			ib_range.end,
 			b"/*testns\0*testdb\0*testtb\0+testix\0!ib\xff\xff\xff\xff\xff\xff\xff\xff"
 		);
 	}

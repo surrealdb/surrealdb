@@ -31,6 +31,7 @@ value = "[{ id: edge:2 }]"
     RELATE a:1->edge:3->a:2;
     RELATE a:1->edge:4->a:2;
     RELATE a:1->edge:5->a:2;
+	NONE
 };
 
 a:1->(SELECT id FROM edge).*;

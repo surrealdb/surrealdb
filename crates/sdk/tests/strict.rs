@@ -1,11 +1,8 @@
-mod parse;
-
-use parse::Parse;
 mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::expr::Value;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::syn;
 
 /*
 #[tokio::test]
@@ -196,11 +193,11 @@ async fn strict_mode_all_ok() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: test:tester, extra: true }]");
+	let val = syn::value("[{ id: test:tester, extra: true }]").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: test:tester, extra: true }]");
+	let val = syn::value("[{ id: test:tester, extra: true }]").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -226,15 +223,15 @@ async fn loose_mode_all_ok() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: test:tester, extra: true }]");
+	let val = syn::value("[{ id: test:tester, extra: true }]").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: test:tester, extra: true }]");
+	let val = syn::value("[{ id: test:tester, extra: true }]").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"{
 			accesses: { },
 			namespaces: { test: 'DEFINE NAMESPACE test' },
@@ -242,21 +239,22 @@ async fn loose_mode_all_ok() -> Result<()> {
 			system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 },
 			users: { },
 		}"
-	);
+	).unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"{
 			accesses: {},
 			databases: { test: 'DEFINE DATABASE test' },
 			users: {},
 		}",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"{
 			accesses: {},
 			analyzers: {},
@@ -270,11 +268,12 @@ async fn loose_mode_all_ok() -> Result<()> {
 			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"{
 			events: {},
 			fields: { extra: 'DEFINE FIELD extra ON test VALUE true PERMISSIONS FULL' },
@@ -282,7 +281,8 @@ async fn loose_mode_all_ok() -> Result<()> {
 			indexes: {},
 			lives: {},
 		}",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

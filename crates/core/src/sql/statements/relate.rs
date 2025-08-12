@@ -1,19 +1,17 @@
-use crate::sql::{Data, Output, SqlValue, Timeout};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use crate::sql::{Data, Expr, Output, Timeout};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct RelateStatement {
-	#[revision(start = 2)]
 	pub only: bool,
-	pub kind: SqlValue,
-	pub from: SqlValue,
-	pub with: SqlValue,
+	/// The expression through which we create a relation
+	pub through: Expr,
+	/// The expression the relation is from
+	pub from: Expr,
+	/// The expression the relation targets.
+	pub to: Expr,
 	pub uniq: bool,
 	pub data: Option<Data>,
 	pub output: Option<Output>,
@@ -27,7 +25,7 @@ impl fmt::Display for RelateStatement {
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {} -> {} -> {}", self.from, self.kind, self.with)?;
+		write!(f, " {} -> {} -> {}", self.from, self.through, self.to)?;
 		if self.uniq {
 			f.write_str(" UNIQUE")?
 		}
@@ -51,9 +49,9 @@ impl From<RelateStatement> for crate::expr::statements::RelateStatement {
 	fn from(v: RelateStatement) -> Self {
 		crate::expr::statements::RelateStatement {
 			only: v.only,
-			kind: v.kind.into(),
+			through: v.through.into(),
 			from: v.from.into(),
-			with: v.with.into(),
+			to: v.to.into(),
 			uniq: v.uniq,
 			data: v.data.map(Into::into),
 			output: v.output.map(Into::into),
@@ -67,9 +65,9 @@ impl From<crate::expr::statements::RelateStatement> for RelateStatement {
 	fn from(v: crate::expr::statements::RelateStatement) -> Self {
 		RelateStatement {
 			only: v.only,
-			kind: v.kind.into(),
+			through: v.through.into(),
 			from: v.from.into(),
-			with: v.with.into(),
+			to: v.to.into(),
 			uniq: v.uniq,
 			data: v.data.map(Into::into),
 			output: v.output.map(Into::into),

@@ -1,13 +1,21 @@
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
+
+use anyhow::{Result, bail, ensure};
+use num_traits::{FromPrimitive, ToPrimitive};
+use reblessive::tree::Stk;
+use rust_decimal::Decimal;
+use tokio::sync::RwLock;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::index::{Distance, Index};
+use crate::expr::operator::{BooleanOperator, MatchesOperator};
 use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{
-	Array, BooleanOperation, Cond, Expression, FlowResultExt as _, Idiom, Number, Object, Table,
-	Thing, Value,
-};
+use crate::expr::{Cond, Expr, FlowResultExt as _, Ident, Idiom};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::btdocids::BTreeDocIds;
 use crate::idx::ft::MatchRef;
@@ -37,14 +45,7 @@ use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::kvs::TransactionType;
-use anyhow::{Result, bail, ensure};
-use num_traits::{FromPrimitive, ToPrimitive};
-use reblessive::tree::Stk;
-use rust_decimal::Decimal;
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use crate::val::{Array, Number, Object, RecordId, Value};
 
 pub(super) type KnnBruteForceEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Distance);
 
@@ -66,9 +67,9 @@ impl KnnBruteForceExpression {
 	}
 }
 
-pub(super) type KnnBruteForceExpressions = HashMap<Arc<Expression>, KnnBruteForceExpression>;
+pub(super) type KnnBruteForceExpressions = HashMap<Arc<Expr>, KnnBruteForceExpression>;
 
-pub(super) type KnnExpressions = HashSet<Arc<Expression>>;
+pub(super) type KnnExpressions = HashSet<Arc<Expr>>;
 
 #[derive(Clone)]
 pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
@@ -97,7 +98,7 @@ pub(super) struct InnerQueryExecutor {
 	table: String,
 	ir_map: HashMap<IndexReference, PerIndexReferenceIndex>,
 	mr_entries: HashMap<MatchRef, PerMatchRefEntry>,
-	exp_entries: HashMap<Arc<Expression>, PerExpressionEntry>,
+	exp_entries: HashMap<Arc<Expr>, PerExpressionEntry>,
 	it_entries: Vec<IteratorEntry>,
 	knn_bruteforce_len: usize,
 }
@@ -109,8 +110,8 @@ impl From<InnerQueryExecutor> for QueryExecutor {
 }
 
 pub(super) enum IteratorEntry {
-	Single(Option<Arc<Expression>>, IndexOption),
-	Range(HashSet<Arc<Expression>>, IndexReference, RangeValue, RangeValue),
+	Single(Option<Arc<Expr>>, IndexOption),
+	Range(HashSet<Arc<Expr>>, IndexReference, RangeValue, RangeValue),
 }
 
 impl IteratorEntry {
@@ -119,7 +120,7 @@ impl IteratorEntry {
 			Self::Single(_, io) => io.explain(),
 			Self::Range(_, ir, from, to) => {
 				let mut e = HashMap::default();
-				e.insert("index", Value::from(ir.name.0.clone()));
+				e.insert("index", Value::from(ir.name.clone().into_strand()));
 				e.insert("from", Value::from(from));
 				e.insert("to", Value::from(to));
 				Value::from(Object::from(e))
@@ -134,8 +135,8 @@ impl InnerQueryExecutor {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		table: &Table,
-		ios: Vec<(Arc<Expression>, IndexOption)>,
+		table: &Ident,
+		ios: Vec<(Arc<Expr>, IndexOption)>,
 		kbtes: KnnBruteForceExpressions,
 		knn_condition: Option<Cond>,
 	) -> Result<Self> {
@@ -177,7 +178,14 @@ impl InnerQueryExecutor {
 						}
 					};
 					if let Some(e) = search_entry {
-						if let Matches(_, Some(mr), _) = e.0.index_option.op() {
+						if let Matches(
+							_,
+							MatchesOperator {
+								rf: Some(mr),
+								..
+							},
+						) = e.0.index_option.op()
+						{
 							let mr_entry = PerMatchRefEntry::Search(e.clone());
 							ensure!(
 								mr_entries.insert(*mr, mr_entry).is_none(),
@@ -216,7 +224,14 @@ impl InnerQueryExecutor {
 						}
 					};
 					if let Some(e) = fulltext_entry {
-						if let Matches(_, Some(mr), _) = e.0.io.op() {
+						if let Matches(
+							_,
+							MatchesOperator {
+								rf: Some(mr),
+								..
+							},
+						) = e.0.io.op()
+						{
 							let mr_entry = PerMatchRefEntry::FullText(e.clone());
 							ensure!(
 								mr_entries.insert(*mr, mr_entry).is_none(),
@@ -328,7 +343,7 @@ impl InnerQueryExecutor {
 		}
 
 		Ok(Self {
-			table: table.0.clone(),
+			table: table.clone().into_string(),
 			ir_map,
 			mr_entries,
 			exp_entries,
@@ -350,9 +365,9 @@ impl QueryExecutor {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		thg: &Thing,
+		thg: &RecordId,
 		doc: Option<&CursorDoc>,
-		exp: &Expression,
+		exp: &Expr,
 	) -> Result<Value> {
 		if let Some(IterationStage::Iterate(e)) = ctx.get_iteration_stage() {
 			if let Some(results) = e {
@@ -394,7 +409,7 @@ impl QueryExecutor {
 	}
 
 	/// Returns `true` if the expression is matching the current iterator.
-	pub(crate) fn is_iterator_expression(&self, ir: IteratorRef, exp: &Expression) -> bool {
+	pub(crate) fn is_iterator_expression(&self, ir: IteratorRef, exp: &Expr) -> bool {
 		match self.0.it_entries.get(ir) {
 			Some(IteratorEntry::Single(Some(e), ..)) => exp.eq(e.as_ref()),
 			Some(IteratorEntry::Range(es, ..)) => es.contains(exp),
@@ -585,25 +600,37 @@ impl QueryExecutor {
 		Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(irf, ns, db, ix, array)?))
 	}
 
-	/// This function takes a reference to a `Number` enum and a conversion function `float_to_int`.
-	/// It returns a tuple containing the variants of the `Number` as `Option<i64>`, `Option<f64>`, and `Option<Decimal>`.
+	/// This function takes a reference to a `Number` enum and a conversion
+	/// function `float_to_int`. It returns a tuple containing the variants of
+	/// the `Number` as `Option<i64>`, `Option<f64>`, and `Option<Decimal>`.
 	///
 	/// The `Number` enum can be one of the following:
 	/// - `Int(i64)`: Integer value.
 	/// - `Float(f64)`: Floating point value.
 	/// - `Decimal(Decimal)`: Decimal value.
 	///
-	/// The function performs the following conversions based on the type of the `Number`:
-	/// - For `Int`, it returns the original `Int` value as `Option<i64>`, the equivalent `Float` value as `Option<f64>`, and the equivalent `Decimal` value as `Option<Decimal>`.
-	/// - For `Float`, it uses the provided `float_to_int` function to convert the `Float` to `Option<i64>`, returns the original `Float` value as `Option<f64>`, and the equivalent `Decimal` value as `Option<Decimal>`.
-	/// - For `Decimal`, it converts the `Decimal` to `Option<i64>` (if representable as `i64`), returns the equivalent `Float` value as `Option<f64>` (if representable as `f64`), and the original `Decimal` value as `Option<Decimal>`.
+	/// The function performs the following conversions based on the type of the
+	/// `Number`:
+	/// - For `Int`, it returns the original `Int` value as `Option<i64>`, the
+	///   equivalent `Float` value as `Option<f64>`, and the equivalent
+	///   `Decimal` value as `Option<Decimal>`.
+	/// - For `Float`, it uses the provided `float_to_int` function to convert
+	///   the `Float` to `Option<i64>`, returns the original `Float` value as
+	///   `Option<f64>`, and the equivalent `Decimal` value as
+	///   `Option<Decimal>`.
+	/// - For `Decimal`, it converts the `Decimal` to `Option<i64>` (if
+	///   representable as `i64`), returns the equivalent `Float` value as
+	///   `Option<f64>` (if representable as `f64`), and the original `Decimal`
+	///   value as `Option<Decimal>`.
 	///
 	/// # Parameters
 	/// - `n`: A reference to a `Number` enum.
-	/// - `float_to_int`: A function that converts a reference to `f64` to `Option<i64>`.
+	/// - `float_to_int`: A function that converts a reference to `f64` to
+	///   `Option<i64>`.
 	///
 	/// # Returns
-	/// A tuple of `(Option<i64>, Option<f64>, Option<Decimal>)` representing the converted variants of the input `Number`.
+	/// A tuple of `(Option<i64>, Option<f64>, Option<Decimal>)` representing
+	/// the converted variants of the input `Number`.
 	fn get_number_variants<F>(
 		n: &Number,
 		float_to_int: F,
@@ -998,7 +1025,7 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>> {
 		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
-			if let Matches(_, _, _) = io.op() {
+			if let Matches(_, _) = io.op() {
 				if let Some(PerIndexReferenceIndex::Search(si)) = self.0.ir_map.get(io.ix_ref()) {
 					if let Some(PerExpressionEntry::Search(se)) = self.0.exp_entries.get(exp) {
 						let hits = si.new_hits_iterator(&se.0.terms_docs)?;
@@ -1017,11 +1044,18 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>> {
 		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
-			if let Matches(_, _, bo) = io.op() {
+			if let Matches(
+				_,
+				MatchesOperator {
+					operator,
+					..
+				},
+			) = io.op()
+			{
 				if let Some(PerIndexReferenceIndex::FullText(fti)) = self.0.ir_map.get(io.ix_ref())
 				{
 					if let Some(PerExpressionEntry::FullText(fte)) = self.0.exp_entries.get(exp) {
-						let hits = fti.new_hits_iterator(&fte.0.qt, bo.clone());
+						let hits = fti.new_hits_iterator(&fte.0.qt, operator.clone());
 						let it = MatchesThingIterator::new(ir, hits);
 						return Ok(Some(ThingIterator::FullTextMatches(it)));
 					}
@@ -1072,15 +1106,15 @@ impl QueryExecutor {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		thg: &Thing,
-		exp: &Expression,
+		thg: &RecordId,
+		exp: &Expr,
 		l: Value,
 		r: Value,
 	) -> Result<bool> {
 		match self.0.exp_entries.get(exp) {
 			Some(PerExpressionEntry::Search(se)) => {
 				let ix = se.0.index_option.ix_ref();
-				if self.0.table.eq(&ix.what.0) {
+				if self.0.table == ix.what.as_str() {
 					return self.search_matches_with_doc_id(ctx, thg, se).await;
 				}
 				if let Some(PerIndexReferenceIndex::Search(si)) = self.0.ir_map.get(ix) {
@@ -1090,7 +1124,7 @@ impl QueryExecutor {
 			Some(PerExpressionEntry::FullText(fte)) => {
 				let ix = fte.0.io.ix_ref();
 				if let Some(PerIndexReferenceIndex::FullText(fti)) = self.0.ir_map.get(ix) {
-					if self.0.table.eq(&ix.what.0) {
+					if self.0.table == ix.what.as_str() {
 						return self.fulltext_matches_with_doc_id(ctx, thg, fti, fte).await;
 					}
 					return self.fulltext_matches_with_value(stk, ctx, opt, fti, fte, l, r).await;
@@ -1107,10 +1141,9 @@ impl QueryExecutor {
 	async fn search_matches_with_doc_id(
 		&self,
 		ctx: &Context,
-		thg: &Thing,
+		thg: &RecordId,
 		se: &SearchEntry,
 	) -> Result<bool> {
-		// TODO ask Emmanuel
 		// If there is no terms, it can't be a match
 		if se.0.terms_docs.is_empty() {
 			return Ok(false);
@@ -1139,7 +1172,7 @@ impl QueryExecutor {
 	async fn fulltext_matches_with_doc_id(
 		&self,
 		ctx: &Context,
-		thg: &Thing,
+		thg: &RecordId,
 		fti: &FullTextIndex,
 		fte: &FullTextEntry,
 	) -> Result<bool> {
@@ -1226,7 +1259,7 @@ impl QueryExecutor {
 	pub(crate) async fn highlight(
 		&self,
 		ctx: &Context,
-		thg: &Thing,
+		thg: &RecordId,
 		hlp: HighlightParams,
 		doc: &Value,
 	) -> Result<Value> {
@@ -1258,7 +1291,7 @@ impl QueryExecutor {
 	pub(crate) async fn offsets(
 		&self,
 		ctx: &Context,
-		thg: &Thing,
+		thg: &RecordId,
 		match_ref: Value,
 		partial: bool,
 	) -> Result<Value> {
@@ -1287,7 +1320,7 @@ impl QueryExecutor {
 		&self,
 		ctx: &Context,
 		match_ref: &Value,
-		rid: &Thing,
+		rid: &RecordId,
 		ir: Option<&Arc<IteratorRecord>>,
 	) -> Result<Value> {
 		if let Some(mre) = self.get_match_ref_entry(match_ref) {
@@ -1353,8 +1386,15 @@ impl SearchEntry {
 		si: &SearchIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>> {
-		if let Matches(qs, _, bo) = io.op() {
-			if !matches!(bo, BooleanOperation::And) {
+		if let Matches(
+			qs,
+			MatchesOperator {
+				operator,
+				..
+			},
+		) = io.op()
+		{
+			if !matches!(operator, BooleanOperator::And) {
 				bail!(Error::Unimplemented(
 					"SEARCH indexes only support AND operations".to_string()
 				))
@@ -1394,7 +1434,7 @@ impl FullTextEntry {
 		fti: &FullTextIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>> {
-		if let Matches(qs, _, _) = io.op() {
+		if let Matches(qs, _) = io.op() {
 			let qt = fti.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
 			let scorer = fti.new_scorer(ctx).await?;
 			Ok(Some(Self(Arc::new(InnerFullTextEntry {

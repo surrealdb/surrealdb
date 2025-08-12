@@ -1,5 +1,5 @@
 mod flatbuffers;
-mod protobuffers;
+// mod protobuffers;
 
 pub use surrealdb_protocol::{TryFromValue, TryIntoValue};
 

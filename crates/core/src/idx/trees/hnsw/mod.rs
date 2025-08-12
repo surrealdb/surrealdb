@@ -1,30 +1,29 @@
-pub(in crate::idx) mod docs;
+pub(crate) mod docs;
 mod elements;
 mod flavor;
 mod heuristic;
 pub mod index;
 mod layer;
 
-use crate::idx::planner::checker::HnswConditionChecker;
-use crate::idx::trees::dynamicset::DynamicSet;
-use crate::idx::trees::hnsw::docs::HnswDocs;
-use crate::idx::trees::hnsw::docs::VecDocs;
-use crate::idx::trees::hnsw::elements::HnswElements;
-use crate::idx::trees::hnsw::heuristic::Heuristic;
-use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
 use anyhow::Result;
-
-use crate::expr::index::HnswParams;
-use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
-use crate::idx::trees::knn::DoublePriorityQueue;
-use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
-use crate::idx::{IndexKeyBase, VersionedStore};
-use crate::kvs::{Key, Transaction, Val};
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use reblessive::tree::Stk;
-use revision::revisioned;
+use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
+
+use crate::expr::index::HnswParams;
+use crate::idx::IndexKeyBase;
+use crate::idx::planner::checker::HnswConditionChecker;
+use crate::idx::trees::dynamicset::DynamicSet;
+use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
+use crate::idx::trees::hnsw::elements::HnswElements;
+use crate::idx::trees::hnsw::heuristic::Heuristic;
+use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
+use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
+use crate::idx::trees::knn::DoublePriorityQueue;
+use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
+use crate::kvs::{KVValue, Transaction};
 
 struct HnswSearch {
 	pt: SharedVector,
@@ -44,14 +43,26 @@ impl HnswSearch {
 
 #[revisioned(revision = 1)]
 #[derive(Default, Serialize, Deserialize)]
-pub(super) struct HnswState {
+pub(crate) struct HnswState {
 	enter_point: Option<ElementId>,
 	next_element_id: ElementId,
 	layer0: LayerState,
 	layers: Vec<LayerState>,
 }
 
-impl VersionedStore for HnswState {}
+impl KVValue for HnswState {
+	#[inline]
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let mut val = Vec::new();
+		self.serialize_revisioned(&mut val)?;
+		Ok(val)
+	}
+
+	#[inline]
+	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
+		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
+	}
+}
 
 struct Hnsw<L0, L>
 where
@@ -59,7 +70,6 @@ where
 	L: DynamicSet,
 {
 	ikb: IndexKeyBase,
-	state_key: Key,
 	state: HnswState,
 	m: usize,
 	efc: usize,
@@ -80,9 +90,7 @@ where
 {
 	fn new(ikb: IndexKeyBase, p: &HnswParams) -> Result<Self> {
 		let m0 = p.m0 as usize;
-		let state_key = ikb.new_hs_key()?;
 		Ok(Self {
-			state_key,
 			state: Default::default(),
 			m: p.m as usize,
 			efc: p.ef_construction as usize,
@@ -98,11 +106,7 @@ where
 
 	async fn check_state(&mut self, tx: &Transaction) -> Result<()> {
 		// Read the state
-		let st: HnswState = if let Some(val) = tx.get(self.state_key.clone(), None).await? {
-			VersionedStore::try_from(val)?
-		} else {
-			Default::default()
-		};
+		let st: HnswState = tx.get(&self.ikb.new_hs_key(), None).await?.unwrap_or_default();
 		// Compare versions
 		if st.layer0.version != self.state.layer0.version {
 			self.layer0.load(tx, &st.layer0).await?;
@@ -272,8 +276,8 @@ where
 	}
 
 	async fn save_state(&self, tx: &Transaction) -> Result<()> {
-		let val: Val = VersionedStore::try_into(&self.state)?;
-		tx.set(self.state_key.clone(), val, None).await?;
+		let state_key = self.ikb.new_hs_key();
+		tx.set(&state_key, &self.state, None).await?;
 		Ok(())
 	}
 
@@ -429,9 +433,19 @@ where
 
 #[cfg(test)]
 mod tests {
+	use std::collections::hash_map::Entry;
+	use std::ops::Deref;
+	use std::sync::Arc;
+
+	use ahash::{HashMap, HashSet};
+	use anyhow::Result;
+	use ndarray::Array1;
+	use reblessive::tree::Stk;
+	use roaring::RoaringTreemap;
+	use test_log::test;
+
 	use crate::ctx::{Context, MutableContext};
 	use crate::expr::index::{Distance, HnswParams, VectorType};
-	use crate::expr::{Id, Value};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::DocId;
 	use crate::idx::planner::checker::HnswConditionChecker;
@@ -443,15 +457,7 @@ mod tests {
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
-	use ahash::{HashMap, HashSet};
-	use anyhow::Result;
-	use ndarray::Array1;
-	use reblessive::tree::Stk;
-	use roaring::RoaringTreemap;
-	use std::collections::hash_map::Entry;
-	use std::ops::Deref;
-	use std::sync::Arc;
-	use test_log::test;
+	use crate::val::{RecordIdKey, Value};
 
 	async fn insert_collection_hnsw(
 		tx: &Transaction,
@@ -623,7 +629,7 @@ mod tests {
 		let mut map: HashMap<SharedVector, HashSet<DocId>> = HashMap::default();
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.index_document(tx, &Id::Number(*doc_id as i64), &content).await.unwrap();
+			h.index_document(tx, &RecordIdKey::Number(*doc_id as i64), &content).await.unwrap();
 			match map.entry(obj.clone()) {
 				Entry::Occupied(mut e) => {
 					e.get_mut().insert(*doc_id);
@@ -684,7 +690,7 @@ mod tests {
 	) -> Result<()> {
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.remove_document(tx, Id::Number(*doc_id as i64), &content).await?;
+			h.remove_document(tx, RecordIdKey::Number(*doc_id as i64), &content).await?;
 			if let Entry::Occupied(mut e) = map.entry(obj.clone()) {
 				let set = e.get_mut();
 				set.remove(doc_id);
@@ -846,7 +852,7 @@ mod tests {
 		info!("Insert collection");
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.index_document(&tx, &Id::Number(*doc_id as i64), &content).await?;
+			h.index_document(&tx, &RecordIdKey::Number(*doc_id as i64), &content).await?;
 		}
 		tx.commit().await?;
 

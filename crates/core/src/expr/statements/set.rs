@@ -1,61 +1,71 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::{ControlFlow, FlowResult, Value};
-use crate::{cnf::PROTECTED_PARAM_NAMES, expr::Kind};
+use std::fmt;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+use crate::cnf::PROTECTED_PARAM_NAMES;
+use crate::ctx::{Context, MutableContext};
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::expr::{ControlFlow, Expr, FlowResult, Ident, Kind, Value};
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct SetStatement {
-	pub name: String,
-	pub what: Value,
-	#[revision(start = 2)]
+	pub name: Ident,
+	pub what: Expr,
 	pub kind: Option<Kind>,
 }
 
 impl SetStatement {
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		self.what.writeable()
+	pub(crate) fn read_only(&self) -> bool {
+		self.what.read_only()
 	}
-	/// Process this type returning a computed simple Value
+
+	/// returns if the set is setting a protected param.
+	pub(crate) fn is_protected_set(&self) -> bool {
+		PROTECTED_PARAM_NAMES.contains(&self.name.as_str())
+	}
+
+	/// Compute the set statement, must be called with a valid a ctx that is
+	/// Some.
+	///
+	/// Will keep the ctx Some unless an error happens in which case the calling
+	/// function should return the error.
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &mut Option<Context>,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
-		// Check if the variable is a protected variable
-		match PROTECTED_PARAM_NAMES.contains(&self.name.as_str()) {
-			// The variable isn't protected and can be stored
-			false => {
-				let result = self.what.compute(stk, ctx, opt, doc).await?;
-				match self.kind {
-					Some(ref kind) => result
-						.coerce_to_kind(kind)
-						.map_err(|e| Error::SetCoerce {
-							name: self.name.to_string(),
-							error: Box::new(e),
-						})
-						.map_err(anyhow::Error::new)
-						.map_err(ControlFlow::from),
-					None => Ok(result),
-				}
-			}
-			// The user tried to set a protected variable
-			true => Err(ControlFlow::from(anyhow::Error::new(Error::InvalidParam {
-				name: self.name.clone(),
-			}))),
+		assert!(ctx.is_some(), "SetStatement::compute must be called with a set option.");
+
+		if self.is_protected_set() {
+			return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidParam {
+				name: self.name.clone().into_string(),
+			})));
 		}
+
+		let result = stk.run(|stk| self.what.compute(stk, ctx.as_ref().unwrap(), opt, doc)).await?;
+		let result = match &self.kind {
+			Some(kind) => result
+				.coerce_to_kind(kind)
+				.map_err(|e| Error::SetCoerce {
+					name: self.name.to_string(),
+					error: Box::new(e),
+				})
+				.map_err(anyhow::Error::new)?,
+			None => result,
+		};
+
+		let mut c = MutableContext::unfreeze(ctx.take().unwrap())?;
+		c.add_value(self.name.clone().into_string(), result.into());
+		*ctx = Some(c.freeze());
+		Ok(Value::None)
 	}
 }
 
@@ -72,14 +82,14 @@ impl fmt::Display for SetStatement {
 
 #[cfg(test)]
 mod tests {
-	use crate::syn::parse;
+	use crate::syn;
 
 	#[test]
 	fn check_type() {
-		let query = parse("LET $param = 5").unwrap();
-		assert_eq!(format!("{}", query), "LET $param = 5;");
+		let query = syn::expr("LET $param = 5").unwrap();
+		assert_eq!(format!("{}", query), "LET $param = 5");
 
-		let query = parse("LET $param: number = 5").unwrap();
-		assert_eq!(format!("{}", query), "LET $param: number = 5;");
+		let query = syn::expr("LET $param: number = 5").unwrap();
+		assert_eq!(format!("{}", query), "LET $param: number = 5");
 	}
 }

@@ -21,11 +21,11 @@ mod sync;
 mod tracer;
 mod version;
 
-use crate::cli::CF;
-use crate::cnf;
-use crate::net::signals::graceful_shutdown;
-use crate::rpc::{RpcState, notifications};
-use crate::telemetry::metrics::HttpMetricsLayer;
+use std::io;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
 use anyhow::Result;
 use axum::response::Redirect;
 use axum::routing::get;
@@ -33,34 +33,35 @@ use axum::{Router, middleware};
 use axum_server::Handle;
 use axum_server::tls_rustls::RustlsConfig;
 use http::header;
-use std::io;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::Duration;
-use surrealdb::dbs::capabilities::ExperimentalTarget;
 use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
-use surrealdb::kvs::Datastore;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 use tower_http::ServiceBuilderExt;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::auth::AsyncRequireAuthorizationLayer;
-use tower_http::cors::{Any, CorsLayer};
-use tower_http::request_id::MakeRequestUuid;
-use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
-use tower_http::sensitive_headers::SetSensitiveResponseHeadersLayer;
-use tower_http::trace::TraceLayer;
-
 #[cfg(feature = "http-compression")]
 use tower_http::compression::CompressionLayer;
 #[cfg(feature = "http-compression")]
 use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove};
+use tower_http::cors::{Any, CorsLayer};
+use tower_http::request_id::MakeRequestUuid;
+use tower_http::sensitive_headers::{
+	SetSensitiveRequestHeadersLayer, SetSensitiveResponseHeadersLayer,
+};
+use tower_http::trace::TraceLayer;
+
+use crate::cli::CF;
+use crate::cnf;
+use crate::core::dbs::capabilities::ExperimentalTarget;
+use crate::core::kvs::Datastore;
+use crate::net::signals::graceful_shutdown;
+use crate::rpc::{RpcState, notifications};
+use crate::telemetry::metrics::HttpMetricsLayer;
 
 const LOG: &str = "surrealdb::net";
 
 ///
 /// AppState is used to share data between routes.
-///
 #[derive(Clone)]
 pub struct AppState {
 	pub client_ip: client_ip::ClientIp,
@@ -182,8 +183,8 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<()> {
 		.merge(signup::router())
 		.merge(key::router())
 		.merge(ml::router())
-		.merge(api::router())
-		.merge(gql::router(ds.clone()));
+		.merge(api::router());
+	//.merge(gql::router(ds.clone()));
 
 	if ds.get_capabilities().allows_experimental(&ExperimentalTarget::GraphQL) {
 		warn!(

@@ -1,6 +1,7 @@
+use std::sync::Arc;
+
 use super::Auth;
 use crate::dbs::{Session, Variables};
-use std::sync::Arc;
 
 pub fn reset(session: &mut Session) {
 	session.au = Arc::new(Auth::default());

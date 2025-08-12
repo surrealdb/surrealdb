@@ -1,6 +1,18 @@
+use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use roaring::RoaringTreemap;
+use roaring::treemap::IntoIter;
+use uuid::Uuid;
+
 /// This module implements a concurrent full-text search index.
 ///
-/// The full-text index allows for efficient text search operations with support for:
+/// The full-text index allows for efficient text search operations with support
+/// for:
 /// - Concurrent read and write operations
 /// - BM25 scoring for relevance ranking
 /// - Highlighting of search terms in results
@@ -10,8 +22,9 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::index::FullTextParams;
+use crate::expr::operator::BooleanOperator;
 use crate::expr::statements::DefineAnalyzerStatement;
-use crate::expr::{BooleanOperation, Idiom, Scoring, Thing, Value};
+use crate::expr::{Idiom, Scoring};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::docids::seqdocids::SeqDocIds;
@@ -25,37 +38,31 @@ use crate::idx::ft::{DocLength, Score, TermFrequency};
 use crate::idx::planner::iterators::MatchesHitsIterator;
 use crate::idx::trees::store::IndexStores;
 use crate::key::index::tt::Tt;
-use crate::kvs::KeyDecode;
-use crate::kvs::Transaction;
-use anyhow::Result;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use roaring::RoaringTreemap;
-use roaring::treemap::IntoIter;
-use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use uuid::Uuid;
+use crate::kvs::{Transaction, impl_kv_value_revisioned};
+use crate::val::{RecordId, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Default, PartialEq)]
 /// Represents a term occurrence within a document
-struct TermDocument {
+pub(crate) struct TermDocument {
 	/// The frequency of the term in the document
 	f: TermFrequency,
 	/// The offsets of the term occurrences in the document
 	o: Vec<Offset>,
 }
 
+impl_kv_value_revisioned!(TermDocument);
+
 #[revisioned(revision = 1)]
 #[derive(Debug, Default)]
 /// Tracks document length and count statistics for the index
-struct DocLengthAndCount {
+pub(crate) struct DocLengthAndCount {
 	/// The total length of all documents in the index
 	total_docs_length: i128,
 	/// The total number of documents in the index
 	doc_count: i64,
 }
+impl_kv_value_revisioned!(DocLengthAndCount);
 
 /// Represents the terms in a search query and their associated document sets
 pub(in crate::idx) struct QueryTerms {
@@ -85,7 +92,8 @@ impl QueryTerms {
 	}
 }
 
-/// The main full-text index implementation that supports concurrent read and write operations
+/// The main full-text index implementation that supports concurrent read and
+/// write operations
 pub(crate) struct FullTextIndex {
 	/// The index key base used for key generation
 	ikb: IndexKeyBase,
@@ -102,7 +110,8 @@ pub(crate) struct FullTextIndex {
 impl FullTextIndex {
 	/// Creates a new full-text index with the specified parameters
 	///
-	/// This method retrieves the analyzer from the database and then calls `with_analyzer`
+	/// This method retrieves the analyzer from the database and then calls
+	/// `with_analyzer`
 	pub(crate) async fn new(
 		nid: Uuid,
 		ixs: &IndexStores,
@@ -117,7 +126,8 @@ impl FullTextIndex {
 
 	/// Creates a new full-text index with the specified analyzer
 	///
-	/// This method initializes the index with the provided analyzer and parameters
+	/// This method initializes the index with the provided analyzer and
+	/// parameters
 	fn with_analyzer(
 		nid: Uuid,
 		ixs: &IndexStores,
@@ -155,7 +165,7 @@ impl FullTextIndex {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		rid: &Thing,
+		rid: &RecordId,
 		content: Vec<Value>,
 		require_compaction: &mut bool,
 	) -> Result<Option<DocId>> {
@@ -176,8 +186,8 @@ impl FullTextIndex {
 					// Check if the term has already been deleted
 					if set.insert(s) {
 						// Delete the term
-						let key = self.ikb.new_td(s, Some(doc_id));
-						tx.del(key).await?;
+						let key = self.ikb.new_td(s, doc_id);
+						tx.del(&key).await?;
 						self.set_tt(&tx, s, doc_id, &nid, false).await?;
 					}
 				}
@@ -185,17 +195,16 @@ impl FullTextIndex {
 			{
 				let key = self.ikb.new_dl(doc_id);
 				// get the doc length
-				if let Some(v) = tx.get(key.clone(), None).await? {
+				if let Some(dl) = tx.get(&key, None).await? {
 					// Delete the doc length
-					tx.del(key).await?;
+					tx.del(&key).await?;
 					// Decrease the doc count and total doc length
-					let dl: DocLength = revision::from_slice(&v)?;
 					let dcl = DocLengthAndCount {
 						total_docs_length: -(dl as i128),
 						doc_count: -1,
 					};
 					let key = self.ikb.new_dc_with_id(doc_id, opt.id()?, Uuid::now_v7());
-					tx.put(key, revision::to_vec(&dcl)?, None).await?;
+					tx.put(&key, &dcl, None).await?;
 					*require_compaction = true;
 				}
 			}
@@ -206,7 +215,8 @@ impl FullTextIndex {
 	}
 
 	/// This method assumes that remove_content has been called previously,
-	/// as it does not remove the content (terms) but only removes the doc_id reference.
+	/// as it does not remove the content (terms) but only removes the doc_id
+	/// reference.
 	pub(crate) async fn remove_doc(&self, ctx: &Context, doc_id: DocId) -> Result<()> {
 		self.doc_ids.remove_doc_id(&ctx.tx(), doc_id).await
 	}
@@ -214,20 +224,21 @@ impl FullTextIndex {
 	/// Indexes content in the full-text index
 	///
 	/// This method analyzes and indexes the specified content for a document.
-	/// It resolves the document ID, tokenizes the content, and stores term frequencies and offsets.
+	/// It resolves the document ID, tokenizes the content, and stores term
+	/// frequencies and offsets.
 	pub(crate) async fn index_content(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		rid: &Thing,
+		rid: &RecordId,
 		content: Vec<Value>,
 		require_compaction: &mut bool,
 	) -> Result<()> {
 		let tx = ctx.tx();
 		let nid = opt.id()?;
 		// Get the doc id (if it exists)
-		let id = self.doc_ids.resolve_doc_id(ctx, rid.id.clone()).await?;
+		let id = self.doc_ids.resolve_doc_id(ctx, rid.key.clone()).await?;
 		// Collect the tokens.
 		let tokens =
 			self.analyzer.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;
@@ -239,7 +250,7 @@ impl FullTextIndex {
 		{
 			// Set the doc length
 			let key = self.ikb.new_dl(id.doc_id());
-			tx.set(key, revision::to_vec(&dl)?, None).await?;
+			tx.set(&key, &dl, None).await?;
 		}
 		{
 			// Increase the doc count and total doc length
@@ -248,7 +259,7 @@ impl FullTextIndex {
 				total_docs_length: dl as i128,
 				doc_count: 1,
 			};
-			tx.put(key, revision::to_vec(&dcl)?, None).await?;
+			tx.put(&key, &dcl, None).await?;
 			*require_compaction = true;
 		}
 		// We're done
@@ -257,12 +268,7 @@ impl FullTextIndex {
 
 	async fn get_doc_length(&self, tx: &Transaction, doc_id: DocId) -> Result<Option<DocLength>> {
 		let key = self.ikb.new_dl(doc_id);
-		if let Some(v) = tx.get(key, None).await? {
-			let dl: DocLength = revision::from_slice(&v)?;
-			Ok(Some(dl))
-		} else {
-			Ok(None)
-		}
+		tx.get(&key, None).await
 	}
 
 	async fn index_with_offsets(
@@ -275,10 +281,10 @@ impl FullTextIndex {
 		let (dl, offsets) = Analyzer::extract_offsets(&tokens)?;
 		let mut td = TermDocument::default();
 		for (t, o) in offsets {
-			let key = self.ikb.new_td(t, Some(id));
+			let key = self.ikb.new_td(t, id);
 			td.f = o.len() as TermFrequency;
 			td.o = o;
-			tx.set(key, revision::to_vec(&td)?, None).await?;
+			tx.set(&key, &td, None).await?;
 			self.set_tt(tx, t, id, nid, true).await?;
 		}
 		Ok(dl)
@@ -294,9 +300,9 @@ impl FullTextIndex {
 		let (dl, tf) = Analyzer::extract_frequencies(&tokens)?;
 		let mut td = TermDocument::default();
 		for (t, f) in tf {
-			let key = self.ikb.new_td(t, Some(id));
+			let key = self.ikb.new_td(t, id);
 			td.f = f;
-			tx.set(key, revision::to_vec(&td)?, None).await?;
+			tx.set(&key, &td, None).await?;
 			self.set_tt(tx, t, id, nid, true).await?;
 		}
 		Ok(dl)
@@ -311,13 +317,14 @@ impl FullTextIndex {
 		add: bool,
 	) -> Result<()> {
 		let key = self.ikb.new_tt(term, doc_id, *nid, Uuid::now_v7(), add);
-		tx.set(key, "", None).await
+		tx.set(&key, &String::new(), None).await
 	}
 
 	/// Extracts query terms from a search string
 	///
-	/// This method tokenizes the query string and retrieves the document sets for each term.
-	/// It returns a QueryTerms object containing the tokens and their associated document sets.
+	/// This method tokenizes the query string and retrieves the document sets
+	/// for each term. It returns a QueryTerms object containing the tokens and
+	/// their associated document sets.
 	pub(in crate::idx) async fn extract_querying_terms(
 		&self,
 		stk: &mut Stk,
@@ -364,9 +371,10 @@ impl FullTextIndex {
 
 		// Scan all term-document transaction logs for this term
 		for k in tx.keys(beg..end, u32::MAX, None).await? {
-			let tt = Tt::decode(&k)?;
+			let tt = Tt::decode_key(&k)?;
 			let entry = deltas.entry(tt.doc_id).or_default();
-			// Increment or decrement the counter based on whether we're adding or removing the term
+			// Increment or decrement the counter based on whether we're adding or removing
+			// the term
 			if tt.add {
 				*entry += 1;
 			} else {
@@ -377,7 +385,8 @@ impl FullTextIndex {
 		// Merge the delta changes with the consolidated document set
 		let docs = self.append_term_docs_delta(tx, term, &deltas).await?;
 
-		// If the final `docs` is empty, we return `None` to indicate no documents contain this term
+		// If the final `docs` is empty, we return `None` to indicate no documents
+		// contain this term
 		if docs.is_empty() {
 			Ok(None)
 		} else {
@@ -393,11 +402,8 @@ impl FullTextIndex {
 	) -> Result<RoaringTreemap> {
 		// Retrieve the current compacted document set for this term
 		// This is the consolidated bitmap of all documents containing this term
-		let td = self.ikb.new_td(term, None);
-		let mut docs = match tx.get(td, None).await? {
-			None => RoaringTreemap::default(), // No documents contain this term yet
-			Some(v) => revision::from_slice(&v)?,
-		};
+		let td = self.ikb.new_td_root(term);
+		let mut docs = tx.get(&td, None).await?.unwrap_or_default();
 
 		// Apply the delta changes to the document set
 		for (doc_id, delta) in deltas {
@@ -424,19 +430,20 @@ impl FullTextIndex {
 		deltas: &HashMap<DocId, i64>,
 	) -> Result<()> {
 		let docs = self.append_term_docs_delta(tx, term, deltas).await?;
-		let td = self.ikb.new_td(term, None);
+		let td = self.ikb.new_td_root(term);
 		if docs.is_empty() {
-			tx.del(td).await?;
+			tx.del(&td).await?;
 		} else {
-			tx.set(td, revision::to_vec(&docs)?, None).await?;
+			tx.set(&td, &docs, None).await?;
 		}
 		Ok(())
 	}
 
 	/// Compacts term documents by consolidating deltas and removing logs
 	///
-	/// This method processes all term document deltas, applies them to the consolidated term documents,
-	/// and removes the delta logs. It returns true if any compaction was performed.
+	/// This method processes all term document deltas, applies them to the
+	/// consolidated term documents, and removes the delta logs. It returns
+	/// true if any compaction was performed.
 	async fn compact_term_docs(&self, tx: &Transaction) -> Result<bool> {
 		// Get the range of all term transaction logs
 		let (beg, end) = self.ikb.new_tt_terms_range()?;
@@ -447,7 +454,7 @@ impl FullTextIndex {
 
 		// Process all term transaction logs, grouped by term
 		for k in tx.keys(range.clone(), u32::MAX, None).await? {
-			let tt = Tt::decode(&k)?;
+			let tt = Tt::decode_key(&k)?;
 			has_log = true;
 
 			// If we've moved to a new term, consolidate the previous term's deltas
@@ -486,17 +493,17 @@ impl FullTextIndex {
 
 	/// Creates a new iterator for search hits
 	///
-	/// This method creates an iterator over the documents that match all query terms.
-	/// It returns None if any term has no matching documents.
+	/// This method creates an iterator over the documents that match all query
+	/// terms. It returns None if any term has no matching documents.
 	pub(in crate::idx) fn new_hits_iterator(
 		&self,
 		qt: &QueryTerms,
-		bo: BooleanOperation,
+		bo: BooleanOperator,
 	) -> Option<FullTextHitsIterator> {
 		// Execute the operation depending on the operator
 		let hits = match bo {
-			BooleanOperation::And => Self::intersection_operation(&qt.docs),
-			BooleanOperation::Or => Self::union_operation(&qt.docs),
+			BooleanOperator::And => Self::intersection_operation(&qt.docs),
+			BooleanOperator::Or => Self::union_operation(&qt.docs),
 		};
 
 		// Create and return an iterator if we have matching documents
@@ -571,12 +578,12 @@ impl FullTextIndex {
 	pub(in crate::idx) async fn get_doc_id(
 		&self,
 		tx: &Transaction,
-		rid: &Thing,
+		rid: &RecordId,
 	) -> Result<Option<DocId>> {
-		if !rid.tb.eq(self.ikb.table()) {
+		if rid.table != self.ikb.table() {
 			return Ok(None);
 		}
-		self.doc_ids.get_doc_id(tx, &rid.id).await
+		self.doc_ids.get_doc_id(tx, &rid.key).await
 	}
 	pub(in crate::idx) async fn new_scorer(&self, ctx: &Context) -> Result<Option<Scorer>> {
 		if let Some(bm25) = &self.bm25 {
@@ -589,9 +596,9 @@ impl FullTextIndex {
 
 	/// Computes document length and count statistics for the index
 	///
-	/// This method calculates the total document length and count by aggregating all deltas.
-	/// If compact_log is provided, it will also remove the delta logs and set the flag to true
-	/// if any logs were removed.
+	/// This method calculates the total document length and count by
+	/// aggregating all deltas. If compact_log is provided, it will also remove
+	/// the delta logs and set the flag to true if any logs were removed.
 	async fn compute_doc_length_and_count(
 		&self,
 		tx: &Transaction,
@@ -600,9 +607,10 @@ impl FullTextIndex {
 		let mut dlc = DocLengthAndCount::default();
 		let (beg, end) = self.ikb.new_dc_range()?;
 		let range = beg..end;
-		// Compute the total number of documents (DocCount) and the total number of terms (DocLength)
-		// This key list is supposed to be small, subject to compaction.
-		// The root key is the compacted values, and the others are deltas from transaction not yet compacted.
+		// Compute the total number of documents (DocCount) and the total number of
+		// terms (DocLength) This key list is supposed to be small, subject to
+		// compaction. The root key is the compacted values, and the others are deltas
+		// from transaction not yet compacted.
 		let mut has_log = false;
 		for (_, v) in tx.getr(range.clone(), None).await? {
 			let st: DocLengthAndCount = revision::from_slice(&v)?;
@@ -621,20 +629,21 @@ impl FullTextIndex {
 
 	/// Compacts document length and count statistics
 	///
-	/// This method consolidates document length and count statistics and removes the delta logs.
-	/// It returns true if any compaction was performed.
+	/// This method consolidates document length and count statistics and
+	/// removes the delta logs. It returns true if any compaction was
+	/// performed.
 	async fn compact_doc_length_and_count(&self, tx: &Transaction) -> Result<bool> {
 		let mut has_logs = false;
 		let dlc = self.compute_doc_length_and_count(tx, Some(&mut has_logs)).await?;
 		let key = self.ikb.new_dc_compacted()?;
-		tx.set(key, revision::to_vec(&dlc)?, None).await?;
+		tx.set(&key, &revision::to_vec(&dlc)?, None).await?;
 		Ok(has_logs)
 	}
 
 	/// Performs compaction on the full-text index
 	///
-	/// This method compacts both document length/count statistics and term documents.
-	/// It returns true if any compaction was performed.
+	/// This method compacts both document length/count statistics and term
+	/// documents. It returns true if any compaction was performed.
 	pub(crate) async fn compaction(&self, tx: &Transaction) -> Result<bool> {
 		let r1 = self.compact_doc_length_and_count(tx).await?;
 		let r2 = self.compact_term_docs(tx).await?;
@@ -643,31 +652,33 @@ impl FullTextIndex {
 
 	/// Triggers compaction for the full-text index
 	///
-	/// This method adds an entry to the index compaction queue by creating an `Ic` key
-	/// for the specified index. The index compaction thread will later process this entry
-	/// and perform the actual compaction of the index.
+	/// This method adds an entry to the index compaction queue by creating an
+	/// `Ic` key for the specified index. The index compaction thread will
+	/// later process this entry and perform the actual compaction of the
+	/// index.
 	///
-	/// Compaction helps optimize full-text index performance by consolidating term
-	/// frequency data and document length information, which can become fragmented
-	/// after many updates to the index.
+	/// Compaction helps optimize full-text index performance by consolidating
+	/// term frequency data and document length information, which can become
+	/// fragmented after many updates to the index.
 	pub(crate) async fn trigger_compaction(
 		ikb: &IndexKeyBase,
 		tx: &Transaction,
 		nid: Uuid,
 	) -> Result<()> {
 		let ic = ikb.new_ic_key(nid);
-		tx.put(ic, "", None).await?;
+		tx.put(&ic, &(), None).await?;
 		Ok(())
 	}
 
 	/// Highlights search terms in a document
 	///
-	/// This method highlights the occurrences of search terms in the document value.
-	/// It uses the provided highlighting parameters to format the highlighted text.
+	/// This method highlights the occurrences of search terms in the document
+	/// value. It uses the provided highlighting parameters to format the
+	/// highlighted text.
 	pub(in crate::idx) async fn highlight(
 		&self,
 		tx: &Transaction,
-		thg: &Thing,
+		thg: &RecordId,
 		qt: &QueryTerms,
 		hlp: HighlightParams,
 		idiom: &Idiom,
@@ -694,19 +705,14 @@ impl FullTextIndex {
 		id: DocId,
 		term: &str,
 	) -> Result<Option<TermDocument>> {
-		let key = self.ikb.new_td(term, Some(id));
-		if let Some(v) = tx.get(key, None).await? {
-			let td: TermDocument = revision::from_slice(&v)?;
-			Ok(Some(td))
-		} else {
-			Ok(None)
-		}
+		let key = self.ikb.new_td(term, id);
+		tx.get(&key, None).await
 	}
 
 	pub(in crate::idx) async fn read_offsets(
 		&self,
 		tx: &Transaction,
-		thg: &Thing,
+		thg: &RecordId,
 		qt: &QueryTerms,
 		partial: bool,
 	) -> Result<Value> {
@@ -726,7 +732,8 @@ impl FullTextIndex {
 	}
 }
 
-/// Iterator for full-text search hits that implements the MatchesHitsIterator trait
+/// Iterator for full-text search hits that implements the MatchesHitsIterator
+/// trait
 pub(crate) struct FullTextHitsIterator {
 	/// The index key base used for key generation
 	ikb: IndexKeyBase,
@@ -737,7 +744,8 @@ pub(crate) struct FullTextHitsIterator {
 impl FullTextHitsIterator {
 	/// Creates a new iterator for full-text search hits
 	///
-	/// This method initializes an iterator with the index key base and a bitmap of matching document IDs.
+	/// This method initializes an iterator with the index key base and a bitmap
+	/// of matching document IDs.
 	fn new(ikb: IndexKeyBase, hits: RoaringTreemap) -> Self {
 		Self {
 			ikb,
@@ -758,14 +766,14 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 
 	/// Returns the next search hit in the iterator
 	///
-	/// This method retrieves the next document ID from the bitmap and resolves it to a Thing.
-	/// It returns None when there are no more hits.
-	async fn next(&mut self, tx: &Transaction) -> Result<Option<(Thing, DocId)>> {
+	/// This method retrieves the next document ID from the bitmap and resolves
+	/// it to a Thing. It returns None when there are no more hits.
+	async fn next(&mut self, tx: &Transaction) -> Result<Option<(RecordId, DocId)>> {
 		for doc_id in self.iter.by_ref() {
-			if let Some(id) = SeqDocIds::get_id(&self.ikb, tx, doc_id).await? {
-				let rid = Thing {
-					tb: self.ikb.table().to_string(),
-					id,
+			if let Some(key) = SeqDocIds::get_id(&self.ikb, tx, doc_id).await? {
+				let rid = RecordId {
+					table: self.ikb.table().to_string(),
+					key,
 				};
 				return Ok(Some((rid, doc_id)));
 			}
@@ -787,8 +795,9 @@ pub(in crate::idx) struct Scorer {
 impl Scorer {
 	/// Creates a new scorer with the specified parameters
 	///
-	/// This method initializes a scorer with document statistics and BM25 parameters.
-	/// It calculates the average document length for use in the BM25 algorithm.
+	/// This method initializes a scorer with document statistics and BM25
+	/// parameters. It calculates the average document length for use in the
+	/// BM25 algorithm.
 	fn new(dlc: DocLengthAndCount, bm25: Bm25Params) -> Self {
 		let doc_count = dlc.doc_count as f64;
 		let average_doc_length = (dlc.total_docs_length as f64) / doc_count;
@@ -805,8 +814,9 @@ impl Scorer {
 
 	/// Calculates the overall score for a document based on query terms
 	///
-	/// This method computes the sum of BM25 scores for all matching terms in the document.
-	/// The score represents the relevance of the document to the query.
+	/// This method computes the sum of BM25 scores for all matching terms in
+	/// the document. The score represents the relevance of the document to the
+	/// query.
 	pub(crate) async fn score(
 		&self,
 		fti: &FullTextIndex,
@@ -881,23 +891,27 @@ impl Scorer {
 
 #[cfg(test)]
 mod tests {
+	use std::sync::Arc;
+	use std::time::{Duration, Instant};
+
+	use reblessive::tree::Stk;
+	use test_log::test;
+	use tokio::time::sleep;
+	use uuid::Uuid;
+
 	use super::{FullTextIndex, TermDocument};
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
 	use crate::expr::index::FullTextParams;
 	use crate::expr::statements::DefineAnalyzerStatement;
-	use crate::expr::{Array, Thing, Value};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::offset::Offset;
-	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
-	use crate::sql::{Statement, statements::DefineStatement};
+	use crate::kvs::LockType::*;
+	use crate::kvs::{Datastore, Transaction, TransactionType};
+	use crate::sql::Expr;
+	use crate::sql::statements::DefineStatement;
 	use crate::syn;
-	use reblessive::tree::Stk;
-	use std::sync::Arc;
-	use std::time::{Duration, Instant};
-	use test_log::test;
-	use tokio::time::sleep;
-	use uuid::Uuid;
+	use crate::val::{Array, RecordId, Value};
 
 	#[derive(Clone)]
 	struct TestContext {
@@ -915,8 +929,11 @@ mod tests {
 		async fn new() -> Self {
 			let ds = Arc::new(Datastore::new("memory").await.unwrap());
 			let ctx = ds.setup_ctx().unwrap().freeze();
-			let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-			let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
+			let q = syn::expr("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+			let Expr::Define(q) = q else {
+				panic!()
+			};
+			let DefineStatement::Analyzer(az) = *q else {
 				panic!()
 			};
 			let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
@@ -985,7 +1002,7 @@ mod tests {
 			Arc::new(self.ds.transaction(tt, Optimistic).await.unwrap())
 		}
 
-		async fn remove_insert_task(&self, stk: &mut Stk, rid: &Thing) {
+		async fn remove_insert_task(&self, stk: &mut Stk, rid: &RecordId) {
 			let mut ctx = MutableContext::new(&self.ctx);
 			let tx = self.new_tx(TransactionType::Write).await;
 			ctx.set_transaction(tx.clone());
@@ -1023,7 +1040,7 @@ mod tests {
 		}
 	}
 
-	async fn concurrent_doc_update(test: TestContext, rid: Arc<Thing>, mut count: usize) {
+	async fn concurrent_doc_update(test: TestContext, rid: Arc<RecordId>, mut count: usize) {
 		let mut stack = reblessive::TreeStack::new();
 		while count > 0 && test.start.elapsed().as_millis() < 3000 {
 			stack.enter(|stk| test.remove_insert_task(stk, &rid)).finish().await;
@@ -1031,7 +1048,7 @@ mod tests {
 		}
 	}
 
-	async fn concurrent_search(test: TestContext, doc_ids: Vec<Arc<Thing>>) {
+	async fn concurrent_search(test: TestContext, doc_ids: Vec<Arc<RecordId>>) {
 		while test.start.elapsed().as_millis() < 3500 {
 			let tx = test.new_tx(TransactionType::Read).await;
 			let expected = {
@@ -1096,8 +1113,10 @@ mod tests {
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn concurrent_test() {
-		let doc1: Arc<Thing> = Arc::new(("t", "doc1").into());
-		let doc2: Arc<Thing> = Arc::new(("t", "doc2").into());
+		let doc1: Arc<RecordId> =
+			Arc::new(RecordId::new("t".to_owned(), strand!("doc1").to_owned()));
+		let doc2: Arc<RecordId> =
+			Arc::new(RecordId::new("t".to_owned(), strand!("doc2").to_owned()));
 
 		let test = TestContext::new().await;
 		// Ensure the documents are pre-existing

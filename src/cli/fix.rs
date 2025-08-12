@@ -1,7 +1,8 @@
-use crate::dbs;
 use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::any;
+
+use crate::dbs;
 
 #[derive(Args, Debug)]
 pub struct FixCommandArguments {

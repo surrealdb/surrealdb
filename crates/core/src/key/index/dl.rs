@@ -1,9 +1,9 @@
 //! Stores the doc length
 //!
 //! This key is used in the concurrent full-text search implementation to store
-//! the length of individual documents in the index. Document length is a critical
-//! factor in relevance scoring algorithms like BM25, which normalize term frequencies
-//! based on document length.
+//! the length of individual documents in the index. Document length is a
+//! critical factor in relevance scoring algorithms like BM25, which normalize
+//! term frequencies based on document length.
 //!
 //! The key structure includes:
 //! - Namespace, database, table, and index identifiers
@@ -12,17 +12,18 @@
 //! This key is essential for:
 //! - Calculating accurate relevance scores for search results
 //! - Supporting document length normalization
-//! - Enabling proper ranking of search results based on term frequency and document length
+//! - Enabling proper ranking of search results based on term frequency and
+//!   document length
 //! - Providing document-specific statistics for the full-text search engine
-use crate::idx::docids::DocId;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
+use crate::idx::docids::DocId;
+use crate::idx::ft::DocLength;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Dl<'a> {
+pub(crate) struct Dl<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -37,7 +38,10 @@ pub struct Dl<'a> {
 	_g: u8,
 	pub id: DocId,
 }
-impl_key!(Dl<'a>);
+
+impl KVKey for Dl<'_> {
+	type ValueType = DocLength;
+}
 
 impl Categorise for Dl<'_> {
 	fn categorise(&self) -> Category {
@@ -48,9 +52,10 @@ impl Categorise for Dl<'_> {
 impl<'a> Dl<'a> {
 	/// Creates a new document length key
 	///
-	/// This constructor creates a key that stores the length of an individual document
-	/// in the full-text index. Document length is a critical factor in relevance scoring
-	/// algorithms like BM25, which normalize term frequencies based on document length.
+	/// This constructor creates a key that stores the length of an individual
+	/// document in the full-text index. Document length is a critical factor
+	/// in relevance scoring algorithms like BM25, which normalize term
+	/// frequencies based on document length.
 	///
 	/// # Arguments
 	/// * `ns` - Namespace identifier
@@ -79,16 +84,12 @@ impl<'a> Dl<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		let val = Dl::new("testns", "testdb", "testtb", "testix", 16);
-		let enc = Dl::encode(&val).unwrap();
+		let enc = Dl::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dl\0\0\0\0\0\0\0\x10");
-
-		let dec = Dl::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

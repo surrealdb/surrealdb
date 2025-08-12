@@ -1,19 +1,22 @@
 //! Stores a DEFINE NAMESPACE config definition
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
+use crate::expr::statements::define::DefineNamespaceStatement;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Ns<'a> {
+pub(crate) struct Ns<'a> {
 	__: u8,
 	_a: u8,
 	_b: u8,
 	_c: u8,
 	pub ns: &'a str,
 }
-impl_key!(Ns<'a>);
+
+impl KVKey for Ns<'_> {
+	type ValueType = DefineNamespaceStatement;
+}
 
 pub fn new(ns: &str) -> Ns<'_> {
 	Ns::new(ns)
@@ -51,18 +54,15 @@ impl<'a> Ns<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
             let val = Ns::new(
             "testns",
         );
-		let enc = Ns::encode(&val).unwrap();
+		let enc = Ns::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/!nstestns\0");
-
-		let dec = Ns::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

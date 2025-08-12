@@ -1,37 +1,32 @@
-use crate::ctx::Context;
-use crate::ctx::MutableContext;
-use crate::dbs::Options;
-use crate::dbs::Workable;
-use crate::err::Error;
-use crate::expr::Base;
-use crate::expr::FlowResultExt as _;
-use crate::expr::permission::Permission;
-use crate::expr::statements::define::DefineDatabaseStatement;
-use crate::expr::statements::define::DefineEventStatement;
-use crate::expr::statements::define::DefineFieldStatement;
-use crate::expr::statements::define::DefineIndexStatement;
-use crate::expr::statements::define::DefineTableStatement;
-use crate::expr::statements::live::LiveStatement;
-use crate::expr::table::Table;
-use crate::expr::thing::Thing;
-use crate::expr::value::Value;
-use crate::iam::Action;
-use crate::iam::ResourceKind;
-use crate::idx::planner::RecordStrategy;
-use crate::idx::planner::iterators::IteratorRecord;
-use crate::kvs::cache;
-use anyhow::Result;
-use reblessive::tree::Stk;
 use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use anyhow::Result;
+use reblessive::tree::Stk;
+
+use crate::ctx::{Context, MutableContext};
+use crate::dbs::{Options, Workable};
+use crate::err::Error;
+use crate::expr::permission::Permission;
+use crate::expr::statements::define::{
+	DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement, DefineIndexStatement,
+	DefineTableStatement,
+};
+use crate::expr::statements::live::LiveStatement;
+use crate::expr::{Base, FlowResultExt as _, Ident};
+use crate::iam::{Action, ResourceKind};
+use crate::idx::planner::RecordStrategy;
+use crate::idx::planner::iterators::IteratorRecord;
+use crate::kvs::cache;
+use crate::val::{RecordId, Value};
+
 pub(crate) struct Document {
 	/// The record id of this document
-	pub(super) id: Option<Arc<Thing>>,
+	pub(super) id: Option<Arc<RecordId>>,
 	/// The table that we should generate a record id from
-	pub(super) r#gen: Option<Table>,
+	pub(super) r#gen: Option<Ident>,
 	/// Whether this is the second iteration of the processing
 	pub(super) retry: bool,
 	pub(super) extras: Workable,
@@ -42,15 +37,13 @@ pub(crate) struct Document {
 	pub(super) record_strategy: RecordStrategy,
 }
 
-#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub(crate) struct CursorDoc {
-	pub(crate) rid: Option<Arc<Thing>>,
+	pub(crate) rid: Option<Arc<RecordId>>,
 	pub(crate) ir: Option<Arc<IteratorRecord>>,
 	pub(crate) doc: CursorValue,
 }
 
-#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub(crate) struct CursorValue {
 	mutable: Value,
@@ -102,7 +95,7 @@ impl Deref for CursorValue {
 
 impl CursorDoc {
 	pub(crate) fn new<T: Into<CursorValue>>(
-		rid: Option<Arc<Thing>>,
+		rid: Option<Arc<RecordId>>,
 		ir: Option<Arc<IteratorRecord>>,
 		doc: T,
 	) -> Self {
@@ -173,9 +166,9 @@ pub(crate) enum Permitted {
 impl Document {
 	/// Initialise a new document
 	pub fn new(
-		id: Option<Arc<Thing>>,
+		id: Option<Arc<RecordId>>,
 		ir: Option<Arc<IteratorRecord>>,
-		r#gen: Option<Table>,
+		r#gen: Option<Ident>,
 		val: Arc<Value>,
 		extras: Workable,
 		retry: bool,
@@ -246,19 +239,20 @@ impl Document {
 	/// DELETE some:from..to;
 	pub(crate) fn is_specific_record_id(&self) -> bool {
 		match self.extras {
-			Workable::Insert(ref v) if v.rid().is_some() => true,
-			Workable::Normal if self.r#gen.is_none() => true,
+			Workable::Insert(ref v) => !v.rid().is_nullish(),
+			Workable::Normal => self.r#gen.is_none(),
 			_ => false,
 		}
 	}
 
-	/// Retur true if the document has been extracted by an iterator that already matcheed the condition.
+	/// Retur true if the document has been extracted by an iterator that
+	/// already matcheed the condition.
 	pub(crate) fn is_condition_checked(&self) -> bool {
 		matches!(self.record_strategy, RecordStrategy::Count | RecordStrategy::KeysOnly)
 	}
 
 	/// Update the document for a retry to update after an insert failed.
-	pub fn modify_for_update_retry(&mut self, id: Thing, value: Arc<Value>) {
+	pub fn modify_for_update_retry(&mut self, id: RecordId, value: Arc<Value>) {
 		let retry = Arc::new(id);
 		self.id = Some(retry.clone());
 		self.r#gen = None;
@@ -327,8 +321,7 @@ impl Document {
 			// Get the full document
 			let full = target.0;
 			// Process the full document
-			let mut out =
-				full.doc.as_ref().compute(stk, ctx, opt, Some(full)).await.catch_return()?;
+			let mut out = (*full.doc).clone();
 			// Loop over each field in document
 			for fd in fds.iter() {
 				// Loop over each field in document
@@ -347,8 +340,8 @@ impl Document {
 							ctx.add_value("value", val);
 							let ctx = ctx.freeze();
 							// Process the PERMISSION clause
-							if !e
-								.compute(stk, &ctx, opt, Some(full))
+							if !stk
+								.run(|stk| e.compute(stk, &ctx, opt, Some(full)))
 								.await
 								.catch_return()?
 								.is_truthy()
@@ -367,7 +360,7 @@ impl Document {
 	}
 
 	/// Retrieve the record id for this document
-	pub fn id(&self) -> Result<Arc<Thing>> {
+	pub fn id(&self) -> Result<Arc<RecordId>> {
 		match self.id.clone() {
 			Some(id) => Ok(id),
 			_ => fail!("Expected a document id to be present"),
@@ -375,7 +368,7 @@ impl Document {
 	}
 
 	/// Retrieve the record id for this document
-	pub fn inner_id(&self) -> Result<Thing> {
+	pub fn inner_id(&self) -> Result<RecordId> {
 		match self.id.clone() {
 			Some(id) => Ok(Arc::unwrap_or_clone(id)),
 			_ => fail!("Expected a document id to be present"),
@@ -424,19 +417,19 @@ impl Document {
 			// A cache is present on the context
 			Some(cache) if txn.local() => {
 				// Get the cache entry key
-				let key = cache::ds::Lookup::Tb(ns, db, &id.tb);
+				let key = cache::ds::Lookup::Tb(ns, db, &id.table);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_type(),
 					None => {
-						let val = match txn.get_tb(ns, db, &id.tb).await {
+						let val = match txn.get_tb(ns, db, &id.table).await {
 							Err(e) => {
 								// The table doesn't exist
 								if matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
 									// Allowed to run?
 									opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 									// We can create the table automatically
-									txn.ensure_ns_db_tb(ns, db, &id.tb, opt.strict).await
+									txn.ensure_ns_db_tb(ns, db, &id.table, opt.strict).await
 								} else {
 									// There was an error
 									Err(e)
@@ -445,24 +438,22 @@ impl Document {
 							// The table exists
 							Ok(tb) => Ok(tb),
 						}?;
-						let val = cache::ds::Entry::Any(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Any(val.clone()));
+						Ok(val)
 					}
 				}
-				.try_into_type()
 			}
 			// No cache is present on the context
 			_ => {
 				// Return the table or attempt to define it
-				match txn.get_tb(ns, db, &id.tb).await {
+				match txn.get_tb(ns, db, &id.table).await {
 					Err(e) => {
 						// The table doesn't exist
 						if matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
 							// Allowed to run?
 							opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 							// We can create the table automatically
-							txn.ensure_ns_db_tb(ns, db, &id.tb, opt.strict).await
+							txn.ensure_ns_db_tb(ns, db, &id.table, opt.strict).await
 						} else {
 							// There was an error
 							Err(e)

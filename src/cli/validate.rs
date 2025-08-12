@@ -1,7 +1,8 @@
 use anyhow::{Result, bail};
 use clap::Args;
 use glob::glob;
-use surrealdb::expr::parse;
+
+use crate::core::syn;
 
 #[derive(Args, Debug)]
 pub struct ValidateCommandArguments {
@@ -35,7 +36,7 @@ pub async fn init(args: ValidateCommandArguments) -> Result<()> {
 
 	for entry in entries {
 		let file_content = tokio::fs::read_to_string(entry.clone()).await?;
-		let parse_result = parse(&file_content);
+		let parse_result = syn::parse(&file_content);
 
 		match parse_result {
 			Ok(_) => {

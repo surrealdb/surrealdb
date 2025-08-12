@@ -1,12 +1,9 @@
 mod helpers;
-mod parse;
 use anyhow::Result;
-use helpers::new_ds;
-use helpers::skip_ok;
-use parse::Parse;
-use surrealdb::dbs::Session;
-use surrealdb::expr::Thing;
-use surrealdb::expr::Value;
+use helpers::{new_ds, skip_ok};
+use surrealdb_core::dbs::Session;
+use surrealdb_core::val::RecordId;
+use surrealdb_core::{strand, syn};
 
 #[tokio::test]
 async fn live_permissions() -> Result<()> {
@@ -27,19 +24,25 @@ async fn live_permissions() -> Result<()> {
 	skip_ok(res, 1)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: test:1,
 			},
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
-	let ses = Session::for_record("test", "test", "test", Thing::from(("user", "test")).into())
-		.with_rt(true);
+	let ses = Session::for_record(
+		"test",
+		"test",
+		"test",
+		RecordId::new("user".to_owned(), strand!("test").to_owned()).into(),
+	)
+	.with_rt(true);
 	let sql = "
-		LIVE SELECT * FROM test;
+		LIVE SELECT * FROM type::table('test');
 		CREATE test:2;
 	";
 	let res = &mut dbs.execute(sql, &ses, None).await?;
@@ -57,13 +60,14 @@ async fn live_permissions() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: test:3,
 			},
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

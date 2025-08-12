@@ -1,12 +1,8 @@
-mod parse;
-use parse::Parse;
-
 mod helpers;
 use helpers::*;
-
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::sql::SqlValue;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::syn;
 
 #[tokio::test]
 async fn rebuild_index_statement() -> Result<()> {
@@ -36,7 +32,7 @@ async fn rebuild_index_statement() -> Result<()> {
 	}
 	// Check infos output
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"{
 				events: {},
 				fields: {},
@@ -46,7 +42,8 @@ async fn rebuild_index_statement() -> Result<()> {
 				lives: {},
 				tables: {}
 			}",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	for _ in 0..8 {
 		let tmp = res.remove(0).result;
@@ -54,7 +51,7 @@ async fn rebuild_index_statement() -> Result<()> {
 	}
 	// Check infos output
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"{
 				events: {},
 				fields: {},
@@ -66,11 +63,11 @@ async fn rebuild_index_statement() -> Result<()> {
 				lives: {},
 				tables: {}
 			}",
-	);
+	).unwrap();
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	// Check record is found
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 				{
 					author: 'Maxwell Flitton',
@@ -79,7 +76,8 @@ async fn rebuild_index_statement() -> Result<()> {
 					title: 'Rust Web Programming'
 				}
 			]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	Ok(())
 }

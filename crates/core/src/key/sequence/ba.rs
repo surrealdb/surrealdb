@@ -1,7 +1,9 @@
 //! Stores sequence batches
-use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
+
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+use crate::kvs::sequences::BatchValue;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Ba<'a> {
@@ -19,7 +21,10 @@ pub(crate) struct Ba<'a> {
 	_h: u8,
 	pub start: i64,
 }
-impl_key!(Ba<'a>);
+
+impl KVKey for Ba<'_> {
+	type ValueType = BatchValue;
+}
 
 impl Categorise for Ba<'_> {
 	fn categorise(&self) -> Category {
@@ -49,15 +54,12 @@ impl<'a> Ba<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		let val = Ba::new("testns", "testdb", "testsq", 100);
-		let enc = Ba::encode(&val).unwrap();
+		let enc = Ba::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0!sqtestsq\0!ba\x80\0\0\0\0\0\0\x64");
-
-		let dec = Ba::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

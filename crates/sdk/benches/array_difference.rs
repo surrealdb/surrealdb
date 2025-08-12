@@ -1,7 +1,9 @@
+use std::collections::VecDeque;
+use std::hint::black_box;
+
 use criterion::{Criterion, criterion_group, criterion_main};
 use rand::Rng;
-use std::{collections::VecDeque, hint::black_box};
-use surrealdb_core::expr::{Array, Number, Value};
+use surrealdb_core::val::{Array, Number, Value};
 
 // Current implementation as of https://github.com/surrealdb/surrealdb/pull/6047
 // crates/core/src/expr/array.rs

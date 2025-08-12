@@ -1,27 +1,27 @@
+use std::fmt;
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Cond, Fetchs, Fields, FlowResultExt as _, Uuid, Value};
+use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _, Literal};
 use crate::iam::Auth;
-use crate::kvs::Live;
-use anyhow::{Result, bail};
-
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
+use crate::kvs::{Live, impl_kv_value_revisioned};
+use crate::val::{Uuid, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct LiveStatement {
 	pub id: Uuid,
 	pub node: Uuid,
 	pub expr: Fields,
-	pub what: Value,
+	pub what: Expr,
 	pub cond: Option<Cond>,
 	pub fetch: Option<Fetchs>,
 	// When a live query is created, we must also store the
@@ -38,23 +38,32 @@ pub struct LiveStatement {
 	pub(crate) session: Option<Value>,
 }
 
+impl_kv_value_revisioned!(LiveStatement);
+
 impl LiveStatement {
 	pub fn new(expr: Fields) -> Self {
 		LiveStatement {
 			id: Uuid::new_v4(),
 			node: Uuid::new_v4(),
 			expr,
-			..Default::default()
+			what: Expr::Literal(Literal::Null),
+			cond: None,
+			fetch: None,
+			auth: None,
+			session: None,
 		}
 	}
 
-	pub fn new_from_what_expr(expr: Fields, what: Value) -> Self {
+	pub fn new_from_what_expr(expr: Fields, what: Expr) -> Self {
 		LiveStatement {
 			id: Uuid::new_v4(),
 			node: Uuid::new_v4(),
 			what,
 			expr,
-			..Default::default()
+			cond: None,
+			auth: None,
+			session: None,
+			fetch: None,
 		}
 	}
 
@@ -87,7 +96,7 @@ impl LiveStatement {
 		// Get the id
 		let id = stm.id.0;
 		// Process the live query table
-		match stm.what.compute(stk, ctx, opt, doc).await.catch_return()? {
+		match stk.run(|stk| stm.what.compute(stk, ctx, opt, doc)).await.catch_return()? {
 			Value::Table(tb) => {
 				// Store the current Node ID
 				stm.node = nid.into();
@@ -105,16 +114,16 @@ impl LiveStatement {
 				txn.ensure_ns_db_tb(ns, db, &tb, opt.strict).await?;
 				// Insert the node live query
 				let key = crate::key::node::lq::new(nid, id);
-				txn.replace(key, revision::to_vec(&lq)?).await?;
+				txn.replace(&key, &lq).await?;
 				// Insert the table live query
 				let key = crate::key::table::lq::new(ns, db, &tb, id);
-				txn.replace(key, revision::to_vec(&stm)?).await?;
+				txn.replace(&key, &stm).await?;
 				// Refresh the table cache for lives
 				if let Some(cache) = ctx.get_cache() {
 					cache.new_live_queries_version(ns, db, &tb);
 				}
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 			}
 			v => {
 				bail!(Error::LiveStatement {
@@ -123,7 +132,7 @@ impl LiveStatement {
 			}
 		};
 		// Return the query id
-		Ok(id.into())
+		Ok(Uuid(id).into())
 	}
 }
 
@@ -145,7 +154,7 @@ impl InfoStructure for LiveStatement {
 		Value::from(map! {
 			"expr".to_string() => self.expr.structure(),
 			"what".to_string() => self.what.structure(),
-			"cond".to_string(), if let Some(v) = self.cond => v.structure(),
+			"cond".to_string(), if let Some(v) = self.cond => v.0.structure(),
 			"fetch".to_string(), if let Some(v) = self.fetch => v.structure(),
 		})
 	}
@@ -153,15 +162,15 @@ impl InfoStructure for LiveStatement {
 
 #[cfg(test)]
 mod tests {
+	use anyhow::Result;
+
 	use crate::dbs::{Action, Capabilities, Notification, Session};
-	use crate::expr::Thing;
 	use crate::expr::Value;
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
-	use crate::sql::SqlValue;
-	use crate::syn::Parse;
-	use anyhow::Result;
+	use crate::syn;
+	use crate::val::{RecordId, RecordIdKey};
 
 	pub async fn new_ds() -> Result<Datastore> {
 		Ok(Datastore::new("memory")
@@ -196,20 +205,20 @@ mod tests {
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
 		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
-		assert_eq!(table_occurrences[0].name.0, tb);
+		assert_eq!(table_occurrences[0].name.as_str(), tb);
 		tx.cancel().await.unwrap();
 
 		// Initiate a Create record
 		let create_statement = format!("CREATE {tb}:test_true SET condition = true");
 		let create_response = &mut dbs.execute(&create_statement, &ses, None).await.unwrap();
 		assert_eq!(create_response.len(), 1);
-		let expected_record: Value = SqlValue::parse(&format!(
+		let expected_record: Value = syn::value(&format!(
 			"[{{
 				id: {tb}:test_true,
 				condition: true,
 			}}]"
 		))
-		.into();
+		.unwrap();
 
 		let tmp = create_response.remove(0).result.unwrap();
 		assert_eq!(tmp, expected_record);
@@ -218,7 +227,7 @@ mod tests {
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
 		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
-		assert_eq!(table_occurrences[0].name.0, tb);
+		assert_eq!(table_occurrences[0].name.as_str(), tb);
 		tx.cancel().await.unwrap();
 
 		// Validate notification
@@ -229,14 +238,17 @@ mod tests {
 			Notification::new(
 				live_id,
 				Action::Create,
-				Value::Thing(Thing::from((tb, "test_true"))),
-				SqlValue::parse(&format!(
+				Value::RecordId(RecordId {
+					table: tb.to_owned(),
+					key: RecordIdKey::String("test_true".to_owned())
+				}),
+				syn::value(&format!(
 					"{{
 						id: {tb}:test_true,
 						condition: true,
 					}}"
 				))
-				.into(),
+				.unwrap(),
 			)
 		);
 	}
@@ -261,7 +273,7 @@ mod tests {
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
 		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
-		assert_eq!(table_occurrences[0].name.0, tb);
+		assert_eq!(table_occurrences[0].name.as_str(), tb);
 		tx.cancel().await.unwrap();
 
 		// Initiate a live query statement
@@ -272,7 +284,7 @@ mod tests {
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
 		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
-		assert_eq!(table_occurrences[0].name.0, tb);
+		assert_eq!(table_occurrences[0].name.as_str(), tb);
 		tx.cancel().await.unwrap();
 	}
 }

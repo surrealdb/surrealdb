@@ -1,16 +1,18 @@
-use crate::rpc::failure::Failure;
-use crate::rpc::format::WsFormat;
-use crate::telemetry::metrics::ws::record_rpc;
+use std::sync::Arc;
+
 use axum::extract::ws::Message;
 use opentelemetry::Context as TelemetryContext;
 use revision::revisioned;
 use serde::Serialize;
-use std::sync::Arc;
-use surrealdb::rpc::Data;
-use surrealdb::rpc::format::Format;
-use surrealdb_core::expr::Value;
 use tokio::sync::mpsc::Sender;
 use tracing::Span;
+
+use crate::core::rpc::Data;
+use crate::core::rpc::format::Format;
+use crate::core::val::Value;
+use crate::rpc::failure::Failure;
+use crate::rpc::format::WsFormat;
+use crate::telemetry::metrics::ws::record_rpc;
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize)]
@@ -23,12 +25,9 @@ impl Response {
 	#[inline]
 	pub fn into_value(self) -> Value {
 		let mut value = match self.result {
-			Ok(val) => match Value::try_from(val) {
-				Ok(v) => map! {"result" => v},
-				Err(e) => map!("error" => Value::from(e.to_string())),
-			},
+			Ok(val) => map! { "result" => val.into_value() },
 			Err(err) => map! {
-				"error" => Value::from(err),
+				"error" => err.into_value(),
 			},
 		};
 		if let Some(id) = self.id {

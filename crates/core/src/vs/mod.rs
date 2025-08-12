@@ -1,15 +1,18 @@
 //! vs is a module to handle Versionstamps.
-//! This module is supplemental to the kvs::tx module and is not intended to be used directly
-//! by applications.
+//! This module is supplemental to the kvs::tx module and is not intended to be
+//! used directly by applications.
 //! This module might be migrated into the kvs or kvs::tx module in the future.
 
 pub use std::{error, fmt, mem};
 
 use revision::Revisioned;
 
-/// Versionstamp is a 10-byte array used to identify a specific version of a key.
-/// The first 8 bytes are significant (the u64), and the remaining 2 bytes are not significant, but used for extra precision.
-/// To convert to and from this module, see the conv module in this same directory.
+use crate::kvs::KVValue;
+
+/// Versionstamp is a 10-byte array used to identify a specific version of a
+/// key. The first 8 bytes are significant (the u64), and the remaining 2 bytes
+/// are not significant, but used for extra precision. To convert to and from
+/// this module, see the conv module in this same directory.
 ///
 /// You're going to want these
 /// 65536
@@ -20,6 +23,18 @@ use revision::Revisioned;
 /// 393216
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, PartialOrd)]
 pub struct VersionStamp([u8; 10]);
+
+impl KVValue for VersionStamp {
+	#[inline]
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		Ok(self.0.to_vec())
+	}
+
+	#[inline]
+	fn kv_decode_value(bytes: Vec<u8>) -> anyhow::Result<Self> {
+		Ok(Self::from_slice(&bytes)?)
+	}
+}
 
 impl serde::Serialize for VersionStamp {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -40,8 +55,8 @@ impl<'de> serde::Deserialize<'de> for VersionStamp {
 	}
 }
 
-// Version stamp was previously a normal array so it doesn't have any kind of revision tracking and
-// is serialized just like any other array.
+// Version stamp was previously a normal array so it doesn't have any kind of
+// revision tracking and is serialized just like any other array.
 impl Revisioned for VersionStamp {
 	fn revision() -> u16 {
 		0
@@ -159,7 +174,8 @@ impl VersionStamp {
 		Some(next)
 	}
 
-	/// Returns an iterator of version stamps starting with the current version stamp.
+	/// Returns an iterator of version stamps starting with the current version
+	/// stamp.
 	pub fn iter(self) -> VersionStampIter {
 		VersionStampIter {
 			cur: Some(self),
@@ -182,7 +198,7 @@ impl Iterator for VersionStampIter {
 
 #[cfg(test)]
 mod test {
-	use super::VersionStamp;
+	use super::*;
 
 	#[test]
 	pub fn generate_one_vs() {
@@ -225,7 +241,6 @@ mod test {
 
 	#[test]
 	fn try_to_u64_be() {
-		use super::*;
 		// Overflow
 		let v = VersionStamp::from_bytes([255, 255, 255, 255, 255, 255, 255, 255, 0, 1]);
 		let res = v.try_into_u64();
@@ -238,7 +253,6 @@ mod test {
 
 	#[test]
 	fn try_u128_to_versionstamp() {
-		use super::*;
 		// Overflow
 		let v = u128::MAX;
 		let res = VersionStamp::try_from_u128(v);

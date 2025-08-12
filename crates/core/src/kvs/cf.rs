@@ -1,8 +1,10 @@
-use crate::kvs::Datastore;
-use crate::kvs::tasklease::LeaseHandler;
-use crate::kvs::{LockType::*, TransactionType::*};
-use crate::vs::VersionStamp;
 use anyhow::Result;
+
+use super::tasklease::LeaseHandler;
+use crate::kvs::Datastore;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
+use crate::vs::VersionStamp;
 
 impl Datastore {
 	/// Saves the current timestamp for each database's current versionstamp.

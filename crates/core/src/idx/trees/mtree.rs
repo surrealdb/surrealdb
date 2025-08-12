@@ -1,21 +1,21 @@
-use crate::ctx::Context;
-use ahash::{HashMap, HashMapExt, HashSet};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use roaring::RoaringTreemap;
-use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
 use std::collections::{BinaryHeap, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
 use std::sync::Arc;
+
+use ahash::{HashMap, HashMapExt, HashSet};
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::{Revisioned, revisioned};
+use roaring::RoaringTreemap;
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
+use crate::ctx::Context;
 use crate::err::Error;
-
 use crate::expr::index::{Distance, MTreeParams, VectorType};
-use crate::expr::{Number, Object, Thing, Value};
+use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::docids::btdocids::BTreeDocIds;
 use crate::idx::planner::checker::MTreeConditionChecker;
@@ -24,12 +24,11 @@ use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder, PriorityNode};
 use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeStore};
 use crate::idx::trees::vector::{SharedVector, Vector};
-use crate::idx::{IndexKeyBase, VersionedStore};
-use crate::kvs::{Key, Transaction, TransactionType, Val};
+use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val};
+use crate::val::{Number, Object, RecordId, Value};
 
-#[non_exhaustive]
 pub struct MTreeIndex {
-	state_key: Key,
+	ikb: IndexKeyBase,
 	dim: usize,
 	vector_type: VectorType,
 	store: MTreeStore,
@@ -54,16 +53,16 @@ impl MTreeIndex {
 		let doc_ids = Arc::new(RwLock::new(
 			BTreeDocIds::new(txn, tt, ikb.clone(), p.doc_ids_order, p.doc_ids_cache).await?,
 		));
-		let state_key = ikb.new_vm_key(None)?;
-		let state: MState = if let Some(val) = txn.get(state_key.clone(), None).await? {
-			VersionedStore::try_from(val)?
+		let state_key = ikb.new_vm_root_key();
+		let state: MState = if let Some(val) = txn.get(&state_key, None).await? {
+			val
 		} else {
 			MState::new(p.capacity)
 		};
 		let store = txn
 			.index_caches()
 			.get_store_mtree(
-				TreeNodeProvider::Vector(ikb),
+				TreeNodeProvider::Vector(ikb.clone()),
 				state.generation,
 				tt,
 				p.mtree_cache as usize,
@@ -71,7 +70,7 @@ impl MTreeIndex {
 			.await?;
 		let mtree = Arc::new(RwLock::new(MTree::new(state, p.distance.clone())));
 		Ok(Self {
-			state_key,
+			ikb,
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
 			doc_ids,
@@ -84,17 +83,17 @@ impl MTreeIndex {
 		&mut self,
 		stk: &mut Stk,
 		txn: &Transaction,
-		rid: &Thing,
+		rid: &RecordId,
 		content: &[Value],
 	) -> Result<()> {
 		// Resolve the doc_id
 		let mut doc_ids = self.doc_ids.write().await;
-		let resolved = doc_ids.resolve_doc_id(txn, revision::to_vec(rid)?).await?;
+		let resolved = doc_ids.resolve_doc_id(txn, rid).await?;
 		let doc_id = resolved.doc_id();
 		drop(doc_ids);
 		// Index the values
 		let mut mtree = self.mtree.write().await;
-		for v in content.iter().filter(|v| v.is_some()) {
+		for v in content.iter().filter(|v| !v.is_nullish()) {
 			// Extract the vector
 			let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
 			vector.check_dimension(self.dim)?;
@@ -109,16 +108,16 @@ impl MTreeIndex {
 		&mut self,
 		stk: &mut Stk,
 		txn: &Transaction,
-		rid: &Thing,
+		rid: &RecordId,
 		content: &[Value],
 	) -> Result<()> {
 		let mut doc_ids = self.doc_ids.write().await;
-		let doc_id = doc_ids.remove_doc(txn, revision::to_vec(rid)?).await?;
+		let doc_id = doc_ids.remove_doc(txn, rid).await?;
 		drop(doc_ids);
 		if let Some(doc_id) = doc_id {
 			// Lock the index
 			let mut mtree = self.mtree.write().await;
-			for v in content.iter().filter(|v| v.is_some()) {
+			for v in content.iter().filter(|v| !v.is_nullish()) {
 				// Extract the vector
 				let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
 				vector.check_dimension(self.dim)?;
@@ -173,7 +172,8 @@ impl MTreeIndex {
 		let mut mtree = self.mtree.write().await;
 		if let Some(new_cache) = self.store.finish(tx).await? {
 			mtree.state.generation += 1;
-			tx.set(self.state_key.clone(), VersionedStore::try_into(&mtree.state)?, None).await?;
+			let state_key = self.ikb.new_vm_root_key();
+			tx.set(&state_key, &mtree.state, None).await?;
 			tx.index_caches().advance_store_mtree(new_cache);
 		}
 		drop(mtree);
@@ -183,7 +183,6 @@ impl MTreeIndex {
 
 // https://en.wikipedia.org/wiki/M-tree
 // https://arxiv.org/pdf/1004.4216.pdf
-#[non_exhaustive]
 struct MTree {
 	state: MState,
 	distance: Distance,
@@ -302,7 +301,8 @@ impl MTree {
 	) -> Result<()> {
 		#[cfg(debug_assertions)]
 		debug!("Insert - obj: {:?} - doc: {}", obj, id);
-		// First we check if we already have the object. In this case we just append the doc.
+		// First we check if we already have the object. In this case we just append the
+		// doc.
 		if self.append(tx, store, &obj, id).await? {
 			return Ok(());
 		}
@@ -1191,11 +1191,11 @@ type LeafMap = HashMap<SharedVector, ObjectProperties>;
 #[derive(Debug, Clone)]
 /// A node in this tree structure holds entries.
 /// Each entry is a tuple consisting of an object and its associated properties.
-/// It's essential to note that the properties vary between a LeafNode and an InternalNode.
-/// Both LeafNodes and InternalNodes are implemented as a map.
-/// In this map, the key is an object, and the values correspond to its properties.
-/// In essence, an entry can be visualized as a tuple of the form (object, properties).
-#[non_exhaustive]
+/// It's essential to note that the properties vary between a LeafNode and an
+/// InternalNode. Both LeafNodes and InternalNodes are implemented as a map.
+/// In this map, the key is an object, and the values correspond to its
+/// properties. In essence, an entry can be visualized as a tuple of the form
+/// (object, properties).
 pub enum MTreeNode {
 	Internal(InternalNode),
 	Leaf(LeafNode),
@@ -1408,8 +1408,7 @@ impl From<MtStatistics> for Value {
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct MState {
+pub(crate) struct MState {
 	capacity: u16,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
@@ -1430,7 +1429,6 @@ impl MState {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
-#[non_exhaustive]
 pub struct RoutingProperties {
 	// Reference to the node
 	node: NodeId,
@@ -1441,7 +1439,6 @@ pub struct RoutingProperties {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[non_exhaustive]
 pub struct ObjectProperties {
 	// Distance to its parent object
 	parent_dist: f64,
@@ -1464,10 +1461,29 @@ impl ObjectProperties {
 	}
 }
 
-impl VersionedStore for MState {}
+impl KVValue for MState {
+	#[inline]
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let mut val = Vec::new();
+		self.serialize_revisioned(&mut val)?;
+		Ok(val)
+	}
+
+	#[inline]
+	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
+		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
+	}
+}
 
 #[cfg(test)]
 mod tests {
+	use std::collections::VecDeque;
+
+	use ahash::{HashMap, HashMapExt, HashSet};
+	use anyhow::Result;
+	use reblessive::tree::Stk;
+	use test_log::test;
+
 	use crate::ctx::{Context, MutableContext};
 	use crate::expr::index::{Distance, VectorType};
 	use crate::idx::IndexKeyBase;
@@ -1479,13 +1495,7 @@ mod tests {
 	use crate::idx::trees::store::{NodeId, TreeNodeProvider, TreeStore};
 	use crate::idx::trees::vector::SharedVector;
 	use crate::kvs::LockType::*;
-	use crate::kvs::Transaction;
-	use crate::kvs::{Datastore, TransactionType};
-	use ahash::{HashMap, HashMapExt, HashSet};
-	use anyhow::Result;
-	use reblessive::tree::Stk;
-	use std::collections::VecDeque;
-	use test_log::test;
+	use crate::kvs::{Datastore, Transaction, TransactionType};
 
 	async fn new_operation(
 		ds: &Datastore,

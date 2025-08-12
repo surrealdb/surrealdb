@@ -1,13 +1,13 @@
 //! Stores a DEFINE TABLE AS config definition
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::expr::statements::define::DefineTableStatement;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Ft<'a> {
+pub(crate) struct Ft<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -20,20 +20,23 @@ pub struct Ft<'a> {
 	_f: u8,
 	pub ft: &'a str,
 }
-impl_key!(Ft<'a>);
+
+impl KVKey for Ft<'_> {
+	type ValueType = DefineTableStatement;
+}
 
 pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, ft: &'a str) -> Ft<'a> {
 	Ft::new(ns, db, tb, ft)
 }
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db, tb).encode()?;
+	let mut k = super::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"!ft\x00");
 	Ok(k)
 }
 
 pub fn suffix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db, tb).encode()?;
+	let mut k = super::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"!ft\xff");
 	Ok(k)
 }
@@ -64,10 +67,10 @@ impl<'a> Ft<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Ft::new(
 			"testns",
@@ -75,11 +78,8 @@ mod tests {
 			"testtb",
 			"testft",
 		);
-		let enc = Ft::encode(&val).unwrap();
+		let enc = Ft::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\x00*testdb\x00*testtb\x00!fttestft\x00");
-
-		let dec = Ft::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 
 	#[test]

@@ -1,8 +1,10 @@
 //! Stores sequence states
-use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+use crate::kvs::sequences::SequenceState;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct St<'a> {
@@ -21,7 +23,10 @@ pub(crate) struct St<'a> {
 	#[serde(with = "uuid::serde::compact")]
 	pub nid: Uuid,
 }
-impl_key!(St<'a>);
+
+impl KVKey for St<'_> {
+	type ValueType = SequenceState;
+}
 
 impl Categorise for St<'_> {
 	fn categorise(&self) -> Category {
@@ -51,20 +56,17 @@ impl<'a> St<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		let val = St::new(
 			"testns",
 			"testdb",
 			"testsq",
 			Uuid::from_bytes([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]),
 		);
-		let enc = St::encode(&val).unwrap();
+		let enc = St::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0!sqtestsq\0!st\0\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f");
-
-		let dec = St::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

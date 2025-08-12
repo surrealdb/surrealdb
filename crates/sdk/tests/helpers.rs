@@ -1,19 +1,20 @@
 #![cfg(test)]
 
-use anyhow::ensure;
-use regex::Regex;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
 use std::sync::Arc;
 use std::thread::Builder;
+
+use anyhow::ensure;
+use regex::Regex;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::dbs::capabilities::Capabilities;
-use surrealdb::iam::{Auth, Level, Role};
-use surrealdb::kvs::Datastore;
-use surrealdb_core::dbs::Response;
-use surrealdb_core::expr::{Number, Value, value};
+use surrealdb_core::dbs::capabilities::Capabilities;
+use surrealdb_core::dbs::{Response, Session};
+use surrealdb_core::iam::{Auth, Level, Role};
+use surrealdb_core::kvs::Datastore;
+use surrealdb_core::syn;
+use surrealdb_core::val::{Number, Value};
 
 pub async fn new_ds() -> Result<Datastore> {
 	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())
@@ -29,7 +30,8 @@ pub async fn iam_run_case(
 	sess: &Session,
 	should_succeed: bool,
 ) -> Result<()> {
-	// Use the session as the test statement, but change the Auth to run the check with full permissions
+	// Use the session as the test statement, but change the Auth to run the check
+	// with full permissions
 	let mut owner_sess = sess.clone();
 	owner_sess.au = Arc::new(Auth::for_root(Role::Owner));
 
@@ -62,7 +64,7 @@ pub async fn iam_run_case(
 			ensure!(tmp.is_ok(), "Check statement errored for test: {}", tmp.unwrap_err());
 
 			let tmp = tmp.unwrap();
-			let expected = value(check_expected_result[i])?;
+			let expected = syn::value(check_expected_result[i])?;
 			ensure!(
 				tmp == expected,
 				"Check statement failed for test: expected value '{:#}' doesn't match '{:#}'",
@@ -72,7 +74,8 @@ pub async fn iam_run_case(
 		}
 	}
 
-	// Check statement result. If the statement should succeed, check that the result is Ok, otherwise check that the result is a 'Not Allowed' error
+	// Check statement result. If the statement should succeed, check that the
+	// result is Ok, otherwise check that the result is a 'Not Allowed' error
 	let res = resp.pop().unwrap().output();
 	if should_succeed {
 		ensure!(res.is_ok(), "Test statement failed: {}", res.unwrap_err());
@@ -163,7 +166,8 @@ pub async fn iam_check_cases(
 pub fn with_enough_stack(fut: impl Future<Output = Result<()>> + Send + 'static) -> Result<()> {
 	let mut builder = Builder::new();
 
-	// Roughly how much stack is allocated for surreal server workers in release mode
+	// Roughly how much stack is allocated for surreal server workers in release
+	// mode
 	#[cfg(not(debug_assertions))]
 	{
 		builder = builder.stack_size(10_000_000);
@@ -197,7 +201,8 @@ fn skip_ok_pos(res: &mut Vec<Response>, pos: usize) -> Result<()> {
 }
 
 /// Skip the specified number of successful results from a vector of responses.
-/// This function will panic if there are not enough results in the vector or if an error occurs.
+/// This function will panic if there are not enough results in the vector or if
+/// an error occurs.
 #[track_caller]
 #[allow(dead_code)]
 pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<()> {
@@ -276,8 +281,9 @@ impl Test {
 	}
 
 	/// Retrieves the next response from the responses list.
-	/// This method will panic if the responses list is empty, indicating that there are no more responses to retrieve.
-	/// The panic message will include the last position in the responses list before it was emptied.
+	/// This method will panic if the responses list is empty, indicating that
+	/// there are no more responses to retrieve. The panic message will include
+	/// the last position in the responses list before it was emptied.
 	#[track_caller]
 	#[allow(dead_code)]
 	#[allow(clippy::should_implement_trait)]
@@ -288,15 +294,16 @@ impl Test {
 	}
 
 	/// Retrieves the next value from the responses list.
-	/// This method will panic if the responses list is empty, indicating that there are no more responses to retrieve.
-	/// The panic message will include the last position in the responses list before it was emptied.
+	/// This method will panic if the responses list is empty, indicating that
+	/// there are no more responses to retrieve. The panic message will include
+	/// the last position in the responses list before it was emptied.
 	#[track_caller]
 	pub fn next_value(&mut self) -> Result<Value> {
 		self.next()?.result
 	}
 
-	/// Skips a specified number of elements from the beginning of the `responses` vector
-	/// and updates the position.
+	/// Skips a specified number of elements from the beginning of the
+	/// `responses` vector and updates the position.
 	#[track_caller]
 	#[allow(dead_code)]
 	pub fn skip_ok(&mut self, skip: usize) -> Result<&mut Self> {
@@ -317,11 +324,6 @@ impl Test {
 		// Then check they are indeed the same values
 		//
 		// If it is a constant we need to transform it as a number
-		let val = if let Value::Constant(c) = val {
-			c.compute().unwrap_or_else(|e| panic!("Can't convert constant {c} - {e}"))
-		} else {
-			val
-		};
 		if val.as_number().map(|x| x.is_nan()).unwrap_or(false) {
 			assert!(
 				tmp.as_number().map(|x| x.is_nan()).unwrap_or(false),
@@ -349,7 +351,8 @@ impl Test {
 		self.expect_value_info(val, "")
 	}
 
-	/// Expect values in the given slice to be present in the responses, following the same order.
+	/// Expect values in the given slice to be present in the responses,
+	/// following the same order.
 	#[track_caller]
 	#[allow(dead_code)]
 	pub fn expect_values(&mut self, values: &[Value]) -> Result<&mut Self> {
@@ -370,14 +373,15 @@ impl Test {
 	#[allow(dead_code)]
 	pub fn expect_val_info<I: Display>(&mut self, val: &str, info: I) -> Result<&mut Self> {
 		self.expect_value_info(
-			value(val).unwrap_or_else(|_| panic!("INVALID VALUE {info}:\n{val}")),
+			syn::value(val).unwrap_or_else(|_| panic!("INVALID VALUE {info}:\n{val}")),
 			info,
 		)
 	}
 
 	#[track_caller]
 	#[allow(dead_code)]
-	/// Expect values in the given slice to be present in the responses, following the same order.
+	/// Expect values in the given slice to be present in the responses,
+	/// following the same order.
 	pub fn expect_vals(&mut self, vals: &[&str]) -> Result<&mut Self> {
 		for (i, val) in vals.iter().enumerate() {
 			self.expect_val_info(val, i)?;
@@ -385,9 +389,9 @@ impl Test {
 		Ok(self)
 	}
 
-	/// Expects the next result to be an error with the given check function returning true.
-	/// This function will panic if the next result is not an error or if the error
-	/// message does not pass the check.
+	/// Expects the next result to be an error with the given check function
+	/// returning true. This function will panic if the next result is not an
+	/// error or if the error message does not pass the check.
 	#[track_caller]
 	#[allow(dead_code)]
 	pub fn expect_error_func<F: Fn(&anyhow::Error) -> bool>(
@@ -422,12 +426,14 @@ impl Test {
 		Ok(self)
 	}
 
-	/// Expects the next value to be a floating-point number and compares it with the given value.
+	/// Expects the next value to be a floating-point number and compares it
+	/// with the given value.
 	///
 	/// # Arguments
 	///
 	/// * `val` - The expected floating-point value
-	/// * `precision` - The allowed difference between the expected and actual value
+	/// * `precision` - The allowed difference between the expected and actual
+	///   value
 	///
 	/// # Panics
 	///

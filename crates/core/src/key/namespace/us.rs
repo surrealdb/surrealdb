@@ -1,13 +1,13 @@
 //! Stores a DEFINE USER ON NAMESPACE config definition
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::expr::statements::define::DefineUserStatement;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Us<'a> {
+pub(crate) struct Us<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -16,20 +16,23 @@ pub struct Us<'a> {
 	_d: u8,
 	pub user: &'a str,
 }
-impl_key!(Us<'a>);
+
+impl KVKey for Us<'_> {
+	type ValueType = DefineUserStatement;
+}
 
 pub fn new<'a>(ns: &'a str, user: &'a str) -> Us<'a> {
 	Us::new(ns, user)
 }
 
 pub fn prefix(ns: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns).encode()?;
+	let mut k = super::all::new(ns).encode_key()?;
 	k.extend_from_slice(b"!us\x00");
 	Ok(k)
 }
 
 pub fn suffix(ns: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns).encode()?;
+	let mut k = super::all::new(ns).encode_key()?;
 	k.extend_from_slice(b"!us\xff");
 	Ok(k)
 }
@@ -56,19 +59,17 @@ impl<'a> Us<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Us::new(
 			"testns",
 			"testuser",
 		);
-		let enc = Us::encode(&val).unwrap();
+		let enc = Us::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\x00!ustestuser\x00");
-		let dec = Us::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 
 	#[test]

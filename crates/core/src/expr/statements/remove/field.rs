@@ -1,24 +1,22 @@
+use std::fmt::{self, Display, Formatter};
+
+use anyhow::Result;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::statements::define::DefineTableStatement;
 use crate::expr::{Base, Ident, Idiom, Value};
 use crate::iam::{Action, ResourceKind};
-use anyhow::Result;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
-use uuid::Uuid;
-
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct RemoveFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
-	#[revision(start = 2)]
 	pub if_exists: bool,
 }
 
@@ -46,16 +44,16 @@ impl RemoveFieldStatement {
 		};
 		// Delete the definition
 		let key = crate::key::table::fd::new(ns, db, &fd.what, &na);
-		txn.del(key).await?;
+		txn.del(&key).await?;
 		// Refresh the table cache for fields
 		let key = crate::key::database::tb::new(ns, db, &self.what);
 		let tb = txn.get_tb(ns, db, &self.what).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DefineTableStatement {
+			&key,
+			&DefineTableStatement {
 				cache_fields_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
-			})?,
+			},
 			None,
 		)
 		.await?;
@@ -64,7 +62,7 @@ impl RemoveFieldStatement {
 			cache.clear_tb(ns, db, &self.what);
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

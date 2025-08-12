@@ -1,15 +1,12 @@
-mod parse;
-
-use parse::Parse;
-
 mod helpers;
-use crate::helpers::Test;
-
 use helpers::new_ds;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::expr::Value;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::err::Error;
+use surrealdb_core::syn;
+use surrealdb_core::val::Value;
+
+use crate::helpers::Test;
 
 #[tokio::test]
 async fn relate_with_parameters() -> Result<()> {
@@ -32,7 +29,7 @@ async fn relate_with_parameters() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: knows:test,
@@ -41,7 +38,8 @@ async fn relate_with_parameters() -> Result<()> {
 				brother: true,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -70,7 +68,7 @@ async fn relate_and_overwrite() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: knows:test,
@@ -79,11 +77,12 @@ async fn relate_and_overwrite() -> Result<()> {
 				brother: true,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: knows:test,
@@ -92,11 +91,12 @@ async fn relate_and_overwrite() -> Result<()> {
 				test: true,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: knows:test,
@@ -105,7 +105,8 @@ async fn relate_and_overwrite() -> Result<()> {
 				test: true,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -144,14 +145,14 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 		let Value::Object(o) = tmp else {
 			panic!("should be object {tmp:?}")
 		};
-		assert_eq!(o.get("in").unwrap(), &Value::parse("person:tobie"));
-		assert_eq!(o.get("out").unwrap(), &Value::parse("person:jaime"));
+		assert_eq!(o.get("in").unwrap(), &syn::value("person:tobie").unwrap());
+		assert_eq!(o.get("out").unwrap(), &syn::value("person:jaime").unwrap());
 		let id = o.get("id").unwrap();
 
-		let Value::Thing(t) = id else {
+		let Value::RecordId(t) = id else {
 			panic!("should be thing {id:?}")
 		};
-		assert_eq!(t.tb, "knows");
+		assert_eq!(t.table, "knows");
 	}
 	//
 	let tmp = res.remove(0).result?;
@@ -159,7 +160,7 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: knows:foo,
@@ -167,11 +168,12 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 				out: person:jaime,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: knows:bar,
@@ -179,7 +181,8 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 				out: person:jaime,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -198,15 +201,15 @@ async fn relate_with_complex_table() -> Result<()> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: a:1 }, { id: a:2 }]");
+	let val = syn::value("[{ id: a:1 }, { id: a:2 }]").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: `-`:`-`, in: a:1, out: a:2 }]");
+	let val = syn::value("[{ id: `-`:`-`, in: a:1, out: a:2 }]").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ rel: [`-`:`-`] }]");
+	let val = syn::value("[{ rel: [`-`:`-`] }]").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -279,7 +282,7 @@ async fn relate_enforced() -> Result<()> {
 	//
 	t.expect_val("[{ id: edge:1, in: a:1, out: a:2 }]")?;
 	//
-	let info = Value::parse(
+	let info = syn::value(
 		"{
 	accesses: {},
 	analyzers: {},
@@ -296,7 +299,8 @@ async fn relate_enforced() -> Result<()> {
 	},
 	users: {}
 	}",
-	);
+	)
+	.unwrap();
 	t.expect_value(info)?;
 	Ok(())
 }

@@ -3,15 +3,13 @@ use std::fmt::{self, Display};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-	err::Error,
-	expr::{Value, statements::info::InfoStructure},
-};
+use crate::err::Error;
+use crate::expr::statements::info::InfoStructure;
+use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Method {
 	Delete,
 	Get,

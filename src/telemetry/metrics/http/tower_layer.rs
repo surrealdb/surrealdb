@@ -1,18 +1,18 @@
-use crate::cnf::TELEMETRY_NAMESPACE;
-use axum::extract::MatchedPath;
-use opentelemetry::{KeyValue, metrics::MetricsError};
-use pin_project_lite::pin_project;
-use std::{
-	cell::Cell,
-	fmt,
-	pin::Pin,
-	task::{Context, Poll},
-	time::{Duration, Instant},
-};
+use std::cell::Cell;
+use std::fmt;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
 
+use axum::extract::MatchedPath;
 use futures::Future;
 use http::{Request, Response, StatusCode, Version};
+use opentelemetry::KeyValue;
+use opentelemetry::metrics::MetricsError;
+use pin_project_lite::pin_project;
 use tower::{Layer, Service};
+
+use crate::cnf::TELEMETRY_NAMESPACE;
 
 #[derive(Clone, Default)]
 pub struct HttpMetricsLayer;
@@ -88,7 +88,8 @@ where
 
 			if let Err(err) = on_request_start(this.tracker) {
 				error!("Failed to setup metrics when request started: {}", err);
-				// Consider this request not tracked: reset the state to None, so that the drop handler does not decrease the counter.
+				// Consider this request not tracked: reset the state to None, so that the drop
+				// handler does not decrease the counter.
 				this.tracker.set_state(ResultState::None);
 			};
 		}
@@ -229,10 +230,12 @@ impl Drop for HttpCallMetricTracker {
 				return;
 			}
 			ResultState::Started => {
-				// If the response was never processed, we can't get a valid status code
+				// If the response was never processed, we can't get a valid
+				// status code
 			}
 			ResultState::Failed => {
-				// If there's an error processing the request and we don't have a response, we can't get a valid status code
+				// If there's an error processing the request and we don't have
+				// a response, we can't get a valid status code
 			}
 			ResultState::Result(s, v, size) => {
 				self.status_code = Some(s);

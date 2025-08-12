@@ -1,3 +1,12 @@
+use std::cmp::Ordering;
+use std::fmt::{Debug, Display};
+use std::sync::Arc;
+
+use ahash::{HashMap, HashSet};
+use anyhow::Result;
+use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
+
 use crate::idx::trees::bkeys::{FstKeys, TrieKeys};
 use crate::idx::trees::btree::{BTreeNode, BTreeStore};
 use crate::idx::trees::mtree::{MTreeNode, MTreeStore};
@@ -6,13 +15,6 @@ use crate::idx::trees::store::{
 	NodeId, StoreGeneration, StoredNode, TreeNode, TreeNodeProvider, TreeStore,
 };
 use crate::kvs::{Key, Transaction, TransactionType};
-use ahash::{HashMap, HashSet};
-use anyhow::Result;
-use dashmap::DashMap;
-use dashmap::mapref::entry::Entry;
-use std::cmp::Ordering;
-use std::fmt::{Debug, Display};
-use std::sync::Arc;
 
 #[derive(Default)]
 pub(crate) struct IndexTreeCaches {
@@ -150,7 +152,6 @@ where
 	}
 }
 
-#[non_exhaustive]
 pub enum TreeCache<N>
 where
 	N: TreeNode + Debug + Clone + Display,
@@ -222,8 +223,9 @@ where
 		}
 	}
 
-	/// Creates a copy of the cache, with a generation number incremented by one.
-	/// The new cache does not contain the NodeID contained in `updated` and `removed`.
+	/// Creates a copy of the cache, with a generation number incremented by
+	/// one. The new cache does not contain the NodeID contained in `updated`
+	/// and `removed`.
 	pub(super) async fn next_generation(
 		&self,
 		updated: &HashSet<NodeId>,
@@ -240,7 +242,6 @@ where
 	}
 }
 
-#[non_exhaustive]
 pub struct TreeLruCache<N>
 where
 	N: TreeNode + Debug + Clone + Display,
@@ -289,7 +290,6 @@ where
 	}
 }
 
-#[non_exhaustive]
 pub struct TreeFullCache<N>
 where
 	N: TreeNode + Debug + Clone,

@@ -1,17 +1,19 @@
 //! Stores the key prefix for all keys under a namespace
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct All<'a> {
+pub(crate) struct All<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
 }
-impl_key!(All<'a>);
+
+impl KVKey for All<'_> {
+	type ValueType = Vec<u8>;
+}
 
 pub fn new(ns: &str) -> All<'_> {
 	All::new(ns)
@@ -35,18 +37,15 @@ impl<'a> All<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = All::new(
 			"testns",
 		);
-		let enc = All::encode(&val).unwrap();
+		let enc = All::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0");
-
-		let dec = All::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

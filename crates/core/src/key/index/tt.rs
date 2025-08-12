@@ -1,8 +1,9 @@
 //! Stores the term/document frequency and offsets
 //!
 //! This key is used in the concurrent full-text search implementation to store
-//! term-document relationships with their frequencies and offsets. It maps terms
-//! to the documents that contain them, allowing for efficient text search operations.
+//! term-document relationships with their frequencies and offsets. It maps
+//! terms to the documents that contain them, allowing for efficient text search
+//! operations.
 //!
 //! The key structure includes:
 //! - Namespace, database, table, and index identifiers
@@ -16,17 +17,16 @@
 //! - Supporting concurrent read and write operations
 //! - Enabling efficient term frequency tracking for relevance scoring
 
-use crate::idx::docids::DocId;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::idx::docids::DocId;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Tt<'a> {
+pub(crate) struct Tt<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -48,7 +48,9 @@ pub struct Tt<'a> {
 	pub add: bool,
 }
 
-impl_key!(Tt<'a>);
+impl KVKey for Tt<'_> {
+	type ValueType = String;
+}
 
 impl Categorise for Tt<'_> {
 	fn categorise(&self) -> Category {
@@ -59,9 +61,9 @@ impl Categorise for Tt<'_> {
 impl<'a> Tt<'a> {
 	/// Creates a new term-document key
 	///
-	/// This constructor creates a key that represents a term occurrence in a document.
-	/// It's used by the full-text search engine to build the inverted index that maps
-	/// terms to the documents containing them.
+	/// This constructor creates a key that represents a term occurrence in a
+	/// document. It's used by the full-text search engine to build the
+	/// inverted index that maps terms to the documents containing them.
 	///
 	/// # Arguments
 	/// * `ns` - Namespace identifier
@@ -72,7 +74,8 @@ impl<'a> Tt<'a> {
 	/// * `doc_id` - The document ID where the term appears
 	/// * `nid` - Node ID for distributed transaction tracking
 	/// * `uid` - Transaction ID for concurrency control
-	/// * `add` - Whether this is an addition (true) or removal (false) operation
+	/// * `add` - Whether this is an addition (true) or removal (false)
+	///   operation
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
 		ns: &'a str,
@@ -108,9 +111,9 @@ impl<'a> Tt<'a> {
 
 	/// Creates a key range for querying a specific term
 	///
-	/// This method generates a key range that can be used to query all occurrences
-	/// of a specific term across all documents in the full-text index. It's used
-	/// for term-specific searches and frequency analysis.
+	/// This method generates a key range that can be used to query all
+	/// occurrences of a specific term across all documents in the full-text
+	/// index. It's used for term-specific searches and frequency analysis.
 	///
 	/// # Arguments
 	/// * `ns` - Namespace identifier
@@ -129,9 +132,9 @@ impl<'a> Tt<'a> {
 		term: &'a str,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		let prefix = TtTermPrefix::new(ns, db, tb, ix, term);
-		let mut beg = prefix.encode()?;
+		let mut beg = prefix.encode_key()?;
 		beg.extend([0; 41]);
-		let mut end = prefix.encode()?;
+		let mut end = prefix.encode_key()?;
 		end.extend([255; 41]);
 		Ok((beg, end))
 	}
@@ -158,11 +161,15 @@ impl<'a> Tt<'a> {
 		ix: &'a str,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		let prefix = TtTermsPrefix::new(ns, db, tb, ix);
-		let mut beg = prefix.encode()?;
+		let mut beg = prefix.encode_key()?;
 		beg.push(0);
-		let mut end = prefix.encode()?;
+		let mut end = prefix.encode_key()?;
 		end.push(255);
 		Ok((beg, end))
+	}
+
+	pub fn decode_key(k: &[u8]) -> Result<Tt<'_>> {
+		Ok(storekey::deserialize(k)?)
 	}
 }
 
@@ -182,7 +189,10 @@ struct TtTermPrefix<'a> {
 	_g: u8,
 	pub term: &'a str,
 }
-impl_key!(TtTermPrefix<'a>);
+
+impl KVKey for TtTermPrefix<'_> {
+	type ValueType = String;
+}
 
 impl<'a> TtTermPrefix<'a> {
 	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, term: &'a str) -> Self {
@@ -219,7 +229,10 @@ struct TtTermsPrefix<'a> {
 	_f: u8,
 	_g: u8,
 }
-impl_key!(TtTermsPrefix<'a>);
+
+impl KVKey for TtTermsPrefix<'_> {
+	type ValueType = String;
+}
 
 impl<'a> TtTermsPrefix<'a> {
 	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
@@ -243,7 +256,6 @@ impl<'a> TtTermsPrefix<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::KeyDecode;
 
 	#[test]
 	fn key() {
@@ -258,10 +270,8 @@ mod tests {
 			Uuid::from_u128(2),
 			true,
 		);
-		let enc = Tt::encode(&val).unwrap();
+		let enc = Tt::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!ttterm\0\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02\x01");
-		let dec = Tt::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 
 	#[test]

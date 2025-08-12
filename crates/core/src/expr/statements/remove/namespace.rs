@@ -1,23 +1,20 @@
+use std::fmt::{self, Display, Formatter};
+
+use anyhow::Result;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
-use anyhow::Result;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
-
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct RemoveNamespaceStatement {
 	pub name: Ident,
-	#[revision(start = 2)]
 	pub if_exists: bool,
-	#[revision(start = 3)]
 	pub expunge: bool,
 }
 
@@ -51,23 +48,23 @@ impl RemoveNamespaceStatement {
 		// Delete the definition
 		let key = crate::key::root::ns::new(&ns.name);
 		if self.expunge {
-			txn.clr(key).await?
+			txn.clr(&key).await?
 		} else {
-			txn.del(key).await?
+			txn.del(&key).await?
 		};
 		// Delete the resource data
 		let key = crate::key::namespace::all::new(&ns.name);
 		if self.expunge {
-			txn.clrp(key).await?
+			txn.clrp(&key).await?
 		} else {
-			txn.delp(key).await?
+			txn.delp(&key).await?
 		};
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
 			cache.clear();
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

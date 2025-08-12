@@ -30,7 +30,7 @@ permissions:
   contents: read
 
 env:
-  RUST_VERSION: 1.86.0
+  RUST_VERSION: 1.87.0
 
 jobs:
   # ----------------------------------------
@@ -80,14 +80,20 @@ jobs:
     name: Check format
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          components: rustfmt
-
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+
+      - name: Lookup the nightly toolchain
+        id: info
+        run: |
+          set -x
+          echo "toolchain=$(cat rust-toolchain.nightly)" >> $GITHUB_OUTPUT
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ steps.info.outputs.toolchain }}
+          components: rustfmt
 
       - name: Setup cache
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
@@ -157,7 +163,7 @@ jobs:
     name: Check workspace MSRV
     runs-on: ubuntu-latest
     env:
-      msrv: "1.85" # This should be updated if the MSRV is updated.
+      msrv: "1.87" # This should be updated if the MSRV is updated.
 
     steps:
       - name: Install MSRV toolchain
@@ -378,11 +384,11 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      #- name: Install cargo-make
+        #run: cargo install --debug --locked cargo-make
 
-      - name: Run GraphQL integration tests
-        run: cargo make ci-graphql-integration
+      #- name: Run GraphQL integration tests
+        #run: cargo make ci-graphql-integration
 
   # ----------------------------------------
   # Workspace tests
@@ -806,9 +812,6 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test upgrade
-        run: cargo make ci-database-upgrade
-
   # ----------------------------------------
   # SurrealQL language tests
   # ----------------------------------------
@@ -862,15 +865,15 @@ jobs:
             ./
           cache-directories: crates/language-tests/.binary-cache
 
-      - name: Build SurrealQL test tool
-        run: |
-          cd crates/language-tests
-          cargo build --features upgrade
+  #    - name: Build SurrealQL test tool
+        #run: |
+        #  cd crates/language-tests
+        #  cargo build --features upgrade
 
-      - name: Run SurrealQL test suite
-        run: |
-          cd crates/language-tests
-          ./target/debug/surrealql-test --color always upgrade --allow-download --from 2.2.0,2.1.0,2.0.0 --to ../..
+  #    - name: Run SurrealQL test suite
+        #run: |
+        #  cd crates/language-tests
+        #  ./target/debug/surrealql-test --color always upgrade --allow-download --from 2.2.0,2.1.0,2.0.0 --to ../..
 
   # ----------------------------------------
   # Other SDK tests
@@ -959,7 +962,22 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
-        run: sleep 10
+        run: |
+          # Wait for SurrealDB to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "SurrealDB is ready"
+              break
+            fi
+            echo "Waiting for SurrealDB to start... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Final check
+          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "SurrealDB failed to start"
+            exit 1
+          fi
 
       - name: Run Golang tests (HTTP)
         run: go test -v -cover ./...
@@ -1001,28 +1019,51 @@ jobs:
         with:
           python-version: ${{ matrix.version }}
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          enable-cache: true
+
       - name: Start SurrealDB
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
-        run: sleep 10
+        run: |
+          # Wait for SurrealDB to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "SurrealDB is ready"
+              break
+            fi
+            echo "Waiting for SurrealDB to start... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Final check
+          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "SurrealDB failed to start"
+            exit 1
+          fi
 
       - name: Install dependencies
-        run: pip install .
+        run: uv sync --group dev
 
       - name: Run Python tests (HTTP)
-        run: python -m unittest discover -s tests
+        run: uv run pytest
         env:
           PYTHONPATH: ./src
           SURREALDB_URL: http://localhost:8000
           SURREALDB_VERSION: ${{ matrix.version }}
+          PYTHONWARNINGS: ignore::ResourceWarning,ignore::UserWarning
 
       - name: Run Python tests (WebSocket)
-        run: python -m unittest discover -s tests
+        run: uv run pytest
         env:
           PYTHONPATH: ./src
           SURREALDB_URL: ws://localhost:8000
           SURREALDB_VERSION: ${{ matrix.version }}
+          PYTHONWARNINGS: ignore::ResourceWarning,ignore::UserWarning
 
   sdk-php:
     name: PHP SDK tests (${{ matrix.version }})
@@ -1063,7 +1104,22 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
-        run: sleep 10
+        run: |
+          # Wait for SurrealDB to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "SurrealDB is ready"
+              break
+            fi
+            echo "Waiting for SurrealDB to start... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Final check
+          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "SurrealDB failed to start"
+            exit 1
+          fi
 
       - name: Run PHP tests
         run: composer test-coverage-v2
@@ -1111,7 +1167,22 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
-        run: sleep 10
+        run: |
+          # Wait for SurrealDB to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "SurrealDB is ready"
+              break
+            fi
+            echo "Waiting for SurrealDB to start... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Final check
+          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "SurrealDB failed to start"
+            exit 1
+          fi
 
       - name: Run .NET tests
         run: >

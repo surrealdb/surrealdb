@@ -1,23 +1,26 @@
+use std::sync::Arc;
+
+use anyhow::Result;
+use uuid::Uuid;
+
 use crate::ctx::Context;
-use crate::err::Error;
-use crate::expr::Id;
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::{DocId, Resolved};
+use crate::kvs::Transaction;
 use crate::kvs::sequences::SequenceDomain;
-use crate::kvs::{Key, KeyEncode, Transaction, Val};
-use anyhow::Result;
-use std::sync::Arc;
-use uuid::Uuid;
+use crate::val::RecordIdKey;
 
 /// Sequence-based DocIds store for concurrent full-text search
 ///
-/// This module implements a document ID management system for the concurrent full-text search
-/// implementation. It uses the distributed sequence mechanism to provide concurrent document ID
-/// creation, which is essential for the inverted index.
+/// This module implements a document ID management system for the concurrent
+/// full-text search implementation. It uses the distributed sequence mechanism
+/// to provide concurrent document ID creation, which is essential for the
+/// inverted index.
 ///
-/// The `SeqDocIds` struct maintains bidirectional mappings between document IDs (numeric identifiers
-/// used internally by the full-text index) and record IDs (the actual identifiers of the documents
-/// being indexed). This allows for efficient lookup in both directions.
+/// The `SeqDocIds` struct maintains bidirectional mappings between document IDs
+/// (numeric identifiers used internally by the full-text index) and record IDs
+/// (the actual identifiers of the documents being indexed). This allows for
+/// efficient lookup in both directions.
 ///
 /// Key features:
 /// - Uses distributed sequences for concurrent ID generation
@@ -35,12 +38,14 @@ pub(crate) struct SeqDocIds {
 impl SeqDocIds {
 	/// Creates a new SeqDocIds instance
 	///
-	/// Initializes a new document ID manager with the specified node ID and index key base.
-	/// Sets up the sequence domain for generating unique document IDs.
+	/// Initializes a new document ID manager with the specified node ID and
+	/// index key base. Sets up the sequence domain for generating unique
+	/// document IDs.
 	///
 	/// # Arguments
 	/// * `nid` - The node ID used for distributed sequence generation
-	/// * `ikb` - The index key base containing namespace, database, table, and index information
+	/// * `ikb` - The index key base containing namespace, database, table, and
+	///   index information
 	pub(in crate::idx) fn new(nid: Uuid, ikb: IndexKeyBase) -> Self {
 		Self {
 			nid,
@@ -64,34 +69,10 @@ impl SeqDocIds {
 	pub(in crate::idx) async fn get_doc_id(
 		&self,
 		tx: &Transaction,
-		id: &Id,
+		id: &RecordIdKey,
 	) -> Result<Option<DocId>> {
 		let id_key = self.ikb.new_id_key(id.clone());
-		if let Some(v) = tx.get(id_key, None).await? {
-			return Ok(Some(Self::val_to_doc_id(v)?));
-		}
-		Ok(None)
-	}
-
-	/// Converts a raw value to a document ID
-	///
-	/// Validates and converts a byte array to a document ID.
-	///
-	/// # Arguments
-	/// * `val` - The raw value to convert
-	///
-	/// # Returns
-	/// * `Ok(DocId)` - The converted document ID
-	/// * `Err` - If the value has an invalid format
-	fn val_to_doc_id(val: Val) -> Result<DocId> {
-		// Validate the length and convert to array (zero copy)
-		let val: [u8; 8] = val.as_slice().try_into().map_err(|_| {
-			Error::Internal(format!(
-				"invalid stored DocId length: expected 8 bytes, got {}",
-				val.len()
-			))
-		})?;
-		Ok(u64::from_be_bytes(val))
+		tx.get(&id_key, None).await
 	}
 
 	/// Resolves a record ID to a document ID, creating a new one if needed
@@ -107,12 +88,15 @@ impl SeqDocIds {
 	/// # Returns
 	/// * `Ok(Resolved::Existing(DocId))` - If the document ID already exists
 	/// * `Ok(Resolved::New(DocId))` - If a new document ID was created
-	pub(in crate::idx) async fn resolve_doc_id(&self, ctx: &Context, id: Id) -> Result<Resolved> {
+	pub(in crate::idx) async fn resolve_doc_id(
+		&self,
+		ctx: &Context,
+		id: RecordIdKey,
+	) -> Result<Resolved> {
 		let id_key = self.ikb.new_id_key(id.clone());
 		let tx = ctx.tx();
 		// Do we already have an ID?
-		if let Some(val) = tx.get(id_key.clone(), None).await? {
-			let doc_id = Self::val_to_doc_id(val)?;
+		if let Some(doc_id) = tx.get(&id_key, None).await? {
 			return Ok(Resolved::Existing(doc_id));
 		}
 		// If not, let's get one from the sequence
@@ -121,13 +105,11 @@ impl SeqDocIds {
 			.next_val_fts_idx(ctx, self.nid, self.domain.clone(), self.batch)
 			.await? as DocId;
 		{
-			let val = new_doc_id.to_be_bytes();
-			tx.set(id_key, &val, None).await?;
+			tx.set(&id_key, &new_doc_id, None).await?;
 		}
 		{
-			let k = self.ikb.new_bi_key(new_doc_id);
-			let v = revision::to_vec(&id)?;
-			tx.set(k, v, None).await?;
+			let k = self.ikb.new_ii_key(new_doc_id);
+			tx.set(&k, &id, None).await?;
 		}
 		Ok(Resolved::New(new_doc_id))
 	}
@@ -138,7 +120,8 @@ impl SeqDocIds {
 	/// This is the reverse lookup of `get_doc_id`.
 	///
 	/// # Arguments
-	/// * `ikb` - The index key base containing namespace, database, table, and index information
+	/// * `ikb` - The index key base containing namespace, database, table, and
+	///   index information
 	/// * `tx` - The transaction to use for the lookup
 	/// * `doc_id` - The document ID to look up
 	///
@@ -149,12 +132,8 @@ impl SeqDocIds {
 		ikb: &IndexKeyBase,
 		tx: &Transaction,
 		doc_id: DocId,
-	) -> Result<Option<Id>> {
-		if let Some(v) = tx.get(ikb.new_bi_key(doc_id), None).await? {
-			Ok(Some(revision::from_slice(&v)?))
-		} else {
-			Ok(None)
-		}
+	) -> Result<Option<RecordIdKey>> {
+		tx.get(&ikb.new_ii_key(doc_id), None).await
 	}
 
 	/// Removes a document ID and its associated record ID
@@ -170,11 +149,10 @@ impl SeqDocIds {
 		tx: &Transaction,
 		doc_id: DocId,
 	) -> Result<()> {
-		let k: Key = self.ikb.new_bi_key(doc_id).encode()?;
-		if let Some(v) = tx.get(k.clone(), None).await? {
-			let id: Id = revision::from_slice(&v)?;
-			tx.del(self.ikb.new_id_key(id)).await?;
-			tx.del(k).await?;
+		let k = self.ikb.new_ii_key(doc_id);
+		if let Some(id) = tx.get(&k, None).await? {
+			tx.del(&self.ikb.new_id_key(id)).await?;
+			tx.del(&k).await?;
 		}
 		Ok(())
 	}
@@ -182,8 +160,9 @@ impl SeqDocIds {
 
 #[cfg(test)]
 mod tests {
+	use uuid::Uuid;
+
 	use crate::ctx::Context;
-	use crate::expr::Id;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::seqdocids::SeqDocIds;
 	use crate::idx::docids::{DocId, Resolved};
@@ -191,7 +170,7 @@ mod tests {
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::{Read, Write};
 	use crate::kvs::{Datastore, TransactionType};
-	use uuid::Uuid;
+	use crate::val::{RecordIdKey, Strand};
 
 	const TEST_NS: &str = "test_ns";
 	const TEST_DB: &str = "test_db";
@@ -213,9 +192,9 @@ mod tests {
 
 	async fn check_get_doc_key_id(ctx: &Context, d: &SeqDocIds, doc_id: DocId, key: &str) {
 		let tx = ctx.tx();
-		let id: Id = key.into();
-		assert_eq!(SeqDocIds::get_id(&d.ikb, &tx, doc_id).await.unwrap(), Some(id));
-		assert_eq!(d.get_doc_id(&tx, &key.into()).await.unwrap(), Some(doc_id));
+		let id = RecordIdKey::String(key.to_owned());
+		assert_eq!(SeqDocIds::get_id(&d.ikb, &tx, doc_id).await.unwrap(), Some(id.clone()));
+		assert_eq!(d.get_doc_id(&tx, &id).await.unwrap(), Some(doc_id));
 	}
 	#[tokio::test]
 	async fn test_resolve_doc_id() {
@@ -224,7 +203,7 @@ mod tests {
 		// Resolve a first doc key
 		{
 			let (ctx, d) = new_operation(&ds, Write).await;
-			let doc_id = d.resolve_doc_id(&ctx, "Foo".into()).await.unwrap();
+			let doc_id = d.resolve_doc_id(&ctx, strand!("Foo").to_owned().into()).await.unwrap();
 			assert_eq!(doc_id, Resolved::New(0));
 			finish(ctx).await;
 
@@ -235,7 +214,7 @@ mod tests {
 		// Resolve the same doc key
 		{
 			let (tx, d) = new_operation(&ds, Write).await;
-			let doc_id = d.resolve_doc_id(&tx, "Foo".into()).await.unwrap();
+			let doc_id = d.resolve_doc_id(&tx, strand!("Foo").to_owned().into()).await.unwrap();
 			assert_eq!(doc_id, Resolved::Existing(0));
 			finish(tx).await;
 
@@ -246,7 +225,7 @@ mod tests {
 		// Resolve another single doc key
 		{
 			let (tx, d) = new_operation(&ds, Write).await;
-			let doc_id = d.resolve_doc_id(&tx, "Bar".into()).await.unwrap();
+			let doc_id = d.resolve_doc_id(&tx, strand!("Bar").to_owned().into()).await.unwrap();
 			assert_eq!(doc_id, Resolved::New(1));
 			finish(tx).await;
 
@@ -257,10 +236,22 @@ mod tests {
 		// Resolve another two existing doc keys and two new doc keys (interlaced)
 		{
 			let (tx, d) = new_operation(&ds, Write).await;
-			assert_eq!(d.resolve_doc_id(&tx, "Foo".into()).await.unwrap(), Resolved::Existing(0));
-			assert_eq!(d.resolve_doc_id(&tx, "Hello".into()).await.unwrap(), Resolved::New(2));
-			assert_eq!(d.resolve_doc_id(&tx, "Bar".into()).await.unwrap(), Resolved::Existing(1));
-			assert_eq!(d.resolve_doc_id(&tx, "World".into()).await.unwrap(), Resolved::New(3));
+			assert_eq!(
+				d.resolve_doc_id(&tx, strand!("Foo").to_owned().into()).await.unwrap(),
+				Resolved::Existing(0)
+			);
+			assert_eq!(
+				d.resolve_doc_id(&tx, strand!("Hello").to_owned().into()).await.unwrap(),
+				Resolved::New(2)
+			);
+			assert_eq!(
+				d.resolve_doc_id(&tx, strand!("Bar").to_owned().into()).await.unwrap(),
+				Resolved::Existing(1)
+			);
+			assert_eq!(
+				d.resolve_doc_id(&tx, strand!("World").to_owned().into()).await.unwrap(),
+				Resolved::New(3)
+			);
 			finish(tx).await;
 			let (tx, d) = new_operation(&ds, Read).await;
 			check_get_doc_key_id(&tx, &d, 0, "Foo").await;
@@ -271,10 +262,22 @@ mod tests {
 
 		{
 			let (tx, d) = new_operation(&ds, Write).await;
-			assert_eq!(d.resolve_doc_id(&tx, "Foo".into()).await.unwrap(), Resolved::Existing(0));
-			assert_eq!(d.resolve_doc_id(&tx, "Bar".into()).await.unwrap(), Resolved::Existing(1));
-			assert_eq!(d.resolve_doc_id(&tx, "Hello".into()).await.unwrap(), Resolved::Existing(2));
-			assert_eq!(d.resolve_doc_id(&tx, "World".into()).await.unwrap(), Resolved::Existing(3));
+			assert_eq!(
+				d.resolve_doc_id(&tx, strand!("Foo").to_owned().into()).await.unwrap(),
+				Resolved::Existing(0)
+			);
+			assert_eq!(
+				d.resolve_doc_id(&tx, strand!("Bar").to_owned().into()).await.unwrap(),
+				Resolved::Existing(1)
+			);
+			assert_eq!(
+				d.resolve_doc_id(&tx, strand!("Hello").to_owned().into()).await.unwrap(),
+				Resolved::Existing(2)
+			);
+			assert_eq!(
+				d.resolve_doc_id(&tx, strand!("World").to_owned().into()).await.unwrap(),
+				Resolved::Existing(3)
+			);
 			finish(tx).await;
 			let (tx, d) = new_operation(&ds, Read).await;
 			check_get_doc_key_id(&tx, &d, 0, "Foo").await;
@@ -291,8 +294,14 @@ mod tests {
 		// Create two docs
 		{
 			let (tx, d) = new_operation(&ds, Write).await;
-			assert_eq!(d.resolve_doc_id(&tx, "Foo".into()).await.unwrap(), Resolved::New(0));
-			assert_eq!(d.resolve_doc_id(&tx, "Bar".into()).await.unwrap(), Resolved::New(1));
+			assert_eq!(
+				d.resolve_doc_id(&tx, strand!("Foo").to_owned().into()).await.unwrap(),
+				Resolved::New(0)
+			);
+			assert_eq!(
+				d.resolve_doc_id(&tx, strand!("Bar").to_owned().into()).await.unwrap(),
+				Resolved::New(1)
+			);
 			finish(tx).await;
 		}
 
@@ -307,23 +316,41 @@ mod tests {
 		// Check 'Foo' has been removed
 		{
 			let (ctx, d) = new_operation(&ds, Read).await;
-			assert_eq!(d.get_doc_id(&ctx.tx(), &"Foo".into()).await.unwrap(), None);
-			assert_eq!(d.get_doc_id(&ctx.tx(), &"Bar".into()).await.unwrap(), Some(1));
+			assert_eq!(
+				d.get_doc_id(&ctx.tx(), &strand!("Foo").to_owned().into()).await.unwrap(),
+				None
+			);
+			assert_eq!(
+				d.get_doc_id(&ctx.tx(), &strand!("Bar").to_owned().into()).await.unwrap(),
+				Some(1)
+			);
 		}
 
 		// Insert a new doc - should take the next available id 2
 		{
 			let (ctx, d) = new_operation(&ds, Write).await;
-			assert_eq!(d.resolve_doc_id(&ctx, "Hello".into()).await.unwrap(), Resolved::New(2));
+			assert_eq!(
+				d.resolve_doc_id(&ctx, strand!("Hello").to_owned().into()).await.unwrap(),
+				Resolved::New(2)
+			);
 			finish(ctx).await;
 		}
 
 		// Check we have "Hello" and "Bar"
 		{
 			let (ctx, d) = new_operation(&ds, Read).await;
-			assert_eq!(d.get_doc_id(&ctx.tx(), &"Foo".into()).await.unwrap(), None);
-			assert_eq!(d.get_doc_id(&ctx.tx(), &"Bar".into()).await.unwrap(), Some(1));
-			assert_eq!(d.get_doc_id(&ctx.tx(), &"Hello".into()).await.unwrap(), Some(2));
+			assert_eq!(
+				d.get_doc_id(&ctx.tx(), &strand!("Foo").to_owned().into()).await.unwrap(),
+				None
+			);
+			assert_eq!(
+				d.get_doc_id(&ctx.tx(), &strand!("Bar").to_owned().into()).await.unwrap(),
+				Some(1)
+			);
+			assert_eq!(
+				d.get_doc_id(&ctx.tx(), &strand!("Hello").to_owned().into()).await.unwrap(),
+				Some(2)
+			);
 		}
 
 		// Remove doc 1 "Bar"
@@ -336,25 +363,49 @@ mod tests {
 		// Check "Bar" has been removed
 		{
 			let (ctx, d) = new_operation(&ds, Read).await;
-			assert_eq!(d.get_doc_id(&ctx.tx(), &"Foo".into()).await.unwrap(), None);
-			assert_eq!(d.get_doc_id(&ctx.tx(), &"Bar".into()).await.unwrap(), None);
-			assert_eq!(d.get_doc_id(&ctx.tx(), &"Hello".into()).await.unwrap(), Some(2));
+			assert_eq!(
+				d.get_doc_id(&ctx.tx(), &strand!("Foo").to_owned().into()).await.unwrap(),
+				None
+			);
+			assert_eq!(
+				d.get_doc_id(&ctx.tx(), &strand!("Bar").to_owned().into()).await.unwrap(),
+				None
+			);
+			assert_eq!(
+				d.get_doc_id(&ctx.tx(), &strand!("Hello").to_owned().into()).await.unwrap(),
+				Some(2)
+			);
 		}
 
 		// Insert a new doc - should take the available id 3
 		{
 			let (ctx, d) = new_operation(&ds, Write).await;
-			assert_eq!(d.resolve_doc_id(&ctx, "World".into()).await.unwrap(), Resolved::New(3));
+			assert_eq!(
+				d.resolve_doc_id(&ctx, strand!("World").to_owned().into()).await.unwrap(),
+				Resolved::New(3)
+			);
 			finish(ctx).await;
 		}
 
 		// Check "World" has been added
 		{
 			let (ctx, d) = new_operation(&ds, Read).await;
-			assert_eq!(d.get_doc_id(&ctx.tx(), &"Foo".into()).await.unwrap(), None);
-			assert_eq!(d.get_doc_id(&ctx.tx(), &"Bar".into()).await.unwrap(), None);
-			assert_eq!(d.get_doc_id(&ctx.tx(), &"Hello".into()).await.unwrap(), Some(2));
-			assert_eq!(d.get_doc_id(&ctx.tx(), &"World".into()).await.unwrap(), Some(3));
+			assert_eq!(
+				d.get_doc_id(&ctx.tx(), &strand!("Foo").to_owned().into()).await.unwrap(),
+				None
+			);
+			assert_eq!(
+				d.get_doc_id(&ctx.tx(), &strand!("Bar").to_owned().into()).await.unwrap(),
+				None
+			);
+			assert_eq!(
+				d.get_doc_id(&ctx.tx(), &strand!("Hello").to_owned().into()).await.unwrap(),
+				Some(2)
+			);
+			assert_eq!(
+				d.get_doc_id(&ctx.tx(), &strand!("World").to_owned().into()).await.unwrap(),
+				Some(3)
+			);
 		}
 
 		// Remove remaining docs
@@ -371,13 +422,18 @@ mod tests {
 			let (ctx, _) = new_operation(&ds, Read).await;
 			let tx = ctx.tx();
 			for id in ["Foo", "Bar", "Hello", "World"] {
-				let id =
-					crate::key::index::id::Id::new(TEST_NS, TEST_DB, TEST_TB, TEST_IX, id.into());
-				assert!(!tx.exists(id, None).await.unwrap());
+				let id = crate::key::index::id::Id::new(
+					TEST_NS,
+					TEST_DB,
+					TEST_TB,
+					TEST_IX,
+					Strand::new(id.to_owned()).unwrap().into(),
+				);
+				assert!(!tx.exists(&id, None).await.unwrap());
 			}
 			for doc_id in 0..=3 {
 				let bi = Bi::new(TEST_NS, TEST_DB, TEST_TB, TEST_IX, doc_id);
-				assert!(!tx.exists(bi, None).await.unwrap());
+				assert!(!tx.exists(&bi, None).await.unwrap());
 			}
 		}
 	}
