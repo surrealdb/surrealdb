@@ -1,21 +1,22 @@
+use std::borrow::Cow;
+use std::future::IntoFuture;
+use std::marker::PhantomData;
+
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use uuid::Uuid;
+
+use super::insert_relation::InsertRelation;
 use super::transaction::WithTransaction;
+use super::validate_data;
 use crate::api::conn::Command;
 use crate::api::err::Error;
 use crate::api::method::{BoxFuture, Content};
 use crate::api::opt::Resource;
 use crate::api::{self, Connection, Result};
+use crate::core::val;
 use crate::method::OnceLockExt;
 use crate::{Surreal, Value};
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-use std::borrow::Cow;
-use std::future::IntoFuture;
-use std::marker::PhantomData;
-use surrealdb_core::val;
-use uuid::Uuid;
-
-use super::insert_relation::InsertRelation;
-use super::validate_data;
 
 /// An insert future
 #[derive(Debug)]
@@ -41,7 +42,8 @@ impl<C, R> Insert<'_, C, R>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Insert<'static, C, R> {
 		Insert {
 			client: Cow::Owned(self.client.into_owned()),

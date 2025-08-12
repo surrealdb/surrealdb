@@ -1,9 +1,11 @@
+use std::borrow::Cow;
+
 use anyhow::Result;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_content::{Deserializer, Number, Serializer, Value as Content};
-use std::borrow::Cow;
-use surrealdb_core::val;
+
+use crate::core::val;
 
 mod ser;
 
@@ -61,7 +63,7 @@ pub fn from_value<T: DeserializeOwned>(value: val::Value) -> Result<T> {
 	T::deserialize(deserializer).map_err(From::from)
 }
 
-/// Converts a serializable type into surrealdb_core::val::Value
+/// Converts a serializable type into crate::core::val::Value
 pub fn to_value<T: Serialize + 'static>(value: T) -> Result<val::Value> {
 	ser::to_value(value)
 }

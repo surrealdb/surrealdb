@@ -1,8 +1,5 @@
 pub mod rpc;
 
-use crate::cli::validator::parser::tracing::CustomFilter;
-use crate::cnf::{TELEMETRY_DISABLE_TRACING, TELEMETRY_PROVIDER};
-use crate::telemetry::OTEL_DEFAULT_RESOURCE;
 use anyhow::Result;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::SpanExporterBuilder;
@@ -10,7 +7,12 @@ use opentelemetry_sdk::trace::{Config, TracerProvider};
 use tracing::Subscriber;
 use tracing_subscriber::Layer;
 
-// Returns a tracer provider based on the SURREAL_TELEMETRY_PROVIDER environment variable
+use crate::cli::validator::parser::tracing::CustomFilter;
+use crate::cnf::{TELEMETRY_DISABLE_TRACING, TELEMETRY_PROVIDER};
+use crate::telemetry::OTEL_DEFAULT_RESOURCE;
+
+// Returns a tracer provider based on the SURREAL_TELEMETRY_PROVIDER environment
+// variable
 pub fn new<S>(filter: CustomFilter) -> Result<Option<Box<dyn Layer<S> + Send + Sync>>>
 where
 	S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,

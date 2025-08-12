@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use criterion::Bencher;
 use criterion::measurement::WallTime;
-use surrealdb::dbs::Session;
-use surrealdb::kvs::Datastore;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::kvs::Datastore;
 
 mod create;
 pub(super) use create::*;
@@ -12,9 +12,10 @@ pub(super) use read::*;
 
 /// Routine trait for the benchmark routines.
 ///
-/// The `setup` function is called once before the benchmark starts. It's used to prepare the database for the benchmark.
-/// The `run` function is called for each iteration of the benchmark.
-/// The `cleanup` function is called once after the benchmark ends. It's used to clean up the database after the benchmark.
+/// The `setup` function is called once before the benchmark starts. It's used
+/// to prepare the database for the benchmark. The `run` function is called for
+/// each iteration of the benchmark. The `cleanup` function is called once after
+/// the benchmark ends. It's used to clean up the database after the benchmark.
 pub(super) trait Routine {
 	fn setup(&self, ds: Arc<Datastore>, session: Session, num_ops: usize);
 	fn run(&self, ds: Arc<Datastore>, session: Session, num_ops: usize);
@@ -30,7 +31,8 @@ pub(super) fn bench_routine<R>(
 ) where
 	R: Routine,
 {
-	// Run the runtime and return the duration, accounting for the number of operations on each run
+	// Run the runtime and return the duration, accounting for the number of
+	// operations on each run
 	b.iter_custom(|iters| {
 		// Total time spent running the actual benchmark run for all iterations
 		let mut total = std::time::Duration::from_secs(0);

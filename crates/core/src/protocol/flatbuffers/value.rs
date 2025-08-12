@@ -1,11 +1,12 @@
-use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
-use crate::val::{
-	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, RecordId, Strand, Uuid, Value,
-};
 use anyhow::{Context, anyhow};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use surrealdb_protocol::fb::v1 as proto_fb;
+
+use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
+use crate::val::{
+	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, RecordId, Strand, Uuid, Value,
+};
 
 impl ToFlatbuffers for Value {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Value<'bldr>>;
@@ -86,7 +87,8 @@ impl ToFlatbuffers for Value {
 				value: Some(file.to_fb(builder)?.as_union_value()),
 			},
 			_ => {
-				// TODO: DO NOT PANIC, we just need to modify the Value enum which Mees is currently working on.
+				// TODO: DO NOT PANIC, we just need to modify the Value enum which Mees is
+				// currently working on.
 				panic!("Unsupported value type for Flatbuffers serialization: {:?}", self);
 			}
 		};
@@ -182,13 +184,15 @@ impl FromFlatbuffers for Value {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use crate::val::*;
+	use std::collections::BTreeMap;
+
 	use chrono::{DateTime, Utc};
 	use rstest::rstest;
 	use rust_decimal::Decimal;
-	use std::collections::BTreeMap;
 	use surrealdb_protocol::fb::v1 as proto_fb;
+
+	use super::*;
+	use crate::val::*;
 
 	#[rstest]
 	#[case::none(Value::None)]

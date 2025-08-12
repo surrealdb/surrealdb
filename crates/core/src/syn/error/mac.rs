@@ -1,6 +1,7 @@
 /// Macro to create an parser error.
 ///
-/// This creates an error with a message first and then a number of spans, possibly with a label.
+/// This creates an error with a message first and then a number of spans,
+/// possibly with a label.
 ///
 /// # Example
 ///

@@ -3,9 +3,11 @@
 	expect(dead_code, reason = "This is only used in FoundationDB and TiKV")
 )]
 
-use crate::kvs::{Key, Val};
-use anyhow::Result;
 use std::collections::{HashMap, VecDeque};
+
+use anyhow::Result;
+
+use crate::kvs::{Key, Val};
 
 type SavePoint = HashMap<Key, SavedValue>;
 
@@ -77,7 +79,8 @@ impl SavePoints {
 			match prep {
 				SavePrepare::AlreadyPresent(key, op) => {
 					if let Some(sv) = current.get_mut(&key) {
-						// We keep the last operation executed in the transaction so we can do the appropriate rollback action (SET or PUT)
+						// We keep the last operation executed in the transaction so we can do the
+						// appropriate rollback action (SET or PUT)
 						sv.last_operation = op;
 					}
 				}

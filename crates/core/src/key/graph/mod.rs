@@ -1,11 +1,11 @@
 //! Stores a graph edge pointer
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+
 use crate::expr::dir::Dir;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::val::{RecordId, RecordIdKey};
-
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct Prefix<'a> {
@@ -260,7 +260,6 @@ impl<'a> Graph<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-
 	use crate::syn;
 	use crate::val::Value;
 

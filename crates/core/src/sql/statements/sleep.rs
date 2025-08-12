@@ -1,5 +1,6 @@
-use crate::val::Duration;
 use std::fmt;
+
+use crate::val::Duration;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 pub struct SleepStatement {

@@ -1,31 +1,31 @@
+use std::fmt::{self, Display};
+#[cfg(target_family = "wasm")]
+use std::sync::Arc;
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use super::DefineKind;
 use crate::ctx::Context;
 #[cfg(target_family = "wasm")]
 use crate::dbs::Force;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+#[cfg(target_family = "wasm")]
+use crate::expr::Output;
 use crate::expr::fmt::Fmt;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
+#[cfg(target_family = "wasm")]
+use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
 use crate::expr::{Base, Ident, Idiom, Index, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, Strand, Value};
-use anyhow::{Result, bail};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
-#[cfg(target_family = "wasm")]
-use std::sync::Arc;
-use uuid::Uuid;
-
-#[cfg(target_family = "wasm")]
-use crate::expr::Output;
-#[cfg(target_family = "wasm")]
-use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
-
-use super::DefineKind;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -105,7 +105,8 @@ impl DefineIndexStatement {
 		txn.set(
 			&key,
 			&DefineIndexStatement {
-				// Don't persist the `IF NOT EXISTS`, `OVERWRITE` and `CONCURRENTLY` clause to schema
+				// Don't persist the `IF NOT EXISTS`, `OVERWRITE` and `CONCURRENTLY` clause to
+				// schema
 				kind: DefineKind::Default,
 				concurrently: false,
 				..self.clone()

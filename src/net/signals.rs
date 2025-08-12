@@ -1,10 +1,12 @@
-use crate::rpc::{self, RpcState};
-use crate::telemetry;
+use std::sync::Arc;
+
 use anyhow::Result;
 use axum_server::Handle;
-use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+
+use crate::rpc::{self, RpcState};
+use crate::telemetry;
 
 /// Start a graceful shutdown:
 /// * Signal the Axum Handle when a shutdown signal is received.

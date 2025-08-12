@@ -1,10 +1,11 @@
 // Tests common to all protocols and storage engines
 
-use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::borrow::Cow;
 use std::ops::Bound;
 use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use surrealdb::error::{Api as ApiError, Db as DbError};
 use surrealdb::opt::auth::{Database, Namespace, Record as RecordAccess};
 use surrealdb::opt::{PatchOp, PatchOps, Raw, Resource};
@@ -13,9 +14,8 @@ use surrealdb_core::expr::TopLevelExpr;
 use surrealdb_core::{syn, val};
 use ulid::Ulid;
 
-use crate::api_integration::{ApiRecordId, NS, Record, RecordBuf, RecordName};
-
 use super::{AuthParams, CreateDb};
+use crate::api_integration::{ApiRecordId, NS, Record, RecordBuf, RecordName};
 
 pub async fn connect(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
@@ -196,7 +196,7 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 
 	if let Some(e) = err.downcast_ref() {
 		match e {
-			surrealdb::err::Error::Thrown(e) => assert_eq!(e, "signup_thrown_error"),
+			surrealdb_core::err::Error::Thrown(e) => assert_eq!(e, "signup_thrown_error"),
 			x => panic!("unexpected error: {x:?}"),
 		}
 	} else if let Some(e) = err.downcast_ref() {
@@ -227,7 +227,7 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 
 	if let Some(e) = err.downcast_ref() {
 		match e {
-			surrealdb::err::Error::Thrown(e) => assert_eq!(e, "signin_thrown_error"),
+			surrealdb_core::err::Error::Thrown(e) => assert_eq!(e, "signin_thrown_error"),
 			x => panic!("unexpected error: {x:?}"),
 		}
 	} else if let Some(e) = err.downcast_ref() {
@@ -278,7 +278,7 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 
 	if let Some(e) = err.downcast_ref() {
 		match e {
-			surrealdb::err::Error::AccessRecordSignupQueryFailed => {}
+			surrealdb_core::err::Error::AccessRecordSignupQueryFailed => {}
 			x => panic!("unexpected error: {x:?}"),
 		}
 	} else if let Some(e) = err.downcast_ref() {
@@ -312,7 +312,7 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 
 	if let Some(e) = err.downcast_ref() {
 		match e {
-			surrealdb::err::Error::AccessRecordSigninQueryFailed => {}
+			surrealdb_core::err::Error::AccessRecordSigninQueryFailed => {}
 			x => panic!("unexpected error: {x:?}"),
 		}
 	} else if let Some(e) = err.downcast_ref() {

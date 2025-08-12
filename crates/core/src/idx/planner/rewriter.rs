@@ -1,3 +1,5 @@
+use std::ops::Bound;
+
 use crate::expr::literal::ObjectEntry;
 use crate::expr::part::DestructurePart;
 use crate::expr::{
@@ -6,12 +8,11 @@ use crate::expr::{
 };
 use crate::idx::planner::executor::KnnExpressions;
 
-use std::ops::Bound;
-
 pub(super) struct KnnConditionRewriter<'a>(&'a KnnExpressions);
 
 impl<'a> KnnConditionRewriter<'a> {
-	// This function rebuild the same condition, but replaces any KnnExpression by a `true` value
+	// This function rebuild the same condition, but replaces any KnnExpression by a
+	// `true` value
 	#[expect(clippy::mutable_key_type)]
 	pub(super) fn build(expressions: &'a KnnExpressions, cond: &Cond) -> Option<Cond> {
 		let b = Self(expressions);

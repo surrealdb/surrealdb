@@ -1,15 +1,17 @@
 //! Functionality for connecting to local and remote databases
 
-use crate::Result;
-use anyhow::ensure;
-use method::BoxFuture;
-use semver::{BuildMetadata, Version, VersionReq};
 use std::fmt;
 use std::fmt::Debug;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::sync::{Arc, OnceLock};
+
+use anyhow::ensure;
+use method::BoxFuture;
+use semver::{BuildMetadata, Version, VersionReq};
 use tokio::sync::watch;
+
+use crate::Result;
 
 macro_rules! transparent_wrapper{
 	(
@@ -74,7 +76,7 @@ macro_rules! impl_serialize_wrapper {
 	($ty:ty) => {
 		impl ::revision::Revisioned for $ty {
 			fn revision() -> u16 {
-				surrealdb_core::val::Value::revision()
+				crate::core::val::Value::revision()
 			}
 
 			fn serialize_revisioned<W: std::io::Write>(
@@ -124,11 +126,11 @@ pub mod value;
 
 mod conn;
 
+pub use method::query::Response;
+
 use self::conn::Router;
 use self::err::Error;
 use self::opt::{Endpoint, EndpointKind, WaitFor};
-
-pub use method::query::Response;
 
 // Channel for waiters
 type Waiter = (watch::Sender<Option<WaitFor>>, watch::Receiver<Option<WaitFor>>);
@@ -264,9 +266,9 @@ struct Inner {
 
 /// A database client instance for embedded or remote databases.
 ///
-/// See [Running SurrealDB embedded in Rust](crate#running-surrealdb-embedded-in-rust)
-/// for tips on how to optimize performance for the client when working
-/// with embedded instances.
+/// See [Running SurrealDB embedded in
+/// Rust](crate#running-surrealdb-embedded-in-rust) for tips on how to optimize
+/// performance for the client when working with embedded instances.
 pub struct Surreal<C: Connection> {
 	inner: Arc<Inner>,
 	engine: PhantomData<C>,

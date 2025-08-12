@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::mem;
 
-use surrealdb_core::dbs::capabilities::{
+use crate::core::dbs::capabilities::{
 	Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, ParseFuncTargetError,
 	ParseNetTargetError, Targets,
 };
@@ -39,25 +39,28 @@ impl From<&ExperimentalFeature> for ExperimentalTarget {
 /// - Functions: Whether or not users can execute certain functions
 /// - Network: Whether or not users can connect to certain network addresses
 ///
-/// Capabilities are configured globally. By default, capabilities are configured as:
+/// Capabilities are configured globally. By default, capabilities are
+/// configured as:
 /// - Scripting: false
 /// - Guest access: false
 /// - Functions: All functions are allowed
 /// - Network: No network address is allowed, all are impliticly denied
 ///
-/// The capabilities are defined using allow/deny lists for fine-grained control.
+/// The capabilities are defined using allow/deny lists for fine-grained
+/// control.
 ///
 /// # Filtering functions and net-targets.
 ///
 /// The filtering of net targets and functions is done with an allow/deny list.
 /// These list can either match everything, nothing or a given list.
 ///
-/// By default every function and net-target is disallowed. For a function or net target to be
-/// allowed it must match the allow-list and not match the deny-list. This means that if for
-/// example a function is both in the allow-list and in the deny-list it will be disallowed.
+/// By default every function and net-target is disallowed. For a function or
+/// net target to be allowed it must match the allow-list and not match the
+/// deny-list. This means that if for example a function is both in the
+/// allow-list and in the deny-list it will be disallowed.
 ///
-/// With the combination of both these lists you can filter subgroups. For example:
-/// ```
+/// With the combination of both these lists you can filter subgroups. For
+/// example: ```
 /// # use surrealdb::opt::capabilities::Capabilities;
 /// # fn cap() -> surrealdb::Result<Capabilities>{
 /// # let cap =
@@ -69,13 +72,15 @@ impl From<&ExperimentalFeature> for ExperimentalTarget {
 ///  # Ok(cap)
 /// # }
 /// ```
-///
-/// Will allow all and only all `http::*` functions except the function `http::post`.
+/// 
+/// Will allow all and only all `http::*` functions except the function
+/// `http::post`.
 ///
 /// Examples:
 /// - Allow all functions: `--allow-funcs`
 /// - Allow all functions except `http.*`: `--allow-funcs --deny-funcs 'http.*'`
-/// - Allow all network addresses except AWS metadata endpoint: `--allow-net --deny-net='169.254.169.254'`
+/// - Allow all network addresses except AWS metadata endpoint: `--allow-net
+///   --deny-net='169.254.169.254'`
 ///
 /// # Examples
 ///
@@ -126,7 +131,8 @@ impl Default for Capabilities {
 impl Capabilities {
 	/// Create a builder with default capabilities enabled.
 	///
-	/// Default capabilities enables live query notifications and all (non-scripting) functions.
+	/// Default capabilities enables live query notifications and all
+	/// (non-scripting) functions.
 	pub fn new() -> Self {
 		Capabilities {
 			cap: CoreCapabilities::default()
@@ -166,8 +172,8 @@ impl Capabilities {
 		}
 	}
 
-	/// Set whether to allow non-authenticated users to execute queries when authentication is
-	/// enabled.
+	/// Set whether to allow non-authenticated users to execute queries when
+	/// authentication is enabled.
 	pub fn with_guest_access(self, enabled: bool) -> Self {
 		Self {
 			cap: self.cap.with_guest_access(enabled),
@@ -231,8 +237,8 @@ impl Capabilities {
 
 	/// Add a function to the allow lists
 	///
-	/// Adding a function to the allow list overwrites previously set allow-all or allow-none
-	/// filters.
+	/// Adding a function to the allow list overwrites previously set allow-all
+	/// or allow-none filters.
 	pub fn allow_function<S: AsRef<str>>(
 		&mut self,
 		func: S,
@@ -242,8 +248,8 @@ impl Capabilities {
 
 	/// Add a function to the allow lists
 	///
-	/// Adding a function to the allow list overwrites previously set allow-all or allow-none
-	/// filters.
+	/// Adding a function to the allow list overwrites previously set allow-all
+	/// or allow-none filters.
 	pub fn with_function_allowed<S: AsRef<str>>(
 		mut self,
 		func: S,
@@ -269,8 +275,8 @@ impl Capabilities {
 
 	/// Add a function to the deny lists
 	///
-	/// Adding a function to the deny list overwrites previously set deny-all or deny-none
-	/// filters.
+	/// Adding a function to the deny list overwrites previously set deny-all or
+	/// deny-none filters.
 	pub fn deny_function<S: AsRef<str>>(
 		&mut self,
 		func: S,
@@ -280,8 +286,8 @@ impl Capabilities {
 
 	/// Add a function to the deny lists
 	///
-	/// Adding a function to the deny list overwrites previously set deny-all or deny-none
-	/// filters.
+	/// Adding a function to the deny list overwrites previously set deny-all or
+	/// deny-none filters.
 	pub fn with_function_denied<S: AsRef<str>>(
 		mut self,
 		func: S,
@@ -355,8 +361,8 @@ impl Capabilities {
 
 	/// Add a net target to the allow lists
 	///
-	/// Adding a net target to the allow list overwrites previously set allow-all or allow-none
-	/// filters.
+	/// Adding a net target to the allow list overwrites previously set
+	/// allow-all or allow-none filters.
 	pub fn allow_net_target<S: AsRef<str>>(
 		&mut self,
 		func: S,
@@ -366,8 +372,8 @@ impl Capabilities {
 
 	/// Add a net target to the allow lists
 	///
-	/// Adding a net target to the allow list overwrites previously set allow-all or allow-none
-	/// filters.
+	/// Adding a net target to the allow list overwrites previously set
+	/// allow-all or allow-none filters.
 	pub fn with_net_target_allowed<S: AsRef<str>>(
 		mut self,
 		func: S,
@@ -393,8 +399,8 @@ impl Capabilities {
 
 	/// Add a net target to the deny lists
 	///
-	/// Adding a net target to the deny list overwrites previously set deny-all or deny-none
-	/// filters.
+	/// Adding a net target to the deny list overwrites previously set deny-all
+	/// or deny-none filters.
 	pub fn deny_net_target<S: AsRef<str>>(
 		&mut self,
 		func: S,
@@ -404,8 +410,8 @@ impl Capabilities {
 
 	/// Add a net target to the deny lists
 	///
-	/// Adding a net target to the deny list overwrites previously set deny-all or deny-none
-	/// filters.
+	/// Adding a net target to the deny list overwrites previously set deny-all
+	/// or deny-none filters.
 	pub fn with_net_target_denied<S: AsRef<str>>(
 		mut self,
 		func: S,
@@ -443,8 +449,8 @@ impl Capabilities {
 
 	/// Add a list of experimental features to the allow lists
 	///
-	/// Adding features to the allow list overwrites previously set allow-all or allow-none
-	/// filters.
+	/// Adding features to the allow list overwrites previously set allow-all or
+	/// allow-none filters.
 	pub fn allow_experimental_features(&mut self, features: &[ExperimentalFeature]) -> &mut Self {
 		let features = features.iter().map(ExperimentalTarget::from);
 		match self.cap.allowed_experimental_features_mut() {
@@ -462,8 +468,8 @@ impl Capabilities {
 
 	/// Add a list of experimental features to the allow lists
 	///
-	/// Adding features to the allow list overwrites previously set allow-all or allow-none
-	/// filters.
+	/// Adding features to the allow list overwrites previously set allow-all or
+	/// allow-none filters.
 	pub fn with_experimental_features_allowed(mut self, features: &[ExperimentalFeature]) -> Self {
 		self.allow_experimental_features(features);
 		self
@@ -471,8 +477,8 @@ impl Capabilities {
 
 	/// Add an experimental feature to the allow lists
 	///
-	/// Adding a feature to the allow list overwrites previously set allow-all or allow-none
-	/// filters.
+	/// Adding a feature to the allow list overwrites previously set allow-all
+	/// or allow-none filters.
 	pub fn allow_experimental_feature(&mut self, feature: ExperimentalFeature) -> &mut Self {
 		let feature = ExperimentalTarget::from(&feature);
 		match self.cap.allowed_experimental_features_mut() {
@@ -490,8 +496,8 @@ impl Capabilities {
 
 	/// Add an experimental feature to the allow lists
 	///
-	/// Adding a feature to the allow list overwrites previously set allow-all or allow-none
-	/// filters.
+	/// Adding a feature to the allow list overwrites previously set allow-all
+	/// or allow-none filters.
 	pub fn with_experimental_feature_allowed(mut self, feature: ExperimentalFeature) -> Self {
 		self.allow_experimental_feature(feature);
 		self
@@ -523,8 +529,8 @@ impl Capabilities {
 
 	/// Add a list of experimental features to the deny lists
 	///
-	/// Adding features to the deny list overwrites previously set deny-all or deny-none
-	/// filters.
+	/// Adding features to the deny list overwrites previously set deny-all or
+	/// deny-none filters.
 	pub fn deny_experimental_features(&mut self, features: &[ExperimentalFeature]) -> &mut Self {
 		let features = features.iter().map(ExperimentalTarget::from);
 		match self.cap.denied_experimental_features_mut() {
@@ -542,8 +548,8 @@ impl Capabilities {
 
 	/// Add a list of experimental features to the deny lists
 	///
-	/// Adding features to the deny list overwrites previously set deny-all or deny-none
-	/// filters.
+	/// Adding features to the deny list overwrites previously set deny-all or
+	/// deny-none filters.
 	pub fn with_experimental_features_denied(mut self, features: &[ExperimentalFeature]) -> Self {
 		self.deny_experimental_features(features);
 		self
@@ -551,8 +557,8 @@ impl Capabilities {
 
 	/// Add an experimental feature to the deny lists
 	///
-	/// Adding a feature to the deny list overwrites previously set deny-all or deny-none
-	/// filters.
+	/// Adding a feature to the deny list overwrites previously set deny-all or
+	/// deny-none filters.
 	pub fn deny_experimental_feature(&mut self, feature: ExperimentalFeature) -> &mut Self {
 		let feature = ExperimentalTarget::from(&feature);
 		match self.cap.denied_experimental_features_mut() {
@@ -570,8 +576,8 @@ impl Capabilities {
 
 	/// Add an experimental feature to the deny lists
 	///
-	/// Adding a feature to the deny list overwrites previously set deny-all or deny-none
-	/// filters.
+	/// Adding a feature to the deny list overwrites previously set deny-all or
+	/// deny-none filters.
 	pub fn with_experimental_feature_denied(mut self, feature: ExperimentalFeature) -> Self {
 		self.deny_experimental_feature(feature);
 		self

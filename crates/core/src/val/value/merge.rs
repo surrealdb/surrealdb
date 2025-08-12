@@ -1,7 +1,8 @@
+use anyhow::{Result, ensure};
+
 use crate::err::Error;
 use crate::val::Value;
 use crate::val::value::every::ArrayBehaviour;
-use anyhow::{Result, ensure};
 
 impl Value {
 	pub(crate) fn merge(&mut self, val: Value) -> Result<()> {

@@ -1,3 +1,10 @@
+use std::sync::Arc;
+
+use anyhow::Result;
+use revision::{Revisioned, revisioned};
+use roaring::RoaringTreemap;
+use serde::{Deserialize, Serialize};
+
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::ElementId;
@@ -6,11 +13,6 @@ use crate::idx::trees::knn::Ids64;
 use crate::idx::trees::vector::{SerializedVector, Vector};
 use crate::kvs::{KVValue, Transaction};
 use crate::val::{RecordId, RecordIdKey};
-use anyhow::Result;
-use revision::{Revisioned, revisioned};
-use roaring::RoaringTreemap;
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 pub(in crate::idx) struct HnswDocs {
 	tb: String,

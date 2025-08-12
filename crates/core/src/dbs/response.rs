@@ -1,11 +1,13 @@
-use crate::expr::TopLevelExpr;
-use crate::val::{Object, Strand, Value};
+use std::fmt;
+use std::time::Duration;
+
 use anyhow::Result;
 use revision::{Revisioned, revisioned};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::time::Duration;
+
+use crate::expr::TopLevelExpr;
+use crate::val::{Object, Strand, Value};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Response";
 
@@ -48,7 +50,8 @@ impl QueryType {
 pub struct Response {
 	pub time: Duration,
 	pub result: Result<Value>,
-	// Record the query type in case processing the response is necessary (such as tracking live queries).
+	// Record the query type in case processing the response is necessary (such as tracking live
+	// queries).
 	pub query_type: QueryType,
 }
 

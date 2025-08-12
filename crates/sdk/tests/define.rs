@@ -1,16 +1,14 @@
 mod helpers;
-use helpers::*;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
+
+use helpers::*;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::expr::{Idiom, Part};
-use surrealdb::iam::Role;
-use surrealdb::kvs::{LockType, TransactionType};
-use surrealdb_core::dbs::Variables;
-use surrealdb_core::expr::Ident;
-use surrealdb_core::iam::Level;
+use surrealdb_core::dbs::{Session, Variables};
+use surrealdb_core::err::Error;
+use surrealdb_core::expr::{Ident, Idiom, Part};
+use surrealdb_core::iam::{Level, Role};
+use surrealdb_core::kvs::{LockType, TransactionType};
 use surrealdb_core::val::Value;
 use surrealdb_core::{strand, syn};
 use test_log::test;
@@ -330,9 +328,9 @@ async fn define_statement_search_index() -> Result<()> {
 	check_path(&tmp, &["doc_ids", "keys_count"], |v| assert_eq!(v, Value::from(2)));
 	check_path(&tmp, &["doc_ids", "max_depth"], |v| assert_eq!(v, Value::from(1)));
 	check_path(&tmp, &["doc_ids", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
-	// TODO(emmanuel) My (Mees) changes caused some changes in these numbers but I didn't have
-	// time to figure out what was going on so if you could have a look after the PR merges it
-	// would be appreaciated.
+	// TODO(emmanuel) My (Mees) changes caused some changes in these numbers but I
+	// didn't have time to figure out what was going on so if you could have a look
+	// after the PR merges it would be appreaciated.
 	check_path(&tmp, &["doc_ids", "total_size"], |v| assert_eq!(v, Value::from(63)));
 
 	check_path(&tmp, &["doc_lengths", "keys_count"], |v| assert_eq!(v, Value::from(2)));
@@ -551,7 +549,8 @@ async fn permissions_checks_define_ns() {
 		("check", "INFO FOR ROOT"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let access1 = "{ accesses: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
 	let access2 = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
 	let check_results = [vec![access1], vec![access2]];
@@ -589,7 +588,8 @@ async fn permissions_checks_define_db() {
 	let scenario =
 		HashMap::from([("prepare", ""), ("test", "DEFINE DATABASE DB"), ("check", "INFO FOR NS")]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec!["{ accesses: {  }, databases: { DB: 'DEFINE DATABASE DB' }, users: {  } }"],
 		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
@@ -630,7 +630,8 @@ async fn permissions_checks_define_function() {
 		("check", "INFO FOR DB"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec![
 			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello' } PERMISSIONS FULL\" }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
@@ -676,7 +677,8 @@ async fn permissions_checks_define_analyzer() {
 		("check", "INFO FOR DB"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec![
 			"{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, sequences: { }, users: {  } }",
@@ -722,7 +724,8 @@ async fn permissions_checks_define_access_root() {
 		("check", "INFO FOR ROOT"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let access1 = r#"{ accesses: { access: "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }"#;
 	let access2 = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
 	let check_results = [vec![access1], vec![access2]];
@@ -763,7 +766,8 @@ async fn permissions_checks_define_access_ns() {
 		("check", "INFO FOR NS"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec![
 			"{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, databases: {  }, users: {  } }",
@@ -807,7 +811,8 @@ async fn permissions_checks_define_access_db() {
 		("check", "INFO FOR DB"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec![
 			"{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
@@ -856,7 +861,8 @@ async fn permissions_checks_define_user_root() {
 		("check", "INFO FOR ROOT"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check1 = r#"{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#;
 	let check2 = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
 	let check_results = [vec![check1], vec![check2]];
@@ -900,7 +906,8 @@ async fn permissions_checks_define_user_ns() {
 		("check", "INFO FOR NS"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec![
 			"{ accesses: {  }, databases: {  }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }",
@@ -947,7 +954,8 @@ async fn permissions_checks_define_user_db() {
 		("check", "INFO FOR DB"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec![
 			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }",
@@ -996,7 +1004,8 @@ async fn permissions_checks_define_access_record() {
 		("check", "INFO FOR DB"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec![
 			"{ accesses: { account: \"DEFINE ACCESS account ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 15m, FOR SESSION 12h\" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
@@ -1042,7 +1051,8 @@ async fn permissions_checks_define_param() {
 		("check", "INFO FOR DB"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec![
 			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, sequences: { }, tables: {  }, users: {  } }",
@@ -1085,7 +1095,8 @@ async fn permissions_checks_define_table() {
 	let scenario =
 		HashMap::from([("prepare", ""), ("test", "DEFINE TABLE TB"), ("check", "INFO FOR DB")]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec![
 			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }",
@@ -1131,7 +1142,8 @@ async fn permissions_checks_define_event() {
 		("check", "INFO FOR TABLE TB"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec![
 			"{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN RETURN 'foo'\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }",
@@ -1175,7 +1187,8 @@ async fn permissions_checks_define_field() {
 		("check", "INFO FOR TABLE TB"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec![
 			"{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }",
@@ -1219,7 +1232,8 @@ async fn permissions_checks_define_index() {
 		("check", "INFO FOR TABLE TB"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec![
 			"{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, lives: {  }, tables: {  } }",

@@ -16,10 +16,10 @@ pub mod remote;
 #[doc(hidden)]
 pub mod tasks;
 
-use futures::Stream;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use surrealdb_core::expr;
+
+use futures::Stream;
 #[cfg(not(target_family = "wasm"))]
 use tokio::time::Instant;
 #[cfg(not(target_family = "wasm"))]
@@ -30,6 +30,7 @@ use wasmtimer::std::Instant;
 use wasmtimer::tokio::Interval;
 
 use super::opt::Resource;
+use crate::core::expr;
 
 // used in http and all local engines.
 #[allow(dead_code)]

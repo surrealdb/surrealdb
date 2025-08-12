@@ -1,3 +1,12 @@
+use std::fmt::{self, Display};
+
+use anyhow::{Result, bail};
+use rand::Rng;
+use rand::distributions::Alphanumeric;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::DefineKind;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -8,15 +17,6 @@ use crate::expr::{AccessType, Base, Expr, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Strand, Value};
-use anyhow::{Result, bail};
-
-use rand::Rng;
-use rand::distributions::Alphanumeric;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
-
-use super::DefineKind;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -41,8 +41,9 @@ impl DefineAccessStatement {
 	}
 
 	/// Returns a version of the statement where potential secrets are redacted
-	/// This function should be used when displaying the statement to datastore users
-	/// This function should NOT be used when displaying the statement for export purposes
+	/// This function should be used when displaying the statement to datastore
+	/// users This function should NOT be used when displaying the statement
+	/// for export purposes
 	pub fn redacted(&self) -> DefineAccessStatement {
 		let mut das = self.clone();
 		das.access_type = match das.access_type {

@@ -317,7 +317,8 @@ impl Parser<'_> {
 	/// Parses an array production
 	///
 	/// # Parser state
-	/// Expects the starting `[` to already be eaten and its span passed as an argument.
+	/// Expects the starting `[` to already be eaten and its span passed as an
+	/// argument.
 	pub(crate) async fn parse_array(
 		&mut self,
 		ctx: &mut Stk,
@@ -346,7 +347,8 @@ impl Parser<'_> {
 	/// Parse a mock `|foo:1..3|`
 	///
 	/// # Parser State
-	/// Expects the starting `|` already be eaten and its span passed as an argument.
+	/// Expects the starting `|` already be eaten and its span passed as an
+	/// argument.
 	pub(super) fn parse_mock(&mut self, start: Span) -> ParseResult<Mock> {
 		let name = self.next_token_value::<Ident>()?.into_string();
 		expected!(self, t!(":"));
@@ -475,8 +477,8 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	/// Parses a strand with legacy rules, parsing to a record id, datetime or uuid if the string
-	/// matches.
+	/// Parses a strand with legacy rules, parsing to a record id, datetime or
+	/// uuid if the string matches.
 	pub(super) async fn reparse_legacy_strand(&mut self, ctx: &mut Stk, text: Strand) -> Literal {
 		if let Ok(x) = Parser::new(text.as_bytes()).parse_record_id(ctx).await {
 			return Literal::RecordId(x);

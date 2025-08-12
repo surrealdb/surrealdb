@@ -1,9 +1,11 @@
-use crate::syn;
-use crate::val::{Object, Strand, Value};
-use jsonwebtoken::{Algorithm, Header};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::LazyLock;
+
+use jsonwebtoken::{Algorithm, Header};
+use serde::{Deserialize, Serialize};
+
+use crate::syn;
+use crate::val::{Object, Strand, Value};
 
 pub static HEADER: LazyLock<Header> = LazyLock::new(|| Header::new(Algorithm::HS512));
 

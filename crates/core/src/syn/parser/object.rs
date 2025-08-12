@@ -1,5 +1,6 @@
 use reblessive::Stk;
 
+use super::mac::unexpected;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{Block, Expr, Literal};
 use crate::syn::lexer::compound;
@@ -7,8 +8,6 @@ use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser, enter_object_recursion};
 use crate::syn::token::{Glued, Span, TokenKind, t};
 use crate::val::Strand;
-
-use super::mac::unexpected;
 
 impl Parser<'_> {
 	/// Parse an production which starts with an `{`
@@ -79,8 +78,8 @@ impl Parser<'_> {
 	/// Parses a block of statements
 	///
 	/// # Parser State
-	/// Expects the starting `{` to have already been eaten and its span to be handed to this
-	/// functions as the `start` parameter.
+	/// Expects the starting `{` to have already been eaten and its span to be
+	/// handed to this functions as the `start` parameter.
 	pub async fn parse_block(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Block> {
 		let mut statements = Vec::new();
 		loop {
@@ -99,8 +98,8 @@ impl Parser<'_> {
 		Ok(Block(statements))
 	}
 
-	/// Parse a single entry in the object, i.e. `field: value + 1` in the object `{ field: value +
-	/// 1 }`
+	/// Parse a single entry in the object, i.e. `field: value + 1` in the
+	/// object `{ field: value + 1 }`
 	async fn parse_object_entry(&mut self, ctx: &mut Stk) -> ParseResult<(String, Expr)> {
 		let text = self.parse_object_key()?;
 		expected!(self, t!(":"));

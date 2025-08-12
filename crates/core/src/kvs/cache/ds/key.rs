@@ -1,5 +1,6 @@
-use super::lookup::Lookup;
 use uuid::Uuid;
+
+use super::lookup::Lookup;
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub(crate) enum Key {

@@ -1,6 +1,12 @@
+//#[cfg(not(target_family = "wasm"))]
+//use async_graphql::BatchRequest;
 use std::mem;
 use std::sync::Arc;
 
+use anyhow::{Result, ensure};
+
+#[cfg(not(target_family = "wasm"))]
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::capabilities::MethodTarget;
 use crate::dbs::{QueryType, Response, Variables};
 use crate::err::Error;
@@ -13,12 +19,6 @@ use crate::sql::{
 	SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
 use crate::val::{Array, Object, Strand, Value};
-use anyhow::{Result, ensure};
-
-//#[cfg(not(target_family = "wasm"))]
-//use async_graphql::BatchRequest;
-#[cfg(not(target_family = "wasm"))]
-use crate::dbs::capabilities::ExperimentalTarget;
 
 /// utility function converting a `Value::Strand` into a `Expr::Table`
 fn value_to_table(value: Value) -> Expr {
@@ -88,7 +88,8 @@ pub trait RpcProtocolV2: RpcContext {
 		}
 		// For both ns+db, string = change, null = unset, none = do nothing
 		// We need to be able to adjust either ns or db without affecting the other
-		// To be able to select a namespace, and then list resources in that namespace, as an example
+		// To be able to select a namespace, and then list resources in that namespace,
+		// as an example
 		let (ns, db) = extract_args::<(Value, Value)>(params.0)
 			.ok_or(RpcError::InvalidParams("Expected (ns, db)".to_string()))?;
 		// Get the context lock
@@ -131,8 +132,9 @@ pub trait RpcProtocolV2: RpcContext {
 		Ok(Data::Other(Value::None))
 	}
 
-	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of a string.
-	// This will allow returning refresh tokens as well as any additional credential resulting from signing up.
+	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of
+	// a string. This will allow returning refresh tokens as well as any additional
+	// credential resulting from signing up.
 	async fn signup(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Some(Value::Object(params)) = extract_args(params.0) else {
@@ -163,8 +165,9 @@ pub trait RpcProtocolV2: RpcContext {
 		out.map(Data::Other).map_err(Into::into)
 	}
 
-	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of a string.
-	// This will allow returning refresh tokens as well as any additional credential resulting from signing in.
+	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of
+	// a string. This will allow returning refresh tokens as well as any additional
+	// credential resulting from signing in.
 	async fn signin(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Some(Value::Object(params)) = extract_args(params.0) else {
@@ -256,8 +259,8 @@ pub trait RpcProtocolV2: RpcContext {
 	async fn info(&self) -> Result<Data, RpcError> {
 		let what = vec![Expr::Param(Param::from_strand(strand!("auth").to_owned()))];
 
-		// TODO: Check if this can be replaced by just evaluating the param or a `$auth.*`
-		// expression
+		// TODO: Check if this can be replaced by just evaluating the param or a
+		// `$auth.*` expression
 		// Specify the SQL query string
 		let sql = SelectStatement {
 			expr: Fields::all(),
@@ -303,8 +306,8 @@ pub trait RpcProtocolV2: RpcContext {
 
 		crate::rpc::check_protected_param(&key)?;
 
-		// TODO(3.0.0): The value inversion PR has removed the ability to set a value from an
-		// expression.
+		// TODO(3.0.0): The value inversion PR has removed the ability to set a value
+		// from an expression.
 		// Maybe reintroduce.
 
 		let mutex = self.lock();
@@ -1120,7 +1123,8 @@ where
 	};
 	// Post-process hooks for web layer
 	for response in &res {
-		// This error should be unreachable because we shouldn't proceed if there's no handler
+		// This error should be unreachable because we shouldn't proceed if there's no
+		// handler
 		match &response.query_type {
 			QueryType::Live => {
 				if let Ok(Value::Uuid(lqid)) = &response.result {

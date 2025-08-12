@@ -1,9 +1,10 @@
-use crate::err::Error;
-use crate::expr::Algorithm;
-use crate::val::Duration;
 use anyhow::{Result, bail};
 use chrono::{Duration as ChronoDuration, Utc};
 use jsonwebtoken::EncodingKey;
+
+use crate::err::Error;
+use crate::expr::Algorithm;
+use crate::val::Duration;
 
 pub(crate) fn config(alg: Algorithm, key: &str) -> Result<EncodingKey> {
 	match alg {

@@ -1,7 +1,8 @@
 //! Stores Things of an HNSW index
+use serde::{Deserialize, Serialize};
+
 use crate::kvs::KVKey;
 use crate::val::RecordIdKey;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Hi<'a> {

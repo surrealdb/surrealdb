@@ -83,7 +83,6 @@
 ///
 /// crate::key::sequence::st             /*{ns}*{db}*{tb}*{sq}!st{id}
 /// crate::key::sequence::ba             /*{ns}*{db}*{tb}*{sq}!ba{start}
-///
 pub(crate) mod category;
 pub(crate) mod change;
 pub(crate) mod database;

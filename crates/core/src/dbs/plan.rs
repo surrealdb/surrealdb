@@ -1,9 +1,10 @@
+use std::collections::HashMap;
+
 use crate::ctx::Context;
 use crate::dbs::result::Results;
 use crate::dbs::{Iterable, Statement};
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Object, Strand, Value};
-use std::collections::HashMap;
 
 pub(super) struct Plan {
 	pub(super) do_iterate: bool,

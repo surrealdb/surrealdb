@@ -1,3 +1,10 @@
+use std::fmt::{self, Display, Formatter, Write as _};
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -6,12 +13,6 @@ use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::literal::ObjectEntry;
 use crate::expr::{Expr, FlowResultExt as _, RecordIdKeyRangeLit};
 use crate::val::{Array, Object, RecordIdKey, Strand, Uuid};
-
-use anyhow::Result;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter, Write as _};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]

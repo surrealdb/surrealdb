@@ -1,3 +1,7 @@
+use anyhow::{Result, bail, ensure};
+use reblessive::tree::Stk;
+
+use super::IgnoreError;
 use crate::ctx::Context;
 use crate::dbs::{Options, Statement, Workable};
 use crate::doc::Document;
@@ -8,10 +12,6 @@ use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::permission::Permission;
 use crate::iam::Action;
 use crate::val::Value;
-use anyhow::{Result, bail, ensure};
-use reblessive::tree::Stk;
-
-use super::IgnoreError;
 
 impl Document {
 	/// Checks whether this operation is allowed on

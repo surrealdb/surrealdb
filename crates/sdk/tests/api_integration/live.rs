@@ -26,9 +26,8 @@ use tokio::sync::RwLock;
 use tracing::info;
 use ulid::Ulid;
 
-use crate::api_integration::ApiRecordId;
-
 use super::{CreateDb, NS};
+use crate::api_integration::ApiRecordId;
 
 const LQ_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_NOTIFICATIONS: usize = 100;

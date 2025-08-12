@@ -1,14 +1,16 @@
 //! Index Sequence State Key Structure
 //!
-//! This module defines the `Is` key structure used to store distributed sequence states
-//! for full-text search document ID generation. The key enables concurrent indexing
-//! by maintaining a sequence state per node in a distributed system.
+//! This module defines the `Is` key structure used to store distributed
+//! sequence states for full-text search document ID generation. The key enables
+//! concurrent indexing by maintaining a sequence state per node in a
+//! distributed system.
 //!
 //! # Purpose
 //!
-//! The `Is` key stores the state of distributed sequences used to provide unique numeric
-//! IDs to documents during full-text indexing operations. This allows multiple nodes
-//! to concurrently index documents while maintaining unique document identifiers.
+//! The `Is` key stores the state of distributed sequences used to provide
+//! unique numeric IDs to documents during full-text indexing operations. This
+//! allows multiple nodes to concurrently index documents while maintaining
+//! unique document identifiers.
 //!
 //! # Key Structure
 //!
@@ -20,11 +22,12 @@
 //! - `tb`: Table identifier
 //! - `ix`: Index identifier
 //! - `nid`: Node UUID (16 bytes, compact serialized)
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::kvs::sequences::SequenceState;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Is<'a> {

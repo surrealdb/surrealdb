@@ -1,3 +1,9 @@
+use anyhow::{Result, bail, ensure};
+use geo::Point;
+use reblessive::tree::Stk;
+use rust_decimal::Decimal;
+
+use super::args::Optional;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -8,12 +14,6 @@ use crate::val::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, RecordIdKey,
 	RecordIdKeyRange, Strand, Table, Uuid, Value,
 };
-use anyhow::{Result, bail, ensure};
-use geo::Point;
-use reblessive::tree::Stk;
-use rust_decimal::Decimal;
-
-use super::args::Optional;
 
 pub fn array((val,): (Value,)) -> Result<Value> {
 	Ok(val.cast_to::<Array>()?.into())
@@ -211,10 +211,11 @@ pub fn uuid((val,): (Value,)) -> Result<Value> {
 }
 
 pub mod is {
+	use anyhow::Result;
+
 	use crate::expr::Ident;
 	use crate::fnc::args::Optional;
 	use crate::val::{Geometry, Strand, Value};
-	use anyhow::Result;
 
 	pub fn array((arg,): (Value,)) -> Result<Value> {
 		Ok((arg).is_array().into())

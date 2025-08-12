@@ -1,3 +1,6 @@
+use chrono::offset::TimeZone;
+use chrono::{NaiveDate, Offset, Utc};
+
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::{
 	AccessType, BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess, JwtAccessIssue,
@@ -37,11 +40,9 @@ use crate::sql::{
 	Mock, Order, Output, Param, Part, Permission, Permissions, RecordIdKeyLit, RecordIdLit,
 	Scoring, Split, Splits, Start, TableType, Timeout, TopLevelExpr, With,
 };
+use crate::syn;
 use crate::syn::parser::ParserSettings;
-use crate::syn::{self};
 use crate::val::{Datetime, Duration, Number, Strand, Uuid};
-use chrono::offset::TimeZone;
-use chrono::{NaiveDate, Offset, Utc};
 
 fn ident_field(name: &str) -> Expr {
 	Expr::Idiom(Idiom(vec![Part::Field(Ident::new(name.to_string()).unwrap())]))
@@ -1034,7 +1035,8 @@ fn parse_define_access_record() {
 						}),
 						issue: Some(JwtAccessIssue {
 							alg: Algorithm::Hs384,
-							// Issuer key matches verification key by default in symmetric algorithms.
+							// Issuer key matches verification key by default in symmetric
+							// algorithms.
 							key: "foo".to_string(),
 						}),
 					},
@@ -1050,7 +1052,8 @@ fn parse_define_access_record() {
 			}))),
 		);
 	}
-	// Verification and issuing with JWT are explicitly defined with two different keys.
+	// Verification and issuing with JWT are explicitly defined with two different
+	// keys.
 	{
 		let res = syn::parse_with(r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" DURATION FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
 		assert_eq!(
@@ -1084,7 +1087,8 @@ fn parse_define_access_record() {
 			}))),
 		);
 	}
-	// Verification and issuing with JWT are explicitly defined with two different keys. Refresh specified before JWT.
+	// Verification and issuing with JWT are explicitly defined with two different
+	// keys. Refresh specified before JWT.
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH REFRESH WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" DURATION FOR GRANT 10d, FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),
@@ -1139,7 +1143,8 @@ fn parse_define_access_record() {
 			}))),
 		);
 	}
-	// Verification and issuing with JWT are explicitly defined with two different keys. Refresh specified after JWT.
+	// Verification and issuing with JWT are explicitly defined with two different
+	// keys. Refresh specified after JWT.
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" WITH REFRESH DURATION FOR GRANT 10d, FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),
@@ -1193,7 +1198,8 @@ fn parse_define_access_record() {
 			}))),
 		);
 	}
-	// Verification and issuing with JWT are explicitly defined with two different keys. Token duration is explicitly defined.
+	// Verification and issuing with JWT are explicitly defined with two different
+	// keys. Token duration is explicitly defined.
 	{
 		let res = syn::parse_with(r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM RS256 KEY 'foo' WITH ISSUER KEY 'bar' DURATION FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
 		assert_eq!(
@@ -1227,7 +1233,8 @@ fn parse_define_access_record() {
 			}))),
 		);
 	}
-	// kjjification with JWT is explicitly defined only with symmetric key. Token duration is none.
+	// kjjification with JWT is explicitly defined only with symmetric key. Token
+	// duration is none.
 	{
 		syn::parse_with(
 			r#"DEFINE ACCESS a ON DB TYPE RECORD DURATION FOR TOKEN NONE"#.as_bytes(),
@@ -1472,7 +1479,8 @@ fn parse_define_access_bearer() {
 						}),
 						issue: Some(JwtAccessIssue {
 							alg: Algorithm::Hs384,
-							// Issuer key matches verification key by default in symmetric algorithms.
+							// Issuer key matches verification key by default in symmetric
+							// algorithms.
 							key: "foo".to_string(),
 						}),
 					},
@@ -1513,7 +1521,8 @@ fn parse_define_access_bearer() {
 						}),
 						issue: Some(JwtAccessIssue {
 							alg: Algorithm::Hs384,
-							// Issuer key matches verification key by default in symmetric algorithms.
+							// Issuer key matches verification key by default in symmetric
+							// algorithms.
 							key: "foo".to_string(),
 						}),
 					},
@@ -1668,8 +1677,9 @@ fn parse_define_field() {
 
 	// Invalid DELETE permission
 	{
-		// TODO(gguillemas): Providing the DELETE permission should return a parse error in 3.0.0.
-		// Currently, the DELETE permission is just ignored to maintain backward compatibility.
+		// TODO(gguillemas): Providing the DELETE permission should return a parse error
+		// in 3.0.0. Currently, the DELETE permission is just ignored to maintain
+		// backward compatibility.
 		let res = syn::parse_with(
 			r#"DEFINE FIELD foo ON TABLE bar PERMISSIONS FOR DELETE NONE"#.as_bytes(),
 			async |parser, stk| parser.parse_expr_inherit(stk).await,

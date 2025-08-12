@@ -1,21 +1,10 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::{ControlFlow, FlowResult};
-use crate::val::Value;
+#[cfg(feature = "ml")]
+use std::collections::HashMap;
+use std::fmt;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-
-#[cfg(feature = "ml")]
-use crate::expr::Permission;
-#[cfg(feature = "ml")]
-use crate::iam::Action;
-#[cfg(feature = "ml")]
-use std::collections::HashMap;
 #[cfg(feature = "ml")]
 use surrealml::errors::error::SurrealError;
 #[cfg(feature = "ml")]
@@ -24,6 +13,17 @@ use surrealml::execution::compute::ModelComputation;
 use surrealml::ndarray as mlNdarray;
 #[cfg(feature = "ml")]
 use surrealml::storage::surml_file::SurMlFile;
+
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+#[cfg(feature = "ml")]
+use crate::expr::Permission;
+use crate::expr::{ControlFlow, FlowResult};
+#[cfg(feature = "ml")]
+use crate::iam::Action;
+use crate::val::Value;
 
 #[cfg(feature = "ml")]
 const ARGUMENTS: &str = "The model expects 1 argument. The argument can be either a number, an object, or an array of numbers.";

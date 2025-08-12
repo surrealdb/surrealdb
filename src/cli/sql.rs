@@ -1,9 +1,3 @@
-use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
-use crate::cli::abstraction::{
-	AuthArguments, DatabaseConnectionArguments, LevelSelectionArguments,
-};
-use crate::cnf::PKG_VERSION;
-use crate::dbs::DbsCapabilities;
 use anyhow::{Result, anyhow};
 use clap::Args;
 use futures::StreamExt;
@@ -12,13 +6,20 @@ use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
 use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
-use surrealdb::dbs::Capabilities as CoreCapabilities;
 use surrealdb::engine::any::{self, connect};
 use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::Config;
 use surrealdb::{Notification, Response, Value};
-use surrealdb_core::sql::{Expr, Param, TopLevelExpr};
-use surrealdb_core::val;
+
+use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
+use crate::cli::abstraction::{
+	AuthArguments, DatabaseConnectionArguments, LevelSelectionArguments,
+};
+use crate::cnf::PKG_VERSION;
+use crate::core::dbs::Capabilities as CoreCapabilities;
+use crate::core::sql::{Expr, Param, TopLevelExpr};
+use crate::core::val;
+use crate::dbs::DbsCapabilities;
 
 #[derive(Args, Debug)]
 pub struct SqlCommandArguments {
@@ -72,8 +73,11 @@ pub async fn init(
 	let capabilities = capabilities.into_cli_capabilities();
 	let config = Config::new().capabilities(capabilities.clone().into());
 	let is_local = any::__into_endpoint(&endpoint)?.parse_kind()?.is_local();
-	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
-	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
+	// If username and password are specified, and we are connecting to a remote
+	// SurrealDB server, then we need to authenticate. If we are connecting
+	// directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we
+	// don't need to authenticate because we use an embedded (local) SurrealDB
+	// instance with auth disabled.
 	let client = if username.is_some() && password.is_some() && !is_local {
 		debug!("Connecting to the database engine with authentication");
 		let creds = CredentialsBuilder::default()
@@ -191,7 +195,7 @@ pub async fn init(
 			continue;
 		}
 		// Complete the request
-		match surrealdb_core::syn::parse_with_capabilities(&line, &capabilities) {
+		match crate::core::syn::parse_with_capabilities(&line, &capabilities) {
 			Ok(mut query) => {
 				let mut namespace = None;
 				let mut database = None;
@@ -248,9 +252,11 @@ pub async fn init(
 
 				// Process the last `use` statements, if any
 				if namespace.is_some() || database.is_some() {
-					// Use the namespace provided in the query if any, otherwise use the one in the prompt
+					// Use the namespace provided in the query if any, otherwise use the one in the
+					// prompt
 					let namespace = namespace.as_deref().unwrap_or(prompt_ns);
-					// Use the database provided in the query if any, otherwise use the one in the prompt
+					// Use the database provided in the query if any, otherwise use the one in the
+					// prompt
 					let database = database.as_deref().unwrap_or(prompt_db);
 					// If the database is empty we should only use the namespace
 					if database.is_empty() {
@@ -442,7 +448,7 @@ impl Validator for InputValidator<'_> {
 		} else if input.is_empty() {
 			Valid(None) // Ignore empty lines
 		} else {
-			match surrealdb::syn::parse_with_capabilities(input, self.capabilities) {
+			match crate::core::syn::parse_with_capabilities(input, self.capabilities) {
 				Err(e) => Invalid(Some(format!(" --< {e}"))),
 				_ => Valid(None),
 			}

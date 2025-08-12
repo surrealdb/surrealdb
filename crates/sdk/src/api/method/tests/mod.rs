@@ -5,16 +5,18 @@ mod protocol;
 mod server;
 mod types;
 
+use std::ops::Bound;
+use std::sync::LazyLock;
+
+use protocol::{Client, Test};
+use semver::Version;
+use types::{USER, User};
+
 use crate::api::method::tests::types::AuthParams;
 use crate::api::opt::PatchOp;
 use crate::api::opt::auth::{Database, Jwt, Namespace, Record, Root};
 use crate::api::{Response as QueryResponse, Surreal};
-use protocol::{Client, Test};
-use semver::Version;
-use std::ops::Bound;
-use std::sync::LazyLock;
-use surrealdb_core::expr::TopLevelExpr;
-use types::{USER, User};
+use crate::core::expr::TopLevelExpr;
 
 static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
 

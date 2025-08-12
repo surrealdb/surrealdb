@@ -1,17 +1,16 @@
-use crate::api::conn::Command;
-use crate::api::{Connection, Result};
-use crate::method::OnceLockExt;
-use crate::{Surreal, Value};
-use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
+use serde::de::DeserializeOwned;
+
 use super::BoxFuture;
+use crate::api::conn::Command;
+use crate::api::{Connection, Result};
+use crate::method::OnceLockExt;
+use crate::{Surreal, Value};
 
 /// An Insert Relation future
-///
-///
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct InsertRelation<'r, C: Connection, R> {
@@ -35,7 +34,8 @@ where
 		}
 	}
 
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> InsertRelation<'static, C, R> {
 		InsertRelation {
 			client: Cow::Owned(self.client.into_owned()),
