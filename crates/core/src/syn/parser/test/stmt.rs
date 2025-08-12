@@ -40,8 +40,8 @@ use crate::sql::{
 	Mock, Order, Output, Param, Part, Permission, Permissions, RecordIdKeyLit, RecordIdLit,
 	Scoring, Split, Splits, Start, TableType, Timeout, TopLevelExpr, With,
 };
+use crate::syn;
 use crate::syn::parser::ParserSettings;
-use crate::syn::{self};
 use crate::val::{Datetime, Duration, Number, Strand, Uuid};
 
 fn ident_field(name: &str) -> Expr {

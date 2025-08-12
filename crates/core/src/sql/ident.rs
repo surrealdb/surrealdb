@@ -1,4 +1,4 @@
-use std::fmt::{self};
+use std::fmt;
 use std::ops::Deref;
 
 use crate::sql::escape::EscapeIdent;

@@ -6,8 +6,8 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use super::value::CoerceErrorExt;
+use crate::expr;
 use crate::expr::kind::HasKind;
-use crate::expr::{self};
 use crate::val::value::{Coerce, CoerceError};
 use crate::val::{Array, Number, Value};
 

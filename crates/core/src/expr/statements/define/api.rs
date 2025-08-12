@@ -1,4 +1,4 @@
-use std::fmt::{self};
+use std::fmt;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;

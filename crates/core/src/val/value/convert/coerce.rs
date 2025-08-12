@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
-use std::fmt::{self};
+use std::fmt;
 use std::hash::BuildHasher;
 
 use geo::Point;

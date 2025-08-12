@@ -1,4 +1,4 @@
-use std::fmt::{self};
+use std::fmt;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

@@ -17,8 +17,7 @@ use crate::core::ml::execution::session::set_environment;
 use crate::core::options::EngineOptions;
 use crate::dbs::StartCommandDbsOptions;
 use crate::net::client_ip::ClientIp;
-use crate::net::{self};
-use crate::{dbs, env};
+use crate::{dbs, env, net};
 
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {

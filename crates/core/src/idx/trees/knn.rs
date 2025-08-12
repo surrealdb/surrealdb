@@ -638,7 +638,7 @@ pub(super) mod tests {
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
-	use crate::syn::{self};
+	use crate::syn;
 	use crate::val::{Number, Value};
 
 	pub(crate) fn get_seed_rnd() -> SmallRng {

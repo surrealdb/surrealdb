@@ -281,7 +281,7 @@ impl<W: std::fmt::Write> std::fmt::Write for Pretty<W> {
 
 #[cfg(test)]
 mod tests {
-	use crate::syn::{self};
+	use crate::syn;
 
 	#[test]
 	fn pretty_query() {
