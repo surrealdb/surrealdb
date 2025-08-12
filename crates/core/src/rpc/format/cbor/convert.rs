@@ -8,7 +8,6 @@ use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use rust_decimal::Decimal;
 
 use crate::syn;
-
 use crate::val::{
 	self, Array, DecimalExt, Geometry, Number, Object, Range, RecordIdKey, RecordIdKeyRange, Table,
 	Uuid, Value,

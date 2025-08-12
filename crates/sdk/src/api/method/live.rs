@@ -76,8 +76,8 @@ where
 						op: BinaryOperator::MoreThanEqual,
 						right: Box::new(Expr::Literal(Literal::RecordId(
 							crate::core::expr::RecordIdLit {
-								tb: record.table.clone(),
-								id: x.into_literal(),
+								table: record.table.clone(),
+								key: x.into_literal(),
 							},
 						))),
 					}),
@@ -86,8 +86,8 @@ where
 						op: BinaryOperator::MoreThan,
 						right: Box::new(Expr::Literal(Literal::RecordId(
 							crate::core::expr::RecordIdLit {
-								tb: record.table.clone(),
-								id: x.into_literal(),
+								table: record.table.clone(),
+								key: x.into_literal(),
 							},
 						))),
 					}),
@@ -99,8 +99,8 @@ where
 						op: BinaryOperator::LessThanEqual,
 						right: Box::new(Expr::Literal(Literal::RecordId(
 							crate::core::expr::RecordIdLit {
-								tb: record.table,
-								id: x.into_literal(),
+								table: record.table,
+								key: x.into_literal(),
 							},
 						))),
 					}),
@@ -109,8 +109,8 @@ where
 						op: BinaryOperator::LessThan,
 						right: Box::new(Expr::Literal(Literal::RecordId(
 							crate::core::expr::RecordIdLit {
-								tb: record.table,
-								id: x.into_literal(),
+								table: record.table,
+								key: x.into_literal(),
 							},
 						))),
 					}),
