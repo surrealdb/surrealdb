@@ -435,7 +435,7 @@ impl Parser<'_> {
 		expected!(self, t!("FROM"));
 		let what = match self.peek().kind {
 			t!("$param") => Expr::Param(self.next_token_value()?),
-			_ => Expr::Table(self.next_token_value()?),
+			_ => self.parse_expr_table(stk).await?,
 		};
 		let cond = self.try_parse_condition(stk).await?;
 		let fetch = self.try_parse_fetch(stk).await?;
