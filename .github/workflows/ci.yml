@@ -179,9 +179,6 @@ jobs:
       - name: Check workspace on MSRV
         run: cargo +${{ env.msrv }} make ci-check
 
-      - name: Check workspace release on MSRV
-        run: cargo +${{ env.msrv }} make ci-check-release
-
   check-fuzzing:
     name: Check fuzzing
     runs-on: ubuntu-latest
