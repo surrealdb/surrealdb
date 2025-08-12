@@ -8,6 +8,7 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::capabilities::MethodTarget;
 use crate::dbs::{QueryType, Response};
 use crate::err::Error;
+use crate::kvs::{LockType, TransactionType};
 use crate::rpc::args::extract_args;
 use crate::rpc::{Data, Method, RpcContext, RpcError};
 use crate::sql::{
@@ -107,7 +108,14 @@ pub trait RpcProtocolV1: RpcContext {
 		match ns {
 			Value::None => (),
 			Value::Null => session.ns = None,
-			Value::Strand(ns) => session.ns = Some(ns.into_string()),
+			Value::Strand(ns) => {
+				let tx =
+					self.kvs().transaction(TransactionType::Write, LockType::Optimistic).await?;
+				tx.get_or_add_ns(&ns, self.kvs().is_strict_mode()).await?;
+				tx.commit().await?;
+
+				session.ns = Some(ns.into_string())
+			}
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
 					"Expected ns to be string, got {unexpected:?}"
@@ -118,7 +126,14 @@ pub trait RpcProtocolV1: RpcContext {
 		match db {
 			Value::None => (),
 			Value::Null => session.db = None,
-			Value::Strand(db) => session.db = Some(db.into_string()),
+			Value::Strand(db) => {
+				let ns = session.ns.clone().unwrap();
+				let tx =
+					self.kvs().transaction(TransactionType::Write, LockType::Optimistic).await?;
+				tx.ensure_ns_db(&ns, &db, self.kvs().is_strict_mode()).await?;
+				tx.commit().await?;
+				session.db = Some(db.into_string())
+			}
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
 					"Expected db to be string, got {unexpected:?}"

@@ -6,19 +6,19 @@ strict = true
 [test]
 
 [[test.results]]
-value = "NONE"
-
-[[test.results]]
 error = "The database 'test' does not exist"
 
 [[test.results]]
-error = "The database 'test' does not exist"
+error = "Specify a database to use"
 
 [[test.results]]
-error = "The database 'test' does not exist"
+error = "Specify a database to use"
 
 [[test.results]]
-error = "The database 'test' does not exist"
+error = "Specify a database to use"
+
+[[test.results]]
+error = "Specify a database to use"
 */
 
 USE DB test;

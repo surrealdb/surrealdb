@@ -488,7 +488,6 @@ pub trait Transaction: requirements::TransactionRequirements {
 		k.extend_from_slice(&ts.as_bytes());
 		k.extend_from_slice(&suffix);
 
-		tracing::info!("set_versionstamp: {:?}", k);
 		self.set(k, val, None).await
 	}
 

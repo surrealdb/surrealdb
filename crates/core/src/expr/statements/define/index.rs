@@ -55,12 +55,6 @@ impl DefineIndexStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 
-		eprintln!("name={}", self.name);
-		eprintln!("name={}", self.name);
-		eprintln!("name={}", self.name);
-		eprintln!("name={}", self.name);
-		eprintln!("name={}", self.name);
-
 		let (ns, db) = opt.ns_db()?;
 		let tb = txn.ensure_ns_db_tb(ns, db, &self.what, opt.strict).await?;
 

@@ -163,7 +163,7 @@ use surrealdb_core::expr::{
 	LogicalPlan, Output, SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
 use surrealdb_core::iam;
-use surrealdb_core::kvs::Datastore;
+use surrealdb_core::kvs::{Datastore, LockType, TransactionType};
 use surrealdb_core::val::{self, Strand};
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -201,7 +201,6 @@ use futures::StreamExt;
 use surrealdb_core::{
 	expr::statements::{DefineModelStatement, DefineStatement},
 	iam::{Action, ResourceKind, check::check_ns_db},
-	kvs::{LockType, TransactionType},
 	ml::storage::surml_file::SurMlFile,
 };
 
@@ -619,9 +618,16 @@ async fn router(
 			database,
 		} => {
 			if let Some(ns) = namespace {
+				let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
+				tx.get_or_add_ns(&ns, kvs.is_strict_mode()).await?;
+				tx.commit().await?;
 				session.write().await.ns = Some(ns);
 			}
 			if let Some(db) = database {
+				let ns = session.read().await.ns.clone().unwrap();
+				let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
+				tx.ensure_ns_db(&ns, &db, kvs.is_strict_mode()).await?;
+				tx.commit().await?;
 				session.write().await.db = Some(db);
 			}
 			Ok(DbResponse::Other(val::Value::None))

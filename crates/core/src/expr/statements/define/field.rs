@@ -76,10 +76,6 @@ impl DefineFieldStatement {
 		let txn = ctx.tx();
 		// Get the name of the field
 		let fd = self.name.as_raw_string();
-		eprintln!("fd={}", fd);
-		eprintln!("fd={}", fd);
-		eprintln!("fd={}", fd);
-		eprintln!("fd={}", fd);
 		// Check if the definition exists
 		if let Some(fd) = txn.get_tb_field(ns, db, &self.what, &fd).await? {
 			match self.kind {

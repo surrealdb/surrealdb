@@ -459,6 +459,10 @@ impl Datastore {
 		self
 	}
 
+	pub fn is_strict_mode(&self) -> bool {
+		self.strict
+	}
+
 	/// Specify whether this datastore should enable live query notifications
 	pub fn with_notifications(mut self) -> Self {
 		self.notification_channel = Some(async_channel::bounded(LQ_CHANNEL_SIZE));

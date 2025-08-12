@@ -2,12 +2,9 @@
 [env]
 namespace = false
 database = false
-clean = true
+strict = true
 
 [test]
-
-[[test.results]]
-value = "NONE"
 
 [[test.results]]
 value = "NONE"
@@ -16,10 +13,13 @@ value = "NONE"
 error = "The namespace 'foo' does not exist"
 
 [[test.results]]
-value = "NONE"
+error = "Specify a namespace to use"
 
 [[test.results]]
 error = "The namespace 'TEST' does not exist"
+
+[[test.results]]
+error = "Specify a namespace to use"
 */
 
 

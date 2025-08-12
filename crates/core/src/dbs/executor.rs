@@ -45,18 +45,30 @@ impl Executor {
 		}
 	}
 
-	fn execute_use_statement(&mut self, stmt: UseStatement) -> Result<()> {
+	async fn execute_use_statement(&mut self, kvs: &Datastore, stmt: UseStatement) -> Result<()> {
 		let ctx_ref = Arc::get_mut(&mut self.ctx).ok_or_else(|| {
 			Error::unreachable(format_args!("Tried to unfreeze a Context with multiple references"))
 		})?;
 
 		if let Some(ns) = stmt.ns {
+			let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
+			tx.get_or_add_ns(&ns, self.opt.strict).await?;
+			tx.commit().await?;
+
 			let mut session = ctx_ref.value("session").unwrap_or(&Value::None).clone();
 			self.opt.set_ns(Some(ns.as_str().into()));
 			session.put(NS.as_ref(), ns.into_strand().into());
 			ctx_ref.add_value("session", session.into());
 		}
 		if let Some(db) = stmt.db {
+			let Some(ns) = &self.opt.ns else {
+				return Err(anyhow::anyhow!("Cannot use database without namespace"));
+			};
+
+			let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
+			tx.ensure_ns_db(ns, &db, self.opt.strict).await?;
+			tx.commit().await?;
+
 			let mut session = ctx_ref.value("session").unwrap_or(&Value::None).clone();
 			self.opt.set_db(Some(db.as_str().into()));
 			session.put(DB.as_ref(), db.into_strand().into());
@@ -286,7 +298,9 @@ impl Executor {
 
 		match stmt {
 			// These statements don't need a transaction.
-			TopLevelExpr::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
+			TopLevelExpr::Use(stmt) => {
+				self.execute_use_statement(kvs, stmt).await.map(|_| Value::None)
+			}
 			stmt => self.execute_plan_impl(kvs, start, stmt).await,
 		}
 	}
@@ -563,7 +577,9 @@ impl Executor {
 					}
 					Err(e) => Err(e),
 				},
-				TopLevelExpr::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
+				TopLevelExpr::Use(stmt) => {
+					self.execute_use_statement(kvs, stmt).await.map(|_| Value::None)
+				}
 				stmt => {
 					skip_remaining = matches!(stmt, TopLevelExpr::Expr(Expr::Return(_)));
 

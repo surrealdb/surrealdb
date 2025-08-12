@@ -1480,7 +1480,22 @@ pub async fn changefeed(new_db: impl CreateDb) {
 		"[
         {
             define_table: {
-                name: 'testuser'
+                name: 'testuser',
+				changefeed: {
+					expiry: '1h',
+					original: false
+				},
+				drop: false,
+				kind: {
+					kind: 'ANY'
+				},
+				permissions: {
+					create: false,
+					delete: false,
+					select: false,
+					update: false
+				},
+				schemafull: false
             }
         }
     ]"
