@@ -43,7 +43,7 @@ async fn live_permissions() -> Result<()> {
 	)
 	.with_rt(true);
 	let sql = "
-		LIVE SELECT * FROM test;
+		LIVE SELECT * FROM type::table('test');
 		CREATE test:2;
 	";
 	let res = &mut dbs.execute(sql, &ses, None).await?;
