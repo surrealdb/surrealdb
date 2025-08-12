@@ -60,7 +60,7 @@ impl Value {
 			Value::Bytes(bytes) => {
 				JsonValue::Array(bytes.0.into_iter().map(|x| JsonValue::Number(x.into())).collect())
 			}
-			Value::Thing(thing) => JsonValue::String(thing.to_string()),
+			Value::RecordId(thing) => JsonValue::String(thing.to_string()),
 			// TODO: Maybe remove
 			Value::Regex(regex) => JsonValue::String(regex.0.to_string()),
 			Value::File(file) => JsonValue::String(file.to_string()),
@@ -145,17 +145,10 @@ fn polygon_into_json_value(polygon: Polygon) -> JsonValue {
 mod tests {
 	use crate::val::{self, RecordId, RecordIdKey, Value};
 
-	use chrono::DateTime;
-	use chrono::Utc;
-	use geo::MultiLineString;
-	use geo::MultiPoint;
-	use geo::MultiPolygon;
-	use geo::line_string;
-	use geo::point;
-	use geo::polygon;
+	use chrono::{DateTime, Utc};
+	use geo::{MultiLineString, MultiPoint, MultiPolygon, line_string, point, polygon};
 	use rust_decimal::Decimal;
-	use serde_json::Value as Json;
-	use serde_json::json;
+	use serde_json::{Value as Json, json};
 	use std::collections::BTreeMap;
 	use std::time::Duration;
 	use uuid::Uuid;
@@ -272,9 +265,9 @@ mod tests {
 		])),
 	)]
 	#[case::thing(
-		Value::Thing(RecordId{ table: "foo".to_string(), key: RecordIdKey::String("bar".into())}) ,
+		Value::RecordId(RecordId{ table: "foo".to_string(), key: RecordIdKey::String("bar".into())}) ,
 		json!("foo:bar"),
-		Value::Thing(RecordId{ table: "foo".to_string(), key: RecordIdKey::String("bar".into())}) ,
+		Value::RecordId(RecordId{ table: "foo".to_string(), key: RecordIdKey::String("bar".into())}) ,
 	)]
 	#[case::array(
 		Value::Array(val::Array(vec![])),

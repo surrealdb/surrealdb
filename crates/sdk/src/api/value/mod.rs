@@ -9,8 +9,7 @@ use std::fmt;
 use std::ops::{Deref, Index};
 use std::str::FromStr;
 use surrealdb_core::dbs::Action as CoreAction;
-use surrealdb_core::syn;
-use surrealdb_core::val;
+use surrealdb_core::{syn, val};
 use uuid::Uuid;
 
 mod convert;
@@ -212,7 +211,7 @@ impl From<RecordIdKey> for Value {
 
 impl From<RecordId> for Value {
 	fn from(key: RecordId) -> Self {
-		Value::from_inner(val::Value::Thing(key.0))
+		Value::from_inner(val::Value::RecordId(key.0))
 	}
 }
 

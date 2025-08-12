@@ -1,10 +1,11 @@
 use crate::dbs::Options;
-use crate::expr::FlowResultExt as _;
 use crate::expr::index::Index;
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
 use crate::expr::statements::{DefineFieldStatement, DefineIndexStatement};
-use crate::expr::{BinaryOperator, Cond, Expr, Ident, Idiom, Kind, Literal, Order, Part, With};
+use crate::expr::{
+	BinaryOperator, Cond, Expr, FlowResultExt as _, Ident, Idiom, Kind, Literal, Order, Part, With,
+};
 use crate::idx::planner::StatementContext;
 use crate::idx::planner::executor::{
 	KnnBruteForceExpression, KnnBruteForceExpressions, KnnExpressions,
