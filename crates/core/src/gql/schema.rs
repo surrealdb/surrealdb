@@ -224,7 +224,7 @@ pub fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> {
 		),
 		SurValue::Geometry(_) => return Err(resolver_error("unimplemented: Geometry types")),
 		SurValue::Bytes(b) => GqlValue::Binary(b.into_inner().into()),
-		SurValue::Thing(t) => GqlValue::String(t.to_string()),
+		SurValue::RecordId(t) => GqlValue::String(t.to_string()),
 		v => return Err(internal_error(format!("found unsupported value variant: {v:?}"))),
 	};
 	Ok(out)
@@ -588,7 +588,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 		Kind::Record(ref ts) => match val {
 			GqlValue::String(s) => match syn::thing(s) {
 				Ok(t) => match ts.contains(&t.tb.as_str().into()) {
-					true => Ok(SurValue::Thing(t.into())),
+					true => Ok(SurValue::RecordId(t.into())),
 					false => Err(type_error(kind, val)),
 				},
 				Err(_) => Err(type_error(kind, val)),

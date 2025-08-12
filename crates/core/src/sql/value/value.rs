@@ -156,7 +156,7 @@ impl SqlValue {
 		fields: OldValueRangeFields,
 		_revision: u16,
 	) -> Result<Self, revision::Error> {
-		Ok(SqlValue::Thing(Thing {
+		Ok(SqlValue::RecordId(Thing {
 			tb: fields.0.tb,
 			id: Id::Range(Box::new(IdRange {
 				beg: fields.0.beg,
@@ -246,7 +246,7 @@ impl SqlValue {
 		match self {
 			SqlValue::Bool(v) => *v,
 			SqlValue::Uuid(_) => true,
-			SqlValue::Thing(_) => true,
+			SqlValue::RecordId(_) => true,
 			SqlValue::Geometry(_) => true,
 			SqlValue::Datetime(_) => true,
 			SqlValue::Array(v) => !v.is_empty(),
@@ -261,7 +261,7 @@ impl SqlValue {
 	/// Check if this Value is a single Thing
 	pub fn is_thing_single(&self) -> bool {
 		match self {
-			SqlValue::Thing(t) => !matches!(t.id, Id::Range(_)),
+			SqlValue::RecordId(t) => !matches!(t.id, Id::Range(_)),
 			_ => false,
 		}
 	}
@@ -270,7 +270,7 @@ impl SqlValue {
 	pub fn is_thing_range(&self) -> bool {
 		matches!(
 			self,
-			SqlValue::Thing(Thing {
+			SqlValue::RecordId(Thing {
 				id: Id::Range(_),
 				..
 			})
@@ -280,7 +280,7 @@ impl SqlValue {
 	/// Check if this Value is a Thing, and belongs to a certain table
 	pub fn is_record_of_table(&self, table: String) -> bool {
 		match self {
-			SqlValue::Thing(Thing {
+			SqlValue::RecordId(Thing {
 				tb,
 				..
 			}) => *tb == table,
@@ -330,7 +330,7 @@ impl SqlValue {
 	/// Check if this Value is a Thing of a specific type
 	pub fn is_record_type(&self, types: &[Table]) -> bool {
 		match self {
-			SqlValue::Thing(v) => v.is_record_type(types),
+			SqlValue::RecordId(v) => v.is_record_type(types),
 			_ => false,
 		}
 	}
@@ -367,7 +367,7 @@ impl SqlValue {
 	pub fn is_singular_selector(&self) -> bool {
 		match self {
 			SqlValue::Object(_) => true,
-			t @ SqlValue::Thing(_) => t.is_thing_single(),
+			t @ SqlValue::RecordId(_) => t.is_thing_single(),
 			_ => false,
 		}
 	}
@@ -438,7 +438,7 @@ impl SqlValue {
 			| SqlValue::Array(_)
 			| SqlValue::Param(_)
 			| SqlValue::Edges(_)
-			| SqlValue::Thing(_)
+			| SqlValue::RecordId(_)
 			| SqlValue::Table(_) => true,
 			_ => false,
 		}
@@ -503,7 +503,7 @@ impl SqlValue {
 			SqlValue::Object(_) => Some(Kind::Object),
 			SqlValue::Geometry(geo) => Some(Kind::Geometry(vec![geo.as_type().to_string()])),
 			SqlValue::Bytes(_) => Some(Kind::Bytes),
-			SqlValue::Thing(thing) => Some(Kind::Record(vec![thing.tb.clone().into()])),
+			SqlValue::RecordId(thing) => Some(Kind::Record(vec![thing.tb.clone().into()])),
 			SqlValue::Param(_) => None,
 			SqlValue::Idiom(_) => None,
 			SqlValue::Table(_) => None,
@@ -576,7 +576,7 @@ impl SqlValue {
 		match self {
 			// This is an object so look for the id field
 			SqlValue::Object(mut v) => match v.remove("id") {
-				Some(SqlValue::Thing(v)) => Some(v),
+				Some(SqlValue::RecordId(v)) => Some(v),
 				_ => None,
 			},
 			// This is an array so take the first item
@@ -585,7 +585,7 @@ impl SqlValue {
 				_ => None,
 			},
 			// This is a record id already
-			SqlValue::Thing(v) => Some(v),
+			SqlValue::RecordId(v) => Some(v),
 			// There is no valid record id
 			_ => None,
 		}
@@ -618,7 +618,7 @@ impl SqlValue {
 			SqlValue::Bool(_) => true,
 			SqlValue::Bytes(_) => true,
 			SqlValue::Uuid(_) => true,
-			SqlValue::Thing(_) => true,
+			SqlValue::RecordId(_) => true,
 			SqlValue::Number(_) => true,
 			SqlValue::Strand(_) => true,
 			SqlValue::Duration(_) => true,
@@ -651,8 +651,8 @@ impl SqlValue {
 				SqlValue::Uuid(w) => v == w,
 				_ => false,
 			},
-			SqlValue::Thing(v) => match other {
-				SqlValue::Thing(w) => v == w,
+			SqlValue::RecordId(v) => match other {
+				SqlValue::RecordId(w) => v == w,
 				SqlValue::Regex(w) => w.regex().is_match(v.to_raw().as_str()),
 				_ => false,
 			},
@@ -663,7 +663,7 @@ impl SqlValue {
 			},
 			SqlValue::Regex(v) => match other {
 				SqlValue::Regex(w) => v == w,
-				SqlValue::Thing(w) => v.regex().is_match(w.to_raw().as_str()),
+				SqlValue::RecordId(w) => v.regex().is_match(w.to_raw().as_str()),
 				SqlValue::Strand(w) => v.regex().is_match(w.as_str()),
 				_ => false,
 			},
@@ -888,7 +888,7 @@ impl fmt::Display for SqlValue {
 			SqlValue::Query(v) => write!(f, "{v}"),
 			SqlValue::Subquery(v) => write!(f, "{v}"),
 			SqlValue::Table(v) => write!(f, "{v}"),
-			SqlValue::Thing(v) => write!(f, "{v}"),
+			SqlValue::RecordId(v) => write!(f, "{v}"),
 			SqlValue::Uuid(v) => write!(f, "{v}"),
 			SqlValue::Closure(v) => write!(f, "{v}"),
 			SqlValue::Refs(v) => write!(f, "{v}"),
@@ -912,7 +912,7 @@ impl From<SqlValue> for crate::expr::Value {
 			SqlValue::Object(v) => crate::expr::Value::Object(v.into()),
 			SqlValue::Geometry(v) => crate::expr::Value::Geometry(v.into()),
 			SqlValue::Bytes(v) => crate::expr::Value::Bytes(v.into()),
-			SqlValue::Thing(v) => crate::expr::Value::Thing(v.into()),
+			SqlValue::RecordId(v) => crate::expr::Value::RecordId(v.into()),
 			SqlValue::Param(v) => crate::expr::Value::Param(v.into()),
 			SqlValue::Idiom(v) => crate::expr::Value::Idiom(v.into()),
 			SqlValue::Table(v) => crate::expr::Value::Table(v.into()),
@@ -951,7 +951,7 @@ impl From<crate::expr::Value> for SqlValue {
 			crate::expr::Value::Object(v) => SqlValue::Object(v.into()),
 			crate::expr::Value::Geometry(v) => SqlValue::Geometry(v.into()),
 			crate::expr::Value::Bytes(v) => SqlValue::Bytes(v.into()),
-			crate::expr::Value::Thing(v) => SqlValue::Thing(v.into()),
+			crate::expr::Value::RecordId(v) => SqlValue::RecordId(v.into()),
 			crate::expr::Value::Param(v) => SqlValue::Param(v.into()),
 			crate::expr::Value::Idiom(v) => SqlValue::Idiom(v.into()),
 			crate::expr::Value::Table(v) => SqlValue::Table(v.into()),

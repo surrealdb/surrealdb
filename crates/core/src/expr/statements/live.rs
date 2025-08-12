@@ -244,7 +244,7 @@ mod tests {
 			Notification::new(
 				live_id,
 				Action::Create,
-				Value::Thing(RecordId {
+				Value::RecordId(RecordId {
 					table: tb.to_owned(),
 					key: RecordIdKey::String("test_true".to_owned())
 				}),

@@ -562,7 +562,7 @@ async fn export_ml(
 		anyhow::bail!("Model not found".to_string());
 	};
 	// Export the file data in to the store
-	let mut data = crate::obs::stream(model.hash.clone()).await?;
+	let mut data = surrealdb_core::obs::stream(model.hash.clone()).await?;
 	// Process all stream values
 	while let Some(Ok(bytes)) = data.next().await {
 		if chn.send(bytes.to_vec()).await.is_err() {
@@ -1227,9 +1227,9 @@ async fn router(
 			// Convert the file back in to raw bytes
 			let data = file.to_bytes();
 			// Calculate the hash of the model file
-			let hash = crate::obs::hash(&data);
+			let hash = surrealdb_core::obs::hash(&data);
 			// Insert the file data in to the store
-			crate::obs::put(&hash, data).await?;
+			surrealdb_core::obs::put(&hash, data).await?;
 			// Insert the model in to the database
 			let model = DefineModelStatement {
 				name: Ident::new(file.header.name.to_string()).unwrap(),

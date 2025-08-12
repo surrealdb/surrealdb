@@ -386,7 +386,7 @@ impl FieldEditContext<'_> {
 			// Check if this is the `id` field
 			if self.def.name.is_id() {
 				// Ensure that the outer value is a record
-				if let Value::Thing(ref id) = val {
+				if let Value::RecordId(ref id) = val {
 					// See if we should check the inner type
 					if !kind.is_record() {
 						// Get the value of the ID only
@@ -667,7 +667,7 @@ impl FieldEditContext<'_> {
 			let action = if val == old {
 				RefAction::Ignore
 			// Check if the old value was a record id
-			} else if let Value::Thing(thing) = old {
+			} else if let Value::RecordId(thing) = old {
 				// We need to check if this reference is contained in an array
 				let others = self
 					.doc
@@ -699,7 +699,7 @@ impl FieldEditContext<'_> {
 							// the reference
 							if newarr.contains(v) {
 								None
-							} else if let Value::Thing(thing) = v {
+							} else if let Value::RecordId(thing) = v {
 								Some(thing)
 							} else {
 								None
@@ -713,7 +713,7 @@ impl FieldEditContext<'_> {
 					oldarr
 						.iter()
 						.filter_map(|v| {
-							if let Value::Thing(thing) = v {
+							if let Value::RecordId(thing) = v {
 								Some(thing)
 							} else {
 								None
@@ -724,7 +724,7 @@ impl FieldEditContext<'_> {
 
 				RefAction::Delete(removed, self.def.name.clone().push(Part::All).to_string())
 			// We found a new reference, let's create the link
-			} else if let Value::Thing(thing) = val {
+			} else if let Value::RecordId(thing) = val {
 				RefAction::Set(thing)
 			} else {
 				// This value is not a record id, nothing to process

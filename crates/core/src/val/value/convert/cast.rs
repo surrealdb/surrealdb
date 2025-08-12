@@ -641,7 +641,7 @@ impl Cast for Point<f64> {
 impl Cast for RecordId {
 	fn can_cast(v: &Value) -> bool {
 		match v {
-			Value::Thing(_) => true,
+			Value::RecordId(_) => true,
 			Value::Strand(x) => syn::record_id(x).is_ok(),
 			_ => false,
 		}
@@ -649,7 +649,7 @@ impl Cast for RecordId {
 
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
-			Value::Thing(x) => Ok(x),
+			Value::RecordId(x) => Ok(x),
 			Value::Strand(x) => match syn::record_id(&x) {
 				Ok(x) => Ok(x),
 				Err(_) => Err(CastError::InvalidKind {
@@ -783,7 +783,7 @@ impl Value {
 
 	fn can_cast_to_record(&self, val: &[Ident]) -> bool {
 		match self {
-			Value::Thing(t) => t.is_record_type(val),
+			Value::RecordId(t) => t.is_record_type(val),
 			_ => false,
 		}
 	}
@@ -888,7 +888,7 @@ impl Value {
 	/// Try to convert this value to a Record of a certain type
 	fn cast_to_record(self, val: &[Ident]) -> Result<RecordId, CastError> {
 		match self {
-			Value::Thing(v) if v.is_record_type(val) => Ok(v),
+			Value::RecordId(v) if v.is_record_type(val) => Ok(v),
 			Value::Strand(v) => match syn::record_id(v.as_str()) {
 				Ok(x) if x.is_record_type(val) => Ok(x),
 				_ => {

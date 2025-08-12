@@ -1,8 +1,6 @@
 use anyhow::Result;
 use clap::Args;
 
-use crate::dbs;
-
 #[derive(Args, Debug)]
 pub struct FixCommandArguments {
 	#[arg(help = "Database path used for storing data")]

@@ -103,7 +103,7 @@ impl TableMutation {
 				h.insert(
 					"delete".to_string(),
 					Value::Object(Object::from(map! {
-						"id".to_string() => Value::Thing(t)
+						"id".to_string() => Value::RecordId(t)
 					})),
 				);
 				h
@@ -116,7 +116,7 @@ impl TableMutation {
 				h.insert(
 					"delete".to_string(),
 					Value::Object(Object::from(map! {
-						"id".to_string() => Value::Thing(id),
+						"id".to_string() => Value::RecordId(id),
 					})),
 				);
 				h

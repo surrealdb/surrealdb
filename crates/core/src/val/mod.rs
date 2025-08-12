@@ -404,7 +404,7 @@ impl Value {
 			Value::Regex(v) => match other {
 				Value::Regex(w) => v == w,
 				// TODO(3.0.0): Decide if we want to keep this behavior.
-				//Value::Thing(w) => v.regex().is_match(w.to_raw().as_str()),
+				//Value::RecordId(w) => v.regex().is_match(w.to_raw().as_str()),
 				Value::Strand(w) => v.regex().is_match(w.as_str()),
 				_ => false,
 			},

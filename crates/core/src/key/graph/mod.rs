@@ -259,7 +259,7 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let Ok(Value::Thing(fk)) = syn::value("other:test") else {
+		let Ok(Value::RecordId(fk)) = syn::value("other:test") else {
 			panic!()
 		};
 		#[rustfmt::skip]

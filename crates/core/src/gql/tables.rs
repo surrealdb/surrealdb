@@ -281,7 +281,7 @@ pub async fn process_tbs(
 							};
 
 							match gtx.get_record_field(thing, Part::Field("id".to_owned())).await? {
-								SqlValue::Thing(t) => {
+								SqlValue::RecordId(t) => {
 									let erased: ErasedRecord = (gtx, t);
 									Ok(Some(field_val_erase_owned(erased)))
 								}
@@ -381,7 +381,7 @@ pub async fn process_tbs(
 					};
 
 					match gtx.get_record_field(thing, "id").await? {
-						SqlValue::Thing(t) => {
+						SqlValue::RecordId(t) => {
 							let ty = t.tb.to_string();
 							let out = field_val_erase_owned((gtx, t)).with_type(ty);
 							Ok(Some(out))
@@ -416,7 +416,7 @@ fn make_table_field_resolver(
 				let val = gtx.get_record_field(rid.clone(), fd_name.as_str()).await?;
 
 				match val {
-					SqlValue::Thing(rid) if fd_name != "id" => {
+					SqlValue::RecordId(rid) if fd_name != "id" => {
 						let mut tmp = field_val_erase_owned((gtx.clone(), rid.clone()));
 						match field_kind {
 							Some(Kind::Record(ts)) if ts.len() != 1 => {

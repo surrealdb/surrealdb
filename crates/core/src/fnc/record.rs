@@ -62,7 +62,7 @@ pub async fn refs(
 	// Get the references
 	let ids = id.refs(ctx, opt, ft.as_ref(), ff.as_ref()).await?;
 	// Convert the references into a value
-	let val = ids.into_iter().map(Value::Thing).collect();
+	let val = ids.into_iter().map(Value::RecordId).collect();
 
 	Ok(Value::Array(val))
 }

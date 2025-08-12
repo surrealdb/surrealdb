@@ -91,7 +91,7 @@ impl GQLTx {
 	pub async fn get_record_field(&self, rid: RecordId, field: Part) -> Result<SqlValue, GqlError> {
 		let mut stack = TreeStack::new();
 		let part = [field.into()];
-		let value = SqlValue::Thing(rid);
+		let value = SqlValue::RecordId(rid);
 		stack
 			.enter(|stk| value.get(stk, &self.ctx, &self.opt, None, &part))
 			.finish()

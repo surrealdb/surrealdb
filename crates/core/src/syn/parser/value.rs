@@ -194,7 +194,7 @@ impl Parser<'_> {
 					Numeric::Decimal(x) => Value::Number(Number::Decimal(x)),
 				}
 			}
-			_ => self.parse_value_record_id_inner::<SurrealQL>(stk).await.map(Value::Thing)?,
+			_ => self.parse_value_record_id_inner::<SurrealQL>(stk).await.map(Value::RecordId)?,
 		};
 
 		match self.peek_whitespace().kind {
@@ -299,13 +299,13 @@ impl Parser<'_> {
 				let glued = pop_glued!(self, Duration);
 				Ok(Value::Duration(glued))
 			}
-			_ => self.parse_value_record_id_inner::<Json>(stk).await.map(Value::Thing),
+			_ => self.parse_value_record_id_inner::<Json>(stk).await.map(Value::RecordId),
 		}
 	}
 
 	async fn reparse_json_legacy_strand(&mut self, stk: &mut Stk, strand: Strand) -> Value {
 		if let Ok(x) = Parser::new(strand.as_bytes()).parse_value_record_id(stk).await {
-			return Value::Thing(x);
+			return Value::RecordId(x);
 		}
 		if let Ok(x) = Parser::new(strand.as_bytes()).next_token_value() {
 			return Value::Datetime(x);
