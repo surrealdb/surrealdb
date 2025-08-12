@@ -1,20 +1,20 @@
-use crate::catalog::DatabaseDefinition;
-use crate::ctx::Context;
+use std::collections::hash_map::Entry;
+use std::collections::{BinaryHeap, VecDeque};
+use std::fmt::{Debug, Display, Formatter};
+use std::io::Cursor;
+use std::sync::Arc;
+
 use ahash::{HashMap, HashMapExt, HashSet};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::{Revisioned, revisioned};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::Entry;
-use std::collections::{BinaryHeap, VecDeque};
-use std::fmt::{Debug, Display, Formatter};
-use std::io::Cursor;
-use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use crate::catalog::DatabaseDefinition;
+use crate::ctx::Context;
 use crate::err::Error;
-
 use crate::expr::index::{Distance, MTreeParams, VectorType};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
@@ -304,7 +304,8 @@ impl MTree {
 	) -> Result<()> {
 		#[cfg(debug_assertions)]
 		debug!("Insert - obj: {:?} - doc: {}", obj, id);
-		// First we check if we already have the object. In this case we just append the doc.
+		// First we check if we already have the object. In this case we just append the
+		// doc.
 		if self.append(tx, store, &obj, id).await? {
 			return Ok(());
 		}
@@ -1193,10 +1194,11 @@ type LeafMap = HashMap<SharedVector, ObjectProperties>;
 #[derive(Debug, Clone)]
 /// A node in this tree structure holds entries.
 /// Each entry is a tuple consisting of an object and its associated properties.
-/// It's essential to note that the properties vary between a LeafNode and an InternalNode.
-/// Both LeafNodes and InternalNodes are implemented as a map.
-/// In this map, the key is an object, and the values correspond to its properties.
-/// In essence, an entry can be visualized as a tuple of the form (object, properties).
+/// It's essential to note that the properties vary between a LeafNode and an
+/// InternalNode. Both LeafNodes and InternalNodes are implemented as a map.
+/// In this map, the key is an object, and the values correspond to its
+/// properties. In essence, an entry can be visualized as a tuple of the form
+/// (object, properties).
 pub enum MTreeNode {
 	Internal(InternalNode),
 	Leaf(LeafNode),
@@ -1478,6 +1480,14 @@ impl KVValue for MState {
 
 #[cfg(test)]
 mod tests {
+	use std::collections::VecDeque;
+	use std::sync::Arc;
+
+	use ahash::{HashMap, HashMapExt, HashSet};
+	use anyhow::Result;
+	use reblessive::tree::Stk;
+	use test_log::test;
+
 	use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 	use crate::ctx::{Context, MutableContext};
 	use crate::expr::index::{Distance, VectorType};
@@ -1491,12 +1501,6 @@ mod tests {
 	use crate::idx::trees::vector::SharedVector;
 	use crate::kvs::LockType::*;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
-	use ahash::{HashMap, HashMapExt, HashSet};
-	use anyhow::Result;
-	use reblessive::tree::Stk;
-	use std::collections::VecDeque;
-	use std::sync::Arc;
-	use test_log::test;
 
 	async fn get_db(ds: &Datastore) -> Arc<DatabaseDefinition> {
 		let tx = ds.transaction(TransactionType::Read, Optimistic).await.unwrap();

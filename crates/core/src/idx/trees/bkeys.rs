@@ -1,14 +1,16 @@
-use crate::err::Error;
-use crate::idx::trees::btree::Payload;
-use crate::kvs::Key;
-use anyhow::Result;
-use fst::{IntoStreamer, Map, MapBuilder, Streamer};
-use radix_trie::{SubTrie, Trie, TrieCommon};
-use serde::ser;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter};
 use std::io;
 use std::io::Cursor;
+
+use anyhow::Result;
+use fst::{IntoStreamer, Map, MapBuilder, Streamer};
+use radix_trie::{SubTrie, Trie, TrieCommon};
+use serde::ser;
+
+use crate::err::Error;
+use crate::idx::trees::btree::Payload;
+use crate::kvs::Key;
 
 pub trait BKeys: Default + Debug + Display + Sized {
 	fn with_key_val(key: Key, payload: Payload) -> Result<Self>;
@@ -492,11 +494,12 @@ impl<'a> KeysIterator<'a> {
 
 #[cfg(test)]
 mod tests {
+	use std::collections::{HashMap, HashSet, VecDeque};
+	use std::io::Cursor;
+
 	use crate::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
 	use crate::idx::trees::btree::Payload;
 	use crate::kvs::Key;
-	use std::collections::{HashMap, HashSet, VecDeque};
-	use std::io::Cursor;
 
 	fn test_keys_serde<BK: BKeys>(expected_size: usize) {
 		let key: Key = "a".as_bytes().into();

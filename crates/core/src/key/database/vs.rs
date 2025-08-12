@@ -1,10 +1,10 @@
 //! Stores database versionstamps
-use crate::catalog::{DatabaseId, NamespaceId};
+use serde::{Deserialize, Serialize};
 
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::vs::VersionStamp;
-use serde::{Deserialize, Serialize};
 
 // Vs stands for Database Versionstamp
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

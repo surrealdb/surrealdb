@@ -1,9 +1,11 @@
+use std::collections::HashSet;
+
+use anyhow::{Result, ensure};
+
 use crate::err::Error;
 use crate::fnc::util::math::deviation::deviation;
 use crate::fnc::util::math::mean::Mean;
 use crate::val::Number;
-use anyhow::{Result, ensure};
-use std::collections::HashSet;
 
 pub(crate) fn check_same_dimension<T>(fnc: &str, a: &[T], b: &[T]) -> Result<()> {
 	ensure!(

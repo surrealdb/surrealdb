@@ -1,12 +1,12 @@
-use anyhow::{Result, ensure};
 use std::mem;
 use std::sync::Arc;
 
-use crate::dbs::Variables;
+use anyhow::{Result, ensure};
+
 #[cfg(not(target_family = "wasm"))]
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::capabilities::MethodTarget;
-use crate::dbs::{QueryType, Response};
+use crate::dbs::{QueryType, Response, Variables};
 use crate::err::Error;
 use crate::kvs::{LockType, TransactionType};
 use crate::rpc::args::extract_args;
@@ -28,11 +28,12 @@ fn value_to_table(value: Value) -> Expr {
 
 /// returns if the expression returns a singular value when selected.
 ///
-/// As this rpc is some what convuluted the singular conditions is not the same for all cases.
+/// As this rpc is some what convuluted the singular conditions is not the same
+/// for all cases.
 fn singular(value: &Value) -> bool {
 	match value {
 		Value::Object(_) => true,
-		Value::Thing(t) => !matches!(t.key, RecordIdKey::Range(_)),
+		Value::RecordId(t) => !matches!(t.key, RecordIdKey::Range(_)),
 		_ => false,
 	}
 }
@@ -95,7 +96,8 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		// For both ns+db, string = change, null = unset, none = do nothing
 		// We need to be able to adjust either ns or db without affecting the other
-		// To be able to select a namespace, and then list resources in that namespace, as an example
+		// To be able to select a namespace, and then list resources in that namespace,
+		// as an example
 		let (ns, db) = extract_args::<(Value, Value)>(params.0.clone())
 			.ok_or(RpcError::InvalidParams("Expected (ns, db)".to_string()))?;
 		// Get the context lock
@@ -152,8 +154,9 @@ pub trait RpcProtocolV1: RpcContext {
 		Ok(Data::Other(Value::None))
 	}
 
-	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of a string.
-	// This will allow returning refresh tokens as well as any additional credential resulting from signing up.
+	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of
+	// a string. This will allow returning refresh tokens as well as any additional
+	// credential resulting from signing up.
 	async fn signup(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Some(Value::Object(params)) = extract_args(params.0) else {
@@ -184,8 +187,9 @@ pub trait RpcProtocolV1: RpcContext {
 		out.map(Data::Other).map_err(Into::into)
 	}
 
-	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of a string.
-	// This will allow returning refresh tokens as well as any additional credential resulting from signing in.
+	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of
+	// a string. This will allow returning refresh tokens as well as any additional
+	// credential resulting from signing in.
 	async fn signin(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Some(Value::Object(params)) = extract_args(params.0) else {
@@ -277,8 +281,8 @@ pub trait RpcProtocolV1: RpcContext {
 	async fn info(&self) -> Result<Data, RpcError> {
 		let what = vec![Expr::Param(Param::from_strand(strand!("auth").to_owned()))];
 
-		// TODO: Check if this can be replaced by just evaluating the param or a `$auth.*`
-		// expression
+		// TODO: Check if this can be replaced by just evaluating the param or a
+		// `$auth.*` expression
 		// Specify the SQL query string
 		let sql = SelectStatement {
 			expr: Fields::all(),
@@ -321,8 +325,8 @@ pub trait RpcProtocolV1: RpcContext {
 		else {
 			return Err(RpcError::InvalidParams("Expected (key:string, value:Value)".to_string()));
 		};
-		// TODO(3.0.0): The value inversion PR has removed the ability to set a value from an
-		// expression.
+		// TODO(3.0.0): The value inversion PR has removed the ability to set a value
+		// from an expression.
 		// Maybe reintroduce somehow.
 
 		let mutex = self.lock();
@@ -446,10 +450,10 @@ pub trait RpcProtocolV1: RpcContext {
 		let (what,) = extract_args::<(Value,)>(params.0)
 			.ok_or(RpcError::InvalidParams("Expected (what:Value)".to_string()))?;
 
-		// If the what is a single record with a non range value, make it return only a single
-		// result.
+		// If the what is a single record with a non range value, make it return only a
+		// single result.
 		let only = match what {
-			Value::Thing(ref x) => !x.key.is_range(),
+			Value::RecordId(ref x) => !x.key.is_range(),
 			_ => false,
 		};
 
@@ -594,7 +598,7 @@ pub trait RpcProtocolV1: RpcContext {
 
 		let only = match what {
 			Value::Strand(_) | Value::Table(_) => true,
-			Value::Thing(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
+			Value::RecordId(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
 			_ => false,
 		};
 
@@ -643,7 +647,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
 
 		let only = match what {
-			Value::Thing(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
+			Value::RecordId(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
 			_ => false,
 		};
 
@@ -696,7 +700,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.ok_or(RpcError::InvalidParams("Expected (what, data)".to_string()))?;
 
 		let only = match what {
-			Value::Thing(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
+			Value::RecordId(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
 			_ => false,
 		};
 
@@ -748,7 +752,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
 
 		let only = match what {
-			Value::Thing(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
+			Value::RecordId(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
 			_ => false,
 		};
 
@@ -799,7 +803,7 @@ pub trait RpcProtocolV1: RpcContext {
 
 		// Process the method arguments
 		let only = match what {
-			Value::Thing(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
+			Value::RecordId(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
 			_ => false,
 		};
 
@@ -1201,7 +1205,8 @@ where
 	};
 	// Post-process hooks for web layer
 	for response in &res {
-		// This error should be unreachable because we shouldn't proceed if there's no handler
+		// This error should be unreachable because we shouldn't proceed if there's no
+		// handler
 		match &response.query_type {
 			QueryType::Live => {
 				if let Ok(Value::Uuid(lqid)) = &response.result {

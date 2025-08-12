@@ -1,9 +1,10 @@
 //! Stores a database ID generator state
+use serde::{Deserialize, Serialize};
+
 use crate::catalog::NamespaceId;
 use crate::idg::u32::U32;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Di {

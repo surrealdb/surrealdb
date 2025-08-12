@@ -1,7 +1,8 @@
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::hash::{Hash, Hasher};
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialOrd, Serialize, Deserialize)]

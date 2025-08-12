@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 use std::ops::Deref;
 
+use futures::future::try_join_all;
+use reblessive::tree::Stk;
+
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -14,8 +17,6 @@ use crate::expr::statements::select::SelectStatement;
 use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Graph, Idiom, Literal};
 use crate::fnc::idiom;
 use crate::val::{RecordId, RecordIdKey, Value};
-use futures::future::try_join_all;
-use reblessive::tree::Stk;
 
 impl Value {
 	/// Asynchronous method for getting a local or remote field from a `Value`
@@ -36,7 +37,8 @@ impl Value {
 		match path.first() {
 			// The knowledge of the current value is not relevant to Part::Recurse
 			Some(Part::Recurse(recurse, inner_path, instruction)) => {
-				// Find the path to recurse and what path to process after the recursion is finished
+				// Find the path to recurse and what path to process after the recursion is
+				// finished
 				let (path, after) = match inner_path {
 					Some(p) => (p.0.as_slice(), path.next().to_vec()),
 					_ => (path.next(), vec![]),
@@ -108,7 +110,7 @@ impl Value {
 				// Try to obtain a Record ID from the document, otherwise we'll operate on NONE
 				let v = match doc {
 					Some(doc) => match &doc.rid {
-						Some(id) => Value::Thing(id.deref().to_owned()),
+						Some(id) => Value::RecordId(id.deref().to_owned()),
 						_ => Value::None,
 					},
 					None => Value::None,
@@ -169,14 +171,14 @@ impl Value {
 				Value::Object(v) => match p {
 					// If requesting an `id` field, check if it is a complex Record ID
 					Part::Field(f) if f.is_id() && path.len() > 1 => match v.get(f.as_str()) {
-						Some(Value::Thing(RecordId {
+						Some(Value::RecordId(RecordId {
 							key: RecordIdKey::Object(v),
 							..
 						})) => {
 							let v = Value::Object(v.clone());
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 						}
-						Some(Value::Thing(RecordId {
+						Some(Value::RecordId(RecordId {
 							key: RecordIdKey::Array(v),
 							..
 						})) => {
@@ -190,7 +192,7 @@ impl Value {
 					},
 					Part::Graph(_) => match v.rid() {
 						Some(v) => {
-							let v = Value::Thing(v);
+							let v = Value::RecordId(v);
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path)).await
 						}
 						None => {
@@ -219,7 +221,7 @@ impl Value {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
-						Value::Thing(t) => match v.get(&t.to_string()) {
+						Value::RecordId(t) => match v.get(&t.to_string()) {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
@@ -371,7 +373,8 @@ impl Value {
 							.await
 							.map(Value::from)?;
 
-						// If we are chaining graph parts, we need to make sure to flatten the result
+						// If we are chaining graph parts, we need to make sure to flatten the
+						// result
 						let mapped = match (path.first(), path.get(1)) {
 							(Some(Part::Graph(_)), Some(Part::Graph(_))) => mapped.flatten(),
 							(Some(Part::Graph(_)), Some(Part::Where(_))) => mapped.flatten(),
@@ -382,12 +385,12 @@ impl Value {
 					}
 				},
 				// Current value at path is a thing
-				Value::Thing(v) => {
+				Value::RecordId(v) => {
 					// Clone the thing
 					let val = v.clone();
 					// Check how many path parts are remaining
 					if path.is_empty() {
-						return Ok(Value::Thing(val));
+						return Ok(Value::RecordId(val));
 					}
 
 					match p {
@@ -506,7 +509,8 @@ impl Value {
 								.await?;
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 						}
-						// Only continue processing the path from the point that it contains a method
+						// Only continue processing the path from the point that it contains a
+						// method
 						_ => {
 							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next_method()))
 								.await

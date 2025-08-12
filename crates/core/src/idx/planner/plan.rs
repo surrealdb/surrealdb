@@ -1,3 +1,10 @@
+use std::collections::hash_map::Entry;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::hash::Hash;
+use std::sync::Arc;
+
+use anyhow::Result;
+
 use crate::expr::operator::{MatchesOperator, NearestNeighbor};
 use crate::expr::with::With;
 use crate::expr::{BinaryOperator, Expr, Idiom};
@@ -6,11 +13,6 @@ use crate::idx::planner::tree::{
 };
 use crate::idx::planner::{GrantedPermission, RecordStrategy, ScanDirection, StatementContext};
 use crate::val::{Array, Number, Object, Value};
-use anyhow::Result;
-use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::hash::Hash;
-use std::sync::Arc;
 
 /// The `PlanBuilder` struct represents a builder for constructing query plans.
 pub(super) struct PlanBuilder {
@@ -21,7 +23,8 @@ pub(super) struct PlanBuilder {
 	/// List of indexes allowed in this plan
 	with_indexes: Option<Vec<IndexReference>>,
 	/// Group each possible optimisations local to a SubQuery
-	groups: BTreeMap<GroupRef, Group>, // The order matters because we want the plan to be consistent across repeated queries.
+	groups: BTreeMap<GroupRef, Group>, /* The order matters because we want the plan to be
+	                                    * consistent across repeated queries. */
 }
 
 pub(super) struct PlanBuilderParameters {
@@ -99,7 +102,8 @@ impl PlanBuilder {
 				}
 			}
 
-			// Otherwise, we try to find the most interesting (todo: TBD) single index option
+			// Otherwise, we try to find the most interesting (todo: TBD) single index
+			// option
 			if let Some((e, i)) = b.non_range_indexes.pop() {
 				// Evaluate the record strategy
 				let record_strategy =
@@ -171,7 +175,8 @@ impl PlanBuilder {
 		true
 	}
 
-	/// Check if the ordering is compatible with the datastore transaction capabilities
+	/// Check if the ordering is compatible with the datastore transaction
+	/// capabilities
 	fn check_order_scan(has_reverse_scan: bool, op: &IndexOperator) -> bool {
 		has_reverse_scan || matches!(op, IndexOperator::Order(false))
 	}
@@ -590,12 +595,13 @@ impl UnionRangeQueryBuilder {
 
 #[cfg(test)]
 mod tests {
+	use std::collections::HashSet;
+	use std::sync::Arc;
+
 	use crate::expr::{Ident, Idiom};
 	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 	use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 	use crate::val::{Array, Value};
-	use std::collections::HashSet;
-	use std::sync::Arc;
 
 	#[expect(clippy::mutable_key_type)]
 	#[test]

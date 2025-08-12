@@ -1,3 +1,12 @@
+use std::fmt::{self, Display, Formatter};
+use std::ops::Deref;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::FlowResultExt as _;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -7,14 +16,6 @@ use crate::expr::{Expr, Function, Idiom};
 use crate::fnc::args::FromArgs;
 use crate::syn;
 use crate::val::{Strand, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
-use std::ops::Deref;
-
-use super::FlowResultExt as _;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]

@@ -6,6 +6,13 @@ pub(crate) mod plan;
 pub(in crate::idx) mod rewriter;
 pub(in crate::idx) mod tree;
 
+use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
+use std::sync::atomic::{self, AtomicU8};
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::catalog::DatabaseDefinition;
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
@@ -17,14 +24,9 @@ use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::knn::KnnBruteForceResults;
 use crate::idx::planner::plan::{Plan, PlanBuilder, PlanBuilderParameters};
 use crate::idx::planner::tree::Tree;
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
-use std::sync::atomic::{self, AtomicU8};
 
-/// The goal of this structure is to cache parameters so they can be easily passed
-/// from one function to the other, so we don't pass too many arguments.
+/// The goal of this structure is to cache parameters so they can be easily
+/// passed from one function to the other, so we don't pass too many arguments.
 /// It also caches evaluated fields (like is_keys_only)
 pub(crate) struct StatementContext<'a> {
 	pub(crate) ctx: &'a Context,
@@ -190,8 +192,8 @@ impl<'a> StatementContext<'a> {
 
 	/// Determines the scan direction.
 	/// This is used for Table and Range iterators.
-	/// The direction is reversed if the first element of order is ID descending.
-	/// Typically: `ORDER BY id DESC`
+	/// The direction is reversed if the first element of order is ID
+	/// descending. Typically: `ORDER BY id DESC`
 	pub(crate) fn check_scan_direction(&self) -> ScanDirection {
 		#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 		if let Some(Ordering::Order(o)) = self.order {

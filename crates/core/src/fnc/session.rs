@@ -1,7 +1,8 @@
+use anyhow::Result;
+
 use crate::ctx::Context;
 use crate::expr::paths::{AC, DB, ID, IP, NS, OR, RD, TK};
 use crate::val::Value;
-use anyhow::Result;
 
 pub fn ac(ctx: &Context, _: ()) -> Result<Value> {
 	Ok(ctx.value("session").unwrap_or(&Value::None).pick(AC.as_ref()))

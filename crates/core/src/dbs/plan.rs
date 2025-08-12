@@ -1,9 +1,10 @@
+use std::collections::HashMap;
+
 use crate::ctx::Context;
 use crate::dbs::result::Results;
 use crate::dbs::{Iterable, Statement};
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Object, Strand, Value};
-use std::collections::HashMap;
 
 pub(super) struct Plan {
 	pub(super) do_iterate: bool,
@@ -112,18 +113,18 @@ impl ExplainItem {
 			},
 			Iterable::Thing(t) => Self {
 				name: "Iterate Thing".into(),
-				details: vec![("thing", Value::Thing(t.clone()))],
+				details: vec![("thing", Value::RecordId(t.clone()))],
 			},
 			Iterable::Defer(t) => Self {
 				name: "Iterate Defer".into(),
-				details: vec![("thing", Value::Thing(t.clone()))],
+				details: vec![("thing", Value::RecordId(t.clone()))],
 			},
 			Iterable::Edges {
 				from,
 				..
 			} => Self {
 				name: "Iterate Edges".into(),
-				details: vec![("from", Value::Thing(from.clone()))],
+				details: vec![("from", Value::RecordId(from.clone()))],
 			},
 			Iterable::Table(t, rs, sc) => Self {
 				name: match rs {
@@ -153,22 +154,22 @@ impl ExplainItem {
 			},
 			Iterable::Mergeable(t, v) => Self {
 				name: "Iterate Mergeable".into(),
-				details: vec![("thing", Value::Thing(t.to_owned())), ("value", v.to_owned())],
+				details: vec![("thing", Value::RecordId(t.to_owned())), ("value", v.to_owned())],
 			},
 			Iterable::Relatable(t1, t2, t3, None) => Self {
 				name: "Iterate Relatable".into(),
 				details: vec![
-					("thing-1", Value::Thing(t1.to_owned())),
-					("thing-2", Value::Thing(t2.to_owned())),
-					("thing-3", Value::Thing(t3.to_owned())),
+					("thing-1", Value::RecordId(t1.to_owned())),
+					("thing-2", Value::RecordId(t2.to_owned())),
+					("thing-3", Value::RecordId(t3.to_owned())),
 				],
 			},
 			Iterable::Relatable(t1, t2, t3, Some(v)) => Self {
 				name: "Iterate Relatable".into(),
 				details: vec![
-					("thing-1", Value::Thing(t1.to_owned())),
-					("thing-2", Value::Thing(t2.to_owned())),
-					("thing-3", Value::Thing(t3.to_owned())),
+					("thing-1", Value::RecordId(t1.to_owned())),
+					("thing-2", Value::RecordId(t2.to_owned())),
+					("thing-3", Value::RecordId(t3.to_owned())),
 					("value", v.to_owned()),
 				],
 			},

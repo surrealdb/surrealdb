@@ -1,12 +1,14 @@
+use std::any::Any;
+use std::sync::Arc;
+
+use anyhow::Result;
+use uuid::Uuid;
+
 use crate::catalog::TableDefinition;
 use crate::err::Error;
 use crate::expr::statements::{
 	DefineEventStatement, DefineFieldStatement, DefineIndexStatement, LiveStatement,
 };
-use anyhow::Result;
-use std::any::Any;
-use std::sync::Arc;
-use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Entry {

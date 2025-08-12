@@ -72,7 +72,8 @@ impl Parser<'_> {
 		self.parse_output(stk).await.map(Some)
 	}
 
-	/// Needed because some part of the RPC needs to call into the parser for this specific part.
+	/// Needed because some part of the RPC needs to call into the parser for
+	/// this specific part.
 	pub async fn parse_output(&mut self, stk: &mut Stk) -> ParseResult<Output> {
 		let res = match self.peek_kind() {
 			t!("NONE") => {
@@ -342,7 +343,8 @@ impl Parser<'_> {
 
 	/// Parse a specific permission for a type of query
 	///
-	/// Sets the permission for a specific query on the given permission keyword.
+	/// Sets the permission for a specific query on the given permission
+	/// keyword.
 	///
 	/// # Parser State
 	/// Expects the parser to just have eaten the `FOR` keyword.
@@ -408,7 +410,8 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	///
-	/// Expects the parser to just have eaten either `SELECT`, `CREATE`, `UPDATE` or `DELETE`.
+	/// Expects the parser to just have eaten either `SELECT`, `CREATE`,
+	/// `UPDATE` or `DELETE`.
 	pub async fn parse_permission_value(&mut self, stk: &mut Stk) -> ParseResult<Permission> {
 		let next = self.next();
 		match next.kind {
@@ -421,10 +424,12 @@ impl Parser<'_> {
 		}
 	}
 
-	// TODO(gguillemas): Deprecated in 2.0.0. Kept for backward compatibility. Drop it in 3.0.0.
+	// TODO(gguillemas): Deprecated in 2.0.0. Kept for backward compatibility. Drop
+	// it in 3.0.0.
 	/// Parses a base
 	///
-	/// So either `NAMESPACE`, `DATABASE`, `ROOT`, or `SCOPE` if `scope_allowed` is true.
+	/// So either `NAMESPACE`, `DATABASE`, `ROOT`, or `SCOPE` if `scope_allowed`
+	/// is true.
 	///
 	/// # Parser state
 	/// Expects the next keyword to be a base.
@@ -502,8 +507,8 @@ impl Parser<'_> {
 	/// Parses a view production
 	///
 	/// # Parse State
-	/// Expects the parser to have already eaten the possible `(` if the view was wrapped in
-	/// parens. Expects the next keyword to be `SELECT`.
+	/// Expects the parser to have already eaten the possible `(` if the view
+	/// was wrapped in parens. Expects the next keyword to be `SELECT`.
 	pub async fn parse_view(&mut self, stk: &mut Stk) -> ParseResult<View> {
 		expected!(self, t!("SELECT"));
 		let before_fields = self.peek().span;

@@ -3,11 +3,12 @@ mod key;
 mod lookup;
 mod weight;
 
-use crate::catalog::{DatabaseId, NamespaceId};
 use anyhow::Result;
 pub(crate) use entry::Entry;
 pub(crate) use lookup::Lookup;
 use uuid::Uuid;
+
+use crate::catalog::{DatabaseId, NamespaceId};
 
 pub(crate) type Cache = quick_cache::sync::Cache<key::Key, Entry, weight::Weight>;
 

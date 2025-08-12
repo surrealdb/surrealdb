@@ -1,6 +1,7 @@
+use anyhow::Result;
+
 use crate::err::Error;
 use crate::kvs::KVValue;
-use anyhow::Result;
 
 #[derive(Copy, Debug, Clone, PartialEq)]
 pub struct MajorVersion(u16);

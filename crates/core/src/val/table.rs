@@ -1,9 +1,12 @@
-use std::{fmt, ops::Deref};
+use std::fmt;
+use std::ops::Deref;
 
-use crate::expr::{Ident, escape::EscapeIdent};
-use crate::val::Strand;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+
+use crate::expr::Ident;
+use crate::expr::escape::EscapeIdent;
+use crate::val::Strand;
 
 /// A value type referencing a specific table.
 #[revisioned(revision = 1)]
@@ -25,7 +28,8 @@ impl Table {
 	/// Create a new strand, without checking the string.
 	///
 	/// # Safety
-	/// Caller must ensure that string handed as an argument does not contain any null bytes.
+	/// Caller must ensure that string handed as an argument does not contain
+	/// any null bytes.
 	pub unsafe fn new_unchecked(s: String) -> Table {
 		// Check in debug mode if the variants
 		debug_assert!(!s.contains('\0'));

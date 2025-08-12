@@ -1,7 +1,5 @@
 //! Request class implementation
 
-use crate::fnc::script::fetch::RequestError;
-use crate::fnc::script::fetch::body::Body;
 use bytes::Bytes;
 use js::class::Trace;
 use js::function::Opt;
@@ -11,6 +9,8 @@ use reqwest::header::HeaderName;
 use reqwest::{Method, Url};
 
 use super::{Blob, Headers};
+use crate::fnc::script::fetch::RequestError;
+use crate::fnc::script::fetch::body::Body;
 
 #[derive(Clone, Copy, Eq, PartialEq, JsLifetime)]
 pub enum RequestMode {
@@ -282,7 +282,8 @@ fn normalize_method(ctx: &Ctx<'_>, m: String) -> Result<Method> {
 		return Err(Exception::throw_type(ctx, &format!("method {m} is forbidden")));
 	}
 
-	// The following methods must be uppercased to the default case insensitive equivalent.
+	// The following methods must be uppercased to the default case insensitive
+	// equivalent.
 	if m.as_bytes().eq_ignore_ascii_case(b"DELETE") {
 		return Ok(Method::DELETE);
 	}
@@ -538,9 +539,10 @@ impl<'js> Request<'js> {
 
 #[cfg(test)]
 mod test {
-	use crate::fnc::script::fetch::test::create_test_context;
 	use js::CatchResultExt;
 	use js::promise::Promise;
+
+	use crate::fnc::script::fetch::test::create_test_context;
 
 	#[tokio::test]
 	async fn basic_request_use() {

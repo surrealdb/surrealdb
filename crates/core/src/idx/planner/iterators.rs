@@ -1,3 +1,12 @@
+use std::borrow::Cow;
+use std::collections::VecDeque;
+use std::ops::Range;
+use std::sync::Arc;
+
+use anyhow::Result;
+use radix_trie::Trie;
+use rust_decimal::Decimal;
+
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::expr::Ident;
@@ -10,13 +19,6 @@ use crate::idx::planner::tree::IndexReference;
 use crate::key::index::Index;
 use crate::kvs::{KVKey, Key, Transaction, Val};
 use crate::val::{Array, Number, RecordId, Value};
-use anyhow::Result;
-use radix_trie::Trie;
-use rust_decimal::Decimal;
-use std::borrow::Cow;
-use std::collections::VecDeque;
-use std::ops::Range;
-use std::sync::Arc;
 
 pub(crate) type IteratorRef = usize;
 
@@ -656,7 +658,8 @@ impl IndexRangeReverseThingIterator {
 		tx: &Transaction,
 		mut limit: u32,
 	) -> Result<B> {
-		// Check if we need to retrieve the key at end of the range (not returned by the scanr)
+		// Check if we need to retrieve the key at end of the range (not returned by the
+		// scanr)
 		let ending = self.check_batch_ending(tx, &mut limit).await?;
 
 		// Do we have enough limit left to collect additional records?
@@ -698,7 +701,8 @@ impl IndexRangeReverseThingIterator {
 	}
 
 	async fn next_count(&mut self, tx: &Transaction, mut limit: u32) -> Result<usize> {
-		// Check if we need to retrieve the key at end of the range (not returned by the keysr)
+		// Check if we need to retrieve the key at end of the range (not returned by the
+		// keysr)
 		let mut count = self.check_keys_ending(tx, &mut limit).await? as usize;
 
 		// Do we have enough limit left to collect additional records?
@@ -738,7 +742,8 @@ impl IndexUnionThingIterator {
 		ix: &DefineIndexStatement,
 		arrays: &[Array],
 	) -> Result<Self> {
-		// We create a VecDeque to hold the prefix keys (begin and end) for each value in the array.
+		// We create a VecDeque to hold the prefix keys (begin and end) for each value
+		// in the array.
 		let mut values: VecDeque<(Vec<u8>, Vec<u8>)> = VecDeque::with_capacity(arrays.len());
 
 		for a in arrays {
@@ -1182,7 +1187,8 @@ impl UniqueRangeReverseThingIterator {
 		let ending_record = if self.r.end_incl {
 			// we don't include the ending key for the next batches
 			self.r.end_incl = false;
-			// tx.scanr is end exclusive, so we have to manually collect the value using a get
+			// tx.scanr is end exclusive, so we have to manually collect the value using a
+			// get
 			if let Some(v) = tx.get(&self.r.r.end, None).await? {
 				let rid: RecordId = revision::from_slice(&v)?;
 				let record = IndexItemRecord::new_key(rid, self.irf.into());

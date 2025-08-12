@@ -1,10 +1,10 @@
 //! Stores FullText index states
+use serde::{Deserialize, Serialize};
+
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::ft::search::SearchIndexState;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Bs<'a> {

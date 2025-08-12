@@ -1,3 +1,10 @@
+use std::collections::VecDeque;
+
+#[cfg(debug_assertions)]
+use ahash::HashMap;
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::catalog::DatabaseDefinition;
 use crate::expr::index::{HnswParams, VectorType};
 use crate::idx::IndexKeyBase;
@@ -11,11 +18,6 @@ use crate::idx::trees::knn::{KnnResult, KnnResultBuilder};
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::Transaction;
 use crate::val::{Number, RecordIdKey, Value};
-#[cfg(debug_assertions)]
-use ahash::HashMap;
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::collections::VecDeque;
 
 pub struct HnswIndex {
 	dim: usize,

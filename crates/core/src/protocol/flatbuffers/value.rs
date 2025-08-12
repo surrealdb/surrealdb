@@ -1,11 +1,12 @@
-use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
-use crate::val::{
-	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, RecordId, Strand, Uuid, Value,
-};
 use anyhow::{Context, anyhow};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use surrealdb_protocol::fb::v1 as proto_fb;
+
+use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
+use crate::val::{
+	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, RecordId, Strand, Uuid, Value,
+};
 
 impl ToFlatbuffers for Value {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Value<'bldr>>;
@@ -53,7 +54,7 @@ impl ToFlatbuffers for Value {
 				value_type: proto_fb::ValueType::Bytes,
 				value: Some(b.to_fb(builder)?.as_union_value()),
 			},
-			Self::Thing(thing) => proto_fb::ValueArgs {
+			Self::RecordId(thing) => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::RecordId,
 				value: Some(thing.to_fb(builder)?.as_union_value()),
 			},
@@ -86,7 +87,8 @@ impl ToFlatbuffers for Value {
 				value: Some(file.to_fb(builder)?.as_union_value()),
 			},
 			_ => {
-				// TODO: DO NOT PANIC, we just need to modify the Value enum which Mees is currently working on.
+				// TODO: DO NOT PANIC, we just need to modify the Value enum which Mees is
+				// currently working on.
 				panic!("Unsupported value type for Flatbuffers serialization: {:?}", self);
 			}
 		};
@@ -132,7 +134,7 @@ impl FromFlatbuffers for Value {
 				let record_id_value =
 					input.value_as_record_id().expect("Guaranteed to be a RecordId");
 				let thing = RecordId::from_fb(record_id_value)?;
-				Ok(Value::Thing(thing))
+				Ok(Value::RecordId(thing))
 			}
 			proto_fb::ValueType::Duration => {
 				let duration_value =
@@ -182,13 +184,15 @@ impl FromFlatbuffers for Value {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use crate::val::*;
+	use std::collections::BTreeMap;
+
 	use chrono::{DateTime, Utc};
 	use rstest::rstest;
 	use rust_decimal::Decimal;
-	use std::collections::BTreeMap;
 	use surrealdb_protocol::fb::v1 as proto_fb;
+
+	use super::*;
+	use crate::val::*;
 
 	#[rstest]
 	#[case::none(Value::None)]
@@ -210,7 +214,7 @@ mod tests {
 	#[case::uuid(Value::Uuid(Uuid::new_v4()))]
 	#[case::string(Value::Strand(Strand::new("Hello, World!".to_string()).unwrap()))]
 	#[case::bytes(Value::Bytes(Bytes(vec![1, 2, 3, 4, 5])))]
-	#[case::thing(Value::Thing(RecordId{ table: "test_table".to_string(), key: RecordIdKey::Number(42) }))] // Example Thing
+	#[case::thing(Value::RecordId(RecordId{ table: "test_table".to_string(), key: RecordIdKey::Number(42) }))] // Example Thing
 	#[case::object(Value::Object(Object(BTreeMap::from([("key".to_string(), Value::Strand(Strand::new("value".to_owned()).unwrap()))]))))]
 	#[case::array(Value::Array(Array(vec![Value::Number(Number::Int(1)), Value::Number(Number::Float(2.0))])))]
 	#[case::geometry::point(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))))]

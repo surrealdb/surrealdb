@@ -1,8 +1,9 @@
 use std::fmt;
 
-use crate::val::{Array, Object, Strand, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+
+use crate::val::{Array, Object, Strand, Value};
 
 #[derive(Debug)]
 pub struct PatchError {
@@ -155,8 +156,8 @@ impl Operation {
 		Object(res)
 	}
 
-	/// Returns the operaton encoded in the object, or an error if the object does not contain a
-	/// valid operation.
+	/// Returns the operaton encoded in the object, or an error if the object
+	/// does not contain a valid operation.
 	pub fn operation_from_object(object: Object) -> Result<Operation, PatchError> {
 		let Some(op) = object.get("op") else {
 			return Err(PatchError {
@@ -225,7 +226,8 @@ impl Operation {
 		}
 	}
 
-	/// Turns a value into a list of operations if the value has the right structure.
+	/// Turns a value into a list of operations if the value has the right
+	/// structure.
 	pub fn value_to_operations(value: Value) -> Result<Vec<Operation>, PatchError> {
 		let Value::Array(array) = value else {
 			return Err(PatchError {

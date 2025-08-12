@@ -1,3 +1,9 @@
+use std::sync::Arc;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+
+use super::IgnoreError;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Action, Notification, Options, Statement};
 use crate::doc::{CursorDoc, Document};
@@ -6,11 +12,6 @@ use crate::expr::FlowResultExt as _;
 use crate::expr::paths::{AC, META, RD, TK};
 use crate::expr::permission::Permission;
 use crate::val::Value;
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::sync::Arc;
-
-use super::IgnoreError;
 
 impl Document {
 	/// Processes any LIVE SELECT statements which
@@ -194,7 +195,7 @@ impl Document {
 				.send(Notification {
 					id: lv.id,
 					action,
-					record: Value::Thing(rid.as_ref().clone()),
+					record: Value::RecordId(rid.as_ref().clone()),
 					result,
 				})
 				.await;

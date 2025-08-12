@@ -1,11 +1,11 @@
 //! Stores a DEFINE FUNCTION config definition
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::expr::statements::define::DefineFunctionStatement;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Fc<'a> {

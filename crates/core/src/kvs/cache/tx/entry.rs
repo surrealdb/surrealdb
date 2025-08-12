@@ -1,3 +1,8 @@
+use std::any::Any;
+use std::sync::Arc;
+
+use anyhow::Result;
+
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition, TableDefinition};
 use crate::dbs::node::Node;
 use crate::expr::statements::access::AccessGrantStore;
@@ -9,9 +14,6 @@ use crate::expr::statements::{
 	DefineUserStatement, LiveStatement,
 };
 use crate::val::Value;
-use anyhow::Result;
-use std::any::Any;
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) enum Entry {

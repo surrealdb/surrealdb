@@ -2,11 +2,11 @@ pub mod field;
 mod sequence;
 mod table;
 
+use std::fmt::{self, Display};
+
 pub use field::AlterFieldStatement;
 pub use sequence::AlterSequenceStatement;
 pub use table::AlterTableStatement;
-
-use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

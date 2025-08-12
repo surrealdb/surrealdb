@@ -1,10 +1,11 @@
 //! Stores Doc list for each term
+use roaring::RoaringTreemap;
+use serde::{Deserialize, Serialize};
+
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::ft::search::terms::TermId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-use roaring::RoaringTreemap;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Bc<'a> {

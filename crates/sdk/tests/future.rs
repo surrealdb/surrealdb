@@ -1,21 +1,23 @@
 mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::err::Error;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::err::Error;
 
 #[tokio::test]
 #[ignore]
 async fn concurrency() -> Result<()> {
-	// cargo test --package surrealdb --test future --features kv-mem --release -- concurrency --nocapture
+	// cargo test --package surrealdb --test future --features kv-mem --release --
+	// concurrency --nocapture
 
 	const MILLIS: usize = 50;
 
-	// If all futures complete in less than double `MILLIS`, then they must have executed
-	// concurrently. Otherwise, some executed sequentially.
+	// If all futures complete in less than double `MILLIS`, then they must have
+	// executed concurrently. Otherwise, some executed sequentially.
 	const TIMEOUT: usize = MILLIS * 19 / 10;
 
-	/// Returns a query that will execute `count` futures that each wait for `millis`
+	/// Returns a query that will execute `count` futures that each wait for
+	/// `millis`
 	fn query(count: usize, millis: usize) -> String {
 		// TODO: Find a simpler way to trigger the concurrent future case.
 		format!(

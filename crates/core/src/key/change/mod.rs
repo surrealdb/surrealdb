@@ -1,12 +1,12 @@
 //! Stores change feeds
-use crate::catalog::DatabaseId;
-use crate::catalog::NamespaceId;
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::cf::TableMutations;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::vs::VersionStamp;
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
 
 // Cf stands for change feeds
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

@@ -1,14 +1,18 @@
-use super::CreateDs;
 use std::sync::Arc;
+
 use uuid::Uuid;
 
+use super::CreateDs;
 use crate::dbs::Session;
 use crate::dbs::node::Timestamp;
+use crate::kvs::KVKey;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
 use crate::kvs::clock::{FakeClock, SizedClock};
-use crate::kvs::{KVKey, LockType::*, TransactionType::*};
 
 // Timestamp to versionstamp tests
-// This translation mechanism is currently used by the garbage collector to determine which change feed entries to delete.
+// This translation mechanism is currently used by the garbage collector to
+// determine which change feed entries to delete.
 //
 // FAQ:
 // Q: What’s the difference between database TS and database VS?
@@ -16,8 +20,10 @@ use crate::kvs::{KVKey, LockType::*, TransactionType::*};
 //    Versionstamps can be anything that is provided by our TSO.
 // Q: Why do we need to translate timestamps to versionstamps?
 // A: The garbage collector needs to know which change feed entries to delete.
-//    However our SQL syntax `DEFINE DATABASE foo CHANGEFEED 1h` let the user specify the expiration in a duration, not a delta in the versionstamp.
-//    We need to translate the timestamp to the versionstamp due to that; `now - 1h` to a key suffixed by the versionstamp.
+//    However our SQL syntax `DEFINE DATABASE foo CHANGEFEED 1h` let the user
+// specify the expiration in a duration, not a delta in the versionstamp.
+//    We need to translate the timestamp to the versionstamp due to that; `now -
+// 1h` to a key suffixed by the versionstamp.
 pub async fn timestamp_to_versionstamp(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("A905CA25-56ED-49FB-B759-696AEA87C342").unwrap();

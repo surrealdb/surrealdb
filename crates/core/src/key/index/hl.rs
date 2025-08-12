@@ -1,10 +1,10 @@
 //! Store and chunked layers of an HNSW index
-use crate::catalog::DatabaseId;
-use crate::catalog::NamespaceId;
-use crate::kvs::KVKey;
+use std::fmt::Debug;
 
 use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
+
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::kvs::KVKey;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Hl<'a> {

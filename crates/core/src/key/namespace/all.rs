@@ -1,8 +1,9 @@
 //! Stores the key prefix for all keys under a namespace
+use serde::{Deserialize, Serialize};
+
 use crate::catalog::NamespaceId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct NamespaceRoot {
@@ -11,7 +12,8 @@ pub(crate) struct NamespaceRoot {
 	pub ns: NamespaceId,
 }
 
-/// When querying all keys under a namespace, the output value could be any value.
+/// When querying all keys under a namespace, the output value could be any
+/// value.
 impl KVKey for NamespaceRoot {
 	type ValueType = Vec<u8>;
 }

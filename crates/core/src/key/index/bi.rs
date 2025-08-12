@@ -1,11 +1,11 @@
 //! Stores doc keys for doc_ids
-use crate::catalog::DatabaseId;
-use crate::catalog::NamespaceId;
+use serde::{Deserialize, Serialize};
+
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::val::RecordId;
-use serde::{Deserialize, Serialize};
 
 /// Id inverted. DocId -> Thing
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

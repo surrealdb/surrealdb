@@ -18,8 +18,9 @@ pub struct Path(pub Vec<Segment>);
 
 impl<'a> Path {
 	/// Attempts to fit a passed URL into a already parsed Path Segments.
-	/// A segment can be fixed, be a dynamic variable or a collect the rest of the url
-	/// Considering path the parsed path of an API, and url the current subject, this method:
+	/// A segment can be fixed, be a dynamic variable or a collect the rest of
+	/// the url Considering path the parsed path of an API, and url the current
+	/// subject, this method:
 	///  - iterates over each path segment (divided by `/`)
 	///  - attempts to to match against url segment
 	///  - extracting variables where instructed by the path segment
@@ -102,7 +103,8 @@ impl FromStr for Path {
 						continue 'segment;
 					}
 
-					// We allow the first character to be an escape character to ignore potential otherwise instruction characters
+					// We allow the first character to be an escape character to ignore potential
+					// otherwise instruction characters
 					'\\' if scratch.is_empty() => {
 						chars.next();
 						if let Some(x @ ':' | x @ '*') = chars.next() {

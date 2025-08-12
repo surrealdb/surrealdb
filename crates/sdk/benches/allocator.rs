@@ -1,11 +1,12 @@
-use criterion::{Criterion, criterion_group, criterion_main};
-use parking_lot::Mutex;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::RefCell;
 use std::hint::black_box;
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
+
+use criterion::{Criterion, criterion_group, criterion_main};
+use parking_lot::Mutex;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 trait BenchAllocator: Send + Sync {
 	fn alloc(&self, size: usize);

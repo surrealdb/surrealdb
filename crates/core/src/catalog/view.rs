@@ -1,9 +1,10 @@
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Fields, Groups};
 use crate::sql::{Ident, ToSql, View};
 use crate::val::Value;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -19,7 +20,8 @@ impl ViewDefinition {
 	pub(crate) fn to_sql_definition(&self) -> View {
 		View {
 			expr: self.expr.clone().into(),
-			// SAFETY: we know the names are valid because they were validated when the view was created.
+			// SAFETY: we know the names are valid because they were validated when the view was
+			// created.
 			what: self
 				.what
 				.clone()

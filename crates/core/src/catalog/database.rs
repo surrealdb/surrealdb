@@ -3,15 +3,13 @@ use std::fmt::{Display, Formatter};
 use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
 
-use crate::sql::Ident;
+use crate::catalog::NamespaceId;
+use crate::expr::ChangeFeed;
+use crate::expr::statements::info::InfoStructure;
+use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::define::DefineDatabaseStatement;
-use crate::{
-	catalog::NamespaceId,
-	expr::{ChangeFeed, statements::info::InfoStructure},
-	kvs::impl_kv_value_revisioned,
-	sql::ToSql,
-	val::Value,
-};
+use crate::sql::{Ident, ToSql};
+use crate::val::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -66,7 +64,8 @@ impl_kv_value_revisioned!(DatabaseDefinition);
 impl DatabaseDefinition {
 	pub fn to_sql_definition(&self) -> DefineDatabaseStatement {
 		DefineDatabaseStatement {
-			// SAFETY: we know the name is valid because it was validated when the database was created.
+			// SAFETY: we know the name is valid because it was validated when the database was
+			// created.
 			name: unsafe { Ident::new_unchecked(self.name.clone()) },
 			comment: self.comment.clone().map(|v| v.into()),
 			changefeed: self.changefeed.map(|v| v.into()),

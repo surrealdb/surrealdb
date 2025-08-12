@@ -1,3 +1,5 @@
+use anyhow::{Result, ensure};
+
 use crate::catalog::{Relation, TableType};
 use crate::ctx::Context;
 use crate::dbs::{Options, Statement, Workable};
@@ -6,7 +8,6 @@ use crate::err::Error;
 use crate::expr::Dir;
 use crate::expr::paths::{EDGE, IN, OUT};
 use crate::val::Value;
-use anyhow::{Result, ensure};
 
 impl Document {
 	pub(super) async fn store_edges_data(

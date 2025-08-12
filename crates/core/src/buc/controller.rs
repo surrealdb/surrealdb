@@ -1,18 +1,18 @@
+use core::fmt;
+use std::sync::Arc;
+
+use anyhow::{Result, bail, ensure};
+use reblessive::tree::Stk;
+
+use super::store::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err;
 use crate::expr::statements::define::BucketDefinition;
 use crate::expr::{FlowResultExt, Permission};
-
 use crate::iam::Action;
 use crate::val::{Bytes, File, Value};
-use anyhow::{Result, bail, ensure};
-use core::fmt;
-use reblessive::tree::Stk;
-use std::sync::Arc;
-
-use super::store::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 
 fn accept_payload(value: Value) -> Result<bytes::Bytes> {
 	value
@@ -35,7 +35,8 @@ pub(crate) struct BucketController<'a> {
 
 impl<'a> BucketController<'a> {
 	/// Create a `FileController` for a specified file
-	/// Will obtain a bucket connection and return back a `FileController` or `Error`
+	/// Will obtain a bucket connection and return back a `FileController` or
+	/// `Error`
 	pub(crate) async fn new(
 		stk: &'a mut Stk,
 		ctx: &'a Context,
@@ -58,7 +59,8 @@ impl<'a> BucketController<'a> {
 		})
 	}
 
-	/// Checks if the bucket allows writes, and if not, return an `Error::ReadonlyBucket`
+	/// Checks if the bucket allows writes, and if not, return an
+	/// `Error::ReadonlyBucket`
 	fn require_writeable(&self) -> Result<()> {
 		ensure!(
 			!self.bucket.readonly,
@@ -68,8 +70,9 @@ impl<'a> BucketController<'a> {
 	}
 
 	/// Attempt to put a file
-	/// `Bytes` and `Strand` values are supported, and will be converted into `Bytes`
-	/// Create or update permissions will be used, based on if the remote file already exists
+	/// `Bytes` and `Strand` values are supported, and will be converted into
+	/// `Bytes` Create or update permissions will be used, based on if the
+	/// remote file already exists
 	pub(crate) async fn put(&mut self, key: &ObjectKey, value: Value) -> Result<()> {
 		let payload = accept_payload(value)?;
 		self.require_writeable()?;
@@ -83,8 +86,9 @@ impl<'a> BucketController<'a> {
 	}
 
 	/// Attempt to put a file
-	/// `Bytes` and `Strand` values are supported, and will be converted into `Bytes`
-	/// Create or update permissions will be used, based on if the remote file already exists
+	/// `Bytes` and `Strand` values are supported, and will be converted into
+	/// `Bytes` Create or update permissions will be used, based on if the
+	/// remote file already exists
 	pub(crate) async fn put_if_not_exists(&mut self, key: &ObjectKey, value: Value) -> Result<()> {
 		let payload = accept_payload(value)?;
 		self.require_writeable()?;

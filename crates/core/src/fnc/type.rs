@@ -1,3 +1,9 @@
+use anyhow::{Result, bail, ensure};
+use geo::Point;
+use reblessive::tree::Stk;
+use rust_decimal::Decimal;
+
+use super::args::Optional;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -8,12 +14,6 @@ use crate::val::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, RecordIdKey,
 	RecordIdKeyRange, Strand, Table, Uuid, Value,
 };
-use anyhow::{Result, bail, ensure};
-use geo::Point;
-use reblessive::tree::Stk;
-use rust_decimal::Decimal;
-
-use super::args::Optional;
 
 pub fn array((val,): (Value,)) -> Result<Value> {
 	Ok(val.cast_to::<Array>()?.into())
@@ -147,7 +147,7 @@ pub fn string_lossy((val,): (Value,)) -> Result<Value> {
 pub fn table((val,): (Value,)) -> Result<Value> {
 	let strand = match val {
 		// TODO: null byte check.
-		Value::Thing(t) => unsafe { Strand::new_unchecked(t.table) },
+		Value::RecordId(t) => unsafe { Strand::new_unchecked(t.table) },
 		// TODO: Handle null byte
 		v => unsafe { Strand::new_unchecked(v.as_raw_string()) },
 	};
@@ -162,9 +162,9 @@ pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> 
 		}),
 
 		// Handle second argument
-		(arg1, Some(arg2)) => Ok(Value::Thing(RecordId {
+		(arg1, Some(arg2)) => Ok(Value::RecordId(RecordId {
 			key: match arg2 {
-				Value::Thing(v) => v.key,
+				Value::RecordId(v) => v.key,
 				Value::Array(v) => v.into(),
 				Value::Object(v) => v.into(),
 				Value::Number(v) => match v {
@@ -211,10 +211,11 @@ pub fn uuid((val,): (Value,)) -> Result<Value> {
 }
 
 pub mod is {
+	use anyhow::Result;
+
 	use crate::expr::Ident;
 	use crate::fnc::args::Optional;
 	use crate::val::{Geometry, Strand, Value};
-	use anyhow::Result;
 
 	pub fn array((arg,): (Value,)) -> Result<Value> {
 		Ok((arg).is_array().into())

@@ -1,3 +1,8 @@
+use std::sync::Arc;
+
+use anyhow::{Result, bail, ensure};
+use reblessive::tree::Stk;
+
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Options, Statement};
@@ -14,11 +19,9 @@ use crate::iam::Action;
 use crate::val::value::CoerceError;
 use crate::val::value::every::ArrayBehaviour;
 use crate::val::{RecordId, Value};
-use anyhow::{Result, bail, ensure};
-use reblessive::tree::Stk;
-use std::sync::Arc;
 
-/// Removes `NONE` values recursively from objects, but not when `NONE` is a direct child of an array
+/// Removes `NONE` values recursively from objects, but not when `NONE` is a
+/// direct child of an array
 fn clean_none(v: &mut Value) -> bool {
 	match v {
 		Value::None => false,
@@ -51,7 +54,8 @@ impl Document {
 		let tb = self.tb(ctx, opt).await?;
 		// This table is schemafull
 		if tb.schemafull {
-			// Prune unspecified fields from the document that are not defined via `DefineFieldStatement`s.
+			// Prune unspecified fields from the document that are not defined via
+			// `DefineFieldStatement`s.
 
 			// Create a vector to store the keys
 			let mut defined_field_names = IdiomTrie::new();
@@ -81,9 +85,11 @@ impl Document {
 						continue;
 					}
 					IdiomTrieContains::Ancestor(true) => {
-						// This field is not explicitly defined in the schema, but it is a child of a flex or literal field.
-						// If the field is a child of a flex field, then any nested fields are allowed.
-						// If the field is a child of a literal field, then allow any fields as they will be caught during coercion.
+						// This field is not explicitly defined in the schema, but it is a child of
+						// a flex or literal field. If the field is a child of a flex field,
+						// then any nested fields are allowed. If the field is a child of a
+						// literal field, then allow any fields as they will be caught during
+						// coercion.
 						continue;
 					}
 					IdiomTrieContains::Ancestor(false) => {
@@ -95,7 +101,8 @@ impl Document {
 							}
 						}
 
-						// This field is not explicitly defined in the schema or it is not a child of a flex field.
+						// This field is not explicitly defined in the schema or it is not a child
+						// of a flex field.
 						ensure!(
 							!opt.strict,
 							// If strict, then throw an error on an undefined field
@@ -110,7 +117,8 @@ impl Document {
 					}
 
 					IdiomTrieContains::None => {
-						// This field is not explicitly defined in the schema or it is not a child of a flex field.
+						// This field is not explicitly defined in the schema or it is not a child
+						// of a flex field.
 						ensure!(
 							!opt.strict,
 							// If strict, then throw an error on an undefined field
@@ -681,12 +689,14 @@ impl FieldEditContext<'_> {
 					RefAction::Delete(vec![thing], self.def.name.to_string())
 				}
 			} else if let Value::Array(oldarr) = old {
-				// If the new value is still an array, we only filter out the record ids that are not present in the new array
+				// If the new value is still an array, we only filter out the record ids that
+				// are not present in the new array
 				let removed = if let Value::Array(newarr) = val {
 					oldarr
 						.iter()
 						.filter_map(|v| {
-							// If the record id is still present in the new array, we do not remove the reference
+							// If the record id is still present in the new array, we do not remove
+							// the reference
 							if newarr.contains(v) {
 								None
 							} else if let Value::Thing(thing) = v {
@@ -697,7 +707,8 @@ impl FieldEditContext<'_> {
 						})
 						.collect()
 
-				// If the new value is not an array, then all record ids in the old array are removed
+				// If the new value is not an array, then all record ids in the
+				// old array are removed
 				} else {
 					oldarr
 						.iter()

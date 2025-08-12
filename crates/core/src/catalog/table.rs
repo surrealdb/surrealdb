@@ -1,17 +1,14 @@
-use crate::{
-	catalog::{DatabaseId, NamespaceId},
-	kvs::impl_kv_value_revisioned,
-	sql::{Ident, ToSql, statements::DefineTableStatement},
-};
 use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{
-	catalog::ViewDefinition,
-	expr::{ChangeFeed, Kind, Permissions, statements::info::InfoStructure},
-	val::Value,
-};
+use crate::catalog::{DatabaseId, NamespaceId, ViewDefinition};
+use crate::expr::statements::info::InfoStructure;
+use crate::expr::{ChangeFeed, Kind, Permissions};
+use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::statements::DefineTableStatement;
+use crate::sql::{Ident, ToSql};
+use crate::val::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -112,7 +109,8 @@ impl TableDefinition {
 	fn to_sql_definition(&self) -> DefineTableStatement {
 		DefineTableStatement {
 			id: Some(self.table_id.0),
-			// SAFETY: we know the name is valid because it was validated when the table was created.
+			// SAFETY: we know the name is valid because it was validated when the table was
+			// created.
 			name: unsafe { Ident::new_unchecked(self.name.clone()) },
 			drop: self.drop,
 			full: self.schemafull,

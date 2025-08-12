@@ -1,3 +1,6 @@
+use anyhow::{Result, ensure};
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -5,8 +8,6 @@ use crate::exe::try_join_all_buffered;
 use crate::expr::part::{DestructurePart, Next, Part};
 use crate::expr::{Expr, FlowResultExt as _, Literal};
 use crate::val::Value;
-use anyhow::{Result, ensure};
-use reblessive::tree::Stk;
 
 impl Value {
 	/// Asynchronous method for deleting a field from a `Value`
@@ -77,7 +78,7 @@ impl Value {
 									_ => Ok(()),
 								},
 							},
-							Value::Thing(t) => match path.len() {
+							Value::RecordId(t) => match path.len() {
 								1 => {
 									v.remove(&t.to_string());
 									Ok(())

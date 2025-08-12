@@ -1,12 +1,14 @@
-use crate::err::Error;
-use crate::expr::statements::info::InfoStructure;
-use crate::val::{TryAdd, TrySub, Value};
-use anyhow::{Result, bail, ensure};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::iter::Sum;
 use std::str::FromStr;
 use std::{fmt, ops};
+
+use anyhow::{Result, bail, ensure};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use crate::err::Error;
+use crate::expr::statements::info::InfoStructure;
+use crate::val::{TryAdd, TrySub, Value};
 
 #[revisioned(revision = 1)]
 #[derive(

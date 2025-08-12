@@ -1,12 +1,11 @@
 //! Stores the DocIds -> Thing of an HNSW index
-use crate::idx::trees::hnsw::docs::HnswDocsState;
-use crate::kvs::KVKey;
-use crate::{idx::docids::DocId, val::RecordIdKey};
-
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::DatabaseId;
-use crate::catalog::NamespaceId;
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::idx::docids::DocId;
+use crate::idx::trees::hnsw::docs::HnswDocsState;
+use crate::kvs::KVKey;
+use crate::val::RecordIdKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct HdRoot<'a> {

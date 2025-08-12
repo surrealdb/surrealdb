@@ -1,10 +1,9 @@
-use crate::sql::Ident;
-use crate::sql::changefeed::ChangeFeed;
-use crate::val::Strand;
-
 use std::fmt::{self, Display};
 
 use super::DefineKind;
+use crate::sql::Ident;
+use crate::sql::changefeed::ChangeFeed;
+use crate::val::Strand;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

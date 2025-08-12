@@ -1,3 +1,8 @@
+use anyhow::{Result, bail};
+use futures::future::try_join_all;
+use reblessive::tree::Stk;
+use rust_decimal::Decimal;
+
 use crate::catalog::{TableDefinition, ViewDefinition};
 use crate::ctx::Context;
 use crate::dbs::{Force, Options, Statement};
@@ -14,10 +19,6 @@ use crate::expr::{
 	FunctionCall, Groups, Ident, Idiom, Literal, Part,
 };
 use crate::val::{Array, RecordId, RecordIdKey, Value};
-use anyhow::{Result, bail};
-use futures::future::try_join_all;
-use reblessive::tree::Stk;
-use rust_decimal::Decimal;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Action {
@@ -41,8 +42,8 @@ struct FieldDataContext<'a> {
 	doc: &'a CursorDoc,
 }
 
-/// utlity function for `OR`ing expressions together, modifies accum to be the expression of all
-/// `new`'s OR'ed together.
+/// utlity function for `OR`ing expressions together, modifies accum to be the
+/// expression of all `new`'s OR'ed together.
 fn accumulate_delete_expr(accum: &mut Option<Expr>, new: Expr) {
 	match accum.take() {
 		Some(old) => {
@@ -844,7 +845,8 @@ impl Document {
 		key: &Idiom,
 		val: Value,
 	) -> Result<Expr> {
-		// Build the condition merging the optional user provided condition and the group
+		// Build the condition merging the optional user provided condition and the
+		// group
 		let mut iter = fdc.groups.0.iter().enumerate();
 		let cond = if let Some((i, g)) = iter.next() {
 			let mut root = Expr::Binary {

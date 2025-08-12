@@ -1,14 +1,16 @@
+use std::borrow::Cow;
+use std::future::IntoFuture;
+use std::marker::PhantomData;
+
+use serde::de::DeserializeOwned;
+use serde_content::Value as Content;
+
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Result};
 use crate::error::Api;
 use crate::method::OnceLockExt;
 use crate::{Surreal, api};
-use serde::de::DeserializeOwned;
-use serde_content::Value as Content;
-use std::borrow::Cow;
-use std::future::IntoFuture;
-use std::marker::PhantomData;
 
 /// A signup future
 #[derive(Debug)]
@@ -23,7 +25,8 @@ impl<C, R> Signup<'_, C, R>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Signup<'static, C, R> {
 		Signup {
 			client: Cow::Owned(self.client.into_owned()),

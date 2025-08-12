@@ -1,37 +1,33 @@
-use super::FlowResultExt as _;
-use super::escape::EscapeKey;
-use super::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::expr::Expr;
-use crate::expr::escape::EscapeRid;
-use crate::expr::literal::ObjectEntry;
-use crate::val::{Array, Object, RecordIdKey, Strand, Uuid};
+use std::fmt::{self, Display, Formatter, Write as _};
 
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter, Write as _};
 
-pub mod range;
-pub use range::RecordIdKeyRangeLit;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::expr::escape::{EscapeKey, EscapeRid};
+use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
+use crate::expr::literal::ObjectEntry;
+use crate::expr::{Expr, FlowResultExt as _, RecordIdKeyRangeLit};
+use crate::val::{Array, Object, RecordIdKey, Strand, Uuid};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-pub enum Gen {
+pub enum RecordIdKeyGen {
 	Rand,
 	Ulid,
 	Uuid,
 }
 
-impl Gen {
+impl RecordIdKeyGen {
 	pub fn compute(&self) -> RecordIdKey {
 		match self {
-			Gen::Rand => RecordIdKey::rand(),
-			Gen::Ulid => RecordIdKey::ulid(),
-			Gen::Uuid => RecordIdKey::uuid(),
+			RecordIdKeyGen::Rand => RecordIdKey::rand(),
+			RecordIdKeyGen::Ulid => RecordIdKey::ulid(),
+			RecordIdKeyGen::Uuid => RecordIdKey::uuid(),
 		}
 	}
 }
@@ -44,7 +40,7 @@ pub enum RecordIdKeyLit {
 	Uuid(Uuid),
 	Array(Vec<Expr>),
 	Object(Vec<ObjectEntry>),
-	Generate(Gen),
+	Generate(RecordIdKeyGen),
 	Range(Box<RecordIdKeyRangeLit>),
 }
 
@@ -96,9 +92,9 @@ impl Display for RecordIdKeyLit {
 				}
 			}
 			Self::Generate(v) => match v {
-				Gen::Rand => Display::fmt("rand()", f),
-				Gen::Ulid => Display::fmt("ulid()", f),
-				Gen::Uuid => Display::fmt("uuid()", f),
+				RecordIdKeyGen::Rand => Display::fmt("rand()", f),
+				RecordIdKeyGen::Ulid => Display::fmt("ulid()", f),
+				RecordIdKeyGen::Uuid => Display::fmt("uuid()", f),
 			},
 			Self::Range(v) => Display::fmt(v, f),
 		}

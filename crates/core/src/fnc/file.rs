@@ -1,14 +1,13 @@
+use anyhow::Result;
 use reblessive::tree::Stk;
 
+use super::CursorDoc;
+use super::args::Optional;
 use crate::buc::BucketController;
 use crate::buc::store::ObjectKey;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::val::{File, Object, Strand, Value};
-use anyhow::Result;
-
-use super::CursorDoc;
-use super::args::Optional;
 
 pub async fn put(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),

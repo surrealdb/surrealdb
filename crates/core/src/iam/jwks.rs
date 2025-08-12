@@ -1,6 +1,7 @@
-use crate::dbs::capabilities::NetTarget;
-use crate::err::Error;
-use crate::kvs::Datastore;
+use std::collections::HashMap;
+use std::str::FromStr;
+use std::sync::{Arc, LazyLock};
+
 use anyhow::{Result, bail};
 use chrono::{DateTime, Duration, Utc};
 use jsonwebtoken::Algorithm::*;
@@ -10,10 +11,11 @@ use jsonwebtoken::{DecodingKey, Validation};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-use std::str::FromStr;
-use std::sync::{Arc, LazyLock};
 use tokio::sync::RwLock;
+
+use crate::dbs::capabilities::NetTarget;
+use crate::err::Error;
+use crate::kvs::Datastore;
 
 pub(crate) type JwksCache = HashMap<String, JwksCacheEntry>;
 #[derive(Clone, Serialize, Deserialize)]
@@ -68,11 +70,11 @@ static REMOTE_TIMEOUT: LazyLock<chrono::Duration> =
 		}
 	});
 
-// Generates a verification configuration from a JWKS object hosted in a remote location
-// Performs local caching of all JWKS objects to prevent unnecessary network requests
-// Implements checks to prevent denial of service and unauthorized network requests
-// Validates the JWK objects found in the JWKS object according to RFC 7517
-// Source: https://datatracker.ietf.org/doc/html/rfc7517
+// Generates a verification configuration from a JWKS object hosted in a remote
+// location Performs local caching of all JWKS objects to prevent unnecessary
+// network requests Implements checks to prevent denial of service and
+// unauthorized network requests Validates the JWK objects found in the JWKS
+// object according to RFC 7517 Source: https://datatracker.ietf.org/doc/html/rfc7517
 pub(super) async fn config(
 	kvs: &Datastore,
 	kid: &str,
@@ -81,7 +83,8 @@ pub(super) async fn config(
 ) -> Result<(DecodingKey, Validation)> {
 	// Retrieve JWKS cache
 	let cache = kvs.jwks_cache();
-	// Attempt to fetch relevant JWK object either from local cache or remote location
+	// Attempt to fetch relevant JWK object either from local cache or remote
+	// location
 	let jwk = match fetch_jwks_from_cache(cache, url).await {
 		Some(jwks) => {
 			trace!("Successfully fetched JWKS object from local cache");
@@ -115,9 +118,9 @@ pub(super) async fn config(
 
 	// Use algorithm provided, if specified
 	// This parameter is not required to be present, although is usually expected
-	// When missing, tokens must be validated using only the required key type parameter
-	// This is discouraged, as it requires relying on the algorithm specified in the token
-	// Source: https://datatracker.ietf.org/doc/html/rfc7517#section-4.4
+	// When missing, tokens must be validated using only the required key type
+	// parameter This is discouraged, as it requires relying on the algorithm
+	// specified in the token Source: https://datatracker.ietf.org/doc/html/rfc7517#section-4.4
 	let alg = match jwk.common.key_algorithm {
 		Some(alg) => match alg {
 			KeyAlgorithm::HS256 => HS256,
@@ -144,7 +147,8 @@ pub(super) async fn config(
 		// Source: https://docs.rs/jsonwebtoken/latest/jsonwebtoken/enum.Algorithm.html
 		// Confirmation: https://github.com/Keats/jsonwebtoken/issues/381
 		_ => {
-			// Ensure that the algorithm specified in the token matches the key type defined in the JWK
+			// Ensure that the algorithm specified in the token matches the key type defined
+			// in the JWK
 			match (&jwk.algorithm, token_alg) {
 				(RSA(_), RS256 | RS384 | RS512 | PS256 | PS384 | PS512) => token_alg,
 				(RSA(key), _) => {
@@ -203,15 +207,17 @@ pub(super) async fn config(
 		}
 	}
 
-	// Return verification configuration if a decoding key can be retrieved from the JWK object
+	// Return verification configuration if a decoding key can be retrieved from the
+	// JWK object
 	match DecodingKey::from_jwk(&jwk) {
 		Ok(dec) => {
 			let mut val = Validation::new(alg);
 
-			// TODO(gguillemas): This keeps the existing behavior as of SurrealDB 2.0.0-alpha.9.
-			// Up to that point, a fork of the "jsonwebtoken" crate in version 8.3.0 was being used.
-			// Now that the audience claim is validated by default, we could allow users to leverage this.
-			// This will most likely involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
+			// TODO(gguillemas): This keeps the existing behavior as of SurrealDB
+			// 2.0.0-alpha.9. Up to that point, a fork of the "jsonwebtoken" crate in
+			// version 8.3.0 was being used. Now that the audience claim is validated by
+			// default, we could allow users to leverage this. This will most likely
+			// involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
 			val.validate_aud = false;
 
 			Ok((dec, val))
@@ -223,8 +229,9 @@ pub(super) async fn config(
 	}
 }
 
-// Checks if network access to a remote location is allowed by the datastore capabilities
-// Attempts to find a relevant JWK object inside a JWKS object fetched from the remote location
+// Checks if network access to a remote location is allowed by the datastore
+// capabilities Attempts to find a relevant JWK object inside a JWKS object
+// fetched from the remote location
 async fn find_jwk_from_url(kvs: &Datastore, url: &str, kid: &str) -> Result<Jwk> {
 	// Check that the datastore capabilities allow connections to the URL host
 	if let Err(err) = check_capabilities_url(kvs, url) {
@@ -256,7 +263,8 @@ async fn find_jwk_from_url(kvs: &Datastore, url: &str, kid: &str) -> Result<Jwk>
 	}
 }
 
-// Returns an error if network access to the address from a given URL string is not allowed
+// Returns an error if network access to the address from a given URL string is
+// not allowed
 fn check_capabilities_url(kvs: &Datastore, url: &str) -> Result<()> {
 	let url_parsed = match Url::parse(url) {
 		Ok(url) => url,
@@ -291,7 +299,8 @@ fn check_capabilities_url(kvs: &Datastore, url: &str) -> Result<()> {
 	Ok(())
 }
 
-// Attempts to fetch a JWKS object from a remote location and stores it in the cache if successful
+// Attempts to fetch a JWKS object from a remote location and stores it in the
+// cache if successful
 async fn fetch_jwks_from_url(cache: &Arc<RwLock<JwksCache>>, url: &str) -> Result<JwkSet> {
 	let client = Client::new();
 	let req = client.get(url);
@@ -366,12 +375,13 @@ fn cache_key_from_url(url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
 	use rand::Rng;
 	use rand::distributions::Alphanumeric;
 	use wiremock::matchers::{header, method, path};
 	use wiremock::{Mock, MockServer, ResponseTemplate};
+
+	use super::*;
+	use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
 
 	// Use unique path to prevent accidental cache reuse
 	fn random_path() -> String {
@@ -502,7 +512,8 @@ mod tests {
 	async fn test_capabilities_specific_port() {
 		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
 			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
-				[NetTarget::from_str("127.0.0.1:443").unwrap()].into(), // Different port from server
+				[NetTarget::from_str("127.0.0.1:443").unwrap()].into(), /* Different port from
+				                                                         * server */
 			)),
 		);
 		let jwks = DEFAULT_JWKS.clone();
@@ -572,7 +583,8 @@ mod tests {
 		.await;
 		assert!(res.is_ok(), "Failed to validate token the second time: {:?}", res.err());
 
-		// The server will panic if it does not receive exactly two expected requests
+		// The server will panic if it does not receive exactly two expected
+		// requests
 	}
 
 	#[tokio::test]
@@ -605,7 +617,8 @@ mod tests {
 		.await;
 		assert!(res.is_err(), "Unexpected success validating token with invalid key identifier");
 
-		// Use token with invalid key identifier claim to force cache refresh again before cooldown
+		// Use token with invalid key identifier claim to force cache refresh again
+		// before cooldown
 		let res = config(
 			&ds,
 			"invalid",
@@ -615,7 +628,8 @@ mod tests {
 		.await;
 		assert!(res.is_err(), "Unexpected success validating token with invalid key identifier");
 
-		// The server will panic if it receives more than the single expected request
+		// The server will panic if it receives more than the single expected
+		// request
 	}
 
 	#[tokio::test]
@@ -700,10 +714,11 @@ mod tests {
 	}
 
 	#[tokio::test]
-	// An attacker can issue token indicating that it has been signed with an HMAC algorithm
-	// If the original issuer was trusted using RSA, this may allow the attacker to sign the token with the public key
-	// This test verifies that SurrealDB will not trust a token specifying an algorithm that does not match the key type
-	// Reference: https://auth0.com/blog/critical-vulnerabilities-in-json-web-token-libraries/#RSA-or-HMAC
+	// An attacker can issue token indicating that it has been signed with an HMAC
+	// algorithm If the original issuer was trusted using RSA, this may allow the
+	// attacker to sign the token with the public key This test verifies that
+	// SurrealDB will not trust a token specifying an algorithm that does not match
+	// the key type Reference: https://auth0.com/blog/critical-vulnerabilities-in-json-web-token-libraries/#RSA-or-HMAC
 	async fn test_no_algorithm_invalid() {
 		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
 			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
@@ -888,7 +903,8 @@ mod tests {
 
 		let url = mock_server.uri();
 
-		// Get token configuration from remote location responding with Internal Server Error
+		// Get token configuration from remote location responding with Internal Server
+		// Error
 		let res = config(
 			&ds,
 			"test_1",

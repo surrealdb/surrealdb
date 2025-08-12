@@ -1,13 +1,14 @@
-use crate::cnf::{PKG_NAME, PKG_VERSION};
-use crate::net::error::Error;
 use axum_extra::TypedHeader;
 use axum_extra::headers::Header;
 use axum_extra::typed_header::{TypedHeaderRejection, TypedHeaderRejectionReason};
 use http::HeaderValue;
 use http::header::SERVER;
-use surrealdb::cnf::SERVER_NAME;
 use surrealdb::headers::VERSION;
 use tower_http::set_header::SetResponseHeaderLayer;
+
+use crate::cnf::{PKG_NAME, PKG_VERSION};
+use crate::core::cnf::SERVER_NAME;
+use crate::net::error::Error;
 
 mod accept;
 mod auth_db;
@@ -46,7 +47,8 @@ pub fn add_server_header(enabled: bool) -> SetResponseHeaderLayer<Option<HeaderV
 	SetResponseHeaderLayer::if_not_present(SERVER, header_value)
 }
 
-// Parse a TypedHeader, returning None if the header is missing and an error if the header is invalid.
+// Parse a TypedHeader, returning None if the header is missing and an error if
+// the header is invalid.
 pub fn parse_typed_header<H>(
 	header: Result<TypedHeader<H>, TypedHeaderRejection>,
 ) -> Result<Option<String>, Error>

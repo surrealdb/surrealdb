@@ -3,7 +3,8 @@
 //! Key struct naming conventions:
 //! `XxKey` - A specific key type. eg. `/*{ns}*{db}*{tb}*{id}`
 //! `XxRoot` - A root key which prefixes other keys. eg. `/*{ns}*{db}`
-//! `XxRange` - Represents a start and end key. eg. `/*{ns}*{db}#\x00` or `/*{ns}*{db}#\xff`
+//! `XxRange` - Represents a start and end key. eg. `/*{ns}*{db}#\x00` or
+//! `/*{ns}*{db}#\xff`
 //!
 //!
 //!
@@ -31,8 +32,9 @@
 //! crate::key::node::lq                 /${nd}!lq{lq}{ns}{db}
 //!
 //! crate::key::catalog::ns              /ns/{ns_name} -> NamespaceDefinition
-//! crate::key::catalog::db              /ns/{ns_name}/db/{db_name} -> DatabaseDefinition
-//! crate::key::catalog::tb              /ns/{ns_name}/db/{db_name}/tb/{tb_name} -> TableDefinition
+//! crate::key::catalog::db              /ns/{ns_name}/db/{db_name} ->
+//! DatabaseDefinition crate::key::catalog::tb
+//! /ns/{ns_name}/db/{db_name}/tb/{tb_name} -> TableDefinition
 //!
 //! crate::key::root::access::all        /&{ac}
 //! crate::key::root::access::gr         /&{ac}!gr{gr}
@@ -104,7 +106,6 @@
 //!
 //! crate::key::sequence::st             /*{ns}*{db}*{tb}*{sq}!st{id}
 //! crate::key::sequence::ba             /*{ns}*{db}*{tb}*{sq}!ba{start}
-//!
 pub(crate) mod catalog;
 pub(crate) mod category;
 pub(crate) mod change;

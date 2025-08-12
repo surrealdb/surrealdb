@@ -1,6 +1,7 @@
-use crate::sql::language::Language;
 use std::fmt;
 use std::fmt::Display;
+
+use crate::sql::language::Language;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

@@ -1,13 +1,13 @@
 //! Stores Things of an HNSW index
-use crate::catalog::DatabaseId;
-use crate::catalog::NamespaceId;
+use std::fmt::Debug;
+use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::trees::hnsw::docs::ElementDocs;
 use crate::idx::trees::vector::SerializedVector;
 use crate::kvs::KVKey;
-
-use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Hv<'a> {

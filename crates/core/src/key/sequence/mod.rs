@@ -2,12 +2,12 @@
 pub mod ba;
 pub mod st;
 
-use crate::catalog::{DatabaseId, NamespaceId};
 use std::ops::Range;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::kvs::KVKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

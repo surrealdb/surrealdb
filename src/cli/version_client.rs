@@ -1,10 +1,12 @@
-use crate::cli::upgrade::ROOT;
-use anyhow::{Result, bail};
-use reqwest::Client;
 use std::borrow::Cow;
 #[cfg(test)]
 use std::collections::BTreeMap;
 use std::time::Duration;
+
+use anyhow::{Result, bail};
+use reqwest::Client;
+
+use crate::cli::upgrade::ROOT;
 
 pub(crate) trait VersionClient {
 	async fn fetch(&self, version: &str) -> Result<Cow<'static, str>>;

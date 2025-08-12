@@ -1,3 +1,9 @@
+use std::mem;
+use std::sync::Arc;
+
+use anyhow::{Result, bail, ensure};
+use reblessive::tree::Stk;
+
 use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::ctx::{Canceller, Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
@@ -16,10 +22,6 @@ use crate::idx::planner::{
 	StatementContext,
 };
 use crate::val::{Object, RecordId, RecordIdKey, RecordIdKeyRange, Value};
-use anyhow::{Result, bail, ensure};
-use reblessive::tree::Stk;
-use std::mem;
-use std::sync::Arc;
 
 const TARGET: &str = "surrealdb::core::dbs";
 
@@ -66,8 +68,9 @@ pub(crate) enum Iterable {
 	/// is used in INSERT RELATION statements, where each value
 	/// passed in to the iterable is unique for each record.
 	///
-	/// The first field is the rid from which we create, the second is the rid which is the
-	/// relation itself and the third is the target of the relation
+	/// The first field is the rid from which we create, the second is the rid
+	/// which is the relation itself and the third is the target of the
+	/// relation
 	Relatable(RecordId, RecordId, RecordId, Option<Value>),
 	/// An iterable which iterates over an index range for a
 	/// table, which then fetches the corresponding records
@@ -465,8 +468,8 @@ impl Iterator {
 						&& graph.start.is_none()
 						&& graph.expr.is_none()
 					{
-						// TODO: Do we support `RETURN a:b` here? What do we do when it is not of the
-						// right type?
+						// TODO: Do we support `RETURN a:b` here? What do we do when it is not of
+						// the right type?
 						let from = match from.compute(stk, ctx, opt, doc).await {
 							Ok(x) => x,
 							Err(ControlFlow::Err(e)) => return Err(e),
@@ -521,7 +524,8 @@ impl Iterator {
 			self.limit,
 		)?;
 
-		// Extract the expected behaviour depending on the presence of EXPLAIN with or without FULL
+		// Extract the expected behaviour depending on the presence of EXPLAIN with or
+		// without FULL
 		let mut plan = Plan::new(ctx, stm, &self.entries, &self.results);
 		// Check if we actually need to process and iterate over the results
 		if plan.do_iterate {
@@ -653,11 +657,13 @@ impl Iterator {
 		Ok(())
 	}
 
-	/// Determines whether START/LIMIT clauses can be optimized at the storage level.
+	/// Determines whether START/LIMIT clauses can be optimized at the storage
+	/// level.
 	///
-	/// This method enables a critical performance optimization where START and LIMIT clauses
-	/// can be applied directly at the storage/iterator level (using `start_skip` and
-	/// `cancel_on_limit`) rather than after all query processing is complete.
+	/// This method enables a critical performance optimization where START and
+	/// LIMIT clauses can be applied directly at the storage/iterator level
+	/// (using `start_skip` and `cancel_on_limit`) rather than after all query
+	/// processing is complete.
 	///
 	/// ## The Optimization
 	///
@@ -665,26 +671,30 @@ impl Iterator {
 	/// - Skip records at the storage level before any processing (`start_skip`)
 	/// - Cancel iteration early when the limit is reached (`cancel_on_limit`)
 	///
-	/// This provides significant performance benefits for queries with large result sets,
-	/// as it avoids unnecessary processing of records that would be filtered out anyway.
+	/// This provides significant performance benefits for queries with large
+	/// result sets, as it avoids unnecessary processing of records that would
+	/// be filtered out anyway.
 	///
 	/// ## Safety Conditions
 	///
-	/// The optimization is only safe when the order of records at the storage level
-	/// matches the order of records in the final result set. This method returns `false`
-	/// when any of the following conditions would change the record order or filtering:
+	/// The optimization is only safe when the order of records at the storage
+	/// level matches the order of records in the final result set. This method
+	/// returns `false` when any of the following conditions would change the
+	/// record order or filtering:
 	///
 	/// ### GROUP BY clauses
-	/// Grouping operations fundamentally change the result structure and record count,
-	/// making storage-level limiting meaningless.
+	/// Grouping operations fundamentally change the result structure and record
+	/// count, making storage-level limiting meaningless.
 	///
 	/// ### Multiple iterators
-	/// When multiple iterators are involved (e.g., JOINs, UNIONs), records from different
-	/// sources need to be merged, so individual iterator limits would be incorrect.
+	/// When multiple iterators are involved (e.g., JOINs, UNIONs), records from
+	/// different sources need to be merged, so individual iterator limits
+	/// would be incorrect.
 	///
 	/// ### WHERE clauses
-	/// Filtering operations change which records appear in the final result set.
-	/// START should skip records from the filtered set, not from the raw storage.
+	/// Filtering operations change which records appear in the final result
+	/// set. START should skip records from the filtered set, not from the raw
+	/// storage.
 	///
 	/// Example problem:
 	/// ```sql
@@ -702,9 +712,10 @@ impl Iterator {
 	///
 	/// ## Performance Impact
 	///
-	/// - **When enabled**: Significant performance improvement for large result sets
-	/// - **When disabled**: Slight performance cost as all records must be processed
-	///   before START/LIMIT is applied
+	/// - **When enabled**: Significant performance improvement for large result
+	///   sets
+	/// - **When disabled**: Slight performance cost as all records must be
+	///   processed before START/LIMIT is applied
 	///
 	/// ## Returns
 	///
@@ -896,7 +907,8 @@ impl Iterator {
 		}
 		// Prevent deep recursion
 		let opt = opt.dive(4)?;
-		// If any iterator requires distinct, we need to create a global distinct instance
+		// If any iterator requires distinct, we need to create a global distinct
+		// instance
 		let mut distinct = SyncDistinct::new(ctx);
 		// Process all prepared values
 		for (count, v) in mem::take(&mut self.entries).into_iter().enumerate() {

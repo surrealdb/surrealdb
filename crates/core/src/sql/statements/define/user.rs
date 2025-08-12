@@ -1,16 +1,16 @@
+use std::fmt::{self, Display};
+
+use argon2::Argon2;
+use argon2::password_hash::{PasswordHasher, SaltString};
+use rand::Rng;
+use rand::distributions::Alphanumeric;
+use rand::rngs::OsRng;
+
 use super::DefineKind;
 use crate::sql::escape::QuoteStr;
 use crate::sql::fmt::Fmt;
 use crate::sql::{Base, Ident};
 use crate::val::{Duration, Strand};
-use argon2::{
-	Argon2,
-	password_hash::{PasswordHasher, SaltString},
-};
-use rand::Rng;
-use rand::distributions::Alphanumeric;
-use rand::rngs::OsRng;
-use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

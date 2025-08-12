@@ -1,10 +1,11 @@
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::Operation;
 use crate::val::{Closure, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
 
 pub async fn chain(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),

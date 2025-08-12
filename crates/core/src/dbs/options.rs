@@ -1,3 +1,9 @@
+use std::sync::Arc;
+
+use anyhow::{Result, bail};
+use async_channel::Sender;
+use uuid::Uuid;
+
 use crate::catalog::TableDefinition;
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::dbs::Notification;
@@ -5,10 +11,6 @@ use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::statements::define::DefineIndexStatement;
 use crate::iam::{Action, Auth, ResourceKind};
-use anyhow::{Result, bail};
-use async_channel::Sender;
-use std::sync::Arc;
-use uuid::Uuid;
 
 /// An Options is passed around when processing a set of query
 /// statements.
@@ -271,8 +273,9 @@ impl Options {
 
 	/// Create a new Options object for a function/subquery/future/etc.
 	///
-	/// The parameter is the approximate cost of the operation (more concretely, the size of the
-	/// stack frame it uses relative to a simple function call). When in doubt, use a value of 1.
+	/// The parameter is the approximate cost of the operation (more concretely,
+	/// the size of the stack frame it uses relative to a simple function
+	/// call). When in doubt, use a value of 1.
 	pub fn dive(&self, cost: u8) -> Result<Self, Error> {
 		if self.dive < cost as u32 {
 			return Err(Error::ComputationDepthExceeded);
@@ -346,7 +349,8 @@ impl Options {
 		Ok(())
 	}
 
-	/// Check if the current auth is allowed to perform an action on a given resource
+	/// Check if the current auth is allowed to perform an action on a given
+	/// resource
 	pub fn is_allowed(&self, action: Action, res: ResourceKind, base: &Base) -> Result<()> {
 		// Validate the target resource and base
 		let res = match base {
@@ -356,9 +360,11 @@ impl Options {
 				let (ns, db) = self.ns_db()?;
 				res.on_db(ns, db)
 			}
-			// TODO(gguillemas): This variant is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
+			// TODO(gguillemas): This variant is kept in 2.0.0 for backward compatibility. Drop in
+			// 3.0.0.
 			Base::Sc(_) => {
-				// We should not get here, the scope base is only used in parsing for backward compatibility.
+				// We should not get here, the scope base is only used in parsing for backward
+				// compatibility.
 				bail!(Error::InvalidAuth);
 			}
 		};

@@ -1,3 +1,11 @@
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::sync::Arc;
+
+use anyhow::{Result, bail};
+use filter::Filter;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -9,12 +17,6 @@ use crate::idx::ft::offset::Offset;
 use crate::idx::ft::{DocLength, TermFrequency};
 use crate::idx::trees::store::IndexStores;
 use crate::val::{Strand, Value};
-use anyhow::{Result, bail};
-use filter::Filter;
-use reblessive::tree::Stk;
-use std::collections::HashMap;
-use std::collections::hash_map::Entry;
-use std::sync::Arc;
 
 pub(in crate::idx::ft) mod filter;
 pub(in crate::idx) mod mapper;
@@ -177,6 +179,8 @@ impl Analyzer {
 
 #[cfg(test)]
 mod tests {
+	use std::sync::Arc;
+
 	use super::Analyzer;
 	use crate::ctx::MutableContext;
 	use crate::dbs::Options;
@@ -185,7 +189,6 @@ mod tests {
 	use crate::kvs::{Datastore, LockType, TransactionType};
 	use crate::sql::{DefineStatement, Expr};
 	use crate::syn;
-	use std::sync::Arc;
 
 	async fn get_analyzer_tokens(def: &str, input: &str) -> Tokens {
 		let ds = Datastore::new("memory").await.unwrap();

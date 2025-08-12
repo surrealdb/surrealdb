@@ -1,7 +1,8 @@
 pub(crate) mod ns {
+	use serde::{Deserialize, Serialize};
+
 	use crate::catalog::NamespaceDefinition;
 	use crate::kvs::KVKey;
-	use serde::{Deserialize, Serialize};
 
 	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 	#[non_exhaustive]
@@ -31,10 +32,10 @@ pub(crate) mod ns {
 }
 
 pub(crate) mod db {
+	use serde::{Deserialize, Serialize};
+
 	use crate::catalog::DatabaseDefinition;
 	use crate::kvs::KVKey;
-
-	use serde::{Deserialize, Serialize};
 
 	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 	#[non_exhaustive]
@@ -67,10 +68,10 @@ pub(crate) mod db {
 }
 
 pub(crate) mod tb {
+	use serde::{Deserialize, Serialize};
+
 	use crate::catalog::TableDefinition;
 	use crate::kvs::KVKey;
-
-	use serde::{Deserialize, Serialize};
 
 	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 	#[non_exhaustive]

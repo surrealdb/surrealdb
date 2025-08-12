@@ -1,3 +1,11 @@
+use std::collections::VecDeque;
+use std::collections::hash_map::Entry;
+use std::sync::Arc;
+
+use ahash::HashMap;
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::catalog::DatabaseDefinition;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -10,12 +18,6 @@ use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::knn::Ids64;
 use crate::kvs::Transaction;
 use crate::val::{RecordId, Value};
-use ahash::HashMap;
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::collections::VecDeque;
-use std::collections::hash_map::Entry;
-use std::sync::Arc;
 
 pub enum HnswConditionChecker<'a> {
 	Hnsw(HnswChecker),

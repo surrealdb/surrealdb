@@ -1,3 +1,16 @@
+use std::ops::Range;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use anyhow::Result;
+use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
+use rand::{Rng, thread_rng};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use tokio::time::sleep;
+use uuid::Uuid;
+
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -8,17 +21,6 @@ use crate::key::sequence::ba::Ba;
 use crate::key::sequence::st::St;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{KVKey, LockType, Transaction, TransactionType, impl_kv_value_revisioned};
-use anyhow::Result;
-use dashmap::DashMap;
-use dashmap::mapref::entry::Entry;
-use rand::{Rng, thread_rng};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::ops::Range;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::time::sleep;
-use uuid::Uuid;
 
 #[derive(Clone)]
 pub(crate) struct Sequences {

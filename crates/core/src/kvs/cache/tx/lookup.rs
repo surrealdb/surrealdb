@@ -1,8 +1,9 @@
+use quick_cache::Equivalent;
+use uuid::Uuid;
+
 use super::key::Key;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::val::RecordIdKey;
-use quick_cache::Equivalent;
-use uuid::Uuid;
 
 #[derive(Hash, Eq, PartialEq)]
 pub(crate) enum Lookup<'a> {
@@ -183,9 +184,9 @@ impl Equivalent<Key> for Lookup<'_> {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-
 	use rstest::rstest;
+
+	use super::*;
 
 	#[rstest]
 	#[case(Lookup::Nds, Key::Nds, true)]

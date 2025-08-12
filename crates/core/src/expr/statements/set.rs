@@ -1,14 +1,15 @@
+use std::fmt;
+
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{ControlFlow, Expr, FlowResult, Ident, Kind, Value};
-
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -29,10 +30,11 @@ impl SetStatement {
 		PROTECTED_PARAM_NAMES.contains(&self.name.as_str())
 	}
 
-	/// Compute the set statement, must be called with a valid a ctx that is Some.
+	/// Compute the set statement, must be called with a valid a ctx that is
+	/// Some.
 	///
-	/// Will keep the ctx Some unless an error happens in which case the calling function should
-	/// return the error.
+	/// Will keep the ctx Some unless an error happens in which case the calling
+	/// function should return the error.
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

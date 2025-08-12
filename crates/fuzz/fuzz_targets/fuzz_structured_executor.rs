@@ -2,7 +2,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use std::hint::black_box;
-use surrealdb::{dbs::Session, kvs::Datastore, sql::Ast};
+use surrealdb_core::{dbs::Session, kvs::Datastore, sql::Ast};
 
 fuzz_target!(|query: Ast| {
 	tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {

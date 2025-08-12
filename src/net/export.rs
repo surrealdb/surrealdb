@@ -1,9 +1,5 @@
 use std::ops::Deref;
 
-use super::AppState;
-use super::error::ResponseError;
-use super::headers::ContentType;
-use crate::net::error::Error as NetError;
 use anyhow::Result;
 use axum::body::Body;
 use axum::response::{IntoResponse, Response};
@@ -12,13 +8,18 @@ use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use http::StatusCode;
-use surrealdb::dbs::Session;
-use surrealdb::dbs::capabilities::RouteTarget;
-use surrealdb::iam::Action::View;
-use surrealdb::iam::ResourceKind::Any;
-use surrealdb::iam::check::check_ns_db;
-use surrealdb::kvs::export;
-use surrealdb::rpc::format::Format;
+
+use super::AppState;
+use super::error::ResponseError;
+use super::headers::ContentType;
+use crate::core::dbs::Session;
+use crate::core::dbs::capabilities::RouteTarget;
+use crate::core::iam::Action::View;
+use crate::core::iam::ResourceKind::Any;
+use crate::core::iam::check::check_ns_db;
+use crate::core::kvs::export;
+use crate::core::rpc::format::Format;
+use crate::net::error::Error as NetError;
 
 pub(super) fn router<S>() -> Router<S>
 where
@@ -44,16 +45,16 @@ async fn post_handler(
 	let fmt = content_type.deref();
 	let fmt: Format = fmt.into();
 	let val = match fmt {
-		Format::Json => surrealdb_core::rpc::format::json::decode(&body)
+		Format::Json => crate::core::rpc::format::json::decode(&body)
 			.map_err(anyhow::Error::msg)
 			.map_err(ResponseError)?,
-		Format::Cbor => surrealdb_core::rpc::format::cbor::decode(&body)
+		Format::Cbor => crate::core::rpc::format::cbor::decode(&body)
 			.map_err(anyhow::Error::msg)
 			.map_err(ResponseError)?,
-		Format::Bincode => surrealdb_core::rpc::format::bincode::decode(&body)
+		Format::Bincode => crate::core::rpc::format::bincode::decode(&body)
 			.map_err(anyhow::Error::msg)
 			.map_err(ResponseError)?,
-		Format::Revision => surrealdb_core::rpc::format::revision::decode(&body)
+		Format::Revision => crate::core::rpc::format::revision::decode(&body)
 			.map_err(anyhow::Error::msg)
 			.map_err(ResponseError)?,
 		Format::Unsupported => {

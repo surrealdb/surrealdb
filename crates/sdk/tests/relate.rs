@@ -1,12 +1,12 @@
 mod helpers;
-use crate::helpers::Test;
-
 use helpers::new_ds;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::err::Error;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::err::Error;
 use surrealdb_core::syn;
 use surrealdb_core::val::Value;
+
+use crate::helpers::Test;
 
 #[tokio::test]
 async fn relate_with_parameters() -> Result<()> {
@@ -149,7 +149,7 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 		assert_eq!(o.get("out").unwrap(), &syn::value("person:jaime").unwrap());
 		let id = o.get("id").unwrap();
 
-		let Value::Thing(t) = id else {
+		let Value::RecordId(t) = id else {
 			panic!("should be thing {id:?}")
 		};
 		assert_eq!(t.table, "knows");

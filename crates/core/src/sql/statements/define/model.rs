@@ -1,8 +1,9 @@
+use std::fmt::{self, Write};
+
 use super::DefineKind;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::{Ident, Permission};
 use crate::val::Strand;
-use std::fmt::{self, Write};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

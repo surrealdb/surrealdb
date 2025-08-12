@@ -1,5 +1,10 @@
 #![cfg(not(target_family = "wasm"))]
 
+use std::sync::atomic::AtomicBool;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -14,9 +19,6 @@ use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
 use crate::kvs::TransactionType;
 use crate::val::{Array, RecordId, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::sync::atomic::AtomicBool;
 
 pub(crate) struct IndexOperation<'a> {
 	ctx: &'a Context,
@@ -250,10 +252,10 @@ impl<'a> IndexOperation<'a> {
 	}
 }
 
-/// Extract from the given document, the values required by the index and put then in an array.
-/// Eg. IF the index is composed of the columns `name` and `instrument`
-/// Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie" }
-/// It will return: ["Tobie", "piano"]
+/// Extract from the given document, the values required by the index and put
+/// then in an array. Eg. IF the index is composed of the columns `name` and
+/// `instrument` Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie"
+/// } It will return: ["Tobie", "piano"]
 struct Indexable(Vec<(Value, bool)>);
 
 impl Indexable {

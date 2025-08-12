@@ -1,6 +1,18 @@
+use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use roaring::RoaringTreemap;
+use roaring::treemap::IntoIter;
+use uuid::Uuid;
+
 /// This module implements a concurrent full-text search index.
 ///
-/// The full-text index allows for efficient text search operations with support for:
+/// The full-text index allows for efficient text search operations with support
+/// for:
 /// - Concurrent read and write operations
 /// - BM25 scoring for relevance ranking
 /// - Highlighting of search terms in results
@@ -26,18 +38,8 @@ use crate::idx::ft::{DocLength, Score, TermFrequency};
 use crate::idx::planner::iterators::MatchesHitsIterator;
 use crate::idx::trees::store::IndexStores;
 use crate::key::index::tt::Tt;
-use crate::kvs::Transaction;
-use crate::kvs::impl_kv_value_revisioned;
+use crate::kvs::{Transaction, impl_kv_value_revisioned};
 use crate::val::{RecordId, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use roaring::RoaringTreemap;
-use roaring::treemap::IntoIter;
-use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use uuid::Uuid;
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Default, PartialEq)]
@@ -90,7 +92,8 @@ impl QueryTerms {
 	}
 }
 
-/// The main full-text index implementation that supports concurrent read and write operations
+/// The main full-text index implementation that supports concurrent read and
+/// write operations
 pub(crate) struct FullTextIndex {
 	/// The index key base used for key generation
 	ikb: IndexKeyBase,
@@ -107,7 +110,8 @@ pub(crate) struct FullTextIndex {
 impl FullTextIndex {
 	/// Creates a new full-text index with the specified parameters
 	///
-	/// This method retrieves the analyzer from the database and then calls `with_analyzer`
+	/// This method retrieves the analyzer from the database and then calls
+	/// `with_analyzer`
 	pub(crate) async fn new(
 		nid: Uuid,
 		ixs: &IndexStores,
@@ -122,7 +126,8 @@ impl FullTextIndex {
 
 	/// Creates a new full-text index with the specified analyzer
 	///
-	/// This method initializes the index with the provided analyzer and parameters
+	/// This method initializes the index with the provided analyzer and
+	/// parameters
 	fn with_analyzer(
 		nid: Uuid,
 		ixs: &IndexStores,
@@ -210,7 +215,8 @@ impl FullTextIndex {
 	}
 
 	/// This method assumes that remove_content has been called previously,
-	/// as it does not remove the content (terms) but only removes the doc_id reference.
+	/// as it does not remove the content (terms) but only removes the doc_id
+	/// reference.
 	pub(crate) async fn remove_doc(&self, ctx: &Context, doc_id: DocId) -> Result<()> {
 		self.doc_ids.remove_doc_id(&ctx.tx(), doc_id).await
 	}
@@ -218,7 +224,8 @@ impl FullTextIndex {
 	/// Indexes content in the full-text index
 	///
 	/// This method analyzes and indexes the specified content for a document.
-	/// It resolves the document ID, tokenizes the content, and stores term frequencies and offsets.
+	/// It resolves the document ID, tokenizes the content, and stores term
+	/// frequencies and offsets.
 	pub(crate) async fn index_content(
 		&self,
 		stk: &mut Stk,
@@ -315,8 +322,9 @@ impl FullTextIndex {
 
 	/// Extracts query terms from a search string
 	///
-	/// This method tokenizes the query string and retrieves the document sets for each term.
-	/// It returns a QueryTerms object containing the tokens and their associated document sets.
+	/// This method tokenizes the query string and retrieves the document sets
+	/// for each term. It returns a QueryTerms object containing the tokens and
+	/// their associated document sets.
 	pub(in crate::idx) async fn extract_querying_terms(
 		&self,
 		stk: &mut Stk,
@@ -365,7 +373,8 @@ impl FullTextIndex {
 		for k in tx.keys(beg..end, u32::MAX, None).await? {
 			let tt = Tt::decode_key(&k)?;
 			let entry = deltas.entry(tt.doc_id).or_default();
-			// Increment or decrement the counter based on whether we're adding or removing the term
+			// Increment or decrement the counter based on whether we're adding or removing
+			// the term
 			if tt.add {
 				*entry += 1;
 			} else {
@@ -376,7 +385,8 @@ impl FullTextIndex {
 		// Merge the delta changes with the consolidated document set
 		let docs = self.append_term_docs_delta(tx, term, &deltas).await?;
 
-		// If the final `docs` is empty, we return `None` to indicate no documents contain this term
+		// If the final `docs` is empty, we return `None` to indicate no documents
+		// contain this term
 		if docs.is_empty() {
 			Ok(None)
 		} else {
@@ -431,8 +441,9 @@ impl FullTextIndex {
 
 	/// Compacts term documents by consolidating deltas and removing logs
 	///
-	/// This method processes all term document deltas, applies them to the consolidated term documents,
-	/// and removes the delta logs. It returns true if any compaction was performed.
+	/// This method processes all term document deltas, applies them to the
+	/// consolidated term documents, and removes the delta logs. It returns
+	/// true if any compaction was performed.
 	async fn compact_term_docs(&self, tx: &Transaction) -> Result<bool> {
 		// Get the range of all term transaction logs
 		let (beg, end) = self.ikb.new_tt_terms_range()?;
@@ -482,8 +493,8 @@ impl FullTextIndex {
 
 	/// Creates a new iterator for search hits
 	///
-	/// This method creates an iterator over the documents that match all query terms.
-	/// It returns None if any term has no matching documents.
+	/// This method creates an iterator over the documents that match all query
+	/// terms. It returns None if any term has no matching documents.
 	pub(in crate::idx) fn new_hits_iterator(
 		&self,
 		qt: &QueryTerms,
@@ -585,9 +596,9 @@ impl FullTextIndex {
 
 	/// Computes document length and count statistics for the index
 	///
-	/// This method calculates the total document length and count by aggregating all deltas.
-	/// If compact_log is provided, it will also remove the delta logs and set the flag to true
-	/// if any logs were removed.
+	/// This method calculates the total document length and count by
+	/// aggregating all deltas. If compact_log is provided, it will also remove
+	/// the delta logs and set the flag to true if any logs were removed.
 	async fn compute_doc_length_and_count(
 		&self,
 		tx: &Transaction,
@@ -596,9 +607,10 @@ impl FullTextIndex {
 		let mut dlc = DocLengthAndCount::default();
 		let (beg, end) = self.ikb.new_dc_range()?;
 		let range = beg..end;
-		// Compute the total number of documents (DocCount) and the total number of terms (DocLength)
-		// This key list is supposed to be small, subject to compaction.
-		// The root key is the compacted values, and the others are deltas from transaction not yet compacted.
+		// Compute the total number of documents (DocCount) and the total number of
+		// terms (DocLength) This key list is supposed to be small, subject to
+		// compaction. The root key is the compacted values, and the others are deltas
+		// from transaction not yet compacted.
 		let mut has_log = false;
 		for (_, v) in tx.getr(range.clone(), None).await? {
 			let st: DocLengthAndCount = revision::from_slice(&v)?;
@@ -617,8 +629,9 @@ impl FullTextIndex {
 
 	/// Compacts document length and count statistics
 	///
-	/// This method consolidates document length and count statistics and removes the delta logs.
-	/// It returns true if any compaction was performed.
+	/// This method consolidates document length and count statistics and
+	/// removes the delta logs. It returns true if any compaction was
+	/// performed.
 	async fn compact_doc_length_and_count(&self, tx: &Transaction) -> Result<bool> {
 		let mut has_logs = false;
 		let dlc = self.compute_doc_length_and_count(tx, Some(&mut has_logs)).await?;
@@ -629,8 +642,8 @@ impl FullTextIndex {
 
 	/// Performs compaction on the full-text index
 	///
-	/// This method compacts both document length/count statistics and term documents.
-	/// It returns true if any compaction was performed.
+	/// This method compacts both document length/count statistics and term
+	/// documents. It returns true if any compaction was performed.
 	pub(crate) async fn compaction(&self, tx: &Transaction) -> Result<bool> {
 		let r1 = self.compact_doc_length_and_count(tx).await?;
 		let r2 = self.compact_term_docs(tx).await?;
@@ -639,13 +652,14 @@ impl FullTextIndex {
 
 	/// Triggers compaction for the full-text index
 	///
-	/// This method adds an entry to the index compaction queue by creating an `Ic` key
-	/// for the specified index. The index compaction thread will later process this entry
-	/// and perform the actual compaction of the index.
+	/// This method adds an entry to the index compaction queue by creating an
+	/// `Ic` key for the specified index. The index compaction thread will
+	/// later process this entry and perform the actual compaction of the
+	/// index.
 	///
-	/// Compaction helps optimize full-text index performance by consolidating term
-	/// frequency data and document length information, which can become fragmented
-	/// after many updates to the index.
+	/// Compaction helps optimize full-text index performance by consolidating
+	/// term frequency data and document length information, which can become
+	/// fragmented after many updates to the index.
 	pub(crate) async fn trigger_compaction(
 		ikb: &IndexKeyBase,
 		tx: &Transaction,
@@ -658,8 +672,9 @@ impl FullTextIndex {
 
 	/// Highlights search terms in a document
 	///
-	/// This method highlights the occurrences of search terms in the document value.
-	/// It uses the provided highlighting parameters to format the highlighted text.
+	/// This method highlights the occurrences of search terms in the document
+	/// value. It uses the provided highlighting parameters to format the
+	/// highlighted text.
 	pub(in crate::idx) async fn highlight(
 		&self,
 		tx: &Transaction,
@@ -717,7 +732,8 @@ impl FullTextIndex {
 	}
 }
 
-/// Iterator for full-text search hits that implements the MatchesHitsIterator trait
+/// Iterator for full-text search hits that implements the MatchesHitsIterator
+/// trait
 pub(crate) struct FullTextHitsIterator {
 	/// The index key base used for key generation
 	ikb: IndexKeyBase,
@@ -728,7 +744,8 @@ pub(crate) struct FullTextHitsIterator {
 impl FullTextHitsIterator {
 	/// Creates a new iterator for full-text search hits
 	///
-	/// This method initializes an iterator with the index key base and a bitmap of matching document IDs.
+	/// This method initializes an iterator with the index key base and a bitmap
+	/// of matching document IDs.
 	fn new(ikb: IndexKeyBase, hits: RoaringTreemap) -> Self {
 		Self {
 			ikb,
@@ -749,8 +766,8 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 
 	/// Returns the next search hit in the iterator
 	///
-	/// This method retrieves the next document ID from the bitmap and resolves it to a Thing.
-	/// It returns None when there are no more hits.
+	/// This method retrieves the next document ID from the bitmap and resolves
+	/// it to a Thing. It returns None when there are no more hits.
 	async fn next(&mut self, tx: &Transaction) -> Result<Option<(RecordId, DocId)>> {
 		for doc_id in self.iter.by_ref() {
 			if let Some(key) = SeqDocIds::get_id(&self.ikb, tx, doc_id).await? {
@@ -778,8 +795,9 @@ pub(in crate::idx) struct Scorer {
 impl Scorer {
 	/// Creates a new scorer with the specified parameters
 	///
-	/// This method initializes a scorer with document statistics and BM25 parameters.
-	/// It calculates the average document length for use in the BM25 algorithm.
+	/// This method initializes a scorer with document statistics and BM25
+	/// parameters. It calculates the average document length for use in the
+	/// BM25 algorithm.
 	fn new(dlc: DocLengthAndCount, bm25: Bm25Params) -> Self {
 		let doc_count = dlc.doc_count as f64;
 		let average_doc_length = (dlc.total_docs_length as f64) / doc_count;
@@ -796,8 +814,9 @@ impl Scorer {
 
 	/// Calculates the overall score for a document based on query terms
 	///
-	/// This method computes the sum of BM25 scores for all matching terms in the document.
-	/// The score represents the relevance of the document to the query.
+	/// This method computes the sum of BM25 scores for all matching terms in
+	/// the document. The score represents the relevance of the document to the
+	/// query.
 	pub(crate) async fn score(
 		&self,
 		fti: &FullTextIndex,
@@ -872,6 +891,14 @@ impl Scorer {
 
 #[cfg(test)]
 mod tests {
+	use std::sync::Arc;
+	use std::time::{Duration, Instant};
+
+	use reblessive::tree::Stk;
+	use test_log::test;
+	use tokio::time::sleep;
+	use uuid::Uuid;
+
 	use super::{FullTextIndex, TermDocument};
 	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::ctx::{Context, MutableContext};
@@ -880,18 +907,12 @@ mod tests {
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::offset::Offset;
-	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
+	use crate::kvs::LockType::*;
+	use crate::kvs::{Datastore, Transaction, TransactionType};
 	use crate::sql::Expr;
 	use crate::sql::statements::DefineStatement;
 	use crate::syn;
 	use crate::val::{Array, RecordId, Value};
-	use reblessive::tree::Stk;
-	use std::sync::Arc;
-	use std::time::{Duration, Instant};
-	use test_log::test;
-
-	use tokio::time::sleep;
-	use uuid::Uuid;
 
 	#[derive(Clone)]
 	struct TestContext {

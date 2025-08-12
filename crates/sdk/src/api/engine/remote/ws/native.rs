@@ -1,25 +1,12 @@
-use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
-use crate::api::conn::{self, Command, DbResponse, RequestData, Route, Router};
-use crate::api::engine::remote::Response;
-use crate::api::engine::remote::ws::{Client, PING_INTERVAL};
-use crate::api::err::Error;
-use crate::api::method::BoxFuture;
-use crate::api::opt::Endpoint;
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
-use crate::api::opt::Tls;
-use crate::api::{ExtraFeatures, Result, Surreal};
-use crate::engine::IntervalStream;
-use crate::engine::remote::Data;
-use crate::opt::WaitFor;
+use std::collections::HashSet;
+use std::collections::hash_map::Entry;
+use std::sync::atomic::AtomicI64;
+
 use async_channel::Receiver;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use revision::revisioned;
 use serde::Deserialize;
-use std::collections::HashSet;
-use std::collections::hash_map::Entry;
-use std::sync::atomic::AtomicI64;
-use surrealdb_core::val::Value as CoreValue;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 use tokio::time;
@@ -32,6 +19,21 @@ use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use trice::Instant;
+
+use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
+use crate::api::conn::{self, Command, DbResponse, RequestData, Route, Router};
+use crate::api::engine::remote::Response;
+use crate::api::engine::remote::ws::{Client, PING_INTERVAL};
+use crate::api::err::Error;
+use crate::api::method::BoxFuture;
+use crate::api::opt::Endpoint;
+#[cfg(any(feature = "native-tls", feature = "rustls"))]
+use crate::api::opt::Tls;
+use crate::api::{ExtraFeatures, Result, Surreal};
+use crate::core::val::Value as CoreValue;
+use crate::engine::IntervalStream;
+use crate::engine::remote::Data;
+use crate::opt::WaitFor;
 
 pub(crate) const MAX_MESSAGE_SIZE: usize = 64 << 20; // 64 MiB
 pub(crate) const MAX_FRAME_SIZE: usize = 16 << 20; // 16 MiB
@@ -231,7 +233,7 @@ async fn router_handle_route(
 		trace!("Request {:?}", request);
 
 		// Unwrap because a router request cannot fail to serialize.
-		let payload = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
+		let payload = crate::core::rpc::format::revision::encode(&request).unwrap();
 
 		Message::Binary(payload)
 	};
@@ -279,7 +281,8 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 									match pending.effect {
 										RequestEffect::None => {}
 										RequestEffect::Insert => {
-											// For insert, we need to flatten single responses in an array
+											// For insert, we need to flatten single responses in an
+											// array
 											if let DbResponse::Other(CoreValue::Array(array)) = resp
 											{
 												if array.len() == 1 {
@@ -329,7 +332,8 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 								let live_query_id = notification.id;
 								// Check if this live query is registered
 								if let Some(sender) = state.live_queries.get(&live_query_id) {
-									// Send the notification back to the caller or kill live query if the receiver is already dropped
+									// Send the notification back to the caller or kill live query
+									// if the receiver is already dropped
 									if sender.send(notification).await.is_err() {
 										state.live_queries.remove(&live_query_id);
 										let kill = {
@@ -339,11 +343,10 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 											.into_router_request(None)
 											.unwrap();
 
-											let value =
-												surrealdb_core::rpc::format::revision::encode(
-													&request,
-												)
-												.unwrap();
+											let value = crate::core::rpc::format::revision::encode(
+												&request,
+											)
+											.unwrap();
 											Message::Binary(value)
 										};
 										if let Err(error) = state.sink.send(kill).await {
@@ -371,7 +374,7 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 
 			// Let's try to find out the ID of the response that failed to deserialise
 			if let Message::Binary(binary) = response {
-				match surrealdb_core::rpc::format::revision::decode(&binary) {
+				match crate::core::rpc::format::revision::decode(&binary) {
 					Ok(ErrorResponse {
 						id,
 					}) => {
@@ -419,7 +422,7 @@ async fn router_reconnect(
 						.into_router_request(None)
 						.expect("replay commands should always convert to route requests");
 
-					let message = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
+					let message = crate::core::rpc::format::revision::encode(&request).unwrap();
 
 					if let Err(error) = state.sink.send(Message::Binary(message)).await {
 						trace!("{error}");
@@ -435,7 +438,7 @@ async fn router_reconnect(
 					.into_router_request(None)
 					.unwrap();
 					trace!("Request {:?}", request);
-					let payload = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
+					let payload = crate::core::rpc::format::revision::encode(&request).unwrap();
 
 					if let Err(error) = state.sink.send(Message::Binary(payload)).await {
 						trace!("{error}");
@@ -464,7 +467,7 @@ pub(crate) async fn run_router(
 ) {
 	let ping = {
 		let request = Command::Health.into_router_request(None).unwrap();
-		let value = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
+		let value = crate::core::rpc::format::revision::encode(&request).unwrap();
 		Message::Binary(value)
 	};
 
@@ -478,8 +481,8 @@ pub(crate) async fn run_router(
 
 		let mut pinger = IntervalStream::new(interval);
 		// Turn into a stream instead of calling recv_async
-		// The stream seems to be able to keep some state which would otherwise need to be
-		// recreated with each next.
+		// The stream seems to be able to keep some state which would otherwise need to
+		// be recreated with each next.
 
 		state.last_activity = Instant::now();
 		state.live_queries.clear();
@@ -598,7 +601,7 @@ impl Response {
 				trace!("Received an unexpected text message; {text}");
 				Ok(None)
 			}
-			Message::Binary(binary) => surrealdb_core::rpc::format::revision::decode(binary)
+			Message::Binary(binary) => crate::core::rpc::format::revision::decode(binary)
 				.map(Some)
 				.map_err(|x| format!("Failed to deserialize revision payload: {x}"))
 				.map_err(crate::api::Error::InvalidResponse)
@@ -625,13 +628,15 @@ impl Response {
 
 #[cfg(test)]
 mod tests {
+	use std::io::Write;
+	use std::time::SystemTime;
+
 	use bincode::Options;
 	use flate2::Compression;
 	use flate2::write::GzEncoder;
 	use rand::{Rng, thread_rng};
-	use std::io::Write;
-	use std::time::SystemTime;
-	use surrealdb_core::{rpc, val};
+
+	use crate::core::{rpc, val};
 
 	#[test_log::test]
 	fn large_vector_serialisation_bench() {
@@ -717,7 +722,7 @@ mod tests {
 		{
 			// Unversioned
 			let (duration, payload) =
-				timed(&|| surrealdb_core::rpc::format::bincode::encode(&vector).unwrap());
+				timed(&|| crate::core::rpc::format::bincode::encode(&vector).unwrap());
 			results.push((
 				payload.len(),
 				UNVERSIONED,
@@ -741,7 +746,7 @@ mod tests {
 		{
 			// Versioned
 			let (duration, payload) =
-				timed(&|| surrealdb_core::rpc::format::revision::encode(&vector).unwrap());
+				timed(&|| crate::core::rpc::format::revision::encode(&vector).unwrap());
 			results.push((payload.len(), VERSIONED, duration, payload.len() as f32 / ref_payload));
 
 			// Compressed Versioned
@@ -785,7 +790,8 @@ mod tests {
 
 		// TODO: Figure out what this test was supposed to track.
 		//
-		//	Note this test changed with the value inversion PR, below is the previous check.
+		//	Note this test changed with the value inversion PR, below is the previous
+		// check.
 		//
 		//	vec![
 		//		BINCODE_REF,

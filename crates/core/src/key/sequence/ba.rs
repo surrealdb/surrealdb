@@ -1,11 +1,10 @@
 //! Stores sequence batches
-use crate::catalog::DatabaseId;
-use crate::catalog::NamespaceId;
+use serde::{Deserialize, Serialize};
+
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::kvs::sequences::BatchValue;
-
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Ba<'a> {

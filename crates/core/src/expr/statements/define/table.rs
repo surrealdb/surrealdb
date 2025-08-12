@@ -1,3 +1,12 @@
+use std::fmt::{self, Display, Write};
+use std::sync::Arc;
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
 use super::{DefineFieldStatement, DefineKind};
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition, TableType};
 use crate::ctx::Context;
@@ -13,14 +22,6 @@ use crate::expr::{Base, Expr, Ident, Idiom, Kind, Output, Permissions, View};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Transaction, impl_kv_value_revisioned};
 use crate::val::{Strand, Value};
-use anyhow::{Result, bail};
-
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
-use std::sync::Arc;
-use uuid::Uuid;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]

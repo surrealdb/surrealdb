@@ -1,8 +1,8 @@
-use crate::{sql::escape::EscapeIdent, val::Strand};
-use std::{
-	fmt::{self, Display, Formatter},
-	ops::Deref,
-};
+use std::fmt::{self, Display, Formatter};
+use std::ops::Deref;
+
+use crate::sql::escape::EscapeIdent;
+use crate::val::Strand;
 
 /// An identifier.
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash)]
@@ -12,7 +12,8 @@ pub struct Ident(String);
 impl Ident {
 	/// Create a new identifier
 	///
-	/// This function checks if the string has a null byte, returns None if it has.
+	/// This function checks if the string has a null byte, returns None if it
+	/// has.
 	pub fn new(str: String) -> Option<Self> {
 		if str.contains('\0') {
 			return None;

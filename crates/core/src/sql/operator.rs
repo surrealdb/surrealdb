@@ -1,6 +1,8 @@
-use crate::sql::index::Distance;
-use crate::sql::{Expr, Ident, Kind, fmt::Fmt};
 use std::fmt;
+
+use crate::sql::fmt::Fmt;
+use crate::sql::index::Distance;
+use crate::sql::{Expr, Ident, Kind};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -496,8 +498,8 @@ impl fmt::Display for AssignOperator {
 
 /// An enum which defines how strong a operator binds it's operands.
 ///
-/// If a binding power is higher the operator is more likely to directly operate on it's
-/// neighbours.
+/// If a binding power is higher the operator is more likely to directly operate
+/// on it's neighbours.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub enum BindingPower {
 	Base,
@@ -520,10 +522,11 @@ impl BindingPower {
 	///
 	/// Note that there are some variants here which can have multiple meanings.
 	/// `Operator::Equal` can be assignment but can also be equality.
-	/// `Operator::Add` can be the add operator but also the plus prefix operator which have different binding
-	/// powers.
+	/// `Operator::Add` can be the add operator but also the plus prefix
+	/// operator which have different binding powers.
 	///
-	/// This function returns the binding power for if the operator is used in the infix position.
+	/// This function returns the binding power for if the operator is used in
+	/// the infix position.
 	pub fn for_binary_operator(op: &BinaryOperator) -> Self {
 		match op {
 			BinaryOperator::Or => BindingPower::Or,
@@ -590,9 +593,10 @@ impl BindingPower {
 		}
 	}
 
-	/// Returns the binding power for this expression. This is generally `BindingPower::Prime` as
-	/// most value variants are prime expressions, however some like Value::Expression and
-	/// Value::Range have a different binding power.
+	/// Returns the binding power for this expression. This is generally
+	/// `BindingPower::Prime` as most value variants are prime expressions,
+	/// however some like Value::Expression and Value::Range have a different
+	/// binding power.
 	pub fn for_expr(expr: &Expr) -> BindingPower {
 		match expr {
 			Expr::Prefix {
