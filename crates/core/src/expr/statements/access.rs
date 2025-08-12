@@ -356,15 +356,15 @@ pub async fn create_grant(
 			let ns = ctx.get_ns_id_ro(opt).await?;
 			txn.get_ns_access(ns, &access).await?.ok_or_else(|| Error::AccessNsNotFound {
 				ac: access.to_string(),
-				ns: ns.to_string(),
+				ns: opt.ns().expect("ns must be set given above statements").to_string(),
 			})?
 		}
 		Base::Db => {
 			let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 			txn.get_db_access(ns, db, &access).await?.ok_or_else(|| Error::AccessDbNotFound {
 				ac: access.to_string(),
-				ns: ns.to_string(),
-				db: db.to_string(),
+				ns: opt.ns().expect("ns must be set given above statements").to_string(),
+				db: opt.db().expect("db must be set given above statements").to_string(),
 			})?
 		}
 		_ => {
@@ -475,7 +475,10 @@ pub async fn create_grant(
 							txn.get_ns_user(ns_id, user).await?.ok_or_else(|| {
 								Error::UserNsNotFound {
 									name: user.to_string(),
-									ns: ns_id.to_string(),
+									ns: opt
+										.ns()
+										.expect("ns must be set given above statements")
+										.to_string(),
 								}
 							})?
 						}
@@ -484,8 +487,14 @@ pub async fn create_grant(
 							txn.get_db_user(ns_id, db_id, user).await?.ok_or_else(|| {
 								Error::UserDbNotFound {
 									name: user.to_string(),
-									ns: ns_id.to_string(),
-									db: db_id.to_string(),
+									ns: opt
+										.ns()
+										.expect("ns must be set given above statements")
+										.to_string(),
+									db: opt
+										.db()
+										.expect("db must be set given above statements")
+										.to_string(),
 								}
 							})?
 						}
@@ -657,7 +666,10 @@ async fn compute_show(
 						None => bail!(Error::AccessGrantNsNotFound {
 							ac: stmt.ac.as_raw_string(),
 							gr: gr.as_raw_string(),
-							ns: ns.to_string(),
+							ns: opt
+								.ns()
+								.expect("ns must be set given above statements")
+								.to_string(),
 						}),
 					}
 				}
@@ -668,8 +680,14 @@ async fn compute_show(
 						None => bail!(Error::AccessGrantDbNotFound {
 							ac: stmt.ac.as_raw_string(),
 							gr: gr.as_raw_string(),
-							ns: ns.to_string(),
-							db: db.to_string(),
+							ns: opt
+								.ns()
+								.expect("ns must be set given above statements")
+								.to_string(),
+							db: opt
+								.db()
+								.expect("db must be set given above statements")
+								.to_string(),
 						}),
 					}
 				}
