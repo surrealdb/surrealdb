@@ -73,7 +73,16 @@ mod mem {
 		// Use a memory datastore instance
 		let path = "memory";
 		// Setup the in-memory datastore
-		let ds = Datastore::new_with_clock(path, Some(clock)).await.unwrap().with_node_id(id);
+		let ds = Datastore::new_with_options(
+			path,
+			DatastoreOptions {
+				clock: Some(clock),
+				..Default::default()
+			},
+		)
+		.await
+		.unwrap()
+		.with_node_id(id);
 		// Return the datastore
 		(ds, Kvs::Mem)
 	}
@@ -94,7 +103,16 @@ mod rocksdb {
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
 		let path = format!("rocksdb:{path}");
 		// Setup the RocksDB datastore
-		let ds = Datastore::new_with_clock(&path, Some(clock)).await.unwrap().with_node_id(id);
+		let ds = Datastore::new_with_options(
+			path,
+			DatastoreOptions {
+				clock: Some(clock),
+				..Default::default()
+			},
+		)
+		.await
+		.unwrap()
+		.with_node_id(id);
 		// Return the datastore
 		(ds, Kvs::Rocksdb)
 	}
@@ -115,7 +133,16 @@ mod surrealkv {
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
 		let path = format!("surrealkv:{path}");
 		// Setup the SurrealKV datastore
-		let ds = Datastore::new_with_clock(&path, Some(clock)).await.unwrap().with_node_id(id);
+		let ds = Datastore::new_with_options(
+			path,
+			DatastoreOptions {
+				clock: Some(clock),
+				..Default::default()
+			},
+		)
+		.await
+		.unwrap()
+		.with_node_id(id);
 		// Return the datastore
 		(ds, Kvs::SurrealKV)
 	}
@@ -133,7 +160,16 @@ mod tikv {
 		// Setup the cluster connection string
 		let path = "tikv:127.0.0.1:2379";
 		// Setup the TiKV datastore
-		let ds = Datastore::new_with_clock(path, Some(clock)).await.unwrap().with_node_id(id);
+		let ds = Datastore::new_with_options(
+			path,
+			DatastoreOptions {
+				clock: Some(clock),
+				..Default::default()
+			},
+		)
+		.await
+		.unwrap()
+		.with_node_id(id);
 		// Clear any previous test entries
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
 		tx.delr(vec![0u8]..vec![0xffu8]).await.unwrap();
@@ -155,7 +191,16 @@ mod fdb {
 		// Setup the cluster connection string
 		let path = "fdb:/etc/foundationdb/fdb.cluster";
 		// Setup the FoundationDB datastore
-		let ds = Datastore::new_with_clock(path, Some(clock)).await.unwrap().with_node_id(id);
+		let ds = Datastore::new_with_options(
+			path,
+			DatastoreOptions {
+				clock: Some(clock),
+				..Default::default()
+			},
+		)
+		.await
+		.unwrap()
+		.with_node_id(id);
 		// Clear any previous test entries
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
 		tx.delp(&vec![]).await.unwrap();
