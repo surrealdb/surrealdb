@@ -356,8 +356,8 @@ impl RecordId {
 	/// Turns the record id into a literal which resolves to the same value.
 	pub fn into_literal(self) -> expr::RecordIdLit {
 		expr::RecordIdLit {
-			tb: self.table,
-			id: self.key.into_literal(),
+			table: self.table,
+			key: self.key.into_literal(),
 		}
 	}
 

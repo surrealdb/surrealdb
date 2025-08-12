@@ -53,7 +53,7 @@ impl ToFlatbuffers for Value {
 				value_type: proto_fb::ValueType::Bytes,
 				value: Some(b.to_fb(builder)?.as_union_value()),
 			},
-			Self::Thing(thing) => proto_fb::ValueArgs {
+			Self::RecordId(thing) => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::RecordId,
 				value: Some(thing.to_fb(builder)?.as_union_value()),
 			},
@@ -132,7 +132,7 @@ impl FromFlatbuffers for Value {
 				let record_id_value =
 					input.value_as_record_id().expect("Guaranteed to be a RecordId");
 				let thing = RecordId::from_fb(record_id_value)?;
-				Ok(Value::Thing(thing))
+				Ok(Value::RecordId(thing))
 			}
 			proto_fb::ValueType::Duration => {
 				let duration_value =
@@ -210,7 +210,7 @@ mod tests {
 	#[case::uuid(Value::Uuid(Uuid::new_v4()))]
 	#[case::string(Value::Strand(Strand::new("Hello, World!".to_string()).unwrap()))]
 	#[case::bytes(Value::Bytes(Bytes(vec![1, 2, 3, 4, 5])))]
-	#[case::thing(Value::Thing(RecordId{ table: "test_table".to_string(), key: RecordIdKey::Number(42) }))] // Example Thing
+	#[case::thing(Value::RecordId(RecordId{ table: "test_table".to_string(), key: RecordIdKey::Number(42) }))] // Example Thing
 	#[case::object(Value::Object(Object(BTreeMap::from([("key".to_string(), Value::Strand(Strand::new("value".to_owned()).unwrap()))]))))]
 	#[case::array(Value::Array(Array(vec![Value::Number(Number::Int(1)), Value::Number(Number::Float(2.0))])))]
 	#[case::geometry::point(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))))]

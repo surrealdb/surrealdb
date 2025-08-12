@@ -36,10 +36,10 @@ impl Value {
 							return Ok(());
 						};
 
-						let mut v = Value::Thing(v);
+						let mut v = Value::RecordId(v);
 						return stk.run(|stk| v.fetch(stk, ctx, opt, iter.as_slice())).await;
 					}
-					Value::Thing(x) => {
+					Value::RecordId(x) => {
 						let what = Expr::Idiom(Idiom(vec![
 							Part::Start(Expr::Literal(Literal::RecordId(x.clone().into_literal()))),
 							Part::Graph(Graph {
@@ -237,7 +237,7 @@ impl Value {
 				.await?;
 				Ok(())
 			}
-			Value::Thing(v) => {
+			Value::RecordId(v) => {
 				// Clone the thing
 				let val = v.clone();
 				// Fetch the remote embedded record

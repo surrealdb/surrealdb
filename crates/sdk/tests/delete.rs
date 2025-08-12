@@ -496,7 +496,7 @@ async fn delete_filtered_live_notification() -> Result<()> {
 		Notification::new(
 			live_id,
 			Action::Delete,
-			Value::Thing(RecordId::new("person".to_owned(), strand!("test_true").to_owned())),
+			Value::RecordId(RecordId::new("person".to_owned(), strand!("test_true").to_owned())),
 			syn::value(
 				"{
 					id: person:test_true,

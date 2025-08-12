@@ -411,7 +411,7 @@ impl_direct! {
 	Bytes => Bytes,
 	Object => Object,
 	Array => Array,
-	Thing => RecordId,
+	RecordId => RecordId,
 	Strand => Strand,
 	Geometry => Geometry,
 	Regex => Regex,
@@ -499,7 +499,7 @@ impl Value {
 
 	fn can_coerce_to_record(&self, val: &[Ident]) -> bool {
 		match self {
-			Value::Thing(t) => {
+			Value::RecordId(t) => {
 				val.is_empty() || val.iter().any(|x| t.table == **x)
 				//t.is_record_type(val),
 			}
@@ -620,11 +620,11 @@ impl Value {
 	pub(crate) fn coerce_to_record_kind(self, val: &[Ident]) -> Result<RecordId, CoerceError> {
 		let this = match self {
 			// Records are allowed if correct type
-			Value::Thing(v) => {
+			Value::RecordId(v) => {
 				if val.is_empty() || val.iter().any(|x| **x == v.table) {
 					return Ok(v);
 				} else {
-					Value::Thing(v)
+					Value::RecordId(v)
 				}
 			}
 			x => x,

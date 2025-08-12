@@ -1,5 +1,6 @@
+use crate::err::Error;
 use crate::val::Value;
-use crate::{err::Error, val::value::every::ArrayBehaviour};
+use crate::val::value::every::ArrayBehaviour;
 use anyhow::{Result, ensure};
 
 impl Value {
