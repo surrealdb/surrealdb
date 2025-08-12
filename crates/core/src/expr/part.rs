@@ -9,7 +9,6 @@ use crate::expr::idiom::recursion::{
 	self, Recursion, clean_iteration, compute_idiom_recursion, is_final,
 };
 use crate::expr::{Expr, FlowResultExt as _, Graph, Ident, Idiom, Literal, Value};
-use crate::sql::ToSql;
 use crate::val::{Array, RecordId};
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -52,6 +51,49 @@ impl Part {
 
 	pub(crate) fn is_index(&self) -> bool {
 		matches!(self, Part::Value(Expr::Literal(Literal::Integer(_))) | Part::First | Part::Last)
+	}
+
+	/// Returns a raw string representation of this part without any escaping.
+	pub(crate) fn as_raw_string(&self) -> String {
+		match self {
+			Part::All => "[*]".to_string(),
+			Part::Last => "[$]".to_string(),
+			Part::First => "[0]".to_string(),
+			Part::Start(v) => v.to_string(),
+			Part::Field(v) => format!(".{}", v.as_raw_string()),
+			Part::Flatten => "…".to_string(),
+			Part::Where(v) => format!("[WHERE {v}]"),
+			Part::Graph(v) => v.to_string(),
+			Part::Value(v) => format!("[{v}]"),
+			Part::Method(v, a) => format!(".{v}({})", Fmt::comma_separated(a)),
+			Part::Destructure(v) => {
+				let mut s = String::from(".{");
+				for (i, p) in v.iter().enumerate() {
+					s.push_str(&p.as_raw_string());
+					if i != v.len() - 1 {
+						s.push(',');
+					}
+				}
+				s.push('}');
+				s
+			}
+			Part::Optional => "?".to_string(),
+			Part::Recurse(v, nest, instruction) => {
+				let mut s = format!(".{{{v}");
+				if let Some(instruction) = instruction {
+					s.push_str(&format!("+{instruction}"));
+				}
+				s.push('}');
+
+				if let Some(nest) = nest {
+					s.push_str(&format!("({nest})"));
+				}
+
+				s
+			}
+			Part::Doc => "@".to_string(),
+			Part::RepeatRecurse => ".@".to_string(),
+		}
 	}
 
 	/// Returns the idex if this part would have been `Part::Index(x)` before that field was
@@ -147,7 +189,7 @@ impl fmt::Display for Part {
 			Part::Last => f.write_str("[$]"),
 			Part::First => f.write_str("[0]"),
 			Part::Start(v) => write!(f, "{v}"),
-			Part::Field(v) => write!(f, ".{}", v.to_sql()),
+			Part::Field(v) => write!(f, ".{v}"),
 			Part::Flatten => f.write_str("…"),
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
 			Part::Graph(v) => write!(f, "{v}"),
@@ -274,7 +316,7 @@ impl<'a> RecursionPlan {
 					.catch_return()?
 				{
 					Value::Object(mut obj) => {
-						obj.insert(field.into_raw_string(), v);
+						obj.insert(field.as_raw_string(), v);
 						Ok(Value::Object(obj))
 					}
 					Value::None => Ok(Value::None),
@@ -430,6 +472,25 @@ impl DestructurePart {
 		}
 	}
 
+	pub(crate) fn as_raw_string(&self) -> String {
+		match self {
+			DestructurePart::All(fd) => format!("{}.*", fd.as_raw_string()),
+			DestructurePart::Field(fd) => fd.as_raw_string(),
+			DestructurePart::Aliased(fd, v) => {
+				format!("{}: {}", fd.as_raw_string(), v.as_raw_string())
+			}
+			DestructurePart::Destructure(fd, d) => {
+				let mut s = fd.as_raw_string();
+				s.push('{');
+				for p in d.iter() {
+					s.push_str(&p.as_raw_string());
+				}
+				s.push('}');
+				s
+			}
+		}
+	}
+
 	pub fn idiom(&self) -> Idiom {
 		Idiom(self.path())
 	}
@@ -439,7 +500,7 @@ impl fmt::Display for DestructurePart {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			DestructurePart::All(fd) => write!(f, "{fd}.*"),
-			DestructurePart::Field(fd) => write!(f, "{}", fd.to_sql()),
+			DestructurePart::Field(fd) => write!(f, "{fd}"),
 			DestructurePart::Aliased(fd, v) => write!(f, "{fd}: {v}"),
 			DestructurePart::Destructure(fd, d) => {
 				write!(f, "{fd}{}", Part::Destructure(d.clone()))

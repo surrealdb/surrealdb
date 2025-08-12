@@ -7,7 +7,6 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, FlowResultExt as _, Ident, Permission};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
@@ -112,7 +111,7 @@ impl DefineParamStatement {
 impl Display for DefineParamStore {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE PARAM")?;
-		write!(f, " ${} VALUE {}", self.name.to_sql(), self.value)?;
+		write!(f, " ${} VALUE {}", self.name, self.value)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}
@@ -135,7 +134,7 @@ impl Display for DefineParamStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " ${} VALUE {}", self.name.to_sql(), self.value)?;
+		write!(f, " ${} VALUE {}", self.name, self.value)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}

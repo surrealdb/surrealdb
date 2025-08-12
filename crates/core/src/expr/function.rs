@@ -165,7 +165,7 @@ impl Function {
 				// Process the function arguments
 				for (val, (name, kind)) in args.into_iter().zip(&val.args) {
 					ctx.add_value(
-						name.into_raw_string(),
+						name.as_raw_string(),
 						val.coerce_to_kind(kind)
 							.map_err(Error::from)
 							.map_err(anyhow::Error::new)?

@@ -1,7 +1,7 @@
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 
-use crate::sql::{Ident, Kind, Permissions, TableType, ToSql, View};
+use crate::sql::{Ident, Kind, Permissions, TableType, View};
 use crate::val::Strand;
 use std::fmt::{self, Display, Write};
 use uuid::Uuid;
@@ -31,7 +31,7 @@ impl Display for DefineTableStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name.to_sql())?;
+		write!(f, " {}", self.name)?;
 		write!(f, " TYPE")?;
 		match &self.table_type {
 			TableType::Normal => {

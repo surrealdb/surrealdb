@@ -9,7 +9,6 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident, Idiom, Index, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::sql::fmt::Fmt;
 use crate::val::{Array, Strand, Value};
 use anyhow::{Result, bail};
@@ -56,6 +55,12 @@ impl DefineIndexStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 
+		eprintln!("name={}", self.name);
+		eprintln!("name={}", self.name);
+		eprintln!("name={}", self.name);
+		eprintln!("name={}", self.name);
+		eprintln!("name={}", self.name);
+
 		let (ns, db) = opt.ns_db()?;
 		let tb = txn.ensure_ns_db_tb(ns, db, &self.what, opt.strict).await?;
 
@@ -98,7 +103,7 @@ impl DefineIndexStatement {
 					continue;
 				};
 				if txn
-					.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, &first.to_sql())
+					.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, &first.as_raw_string())
 					.await?
 					.is_none()
 				{
@@ -219,7 +224,7 @@ impl Display for DefineIndexStatement {
 			f,
 			" {} ON {} FIELDS {}",
 			self.name,
-			self.what.to_sql(),
+			self.what,
 			Fmt::comma_separated(self.cols.iter())
 		)?;
 		if Index::Idx != self.index {

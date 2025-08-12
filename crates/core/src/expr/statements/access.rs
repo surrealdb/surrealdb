@@ -108,7 +108,7 @@ impl AccessGrantStore {
 		match self.subject {
 			SubjectStore::Record(id) => sub.insert("record".to_owned(), Value::from(id)),
 			SubjectStore::User(name) => {
-				sub.insert("user".to_owned(), Value::from(name.into_raw_string()))
+				sub.insert("user".to_owned(), Value::from(name.as_raw_string()))
 			}
 		};
 		res.insert("subject".to_owned(), Value::from(sub));
@@ -129,7 +129,7 @@ impl AccessGrantStore {
 				}
 			}
 			Grant::Bearer(bg) => {
-				gr.insert("id".to_owned(), Value::from(bg.id.into_raw_string()));
+				gr.insert("id".to_owned(), Value::from(bg.id.as_raw_string()));
 				gr.insert("key".to_owned(), Value::from(bg.key));
 			}
 		};
@@ -206,7 +206,7 @@ impl SubjectStore {
 	pub fn id(&self) -> String {
 		match self {
 			SubjectStore::Record(id) => id.to_string(),
-			SubjectStore::User(name) => name.into_raw_string(),
+			SubjectStore::User(name) => name.as_raw_string(),
 		}
 	}
 }
@@ -638,8 +638,8 @@ async fn compute_show(
 				Base::Root => match txn.get_root_access_grant(&stmt.ac, gr).await? {
 					Some(val) => val.clone(),
 					None => bail!(Error::AccessGrantRootNotFound {
-						ac: stmt.ac.into_raw_string(),
-						gr: gr.into_raw_string(),
+						ac: stmt.ac.as_raw_string(),
+						gr: gr.as_raw_string(),
 					}),
 				},
 				Base::Ns => {
@@ -647,8 +647,8 @@ async fn compute_show(
 					match txn.get_ns_access_grant(ns, &stmt.ac, gr).await? {
 						Some(val) => val.clone(),
 						None => bail!(Error::AccessGrantNsNotFound {
-							ac: stmt.ac.into_raw_string(),
-							gr: gr.into_raw_string(),
+							ac: stmt.ac.as_raw_string(),
+							gr: gr.as_raw_string(),
 							ns: ns.to_string(),
 						}),
 					}
@@ -658,8 +658,8 @@ async fn compute_show(
 					match txn.get_db_access_grant(ns, db, &stmt.ac, gr).await? {
 						Some(val) => val.clone(),
 						None => bail!(Error::AccessGrantDbNotFound {
-							ac: stmt.ac.into_raw_string(),
-							gr: gr.into_raw_string(),
+							ac: stmt.ac.as_raw_string(),
+							gr: gr.as_raw_string(),
 							ns: ns.to_string(),
 							db: db.to_string(),
 						}),
@@ -773,8 +773,8 @@ pub async fn revoke_grant(
 				Base::Root => match txn.get_root_access_grant(&stmt.ac, gr).await? {
 					Some(val) => (*val).clone(),
 					None => bail!(Error::AccessGrantRootNotFound {
-						ac: stmt.ac.into_raw_string(),
-						gr: gr.into_raw_string(),
+						ac: stmt.ac.as_raw_string(),
+						gr: gr.as_raw_string(),
 					}),
 				},
 				Base::Ns => {
@@ -784,8 +784,8 @@ pub async fn revoke_grant(
 						None => {
 							let ns = opt.ns()?;
 							bail!(Error::AccessGrantNsNotFound {
-								ac: stmt.ac.into_raw_string(),
-								gr: gr.into_raw_string(),
+								ac: stmt.ac.as_raw_string(),
+								gr: gr.as_raw_string(),
 								ns: ns.to_string(),
 							})
 						}
@@ -798,8 +798,8 @@ pub async fn revoke_grant(
 						None => {
 							let (ns, db) = opt.ns_db()?;
 							bail!(Error::AccessGrantDbNotFound {
-								ac: stmt.ac.into_raw_string(),
-								gr: gr.into_raw_string(),
+								ac: stmt.ac.as_raw_string(),
+								gr: gr.as_raw_string(),
 								ns: ns.to_string(),
 								db: db.to_string(),
 							})
@@ -1115,7 +1115,7 @@ impl Display for AccessStatement {
 				}
 				write!(f, " GRANT")?;
 				match &stmt.subject {
-					Subject::User(x) => write!(f, " FOR USER {}", x.into_raw_string())?,
+					Subject::User(x) => write!(f, " FOR USER {}", x.as_raw_string())?,
 					Subject::Record(x) => write!(f, " FOR RECORD {}", x)?,
 				}
 				Ok(())

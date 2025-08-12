@@ -86,7 +86,7 @@ impl DefineTableStatement {
 			namespace_id: ns,
 			database_id: db,
 			table_id,
-			name: self.name.to_string(),
+			name: self.name.as_raw_string(),
 			drop: self.drop,
 			schemafull: self.full,
 			table_type: self.table_type.clone(),

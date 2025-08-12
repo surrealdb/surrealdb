@@ -25,7 +25,7 @@ pub async fn timestamp_to_versionstamp(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Give the current versionstamp a timestamp of 0
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	let db = tx.get_or_add_db("myns", "mydb", false).await.unwrap();
+	let db = tx.ensure_ns_db("myns", "mydb", false).await.unwrap();
 
 	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	tr.set_timestamp_for_versionstamp(0, db.namespace_id, db.database_id).await.unwrap();

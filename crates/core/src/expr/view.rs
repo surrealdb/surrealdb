@@ -18,7 +18,7 @@ impl View {
 	pub(crate) fn to_definition(&self) -> ViewDefinition {
 		ViewDefinition {
 			expr: self.expr.clone(),
-			what: self.what.iter().map(|s| s.into_raw_string()).collect(),
+			what: self.what.iter().map(|s| s.as_raw_string()).collect(),
 			cond: self.cond.clone(),
 			group: self.group.clone(),
 		}

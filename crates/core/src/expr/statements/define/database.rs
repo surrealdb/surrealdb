@@ -73,7 +73,7 @@ impl DefineDatabaseStatement {
 		let db_def = DatabaseDefinition {
 			namespace_id: nsv.namespace_id,
 			database_id,
-			name: self.name.into_raw_string(),
+			name: self.name.as_raw_string(),
 			comment: self.comment.clone().map(|s| s.into_string()),
 			changefeed: self.changefeed,
 		};

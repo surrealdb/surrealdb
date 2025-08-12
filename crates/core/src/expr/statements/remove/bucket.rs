@@ -30,7 +30,7 @@ impl RemoveBucketStatement {
 				return Ok(Value::None);
 			} else {
 				return Err(Error::BuNotFound {
-					name: self.name.into_raw_string(),
+					name: self.name.as_raw_string(),
 				}
 				.into());
 			}

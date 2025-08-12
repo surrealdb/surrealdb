@@ -33,7 +33,7 @@ impl RemoveAccessStatement {
 						return Ok(Value::None);
 					} else {
 						return Err(anyhow::Error::new(Error::AccessRootNotFound {
-							ac: self.name.into_raw_string(),
+							ac: self.name.as_raw_string(),
 						}));
 					}
 				};
@@ -60,7 +60,7 @@ impl RemoveAccessStatement {
 					} else {
 						let ns = opt.ns()?;
 						return Err(anyhow::Error::new(Error::AccessNsNotFound {
-							ac: self.name.into_raw_string(),
+							ac: self.name.as_raw_string(),
 							ns: ns.to_string(),
 						}));
 					}
@@ -88,7 +88,7 @@ impl RemoveAccessStatement {
 					} else {
 						let (ns, db) = opt.ns_db()?;
 						return Err(anyhow::Error::new(Error::AccessDbNotFound {
-							ac: self.name.into_raw_string(),
+							ac: self.name.as_raw_string(),
 							ns: ns.to_string(),
 							db: db.to_string(),
 						}));

@@ -54,8 +54,8 @@ impl Ident {
 	}
 
 	/// Convert the Ident to a raw String
-	pub fn into_raw_string(&self) -> String {
-		self.0.to_string()
+	pub fn as_raw_string(&self) -> String {
+		self.0.clone()
 	}
 
 	/// Checks if this field is the `id` field
@@ -85,13 +85,7 @@ impl Deref for Ident {
 
 impl Display for Ident {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		f.write_str(&self.0)
-	}
-}
-
-impl crate::sql::ToSql for Ident {
-	fn to_sql(&self) -> String {
-		EscapeIdent(&self.0).to_string()
+		EscapeIdent(&self.0).fmt(f)
 	}
 }
 
@@ -103,6 +97,6 @@ impl From<Table> for Ident {
 
 impl InfoStructure for Ident {
 	fn structure(self) -> Value {
-		self.into_raw_string().into()
+		self.as_raw_string().into()
 	}
 }
