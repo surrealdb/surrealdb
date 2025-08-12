@@ -299,6 +299,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Processes `DEFINE FIELD` statements which
 	/// have been defined on the table for this
 	/// record, with a `REFERENCE` clause, and remove
@@ -428,6 +429,7 @@ impl FieldEditContext<'_> {
 		// Return the original value
 		Ok(val)
 	}
+
 	/// Process any DEFAULT clause for the field definition
 	async fn process_default_clause(&mut self, val: Value) -> Result<Value> {
 		// This field has a value specified
@@ -482,6 +484,7 @@ impl FieldEditContext<'_> {
 		// Return the original value
 		Ok(val)
 	}
+
 	/// Process any VALUE clause for the field definition
 	async fn process_value_clause(&mut self, val: Value) -> Result<Value> {
 		// Check for a VALUE clause
@@ -519,6 +522,7 @@ impl FieldEditContext<'_> {
 		// Return the original value
 		Ok(val)
 	}
+
 	/// Process any ASSERT clause for the field definition
 	async fn process_assert_clause(&mut self, val: Value) -> Result<Value> {
 		// If the field TYPE is optional, and the
@@ -570,6 +574,7 @@ impl FieldEditContext<'_> {
 		// Return the original value
 		Ok(val)
 	}
+
 	/// Process any PERMISSIONS clause for the field definition
 	async fn process_permissions_clause(&mut self, val: Value) -> Result<Value> {
 		// Check for a PERMISSIONS clause
@@ -652,6 +657,7 @@ impl FieldEditContext<'_> {
 		// Return the original value
 		Ok(val)
 	}
+
 	/// Process any REFERENCE clause for the field definition
 	async fn process_reference_clause(&mut self, val: &Value) -> Result<()> {
 		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
@@ -780,44 +786,42 @@ impl FieldEditContext<'_> {
 	}
 
 	// Process any `TYPE reference` clause for the field definition
-	/*
-	async fn process_refs_type(&mut self) -> Result<Option<Refs>> {
-		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-			return Ok(None);
-		}
-
-		let refs = match &self.def.field_kind {
-			// We found a reference type for this field
-			// In this case, we force the value to be a reference
-			Some(Kind::References(ft, ff)) => Refs(vec![(ft.clone(), ff.clone())]),
-			Some(Kind::Either(kinds)) => {
-				if !kinds.iter().all(|k| matches!(k, Kind::References(_, _))) {
-					return Ok(None);
-				}
-
-				// Extract all reference types
-				let pairs: Vec<_> = kinds
-					.iter()
-					.filter_map(|k| {
-						if let Kind::References(ft, ff) = k {
-							Some((ft.clone(), ff.clone()))
-						} else {
-							None
-						}
-					})
-					.collect();
-
-				// If the length does not match, there were non-reference types
-				ensure!(pairs.len() == kinds.len(), Error::RefsMismatchingVariants);
-
-				// All ok
-				Refs(pairs)
-			}
-			// This is not a reference type, continue as normal
-			_ => return Ok(None),
-		};
-
-		Ok(Some(refs))
-	}
-	*/
+	// async fn process_refs_type(&mut self) -> Result<Option<Refs>> {
+	// if !self.ctx.get_capabilities().allows_experimental(&
+	// ExperimentalTarget::RecordReferences) { return Ok(None);
+	// }
+	//
+	// let refs = match &self.def.field_kind {
+	// We found a reference type for this field
+	// In this case, we force the value to be a reference
+	// Some(Kind::References(ft, ff)) => Refs(vec![(ft.clone(), ff.clone())]),
+	// Some(Kind::Either(kinds)) => {
+	// if !kinds.iter().all(|k| matches!(k, Kind::References(_, _))) {
+	// return Ok(None);
+	// }
+	//
+	// Extract all reference types
+	// let pairs: Vec<_> = kinds
+	// .iter()
+	// .filter_map(|k| {
+	// if let Kind::References(ft, ff) = k {
+	// Some((ft.clone(), ff.clone()))
+	// } else {
+	// None
+	// }
+	// })
+	// .collect();
+	//
+	// If the length does not match, there were non-reference types
+	// ensure!(pairs.len() == kinds.len(), Error::RefsMismatchingVariants);
+	//
+	// All ok
+	// Refs(pairs)
+	// }
+	// This is not a reference type, continue as normal
+	// _ => return Ok(None),
+	// };
+	//
+	// Ok(Some(refs))
+	// }
 }

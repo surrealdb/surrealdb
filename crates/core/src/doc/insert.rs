@@ -169,6 +169,7 @@ impl Document {
 		self.process_changefeeds(ctx, opt, stm).await?;
 		self.pluck(stk, ctx, opt, stm).await
 	}
+
 	/// Attempt to run an INSERT statement to
 	/// update a record which already exists
 	async fn insert_update(

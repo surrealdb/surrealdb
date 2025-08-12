@@ -628,6 +628,7 @@ impl Building {
 		rc.store(false, Ordering::Relaxed);
 		Ok(())
 	}
+
 	/// Abort the current indexing process.
 	fn abort(&self) {
 		// We use `Ordering::Relaxed` as the called does not require to be synchronized.

@@ -1,6 +1,6 @@
 use std::fmt::{self, Write as _};
 
-//use async_graphql::dynamic::Object;
+// use async_graphql::dynamic::Object;
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use rust_decimal::Decimal;
 
@@ -19,7 +19,7 @@ pub enum Literal {
 	Bool(bool),
 	Float(f64),
 	Integer(i64),
-	//TODO: Possibly remove wrapper.
+	// TODO: Possibly remove wrapper.
 	Decimal(Decimal),
 	Duration(Duration),
 
@@ -29,7 +29,7 @@ pub enum Literal {
 	Uuid(Uuid),
 	Regex(Regex),
 
-	//TODO: Possibly remove wrapper.
+	// TODO: Possibly remove wrapper.
 	Array(Vec<Expr>),
 	Object(Vec<ObjectEntry>),
 	Geometry(Geometry),

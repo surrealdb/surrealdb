@@ -10,6 +10,7 @@ impl Stash {
 	pub fn set(&mut self, key: Vec<u8>, val: U32) {
 		self.0.insert(key, val);
 	}
+
 	/// Get a key from the cache
 	pub fn get(&mut self, key: &[u8]) -> Option<U32> {
 		self.0.get(key).cloned()

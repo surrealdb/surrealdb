@@ -16,8 +16,8 @@ impl<C> IntoFuture for Begin<C>
 where
 	C: Connection,
 {
-	type Output = Result<Transaction<C>>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
+	type Output = Result<Transaction<C>>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {

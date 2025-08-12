@@ -153,7 +153,9 @@ mod tests {
 	use crate::expr::changefeed::ChangeFeed;
 	use crate::expr::statements::show::ShowSince;
 	use crate::expr::statements::{
-		DefineDatabaseStatement, DefineNamespaceStatement, DefineTableStatement,
+		DefineDatabaseStatement,
+		DefineNamespaceStatement,
+		DefineTableStatement,
 	};
 	use crate::kvs::LockType::*;
 	use crate::kvs::TransactionType::*;
@@ -176,7 +178,6 @@ mod tests {
 		// so that we can replay change feeds from the timestamp later.
 		ds.changefeed_process_at(None, ts.0.timestamp().try_into().unwrap()).await.unwrap();
 
-		//
 		// Write things to the table.
 		//
 
@@ -456,7 +457,6 @@ mod tests {
 
 		let ds = Datastore::new("memory").await.unwrap();
 
-		//
 		// Create the ns, db, and tb to let the GC and the timestamp-to-versionstamp
 		// conversion work.
 		//

@@ -5,7 +5,11 @@ use opentelemetry::metrics::MetricsError;
 use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_sdk::metrics::reader::{DefaultAggregationSelector, DefaultTemporalitySelector};
 use opentelemetry_sdk::metrics::{
-	Aggregation, Instrument, PeriodicReader, SdkMeterProvider, Stream,
+	Aggregation,
+	Instrument,
+	PeriodicReader,
+	SdkMeterProvider,
+	Stream,
 };
 use opentelemetry_sdk::runtime;
 

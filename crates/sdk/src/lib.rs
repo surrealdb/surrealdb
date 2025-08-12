@@ -41,15 +41,30 @@ pub mod error {
 pub use crate::api::headers;
 #[doc(inline)]
 pub use crate::api::{
-	Connect, Connection, Response, Surreal, engine, method, opt,
+	Connect,
+	Connection,
+	Response,
+	Surreal,
+	engine,
+	method,
+	opt,
 	value::{
-		self, Action, Bytes, Datetime, Notification, Number, Object, RecordId, RecordIdKey, Value,
+		self,
+		Action,
+		Bytes,
+		Datetime,
+		Notification,
+		Number,
+		Object,
+		RecordId,
+		RecordIdKey,
+		Value,
 	},
 };
 
 /// A specialized `Result` type
 pub type Result<T> = anyhow::Result<T>;
 pub use anyhow::Error;
-// Re-exporting core so it can be imported as `crate::core` so it's not grouped with third
-// party crates.
+// Re-exporting core so it can be imported as `crate::core` so it's not grouped
+// with third party crates.
 use surrealdb_core as core;

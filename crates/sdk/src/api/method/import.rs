@@ -52,8 +52,8 @@ impl<'r, Client, T> IntoFuture for Import<'r, Client, T>
 where
 	Client: Connection,
 {
-	type Output = Result<()>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<()>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {

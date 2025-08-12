@@ -2,7 +2,10 @@ pub mod base64 {
 	use anyhow::Result;
 	use base64::engine::DecodePaddingMode;
 	use base64::engine::general_purpose::{
-		GeneralPurpose, GeneralPurposeConfig, STANDARD, STANDARD_NO_PAD,
+		GeneralPurpose,
+		GeneralPurposeConfig,
+		STANDARD,
+		STANDARD_NO_PAD,
 	};
 	use base64::{Engine, alphabet};
 

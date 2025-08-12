@@ -423,6 +423,7 @@ impl FullTextIndex {
 
 		Ok(docs)
 	}
+
 	async fn set_term_docs_delta(
 		&self,
 		tx: &Transaction,
@@ -585,6 +586,7 @@ impl FullTextIndex {
 		}
 		self.doc_ids.get_doc_id(tx, &rid.key).await
 	}
+
 	pub(in crate::idx) async fn new_scorer(&self, ctx: &Context) -> Result<Option<Scorer>> {
 		if let Some(bm25) = &self.bm25 {
 			let dlc = self.compute_doc_length_and_count(&ctx.tx(), None).await?;
@@ -759,6 +761,7 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 	fn len(&self) -> usize {
 		self.iter.len()
 	}
+
 	#[cfg(not(target_pointer_width = "64"))]
 	fn len(&self) -> usize {
 		self.iter.size_hint().0

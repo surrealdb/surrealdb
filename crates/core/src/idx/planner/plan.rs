@@ -9,7 +9,12 @@ use crate::expr::operator::{MatchesOperator, NearestNeighbor};
 use crate::expr::with::With;
 use crate::expr::{BinaryOperator, Expr, Idiom};
 use crate::idx::planner::tree::{
-	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node,
+	CompoundIndexes,
+	GroupRef,
+	IdiomCol,
+	IdiomPosition,
+	IndexReference,
+	Node,
 };
 use crate::idx::planner::{GrantedPermission, RecordStrategy, ScanDirection, StatementContext};
 use crate::val::{Array, Number, Object, Value};

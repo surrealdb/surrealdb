@@ -11,14 +11,16 @@ pub struct Idioms(pub Vec<Idiom>);
 
 impl Deref for Idioms {
 	type Target = Vec<Idiom>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
 }
 
 impl IntoIterator for Idioms {
-	type Item = Idiom;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
+	type Item = Idiom;
+
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
 	}
@@ -75,26 +77,24 @@ impl From<crate::expr::Idiom> for Idiom {
 }
 
 impl Idiom {
-	/*
-	/// Appends a part to the end of this Idiom
-	pub(crate) fn push(mut self, n: Part) -> Idiom {
-		self.0.push(n);
-		self
-	}
-	/// Convert this Idiom to a JSON Path string
-	pub(crate) fn to_path(&self) -> String {
-		format!("/{self}").replace(']', "").replace(&['.', '['][..], "/")
-	}
-	/// Simplifies this Idiom for use in object keys
-	pub(crate) fn simplify(&self) -> Idiom {
-		self.0
-			.iter()
-			.filter(|&p| matches!(p, Part::Field(_) | Part::Start(_) | Part::Graph(_)))
-			.cloned()
-			.collect::<Vec<_>>()
-			.into()
-	}
-	*/
+	// Appends a part to the end of this Idiom
+	// pub(crate) fn push(mut self, n: Part) -> Idiom {
+	// self.0.push(n);
+	// self
+	// }
+	// Convert this Idiom to a JSON Path string
+	// pub(crate) fn to_path(&self) -> String {
+	// format!("/{self}").replace(']', "").replace(&['.', '['][..], "/")
+	// }
+	// Simplifies this Idiom for use in object keys
+	// pub(crate) fn simplify(&self) -> Idiom {
+	// self.0
+	// .iter()
+	// .filter(|&p| matches!(p, Part::Field(_) | Part::Start(_) | Part::Graph(_)))
+	// .cloned()
+	// .collect::<Vec<_>>()
+	// .into()
+	// }
 }
 
 impl Display for Idiom {

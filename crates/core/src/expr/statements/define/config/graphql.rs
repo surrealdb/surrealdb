@@ -87,31 +87,30 @@ impl From<String> for TableConfig {
 	}
 }
 
-/*
-pub fn val_to_ident(val: Value) -> Result<Ident, Value> {
-	match val {
-		Value::Strand(s) => Ok(Ident::from_strand(s)),
-		Value::Table(n) => Ok(Ident::from_strand(n)),
-		Value::Idiom(ref i) => match &i[..] {
-			[Part::Field(n)] => Ok(n.clone()),
-			_ => Err(val),
-		},
-		_ => Err(val),
-	}
-}
-
-impl TryFrom<Value> for TableConfig {
-	type Error = Value;
-
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			v @ Value::Strand(_) | v @ Value::Table(_) | v @ Value::Idiom(_) => {
-				val_to_ident(v).map(|i| i.0.into())
-			}
-			_ => Err(value),
-		}
-	}
-}*/
+// pub fn val_to_ident(val: Value) -> Result<Ident, Value> {
+// match val {
+// Value::Strand(s) => Ok(Ident::from_strand(s)),
+// Value::Table(n) => Ok(Ident::from_strand(n)),
+// Value::Idiom(ref i) => match &i[..] {
+// [Part::Field(n)] => Ok(n.clone()),
+// _ => Err(val),
+// },
+// _ => Err(val),
+// }
+// }
+//
+// impl TryFrom<Value> for TableConfig {
+// type Error = Value;
+//
+// fn try_from(value: Value) -> Result<Self, Self::Error> {
+// match value {
+// v @ Value::Strand(_) | v @ Value::Table(_) | v @ Value::Idiom(_) => {
+// val_to_ident(v).map(|i| i.0.into())
+// }
+// _ => Err(value),
+// }
+// }
+// }
 
 impl Display for TableConfig {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

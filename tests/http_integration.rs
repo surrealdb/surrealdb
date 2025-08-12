@@ -1039,7 +1039,6 @@ mod http_integration {
 		Ok(())
 	}
 
-	//
 	// Key endpoint tests
 	//
 

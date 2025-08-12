@@ -299,7 +299,7 @@ impl Value {
 
 				Some(Kind::Function(Some(args_kinds), returns_kind))
 			}
-			//Value::Refs(_) => None,
+			// Value::Refs(_) => None,
 			Value::File(file) => {
 				// TODO: Null byte validity
 				let str = unsafe { Ident::new_unchecked(file.bucket.clone()) };
@@ -393,7 +393,7 @@ impl Value {
 			Value::RecordId(v) => match other {
 				Value::RecordId(w) => v == w,
 				// TODO(3.0.0): Decide if we want to keep this behavior.
-				//Value::Regex(w) => w.regex().is_match(v.to_raw().as_str()),
+				// Value::Regex(w) => w.regex().is_match(v.to_raw().as_str()),
 				_ => false,
 			},
 			Value::Strand(v) => match other {
@@ -404,7 +404,7 @@ impl Value {
 			Value::Regex(v) => match other {
 				Value::Regex(w) => v == w,
 				// TODO(3.0.0): Decide if we want to keep this behavior.
-				//Value::Thing(w) => v.regex().is_match(w.to_raw().as_str()),
+				// Value::Thing(w) => v.regex().is_match(w.to_raw().as_str()),
 				Value::Strand(w) => v.regex().is_match(w.as_str()),
 				_ => false,
 			},
@@ -636,7 +636,7 @@ impl fmt::Display for Value {
 			Value::RecordId(v) => write!(f, "{v}"),
 			Value::Uuid(v) => write!(f, "{v}"),
 			Value::Closure(v) => write!(f, "{v}"),
-			//Value::Refs(v) => write!(f, "{v}"),
+			// Value::Refs(v) => write!(f, "{v}"),
 			Value::File(v) => write!(f, "{v}"),
 			Value::Table(v) => write!(f, "{v}"),
 		}
@@ -660,6 +660,7 @@ use std::ops::Add;
 
 impl TryAdd for Value {
 	type Output = Self;
+
 	fn try_add(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_add(w)?),
@@ -683,6 +684,7 @@ pub(crate) trait TrySub<Rhs = Self> {
 
 impl TrySub for Value {
 	type Output = Self;
+
 	fn try_sub(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_sub(w)?),
@@ -704,6 +706,7 @@ pub(crate) trait TryMul<Rhs = Self> {
 
 impl TryMul for Value {
 	type Output = Self;
+
 	fn try_mul(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_mul(w)?),
@@ -721,6 +724,7 @@ pub(crate) trait TryDiv<Rhs = Self> {
 
 impl TryDiv for Value {
 	type Output = Self;
+
 	fn try_div(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_div(w)?),
@@ -738,6 +742,7 @@ pub(crate) trait TryFloatDiv<Rhs = Self> {
 
 impl TryFloatDiv for Value {
 	type Output = Self;
+
 	fn try_float_div(self, other: Self) -> Result<Self::Output> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_float_div(w)?),
@@ -755,6 +760,7 @@ pub(crate) trait TryRem<Rhs = Self> {
 
 impl TryRem for Value {
 	type Output = Self;
+
 	fn try_rem(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_rem(w)?),
@@ -772,6 +778,7 @@ pub(crate) trait TryPow<Rhs = Self> {
 
 impl TryPow for Value {
 	type Output = Self;
+
 	fn try_pow(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Value::Number(v), Value::Number(w)) => Self::Number(v.try_pow(w)?),
@@ -789,6 +796,7 @@ pub(crate) trait TryNeg<Rhs = Self> {
 
 impl TryNeg for Value {
 	type Output = Self;
+
 	fn try_neg(self) -> Result<Self> {
 		Ok(match self {
 			Self::Number(n) => Self::Number(n.try_neg()?),

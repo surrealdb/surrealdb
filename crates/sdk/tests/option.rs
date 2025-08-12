@@ -16,7 +16,6 @@ async fn option_import_indexes_should_be_populated() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	//
 	// OPTION IMPORT does not count as a result
 	assert_eq!(res.len(), 4);
 	//

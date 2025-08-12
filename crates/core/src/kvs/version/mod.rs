@@ -46,22 +46,27 @@ impl KVValue for Version {
 impl Version {
 	/// The latest version
 	pub const LATEST: u16 = 2;
+
 	/// The latest version
 	pub fn latest() -> Self {
 		Self(2)
 	}
+
 	/// SurrealDB version 1
 	pub fn v1() -> Self {
 		Self(1)
 	}
+
 	/// SurrealDB version 2
 	pub fn v2() -> Self {
 		Self(2)
 	}
+
 	/// Check if we are running the latest version
 	pub fn is_latest(&self) -> bool {
 		self.0 == Self::LATEST
 	}
+
 	/// Fix
 	pub async fn fix(&self, ds: Arc<Datastore>) -> Result<()> {
 		// We iterate through each version from the current to the latest

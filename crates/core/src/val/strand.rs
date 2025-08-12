@@ -1,7 +1,8 @@
 use std::borrow::Borrow;
 use std::fmt::{self, Display, Formatter};
 use std::ops::{
-	Deref, {self},
+	Deref,
+	{self},
 };
 use std::str;
 
@@ -126,6 +127,7 @@ impl From<&str> for Strand {
 // TODO: Change this to str, possibly.
 impl Deref for Strand {
 	type Target = str;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
@@ -147,6 +149,7 @@ impl Display for Strand {
 // rust.
 impl ops::Add for Strand {
 	type Output = Self;
+
 	fn add(mut self, other: Self) -> Self {
 		self.0.push_str(other.as_str());
 		self
@@ -155,6 +158,7 @@ impl ops::Add for Strand {
 
 impl TryAdd for Strand {
 	type Output = Self;
+
 	fn try_add(mut self, other: Self) -> Result<Self> {
 		if self.0.try_reserve(other.len()).is_ok() {
 			self.0.push_str(other.as_str());

@@ -68,7 +68,7 @@ pub use self::cond::Cond;
 pub use self::constant::Constant;
 pub use self::data::Data;
 pub use self::dir::Dir;
-//pub use self::edges::Edges;
+// pub use self::edges::Edges;
 pub use self::explain::Explain;
 pub use self::expression::Expr;
 pub use self::fetch::{Fetch, Fetchs};
@@ -97,17 +97,56 @@ pub use self::script::Script;
 pub use self::split::{Split, Splits};
 pub use self::start::Start;
 pub use self::statements::{
-	AccessGrant, AccessStatement, AlterStatement, AlterTableStatement, AnalyzeStatement,
-	CreateStatement, DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement,
-	DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
-	DefineIndexStatement, DefineModelStatement, DefineNamespaceStatement, DefineParamStatement,
-	DefineStatement, DefineTableStatement, DefineUserStatement, DeleteStatement, ForeachStatement,
-	IfelseStatement, InfoStatement, InsertStatement, KillStatement, LiveStatement, OptionStatement,
-	OutputStatement, RebuildStatement, RelateStatement, RemoveAccessStatement,
-	RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
-	RemoveFunctionStatement, RemoveIndexStatement, RemoveModelStatement, RemoveNamespaceStatement,
-	RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
-	SelectStatement, SetStatement, ShowStatement, SleepStatement, UpdateStatement, UpsertStatement,
+	AccessGrant,
+	AccessStatement,
+	AlterStatement,
+	AlterTableStatement,
+	AnalyzeStatement,
+	CreateStatement,
+	DefineAccessStatement,
+	DefineAnalyzerStatement,
+	DefineApiStatement,
+	DefineDatabaseStatement,
+	DefineEventStatement,
+	DefineFieldStatement,
+	DefineFunctionStatement,
+	DefineIndexStatement,
+	DefineModelStatement,
+	DefineNamespaceStatement,
+	DefineParamStatement,
+	DefineStatement,
+	DefineTableStatement,
+	DefineUserStatement,
+	DeleteStatement,
+	ForeachStatement,
+	IfelseStatement,
+	InfoStatement,
+	InsertStatement,
+	KillStatement,
+	LiveStatement,
+	OptionStatement,
+	OutputStatement,
+	RebuildStatement,
+	RelateStatement,
+	RemoveAccessStatement,
+	RemoveAnalyzerStatement,
+	RemoveDatabaseStatement,
+	RemoveEventStatement,
+	RemoveFieldStatement,
+	RemoveFunctionStatement,
+	RemoveIndexStatement,
+	RemoveModelStatement,
+	RemoveNamespaceStatement,
+	RemoveParamStatement,
+	RemoveStatement,
+	RemoveTableStatement,
+	RemoveUserStatement,
+	SelectStatement,
+	SetStatement,
+	ShowStatement,
+	SleepStatement,
+	UpdateStatement,
+	UpsertStatement,
 	UseStatement,
 };
 pub use self::table_type::{Relation, TableType};

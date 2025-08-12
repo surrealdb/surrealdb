@@ -72,8 +72,8 @@ impl Variables {
 }
 
 impl IntoIterator for Variables {
-	type Item = (String, Value);
 	type IntoIter = std::collections::btree_map::IntoIter<String, Value>;
+	type Item = (String, Value);
 
 	#[inline]
 	fn into_iter(self) -> Self::IntoIter {
@@ -99,29 +99,28 @@ impl From<BTreeMap<String, Value>> for Variables {
 	}
 }
 
-/*
-impl TryFrom<proto::Variables> for Variables {
-	type Error = anyhow::Error;
-
-	fn try_from(value: proto::Variables) -> Result<Self, Self::Error> {
-		let mut vars = Self::new();
-		for (k, v) in value.variables.into_iter() {
-			vars.insert(k, v.try_into()?);
-		}
-		Ok(vars)
-	}
-}
-
-impl TryFrom<Variables> for proto::Variables {
-	type Error = anyhow::Error;
-
-	fn try_from(value: Variables) -> Result<Self, Self::Error> {
-		let mut vars = Self {
-			variables: BTreeMap::new(),
-		};
-		for (k, v) in value.0.into_iter() {
-			vars.variables.insert(k, v.try_into()?);
-		}
-		Ok(vars)
-	}
-}*/
+// impl TryFrom<proto::Variables> for Variables {
+// type Error = anyhow::Error;
+//
+// fn try_from(value: proto::Variables) -> Result<Self, Self::Error> {
+// let mut vars = Self::new();
+// for (k, v) in value.variables.into_iter() {
+// vars.insert(k, v.try_into()?);
+// }
+// Ok(vars)
+// }
+// }
+//
+// impl TryFrom<Variables> for proto::Variables {
+// type Error = anyhow::Error;
+//
+// fn try_from(value: Variables) -> Result<Self, Self::Error> {
+// let mut vars = Self {
+// variables: BTreeMap::new(),
+// };
+// for (k, v) in value.0.into_iter() {
+// vars.variables.insert(k, v.try_into()?);
+// }
+// Ok(vars)
+// }
+// }

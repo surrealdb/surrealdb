@@ -167,7 +167,7 @@ pub async fn range(new_ds: impl CreateDs) {
 		SELECT * FROM t:[500]..=[550] ORDER BY id DESC LIMIT 3 EXPLAIN;
 	";
 	let mut r = ds.execute(sql, &Session::owner(), None).await.unwrap();
-	//Check the result
+	// Check the result
 	for _ in 0..3 {
 		check(&mut r, "NONE");
 	}

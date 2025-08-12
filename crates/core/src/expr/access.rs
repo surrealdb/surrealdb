@@ -52,6 +52,7 @@ impl From<Access> for Accesses {
 
 impl Deref for Accesses {
 	type Target = Vec<Access>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
@@ -88,6 +89,7 @@ impl From<Ident> for Access {
 
 impl Deref for Access {
 	type Target = String;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}

@@ -11,8 +11,23 @@ use crate::expr::{Ident, Kind};
 use crate::syn;
 use crate::val::array::Uniq;
 use crate::val::{
-	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Null, Number, Object,
-	Range, RecordId, Regex, Strand, Uuid, Value,
+	Array,
+	Bytes,
+	Closure,
+	Datetime,
+	DecimalExt,
+	Duration,
+	File,
+	Geometry,
+	Null,
+	Number,
+	Object,
+	Range,
+	RecordId,
+	Regex,
+	Strand,
+	Uuid,
+	Value,
 };
 
 #[derive(Clone, Debug)]

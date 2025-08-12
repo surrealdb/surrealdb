@@ -9,6 +9,7 @@ pub struct ChannelStream<R>(Pin<Box<Receiver<R>>>);
 
 impl<R> Stream for ChannelStream<R> {
 	type Item = R;
+
 	fn poll_next(
 		mut self: Pin<&mut Self>,
 		cx: &mut std::task::Context,

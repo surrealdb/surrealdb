@@ -38,15 +38,18 @@ impl Record {
 	pub fn id(&self) -> Value {
 		self.value.key.clone().into_value()
 	}
+
 	// Compare two Record instances
 	pub fn is(a: &Record, b: &Record) -> bool {
 		a.value == b.value
 	}
+
 	/// Convert the object to a string
 	#[qjs(rename = "toString")]
 	pub fn js_to_string(&self) -> String {
 		self.value.to_string()
 	}
+
 	/// Convert the object to JSON
 	#[qjs(rename = "toJSON")]
 	pub fn to_json(&self) -> String {

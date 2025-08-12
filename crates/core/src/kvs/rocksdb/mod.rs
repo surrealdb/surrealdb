@@ -10,8 +10,17 @@ use std::time::Duration;
 
 use anyhow::{Result, bail, ensure};
 use rocksdb::{
-	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel,
-	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
+	BlockBasedOptions,
+	Cache,
+	DBCompactionStyle,
+	DBCompressionType,
+	FlushOptions,
+	LogLevel,
+	OptimisticTransactionDB,
+	OptimisticTransactionOptions,
+	Options,
+	ReadOptions,
+	WriteOptions,
 };
 
 use super::savepoint::SavePoints;

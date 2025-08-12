@@ -10,8 +10,14 @@ use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
 use crate::cli::CF;
 use crate::core::dbs::Session;
 use crate::core::dbs::capabilities::{
-	ArbitraryQueryTarget, Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
-	RouteTarget, Targets,
+	ArbitraryQueryTarget,
+	Capabilities,
+	ExperimentalTarget,
+	FuncTarget,
+	MethodTarget,
+	NetTarget,
+	RouteTarget,
+	Targets,
 };
 use crate::core::kvs::Datastore;
 
@@ -54,7 +60,6 @@ pub struct StartCommandDbsOptions {
 
 #[derive(Args, Debug)]
 pub struct DbsCapabilities {
-	//
 	// Allow
 	#[arg(help = "Allow all capabilities except for those more specifically denied")]
 	#[arg(env = "SURREAL_CAPS_ALLOW_ALL", short = 'A', long, conflicts_with = "deny_all")]
@@ -146,7 +151,6 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(value_parser = super::cli::validator::route_targets)]
 	allow_http: Option<Targets<RouteTarget>>,
 
-	//
 	// Deny
 	#[arg(help = "Deny all capabilities except for those more specifically allowed")]
 	#[arg(env = "SURREAL_CAPS_DENY_ALL", short = 'D', long, conflicts_with = "allow_all")]
@@ -296,7 +300,7 @@ impl DbsCapabilities {
 		// specific allows for networks
 		if self.deny_all {
 			match &self.allow_net {
-				Some(Targets::Some(_)) => return self.allow_net.clone().unwrap(), /* We already */
+				Some(Targets::Some(_)) => return self.allow_net.clone().unwrap(), // We already
 				// checked for
 				// Some
 				Some(Targets::All) => return Targets::All,
@@ -309,7 +313,7 @@ impl DbsCapabilities {
 		// allows for networks
 		if let Some(Targets::All) = self.deny_net {
 			match &self.allow_net {
-				Some(Targets::Some(_)) => return self.allow_net.clone().unwrap(), /* We already */
+				Some(Targets::Some(_)) => return self.allow_net.clone().unwrap(), // We already
 				// checked for
 				// Some
 				Some(_) => return Targets::None,
@@ -333,7 +337,7 @@ impl DbsCapabilities {
 		// specific allows for RPC
 		if self.deny_all {
 			match &self.allow_rpc {
-				Some(Targets::Some(_)) => return self.allow_rpc.clone().unwrap(), /* We already */
+				Some(Targets::Some(_)) => return self.allow_rpc.clone().unwrap(), // We already
 				// checked for
 				// Some
 				Some(Targets::All) => return Targets::All,
@@ -346,7 +350,7 @@ impl DbsCapabilities {
 		// for RPC methods
 		if let Some(Targets::All) = self.deny_rpc {
 			match &self.allow_rpc {
-				Some(Targets::Some(_)) => return self.allow_rpc.clone().unwrap(), /* We already */
+				Some(Targets::Some(_)) => return self.allow_rpc.clone().unwrap(), // We already
 				// checked for
 				// Some
 				Some(_) => return Targets::None,
@@ -369,7 +373,7 @@ impl DbsCapabilities {
 		// specific allows for HTTP
 		if self.deny_all {
 			match &self.allow_http {
-				Some(Targets::Some(_)) => return self.allow_http.clone().unwrap(), /* We already */
+				Some(Targets::Some(_)) => return self.allow_http.clone().unwrap(), // We already
 				// checked for
 				// Some
 				Some(Targets::All) => return Targets::All,
@@ -382,7 +386,7 @@ impl DbsCapabilities {
 		// for HTTP routes
 		if let Some(Targets::All) = self.deny_http {
 			match &self.allow_http {
-				Some(Targets::Some(_)) => return self.allow_http.clone().unwrap(), /* We already */
+				Some(Targets::Some(_)) => return self.allow_http.clone().unwrap(), // We already
 				// checked for
 				// Some
 				Some(_) => return Targets::None,
@@ -449,7 +453,7 @@ impl DbsCapabilities {
 		// functions On top of what is explicitly allowed, we deny what is
 		// specifically denied
 		match &self.deny_funcs {
-			Some(Targets::Some(_)) => self.deny_funcs.clone().unwrap(), /* We already checked */
+			Some(Targets::Some(_)) => self.deny_funcs.clone().unwrap(), // We already checked
 			// for Some
 			Some(_) => Targets::None,
 			None => Targets::None,
@@ -461,7 +465,7 @@ impl DbsCapabilities {
 		// networks On top of what is explicitly allowed, we deny what is specifically
 		// denied
 		match &self.deny_net {
-			Some(Targets::Some(_)) => self.deny_net.clone().unwrap(), /* We already checked for */
+			Some(Targets::Some(_)) => self.deny_net.clone().unwrap(), // We already checked for
 			// Some
 			Some(_) => Targets::None,
 			None => Targets::None,
@@ -476,7 +480,7 @@ impl DbsCapabilities {
 		// Allowed RPC methods already consider a global deny and a general deny for RPC
 		// On top of what is explicitly allowed, we deny what is specifically denied
 		match &self.deny_rpc {
-			Some(Targets::Some(_)) => self.deny_rpc.clone().unwrap(), /* We already checked for */
+			Some(Targets::Some(_)) => self.deny_rpc.clone().unwrap(), // We already checked for
 			// Some
 			Some(_) => Targets::None,
 			None => Targets::None,
@@ -488,7 +492,7 @@ impl DbsCapabilities {
 		// HTTP On top of what is explicitly allowed, we deny what is specifically
 		// denied
 		match &self.deny_http {
-			Some(Targets::Some(_)) => self.deny_http.clone().unwrap(), /* We already checked for */
+			Some(Targets::Some(_)) => self.deny_http.clone().unwrap(), // We already checked for
 			// Some
 			Some(_) => Targets::None,
 			None => Targets::None,
@@ -753,7 +757,6 @@ mod tests {
 
 		// (Datastore, Session, Query, Succeeds, Response Contains)
 		let cases = vec![
-			//
 			// 0 - Functions and Networking are allowed
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
@@ -766,7 +769,6 @@ mod tests {
 				true,
 				"SUCCESS".to_string(),
 			),
-			//
 			// 1 - Scripting is allowed
 			(
 				Datastore::new("memory")
@@ -778,7 +780,6 @@ mod tests {
 				true,
 				"1".to_string(),
 			),
-			//
 			// 2 - Scripting is not allowed
 			(
 				Datastore::new("memory")
@@ -790,7 +791,6 @@ mod tests {
 				false,
 				"Scripting functions are not allowed".to_string(),
 			),
-			//
 			// 3 - Anonymous actor when guest access is allowed and auth is enabled, succeeds
 			(
 				Datastore::new("memory")
@@ -803,7 +803,6 @@ mod tests {
 				true,
 				"1".to_string(),
 			),
-			//
 			// 4 - Anonymous actor when guest access is not allowed and auth is enabled, throws
 			// error
 			(
@@ -817,7 +816,6 @@ mod tests {
 				false,
 				"Not enough permissions to perform this action".to_string(),
 			),
-			//
 			// 5 - Anonymous actor when guest access is not allowed and auth is disabled, succeeds
 			(
 				Datastore::new("memory")
@@ -830,7 +828,6 @@ mod tests {
 				true,
 				"1".to_string(),
 			),
-			//
 			// 6 - Authenticated user when guest access is not allowed and auth is enabled,
 			// succeeds
 			(
@@ -866,7 +863,6 @@ mod tests {
 				false,
 				"Experimental capability `record_references` is not enabled".to_string(),
 			),
-			//
 			// 9 - Some functions are not allowed
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
@@ -915,7 +911,6 @@ mod tests {
 				false,
 				"Function 'time::now' is not allowed".to_string(),
 			),
-			//
 			// 12 - Some net targets are not allowed
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(

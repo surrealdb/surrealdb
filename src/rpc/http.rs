@@ -8,13 +8,13 @@ use crate::core::kvs::Datastore;
 use crate::core::rpc::{Data, RpcContext, RpcError, RpcProtocolV1, RpcProtocolV2};
 use crate::core::val::{Array, Strand, Value};
 
-//use crate::core::gql::{Pessimistic, SchemaCache};
+// use crate::core::gql::{Pessimistic, SchemaCache};
 
 pub struct Http {
 	pub kvs: Arc<Datastore>,
 	pub lock: Arc<Semaphore>,
 	pub session: Arc<Session>,
-	//pub gql_schema: SchemaCache<Pessimistic>,
+	// pub gql_schema: SchemaCache<Pessimistic>,
 }
 
 impl Http {
@@ -23,40 +23,44 @@ impl Http {
 			kvs: kvs.clone(),
 			lock: Arc::new(Semaphore::new(1)),
 			session: Arc::new(session),
-			//gql_schema: SchemaCache::new(kvs.clone()),
+			// gql_schema: SchemaCache::new(kvs.clone()),
 		}
 	}
 }
 
 impl RpcContext for Http {
-	/// The datastore for this RPC interface
-	fn kvs(&self) -> &Datastore {
-		&self.kvs
-	}
-	/// Retrieves the modification lock for this RPC context
-	fn lock(&self) -> Arc<Semaphore> {
-		self.lock.clone()
-	}
-	/// The current session for this RPC context
-	fn session(&self) -> Arc<Session> {
-		self.session.clone()
-	}
-	/// Mutable access to the current session for this RPC context
-	fn set_session(&self, _session: Arc<Session>) {
-		// Do nothing as HTTP is stateless
-	}
-	/// The version information for this RPC context
-	fn version_data(&self) -> Data {
-		let value = Value::from(Strand::new(format!("{PKG_NAME}-{}", *PKG_VERSION)).unwrap());
-		Data::Other(value)
-	}
-
 	// ------------------------------
 	// Realtime
 	// ------------------------------
 
 	/// Live queries are disabled on HTTP
 	const LQ_SUPPORT: bool = false;
+
+	/// The datastore for this RPC interface
+	fn kvs(&self) -> &Datastore {
+		&self.kvs
+	}
+
+	/// Retrieves the modification lock for this RPC context
+	fn lock(&self) -> Arc<Semaphore> {
+		self.lock.clone()
+	}
+
+	/// The current session for this RPC context
+	fn session(&self) -> Arc<Session> {
+		self.session.clone()
+	}
+
+	/// Mutable access to the current session for this RPC context
+	fn set_session(&self, _session: Arc<Session>) {
+		// Do nothing as HTTP is stateless
+	}
+
+	/// The version information for this RPC context
+	fn version_data(&self) -> Data {
+		let value = Value::from(Strand::new(format!("{PKG_NAME}-{}", *PKG_VERSION)).unwrap());
+		Data::Other(value)
+	}
 
 	/// Handles the cleanup of live queries
 	async fn cleanup_lqs(&self) {
@@ -68,13 +72,11 @@ impl RpcContext for Http {
 	// ------------------------------
 
 	// GraphQL queries are enabled on HTTP
-	//const GQL_SUPPORT: bool = true;
+	// const GQL_SUPPORT: bool = true;
 
-	/*
-	fn graphql_schema_cache(&self) -> &SchemaCache {
-		&self.gql_schema
-	}
-	*/
+	// fn graphql_schema_cache(&self) -> &SchemaCache {
+	// &self.gql_schema
+	// }
 }
 
 impl RpcProtocolV1 for Http {

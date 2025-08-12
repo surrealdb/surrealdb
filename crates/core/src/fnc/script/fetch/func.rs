@@ -14,7 +14,12 @@ use crate::fnc::http::resolver::FilteringResolver;
 use crate::fnc::script::fetch::RequestError;
 use crate::fnc::script::fetch::body::{Body, BodyData, BodyKind};
 use crate::fnc::script::fetch::classes::{
-	self, Request, RequestInit, Response, ResponseInit, ResponseType,
+	self,
+	Request,
+	RequestInit,
+	Response,
+	ResponseInit,
+	ResponseType,
 };
 use crate::fnc::script::modules::surrealdb::query::QueryContext;
 

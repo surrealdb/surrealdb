@@ -113,6 +113,7 @@ impl From<Decimal> for Number {
 
 impl FromStr for Number {
 	type Err = ();
+
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		Self::try_from(s)
 	}
@@ -120,6 +121,7 @@ impl FromStr for Number {
 
 impl TryFrom<String> for Number {
 	type Error = ();
+
 	fn try_from(v: String) -> Result<Self, Self::Error> {
 		Self::try_from(v.as_str())
 	}
@@ -127,6 +129,7 @@ impl TryFrom<String> for Number {
 
 impl TryFrom<Strand> for Number {
 	type Error = ();
+
 	fn try_from(v: Strand) -> Result<Self, Self::Error> {
 		Self::try_from(v.as_str())
 	}
@@ -134,6 +137,7 @@ impl TryFrom<Strand> for Number {
 
 impl TryFrom<&str> for Number {
 	type Error = ();
+
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
 		// Attempt to parse as i64
 		match v.parse::<i64>() {
@@ -185,6 +189,7 @@ try_into_prim!(
 
 impl TryFrom<Number> for Decimal {
 	type Error = Error;
+
 	fn try_from(value: Number) -> Result<Self, Self::Error> {
 		match value {
 			Number::Int(v) => match Decimal::from_i64(v) {
@@ -224,6 +229,12 @@ impl Number {
 	// -----------------------------------
 
 	pub const NAN: Number = Number::Float(f64::NAN);
+	const NUMBER_MARKER_DECIMAL: u8 = 128;
+	const NUMBER_MARKER_FLOAT: u8 = 64;
+	const NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE: u8 = 66;
+	const NUMBER_MARKER_FLOAT_INFINITE_POSITIVE: u8 = 65;
+	const NUMBER_MARKER_FLOAT_NAN: u8 = 67;
+	const NUMBER_MARKER_INT: u8 = 0;
 
 	// -----------------------------------
 	// Simple number detection
@@ -372,13 +383,6 @@ impl Number {
 			Number::Decimal(v) => *v,
 		}
 	}
-
-	const NUMBER_MARKER_INT: u8 = 0;
-	const NUMBER_MARKER_FLOAT: u8 = 64;
-	const NUMBER_MARKER_FLOAT_INFINITE_POSITIVE: u8 = 65;
-	const NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE: u8 = 66;
-	const NUMBER_MARKER_FLOAT_NAN: u8 = 67;
-	const NUMBER_MARKER_DECIMAL: u8 = 128;
 
 	/// Converts this Number to a lexicographically-ordered byte buffer.
 	///
@@ -962,6 +966,7 @@ macro_rules! impl_simple_try_op {
 	($trt:ident, $fn:ident, $unchecked:ident, $checked:ident) => {
 		impl $trt for Number {
 			type Output = Self;
+
 			fn $fn(self, other: Self) -> Result<Self> {
 				Ok(match (self, other) {
 					(Number::Int(v), Number::Int(w)) => Number::Int(
@@ -992,6 +997,7 @@ impl_simple_try_op!(TryRem, try_rem, rem, checked_rem);
 
 impl TryPow for Number {
 	type Output = Self;
+
 	fn try_pow(self, power: Self) -> Result<Self> {
 		Ok(match (self, power) {
 			(Self::Int(v), Self::Int(p)) => Self::Int(match v {
@@ -1051,6 +1057,7 @@ impl TryNeg for Number {
 
 impl TryFloatDiv for Number {
 	type Output = Self;
+
 	fn try_float_div(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Number::Int(v), Number::Int(w)) => {
@@ -1069,6 +1076,7 @@ impl TryFloatDiv for Number {
 
 impl ops::Add for Number {
 	type Output = Self;
+
 	fn add(self, other: Self) -> Self {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v + w),
@@ -1083,6 +1091,7 @@ impl ops::Add for Number {
 
 impl<'b> ops::Add<&'b Number> for &Number {
 	type Output = Number;
+
 	fn add(self, other: &'b Number) -> Number {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v + w),
@@ -1097,6 +1106,7 @@ impl<'b> ops::Add<&'b Number> for &Number {
 
 impl ops::Sub for Number {
 	type Output = Self;
+
 	fn sub(self, other: Self) -> Self {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v - w),
@@ -1111,6 +1121,7 @@ impl ops::Sub for Number {
 
 impl<'b> ops::Sub<&'b Number> for &Number {
 	type Output = Number;
+
 	fn sub(self, other: &'b Number) -> Number {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v - w),
@@ -1125,6 +1136,7 @@ impl<'b> ops::Sub<&'b Number> for &Number {
 
 impl ops::Mul for Number {
 	type Output = Self;
+
 	fn mul(self, other: Self) -> Self {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v * w),
@@ -1139,6 +1151,7 @@ impl ops::Mul for Number {
 
 impl<'b> ops::Mul<&'b Number> for &Number {
 	type Output = Number;
+
 	fn mul(self, other: &'b Number) -> Number {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v * w),
@@ -1153,6 +1166,7 @@ impl<'b> ops::Mul<&'b Number> for &Number {
 
 impl ops::Div for Number {
 	type Output = Self;
+
 	fn div(self, other: Self) -> Self {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v / w),
@@ -1167,6 +1181,7 @@ impl ops::Div for Number {
 
 impl<'b> ops::Div<&'b Number> for &Number {
 	type Output = Number;
+
 	fn div(self, other: &'b Number) -> Number {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v / w),

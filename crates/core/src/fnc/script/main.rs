@@ -57,7 +57,7 @@ pub async fn run(
 	// Scripting functions are pretty heavy so make the increase pretty heavy.
 	let opt = opt.dive(4)?;
 
-	//TODO: Maybe check memory usage?
+	// TODO: Maybe check memory usage?
 
 	let instant_start = Instant::now();
 	let time_limit = Duration::from_millis(*crate::cnf::SCRIPTING_MAX_TIME_LIMIT as u64);

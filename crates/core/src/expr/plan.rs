@@ -3,8 +3,13 @@ use std::fmt::{self, Display, Formatter};
 use crate::expr::Expr;
 use crate::expr::fmt::Fmt;
 use crate::expr::statements::{
-	AccessStatement, AnalyzeStatement, KillStatement, LiveStatement, OptionStatement,
-	ShowStatement, UseStatement,
+	AccessStatement,
+	AnalyzeStatement,
+	KillStatement,
+	LiveStatement,
+	OptionStatement,
+	ShowStatement,
+	UseStatement,
 };
 
 #[derive(Clone, Debug)]
@@ -25,8 +30,8 @@ impl Display for LogicalPlan {
 
 impl LogicalPlan {
 	// Check if we require a writeable transaction
-	//pub(crate) fn read_only(&self) -> bool {
-	//self.expressions.iter().all(|x| x.read_only())
+	// pub(crate) fn read_only(&self) -> bool {
+	// self.expressions.iter().all(|x| x.read_only())
 	//}
 }
 

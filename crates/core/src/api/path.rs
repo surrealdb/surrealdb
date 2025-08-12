@@ -57,14 +57,16 @@ impl From<Vec<Segment>> for Path {
 
 impl Deref for Path {
 	type Target = Vec<Segment>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
 }
 
 impl IntoIterator for Path {
-	type Item = Segment;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
+	type Item = Segment;
+
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
 	}
@@ -79,6 +81,7 @@ impl Display for Path {
 
 impl FromStr for Path {
 	type Err = Error;
+
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		if s.is_empty() {
 			return Err(Error::InvalidPath("Path cannot be empty".into()));

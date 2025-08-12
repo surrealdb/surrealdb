@@ -118,19 +118,18 @@ impl ConfigStore {
 	}
 }
 
-/*
-impl InfoStructure for DefineConfigStatement {
-	fn structure(self) -> Value {
-		match self.inner {
-			ConfigInner::GraphQL(v) => Value::from(map!(
-				"graphql" => v.structure()
-			)),
-			ConfigInner::Api(v) => Value::from(map!(
-				"api" => v.structure()
-			)),
-		}
-	}
-}*/
+// impl InfoStructure for DefineConfigStatement {
+// fn structure(self) -> Value {
+// match self.inner {
+// ConfigInner::GraphQL(v) => Value::from(map!(
+// "graphql" => v.structure()
+// )),
+// ConfigInner::Api(v) => Value::from(map!(
+// "api" => v.structure()
+// )),
+// }
+// }
+// }
 
 impl InfoStructure for ConfigStore {
 	fn structure(self) -> Value {

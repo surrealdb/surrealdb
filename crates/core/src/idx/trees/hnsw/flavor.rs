@@ -91,6 +91,7 @@ impl HnswFlavor {
 			HnswFlavor::Hset(h) => h.insert(tx, q_pt).await,
 		}
 	}
+
 	pub(super) async fn remove(&mut self, tx: &Transaction, e_id: ElementId) -> Result<bool> {
 		match self {
 			HnswFlavor::H5_9(h) => h.remove(tx, e_id).await,
@@ -109,6 +110,7 @@ impl HnswFlavor {
 			HnswFlavor::Hset(h) => h.remove(tx, e_id).await,
 		}
 	}
+
 	pub(super) async fn knn_search(
 		&self,
 		tx: &Transaction,
@@ -131,6 +133,7 @@ impl HnswFlavor {
 			HnswFlavor::Hset(h) => h.knn_search(tx, search).await,
 		}
 	}
+
 	pub(super) async fn knn_search_checked(
 		&self,
 		tx: &Transaction,
@@ -185,6 +188,7 @@ impl HnswFlavor {
 			}
 		}
 	}
+
 	pub(super) async fn get_vector(
 		&self,
 		tx: &Transaction,
@@ -207,6 +211,7 @@ impl HnswFlavor {
 			HnswFlavor::Hset(h) => h.get_vector(tx, e_id).await,
 		}
 	}
+
 	#[cfg(test)]
 	pub(super) fn check_hnsw_properties(&self, expected_count: usize) {
 		match self {

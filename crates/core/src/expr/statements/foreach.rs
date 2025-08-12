@@ -40,6 +40,7 @@ impl ForeachStatement {
 	pub(crate) fn read_only(&self) -> bool {
 		self.range.read_only() && self.block.read_only()
 	}
+
 	/// Process this type returning a computed simple Value
 	///
 	/// Was marked recursive

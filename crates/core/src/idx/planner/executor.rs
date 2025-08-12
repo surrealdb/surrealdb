@@ -28,15 +28,28 @@ use crate::idx::ft::search::{SearchIndex, TermIdList, TermIdSet};
 use crate::idx::planner::IterationStage;
 use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
-	IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
-	IndexUnionThingIterator, IteratorRange, IteratorRecord, IteratorRef, KnnIterator,
-	KnnIteratorResult, MatchesThingIterator, MultipleIterators, ThingIterator,
-	UniqueEqualThingIterator, UniqueJoinThingIterator, UniqueRangeThingIterator,
-	UniqueUnionThingIterator, ValueType,
+	IndexEqualThingIterator,
+	IndexJoinThingIterator,
+	IndexRangeThingIterator,
+	IndexUnionThingIterator,
+	IteratorRange,
+	IteratorRecord,
+	IteratorRef,
+	KnnIterator,
+	KnnIteratorResult,
+	MatchesThingIterator,
+	MultipleIterators,
+	ThingIterator,
+	UniqueEqualThingIterator,
+	UniqueJoinThingIterator,
+	UniqueRangeThingIterator,
+	UniqueUnionThingIterator,
+	ValueType,
 };
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 use crate::idx::planner::iterators::{
-	IndexRangeReverseThingIterator, UniqueRangeReverseThingIterator,
+	IndexRangeReverseThingIterator,
+	UniqueRangeReverseThingIterator,
 };
 use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
@@ -660,6 +673,7 @@ impl QueryExecutor {
 		};
 		(oi, of, od)
 	}
+
 	fn get_equal_number_variants(n: &Number) -> Vec<Value> {
 		let (oi, of, od) = Self::get_number_variants(n, |f| {
 			if f.trunc().eq(f) {

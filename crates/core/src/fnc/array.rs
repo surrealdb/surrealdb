@@ -12,7 +12,16 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::val::array::{
-	Clump, Combine, Complement, Difference, Flatten, Intersect, Matches, Transpose, Union, Uniq,
+	Clump,
+	Combine,
+	Complement,
+	Difference,
+	Flatten,
+	Intersect,
+	Matches,
+	Transpose,
+	Union,
+	Uniq,
 	Windows,
 };
 use crate::val::{Array, Closure, Value};

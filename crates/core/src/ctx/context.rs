@@ -504,7 +504,6 @@ impl MutableContext {
 		Ok(())
 	}
 
-	//
 	// Capabilities
 	//
 

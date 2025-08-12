@@ -111,8 +111,8 @@ impl<'r, Client> IntoFuture for Query<'r, Client>
 where
 	Client: Connection,
 {
-	type Output = Result<Response>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Response>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
@@ -210,8 +210,8 @@ impl<'r, Client> IntoFuture for WithStats<Query<'r, Client>>
 where
 	Client: Connection,
 {
-	type Output = Result<WithStats<Response>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<WithStats<Response>>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {

@@ -1,19 +1,37 @@
 edition = "2021"
+
+# Use tab characters for indentation, spaces for alignment
 hard_tabs = true
+
+# Item layout inside an imports block.
+imports_layout = "HorizontalVertical"
+
+# Controls how imports are structured in use statements. Imports will be merged or split to the
+# configured level of granularity.
+imports_granularity = "Module"
+
+# Merge multiple derives into a single one.
 merge_derives = true
+
+# Convert `/* */` comments to `//` comments where possible
+normalize_comments = true
+
+# Reorder impl items. type and const are put first, then macros and methods.
+reorder_impl_items = true
+
+# Reorder import and extern crate statements alphabetically in groups (a group is separated by a newline).
 reorder_imports = true
+
+# Reorder mod declarations alphabetically in group.
 reorder_modules = true
+
+# Use field initialize shorthand if possible.
 use_field_init_shorthand = true
+
+# This option can be used to simplify the management and bulk updates of the granular width
+# configuration settings, that respectively control when formatted constructs are
+# multi-lined/vertical based on width.
 use_small_heuristics = "Off"
 
-# -----------------------------------
-# Unstable options we would like to use in future
-# -----------------------------------
-
-imports_granularity = "Module"
-#blank_lines_lower_bound = 1
-group_imports = "StdExternalCrate"
-#indent_style = "Block"
-#match_arm_blocks = true
-#reorder_impl_items = true
+# Break comments to fit on the line.
 wrap_comments = true

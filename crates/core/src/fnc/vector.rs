@@ -1,7 +1,16 @@
 use anyhow::Result;
 
 use crate::fnc::util::math::vector::{
-	Add, Angle, CrossProduct, Divide, DotProduct, Magnitude, Multiply, Normalize, Project, Scale,
+	Add,
+	Angle,
+	CrossProduct,
+	Divide,
+	DotProduct,
+	Magnitude,
+	Multiply,
+	Normalize,
+	Project,
+	Scale,
 	Subtract,
 };
 use crate::val::{Number, Value};
@@ -59,7 +68,11 @@ pub mod distance {
 	use crate::fnc::args::Optional;
 	use crate::fnc::get_execution_context;
 	use crate::fnc::util::math::vector::{
-		ChebyshevDistance, EuclideanDistance, HammingDistance, ManhattanDistance, MinkowskiDistance,
+		ChebyshevDistance,
+		EuclideanDistance,
+		HammingDistance,
+		ManhattanDistance,
+		MinkowskiDistance,
 	};
 	use crate::idx::planner::IterationStage;
 	use crate::val::{Number, Value};

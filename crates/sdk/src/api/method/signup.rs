@@ -40,8 +40,8 @@ where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<R>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<R>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		let Signup {

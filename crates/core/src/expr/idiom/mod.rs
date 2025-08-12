@@ -24,14 +24,16 @@ pub struct Idioms(pub Vec<Idiom>);
 
 impl Deref for Idioms {
 	type Target = Vec<Idiom>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
 }
 
 impl IntoIterator for Idioms {
-	type Item = Idiom;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
+	type Item = Idiom;
+
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
 	}
@@ -55,6 +57,7 @@ pub struct Idiom(pub Vec<Part>);
 
 impl Deref for Idiom {
 	type Target = [Part];
+
 	fn deref(&self) -> &Self::Target {
 		self.0.as_slice()
 	}
@@ -77,6 +80,7 @@ impl Idiom {
 		self.0.push(n);
 		self
 	}
+
 	/// Convert this Idiom to a unique hash
 	pub(crate) fn to_hash(&self) -> String {
 		let mut hasher = Md5::new();
@@ -93,15 +97,18 @@ impl Idiom {
 			.collect::<Vec<_>>()
 			.into()
 	}
+
 	/// Check if this Idiom is an 'id' field
 	pub(crate) fn is_id(&self) -> bool {
 		self.0.len() == 1 && self.0[0].eq(&ID[0])
 	}
+
 	/// Check if this Idiom is a special field such as `id`, `in`, `out` or
 	/// `meta`.
 	pub(crate) fn is_special(&self) -> bool {
 		self.0.len() == 1 && [&ID[0], &IN[0], &OUT[0], &META[0]].contains(&&self.0[0])
 	}
+
 	/// Check if this Idiom is an specific field
 	pub(crate) fn is_field(&self, other: &str) -> bool {
 		if self.len() != 1 {
@@ -114,10 +121,12 @@ impl Idiom {
 
 		x.as_str() == other
 	}
+
 	/// Check if this is an expression with multiple yields
 	pub(crate) fn is_multi_yield(&self) -> bool {
 		self.iter().any(Self::part_is_multi_yield)
 	}
+
 	/// Check if the path part is a yield in a multi-yield expression
 	pub(crate) fn part_is_multi_yield(v: &Part) -> bool {
 		matches!(v, Part::Graph(g) if g.alias.is_some())
@@ -134,6 +143,7 @@ impl Idiom {
 	pub(crate) fn read_only(&self) -> bool {
 		self.0.iter().all(|v| v.read_only())
 	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

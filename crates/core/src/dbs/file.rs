@@ -30,9 +30,7 @@ pub(super) struct FileCollector {
 impl FileCollector {
 	const INDEX_FILE_NAME: &'static str = "ix";
 	const RECORDS_FILE_NAME: &'static str = "re";
-
 	const SORT_DIRECTORY_NAME: &'static str = "so";
-
 	const USIZE_SIZE: usize = mem::size_of::<usize>();
 
 	pub(super) fn new(temp_dir: &Path) -> Result<Self, Error> {
@@ -46,6 +44,7 @@ impl FileCollector {
 			dir,
 		})
 	}
+
 	pub(super) async fn push(&mut self, value: Value) -> Result<(), Error> {
 		if let Some(mut writer) = self.writer.take() {
 			#[cfg(not(target_family = "wasm"))]
@@ -74,6 +73,7 @@ impl FileCollector {
 		}
 		Ok(())
 	}
+
 	pub(super) fn sort(&mut self, orders: &Ordering) {
 		self.orders = Some(orders.clone());
 	}
@@ -305,8 +305,8 @@ impl FileReader {
 }
 
 impl IntoIterator for FileReader {
-	type Item = Result<Value, Error>;
 	type IntoIter = FileRecordsIterator;
+	type Item = Result<Value, Error>;
 
 	fn into_iter(self) -> Self::IntoIter {
 		FileRecordsIterator::new(self.records.clone(), self.len)
@@ -409,8 +409,8 @@ struct ValueExternalChunk {
 }
 
 impl ExternalChunk<Value> for ValueExternalChunk {
-	type SerializationError = Error;
 	type DeserializationError = Error;
+	type SerializationError = Error;
 
 	fn new(reader: Take<BufReader<File>>) -> Self {
 		Self {

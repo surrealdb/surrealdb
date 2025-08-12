@@ -63,6 +63,7 @@ impl From<Strand> for Param {
 
 impl Deref for Param {
 	type Target = str;
+
 	fn deref(&self) -> &Self::Target {
 		self.0.as_str()
 	}

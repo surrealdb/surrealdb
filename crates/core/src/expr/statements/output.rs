@@ -23,6 +23,7 @@ impl OutputStatement {
 	pub(crate) fn read_only(&self) -> bool {
 		self.what.read_only()
 	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

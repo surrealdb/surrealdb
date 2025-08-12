@@ -4,8 +4,12 @@ use std::collections::HashSet;
 use std::mem;
 
 use crate::core::dbs::capabilities::{
-	Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, ParseFuncTargetError,
-	ParseNetTargetError, Targets,
+	Capabilities as CoreCapabilities,
+	ExperimentalTarget,
+	FuncTarget,
+	ParseFuncTargetError,
+	ParseNetTargetError,
+	Targets,
 };
 
 /// A list of features that are still experimental

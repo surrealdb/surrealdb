@@ -9,8 +9,14 @@ use crate::expr::ident::Ident;
 use crate::expr::scoring::Scoring;
 use crate::expr::statements::info::InfoStructure;
 use crate::fnc::util::math::vector::{
-	ChebyshevDistance, CosineDistance, EuclideanDistance, HammingDistance, JaccardSimilarity,
-	ManhattanDistance, MinkowskiDistance, PearsonSimilarity,
+	ChebyshevDistance,
+	CosineDistance,
+	EuclideanDistance,
+	HammingDistance,
+	JaccardSimilarity,
+	ManhattanDistance,
+	MinkowskiDistance,
+	PearsonSimilarity,
 };
 use crate::val::{Number, Value};
 

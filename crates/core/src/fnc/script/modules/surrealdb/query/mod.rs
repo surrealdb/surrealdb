@@ -30,9 +30,9 @@ impl<'js> Trace<'js> for QueryContext<'js> {
 }
 
 impl<'js> JsClass<'js> for QueryContext<'js> {
-	const NAME: &'static str = "QueryContext";
-
 	type Mutable = Readable;
+
+	const NAME: &'static str = "QueryContext";
 
 	fn prototype(_ctx: &js::Ctx<'js>) -> Result<Option<js::Object<'js>>> {
 		Ok(None)

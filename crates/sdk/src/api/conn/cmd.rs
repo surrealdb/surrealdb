@@ -327,7 +327,7 @@ impl Command {
 					};
 					expr.to_string()
 				};
-				//TODO: Null byte validity
+				// TODO: Null byte validity
 				let query = unsafe { Strand::new_unchecked(query) };
 
 				let variables = val::Object::default();
@@ -374,7 +374,7 @@ impl Command {
 					};
 					expr.to_string()
 				};
-				//TODO: Null byte validity
+				// TODO: Null byte validity
 				let query = unsafe { Strand::new_unchecked(query) };
 
 				let variables = val::Object::default();

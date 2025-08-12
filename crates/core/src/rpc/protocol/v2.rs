@@ -1,5 +1,5 @@
 //#[cfg(not(target_family = "wasm"))]
-//use async_graphql::BatchRequest;
+// use async_graphql::BatchRequest;
 use std::mem;
 use std::sync::Arc;
 
@@ -14,9 +14,25 @@ use crate::rpc::args::extract_args;
 use crate::rpc::statement_options::StatementOptions;
 use crate::rpc::{Data, Method, RpcContext, RpcError};
 use crate::sql::{
-	Ast, CreateStatement, DeleteStatement, Expr, Fields, Function, FunctionCall, Ident,
-	InsertStatement, KillStatement, LiveStatement, Model, Output, Param, RelateStatement,
-	SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
+	Ast,
+	CreateStatement,
+	DeleteStatement,
+	Expr,
+	Fields,
+	Function,
+	FunctionCall,
+	Ident,
+	InsertStatement,
+	KillStatement,
+	LiveStatement,
+	Model,
+	Output,
+	Param,
+	RelateStatement,
+	SelectStatement,
+	TopLevelExpr,
+	UpdateStatement,
+	UpsertStatement,
 };
 use crate::val::{Array, Object, Strand, Value};
 
@@ -983,7 +999,7 @@ pub trait RpcProtocolV2: RpcContext {
 
 	#[cfg(not(target_family = "wasm"))]
 	async fn graphql(&self, _params: Array) -> Result<Data, RpcError> {
-		//use crate::gql;
+		// use crate::gql;
 
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
@@ -996,104 +1012,102 @@ pub trait RpcProtocolV2: RpcContext {
 		// TODO(3.0.0): Reimplement GraphQL.
 		Err(RpcError::from(anyhow::Error::new(Error::Unimplemented("graphql".to_owned()))))
 
-		/*
-		if !Self::GQL_SUPPORT {
-			return Err(RpcError::BadGQLConfig);
-		}
-
-		let Ok((query, options)) = params.needs_one_or_two() else {
-			return Err(RpcError::InvalidParams);
-		};
-
-		enum GraphQLFormat {
-			Json,
-		}
-
+		// if !Self::GQL_SUPPORT {
+		// return Err(RpcError::BadGQLConfig);
+		// }
+		//
+		// let Ok((query, options)) = params.needs_one_or_two() else {
+		// return Err(RpcError::InvalidParams);
+		// };
+		//
+		// enum GraphQLFormat {
+		// Json,
+		// }
+		//
 		// Default to compressed output
-		let mut pretty = false;
+		// let mut pretty = false;
 		// Default to graphql json format
-		let mut format = GraphQLFormat::Json;
+		// let mut format = GraphQLFormat::Json;
 		// Process any secondary config options
-		match options {
-			// A config object was passed
-			SqlValue::Object(o) => {
-				for (k, v) in o {
-					match (k.as_str(), v) {
-						("pretty", SqlValue::Bool(b)) => pretty = b,
-						("format", SqlValue::Strand(s)) => match s.as_str() {
-							"json" => format = GraphQLFormat::Json,
-							_ => return Err(RpcError::InvalidParams),
-						},
-						_ => return Err(RpcError::InvalidParams),
-					}
-				}
-			}
-			// The config argument was not supplied
-			SqlValue::None => (),
-			// An invalid config argument was received
-			_ => return Err(RpcError::InvalidParams),
-		}
+		// match options {
+		// A config object was passed
+		// SqlValue::Object(o) => {
+		// for (k, v) in o {
+		// match (k.as_str(), v) {
+		// ("pretty", SqlValue::Bool(b)) => pretty = b,
+		// ("format", SqlValue::Strand(s)) => match s.as_str() {
+		// "json" => format = GraphQLFormat::Json,
+		// _ => return Err(RpcError::InvalidParams),
+		// },
+		// _ => return Err(RpcError::InvalidParams),
+		// }
+		// }
+		// }
+		// The config argument was not supplied
+		// SqlValue::None => (),
+		// An invalid config argument was received
+		// _ => return Err(RpcError::InvalidParams),
+		// }
 		// Process the graphql query argument
-		let req = match query {
-			// It is a string, so parse the query
-			SqlValue::Strand(s) => match format {
-				GraphQLFormat::Json => {
-					let tmp: BatchRequest =
-						serde_json::from_str(s.as_str()).map_err(|_| RpcError::ParseError)?;
-					tmp.into_single().map_err(|_| RpcError::ParseError)?
-				}
-			},
-			// It is an object, so build the query
-			SqlValue::Object(mut o) => {
-				// We expect a `query` key with the graphql query
-				let mut tmp = match o.remove("query") {
-					Some(SqlValue::Strand(s)) => async_graphql::Request::new(s),
-					_ => return Err(RpcError::InvalidParams),
-				};
-				// We can accept a `variables` key with graphql variables
-				match o.remove("variables").or(o.remove("vars")) {
-					Some(obj @ SqlValue::Object(_)) => {
-						let gql_vars = gql::schema::sql_value_to_gql_value(obj.into())
-							.map_err(|_| RpcError::InvalidRequest)?;
-
-						tmp = tmp.variables(async_graphql::Variables::from_value(gql_vars));
-					}
-					Some(_) => return Err(RpcError::InvalidParams),
-					None => {}
-				}
-				// We can accept an `operation` key with a graphql operation name
-				match o.remove("operationName").or(o.remove("operation")) {
-					Some(SqlValue::Strand(s)) => tmp = tmp.operation_name(s),
-					Some(_) => return Err(RpcError::InvalidParams),
-					None => {}
-				}
-				// Return the graphql query object
-				tmp
-			}
-			// We received an invalid graphql query
-			_ => return Err(RpcError::InvalidParams),
-		};
+		// let req = match query {
+		// It is a string, so parse the query
+		// SqlValue::Strand(s) => match format {
+		// GraphQLFormat::Json => {
+		// let tmp: BatchRequest =
+		// serde_json::from_str(s.as_str()).map_err(|_| RpcError::ParseError)?;
+		// tmp.into_single().map_err(|_| RpcError::ParseError)?
+		// }
+		// },
+		// It is an object, so build the query
+		// SqlValue::Object(mut o) => {
+		// We expect a `query` key with the graphql query
+		// let mut tmp = match o.remove("query") {
+		// Some(SqlValue::Strand(s)) => async_graphql::Request::new(s),
+		// _ => return Err(RpcError::InvalidParams),
+		// };
+		// We can accept a `variables` key with graphql variables
+		// match o.remove("variables").or(o.remove("vars")) {
+		// Some(obj @ SqlValue::Object(_)) => {
+		// let gql_vars = gql::schema::sql_value_to_gql_value(obj.into())
+		// .map_err(|_| RpcError::InvalidRequest)?;
+		//
+		// tmp = tmp.variables(async_graphql::Variables::from_value(gql_vars));
+		// }
+		// Some(_) => return Err(RpcError::InvalidParams),
+		// None => {}
+		// }
+		// We can accept an `operation` key with a graphql operation name
+		// match o.remove("operationName").or(o.remove("operation")) {
+		// Some(SqlValue::Strand(s)) => tmp = tmp.operation_name(s),
+		// Some(_) => return Err(RpcError::InvalidParams),
+		// None => {}
+		// }
+		// Return the graphql query object
+		// tmp
+		// }
+		// We received an invalid graphql query
+		// _ => return Err(RpcError::InvalidParams),
+		// };
 		// Process and cache the graphql schema
-		let schema = self
-			.graphql_schema_cache()
-			.get_schema(&self.session())
-			.await
-			.map_err(|e| RpcError::Thrown(e.to_string()))?;
+		// let schema = self
+		// .graphql_schema_cache()
+		// .get_schema(&self.session())
+		// .await
+		// .map_err(|e| RpcError::Thrown(e.to_string()))?;
 		// Execute the request against the schema
-		let res = schema.execute(req).await;
+		// let res = schema.execute(req).await;
 		// Serialize the graphql response
-		let out = if pretty {
-			let mut buf = Vec::new();
-			let formatter = serde_json::ser::PrettyFormatter::with_indent(b"    ");
-			let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
-			res.serialize(&mut ser).ok().and_then(|_| String::from_utf8(buf).ok())
-		} else {
-			serde_json::to_string(&res).ok()
-		}
-		.ok_or(RpcError::Thrown("Serialization Error".to_string()))?;
+		// let out = if pretty {
+		// let mut buf = Vec::new();
+		// let formatter = serde_json::ser::PrettyFormatter::with_indent(b"
+		// "); let mut ser = serde_json::Serializer::with_formatter(&mut buf,
+		// formatter); res.serialize(&mut ser).ok().and_then(|_|
+		// String::from_utf8(buf).ok()) } else {
+		// serde_json::to_string(&res).ok()
+		// }
+		// .ok_or(RpcError::Thrown("Serialization Error".to_string()))?;
 		// Output the graphql response
-		Ok(Value::Strand(out.into()).into())
-			*/
+		// Ok(Value::Strand(out.into()).into())
 	}
 
 	// ------------------------------

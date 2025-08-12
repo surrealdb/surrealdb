@@ -71,7 +71,6 @@ pub(super) fn observe_active_connection(value: i64) -> Result<(), MetricsError> 
 	Ok(())
 }
 
-//
 // Record an RPC command
 //
 

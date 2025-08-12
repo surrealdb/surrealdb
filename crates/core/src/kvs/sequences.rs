@@ -88,12 +88,14 @@ impl Sequences {
 			sequences: Arc::new(Default::default()),
 		}
 	}
+
 	pub(crate) async fn namespace_removed(&self, tx: &Transaction, ns: &str) -> Result<()> {
 		for db in tx.all_ns().await?.iter() {
 			self.database_removed(tx, ns, &db.name).await?;
 		}
 		Ok(())
 	}
+
 	pub(crate) async fn database_removed(
 		&self,
 		tx: &Transaction,

@@ -413,6 +413,7 @@ where
 	async fn get_vector(&self, tx: &Transaction, e_id: &ElementId) -> Result<Option<SharedVector>> {
 		self.elements.get_vector(tx, e_id).await
 	}
+
 	#[cfg(test)]
 	fn check_hnsw_properties(&self, expected_count: usize) {
 		check_hnsw_props(self, expected_count);

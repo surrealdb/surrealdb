@@ -76,6 +76,7 @@ impl Explanation {
 	) {
 		self.0.push(ExplainItem::new_start_limit(start_skip, cancel_on_limit));
 	}
+
 	pub(super) fn output(self) -> Vec<Value> {
 		self.0.into_iter().map(|e| e.into()).collect()
 	}
@@ -146,7 +147,7 @@ impl ExplainItem {
 				}
 				.into(),
 				details: vec![
-					//TODO: Properly handle possible null byte.
+					// TODO: Properly handle possible null byte.
 					("table", Value::Strand(Strand::new(tb.to_owned()).unwrap())),
 					("range", Value::Range(Box::new(r.clone().into_value_range()))),
 					("direction", sc.to_string().into()),
@@ -203,6 +204,7 @@ impl ExplainItem {
 			details,
 		}
 	}
+
 	pub(super) fn new_record_strategy(rs: RecordStrategy) -> Self {
 		Self {
 			name: "RecordStrategy".into(),

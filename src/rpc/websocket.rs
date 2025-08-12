@@ -18,11 +18,15 @@ use uuid::Uuid;
 
 use super::RpcState;
 use crate::cnf::{
-	PKG_NAME, PKG_VERSION, WEBSOCKET_PING_FREQUENCY, WEBSOCKET_RESPONSE_BUFFER_SIZE,
-	WEBSOCKET_RESPONSE_CHANNEL_SIZE, WEBSOCKET_RESPONSE_FLUSH_PERIOD,
+	PKG_NAME,
+	PKG_VERSION,
+	WEBSOCKET_PING_FREQUENCY,
+	WEBSOCKET_RESPONSE_BUFFER_SIZE,
+	WEBSOCKET_RESPONSE_CHANNEL_SIZE,
+	WEBSOCKET_RESPONSE_FLUSH_PERIOD,
 };
 use crate::core::dbs::Session;
-//use surrealdb::gql::{Pessimistic, SchemaCache};
+// use surrealdb::gql::{Pessimistic, SchemaCache};
 use crate::core::kvs::Datastore;
 use crate::core::mem::ALLOC;
 use crate::core::rpc::format::Format;
@@ -62,7 +66,7 @@ pub struct Websocket {
 	/// The channels used to send and receive WebSocket messages
 	pub(crate) channel: Sender<Message>,
 	// The GraphQL schema cache stored in advance
-	//pub(crate) gql_schema: SchemaCache<Pessimistic>,
+	// pub(crate) gql_schema: SchemaCache<Pessimistic>,
 }
 
 impl Websocket {
@@ -89,7 +93,7 @@ impl Websocket {
 			canceller: CancellationToken::new(),
 			session: ArcSwap::from(Arc::new(session)),
 			channel: sender.clone(),
-			//gql_schema: SchemaCache::new(datastore.clone()),
+			// gql_schema: SchemaCache::new(datastore.clone()),
 			datastore,
 		});
 		// Add this WebSocket to the list
@@ -442,34 +446,38 @@ impl RpcProtocolV1 for Websocket {}
 impl RpcProtocolV2 for Websocket {}
 
 impl RpcContext for Websocket {
-	/// The datastore for this RPC interface
-	fn kvs(&self) -> &Datastore {
-		&self.datastore
-	}
-	/// Retrieves the modification lock for this RPC context
-	fn lock(&self) -> Arc<Semaphore> {
-		self.lock.clone()
-	}
-	/// The current session for this RPC context
-	fn session(&self) -> Arc<Session> {
-		self.session.load_full()
-	}
-	/// Mutable access to the current session for this RPC context
-	fn set_session(&self, session: Arc<Session>) {
-		self.session.store(session);
-	}
-	/// The version information for this RPC context
-	fn version_data(&self) -> Data {
-		let value = Value::from(Strand::new(format!("{PKG_NAME}-{}", *PKG_VERSION)).unwrap());
-		Data::Other(value)
-	}
-
 	// ------------------------------
 	// Realtime
 	// ------------------------------
 
 	/// Live queries are enabled on WebSockets
 	const LQ_SUPPORT: bool = true;
+
+	/// The datastore for this RPC interface
+	fn kvs(&self) -> &Datastore {
+		&self.datastore
+	}
+
+	/// Retrieves the modification lock for this RPC context
+	fn lock(&self) -> Arc<Semaphore> {
+		self.lock.clone()
+	}
+
+	/// The current session for this RPC context
+	fn session(&self) -> Arc<Session> {
+		self.session.load_full()
+	}
+
+	/// Mutable access to the current session for this RPC context
+	fn set_session(&self, session: Arc<Session>) {
+		self.session.store(session);
+	}
+
+	/// The version information for this RPC context
+	fn version_data(&self) -> Data {
+		let value = Value::from(Strand::new(format!("{PKG_NAME}-{}", *PKG_VERSION)).unwrap());
+		Data::Other(value)
+	}
 
 	/// Handles the execution of a LIVE statement
 	async fn handle_live(&self, lqid: &Uuid) {
@@ -507,9 +515,9 @@ impl RpcContext for Websocket {
 	// ------------------------------
 
 	// GraphQL queries are enabled on WebSockets
-	//const GQL_SUPPORT: bool = true;
+	// const GQL_SUPPORT: bool = true;
 
-	//fn graphql_schema_cache(&self) -> &SchemaCache {
+	// fn graphql_schema_cache(&self) -> &SchemaCache {
 	//&self.gql_schema
 	//}
 }

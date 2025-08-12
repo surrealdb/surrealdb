@@ -9,7 +9,7 @@ use crate::doc::{CursorDoc, CursorValue, Document};
 use crate::err::Error;
 use crate::expr::data::Assignment;
 use crate::expr::dir::Dir;
-//use crate::expr::edges::Edges;
+// use crate::expr::edges::Edges;
 use crate::expr::paths::{EDGE, IN, OUT};
 use crate::expr::reference::ReferenceDeleteStrategy;
 use crate::expr::statements::{DeleteStatement, UpdateStatement};

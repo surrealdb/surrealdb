@@ -68,7 +68,9 @@ impl DecimalLexEncoder {
 	/// With D128: exponent ∈ [-6143, +6144] and digit_count ∈ [1, 34], so
 	/// scale = exponent + (digit_count - 1) ∈ [-6143, 6177]. Adding EXP_BIAS
 	/// maps this into [1, 12321], comfortably within u16.
-	const EXP_BIAS: i32 = 6144; // bias used for mapping signed scale into u16 space
+	const EXP_BIAS: i32 = 6144;
+
+	// bias used for mapping signed scale into u16 space
 
 	/// Encodes a D128 value into a lexicographically ordered byte sequence.
 	///

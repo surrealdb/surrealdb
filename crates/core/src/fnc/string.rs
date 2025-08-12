@@ -63,7 +63,7 @@ pub fn lowercase((string,): (String,)) -> Result<Value> {
 }
 
 pub fn repeat((val, num): (String, i64)) -> Result<Value> {
-	//TODO: Deal with truncation of neg:
+	// TODO: Deal with truncation of neg:
 	let num = num as usize;
 	limit("string::repeat", val.len().saturating_mul(num))?;
 	Ok(val.repeat(num).into())

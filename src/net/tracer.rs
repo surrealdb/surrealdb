@@ -10,7 +10,6 @@ use tracing::{Level, Span, field};
 
 use super::client_ip::ExtractClientIP;
 
-///
 /// HttpTraceLayerHooks implements custom hooks for the
 /// tower_http::trace::TraceLayer layer.
 ///

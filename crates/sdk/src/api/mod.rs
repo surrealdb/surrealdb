@@ -190,8 +190,8 @@ impl<Client> IntoFuture for Connect<Client, Surreal<Client>>
 where
 	Client: Connection,
 {
-	type Output = Result<Surreal<Client>>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
+	type Output = Result<Surreal<Client>>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
@@ -220,8 +220,8 @@ impl<Client> IntoFuture for Connect<Client, ()>
 where
 	Client: Connection,
 {
-	type Output = Result<()>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
+	type Output = Result<()>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {

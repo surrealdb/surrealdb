@@ -53,6 +53,7 @@ impl Span {
 			len: 0,
 		}
 	}
+
 	// returns a zero-length span that starts after the current span.
 	pub fn after_offset(self) -> u32 {
 		self.offset + self.len

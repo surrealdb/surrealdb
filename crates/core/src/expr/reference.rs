@@ -78,40 +78,39 @@ impl Refs {
 		_doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		bail!(Error::Unimplemented("Refs::compute not yet implemented".to_owned()))
-		/*
-		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-			return Ok(Value::Array(Default::default()));
-		}
-
+		// if !ctx.get_capabilities().allows_experimental(&
+		// ExperimentalTarget::RecordReferences) {
+		// return Ok(Value::Array(Default::default()));
+		// }
+		//
 		// Collect an array of references
-		let arr = match doc {
-			// Check if the current document has specified an ID
-			Some(doc) => {
-				// Obtain a record id from the document
-				let rid = match &doc.rid {
-					Some(id) => id.as_ref().to_owned(),
-					None => match &doc.doc.rid() {
-						Value::Thing(id) => id.to_owned(),
-						_ => bail!(Error::InvalidRefsContext),
-					},
-				};
-
-				let mut ids: Vec<RecordId> = Vec::new();
-
-				// Map over all input pairs
-				for (ft, ff) in self.0.iter() {
-					// Collect the references
-					ids.append(&mut rid.refs(ctx, opt, ft.as_ref(), ff.as_ref()).await?);
-				}
-
-				// Convert the references into values
-				Array(ids.into_iter().map(Value::Thing).collect::<Vec<_>>())
-			}
-			None => bail!(Error::InvalidRefsContext),
-		};
-
-		Ok(Value::Array(arr.uniq()))
-		*/
+		// let arr = match doc {
+		// Check if the current document has specified an ID
+		// Some(doc) => {
+		// Obtain a record id from the document
+		// let rid = match &doc.rid {
+		// Some(id) => id.as_ref().to_owned(),
+		// None => match &doc.doc.rid() {
+		// Value::Thing(id) => id.to_owned(),
+		// _ => bail!(Error::InvalidRefsContext),
+		// },
+		// };
+		//
+		// let mut ids: Vec<RecordId> = Vec::new();
+		//
+		// Map over all input pairs
+		// for (ft, ff) in self.0.iter() {
+		// Collect the references
+		// ids.append(&mut rid.refs(ctx, opt, ft.as_ref(), ff.as_ref()).await?);
+		// }
+		//
+		// Convert the references into values
+		// Array(ids.into_iter().map(Value::Thing).collect::<Vec<_>>())
+		// }
+		// None => bail!(Error::InvalidRefsContext),
+		// };
+		//
+		// Ok(Value::Array(arr.uniq()))
 	}
 }
 

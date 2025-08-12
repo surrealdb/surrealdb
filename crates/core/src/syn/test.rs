@@ -30,12 +30,10 @@ fn empty_block() {
 	super::block("").unwrap_err();
 }
 
-/*
-#[test]
-fn empty_range() {
-	super::range("").unwrap_err();
-}
-*/
+// #[test]
+// fn empty_range() {
+// super::range("").unwrap_err();
+// }
 
 #[test]
 fn empty_duration() {

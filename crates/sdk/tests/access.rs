@@ -779,7 +779,6 @@ async fn access_bearer_purge() {
 	}
 }
 
-//
 // Permissions
 //
 

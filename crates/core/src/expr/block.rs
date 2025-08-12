@@ -20,6 +20,7 @@ pub struct Block(pub Vec<Expr>);
 
 impl Deref for Block {
 	type Target = [Expr];
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}

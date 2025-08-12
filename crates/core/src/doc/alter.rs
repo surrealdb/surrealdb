@@ -80,6 +80,7 @@ impl Document {
 		//
 		Ok(())
 	}
+
 	/// Clears all of the content of this document.
 	/// This is used to empty the current content
 	/// of the document within a `DELETE` statement.
@@ -88,6 +89,7 @@ impl Document {
 	pub(super) fn clear_record_data(&mut self) {
 		*self.current.doc.to_mut() = Value::None
 	}
+
 	/// Sets the default field data that should be
 	/// present on this document. For normal records
 	/// the `id` field is always specified, and for
@@ -153,6 +155,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Updates the current document using the data
 	/// passed in to each document. This is relevant
 	/// for INSERT and RELATE queries where each
@@ -179,6 +182,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Updates the current document using the data
 	/// clause present on the statement. This can be
 	/// one of CONTENT, REPLACE, MERGE, PATCH, SET,

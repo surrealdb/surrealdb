@@ -18,7 +18,15 @@ use crate::api::method::BoxFuture;
 use crate::api::{self, Connection, ExtraFeatures, Result};
 use crate::core::dbs::{Action as CoreAction, Notification as CoreNotification};
 use crate::core::expr::{
-	BinaryOperator, Cond, Expr, Fields, Ident, Idiom, Literal, LiveStatement, TopLevelExpr,
+	BinaryOperator,
+	Cond,
+	Expr,
+	Fields,
+	Ident,
+	Idiom,
+	Literal,
+	LiveStatement,
+	TopLevelExpr,
 };
 use crate::core::val;
 use crate::engine::any::Any;
@@ -163,8 +171,8 @@ impl<'r, Client> IntoFuture for Select<'r, Client, Value, Live>
 where
 	Client: Connection,
 {
-	type Output = Result<Stream<Value>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Stream<Value>>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		into_future(self)
@@ -176,8 +184,8 @@ where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<Stream<Option<R>>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Stream<Option<R>>>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		into_future(self)
@@ -189,8 +197,8 @@ where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<Stream<Vec<R>>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Stream<Vec<R>>>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		into_future(self)

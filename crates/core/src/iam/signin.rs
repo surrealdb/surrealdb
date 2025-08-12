@@ -12,7 +12,9 @@ use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 use super::access::{
-	authenticate_generic, authenticate_record, create_refresh_token_record,
+	authenticate_generic,
+	authenticate_record,
+	create_refresh_token_record,
 	revoke_refresh_token_record,
 };
 use super::verify::{verify_db_creds, verify_ns_creds, verify_root_creds};

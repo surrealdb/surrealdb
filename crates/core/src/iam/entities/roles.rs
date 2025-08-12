@@ -31,6 +31,7 @@ impl std::fmt::Display for Role {
 
 impl FromStr for Role {
 	type Err = Error;
+
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match s.to_ascii_lowercase().as_str() {
 			"viewer" => Ok(Self::Viewer),

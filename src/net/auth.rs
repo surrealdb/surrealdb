@@ -14,14 +14,17 @@ use uuid::Uuid;
 use super::AppState;
 use super::client_ip::ExtractClientIP;
 use super::headers::{
-	SurrealAuthDatabase, SurrealAuthNamespace, SurrealDatabase, SurrealId, SurrealNamespace,
+	SurrealAuthDatabase,
+	SurrealAuthNamespace,
+	SurrealDatabase,
+	SurrealId,
+	SurrealNamespace,
 	parse_typed_header,
 };
 use crate::core::dbs::Session;
 use crate::core::iam::verify::{basic, token};
 use crate::net::error::Error as NetError;
 
-///
 /// SurrealAuth is a tower layer that implements the AsyncAuthorizeRequest
 /// trait. It is used to authorize requests to SurrealDB using Basic or Token
 /// authentication.
@@ -44,9 +47,9 @@ use crate::net::error::Error as NetError;
 pub(super) struct SurrealAuth;
 
 impl AsyncAuthorizeRequest<Body> for SurrealAuth {
+	type Future = BoxFuture<'static, Result<Request<Body>, Response<Self::ResponseBody>>>;
 	type RequestBody = Body;
 	type ResponseBody = Body;
-	type Future = BoxFuture<'static, Result<Request<Body>, Response<Self::ResponseBody>>>;
 
 	fn authorize(&mut self, request: Request<Body>) -> Self::Future {
 		Box::pin(async {

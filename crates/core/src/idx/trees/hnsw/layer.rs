@@ -40,6 +40,10 @@ impl<S> HnswLayer<S>
 where
 	S: DynamicSet,
 {
+	// Base on FoundationDB max value size (100K)
+	// https://apple.github.io/foundationdb/known-limitations.html#large-keys-and-values
+	const CHUNK_SIZE: usize = 100_000;
+
 	pub(super) fn new(ikb: IndexKeyBase, level: usize, m_max: usize) -> Self {
 		Self {
 			ikb,
@@ -69,6 +73,7 @@ where
 		self.save(tx, st).await?;
 		Ok(true)
 	}
+
 	pub(super) async fn search_single(
 		&self,
 		tx: &Transaction,
@@ -364,9 +369,6 @@ where
 		}
 	}
 
-	// Base on FoundationDB max value size (100K)
-	// https://apple.github.io/foundationdb/known-limitations.html#large-keys-and-values
-	const CHUNK_SIZE: usize = 100_000;
 	async fn save(&mut self, tx: &Transaction, st: &mut LayerState) -> Result<()> {
 		// Serialise the graph
 		let val = self.graph.to_val()?;

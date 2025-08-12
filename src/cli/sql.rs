@@ -13,7 +13,9 @@ use surrealdb::{Notification, Response, Value};
 
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
 use crate::cli::abstraction::{
-	AuthArguments, DatabaseConnectionArguments, LevelSelectionArguments,
+	AuthArguments,
+	DatabaseConnectionArguments,
+	LevelSelectionArguments,
 };
 use crate::cnf::PKG_VERSION;
 use crate::core::dbs::Capabilities as CoreCapabilities;

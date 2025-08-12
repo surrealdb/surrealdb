@@ -141,6 +141,7 @@ impl From<Vec<&str>> for TableConfig {
 
 impl TryFrom<&Value> for TableConfig {
 	type Error = anyhow::Error;
+
 	fn try_from(value: &Value) -> Result<Self, Self::Error> {
 		match value {
 			Value::Bool(b) => {
@@ -176,6 +177,7 @@ impl TableConfig {
 	pub(crate) fn is_any(&self) -> bool {
 		matches!(self, Self::All | Self::Some(_))
 	}
+
 	// Check if we should export a specific table
 	pub(crate) fn includes(&self, table: &str) -> bool {
 		match self {

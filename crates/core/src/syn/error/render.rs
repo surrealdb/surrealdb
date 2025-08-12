@@ -83,11 +83,11 @@ pub struct Snippet {
 }
 
 impl Snippet {
-	/// How long with the source line have to be before it gets truncated.
-	const MAX_SOURCE_DISPLAY_LEN: usize = 80;
 	/// How far the will have to be in the source line before everything before
 	/// it gets truncated.
 	const MAX_ERROR_LINE_OFFSET: usize = 50;
+	/// How long with the source line have to be before it gets truncated.
+	const MAX_SOURCE_DISPLAY_LEN: usize = 80;
 
 	pub fn from_source_location(
 		source: &str,

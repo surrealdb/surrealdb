@@ -25,6 +25,7 @@ impl From<&str> for Script {
 
 impl Deref for Script {
 	type Target = String;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}

@@ -12,8 +12,20 @@ use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Ident, Idiom, Literal, Part, Value};
 use crate::val::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
-	Regex, Strand, Uuid,
+	Array,
+	Bytes,
+	Closure,
+	Datetime,
+	Duration,
+	File,
+	Geometry,
+	Number,
+	Object,
+	Range,
+	RecordId,
+	Regex,
+	Strand,
+	Uuid,
 };
 
 /// The kind, or data type, of a value or field.
@@ -438,7 +450,7 @@ pub enum KindLiteral {
 	Object(BTreeMap<String, Kind>),
 	// This variant is just for a performance optimization.
 	// Should probably be removed when we have a planner.
-	//DiscriminatedObject(String, Vec<BTreeMap<String, Kind>>),
+	// DiscriminatedObject(String, Vec<BTreeMap<String, Kind>>),
 	Bool(bool),
 }
 
@@ -494,15 +506,13 @@ impl PartialEq for KindLiteral {
 					false
 				}
 			}
-			/*
-			KindLiteral::DiscriminatedObject(a, b) => {
-				if let KindLiteral::DiscriminatedObject(c, d) = other {
-					a == c && b == d
-				} else {
-					false
-				}
-			}
-			*/
+			// KindLiteral::DiscriminatedObject(a, b) => {
+			// if let KindLiteral::DiscriminatedObject(c, d) = other {
+			// a == c && b == d
+			// } else {
+			// false
+			// }
+			// }
 			KindLiteral::Bool(a) => {
 				if let KindLiteral::Bool(b) = other {
 					a == b
@@ -525,12 +535,10 @@ impl Hash for KindLiteral {
 			KindLiteral::Duration(duration) => duration.hash(state),
 			KindLiteral::Array(kinds) => kinds.hash(state),
 			KindLiteral::Object(btree_map) => btree_map.hash(state),
-			/*
-			KindLiteral::DiscriminatedObject(a, b) => {
-				a.hash(state);
-				b.hash(state);
-			}
-			*/
+			// KindLiteral::DiscriminatedObject(a, b) => {
+			// a.hash(state);
+			// b.hash(state);
+			// }
 			KindLiteral::Bool(x) => x.hash(state),
 		}
 	}
@@ -552,7 +560,7 @@ impl KindLiteral {
 				Kind::Array(Box::new(Kind::Any), None)
 			}
 			Self::Object(_) => Kind::Object,
-			//Self::DiscriminatedObject(_, _) => Kind::Object,
+			// Self::DiscriminatedObject(_, _) => Kind::Object,
 			Self::Bool(_) => Kind::Bool,
 		}
 	}
@@ -623,37 +631,35 @@ impl KindLiteral {
 				}
 				_ => false,
 			},
-			/*
-			Self::DiscriminatedObject(key, discriminants) => match value {
-				Value::Object(x) => {
-					let Some(value) = x.get(key) else {
-						return false;
-					};
-					if let Some(o) =
-						discriminants.iter().find(|o| value.can_coerce_to_kind(&o[key]))
-					{
-						if o.len() < x.len() {
-							return false;
-						}
-
-						for (k, v) in o.iter() {
-							if let Some(value) = x.get(k) {
-								if !value.can_coerce_to_kind(v) {
-									return false;
-								}
-							} else if !v.can_be_none() {
-								return false;
-							}
-						}
-
-						true
-					} else {
-						false
-					}
-				}
-				_ => false,
-			},
-			*/
+			// Self::DiscriminatedObject(key, discriminants) => match value {
+			// Value::Object(x) => {
+			// let Some(value) = x.get(key) else {
+			// return false;
+			// };
+			// if let Some(o) =
+			// discriminants.iter().find(|o| value.can_coerce_to_kind(&o[key]))
+			// {
+			// if o.len() < x.len() {
+			// return false;
+			// }
+			//
+			// for (k, v) in o.iter() {
+			// if let Some(value) = x.get(k) {
+			// if !value.can_coerce_to_kind(v) {
+			// return false;
+			// }
+			// } else if !v.can_be_none() {
+			// return false;
+			// }
+			// }
+			//
+			// true
+			// } else {
+			// false
+			// }
+			// }
+			// _ => false,
+			// },
 		}
 	}
 
@@ -756,42 +762,41 @@ impl Display for KindLiteral {
 				} else {
 					f.write_str(" }")
 				}
-			} /*
-			  KindLiteral::DiscriminatedObject(_, discriminants) => {
-				  let mut f = Pretty::from(f);
-
-				  for (i, o) in discriminants.iter().enumerate() {
-					  if i > 0 {
-						  f.write_str(" | ")?;
-					  }
-
-					  if is_pretty() {
-						  f.write_char('{')?;
-					  } else {
-						  f.write_str("{ ")?;
-					  }
-					  if !o.is_empty() {
-						  let indent = pretty_indent();
-						  write!(
-							  f,
-							  "{}",
-							  Fmt::pretty_comma_separated(o.iter().map(|args| Fmt::new(
-								  args,
-								  |(k, v), f| write!(f, "{}: {}", EscapeKey(k), v)
-							  )),)
-						  )?;
-						  drop(indent);
-					  }
-					  if is_pretty() {
-						  f.write_char('}')?;
-					  } else {
-						  f.write_str(" }")?;
-					  }
-				  }
-
-				  Ok(())
-			  }
-			  */
+			} /* KindLiteral::DiscriminatedObject(_, discriminants) => {
+			   * let mut f = Pretty::from(f);
+			   *
+			   * for (i, o) in discriminants.iter().enumerate() {
+			   * if i > 0 {
+			   * f.write_str(" | ")?;
+			   * }
+			   *
+			   * if is_pretty() {
+			   * f.write_char('{')?;
+			   * } else {
+			   * f.write_str("{ ")?;
+			   * }
+			   * if !o.is_empty() {
+			   * let indent = pretty_indent();
+			   * write!(
+			   * f,
+			   * "{}",
+			   * Fmt::pretty_comma_separated(o.iter().map(|args| Fmt::new(
+			   * args,
+			   * |(k, v), f| write!(f, "{}: {}", EscapeKey(k), v)
+			   * )),)
+			   * )?;
+			   * drop(indent);
+			   * }
+			   * if is_pretty() {
+			   * f.write_char('}')?;
+			   * } else {
+			   * f.write_str(" }")?;
+			   * }
+			   * }
+			   *
+			   * Ok(())
+			   * }
+			   */
 		}
 	}
 }

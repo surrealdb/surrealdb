@@ -14,8 +14,21 @@ use crate::expr::statements::ifelse::IfelseStatement;
 use crate::expr::statements::upsert::UpsertStatement;
 use crate::expr::statements::{DefineTableStatement, SelectStatement};
 use crate::expr::{
-	AssignOperator, BinaryOperator, Cond, Data, Expr, Field, Fields, FlowResultExt as _, Function,
-	FunctionCall, Groups, Idiom, Literal, Part, View,
+	AssignOperator,
+	BinaryOperator,
+	Cond,
+	Data,
+	Expr,
+	Field,
+	Fields,
+	FlowResultExt as _,
+	Function,
+	FunctionCall,
+	Groups,
+	Idiom,
+	Literal,
+	Part,
+	View,
 };
 use crate::val::{Array, RecordId, RecordIdKey, Value};
 
@@ -342,6 +355,7 @@ impl Document {
 		data.cut(ID.as_ref());
 		Ok(Data::ReplaceExpression(data.into_literal()))
 	}
+
 	//
 	async fn data(
 		&self,
@@ -558,6 +572,7 @@ impl Document {
 		// Everything ok
 		Ok(())
 	}
+
 	/// Increment or decrement the field in the foreign table
 	fn chg(
 		&self,
@@ -674,6 +689,7 @@ impl Document {
 		// Everything ok
 		Ok(())
 	}
+
 	/// Set the new maximum value for the field in the foreign table
 	fn max(
 		&self,

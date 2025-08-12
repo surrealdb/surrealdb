@@ -20,8 +20,8 @@ use crate::val::{Duration, Strand, TrySub};
 pub struct Datetime(pub DateTime<Utc>);
 
 impl Datetime {
-	pub const MIN_UTC: Self = Datetime(DateTime::<Utc>::MIN_UTC);
 	pub const MAX_UTC: Self = Datetime(DateTime::<Utc>::MAX_UTC);
+	pub const MIN_UTC: Self = Datetime(DateTime::<Utc>::MIN_UTC);
 }
 
 impl Default for Datetime {
@@ -44,6 +44,7 @@ impl From<Datetime> for DateTime<Utc> {
 
 impl FromStr for Datetime {
 	type Err = ();
+
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		Self::try_from(s)
 	}
@@ -51,6 +52,7 @@ impl FromStr for Datetime {
 
 impl TryFrom<String> for Datetime {
 	type Error = ();
+
 	fn try_from(v: String) -> Result<Self, Self::Error> {
 		Self::try_from(v.as_str())
 	}
@@ -58,6 +60,7 @@ impl TryFrom<String> for Datetime {
 
 impl TryFrom<Strand> for Datetime {
 	type Error = ();
+
 	fn try_from(v: Strand) -> Result<Self, Self::Error> {
 		Self::try_from(v.as_str())
 	}
@@ -65,6 +68,7 @@ impl TryFrom<Strand> for Datetime {
 
 impl TryFrom<&str> for Datetime {
 	type Error = ();
+
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
 		match syn::datetime(v) {
 			Ok(v) => Ok(v),
@@ -75,6 +79,7 @@ impl TryFrom<&str> for Datetime {
 
 impl TryFrom<(i64, u32)> for Datetime {
 	type Error = ();
+
 	fn try_from(v: (i64, u32)) -> Result<Self, Self::Error> {
 		match Utc.timestamp_opt(v.0, v.1) {
 			LocalResult::Single(v) => Ok(Self(v)),
@@ -85,6 +90,7 @@ impl TryFrom<(i64, u32)> for Datetime {
 
 impl Deref for Datetime {
 	type Target = DateTime<Utc>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
@@ -124,6 +130,7 @@ impl Display for Datetime {
 
 impl ops::Sub<Self> for Datetime {
 	type Output = Duration;
+
 	fn sub(self, other: Self) -> Duration {
 		match (self.0 - other.0).to_std() {
 			Ok(d) => Duration::from(d),
@@ -134,6 +141,7 @@ impl ops::Sub<Self> for Datetime {
 
 impl TrySub for Datetime {
 	type Output = Duration;
+
 	fn try_sub(self, other: Self) -> Result<Duration> {
 		(self.0 - other.0)
 			.to_std()

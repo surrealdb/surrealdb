@@ -25,7 +25,7 @@ pub(super) fn to_value(content: Content) -> Result<Value> {
 				Value::deserialize(Content::Enum(v).into_deserializer()).map_err(Into::into)
 			}
 			_ => match v.data {
-				//TODO:  Null byte validity
+				// TODO:  Null byte validity
 				Data::Unit => Ok(unsafe { Strand::new_unchecked(v.variant.into_owned()) }.into()),
 				Data::NewType {
 					value,

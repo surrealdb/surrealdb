@@ -4,166 +4,164 @@ use surrealdb::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
 
-/*
-#[tokio::test]
-async fn strict_mode_no_namespace() -> Result<()> {
-	let sql = "
-		-- DEFINE NAMESPACE test;
-		DEFINE DATABASE test;
-		DEFINE TABLE test;
-		DEFINE FIELD extra ON test VALUE true;
-		CREATE test:tester;
-		SELECT * FROM test;
-	";
-	let dbs = new_ds().await?.with_strict_mode(true);
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(Error::NsNotFound {
-			name: _
-		})
-	));
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(Error::NsNotFound {
-			name: _
-		})
-	));
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(Error::NsNotFound {
-			name: _
-		})
-	));
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(Error::NsNotFound {
-			name: _
-		})
-	));
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(Error::NsNotFound {
-			name: _
-		})
-	));
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn strict_mode_no_database() -> Result<()> {
-	let sql = "
-		DEFINE NAMESPACE test;
-		-- DEFINE DATABASE test;
-		DEFINE TABLE test;
-		DEFINE FIELD extra ON test VALUE true;
-		CREATE test:tester;
-		SELECT * FROM test;
-	";
-	let dbs = new_ds().await?.with_strict_mode(true);
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(Error::DbNotFound {
-			name: _
-		})
-	));
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(Error::DbNotFound {
-			name: _
-		})
-	));
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(Error::DbNotFound {
-			name: _
-		})
-	));
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(Error::DbNotFound {
-			name: _
-		})
-	));
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn strict_mode_no_table() -> Result<()> {
-	let sql = "
-		DEFINE NAMESPACE test;
-		DEFINE DATABASE test;
-		-- DEFINE TABLE test;
-		DEFINE FIELD extra ON test VALUE true;
-		CREATE test:tester;
-		SELECT * FROM test;
-	";
-	let dbs = new_ds().await?.with_strict_mode(true);
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(Error::TbNotFound {
-			name: _
-		})
-	));
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(Error::TbNotFound {
-			name: _
-		})
-	));
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(Error::TbNotFound {
-			name: _
-		})
-	));
-	//
-	Ok(())
-}
-*/
+// #[tokio::test]
+// async fn strict_mode_no_namespace() -> Result<()> {
+// let sql = "
+// -- DEFINE NAMESPACE test;
+// DEFINE DATABASE test;
+// DEFINE TABLE test;
+// DEFINE FIELD extra ON test VALUE true;
+// CREATE test:tester;
+// SELECT * FROM test;
+// ";
+// let dbs = new_ds().await?.with_strict_mode(true);
+// let ses = Session::owner().with_ns("test").with_db("test");
+// let res = &mut dbs.execute(sql, &ses, None).await?;
+// assert_eq!(res.len(), 5);
+//
+// let tmp = res.remove(0).result;
+// assert!(matches!(
+// tmp.err(),
+// Some(Error::NsNotFound {
+// name: _
+// })
+// ));
+//
+// let tmp = res.remove(0).result;
+// assert!(matches!(
+// tmp.err(),
+// Some(Error::NsNotFound {
+// name: _
+// })
+// ));
+//
+// let tmp = res.remove(0).result;
+// assert!(matches!(
+// tmp.err(),
+// Some(Error::NsNotFound {
+// name: _
+// })
+// ));
+//
+// let tmp = res.remove(0).result;
+// assert!(matches!(
+// tmp.err(),
+// Some(Error::NsNotFound {
+// name: _
+// })
+// ));
+//
+// let tmp = res.remove(0).result;
+// assert!(matches!(
+// tmp.err(),
+// Some(Error::NsNotFound {
+// name: _
+// })
+// ));
+//
+// Ok(())
+// }
+//
+// #[tokio::test]
+// async fn strict_mode_no_database() -> Result<()> {
+// let sql = "
+// DEFINE NAMESPACE test;
+// -- DEFINE DATABASE test;
+// DEFINE TABLE test;
+// DEFINE FIELD extra ON test VALUE true;
+// CREATE test:tester;
+// SELECT * FROM test;
+// ";
+// let dbs = new_ds().await?.with_strict_mode(true);
+// let ses = Session::owner().with_ns("test").with_db("test");
+// let res = &mut dbs.execute(sql, &ses, None).await?;
+// assert_eq!(res.len(), 5);
+//
+// let tmp = res.remove(0).result;
+// tmp.unwrap();
+//
+// let tmp = res.remove(0).result;
+// assert!(matches!(
+// tmp.err(),
+// Some(Error::DbNotFound {
+// name: _
+// })
+// ));
+//
+// let tmp = res.remove(0).result;
+// assert!(matches!(
+// tmp.err(),
+// Some(Error::DbNotFound {
+// name: _
+// })
+// ));
+//
+// let tmp = res.remove(0).result;
+// assert!(matches!(
+// tmp.err(),
+// Some(Error::DbNotFound {
+// name: _
+// })
+// ));
+//
+// let tmp = res.remove(0).result;
+// assert!(matches!(
+// tmp.err(),
+// Some(Error::DbNotFound {
+// name: _
+// })
+// ));
+//
+// Ok(())
+// }
+//
+// #[tokio::test]
+// async fn strict_mode_no_table() -> Result<()> {
+// let sql = "
+// DEFINE NAMESPACE test;
+// DEFINE DATABASE test;
+// -- DEFINE TABLE test;
+// DEFINE FIELD extra ON test VALUE true;
+// CREATE test:tester;
+// SELECT * FROM test;
+// ";
+// let dbs = new_ds().await?.with_strict_mode(true);
+// let ses = Session::owner().with_ns("test").with_db("test");
+// let res = &mut dbs.execute(sql, &ses, None).await?;
+// assert_eq!(res.len(), 5);
+//
+// let tmp = res.remove(0).result;
+// tmp.unwrap();
+//
+// let tmp = res.remove(0).result;
+// tmp.unwrap();
+//
+// let tmp = res.remove(0).result;
+// assert!(matches!(
+// tmp.err(),
+// Some(Error::TbNotFound {
+// name: _
+// })
+// ));
+//
+// let tmp = res.remove(0).result;
+// assert!(matches!(
+// tmp.err(),
+// Some(Error::TbNotFound {
+// name: _
+// })
+// ));
+//
+// let tmp = res.remove(0).result;
+// assert!(matches!(
+// tmp.err(),
+// Some(Error::TbNotFound {
+// name: _
+// })
+// ));
+//
+// Ok(())
+// }
 
 #[tokio::test]
 async fn strict_mode_all_ok() -> Result<()> {

@@ -12,7 +12,17 @@ use crate::syn::parser::mac::{expected, pop_glued};
 use crate::syn::parser::unexpected;
 use crate::syn::token::{Glued, Span, TokenKind, t};
 use crate::val::{
-	self, Array, Duration, Geometry, Number, Object, Range, RecordId, RecordIdKey, Strand, Value,
+	self,
+	Array,
+	Duration,
+	Geometry,
+	Number,
+	Object,
+	Range,
+	RecordId,
+	RecordIdKey,
+	Strand,
+	Value,
 };
 
 trait ValueParseFunc {
@@ -62,7 +72,7 @@ impl Parser<'_> {
 			t!("{") => {
 				self.pop_peek();
 				let object = self.parse_value_object::<SurrealQL>(stk, token.span).await?;
-				//HACK: This is an annoying hack to have geometries work.
+				// HACK: This is an annoying hack to have geometries work.
 				//
 				// Geometries look exactly like objects and are a strict subsect of objects.
 				// However in code they are distinct and in surrealql the have different
@@ -103,7 +113,7 @@ impl Parser<'_> {
 			t!("b\"") | t!("b'") | TokenKind::Glued(Glued::Bytes) => {
 				Value::Bytes(self.next_token_value()?)
 			}
-			//TODO: Implement record id for value parsing
+			// TODO: Implement record id for value parsing
 			t!("f\"") | t!("f'") => {
 				if !self.settings.files_enabled {
 					unexpected!(self, token, "the experimental files feature to be enabled");
@@ -315,7 +325,7 @@ impl Parser<'_> {
 			return Value::Uuid(x);
 		}
 
-		//TODO: Fix record id and others
+		// TODO: Fix record id and others
 		Value::Strand(strand)
 	}
 

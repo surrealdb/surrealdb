@@ -148,7 +148,6 @@ async fn info_for_user() {
 	);
 }
 
-//
 // Permissions
 //
 

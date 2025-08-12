@@ -46,7 +46,7 @@ impl From<crate::expr::Function> for Function {
 	}
 }
 
-///TODO(3.0): Remove after proper first class function support?
+/// TODO(3.0): Remove after proper first class function support?
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct FunctionCall {

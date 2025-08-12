@@ -8,9 +8,18 @@ use crate::expr::statements::access::AccessGrantStore;
 use crate::expr::statements::define::config::ConfigStore;
 use crate::expr::statements::define::{ApiDefinition, BucketDefinition, DefineSequenceStatement};
 use crate::expr::statements::{
-	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement,
-	DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
-	DefineNamespaceStatement, DefineParamStore, DefineTableStatement, DefineUserStatement,
+	DefineAccessStatement,
+	DefineAnalyzerStatement,
+	DefineDatabaseStatement,
+	DefineEventStatement,
+	DefineFieldStatement,
+	DefineFunctionStatement,
+	DefineIndexStatement,
+	DefineModelStatement,
+	DefineNamespaceStatement,
+	DefineParamStore,
+	DefineTableStatement,
+	DefineUserStatement,
 	LiveStatement,
 };
 use crate::val::Value;
@@ -89,6 +98,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Any"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`Node`].
 	/// This panics if called on a cache entry that is not an [`Entry::Nds`].
 	pub(crate) fn try_into_nds(self) -> Result<Arc<[Node]>> {
@@ -97,6 +107,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Nds"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineUserStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Rus`].
 	pub(crate) fn try_into_rus(self) -> Result<Arc<[DefineUserStatement]>> {
@@ -105,6 +116,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Rus"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineAccessStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Ras`].
 	pub(crate) fn try_into_ras(self) -> Result<Arc<[DefineAccessStatement]>> {
@@ -113,6 +125,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Ras"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`AccessGrantStore`].
 	/// This panics if called on a cache entry that is not an [`Entry::Rag`].
 	pub(crate) fn try_into_rag(self) -> Result<Arc<[AccessGrantStore]>> {
@@ -121,6 +134,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Rag"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineNamespaceStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Nss`].
 	pub(crate) fn try_into_nss(self) -> Result<Arc<[DefineNamespaceStatement]>> {
@@ -129,6 +143,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Nss"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineAccessStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Nas`].
 	pub(crate) fn try_into_nas(self) -> Result<Arc<[DefineAccessStatement]>> {
@@ -137,6 +152,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Nas"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`AccessGrantStore`].
 	/// This panics if called on a cache entry that is not an [`Entry::Nag`].
 	pub(crate) fn try_into_nag(self) -> Result<Arc<[AccessGrantStore]>> {
@@ -145,6 +161,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Nag"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineUserStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Nus`].
 	pub(crate) fn try_into_nus(self) -> Result<Arc<[DefineUserStatement]>> {
@@ -153,6 +170,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Nus"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineDatabaseStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Dbs`].
 	pub(crate) fn try_into_dbs(self) -> Result<Arc<[DefineDatabaseStatement]>> {
@@ -161,6 +179,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Dbs"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineAccessStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Das`].
 	pub(crate) fn try_into_das(self) -> Result<Arc<[DefineAccessStatement]>> {
@@ -169,6 +188,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Das"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`AccessGrantStore`].
 	/// This panics if called on a cache entry that is not an [`Entry::Dag`].
 	pub(crate) fn try_into_dag(self) -> Result<Arc<[AccessGrantStore]>> {
@@ -177,6 +197,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Dag"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineUserStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Dus`].
 	pub(crate) fn try_into_dus(self) -> Result<Arc<[DefineUserStatement]>> {
@@ -185,6 +206,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Dus"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`ApiDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Aps`].
 	pub(crate) fn try_into_aps(self) -> Result<Arc<[ApiDefinition]>> {
@@ -193,6 +215,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Aps"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineAnalyzerStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Azs`].
 	pub(crate) fn try_into_azs(self) -> Result<Arc<[DefineAnalyzerStatement]>> {
@@ -201,6 +224,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Azs"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineBucketStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Bus`].
 	pub(crate) fn try_into_bus(self) -> Result<Arc<[BucketDefinition]>> {
@@ -209,6 +233,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Bus"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineSequenceStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Sqs`].
 	pub(crate) fn try_into_sqs(self) -> Result<Arc<[DefineSequenceStatement]>> {
@@ -226,6 +251,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Fcs"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineParamStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Pas`].
 	pub(crate) fn try_into_pas(self) -> Result<Arc<[DefineParamStore]>> {
@@ -234,6 +260,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Pas"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineModelStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Mls`].
 	pub(crate) fn try_into_mls(self) -> Result<Arc<[DefineModelStatement]>> {
@@ -242,6 +269,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Mls"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineConfigStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Cgs`].
 	pub(crate) fn try_into_cgs(self) -> Result<Arc<[ConfigStore]>> {
@@ -250,6 +278,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Cgs"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineTableStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Tbs`].
 	pub(crate) fn try_into_tbs(self) -> Result<Arc<[DefineTableStatement]>> {
@@ -258,6 +287,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Tbs"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineEventStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Evs`].
 	pub(crate) fn try_into_evs(self) -> Result<Arc<[DefineEventStatement]>> {
@@ -266,6 +296,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Evs"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineFieldStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Fds`].
 	pub(crate) fn try_into_fds(self) -> Result<Arc<[DefineFieldStatement]>> {
@@ -274,6 +305,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Fds"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineIndexStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Ixs`].
 	pub(crate) fn try_into_ixs(self) -> Result<Arc<[DefineIndexStatement]>> {
@@ -282,6 +314,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Ixs"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineTableStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Fts`].
 	pub(crate) fn try_into_fts(self) -> Result<Arc<[DefineTableStatement]>> {
@@ -290,6 +323,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Fts"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`LiveStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Lvs`].
 	pub(crate) fn try_into_lvs(self) -> Result<Arc<[LiveStatement]>> {
@@ -298,6 +332,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Lvs"),
 		}
 	}
+
 	/// Converts this cache entry into a single [`Value`].
 	/// This panics if called on a cache entry that is not an [`Entry::Val`].
 	pub(crate) fn try_into_val(self) -> Result<Arc<Value>> {

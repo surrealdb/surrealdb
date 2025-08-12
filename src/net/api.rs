@@ -79,7 +79,7 @@ async fn handler(
 			.map_err(ResponseError)?,
 	);
 
-	//FIXME: This is bad, the rpc layer should not manually access the kv store.
+	// FIXME: This is bad, the rpc layer should not manually access the kv store.
 	let apis = tx.all_db_apis(&ns, &db).await.map_err(ResponseError)?;
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 

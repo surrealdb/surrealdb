@@ -30,6 +30,7 @@ impl DockerContainer {
 		info!("Logging Docker container {}", self.id);
 		Self::docker(Arguments::new(["logs", &self.id]));
 	}
+
 	pub fn stop(&mut self) {
 		if self.running {
 			info!("Stopping Docker container {}", self.id);

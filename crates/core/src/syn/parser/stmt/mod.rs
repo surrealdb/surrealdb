@@ -4,15 +4,28 @@ use super::mac::expected;
 use super::{ParseResult, Parser};
 use crate::sql::data::Assignment;
 use crate::sql::statements::access::{
-	AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
-	AccessStatementShow, Subject,
+	AccessStatement,
+	AccessStatementGrant,
+	AccessStatementPurge,
+	AccessStatementRevoke,
+	AccessStatementShow,
+	Subject,
 };
 use crate::sql::statements::analyze::AnalyzeStatement;
 use crate::sql::statements::rebuild::RebuildIndexStatement;
 use crate::sql::statements::show::ShowSince;
 use crate::sql::statements::{
-	ForeachStatement, InfoStatement, KillStatement, LiveStatement, OptionStatement,
-	OutputStatement, RebuildStatement, SetStatement, ShowStatement, SleepStatement, UseStatement,
+	ForeachStatement,
+	InfoStatement,
+	KillStatement,
+	LiveStatement,
+	OptionStatement,
+	OutputStatement,
+	RebuildStatement,
+	SetStatement,
+	ShowStatement,
+	SleepStatement,
+	UseStatement,
 };
 use crate::sql::{AssignOperator, Expr, Fields, Ident, Literal, Param, TopLevelExpr};
 use crate::syn::lexer::compound;

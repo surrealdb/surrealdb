@@ -32,6 +32,7 @@ pub struct Split(pub Idiom);
 
 impl Deref for Split {
 	type Target = Idiom;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}

@@ -149,6 +149,7 @@ impl<'a, I> Scanner<'a, I> {
 
 impl Stream for Scanner<'_, (Key, Val)> {
 	type Item = Result<(Key, Val)>;
+
 	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<(Key, Val)>>> {
 		let (store, version) = (self.store, self.version);
 		match self.sc {
@@ -169,6 +170,7 @@ impl Stream for Scanner<'_, (Key, Val)> {
 
 impl Stream for Scanner<'_, Key> {
 	type Item = Result<Key>;
+
 	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<Key>>> {
 		let (store, version) = (self.store, self.version);
 		match self.sc {

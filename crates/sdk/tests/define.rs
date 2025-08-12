@@ -109,7 +109,6 @@ async fn define_statement_index_concurrently_building_status(
 	let mut r = ds.execute(def_index, &session, None).await?;
 	assert_eq!(r.len(), skip_def);
 	skip_ok(&mut r, skip_def)?;
-	//
 	// Loop until the index is built
 	let now = SystemTime::now();
 	let mut initial_count = None;
@@ -527,7 +526,6 @@ where
 	}
 }
 
-//
 // Permissions
 //
 

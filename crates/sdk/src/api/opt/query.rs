@@ -10,9 +10,24 @@ use super::Raw;
 use crate::api::err::Error;
 use crate::api::{OnceLockExt, Response as QueryResponse, Result};
 use crate::core::expr::{
-	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, Expr, IfelseStatement,
-	InfoStatement, InsertStatement, KillStatement, LiveStatement, OptionStatement, OutputStatement,
-	RelateStatement, RemoveStatement, SelectStatement, TopLevelExpr, UpdateStatement, UseStatement,
+	AlterStatement,
+	CreateStatement,
+	DefineStatement,
+	DeleteStatement,
+	Expr,
+	IfelseStatement,
+	InfoStatement,
+	InsertStatement,
+	KillStatement,
+	LiveStatement,
+	OptionStatement,
+	OutputStatement,
+	RelateStatement,
+	RemoveStatement,
+	SelectStatement,
+	TopLevelExpr,
+	UpdateStatement,
+	UseStatement,
 };
 use crate::core::sql::Ast;
 use crate::core::val;
@@ -277,7 +292,7 @@ impl into_query::Sealed for &str {
 		});
 
 		Query(query.map(|x| ValidQuery::Normal {
-			//TODO: Figure out what type to actually use, core::expr, or core::sql
+			// TODO: Figure out what type to actually use, core::expr, or core::sql
 			query: x.expressions.into_iter().map(From::from).collect(),
 			register_live_queries: true,
 			bindings: Default::default(),

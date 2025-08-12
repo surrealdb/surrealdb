@@ -30,10 +30,21 @@ pub use self::alter::{AlterStatement, AlterTableStatement};
 pub use self::analyze::AnalyzeStatement;
 pub use self::create::CreateStatement;
 pub use self::define::{
-	DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement,
-	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineModelStatement, DefineNamespaceStatement, DefineParamStatement, DefineParamStore,
-	DefineStatement, DefineTableStatement, DefineUserStatement,
+	DefineAccessStatement,
+	DefineAnalyzerStatement,
+	DefineApiStatement,
+	DefineDatabaseStatement,
+	DefineEventStatement,
+	DefineFieldStatement,
+	DefineFunctionStatement,
+	DefineIndexStatement,
+	DefineModelStatement,
+	DefineNamespaceStatement,
+	DefineParamStatement,
+	DefineParamStore,
+	DefineStatement,
+	DefineTableStatement,
+	DefineUserStatement,
 };
 pub use self::delete::DeleteStatement;
 pub use self::foreach::ForeachStatement;
@@ -47,9 +58,18 @@ pub use self::output::OutputStatement;
 pub use self::rebuild::RebuildStatement;
 pub use self::relate::RelateStatement;
 pub use self::remove::{
-	RemoveAccessStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
-	RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement, RemoveModelStatement,
-	RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
+	RemoveAccessStatement,
+	RemoveAnalyzerStatement,
+	RemoveDatabaseStatement,
+	RemoveEventStatement,
+	RemoveFieldStatement,
+	RemoveFunctionStatement,
+	RemoveIndexStatement,
+	RemoveModelStatement,
+	RemoveNamespaceStatement,
+	RemoveParamStatement,
+	RemoveStatement,
+	RemoveTableStatement,
 	RemoveUserStatement,
 };
 pub use self::select::SelectStatement;

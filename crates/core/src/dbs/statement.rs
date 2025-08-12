@@ -420,6 +420,7 @@ impl Statement<'_> {
 			_ => None,
 		}
 	}
+
 	pub(crate) fn setup_timeout<'a>(&self, ctx: &'a Context) -> Result<Cow<'a, Context>, Error> {
 		if let Some(t) = self.timeout() {
 			let mut ctx = MutableContext::new(ctx);

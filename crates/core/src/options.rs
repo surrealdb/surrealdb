@@ -42,14 +42,17 @@ impl EngineOptions {
 		self.node_membership_refresh_interval = interval;
 		self
 	}
+
 	pub fn with_node_membership_check_interval(mut self, interval: Duration) -> Self {
 		self.node_membership_check_interval = interval;
 		self
 	}
+
 	pub fn with_node_membership_cleanup_interval(mut self, interval: Duration) -> Self {
 		self.node_membership_cleanup_interval = interval;
 		self
 	}
+
 	pub fn with_changefeed_gc_interval(mut self, interval: Duration) -> Self {
 		self.changefeed_gc_interval = interval;
 		self

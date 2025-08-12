@@ -62,6 +62,7 @@ where
 		self.nodes.insert(node, edges);
 		r
 	}
+
 	#[inline]
 	pub(super) fn set_node(&mut self, node: ElementId, new_edges: S) {
 		self.nodes.insert(node, new_edges);
@@ -122,6 +123,7 @@ where
 	pub(in crate::idx::trees) fn nodes(&self) -> &HashMap<ElementId, S> {
 		&self.nodes
 	}
+
 	pub(in crate::idx::trees) fn check(&self, g: Vec<(ElementId, Vec<ElementId>)>) {
 		for (n, e) in g {
 			let edges: HashSet<ElementId> = e.into_iter().collect();

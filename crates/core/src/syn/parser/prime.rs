@@ -4,7 +4,18 @@ use super::basic::NumberToken;
 use super::mac::pop_glued;
 use super::{ParseResult, Parser};
 use crate::sql::{
-	Closure, Dir, Expr, Function, FunctionCall, Ident, Idiom, Kind, Literal, Mock, Param, Part,
+	Closure,
+	Dir,
+	Expr,
+	Function,
+	FunctionCall,
+	Ident,
+	Idiom,
+	Kind,
+	Literal,
+	Mock,
+	Param,
+	Part,
 	Script,
 };
 use crate::syn::error::bail;

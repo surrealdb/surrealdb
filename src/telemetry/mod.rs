@@ -11,7 +11,9 @@ use anyhow::{Result, anyhow};
 use opentelemetry::{KeyValue, global};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::resource::{
-	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
+	EnvResourceDetector,
+	SdkProvidedResourceDetector,
+	TelemetryResourceDetector,
 };
 use tracing::{Level, Subscriber};
 use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};

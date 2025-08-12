@@ -6,6 +6,7 @@ impl Value {
 	pub fn walk(&self, path: &[Part]) -> Vec<(Idiom, Self)> {
 		self._walk(path, Idiom::default())
 	}
+
 	fn _walk(&self, path: &[Part], prev: Idiom) -> Vec<(Idiom, Self)> {
 		match path.first() {
 			// Get the current path part

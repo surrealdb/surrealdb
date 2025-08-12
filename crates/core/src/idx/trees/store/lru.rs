@@ -44,6 +44,7 @@ where
 			capacity,
 		}
 	}
+
 	pub(super) async fn get<K: Into<CacheKey>>(&self, key: K) -> Option<V> {
 		let key = key.into();
 		// Locate the shard

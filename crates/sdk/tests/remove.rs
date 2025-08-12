@@ -400,7 +400,6 @@ async fn should_not_error_when_remove_user_if_exists() -> Result<()> {
 	Ok(())
 }
 
-//
 // Permissions
 //
 

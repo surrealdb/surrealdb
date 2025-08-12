@@ -250,6 +250,7 @@ impl BKeys for FstKeys {
 
 impl TryFrom<MapBuilder<Vec<u8>>> for FstKeys {
 	type Error = fst::Error;
+
 	fn try_from(builder: MapBuilder<Vec<u8>>) -> Result<Self, Self::Error> {
 		Self::try_from(builder.into_inner()?)
 	}
@@ -257,6 +258,7 @@ impl TryFrom<MapBuilder<Vec<u8>>> for FstKeys {
 
 impl TryFrom<Vec<u8>> for FstKeys {
 	type Error = fst::Error;
+
 	fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
 		let map = Map::new(bytes)?;
 		Ok(Self {

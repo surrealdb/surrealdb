@@ -114,7 +114,7 @@ impl TryFrom<RecordIdKey> for Object {
 	}
 }
 
-//TODO: Null byte validity
+// TODO: Null byte validity
 impl From<String> for RecordIdKey {
 	fn from(value: String) -> Self {
 		Self(val::RecordIdKey::String(value))

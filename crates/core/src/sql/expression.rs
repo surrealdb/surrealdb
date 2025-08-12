@@ -3,14 +3,37 @@ use std::fmt;
 use crate::sql::fmt::Pretty;
 use crate::sql::operator::BindingPower;
 use crate::sql::statements::{
-	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
-	IfelseStatement, InfoStatement, InsertStatement, OutputStatement, RebuildStatement,
-	RelateStatement, RemoveStatement, SelectStatement, SetStatement, SleepStatement,
-	UpdateStatement, UpsertStatement,
+	AlterStatement,
+	CreateStatement,
+	DefineStatement,
+	DeleteStatement,
+	ForeachStatement,
+	IfelseStatement,
+	InfoStatement,
+	InsertStatement,
+	OutputStatement,
+	RebuildStatement,
+	RelateStatement,
+	RemoveStatement,
+	SelectStatement,
+	SetStatement,
+	SleepStatement,
+	UpdateStatement,
+	UpsertStatement,
 };
 use crate::sql::{
-	BinaryOperator, Block, Closure, Constant, FunctionCall, Ident, Idiom, Literal, Mock, Param,
-	PostfixOperator, PrefixOperator,
+	BinaryOperator,
+	Block,
+	Closure,
+	Constant,
+	FunctionCall,
+	Ident,
+	Idiom,
+	Literal,
+	Mock,
+	Param,
+	PostfixOperator,
+	PrefixOperator,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]

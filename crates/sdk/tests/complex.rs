@@ -8,122 +8,122 @@ use surrealdb_core::err::Error;
 use surrealdb_core::syn;
 use surrealdb_core::val::Value;
 
-/* Removed because of <future> removal, should be reintroduced after COMPUTED is added.
-#[test]
-fn self_referential_field() -> Result<()> {
-	// Ensure a good stack size for tests
-	with_enough_stack(async {
-		let mut res = run_queries(
-			"
-			CREATE pet:dog SET tail = <future> { tail };
-			",
-		)
-		.await?;
-		//
-		assert_eq!(res.len(), 1);
-		//
-		let tmp = res.next().unwrap();
-		let err = tmp.unwrap_err();
-		assert!(
-			matches!(err.downcast_ref(), Some(Error::ComputationDepthExceeded)),
-			"found {:?}",
-			err
-		);
-		//
-		Ok(())
-	})
-}
-
-#[test]
-fn cyclic_fields() -> Result<()> {
-	// Ensure a good stack size for tests
-	with_enough_stack(async {
-		let mut res = run_queries(
-			"
-			CREATE recycle SET consume = <future> { produce }, produce = <future> { consume };
-			",
-		)
-		.await?;
-		//
-		assert_eq!(res.len(), 1);
-		//
-		let tmp = res.next().unwrap();
-		let err = tmp.unwrap_err();
-		assert!(
-			matches!(err.downcast_ref(), Some(Error::ComputationDepthExceeded)),
-			"found {:?}",
-			err
-		);
-		//
-		Ok(())
-	})
-}
-
-#[test]
-fn cyclic_records() -> Result<()> {
-	// Ensure a good stack size for tests
-	with_enough_stack(async {
-		let mut res = run_queries(
-			"
-			CREATE thing:one SET friend = <future> { thing:two.friend };
-			CREATE thing:two SET friend = <future> { thing:one.friend };
-			",
-		)
-		.await?;
-		//
-		assert_eq!(res.len(), 2);
-		//
-		let tmp = res.next().unwrap();
-		tmp.unwrap();
-		//
-		let tmp = res.next().unwrap();
-		let err = tmp.unwrap_err();
-		assert!(
-			matches!(err.downcast_ref(), Some(Error::ComputationDepthExceeded)),
-			"found {:?}",
-			err
-		);
-		//
-		Ok(())
-	})
-}
-
-#[test]
-fn ok_future_graph_subquery_recursion_depth() -> Result<()> {
-	// Ensure a good stack size for tests
-	with_enough_stack(async {
-		let mut res = run_queries(
-			r#"
-			CREATE thing:three SET fut = <future> { friends[0].fut }, friends = [thing:four, thing:two];
-			CREATE thing:four SET fut = <future> { (friend) }, friend = <future> { 42 };
-			CREATE thing:two SET fut = <future> { friend }, friend = <future> { thing:three.fut };
-
-			CREATE thing:one SET foo = "bar";
-			RELATE thing:one->friend->thing:two SET timestamp = time::now();
-
-			CREATE thing:zero SET foo = "baz";
-			RELATE thing:zero->enemy->thing:one SET timestamp = time::now();
-
-			SELECT * FROM (SELECT * FROM (SELECT ->enemy->thing->friend->thing.fut as fut FROM thing:zero));
-			"#,
-		)
-		.await?;
-		//
-		assert_eq!(res.len(), 8);
-		//
-		for i in 0..7 {
-			let tmp = res.next().unwrap();
-			assert!(tmp.is_ok(), "Statement {} resulted in {:?}", i, tmp);
-		}
-		//
-		let tmp = res.next().unwrap()?;
-		let val = syn::value("[ { fut: [42] } ]").unwrap();
-		assert_eq!(tmp, val);
-		//
-		Ok(())
-	})
-}
-*/
+// Removed because of <future> removal, should be reintroduced after COMPUTED is
+// added. #[test]
+// fn self_referential_field() -> Result<()> {
+// Ensure a good stack size for tests
+// with_enough_stack(async {
+// let mut res = run_queries(
+// "
+// CREATE pet:dog SET tail = <future> { tail };
+// ",
+// )
+// .await?;
+//
+// assert_eq!(res.len(), 1);
+//
+// let tmp = res.next().unwrap();
+// let err = tmp.unwrap_err();
+// assert!(
+// matches!(err.downcast_ref(), Some(Error::ComputationDepthExceeded)),
+// "found {:?}",
+// err
+// );
+//
+// Ok(())
+// })
+// }
+//
+// #[test]
+// fn cyclic_fields() -> Result<()> {
+// Ensure a good stack size for tests
+// with_enough_stack(async {
+// let mut res = run_queries(
+// "
+// CREATE recycle SET consume = <future> { produce }, produce = <future> {
+// consume }; ",
+// )
+// .await?;
+//
+// assert_eq!(res.len(), 1);
+//
+// let tmp = res.next().unwrap();
+// let err = tmp.unwrap_err();
+// assert!(
+// matches!(err.downcast_ref(), Some(Error::ComputationDepthExceeded)),
+// "found {:?}",
+// err
+// );
+//
+// Ok(())
+// })
+// }
+//
+// #[test]
+// fn cyclic_records() -> Result<()> {
+// Ensure a good stack size for tests
+// with_enough_stack(async {
+// let mut res = run_queries(
+// "
+// CREATE thing:one SET friend = <future> { thing:two.friend };
+// CREATE thing:two SET friend = <future> { thing:one.friend };
+// ",
+// )
+// .await?;
+//
+// assert_eq!(res.len(), 2);
+//
+// let tmp = res.next().unwrap();
+// tmp.unwrap();
+//
+// let tmp = res.next().unwrap();
+// let err = tmp.unwrap_err();
+// assert!(
+// matches!(err.downcast_ref(), Some(Error::ComputationDepthExceeded)),
+// "found {:?}",
+// err
+// );
+//
+// Ok(())
+// })
+// }
+//
+// #[test]
+// fn ok_future_graph_subquery_recursion_depth() -> Result<()> {
+// Ensure a good stack size for tests
+// with_enough_stack(async {
+// let mut res = run_queries(
+// r#"
+// CREATE thing:three SET fut = <future> { friends[0].fut }, friends =
+// [thing:four, thing:two]; CREATE thing:four SET fut = <future> { (friend) },
+// friend = <future> { 42 }; CREATE thing:two SET fut = <future> { friend },
+// friend = <future> { thing:three.fut };
+//
+// CREATE thing:one SET foo = "bar";
+// RELATE thing:one->friend->thing:two SET timestamp = time::now();
+//
+// CREATE thing:zero SET foo = "baz";
+// RELATE thing:zero->enemy->thing:one SET timestamp = time::now();
+//
+// SELECT * FROM (SELECT * FROM (SELECT ->enemy->thing->friend->thing.fut as fut
+// FROM thing:zero)); "#,
+// )
+// .await?;
+//
+// assert_eq!(res.len(), 8);
+//
+// for i in 0..7 {
+// let tmp = res.next().unwrap();
+// assert!(tmp.is_ok(), "Statement {} resulted in {:?}", i, tmp);
+// }
+//
+// let tmp = res.next().unwrap()?;
+// let val = syn::value("[ { fut: [42] } ]").unwrap();
+// assert_eq!(tmp, val);
+//
+// Ok(())
+// })
+// }
 
 #[test]
 fn ok_graph_traversal_depth() -> Result<()> {

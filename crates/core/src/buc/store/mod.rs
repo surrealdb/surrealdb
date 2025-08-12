@@ -42,6 +42,7 @@ pub(crate) struct ListOptions {
 
 impl TryFrom<Object> for ListOptions {
 	type Error = Error;
+
 	fn try_from(mut obj: Object) -> Result<Self, Self::Error> {
 		let mut opts = ListOptions::default();
 

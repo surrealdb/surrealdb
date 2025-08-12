@@ -11,7 +11,7 @@ use serde_content::{Number, Serializer, Unexpected, Value as Content};
 use crate::core::val;
 use crate::error::Api;
 
-//type Content = serde_content::Value<'static>;
+// type Content = serde_content::Value<'static>;
 
 /// Convert a `T` into `surrealdb::expr::Value` which is an enum that can
 /// represent any valid SQL data.

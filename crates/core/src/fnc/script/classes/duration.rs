@@ -26,10 +26,12 @@ impl Duration {
 			None => String::from("Invalid Duration"),
 		}
 	}
+
 	// Compare two Duration instances
 	pub fn is(a: &Duration, b: &Duration) -> bool {
 		a.value.is_some() && b.value.is_some() && a.value == b.value
 	}
+
 	/// Convert the object to a string
 	#[qjs(rename = "toString")]
 	pub fn js_to_string(&self) -> String {
@@ -38,6 +40,7 @@ impl Duration {
 			None => String::from("Invalid Duration"),
 		}
 	}
+
 	/// Convert the object to JSON
 	#[qjs(rename = "toJSON")]
 	pub fn to_json(&self) -> String {

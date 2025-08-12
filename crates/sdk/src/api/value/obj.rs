@@ -119,9 +119,8 @@ impl ExactSizeIterator for IntoIter {
 impl FusedIterator for IntoIter {}
 
 impl IntoIterator for Object {
-	type Item = (String, Value);
-
 	type IntoIter = IntoIter;
+	type Item = (String, Value);
 
 	fn into_iter(self) -> Self::IntoIter {
 		IntoIter {
@@ -136,9 +135,8 @@ pub struct Iter<'a> {
 }
 
 impl<'a> IntoIterator for &'a Object {
-	type Item = (&'a String, &'a Value);
-
 	type IntoIter = Iter<'a>;
+	type Item = (&'a String, &'a Value);
 
 	fn into_iter(self) -> Self::IntoIter {
 		self.iter()
@@ -191,9 +189,8 @@ pub struct IterMut<'a> {
 }
 
 impl<'a> IntoIterator for &'a mut Object {
-	type Item = (&'a String, &'a mut Value);
-
 	type IntoIter = IterMut<'a>;
+	type Item = (&'a String, &'a mut Value);
 
 	fn into_iter(self) -> Self::IntoIter {
 		self.iter_mut()

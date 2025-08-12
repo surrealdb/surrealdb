@@ -244,6 +244,7 @@ where
 			}
 		}
 	}
+
 	#[cfg(debug_assertions)]
 	fn check(&self) {
 		match self {
