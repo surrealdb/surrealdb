@@ -373,16 +373,16 @@ mod tests {
 	use tracing_subscriber::util::SubscriberInitExt;
 
 	/// Helper function to ensure proper telemetry cleanup and reset
-	fn cleanup_telemetry() {
+	async fn cleanup_telemetry() {
 		// Shutdown any existing tracer provider
 		shutdown_tracer_provider();
 		// Give some time for cleanup
-		std::thread::sleep(std::time::Duration::from_millis(100));
+		tokio::time::sleep(std::time::Duration::from_millis(1_000)).await;
 	}
 
-	fn with_vars<K, V, F, R>(vars: &[(K, Option<V>)], f: F) -> R
+	async fn with_vars<K, V, F, R>(vars: &[(K, Option<V>)], f: F) -> R
 	where
-		F: FnOnce() -> R,
+		F: AsyncFnOnce() -> R,
 		K: AsRef<str>,
 		V: AsRef<str>,
 	{
@@ -429,7 +429,7 @@ mod tests {
 		}
 
 		let _guard = Dropper(restore);
-		f()
+		f().await
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
@@ -455,7 +455,7 @@ mod tests {
 	#[serial_test::serial]
 	async fn test_otlp_exporter_direct() {
 		// Ensure clean state
-		cleanup_telemetry();
+		cleanup_telemetry().await;
 
 		println!("Starting mock otlp server...");
 		let (addr, _req_rx) = telemetry::traces::tests::mock_otlp_server().await;
@@ -469,7 +469,7 @@ mod tests {
 				("OTEL_BSP_EXPORT_TIMEOUT", Some("1000")),
 				("OTEL_BSP_MAX_QUEUE_SIZE", Some("1")),
 			],
-			|| {
+			async || {
 				println!("Environment variables set, testing telemetry builder...");
 				match telemetry::builder().with_log_level("info").build() {
 					Ok((_registry, _guards)) => {
@@ -481,14 +481,15 @@ mod tests {
 					}
 				}
 			},
-		);
+		)
+		.await;
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
 	#[serial_test::serial]
 	async fn test_otlp_tracer() {
 		// Ensure clean state
-		cleanup_telemetry();
+		cleanup_telemetry().await;
 
 		println!("Starting mock otlp server...");
 		let (addr, mut req_rx) = telemetry::traces::tests::mock_otlp_server().await;
@@ -504,7 +505,7 @@ mod tests {
 					("OTEL_BSP_EXPORT_TIMEOUT", Some("1000")),
 					("OTEL_BSP_MAX_QUEUE_SIZE", Some("1")),
 				],
-				|| {
+				async || {
 					let (registry, _guards) =
 						telemetry::builder().with_log_level("info").build().unwrap();
 
@@ -519,9 +520,10 @@ mod tests {
 					}
 
 					// Force flush the telemetry data
-					cleanup_telemetry();
+					cleanup_telemetry().await;
 				},
 			)
+			.await;
 		}
 
 		println!("Waiting for request...");
@@ -541,7 +543,7 @@ mod tests {
 	#[serial_test::serial]
 	async fn test_otlp_filter() {
 		// Ensure clean state
-		cleanup_telemetry();
+		cleanup_telemetry().await;
 
 		println!("Starting mock otlp server...");
 		let (addr, mut req_rx) = telemetry::traces::tests::mock_otlp_server().await;
@@ -557,7 +559,7 @@ mod tests {
 					("OTEL_BSP_EXPORT_TIMEOUT", Some("1000")),
 					("OTEL_BSP_MAX_QUEUE_SIZE", Some("1")),
 				],
-				|| {
+				async || {
 					let (registry, _guards) =
 						telemetry::builder().with_log_level("debug").build().unwrap();
 
@@ -580,9 +582,10 @@ mod tests {
 					}
 
 					// Force flush the telemetry data
-					cleanup_telemetry();
+					cleanup_telemetry().await;
 				},
 			)
+			.await;
 		}
 
 		println!("Waiting for request...");
