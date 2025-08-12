@@ -36,7 +36,7 @@ impl Value {
 		// matched we use that to create an object to assign.
 		while let Some(p) = iter.next() {
 			match place {
-				Value::Thing(_) | Value::Null | Value::None => {
+				Value::RecordId(_) | Value::Null | Value::None => {
 					// any index is guaranteed to fail so just assign to this place.
 					return Self::assign(stk, ctx, opt, place, val, prev).await;
 				}
@@ -258,7 +258,7 @@ impl Value {
 					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()?;
 					match v {
 						Value::Strand(x) => x.into_string(),
-						Value::Thing(x) => x.to_string(),
+						Value::RecordId(x) => x.to_string(),
 						Value::Number(x) => x.to_string(),
 						Value::Range(x) => x.to_string(),
 						_ => return Ok(()),

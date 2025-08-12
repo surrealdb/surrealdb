@@ -1,7 +1,9 @@
-use crate::expr::id::range::RecordIdKeyRangeLit;
 use crate::expr::literal::ObjectEntry;
 use crate::expr::part::DestructurePart;
-use crate::expr::{Cond, Expr, FunctionCall, Idiom, Literal, Part, RecordIdKeyLit, RecordIdLit};
+use crate::expr::{
+	Cond, Expr, FunctionCall, Idiom, Literal, Part, RecordIdKeyLit, RecordIdKeyRangeLit,
+	RecordIdLit,
+};
 use crate::idx::planner::executor::KnnExpressions;
 
 use std::ops::Bound;
@@ -151,9 +153,9 @@ impl<'a> KnnConditionRewriter<'a> {
 	}
 
 	fn eval_thing(&self, t: &RecordIdLit) -> Option<RecordIdLit> {
-		self.eval_id(&t.id).map(|id| RecordIdLit {
-			tb: t.tb.clone(),
-			id,
+		self.eval_id(&t.key).map(|id| RecordIdLit {
+			table: t.table.clone(),
+			key: id,
 		})
 	}
 

@@ -1,25 +1,30 @@
+use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::expr::FlowResult;
 use crate::expr::escape::EscapeRid;
-use crate::expr::id::RecordIdKeyLit;
 use crate::val::RecordId;
-use crate::{ctx::Context, doc::CursorDoc};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+pub mod key;
+pub use key::{RecordIdKeyGen, RecordIdKeyLit};
+pub mod range;
+pub use range::RecordIdKeyRangeLit;
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct RecordIdLit {
 	/// Table name
-	pub tb: String,
-	pub id: RecordIdKeyLit,
+	pub table: String,
+	pub key: RecordIdKeyLit,
 }
 
 impl RecordIdLit {
 	pub(crate) fn is_static(&self) -> bool {
-		self.id.is_static()
+		self.key.is_static()
 	}
 
 	pub(crate) async fn compute(
@@ -30,14 +35,14 @@ impl RecordIdLit {
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<RecordId> {
 		Ok(RecordId {
-			table: self.tb.clone(),
-			key: self.id.compute(stk, ctx, opt, doc).await?,
+			table: self.table.clone(),
+			key: self.key.compute(stk, ctx, opt, doc).await?,
 		})
 	}
 }
 
 impl fmt::Display for RecordIdLit {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}:{}", EscapeRid(&self.tb), self.id)
+		write!(f, "{}:{}", EscapeRid(&self.table), self.key)
 	}
 }

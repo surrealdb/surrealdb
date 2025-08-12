@@ -1007,18 +1007,17 @@ where
 
 #[cfg(test)]
 mod tests {
-	use std::{cmp::Ordering, collections::BTreeMap, sync::Arc};
+	use std::cmp::Ordering;
+	use std::collections::BTreeMap;
+	use std::sync::Arc;
 
-	use crate::{
-		idx::trees::{
-			bkeys::{FstKeys, TrieKeys},
-			store::TreeNodeProvider,
-		},
-		kvs::{Datastore, LockType, TransactionType},
-	};
+	use crate::idx::trees::bkeys::{FstKeys, TrieKeys};
+	use crate::idx::trees::store::TreeNodeProvider;
+	use crate::kvs::{Datastore, LockType, TransactionType};
 
 	use super::*;
-	use rand::{seq::SliceRandom, thread_rng};
+	use rand::seq::SliceRandom;
+	use rand::thread_rng;
 	use test_log::test;
 
 	#[test]

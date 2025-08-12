@@ -3,10 +3,8 @@ use crate::sql::escape::QuoteStr;
 use crate::sql::fmt::Fmt;
 use crate::sql::{Base, Ident};
 use crate::val::{Duration, Strand};
-use argon2::{
-	Argon2,
-	password_hash::{PasswordHasher, SaltString},
-};
+use argon2::Argon2;
+use argon2::password_hash::{PasswordHasher, SaltString};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
