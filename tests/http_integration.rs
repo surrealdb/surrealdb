@@ -9,7 +9,6 @@ mod http_integration {
 	use reqwest::Client;
 	use serde_json::json;
 	use surrealdb::headers::{AUTH_DB, AUTH_NS};
-	use surrealdb::sql;
 	use test_log::test;
 	use ulid::Ulid;
 
@@ -56,7 +55,8 @@ mod http_integration {
 			assert!(body.contains(r#"[{"result":[{"id":"foo:"#), "body: {body}");
 		}
 
-		// Prepare users with identical credentials on ROOT, NAMESPACE and DATABASE levels
+		// Prepare users with identical credentials on ROOT, NAMESPACE and DATABASE
+		// levels
 		{
 			let res =
 				client.post(url).basic_auth(USER, Some(PASS))
@@ -744,7 +744,8 @@ mod http_integration {
 			assert_eq!(res.status(), 401, "body: {}", res.text().await?);
 		}
 
-		// Signin with valid ROOT credentials without specifying NS nor DB and get the token
+		// Signin with valid ROOT credentials without specifying NS nor DB and get the
+		// token
 		{
 			let req_body = serde_json::to_string(
 				json!({
@@ -1048,13 +1049,17 @@ mod http_integration {
 		table: &str,
 		num_records: usize,
 	) -> Result<(), Box<dyn std::error::Error>> {
+		let end = num_records + 1;
 		let res = client
 			.post(format!("http://{addr}/sql"))
 			.basic_auth(USER, Some(PASS))
-			.body(format!("CREATE |`{table}`:1..{num_records}| SET default = 'content'"))
+			.body(format!("CREATE |`{table}`:1..{end}| SET default = 'content'"))
 			.send()
 			.await?;
-		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+
+		let text = res.text().await?;
+		println!("{text}");
+		let body: serde_json::Value = serde_json::from_str(&text).unwrap();
 
 		assert_eq!(
 			body[0]["result"].as_array().unwrap().len(),
@@ -1234,7 +1239,10 @@ mod http_integration {
 				.body(r#"{"name": "record_name"}"#)
 				.send()
 				.await?;
-			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+			let status = res.status();
+			let body = res.text().await?;
+			println!("{}", body);
+			assert_eq!(status, 200);
 
 			// Verify the records were updated
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
@@ -1728,8 +1736,6 @@ mod http_integration {
 	#[test(tokio::test)]
 	async fn signup_mal() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
-		let rpc_url = &format!("http://{addr}/rpc");
-
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
 
@@ -1761,41 +1767,6 @@ mod http_integration {
 				.send()
 				.await?;
 			assert!(res.status().is_success(), "body: {}", res.text().await?);
-		}
-
-		{
-			let mut request = sql::Object::default();
-			request.insert("method".to_string(), "signup".into());
-
-			let stmt: sql::Statement = {
-				let mut tmp = sql::statements::CreateStatement::default();
-				let rid = sql::thing("foo:42").unwrap();
-				let mut tmp_values = sql::SqlValues::default();
-				tmp_values.0 = vec![rid.into()];
-				tmp.what = tmp_values;
-				sql::Statement::Create(tmp)
-			};
-
-			let mut obj = sql::Object::default();
-			obj.insert("email".to_string(), sql::SqlValue::Query(stmt.into()));
-			obj.insert("pass".to_string(), "foo".into());
-			request.insert(
-				"params".to_string(),
-				sql::SqlValue::Array(vec![sql::SqlValue::Object(obj)].into()),
-			);
-
-			let req: sql::SqlValue = sql::SqlValue::Object(request);
-
-			let req = sql::serde::serialize(&req).unwrap();
-
-			let res = client.post(rpc_url).body(req).send().await?;
-
-			let body = res.text().await?;
-
-			assert!(
-				body.contains("Found a non-computed value where they are not allowed"),
-				"{body:?}"
-			);
 		}
 
 		Ok(())

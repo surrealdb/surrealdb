@@ -1,18 +1,17 @@
+use std::fmt::{self, Display};
+
+use anyhow::Result;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
-use anyhow::Result;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct RemoveModelStatement {
 	pub name: Ident,
 	pub version: String,
@@ -43,7 +42,7 @@ impl RemoveModelStatement {
 		let key = crate::key::database::ml::new(ns, db, &ml.name, &ml.version);
 		txn.del(&key).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// TODO Remove the model file from storage
 		// Ok all good
 		Ok(Value::None)
@@ -57,7 +56,7 @@ impl Display for RemoveModelStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " ml::{}<{}>", self.name.0, self.version)?;
+		write!(f, " ml::{}<{}>", &*self.name, self.version)?;
 		Ok(())
 	}
 }

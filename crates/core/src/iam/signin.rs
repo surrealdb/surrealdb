@@ -1,3 +1,16 @@
+use std::str::FromStr;
+use std::sync::Arc;
+
+use anyhow::{Result, bail, ensure};
+use chrono::Utc;
+use jsonwebtoken::{EncodingKey, Header, encode};
+use md5::Digest;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+use subtle::ConstantTimeEq;
+use uuid::Uuid;
+
 use super::access::{
 	authenticate_generic, authenticate_record, create_refresh_token_record,
 	revoke_refresh_token_record,
@@ -8,28 +21,20 @@ use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Session, Variables};
 use crate::err::Error;
-use crate::expr::statements::{AccessGrant, DefineAccessStatement, access};
-use crate::expr::{AccessType, Datetime, Object, Value, access_type};
+use crate::expr::statements::access::AccessGrantStore;
+use crate::expr::statements::{DefineAccessStatement, access};
+use crate::expr::{AccessType, access_type};
 use crate::iam::Auth;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, HEADER};
-use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use anyhow::{Result, bail, ensure};
-use chrono::Utc;
-use jsonwebtoken::{EncodingKey, Header, encode};
-use md5::Digest;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use sha2::Sha256;
-use std::str::FromStr;
-use std::sync::Arc;
-use subtle::ConstantTimeEq;
-use uuid::Uuid;
+use crate::kvs::Datastore;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
+use crate::val::{Datetime, Object, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct SigninData {
 	pub token: String,
 	pub refresh: Option<String>,
@@ -47,8 +52,6 @@ impl From<SigninData> for Value {
 }
 
 pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Result<SigninData> {
-	// Check vars contains only computed values
-	vars.validate_computed()?;
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
@@ -154,7 +157,7 @@ pub async fn db_access(
 			// All access method types are supported except for JWT
 			// The JWT access method is the one that is internal to SurrealDB
 			// The equivalent of signing in with JWT is to authenticate it
-			match av.kind.clone() {
+			match av.access_type.clone() {
 				AccessType::Record(at) => {
 					// Check if the record access method supports issuing tokens
 					let iss = match &at.jwt.issue {
@@ -206,24 +209,29 @@ pub async fn db_access(
 												ns: Some(ns.clone()),
 												db: Some(db.clone()),
 												ac: Some(ac.clone()),
-												id: Some(rid.to_raw()),
+												id: Some(rid.to_string()),
 												..Claims::default()
 											};
 											// AUTHENTICATE clause
 											if let Some(au) = &av.authenticate {
-												// Setup the system session for finding the signin record
+												// Setup the system session for finding the signin
+												// record
 												let mut sess =
 													Session::editor().with_ns(&ns).with_db(&db);
 												sess.rd = Some(rid.clone().into());
-												sess.tk = Some((&claims).into());
+												sess.tk = Some(
+													claims.clone().into_claims_object().into(),
+												);
 												sess.ip.clone_from(&session.ip);
 												sess.or.clone_from(&session.or);
 												rid = authenticate_record(kvs, &sess, au).await?;
 											}
-											// Create refresh token if defined for the record access method
+											// Create refresh token if defined for the record access
+											// method
 											let refresh = match &at.bearer {
 												Some(_) => {
-													// TODO(gguillemas): Remove this once bearer access is no longer experimental
+													// TODO(gguillemas): Remove this once bearer
+													// access is no longer experimental
 													if !kvs.get_capabilities().allows_experimental(
 														&ExperimentalTarget::BearerAccess,
 													) {
@@ -255,7 +263,7 @@ pub async fn db_access(
 											let enc =
 												encode(&Header::new(iss.alg.into()), &claims, &key);
 											// Set the authentication on the session
-											session.tk = Some((&claims).into());
+											session.tk = Some(claims.into_claims_object().into());
 											session.ns = Some(ns.clone());
 											session.db = Some(db.clone());
 											session.ac = Some(ac.clone());
@@ -282,17 +290,20 @@ pub async fn db_access(
 									}
 								}
 								Err(e) => match e.downcast_ref() {
-									// If the SIGNIN clause throws a specific error, authentication fails with that error
+									// If the SIGNIN clause throws a specific error, authentication
+									// fails with that error
 									Some(Error::Thrown(_)) => Err(e),
-									// If the SIGNIN clause failed due to an unexpected error, be more specific
-									// This allows clients to handle these errors, which may be retryable
+									// If the SIGNIN clause failed due to an unexpected error, be
+									// more specific This allows clients to handle these
+									// errors, which may be retryable
 									Some(Error::Tx(_) | Error::TxFailure | Error::TxRetryable) => {
 										debug!(
 											"Unexpected error found while executing a SIGNIN clause: {e}"
 										);
 										Err(anyhow::Error::new(Error::UnexpectedAuth))
 									}
-									// Otherwise, return a generic error unless it should be forwarded
+									// Otherwise, return a generic error unless it should be
+									// forwarded
 									_ => {
 										debug!("Record user signin query failed: {e}");
 										if *INSECURE_FORWARD_ACCESS_ERRORS {
@@ -354,7 +365,7 @@ pub async fn db_user(
 			// Create the authentication token
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
-			session.tk = Some((&val).into());
+			session.tk = Some(val.into_claims_object().into());
 			session.ns = Some(ns.clone());
 			session.db = Some(db.clone());
 			session.exp = expiration(u.duration.session)?;
@@ -398,7 +409,7 @@ pub async fn ns_access(
 	match access {
 		Ok(av) => {
 			// Check the access method type
-			match av.kind.clone() {
+			match av.access_type.clone() {
 				AccessType::Bearer(at) => {
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
@@ -442,7 +453,7 @@ pub async fn ns_user(
 			// Create the authentication token
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
-			session.tk = Some((&val).into());
+			session.tk = Some(val.into_claims_object().into());
 			session.ns = Some(ns.clone());
 			session.exp = expiration(u.duration.session)?;
 			session.au =
@@ -492,7 +503,7 @@ pub async fn root_user(
 			// Create the authentication token
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
-			session.tk = Some(val.into());
+			session.tk = Some(val.into_claims_object().into());
 			session.exp = expiration(u.duration.session)?;
 			session.au = Arc::new((&u, Level::Root).try_into().map_err(Error::from)?);
 			// Check the authentication token
@@ -529,7 +540,7 @@ pub async fn root_access(
 	match access {
 		Ok(av) => {
 			// Check the access method type
-			match av.kind.clone() {
+			match av.access_type.clone() {
 				AccessType::Bearer(at) => {
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
@@ -587,7 +598,7 @@ pub async fn signin_bearer(
 	// Authenticate bearer key against stored grant.
 	verify_grant_bearer(&gr, key)?;
 	// If the subject of the grant is a system user, get their roles.
-	let roles = if let access::Subject::User(user) = &gr.subject {
+	let roles = if let access::SubjectStore::User(user) = &gr.subject {
 		// Create a new readonly transaction.
 		let tx = kvs.transaction(Read, Optimistic).await?;
 		// Fetch the specified user from storage.
@@ -628,12 +639,12 @@ pub async fn signin_bearer(
 		db: db.clone(),
 		ac: Some(av.name.to_string()),
 		id: match &gr.subject {
-			access::Subject::User(user) => Some(user.to_raw()),
-			access::Subject::Record(rid) => Some(rid.to_raw()),
+			access::SubjectStore::User(user) => Some(user.into_raw_string()),
+			access::SubjectStore::Record(rid) => Some(rid.to_string()),
 		},
 		roles: match &gr.subject {
-			access::Subject::User(_) => Some(roles.iter().map(|v| v.to_string()).collect()),
-			access::Subject::Record(_) => Default::default(),
+			access::SubjectStore::User(_) => Some(roles.iter().map(|v| v.to_string()).collect()),
+			access::SubjectStore::Record(_) => Default::default(),
 		},
 		..Claims::default()
 	};
@@ -646,7 +657,7 @@ pub async fn signin_bearer(
 			(None, None) => Session::editor(),
 			(None, Some(_)) => bail!(Error::NsEmpty),
 		};
-		sess.tk = Some((&claims).into());
+		sess.tk = Some(claims.clone().into_claims_object().into());
 		sess.ip.clone_from(&session.ip);
 		sess.or.clone_from(&session.or);
 		authenticate_generic(kvs, &sess, au).await?;
@@ -655,7 +666,7 @@ pub async fn signin_bearer(
 	let refresh = match at.kind {
 		access_type::BearerAccessType::Refresh => {
 			match &gr.subject {
-				access::Subject::Record(rid) => {
+				access::SubjectStore::Record(rid) => {
 					if let (Some(ns), Some(db)) = (&ns, &db) {
 						// Revoke the used refresh token.
 						revoke_refresh_token_record(kvs, gr.id.clone(), gr.ac.clone(), ns, db)
@@ -672,7 +683,7 @@ pub async fn signin_bearer(
 						bail!(Error::InvalidAuth);
 					}
 				}
-				access::Subject::User(_) => {
+				access::SubjectStore::User(_) => {
 					debug!(
 						"Invalid attempt to authenticatea as a system user with a refresh token"
 					);
@@ -687,13 +698,13 @@ pub async fn signin_bearer(
 	// Create the authentication token.
 	let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
 	// Set the authentication on the session.
-	session.tk = Some((&claims).into());
+	session.tk = Some(claims.into_claims_object().into());
 	session.ns.clone_from(&ns);
 	session.db.clone_from(&db);
 	session.ac = Some(av.name.to_string());
 	session.exp = expiration(av.duration.session)?;
 	match &gr.subject {
-		access::Subject::User(user) => {
+		access::SubjectStore::User(user) => {
 			session.au = Arc::new(Auth::new(Actor::new(
 				user.to_string(),
 				roles
@@ -709,7 +720,7 @@ pub async fn signin_bearer(
 				},
 			)));
 		}
-		access::Subject::Record(rid) => {
+		access::SubjectStore::Record(rid) => {
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_string(),
 				Default::default(),
@@ -722,7 +733,7 @@ pub async fn signin_bearer(
 					bail!(Error::InvalidAuth);
 				},
 			)));
-			session.rd = Some(Value::from(rid.to_owned()));
+			session.rd = Some(Value::from(rid.clone()));
 		}
 	};
 	// Return the authentication token.
@@ -752,7 +763,10 @@ pub fn validate_grant_bearer(key: &str) -> Result<String> {
 	Ok(kid.to_string())
 }
 
-pub fn verify_grant_bearer(gr: &Arc<AccessGrant>, key: String) -> Result<&access::GrantBearer> {
+pub fn verify_grant_bearer(
+	gr: &Arc<AccessGrantStore>,
+	key: String,
+) -> Result<&access::GrantBearer> {
 	// Check if the grant is revoked or expired.
 	match (&gr.expiration, &gr.revocation) {
 		(None, None) => {}
@@ -794,12 +808,18 @@ pub fn verify_grant_bearer(gr: &Arc<AccessGrant>, key: String) -> Result<&access
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use crate::{dbs::Capabilities, iam::Role};
+	use std::collections::HashMap;
+
 	use chrono::Duration;
 	use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 	use regex::Regex;
-	use std::collections::HashMap;
+
+	use super::*;
+	use crate::dbs::Capabilities;
+	use crate::iam::Role;
+	use crate::sql::statements::define::DefineKind;
+	use crate::sql::statements::define::user::PassType;
+	use crate::sql::{Ast, Expr, Ident, TopLevelExpr};
 
 	struct TestLevel {
 		level: &'static str,
@@ -874,7 +894,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -1055,7 +1076,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -1098,7 +1120,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -1379,7 +1402,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Session expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_sess_exp =
 				(Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_sess_exp =
@@ -1704,7 +1728,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -1799,7 +1824,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -2152,7 +2178,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let key = grant.get("key").unwrap().clone().as_string();
+				let key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Sign in with the bearer key
 				let mut sess = Session {
@@ -2269,7 +2295,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let key = grant.get("key").unwrap().clone().as_string();
+				let key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Sign in with the bearer key
 				let mut sess = Session {
@@ -2386,7 +2412,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let key = grant.get("key").unwrap().clone().as_string();
+				let key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Sign in with the bearer key
 				let mut sess = Session {
@@ -2468,7 +2494,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let key = grant.get("key").unwrap().clone().as_string();
+				let key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Wait for the grant to expire
 				std::thread::sleep(Duration::seconds(2).to_std().unwrap());
@@ -2553,7 +2579,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let key = grant.get("key").unwrap().clone().as_string();
+				let key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Get grant identifier from key
 				let kid = key.split("-").collect::<Vec<&str>>()[2];
@@ -2647,7 +2673,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let key = grant.get("key").unwrap().clone().as_string();
+				let key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Remove bearer access method
 				ds.execute(format!("REMOVE ACCESS api ON {}", level.level).as_str(), &sess, None)
@@ -2734,7 +2760,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let _key = grant.get("key").unwrap().clone().as_string();
+				let _key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Sign in with the bearer key
 				let mut sess = Session {
@@ -2819,7 +2845,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let valid_key = grant.get("key").unwrap().clone().as_string();
+				let valid_key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Replace a character from the key prefix
 				let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -2906,7 +2932,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let valid_key = grant.get("key").unwrap().clone().as_string();
+				let valid_key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Remove a character from the bearer key
 				let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -2993,7 +3019,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let valid_key = grant.get("key").unwrap().clone().as_string();
+				let valid_key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Replace a character from the key identifier
 				let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3080,7 +3106,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let valid_key = grant.get("key").unwrap().clone().as_string();
+				let valid_key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Replace a character from the key value
 				let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3167,8 +3193,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let id = grant.get("id").unwrap().clone().as_string();
-				let key = grant.get("key").unwrap().clone().as_string();
+				let id = grant.get("id").unwrap().clone().as_raw_string();
+				let key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Test that returned key is in plain text
 				assert!(
@@ -3243,7 +3269,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+			let key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3276,7 +3302,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -3318,7 +3345,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+			let key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3352,7 +3379,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -3397,7 +3425,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+			let key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3431,7 +3459,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -3477,7 +3506,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+			let key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3538,7 +3567,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+			let key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Wait for the grant to expire
 			std::thread::sleep(Duration::seconds(2).to_std().unwrap());
@@ -3602,7 +3631,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+			let key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Get grant identifier from key
 			let kid = key.split("-").collect::<Vec<&str>>()[2];
@@ -3671,7 +3700,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+			let key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Remove bearer access method
 			ds.execute("REMOVE ACCESS api ON DATABASE", &sess, None).await.unwrap();
@@ -3735,7 +3764,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let _key = grant.get("key").unwrap().clone().as_string();
+			let _key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3797,7 +3826,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_string();
+			let valid_key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Replace a character from the key prefix
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3863,7 +3892,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_string();
+			let valid_key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Remove a character from the bearer key
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3929,7 +3958,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_string();
+			let valid_key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Replace a character from the key identifier
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3995,7 +4024,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_string();
+			let valid_key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Replace a character from the key value
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -4061,8 +4090,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let id = grant.get("id").unwrap().clone().as_string();
-			let key = grant.get("key").unwrap().clone().as_string();
+			let id = grant.get("id").unwrap().clone().as_raw_string();
+			let key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Test that returned key is in plain text
 			let ok = Regex::new(r"surreal-bearer-[a-zA-Z0-9]{12}-[a-zA-Z0-9]{24}").unwrap();
@@ -4086,11 +4115,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 	#[tokio::test]
 	async fn test_signin_nonexistent_role() {
 		use crate::iam::Error as IamError;
-		use crate::sql::{
-			Base, Statement,
-			statements::{DefineUserStatement, define::DefineStatement},
-			user::UserDuration,
-		};
+		use crate::sql::Base;
+		use crate::sql::statements::DefineUserStatement;
+		use crate::sql::statements::define::DefineStatement;
 		let test_levels = vec![
 			TestLevel {
 				level: "ROOT",
@@ -4121,23 +4148,29 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			};
 
 			let user = DefineUserStatement {
+				kind: DefineKind::Default,
 				base,
-				name: "user".into(),
+				name: Ident::new("user".to_owned()).unwrap(),
 				// This is the Argon2id hash for "pass" with a random salt.
-				hash: "$argon2id$v=19$m=16,t=2,p=1$VUlHTHVOYjc5d0I1dGE3OQ$sVtmRNH+Xtiijk0uXL2+4w"
-					.to_string(),
-				code: "dummy".to_string(),
-				roles: vec!["nonexistent".into()],
-				duration: UserDuration::default(),
+				pass_type: PassType::Hash(
+					"$argon2id$v=19$m=16,t=2,p=1$VUlHTHVOYjc5d0I1dGE3OQ$sVtmRNH+Xtiijk0uXL2+4w"
+						.to_string(),
+				),
+				roles: vec![Ident::new("nonexistent".to_owned()).unwrap()],
+				session_duration: None,
+				token_duration: None,
 				comment: None,
-				if_not_exists: false,
-				overwrite: false,
 			};
 
-			// Use pre-parsed definition, which bypasses the existent role check during parsing.
-			ds.process(Statement::Define(DefineStatement::User(user)).into(), &sess, None)
-				.await
-				.unwrap();
+			let ast = Ast {
+				expressions: vec![TopLevelExpr::Expr(Expr::Define(Box::new(
+					DefineStatement::User(user),
+				)))],
+			};
+
+			// Use pre-parsed definition, which bypasses the existent role check during
+			// parsing.
+			ds.process(ast, &sess, None).await.unwrap();
 
 			let mut sess = Session {
 				ns: level.ns.map(String::from),

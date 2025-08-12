@@ -1,20 +1,23 @@
 #![cfg(not(target_family = "wasm"))]
 
+use std::sync::atomic::AtomicBool;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::index::{FullTextParams, HnswParams, MTreeParams, SearchParams};
 use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{Array, Index, Part, Thing, Value};
+use crate::expr::{Index, Part};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::ft::search::SearchIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
 use crate::kvs::TransactionType;
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::sync::atomic::AtomicBool;
+use crate::val::{Array, RecordId, Value};
 
 pub(crate) struct IndexOperation<'a> {
 	ctx: &'a Context,
@@ -24,7 +27,7 @@ pub(crate) struct IndexOperation<'a> {
 	o: Option<Vec<Value>>,
 	/// The new values (if existing)
 	n: Option<Vec<Value>>,
-	rid: &'a Thing,
+	rid: &'a RecordId,
 }
 
 impl<'a> IndexOperation<'a> {
@@ -34,7 +37,7 @@ impl<'a> IndexOperation<'a> {
 		ix: &'a DefineIndexStatement,
 		o: Option<Vec<Value>>,
 		n: Option<Vec<Value>>,
-		rid: &'a Thing,
+		rid: &'a RecordId,
 	) -> Self {
 		Self {
 			ctx,
@@ -69,7 +72,7 @@ impl<'a> IndexOperation<'a> {
 
 	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
 		let (ns, db) = self.opt.ns_db()?;
-		Ok(key::index::Index::new(ns, db, &self.ix.what, &self.ix.name, v, Some(&self.rid.id)))
+		Ok(key::index::Index::new(ns, db, &self.ix.what, &self.ix.name, v, Some(&self.rid.key)))
 	}
 
 	async fn index_unique(&mut self) -> Result<()> {
@@ -101,7 +104,7 @@ impl<'a> IndexOperation<'a> {
 					let key = self.get_unique_index_key(&n)?;
 					if txn.putc(&key, self.rid, None).await.is_err() {
 						let key = self.get_unique_index_key(&n)?;
-						let rid: Thing = txn.get(&key, None).await?.unwrap();
+						let rid: RecordId = txn.get(&key, None).await?.unwrap();
 						return self.err_index_exists(rid, n);
 					}
 				}
@@ -142,7 +145,7 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	fn err_index_exists(&self, rid: Thing, n: Array) -> Result<()> {
+	fn err_index_exists(&self, rid: RecordId, n: Array) -> Result<()> {
 		Err(anyhow::Error::new(Error::IndexExists {
 			thing: rid,
 			index: self.ix.name.to_string(),
@@ -225,26 +228,26 @@ impl<'a> IndexOperation<'a> {
 		let mut hnsw = hnsw.write().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
-			hnsw.remove_document(&txn, self.rid.id.clone(), &o).await?;
+			hnsw.remove_document(&txn, self.rid.key.clone(), &o).await?;
 		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			hnsw.index_document(&txn, &self.rid.id, &n).await?;
+			hnsw.index_document(&txn, &self.rid.key, &n).await?;
 		}
 		Ok(())
 	}
 }
 
-/// Extract from the given document, the values required by the index and put then in an array.
-/// Eg. IF the index is composed of the columns `name` and `instrument`
-/// Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie" }
-/// It will return: ["Tobie", "piano"]
+/// Extract from the given document, the values required by the index and put
+/// then in an array. Eg. IF the index is composed of the columns `name` and
+/// `instrument` Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie"
+/// } It will return: ["Tobie", "piano"]
 struct Indexable(Vec<(Value, bool)>);
 
 impl Indexable {
 	fn new(vals: Vec<Value>, ix: &DefineIndexStatement) -> Self {
 		let mut source = Vec::with_capacity(vals.len());
-		for (v, i) in vals.into_iter().zip(ix.cols.0.iter()) {
+		for (v, i) in vals.into_iter().zip(ix.cols.iter()) {
 			let f = matches!(i.0.last(), Some(&Part::Flatten));
 			source.push((v, f));
 		}

@@ -1,11 +1,10 @@
 //! Stores a DEFINE CONFIG definition
-use crate::expr::statements::define::DefineConfigStatement;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::KVKey;
-
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+
+use crate::expr::statements::define::config::ConfigStore;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Cg<'a> {
@@ -21,7 +20,7 @@ pub(crate) struct Cg<'a> {
 }
 
 impl KVKey for Cg<'_> {
-	type ValueType = DefineConfigStatement;
+	type ValueType = ConfigStore;
 }
 
 pub fn new<'a>(ns: &'a str, db: &'a str, ty: &'a str) -> Cg<'a> {

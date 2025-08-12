@@ -1,34 +1,43 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::expr::fmt::Fmt;
-use crate::expr::idiom::Idiom;
-use crate::expr::operator::Operator;
-use crate::expr::part::Part;
-use crate::expr::paths::ID;
-use crate::expr::value::Value;
+use std::fmt::{self, Display, Formatter};
+
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
 
 use super::FlowResultExt as _;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::expr::fmt::Fmt;
+use crate::expr::{AssignOperator, Expr, Idiom, Literal, Part, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Data {
 	EmptyExpression,
-	SetExpression(Vec<(Idiom, Operator, Value)>),
+	SetExpression(Vec<Assignment>),
 	UnsetExpression(Vec<Idiom>),
-	PatchExpression(Value),
-	MergeExpression(Value),
-	ReplaceExpression(Value),
-	ContentExpression(Value),
-	SingleExpression(Value),
-	ValuesExpression(Vec<Vec<(Idiom, Value)>>),
-	UpdateExpression(Vec<(Idiom, Operator, Value)>),
+	PatchExpression(Expr),
+	MergeExpression(Expr),
+	ReplaceExpression(Expr),
+	ContentExpression(Expr),
+	SingleExpression(Expr),
+	ValuesExpression(Vec<Vec<(Idiom, Expr)>>),
+	UpdateExpression(Vec<Assignment>),
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+pub struct Assignment {
+	pub place: Idiom,
+	pub operator: AssignOperator,
+	pub value: Expr,
+}
+
+impl fmt::Display for Assignment {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		write!(f, "{} {} {}", self.place, self.operator, self.value)
+	}
 }
 
 impl Default for Data {
@@ -38,130 +47,68 @@ impl Default for Data {
 }
 
 impl Data {
+	/// THIS FUNCTION IS BROKEN, DON'T USE IT ANYWHERE WHERE IT ISN'T ALREADY
+	/// BEING USED.
+	///
+	/// See [`Data::pick`] for why it is broken.
+	///
 	/// Fetch the 'id' field if one has been specified
-	///
-	/// This method extracts record IDs from various expression types used in CREATE, UPSERT, and UPDATE statements.
-	/// It handles both simple values and complex expressions that need to be computed before extraction.
-	///
-	/// BUG FIX: Previously, this method only handled simple values and would fail to extract record IDs
-	/// from complex expressions like inline SELECT statements. This caused UPSERT with SELECT to generate
-	/// new record IDs instead of preserving the original ones.
-	///
-	/// The fix adds support for:
-	/// - Value::Subquery: Inline SELECT statements (e.g., SELECT id FROM person WHERE name = 'John')
-	/// - Value::Param: Parameter values (e.g., $user_id)
-	/// - Value::Idiom: Field references (e.g., content.id)
-	/// - Value::Function: Function calls (e.g., type::string(8))
-	/// - Value::Thing: Record references (e.g., person:john)
-	/// - Value::Constant: Mathematical constants (e.g., math::pi)
-	/// - Value::Expression: Complex expressions (e.g., (1 + 2))
-	///
-	/// This ensures that UPSERT operations correctly preserve record IDs when using complex expressions.
-	pub(crate) async fn rid(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-	) -> Result<Option<Value>> {
-		// Handle subquery expressions (inline SELECT) - these are the most complex case
-		// Example: UPSERT person CONTENT { id: (SELECT id FROM person LIMIT 1).id }
-		if let Self::ContentExpression(Value::Subquery(sub_query)) = self {
-			let result = Box::pin(sub_query.compute(stk, ctx, opt, None)).await.catch_return()?;
-			return Ok(result.pick(&*ID).some());
-		}
-
-		// For all other cases, use a synchronous approach to avoid recursion
-		match self {
-			Self::ContentExpression(Value::Param(param)) => {
-				// For parameter values, compute them and extract id
-				// Example: UPSERT person CONTENT { id: $user_id }
-				Ok(param.compute(stk, ctx, opt, None).await?.pick(&*ID).some())
-			}
-			Self::ContentExpression(Value::Object(obj)) => {
-				// For objects, extract id field directly
-				// Example: CREATE person CONTENT { id: 'john', name: 'John' }
-				Ok(obj.get("id").cloned())
-			}
-			Self::ContentExpression(Value::Thing(thing)) => {
-				// For thing values, return the thing itself as the id
-				// Example: CREATE person CONTENT { id: person:john }
-				Ok(Some(Value::Thing(thing.clone())))
-			}
-			Self::ContentExpression(Value::Idiom(idiom)) => {
-				// For idiom expressions (like .content), compute the underlying value and extract id
-				// Example: UPSERT person CONTENT { id: content.id }
-				Ok(idiom.compute(stk, ctx, opt, None).await.catch_return()?.pick(&*ID).some())
-			}
-			Self::ContentExpression(Value::Function(func)) => {
-				// For function calls, compute them and extract id
-				// Example: CREATE person CONTENT { id: type::string(8) }
-				Ok(func.compute(stk, ctx, opt, None).await.catch_return()?.pick(&*ID).some())
-			}
-			Self::ContentExpression(Value::Constant(constant)) => {
-				// For constant expressions, compute them and extract id
-				// Example: CREATE person CONTENT { id: math::pi }
-				Ok(constant.compute()?.pick(&*ID).some())
-			}
-			Self::ContentExpression(Value::Expression(expr)) => {
-				// For expression types, compute them and extract id
-				// Example: CREATE person CONTENT { id: (1 + 2) }
-				Ok(expr.compute(stk, ctx, opt, None).await.catch_return()?.pick(&*ID).some())
-			}
-			Self::SetExpression(vec) => {
-				// For set expressions, find the id field if it exists
-				// Example: CREATE person SET id = 'john', name = 'John'
-				if let Some((_, _, val)) = vec.iter().find(|f| f.0.is_field(&*ID)) {
-					// For now, just return the value as-is to avoid recursion
-					Ok(Some(val.clone()))
-				} else {
-					Ok(None)
-				}
-			}
-			// For all other cases, return None to avoid recursion
-			// This ensures we don't get into infinite loops with complex expressions
-			_ => Ok(None),
-		}
+	pub(crate) async fn rid(&self, stk: &mut Stk, ctx: &Context, opt: &Options) -> Result<Value> {
+		self.pick(stk, ctx, opt, "id").await
 	}
+
+	/// THIS FUNCTION IS BROKEN, DON'T USE IT ANYWHERE WHERE IT ISN'T ALREADY
+	/// BEING USED.
+	///
 	/// Fetch a field path value if one is specified
+	///
+	/// This function computes the expression it has again. This is a mistake. I
+	/// causes issues with subqueries where queries are executed twice if they
+	/// are in a field picked by this method.
+	///
+	/// Take `CREATE foo SET id = (CREATE bar:1)`. This query will complain
+	/// about br:1 being created twice, because it is. the subquery create is
+	/// being computed twice. This issue cannot be fixed without a proper and
+	/// major restructuring of the executor.
 	pub(crate) async fn pick(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		path: &[Part],
-	) -> Result<Option<Value>> {
+		path: &str,
+	) -> Result<Value> {
 		match self {
-			Self::MergeExpression(v) => match v {
-				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
-				Value::Object(_) => {
-					Ok(v.pick(path).compute(stk, ctx, opt, None).await.catch_return()?.some())
+			Self::MergeExpression(v) | Self::ReplaceExpression(v) | Self::ContentExpression(v) => {
+				match v {
+					Expr::Param(_) => {
+						Ok(stk
+							.run(|stk| v.compute(stk, ctx, opt, None))
+							.await
+							.catch_return()?
+							// Bad unwrap but this function should be removed anyway and it works
+							// with the current calls.
+							.pick(&[Part::field(path.to_owned()).unwrap()]))
+					}
+					Expr::Literal(Literal::Object(x)) => {
+						// Find the field manually, done to replicate previous behavior.
+						if let Some(x) = x.iter().find(|x| x.key == path) {
+							stk.run(|stk| x.value.compute(stk, ctx, opt, None)).await.catch_return()
+						} else {
+							Ok(Value::None)
+						}
+					}
+					_ => Ok(Value::None),
 				}
-				_ => Ok(None),
-			},
-			Self::ReplaceExpression(v) => match v {
-				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
-				Value::Object(_) => {
-					Ok(v.pick(path).compute(stk, ctx, opt, None).await.catch_return()?.some())
-				}
-				_ => Ok(None),
-			},
-			Self::ContentExpression(v) => match v {
-				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
-				Value::Object(_) => {
-					Ok(v.pick(path).compute(stk, ctx, opt, None).await.catch_return()?.some())
-				}
-				_ => Ok(None),
-			},
-			Self::SetExpression(v) => match v.iter().find(|f| f.0.is_field(path)) {
-				Some((_, _, v)) => {
-					// This SET expression has this field
-					Ok(v.compute(stk, ctx, opt, None).await.catch_return()?.some())
+			}
+			Self::SetExpression(v) => match v.iter().find(|f| f.place.is_field(path)) {
+				Some(ass) => {
+					stk.run(|stk| ass.value.compute(stk, ctx, opt, None)).await.catch_return()
 				}
 				// This SET expression does not have this field
-				_ => Ok(None),
+				_ => Ok(Value::None),
 			},
 			// Return nothing
-			_ => Ok(None),
+			_ => Ok(Value::None),
 		}
 	}
 }
@@ -170,13 +117,7 @@ impl Display for Data {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::EmptyExpression => Ok(()),
-			Self::SetExpression(v) => write!(
-				f,
-				"SET {}",
-				Fmt::comma_separated(
-					v.iter().map(|args| Fmt::new(args, |(l, o, r), f| write!(f, "{l} {o} {r}",)))
-				)
-			),
+			Self::SetExpression(v) => write!(f, "SET {}", Fmt::comma_separated(v.iter())),
 			Self::UnsetExpression(v) => write!(
 				f,
 				"UNSET {}",
@@ -197,13 +138,9 @@ impl Display for Data {
 					Fmt::comma_separated(v.iter().map(|(_, v)| v))
 				))))
 			),
-			Self::UpdateExpression(v) => write!(
-				f,
-				"ON DUPLICATE KEY UPDATE {}",
-				Fmt::comma_separated(
-					v.iter().map(|args| Fmt::new(args, |(l, o, r), f| write!(f, "{l} {o} {r}",)))
-				)
-			),
+			Self::UpdateExpression(v) => {
+				write!(f, "ON DUPLICATE KEY UPDATE {}", Fmt::comma_separated(v.iter()))
+			}
 		}
 	}
 }

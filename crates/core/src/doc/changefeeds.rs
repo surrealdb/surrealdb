@@ -1,8 +1,8 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::doc::Document;
 use anyhow::Result;
+
+use crate::ctx::Context;
+use crate::dbs::{Options, Statement};
+use crate::doc::Document;
 
 impl Document {
 	pub async fn process_changefeeds(

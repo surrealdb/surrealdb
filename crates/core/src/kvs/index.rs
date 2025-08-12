@@ -1,10 +1,24 @@
+use std::ops::Range;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use anyhow::{Result, ensure};
+use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
+use futures::channel::oneshot::{Receiver, Sender, channel};
+use reblessive::TreeStack;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
+use tokio::task;
+use tokio::task::JoinHandle;
+
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{Id, Object, Thing, Value};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
@@ -13,19 +27,7 @@ use crate::kvs::LockType::Optimistic;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{Key, Transaction, TransactionType, Val, impl_kv_value_revisioned};
 use crate::mem::ALLOC;
-use anyhow::{Result, ensure};
-use dashmap::DashMap;
-use dashmap::mapref::entry::Entry;
-use futures::channel::oneshot::{Receiver, Sender, channel};
-use reblessive::TreeStack;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::ops::Range;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::RwLock;
-use tokio::task;
-use tokio::task::JoinHandle;
+use crate::val::{Object, RecordId, RecordIdKey, Value};
 
 #[derive(Debug, Clone)]
 pub(crate) enum BuildingStatus {
@@ -221,7 +223,7 @@ impl IndexBuilder {
 		ix: &DefineIndexStatement,
 		old_values: Option<Vec<Value>>,
 		new_values: Option<Vec<Value>>,
-		rid: &Thing,
+		rid: &RecordId,
 	) -> Result<ConsumeResult> {
 		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
 		if let Some(r) = self.indexes.get(&key) {
@@ -259,7 +261,7 @@ impl IndexBuilder {
 pub(crate) struct Appending {
 	old_values: Option<Vec<Value>>,
 	new_values: Option<Vec<Value>>,
-	id: Id,
+	id: RecordIdKey,
 }
 
 impl_kv_value_revisioned!(Appending);
@@ -354,10 +356,11 @@ impl Building {
 		ctx: &Context,
 		old_values: Option<Vec<Value>>,
 		new_values: Option<Vec<Value>>,
-		rid: &Thing,
+		rid: &RecordId,
 	) -> Result<ConsumeResult> {
 		let mut queue = self.queue.write().await;
-		// Now that the queue is locked, we have the possibility to assess if the asynchronous build is done.
+		// Now that the queue is locked, we have the possibility to assess if the
+		// asynchronous build is done.
 		if queue.is_empty() {
 			// If the appending queue is empty and the index is built...
 			if self.status.read().await.is_ready() {
@@ -370,7 +373,7 @@ impl Building {
 		let a = Appending {
 			old_values,
 			new_values,
-			id: rid.id.clone(),
+			id: rid.key.clone(),
 		};
 		// Get the idx of this appended record from the sequence
 		let idx = queue.add_update();
@@ -378,7 +381,7 @@ impl Building {
 		let ia = self.ikb.new_ia_key(idx);
 		tx.set(&ia, &a, None).await?;
 		// Do we already have a primary appending?
-		let ip = self.ikb.new_ip_key(rid.id.clone());
+		let ip = self.ikb.new_ip_key(rid.key.clone());
 		if tx.get(&ip, None).await?.is_none() {
 			// If not, we set it
 			tx.set(&ip, &PrimaryAppending(idx), None).await?;
@@ -409,6 +412,7 @@ impl Building {
 			tx.delp(&key).await?;
 			tx.commit().await?;
 		}
+
 		// First iteration, we index every key
 		let beg = thing::prefix(ns, db, self.ikb.table())?;
 		let end = thing::suffix(ns, db, self.ikb.table())?;
@@ -450,7 +454,8 @@ impl Building {
 				tx.commit().await?;
 			}
 		}
-		// Second iteration, we index/remove any records that has been added or removed since the initial indexing
+		// Second iteration, we index/remove any records that has been added or removed
+		// since the initial indexing
 		self.set_status(BuildingStatus::Indexing {
 			initial: Some(initial_count),
 			pending: Some(self.queue.read().await.pending() as usize),
@@ -471,7 +476,8 @@ impl Building {
 				}
 				if queue.is_empty() {
 					// If the batch is empty, we are done.
-					// Due to the lock on self.queue, we know that no external process can add an item to the queue.
+					// Due to the lock on self.queue, we know that no external process can add an
+					// item to the queue.
 					self.set_status(BuildingStatus::Ready {
 						initial: Some(initial_count),
 						pending: Some(queue.pending() as usize),
@@ -521,14 +527,19 @@ impl Building {
 			let key = thing::Thing::decode_key(&k)?;
 			// Parse the value
 			let val: Value = revision::from_slice(&v)?;
-			let rid: Arc<Thing> = Thing::from((key.tb, key.id)).into();
+			let rid: Arc<RecordId> = RecordId {
+				table: key.tb.to_owned(),
+				key: key.id,
+			}
+			.into();
 
 			let opt_values;
 
 			// Do we already have an appended value?
-			let ip = self.ikb.new_ip_key(rid.id.clone());
+			let ip = self.ikb.new_ip_key(rid.key.clone());
 			if let Some(pa) = tx.get(&ip, None).await? {
-				// Then we take the old value of the appending value as the initial indexing value
+				// Then we take the old value of the appending value as the initial indexing
+				// value
 				let ia = self.ikb.new_ia_key(pa.0);
 				let a = tx
 					.get(&ia, None)
@@ -582,13 +593,16 @@ impl Building {
 			let ia = self.ikb.new_ia_key(i);
 			if let Some(a) = tx.get(&ia, None).await? {
 				tx.del(&ia).await?;
-				let rid = Thing::from((self.ikb.table().to_string(), a.id));
+				let rid = RecordId {
+					table: self.ikb.table().to_string(),
+					key: a.id,
+				};
 				let mut io =
 					IndexOperation::new(ctx, &self.opt, &self.ix, a.old_values, a.new_values, &rid);
 				stack.enter(|stk| io.compute(stk, &rc)).finish().await?;
 
 				// We can delete the ip record if any
-				let ip = self.ikb.new_ip_key(rid.id);
+				let ip = self.ikb.new_ip_key(rid.key);
 				tx.del(&ip).await?;
 
 				*count += 1;
@@ -623,8 +637,9 @@ impl Building {
 
 	/// Check if the indexing process is aborting.
 	async fn is_aborted(&self) -> bool {
-		// We use `Ordering::Relaxed` as there are no shared data that would require any synchronization.
-		// This method is only called by the single thread building the index.
+		// We use `Ordering::Relaxed` as there are no shared data that would require any
+		// synchronization. This method is only called by the single thread building
+		// the index.
 		if self.aborted.load(Ordering::Relaxed) {
 			self.set_status(BuildingStatus::Aborted).await;
 			true

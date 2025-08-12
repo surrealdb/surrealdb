@@ -1,17 +1,17 @@
-use std::{
-	future::Future,
-	path::{Path as OsPath, PathBuf},
-	pin::Pin,
-};
+use std::future::Future;
+use std::path::{Path as OsPath, PathBuf};
+use std::pin::Pin;
 
 use bytes::Bytes;
 use path_clean::PathClean;
-use tokio::{fs::File, io::AsyncWriteExt};
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
 use url::Url;
 
-use crate::{cnf::BUCKET_FOLDER_ALLOWLIST, err::Error, expr::Datetime};
-
 use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
+use crate::cnf::BUCKET_FOLDER_ALLOWLIST;
+use crate::err::Error;
+use crate::val::Datetime;
 
 /// Options for configuring the FileStore
 #[derive(Clone, Debug)]
@@ -97,7 +97,7 @@ impl FileStore {
 		};
 
 		Ok(Some(FileStoreOptions {
-			root: ObjectKey::from(path.to_string()),
+			root: ObjectKey::new(path),
 			lowercase_paths,
 		}))
 	}
@@ -415,7 +415,7 @@ impl ObjectStore for FileStore {
 		Box::pin(async move {
 			// If a prefix is provided, combine it with the store prefix
 			// If not, just use the store's prefix
-			let base_key = opts.prefix.as_ref().cloned().unwrap_or_else(|| ObjectKey::from(""));
+			let base_key = opts.prefix.clone().unwrap_or_default();
 			let os_path = self.to_os_path(&base_key).await?;
 
 			// Check if the directory exists
@@ -477,7 +477,7 @@ impl ObjectStore for FileStore {
 					.strip_prefix(&os_path)
 					.map_err(|e| format!("Failed to get relative path: {}", e))?;
 				let rel_str = rel_path.to_string_lossy();
-				let entry_key = base_key.join(&ObjectKey::from(rel_str.to_string()));
+				let entry_key = base_key.join(&ObjectKey::new(rel_str.into_owned()));
 
 				all_entries.push((entry_key, metadata));
 			}

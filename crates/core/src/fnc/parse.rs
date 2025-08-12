@@ -1,8 +1,9 @@
 pub mod email {
 
-	use crate::expr::value::Value;
 	use addr::email::Host;
 	use anyhow::Result;
+
+	use crate::val::Value;
 
 	pub fn host((string,): (String,)) -> Result<Value> {
 		// Parse the email address
@@ -47,9 +48,10 @@ pub mod email {
 
 pub mod url {
 
-	use crate::expr::value::Value;
 	use anyhow::Result;
 	use url::Url;
+
+	use crate::val::Value;
 
 	pub fn domain((string,): (String,)) -> Result<Value> {
 		match Url::parse(&string) {
@@ -123,7 +125,7 @@ pub mod url {
 
 	#[cfg(test)]
 	mod tests {
-		use crate::expr::value::Value;
+		use crate::val::Value;
 
 		#[test]
 		fn port_default_port_specified() {

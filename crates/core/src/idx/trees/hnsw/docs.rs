@@ -1,4 +1,10 @@
-use crate::expr::{Id, Thing};
+use std::sync::Arc;
+
+use anyhow::Result;
+use revision::{Revisioned, revisioned};
+use roaring::RoaringTreemap;
+use serde::{Deserialize, Serialize};
+
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::ElementId;
@@ -6,11 +12,7 @@ use crate::idx::trees::hnsw::flavor::HnswFlavor;
 use crate::idx::trees::knn::Ids64;
 use crate::idx::trees::vector::{SerializedVector, Vector};
 use crate::kvs::{KVValue, Transaction};
-use anyhow::Result;
-use revision::{Revisioned, revisioned};
-use roaring::RoaringTreemap;
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use crate::val::{RecordId, RecordIdKey};
 
 pub(in crate::idx) struct HnswDocs {
 	tb: String,
@@ -42,7 +44,7 @@ impl HnswDocs {
 		})
 	}
 
-	pub(super) async fn resolve(&mut self, tx: &Transaction, id: &Id) -> Result<DocId> {
+	pub(super) async fn resolve(&mut self, tx: &Transaction, id: &RecordIdKey) -> Result<DocId> {
 		if let Some(doc_id) = tx.get(&self.ikb.new_hi_key(id.clone()), None).await? {
 			Ok(doc_id)
 		} else {
@@ -71,16 +73,23 @@ impl HnswDocs {
 		&self,
 		tx: &Transaction,
 		doc_id: DocId,
-	) -> Result<Option<Thing>> {
+	) -> Result<Option<RecordId>> {
 		let doc_key = self.ikb.new_hd_key(doc_id);
 		if let Some(id) = tx.get(&doc_key, None).await? {
-			Ok(Some(Thing::from((self.tb.clone(), id))))
+			Ok(Some(RecordId {
+				table: self.tb.clone(),
+				key: id,
+			}))
 		} else {
 			Ok(None)
 		}
 	}
 
-	pub(super) async fn remove(&mut self, tx: &Transaction, id: Id) -> Result<Option<DocId>> {
+	pub(super) async fn remove(
+		&mut self,
+		tx: &Transaction,
+		id: RecordIdKey,
+	) -> Result<Option<DocId>> {
 		let id_key = self.ikb.new_hi_key(id);
 		if let Some(doc_id) = tx.get(&id_key, None).await? {
 			let doc_key = self.ikb.new_hd_key(doc_id);

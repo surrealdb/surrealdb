@@ -1,15 +1,16 @@
+use std::borrow::Cow;
+use std::collections::{BTreeMap, HashMap};
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::plan::Explanation;
 use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};
-use crate::expr::function::OptimisedAggregate;
-use crate::expr::value::{TryAdd, TryFloatDiv, Value};
-use crate::expr::{Array, Field, FlowResultExt as _, Function, Idiom};
+use crate::expr::{Expr, Field, FlowResultExt as _, Function, FunctionCall, Idiom};
 use crate::idx::planner::RecordStrategy;
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
+use crate::val::{Array, TryAdd, TryFloatDiv, Value};
 
 pub(super) struct GroupsCollector {
 	base: Vec<Aggregator>,
@@ -22,7 +23,7 @@ struct Aggregator {
 	array: Option<Array>,
 	first_val: Option<Value>,
 	count: Option<usize>,
-	count_function: Option<(Box<Function>, usize)>,
+	count_function: Option<usize>,
 	math_max: Option<Value>,
 	math_min: Option<Value>,
 	math_sum: Option<Value>,
@@ -36,7 +37,7 @@ impl GroupsCollector {
 		#[allow(unfulfilled_lint_expectations)]
 		let mut idioms_agr: HashMap<Idiom, Aggregator> = HashMap::new();
 		if let Some(fields) = stm.expr() {
-			for field in fields.other() {
+			for field in fields.iter_non_all_fields() {
 				if let Field::Single {
 					expr,
 					alias,
@@ -110,7 +111,7 @@ impl GroupsCollector {
 			} else {
 				stk.run(|stk| obj.get(stk, ctx, opt, None, idiom)).await.catch_return()?
 			};
-			agr.push(stk, ctx, opt, rs, val).await?;
+			agr.push(rs, val).await?;
 		}
 		Ok(())
 	}
@@ -131,43 +132,53 @@ impl GroupsCollector {
 			// Loop over each grouped collection
 			for aggregator in self.grp.values_mut() {
 				// Create a new value
-				let mut obj = Value::base();
+				let mut obj = Value::empty_object();
 				// Loop over each group clause
-				for field in fields.other() {
+				for field in fields.iter_non_all_fields() {
 					// Process the field
-					if let Field::Single {
+					let Field::Single {
 						expr,
 						alias,
 					} = field
+					else {
+						// iter_non_all_fields, should remove all non Field::Single entries.
+						unreachable!()
+					};
+					let idiom = alias
+						.as_ref()
+						.map(Cow::Borrowed)
+						.unwrap_or_else(|| Cow::Owned(expr.to_idiom()));
+					if let Some(idioms_pos) = self.idioms.iter().position(|i| i.eq(idiom.as_ref()))
 					{
-						let idiom = alias
-							.as_ref()
-							.map(Cow::Borrowed)
-							.unwrap_or_else(|| Cow::Owned(expr.to_idiom()));
-						if let Some(idioms_pos) =
-							self.idioms.iter().position(|i| i.eq(idiom.as_ref()))
-						{
-							if let Some(agr) = aggregator.get_mut(idioms_pos) {
-								match expr {
-									Value::Function(f) if f.is_aggregate() => {
-										let a = f.get_optimised_aggregate();
-										let x = if matches!(a, OptimisedAggregate::None) {
-											// The aggregation is not optimised, let's compute it with the values
-											let vals = agr.take();
-											f.aggregate(vals)?
-												.compute(stk, ctx, opt, None)
-												.await
-												.catch_return()?
-										} else {
-											// The aggregation is optimised, just get the value
-											agr.compute(a)?
-										};
-										obj.set(stk, ctx, opt, idiom.as_ref(), x).await?;
-									}
-									_ => {
-										let x = agr.take().first();
-										obj.set(stk, ctx, opt, idiom.as_ref(), x).await?;
-									}
+						if let Some(agr) = aggregator.get_mut(idioms_pos) {
+							match expr {
+								Expr::FunctionCall(f) if f.receiver.is_aggregate() => {
+									let a = OptimisedAggregate::from_function_call(f);
+									let x = if matches!(a, OptimisedAggregate::None) {
+										// The aggregation is not optimised, let's compute it with
+										// the values
+										let mut args = vec![agr.take()];
+										for e in f.arguments.iter().skip(1) {
+											args.push(
+												stk.run(|stk| e.compute(stk, ctx, opt, None))
+													.await
+													.catch_return()?,
+											);
+										}
+
+										f.receiver
+											.compute(stk, ctx, opt, None, args)
+											.await
+											.catch_return()?
+									} else {
+										// The aggregation is optimised, just get the value
+										agr.compute(a)?
+									};
+									obj.set(stk, ctx, opt, idiom.as_ref(), x).await?;
+								}
+								_ => {
+									let x = agr.take().first();
+									obj.set(stk, ctx, opt, idiom.as_ref(), x).await?;
 								}
 							}
 						}
@@ -182,8 +193,7 @@ impl GroupsCollector {
 
 	pub(super) fn explain(&self, exp: &mut Explanation) {
 		let mut explain = BTreeMap::new();
-		let idioms: Vec<String> =
-			self.idioms.iter().cloned().map(|i| Value::from(i).to_string()).collect();
+		let idioms: Vec<String> = self.idioms.iter().cloned().map(|i| i.to_string()).collect();
 		for (i, a) in idioms.into_iter().zip(&self.base) {
 			explain.insert(i, a.explain());
 		}
@@ -191,10 +201,46 @@ impl GroupsCollector {
 	}
 }
 
+pub enum OptimisedAggregate {
+	Count,
+	CountFunction,
+	MathMax,
+	MathMean,
+	MathMin,
+	MathSum,
+	TimeMax,
+	TimeMin,
+	None,
+}
+
+impl OptimisedAggregate {
+	fn from_function_call(f: &FunctionCall) -> Self {
+		match f.receiver {
+			Function::Normal(ref x) => match x.as_str() {
+				"count" => {
+					if f.arguments.is_empty() {
+						OptimisedAggregate::Count
+					} else {
+						OptimisedAggregate::CountFunction
+					}
+				}
+				"math::max" => OptimisedAggregate::MathMax,
+				"math::mean" => OptimisedAggregate::MathMean,
+				"math::min" => OptimisedAggregate::MathMin,
+				"math::sum" => OptimisedAggregate::MathSum,
+				"time::max" => OptimisedAggregate::TimeMax,
+				"time::min" => OptimisedAggregate::TimeMin,
+				_ => OptimisedAggregate::None,
+			},
+			_ => OptimisedAggregate::None,
+		}
+	}
+}
+
 impl Aggregator {
-	fn prepare(&mut self, expr: &Value) {
-		let (a, f) = match expr {
-			Value::Function(f) => (f.get_optimised_aggregate(), Some(f)),
+	fn prepare(&mut self, expr: &Expr) {
+		let (a, _) = match expr {
+			Expr::FunctionCall(f) => (OptimisedAggregate::from_function_call(f), Some(f)),
 			_ => {
 				// We set it only if we don't already have an array
 				if self.array.is_none() && self.first_val.is_none() {
@@ -219,7 +265,7 @@ impl Aggregator {
 			}
 			OptimisedAggregate::CountFunction => {
 				if self.count_function.is_none() {
-					self.count_function = Some((f.unwrap().clone(), 0));
+					self.count_function = Some(0);
 				}
 			}
 			OptimisedAggregate::MathMax => {
@@ -260,7 +306,7 @@ impl Aggregator {
 			array: self.array.as_ref().map(|_| Array::new()),
 			first_val: self.first_val.as_ref().map(|_| Value::None),
 			count: self.count.as_ref().map(|_| 0),
-			count_function: self.count_function.as_ref().map(|(f, _)| (f.clone(), 0)),
+			count_function: self.count_function.as_ref().map(|_| 0),
 			math_max: self.math_max.as_ref().map(|_| Value::None),
 			math_min: self.math_min.as_ref().map(|_| Value::None),
 			math_sum: self.math_sum.as_ref().map(|_| 0.into()),
@@ -270,14 +316,7 @@ impl Aggregator {
 		}
 	}
 
-	async fn push(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		rs: RecordStrategy,
-		val: Value,
-	) -> Result<()> {
+	async fn push(&mut self, rs: RecordStrategy, val: Value) -> Result<()> {
 		if let Some(ref mut c) = self.count {
 			let mut count = 1;
 			if matches!(rs, RecordStrategy::Count) {
@@ -287,15 +326,11 @@ impl Aggregator {
 			}
 			*c += count;
 		}
-		if let Some((ref f, ref mut c)) = self.count_function {
-			if f.aggregate(val.clone())?
-				.compute(stk, ctx, opt, None)
-				.await
-				.catch_return()?
-				.is_truthy()
-			{
-				*c += 1;
-			}
+		if let Some(c) = self.count_function.as_mut() {
+			// NOTE: There was some rather complicated juggling of a function here where the
+			// argument was replaced but as far as I can tell the whole thing was just
+			// equivalent to the one liner below.
+			*c += val.is_truthy() as usize;
 		}
 		if val.is_number() {
 			if let Some(s) = self.math_sum.take() {
@@ -347,11 +382,11 @@ impl Aggregator {
 	}
 
 	fn compute(&mut self, a: OptimisedAggregate) -> Result<Value> {
-		Ok(match a {
+		let value = match a {
 			OptimisedAggregate::None => Value::None,
 			OptimisedAggregate::Count => self.count.take().map(|v| v.into()).unwrap_or(Value::None),
 			OptimisedAggregate::CountFunction => {
-				self.count_function.take().map(|(_, v)| v.into()).unwrap_or(Value::None)
+				self.count_function.take().map(|v| v.into()).unwrap_or(Value::None)
 			}
 			OptimisedAggregate::MathMax => self.math_max.take().unwrap_or(Value::None),
 			OptimisedAggregate::MathMin => self.math_min.take().unwrap_or(Value::None),
@@ -365,7 +400,8 @@ impl Aggregator {
 			}
 			OptimisedAggregate::TimeMax => self.time_max.take().unwrap_or(Value::None),
 			OptimisedAggregate::TimeMin => self.time_min.take().unwrap_or(Value::None),
-		})
+		};
+		Ok(value)
 	}
 
 	fn take(&mut self) -> Value {

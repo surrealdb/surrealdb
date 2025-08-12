@@ -1,11 +1,11 @@
-use crate::expr::Value;
-use crate::fnc;
-use crate::fnc::script::modules::impl_module_def;
 use js::Result;
 use js::prelude::Async;
 use reblessive::tree::Stk;
 
 use super::query::QueryContext;
+use crate::fnc;
+use crate::fnc::script::modules::impl_module_def;
+use crate::val::Value;
 
 mod api;
 mod array;
@@ -32,7 +32,6 @@ mod r#type;
 mod value;
 mod vector;
 
-#[non_exhaustive]
 pub struct Package;
 
 impl_module_def!(

@@ -1,22 +1,20 @@
+use std::fmt;
+
 use anyhow::{Result, bail};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
-use crate::{
-	ctx::Context,
-	dbs::{Options, capabilities::ExperimentalTarget},
-	doc::CursorDoc,
-	err::Error,
-};
-
-use super::{Array, Idiom, Table, Thing, Value, array::Uniq, statements::info::InfoStructure};
+use super::statements::info::InfoStructure;
+use super::{Idiom, Value};
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::expr::{Expr, Ident};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Reference")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Reference {
 	pub on_delete: ReferenceDeleteStrategy,
 }
@@ -37,16 +35,14 @@ impl InfoStructure for Reference {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::ReferenceDeleteStrategy")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum ReferenceDeleteStrategy {
 	Reject,
 	Ignore,
 	Cascade,
 	Unset,
-	Custom(Value),
+	Custom(Expr),
 }
 
 impl fmt::Display for ReferenceDeleteStrategy {
@@ -68,25 +64,27 @@ impl InfoStructure for ReferenceDeleteStrategy {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Refs")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct Refs(pub Vec<(Option<Table>, Option<Idiom>)>);
+pub struct Refs(pub Vec<(Option<Ident>, Option<Idiom>)>);
 
 impl Refs {
+	// remove once reintroducing refences
+	#[allow(dead_code)]
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
+		_ctx: &Context,
+		_opt: &Options,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value> {
+		bail!(Error::Unimplemented("Refs::compute not yet implemented".to_owned()))
+		/*
 		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(Value::Array(Default::default()));
 		}
 
 		// Collect an array of references
-		let arr: Array = match doc {
+		let arr = match doc {
 			// Check if the current document has specified an ID
 			Some(doc) => {
 				// Obtain a record id from the document
@@ -98,7 +96,7 @@ impl Refs {
 					},
 				};
 
-				let mut ids: Vec<Thing> = Vec::new();
+				let mut ids: Vec<RecordId> = Vec::new();
 
 				// Map over all input pairs
 				for (ft, ff) in self.0.iter() {
@@ -107,12 +105,13 @@ impl Refs {
 				}
 
 				// Convert the references into values
-				ids.into_iter().map(Value::Thing).collect()
+				Array(ids.into_iter().map(Value::Thing).collect::<Vec<_>>())
 			}
 			None => bail!(Error::InvalidRefsContext),
 		};
 
 		Ok(Value::Array(arr.uniq()))
+		*/
 	}
 }
 

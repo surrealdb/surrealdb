@@ -1,13 +1,14 @@
 pub mod base64 {
-	use crate::err::Error;
-	use crate::expr::{Bytes, Value};
-	use crate::fnc::args::Optional;
 	use anyhow::Result;
 	use base64::engine::DecodePaddingMode;
 	use base64::engine::general_purpose::{
 		GeneralPurpose, GeneralPurposeConfig, STANDARD, STANDARD_NO_PAD,
 	};
 	use base64::{Engine, alphabet};
+
+	use crate::err::Error;
+	use crate::fnc::args::Optional;
+	use crate::val::{Bytes, Value};
 
 	/// Base64 configuration which supports decoding with or without padding.
 	const STANDARD_GENERIC_DECODER: GeneralPurpose = GeneralPurpose::new(
@@ -40,41 +41,26 @@ pub mod base64 {
 	}
 }
 pub mod cbor {
-	use crate::err::Error;
-	use crate::expr::{Bytes, Value};
-	use crate::rpc::format::cbor::Cbor;
 	use anyhow::Result;
-	use ciborium::Value as Data;
+
+	use crate::err::Error;
+	use crate::rpc::format::cbor;
+	use crate::val::{Bytes, Value};
 
 	pub fn encode((arg,): (Value,)) -> Result<Value> {
-		let val: Cbor = arg.try_into().map_err(|_| Error::InvalidArguments {
+		let val = cbor::encode(arg).map_err(|_| Error::InvalidArguments {
 			name: "encoding::cbor::encode".to_owned(),
 			message: "Value could not be encoded into CBOR".to_owned(),
 		})?;
 
-		// Create a new vector for encoding output
-		let mut res = Vec::new();
-		// Serialize the value into CBOR binary data
-		ciborium::into_writer(&val.0, &mut res).map_err(|_| Error::InvalidArguments {
-			name: "encoding::cbor::encode".to_owned(),
-			message: "Value could not be encoded into CBOR".to_owned(),
-		})?;
-
-		Ok(Value::Bytes(Bytes(res)))
+		Ok(Value::Bytes(Bytes(val)))
 	}
 
 	pub fn decode((arg,): (Bytes,)) -> Result<Value> {
-		let cbor = ciborium::from_reader::<Data, _>(&mut arg.as_slice())
+		cbor::decode(arg.as_slice())
 			.map_err(|_| Error::InvalidArguments {
 				name: "encoding::cbor::decode".to_owned(),
 				message: "invalid cbor".to_owned(),
-			})
-			.map(Cbor)?;
-
-		Value::try_from(cbor)
-			.map_err(|v: &str| Error::InvalidArguments {
-				name: "encoding::cbor::decode".to_owned(),
-				message: v.to_owned(),
 			})
 			.map_err(anyhow::Error::new)
 	}
@@ -83,11 +69,8 @@ pub mod cbor {
 #[cfg(test)]
 mod tests {
 	use super::*;
-
-	use crate::{
-		expr::{Bytes, Value},
-		fnc::args::Optional,
-	};
+	use crate::fnc::args::Optional;
+	use crate::val::{Bytes, Value};
 
 	#[test]
 	fn test_base64_encode() {

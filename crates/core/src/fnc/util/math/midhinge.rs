@@ -1,5 +1,6 @@
 use super::percentile::Percentile;
-use crate::expr::number::{Number, Sorted};
+use crate::val::Number;
+use crate::val::number::Sorted;
 
 pub trait Midhinge {
 	/// Tukey Midhinge - the average of the 1st and 3rd Quartiles

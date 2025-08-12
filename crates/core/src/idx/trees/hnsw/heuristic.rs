@@ -1,3 +1,5 @@
+use anyhow::Result;
+
 use crate::expr::index::HnswParams;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::layer::HnswLayer;
@@ -5,7 +7,6 @@ use crate::idx::trees::hnsw::{ElementId, HnswElements};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
 use crate::kvs::Transaction;
-use anyhow::Result;
 
 #[derive(Debug)]
 pub(super) enum Heuristic {

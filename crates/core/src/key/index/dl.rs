@@ -1,9 +1,9 @@
 //! Stores the doc length
 //!
 //! This key is used in the concurrent full-text search implementation to store
-//! the length of individual documents in the index. Document length is a critical
-//! factor in relevance scoring algorithms like BM25, which normalize term frequencies
-//! based on document length.
+//! the length of individual documents in the index. Document length is a
+//! critical factor in relevance scoring algorithms like BM25, which normalize
+//! term frequencies based on document length.
 //!
 //! The key structure includes:
 //! - Namespace, database, table, and index identifiers
@@ -12,15 +12,15 @@
 //! This key is essential for:
 //! - Calculating accurate relevance scores for search results
 //! - Supporting document length normalization
-//! - Enabling proper ranking of search results based on term frequency and document length
+//! - Enabling proper ranking of search results based on term frequency and
+//!   document length
 //! - Providing document-specific statistics for the full-text search engine
+use serde::{Deserialize, Serialize};
+
 use crate::idx::docids::DocId;
 use crate::idx::ft::DocLength;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Dl<'a> {
@@ -52,9 +52,10 @@ impl Categorise for Dl<'_> {
 impl<'a> Dl<'a> {
 	/// Creates a new document length key
 	///
-	/// This constructor creates a key that stores the length of an individual document
-	/// in the full-text index. Document length is a critical factor in relevance scoring
-	/// algorithms like BM25, which normalize term frequencies based on document length.
+	/// This constructor creates a key that stores the length of an individual
+	/// document in the full-text index. Document length is a critical factor
+	/// in relevance scoring algorithms like BM25, which normalize term
+	/// frequencies based on document length.
 	///
 	/// # Arguments
 	/// * `ns` - Namespace identifier

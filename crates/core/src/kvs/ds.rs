@@ -1,47 +1,3 @@
-use super::export;
-use super::tr::Transactor;
-use super::tx::Transaction;
-use super::version::Version;
-use crate::buc::BucketConnections;
-use crate::cf;
-use crate::ctx::MutableContext;
-#[cfg(feature = "jwks")]
-use crate::dbs::capabilities::NetTarget;
-use crate::dbs::capabilities::{
-	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
-};
-use crate::dbs::node::Timestamp;
-use crate::dbs::{Capabilities, Executor, Notification, Options, Response, Session, Variables};
-use crate::err::Error;
-use crate::expr::{Base, FlowResultExt as _, Value, statements::DefineUserStatement};
-use crate::expr::{Index, LogicalPlan};
-#[cfg(feature = "jwks")]
-use crate::iam::jwks::JwksCache;
-use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
-use crate::idx::IndexKeyBase;
-use crate::idx::ft::fulltext::FullTextIndex;
-use crate::idx::trees::store::IndexStores;
-use crate::key::root::ic::Ic;
-use crate::kvs::cache::ds::DatastoreCache;
-use crate::kvs::clock::SizedClock;
-#[expect(unused_imports)]
-use crate::kvs::clock::SystemClock;
-#[cfg(not(target_family = "wasm"))]
-use crate::kvs::index::IndexBuilder;
-use crate::kvs::sequences::Sequences;
-use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
-use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
-use crate::sql::Query;
-use crate::syn;
-use crate::syn::parser::{ParserSettings, StatementStream};
-#[allow(unused_imports)]
-use anyhow::bail;
-use anyhow::{Result, ensure};
-use async_channel::{Receiver, Sender};
-use bytes::{Bytes, BytesMut};
-use dashmap::DashMap;
-use futures::{Future, Stream};
-use reblessive::TreeStack;
 use std::fmt;
 #[cfg(storage)]
 use std::path::PathBuf;
@@ -51,24 +7,72 @@ use std::task::{Poll, ready};
 use std::time::Duration;
 #[cfg(not(target_family = "wasm"))]
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[allow(unused_imports)]
+use anyhow::bail;
+use anyhow::{Result, ensure};
+use async_channel::{Receiver, Sender};
+use bytes::{Bytes, BytesMut};
+use dashmap::DashMap;
+use futures::{Future, Stream};
+use reblessive::TreeStack;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
-use tracing::instrument;
-use tracing::trace;
+use tracing::{instrument, trace};
 use uuid::Uuid;
 #[cfg(target_family = "wasm")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
+use super::export;
+use super::tr::Transactor;
+use super::tx::Transaction;
+use super::version::Version;
+use crate::buc::BucketConnections;
+use crate::ctx::MutableContext;
+#[cfg(feature = "jwks")]
+use crate::dbs::capabilities::NetTarget;
+use crate::dbs::capabilities::{
+	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
+};
+use crate::dbs::node::Timestamp;
+use crate::dbs::{Capabilities, Executor, Notification, Options, Response, Session, Variables};
+use crate::err::Error;
+use crate::expr::statements::DefineUserStatement;
+use crate::expr::{Base, Expr, FlowResultExt as _, Ident, Index, LogicalPlan};
+#[cfg(feature = "jwks")]
+use crate::iam::jwks::JwksCache;
+use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
+use crate::idx::IndexKeyBase;
+use crate::idx::ft::fulltext::FullTextIndex;
+use crate::idx::trees::store::IndexStores;
+use crate::key::root::ic::Ic;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
+use crate::kvs::cache::ds::DatastoreCache;
+use crate::kvs::clock::SizedClock;
+#[expect(unused_imports)]
+use crate::kvs::clock::SystemClock;
+#[cfg(not(target_family = "wasm"))]
+use crate::kvs::index::IndexBuilder;
+use crate::kvs::sequences::Sequences;
+use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
+use crate::kvs::{LockType, TransactionType};
+use crate::sql::Ast;
+use crate::syn::parser::{ParserSettings, StatementStream};
+use crate::val::{Strand, Value};
+use crate::{cf, syn};
+
 const TARGET: &str = "surrealdb::core::kvs::ds";
 
-// If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
+// If there are an infinite number of heartbeats, then we want to go
+// batch-by-batch spread over several checks
 const LQ_CHANNEL_SIZE: usize = 15_000;
 
-// The role assigned to the initial user created when starting the server with credentials for the first time
+// The role assigned to the initial user created when starting the server with
+// credentials for the first time
 const INITIAL_USER_ROLE: &str = "owner";
 
 /// The underlying datastore instance which stores the dataset.
-#[non_exhaustive]
 pub struct Datastore {
 	transaction_factory: TransactionFactory,
 	/// The unique id of this datastore, used in notifications.
@@ -81,7 +85,8 @@ pub struct Datastore {
 	query_timeout: Option<Duration>,
 	/// The duration threshold determining when a query should be logged
 	slow_log_threshold: Option<Duration>,
-	/// The maximum duration timeout for running multiple statements in a transaction.
+	/// The maximum duration timeout for running multiple statements in a
+	/// transaction.
 	transaction_timeout: Option<Duration>,
 	/// The security and feature capabilities for this datastore.
 	capabilities: Arc<Capabilities>,
@@ -416,8 +421,8 @@ impl Datastore {
 		})
 	}
 
-	/// Create a new datastore with the same persistent data (inner), with flushed cache.
-	/// Simulating a server restart
+	/// Create a new datastore with the same persistent data (inner), with
+	/// flushed cache. Simulating a server restart
 	pub fn restart(self) -> Self {
 		Self {
 			id: self.id,
@@ -616,7 +621,14 @@ impl Datastore {
 			// Display information in the logs
 			info!(target: TARGET, "Credentials were provided, and no root users were found. The root user '{user}' will be created");
 			// Create and new root user definition
-			let stm = DefineUserStatement::from((Base::Root, user, pass, INITIAL_USER_ROLE));
+			let stm = DefineUserStatement::new_with_password(
+				Base::Root,
+				// TODO: Null byte validity.
+				Strand::new(user.to_owned()).unwrap(),
+				pass,
+				// TODO: Null byte validity, always correct here probably.
+				Ident::new(INITIAL_USER_ROLE.to_owned()).unwrap(),
+			);
 			let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
 			let mut ctx = MutableContext::default();
 			ctx.set_transaction(txn.clone());
@@ -681,10 +693,10 @@ impl Datastore {
 
 	/// Performs changefeed garbage collection as a background task.
 	///
-	/// This method is responsible for cleaning up old changefeed data across all databases.
-	/// It uses a distributed task lease mechanism to ensure that only one node in a cluster
-	/// performs this maintenance operation at a time, preventing duplicate work and potential
-	/// conflicts.
+	/// This method is responsible for cleaning up old changefeed data across
+	/// all databases. It uses a distributed task lease mechanism to ensure
+	/// that only one node in a cluster performs this maintenance operation at
+	/// a time, preventing duplicate work and potential conflicts.
 	///
 	/// The process involves:
 	/// 1. Acquiring a lease for the ChangeFeedCleanup task
@@ -696,7 +708,8 @@ impl Datastore {
 	/// * `delay` - Duration specifying how long the lease should be valid
 	///
 	/// # Returns
-	/// * `Ok(())` - If the operation completes successfully or if this node doesn't have the lease
+	/// * `Ok(())` - If the operation completes successfully or if this node
+	///   doesn't have the lease
 	/// * `Err` - If any step in the process fails
 	///
 	/// # Errors
@@ -736,20 +749,24 @@ impl Datastore {
 
 	/// Performs changefeed garbage collection using a specified timestamp.
 	///
-	/// This method is similar to `changefeed_process` but accepts an explicit timestamp
-	/// instead of calculating the current time. This allows for more controlled testing
-	/// and specific cleanup operations at predetermined points in time.
+	/// This method is similar to `changefeed_process` but accepts an explicit
+	/// timestamp instead of calculating the current time. This allows for more
+	/// controlled testing and specific cleanup operations at predetermined
+	/// points in time.
 	///
-	/// Unlike `changefeed_process`, this method does not use the task lease mechanism,
-	/// making it suitable for direct invocation in controlled environments or testing
-	/// scenarios where lease coordination is not required.
+	/// Unlike `changefeed_process`, this method does not use the task lease
+	/// mechanism, making it suitable for direct invocation in controlled
+	/// environments or testing scenarios where lease coordination is not
+	/// required.
 	///
 	/// The process involves:
-	/// 1. Saving timestamps for current versionstamps using the provided timestamp
+	/// 1. Saving timestamps for current versionstamps using the provided
+	///    timestamp
 	/// 2. Cleaning up old changefeed data from all databases
 	///
 	/// # Parameters
-	/// * `ts` - Explicit timestamp (in seconds since UNIX epoch) to use for cleanup operations
+	/// * `ts` - Explicit timestamp (in seconds since UNIX epoch) to use for
+	///   cleanup operations
 	///
 	/// # Returns
 	/// * `Ok(())` - If the operation completes successfully
@@ -772,21 +789,22 @@ impl Datastore {
 
 	/// Processes the index compaction queue
 	///
-	/// This method is called periodically by the index compaction thread to process
-	/// indexes that have been marked for compaction. It acquires a distributed lease
-	/// to ensure only one node in a cluster performs the compaction at a time.
+	/// This method is called periodically by the index compaction thread to
+	/// process indexes that have been marked for compaction. It acquires a
+	/// distributed lease to ensure only one node in a cluster performs the
+	/// compaction at a time.
 	///
-	/// The method scans the index compaction queue (stored as `Ic` keys) and processes
-	/// each index that needs compaction. Currently, only full-text indexes support
-	/// compaction, which helps optimize their performance by consolidating changes
-	/// and removing unnecessary data.
+	/// The method scans the index compaction queue (stored as `Ic` keys) and
+	/// processes each index that needs compaction. Currently, only full-text
+	/// indexes support compaction, which helps optimize their performance by
+	/// consolidating changes and removing unnecessary data.
 	///
 	/// After processing an index, it is removed from the compaction queue.
 	///
 	/// # Arguments
 	///
-	/// * `interval` - The time interval between compaction runs, used to calculate
-	///   the lease duration
+	/// * `interval` - The time interval between compaction runs, used to
+	///   calculate the lease duration
 	///
 	/// # Returns
 	///
@@ -1019,8 +1037,8 @@ impl Datastore {
 					filling = buffer.len() < parse_size
 				}
 
-				// if we finished streaming we can parse with complete so that the parser can be sure
-				// of it's results.
+				// if we finished streaming we can parse with complete so that the parser can be
+				// sure of it's results.
 				if complete {
 					return match statements_stream.parse_complete(&mut buffer) {
 						Err(e) => {
@@ -1041,8 +1059,8 @@ impl Datastore {
 						// Couldn't parse a statement for sure.
 						if buffer.len() >= parse_size && parse_size < u32::MAX as usize {
 							// the buffer already contained more or equal to parse_size bytes
-							// this means we are trying to parse a statement of more then buffer size.
-							// so we need to increase the buffer size.
+							// this means we are trying to parse a statement of more then buffer
+							// size. so we need to increase the buffer size.
 							parse_size = (parse_size + 1).next_power_of_two();
 						}
 						// start filling the buffer again.
@@ -1056,54 +1074,15 @@ impl Datastore {
 	}
 
 	/// Execute a pre-parsed SQL query
-	///
-	/// ```rust,no_run
-	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::dbs::Session;
-	/// use surrealdb_core::sql::parse;
-	/// use anyhow::Error;
-	///
-	/// #[tokio::main]
-	/// async fn main() -> Result<(),Error> {
-	///     let ds = Datastore::new("memory").await?;
-	///     let ses = Session::owner();
-	///     let ast = parse("USE NS test DB test; SELECT * FROM person;")?;
-	///     let res = ds.process(ast, &ses, None).await?;
-	///     Ok(())
-	/// }
-	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn process(
 		&self,
-		ast: Query,
+		ast: Ast,
 		sess: &Session,
 		vars: Option<Variables>,
 	) -> Result<Vec<Response>> {
-		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
-		// Check if anonymous actors can execute queries when auth is enabled
-		// TODO(sgirones): Check this as part of the authorisation layer
-		self.check_anon(sess).map_err(|_| {
-			Error::from(IamError::NotAllowed {
-				actor: "anonymous".to_string(),
-				action: "process".to_string(),
-				resource: "query".to_string(),
-			})
-		})?;
-
-		// Create a new query options
-		let opt = self.setup_options(sess);
-
-		// Create a default context
-		let mut ctx = self.setup_ctx()?;
-		// Start an execution context
-		ctx.attach_session(sess)?;
-		// Store the query variables
-		if let Some(vars) = vars {
-			ctx.attach_variables(vars)?;
-		}
-		// Process all statements
-		Executor::execute(self, ctx.freeze(), opt, ast).await
+		//TODO: Insert planner here.
+		self.process_plan(ast.into(), sess, vars).await
 	}
 
 	pub async fn process_plan(
@@ -1141,27 +1120,10 @@ impl Datastore {
 	}
 
 	/// Ensure a SQL [`Value`] is fully computed
-	///
-	/// ```rust,no_run
-	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::dbs::Session;
-	/// use surrealdb_core::expr::Future;
-	/// use surrealdb_core::expr::Value;
-	/// use anyhow::Error;
-	///
-	/// #[tokio::main]
-	/// async fn main() -> Result<(),Error> {
-	///     let ds = Datastore::new("memory").await?;
-	///     let ses = Session::owner();
-	///     let val = Value::Future(Box::new(Future::from(Value::Bool(true))));
-	///     let res = ds.compute(val, &ses, None).await?;
-	///     Ok(())
-	/// }
-	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn compute(
 		&self,
-		val: Value,
+		val: Expr,
 		sess: &Session,
 		vars: Option<Variables>,
 	) -> Result<Value> {
@@ -1199,8 +1161,13 @@ impl Datastore {
 		if let Some(vars) = vars {
 			ctx.attach_variables(vars)?;
 		}
+		let txn_type = if val.read_only() {
+			TransactionType::Read
+		} else {
+			TransactionType::Write
+		};
 		// Start a new transaction
-		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
+		let txn = self.transaction(txn_type, Optimistic).await?.enclose();
 		// Store the transaction
 		ctx.set_transaction(txn.clone());
 		// Freeze the context
@@ -1209,11 +1176,12 @@ impl Datastore {
 		let res =
 			stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.catch_return();
 		// Store any data
-		match (res.is_ok(), val.writeable()) {
+		if res.is_ok() && matches!(txn_type, TransactionType::Read) {
 			// If the compute was successful, then commit if writeable
-			(true, true) => txn.commit().await?,
+			txn.commit().await?
+		} else {
 			// Cancel if the compute was an error, or if readonly
-			(_, _) => txn.cancel().await?,
+			txn.cancel().await?
 		};
 		// Return result
 		res
@@ -1224,27 +1192,10 @@ impl Datastore {
 	/// whether authentication is enabled, or guest access is disabled.
 	/// For example, this is used when processing a record access SIGNUP or
 	/// SIGNIN clause, which still needs to work without guest access.
-	///
-	/// ```rust,no_run
-	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::dbs::Session;
-	/// use surrealdb_core::expr::Future;
-	/// use surrealdb_core::expr::Value;
-	/// use anyhow::Error;
-	///
-	/// #[tokio::main]
-	/// async fn main() -> Result<(),Error> {
-	///     let ds = Datastore::new("memory").await?;
-	///     let ses = Session::owner();
-	///     let val = Value::Future(Box::new(Future::from(Value::Bool(true))));
-	///     let res = ds.evaluate(&val, &ses, None).await?;
-	///     Ok(())
-	/// }
-	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn evaluate(
 		&self,
-		val: &Value,
+		val: &Expr,
 		sess: &Session,
 		vars: Option<Variables>,
 	) -> Result<Value> {
@@ -1272,8 +1223,13 @@ impl Datastore {
 		if let Some(vars) = vars {
 			ctx.attach_variables(vars)?;
 		}
+		let txn_type = if val.read_only() {
+			TransactionType::Read
+		} else {
+			TransactionType::Write
+		};
 		// Start a new transaction
-		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
+		let txn = self.transaction(txn_type, Optimistic).await?.enclose();
 		// Store the transaction
 		ctx.set_transaction(txn.clone());
 		// Freeze the context
@@ -1282,11 +1238,12 @@ impl Datastore {
 		let res =
 			stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.catch_return();
 		// Store any data
-		match (res.is_ok(), val.writeable()) {
+		if res.is_ok() && txn_type == TransactionType::Write {
 			// If the compute was successful, then commit if writeable
-			(true, true) => txn.commit().await?,
+			txn.commit().await?;
+		} else {
 			// Cancel if the compute was an error, or if readonly
-			(_, _) => txn.cancel().await?,
+			txn.cancel().await?;
 		};
 		// Return result
 		res
@@ -1434,28 +1391,32 @@ impl Datastore {
 
 #[cfg(test)]
 mod test {
-	use crate::expr::FlowResultExt as _;
-
 	use super::*;
 
 	#[tokio::test]
 	pub async fn very_deep_query() -> Result<()> {
-		use crate::expr::{Expression, Future, Number, Operator, Value};
-		use crate::kvs::Datastore;
 		use reblessive::{Stack, Stk};
+
+		use crate::expr::{BinaryOperator, Expr, Literal};
+		use crate::kvs::Datastore;
+		use crate::val::{Number, Value};
 
 		// build query manually to bypass query limits.
 		let mut stack = Stack::new();
-		async fn build_query(stk: &mut Stk, depth: usize) -> Value {
+		async fn build_query(stk: &mut Stk, depth: usize) -> Expr {
 			if depth == 0 {
-				Value::Expression(Box::new(Expression::Binary {
-					l: Value::Number(Number::Int(1)),
-					o: Operator::Add,
-					r: Value::Number(Number::Int(1)),
-				}))
+				Expr::Binary {
+					left: Box::new(Expr::Literal(Literal::Integer(1))),
+					op: BinaryOperator::Add,
+					right: Box::new(Expr::Literal(Literal::Integer(1))),
+				}
 			} else {
 				let q = stk.run(|stk| build_query(stk, depth - 1)).await;
-				Value::Future(Box::new(Future::from(q)))
+				Expr::Binary {
+					left: Box::new(q),
+					op: BinaryOperator::Add,
+					right: Box::new(Expr::Literal(Literal::Integer(1))),
+				}
 			}
 		}
 		let val = stack.enter(|stk| build_query(stk, 1000)).finish();
@@ -1469,15 +1430,14 @@ mod test {
 			.with_live(false)
 			.with_strict(false)
 			.with_auth_enabled(false)
-			.with_max_computation_depth(u32::MAX)
-			.with_futures(true);
+			.with_max_computation_depth(u32::MAX);
 
 		// Create a default context
 		let mut ctx = MutableContext::default();
 		// Set context capabilities
 		ctx.add_capabilities(dbs.capabilities.clone());
 		// Start a new transaction
-		let txn = dbs.transaction(val.writeable().into(), Optimistic).await?;
+		let txn = dbs.transaction(TransactionType::Read, Optimistic).await?;
 		// Store the transaction
 		ctx.set_transaction(txn.enclose());
 		// Freeze the context
@@ -1490,7 +1450,7 @@ mod test {
 			.await
 			.catch_return()
 			.unwrap();
-		assert_eq!(res, Value::Number(Number::Int(2)));
+		assert_eq!(res, Value::Number(Number::Int(1002)));
 		Ok(())
 	}
 }

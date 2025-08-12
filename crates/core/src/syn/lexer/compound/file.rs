@@ -1,13 +1,9 @@
-use crate::{
-	sql::File,
-	syn::{
-		error::{SyntaxError, bail},
-		lexer::Lexer,
-		token::{Token, t},
-	},
-};
-
 use std::mem;
+
+use crate::syn::error::{SyntaxError, bail};
+use crate::syn::lexer::Lexer;
+use crate::syn::token::{Token, t};
+use crate::val::File;
 
 pub fn file(lexer: &mut Lexer, start: Token) -> Result<File, SyntaxError> {
 	let close_char = match start.kind {

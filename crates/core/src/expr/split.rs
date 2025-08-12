@@ -1,14 +1,14 @@
-use crate::expr::fmt::Fmt;
-use crate::expr::idiom::Idiom;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use crate::expr::fmt::Fmt;
+use crate::expr::idiom::Idiom;
+
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct Splits(pub Vec<Split>);
 
 impl Deref for Splits {
@@ -33,9 +33,7 @@ impl fmt::Display for Splits {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct Split(pub Idiom);
 
 impl Deref for Split {

@@ -1,10 +1,9 @@
 //! Stores a DEFINE ACCESS ON ROOT configuration
-use crate::expr::statements::define::DefineAccessStatement;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::KVKey;
-
 use serde::{Deserialize, Serialize};
+
+use crate::expr::statements::define::DefineAccessStatement;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Ac<'a> {

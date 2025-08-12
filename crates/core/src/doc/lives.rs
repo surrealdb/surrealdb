@@ -1,22 +1,17 @@
-use crate::ctx::{Context, MutableContext};
-use crate::dbs::Action;
-use crate::dbs::Notification;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::doc::CursorDoc;
-use crate::doc::Document;
-use crate::err::Error;
-use crate::expr::paths::AC;
-use crate::expr::paths::META;
-use crate::expr::paths::RD;
-use crate::expr::paths::TK;
-use crate::expr::permission::Permission;
-use crate::expr::{FlowResultExt as _, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
 use std::sync::Arc;
 
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use super::IgnoreError;
+use crate::ctx::{Context, MutableContext};
+use crate::dbs::{Action, Notification, Options, Statement};
+use crate::doc::{CursorDoc, Document};
+use crate::err::Error;
+use crate::expr::FlowResultExt as _;
+use crate::expr::paths::{AC, META, RD, TK};
+use crate::expr::permission::Permission;
+use crate::val::Value;
 
 impl Document {
 	/// Processes any LIVE SELECT statements which
@@ -66,18 +61,17 @@ impl Document {
 				.id
 				.clone()
 				.ok_or_else(|| {
-					Error::Unreachable(
-						"Processing live query for record without a Record ID".to_owned(),
-					)
+					Error::unreachable("Processing live query for record without a Record ID")
 				})
 				.map_err(anyhow::Error::new)?;
 			// Get the current and initial docs
 			let current = self.current.doc.as_arc();
 			let initial = self.initial.doc.as_arc();
 			// Check if this is a delete statement
-			let doc = match stm.is_delete() {
-				true => &self.initial,
-				false => &self.current,
+			let doc = if stm.is_delete() {
+				&self.initial
+			} else {
+				&self.current
 			};
 			// Ensure that a session exists on the LIVE query
 			let sess = match lv.session.as_ref() {
@@ -142,16 +136,10 @@ impl Document {
 				// Prepare a DELETE notification
 				if opt.id()? == lv.node.0 {
 					// Ensure futures are run
-					let lqopt: &Options = &lqopt.new_with_futures(true);
 					// Output the full document before any changes were applied
-					let mut result = doc
-						.doc
-						.as_ref()
-						.compute(stk, &lqctx, lqopt, Some(doc))
-						.await
-						.catch_return()?;
+					let mut result = (*doc.doc.as_ref()).clone();
 					// Remove metadata fields on output
-					result.del(stk, &lqctx, lqopt, &*META).await?;
+					result.del(stk, &lqctx, &lqopt, &*META).await?;
 					(Action::Delete, result)
 				} else {
 					// TODO: Send to message broker
@@ -207,7 +195,7 @@ impl Document {
 				.send(Notification {
 					id: lv.id,
 					action,
-					record: Value::Thing(rid.as_ref().clone()),
+					record: Value::RecordId(rid.as_ref().clone()),
 					result,
 				})
 				.await;
@@ -233,7 +221,12 @@ impl Document {
 		// Check where condition
 		if let Some(cond) = stm.cond() {
 			// Check if the expression is truthy
-			if !cond.compute(stk, ctx, opt, Some(doc)).await.catch_return()?.is_truthy() {
+			if !stk
+				.run(|stk| cond.0.compute(stk, ctx, opt, Some(doc)))
+				.await
+				.catch_return()?
+				.is_truthy()
+			{
 				// Ignore this document
 				return Err(IgnoreError::Ignore);
 			}
@@ -262,8 +255,8 @@ impl Document {
 					// Disable permissions
 					let opt = &opt.new_with_perms(false);
 					// Process the PERMISSION clause
-					if !e
-						.compute(stk, ctx, opt, Some(doc))
+					if !stk
+						.run(|stk| e.compute(stk, ctx, opt, Some(doc)))
 						.await
 						.catch_return()
 						.is_ok_and(|x| x.is_truthy())

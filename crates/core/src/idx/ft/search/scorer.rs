@@ -1,12 +1,14 @@
+use std::sync::Arc;
+
+use anyhow::Result;
+use tokio::sync::RwLock;
+
 use crate::idx::docids::DocId;
 use crate::idx::ft::search::doclength::DocLengths;
 use crate::idx::ft::search::postings::Postings;
 use crate::idx::ft::search::termdocs::SearchTermsDocs;
 use crate::idx::ft::{DocLength, Score, TermFrequency};
 use crate::kvs::Transaction;
-use anyhow::Result;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub(crate) struct BM25Scorer {
 	postings: Arc<RwLock<Postings>>,

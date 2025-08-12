@@ -1,11 +1,10 @@
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter, Result};
 
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum With {
 	NoIndex,
 	Index(Vec<String>),

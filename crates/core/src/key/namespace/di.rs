@@ -1,10 +1,9 @@
 //! Stores a database ID generator state
-use crate::idg::u32::U32;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::KVKey;
-
 use serde::{Deserialize, Serialize};
+
+use crate::idg::u32::U32;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Di {

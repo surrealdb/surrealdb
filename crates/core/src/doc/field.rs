@@ -1,23 +1,43 @@
+use std::sync::Arc;
+
+use anyhow::{Result, bail, ensure};
+use reblessive::tree::Stk;
+
 use crate::ctx::{Context, MutableContext};
-use crate::dbs::Options;
-use crate::dbs::Statement;
 use crate::dbs::capabilities::ExperimentalTarget;
+use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::expr::data::Data;
 use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
 use crate::expr::kind::Kind;
 use crate::expr::permission::Permission;
-use crate::expr::reference::Refs;
 use crate::expr::statements::DefineFieldStatement;
-use crate::expr::thing::Thing;
-use crate::expr::value::every::ArrayBehaviour;
-use crate::expr::value::{CoerceError, Value};
+use crate::expr::statements::define::DefineDefault;
 use crate::expr::{FlowResultExt as _, Part};
 use crate::iam::Action;
-use anyhow::{Result, bail, ensure};
-use reblessive::tree::Stk;
-use std::sync::Arc;
+use crate::val::value::CoerceError;
+use crate::val::value::every::ArrayBehaviour;
+use crate::val::{RecordId, Value};
+
+/// Removes `NONE` values recursively from objects, but not when `NONE` is a
+/// direct child of an array
+fn clean_none(v: &mut Value) -> bool {
+	match v {
+		Value::None => false,
+		Value::Object(o) => {
+			o.retain(|_, v| clean_none(v));
+			true
+		}
+		Value::Array(x) => {
+			x.iter_mut().for_each(|x| {
+				clean_none(x);
+			});
+			true
+		}
+		_ => true,
+	}
+}
 
 impl Document {
 	/// Ensures that any remaining fields on a
@@ -34,7 +54,8 @@ impl Document {
 		let tb = self.tb(ctx, opt).await?;
 		// This table is schemafull
 		if tb.full {
-			// Prune unspecified fields from the document that are not defined via `DefineFieldStatement`s.
+			// Prune unspecified fields from the document that are not defined via
+			// `DefineFieldStatement`s.
 
 			// Create a vector to store the keys
 			let mut defined_field_names = IdiomTrie::new();
@@ -42,14 +63,16 @@ impl Document {
 			// Loop through all field definitions
 			for fd in self.fd(ctx, opt).await?.iter() {
 				let is_flex = fd.flex;
-				let is_literal = fd.kind.as_ref().is_some_and(Kind::contains_literal);
+				let is_literal = fd.field_kind.as_ref().is_some_and(Kind::contains_literal);
 				for k in self.current.doc.each(&fd.name).into_iter() {
 					defined_field_names.insert(&k, is_flex || is_literal);
 				}
 			}
 
 			// Loop over every field in the document
-			for current_doc_field_idiom in self.current.doc.every(None, true, true).iter() {
+			for current_doc_field_idiom in
+				self.current.doc.every(None, true, ArrayBehaviour::Full).iter()
+			{
 				if current_doc_field_idiom.is_special() {
 					// This field is a built-in field, so we can skip it.
 					continue;
@@ -62,9 +85,11 @@ impl Document {
 						continue;
 					}
 					IdiomTrieContains::Ancestor(true) => {
-						// This field is not explicitly defined in the schema, but it is a child of a flex or literal field.
-						// If the field is a child of a flex field, then any nested fields are allowed.
-						// If the field is a child of a literal field, then allow any fields as they will be caught during coercion.
+						// This field is not explicitly defined in the schema, but it is a child of
+						// a flex or literal field. If the field is a child of a flex field,
+						// then any nested fields are allowed. If the field is a child of a
+						// literal field, then allow any fields as they will be caught during
+						// coercion.
 						continue;
 					}
 					IdiomTrieContains::Ancestor(false) => {
@@ -76,12 +101,13 @@ impl Document {
 							}
 						}
 
-						// This field is not explicitly defined in the schema or it is not a child of a flex field.
+						// This field is not explicitly defined in the schema or it is not a child
+						// of a flex field.
 						ensure!(
 							!opt.strict,
 							// If strict, then throw an error on an undefined field
 							Error::FieldUndefined {
-								table: tb.name.to_raw(),
+								table: tb.name.into_raw_string(),
 								field: current_doc_field_idiom.to_owned(),
 							}
 						);
@@ -91,12 +117,13 @@ impl Document {
 					}
 
 					IdiomTrieContains::None => {
-						// This field is not explicitly defined in the schema or it is not a child of a flex field.
+						// This field is not explicitly defined in the schema or it is not a child
+						// of a flex field.
 						ensure!(
 							!opt.strict,
 							// If strict, then throw an error on an undefined field
 							Error::FieldUndefined {
-								table: tb.name.to_raw(),
+								table: tb.name.into_raw_string(),
 								field: current_doc_field_idiom.to_owned(),
 							}
 						);
@@ -109,15 +136,12 @@ impl Document {
 		}
 
 		// Loop over every field in the document
-		for fd in self.current.doc.every(None, true, ArrayBehaviour::Nested).iter() {
-			// NONE values should never be stored
-			if self.current.doc.pick(fd).is_none() {
-				self.current.doc.to_mut().cut(fd);
-			}
-		}
+		// NONE values should never be stored
+		clean_none(self.current.doc.to_mut());
 		// Carry on
 		Ok(())
 	}
+
 	/// Processes `DEFINE FIELD` statements which
 	/// have been defined on the table for this
 	/// record. These fields are executed for
@@ -146,18 +170,16 @@ impl Document {
 			// Check if we should skip this field
 			let skipped = match skip {
 				// We are skipping a parent field
-				Some(inner) => {
-					// Check if this field is a child field
-					let skipped = fd.name.starts_with(inner);
-					// Let's stop skipping fields if not
-					if !skipped {
-						skip = None;
-					}
-					// Specify whether we should skip
-					skipped
-				}
+				// Check if this field is a child field
+				Some(inner) => fd.name.starts_with(inner),
 				None => false,
 			};
+
+			// Let's stop skipping fields if not
+			// Specify whether we should skip
+			if !skipped {
+				skip = None;
+			}
 
 			// Loop over each field in document
 			for (k, mut val) in self.current.doc.as_ref().walk(&fd.name).into_iter() {
@@ -184,12 +206,13 @@ impl Document {
 				// been modified. If it has just been
 				// omitted then we reset it, otherwise
 				// we throw a field readonly error.
-				if fd.readonly {
-					// Check if we are updating the
-					// document, and check if the new
-					// field value is now different to
-					// the old field value in any way.
-					if !self.is_new() && val.ne(&*old) {
+				//
+				// Check if we are updating the
+				// document, and check if the new
+				// field value is now different to
+				// the old field value in any way.
+				if fd.readonly && !self.is_new() {
+					if val.ne(&*old) {
 						// Check the data clause type
 						match stm.data() {
 							// If the field is NONE, we assume
@@ -219,9 +242,7 @@ impl Document {
 					// If this field was not modified then
 					// we can continue without needing to
 					// process the field in any other way.
-					else if !self.is_new() {
-						continue;
-					}
+					continue;
 				}
 				// Generate the field context
 				let mut field = FieldEditContext {
@@ -233,40 +254,41 @@ impl Document {
 					ctx,
 					opt,
 					old,
-					inp,
+					user_input: inp,
 				};
+				/*
 				// Process a potential `references` TYPE
-				let res = field.process_refs_type().await?;
-				if let Some(v) = res {
+				if let Some(v) = field.process_refs_type().await? {
+					todo!()
 					// We found a `references` TYPE
 					// No other clauses will be present, so no need to process them
 					val = v;
 				} else {
-					// Skip this field?
-					if !skipped {
-						// Process any DEFAULT clause
-						val = field.process_default_clause(val).await?;
-						// Check for the existance of a VALUE clause
-						if field.def.value.is_some() {
-							// Process any TYPE clause
-							val = field.process_type_clause(val).await?;
-							// Process any VALUE clause
-							val = field.process_value_clause(val).await?;
-						}
+				*/
+				// Skip this field?
+				if !skipped {
+					// Process any DEFAULT clause
+					val = field.process_default_clause(val).await?;
+					// Check for the existance of a VALUE clause
+					if field.def.value.is_some() {
 						// Process any TYPE clause
 						val = field.process_type_clause(val).await?;
-						// Process any ASSERT clause
-						val = field.process_assert_clause(val).await?;
-						// Process any REFERENCE clause
-						field.process_reference_clause(&val).await?;
+						// Process any VALUE clause
+						val = field.process_value_clause(val).await?;
 					}
+					// Process any TYPE clause
+					val = field.process_type_clause(val).await?;
+					// Process any ASSERT clause
+					val = field.process_assert_clause(val).await?;
+					// Process any REFERENCE clause
+					field.process_reference_clause(&val).await?;
 				}
 				// Process any PERMISSIONS clause
 				val = field.process_permissions_clause(val).await?;
 				// Skip this field?
 				if !skipped {
 					// If the field is empty, mark child fields as skippable
-					if val.is_none() && fd.kind.as_ref().is_some_and(Kind::can_be_none) {
+					if val.is_none() && fd.field_kind.as_ref().is_some_and(Kind::can_be_none) {
 						skip = Some(&fd.name);
 					}
 					// Set the new value of the field, or delete it if empty
@@ -301,10 +323,10 @@ impl Document {
 			}
 
 			// Loop over each value in document
-			'val: for (_, val) in self.current.doc.as_ref().walk(&fd.name).into_iter() {
+			for (_, val) in self.current.doc.as_ref().walk(&fd.name).into_iter() {
 				// Skip if the value is empty
 				if val.is_none() || val.is_empty_array() {
-					continue 'val;
+					continue;
 				}
 
 				// Prepare the field edit context
@@ -317,7 +339,7 @@ impl Document {
 					ctx,
 					opt,
 					old: val.into(),
-					inp: Value::None.into(),
+					user_input: Value::None.into(),
 				};
 
 				// Pass an empty value to delete all the existing references
@@ -343,16 +365,16 @@ struct FieldEditContext<'a> {
 	/// The current document record being processed
 	doc: &'a Document,
 	/// The record id of the document that we are processing
-	rid: Arc<Thing>,
+	rid: Arc<RecordId>,
 	/// The initial value of the field before being modified
 	old: Arc<Value>,
 	/// The user input value of the field edited by the user
-	inp: Arc<Value>,
+	user_input: Arc<Value>,
 }
 
 enum RefAction<'a> {
-	Set(&'a Thing),
-	Delete(Vec<&'a Thing>, String),
+	Set(&'a RecordId),
+	Delete(Vec<&'a RecordId>, String),
 	Ignore,
 }
 
@@ -360,15 +382,15 @@ impl FieldEditContext<'_> {
 	/// Process any TYPE clause for the field definition
 	async fn process_type_clause(&self, val: Value) -> Result<Value> {
 		// Check for a TYPE clause
-		if let Some(kind) = &self.def.kind {
+		if let Some(kind) = &self.def.field_kind {
 			// Check if this is the `id` field
 			if self.def.name.is_id() {
 				// Ensure that the outer value is a record
-				if let Value::Thing(ref id) = val {
+				if let Value::RecordId(ref id) = val {
 					// See if we should check the inner type
 					if !kind.is_record() {
 						// Get the value of the ID only
-						let inner = Value::from(id.id.clone());
+						let inner = id.key.clone().into_value();
 
 						// Check the type of the ID part
 						inner.coerce_to_kind(kind).map_err(|e| Error::FieldCoerce {
@@ -413,12 +435,12 @@ impl FieldEditContext<'_> {
 			return Ok(val);
 		}
 		// The document is not being created
-		if !self.doc.is_new() && !self.def.default_always {
+		if !self.doc.is_new() && !matches!(self.def.default, DefineDefault::Always(_)) {
 			return Ok(val);
 		}
 		// Get the default value
 		let def = match &self.def.default {
-			Some(v) => Some(v),
+			DefineDefault::Set(v) | DefineDefault::Always(v) => Some(v),
 			_ => match &self.def.value {
 				// The VALUE clause doesn't
 				Some(v) if v.is_static() => Some(v),
@@ -441,7 +463,7 @@ impl FieldEditContext<'_> {
 				None => {
 					let mut ctx = MutableContext::new(self.ctx);
 					ctx.add_value("before", self.old.clone());
-					ctx.add_value("input", self.inp.clone());
+					ctx.add_value("input", self.user_input.clone());
 					ctx.add_value("after", now.clone());
 					ctx.add_value("value", now);
 					ctx
@@ -450,7 +472,8 @@ impl FieldEditContext<'_> {
 			// Freeze the new context
 			let ctx = ctx.freeze();
 			// Process the VALUE clause
-			let val = expr.compute(self.stk, &ctx, self.opt, doc).await.catch_return()?;
+			let val =
+				self.stk.run(|stk| expr.compute(stk, &ctx, self.opt, doc)).await.catch_return()?;
 			// Unfreeze the new context
 			self.context = Some(MutableContext::unfreeze(ctx)?);
 			// Return the modified value
@@ -477,7 +500,7 @@ impl FieldEditContext<'_> {
 				None => {
 					let mut ctx = MutableContext::new(self.ctx);
 					ctx.add_value("before", self.old.clone());
-					ctx.add_value("input", self.inp.clone());
+					ctx.add_value("input", self.user_input.clone());
 					ctx.add_value("after", now.clone());
 					ctx.add_value("value", now);
 					ctx
@@ -486,7 +509,8 @@ impl FieldEditContext<'_> {
 			// Freeze the new context
 			let ctx = ctx.freeze();
 			// Process the VALUE clause
-			let val = expr.compute(self.stk, &ctx, self.opt, doc).await.catch_return()?;
+			let val =
+				self.stk.run(|stk| expr.compute(stk, &ctx, self.opt, doc)).await.catch_return()?;
 			// Unfreeze the new context
 			self.context = Some(MutableContext::unfreeze(ctx)?);
 			// Return the modified value
@@ -500,7 +524,7 @@ impl FieldEditContext<'_> {
 		// If the field TYPE is optional, and the
 		// field value was not set or is NONE we
 		// ignore any defined ASSERT clause.
-		if val.is_none() && self.def.kind.as_ref().is_some_and(Kind::can_be_none) {
+		if val.is_none() && self.def.field_kind.as_ref().is_some_and(Kind::can_be_none) {
 			return Ok(val);
 		}
 		// Check for a ASSERT clause
@@ -519,7 +543,7 @@ impl FieldEditContext<'_> {
 				None => {
 					let mut ctx = MutableContext::new(self.ctx);
 					ctx.add_value("before", self.old.clone());
-					ctx.add_value("input", self.inp.clone());
+					ctx.add_value("input", self.user_input.clone());
 					ctx.add_value("after", now.clone());
 					ctx.add_value("value", now.clone());
 					ctx
@@ -528,7 +552,8 @@ impl FieldEditContext<'_> {
 			// Freeze the new context
 			let ctx = ctx.freeze();
 			// Process the ASSERT clause
-			let res = expr.compute(self.stk, &ctx, self.opt, doc).await.catch_return()?;
+			let res =
+				self.stk.run(|stk| expr.compute(stk, &ctx, self.opt, doc)).await.catch_return()?;
 			// Unfreeze the new context
 			self.context = Some(MutableContext::unfreeze(ctx)?);
 			// Check the ASSERT clause result
@@ -564,10 +589,13 @@ impl FieldEditContext<'_> {
 				// The field PERMISSIONS clause
 				// is NONE, meaning that this
 				// change will be reverted.
-				Permission::None => match val.eq(&*self.old) {
-					false => self.old.as_ref().clone(),
-					true => val,
-				},
+				Permission::None => {
+					if val != *self.old {
+						self.old.as_ref().clone()
+					} else {
+						val
+					}
+				}
 				// The field PERMISSIONS clause
 				// is a custom expression, so
 				// we check the expression and
@@ -590,7 +618,7 @@ impl FieldEditContext<'_> {
 						None => {
 							let mut ctx = MutableContext::new(self.ctx);
 							ctx.add_value("before", self.old.clone());
-							ctx.add_value("input", self.inp.clone());
+							ctx.add_value("input", self.user_input.clone());
 							ctx.add_value("after", now.clone());
 							ctx.add_value("value", now);
 							ctx
@@ -599,7 +627,11 @@ impl FieldEditContext<'_> {
 					// Freeze the new context
 					let ctx = ctx.freeze();
 					// Process the PERMISSION clause
-					let res = expr.compute(self.stk, &ctx, opt, doc).await.catch_return()?;
+					let res = self
+						.stk
+						.run(|stk| expr.compute(stk, &ctx, opt, doc))
+						.await
+						.catch_return()?;
 					// Unfreeze the new context
 					self.context = Some(MutableContext::unfreeze(ctx)?);
 					// If the specific permissions
@@ -607,12 +639,10 @@ impl FieldEditContext<'_> {
 					// then this field could not be
 					// updated, meanint that this
 					// change will be reverted.
-					match res.is_truthy() {
-						false => match val.eq(&*self.old) {
-							false => self.old.as_ref().clone(),
-							true => val,
-						},
-						true => val,
+					if res.is_truthy() || val == *self.old {
+						val
+					} else {
+						self.old.as_ref().clone()
 					}
 				}
 			};
@@ -637,7 +667,7 @@ impl FieldEditContext<'_> {
 			let action = if val == old {
 				RefAction::Ignore
 			// Check if the old value was a record id
-			} else if let Value::Thing(thing) = old {
+			} else if let Value::RecordId(thing) = old {
 				// We need to check if this reference is contained in an array
 				let others = self
 					.doc
@@ -659,15 +689,17 @@ impl FieldEditContext<'_> {
 					RefAction::Delete(vec![thing], self.def.name.to_string())
 				}
 			} else if let Value::Array(oldarr) = old {
-				// If the new value is still an array, we only filter out the record ids that are not present in the new array
+				// If the new value is still an array, we only filter out the record ids that
+				// are not present in the new array
 				let removed = if let Value::Array(newarr) = val {
 					oldarr
 						.iter()
 						.filter_map(|v| {
-							// If the record id is still present in the new array, we do not remove the reference
+							// If the record id is still present in the new array, we do not remove
+							// the reference
 							if newarr.contains(v) {
 								None
-							} else if let Value::Thing(thing) = v {
+							} else if let Value::RecordId(thing) = v {
 								Some(thing)
 							} else {
 								None
@@ -675,12 +707,13 @@ impl FieldEditContext<'_> {
 						})
 						.collect()
 
-				// If the new value is not an array, then all record ids in the old array are removed
+				// If the new value is not an array, then all record ids in the
+				// old array are removed
 				} else {
 					oldarr
 						.iter()
 						.filter_map(|v| {
-							if let Value::Thing(thing) = v {
+							if let Value::RecordId(thing) = v {
 								Some(thing)
 							} else {
 								None
@@ -691,7 +724,7 @@ impl FieldEditContext<'_> {
 
 				RefAction::Delete(removed, self.def.name.clone().push(Part::All).to_string())
 			// We found a new reference, let's create the link
-			} else if let Value::Thing(thing) = val {
+			} else if let Value::RecordId(thing) = val {
 				RefAction::Set(thing)
 			} else {
 				// This value is not a record id, nothing to process
@@ -710,11 +743,11 @@ impl FieldEditContext<'_> {
 					let key = crate::key::r#ref::new(
 						ns,
 						db,
-						&thing.tb,
-						&thing.id,
-						&self.rid.tb,
+						&thing.table,
+						&thing.key,
+						&self.rid.table,
 						&name,
-						&self.rid.id,
+						&self.rid.key,
 					);
 
 					self.ctx.tx().set(&key, &(), None).await?;
@@ -728,11 +761,11 @@ impl FieldEditContext<'_> {
 						let key = crate::key::r#ref::new(
 							ns,
 							db,
-							&thing.tb,
-							&thing.id,
-							&self.rid.tb,
+							&thing.table,
+							&thing.key,
+							&self.rid.table,
 							&ff,
-							&self.rid.id,
+							&self.rid.key,
 						);
 
 						self.ctx.tx().del(&key).await?;
@@ -746,13 +779,14 @@ impl FieldEditContext<'_> {
 		}
 	}
 
-	/// Process any `TYPE reference` clause for the field definition
-	async fn process_refs_type(&mut self) -> Result<Option<Value>> {
+	// Process any `TYPE reference` clause for the field definition
+	/*
+	async fn process_refs_type(&mut self) -> Result<Option<Refs>> {
 		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(None);
 		}
 
-		let refs = match &self.def.kind {
+		let refs = match &self.def.field_kind {
 			// We found a reference type for this field
 			// In this case, we force the value to be a reference
 			Some(Kind::References(ft, ff)) => Refs(vec![(ft.clone(), ff.clone())]),
@@ -783,6 +817,7 @@ impl FieldEditContext<'_> {
 			_ => return Ok(None),
 		};
 
-		Ok(Some(Value::Refs(refs)))
+		Ok(Some(refs))
 	}
+	*/
 }

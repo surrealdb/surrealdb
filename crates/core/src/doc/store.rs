@@ -1,9 +1,9 @@
+use anyhow::Result;
+
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Statement;
+use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err::Error;
-use anyhow::Result;
 
 impl Document {
 	pub(super) async fn store_record_data(
@@ -25,7 +25,7 @@ impl Document {
 		// Get NS & DB
 		let (ns, db) = opt.ns_db()?;
 		// Store the record data
-		let key = crate::key::thing::new(ns, db, &rid.tb, &rid.id);
+		let key = crate::key::thing::new(ns, db, &rid.table, &rid.key);
 		// Remove the id field from the doc so that it's not duplicated,
 		// because it's always present as a key in the underlying key-value
 		// datastore. When the doc is read from the datastore, the key is set
@@ -33,7 +33,7 @@ impl Document {
 		// The cloning of the doc is required because the resulting doc
 		// must be returned to the caller with the id present.
 		let mut doc_without_id = self.current.doc.clone();
-		if let crate::expr::Value::Object(obj) = doc_without_id.to_mut() {
+		if let crate::val::Value::Object(obj) = doc_without_id.to_mut() {
 			obj.0.remove("id");
 		}
 		// Match the statement type
@@ -110,7 +110,7 @@ impl Document {
 			_ => ctx.tx().set(&key, doc_without_id.as_ref(), opt.version).await,
 		}?;
 		// Update the cache
-		ctx.tx().set_record_cache(ns, db, &rid.tb, &rid.id, doc_without_id.as_arc())?;
+		ctx.tx().set_record_cache(ns, db, &rid.table, &rid.key, doc_without_id.as_arc())?;
 		// Carry on
 		Ok(())
 	}

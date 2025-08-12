@@ -1,10 +1,10 @@
 //! Stores the DocIds -> Thing of an HNSW index
-use crate::expr::Id;
+use serde::{Deserialize, Serialize};
+
 use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::docs::HnswDocsState;
 use crate::kvs::KVKey;
-
-use serde::{Deserialize, Serialize};
+use crate::val::RecordIdKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct HdRoot<'a> {
@@ -63,7 +63,7 @@ pub(crate) struct Hd<'a> {
 }
 
 impl KVKey for Hd<'_> {
-	type ValueType = Id;
+	type ValueType = RecordIdKey;
 }
 
 impl<'a> Hd<'a> {

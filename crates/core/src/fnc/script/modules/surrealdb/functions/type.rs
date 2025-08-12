@@ -1,11 +1,10 @@
-use super::fut;
-use super::run;
-use crate::fnc::script::modules::impl_module_def;
 use js::prelude::Async;
+
+use super::{fut, run};
+use crate::fnc::script::modules::impl_module_def;
 
 mod is;
 
-#[non_exhaustive]
 pub struct Package;
 
 impl_module_def!(

@@ -1,8 +1,11 @@
 //! Stores the previous value of record for concurrent index building
-use crate::kvs::KVKey;
-use crate::{expr::Id, kvs::index::PrimaryAppending};
-use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+
+use serde::{Deserialize, Serialize};
+
+use crate::kvs::KVKey;
+use crate::kvs::index::PrimaryAppending;
+use crate::val::RecordIdKey;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Ip<'a> {
@@ -18,7 +21,7 @@ pub(crate) struct Ip<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub id: Id,
+	pub id: RecordIdKey,
 }
 
 impl KVKey for Ip<'_> {
@@ -26,7 +29,7 @@ impl KVKey for Ip<'_> {
 }
 
 impl<'a> Ip<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: Id) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -51,7 +54,13 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Ip::new("testns", "testdb", "testtb", "testix", Id::from("id".to_string()));
+		let val = Ip::new(
+			"testns",
+			"testdb",
+			"testtb",
+			"testix",
+			RecordIdKey::from(strand!("id").to_owned()),
+		);
 		let enc = Ip::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

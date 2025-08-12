@@ -1,10 +1,8 @@
-mod parse;
-use parse::Parse;
 mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::expr::Value;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::syn;
 
 #[tokio::test]
 async fn option_import_indexes_should_be_populated() -> Result<()> {
@@ -26,27 +24,29 @@ async fn option_import_indexes_should_be_populated() -> Result<()> {
 	assert!(tmp.is_ok(), "{:?}", tmp.err());
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"{
 			id: test:1,
 			num: 123
 		}",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: test:1,
 				num: 123
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				detail: {
@@ -66,7 +66,8 @@ async fn option_import_indexes_should_be_populated() -> Result<()> {
 				operation: 'Collector'
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

@@ -4,6 +4,11 @@ mod lru;
 mod mapper;
 pub(crate) mod tree;
 
+use std::fmt::{Debug, Display, Formatter};
+use std::sync::Arc;
+
+use anyhow::Result;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -18,14 +23,10 @@ use crate::idx::trees::store::tree::{TreeRead, TreeWrite};
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::IndexBuilder;
 use crate::kvs::{KVKey, Key, Transaction, TransactionType, Val};
-use anyhow::Result;
-use std::fmt::{Debug, Display, Formatter};
-use std::sync::Arc;
 
 pub type NodeId = u64;
 pub type StoreGeneration = u64;
 
-#[non_exhaustive]
 #[expect(clippy::large_enum_variant)]
 pub enum TreeStore<N>
 where
@@ -122,7 +123,6 @@ where
 }
 
 #[derive(Clone)]
-#[non_exhaustive]
 pub enum TreeNodeProvider {
 	DocIds(IndexKeyBase),
 	DocLengths(IndexKeyBase),
@@ -169,7 +169,6 @@ impl TreeNodeProvider {
 	}
 }
 
-#[non_exhaustive]
 #[derive(Debug)]
 pub struct StoredNode<N>
 where
@@ -213,7 +212,6 @@ pub trait TreeNode: Debug + Clone + Display {
 }
 
 #[derive(Clone)]
-#[non_exhaustive]
 pub struct IndexStores(Arc<Inner>);
 
 struct Inner {

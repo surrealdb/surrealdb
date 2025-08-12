@@ -1,15 +1,18 @@
-use crate::err::Error;
-use crate::expr::value::Value;
-use crate::expr::{Array, Object, Strand};
-use anyhow::{Result, bail};
 use std::collections::BTreeMap;
+
+use anyhow::{Result, bail};
+
+use crate::err::Error;
+use crate::val::{Array, Object, Strand, Value};
 
 pub fn entries((object,): (Object,)) -> Result<Value> {
 	Ok(Value::Array(Array(
 		object
 			.iter()
 			.map(|(k, v)| {
-				Value::Array(Array(vec![Value::Strand(Strand(k.to_owned())), v.to_owned()]))
+				let k = Value::Strand(unsafe { Strand::new_unchecked(k.to_owned()) });
+				let v = v.clone();
+				Value::Array(Array(vec![k, v]))
 			})
 			.collect(),
 	)))
@@ -23,7 +26,7 @@ pub fn from_entries((array,): (Array,)) -> Result<Value> {
 			Value::Array(Array(entry)) if entry.len() == 2 => {
 				let key = match entry.first() {
 					Some(v) => match v {
-						Value::Strand(v) => v.to_owned().to_raw(),
+						Value::Strand(v) => v.clone().into_string(),
 						v => v.to_string(),
 					},
 					_ => {
@@ -49,7 +52,7 @@ pub fn from_entries((array,): (Array,)) -> Result<Value> {
 			_ => {
 				bail!(Error::InvalidArguments {
 					name: "object::from_entries".to_string(),
-					message: format!("Expected entries, found {}", v.kindof()),
+					message: format!("Expected entries, found {}", v.kind_of()),
 				})
 			}
 		}
@@ -72,16 +75,24 @@ pub fn len((object,): (Object,)) -> Result<Value> {
 }
 
 pub fn keys((object,): (Object,)) -> Result<Value> {
-	Ok(Value::Array(Array(object.keys().map(|v| Value::Strand(Strand(v.to_owned()))).collect())))
+	Ok(Value::Array(Array(
+		object
+			.keys()
+			.map(|v| {
+				//TODO: Null bytes
+				let strand = unsafe { Strand::new_unchecked(v.clone()) };
+				Value::Strand(strand)
+			})
+			.collect(),
+	)))
 }
 
 pub fn remove((mut object, targets): (Object, Value)) -> Result<Value> {
 	match targets {
 		Value::Strand(target) => {
-			object.remove(&target.0);
+			object.remove(target.as_str());
 		}
 		Value::Array(targets) => {
-			let mut remove_targets = Vec::with_capacity(targets.len());
 			for target in targets {
 				let Value::Strand(s) = target else {
 					bail!(Error::InvalidArguments {
@@ -91,10 +102,7 @@ pub fn remove((mut object, targets): (Object, Value)) -> Result<Value> {
 						),
 					});
 				};
-				remove_targets.push(s.0);
-			}
-			for target in remove_targets {
-				object.remove(&target);
+				object.remove(s.as_str());
 			}
 		}
 		other => {

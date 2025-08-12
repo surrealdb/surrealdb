@@ -1,26 +1,20 @@
-use crate::Surreal;
-use crate::api::Connection;
-use crate::api::Error;
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::api::conn::Command;
-use crate::api::conn::MlExportConfig;
-use crate::api::method::BoxFuture;
-use crate::method::ExportConfig as Config;
-use crate::method::Model;
-use crate::method::OnceLockExt;
-use async_channel::Receiver;
-use futures::Stream;
-use futures::StreamExt;
-use semver::Version;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::task::Context;
-use std::task::Poll;
-use surrealdb_core::kvs::export::{Config as DbExportConfig, TableConfig};
+use std::task::{Context, Poll};
+
+use async_channel::Receiver;
+use futures::{Stream, StreamExt};
+use semver::Version;
+
+use crate::Surreal;
+use crate::api::conn::{Command, MlExportConfig};
+use crate::api::method::BoxFuture;
+use crate::api::{Connection, Error, ExtraFeatures, Result};
+use crate::core::kvs::export::{Config as DbExportConfig, TableConfig};
+use crate::method::{ExportConfig as Config, Model, OnceLockExt};
 
 /// A database export future
 #[derive(Debug)]
@@ -155,7 +149,8 @@ impl<C, R, T> Export<'_, C, R, T>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Export<'static, C, R, T> {
 		Export {
 			client: Cow::Owned(self.client.into_owned()),

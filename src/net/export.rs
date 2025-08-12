@@ -1,25 +1,25 @@
 use std::ops::Deref;
 
-use super::AppState;
-use super::error::ResponseError;
-use super::headers::ContentType;
-use crate::net::error::Error as NetError;
 use anyhow::Result;
-use axum::Router;
 use axum::body::Body;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::routing::options;
-use axum::{Extension, response::Response};
+use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use http::StatusCode;
-use surrealdb::dbs::Session;
-use surrealdb::dbs::capabilities::RouteTarget;
-use surrealdb::iam::Action::View;
-use surrealdb::iam::ResourceKind::Any;
-use surrealdb::iam::check::check_ns_db;
-use surrealdb::kvs::export;
-use surrealdb::rpc::format::Format;
+
+use super::AppState;
+use super::error::ResponseError;
+use super::headers::ContentType;
+use crate::core::dbs::Session;
+use crate::core::dbs::capabilities::RouteTarget;
+use crate::core::iam::Action::View;
+use crate::core::iam::ResourceKind::Any;
+use crate::core::iam::check::check_ns_db;
+use crate::core::kvs::export;
+use crate::core::rpc::format::Format;
+use crate::net::error::Error as NetError;
 
 pub(super) fn router<S>() -> Router<S>
 where
@@ -44,8 +44,24 @@ async fn post_handler(
 ) -> Result<impl IntoResponse, ResponseError> {
 	let fmt = content_type.deref();
 	let fmt: Format = fmt.into();
-	let val = fmt.parse_value(body)?;
-	let cfg = export::Config::from_value(&val.into()).map_err(ResponseError)?;
+	let val = match fmt {
+		Format::Json => crate::core::rpc::format::json::decode(&body)
+			.map_err(anyhow::Error::msg)
+			.map_err(ResponseError)?,
+		Format::Cbor => crate::core::rpc::format::cbor::decode(&body)
+			.map_err(anyhow::Error::msg)
+			.map_err(ResponseError)?,
+		Format::Bincode => crate::core::rpc::format::bincode::decode(&body)
+			.map_err(anyhow::Error::msg)
+			.map_err(ResponseError)?,
+		Format::Revision => crate::core::rpc::format::revision::decode(&body)
+			.map_err(anyhow::Error::msg)
+			.map_err(ResponseError)?,
+		Format::Unsupported => {
+			return Err(ResponseError(anyhow::Error::msg("unsupported body format")));
+		}
+	};
+	let cfg = export::Config::from_value(&val).map_err(ResponseError)?;
 	handle_inner(state, session, cfg).await
 }
 

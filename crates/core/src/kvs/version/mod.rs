@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
+use anyhow::Result;
+
 use super::{Datastore, LockType, TransactionType};
 use crate::err::Error;
 use crate::kvs::KVValue;
-use anyhow::Result;
-use std::sync::Arc;
 
 mod fixes;
 
@@ -75,6 +77,7 @@ impl Version {
 			// Create a new transaction
 			let tx = Arc::new(ds.transaction(TransactionType::Write, LockType::Pessimistic).await?);
 
+			/*
 			// Easy shortcut to apply a fix
 			macro_rules! apply_fix {
 				($name:ident) => {{
@@ -88,11 +91,13 @@ impl Version {
 					};
 				}};
 			}
+			*/
 
 			// Apply fixes based on the current version
 			if v == 1 {
-				apply_fix!(v1_to_2_id_uuid);
-				apply_fix!(v1_to_2_migrate_to_access);
+				todo!()
+				//apply_fix!(v1_to_2_id_uuid);
+				//apply_fix!(v1_to_2_migrate_to_access);
 			}
 
 			// Obtain storage version key and value

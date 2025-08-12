@@ -4,7 +4,12 @@ pub(crate) mod index;
 pub mod planner;
 pub mod trees;
 
-use crate::expr::Id;
+use std::ops::Range;
+use std::sync::Arc;
+
+use anyhow::Result;
+use uuid::Uuid;
+
 use crate::idx::docids::DocId;
 use crate::idx::ft::search::terms::TermId;
 use crate::idx::trees::hnsw::ElementId;
@@ -21,35 +26,30 @@ use crate::key::index::bp::{Bp, BpRoot};
 use crate::key::index::bs::Bs;
 use crate::key::index::bt::{Bt, BtRoot};
 use crate::key::index::bu::Bu;
+use crate::key::index::dc::Dc;
+use crate::key::index::dl::Dl;
 use crate::key::index::hd::{Hd, HdRoot};
 use crate::key::index::he::He;
 use crate::key::index::hi::Hi;
 use crate::key::index::hl::Hl;
 use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
-use crate::key::index::id::Id as IdKey;
-use crate::key::index::ii::Ii;
-use crate::key::index::vm::{Vm, VmRoot};
-
-use crate::key::index::dc::Dc;
-use crate::key::index::dl::Dl;
 #[cfg(not(target_family = "wasm"))]
 use crate::key::index::ia::Ia;
 use crate::key::index::ib::Ib;
+use crate::key::index::id::Id as IdKey;
+use crate::key::index::ii::Ii;
 #[cfg(not(target_family = "wasm"))]
 use crate::key::index::ip::Ip;
 use crate::key::index::is::Is;
 use crate::key::index::td::{Td, TdRoot};
 use crate::key::index::tt::Tt;
+use crate::key::index::vm::{Vm, VmRoot};
 use crate::key::root::ic::Ic;
 use crate::kvs::Key;
-use anyhow::Result;
-use std::ops::Range;
-use std::sync::Arc;
-use uuid::Uuid;
+use crate::val::RecordIdKey;
 
 #[derive(Debug, Clone, Default, Hash, PartialEq, Eq)]
-#[non_exhaustive]
 pub struct IndexKeyBase(Arc<Inner>);
 
 #[derive(Debug, Default, Hash, PartialEq, Eq)]
@@ -151,7 +151,7 @@ impl IndexKeyBase {
 		He::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, element_id)
 	}
 
-	fn new_hi_key(&self, id: Id) -> Hi<'_> {
+	fn new_hi_key(&self, id: RecordIdKey) -> Hi<'_> {
 		Hi::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, id)
 	}
 
@@ -183,7 +183,7 @@ impl IndexKeyBase {
 		Ii::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id)
 	}
 
-	fn new_id_key(&self, id: Id) -> IdKey {
+	fn new_id_key(&self, id: RecordIdKey) -> IdKey {
 		IdKey::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, id)
 	}
 
@@ -193,7 +193,7 @@ impl IndexKeyBase {
 	}
 
 	#[cfg(not(target_family = "wasm"))]
-	pub(crate) fn new_ip_key(&self, id: Id) -> Ip {
+	pub(crate) fn new_ip_key(&self, id: RecordIdKey) -> Ip {
 		Ip::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, id)
 	}
 

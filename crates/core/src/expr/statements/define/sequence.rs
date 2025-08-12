@@ -1,26 +1,25 @@
+use std::fmt::{self, Display};
+
+use anyhow::{Result, bail};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::DefineKind;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident, Timeout, Value};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::impl_kv_value_revisioned;
-use anyhow::{Result, bail};
-
 use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+use crate::kvs::impl_kv_value_revisioned;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct DefineSequenceStatement {
+	pub kind: DefineKind,
 	pub name: Ident,
-	pub if_not_exists: bool,
-	pub overwrite: bool,
 	pub batch: u32,
 	pub start: i64,
 	pub timeout: Option<Timeout>,
@@ -37,12 +36,18 @@ impl DefineSequenceStatement {
 		let (ns, db) = opt.ns_db()?;
 		// Check if the definition exists
 		if txn.get_db_sequence(ns, db, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::SeqAlreadyExists {
-					name: self.name.to_string(),
-				});
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::SeqAlreadyExists {
+							name: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => {
+					return Ok(Value::None);
+				}
 			}
 		}
 		// Process the statement
@@ -51,8 +56,7 @@ impl DefineSequenceStatement {
 		txn.get_or_add_db(ns, db, opt.strict).await?;
 		let sq = DefineSequenceStatement {
 			// Don't persist the `IF NOT EXISTS` clause to schema
-			if_not_exists: false,
-			overwrite: false,
+			kind: DefineKind::Default,
 			..self.clone()
 		};
 		// Set the definition
@@ -63,7 +67,7 @@ impl DefineSequenceStatement {
 		let st_range = Prefix::new_st_range(ns, db, &sq.name)?;
 		txn.delr(st_range).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -72,11 +76,10 @@ impl DefineSequenceStatement {
 impl Display for DefineSequenceStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE SEQUENCE")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {} BATCH {} START {}", self.name, self.batch, self.start)?;
 		if let Some(ref v) = self.timeout {

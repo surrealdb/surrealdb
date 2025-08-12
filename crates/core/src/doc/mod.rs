@@ -3,7 +3,8 @@
 //! - `Thing`: name of the table and ID of the record
 //! - `current`: value after the transaction
 //! - `initial`: value before the transaction
-//! - `id`: traditionally an integer but can be an object or collection such as an array
+//! - `id`: traditionally an integer but can be an object or collection such as
+//!   an array
 
 pub(crate) use self::document::*;
 
@@ -32,7 +33,9 @@ mod purge; // Deletes this document, and any edges or indexes
 mod store; // Writes the document content to the storage engine
 mod table; // Processes any foreign tables relevant for this document'
 
-/// Error result used when a function can result in the value being processed being ignored.
+/// Error result used when a function can result in the value being processed
+/// being ignored.
+#[derive(Debug)]
 pub enum IgnoreError {
 	Ignore,
 	Error(anyhow::Error),

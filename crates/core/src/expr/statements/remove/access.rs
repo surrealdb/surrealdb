@@ -1,22 +1,20 @@
+use std::fmt::{self, Display, Formatter};
+
+use anyhow::Result;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
-use anyhow::Result;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
-
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct RemoveAccessStatement {
 	pub name: Ident,
 	pub base: Base,
-	#[revision(start = 2)]
 	pub if_exists: bool,
 }
 
@@ -50,7 +48,7 @@ impl RemoveAccessStatement {
 				let key = crate::key::root::access::all::new(&ac.name);
 				txn.delp(&key).await?;
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -77,7 +75,7 @@ impl RemoveAccessStatement {
 				let key = crate::key::namespace::access::all::new(opt.ns()?, &ac.name);
 				txn.delp(&key).await?;
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -105,7 +103,7 @@ impl RemoveAccessStatement {
 				let key = crate::key::database::access::all::new(ns, db, &ac.name);
 				txn.delp(&key).await?;
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 				// Ok all good
 				Ok(Value::None)
 			}

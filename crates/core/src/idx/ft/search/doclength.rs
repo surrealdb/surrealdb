@@ -1,3 +1,5 @@
+use anyhow::Result;
+
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::ft::DocLength;
@@ -5,7 +7,6 @@ use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeStore, Payload};
 use crate::idx::trees::store::TreeNodeProvider;
 use crate::kvs::{Transaction, TransactionType};
-use anyhow::Result;
 
 pub(super) struct DocLengths {
 	ikb: IndexKeyBase,
@@ -96,7 +97,8 @@ impl DocLengths {
 mod tests {
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::search::doclength::DocLengths;
-	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
+	use crate::kvs::LockType::*;
+	use crate::kvs::{Datastore, Transaction, TransactionType};
 
 	async fn doc_length(
 		ds: &Datastore,

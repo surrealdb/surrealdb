@@ -1,14 +1,15 @@
+use revision::{Revisioned, revisioned};
+use roaring::RoaringTreemap;
+use serde::{Deserialize, Serialize};
+
 use crate::err::Error;
-use crate::expr::Thing;
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::{DocId, Resolved};
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BState1, BState1skip, BStatistics, BTree, BTreeStore};
 use crate::idx::trees::store::TreeNodeProvider;
 use crate::kvs::{KVValue, Key, Transaction, TransactionType};
-use revision::{Revisioned, revisioned};
-use roaring::RoaringTreemap;
-use serde::{Deserialize, Serialize};
+use crate::val::RecordId;
 
 /// BTree based DocIds store
 pub(crate) struct BTreeDocIds {
@@ -77,11 +78,12 @@ impl BTreeDocIds {
 	}
 
 	/// Returns the doc_id for the given doc_key.
-	/// If the doc_id does not exists, a new one is created, and associated with the given key.
+	/// If the doc_id does not exists, a new one is created, and associated with
+	/// the given key.
 	pub(in crate::idx) async fn resolve_doc_id(
 		&mut self,
 		tx: &Transaction,
-		doc_key: &Thing,
+		doc_key: &RecordId,
 	) -> anyhow::Result<Resolved> {
 		let doc_key_bytes = doc_key.kv_encode_value()?;
 		{
@@ -100,7 +102,7 @@ impl BTreeDocIds {
 	pub(in crate::idx) async fn remove_doc(
 		&mut self,
 		tx: &Transaction,
-		doc_key: &Thing,
+		doc_key: &RecordId,
 	) -> anyhow::Result<Option<DocId>> {
 		let doc_key_bytes = doc_key.kv_encode_value()?;
 		if let Some(doc_id) = self.btree.delete(tx, &mut self.store, doc_key_bytes).await? {
@@ -123,7 +125,7 @@ impl BTreeDocIds {
 		&self,
 		tx: &Transaction,
 		doc_id: DocId,
-	) -> anyhow::Result<Option<Thing>> {
+	) -> anyhow::Result<Option<RecordId>> {
 		let doc_id_key = self.index_key_base.new_bi_key(doc_id);
 		if let Some(val) = tx.get(&doc_id_key, None).await? {
 			Ok(Some(val))
@@ -234,16 +236,16 @@ impl BTreeDocIdsState {
 
 #[cfg(test)]
 mod tests {
-	use crate::expr::Thing;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::btdocids::{BTreeDocIds, Resolved};
 	use crate::kvs::TransactionType::*;
-	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
+	use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
+	use crate::val::RecordId;
 
 	const BTREE_ORDER: u32 = 7;
 
 	async fn new_operation(ds: &Datastore, tt: TransactionType) -> (Transaction, BTreeDocIds) {
-		let tx = ds.transaction(tt, Optimistic).await.unwrap();
+		let tx = ds.transaction(tt, LockType::Optimistic).await.unwrap();
 		let d = BTreeDocIds::new(&tx, tt, IndexKeyBase::default(), BTREE_ORDER, 100).await.unwrap();
 		(tx, d)
 	}
@@ -257,10 +259,10 @@ mod tests {
 	async fn test_resolve_doc_id() {
 		let ds = Datastore::new("memory").await.unwrap();
 
-		let foo_thing = Thing::from(("Foo", ""));
-		let bar_thing = Thing::from(("Bar", ""));
-		let hello_thing = Thing::from(("Hello", ""));
-		let world_thing = Thing::from(("World", ""));
+		let foo_thing = RecordId::new("Foo".to_owned(), strand!("").to_owned());
+		let bar_thing = RecordId::new("Bar".to_owned(), strand!("").to_owned());
+		let hello_thing = RecordId::new("Hello".to_owned(), strand!("").to_owned());
+		let world_thing = RecordId::new("World".to_owned(), strand!("").to_owned());
 
 		// Resolve a first doc key
 		{
@@ -330,11 +332,11 @@ mod tests {
 	async fn test_remove_doc() {
 		let ds = Datastore::new("memory").await.unwrap();
 
-		let foo_thing = Thing::from(("Foo", ""));
-		let bar_thing = Thing::from(("Bar", ""));
-		let dummy_thing = Thing::from(("Dummy", ""));
-		let hello_thing = Thing::from(("Hello", ""));
-		let world_thing = Thing::from(("World", ""));
+		let foo_thing = RecordId::new("Foo".to_owned(), strand!("").to_owned());
+		let bar_thing = RecordId::new("Bar".to_owned(), strand!("").to_owned());
+		let dummy_thing = RecordId::new("Dummy".to_owned(), strand!("").to_owned());
+		let hello_thing = RecordId::new("Hello".to_owned(), strand!("").to_owned());
+		let world_thing = RecordId::new("World".to_owned(), strand!("").to_owned());
 
 		// Create two docs
 		{

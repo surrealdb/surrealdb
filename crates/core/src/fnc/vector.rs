@@ -1,12 +1,13 @@
-use crate::expr::{Number, Value};
+use anyhow::Result;
+
 use crate::fnc::util::math::vector::{
 	Add, Angle, CrossProduct, Divide, DotProduct, Magnitude, Multiply, Normalize, Project, Scale,
 	Subtract,
 };
-use anyhow::Result;
+use crate::val::{Number, Value};
 
 pub fn add((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
-	Ok(a.add(&b)?.into())
+	Ok(a.add(&b)?.into_iter().map(Value::from).collect::<Vec<_>>().into())
 }
 
 pub fn angle((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
@@ -14,11 +15,11 @@ pub fn angle((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 }
 
 pub fn divide((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
-	Ok(a.divide(&b)?.into())
+	Ok(a.divide(&b)?.into_iter().map(Value::from).collect::<Vec<_>>().into())
 }
 
 pub fn cross((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
-	Ok(a.cross(&b)?.into())
+	Ok(a.cross(&b)?.into_iter().map(Value::from).collect::<Vec<_>>().into())
 }
 
 pub fn dot((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
@@ -30,37 +31,38 @@ pub fn magnitude((a,): (Vec<Number>,)) -> Result<Value> {
 }
 
 pub fn multiply((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
-	Ok(a.multiply(&b)?.into())
+	Ok(a.multiply(&b)?.into_iter().map(Value::from).collect::<Vec<_>>().into())
 }
 
 pub fn normalize((a,): (Vec<Number>,)) -> Result<Value> {
-	Ok(a.normalize().into())
+	Ok(a.normalize().into_iter().map(Value::from).collect::<Vec<_>>().into())
 }
 
 pub fn project((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
-	Ok(a.project(&b)?.into())
+	Ok(a.project(&b)?.into_iter().map(Value::from).collect::<Vec<_>>().into())
 }
 
 pub fn subtract((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
-	Ok(a.subtract(&b)?.into())
+	Ok(a.subtract(&b)?.into_iter().map(Value::from).collect::<Vec<_>>().into())
 }
 
 pub fn scale((a, b): (Vec<Number>, Number)) -> Result<Value> {
-	Ok(a.scale(&b)?.into())
+	Ok(a.scale(&b)?.into_iter().map(Value::from).collect::<Vec<_>>().into())
 }
 
 pub mod distance {
+	use anyhow::Result;
+
 	use crate::ctx::Context;
 	use crate::doc::CursorDoc;
 	use crate::err::Error;
-	use crate::expr::{Number, Value};
 	use crate::fnc::args::Optional;
 	use crate::fnc::get_execution_context;
 	use crate::fnc::util::math::vector::{
 		ChebyshevDistance, EuclideanDistance, HammingDistance, ManhattanDistance, MinkowskiDistance,
 	};
 	use crate::idx::planner::IterationStage;
-	use anyhow::Result;
+	use crate::val::{Number, Value};
 
 	pub fn chebyshev((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 		Ok(a.chebyshev_distance(&b)?.into())
@@ -115,10 +117,11 @@ pub mod distance {
 
 pub mod similarity {
 
-	use crate::err::Error;
-	use crate::expr::{Number, Value};
-	use crate::fnc::util::math::vector::{CosineSimilarity, JaccardSimilarity, PearsonSimilarity};
 	use anyhow::Result;
+
+	use crate::err::Error;
+	use crate::fnc::util::math::vector::{CosineSimilarity, JaccardSimilarity, PearsonSimilarity};
+	use crate::val::{Number, Value};
 
 	pub fn cosine((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 		Ok(a.cosine_similarity(&b)?.into())
@@ -141,9 +144,10 @@ pub mod similarity {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use crate::expr::Number;
 	use rust_decimal::Decimal;
+
+	use super::*;
+	use crate::val::Number;
 
 	#[test]
 	fn vector_scale_int() {
@@ -152,7 +156,8 @@ mod tests {
 
 		let result: Result<Value> = scale((input_vector.clone(), scalar_int));
 
-		let expected_output: Vec<Number> = vec![2, 4, 6, 8].into_iter().map(Number::Int).collect();
+		let expected_output: Vec<_> =
+			vec![2, 4, 6, 8].into_iter().map(Number::Int).map(Value::from).collect();
 
 		assert_eq!(result.unwrap(), Value::from(expected_output));
 	}
@@ -163,9 +168,12 @@ mod tests {
 		let scalar_float = Number::Float(1.51);
 
 		let result: Result<Value> = scale((input_vector.clone(), scalar_float));
-		let expected_output: Vec<Number> =
-			vec![1.51, 3.02, 4.53, 6.04].into_iter().map(Number::Float).collect();
-		assert_eq!(result.unwrap(), Value::from(expected_output));
+		let expected_output = vec![1.51, 3.02, 4.53, 6.04]
+			.into_iter()
+			.map(Number::Float)
+			.map(Value::from)
+			.collect::<Value>();
+		assert_eq!(result.unwrap(), expected_output);
 	}
 
 	#[test]
@@ -174,11 +182,11 @@ mod tests {
 		let scalar_decimal = Number::Decimal(Decimal::new(3141, 3));
 
 		let result: Result<Value> = scale((input_vector.clone(), scalar_decimal));
-		let expected_output: Vec<Number> = vec![
-			Number::Decimal(Decimal::new(3141, 3)),  // 3.141 * 1
-			Number::Decimal(Decimal::new(6282, 3)),  // 3.141 * 2
-			Number::Decimal(Decimal::new(9423, 3)),  // 3.141 * 3
-			Number::Decimal(Decimal::new(12564, 3)), // 3.141 * 4
+		let expected_output: Vec<_> = vec![
+			Value::Number(Number::Decimal(Decimal::new(3141, 3))), // 3.141 * 1
+			Value::Number(Number::Decimal(Decimal::new(6282, 3))), // 3.141 * 2
+			Value::Number(Number::Decimal(Decimal::new(9423, 3))), // 3.141 * 3
+			Value::Number(Number::Decimal(Decimal::new(12564, 3))), // 3.141 * 4
 		];
 		assert_eq!(result.unwrap(), Value::from(expected_output));
 	}

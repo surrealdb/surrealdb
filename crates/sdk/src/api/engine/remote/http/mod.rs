@@ -1,48 +1,31 @@
 //! HTTP engine
-use crate::Value;
-use crate::api::Connect;
-use crate::api::Result;
-use crate::api::Surreal;
-use crate::api::conn::Command;
-use crate::api::conn::DbResponse;
-use crate::api::conn::RequestData;
-use crate::api::conn::RouterRequest;
-use crate::api::engine::remote::{deserialize, serialize};
-use crate::api::err::Error;
-use crate::engine::remote::Response;
-use crate::headers::AUTH_DB;
-use crate::headers::AUTH_NS;
-use crate::headers::DB;
-use crate::headers::NS;
-use crate::opt::IntoEndpoint;
+use std::marker::PhantomData;
+#[cfg(not(target_family = "wasm"))]
+use std::path::PathBuf;
+
 use futures::TryStreamExt;
 use indexmap::IndexMap;
 use reqwest::RequestBuilder;
-use reqwest::header::ACCEPT;
-use reqwest::header::CONTENT_TYPE;
-use reqwest::header::HeaderMap;
-use reqwest::header::HeaderValue;
-use serde::Deserialize;
-use serde::Serialize;
-use std::marker::PhantomData;
-use surrealdb_core::expr::{
-	Object as CoreObject, Value as CoreValue, from_value as from_core_value,
-};
-use surrealdb_core::sql::Statement;
-use surrealdb_core::sql::statements::OutputStatement;
-use surrealdb_core::sql::{Param, Query, SqlValue as CoreSqlValue};
-use url::Url;
-
-#[cfg(not(target_family = "wasm"))]
-use std::path::PathBuf;
+use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
+use serde::{Deserialize, Serialize};
 #[cfg(not(target_family = "wasm"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_family = "wasm"))]
 use tokio::io;
 #[cfg(not(target_family = "wasm"))]
 use tokio_util::compat::FuturesAsyncReadCompatExt;
+use url::Url;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local;
+
+use crate::api;
+use crate::api::conn::{Command, DbResponse, RequestData, RouterRequest};
+use crate::api::err::Error;
+use crate::api::{Connect, Result, Surreal};
+use crate::core::{rpc, val};
+use crate::engine::remote::Response;
+use crate::headers::{AUTH_DB, AUTH_NS, DB, NS};
+use crate::opt::IntoEndpoint;
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod native;
@@ -65,7 +48,8 @@ pub struct Https;
 pub struct Client(());
 
 impl Surreal<Client> {
-	/// Connects to a specific database endpoint, saving the connection on the static client
+	/// Connects to a specific database endpoint, saving the connection on the
+	/// static client
 	///
 	/// # Examples
 	///
@@ -250,10 +234,13 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 			}
 		}
 	} else {
-		let response: Vec<QueryMethodResponse> = deserialize(&res.bytes().await?, false)?;
+		let response: Vec<QueryMethodResponse> =
+			crate::core::rpc::format::bincode::decode(&res.bytes().await?)
+				.map_err(|x| format!("Failed to deserialize bincode payload: {x}"))
+				.map_err(crate::api::Error::InvalidResponse)?;
 		for res in response {
 			if let Status::Err = res.status {
-				return Err(Error::Query(res.result.0.as_string()).into());
+				return Err(Error::Query(res.result.0.as_raw_string()).into());
 			}
 		}
 	}
@@ -274,18 +261,25 @@ async fn send_request(
 	auth: &Option<Auth>,
 ) -> Result<DbResponse> {
 	let url = base_url.join(RPC_PATH).unwrap();
-	let http_req =
-		client.post(url).headers(headers.clone()).auth(auth).body(serialize(&req, false)?);
+
+	let body = crate::core::rpc::format::bincode::encode(&req)
+		.map_err(|x| format!("Failed to serialized to bincode: {x}"))
+		.map_err(crate::api::Error::UnserializableValue)?;
+
+	let http_req = client.post(url).headers(headers.clone()).auth(auth).body(body);
 	let response = http_req.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
 
-	let response: Response = deserialize(&bytes, false)?;
+	let response: Response = crate::core::rpc::format::bincode::decode(&bytes)
+		.map_err(|x| format!("Failed to deserialize bincode payload: {x}"))
+		.map_err(crate::api::Error::InvalidResponse)?;
+
 	DbResponse::from_server_result(response.result)
 }
 
 fn flatten_dbresponse_array(res: DbResponse) -> DbResponse {
 	match res {
-		DbResponse::Other(CoreValue::Array(array)) if array.len() == 1 => {
+		DbResponse::Other(val::Value::Array(array)) if array.len() == 1 => {
 			let v = array.into_iter().next().unwrap();
 			DbResponse::Other(v)
 		}
@@ -298,7 +292,7 @@ async fn router(
 	base_url: &Url,
 	client: &reqwest::Client,
 	headers: &mut HeaderMap,
-	vars: &mut IndexMap<String, CoreValue>,
+	vars: &mut IndexMap<String, val::Value>,
 	auth: &mut Option<Auth>,
 ) -> Result<DbResponse> {
 	match req.command {
@@ -360,7 +354,7 @@ async fn router(
 				.into());
 			};
 
-			match from_core_value(credentials.into()) {
+			match api::value::from_core_value(credentials.into()) {
 				Ok(Credentials {
 					user,
 					pass,
@@ -396,46 +390,25 @@ async fn router(
 			*auth = Some(Auth::Bearer {
 				token,
 			});
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(DbResponse::Other(val::Value::None))
 		}
 		Command::Invalidate => {
 			*auth = None;
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(DbResponse::Other(val::Value::None))
 		}
 		Command::Set {
 			key,
 			value,
 		} => {
-			let mut output_stmt = OutputStatement::default();
-			output_stmt.what = CoreSqlValue::Param(Param::from(key.clone()));
-			let query = Query::from(Statement::Output(output_stmt));
-			let mut variables = CoreObject::default();
-			variables.insert(key.clone(), value);
-			let req = Command::Query {
-				txn: None,
-				query,
-				variables,
-			}
-			.into_router_request(None)
-			.expect("query is valid request");
-			let DbResponse::Query(mut res) =
-				send_request(req, base_url, client, headers, auth).await?
-			else {
-				return Err(Error::InternalError(
-					"recieved invalid result from server".to_string(),
-				)
-				.into());
-			};
-
-			let val: Value = res.take(0)?;
-			vars.insert(key, val.0);
-			Ok(DbResponse::Other(CoreValue::None))
+			crate::core::rpc::check_protected_param(&key)?;
+			vars.insert(key, value);
+			Ok(DbResponse::Other(val::Value::None))
 		}
 		Command::Unset {
 			key,
 		} => {
 			vars.shift_remove(&key);
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(DbResponse::Other(val::Value::None))
 		}
 		#[cfg(target_family = "wasm")]
 		Command::ExportFile {
@@ -461,16 +434,16 @@ async fn router(
 		} => {
 			let req_path = base_url.join("export")?;
 			let config = config.unwrap_or_default();
-			let config_value: CoreValue = config.into();
+			let config_value: val::Value = config.into();
 			let request = client
 				.post(req_path)
-				.body(config_value.into_json().to_string())
+				.body(rpc::format::json::encode_str(config_value).map_err(anyhow::Error::msg)?)
 				.headers(headers.clone())
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/json")
 				.header(ACCEPT, "application/octet-stream");
 			export_file(request, path).await?;
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(DbResponse::Other(val::Value::None))
 		}
 		Command::ExportBytes {
 			bytes,
@@ -478,16 +451,16 @@ async fn router(
 		} => {
 			let req_path = base_url.join("export")?;
 			let config = config.unwrap_or_default();
-			let config_value: CoreValue = config.into();
+			let config_value: val::Value = config.into();
 			let request = client
 				.post(req_path)
-				.body(config_value.into_json().to_string())
+				.body(rpc::format::json::encode_str(config_value).map_err(anyhow::Error::msg)?)
 				.headers(headers.clone())
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/json")
 				.header(ACCEPT, "application/octet-stream");
 			export_bytes(request, bytes).await?;
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(DbResponse::Other(val::Value::None))
 		}
 		#[cfg(not(target_family = "wasm"))]
 		Command::ExportMl {
@@ -502,7 +475,7 @@ async fn router(
 				.auth(auth)
 				.header(ACCEPT, "application/octet-stream");
 			export_file(request, path).await?;
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(DbResponse::Other(val::Value::None))
 		}
 		Command::ExportBytesMl {
 			bytes,
@@ -516,7 +489,7 @@ async fn router(
 				.auth(auth)
 				.header(ACCEPT, "application/octet-stream");
 			export_bytes(request, bytes).await?;
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(DbResponse::Other(val::Value::None))
 		}
 		#[cfg(not(target_family = "wasm"))]
 		Command::ImportFile {
@@ -529,7 +502,7 @@ async fn router(
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/octet-stream");
 			import(request, path).await?;
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(DbResponse::Other(val::Value::None))
 		}
 		#[cfg(not(target_family = "wasm"))]
 		Command::ImportMl {
@@ -542,7 +515,7 @@ async fn router(
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/octet-stream");
 			import(request, path).await?;
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(DbResponse::Other(val::Value::None))
 		}
 		Command::SubscribeLive {
 			..

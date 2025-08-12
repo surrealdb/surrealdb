@@ -1,8 +1,3 @@
-use crate::cnf::ID_CHARS;
-use crate::err::Error;
-use crate::expr::uuid::Uuid;
-use crate::expr::value::Value;
-use crate::expr::{Datetime, Duration, Number};
 use anyhow::{Result, bail, ensure};
 use chrono::{TimeZone, Utc};
 use nanoid::nanoid;
@@ -12,6 +7,9 @@ use rand::prelude::IteratorRandom;
 use ulid::Ulid;
 
 use super::args::{Any, Args, Arity, FromArg, Optional};
+use crate::cnf::ID_CHARS;
+use crate::err::Error;
+use crate::val::{Datetime, Duration, Number, Uuid, Value};
 
 pub fn rand(_: ()) -> Result<Value> {
 	Ok(rand::random::<f64>().into())
@@ -67,9 +65,10 @@ impl<T: FromArg> FromArg for NoneOrRange<T> {
 // seems inconsistent with general use of ranges not including the upperbound.
 // These should probably all be exclusive.
 //
-// TODO (Delskayn): Switching of min and max if min > max is also inconsistent with rest of
-// functions and the range type. The functions should either return NONE or an error if the lowerbound
-// of the ranges here are larger then the upperbound.
+// TODO (Delskayn): Switching of min and max if min > max is also inconsistent
+// with rest of functions and the range type. The functions should either return
+// NONE or an error if the lowerbound of the ranges here are larger then the
+// upperbound.
 pub fn float((NoneOrRange(range),): (NoneOrRange<f64>,)) -> Result<Value> {
 	let v = if let Some((min, max)) = range {
 		if max < min {
@@ -303,11 +302,10 @@ pub fn uuid((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value> {
 
 pub mod uuid {
 
-	use crate::expr::Datetime;
-	use crate::expr::uuid::Uuid;
-	use crate::expr::value::Value;
-	use crate::fnc::args::Optional;
 	use anyhow::Result;
+
+	use crate::fnc::args::Optional;
+	use crate::val::{Datetime, Uuid, Value};
 
 	pub fn v4(_: ()) -> Result<Value> {
 		Ok(Uuid::new_v4().into())

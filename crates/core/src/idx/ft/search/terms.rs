@@ -1,13 +1,14 @@
+use anyhow::Result;
+use revision::{Revisioned, revisioned};
+use roaring::RoaringTreemap;
+use serde::{Deserialize, Serialize};
+
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::bkeys::FstKeys;
 use crate::idx::trees::btree::{BState, BState1, BState1skip, BStatistics, BTree, BTreeStore};
 use crate::idx::trees::store::TreeNodeProvider;
 use crate::kvs::{KVValue, Transaction, TransactionType};
-use anyhow::Result;
-use revision::{Revisioned, revisioned};
-use roaring::RoaringTreemap;
-use serde::{Deserialize, Serialize};
 
 pub(crate) type TermId = u64;
 pub(crate) type TermLen = u32;
@@ -204,15 +205,18 @@ impl KVValue for SearchTermsState {
 
 #[cfg(test)]
 mod tests {
+	use std::collections::HashSet;
+
+	use rand::{Rng, thread_rng};
+	use test_log::test;
+
 	use super::*;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::TermFrequency;
 	use crate::idx::ft::search::terms::{SearchTerms, SearchTermsState};
+	use crate::kvs::LockType::*;
 	use crate::kvs::TransactionType::{Read, Write};
-	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
-	use rand::{Rng, thread_rng};
-	use std::collections::HashSet;
-	use test_log::test;
+	use crate::kvs::{Datastore, Transaction, TransactionType};
 
 	#[test]
 	fn test_state_serde() {

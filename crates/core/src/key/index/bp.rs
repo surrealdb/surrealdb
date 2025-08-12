@@ -1,11 +1,10 @@
 //! Stores BTree nodes for postings
+use serde::{Deserialize, Serialize};
+
 use crate::idx::trees::btree::BState;
 use crate::idx::trees::store::NodeId;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct BpRoot<'a> {

@@ -1,6 +1,7 @@
-use super::lookup::Lookup;
-use crate::expr::id::Id;
 use uuid::Uuid;
+
+use super::lookup::Lookup;
+use crate::val::RecordIdKey;
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub(crate) enum Key {
@@ -105,7 +106,7 @@ pub(crate) enum Key {
 	/// A cache key for an index (on a table)
 	Ix(String, String, String, String),
 	/// A cache key for a record
-	Record(String, String, String, Id),
+	Record(String, String, String, RecordIdKey),
 }
 
 impl<'a> From<Lookup<'a>> for Key {

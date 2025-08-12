@@ -1,11 +1,12 @@
-use crate::{
-	sql::{Algorithm, language::Language},
-	syn::token::{DistanceKind, Keyword, TokenKind, VectorTypeKind},
-};
 use phf::{phf_map, phf_set};
 use unicase::UniCase;
 
-/// A set of keywords which might in some contexts are dissallowed as an identifier.
+use crate::sql::Algorithm;
+use crate::sql::language::Language;
+use crate::syn::token::{DistanceKind, Keyword, TokenKind, VectorTypeKind};
+
+/// A set of keywords which might in some contexts are dissallowed as an
+/// identifier.
 pub static RESERVED_KEYWORD: phf::Set<UniCase<&'static str>> = phf_set! {
 	UniCase::ascii("ALTER"),
 	UniCase::ascii("ANALYZE"),
@@ -293,7 +294,6 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("ARRAY") => TokenKind::Keyword(Keyword::Array),
 	UniCase::ascii("GEOMETRY") => TokenKind::Keyword(Keyword::Geometry),
 	UniCase::ascii("RECORD") => TokenKind::Keyword(Keyword::Record),
-	UniCase::ascii("FUTURE") => TokenKind::Keyword(Keyword::Future),
 	UniCase::ascii("BOOL") => TokenKind::Keyword(Keyword::Bool),
 	UniCase::ascii("BYTES") => TokenKind::Keyword(Keyword::Bytes),
 	UniCase::ascii("DATETIME") => TokenKind::Keyword(Keyword::Datetime),

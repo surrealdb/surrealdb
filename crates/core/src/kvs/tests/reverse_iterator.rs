@@ -1,10 +1,13 @@
+use std::sync::Arc;
+
+use uuid::Uuid;
+
 use crate::dbs::node::Timestamp;
 use crate::dbs::{Response, Session};
 use crate::kvs::clock::{FakeClock, SizedClock};
 use crate::kvs::tests::CreateDs;
-use crate::sql::SqlValue;
-use std::sync::Arc;
-use uuid::Uuid;
+use crate::syn;
+use crate::val::Value;
 
 async fn test(new_ds: impl CreateDs, index: &str) -> Vec<Response> {
 	// Create a new datastore
@@ -33,7 +36,7 @@ async fn test(new_ds: impl CreateDs, index: &str) -> Vec<Response> {
 }
 
 fn check(r: &mut Vec<Response>, tmp: &str) {
-	let tmp = SqlValue::parse(tmp);
+	let tmp = syn::value(tmp).unwrap();
 	let val = match r.remove(0).result {
 		Ok(v) => v,
 		Err(err) => panic!("{err}"),
@@ -215,6 +218,4 @@ macro_rules! define_tests {
 		}
 	};
 }
-use crate::expr::Value;
-use crate::syn::Parse;
 pub(crate) use define_tests;

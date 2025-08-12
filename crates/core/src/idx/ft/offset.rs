@@ -1,8 +1,9 @@
+use anyhow::Result;
+use revision::revisioned;
+
 use crate::err::Error;
 use crate::idx::ft::Position;
 use crate::kvs::KVValue;
-use anyhow::Result;
-use revision::revisioned;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq)]
@@ -64,7 +65,8 @@ impl KVValue for OffsetRecords {
 			.first()
 			.ok_or(Error::CorruptedIndex("OffsetRecords::try_from(1)"))? as usize;
 		// <= v1.4 the Offset contains only two field: start and end.
-		// We check the number of integers. If there is only 3 per offset this is the old format.
+		// We check the number of integers. If there is only 3 per offset this is the
+		// old format.
 		let without_gen_start = n_offsets * 3 + 1 == decompressed.len();
 
 		let mut indexes = decompressed.into_iter().skip(1);

@@ -1,3 +1,10 @@
+use std::fmt::{self, Display, Formatter};
+
+use anyhow::Result;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
 use crate::ctx::Context;
 use crate::dbs::{self, Notification, Options};
 use crate::err::Error;
@@ -5,21 +12,11 @@ use crate::expr::statements::define::DefineTableStatement;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
 
-use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
-use uuid::Uuid;
-
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct RemoveTableStatement {
 	pub name: Ident,
-	#[revision(start = 2)]
 	pub if_exists: bool,
-	#[revision(start = 3)]
 	pub expunge: bool,
 }
 
@@ -56,15 +53,17 @@ impl RemoveTableStatement {
 		let lvs = txn.all_tb_lives(ns, db, &self.name).await?;
 		// Delete the definition
 		let key = crate::key::database::tb::new(ns, db, &self.name);
-		match self.expunge {
-			true => txn.clr(&key).await?,
-			false => txn.del(&key).await?,
+		if self.expunge {
+			txn.clr(&key).await?
+		} else {
+			txn.del(&key).await?
 		};
 		// Remove the resource data
 		let key = crate::key::table::all::new(ns, db, &self.name);
-		match self.expunge {
-			true => txn.clrp(&key).await?,
-			false => txn.delp(&key).await?,
+		if self.expunge {
+			txn.clrp(&key).await?
+		} else {
+			txn.delp(&key).await?
 		};
 		// Process each attached foreign table
 		for ft in fts.iter() {
@@ -84,7 +83,7 @@ impl RemoveTableStatement {
 		// Check if this is a foreign table
 		if let Some(view) = &tb.view {
 			// Process each foreign table
-			for ft in view.what.0.iter() {
+			for ft in view.what.iter() {
 				// Save the view config
 				let key = crate::key::table::ft::new(ns, db, ft, &self.name);
 				txn.del(&key).await?;
@@ -118,7 +117,7 @@ impl RemoveTableStatement {
 			cache.clear_tb(ns, db, &self.name);
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

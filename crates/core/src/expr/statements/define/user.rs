@@ -1,49 +1,49 @@
+use std::fmt::{self, Display};
+
+use anyhow::{Result, bail};
+use argon2::Argon2;
+use argon2::password_hash::{PasswordHasher, SaltString};
+use rand::Rng as _;
+use rand::distributions::Alphanumeric;
+use rand::rngs::OsRng;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::DefineKind;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::escape::QuoteStr;
+use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Strand, Value, escape::QuoteStr, fmt::Fmt, user::UserDuration};
+use crate::expr::user::UserDuration;
+use crate::expr::{Base, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
-use anyhow::{Result, bail};
-use argon2::{
-	Argon2,
-	password_hash::{PasswordHasher, SaltString},
-};
+use crate::val::{Strand, Value};
 
-use rand::{Rng, distributions::Alphanumeric, rngs::OsRng};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
-
-#[revisioned(revision = 4)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct DefineUserStatement {
+	pub kind: DefineKind,
 	pub name: Ident,
 	pub base: Base,
 	pub hash: String,
 	pub code: String,
 	pub roles: Vec<Ident>,
-	#[revision(start = 3)]
 	pub duration: UserDuration,
 	pub comment: Option<Strand>,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 4)]
-	pub overwrite: bool,
 }
 
 impl_kv_value_revisioned!(DefineUserStatement);
 
-#[expect(clippy::fallible_impl_from)]
-impl From<(Base, &str, &str, &str)> for DefineUserStatement {
-	fn from((base, user, pass, role): (Base, &str, &str, &str)) -> Self {
+impl DefineUserStatement {
+	pub fn new_with_password(base: Base, user: Strand, pass: &str, role: Ident) -> Self {
 		DefineUserStatement {
+			kind: DefineKind::Default,
 			base,
-			name: user.into(),
+			name: Ident::from_strand(user),
 			hash: Argon2::default()
 				.hash_password(pass.as_ref(), &SaltString::generate(&mut OsRng))
 				.unwrap()
@@ -53,16 +53,12 @@ impl From<(Base, &str, &str, &str)> for DefineUserStatement {
 				.take(128)
 				.map(char::from)
 				.collect::<String>(),
-			roles: vec![role.into()],
+			roles: vec![role],
 			duration: UserDuration::default(),
 			comment: None,
-			if_not_exists: false,
-			overwrite: false,
 		}
 	}
-}
 
-impl DefineUserStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -79,12 +75,16 @@ impl DefineUserStatement {
 				let txn = ctx.tx();
 				// Check if the definition exists
 				if txn.get_root_user(&self.name).await.is_ok() {
-					if self.if_not_exists {
-						return Ok(Value::None);
-					} else if !self.overwrite && !opt.import {
-						bail!(Error::UserRootAlreadyExists {
-							name: self.name.to_string(),
-						});
+					match self.kind {
+						DefineKind::Default => {
+							if !opt.import {
+								bail!(Error::UserRootAlreadyExists {
+									name: self.name.to_string(),
+								});
+							}
+						}
+						DefineKind::Overwrite => {}
+						DefineKind::IfNotExists => return Ok(Value::None),
 					}
 				}
 				// Process the statement
@@ -93,15 +93,14 @@ impl DefineUserStatement {
 					&key,
 					&DefineUserStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
-						if_not_exists: false,
-						overwrite: false,
+						kind: DefineKind::Default,
 						..self.clone()
 					},
 					None,
 				)
 				.await?;
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -110,13 +109,17 @@ impl DefineUserStatement {
 				let txn = ctx.tx();
 				// Check if the definition exists
 				if txn.get_ns_user(opt.ns()?, &self.name).await.is_ok() {
-					if self.if_not_exists {
-						return Ok(Value::None);
-					} else if !self.overwrite && !opt.import {
-						bail!(Error::UserNsAlreadyExists {
-							name: self.name.to_string(),
-							ns: opt.ns()?.into(),
-						});
+					match self.kind {
+						DefineKind::Default => {
+							if !opt.import {
+								bail!(Error::UserNsAlreadyExists {
+									name: self.name.to_string(),
+									ns: opt.ns()?.into(),
+								});
+							}
+						}
+						DefineKind::Overwrite => {}
+						DefineKind::IfNotExists => return Ok(Value::None),
 					}
 				}
 				// Process the statement
@@ -126,15 +129,14 @@ impl DefineUserStatement {
 					&key,
 					&DefineUserStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
-						if_not_exists: false,
-						overwrite: false,
+						kind: DefineKind::Default,
 						..self.clone()
 					},
 					None,
 				)
 				.await?;
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -144,14 +146,18 @@ impl DefineUserStatement {
 				// Check if the definition exists
 				let (ns, db) = opt.ns_db()?;
 				if txn.get_db_user(ns, db, &self.name).await.is_ok() {
-					if self.if_not_exists {
-						return Ok(Value::None);
-					} else if !self.overwrite && !opt.import {
-						bail!(Error::UserDbAlreadyExists {
-							name: self.name.to_string(),
-							ns: ns.into(),
-							db: db.into(),
-						});
+					match self.kind {
+						DefineKind::Default => {
+							if !opt.import {
+								bail!(Error::UserDbAlreadyExists {
+									name: self.name.to_string(),
+									ns: ns.into(),
+									db: db.into(),
+								});
+							}
+						}
+						DefineKind::Overwrite => {}
+						DefineKind::IfNotExists => return Ok(Value::None),
 					}
 				}
 				// Process the statement
@@ -162,15 +168,14 @@ impl DefineUserStatement {
 					&key,
 					&DefineUserStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
-						if_not_exists: false,
-						overwrite: false,
+						kind: DefineKind::Default,
 						..self.clone()
 					},
 					None,
 				)
 				.await?;
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -183,11 +188,10 @@ impl DefineUserStatement {
 impl Display for DefineUserStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE USER")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(
 			f,
@@ -234,8 +238,8 @@ impl InfoStructure for DefineUserStatement {
 			"hash".to_string() => self.hash.into(),
 			"roles".to_string() => self.roles.into_iter().map(Ident::structure).collect(),
 			"duration".to_string() => Value::from(map! {
-				"token".to_string() => self.duration.token.into(),
-				"session".to_string() => self.duration.session.into(),
+				"token".to_string() => self.duration.token.map(Value::from).unwrap_or(Value::None),
+				"session".to_string() => self.duration.session.map(Value::from).unwrap_or(Value::None),
 			}),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})

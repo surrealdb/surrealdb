@@ -1,11 +1,10 @@
 //! Stores doc keys for doc_ids
-use crate::expr::Id;
-use crate::idx::docids::DocId;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::KVKey;
-
 use serde::{Deserialize, Serialize};
+
+use crate::idx::docids::DocId;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+use crate::val::RecordIdKey;
 
 /// Id inverted. DocId -> Id
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -26,7 +25,7 @@ pub(crate) struct Ii<'a> {
 }
 
 impl KVKey for Ii<'_> {
-	type ValueType = Id;
+	type ValueType = RecordIdKey;
 }
 
 impl Categorise for Ii<'_> {

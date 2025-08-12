@@ -1,22 +1,23 @@
-use crate::iam::{Auth, Level};
-use crate::rpc::Method;
-use ipnet::IpNet;
 use std::collections::HashSet;
 use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
 #[cfg(all(target_family = "wasm", feature = "http"))]
 use std::net::ToSocketAddrs;
+
+use ipnet::IpNet;
 #[cfg(all(not(target_family = "wasm"), feature = "http"))]
 use tokio::net::lookup_host;
 use url::Url;
+
+use crate::iam::{Auth, Level};
+use crate::rpc::Method;
 
 pub trait Target<Item: ?Sized = Self> {
 	fn matches(&self, elem: &Item) -> bool;
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-#[non_exhaustive]
 pub struct FuncTarget(pub String, pub Option<String>);
 
 impl fmt::Display for FuncTarget {
@@ -112,7 +113,6 @@ impl std::str::FromStr for FuncTarget {
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-#[non_exhaustive]
 pub enum ExperimentalTarget {
 	RecordReferences,
 	GraphQL,
@@ -183,7 +183,6 @@ impl std::str::FromStr for ExperimentalTarget {
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-#[non_exhaustive]
 pub enum NetTarget {
 	Host(url::Host<String>, Option<u16>),
 	IPNet(IpNet),
@@ -193,29 +192,34 @@ pub enum NetTarget {
 impl NetTarget {
 	/// Resolves a `NetTarget` to its associated IP address representations.
 	///
-	/// This function performs an asynchronous resolution of a `NetTarget` enum instance. If the
-	/// `NetTarget` is of variant `Host`, it attempts to resolve the provided hostname and optional
-	/// port into a list of `IPNet` values. If the port is not provided, port 80 is used by default.
-	/// If the `NetTarget` is of variant `IPNet`, it simply returns an empty vector, as there is nothing
-	/// to resolve.
+	/// This function performs an asynchronous resolution of a `NetTarget` enum
+	/// instance. If the `NetTarget` is of variant `Host`, it attempts to
+	/// resolve the provided hostname and optional port into a list of `IPNet`
+	/// values. If the port is not provided, port 80 is used by default. If the
+	/// `NetTarget` is of variant `IPNet`, it simply returns an empty vector, as
+	/// there is nothing to resolve.
 	///
 	/// # Returns
-	/// - On success, this function returns a `Vec<Self>` where each resolved `NetTarget::Host` is
-	///   transformed into a `NetTarget::IPNet`.
-	/// - On error, it returns a `std::io::Error` indicating the issue during resolution.
+	/// - On success, this function returns a `Vec<Self>` where each resolved
+	///   `NetTarget::Host` is transformed into a `NetTarget::IPNet`.
+	/// - On error, it returns a `std::io::Error` indicating the issue during
+	///   resolution.
 	///
 	/// # Variants
 	/// - `NetTarget::Host(h, p)`:
-	///    - Resolves the given hostname `h` with an optional port `p` (default is 80) to a list of IPs.
+	///    - Resolves the given hostname `h` with an optional port `p` (default
+	///      is 80) to a list of IPs.
 	///    - Each resolved IP is converted into a `NetTarget::IPNet` value.
 	/// - `NetTarget::IPNet(_)`:
 	///    - Returns an empty vector, as `IPNet` does not require resolution.
 	///
 	/// # Errors
-	/// - Returns `std::io::Error` if there is an issue in the asynchronous DNS resolution process.
+	/// - Returns `std::io::Error` if there is an issue in the asynchronous DNS
+	///   resolution process.
 	///
 	/// # Notes
-	/// - The function uses `lookup_host` for DNS resolution, which must be awaited.
+	/// - The function uses `lookup_host` for DNS resolution, which must be
+	///   awaited.
 	/// - The optional port is replaced by port 80 as a default if not provided.
 	#[cfg(not(target_family = "wasm"))]
 	pub(crate) async fn resolve(&self) -> Result<Vec<Self>, std::io::Error> {
@@ -270,7 +274,8 @@ impl Target for NetTarget {
 				Self::Host(_host, _) => host == _host,
 				_ => false,
 			},
-			// If self is an IPNet, it can match both an IPNet or a Host elem that contains an IPAddr
+			// If self is an IPNet, it can match both an IPNet or a Host elem that contains an
+			// IPAddr
 			Self::IPNet(ipnet) => match elem {
 				Self::IPNet(_ipnet) => ipnet.contains(_ipnet),
 				Self::Host(host, _) => match host {
@@ -307,10 +312,12 @@ impl std::str::FromStr for NetTarget {
 			return Ok(NetTarget::IPNet(IpNet::from(ipnet)));
 		}
 
-		// Parse the host and port parts from a string in the form of 'host' or 'host:port'
+		// Parse the host and port parts from a string in the form of 'host' or
+		// 'host:port'
 		if let Ok(url) = Url::parse(format!("http://{s}").as_str()) {
 			if let Some(host) = url.host() {
-				// Url::parse will return port=None if the provided port was 80 (given we are using the http scheme). Get the original port from the string.
+				// Url::parse will return port=None if the provided port was 80 (given we are
+				// using the http scheme). Get the original port from the string.
 				if let Some(Ok(port)) = s.split(':').next_back().map(|p| p.parse::<u16>()) {
 					return Ok(NetTarget::Host(host.to_owned(), Some(port)));
 				} else {
@@ -365,7 +372,6 @@ impl std::str::FromStr for MethodTarget {
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-#[non_exhaustive]
 pub enum RouteTarget {
 	Health,
 	Export,
@@ -443,7 +449,6 @@ impl std::str::FromStr for RouteTarget {
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-#[non_exhaustive]
 pub enum ArbitraryQueryTarget {
 	Guest,
 	Record,
@@ -524,7 +529,6 @@ impl std::str::FromStr for ArbitraryQueryTarget {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[non_exhaustive]
 pub enum Targets<T: Hash + Eq + PartialEq> {
 	None,
 	Some(HashSet<T>),
@@ -568,7 +572,6 @@ impl<T: Target + Hash + Eq + PartialEq + fmt::Display> fmt::Display for Targets<
 }
 
 #[derive(Debug, Clone)]
-#[non_exhaustive]
 pub struct Capabilities {
 	scripting: bool,
 	guest_access: bool,
@@ -837,6 +840,7 @@ impl Capabilities {
 #[cfg(test)]
 mod tests {
 	use std::str::FromStr;
+
 	use test_log::test;
 
 	use super::*;
@@ -1161,7 +1165,8 @@ mod tests {
 			assert!(!caps.allows_network_target(&NetTarget::from_str("example.com:80").unwrap()));
 		}
 
-		// When some nets are allowed and some are denied, deny overrides the allow rules
+		// When some nets are allowed and some are denied, deny overrides the allow
+		// rules
 		{
 			let caps = Capabilities::default()
 				.with_network_targets(Targets::<NetTarget>::Some(
@@ -1193,7 +1198,8 @@ mod tests {
 			assert!(!caps.allows_function_name("http::post"));
 		}
 
-		// When some funcs are allowed and some are denied, deny overrides the allow rules
+		// When some funcs are allowed and some are denied, deny overrides the allow
+		// rules
 		{
 			let caps = Capabilities::default()
 				.with_functions(Targets::<FuncTarget>::Some(
@@ -1235,7 +1241,8 @@ mod tests {
 			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("query").unwrap()));
 		}
 
-		// When some RPC methods are allowed and some are denied, deny overrides the allow rules
+		// When some RPC methods are allowed and some are denied, deny overrides the
+		// allow rules
 		{
 			let caps = Capabilities::default()
 				.with_rpc_methods(Targets::<MethodTarget>::Some(
@@ -1293,7 +1300,8 @@ mod tests {
 			assert!(!caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
 		}
 
-		// When some HTTP routes are allowed and some are denied, deny overrides the allow rules
+		// When some HTTP routes are allowed and some are denied, deny overrides the
+		// allow rules
 		{
 			let caps = Capabilities::default()
 				.with_http_routes(Targets::<RouteTarget>::Some(
@@ -1349,7 +1357,8 @@ mod tests {
 			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("system").unwrap()));
 		}
 
-		// When some arbitrary query targets are allowed and some are denied, deny overrides the allow rules
+		// When some arbitrary query targets are allowed and some are denied, deny
+		// overrides the allow rules
 		{
 			let caps = Capabilities::default()
 				.with_arbitrary_query(Targets::<ArbitraryQueryTarget>::Some(

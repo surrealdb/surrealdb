@@ -1,19 +1,22 @@
+use std::collections::VecDeque;
+use std::collections::hash_map::Entry;
+use std::sync::Arc;
+
+use ahash::HashMap;
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Options};
 use crate::doc::CursorDoc;
-use crate::expr::{Cond, FlowResultExt as _, Thing, Value};
+use crate::expr::{Cond, Expr, FlowResultExt as _, Literal};
 use crate::idx::docids::DocId;
 use crate::idx::docids::btdocids::BTreeDocIds;
 use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::knn::Ids64;
 use crate::kvs::Transaction;
-use ahash::HashMap;
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::collections::VecDeque;
-use std::collections::hash_map::Entry;
-use std::sync::Arc;
+use crate::val::{RecordId, Value};
 
 pub enum HnswConditionChecker<'a> {
 	Hnsw(HnswChecker),
@@ -79,7 +82,7 @@ impl<'a> HnswConditionChecker<'a> {
 
 impl<'a> MTreeConditionChecker<'a> {
 	pub fn new_cond(ctx: &'a Context, opt: &'a Options, cond: Arc<Cond>) -> Self {
-		if Cond(Value::Bool(true)).ne(cond.as_ref()) {
+		if Expr::Literal(Literal::Bool(true)) != cond.0 {
 			Self::MTreeCondition(MTreeCondChecker {
 				ctx,
 				opt,
@@ -152,7 +155,7 @@ impl MTreeChecker<'_> {
 }
 
 struct CheckerCacheEntry {
-	record: Option<(Arc<Thing>, Arc<Value>)>,
+	record: Option<(Arc<RecordId>, Arc<Value>)>,
 	truthy: bool,
 }
 
@@ -178,22 +181,22 @@ impl CheckerCacheEntry {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		rid: Option<Thing>,
+		rid: Option<RecordId>,
 		cond: &Cond,
 	) -> Result<Self> {
 		if let Some(rid) = rid {
 			let rid = Arc::new(rid);
 			let txn = ctx.tx();
 			let val = Iterable::fetch_thing(&txn, opt, &rid).await?;
-			if !val.is_none_or_null() {
+			if !val.is_nullish() {
 				let (value, truthy) = {
 					let mut cursor_doc = CursorDoc {
 						rid: Some(rid.clone()),
 						ir: None,
 						doc: val.into(),
 					};
-					let truthy = cond
-						.compute(stk, ctx, opt, Some(&cursor_doc))
+					let truthy = stk
+						.run(|stk| cond.0.compute(stk, ctx, opt, Some(&cursor_doc)))
 						.await
 						.catch_return()?
 						.is_truthy();

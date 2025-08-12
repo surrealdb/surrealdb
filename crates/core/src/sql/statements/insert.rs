@@ -1,15 +1,11 @@
-use crate::sql::{Data, Output, SqlValue, Timeout, Version};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use crate::sql::{Data, Expr, Output, Timeout};
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct InsertStatement {
-	pub into: Option<SqlValue>,
+	pub into: Option<Expr>,
 	pub data: Data,
 	/// Does the statement have the ignore clause.
 	pub ignore: bool,
@@ -17,10 +13,8 @@ pub struct InsertStatement {
 	pub output: Option<Output>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
-	#[revision(start = 2)]
 	pub relation: bool,
-	#[revision(start = 3)]
-	pub version: Option<Version>,
+	pub version: Option<Expr>,
 }
 
 impl fmt::Display for InsertStatement {
@@ -43,7 +37,7 @@ impl fmt::Display for InsertStatement {
 			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.version {
-			write!(f, " {v}")?
+			write!(f, " VERSION {v}")?
 		}
 		if let Some(ref v) = self.timeout {
 			write!(f, " {v}")?
@@ -66,7 +60,7 @@ impl From<InsertStatement> for crate::expr::statements::InsertStatement {
 			timeout: v.timeout.map(Into::into),
 			parallel: v.parallel,
 			relation: v.relation,
-			version: v.version.map(Into::into),
+			version: v.version.map(From::from),
 		}
 	}
 }
@@ -82,7 +76,7 @@ impl From<crate::expr::statements::InsertStatement> for InsertStatement {
 			timeout: v.timeout.map(Into::into),
 			parallel: v.parallel,
 			relation: v.relation,
-			version: v.version.map(Into::into),
+			version: v.version.map(From::from),
 		}
 	}
 }

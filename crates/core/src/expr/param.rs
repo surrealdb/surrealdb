@@ -1,50 +1,70 @@
-use crate::{
-	ctx::Context,
-	dbs::Options,
-	doc::CursorDoc,
-	err::Error,
-	expr::{Permission, ident::Ident, value::Value},
-	iam::Action,
-};
+use std::ops::Deref;
+use std::{fmt, str};
+
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::{fmt, ops::Deref, str};
 
 use super::FlowResultExt as _;
-
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Param";
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::expr::Permission;
+use crate::expr::escape::EscapeKwFreeIdent;
+use crate::expr::ident::Ident;
+use crate::iam::Action;
+use crate::val::{Strand, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Param")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct Param(pub Ident);
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+pub struct Param(String);
+
+impl Param {
+	/// Create a new identifier
+	///
+	/// This function checks if the string has a null byte, returns None if it
+	/// has.
+	pub fn new(str: String) -> Option<Self> {
+		if str.contains('\0') {
+			return None;
+		}
+		Some(Self(str))
+	}
+
+	/// Create a new identifier
+	///
+	/// # Safety
+	/// Caller should ensure that the string does not contain a null byte.
+	pub unsafe fn new_unchecked(str: String) -> Self {
+		Self(str)
+	}
+
+	/// returns the identifier section of the parameter,
+	/// i.e. `$foo` without the `$` so: `foo`
+	pub fn ident(self) -> Ident {
+		// Safety: Param guarentees no null bytes within it's internal string.
+		unsafe { Ident::new_unchecked(self.0) }
+	}
+}
 
 impl From<Ident> for Param {
 	fn from(v: Ident) -> Self {
-		Self(v)
+		Self(v.to_string())
 	}
 }
 
-impl From<String> for Param {
-	fn from(v: String) -> Self {
-		Self(v.into())
-	}
-}
-
-impl From<&str> for Param {
-	fn from(v: &str) -> Self {
-		Self(v.into())
+impl From<Strand> for Param {
+	fn from(v: Strand) -> Self {
+		Self(v.into_string())
 	}
 }
 
 impl Deref for Param {
-	type Target = Ident;
+	type Target = str;
 	fn deref(&self) -> &Self::Target {
-		&self.0
+		self.0.as_str()
 	}
 }
 
@@ -58,18 +78,18 @@ impl Param {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Find the variable by name
-		match self.as_str() {
+		match self.0.as_str() {
 			// This is a special param
 			"this" | "self" => match doc {
 				// The base document exists
-				Some(v) => v.doc.as_ref().compute(stk, ctx, opt, doc).await.catch_return(),
+				Some(v) => Ok(v.doc.as_ref().clone()),
 				// The base document does not exist
 				None => Ok(Value::None),
 			},
 			// This is a normal param
 			v => match ctx.value(v) {
 				// The param has been set locally
-				Some(v) => v.compute(stk, ctx, opt, doc).await.catch_return(),
+				Some(v) => Ok(v.clone()),
 				// The param has not been set locally
 				None => {
 					// Ensure a database is set
@@ -101,7 +121,11 @@ impl Param {
 								// Disable permissions
 								let opt = &opt.new_with_perms(false);
 								// Process the PERMISSION clause
-								if !e.compute(stk, ctx, opt, doc).await.catch_return()?.is_truthy()
+								if !stk
+									.run(|stk| e.compute(stk, ctx, opt, doc))
+									.await
+									.catch_return()?
+									.is_truthy()
 								{
 									bail!(Error::ParamPermissions {
 										name: v.to_owned(),
@@ -111,7 +135,7 @@ impl Param {
 						}
 					}
 					// Return the computed value
-					val.value.compute(stk, ctx, opt, doc).await.catch_return()
+					Ok(val.value.clone())
 				}
 			},
 		}
@@ -120,6 +144,6 @@ impl Param {
 
 impl fmt::Display for Param {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "${}", &self.0.0)
+		write!(f, "${}", EscapeKwFreeIdent(&self.0))
 	}
 }

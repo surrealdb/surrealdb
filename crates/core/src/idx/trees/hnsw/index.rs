@@ -1,5 +1,11 @@
+use std::collections::VecDeque;
+
+#[cfg(debug_assertions)]
+use ahash::HashMap;
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::expr::index::{HnswParams, VectorType};
-use crate::expr::{Id, Number, Value};
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::planner::iterators::KnnIteratorResult;
@@ -10,11 +16,7 @@ use crate::idx::trees::hnsw::{ElementId, HnswSearch};
 use crate::idx::trees::knn::{KnnResult, KnnResultBuilder};
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::Transaction;
-#[cfg(debug_assertions)]
-use ahash::HashMap;
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::collections::VecDeque;
+use crate::val::{Number, RecordIdKey, Value};
 
 pub struct HnswIndex {
 	dim: usize,
@@ -89,7 +91,7 @@ impl HnswIndex {
 	pub async fn index_document(
 		&mut self,
 		tx: &Transaction,
-		id: &Id,
+		id: &RecordIdKey,
 		content: &[Value],
 	) -> Result<()> {
 		// Ensure the layers are up-to-date
@@ -97,7 +99,7 @@ impl HnswIndex {
 		// Resolve the doc_id
 		let doc_id = self.docs.resolve(tx, id).await?;
 		// Index the values
-		for value in content.iter().filter(|v| v.is_some()) {
+		for value in content.iter().filter(|v| !v.is_nullish()) {
 			// Extract the vector
 			let vector = Vector::try_from_value(self.vector_type, self.dim, value)?;
 			vector.check_dimension(self.dim)?;
@@ -111,13 +113,13 @@ impl HnswIndex {
 	pub(crate) async fn remove_document(
 		&mut self,
 		tx: &Transaction,
-		id: Id,
+		id: RecordIdKey,
 		content: &[Value],
 	) -> Result<()> {
 		if let Some(doc_id) = self.docs.remove(tx, id).await? {
 			// Ensure the layers are up-to-date
 			self.hnsw.check_state(tx).await?;
-			for v in content.iter().filter(|v| v.is_some()) {
+			for v in content.iter().filter(|v| !v.is_nullish()) {
 				// Extract the vector
 				let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
 				vector.check_dimension(self.dim)?;
