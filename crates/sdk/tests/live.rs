@@ -1,7 +1,6 @@
 mod helpers;
 use anyhow::Result;
-use helpers::new_ds;
-use helpers::skip_ok;
+use helpers::{new_ds, skip_ok};
 use surrealdb::dbs::Session;
 use surrealdb::syn;
 use surrealdb_core::strand;
@@ -44,7 +43,7 @@ async fn live_permissions() -> Result<()> {
 	)
 	.with_rt(true);
 	let sql = "
-		LIVE SELECT * FROM test;
+		LIVE SELECT * FROM type::table('test');
 		CREATE test:2;
 	";
 	let res = &mut dbs.execute(sql, &ses, None).await?;

@@ -110,7 +110,7 @@ impl Object {
 	/// Fetch the record id if there is one
 	pub fn rid(&self) -> Option<RecordId> {
 		match self.get("id") {
-			Some(Value::Thing(v)) => Some(v.clone()),
+			Some(Value::RecordId(v)) => Some(v.clone()),
 			_ => None,
 		}
 	}

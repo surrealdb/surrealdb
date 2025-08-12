@@ -12,7 +12,7 @@ pub async fn exists(
 	(arg,): (RecordId,),
 ) -> Result<Value> {
 	if let Some(opt) = opt {
-		let v = Value::Thing(arg).get(stk, ctx, opt, doc, ID.as_ref()).await.catch_return()?;
+		let v = Value::RecordId(arg).get(stk, ctx, opt, doc, ID.as_ref()).await.catch_return()?;
 		Ok(Value::Bool(!v.is_none()))
 	} else {
 		Ok(Value::None)

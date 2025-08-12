@@ -75,7 +75,7 @@ pub enum Value {
 	Object(Object),
 	Geometry(Geometry),
 	Bytes(Bytes),
-	Thing(RecordId),
+	RecordId(RecordId),
 	Table(Table),
 	File(File),
 	#[serde(skip)]
@@ -139,7 +139,7 @@ impl Value {
 		match self {
 			Value::Bool(v) => *v,
 			Value::Uuid(_) => true,
-			Value::Thing(_) => true,
+			Value::RecordId(_) => true,
 			Value::Geometry(_) => true,
 			Value::Datetime(_) => true,
 			Value::Array(v) => !v.is_empty(),
@@ -156,7 +156,7 @@ impl Value {
 	/// Check if this Value is a Thing, and belongs to a certain table
 	pub fn is_record_of_table(&self, table: String) -> bool {
 		match self {
-			Value::Thing(RecordId {
+			Value::RecordId(RecordId {
 				table: tb,
 				..
 			}) => *tb == table,
@@ -206,7 +206,7 @@ impl Value {
 	/// Check if this Value is a Thing of a specific type
 	pub fn is_record_type(&self, types: &[Ident]) -> bool {
 		match self {
-			Value::Thing(v) => v.is_record_type(types),
+			Value::RecordId(v) => v.is_record_type(types),
 			_ => false,
 		}
 	}
@@ -285,7 +285,7 @@ impl Value {
 			Value::Geometry(geo) => Some(Kind::Geometry(vec![geo.as_type().to_string()])),
 			Value::Bytes(_) => Some(Kind::Bytes),
 			Value::Regex(_) => Some(Kind::Regex),
-			Value::Thing(thing) => {
+			Value::RecordId(thing) => {
 				// TODO: Null byte validity
 				let str = unsafe { Ident::new_unchecked(thing.table.clone()) };
 				Some(Kind::Record(vec![str]))
@@ -340,7 +340,7 @@ impl Value {
 			Self::File(_) => "file",
 			Self::Bytes(_) => "bytes",
 			Self::Range(_) => "range",
-			Self::Thing(_) => "thing",
+			Self::RecordId(_) => "thing",
 			// TODO: Dubious types
 			Self::Table(_) => "table",
 		}
@@ -355,7 +355,7 @@ impl Value {
 		match self {
 			// This is an object so look for the id field
 			Value::Object(mut v) => match v.remove("id") {
-				Some(Value::Thing(v)) => Some(v),
+				Some(Value::RecordId(v)) => Some(v),
 				_ => None,
 			},
 			// This is an array so take the first item
@@ -364,7 +364,7 @@ impl Value {
 				_ => None,
 			},
 			// This is a record id already
-			Value::Thing(v) => Some(v),
+			Value::RecordId(v) => Some(v),
 			// There is no valid record id
 			_ => None,
 		}
@@ -387,8 +387,8 @@ impl Value {
 				Value::Uuid(w) => v == w,
 				_ => false,
 			},
-			Value::Thing(v) => match other {
-				Value::Thing(w) => v == w,
+			Value::RecordId(v) => match other {
+				Value::RecordId(w) => v == w,
 				// TODO(3.0.0): Decide if we want to keep this behavior.
 				//Value::Regex(w) => w.regex().is_match(v.to_raw().as_str()),
 				_ => false,
@@ -600,7 +600,7 @@ impl Value {
 			}
 			Value::Geometry(geometry) => expr::Expr::Literal(expr::Literal::Geometry(geometry)),
 			Value::Bytes(bytes) => expr::Expr::Literal(expr::Literal::Bytes(bytes)),
-			Value::Thing(record_id) => {
+			Value::RecordId(record_id) => {
 				expr::Expr::Literal(expr::Literal::RecordId(record_id.into_literal()))
 			}
 			Value::Regex(regex) => expr::Expr::Literal(expr::Literal::Regex(regex)),
@@ -629,7 +629,7 @@ impl fmt::Display for Value {
 			Value::Range(v) => write!(f, "{v}"),
 			Value::Regex(v) => write!(f, "{v}"),
 			Value::Strand(v) => write!(f, "{v}"),
-			Value::Thing(v) => write!(f, "{v}"),
+			Value::RecordId(v) => write!(f, "{v}"),
 			Value::Uuid(v) => write!(f, "{v}"),
 			Value::Closure(v) => write!(f, "{v}"),
 			//Value::Refs(v) => write!(f, "{v}"),
@@ -904,7 +904,7 @@ subtypes! {
 	Object(Object) => (is_object,as_object,into_object),
 	Geometry(Geometry) => (is_geometry,as_geometry,into_geometry),
 	Bytes(Bytes) => (is_bytes,as_bytes,into_bytes),
-	Thing(RecordId) => (is_thing,as_thing,into_thing),
+	RecordId(RecordId) => (is_thing,as_thing,into_thing),
 	Regex(Regex) => (is_regex,as_regex,into_regex),
 	Range(Box<Range>) => (is_range,as_range,into_range),
 	Closure(Box<Closure>) => (is_closure,as_closure,into_closure),

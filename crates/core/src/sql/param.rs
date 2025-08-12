@@ -1,4 +1,5 @@
-use crate::sql::{Ident, escape::EscapeIdent};
+use crate::sql::Ident;
+use crate::sql::escape::EscapeIdent;
 use crate::val::Strand;
 use std::fmt;
 

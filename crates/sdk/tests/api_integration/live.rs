@@ -224,7 +224,7 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 
 		// Delete the record
 		let thing = match created_value.get("id").unwrap() {
-			val::Value::Thing(thing) => thing,
+			val::Value::RecordId(thing) => thing,
 			_ => panic!("Expected a thing"),
 		};
 		db.query("DELETE $item").bind(("item", RecordId::from_inner(thing.clone()))).await.unwrap();
