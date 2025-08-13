@@ -122,6 +122,15 @@ impl CursorDoc {
 	}
 }
 
+impl From<Arc<Record>> for CursorRecord {
+	fn from(record: Arc<Record>) -> Self {
+		Self {
+			mutable: Default::default(),
+			read_only: Some(record),
+		}
+	}
+}
+
 impl From<Value> for CursorRecord {
 	fn from(value: Value) -> Self {
 		Self {
@@ -263,14 +272,14 @@ impl Document {
 	}
 
 	/// Update the document for a retry to update after an insert failed.
-	pub fn modify_for_update_retry(&mut self, id: RecordId, value: Arc<Value>) {
+	pub fn modify_for_update_retry(&mut self, id: RecordId, record: Arc<Record>) {
 		let retry = Arc::new(id);
 		self.id = Some(retry.clone());
 		self.r#gen = None;
 		self.retry = true;
 		self.record_strategy = RecordStrategy::KeysAndValues;
 
-		self.current = CursorDoc::new(Some(retry), None, value);
+		self.current = CursorDoc::new(Some(retry), None, record);
 		self.initial = self.current.clone();
 	}
 
