@@ -4,7 +4,8 @@ use anyhow::Result;
 
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cf::{TableMutation, TableMutations};
-use crate::doc::CursorValue;
+use crate::doc::CursorRecord;
+use crate::expr::statements::DefineTableStatement;
 use crate::kvs::{KVKey, Key};
 use crate::val::RecordId;
 
@@ -69,8 +70,8 @@ impl Writer {
 		db: DatabaseId,
 		tb: &str,
 		id: RecordId,
-		previous: CursorValue,
-		current: CursorValue,
+		previous: CursorRecord,
+		current: CursorRecord,
 		store_difference: bool,
 	) {
 		if current.as_ref().is_nullish() {
@@ -96,7 +97,8 @@ impl Writer {
 							// We intentionally record the patches in reverse (current -> previous)
 							// because we cannot otherwise resolve operations such as "replace" and
 							// "remove".
-							let patches_to_create_previous = current.diff(&previous);
+							let patches_to_create_previous =
+								current.as_ref().diff(&previous.as_ref());
 							TableMutation::SetWithDiff(
 								id,
 								current.into_owned(),
