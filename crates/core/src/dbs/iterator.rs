@@ -20,6 +20,7 @@ use crate::idx::planner::{
 	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
 	StatementContext,
 };
+use crate::val::record::Record;
 use crate::val::{Object, RecordId, RecordIdKey, RecordIdKeyRange, Value};
 
 const TARGET: &str = "surrealdb::core::dbs";
@@ -80,9 +81,9 @@ pub(crate) enum Iterable {
 
 #[derive(Debug)]
 pub(crate) enum Operable {
-	Value(Arc<Value>),
-	Insert(Arc<Value>, Arc<Value>),
-	Relate(RecordId, Arc<Value>, RecordId, Option<Arc<Value>>),
+	Value(Arc<Record>),
+	Insert(Arc<Record>, Arc<Record>),
+	Relate(RecordId, Arc<Record>, RecordId, Option<Arc<Record>>),
 	Count(usize),
 }
 
