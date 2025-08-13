@@ -194,7 +194,7 @@ impl CheckerCacheEntry {
 			let txn = ctx.tx();
 			let val =
 				txn.get_record(db.namespace_id, db.database_id, &rid.table, &rid.key, None).await?;
-			if !val.is_nullish() {
+			if !val.data.is_nullish() {
 				let (value, truthy) = {
 					let mut cursor_doc = CursorDoc {
 						rid: Some(rid.clone()),
