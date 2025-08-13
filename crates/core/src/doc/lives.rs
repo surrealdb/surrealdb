@@ -8,7 +8,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Action, Notification, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
-use crate::expr::paths::{AC, META, RD, TK};
+use crate::expr::paths::{AC, RD, TK};
 use crate::expr::permission::Permission;
 use crate::expr::{FlowResultExt as _, LiveStatement};
 use crate::val::Value;

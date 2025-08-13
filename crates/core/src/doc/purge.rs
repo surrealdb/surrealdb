@@ -5,7 +5,7 @@ use reblessive::tree::Stk;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Options, Statement};
-use crate::doc::{CursorDoc, CursorValue, Document};
+use crate::doc::{CursorDoc, CursorRecord, Document};
 use crate::err::Error;
 use crate::expr::data::Assignment;
 use crate::expr::dir::Dir;
@@ -40,11 +40,11 @@ impl Document {
 			txn.del_record(ns, db, &rid.table, &rid.key).await?;
 			// Purge the record edges
 			match (
-				self.initial.doc.as_ref().pick(&*EDGE),
+				self.initial.doc.is_edge(),
 				self.initial.doc.as_ref().pick(&*IN),
 				self.initial.doc.as_ref().pick(&*OUT),
 			) {
-				(Value::Bool(true), Value::RecordId(ref l), Value::RecordId(ref r)) => {
+				(true, Value::RecordId(ref l), Value::RecordId(ref r)) => {
 					// Lock the transaction
 					let mut txn = txn.lock().await;
 					// Get temporary edge references
@@ -202,7 +202,7 @@ impl Document {
 								let ctx = ctx.freeze();
 
 								// Obtain the document for the remote record
-								let doc: CursorValue = Value::RecordId(this)
+								let doc: CursorRecord = Value::RecordId(this)
 									.get(
 										stk,
 										&ctx,
