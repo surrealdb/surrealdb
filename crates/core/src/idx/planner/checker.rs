@@ -16,7 +16,8 @@ use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::knn::Ids64;
 use crate::kvs::Transaction;
-use crate::val::{RecordId, Value};
+use crate::val::RecordId;
+use crate::val::record::Record;
 
 pub enum HnswConditionChecker<'a> {
 	Hnsw(HnswChecker),
@@ -155,7 +156,7 @@ impl MTreeChecker<'_> {
 }
 
 struct CheckerCacheEntry {
-	record: Option<(Arc<RecordId>, Arc<Value>)>,
+	record: Option<(Arc<RecordId>, Arc<Record>)>,
 	truthy: bool,
 }
 
