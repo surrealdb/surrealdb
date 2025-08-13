@@ -42,7 +42,7 @@ In short, feel free to submit any and all PRs, and then sit back and relax. Disc
 
 ## Coding standards
 
-SurrealDB uses the `cargo fmt` and `cargo clippy` commands to ensure that code is formatted and linted to the same standards. To run them, use the following commands:
+SurrealDB uses cargo commands to ensure that code is formatted and linted to the same standards. To run them, use the following commands:
 
 ```bash
 // Use this for formatting because nightly rustfmt is used
