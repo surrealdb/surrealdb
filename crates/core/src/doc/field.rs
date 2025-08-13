@@ -64,14 +64,14 @@ impl Document {
 			for fd in self.fd(ctx, opt).await?.iter() {
 				let is_flex = fd.flex;
 				let is_literal = fd.field_kind.as_ref().is_some_and(Kind::contains_literal);
-				for k in self.current.doc.each(&fd.name).into_iter() {
+				for k in self.current.doc.as_ref().each(&fd.name).into_iter() {
 					defined_field_names.insert(&k, is_flex || is_literal);
 				}
 			}
 
 			// Loop over every field in the document
 			for current_doc_field_idiom in
-				self.current.doc.every(None, true, ArrayBehaviour::Full).iter()
+				self.current.doc.as_ref().every(None, true, ArrayBehaviour::Full).iter()
 			{
 				if current_doc_field_idiom.is_special() {
 					// This field is a built-in field, so we can skip it.
@@ -678,6 +678,7 @@ impl FieldEditContext<'_> {
 					.doc
 					.current
 					.doc
+					.as_ref()
 					.get(self.stk, self.ctx, self.opt, doc, &self.def.name)
 					.await
 					.catch_return()?;
