@@ -6,7 +6,7 @@ use crate::doc::Document;
 use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::{Dir, Relation, TableType};
-use crate::val::Value;
+use crate::val::record::RecordType;
 
 impl Document {
 	pub(super) async fn store_edges_data(
@@ -71,7 +71,7 @@ impl Document {
 			let key = crate::key::graph::new(ns, db, &r.table, &r.key, i, &rid);
 			txn.set(&key, &(), opt.version).await?;
 			// Store the edges on the record
-			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));
+			self.current.doc.set_record_type(RecordType::Edge);
 			self.current.doc.to_mut().put(&*IN, l.clone().into());
 			self.current.doc.to_mut().put(&*OUT, r.clone().into());
 		}
