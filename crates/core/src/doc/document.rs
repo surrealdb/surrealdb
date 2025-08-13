@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Formatter};
 use std::mem;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -20,6 +20,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::idx::planner::RecordStrategy;
 use crate::idx::planner::iterators::IteratorRecord;
 use crate::kvs::cache;
+use crate::val::record::Record;
 use crate::val::{RecordId, Value};
 
 pub(crate) struct Document {
@@ -41,24 +42,24 @@ pub(crate) struct Document {
 pub(crate) struct CursorDoc {
 	pub(crate) rid: Option<Arc<RecordId>>,
 	pub(crate) ir: Option<Arc<IteratorRecord>>,
-	pub(crate) doc: CursorValue,
+	pub(crate) doc: CursorRecord,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct CursorValue {
-	mutable: Value,
-	read_only: Option<Arc<Value>>,
+pub(crate) struct CursorRecord {
+	mutable: Record,
+	read_only: Option<Arc<Record>>,
 }
 
-impl CursorValue {
+impl CursorRecord {
 	pub(crate) fn to_mut(&mut self) -> &mut Value {
 		if let Some(ro) = self.read_only.take() {
 			self.mutable = ro.as_ref().clone();
 		}
-		&mut self.mutable
+		&mut self.mutable.data
 	}
 
-	pub(crate) fn as_arc(&mut self) -> Arc<Value> {
+	pub(crate) fn as_arc(&mut self) -> Arc<Record> {
 		match &self.read_only {
 			None => {
 				let v = Arc::new(mem::take(&mut self.mutable));
@@ -71,30 +72,43 @@ impl CursorValue {
 
 	pub(crate) fn as_ref(&self) -> &Value {
 		if let Some(ro) = &self.read_only {
-			ro.as_ref()
+			&ro.data
 		} else {
-			&self.mutable
+			&self.mutable.data
 		}
 	}
 
 	pub(crate) fn into_owned(self) -> Value {
 		if let Some(ro) = &self.read_only {
-			ro.as_ref().clone()
+			ro.data.clone()
 		} else {
-			self.mutable
+			self.mutable.data
 		}
 	}
 }
 
-impl Deref for CursorValue {
-	type Target = Value;
+impl Deref for CursorRecord {
+	type Target = Record;
 	fn deref(&self) -> &Self::Target {
-		self.as_ref()
+		if let Some(ro) = &self.read_only {
+			&ro
+		} else {
+			&self.mutable
+		}
+	}
+}
+
+impl DerefMut for CursorRecord {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		if let Some(ro) = self.read_only.take() {
+			self.mutable = ro.as_ref().clone();
+		}
+		&mut self.mutable
 	}
 }
 
 impl CursorDoc {
-	pub(crate) fn new<T: Into<CursorValue>>(
+	pub(crate) fn new<T: Into<CursorRecord>>(
 		rid: Option<Arc<RecordId>>,
 		ir: Option<Arc<IteratorRecord>>,
 		doc: T,
@@ -107,20 +121,20 @@ impl CursorDoc {
 	}
 }
 
-impl From<Value> for CursorValue {
+impl From<Value> for CursorRecord {
 	fn from(value: Value) -> Self {
 		Self {
-			mutable: value,
+			mutable: Record::new(value),
 			read_only: None,
 		}
 	}
 }
 
-impl From<Arc<Value>> for CursorValue {
+impl From<Arc<Value>> for CursorRecord {
 	fn from(value: Arc<Value>) -> Self {
 		Self {
-			mutable: Value::None,
-			read_only: Some(value),
+			mutable: Default::default(),
+			read_only: Some(Arc::new(Record::new(value.as_ref().clone()))),
 		}
 	}
 }
@@ -130,10 +144,7 @@ impl From<Value> for CursorDoc {
 		Self {
 			rid: None,
 			ir: None,
-			doc: CursorValue {
-				mutable: val,
-				read_only: None,
-			},
+			doc: val.into(),
 		}
 	}
 }
@@ -143,10 +154,7 @@ impl From<Arc<Value>> for CursorDoc {
 		Self {
 			rid: None,
 			ir: None,
-			doc: CursorValue {
-				mutable: Value::None,
-				read_only: Some(doc),
-			},
+			doc: doc.into(),
 		}
 	}
 }
@@ -321,7 +329,7 @@ impl Document {
 			// Get the full document
 			let full = target.0;
 			// Process the full document
-			let mut out = (*full.doc).clone();
+			let mut out = full.doc.as_ref().clone();
 			// Loop over each field in document
 			for fd in fds.iter() {
 				// Loop over each field in document
