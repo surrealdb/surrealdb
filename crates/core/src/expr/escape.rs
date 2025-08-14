@@ -73,7 +73,8 @@ impl fmt::Display for EscapeIdent<'_> {
 
 /// Escapes identifiers which can never be used in the same place as a keyword.
 ///
-/// Examples of this is a Param as '$' is in front of the identifier so it cannot be an
+/// Examples of this is a Param as '$' is in front of the identifier so it
+/// cannot be an
 pub struct EscapeKwFreeIdent<'a>(pub &'a str);
 impl fmt::Display for EscapeKwFreeIdent<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

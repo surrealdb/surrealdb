@@ -1,9 +1,10 @@
+use url::Url;
+
 use crate::api::Result;
 use crate::api::engine::local::{Db, Mem};
 use crate::api::opt::endpoint::into_endpoint;
 use crate::api::opt::{Endpoint, IntoEndpoint};
 use crate::opt::Config;
-use url::Url;
 
 impl IntoEndpoint<Mem> for () {}
 impl into_endpoint::Sealed<Mem> for () {

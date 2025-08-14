@@ -2,11 +2,12 @@ use surrealdb_core::iam::Level;
 use surrealdb_core::syn;
 use surrealdb_core::val::Array;
 mod helpers;
-use crate::helpers::Test;
 use helpers::new_ds;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::iam::Role;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::iam::Role;
+
+use crate::helpers::Test;
 
 #[tokio::test]
 async fn update_merge_and_content() -> Result<()> {

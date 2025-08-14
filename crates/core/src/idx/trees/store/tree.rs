@@ -1,11 +1,13 @@
-use crate::idx::trees::store::cache::TreeCache;
-use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider};
-use crate::kvs::{Key, Transaction};
-use ahash::{HashMap, HashSet};
-use anyhow::Result;
 use std::fmt::{Debug, Display};
 use std::mem;
 use std::sync::Arc;
+
+use ahash::{HashMap, HashSet};
+use anyhow::Result;
+
+use crate::idx::trees::store::cache::TreeCache;
+use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider};
+use crate::kvs::{Key, Transaction};
 
 pub struct TreeWrite<N>
 where
@@ -104,7 +106,8 @@ where
 		if self.updated.is_empty() && self.removed.is_empty() {
 			return Ok(None);
 		}
-		// Create a new cache hydrated with non-updated and non-removed previous cache entries.
+		// Create a new cache hydrated with non-updated and non-removed previous cache
+		// entries.
 		let new_cache = self.cache.next_generation(&self.updated, &self.removed).await;
 
 		let updated = mem::take(&mut self.updated);

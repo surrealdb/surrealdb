@@ -1,10 +1,11 @@
+use std::borrow::Cow;
+use std::future::IntoFuture;
+
 use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::method::{BoxFuture, OnceLockExt};
 use crate::api::opt::auth::Jwt;
 use crate::api::{Connection, Result};
-use std::borrow::Cow;
-use std::future::IntoFuture;
 
 /// An authentication future
 #[derive(Debug)]

@@ -1,8 +1,8 @@
-use crate::err::Error;
-use crate::expr::index::{Distance, VectorType};
-use crate::fnc::util::math::ToFloat;
-use crate::kvs::KVValue;
-use crate::val::{Number, Value};
+use std::cmp::PartialEq;
+use std::hash::{Hash, Hasher};
+use std::ops::{Add, Deref, Div, Sub};
+use std::sync::Arc;
+
 use ahash::{AHasher, HashSet};
 use anyhow::{Result, ensure};
 use linfa_linalg::norm::Norm;
@@ -12,12 +12,15 @@ use num_traits::Zero;
 use revision::{Revisioned, revisioned};
 use rust_decimal::prelude::FromPrimitive;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::cmp::PartialEq;
-use std::hash::{Hash, Hasher};
-use std::ops::{Add, Deref, Div, Sub};
-use std::sync::Arc;
 
-/// In the context of a Symmetric MTree index, the term object refers to a vector, representing the indexed item.
+use crate::err::Error;
+use crate::expr::index::{Distance, VectorType};
+use crate::fnc::util::math::ToFloat;
+use crate::kvs::KVValue;
+use crate::val::{Number, Value};
+
+/// In the context of a Symmetric MTree index, the term object refers to a
+/// vector, representing the indexed item.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Vector {
 	F64(Array1<f64>),
@@ -323,11 +326,13 @@ impl Vector {
 	}
 }
 
-/// For vectors, as we want to support very large vectors, we want to avoid copy or clone.
-/// So the requirement is multiple ownership but not thread safety.
-/// However, because we are running in an async context, and because we are using cache structures that use the Arc as a key,
-/// the cached objects has to be Sent, which then requires the use of Arc (rather than just Rc).
-/// As computing the hash for a large vector is costly, this structures also caches the hashcode to avoid recomputing it.
+/// For vectors, as we want to support very large vectors, we want to avoid copy
+/// or clone. So the requirement is multiple ownership but not thread safety.
+/// However, because we are running in an async context, and because we are
+/// using cache structures that use the Arc as a key, the cached objects has to
+/// be Sent, which then requires the use of Arc (rather than just Rc).
+/// As computing the hash for a large vector is costly, this structures also
+/// caches the hashcode to avoid recomputing it.
 #[derive(Debug, Clone)]
 pub struct SharedVector(Arc<Vector>, u64);
 impl From<Vector> for SharedVector {

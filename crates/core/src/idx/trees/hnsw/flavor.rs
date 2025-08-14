@@ -1,3 +1,6 @@
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::expr::index::HnswParams;
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
@@ -6,8 +9,6 @@ use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
 use crate::idx::trees::hnsw::{ElementId, Hnsw, HnswSearch};
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::Transaction;
-use anyhow::Result;
-use reblessive::tree::Stk;
 
 pub(super) enum HnswFlavor {
 	H5_9(Hnsw<ArraySet<9>, ArraySet<5>>),

@@ -1,9 +1,11 @@
+use std::path::{Path, PathBuf};
+
+use url::Url;
+
 use crate::api::Result;
 use crate::api::engine::local::{Db, RocksDb};
 use crate::api::opt::endpoint::into_endpoint;
 use crate::api::opt::{Config, Endpoint, IntoEndpoint};
-use std::path::{Path, PathBuf};
-use url::Url;
 
 macro_rules! endpoints {
 	($($name:ty),*) => {

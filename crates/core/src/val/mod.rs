@@ -1,20 +1,22 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
-use crate::err::Error;
-use crate::expr::fmt::Pretty;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{self, Ident, Kind};
-use crate::kvs::impl_kv_value_revisioned;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::{self, Write};
+use std::ops::Bound;
+
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use geo::Point;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
-use std::fmt::{self, Write};
-use std::ops::Bound;
+
+use crate::err::Error;
+use crate::expr::fmt::Pretty;
+use crate::expr::statements::info::InfoStructure;
+use crate::expr::{self, Ident, Kind};
+use crate::kvs::impl_kv_value_revisioned;
 
 pub mod array;
 pub mod bytes;
@@ -75,7 +77,7 @@ pub enum Value {
 	Object(Object),
 	Geometry(Geometry),
 	Bytes(Bytes),
-	Thing(RecordId),
+	RecordId(RecordId),
 	Table(Table),
 	File(File),
 	#[serde(skip)]
@@ -139,7 +141,7 @@ impl Value {
 		match self {
 			Value::Bool(v) => *v,
 			Value::Uuid(_) => true,
-			Value::Thing(_) => true,
+			Value::RecordId(_) => true,
 			Value::Geometry(_) => true,
 			Value::Datetime(_) => true,
 			Value::Array(v) => !v.is_empty(),
@@ -156,7 +158,7 @@ impl Value {
 	/// Check if this Value is a Thing, and belongs to a certain table
 	pub fn is_record_of_table(&self, table: String) -> bool {
 		match self {
-			Value::Thing(RecordId {
+			Value::RecordId(RecordId {
 				table: tb,
 				..
 			}) => *tb == table,
@@ -206,7 +208,7 @@ impl Value {
 	/// Check if this Value is a Thing of a specific type
 	pub fn is_record_type(&self, types: &[Ident]) -> bool {
 		match self {
-			Value::Thing(v) => v.is_record_type(types),
+			Value::RecordId(v) => v.is_record_type(types),
 			_ => false,
 		}
 	}
@@ -285,7 +287,7 @@ impl Value {
 			Value::Geometry(geo) => Some(Kind::Geometry(vec![geo.as_type().to_string()])),
 			Value::Bytes(_) => Some(Kind::Bytes),
 			Value::Regex(_) => Some(Kind::Regex),
-			Value::Thing(thing) => {
+			Value::RecordId(thing) => {
 				// TODO: Null byte validity
 				let str = unsafe { Ident::new_unchecked(thing.table.clone()) };
 				Some(Kind::Record(vec![str]))
@@ -310,11 +312,12 @@ impl Value {
 	/// Returns the surql representation of the kind of the value as a string.
 	///
 	/// # Warning
-	/// This function is not fully implement for all variants, make sure you don't accidentally use
-	/// it where it can return an invalid value.
+	/// This function is not fully implement for all variants, make sure you
+	/// don't accidentally use it where it can return an invalid value.
 	pub fn kind_of(&self) -> &'static str {
-		// TODO: Look at this function, there are a whole bunch of options for which this returns
-		// "incorrect type" which might sneak into the results where it shouldn.t
+		// TODO: Look at this function, there are a whole bunch of options for which
+		// this returns "incorrect type" which might sneak into the results where it
+		// shouldn.t
 		match self {
 			Self::None => "none",
 			Self::Null => "null",
@@ -340,7 +343,7 @@ impl Value {
 			Self::File(_) => "file",
 			Self::Bytes(_) => "bytes",
 			Self::Range(_) => "range",
-			Self::Thing(_) => "thing",
+			Self::RecordId(_) => "thing",
 			// TODO: Dubious types
 			Self::Table(_) => "table",
 		}
@@ -355,7 +358,7 @@ impl Value {
 		match self {
 			// This is an object so look for the id field
 			Value::Object(mut v) => match v.remove("id") {
-				Some(Value::Thing(v)) => Some(v),
+				Some(Value::RecordId(v)) => Some(v),
 				_ => None,
 			},
 			// This is an array so take the first item
@@ -364,7 +367,7 @@ impl Value {
 				_ => None,
 			},
 			// This is a record id already
-			Value::Thing(v) => Some(v),
+			Value::RecordId(v) => Some(v),
 			// There is no valid record id
 			_ => None,
 		}
@@ -387,8 +390,8 @@ impl Value {
 				Value::Uuid(w) => v == w,
 				_ => false,
 			},
-			Value::Thing(v) => match other {
-				Value::Thing(w) => v == w,
+			Value::RecordId(v) => match other {
+				Value::RecordId(w) => v == w,
 				// TODO(3.0.0): Decide if we want to keep this behavior.
 				//Value::Regex(w) => w.regex().is_match(v.to_raw().as_str()),
 				_ => false,
@@ -573,7 +576,8 @@ impl Value {
 		}
 	}
 
-	/// Compare this Value to another Value lexicographically and using natural numerical comparison
+	/// Compare this Value to another Value lexicographically and using natural
+	/// numerical comparison
 	pub fn natural_lexical_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
 			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_lexical_cmp(a, b)),
@@ -600,7 +604,7 @@ impl Value {
 			}
 			Value::Geometry(geometry) => expr::Expr::Literal(expr::Literal::Geometry(geometry)),
 			Value::Bytes(bytes) => expr::Expr::Literal(expr::Literal::Bytes(bytes)),
-			Value::Thing(record_id) => {
+			Value::RecordId(record_id) => {
 				expr::Expr::Literal(expr::Literal::RecordId(record_id.into_literal()))
 			}
 			Value::Regex(regex) => expr::Expr::Literal(expr::Literal::Regex(regex)),
@@ -629,7 +633,7 @@ impl fmt::Display for Value {
 			Value::Range(v) => write!(f, "{v}"),
 			Value::Regex(v) => write!(f, "{v}"),
 			Value::Strand(v) => write!(f, "{v}"),
-			Value::Thing(v) => write!(f, "{v}"),
+			Value::RecordId(v) => write!(f, "{v}"),
 			Value::Uuid(v) => write!(f, "{v}"),
 			Value::Closure(v) => write!(f, "{v}"),
 			//Value::Refs(v) => write!(f, "{v}"),
@@ -904,7 +908,7 @@ subtypes! {
 	Object(Object) => (is_object,as_object,into_object),
 	Geometry(Geometry) => (is_geometry,as_geometry,into_geometry),
 	Bytes(Bytes) => (is_bytes,as_bytes,into_bytes),
-	Thing(RecordId) => (is_thing,as_thing,into_thing),
+	RecordId(RecordId) => (is_thing,as_thing,into_thing),
 	Regex(Regex) => (is_regex,as_regex,into_regex),
 	Range(Box<Range>) => (is_range,as_range,into_range),
 	Closure(Box<Closure>) => (is_closure,as_closure,into_closure),
@@ -1025,10 +1029,10 @@ impl FromIterator<(String, Value)> for Value {
 
 #[cfg(test)]
 mod tests {
-	use crate::syn;
+	use chrono::TimeZone;
 
 	use super::*;
-	use chrono::TimeZone;
+	use crate::syn;
 
 	#[test]
 	fn check_none() {

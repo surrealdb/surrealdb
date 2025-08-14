@@ -1,3 +1,12 @@
+use std::fmt;
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::config::api::{ApiConfig, ApiConfigStore};
+use super::{CursorDoc, DefineKind};
 use crate::api::method::Method;
 use crate::api::path::Path;
 use crate::ctx::Context;
@@ -9,14 +18,6 @@ use crate::expr::{Base, Expr, FlowResultExt as _, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Object, Strand};
-use anyhow::{Result, bail};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self};
-
-use super::config::api::{ApiConfig, ApiConfigStore};
-use super::{CursorDoc, DefineKind};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -158,7 +159,8 @@ pub struct ApiDefinition {
 impl_kv_value_revisioned!(ApiDefinition);
 
 impl ApiDefinition {
-	/// Finds the api definition which most closely matches the segments of the path.
+	/// Finds the api definition which most closely matches the segments of the
+	/// path.
 	pub fn find_definition<'a>(
 		definitions: &'a [ApiDefinition],
 		segments: Vec<&str>,

@@ -1,8 +1,9 @@
 //! Stores the term/document frequency and offsets
 //!
 //! This key is used in the concurrent full-text search implementation to store
-//! term-document relationships with their frequencies and offsets. It maps terms
-//! to the documents that contain them, allowing for efficient text search operations.
+//! term-document relationships with their frequencies and offsets. It maps
+//! terms to the documents that contain them, allowing for efficient text search
+//! operations.
 //!
 //! The key structure includes:
 //! - Namespace, database, table, and index identifiers
@@ -16,13 +17,13 @@
 //! - Supporting concurrent read and write operations
 //! - Enabling efficient term frequency tracking for relevance scoring
 
-use crate::idx::docids::DocId;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::KVKey;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::idx::docids::DocId;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Tt<'a> {
@@ -60,9 +61,9 @@ impl Categorise for Tt<'_> {
 impl<'a> Tt<'a> {
 	/// Creates a new term-document key
 	///
-	/// This constructor creates a key that represents a term occurrence in a document.
-	/// It's used by the full-text search engine to build the inverted index that maps
-	/// terms to the documents containing them.
+	/// This constructor creates a key that represents a term occurrence in a
+	/// document. It's used by the full-text search engine to build the
+	/// inverted index that maps terms to the documents containing them.
 	///
 	/// # Arguments
 	/// * `ns` - Namespace identifier
@@ -73,7 +74,8 @@ impl<'a> Tt<'a> {
 	/// * `doc_id` - The document ID where the term appears
 	/// * `nid` - Node ID for distributed transaction tracking
 	/// * `uid` - Transaction ID for concurrency control
-	/// * `add` - Whether this is an addition (true) or removal (false) operation
+	/// * `add` - Whether this is an addition (true) or removal (false)
+	///   operation
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
 		ns: &'a str,
@@ -109,9 +111,9 @@ impl<'a> Tt<'a> {
 
 	/// Creates a key range for querying a specific term
 	///
-	/// This method generates a key range that can be used to query all occurrences
-	/// of a specific term across all documents in the full-text index. It's used
-	/// for term-specific searches and frequency analysis.
+	/// This method generates a key range that can be used to query all
+	/// occurrences of a specific term across all documents in the full-text
+	/// index. It's used for term-specific searches and frequency analysis.
 	///
 	/// # Arguments
 	/// * `ns` - Namespace identifier

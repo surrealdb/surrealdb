@@ -1,9 +1,10 @@
-use super::{Content, array_from_content, object_from_content_struct, value_from_content};
-use crate::val::{self, Value};
 use anyhow::Result;
 use serde::Deserialize;
 use serde::de::IntoDeserializer;
 use serde_content::{Data, Expected, Unexpected};
+
+use super::{Content, array_from_content, object_from_content_struct, value_from_content};
+use crate::core::val::{self, Value};
 
 pub(super) fn to_value(content: Content) -> Result<Value> {
 	match content {
@@ -86,7 +87,8 @@ pub(super) fn to_value(content: Content) -> Result<Value> {
 #[cfg(test)]
 mod test {
 	use serde::Serialize;
-	use surrealdb_core::val;
+
+	use crate::core::val;
 
 	fn val_to_serde_name<T: Serialize>(t: T) -> String {
 		let ser = t.serialize(serde_content::Serializer::new()).unwrap();
@@ -119,7 +121,7 @@ mod test {
 			val_to_serde_name(val::Closure {
 				args: Vec::new(),
 				returns: None,
-				body: surrealdb_core::expr::Expr::Break,
+				body: crate::core::expr::Expr::Break,
 			})
 		);
 		assert_eq!(

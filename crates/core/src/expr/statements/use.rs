@@ -1,8 +1,10 @@
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::expr::{Ident, escape::EscapeIdent};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use crate::expr::Ident;
+use crate::expr::escape::EscapeIdent;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]

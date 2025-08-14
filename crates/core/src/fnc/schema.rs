@@ -1,11 +1,12 @@
 pub mod table {
+	use anyhow::Result;
+
 	use crate::ctx::Context;
 	use crate::dbs::Options;
 	use crate::err::Error;
 	use crate::expr::Base;
 	use crate::iam::{Action, ResourceKind};
 	use crate::val::Value;
-	use anyhow::Result;
 
 	pub async fn exists(
 		(ctx, opt): (&Context, Option<&Options>),

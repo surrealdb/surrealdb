@@ -1,7 +1,9 @@
+use std::sync::Arc;
+
+use anyhow::Result;
+
 use super::Auth;
 use crate::dbs::Session;
-use anyhow::Result;
-use std::sync::Arc;
 
 pub fn clear(session: &mut Session) -> Result<()> {
 	session.au = Arc::new(Auth::default());

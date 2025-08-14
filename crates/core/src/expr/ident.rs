@@ -1,13 +1,15 @@
+use std::fmt::{self, Display, Formatter};
+use std::ops::Deref;
+use std::str;
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::expr::Value;
 use crate::expr::escape::EscapeIdent;
 use crate::expr::statements::info::InfoStructure;
 use crate::val::strand::no_nul_bytes;
 use crate::val::{Strand, Table};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
-use std::ops::Deref;
-use std::str;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -17,7 +19,8 @@ pub struct Ident(#[serde(with = "no_nul_bytes")] String);
 impl Ident {
 	/// Create a new identifier
 	///
-	/// This function checks if the string has a null byte, returns None if it has.
+	/// This function checks if the string has a null byte, returns None if it
+	/// has.
 	pub fn new(str: String) -> Option<Self> {
 		if str.contains('\0') {
 			return None;

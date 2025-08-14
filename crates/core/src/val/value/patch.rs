@@ -1,9 +1,10 @@
-use crate::expr::Ident;
+use anyhow::{Result, ensure};
+
+use crate::err::Error;
 use crate::expr::operation::PatchError;
 use crate::expr::part::Part;
+use crate::expr::{Ident, Operation};
 use crate::val::Value;
-use crate::{err::Error, expr::Operation};
-use anyhow::{Result, ensure};
 
 impl Value {
 	pub(crate) fn patch(&mut self, ops: Value) -> Result<()> {

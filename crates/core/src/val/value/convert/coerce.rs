@@ -1,8 +1,9 @@
+use std::collections::{BTreeMap, HashMap};
+use std::fmt;
+use std::hash::BuildHasher;
+
 use geo::Point;
 use rust_decimal::Decimal;
-use std::collections::{BTreeMap, HashMap};
-use std::fmt::{self};
-use std::hash::BuildHasher;
 
 use crate::expr::kind::{HasKind, KindLiteral};
 use crate::expr::{Ident, Kind};
@@ -79,12 +80,13 @@ impl<T> CoerceErrorExt for Result<T, CoerceError> {
 
 /// Trait for converting the value using coercion rules.
 ///
-/// Coercion rules are applied whenever a Value needs to be of a specific [`Kind`].
-/// This happens when a value is applied to a place with a type like table fields and function
-/// parameters.
+/// Coercion rules are applied whenever a Value needs to be of a specific
+/// [`Kind`]. This happens when a value is applied to a place with a type like
+/// table fields and function parameters.
 ///
 /// Coercion rules are more strict then casting rules.
-/// Calling this method will succeed if the value can be unified with the kind of the target
+/// Calling this method will succeed if the value can be unified with the kind
+/// of the target
 pub trait Coerce: Sized {
 	/// Returns if calling coerce on the value will succeed or not.
 	///
@@ -411,7 +413,7 @@ impl_direct! {
 	Bytes => Bytes,
 	Object => Object,
 	Array => Array,
-	Thing => RecordId,
+	RecordId => RecordId,
 	Strand => Strand,
 	Geometry => Geometry,
 	Regex => Regex,
@@ -499,7 +501,7 @@ impl Value {
 
 	fn can_coerce_to_record(&self, val: &[Ident]) -> bool {
 		match self {
-			Value::Thing(t) => {
+			Value::RecordId(t) => {
 				val.is_empty() || val.iter().any(|x| t.table == **x)
 				//t.is_record_type(val),
 			}
@@ -522,7 +524,8 @@ impl Value {
 	/// Convert the value using coercion rules.
 	///
 	/// Coercion rules are more strict then coverting rules.
-	/// Calling this method will succeed if the value can by unified with the kind of the target
+	/// Calling this method will succeed if the value can by unified with the
+	/// kind of the target
 	///
 	/// This method is a shorthand for `T::coerce(self)`
 	pub fn coerce_to<T: Coerce>(self) -> Result<T, CoerceError> {
@@ -604,7 +607,8 @@ impl Value {
 		}
 	}
 
-	/// Try to coerce this value to a Literal, returns a `Value` with the coerced value
+	/// Try to coerce this value to a Literal, returns a `Value` with the
+	/// coerced value
 	pub(crate) fn coerce_to_literal(self, literal: &KindLiteral) -> Result<Value, CoerceError> {
 		if literal.validate_value(&self) {
 			Ok(self)
@@ -620,11 +624,11 @@ impl Value {
 	pub(crate) fn coerce_to_record_kind(self, val: &[Ident]) -> Result<RecordId, CoerceError> {
 		let this = match self {
 			// Records are allowed if correct type
-			Value::Thing(v) => {
+			Value::RecordId(v) => {
 				if val.is_empty() || val.iter().any(|x| **x == v.table) {
 					return Ok(v);
 				} else {
-					Value::Thing(v)
+					Value::RecordId(v)
 				}
 			}
 			x => x,
@@ -701,7 +705,8 @@ impl Value {
 			.with_element_of(|| format!("set<{kind}>"))
 	}
 
-	/// Try to coerce this value to an `Array` of a certain type, unique values, and length
+	/// Try to coerce this value to an `Array` of a certain type, unique values,
+	/// and length
 	pub(crate) fn coerce_to_set_kind_len(
 		self,
 		kind: &Kind,

@@ -1,8 +1,9 @@
-use crate::val::Value;
 use anyhow::Result;
 use md5::{Digest, Md5};
 use sha1::Sha1;
 use sha2::{Sha256, Sha512};
+
+use crate::val::Value;
 
 pub fn blake3((arg,): (String,)) -> Result<Value> {
 	Ok(blake3::hash(arg.as_bytes()).to_string().into())
@@ -47,8 +48,8 @@ pub fn sha512((arg,): (String,)) -> Result<Value> {
 /// Allowed to cost this much more than default setting for each hash function.
 const COST_ALLOWANCE: u32 = 4;
 
-/// Like verify_password, but takes a closure to determine whether the cost of performing the
-/// operation is not too high.
+/// Like verify_password, but takes a closure to determine whether the cost of
+/// performing the operation is not too high.
 macro_rules! bounded_verify_password {
 	($algo: ident, $instance: expr_2021, $password: expr_2021, $hash: expr_2021, $bound: expr_2021) => {
 		if let (Some(salt), Some(expected_output)) = (&$hash.salt, &$hash.hash) {
@@ -85,12 +86,13 @@ macro_rules! bounded_verify_password {
 
 pub mod argon2 {
 
-	use super::COST_ALLOWANCE;
-	use crate::val::Value;
 	use anyhow::Result;
 	use argon2::Argon2;
 	use argon2::password_hash::{PasswordHash, PasswordHasher, SaltString};
 	use rand::rngs::OsRng;
+
+	use super::COST_ALLOWANCE;
+	use crate::val::Value;
 
 	pub fn cmp((hash, pass): (String, String)) -> Result<Value> {
 		type Params<'a> = <Argon2<'a> as PasswordHasher>::Params;
@@ -117,24 +119,27 @@ pub mod argon2 {
 
 pub mod bcrypt {
 
-	use crate::fnc::crypto::COST_ALLOWANCE;
-	use crate::val::Value;
+	use std::str::FromStr;
+
 	use anyhow::Result;
 	use bcrypt::HashParts;
-	use std::str::FromStr;
+
+	use crate::fnc::crypto::COST_ALLOWANCE;
+	use crate::val::Value;
 
 	pub fn cmp((hash, pass): (String, String)) -> Result<Value> {
 		let parts = match HashParts::from_str(&hash) {
 			Ok(parts) => parts,
 			Err(_) => return Ok(Value::Bool(false)),
 		};
-		// Note: Bcrypt cost is exponential, so add the cost allowance as opposed to multiplying.
+		// Note: Bcrypt cost is exponential, so add the cost allowance as opposed to
+		// multiplying.
 		Ok(if parts.get_cost() > bcrypt::DEFAULT_COST.saturating_add(COST_ALLOWANCE) {
 			// Too expensive to compute.
 			Value::Bool(false)
 		} else {
-			// FIXME: If base64 dependency is added, can avoid parsing the HashParts twice, once
-			// above and once in verity, by using bcrypt::bcrypt.
+			// FIXME: If base64 dependency is added, can avoid parsing the HashParts twice,
+			// once above and once in verity, by using bcrypt::bcrypt.
 			bcrypt::verify(pass, &hash).unwrap_or(false).into()
 		})
 	}
@@ -147,12 +152,13 @@ pub mod bcrypt {
 
 pub mod pbkdf2 {
 
-	use super::COST_ALLOWANCE;
-	use crate::val::Value;
 	use anyhow::Result;
 	use pbkdf2::Pbkdf2;
 	use pbkdf2::password_hash::{PasswordHash, PasswordHasher, SaltString};
 	use rand::rngs::OsRng;
+
+	use super::COST_ALLOWANCE;
+	use crate::val::Value;
 
 	pub fn cmp((hash, pass): (String, String)) -> Result<Value> {
 		type Params = <Pbkdf2 as PasswordHasher>::Params;
@@ -180,11 +186,12 @@ pub mod pbkdf2 {
 
 pub mod scrypt {
 
-	use crate::val::Value;
 	use anyhow::Result;
 	use rand::rngs::OsRng;
 	use scrypt::Scrypt;
 	use scrypt::password_hash::{PasswordHash, PasswordHasher, SaltString};
+
+	use crate::val::Value;
 
 	pub fn cmp((hash, pass): (String, String)) -> Result<Value> {
 		type Params = <Scrypt as PasswordHasher>::Params;
@@ -214,7 +221,8 @@ pub mod scrypt {
 /// Code borrowed from [joaat-rs](https://github.com/Pocakking/joaat-rs).
 /// All credits to its author.
 mod joaat {
-	use std::{default::Default, hash::Hasher};
+	use std::default::Default;
+	use std::hash::Hasher;
 
 	pub struct JoaatHasher(u32);
 

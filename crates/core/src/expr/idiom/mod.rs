@@ -1,3 +1,12 @@
+use std::collections::HashMap;
+use std::fmt::{self, Display, Formatter};
+use std::ops::Deref;
+
+use md5::{Digest, Md5};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -6,13 +15,6 @@ use crate::expr::part::{Next, NextMethod};
 use crate::expr::paths::{ID, IN, META, OUT};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{FlowResult, Ident, Part, Value};
-use md5::{Digest, Md5};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fmt::{self, Display, Formatter};
-use std::ops::Deref;
 
 pub mod recursion;
 
@@ -95,7 +97,8 @@ impl Idiom {
 	pub(crate) fn is_id(&self) -> bool {
 		self.0.len() == 1 && self.0[0].eq(&ID[0])
 	}
-	/// Check if this Idiom is a special field such as `id`, `in`, `out` or `meta`.
+	/// Check if this Idiom is a special field such as `id`, `in`, `out` or
+	/// `meta`.
 	pub(crate) fn is_special(&self) -> bool {
 		self.0.len() == 1 && [&ID[0], &IN[0], &OUT[0], &META[0]].contains(&&self.0[0])
 	}
@@ -182,9 +185,11 @@ impl InfoStructure for Idiom {
 
 /// A trie structure for storing idioms.
 ///
-/// This is used for efficient searching and retrieval of idioms based on their path parts.
+/// This is used for efficient searching and retrieval of idioms based on their
+/// path parts.
 ///
-/// Note: This is a simplified version of a trie and does not implement all the features of a full trie.
+/// Note: This is a simplified version of a trie and does not implement all the
+/// features of a full trie.
 #[derive(Debug)]
 pub(crate) struct IdiomTrie<T> {
 	/// The children of this node, indexed by their path part.
@@ -214,8 +219,9 @@ impl<T: Clone + std::fmt::Debug> IdiomTrie<T> {
 	/// Checks if the trie contains a path and returns the associated data.
 	///
 	/// If the path is found, it returns [`IdiomTrieContains::Exact`].
-	/// If the path is not found but an ancestor is found, it returns [`IdiomTrieContains::Ancestor`].
-	/// If an ancestor is not found, it returns [`IdiomTrieContains::None`].
+	/// If the path is not found but an ancestor is found, it returns
+	/// [`IdiomTrieContains::Ancestor`]. If an ancestor is not found, it
+	/// returns [`IdiomTrieContains::None`].
 	pub(crate) fn contains(&self, path: &[Part]) -> IdiomTrieContains<T> {
 		let mut node = self;
 		let mut last_node_had_data = false;

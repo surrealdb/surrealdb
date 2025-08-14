@@ -1,20 +1,21 @@
+use std::borrow::Cow;
+use std::future::IntoFuture;
+use std::marker::PhantomData;
+
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use uuid::Uuid;
+
 use super::transaction::WithTransaction;
+use super::validate_data;
 use crate::api::conn::Command;
 use crate::api::method::{BoxFuture, Content, Merge, Patch};
 use crate::api::opt::{PatchOp, Resource};
 use crate::api::{self, Connection, Result};
+use crate::core::val;
 use crate::method::OnceLockExt;
 use crate::opt::KeyRange;
 use crate::{Surreal, Value};
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-use std::borrow::Cow;
-use std::future::IntoFuture;
-use std::marker::PhantomData;
-use surrealdb_core::val;
-use uuid::Uuid;
-
-use super::validate_data;
 
 /// An upsert future
 #[derive(Debug)]
@@ -40,7 +41,8 @@ impl<C, R> Upsert<'_, C, R>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Upsert<'static, C, R> {
 		Upsert {
 			client: Cow::Owned(self.client.into_owned()),
@@ -172,7 +174,8 @@ where
 		}
 	}
 
-	/// Patches the current document / record data with the specified JSON Patch data
+	/// Patches the current document / record data with the specified JSON Patch
+	/// data
 	pub fn patch(self, patch: impl Into<PatchOp>) -> Patch<'r, C, R> {
 		let PatchOp(result) = patch.into();
 		let patches = match result {

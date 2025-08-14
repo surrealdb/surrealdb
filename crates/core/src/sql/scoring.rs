@@ -1,6 +1,7 @@
-use revision::revisioned;
 use std::fmt;
 use std::hash::{Hash, Hasher};
+
+use revision::revisioned;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialOrd)]

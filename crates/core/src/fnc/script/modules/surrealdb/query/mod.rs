@@ -12,8 +12,9 @@ use crate::expr::FlowResultExt as _;
 
 mod classes;
 
-use crate::ctx::MutableContext;
 pub use classes::Query;
+
+use crate::ctx::MutableContext;
 
 /// A class to carry the data to run subqueries.
 #[derive(js::JsLifetime)]
@@ -57,7 +58,8 @@ pub fn query<'js>(
 	let promise = Promise::wrap_future(&ctx_clone, async move {
 		let query_ctx = ctx.userdata::<QueryContext<'js>>().expect("query context should be set");
 
-		// Wait on existing query ctx so that we can't spawn more then one query at the same time.
+		// Wait on existing query ctx so that we can't spawn more then one query at the
+		// same time.
 		if let Some(x) = pending_query_future {
 			let _ = x.await;
 		}

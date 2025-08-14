@@ -1,6 +1,15 @@
 pub mod api;
 pub mod graphql;
 
+use std::fmt::{self, Display};
+
+use anyhow::{Result, bail};
+use api::{ApiConfig, ApiConfigStore};
+use graphql::GraphQLConfig;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -10,13 +19,6 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Value};
 use crate::iam::{Action, ConfigKind, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
-use anyhow::{Result, bail};
-use api::{ApiConfig, ApiConfigStore};
-use graphql::GraphQLConfig;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]

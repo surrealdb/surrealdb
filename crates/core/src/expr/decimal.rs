@@ -1,20 +1,23 @@
 //! Decimal functionality and extension traits.
 
-use crate::err::Error;
 use anyhow::Result;
 use fastnum::decimal::{Context, Sign};
 use fastnum::{D128, U128};
 use rust_decimal::Decimal;
 
-/// Variable-length lexicographic encoding for D128 values that preserves sort order.
+use crate::err::Error;
+
+/// Variable-length lexicographic encoding for D128 values that preserves sort
+/// order.
 ///
 /// This encoder converts D128 values into byte sequences that maintain the same
-/// lexicographic ordering as the original decimal values. This is crucial for database
-/// indexing where byte-level comparison must match numeric comparison.
+/// lexicographic ordering as the original decimal values. This is crucial for
+/// database indexing where byte-level comparison must match numeric comparison.
 ///
 /// ## Encoding Format
 ///
-/// The encoding uses a variable-length format optimized for lexicographic ordering:
+/// The encoding uses a variable-length format optimized for lexicographic
+/// ordering:
 ///
 /// ### Zero Values
 /// - Zero is encoded as a single byte: `0x80`
@@ -27,49 +30,54 @@ use rust_decimal::Decimal;
 ///    - `0x00` for negative numbers
 ///
 /// 2. **Biased scale** (2 bytes, big-endian):
-///    - We bias the "scale" (not the raw exponent). Scale is defined as:
-///      `scale = exponent + (digit_count - 1)`, i.e., the position of the most-significant digit
-///      in a scientific-notation sense.
+///    - We bias the "scale" (not the raw exponent). Scale is defined as: `scale
+///      = exponent + (digit_count - 1)`, i.e., the position of the
+///      most-significant digit in a scientific-notation sense.
 ///    - Stored as: `biased = scale + EXP_BIAS` (unsigned 16-bit)
-///    - For negative numbers: stored as `0xFFFF - biased` (one's complement) to reverse order
-///    - EXP_BIAS = 6144. With D128, `exponent ∈ [-6143, +6144]` and `digit_count ∈ [1, 34]`,
-///      so `scale ∈ [-6143, 6177]`, which maps into `[1, 12321]` after biasing, well within `u16`.
+///    - For negative numbers: stored as `0xFFFF - biased` (one's complement) to
+///      reverse order
+///    - EXP_BIAS = 6144. With D128, `exponent ∈ [-6143, +6144]` and
+///      `digit_count ∈ [1, 34]`, so `scale ∈ [-6143, 6177]`, which maps into
+///      `[1, 12321]` after biasing, well within `u16`.
 ///
 /// 3. **Packed digit representation** (variable length):
 ///    - Digits are taken from the absolute value's base-10 representation
 ///    - Each pair of digits is packed into one byte (4 bits per digit)
 ///    - For positive numbers: stored as-is
-///    - For negative numbers: all bytes are bitwise complemented to reverse ordering
-///    - Termination: encoding stops when a nibble equals `0x0`. This naturally handles both
-///      odd and even digit counts:
-///      • odd count: the last byte has a low nibble of 0
-///      • even count: an extra full terminator byte is appended (0x00 for positives, 0xFF for negatives)
+///    - For negative numbers: all bytes are bitwise complemented to reverse
+///      ordering
+///    - Termination: encoding stops when a nibble equals `0x0`. This naturally
+///      handles both odd and even digit counts: • odd count: the last byte has
+///      a low nibble of 0 • even count: an extra full terminator byte is
+///      appended (0x00 for positives, 0xFF for negatives)
 ///
-/// Because a terminator is always present within (or immediately after) the mantissa, any trailing
-/// type-marker byte appended by higher layers will never be consumed by the mantissa decoder.
+/// Because a terminator is always present within (or immediately after) the
+/// mantissa, any trailing type-marker byte appended by higher layers will never
+/// be consumed by the mantissa decoder.
 ///
 /// ## Properties
 /// - Preserves lexicographic ordering: if `a < b` then `encode(a) < encode(b)`
-/// - Variable length encoding (3+ bytes typical: 1 sign + 2 scale + packed digits)
+/// - Variable length encoding (3+ bytes typical: 1 sign + 2 scale + packed
+///   digits)
 /// - Handles full D128 range including extreme values
 /// - Uses packed digit encoding for efficient storage (2 digits per byte)
-///
 pub(crate) struct DecimalLexEncoder;
 
 impl DecimalLexEncoder {
 	/// We use a 16-bit biased "scale" (not the raw exponent).
 	/// With D128: exponent ∈ [-6143, +6144] and digit_count ∈ [1, 34], so
-	/// scale = exponent + (digit_count - 1) ∈ [-6143, 6177]. Adding EXP_BIAS maps this
-	/// into [1, 12321], comfortably within u16.
+	/// scale = exponent + (digit_count - 1) ∈ [-6143, 6177]. Adding EXP_BIAS
+	/// maps this into [1, 12321], comfortably within u16.
 	const EXP_BIAS: i32 = 6144; // bias used for mapping signed scale into u16 space
 
 	/// Encodes a D128 value into a lexicographically ordered byte sequence.
 	///
-	/// The encoding preserves sort order: if `a < b` then `encode(a) < encode(b)`.
-	/// This is essential for database indexing where byte-level comparison must
-	/// match numeric comparison.
+	/// The encoding preserves sort order: if `a < b` then `encode(a) <
+	/// encode(b)`. This is essential for database indexing where byte-level
+	/// comparison must match numeric comparison.
 	pub(crate) fn encode(dec: D128) -> Vec<u8> {
-		// Special case: zero gets a fixed encoding that sorts between negative and positive
+		// Special case: zero gets a fixed encoding that sorts between negative and
+		// positive
 		if dec.is_zero() {
 			return vec![0x80]; // 0x80 = 128, middle value for proper ordering
 		}
@@ -89,7 +97,8 @@ impl DecimalLexEncoder {
 		let biased_exponent = (scale + Self::EXP_BIAS) as u16;
 
 		// Build the final encoded result
-		// Capacity: 1 sign + 2 exponent + packed digits (2 digits per byte) + potential terminator
+		// Capacity: 1 sign + 2 exponent + packed digits (2 digits per byte) + potential
+		// terminator
 		let mut result = Vec::with_capacity(5 + (digit_count + 1).div_ceil(2));
 
 		// Convert the mantissa to decimal string representation for digit packing
@@ -99,10 +108,12 @@ impl DecimalLexEncoder {
 		if is_negative {
 			// Sign marker: 0x00 ensures negative numbers sort before positive ones
 			result.push(0x00);
-			// Complement of biased scale: reverses ordering so that more negative values sort first
-			// This maintains total ordering for negatives when compared bytewise.
+			// Complement of biased scale: reverses ordering so that more negative values
+			// sort first This maintains total ordering for negatives when compared
+			// bytewise.
 			result.extend((0xFFFF - biased_exponent).to_be_bytes());
-			// Complement all packed digit bytes to reverse their ordering for negative numbers
+			// Complement all packed digit bytes to reverse their ordering for negative
+			// numbers
 			Self::pack_digits_negative(radix10, &mut result);
 		} else {
 			// Sign marker: 0xFF ensures positive numbers sort after negative ones
@@ -119,7 +130,8 @@ impl DecimalLexEncoder {
 	/// Decodes a lexicographically encoded byte sequence back to a D128 value.
 	///
 	/// This reverses the encoding process, reconstructing the original D128
-	/// from its byte representation while handling all the encoding transformations.
+	/// from its byte representation while handling all the encoding
+	/// transformations.
 	pub(crate) fn decode(bytes: &[u8]) -> Result<D128> {
 		// Handle empty buffer
 		if bytes.is_empty() {
@@ -160,7 +172,8 @@ impl DecimalLexEncoder {
 		// Convert back to the original scale by removing the bias
 		let scale = biased_exponent as i32 - Self::EXP_BIAS;
 
-		// Unpack the digit bytes back to decimal string, handling sign-specific encoding
+		// Unpack the digit bytes back to decimal string, handling sign-specific
+		// encoding
 		let (mantissa, digit_count) = if is_negative {
 			Self::unpack_digits_negative(&bytes[3..])?
 		} else {
@@ -169,7 +182,8 @@ impl DecimalLexEncoder {
 		if digit_count == 0 {
 			return Err(Error::Serialization("Empty mantissa".to_string()).into());
 		}
-		// Calculate the final exponent: scale minus the position adjustment for scientific notation
+		// Calculate the final exponent: scale minus the position adjustment for
+		// scientific notation
 		let exponent = scale - (digit_count - 1);
 
 		Ok(D128::from_parts(
@@ -184,11 +198,12 @@ impl DecimalLexEncoder {
 		))
 	}
 
-	/// Packs decimal digits for negative numbers with bit inversion for lexicographic ordering.
-	/// Each pair of ASCII digits is packed into a single byte (4 bits each) and then inverted.
-	/// Mapping: '0'..'9' → 1..10 (we avoid 0 so that 0 nibbles can be used as terminators).
-	/// For odd digit counts, the last byte has a zero low nibble; for even counts, an extra 0xFF
-	/// terminator byte is appended after bit inversion.
+	/// Packs decimal digits for negative numbers with bit inversion for
+	/// lexicographic ordering. Each pair of ASCII digits is packed into a
+	/// single byte (4 bits each) and then inverted. Mapping: '0'..'9' → 1..10
+	/// (we avoid 0 so that 0 nibbles can be used as terminators).
+	/// For odd digit counts, the last byte has a zero low nibble; for even
+	/// counts, an extra 0xFF terminator byte is appended after bit inversion.
 	fn pack_digits_negative(radix10: String, buf: &mut Vec<u8>) {
 		let mut iter = radix10.as_bytes().chunks_exact(2);
 		for pair in &mut iter {
@@ -212,11 +227,12 @@ impl DecimalLexEncoder {
 		}
 	}
 
-	/// Packs decimal digits for positive numbers into bytes for lexicographic ordering.
-	/// Each pair of ASCII digits is packed into a single byte (4 bits each).
-	/// Mapping: '0'..'9' → 1..10. For odd digit counts, the last byte has a zero low nibble;
-	/// for even counts, an extra 0x00 terminator byte is appended. This ensures decode will
-	/// stop before any trailing type marker appended by higher layers.
+	/// Packs decimal digits for positive numbers into bytes for lexicographic
+	/// ordering. Each pair of ASCII digits is packed into a single byte (4
+	/// bits each). Mapping: '0'..'9' → 1..10. For odd digit counts, the last
+	/// byte has a zero low nibble; for even counts, an extra 0x00 terminator
+	/// byte is appended. This ensures decode will stop before any trailing
+	/// type marker appended by higher layers.
 	fn pack_digits_positive(radix10: String, buf: &mut Vec<u8>) {
 		let mut iter = radix10.as_bytes().chunks_exact(2);
 		for pair in &mut iter {
@@ -243,8 +259,8 @@ impl DecimalLexEncoder {
 
 	/// Unpacks digits from bytes for positive numbers.
 	/// Reverses the packing process by extracting digit pairs from each byte.
-	/// Stops when a nibble equals 0 (terminator). Accumulates the mantissa directly into U128
-	/// and returns the total number of decoded digits.
+	/// Stops when a nibble equals 0 (terminator). Accumulates the mantissa
+	/// directly into U128 and returns the total number of decoded digits.
 	fn unpack_digits_positive(buf: &[u8]) -> Result<(U128, i32)> {
 		let mut m = U128::ZERO;
 		let mut l = 0;
@@ -259,9 +275,9 @@ impl DecimalLexEncoder {
 	}
 
 	/// Unpacks digits from bytes for negative numbers.
-	/// First inverts each byte to undo the bit inversion, then extracts digit pairs.
-	/// Stops when a nibble equals 0 (after inversion). Accumulates into U128 and returns
-	/// the number of decoded digits.
+	/// First inverts each byte to undo the bit inversion, then extracts digit
+	/// pairs. Stops when a nibble equals 0 (after inversion). Accumulates into
+	/// U128 and returns the number of decoded digits.
 	fn unpack_digits_negative(buf: &[u8]) -> Result<(U128, i32)> {
 		let mut m = U128::ZERO;
 		let mut l = 0i32;
@@ -276,12 +292,13 @@ impl DecimalLexEncoder {
 	}
 
 	/// Unpacks a single packed byte into one or two digits.
-	/// Returns the number of digits appended (0, 1, or 2). A return of 0 or 1 indicates
-	/// that a terminator nibble (0x0) was encountered and the caller should stop.
+	/// Returns the number of digits appended (0, 1, or 2). A return of 0 or 1
+	/// indicates that a terminator nibble (0x0) was encountered and the caller
+	/// should stop.
 	///
-	/// The byte contains two 4-bit values (nibbles): high nibble and low nibble.
-	/// Each nibble represents a digit value (1..=10 mapping to '0'..'9'). Values outside
-	/// 1..=10 are rejected as corrupted input.
+	/// The byte contains two 4-bit values (nibbles): high nibble and low
+	/// nibble. Each nibble represents a digit value (1..=10 mapping to
+	/// '0'..'9'). Values outside 1..=10 are rejected as corrupted input.
 	fn unpack_digit(pack: u8, m: &mut U128) -> Result<u8> {
 		let hi = pack >> 4;
 		let lo = pack & 0x0F;
@@ -417,7 +434,8 @@ mod tests {
 
 	#[test]
 	fn test_decode_empty_mantissa() {
-		// Create a buffer that starts correctly but is truncated during mantissa decoding
+		// Create a buffer that starts correctly but is truncated during mantissa
+		// decoding
 		let result = DecimalLexEncoder::decode(&[0xFF, 0x00, 0x00, 0x00]); // Missing mantissa data
 		assert!(result.is_err());
 		let err = result.unwrap_err();

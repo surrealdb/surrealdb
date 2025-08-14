@@ -1,7 +1,9 @@
-use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
-use bytes::Bytes;
 use std::future::Future;
 use std::pin::Pin;
+
+use bytes::Bytes;
+
+use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 
 #[derive(Clone, Debug)]
 pub struct PrefixedStore<T: ObjectStore> {

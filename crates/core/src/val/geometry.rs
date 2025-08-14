@@ -1,19 +1,20 @@
 #![allow(clippy::derived_hash_with_manual_eq)]
 
-use crate::expr::fmt::Fmt;
-use crate::val::{Array, Value};
+use std::cmp::Ordering;
+use std::collections::BTreeMap;
+use std::iter::once;
+use std::{fmt, hash};
+
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
 use geo::{Coord, LineString, LinesIter, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::collections::BTreeMap;
-use std::iter::once;
-use std::{fmt, hash};
 
 use super::Object;
+use crate::expr::fmt::Fmt;
+use crate::val::{Array, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -227,7 +228,8 @@ impl Geometry {
 		}
 	}
 
-	/// Converts a surreal value to a MultiPolygon if the array matches to a MultiPolygon.
+	/// Converts a surreal value to a MultiPolygon if the array matches to a
+	/// MultiPolygon.
 	pub(crate) fn array_to_multipolygon(v: &Value) -> Option<MultiPolygon<f64>> {
 		let mut res = Vec::new();
 		let Value::Array(v) = v else {
@@ -239,7 +241,8 @@ impl Geometry {
 		Some(MultiPolygon::new(res))
 	}
 
-	/// Converts a surreal value to a MultiLine if the array matches to a MultiLine.
+	/// Converts a surreal value to a MultiLine if the array matches to a
+	/// MultiLine.
 	pub(crate) fn array_to_multiline(v: &Value) -> Option<MultiLineString<f64>> {
 		let mut res = Vec::new();
 		let Value::Array(v) = v else {
@@ -251,7 +254,8 @@ impl Geometry {
 		Some(MultiLineString::new(res))
 	}
 
-	/// Converts a surreal value to a MultiPoint if the array matches to a MultiPoint.
+	/// Converts a surreal value to a MultiPoint if the array matches to a
+	/// MultiPoint.
 	pub(crate) fn array_to_multipoint(v: &Value) -> Option<MultiPoint<f64>> {
 		let mut res = Vec::new();
 		let Value::Array(v) = v else {
@@ -279,7 +283,8 @@ impl Geometry {
 		Some(Polygon::new(first, res))
 	}
 
-	/// Converts a surreal value to a LineString if the array matches to a LineString.
+	/// Converts a surreal value to a LineString if the array matches to a
+	/// LineString.
 	pub(crate) fn array_to_line(v: &Value) -> Option<LineString<f64>> {
 		let mut res = Vec::new();
 		let Value::Array(v) = v else {

@@ -1,8 +1,8 @@
+use std::fmt;
+
 use crate::sql::Ident;
 use crate::val::Datetime;
 use crate::vs::VersionStamp;
-
-use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

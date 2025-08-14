@@ -1,10 +1,11 @@
+use anyhow::Result;
+use roaring::RoaringTreemap;
+
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::ft::DocLength;
 use crate::idx::ft::search::terms::TermId;
 use crate::kvs::Transaction;
-use anyhow::Result;
-use roaring::RoaringTreemap;
 
 pub(in crate::idx) type SearchTermsDocs = Vec<Option<(TermId, RoaringTreemap)>>;
 

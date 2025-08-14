@@ -1,10 +1,10 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use crate::kvs::KVKey;
+use anyhow::Result;
 use revision::Revisioned;
 
-use anyhow::Result;
+use crate::kvs::KVKey;
 
 /// Advances a key to the next value,
 /// can be used to skip over a certain key.
@@ -27,8 +27,8 @@ pub fn to_prefix_range<K: KVKey>(key: K) -> Result<Range<Vec<u8>>> {
 	})
 }
 
-/// Takes an iterator of byte slices and deserializes the byte slices to the expected type,
-/// returning an error if any of the values fail to serialize.
+/// Takes an iterator of byte slices and deserializes the byte slices to the
+/// expected type, returning an error if any of the values fail to serialize.
 pub fn deserialize_cache<'a, I, T>(iter: I) -> Result<Arc<[T]>>
 where
 	T: Revisioned,

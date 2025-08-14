@@ -24,7 +24,7 @@ mod tests {
 	#[tokio::test]
 	async fn rid_some() {
 		let val = syn::value("{ id: test:id, test: { other: null, something: 123 } }").unwrap();
-		let res = Value::Thing(RecordId {
+		let res = Value::RecordId(RecordId {
 			table: String::from("test"),
 			key: RecordIdKey::String("id".to_owned()),
 		});

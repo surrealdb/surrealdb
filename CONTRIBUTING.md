@@ -187,7 +187,7 @@ To summarize, fork the project and use the `git clone` command to download the r
 
 4. Make changes to the code, and ensure all code changes are formatted correctly:
     ```bash
-    cargo fmt
+    make fmt
     ```
 
 5. Commit your changes when finished:

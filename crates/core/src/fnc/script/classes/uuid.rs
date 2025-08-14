@@ -1,6 +1,7 @@
-use crate::val::Uuid as SqlUuid;
 use js::JsLifetime;
 use js::class::Trace;
+
+use crate::val::Uuid as SqlUuid;
 
 #[derive(Clone, Trace, JsLifetime)]
 #[js::class]

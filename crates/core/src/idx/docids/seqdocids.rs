@@ -1,22 +1,26 @@
+use std::sync::Arc;
+
+use anyhow::Result;
+use uuid::Uuid;
+
 use crate::ctx::Context;
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::{DocId, Resolved};
 use crate::kvs::Transaction;
 use crate::kvs::sequences::SequenceDomain;
 use crate::val::RecordIdKey;
-use anyhow::Result;
-use std::sync::Arc;
-use uuid::Uuid;
 
 /// Sequence-based DocIds store for concurrent full-text search
 ///
-/// This module implements a document ID management system for the concurrent full-text search
-/// implementation. It uses the distributed sequence mechanism to provide concurrent document ID
-/// creation, which is essential for the inverted index.
+/// This module implements a document ID management system for the concurrent
+/// full-text search implementation. It uses the distributed sequence mechanism
+/// to provide concurrent document ID creation, which is essential for the
+/// inverted index.
 ///
-/// The `SeqDocIds` struct maintains bidirectional mappings between document IDs (numeric identifiers
-/// used internally by the full-text index) and record IDs (the actual identifiers of the documents
-/// being indexed). This allows for efficient lookup in both directions.
+/// The `SeqDocIds` struct maintains bidirectional mappings between document IDs
+/// (numeric identifiers used internally by the full-text index) and record IDs
+/// (the actual identifiers of the documents being indexed). This allows for
+/// efficient lookup in both directions.
 ///
 /// Key features:
 /// - Uses distributed sequences for concurrent ID generation
@@ -34,12 +38,14 @@ pub(crate) struct SeqDocIds {
 impl SeqDocIds {
 	/// Creates a new SeqDocIds instance
 	///
-	/// Initializes a new document ID manager with the specified node ID and index key base.
-	/// Sets up the sequence domain for generating unique document IDs.
+	/// Initializes a new document ID manager with the specified node ID and
+	/// index key base. Sets up the sequence domain for generating unique
+	/// document IDs.
 	///
 	/// # Arguments
 	/// * `nid` - The node ID used for distributed sequence generation
-	/// * `ikb` - The index key base containing namespace, database, table, and index information
+	/// * `ikb` - The index key base containing namespace, database, table, and
+	///   index information
 	pub(in crate::idx) fn new(nid: Uuid, ikb: IndexKeyBase) -> Self {
 		Self {
 			nid,
@@ -114,7 +120,8 @@ impl SeqDocIds {
 	/// This is the reverse lookup of `get_doc_id`.
 	///
 	/// # Arguments
-	/// * `ikb` - The index key base containing namespace, database, table, and index information
+	/// * `ikb` - The index key base containing namespace, database, table, and
+	///   index information
 	/// * `tx` - The transaction to use for the lookup
 	/// * `doc_id` - The document ID to look up
 	///
@@ -153,6 +160,8 @@ impl SeqDocIds {
 
 #[cfg(test)]
 mod tests {
+	use uuid::Uuid;
+
 	use crate::ctx::Context;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::seqdocids::SeqDocIds;
@@ -162,7 +171,6 @@ mod tests {
 	use crate::kvs::TransactionType::{Read, Write};
 	use crate::kvs::{Datastore, TransactionType};
 	use crate::val::{RecordIdKey, Strand};
-	use uuid::Uuid;
 
 	const TEST_NS: &str = "test_ns";
 	const TEST_DB: &str = "test_db";

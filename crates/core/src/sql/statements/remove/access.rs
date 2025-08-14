@@ -1,5 +1,6 @@
-use crate::sql::{Base, Ident};
 use std::fmt::{self, Display, Formatter};
+
+use crate::sql::{Base, Ident};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

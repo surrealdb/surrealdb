@@ -1,3 +1,10 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+
+use anyhow::Result;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::expr::ident::Ident;
 use crate::expr::scoring::Scoring;
 use crate::expr::statements::info::InfoStructure;
@@ -6,11 +13,6 @@ use crate::fnc::util::math::vector::{
 	ManhattanDistance, MinkowskiDistance, PearsonSimilarity,
 };
 use crate::val::{Number, Value};
-use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::fmt::{Display, Formatter};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]

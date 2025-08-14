@@ -31,12 +31,14 @@ pub mod td;
 pub mod tt;
 pub mod vm;
 
+use std::borrow::Cow;
+
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::val::{Array, RecordId, RecordIdKey};
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 struct Prefix<'a> {
