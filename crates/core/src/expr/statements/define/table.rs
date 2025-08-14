@@ -198,7 +198,7 @@ impl DefineTableStatement {
 	/// Used to add relational fields to existing table records
 	///
 	/// Returns the cache key ts.
-	pub async fn add_in_out_fields(
+	pub(crate) async fn add_in_out_fields(
 		txn: &Transaction,
 		ns: NamespaceId,
 		db: DatabaseId,

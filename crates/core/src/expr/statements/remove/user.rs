@@ -82,7 +82,7 @@ impl RemoveUserStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Get the definition
-				let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
+				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 				let us = match txn.get_db_user(ns, db, &self.name).await? {
 					Some(x) => x,
 					None => {

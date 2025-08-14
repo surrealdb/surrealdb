@@ -51,10 +51,11 @@ pub struct Options {
 }
 
 #[derive(Clone, Debug)]
-pub enum Force {
+pub(crate) enum Force {
 	All,
 	None,
 	Table(Arc<[TableDefinition]>),
+	#[cfg_attr(not(target_family = "wasm"), expect(dead_code))]
 	Index(Arc<[DefineIndexStatement]>),
 }
 
@@ -148,12 +149,6 @@ impl Options {
 		self
 	}
 
-	/// Specify wether tables/events should re-run
-	pub fn with_force(mut self, force: Force) -> Self {
-		self.force = force;
-		self
-	}
-
 	/// Sepecify if we should error when a table does not exist
 	pub fn with_strict(mut self, strict: bool) -> Self {
 		self.strict = strict;
@@ -212,7 +207,7 @@ impl Options {
 	}
 
 	/// Create a new Options object for a subquery
-	pub fn new_with_force(&self, force: Force) -> Self {
+	pub(crate) fn new_with_force(&self, force: Force) -> Self {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),

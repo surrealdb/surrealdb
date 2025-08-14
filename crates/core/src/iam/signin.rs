@@ -566,7 +566,7 @@ pub async fn root_access(
 	}
 }
 
-pub async fn signin_bearer(
+pub(crate) async fn signin_bearer(
 	kvs: &Datastore,
 	session: &mut Session,
 	ns: Option<&NamespaceDefinition>,

@@ -1503,7 +1503,7 @@ mod tests {
 	use crate::kvs::{Datastore, Transaction, TransactionType};
 
 	async fn get_db(ds: &Datastore) -> Arc<DatabaseDefinition> {
-		let tx = ds.transaction(TransactionType::Read, Optimistic).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
 		tx.ensure_ns_db("myns", "mydb", false).await.unwrap()
 	}
 

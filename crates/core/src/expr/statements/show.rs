@@ -54,7 +54,7 @@ impl ShowStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Process the show query
-		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let r =
 			crate::cf::read(&txn, ns, db, self.table.as_deref(), self.since.clone(), self.limit)
 				.await?;

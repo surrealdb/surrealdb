@@ -91,8 +91,8 @@ impl<'a> StatementContext<'a> {
 		if !self.is_perm {
 			return Ok(GrantedPermission::Full);
 		}
+		let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
 		// Get the table for this planner
-		let (ns, db) = self.ctx.get_ns_db_ids_ro(self.opt).await?;
 		match self.ctx.tx().get_tb(ns, db, tb).await? {
 			Some(table) => {
 				// TODO(tobiemh): we should really

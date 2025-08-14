@@ -752,7 +752,7 @@ mod tests {
 		// Search index
 		{
 			let mut stack = reblessive::tree::TreeStack::new();
-			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
 
 			let db = tx.ensure_ns_db("myns", "mydb", false).await.unwrap();
@@ -854,6 +854,9 @@ mod tests {
 		info!("Build data collection");
 
 		let ds = Arc::new(Datastore::new("memory").await?);
+		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
+		let db = tx.ensure_ns_db("myns", "mydb", false).await.unwrap();
+		tx.commit().await.unwrap();
 
 		let collection: Arc<TestCollection> =
 			Arc::new(TestCollection::NonUnique(new_vectors_from_file(
@@ -894,6 +897,7 @@ mod tests {
 			let collection = collection.clone();
 			let h = h.clone();
 			let ds = ds.clone();
+			let db = db.clone();
 			let f = tokio::spawn(async move {
 				let mut stack = reblessive::tree::TreeStack::new();
 				stack
@@ -903,9 +907,9 @@ mod tests {
 							let knn = 10;
 							let mut chk = HnswConditionChecker::new();
 							let search = HnswSearch::new(pt.clone(), knn, efs);
+
 							let ctx = new_ctx(&ds, TransactionType::Read).await;
 							let tx = ctx.tx();
-							let db = tx.ensure_ns_db("myns", "mydb", false).await.unwrap();
 							let hnsw_res =
 								h.search(&db, &tx, stk, &search, &mut chk).await.unwrap();
 							assert_eq!(hnsw_res.docs.len(), knn, "Different size - knn: {knn}",);

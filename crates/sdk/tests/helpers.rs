@@ -25,15 +25,28 @@ pub async fn iam_run_case(
 	prepare: &str,
 	test: &str,
 	check: &str,
-	check_expected_result: &[&str],
+	check_expected_result: &[String],
 	ds: &Datastore,
 	sess: &Session,
+	use_ns: bool,
+	use_db: bool,
 	should_succeed: bool,
 ) -> Result<()> {
 	// Use the session as the test statement, but change the Auth to run the check
 	// with full permissions
 	let mut owner_sess = sess.clone();
 	owner_sess.au = Arc::new(Auth::for_root(Role::Owner));
+
+	if use_ns {
+		if let Some(ns) = &sess.ns {
+			ds.execute(&format!("USE NS {ns}"), &owner_sess, None).await.unwrap();
+		}
+	}
+	if use_db {
+		if let Some(db) = &sess.db {
+			ds.execute(&format!("USE DB {db}"), &owner_sess, None).await.unwrap();
+		}
+	}
 
 	// Prepare statement
 	{
@@ -64,7 +77,7 @@ pub async fn iam_run_case(
 			ensure!(tmp.is_ok(), "Check statement errored for test: {}", tmp.unwrap_err());
 
 			let tmp = tmp.unwrap();
-			let expected = syn::value(check_expected_result[i])?;
+			let expected = syn::value(&check_expected_result[i])?;
 			ensure!(
 				tmp == expected,
 				"Check statement failed for test: expected value '{:#}' doesn't match '{:#}'",
@@ -100,6 +113,17 @@ pub async fn iam_check_cases(
 	scenario: &HashMap<&str, &str>,
 	check_results: [Vec<&str>; 2],
 ) -> Result<()> {
+	iam_check_cases_impl(cases, scenario, check_results, true, true).await
+}
+
+#[allow(dead_code)]
+pub async fn iam_check_cases_impl(
+	cases: CaseIter<'_>,
+	scenario: &HashMap<&str, &str>,
+	check_results: [Vec<&str>; 2],
+	use_ns: bool,
+	use_db: bool,
+) -> Result<()> {
 	let prepare = scenario.get("prepare").unwrap();
 	let test = scenario.get("test").unwrap();
 	let check = scenario.get("check").unwrap();
@@ -107,23 +131,50 @@ pub async fn iam_check_cases(
 	for ((level, role), (ns, db), should_succeed) in cases {
 		println!("* Testing '{test}' for '{level}Actor({role})' on '({ns}, {db})'");
 		let sess = Session::for_level(level.to_owned(), role.to_owned()).with_ns(ns).with_db(db);
+
 		let expected_result = if *should_succeed {
-			check_results.first().unwrap()
+			check_results[0]
+				.iter()
+				.map(|s| s.replace("{{NS}}", ns).replace("{{DB}}", db))
+				.collect::<Vec<_>>()
 		} else {
-			&check_results[1]
+			check_results[1]
+				.iter()
+				.map(|s| s.replace("{{NS}}", ns).replace("{{DB}}", db))
+				.collect::<Vec<_>>()
 		};
 		// Auth enabled
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(true);
-			iam_run_case(prepare, test, check, expected_result, &ds, &sess, *should_succeed)
-				.await?;
+			iam_run_case(
+				prepare,
+				test,
+				check,
+				&expected_result,
+				&ds,
+				&sess,
+				use_ns,
+				use_db,
+				*should_succeed,
+			)
+			.await?;
 		}
 
 		// Auth disabled
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(false);
-			iam_run_case(prepare, test, check, expected_result, &ds, &sess, *should_succeed)
-				.await?;
+			iam_run_case(
+				prepare,
+				test,
+				check,
+				&expected_result,
+				&ds,
+				&sess,
+				use_ns,
+				use_db,
+				*should_succeed,
+			)
+			.await?;
 		}
 	}
 
@@ -142,17 +193,25 @@ pub async fn iam_check_cases(
 			);
 			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 			let expected_result = if auth_enabled {
-				&check_results[1]
+				check_results[1]
+					.iter()
+					.map(|s| s.replace("{{NS}}", ns).replace("{{DB}}", db))
+					.collect::<Vec<_>>()
 			} else {
-				check_results.first().unwrap()
+				check_results[0]
+					.iter()
+					.map(|s| s.replace("{{NS}}", ns).replace("{{DB}}", db))
+					.collect::<Vec<_>>()
 			};
 			iam_run_case(
 				prepare,
 				test,
 				check,
-				expected_result,
+				&expected_result,
 				&ds,
 				&Session::default().with_ns(ns).with_db(db),
+				use_ns,
+				use_db,
 				!auth_enabled,
 			)
 			.await?;

@@ -113,6 +113,7 @@ async fn subquery_select() -> Result<()> {
 #[tokio::test]
 async fn subquery_ifelse_set() -> Result<()> {
 	let sql = "
+		DEFINE TABLE person;
 		-- Check if the record exists
 		LET $record = (SELECT *, count() AS count FROM person:test);
 		-- Return the specified record
@@ -147,7 +148,14 @@ async fn subquery_ifelse_set() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 9);
+	assert_eq!(res.len(), 10);
+	// DEFINE TABLE person;
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	// LET $record = (SELECT *, count() AS count FROM person:test);
+	let tmp = res.remove(0).result?;
+	let val = Array::new().into();
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::None;
@@ -243,6 +251,7 @@ async fn subquery_ifelse_set() -> Result<()> {
 #[tokio::test]
 async fn subquery_ifelse_array() -> Result<()> {
 	let sql = "
+		DEFINE TABLE person;
 		-- Check if the record exists
 		LET $record = (SELECT *, count() AS count FROM person:test);
 		-- Return the specified record
@@ -277,8 +286,11 @@ async fn subquery_ifelse_array() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 9);
-	//
+	assert_eq!(res.len(), 10);
+	// DEFINE TABLE person;
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	// LET $record = (SELECT *, count() AS count FROM person:test);
 	let tmp = res.remove(0).result?;
 	let val = Value::None;
 	assert_eq!(tmp, val);

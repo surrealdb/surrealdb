@@ -8,6 +8,7 @@ use surrealdb_core::{strand, syn};
 #[tokio::test]
 async fn return_subquery_only() -> Result<()> {
 	let sql = "
+		USE NS test DB test;
 		CREATE person:tobie SET name = 'Tobie';
 		CREATE person:jaime SET name = 'Jaime';
 		LET $single = person:tobie;
@@ -42,13 +43,17 @@ async fn return_subquery_only() -> Result<()> {
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 27);
-	//
+
+	// USE NS test DB test;
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
-	//
+	// CREATE person:tobie SET name = 'Tobie';
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
-	//
+	// CREATE person:jaime SET name = 'Jaime';
+	let tmp = res.remove(0).result;
+	tmp.unwrap();
+	// LET $single = person:tobie;
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
 	//

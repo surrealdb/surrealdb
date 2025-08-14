@@ -1154,7 +1154,7 @@ impl Transaction {
 		}
 	}
 
-	async fn put_ns(&self, ns: NamespaceDefinition) -> Result<Arc<NamespaceDefinition>> {
+	pub(crate) async fn put_ns(&self, ns: NamespaceDefinition) -> Result<Arc<NamespaceDefinition>> {
 		let key = crate::key::catalog::ns::new(&ns.name);
 		self.put(&key, &ns, None).await?;
 
@@ -1174,12 +1174,12 @@ impl Transaction {
 		Ok(cached_ns)
 	}
 
-	async fn put_db(
+	pub(crate) async fn put_db(
 		&self,
-		ns: &NamespaceDefinition,
+		ns: &str,
 		db: DatabaseDefinition,
 	) -> Result<Arc<DatabaseDefinition>> {
-		let key = crate::key::catalog::db::new(&ns.name, &db.name);
+		let key = crate::key::catalog::db::new(ns, &db.name);
 		self.put(&key, &db, None).await?;
 
 		let key = crate::key::namespace::db::new(db.namespace_id, db.database_id);
@@ -1192,13 +1192,13 @@ impl Transaction {
 		let entry = cache::tx::Entry::Any(Arc::clone(&cached_db) as Arc<dyn Any + Send + Sync>);
 		self.cache.insert(qey, entry.clone());
 
-		let qey = cache::tx::Lookup::DbByName(&ns.name, &db.name);
+		let qey = cache::tx::Lookup::DbByName(ns, &db.name);
 		self.cache.insert(qey, entry);
 
 		Ok(cached_db)
 	}
 
-	async fn put_tb(
+	pub(crate) async fn put_tb(
 		&self,
 		ns: &str,
 		db: &str,
@@ -1357,6 +1357,7 @@ impl Transaction {
 				self.expect_ns_by_name(ns).await?;
 
 				// Return a database not found error.
+				eprintln!("DB NOT FOUND: 3");
 				Err(anyhow::anyhow!(Error::DbNotFound {
 					name: db.to_owned()
 				}))
@@ -1971,6 +1972,7 @@ impl Transaction {
 		let db = match self.get_db_by_name(ns, db).await? {
 			Some(db) => db,
 			None => {
+				eprintln!("DB NOT FOUND: 4");
 				return Err(Error::DbNotFound {
 					name: db.to_owned(),
 				}
@@ -2075,7 +2077,7 @@ impl Transaction {
 						changefeed: None,
 					};
 
-					return self.put_db(&ns_def, db_def).await;
+					return self.put_db(&ns_def.name, db_def).await;
 				}
 
 				// Ensure the namespace exists
@@ -2085,6 +2087,8 @@ impl Transaction {
 					}
 					.into());
 				}
+
+				eprintln!("DB NOT FOUND: 1");
 
 				return Err(Error::DbNotFound {
 					name: db.to_owned(),
@@ -2140,6 +2144,7 @@ impl Transaction {
 					match self.get_db_by_name(ns, db).await? {
 						Some(db_def) => db_def,
 						None => {
+							eprintln!("DB NOT FOUND: 5");
 							return Err(Error::DbNotFound {
 								name: db.to_owned(),
 							}

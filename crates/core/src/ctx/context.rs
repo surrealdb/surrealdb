@@ -15,7 +15,7 @@ use url::Url;
 
 use crate::buc::store::ObjectStore;
 use crate::buc::{self, BucketConnectionKey, BucketConnections};
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
@@ -276,7 +276,7 @@ impl MutableContext {
 
 	/// Get the namespace id for the current context.
 	/// If the namespace does not exist, it will return an error.
-	pub(crate) async fn get_ns_id_ro(&self, opt: &Options) -> Result<NamespaceId> {
+	pub(crate) async fn expect_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
 		let ns = opt.ns()?;
 		let Some(ns_def) = self.tx().get_ns_by_name(ns).await? else {
 			return Err(Error::NsNotFound {
@@ -298,18 +298,25 @@ impl MutableContext {
 
 	/// Get the namespace and database ids for the current context.
 	/// If the namespace or database does not exist, it will return an error.
-	pub(crate) async fn get_ns_db_ids_ro(
+	pub(crate) async fn expect_ns_db_ids(
 		&self,
 		opt: &Options,
 	) -> Result<(NamespaceId, DatabaseId)> {
 		let (ns, db) = opt.ns_db()?;
 		let Some(db_def) = self.tx().get_db_by_name(ns, db).await? else {
+			// eprintln!("DB NOT FOUND: 2: {}", std::backtrace::Backtrace::force_capture());
 			return Err(Error::DbNotFound {
 				name: db.to_string(),
 			}
 			.into());
 		};
 		Ok((db_def.namespace_id, db_def.database_id))
+	}
+
+	pub(crate) async fn get_db(&self, opt: &Options) -> Result<Arc<DatabaseDefinition>> {
+		let (ns, db) = opt.ns_db()?;
+		let db_def = self.tx().ensure_ns_db(ns, db, opt.strict).await?;
+		Ok(db_def)
 	}
 
 	/// Add a value to the context. It overwrites any previously set values

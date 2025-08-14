@@ -58,7 +58,7 @@ pub use ds::Datastore;
 pub(crate) use index::{ConsumeResult, IndexBuilder};
 pub(crate) use key::impl_kv_value_revisioned;
 pub use key::{KVKey, KVValue};
-pub use live::Live;
+pub(crate) use live::Live;
 pub use tr::{Check, LockType, TransactionType, Transactor};
 pub use tx::Transaction;
 

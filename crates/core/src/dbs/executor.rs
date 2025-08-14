@@ -20,7 +20,7 @@ use crate::dbs::{Force, Options, QueryType};
 use crate::err::Error;
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
-use crate::expr::statements::{OptionStatement, UseStatement};
+use crate::expr::statements::OptionStatement;
 use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
@@ -45,38 +45,6 @@ impl Executor {
 			opt,
 			ctx,
 		}
-	}
-
-	async fn execute_use_statement(&mut self, kvs: &Datastore, stmt: UseStatement) -> Result<()> {
-		let ctx_ref = Arc::get_mut(&mut self.ctx).ok_or_else(|| {
-			Error::unreachable(format_args!("Tried to unfreeze a Context with multiple references"))
-		})?;
-
-		if let Some(ns) = stmt.ns {
-			let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-			tx.get_or_add_ns(&ns, self.opt.strict).await?;
-			tx.commit().await?;
-
-			let mut session = ctx_ref.value("session").unwrap_or(&Value::None).clone();
-			self.opt.set_ns(Some(ns.as_str().into()));
-			session.put(NS.as_ref(), ns.into_strand().into());
-			ctx_ref.add_value("session", session.into());
-		}
-		if let Some(db) = stmt.db {
-			let Some(ns) = &self.opt.ns else {
-				return Err(anyhow::anyhow!("Cannot use database without namespace"));
-			};
-
-			let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-			tx.ensure_ns_db(ns, &db, self.opt.strict).await?;
-			tx.commit().await?;
-
-			let mut session = ctx_ref.value("session").unwrap_or(&Value::None).clone();
-			self.opt.set_db(Some(db.as_str().into()));
-			session.put(DB.as_ref(), db.into_strand().into());
-			ctx_ref.add_value("session", session.into());
-		}
-		Ok(())
 	}
 
 	fn execute_option_statement(&mut self, stmt: OptionStatement) -> Result<()> {
@@ -116,10 +84,37 @@ impl Executor {
 		plan: TopLevelExpr,
 	) -> FlowResult<Value> {
 		let res = match plan {
-			TopLevelExpr::Use(_) => {
-				return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
-					"TopLevelExpr::Use should have been handled by a calling function",
-				))));
+			TopLevelExpr::Use(stmt) => {
+				// Avoid moving in and out of the context via Arc::get_mut
+				let ctx = Arc::get_mut(&mut self.ctx)
+					.ok_or_else(|| {
+						Error::unreachable("Tried to unfreeze a Context with multiple references")
+					})
+					.map_err(anyhow::Error::new)?;
+
+				if let Some(ns) = stmt.ns {
+					txn.get_or_add_ns(&ns, self.opt.strict).await?;
+
+					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+					self.opt.set_ns(Some(ns.as_str().into()));
+					session.put(NS.as_ref(), ns.into_strand().into());
+					ctx.add_value("session", session.into());
+				}
+				if let Some(db) = stmt.db {
+					let Some(ns) = &self.opt.ns else {
+						return Err(ControlFlow::Err(anyhow::anyhow!(
+							"Cannot use database without namespace"
+						)));
+					};
+
+					txn.ensure_ns_db(ns, &db, self.opt.strict).await?;
+
+					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+					self.opt.set_db(Some(db.as_str().into()));
+					session.put(DB.as_ref(), db.into_strand().into());
+					ctx.add_value("session", session.into());
+				}
+				Ok(Value::None)
 			}
 			TopLevelExpr::Option(_) => {
 				return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
@@ -299,13 +294,7 @@ impl Executor {
 			}
 		}
 
-		match stmt {
-			// These statements don't need a transaction.
-			TopLevelExpr::Use(stmt) => {
-				self.execute_use_statement(kvs, stmt).await.map(|_| Value::None)
-			}
-			stmt => self.execute_plan_impl(kvs, start, stmt).await,
-		}
+		self.execute_plan_impl(kvs, start, stmt).await
 	}
 
 	async fn execute_plan_impl(
@@ -582,9 +571,6 @@ impl Executor {
 					}
 					Err(e) => Err(e),
 				},
-				TopLevelExpr::Use(stmt) => {
-					self.execute_use_statement(kvs, stmt).await.map(|_| Value::None)
-				}
 				stmt => {
 					skip_remaining = matches!(stmt, TopLevelExpr::Expr(Expr::Return(_)));
 

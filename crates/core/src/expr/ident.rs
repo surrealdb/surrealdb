@@ -32,8 +32,9 @@ impl Ident {
 	///
 	/// # Safety
 	/// Caller should ensure that the string does not contain a null byte.
-	pub unsafe fn new_unchecked(str: String) -> Self {
-		Ident(str)
+	pub unsafe fn new_unchecked(s: String) -> Self {
+		debug_assert!(!s.as_bytes().contains(&0));
+		Ident(s)
 	}
 
 	pub fn from_strand(str: Strand) -> Self {

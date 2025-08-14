@@ -194,7 +194,7 @@ impl DefineIndexStatement {
 		_doc: Option<&CursorDoc>,
 		blocking: bool,
 	) -> Result<()> {
-		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let rcv = ctx
 			.get_index_builder()
 			.ok_or_else(|| Error::unreachable("No Index Builder"))?

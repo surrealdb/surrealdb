@@ -47,15 +47,13 @@ impl UpdateStatement {
 		// Check if there is a timeout
 		let ctx = stm.setup_timeout(ctx)?;
 
-		let (ns, db) = opt.ns_db()?;
-		let db = ctx.tx().ensure_ns_db(ns, db, opt.strict).await?;
 		// Get a query planner
 		let mut planner = QueryPlanner::new();
 
 		let stm_ctx = StatementContext::new(&ctx, opt, &stm)?;
 		// Loop over the update targets
 		for w in self.what.iter() {
-			i.prepare(&db, stk, &ctx, opt, doc, &mut planner, &stm_ctx, w).await.map_err(|e| {
+			i.prepare(stk, &ctx, opt, doc, &mut planner, &stm_ctx, w).await.map_err(|e| {
 				if matches!(e.downcast_ref(), Some(Error::InvalidStatementTarget { .. })) {
 					let Ok(Error::InvalidStatementTarget {
 						value,
@@ -75,17 +73,7 @@ impl UpdateStatement {
 		let ctx = stm.setup_query_planner(planner, ctx);
 
 		// Process the statement
-		let res = i
-			.output(
-				stk,
-				db.namespace_id,
-				db.database_id,
-				&ctx,
-				opt,
-				&stm,
-				RecordStrategy::KeysAndValues,
-			)
-			.await?;
+		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout
 		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
 		// Output the results

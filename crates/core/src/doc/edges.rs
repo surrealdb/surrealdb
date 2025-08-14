@@ -25,7 +25,7 @@ impl Document {
 		// Store the record edges
 		if let Workable::Relate(l, r, _) = &self.extras {
 			// Get the namespace / database
-			let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
+			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 			// Get the record id
 			let rid = self.id()?;
 			// Get the transaction

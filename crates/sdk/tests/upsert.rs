@@ -697,7 +697,8 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				let res = res.unwrap().to_string();
 				assert!(res.contains("Name"), "{}: {:?}", msg, res);
 			} else {
-				assert!(res.unwrap() == Array::new().into(), "{}", msg);
+				let res = res.unwrap();
+				assert!(res == Array::new().into(), "{}: {:?}", msg, res);
 
 				// Verify the update was not persisted
 				let mut resp = ds

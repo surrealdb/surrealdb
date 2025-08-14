@@ -81,7 +81,7 @@ impl ApiInvocation {
 		let mut inv_ctx = InvocationContext::default();
 
 		// first run the middleware which is globally configured for the database.
-		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let global = ctx.tx().get_db_optional_config(ns, db, "api").await?;
 		if let Some(config) = global.as_ref().map(|v| v.try_as_api()).transpose()? {
 			for m in config.middleware.iter() {

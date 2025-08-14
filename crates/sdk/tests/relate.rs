@@ -115,6 +115,7 @@ async fn relate_and_overwrite() -> Result<()> {
 #[tokio::test]
 async fn relate_with_param_or_subquery() -> Result<()> {
 	let sql = r#"
+		USE NS test DB test;
 		LET $tobie = person:tobie;
 		LET $jaime = person:jaime;
         LET $relation = type::table("knows");
@@ -128,6 +129,10 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 8);
+
+	// USE NS test DB test;
+	let tmp = res.remove(0).result;
+	tmp.unwrap();
 	//
 	for _ in 0..3 {
 		let tmp = res.remove(0).result?;
@@ -218,6 +223,7 @@ async fn relate_with_complex_table() -> Result<()> {
 #[tokio::test]
 async fn schemafull_relate() -> Result<()> {
 	let sql = r#"
+	USE NS test DB test;
 	INSERT INTO person [
 		{ id: 1 },
 		{ id: 2 }
@@ -232,7 +238,10 @@ async fn schemafull_relate() -> Result<()> {
 	"#;
 
 	let mut t = Test::new(sql).await?;
-
+	// USE NS test DB test;
+	let tmp = t.next()?.result;
+	tmp.unwrap();
+	//
 	t.expect_val(
 		"[
 			{id: person:1},

@@ -551,7 +551,7 @@ async fn permissions_checks_define_ns() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let access1 = "{ accesses: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
+	let access1 = "{ accesses: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
 	let access2 = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
 	let check_results = [vec![access1], vec![access2]];
 
@@ -579,7 +579,7 @@ async fn permissions_checks_define_ns() {
 		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
-	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	let res = iam_check_cases_impl(test_cases.iter(), &scenario, check_results, false, false).await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
 }
 
@@ -591,8 +591,8 @@ async fn permissions_checks_define_db() {
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
 	let check_results = [
-		vec!["{ accesses: {  }, databases: { DB: 'DEFINE DATABASE DB' }, users: {  } }"],
-		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}}' }, users: {  } }"],
+		vec!["{ accesses: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}}' }, users: {  } }"],
 	];
 
 	let test_cases = [
@@ -619,7 +619,7 @@ async fn permissions_checks_define_db() {
 		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
-	iam_check_cases(test_cases.iter(), &scenario, check_results).await.unwrap();
+	iam_check_cases_impl(test_cases.iter(), &scenario, check_results, true, false).await.unwrap();
 }
 
 #[tokio::test]
@@ -726,8 +726,8 @@ async fn permissions_checks_define_access_root() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let access1 = r#"{ accesses: { access: "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }"#;
-	let access2 = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
+	let access1 = r#"{ accesses: { access: "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }"#;
+	let access2 = "{ accesses: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
 	let check_results = [vec![access1], vec![access2]];
 
 	let test_cases = [
@@ -770,9 +770,9 @@ async fn permissions_checks_define_access_ns() {
 	// succeeded and when it failed
 	let check_results = [
 		vec![
-			"{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, databases: {  }, users: {  } }",
+			"{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}}' }, users: {  } }",
 		],
-		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}}' }, users: {  } }"],
 	];
 
 	let test_cases = [
@@ -863,8 +863,8 @@ async fn permissions_checks_define_user_root() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check1 = r#"{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#;
-	let check2 = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
+	let check1 = r#"{ accesses: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#;
+	let check2 = "{ accesses: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
 	let check_results = [vec![check1], vec![check2]];
 
 	let test_cases = [
@@ -910,9 +910,9 @@ async fn permissions_checks_define_user_ns() {
 	// succeeded and when it failed
 	let check_results = [
 		vec![
-			"{ accesses: {  }, databases: {  }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }",
+			"{ accesses: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}}' }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }",
 		],
-		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}}' }, users: {  } }"],
 	];
 
 	let test_cases = [
@@ -1275,7 +1275,7 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	let cache = ds.get_cache();
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 
-	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+	let txn = ds.transaction(TransactionType::Write, LockType::Pessimistic).await?;
 	let db = txn.ensure_ns_db("test", "test", false).await?;
 	drop(txn);
 

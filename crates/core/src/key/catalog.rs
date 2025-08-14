@@ -6,7 +6,7 @@ pub(crate) mod ns {
 
 	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 	#[non_exhaustive]
-	pub struct CatalogNamespaceKey<'a> {
+	pub(crate) struct CatalogNamespaceKey<'a> {
 		__: u8,
 		_a: u8,
 		pub ns: &'a str,
@@ -16,7 +16,7 @@ pub(crate) mod ns {
 		type ValueType = NamespaceDefinition;
 	}
 
-	pub fn new(ns: &str) -> CatalogNamespaceKey<'_> {
+	pub(crate) fn new(ns: &str) -> CatalogNamespaceKey<'_> {
 		CatalogNamespaceKey::new(ns)
 	}
 
@@ -39,7 +39,7 @@ pub(crate) mod db {
 
 	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 	#[non_exhaustive]
-	pub struct CatalogDatabaseKey<'a> {
+	pub(crate) struct CatalogDatabaseKey<'a> {
 		__: u8,
 		_a: u8,
 		pub ns: &'a str,
@@ -50,7 +50,7 @@ pub(crate) mod db {
 		type ValueType = DatabaseDefinition;
 	}
 
-	pub fn new<'a>(ns: &'a str, db: &'a str) -> CatalogDatabaseKey<'a> {
+	pub(crate) fn new<'a>(ns: &'a str, db: &'a str) -> CatalogDatabaseKey<'a> {
 		CatalogDatabaseKey::new(ns, db)
 	}
 
@@ -75,7 +75,7 @@ pub(crate) mod tb {
 
 	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 	#[non_exhaustive]
-	pub struct CatalogTableKey<'a> {
+	pub(crate) struct CatalogTableKey<'a> {
 		__: u8,
 		_a: u8,
 		pub ns: &'a str,
@@ -88,7 +88,7 @@ pub(crate) mod tb {
 		type ValueType = TableDefinition;
 	}
 
-	pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> CatalogTableKey<'a> {
+	pub(crate) fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> CatalogTableKey<'a> {
 		CatalogTableKey::new(ns, db, tb)
 	}
 
