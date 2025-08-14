@@ -1,8 +1,7 @@
 mod helpers;
 use helpers::*;
-
 use surrealdb::Result;
-use surrealdb::dbs::Session;
+use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
 
 #[tokio::test]

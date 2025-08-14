@@ -1,14 +1,16 @@
-use crate::err::Error;
-use crate::expr::Idiom;
-use crate::idx::ft::Position;
-use crate::idx::ft::offset::Offset;
-use crate::val::{Array, Object, Value};
-use anyhow::{Result, ensure};
 use std::collections::btree_map::Entry as BEntry;
 use std::collections::hash_map::Entry as HEntry;
 use std::collections::{BTreeMap, HashMap};
 use std::convert::Infallible;
 use std::result;
+
+use anyhow::{Result, ensure};
+
+use crate::err::Error;
+use crate::expr::Idiom;
+use crate::idx::ft::Position;
+use crate::idx::ft::offset::Offset;
+use crate::val::{Array, Object, Value};
 
 pub(crate) struct HighlightParams {
 	pub(crate) prefix: Value,

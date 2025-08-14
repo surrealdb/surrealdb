@@ -1,6 +1,6 @@
-use crate::sql::{Ident, Idiom};
-
 use std::fmt::{self, Display, Formatter};
+
+use crate::sql::{Ident, Idiom};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

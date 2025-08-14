@@ -1,10 +1,11 @@
-use super::headers::Accept;
 use axum::response::{IntoResponse, Response};
 use bincode::Options;
 use http::StatusCode;
 use http::header::{CONTENT_TYPE, HeaderValue};
 use serde::Serialize;
-use surrealdb_core::val;
+
+use super::headers::Accept;
+use crate::core::val;
 
 pub enum Output {
 	None,
@@ -12,18 +13,18 @@ pub enum Output {
 	Text(String),
 	Json(Vec<u8>), // JSON
 	Cbor(Vec<u8>), // CBOR
-	Bincode(Vec<u8>), // Full type serialization, don't know why this is called 'full'
-	               // serialization, this is just bincode. Should not be used.
+	Bincode(Vec<u8>), /* Full type serialization, don't know why this is called 'full'
+	                * serialization, this is just bincode. Should not be used. */
 }
 impl Output {
 	// All these methods should not be used.
 	//
-	// They handle serialization differently then how serialization is handled in core.
-	// We need to force a single way to serialize values or end up with subtle bugs and format
-	// differences.
+	// They handle serialization differently then how serialization is handled in
+	// core. We need to force a single way to serialize values or end up with
+	// subtle bugs and format differences.
 	#[deprecated]
 	pub fn json_value(val: &val::Value) -> Output {
-		match surrealdb_core::rpc::format::json::encode(val.clone()) {
+		match crate::core::rpc::format::json::encode(val.clone()) {
 			Ok(v) => Output::Json(v),
 			Err(_) => Output::Fail,
 		}

@@ -1,3 +1,13 @@
+use std::borrow::Cow;
+use std::fmt::{self, Display, Formatter, Write};
+use std::slice::Iter;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::paths::ID;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -7,15 +17,6 @@ use crate::expr::{Expr, FlowResultExt as _, Function, Idiom, Part};
 use crate::fnc::args::FromArgs;
 use crate::syn;
 use crate::val::{Array, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
-use std::fmt::{self, Display, Formatter, Write};
-use std::slice::Iter;
-
-use super::paths::ID;
 
 /// The `foo,bar,*` part of statements like `SELECT foo,bar.* FROM faz`.
 #[revisioned(revision = 1)]
@@ -46,7 +47,8 @@ impl InfoStructure for Fields {
 }
 
 impl Fields {
-	/// Returns true if computing this value can be done on a read only transaction.
+	/// Returns true if computing this value can be done on a read only
+	/// transaction.
 	pub fn read_only(&self) -> bool {
 		match self {
 			Fields::Value(field) => field.read_only(),
@@ -147,10 +149,10 @@ impl Fields {
 	) -> Result<Value> {
 		// Process the desired output
 
-		// TODO: This makes it so that with selection `SELECT 1 as foo,*,bar` if `foo` is in the
-		// document it will be overwritten with 1. It might be slightly more usefull to have the
-		// ordering matter and make `1 as foo,*` provide the foo from the document and have `*, 1
-		// as foo` provide the overwritten foo.
+		// TODO: This makes it so that with selection `SELECT 1 as foo,*,bar` if `foo`
+		// is in the document it will be overwritten with 1. It might be slightly more
+		// usefull to have the ordering matter and make `1 as foo,*` provide the foo
+		// from the document and have `*, 1 as foo` provide the overwritten foo.
 		let mut out = if self.has_all_selection() {
 			doc.doc.as_ref().clone()
 		} else {
@@ -271,8 +273,8 @@ impl Fields {
 										} else {
 											// TODO: Alias is ignored here, figure out the right
 											// behaviour. Maybe make an alias result in sub fields?
-											// `select type::fields(["foo","faz"]) as bar` resulting in
-											// `{ "bar": { foo: value, faz: value} }`?
+											// `select type::fields(["foo","faz"]) as bar` resulting
+											// in `{ "bar": { foo: value, faz: value} }`?
 											for (idiom, idiom_res) in
 												idioms.iter().zip(idiom_results.into_iter())
 											{

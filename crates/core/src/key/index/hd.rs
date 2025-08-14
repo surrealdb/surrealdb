@@ -1,10 +1,10 @@
 //! Stores the DocIds -> Thing of an HNSW index
+use serde::{Deserialize, Serialize};
+
 use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::docs::HnswDocsState;
 use crate::kvs::KVKey;
 use crate::val::RecordIdKey;
-
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct HdRoot<'a> {

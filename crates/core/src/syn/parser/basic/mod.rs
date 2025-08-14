@@ -2,6 +2,8 @@ use std::mem;
 
 use rust_decimal::Decimal;
 
+use super::GluedValue;
+use super::mac::pop_glued;
 use crate::sql::language::Language;
 use crate::sql::{Ident, Param};
 use crate::syn::error::{bail, syntax_error};
@@ -10,9 +12,6 @@ use crate::syn::parser::mac::unexpected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{self, TokenKind, t};
 use crate::val::{Bytes, Datetime, DecimalExt as _, Duration, File, Number, Regex, Strand, Uuid};
-
-use super::GluedValue;
-use super::mac::pop_glued;
 
 mod number;
 
@@ -310,8 +309,9 @@ mod test {
 		use crate::sql;
 
 		fn assert_ident_parses_correctly(ident: &str) {
-			use crate::syn::Parser;
 			use reblessive::Stack;
+
+			use crate::syn::Parser;
 
 			let mut parser = Parser::new(ident.as_bytes());
 			let mut stack = Stack::new();

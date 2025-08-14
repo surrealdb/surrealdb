@@ -1,8 +1,9 @@
-use crate::net::client_ip::ClientIp;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use surrealdb::options::EngineOptions;
+
+use crate::core::options::EngineOptions;
+use crate::net::client_ip::ClientIp;
 
 pub static CF: OnceLock<Config> = OnceLock::new();
 

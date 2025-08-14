@@ -1,3 +1,9 @@
+use std::borrow::Cow;
+use std::collections::{BTreeMap, HashMap};
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::plan::Explanation;
 use crate::dbs::store::MemoryCollector;
@@ -5,10 +11,6 @@ use crate::dbs::{Options, Statement};
 use crate::expr::{Expr, Field, FlowResultExt as _, Function, FunctionCall, Idiom};
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Array, TryAdd, TryFloatDiv, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
 
 pub(super) struct GroupsCollector {
 	base: Vec<Aggregator>,
@@ -153,7 +155,8 @@ impl GroupsCollector {
 								Expr::FunctionCall(f) if f.receiver.is_aggregate() => {
 									let a = OptimisedAggregate::from_function_call(f);
 									let x = if matches!(a, OptimisedAggregate::None) {
-										// The aggregation is not optimised, let's compute it with the values
+										// The aggregation is not optimised, let's compute it with
+										// the values
 										let mut args = vec![agr.take()];
 										for e in f.arguments.iter().skip(1) {
 											args.push(
@@ -324,9 +327,9 @@ impl Aggregator {
 			*c += count;
 		}
 		if let Some(c) = self.count_function.as_mut() {
-			// NOTE: There was some rather complicated juggling of a function here where the argument
-			// was replaced but as far as I can tell the whole thing was just equivalent to the
-			// one liner below.
+			// NOTE: There was some rather complicated juggling of a function here where the
+			// argument was replaced but as far as I can tell the whole thing was just
+			// equivalent to the one liner below.
 			*c += val.is_truthy() as usize;
 		}
 		if val.is_number() {

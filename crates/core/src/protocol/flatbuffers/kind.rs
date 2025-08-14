@@ -1,9 +1,12 @@
-use crate::expr::{Ident, Kind, kind::KindLiteral};
+use std::collections::BTreeMap;
+
+use rust_decimal::Decimal;
+use surrealdb_protocol::fb::v1 as proto_fb;
+
+use crate::expr::kind::KindLiteral;
+use crate::expr::{Ident, Kind};
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use crate::val::{Duration, Strand, Table};
-use rust_decimal::Decimal;
-use std::collections::BTreeMap;
-use surrealdb_protocol::fb::v1 as proto_fb;
 
 impl ToFlatbuffers for Kind {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Kind<'bldr>>;
@@ -605,16 +608,15 @@ impl FromFlatbuffers for KindLiteral {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use crate::expr::Ident;
-	use crate::expr::Kind;
-	use crate::expr::KindLiteral;
-	use crate::val::Duration;
-	use crate::val::Strand;
+	use std::collections::BTreeMap;
+
 	use rstest::rstest;
 	use rust_decimal::Decimal;
-	use std::collections::BTreeMap;
 	use surrealdb_protocol::fb::v1 as proto_fb;
+
+	use super::*;
+	use crate::expr::{Ident, Kind, KindLiteral};
+	use crate::val::{Duration, Strand};
 
 	#[rstest]
 	#[case::any(Kind::Any)]

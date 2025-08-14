@@ -1,3 +1,5 @@
+use anyhow::{Result, bail};
+
 use crate::cf::{ChangeSet, DatabaseMutation, TableMutations};
 use crate::err::Error;
 use crate::expr::statements::show::ShowSince;
@@ -6,7 +8,6 @@ use crate::key::change;
 use crate::key::debug::Sprintable;
 use crate::kvs::Transaction;
 use crate::vs::VersionStamp;
-use anyhow::{Result, bail};
 
 // Reads the change feed for a specific database or a table,
 // starting from a specific versionstamp.

@@ -15,9 +15,11 @@ mod sequence;
 mod table;
 pub mod user;
 
+use std::fmt::{self, Display};
+
 pub use access::DefineAccessStatement;
 pub use analyzer::DefineAnalyzerStatement;
-pub use api::DefineApiStatement;
+pub use api::{ApiAction, DefineApiStatement};
 pub use bucket::DefineBucketStatement;
 pub use config::DefineConfigStatement;
 pub use database::DefineDatabaseStatement;
@@ -31,10 +33,6 @@ pub use param::DefineParamStatement;
 pub use sequence::DefineSequenceStatement;
 pub use table::DefineTableStatement;
 pub use user::DefineUserStatement;
-
-pub use api::ApiAction;
-
-use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

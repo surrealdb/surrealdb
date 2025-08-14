@@ -5,7 +5,8 @@ use crate::syn::token::{Token, TokenKind, t};
 impl Lexer<'_> {
 	/// lex non-ascii characters.
 	///
-	/// Should only be called after determining that the byte is not a valid ascii character.
+	/// Should only be called after determining that the byte is not a valid
+	/// ascii character.
 	pub(super) fn lex_char(&mut self, byte: u8) -> Token {
 		let c = match self.reader.complete_char(byte) {
 			Ok(x) => x,

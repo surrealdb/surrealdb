@@ -1,10 +1,11 @@
+use std::collections::BTreeMap;
+
+use anyhow::Context;
+use surrealdb_protocol::fb::v1 as proto_fb;
+
 use crate::expr::Kind;
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use crate::val::{Array, Object, Value};
-use anyhow::Context;
-use std::collections::BTreeMap;
-
-use surrealdb_protocol::fb::v1 as proto_fb;
 
 impl ToFlatbuffers for BTreeMap<String, Kind> {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::LiteralObject<'bldr>>;

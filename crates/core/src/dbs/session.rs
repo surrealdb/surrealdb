@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
+use chrono::Utc;
+
 use crate::dbs::Variables;
 use crate::iam::{Auth, Level, Role};
 use crate::val::{Strand, Value};
-use chrono::Utc;
-use std::sync::Arc;
 
 /// Specifies the current session information when processing a query.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

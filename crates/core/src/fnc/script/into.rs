@@ -1,10 +1,11 @@
-use super::classes;
-use crate::val::{Geometry, Number, Value};
 use js::{
 	Array, BigInt, Class, Ctx, Error, Exception, FromIteratorJs as _, IntoJs, Null, Object,
 	TypedArray, Undefined,
 };
 use rust_decimal::prelude::ToPrimitive;
+
+use super::classes;
+use crate::val::{Geometry, Number, Value};
 
 const F64_INT_MAX: i64 = ((1u64 << f64::MANTISSA_DIGITS) - 1) as i64;
 const F64_INT_MIN: i64 = -F64_INT_MAX - 1;

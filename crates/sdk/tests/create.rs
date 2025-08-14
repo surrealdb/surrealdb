@@ -2,11 +2,12 @@ use surrealdb_core::iam::Level;
 use surrealdb_core::val::{Array, RecordId};
 use surrealdb_core::{strand, syn};
 mod helpers;
-use crate::helpers::skip_ok;
 use helpers::new_ds;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::iam::Role;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::iam::Role;
+
+use crate::helpers::skip_ok;
 
 #[tokio::test]
 async fn create_or_insert_with_permissions() -> Result<()> {

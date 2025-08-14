@@ -1,9 +1,11 @@
-use crate::telemetry::{filter_from_value, span_filters_from_value};
+use std::collections::HashMap;
+
 use clap::builder::{NonEmptyStringValueParser, PossibleValue, TypedValueParser};
 use clap::error::{ContextKind, ContextValue, ErrorKind};
-use std::collections::HashMap;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::{DynFilterFn, LevelFilter};
+
+use crate::telemetry::{filter_from_value, span_filters_from_value};
 
 #[derive(Debug)]
 pub struct CustomFilter {

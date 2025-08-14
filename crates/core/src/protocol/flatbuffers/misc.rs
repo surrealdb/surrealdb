@@ -1,8 +1,7 @@
-use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
-use crate::val::File;
-use crate::val::Table;
-
 use surrealdb_protocol::fb::v1 as proto_fb;
+
+use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
+use crate::val::{File, Table};
 
 impl ToFlatbuffers for File {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::File<'bldr>>;

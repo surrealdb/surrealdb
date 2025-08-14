@@ -1,20 +1,22 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
-use crate::err::Error;
-use crate::expr::fmt::Pretty;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{self, Ident, Kind};
-use crate::kvs::impl_kv_value_revisioned;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::{self, Write};
+use std::ops::Bound;
+
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use geo::Point;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
-use std::fmt::{self, Write};
-use std::ops::Bound;
+
+use crate::err::Error;
+use crate::expr::fmt::Pretty;
+use crate::expr::statements::info::InfoStructure;
+use crate::expr::{self, Ident, Kind};
+use crate::kvs::impl_kv_value_revisioned;
 
 pub mod array;
 pub mod bytes;
@@ -310,11 +312,12 @@ impl Value {
 	/// Returns the surql representation of the kind of the value as a string.
 	///
 	/// # Warning
-	/// This function is not fully implement for all variants, make sure you don't accidentally use
-	/// it where it can return an invalid value.
+	/// This function is not fully implement for all variants, make sure you
+	/// don't accidentally use it where it can return an invalid value.
 	pub fn kind_of(&self) -> &'static str {
-		// TODO: Look at this function, there are a whole bunch of options for which this returns
-		// "incorrect type" which might sneak into the results where it shouldn.t
+		// TODO: Look at this function, there are a whole bunch of options for which
+		// this returns "incorrect type" which might sneak into the results where it
+		// shouldn.t
 		match self {
 			Self::None => "none",
 			Self::Null => "null",
@@ -573,7 +576,8 @@ impl Value {
 		}
 	}
 
-	/// Compare this Value to another Value lexicographically and using natural numerical comparison
+	/// Compare this Value to another Value lexicographically and using natural
+	/// numerical comparison
 	pub fn natural_lexical_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
 			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_lexical_cmp(a, b)),
@@ -1025,10 +1029,10 @@ impl FromIterator<(String, Value)> for Value {
 
 #[cfg(test)]
 mod tests {
-	use crate::syn;
+	use chrono::TimeZone;
 
 	use super::*;
-	use chrono::TimeZone;
+	use crate::syn;
 
 	#[test]
 	fn check_none() {

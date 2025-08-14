@@ -1,3 +1,11 @@
+use std::cmp::Ordering;
+use std::mem::size_of_val;
+
+use anyhow::{Result, bail, ensure};
+use rand::prelude::SliceRandom;
+use reblessive::tree::Stk;
+
+use super::args::{Optional, Rest};
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -8,13 +16,6 @@ use crate::val::array::{
 	Windows,
 };
 use crate::val::{Array, Closure, Value};
-use anyhow::{Result, bail, ensure};
-use rand::prelude::SliceRandom;
-use reblessive::tree::Stk;
-use std::cmp::Ordering;
-use std::mem::size_of_val;
-
-use super::args::{Optional, Rest};
 
 /// Returns an error if an array of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
@@ -730,8 +731,9 @@ pub fn windows((array, window_size): (Array, i64)) -> Result<Value> {
 
 pub mod sort {
 
-	use crate::val::{Array, Value};
 	use anyhow::Result;
+
+	use crate::val::{Array, Value};
 
 	pub fn asc((mut array,): (Array,)) -> Result<Value> {
 		array.sort_unstable();

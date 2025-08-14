@@ -1,16 +1,18 @@
-use crate::val::{Geometry, Number, Value};
 use chrono::SecondsFormat;
 use geo::{LineString, Point, Polygon};
 use serde_json::{Map, Number as JsonNumber, Value as JsonValue, json};
 
+use crate::val::{Geometry, Number, Value};
+
 impl Value {
 	/// Converts the value into a json representation of the value.
 	/// Returns None if there are non serializable values present in the value.
-	// TODO: Remove the JsonValue intermediate and implement a json formatter for Value.
+	// TODO: Remove the JsonValue intermediate and implement a json formatter for
+	// Value.
 	pub fn into_json_value(self) -> Option<JsonValue> {
-		// This function goes through some extra length to manually implement the encoding into
-		// json value. This is done to ensure clarity and stability in regards to how the value varients are
-		// converted.
+		// This function goes through some extra length to manually implement the
+		// encoding into json value. This is done to ensure clarity and stability in
+		// regards to how the value varients are converted.
 
 		let res = match self {
 			// These value types are simple values which
@@ -143,17 +145,17 @@ fn polygon_into_json_value(polygon: Polygon) -> JsonValue {
 
 #[cfg(test)]
 mod tests {
-	use crate::val::{self, RecordId, RecordIdKey, Value};
+	use std::collections::BTreeMap;
+	use std::time::Duration;
 
 	use chrono::{DateTime, Utc};
 	use geo::{MultiLineString, MultiPoint, MultiPolygon, line_string, point, polygon};
+	use rstest::rstest;
 	use rust_decimal::Decimal;
 	use serde_json::{Value as Json, json};
-	use std::collections::BTreeMap;
-	use std::time::Duration;
 	use uuid::Uuid;
 
-	use rstest::rstest;
+	use crate::val::{self, RecordId, RecordIdKey, Value};
 
 	#[rstest]
 	#[case::none(Value::None, json!(null), Value::Null)]

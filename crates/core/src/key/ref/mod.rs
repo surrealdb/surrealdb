@@ -1,9 +1,10 @@
 //! Stores a graph edge pointer
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::val::RecordIdKey;
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct Prefix<'a> {
@@ -126,7 +127,8 @@ impl<'a> PrefixFf<'a> {
 // The order in this key is made so we can scan:
 // - all references for a given record
 // - all references for a given record, filtered by a origin table
-// - all references for a given record, filtered by a origin table and an origin field
+// - all references for a given record, filtered by a origin table and an origin
+//   field
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Ref<'a> {
@@ -178,8 +180,8 @@ pub fn suffix(ns: &str, db: &str, tb: &str, id: &RecordIdKey) -> Result<Vec<u8>>
 	Ok(k)
 }
 
-// All these functions are related to record references which were temporarly deleted during the
-// value inversion PR.
+// All these functions are related to record references which were temporarly
+// deleted during the value inversion PR.
 #[allow(dead_code)]
 pub fn ftprefix(ns: &str, db: &str, tb: &str, id: &RecordIdKey, ft: &str) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_key()?;

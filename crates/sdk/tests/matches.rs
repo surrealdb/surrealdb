@@ -1,10 +1,11 @@
 mod helpers;
-use crate::helpers::{Test, skip_ok};
 use helpers::new_ds;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
+use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
 use surrealdb_core::val::{Array, Value};
+
+use crate::helpers::{Test, skip_ok};
 
 #[tokio::test]
 async fn select_where_matches_partial_highlight() -> Result<()> {
@@ -287,7 +288,8 @@ async fn select_where_matches_without_using_index_and_score() -> Result<()> {
 	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 
-	// This result should be empty, as we are looking for non-existing terms (dummy1 and dummy2).
+	// This result should be empty, as we are looking for non-existing terms (dummy1
+	// and dummy2).
 	let tmp = res.remove(0).result?;
 	let val: Value = Array::new().into();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));

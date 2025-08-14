@@ -1,6 +1,7 @@
 mod helpers;
-use crate::helpers::Test;
 use surrealdb::Result;
+
+use crate::helpers::Test;
 
 #[tokio::test]
 async fn select_start_limit_fetch() -> Result<()> {

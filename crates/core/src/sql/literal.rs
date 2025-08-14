@@ -1,12 +1,13 @@
 use std::fmt::{self, Write as _};
 
+//use async_graphql::dynamic::Object;
+use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+use rust_decimal::Decimal;
+
 use crate::sql::escape::EscapeKey;
 use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::sql::{Closure, Expr, RecordIdLit};
 use crate::val::{Bytes, Datetime, Duration, File, Geometry, Regex, Strand, Uuid};
-//use async_graphql::dynamic::Object;
-use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
-use rust_decimal::Decimal;
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -197,10 +198,11 @@ impl From<crate::expr::Literal> for Literal {
 }
 
 /// A hack to convert objects to geometries like they previously would.
-/// If it fails to convert to geometry it just returns an object like previous behaviour>
+/// If it fails to convert to geometry it just returns an object like previous
+/// behaviour>
 ///
-/// The behaviour around geometries needs to be improved but until then this is her to ensure they
-/// still work like they previously would.
+/// The behaviour around geometries needs to be improved but until then this is
+/// her to ensure they still work like they previously would.
 fn convert_geometry(map: Vec<ObjectEntry>) -> crate::expr::Literal {
 	if let Some(geom) = collect_geometry(&map) {
 		crate::expr::Literal::Geometry(geom)

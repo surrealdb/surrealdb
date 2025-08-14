@@ -1,18 +1,20 @@
+use std::collections::HashSet;
+use std::sync::atomic::AtomicI64;
+
+use async_channel::{Receiver, Sender};
+use indexmap::IndexMap;
+use reqwest::ClientBuilder;
+use reqwest::header::HeaderMap;
+use tokio::sync::watch;
+use url::Url;
+use wasm_bindgen_futures::spawn_local;
+
 use super::Client;
 use crate::api::conn::{Route, Router};
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 use crate::api::{Result, Surreal, conn};
 use crate::opt::WaitFor;
-use async_channel::{Receiver, Sender};
-use indexmap::IndexMap;
-use reqwest::ClientBuilder;
-use reqwest::header::HeaderMap;
-use std::collections::HashSet;
-use std::sync::atomic::AtomicI64;
-use tokio::sync::watch;
-use url::Url;
-use wasm_bindgen_futures::spawn_local;
 
 impl crate::api::Connection for Client {}
 impl conn::Sealed for Client {

@@ -5,8 +5,8 @@ use crate::sql::literal::ObjectEntry;
 use crate::sql::{
 	BinaryOperator, Constant, Expr, Ident, Idiom, Literal, Part, RecordIdKeyLit, RecordIdLit,
 };
+use crate::syn;
 use crate::syn::parser::{Parser, ParserSettings};
-use crate::syn::{self};
 use crate::val::Geometry;
 
 #[test]

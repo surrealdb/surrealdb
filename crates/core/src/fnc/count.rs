@@ -1,6 +1,7 @@
+use anyhow::Result;
+
 use super::args::Optional;
 use crate::val::Value;
-use anyhow::Result;
 
 pub fn count((Optional(arg),): (Optional<Value>,)) -> Result<Value> {
 	Ok(arg

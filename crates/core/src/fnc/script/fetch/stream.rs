@@ -36,8 +36,8 @@ impl<R: Clone + 'static + Send + Sync> ReadableStream<R> {
 		// replace the stream with a channel driven by as task.
 		// TODO: figure out how backpressure works in the stream API.
 
-		// Unbounded, otherwise when one channel gets awaited it might block forever because the
-		// other channel fills up.
+		// Unbounded, otherwise when one channel gets awaited it might block forever
+		// because the other channel fills up.
 		let (send_a, recv_a) = async_channel::unbounded::<R>();
 		let (send_b, recv_b) = async_channel::unbounded::<R>();
 		let new_stream = Box::pin(recv_a);

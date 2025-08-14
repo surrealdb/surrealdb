@@ -1,9 +1,10 @@
-use super::classes;
-use crate::val::{Array, Bytes, Datetime, Geometry, Object, RecordIdKey, Value};
 use chrono::{TimeZone, Utc};
 use js::prelude::This;
 use js::{Coerced, Ctx, Error, Exception, FromAtom, FromJs};
 use rust_decimal::Decimal;
+
+use super::classes;
+use crate::val::{Array, Bytes, Datetime, Geometry, Object, RecordIdKey, Value};
 
 fn check_nul(s: &str) -> Result<(), Error> {
 	if s.contains('\0') {

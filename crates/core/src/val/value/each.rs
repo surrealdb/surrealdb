@@ -6,8 +6,8 @@ impl Value {
 	/// Widens an idiom into a list of idioms with the given object.
 	/// Resolving .* to all the different fields or indexes in that position.
 	///
-	/// For example `a.*.*` with the object `{ a: { b:  [1,2], c: 1} }` resolves to a.b[0], a.b[1],
-	/// a.c.
+	/// For example `a.*.*` with the object `{ a: { b:  [1,2], c: 1} }` resolves
+	/// to a.b[0], a.b[1], a.c.
 	/// and `a.$` with object `{ a: [1,2,3] }` resolves to `a[2]`.
 	pub(crate) fn each(&self, path: &[Part]) -> Vec<Idiom> {
 		let mut accum = Vec::new();
@@ -75,8 +75,8 @@ impl Value {
 				x => {
 					if let Some(idx) = x.as_old_index() {
 						if let Some(v) = v.get(idx) {
-							// NOTE: We previously did not add an index into the resulting path here.
-							// That seemed like an bug but it might not be.
+							// NOTE: We previously did not add an index into the resulting path
+							// here. That seemed like an bug but it might not be.
 							accum.push(x.clone());
 							v._each(rest, accum, build);
 							accum.pop();

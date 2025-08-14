@@ -1,9 +1,10 @@
+use async_channel::Receiver;
+
 use super::types::User;
 use crate::api::conn::{Command, DbResponse, Route};
 use crate::api::{self, Response as QueryResponse};
+use crate::core::val;
 use crate::opt::Resource;
-use async_channel::Receiver;
-use surrealdb_core::val;
 
 pub(super) fn mock(route_rx: Receiver<Route>) {
 	tokio::spawn(async move {

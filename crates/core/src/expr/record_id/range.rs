@@ -1,14 +1,16 @@
+use std::fmt;
+use std::ops::Bound;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use super::RecordIdKeyLit;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::val::RecordIdKeyRange;
-use anyhow::Result;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::ops::Bound;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -80,7 +82,8 @@ impl RecordIdKeyRangeLit {
 			Bound::Unbounded => Bound::Unbounded,
 		};
 
-		// The TryFrom implementation ensures that the bounds do not contain an `Id::Range` value
+		// The TryFrom implementation ensures that the bounds do not contain an
+		// `Id::Range` value
 		Ok(RecordIdKeyRange {
 			start,
 			end,

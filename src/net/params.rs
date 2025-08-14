@@ -1,11 +1,12 @@
-use anyhow::Context as _;
-use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::str::FromStr;
-use surrealdb_core::val::Value;
+
+use anyhow::Context as _;
+use serde::Deserialize;
 
 use super::error::ResponseError;
+use crate::core::val::Value;
 
 #[derive(Debug, Clone)]
 pub struct Param(pub String);
@@ -54,7 +55,7 @@ impl From<Params> for BTreeMap<String, Value> {
 			.into_iter()
 			.map(|(k, v)| {
 				let value =
-					surrealdb::syn::json_legacy_strand(&v).unwrap_or_else(|_| Value::from(v));
+					crate::core::syn::json_legacy_strand(&v).unwrap_or_else(|_| Value::from(v));
 				(k, value)
 			})
 			.collect::<BTreeMap<_, _>>()

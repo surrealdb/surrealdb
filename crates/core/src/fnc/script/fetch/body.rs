@@ -1,12 +1,13 @@
-use crate::fnc::script::fetch::RequestError;
-use crate::fnc::script::fetch::stream::ReadableStream;
-use bytes::{Bytes, BytesMut};
-use futures::{Stream, TryStreamExt, future};
-use js::{ArrayBuffer, Class, Ctx, Error, Exception, FromJs, Result, Type, TypedArray, Value};
 use std::cell::{Cell, RefCell};
 use std::result::Result as StdResult;
 
+use bytes::{Bytes, BytesMut};
+use futures::{Stream, TryStreamExt, future};
+use js::{ArrayBuffer, Class, Ctx, Error, Exception, FromJs, Result, Type, TypedArray, Value};
+
 use super::classes::Blob;
+use crate::fnc::script::fetch::RequestError;
+use crate::fnc::script::fetch::stream::ReadableStream;
 
 pub type StreamItem = StdResult<Bytes, RequestError>;
 
@@ -26,7 +27,8 @@ pub enum BodyData {
 
 /// A struct representing the body mixin.
 ///
-/// Implements [`FromJs`] for conversion from `Blob`, `ArrayBuffer`, any `TypedBuffer` and `String`.
+/// Implements [`FromJs`] for conversion from `Blob`, `ArrayBuffer`, any
+/// `TypedBuffer` and `String`.
 pub struct Body {
 	/// The type of body
 	pub kind: BodyKind,
@@ -85,7 +87,8 @@ impl Body {
 
 	/// Returns the data from the body as a buffer.
 	///
-	/// if the body is a stream this future only returns when the full body is consumed.
+	/// if the body is a stream this future only returns when the full body is
+	/// consumed.
 	pub async fn to_buffer(&self) -> StdResult<Option<Bytes>, RequestError> {
 		match self.data.replace(BodyData::Used) {
 			BodyData::Buffer(x) => Ok(Some(x)),

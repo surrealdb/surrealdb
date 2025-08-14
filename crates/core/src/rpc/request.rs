@@ -19,7 +19,8 @@ pub struct Request {
 }
 
 impl Request {
-	/// Create a request by extracting the request fields from an surealql object.
+	/// Create a request by extracting the request fields from an surealql
+	/// object.
 	pub fn from_object(mut obj: Object) -> Result<Self, RpcError> {
 		// Fetch the 'id' argument
 

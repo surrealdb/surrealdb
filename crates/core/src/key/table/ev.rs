@@ -1,10 +1,10 @@
 //! Stores a DEFINE EVENT config definition
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+
 use crate::expr::statements::define::DefineEventStatement;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Ev<'a> {

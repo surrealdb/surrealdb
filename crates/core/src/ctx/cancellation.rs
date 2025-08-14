@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+
 use trice::Instant;
 
 /// A 'static view into the cancellation status of a Context.
