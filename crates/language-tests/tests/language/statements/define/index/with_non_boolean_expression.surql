@@ -20,31 +20,31 @@ value = "NONE"
 value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { from: { inclusive: false, value: 1 }, index: 'idx', to: { inclusive: false, value: NONE } }, table: 't' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+value = "[{ detail: { plan: { direction: 'forward', from: { inclusive: false, value: 1 }, index: 'idx', to: { inclusive: false, value: NONE } }, table: 't' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 [[test.results]]
 value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { from: { inclusive: false, value: 1 }, index: 'idx', to: { inclusive: false, value: NONE } }, table: 't' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+value = "[{ detail: { plan: { direction: 'forward', from: { inclusive: false, value: 1 }, index: 'idx', to: { inclusive: false, value: NONE } }, table: 't' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 [[test.results]]
 value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { from: { inclusive: false, value: 1 }, index: 'idx', to: { inclusive: false, value: NONE } }, table: 't' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+value = "[{ detail: { plan: { direction: 'forward', from: { inclusive: false, value: 1 }, index: 'idx', to: { inclusive: false, value: NONE } }, table: 't' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 [[test.results]]
 value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { from: { inclusive: false, value: 1 }, index: 'idx', to: { inclusive: false, value: NONE } }, table: 't' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+value = "[{ detail: { plan: { direction: 'forward', from: { inclusive: false, value: 1 }, index: 'idx', to: { inclusive: false, value: NONE } }, table: 't' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 [[test.results]]
 value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { from: { inclusive: false, value: 1 }, index: 'idx', to: { inclusive: false, value: NONE } }, table: 't' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+value = "[{ detail: { plan: { direction: 'forward', from: { inclusive: false, value: 1 }, index: 'idx', to: { inclusive: false, value: NONE } }, table: 't' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 */
 DEFINE INDEX idx ON t FIELDS v;
