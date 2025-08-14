@@ -94,16 +94,21 @@ pub(super) enum Collected {
 }
 
 impl Collected {
-	/// Processes a collected item and transforms it into a format ready for query execution.
+	/// Processes a collected item and transforms it into a format ready for
+	/// query execution.
 	///
-	/// This is the main entry point for the data processing pipeline. It handles different
-	/// types of collected data from various sources (indexes, table scans, graph traversals, etc.)
-	/// and applies the appropriate processing strategy based on the item type and execution context.
+	/// This is the main entry point for the data processing pipeline. It
+	/// handles different types of collected data from various sources
+	/// (indexes, table scans, graph traversals, etc.) and applies the
+	/// appropriate processing strategy based on the item type and execution
+	/// context.
 	///
-	/// The `rid_only` parameter optimizes performance by skipping value fetching when only
-	/// record IDs are needed (e.g., for COUNT operations or when values will be filtered out later).
+	/// The `rid_only` parameter optimizes performance by skipping value
+	/// fetching when only record IDs are needed (e.g., for COUNT operations or
+	/// when values will be filtered out later).
 	///
-	/// Each variant uses a specific processing strategy optimized for its data source and use case.
+	/// Each variant uses a specific processing strategy optimized for its data
+	/// source and use case.
 	pub(super) async fn process(
 		self,
 		opt: &Options,
@@ -600,11 +605,13 @@ pub(super) trait Collector {
 		mut rng: Range<Key>,
 		sc: ScanDirection,
 	) -> Result<Option<Range<Key>>> {
-		// Fast-forward a key range by skipping the first N keys when a START clause is active.
+		// Fast-forward a key range by skipping the first N keys when a START clause is
+		// active.
 		//
-		// This method avoids fully materializing or processing records prior to the requested
-		// offset by streaming only keys from the underlying KV store. It updates the iterator’s
-		// internal skipped counter and returns a narrowed range to resume scanning from.
+		// This method avoids fully materializing or processing records prior to the
+		// requested offset by streaming only keys from the underlying KV store. It
+		// updates the iterator’s internal skipped counter and returns a narrowed
+		// range to resume scanning from.
 		let ite = self.iterator();
 		let skippable = ite.skippable();
 		if skippable == 0 {

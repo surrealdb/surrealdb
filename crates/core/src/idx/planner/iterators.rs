@@ -110,12 +110,12 @@ impl IteratorBatch for VecDeque<IndexItemRecord> {
 	}
 }
 
-/// High-level iterator over index-backed scans which yields RecordIds (and optionally
-/// pre-fetched Values) depending on the current RecordStrategy.
+/// High-level iterator over index-backed scans which yields RecordIds (and
+/// optionally pre-fetched Values) depending on the current RecordStrategy.
 ///
-/// Each variant encapsulates a concrete scan strategy (equality, range, union, join,
-/// text search, KNN, etc). Iteration is performed in batches to cap per-IO work
-/// and allow cooperative cancellation via Context.
+/// Each variant encapsulates a concrete scan strategy (equality, range, union,
+/// join, text search, KNN, etc). Iteration is performed in batches to cap
+/// per-IO work and allow cooperative cancellation via Context.
 pub(crate) enum ThingIterator {
 	IndexEqual(IndexEqualThingIterator),
 	IndexRange(IndexRangeThingIterator),
@@ -138,9 +138,10 @@ pub(crate) enum ThingIterator {
 impl ThingIterator {
 	/// Fetch the next batch of index items.
 	///
-	/// - `size` is a soft upper bound on how many items to fetch. Concrete iterators may
-	///   return fewer items (e.g., due to range boundaries) or, in rare edge-cases, one extra
-	///   to honor inclusivity semantics when scanning in reverse.
+	/// - `size` is a soft upper bound on how many items to fetch. Concrete
+	///   iterators may return fewer items (e.g., due to range boundaries) or,
+	///   in rare edge-cases, one extra to honor inclusivity semantics when
+	///   scanning in reverse.
 	pub(crate) async fn next_batch<B: IteratorBatch>(
 		&mut self,
 		ctx: &Context,
@@ -169,7 +170,8 @@ impl ThingIterator {
 
 	/// Count up to the next `size` matching items without materializing values.
 	///
-	/// Used for SELECT ... COUNT and for explain paths where only cardinality is required.
+	/// Used for SELECT ... COUNT and for explain paths where only cardinality
+	/// is required.
 	pub(crate) async fn next_count(
 		&mut self,
 		ctx: &Context,
@@ -284,14 +286,17 @@ impl IndexEqualThingIterator {
 		})
 	}
 
-	/// Performs a key-value scan within the specified range and updates the begin key for pagination.
+	/// Performs a key-value scan within the specified range and updates the
+	/// begin key for pagination.
 	///
-	/// This method scans the key-value store between `beg` and `end` keys, returning up to `limit` results.
-	/// After scanning, it updates the `beg` key to continue from where this scan left off, enabling
+	/// This method scans the key-value store between `beg` and `end` keys,
+	/// returning up to `limit` results. After scanning, it updates the `beg`
+	/// key to continue from where this scan left off, enabling
 	/// efficient pagination through large result sets.
 	///
-	/// The key manipulation (appending 0x00) ensures that the next scan will start after the last
-	/// key returned, avoiding duplicate results while maintaining correct lexicographic ordering.
+	/// The key manipulation (appending 0x00) ensures that the next scan will
+	/// start after the last key returned, avoiding duplicate results while
+	/// maintaining correct lexicographic ordering.
 	async fn next_scan(
 		tx: &Transaction,
 		beg: &mut Vec<u8>,
@@ -301,7 +306,8 @@ impl IndexEqualThingIterator {
 		let min = beg.clone();
 		let max = end.to_owned();
 		let res = tx.scan(min..max, limit, None).await?;
-		// Update the begin key for the next scan to avoid duplicates and enable pagination
+		// Update the begin key for the next scan to avoid duplicates and enable
+		// pagination
 		if let Some((key, _)) = res.last() {
 			let mut key = key.clone();
 			key.push(0x00); // Move to the next possible key lexicographically
@@ -358,14 +364,17 @@ impl RangeScan {
 		self.beg.clone()..self.end.clone()
 	}
 
-	/// Determines whether a given key should be included in the range scan results.
+	/// Determines whether a given key should be included in the range scan
+	/// results.
 	///
-	/// This method implements inclusive/exclusive boundary logic for range scans.
-	/// It tracks whether boundary keys have been encountered and applies the appropriate
-	/// inclusion/exclusion rules based on the range configuration.
+	/// This method implements inclusive/exclusive boundary logic for range
+	/// scans. It tracks whether boundary keys have been encountered and
+	/// applies the appropriate inclusion/exclusion rules based on the range
+	/// configuration.
 	///
-	/// Returns `false` for keys that should be excluded (boundary keys when the range
-	/// is exclusive at that boundary), `true` for keys that should be included.
+	/// Returns `false` for keys that should be excluded (boundary keys when the
+	/// range is exclusive at that boundary), `true` for keys that should be
+	/// included.
 	fn matches(&mut self, k: &Key) -> bool {
 		// Handle beginning boundary: exclude if this is an exclusive range start
 		if !self.beg_excl_match_checked && self.beg.eq(k) {

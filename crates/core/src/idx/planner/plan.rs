@@ -40,10 +40,11 @@ pub(super) struct PlanBuilderParameters {
 }
 
 impl PlanBuilder {
-	/// Builds an optimal query execution plan by analyzing available indexes and query conditions.
+	/// Builds an optimal query execution plan by analyzing available indexes
+	/// and query conditions.
 	///
-	/// This method implements a sophisticated cost-based optimizer that chooses between different
-	/// execution strategies:
+	/// This method implements a sophisticated cost-based optimizer that chooses
+	/// between different execution strategies:
 	/// 1. Table scan (fallback when no indexes are suitable)
 	/// 2. Single index scan (most common, using one optimal index)
 	/// 3. Multi-index scan (when multiple indexes can be combined)
@@ -51,7 +52,8 @@ impl PlanBuilder {
 	///
 	/// The optimizer considers factors like:
 	/// - Available indexes and their selectivity
-	/// - Boolean operator types (AND vs OR affects index combination strategies)
+	/// - Boolean operator types (AND vs OR affects index combination
+	///   strategies)
 	/// - Compound index opportunities for multi-column queries
 	/// - Range query optimization with proper scan direction
 	/// - Order clause compatibility with index ordering
@@ -71,7 +73,8 @@ impl PlanBuilder {
 			return Self::table_iterator(ctx, Some("WITH NOINDEX"), p.gp).await;
 		}
 
-		// Analyze the query AST to discover indexable conditions and collect optimization opportunities
+		// Analyze the query AST to discover indexable conditions and collect
+		// optimization opportunities
 		if let Some(root) = &p.root {
 			if let Err(e) = b.eval_node(root) {
 				// Fall back to table scan if analysis fails
@@ -82,9 +85,10 @@ impl PlanBuilder {
 		// Optimization path 1: All conditions connected by AND operators
 		// This enables single-index optimizations and compound index usage
 		if p.all_and {
-			// Priority 1: Find the best compound index that covers multiple query conditions
-			// Compound indexes are highly efficient as they can satisfy multiple WHERE clauses
-			// in a single index scan, significantly reducing I/O operations
+			// Priority 1: Find the best compound index that covers multiple query
+			// conditions Compound indexes are highly efficient as they can satisfy
+			// multiple WHERE clauses in a single index scan, significantly reducing I/O
+			// operations
 			let mut compound_index = None;
 			for (ixr, vals) in p.compound_indexes {
 				if let Some((cols, io)) = b.check_compound_index(ixr, vals) {
