@@ -169,7 +169,6 @@ impl Iterator {
 		val: &Expr,
 	) -> Result<()> {
 		// Match the values
-		eprintln!("PREPARE: {:?}", val);
 		match val {
 			Expr::Mock(v) => self.prepare_mock(stm_ctx, v).await?,
 			Expr::Table(v) => {

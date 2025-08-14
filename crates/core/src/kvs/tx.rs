@@ -1198,6 +1198,29 @@ impl Transaction {
 		Ok(cached_db)
 	}
 
+	pub(crate) async fn get_tb_by_name(
+		&self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+	) -> Result<Option<Arc<TableDefinition>>> {
+		let qey = cache::tx::Lookup::TbByName(ns, db, tb);
+		match self.cache.get(&qey) {
+			Some(val) => val.try_into_type().map(Some),
+			None => {
+				let key = crate::key::catalog::tb::new(ns, db, tb);
+				let Some(tb) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
+
+				let tb = Arc::new(tb);
+				let entr = cache::tx::Entry::Any(tb.clone());
+				self.cache.insert(qey, entr);
+				Ok(Some(tb))
+			}
+		}
+	}
+
 	pub(crate) async fn put_tb(
 		&self,
 		ns: &str,
@@ -1205,10 +1228,10 @@ impl Transaction {
 		tb: TableDefinition,
 	) -> Result<Arc<TableDefinition>> {
 		let key = crate::key::catalog::tb::new(ns, db, &tb.name);
-		self.put(&key, &tb, None).await?;
+		self.set(&key, &tb, None).await?;
 
 		let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
-		self.put(&key, &tb, None).await?;
+		self.set(&key, &tb, None).await?;
 
 		// Populate cache
 		let cached_tb = Arc::new(tb.clone());
@@ -1222,6 +1245,58 @@ impl Transaction {
 		self.cache.insert(qey, cached_entry);
 
 		Ok(cached_tb)
+	}
+
+	pub(crate) async fn del_tb(&self, ns: &str, db: &str, tb: &str) -> Result<()> {
+		let Some(tb) = self.get_tb_by_name(ns, db, tb).await? else {
+			return Err(Error::TbNotFound {
+				name: tb.to_string(),
+			}
+			.into());
+		};
+
+		{
+			let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
+			self.del(&key).await?;
+		}
+		{
+			let key = crate::key::catalog::tb::new(ns, db, &tb.name);
+			self.del(&key).await?;
+		}
+
+		// Clear the cache
+		let qey = cache::tx::Lookup::TbById(tb.namespace_id, tb.database_id, &tb.name);
+		self.cache.remove(qey);
+		let qey = cache::tx::Lookup::TbByName(ns, db, &tb.name);
+		self.cache.remove(qey);
+
+		Ok(())
+	}
+
+	pub(crate) async fn clr_tb(&self, ns: &str, db: &str, tb: &str) -> Result<()> {
+		let Some(tb) = self.get_tb_by_name(ns, db, tb).await? else {
+			return Err(Error::TbNotFound {
+				name: tb.to_string(),
+			}
+			.into());
+		};
+
+		{
+			let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
+			self.clr(&key).await?;
+		}
+		{
+			let key = crate::key::catalog::tb::new(ns, db, &tb.name);
+			self.clr(&key).await?;
+		}
+
+		// Clear the cache
+		let qey = cache::tx::Lookup::TbById(tb.namespace_id, tb.database_id, &tb.name);
+		self.cache.remove(qey);
+		let qey = cache::tx::Lookup::TbByName(ns, db, &tb.name);
+		self.cache.remove(qey);
+
+		Ok(())
 	}
 
 	/// Retrieve a specific namespace user definition.
@@ -1357,7 +1432,6 @@ impl Transaction {
 				self.expect_ns_by_name(ns).await?;
 
 				// Return a database not found error.
-				eprintln!("DB NOT FOUND: 3");
 				Err(anyhow::anyhow!(Error::DbNotFound {
 					name: db.to_owned()
 				}))
@@ -1972,7 +2046,6 @@ impl Transaction {
 		let db = match self.get_db_by_name(ns, db).await? {
 			Some(db) => db,
 			None => {
-				eprintln!("DB NOT FOUND: 4");
 				return Err(Error::DbNotFound {
 					name: db.to_owned(),
 				}
@@ -2088,8 +2161,6 @@ impl Transaction {
 					.into());
 				}
 
-				eprintln!("DB NOT FOUND: 1");
-
 				return Err(Error::DbNotFound {
 					name: db.to_owned(),
 				}
@@ -2144,7 +2215,6 @@ impl Transaction {
 					match self.get_db_by_name(ns, db).await? {
 						Some(db_def) => db_def,
 						None => {
-							eprintln!("DB NOT FOUND: 5");
 							return Err(Error::DbNotFound {
 								name: db.to_owned(),
 							}

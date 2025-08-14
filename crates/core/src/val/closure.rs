@@ -11,7 +11,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Expr, FlowResultExt, Ident, Kind};
-use crate::sql::ToSql;
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
@@ -54,7 +53,7 @@ impl Closure {
 				(_, None) => {
 					bail!(Error::InvalidArguments {
 						name: "ANONYMOUS".to_string(),
-						message: format!("Expected a value for ${}", name),
+						message: format!("Expected a value for ${name}"),
 					})
 				}
 				(kind, Some(val)) => {
@@ -64,9 +63,7 @@ impl Closure {
 						bail!(Error::InvalidArguments {
 							name: "ANONYMOUS".to_string(),
 							message: format!(
-								"Expected a value of type '{}' for argument ${}",
-								kind.to_sql(),
-								name
+								"Expected a value of type '{kind}' for argument ${name}"
 							),
 						});
 					}
@@ -99,13 +96,13 @@ impl fmt::Display for Closure {
 			}
 			write!(f, "${name}: ")?;
 			match kind {
-				k @ Kind::Either(_) => write!(f, "<{}>", k.to_sql())?,
-				k => write!(f, "{}", k.to_sql())?,
+				k @ Kind::Either(_) => write!(f, "<{k}>")?,
+				k => write!(f, "{k}")?,
 			}
 		}
 		f.write_str("|")?;
 		if let Some(returns) = &self.returns {
-			write!(f, " -> {}", returns.to_sql())?;
+			write!(f, " -> {returns}")?;
 		}
 		write!(f, " {}", self.body)
 	}

@@ -154,8 +154,7 @@ async fn subquery_ifelse_set() -> Result<()> {
 	assert_eq!(tmp, Value::None);
 	// LET $record = (SELECT *, count() AS count FROM person:test);
 	let tmp = res.remove(0).result?;
-	let val = Array::new().into();
-	assert_eq!(tmp, val);
+	assert_eq!(tmp, Value::None);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::None;

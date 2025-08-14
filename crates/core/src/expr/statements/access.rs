@@ -627,8 +627,6 @@ async fn compute_show(
 	// Clear the cache.
 	txn.clear_cache();
 	// Check if the access method exists.
-	eprintln!("show {:?}", base);
-	eprintln!("show {:?}", base);
 	match base {
 		Base::Root => {
 			txn.get_root_access(&stmt.ac).await?.ok_or_else(|| Error::AccessRootNotFound {
@@ -659,8 +657,6 @@ async fn compute_show(
 	};
 
 	// Get the grants to show.
-	eprintln!("gr: {:?}", &stmt.gr);
-	eprintln!("gr: {:?}", &stmt.gr);
 	match &stmt.gr {
 		Some(gr) => {
 			let grant = match base {

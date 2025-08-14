@@ -11,7 +11,6 @@ use super::escape::EscapeKey;
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Ident, Idiom, Literal, Part, Value};
-use crate::sql::ToSql;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
 	Regex, Strand, Uuid,
@@ -358,80 +357,72 @@ impl From<&Kind> for Box<Kind> {
 	}
 }
 
-impl ToSql for Kind {
-	fn to_sql(&self) -> String {
-		let mut out = String::new();
+impl Display for Kind {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Kind::Any => out.push_str("any"),
-			Kind::Null => out.push_str("null"),
-			Kind::Bool => out.push_str("bool"),
-			Kind::Bytes => out.push_str("bytes"),
-			Kind::Datetime => out.push_str("datetime"),
-			Kind::Decimal => out.push_str("decimal"),
-			Kind::Duration => out.push_str("duration"),
-			Kind::Float => out.push_str("float"),
-			Kind::Int => out.push_str("int"),
-			Kind::Number => out.push_str("number"),
-			Kind::Object => out.push_str("object"),
-			Kind::Point => out.push_str("point"),
-			Kind::String => out.push_str("string"),
-			Kind::Uuid => out.push_str("uuid"),
-			Kind::Regex => out.push_str("regex"),
-			Kind::Function(_, _) => out.push_str("function"),
-			Kind::Option(k) => out.push_str(&format!("option<{}>", k)),
+			Kind::Any => f.write_str("any"),
+			Kind::Null => f.write_str("null"),
+			Kind::Bool => f.write_str("bool"),
+			Kind::Bytes => f.write_str("bytes"),
+			Kind::Datetime => f.write_str("datetime"),
+			Kind::Decimal => f.write_str("decimal"),
+			Kind::Duration => f.write_str("duration"),
+			Kind::Float => f.write_str("float"),
+			Kind::Int => f.write_str("int"),
+			Kind::Number => f.write_str("number"),
+			Kind::Object => f.write_str("object"),
+			Kind::Point => f.write_str("point"),
+			Kind::String => f.write_str("string"),
+			Kind::Uuid => f.write_str("uuid"),
+			Kind::Regex => f.write_str("regex"),
+			Kind::Function(_, _) => f.write_str("function"),
+			Kind::Option(k) => write!(f, "option<{}>", k),
 			Kind::Record(k) => {
 				if k.is_empty() {
-					out.push_str("record")
+					f.write_str("record")
 				} else {
-					out.push_str(&format!("record<{}>", Fmt::verbar_separated(k)))
+					write!(f, "record<{}>", Fmt::verbar_separated(k))
 				}
 			}
 			Kind::Geometry(k) => {
 				if k.is_empty() {
-					out.push_str("geometry")
+					f.write_str("geometry")
 				} else {
-					out.push_str(&format!("geometry<{}>", Fmt::verbar_separated(k)))
+					write!(f, "geometry<{}>", Fmt::verbar_separated(k))
 				}
 			}
 			Kind::Set(k, l) => match (k, l) {
-				(k, None) if k.is_any() => out.push_str("set"),
-				(k, None) => out.push_str(&format!("set<{}>", k)),
-				(k, Some(l)) => out.push_str(&format!("set<{}, {}>", k, l)),
+				(k, None) if k.is_any() => f.write_str("set"),
+				(k, None) => write!(f, "set<{}>", k),
+				(k, Some(l)) => write!(f, "set<{}, {}>", k, l),
 			},
 			Kind::Array(k, l) => match (k, l) {
-				(k, None) if k.is_any() => out.push_str("array"),
-				(k, None) => out.push_str(&format!("array<{}>", k)),
-				(k, Some(l)) => out.push_str(&format!("array<{}, {}>", k, l)),
+				(k, None) if k.is_any() => f.write_str("array"),
+				(k, None) => write!(f, "array<{}>", k),
+				(k, Some(l)) => write!(f, "array<{}, {}>", k, l),
 			},
-			Kind::Either(k) => out.push_str(&format!("{}", Fmt::verbar_separated(k))),
-			Kind::Range => out.push_str("range"),
-			Kind::Literal(l) => out.push_str(&format!("{}", l)),
+			Kind::Either(k) => write!(f, "{}", Fmt::verbar_separated(k)),
+			Kind::Range => f.write_str("range"),
+			Kind::Literal(l) => write!(f, "{}", l),
 			Kind::References(t, i) => match (t, i) {
-				(Some(t), None) => out.push_str(&format!("references<{}>", t)),
-				(Some(t), Some(i)) => out.push_str(&format!("references<{}, {}>", t, i)),
-				(None, _) => out.push_str("references"),
+				(Some(t), None) => write!(f, "references<{}>", t),
+				(Some(t), Some(i)) => write!(f, "references<{}, {}>", t, i),
+				(None, _) => f.write_str("references"),
 			},
 			Kind::File(k) => {
 				if k.is_empty() {
-					out.push_str("file")
+					f.write_str("file")
 				} else {
-					out.push_str(&format!("file<{}>", Fmt::verbar_separated(k)))
+					write!(f, "file<{}>", Fmt::verbar_separated(k))
 				}
 			}
 		}
-		out
-	}
-}
-
-impl Display for Kind {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "{}", self.to_sql())
 	}
 }
 
 impl InfoStructure for Kind {
 	fn structure(self) -> Value {
-		self.to_sql().into()
+		self.to_string().into()
 	}
 }
 
@@ -755,7 +746,7 @@ impl Display for KindLiteral {
 						"{}",
 						Fmt::pretty_comma_separated(o.iter().map(|args| Fmt::new(
 							args,
-							|(k, v), f| write!(f, "{}: {}", EscapeKey(k), v.to_sql())
+							|(k, v), f| write!(f, "{}: {}", EscapeKey(k), v)
 						)),)
 					)?;
 					drop(indent);

@@ -34,25 +34,6 @@ impl Display for DefineDatabaseStatement {
 	}
 }
 
-impl crate::sql::ToSql for DefineDatabaseStatement {
-	fn to_sql(&self) -> String {
-		let mut out = "DEFINE DATABASE".to_string();
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => out.push_str(" OVERWRITE"),
-			DefineKind::IfNotExists => out.push_str(" IF NOT EXISTS"),
-		}
-		out.push_str(&format!(" {}", self.name));
-		if let Some(ref v) = self.comment {
-			out.push_str(&format!(" COMMENT {v}"));
-		}
-		if let Some(ref v) = self.changefeed {
-			out.push_str(&format!(" {v}"));
-		}
-		out
-	}
-}
-
 impl From<DefineDatabaseStatement> for crate::expr::statements::DefineDatabaseStatement {
 	fn from(v: DefineDatabaseStatement) -> Self {
 		crate::expr::statements::DefineDatabaseStatement {

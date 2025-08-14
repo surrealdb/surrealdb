@@ -304,7 +304,6 @@ impl MutableContext {
 	) -> Result<(NamespaceId, DatabaseId)> {
 		let (ns, db) = opt.ns_db()?;
 		let Some(db_def) = self.tx().get_db_by_name(ns, db).await? else {
-			// eprintln!("DB NOT FOUND: 2: {}", std::backtrace::Backtrace::force_capture());
 			return Err(Error::DbNotFound {
 				name: db.to_string(),
 			}

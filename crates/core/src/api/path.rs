@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use crate::err::Error;
 use crate::expr::Kind;
 use crate::expr::fmt::{Fmt, fmt_separated_by};
-use crate::sql::ToSql;
 use crate::syn;
 use crate::val::{Array, Object, Strand, Value};
 
@@ -285,7 +284,7 @@ impl Display for Segment {
 			Self::Dynamic(v, k) => {
 				write!(f, ":{v}")?;
 				if let Some(k) = k {
-					write!(f, "<{}>", k.to_sql())?;
+					write!(f, "<{k}>")?;
 				}
 
 				Ok(())

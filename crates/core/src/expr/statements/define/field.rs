@@ -20,7 +20,6 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Ident, Idiom, Kind, Part, Permissions};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Transaction, impl_kv_value_revisioned};
-use crate::sql::ToSql;
 use crate::val::{Strand, Value};
 
 #[revisioned(revision = 1)]
@@ -120,6 +119,7 @@ impl DefineFieldStatement {
 
 		let key = crate::key::database::tb::new(ns, db, &self.what);
 		txn.set(&key, &tb_def, None).await?;
+
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
 			cache.clear_tb(ns, db, &self.what);
@@ -287,7 +287,7 @@ impl DefineFieldStatement {
 
 				// As the refs and dynrefs type essentially take over a field
 				// they are not allowed to be mixed with most other clauses
-				let typename = kind.to_sql();
+				let typename = kind.to_string();
 
 				ensure!(
 					self.reference.is_none(),
@@ -383,9 +383,9 @@ impl DefineFieldStatement {
 						if !fd_kind.allows_nested_kind(&path, self_kind) {
 							bail!(Error::MismatchedFieldTypes {
 								name: self.name.to_string(),
-								kind: self_kind.to_sql(),
+								kind: self_kind.to_string(),
 								existing_name: fd.name.to_string(),
-								existing_kind: fd_kind.to_sql(),
+								existing_kind: fd_kind.to_string(),
 							});
 						}
 					}

@@ -146,18 +146,20 @@ impl DefineTableStatement {
 					});
 				};
 
-				let key = crate::key::database::tb::new(ns, db, ft);
-				txn.set(
-					&key,
-					&TableDefinition {
+				let (ns, db) = opt.ns_db()?;
+				txn.put_tb(
+					ns,
+					db,
+					TableDefinition {
 						cache_tables_ts: Uuid::now_v7(),
 						..foreign_tb.as_ref().clone()
 					},
-					None,
 				)
 				.await?;
+
 				// Clear the cache
 				if let Some(cache) = ctx.get_cache() {
+					let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 					cache.clear_tb(ns, db, ft);
 				}
 				// Clear the cache

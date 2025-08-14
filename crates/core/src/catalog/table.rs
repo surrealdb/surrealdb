@@ -81,7 +81,7 @@ impl TableDefinition {
 			drop: false,
 			schemafull: false,
 			view: None,
-			permissions: Permissions::default(),
+			permissions: Permissions::none(),
 			changefeed: None,
 			comment: None,
 			table_type: TableType::default(),
