@@ -701,6 +701,7 @@ const EXPLAIN_FROM_TO: &str = r"[
 		{
 			detail: {
 				plan: {
+				    direction: 'forward',
 					from: {
 						inclusive: false,
 						value: 2000
@@ -748,6 +749,7 @@ const EXPLAIN_FROM_INCL_TO: &str = r"[
 		{
 			detail: {
 				plan: {
+				    direction: 'forward',
 					from: {
 						inclusive: true,
 						value: 2000
@@ -799,6 +801,7 @@ const EXPLAIN_FROM_TO_INCL: &str = r"[
 			{
 				detail: {
 					plan: {
+					    direction: 'forward',
 						from: {
 							inclusive: false,
 							value: 2000
@@ -850,6 +853,7 @@ const EXPLAIN_FROM_INCL_TO_INCL: &str = r"[
 			{
 				detail: {
 					plan: {
+					    direction: 'forward',
 						from: {
 							inclusive: true,
 							value: 2000
@@ -944,6 +948,7 @@ const EXPLAIN_LESS: &str = r"[
 			{
 				detail: {
 					plan: {
+					    direction: 'forward',
 						from: {
 							inclusive: false,
 							value: None
@@ -985,6 +990,7 @@ const EXPLAIN_LESS_OR_EQUAL: &str = r"[
 			{
 				detail: {
 					plan: {
+					    direction: 'forward',
 						from: {
 							inclusive: false,
 							value: None
@@ -1030,6 +1036,7 @@ const EXPLAIN_MORE: &str = r"[
 			{
 				detail: {
 					plan: {
+					    direction: 'forward',
 						from: {
 							inclusive: false,
 							value: 2015
@@ -1071,6 +1078,7 @@ const EXPLAIN_MORE_OR_EQUAL: &str = r"[
 			{
 				detail: {
 					plan: {
+					    direction: 'forward',
 						from: {
 							inclusive: true,
 							value: 2015
@@ -2740,6 +2748,7 @@ async fn select_count_group_all_with_or_without_index() -> Result<()> {
 			{
 				detail: {
 					plan: {
+						direction: 'forward',
 						from: {
 							inclusive: true,
 							value: 5000

@@ -128,6 +128,18 @@ impl<'a> StatementContext<'a> {
 		Ok(GrantedPermission::Full)
 	}
 
+	/// Decide whether to fetch just record keys, keys and values, or only a
+	/// COUNT.
+	///
+	/// This function evaluates the statement shape (UPDATE/DELETE/etc.),
+	/// WHERE/GROUP/ORDER clauses, selected fields, and table permissions to
+	/// select the most efficient record retrieval strategy:
+	/// - KeysAndValues: required when values must be read (e.g., UPDATE/DELETE;
+	///   WHERE not fully covered by indexes; GROUP BY with fields; ORDER BY
+	///   with fields; non-count projections; or when table permissions are
+	///   Specific).
+	/// - Count: when we only need COUNT(*) and GROUP ALL.
+	/// - KeysOnly: when none of the above apply, allowing index-only iteration.
 	pub(crate) fn check_record_strategy(
 		&self,
 		all_expressions_with_index: bool,
@@ -203,6 +215,11 @@ impl<'a> StatementContext<'a> {
 	/// This is used for Table and Range iterators.
 	/// The direction is reversed if the first element of order is ID
 	/// descending. Typically: `ORDER BY id DESC`
+	/// Determine forward/backward scan direction for table/range iterators.
+	///
+	/// On backends that support reverse scans (e.g., RocksDB/TiKV), we reverse
+	/// the direction when the first ORDER BY is `id DESC`. Otherwise, we
+	/// default to forward.
 	pub(crate) fn check_scan_direction(&self) -> ScanDirection {
 		#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 		if let Some(Ordering::Order(o)) = self.order {
@@ -316,15 +333,16 @@ impl QueryPlanner {
 					it.ingest(Iterable::Index(t.clone(), ir, rs));
 				}
 				for (ixr, rq) in ranges_indexes {
-					let ie = IteratorEntry::Range(rq.exps, ixr, rq.from, rq.to);
+					let ie =
+						IteratorEntry::Range(rq.exps, ixr, rq.from, rq.to, ScanDirection::Forward);
 					let ir = exe.add_iterator(ie);
 					it.ingest(Iterable::Index(t.clone(), ir, rs));
 				}
 				self.requires_distinct = true;
 				self.add(t.clone(), None, exe, it, rs);
 			}
-			Plan::SingleIndexRange(ixn, rq, keys_only, is_order) => {
-				let ir = exe.add_iterator(IteratorEntry::Range(rq.exps, ixn, rq.from, rq.to));
+			Plan::SingleIndexRange(ixn, rq, keys_only, sc, is_order) => {
+				let ir = exe.add_iterator(IteratorEntry::Range(rq.exps, ixn, rq.from, rq.to, sc));
 				if is_order {
 					self.ordering_indexes.push(ir);
 				}
