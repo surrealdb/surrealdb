@@ -91,7 +91,7 @@ impl PlanBuilder {
 			// operations
 			let mut compound_index = None;
 			for (ixr, vals) in p.compound_indexes {
-				if let Some((cols, io)) = b.check_compound_index(ixr, vals) {
+				if let Some((cols, io)) = b.check_compound_index_all_and(ixr, vals) {
 					// Prefer indexes that cover more columns (higher selectivity)
 					if let Some((c, _)) = &compound_index {
 						if cols <= *c {
@@ -226,34 +226,59 @@ impl PlanBuilder {
 	}
 
 	/// Check if a compound index can be used.
-	fn check_compound_index(
+	fn check_compound_index_all_and(
 		&self,
 		ixr: IndexReference,
-		columns: Vec<Vec<Arc<Value>>>,
+		columns: Vec<Vec<IndexOperator>>,
 	) -> Option<(IdiomCol, IndexOption)> {
 		// Check the index can be used
 		if !self.allowed_index(&ixr) {
 			return None;
 		}
-		// Count contiguous values (from the left)
-		let mut cont = 0;
+		// Count contiguous values (from the left) that will be part of an equal search
+		let mut contigues_equals_values = 0;
+		// Collect ranges parts following the first equals value
+		let mut range_parts = vec![];
 		for vals in &columns {
-			if vals.is_empty() {
+			if vals.is_empty() || !range_parts.is_empty() {
 				break;
 			}
-			if vals.iter().all(|v| v.is_nullish()) {
+			let mut nullish = 0;
+			for iop in vals {
+				match iop {
+					IndexOperator::Equality(val) => {
+						if range_parts.is_empty() && val.is_nullish() {
+							nullish += 1;
+						}
+					}
+					IndexOperator::RangePart(_, val) => {
+						if val.is_nullish() {
+							nullish += 1;
+						} else {
+							range_parts.push(iop.clone());
+						}
+					}
+					_ => {
+						// Any other operator is not compatible with a compound index
+						break;
+					}
+				}
+			}
+			if nullish == vals.len() {
 				break;
 			}
-			cont += 1;
+			contigues_equals_values += 1;
 		}
-		if cont == 0 {
+		//
+		if contigues_equals_values == 0 && range_parts.is_empty() {
 			return None;
 		}
-		let combinations = Self::cartesian_product(&columns);
-		if combinations.len() == 1 {
-			let val: Vec<Value> = combinations[0].iter().map(|v| v.as_ref().clone()).collect();
+		let equal_combinations = Self::cartesian_equals_product(&columns, contigues_equals_values);
+		if equal_combinations.len() == 1 {
+			let val: Vec<Value> =
+				equal_combinations[0].iter().map(|v| v.as_ref().clone()).collect();
 			return Some((
-				cont,
+				contigues_equals_values,
 				IndexOption::new(
 					ixr,
 					None,
@@ -262,7 +287,7 @@ impl PlanBuilder {
 				),
 			));
 		}
-		let vals: Vec<Value> = combinations
+		let vals: Vec<Value> = equal_combinations
 			.iter()
 			.map(|v| {
 				let a: Vec<Value> = v.iter().map(|v| v.as_ref().clone()).collect();
@@ -270,7 +295,7 @@ impl PlanBuilder {
 			})
 			.collect();
 		Some((
-			cont,
+			contigues_equals_values,
 			IndexOption::new(
 				ixr,
 				None,
@@ -280,13 +305,21 @@ impl PlanBuilder {
 		))
 	}
 
-	fn cartesian_product(values: &[Vec<Arc<Value>>]) -> Vec<Vec<Arc<Value>>> {
-		values.iter().fold(vec![vec![]], |acc, v| {
+	fn cartesian_equals_product(
+		columns: &[Vec<IndexOperator>],
+		contigues_equals_value: usize,
+	) -> Vec<Vec<Arc<Value>>> {
+		columns.iter().take(contigues_equals_value).fold(vec![vec![]], |acc, v| {
 			acc.iter()
 				.flat_map(|prev| {
-					v.iter().map(move |x| {
+					v.iter().map(move |iop| {
 						let mut new_vec = prev.clone();
-						new_vec.push(x.clone());
+						let val = if let IndexOperator::Equality(val) = iop {
+							val.clone()
+						} else {
+							Arc::new(Value::None)
+						};
+						new_vec.push(val);
 						new_vec
 					})
 				})
@@ -372,7 +405,7 @@ pub(super) struct IndexOption {
 	op: Arc<IndexOperator>,
 }
 
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub(super) enum IndexOperator {
 	Equality(Arc<Value>),
 	Union(Arc<Value>),
