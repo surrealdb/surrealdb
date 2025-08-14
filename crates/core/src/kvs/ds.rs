@@ -32,7 +32,10 @@ use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::capabilities::{
-	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
+	ArbitraryQueryTarget,
+	ExperimentalTarget,
+	MethodTarget,
+	RouteTarget,
 };
 use crate::dbs::node::Timestamp;
 use crate::dbs::{Capabilities, Executor, Notification, Options, Response, Session, Variables};
@@ -1081,7 +1084,7 @@ impl Datastore {
 		sess: &Session,
 		vars: Option<Variables>,
 	) -> Result<Vec<Response>> {
-		//TODO: Insert planner here.
+		// TODO: Insert planner here.
 		self.process_plan(ast.into(), sess, vars).await
 	}
 

@@ -11,7 +11,10 @@ use crate::dbs::{Options, Workable};
 use crate::err::Error;
 use crate::expr::permission::Permission;
 use crate::expr::statements::define::{
-	DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement, DefineIndexStatement,
+	DefineDatabaseStatement,
+	DefineEventStatement,
+	DefineFieldStatement,
+	DefineIndexStatement,
 	DefineTableStatement,
 };
 use crate::expr::statements::live::LiveStatement;
@@ -88,6 +91,7 @@ impl CursorValue {
 
 impl Deref for CursorValue {
 	type Target = Value;
+
 	fn deref(&self) -> &Self::Target {
 		self.as_ref()
 	}

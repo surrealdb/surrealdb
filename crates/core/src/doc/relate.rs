@@ -26,6 +26,7 @@ impl Document {
 			self.relate_update(stk, ctx, opt, stm).await
 		}
 	}
+
 	/// Attempt to run a RELATE clause
 	async fn relate_create(
 		&mut self,
@@ -51,6 +52,7 @@ impl Document {
 		self.process_table_events(stk, ctx, opt, stm).await?;
 		self.pluck(stk, ctx, opt, stm).await
 	}
+
 	/// Attempt to run an UPDATE clause
 	async fn relate_update(
 		&mut self,

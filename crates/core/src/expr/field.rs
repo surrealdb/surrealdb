@@ -68,6 +68,7 @@ impl Fields {
 			Fields::Value(_) => false,
 		}
 	}
+
 	/// Create a new `VALUE id` field projection
 	pub(crate) fn value_id() -> Self {
 		Fields::Value(Box::new(Field::Single {
@@ -93,6 +94,7 @@ impl Fields {
 	pub fn is_single(&self) -> bool {
 		matches!(self, Fields::Value(_))
 	}
+
 	/// Check if the fields are only about counting
 	pub(crate) fn is_count_all_only(&self) -> bool {
 		fn is_count(f: &Field) -> bool {

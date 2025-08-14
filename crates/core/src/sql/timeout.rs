@@ -9,6 +9,7 @@ pub struct Timeout(pub Duration);
 
 impl Deref for Timeout {
 	type Target = Duration;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}

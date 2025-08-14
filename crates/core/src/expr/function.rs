@@ -44,6 +44,7 @@ impl Function {
 			Self::Model(m) => Idiom::field(unsafe { Ident::new_unchecked(m.to_string()) }),
 		}
 	}
+
 	/// Checks if this function invocation is writable
 	pub fn read_only(&self) -> bool {
 		match self {
@@ -149,7 +150,7 @@ impl Function {
 						_ => acc + 1,
 					});
 				// Check the necessary arguments are passed
-				//TODO(planner): Move this check out of the call.
+				// TODO(planner): Move this check out of the call.
 				if !(min_args_len..=max_args_len).contains(&args.len()) {
 					return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidArguments {
 						name: format!("fn::{}", val.name.as_str()),
@@ -212,7 +213,7 @@ impl Function {
 	}
 }
 
-///TODO(3.0): Remove after proper first class function support?
+/// TODO(3.0): Remove after proper first class function support?
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Function")]

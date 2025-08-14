@@ -83,8 +83,8 @@ where
 	Client: Connection,
 	D: Serialize + 'static,
 {
-	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Value>;
 
 	into_future! {}
 }
@@ -95,8 +95,8 @@ where
 	D: Serialize + 'static,
 	R: DeserializeOwned,
 {
-	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Option<R>>;
 
 	into_future! {}
 }
@@ -107,8 +107,8 @@ where
 	D: Serialize + 'static,
 	R: DeserializeOwned,
 {
-	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Vec<R>>;
 
 	into_future! {}
 }

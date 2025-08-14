@@ -57,11 +57,9 @@ async fn concurrency() -> Result<()> {
 	}
 
 	// Diagnostics.
-	/*
-	for i in (1..=80).step_by(8) {
-		println!("{i} futures => {}", test_limit(i).await?);
-	}
-	*/
+	// for i in (1..=80).step_by(8) {
+	// println!("{i} futures => {}", test_limit(i).await?);
+	// }
 
 	assert!(test_limit(3).await?);
 

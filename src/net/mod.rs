@@ -46,7 +46,8 @@ use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::request_id::MakeRequestUuid;
 use tower_http::sensitive_headers::{
-	SetSensitiveRequestHeadersLayer, SetSensitiveResponseHeadersLayer,
+	SetSensitiveRequestHeadersLayer,
+	SetSensitiveResponseHeadersLayer,
 };
 use tower_http::trace::TraceLayer;
 
@@ -60,7 +61,6 @@ use crate::telemetry::metrics::HttpMetricsLayer;
 
 const LOG: &str = "surrealdb::net";
 
-///
 /// AppState is used to share data between routes.
 #[derive(Clone)]
 pub struct AppState {

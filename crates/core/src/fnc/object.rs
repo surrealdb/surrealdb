@@ -79,7 +79,7 @@ pub fn keys((object,): (Object,)) -> Result<Value> {
 		object
 			.keys()
 			.map(|v| {
-				//TODO: Null bytes
+				// TODO: Null bytes
 				let strand = unsafe { Strand::new_unchecked(v.clone()) };
 				Value::Strand(strand)
 			})

@@ -93,7 +93,6 @@ impl Auth {
 		))
 	}
 
-	//
 	// Permission checks
 	//
 
@@ -128,6 +127,7 @@ impl Auth {
 
 impl std::convert::TryFrom<(&DefineUserStatement, Level)> for Auth {
 	type Error = Error;
+
 	fn try_from(val: (&DefineUserStatement, Level)) -> Result<Self, Self::Error> {
 		Ok(Self::new((val.0, val.1).try_into()?))
 	}

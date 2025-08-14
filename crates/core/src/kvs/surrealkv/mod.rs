@@ -78,6 +78,7 @@ impl Datastore {
 			Err(e) => Err(anyhow::Error::new(Error::Ds(e.to_string()))),
 		}
 	}
+
 	pub(crate) fn parse_start_string(start: &str) -> Result<(&str, bool)> {
 		let (scheme, path) = start
 			// Support conventional paths like surrealkv:///absolute/path

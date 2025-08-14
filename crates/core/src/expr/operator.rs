@@ -373,6 +373,7 @@ impl BindingPower {
 			| PrefixOperator::Cast(_) => BindingPower::Prefix,
 		}
 	}
+
 	/// Returns the binding power for this expression. This is generally
 	/// `BindingPower::Prime` as most value variants are prime expressions,
 	/// however some like Value::Expression and Value::Range have a different

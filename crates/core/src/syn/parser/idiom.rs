@@ -250,6 +250,7 @@ impl Parser<'_> {
 		};
 		Ok(res)
 	}
+
 	pub(super) async fn parse_function_part(
 		&mut self,
 		ctx: &mut Stk,
@@ -258,6 +259,7 @@ impl Parser<'_> {
 		let args = self.parse_function_args(ctx).await?;
 		Ok(Part::Method(name.into_string(), args))
 	}
+
 	/// Parse the part after the `.{` in an idiom
 	pub(super) async fn parse_curly_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
 		match self.peek_kind() {
@@ -265,6 +267,7 @@ impl Parser<'_> {
 			_ => self.parse_destructure_part(ctx).await,
 		}
 	}
+
 	/// Parse a destructure part, expects `.{` to already be parsed
 	pub(super) async fn parse_destructure_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
 		let start = self.last_span();
@@ -310,6 +313,7 @@ impl Parser<'_> {
 
 		Ok(Part::Destructure(destructured))
 	}
+
 	/// Parse the inner part of a recurse, expects a valid recurse value in the
 	/// current position
 	pub(super) fn parse_recurse_inner(&mut self) -> ParseResult<Recurse> {
@@ -339,6 +343,7 @@ impl Parser<'_> {
 
 		Ok(Recurse::Range(min, max))
 	}
+
 	/// Parse a recursion instruction following the inner recurse part, if any
 	pub(super) async fn parse_recurse_instruction(
 		&mut self,
@@ -418,6 +423,7 @@ impl Parser<'_> {
 
 		Ok(instruction)
 	}
+
 	/// Parse a recurse part, expects `.{` to already be parsed
 	pub(super) async fn parse_recurse_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
 		let start = self.last_span();

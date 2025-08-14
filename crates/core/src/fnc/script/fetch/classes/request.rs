@@ -278,7 +278,7 @@ fn normalize_method(ctx: &Ctx<'_>, m: String) -> Result<Method> {
 		|| m.as_bytes().eq_ignore_ascii_case(b"TRACE")
 		|| m.as_bytes().eq_ignore_ascii_case(b"TRACK")
 	{
-		//methods that are not allowed [`https://fetch.spec.whatwg.org/#methods`]
+		// methods that are not allowed [`https://fetch.spec.whatwg.org/#methods`]
 		return Err(Exception::throw_type(ctx, &format!("method {m} is forbidden")));
 	}
 
@@ -459,6 +459,7 @@ impl<'js> Request<'js> {
 	pub fn referrer(&self) -> String {
 		self.init.referrer.clone()
 	}
+
 	// TODO
 
 	// ------------------------------

@@ -99,6 +99,7 @@ impl Document {
 
 		self.upsert_update(stk, ctx, opt, stm).await
 	}
+
 	/// Attempt to run an UPSERT statement to
 	/// create a record which does not exist
 	async fn upsert_create(
@@ -124,6 +125,7 @@ impl Document {
 		self.process_changefeeds(ctx, opt, stm).await?;
 		self.pluck(stk, ctx, opt, stm).await
 	}
+
 	/// Attempt to run an UPSERT statement to
 	/// update a record which already exists
 	async fn upsert_update(

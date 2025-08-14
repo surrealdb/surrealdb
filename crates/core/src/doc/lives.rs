@@ -209,6 +209,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Check the WHERE clause for a LIVE query
 	async fn lq_check(
 		&self,
@@ -234,6 +235,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Check any PERRMISSIONS for a LIVE query
 	async fn lq_allow(
 		&self,

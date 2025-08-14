@@ -36,6 +36,7 @@ impl Node {
 			gc,
 		}
 	}
+
 	/// Mark this node as archived
 	pub fn archive(&self) -> Self {
 		Node {
@@ -43,39 +44,48 @@ impl Node {
 			..self.to_owned()
 		}
 	}
+
 	/// Check if this node is active
 	pub fn id(&self) -> Uuid {
 		self.id
 	}
+
 	/// Check if this node is active
 	pub fn is_active(&self) -> bool {
 		!self.gc
 	}
+
 	/// Check if this node is archived
 	pub fn is_archived(&self) -> bool {
 		self.gc
 	}
+
 	// Return the node id if archived
 	pub fn archived(&self) -> Option<Uuid> {
 		self.is_archived().then_some(self.id)
 	}
+
 	// Sets the default gc value for old nodes
 	fn default_id(_revision: u16) -> Result<Uuid, Error> {
 		Ok(Uuid::default())
 	}
+
 	// Sets the default gc value for old nodes
 	fn default_hb(_revision: u16) -> Result<Timestamp, Error> {
 		Ok(Timestamp::default())
 	}
+
 	// Sets the default gc value for old nodes
 	fn default_gc(_revision: u16) -> Result<bool, Error> {
 		Ok(true)
 	}
+
 	// Sets the default gc value for old nodes
 	fn convert_name(&mut self, _revision: u16, value: String) -> Result<(), Error> {
 		self.id = Uuid::parse_str(&value).unwrap();
 		Ok(())
 	}
+
 	// Sets the default gc value for old nodes
 	fn convert_heartbeat(&mut self, _revision: u16, value: Timestamp) -> Result<(), Error> {
 		self.hb = value;
@@ -123,6 +133,7 @@ impl From<u64> for Timestamp {
 
 impl Add<Duration> for Timestamp {
 	type Output = Timestamp;
+
 	fn add(self, rhs: Duration) -> Self::Output {
 		Timestamp {
 			value: self.value.wrapping_add(rhs.as_millis() as u64),
@@ -132,6 +143,7 @@ impl Add<Duration> for Timestamp {
 
 impl Sub<Duration> for Timestamp {
 	type Output = Timestamp;
+
 	fn sub(self, rhs: Duration) -> Self::Output {
 		Timestamp {
 			value: self.value.wrapping_sub(rhs.as_millis() as u64),

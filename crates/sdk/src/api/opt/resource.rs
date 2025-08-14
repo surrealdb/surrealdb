@@ -97,6 +97,7 @@ impl Resource {
 			Resource::Unspecified => val::Value::None,
 		}
 	}
+
 	pub fn is_single_recordid(&self) -> bool {
 		match self {
 			Resource::RecordId(rid) => {

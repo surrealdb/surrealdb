@@ -1267,7 +1267,6 @@ mod tests {
 		.await
 		.unwrap();
 
-		//
 		// Token with valid custom claims of different types
 		//
 		let now = Utc::now().timestamp();
@@ -1462,7 +1461,6 @@ mod tests {
 			..Claims::default()
 		};
 
-		//
 		// Test without roles defined
 		// Roles should be ignored in record access
 		//
@@ -1490,7 +1488,6 @@ mod tests {
 			assert_eq!(sess.exp, None, "Default session expiration is expected to be None");
 		}
 
-		//
 		// Test with invalid signature
 		//
 		{

@@ -33,6 +33,7 @@ impl IteratorRecord {
 	pub(crate) fn irf(&self) -> IteratorRef {
 		self.irf
 	}
+
 	pub(crate) fn doc_id(&self) -> Option<DocId> {
 		self.doc_id
 	}
@@ -68,6 +69,7 @@ impl IteratorBatch for Vec<IndexItemRecord> {
 	fn with_capacity(capacity: usize) -> Self {
 		Vec::with_capacity(capacity)
 	}
+
 	fn from_one(record: IndexItemRecord) -> Self {
 		Vec::from([record])
 	}
@@ -89,9 +91,11 @@ impl IteratorBatch for VecDeque<IndexItemRecord> {
 	fn empty() -> Self {
 		VecDeque::from([])
 	}
+
 	fn with_capacity(capacity: usize) -> Self {
 		VecDeque::with_capacity(capacity)
 	}
+
 	fn from_one(record: IndexItemRecord) -> Self {
 		VecDeque::from([record])
 	}
@@ -103,6 +107,7 @@ impl IteratorBatch for VecDeque<IndexItemRecord> {
 	fn len(&self) -> usize {
 		VecDeque::len(self)
 	}
+
 	fn is_empty(&self) -> bool {
 		VecDeque::is_empty(self)
 	}
@@ -200,6 +205,7 @@ impl IndexItemRecord {
 	fn new_key(t: RecordId, ir: IteratorRecord) -> Self {
 		Self::Key(Arc::new(t), ir)
 	}
+
 	fn thing(&self) -> &RecordId {
 		match self {
 			Self::Key(t, _) => t,
@@ -363,6 +369,7 @@ impl ReverseRangeScan {
 			r,
 		}
 	}
+
 	fn matches_check(&self, k: &Key) -> bool {
 		// We check if we should match the key matching the beginning of the range
 		if !self.r.beg_excl_match_checked && self.r.beg.eq(k) {
@@ -611,6 +618,7 @@ impl IndexRangeReverseThingIterator {
 		let range = full_iterator_range();
 		Self::new(irf, ns, db, ix, &range)
 	}
+
 	async fn check_batch_ending(
 		&mut self,
 		tx: &Transaction,
@@ -1445,6 +1453,7 @@ impl KnnIterator {
 			res,
 		}
 	}
+
 	async fn next_batch<B: IteratorBatch>(&mut self, ctx: &Context, limit: u32) -> Result<B> {
 		let limit = limit as usize;
 		let mut records = B::with_capacity(limit.min(self.res.len()));

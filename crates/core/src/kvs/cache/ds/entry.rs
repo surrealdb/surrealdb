@@ -6,7 +6,10 @@ use uuid::Uuid;
 
 use crate::err::Error;
 use crate::expr::statements::{
-	DefineEventStatement, DefineFieldStatement, DefineIndexStatement, DefineTableStatement,
+	DefineEventStatement,
+	DefineFieldStatement,
+	DefineIndexStatement,
+	DefineTableStatement,
 	LiveStatement,
 };
 
@@ -40,6 +43,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Any"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineEventStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Evs`].
 	pub(crate) fn try_into_evs(self) -> Result<Arc<[DefineEventStatement]>> {
@@ -48,6 +52,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Evs"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineFieldStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Fds`].
 	pub(crate) fn try_into_fds(self) -> Result<Arc<[DefineFieldStatement]>> {
@@ -56,6 +61,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Fds"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineIndexStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Ixs`].
 	pub(crate) fn try_into_ixs(self) -> Result<Arc<[DefineIndexStatement]>> {
@@ -64,6 +70,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Ixs"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineTableStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Fts`].
 	pub(crate) fn try_into_fts(self) -> Result<Arc<[DefineTableStatement]>> {
@@ -72,6 +79,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Fts"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`LiveStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Lvs`].
 	pub(crate) fn try_into_lvs(self) -> Result<Arc<[LiveStatement]>> {

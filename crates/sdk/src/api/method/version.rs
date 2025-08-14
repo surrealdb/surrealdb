@@ -32,8 +32,8 @@ impl<'r, Client> IntoFuture for Version<'r, Client>
 where
 	Client: Connection,
 {
-	type Output = Result<semver::Version>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<semver::Version>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {

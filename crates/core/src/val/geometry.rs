@@ -36,34 +36,42 @@ impl Geometry {
 	pub fn is_point(&self) -> bool {
 		matches!(self, Self::Point(_))
 	}
+
 	/// Check if this is a Line
 	pub fn is_line(&self) -> bool {
 		matches!(self, Self::Line(_))
 	}
+
 	/// Check if this is a Polygon
 	pub fn is_polygon(&self) -> bool {
 		matches!(self, Self::Polygon(_))
 	}
+
 	/// Check if this is a MultiPoint
 	pub fn is_multipoint(&self) -> bool {
 		matches!(self, Self::MultiPoint(_))
 	}
+
 	/// Check if this is a MultiLine
 	pub fn is_multiline(&self) -> bool {
 		matches!(self, Self::MultiLine(_))
 	}
+
 	/// Check if this is a MultiPolygon
 	pub fn is_multipolygon(&self) -> bool {
 		matches!(self, Self::MultiPolygon(_))
 	}
+
 	/// Check if this is not a Collection
 	pub fn is_geometry(&self) -> bool {
 		!matches!(self, Self::Collection(_))
 	}
+
 	/// Check if this is a Collection
 	pub fn is_collection(&self) -> bool {
 		matches!(self, Self::Collection(_))
 	}
+
 	/// Check if this has valid latitude and longitude points:
 	/// * -90 <= lat <= 90
 	/// * -180 <= lng <= 180
@@ -106,6 +114,7 @@ impl Geometry {
 			Geometry::Collection(v) => v.iter().all(Geometry::is_valid),
 		}
 	}
+
 	/// Get the type of this Geometry as text
 	pub fn as_type(&self) -> &'static str {
 		match self {
@@ -118,6 +127,7 @@ impl Geometry {
 			Self::Collection(_) => "GeometryCollection",
 		}
 	}
+
 	/// Get the raw coordinates of this Geometry as an Array
 	pub fn as_coordinates(&self) -> Value {
 		fn point(v: &Point) -> Value {

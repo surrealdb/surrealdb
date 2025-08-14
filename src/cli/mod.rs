@@ -60,11 +60,9 @@ We would love it if you could star the repository (https://github.com/surrealdb/
 #[command(version = RELEASE.as_str(), about = INFO, before_help = LOGO)]
 #[command(disable_version_flag = false, arg_required_else_help = true)]
 struct Cli {
-	//
 	// Commands
 	#[command(subcommand)]
 	command: Commands,
-	//
 	// Logging
 	#[arg(help = "The logging level for the command-line tool", help_heading = "Logging")]
 	#[arg(env = "SURREAL_LOG", short = 'l', long = "log")]
@@ -82,7 +80,6 @@ struct Cli {
 	#[arg(env = "SURREAL_LOG_SOCKET", long = "log-socket")]
 	#[arg(global = true)]
 	log_socket: Option<String>,
-	//
 	// Log level overrides
 	#[arg(help = "Override the logging level for file output", help_heading = "Logging")]
 	#[arg(env = "SURREAL_LOG_FILE_LEVEL", long = "log-file-level")]
@@ -99,7 +96,6 @@ struct Cli {
 	#[arg(global = true)]
 	#[arg(value_parser = CustomFilterParser::new())]
 	log_socket_level: Option<CustomFilter>,
-	//
 	// Log socket options
 	#[arg(help = "The format for socket output", help_heading = "Logging")]
 	#[arg(env = "SURREAL_LOG_SOCKET_FORMAT", long = "log-socket-format")]
@@ -107,7 +103,6 @@ struct Cli {
 	#[arg(default_value = "text")]
 	#[arg(value_enum)]
 	log_socket_format: LogFormat,
-	//
 	// Log file options
 	#[arg(help = "Whether to enable log file output", help_heading = "Logging")]
 	#[arg(env = "SURREAL_LOG_FILE_ENABLED", long = "log-file-enabled")]
@@ -136,7 +131,6 @@ struct Cli {
 	#[arg(default_value = "daily")]
 	#[arg(value_enum)]
 	log_file_rotation: LogFileRotation,
-	//
 	// Version check
 	#[arg(help = "Whether to allow web check for client version upgrades at start")]
 	#[arg(env = "SURREAL_ONLINE_VERSION_CHECK", long)]
@@ -149,10 +143,9 @@ struct Cli {
 enum Commands {
 	#[command(about = "Start the database server")]
 	Start(StartCommandArguments),
-	/* Not implemented yet
-	#[command(about = "Backup data to or from an existing database")]
-	Backup(BackupCommandArguments),
-	*/
+	// Not implemented yet
+	// #[command(about = "Backup data to or from an existing database")]
+	// Backup(BackupCommandArguments),
 	#[command(about = "Import a SurrealQL script into an existing database")]
 	Import(ImportCommandArguments),
 	#[command(about = "Export an existing database as a SurrealQL script")]

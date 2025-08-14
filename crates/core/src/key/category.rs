@@ -31,21 +31,18 @@ pub enum Category {
 	TaskLease,
 	/// crate::key::root::ic                 /!ic{ns}{db}{tb}{ix}{nid}{uuid}
 	IndexCompaction,
-	///
 	/// ------------------------------
 	///
 	/// crate::key::node::all                /${nd}
 	NodeRoot,
 	/// crate::key::node::lq                 /${nd}!lq{lq}{ns}{db}
 	NodeLiveQuery,
-	///
 	/// ------------------------------
 	///
 	/// crate::key::namespace::di            /+{ni}!di
 	DatabaseIdentifier,
 	/// crate::key::database::ti             /+{ni}*{di}!ti
 	DatabaseTableIdentifier,
-	///
 	/// ------------------------------
 	///
 	/// crate::key::namespace::all           /*{ns}
@@ -60,7 +57,6 @@ pub enum Category {
 	NamespaceAccessGrant,
 	/// crate::key::namespace::us            /*{ns}!us{us}
 	NamespaceUser,
-	///
 	/// ------------------------------
 	///
 	/// crate::key::database::all            /*{ns}*{db}
@@ -95,7 +91,6 @@ pub enum Category {
 	DatabaseConfig,
 	/// crate::key::database::sq             /*{ns}*{db}*sq{sq}
 	DatabaseSequence,
-	///
 	/// ------------------------------
 	///
 	/// crate::key::table::all               /*{ns}*{db}*{tb}
@@ -110,7 +105,6 @@ pub enum Category {
 	IndexDefinition,
 	/// crate::key::table::lq                /*{ns}*{db}*{tb}!lq{lq}
 	TableLiveQuery,
-	///
 	/// ------------------------------
 	///
 	/// crate::key::index::all               /*{ns}*{db}*{tb}+{ix}
@@ -164,27 +158,22 @@ pub enum Category {
 	IndexFullTextDocIdsSequenceState,
 	/// crate::key::index                    /*{ns}*{db}*{tb}+{ix}*{fd}{id}
 	Index,
-	///
 	/// ------------------------------
 	///
 	/// crate::key::change                   /*{ns}*{db}#{ts}
 	ChangeFeed,
-	///
 	/// ------------------------------
 	///
 	/// crate::key::thing                    /*{ns}*{db}*{tb}*{id}
 	Thing,
-	///
 	/// ------------------------------
 	///
 	/// crate::key::graph                    /*{ns}*{db}*{tb}~{id}{eg}{ft}{fk}
 	Graph,
-	///
 	/// ------------------------------
 	///
 	/// crate::key::ref                      /*{ns}*{db}*{tb}&{id}{ft}{ff}{fk}
 	Ref,
-	///
 	/// ------------------------------
 	///
 	/// crate::seq::state                      /*{ns}*{db}!sq{sq}!st{nid}

@@ -65,14 +65,17 @@ impl Ident {
 	pub(crate) fn is_id(&self) -> bool {
 		self.0.as_str() == "id"
 	}
+
 	/// Checks if this field is the `type` field
 	pub(crate) fn is_type(&self) -> bool {
 		self.0.as_str() == "type"
 	}
+
 	/// Checks if this field is the `coordinates` field
 	pub(crate) fn is_coordinates(&self) -> bool {
 		self.0.as_str() == "coordinates"
 	}
+
 	/// Checks if this field is the `geometries` field
 	pub(crate) fn is_geometries(&self) -> bool {
 		self.0.as_str() == "geometries"
@@ -81,6 +84,7 @@ impl Ident {
 
 impl Deref for Ident {
 	type Target = str;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}

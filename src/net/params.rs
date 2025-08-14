@@ -13,6 +13,7 @@ pub struct Param(pub String);
 
 impl Deref for Param {
 	type Target = str;
+
 	#[inline]
 	fn deref(&self) -> &Self::Target {
 		self.0.as_str()
@@ -21,6 +22,7 @@ impl Deref for Param {
 
 impl FromStr for Param {
 	type Err = ResponseError;
+
 	#[inline]
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		let s = urlencoding::decode(s)

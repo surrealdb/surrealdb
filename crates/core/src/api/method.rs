@@ -21,6 +21,7 @@ pub enum Method {
 
 impl TryFrom<&Value> for Method {
 	type Error = Error;
+
 	fn try_from(value: &Value) -> Result<Self, Self::Error> {
 		match value {
 			Value::Strand(s) => match s.to_ascii_lowercase().as_str() {

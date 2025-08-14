@@ -148,6 +148,7 @@ impl SearchIndex {
 		ixs.mappers().check(&az).await?;
 		Self::with_analyzer(ixs, &tx, az, ikb, p, tt).await
 	}
+
 	async fn with_analyzer(
 		ixs: &IndexStores,
 		txn: &Transaction,
@@ -638,6 +639,7 @@ impl MatchesHitsIterator for SearchHitsIterator {
 	fn len(&self) -> usize {
 		self.iter.len()
 	}
+
 	#[cfg(not(target_pointer_width = "64"))]
 	fn len(&self) -> usize {
 		self.iter.size_hint().0

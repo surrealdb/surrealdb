@@ -9,8 +9,18 @@ use rust_decimal::Decimal;
 
 use crate::syn;
 use crate::val::{
-	self, Array, DecimalExt, Geometry, Number, Object, Range, RecordIdKey, RecordIdKeyRange, Table,
-	Uuid, Value,
+	self,
+	Array,
+	DecimalExt,
+	Geometry,
+	Number,
+	Object,
+	Range,
+	RecordIdKey,
+	RecordIdKeyRange,
+	Table,
+	Uuid,
+	Value,
 };
 
 // Tags from the spec - https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml

@@ -18,7 +18,15 @@ pub use file::file;
 pub use ident::flexible_ident;
 pub use js::javascript;
 pub use number::{
-	NumberKind, Numeric, NumericKind, duration, float, integer, number, numeric, numeric_kind,
+	NumberKind,
+	Numeric,
+	NumericKind,
+	duration,
+	float,
+	integer,
+	number,
+	numeric,
+	numeric_kind,
 };
 pub use regex::regex;
 pub use strand::strand;

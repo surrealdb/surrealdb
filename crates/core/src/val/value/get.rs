@@ -122,9 +122,9 @@ impl Value {
 			Some(p) => match self {
 				// Compute the refs first, then continue the path
 				// TODO: Reimplement references
-				//Value::Refs(r) => {
-				//	let v = r.compute(ctx, opt, doc).await?;
-				//	stk.run(|stk| v.get(stk, ctx, opt, doc, path)).await
+				// Value::Refs(r) => {
+				// 	let v = r.compute(ctx, opt, doc).await?;
+				// 	stk.run(|stk| v.get(stk, ctx, opt, doc, path)).await
 				//}
 				// Current value at path is a geometry
 				Value::Geometry(v) => match p {

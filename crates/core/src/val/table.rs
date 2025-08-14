@@ -55,6 +55,7 @@ impl Table {
 
 impl Deref for Table {
 	type Target = str;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}

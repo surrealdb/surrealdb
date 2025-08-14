@@ -76,6 +76,7 @@ impl Constant {
 			Self::DurationMax => ConstantValue::Duration(Duration::MAX),
 		}
 	}
+
 	/// Process this type returning a computed simple Value
 	pub fn compute(&self) -> Result<Value> {
 		Ok(match self.value() {

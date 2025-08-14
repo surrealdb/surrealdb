@@ -1,5 +1,4 @@
 //! How the keys are structured in the key value store
-///
 /// crate::key::version                  !v
 ///
 /// crate::key::root::all                /

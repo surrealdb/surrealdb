@@ -11,8 +11,21 @@ use crate::err::Error;
 use crate::expr::{FlowResultExt as _, Ident, Idiom, Kind};
 use crate::syn;
 use crate::val::{
-	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, RecordIdKey,
-	RecordIdKeyRange, Strand, Table, Uuid, Value,
+	Array,
+	Bytes,
+	Datetime,
+	Duration,
+	File,
+	Geometry,
+	Number,
+	Range,
+	RecordId,
+	RecordIdKey,
+	RecordIdKeyRange,
+	Strand,
+	Table,
+	Uuid,
+	Value,
 };
 
 pub fn array((val,): (Value,)) -> Result<Value> {
@@ -136,7 +149,7 @@ pub fn string((val,): (Value,)) -> Result<Value> {
 
 pub fn string_lossy((val,): (Value,)) -> Result<Value> {
 	match val {
-		//TODO: Replace with from_utf8_lossy_owned once stablized.
+		// TODO: Replace with from_utf8_lossy_owned once stablized.
 		Value::Bytes(x) => Ok(String::from_utf8_lossy(&x).into_owned().into()),
 		x => {
 			x.cast_to::<String>().map(Value::from).map_err(Error::from).map_err(anyhow::Error::new)

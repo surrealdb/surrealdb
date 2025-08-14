@@ -78,7 +78,7 @@ impl Parser<'_> {
 		// TODO: Look at ordering of operators.
 		match token {
 			// assigment operators have the lowest binding power.
-			//t!("+=") | t!("-=") | t!("+?=") => Some((2, 1)),
+			// t!("+=") | t!("-=") | t!("+?=") => Some((2, 1)),
 			t!("||") | t!("OR") => Some(BindingPower::Or),
 			t!("&&") | t!("AND") => Some(BindingPower::And),
 
@@ -347,7 +347,7 @@ impl Parser<'_> {
 	}
 
 	fn expr_is_range(expr: &Expr) -> bool {
-		//TODO(EXPR): Prefix and Postfix range
+		// TODO(EXPR): Prefix and Postfix range
 		match expr {
 			Expr::Binary {
 				op,

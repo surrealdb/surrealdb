@@ -9,8 +9,22 @@ use crate::expr::kind::{HasKind, KindLiteral};
 use crate::expr::{Ident, Kind};
 use crate::val::array::Uniq;
 use crate::val::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range,
-	RecordId, Regex, Strand, Uuid, Value,
+	Array,
+	Bytes,
+	Closure,
+	Datetime,
+	Duration,
+	File,
+	Geometry,
+	Null,
+	Number,
+	Object,
+	Range,
+	RecordId,
+	Regex,
+	Strand,
+	Uuid,
+	Value,
 };
 
 #[derive(Clone, Debug)]
@@ -503,7 +517,7 @@ impl Value {
 		match self {
 			Value::RecordId(t) => {
 				val.is_empty() || val.iter().any(|x| t.table == **x)
-				//t.is_record_type(val),
+				// t.is_record_type(val),
 			}
 			_ => false,
 		}

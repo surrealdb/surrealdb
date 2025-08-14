@@ -13,6 +13,7 @@ impl js::module::ModuleDef for Package {
 		decls.declare("v7")?;
 		Ok(())
 	}
+
 	fn evaluate<'js>(ctx: &js::Ctx<'js>, exports: &js::module::Exports<'js>) -> js::Result<()> {
 		let default = js::Function::new(ctx.clone(), |ctx: Ctx<'js>, args: Rest<Value>| {
 			run(ctx, "rand::uuid", args.0)

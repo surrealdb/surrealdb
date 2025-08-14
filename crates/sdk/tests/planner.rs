@@ -2338,7 +2338,6 @@ async fn select_with_exact_operator() -> Result<()> {
 	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
-	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
 		r#"[

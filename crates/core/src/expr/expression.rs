@@ -14,14 +14,37 @@ use crate::expr::fmt::Pretty;
 use crate::expr::operator::BindingPower;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::statements::{
-	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
-	IfelseStatement, InfoStatement, InsertStatement, OutputStatement, RebuildStatement,
-	RelateStatement, RemoveStatement, SelectStatement, SetStatement, UpdateStatement,
+	AlterStatement,
+	CreateStatement,
+	DefineStatement,
+	DeleteStatement,
+	ForeachStatement,
+	IfelseStatement,
+	InfoStatement,
+	InsertStatement,
+	OutputStatement,
+	RebuildStatement,
+	RelateStatement,
+	RemoveStatement,
+	SelectStatement,
+	SetStatement,
+	UpdateStatement,
 	UpsertStatement,
 };
 use crate::expr::{
-	BinaryOperator, Block, Constant, ControlFlow, FlowResult, FunctionCall, Ident, Idiom, Literal,
-	Mock, Param, PostfixOperator, PrefixOperator,
+	BinaryOperator,
+	Block,
+	Constant,
+	ControlFlow,
+	FlowResult,
+	FunctionCall,
+	Ident,
+	Idiom,
+	Literal,
+	Mock,
+	Param,
+	PostfixOperator,
+	PrefixOperator,
 };
 use crate::fnc;
 use crate::val::{Array, Closure, Range, Strand, Value};
@@ -344,7 +367,7 @@ impl Expr {
 				foreach_statement.compute(stk, ctx, &opt, doc).await
 			}
 			Expr::Let(_) => {
-				//TODO: This error needs to be improved or it needs to be rejected in the
+				// TODO: This error needs to be improved or it needs to be rejected in the
 				// parser.
 				Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
 					"Set statement outside of block",

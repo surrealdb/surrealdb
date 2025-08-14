@@ -6,7 +6,9 @@ use surrealdb::opt::capabilities::Capabilities;
 
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
 use crate::cli::abstraction::{
-	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments,
+	AuthArguments,
+	DatabaseConnectionArguments,
+	DatabaseSelectionArguments,
 };
 
 #[derive(Args, Debug)]

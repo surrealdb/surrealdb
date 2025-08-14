@@ -46,6 +46,7 @@ impl FromIterator<Value> for Array {
 
 impl Deref for Array {
 	type Target = Vec<Value>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
@@ -58,8 +59,9 @@ impl DerefMut for Array {
 }
 
 impl IntoIterator for Array {
-	type Item = Value;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
+	type Item = Value;
+
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
 	}
@@ -70,14 +72,17 @@ impl Array {
 	pub fn new() -> Self {
 		Self::default()
 	}
+
 	// Create a new array with capacity
 	pub fn with_capacity(len: usize) -> Self {
 		Self(Vec::with_capacity(len))
 	}
+
 	// Get the length of the array
 	pub fn len(&self) -> usize {
 		self.0.len()
 	}
+
 	// Check if there array is empty
 	pub fn is_empty(&self) -> bool {
 		self.0.is_empty()
@@ -111,6 +116,7 @@ impl Display for Array {
 
 impl ops::Add<Value> for Array {
 	type Output = Self;
+
 	fn add(mut self, other: Value) -> Self {
 		self.0.push(other);
 		self
@@ -119,6 +125,7 @@ impl ops::Add<Value> for Array {
 
 impl ops::Add for Array {
 	type Output = Self;
+
 	fn add(mut self, mut other: Self) -> Self {
 		self.0.append(&mut other.0);
 		self
@@ -129,6 +136,7 @@ impl ops::Add for Array {
 
 impl ops::Sub<Value> for Array {
 	type Output = Self;
+
 	fn sub(mut self, other: Value) -> Self {
 		if let Some(p) = self.0.iter().position(|x| *x == other) {
 			self.0.remove(p);
@@ -139,6 +147,7 @@ impl ops::Sub<Value> for Array {
 
 impl ops::Sub for Array {
 	type Output = Self;
+
 	fn sub(mut self, other: Self) -> Self {
 		for v in other.0 {
 			if let Some(p) = self.0.iter().position(|x| *x == v) {

@@ -12,6 +12,7 @@ pub struct IntoIter {
 
 impl Iterator for IntoIter {
 	type Item = RecordId;
+
 	fn next(&mut self) -> Option<RecordId> {
 		match self.model {
 			Mock::Count(ref tb, ref mut c) => {
@@ -49,8 +50,9 @@ pub enum Mock {
 }
 
 impl IntoIterator for Mock {
-	type Item = RecordId;
 	type IntoIter = IntoIter;
+	type Item = RecordId;
+
 	fn into_iter(self) -> Self::IntoIter {
 		IntoIter {
 			model: self,

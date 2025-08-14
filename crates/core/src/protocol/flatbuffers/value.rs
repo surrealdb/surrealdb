@@ -5,7 +5,18 @@ use surrealdb_protocol::fb::v1 as proto_fb;
 
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use crate::val::{
-	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, RecordId, Strand, Uuid, Value,
+	Array,
+	Bytes,
+	Datetime,
+	Duration,
+	File,
+	Geometry,
+	Number,
+	Object,
+	RecordId,
+	Strand,
+	Uuid,
+	Value,
 };
 
 impl ToFlatbuffers for Value {

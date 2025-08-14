@@ -177,6 +177,7 @@ impl HttpFormat for Format {
 			Format::Unsupported => Err(RpcError::InvalidRequest),
 		}
 	}
+
 	/// Process a HTTP RPC response
 	fn res_http(&self, res: Response) -> Result<AxumResponse, RpcError> {
 		match self {

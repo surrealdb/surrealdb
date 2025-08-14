@@ -39,9 +39,9 @@ where
 	ResBody: http_body::Body,
 	S::Error: fmt::Display + 'static,
 {
-	type Response = Response<ResBody>;
 	type Error = S::Error;
 	type Future = HttpCallMetricsFuture<S::Future>;
+	type Response = Response<ResBody>;
 
 	fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
 		self.inner.poll_ready(cx)

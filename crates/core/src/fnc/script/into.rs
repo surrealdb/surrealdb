@@ -1,6 +1,16 @@
 use js::{
-	Array, BigInt, Class, Ctx, Error, Exception, FromIteratorJs as _, IntoJs, Null, Object,
-	TypedArray, Undefined,
+	Array,
+	BigInt,
+	Class,
+	Ctx,
+	Error,
+	Exception,
+	FromIteratorJs as _,
+	IntoJs,
+	Null,
+	Object,
+	TypedArray,
+	Undefined,
 };
 use rust_decimal::prelude::ToPrimitive;
 

@@ -30,6 +30,7 @@ pub struct OrderList(pub Vec<Order>);
 
 impl Deref for OrderList {
 	type Target = Vec<Order>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}

@@ -663,7 +663,7 @@ mod tests {
 		for _ in 0..vector_size {
 			vector.push(rng.r#gen());
 		}
-		//	Store the results
+		// 	Store the results
 		let mut results = vec![];
 		// Calculate the reference
 		let ref_payload;
@@ -790,21 +790,21 @@ mod tests {
 
 		// TODO: Figure out what this test was supposed to track.
 		//
-		//	Note this test changed with the value inversion PR, below is the previous
+		// 	Note this test changed with the value inversion PR, below is the previous
 		// check.
 		//
-		//	vec![
-		//		BINCODE_REF,
-		//		COMPRESSED_BINCODE_REF,
-		//		COMPRESSED_CBOR,
-		//		COMPRESSED_BINCODE,
-		//		COMPRESSED_UNVERSIONED,
-		//		CBOR,
-		//		COMPRESSED_VERSIONED,
-		//		BINCODE,
-		//		UNVERSIONED,
-		//		VERSIONED,
-		//	]
+		// 	vec![
+		// 		BINCODE_REF,
+		// 		COMPRESSED_BINCODE_REF,
+		// 		COMPRESSED_CBOR,
+		// 		COMPRESSED_BINCODE,
+		// 		COMPRESSED_UNVERSIONED,
+		// 		CBOR,
+		// 		COMPRESSED_VERSIONED,
+		// 		BINCODE,
+		// 		UNVERSIONED,
+		// 		VERSIONED,
+		// 	]
 
 		// Check the expected sorted results
 		let results: Vec<&str> = results.into_iter().map(|(_, name, _, _)| name).collect();

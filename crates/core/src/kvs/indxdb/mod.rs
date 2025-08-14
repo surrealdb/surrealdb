@@ -54,11 +54,13 @@ impl Datastore {
 			Err(e) => Err(anyhow::Error::new(Error::Ds(e.to_string()))),
 		}
 	}
+
 	/// Shutdown the database
 	pub(crate) async fn shutdown(&self) -> Result<()> {
 		// Nothing to do here
 		Ok(())
 	}
+
 	/// Start a new transaction
 	pub async fn transaction(
 		&self,

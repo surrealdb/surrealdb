@@ -107,6 +107,7 @@ impl BenchAllocator for PerThreadBenchAllocator {
 			}
 		}
 	}
+
 	fn total_usage(&self) -> usize {
 		let mut total = 0;
 		if MAIN_PASSED.load(Ordering::Relaxed) {

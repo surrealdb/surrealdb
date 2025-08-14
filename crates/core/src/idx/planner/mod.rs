@@ -360,6 +360,7 @@ impl QueryPlanner {
 			it.ingest(Iterable::Index(tb, irf, rs));
 		}
 	}
+
 	pub(crate) fn has_executors(&self) -> bool {
 		!self.executors.is_empty()
 	}

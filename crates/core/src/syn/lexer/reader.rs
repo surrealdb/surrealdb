@@ -143,6 +143,7 @@ impl Iterator for BytesReader<'_> {
 		self.current += 1;
 		Some(res)
 	}
+
 	fn size_hint(&self) -> (usize, Option<usize>) {
 		let len = self.len();
 		(len, Some(len))

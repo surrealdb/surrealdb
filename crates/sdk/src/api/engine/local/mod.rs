@@ -191,8 +191,21 @@ use crate::core::err::Error as CoreError;
 use crate::core::expr::Model;
 use crate::core::expr::statements::DeleteStatement;
 use crate::core::expr::{
-	CreateStatement, Data, Expr, Fields, Function, Ident, InsertStatement, KillStatement, Literal,
-	LogicalPlan, Output, SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
+	CreateStatement,
+	Data,
+	Expr,
+	Fields,
+	Function,
+	Ident,
+	InsertStatement,
+	KillStatement,
+	Literal,
+	LogicalPlan,
+	Output,
+	SelectStatement,
+	TopLevelExpr,
+	UpdateStatement,
+	UpsertStatement,
 };
 use crate::core::iam;
 use crate::core::kvs::Datastore;

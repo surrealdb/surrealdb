@@ -113,6 +113,7 @@ impl AccessType {
 			AccessType::Bearer(_) => true,
 		}
 	}
+
 	/// Returns whether or not the access method can issue tokens
 	/// In this context, tokens refers exclusively to JWT
 	pub fn can_issue_tokens(&self) -> bool {
@@ -134,7 +135,7 @@ pub struct JwtAccess {
 	pub issue: Option<JwtAccessIssue>,
 }
 
-//TODO: Move this logic out of the parser
+// TODO: Move this logic out of the parser
 impl Default for JwtAccess {
 	fn default() -> Self {
 		// Defaults to HS512 with a randomly generated key
@@ -397,6 +398,7 @@ impl BearerAccessType {
 
 impl FromStr for BearerAccessType {
 	type Err = Error;
+
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match s.to_ascii_lowercase().as_str() {
 			"bearer" => Ok(Self::Bearer),

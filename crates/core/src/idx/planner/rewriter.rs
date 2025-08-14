@@ -3,7 +3,14 @@ use std::ops::Bound;
 use crate::expr::literal::ObjectEntry;
 use crate::expr::part::DestructurePart;
 use crate::expr::{
-	Cond, Expr, FunctionCall, Idiom, Literal, Part, RecordIdKeyLit, RecordIdKeyRangeLit,
+	Cond,
+	Expr,
+	FunctionCall,
+	Idiom,
+	Literal,
+	Part,
+	RecordIdKeyLit,
+	RecordIdKeyRangeLit,
 	RecordIdLit,
 };
 use crate::idx::planner::executor::KnnExpressions;
@@ -186,6 +193,7 @@ impl<'a> KnnConditionRewriter<'a> {
 		}
 		Some(new_i.into())
 	}
+
 	fn eval_part(&self, p: &Part) -> Option<Part> {
 		match p {
 			Part::All

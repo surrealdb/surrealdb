@@ -881,7 +881,6 @@ pub enum Error {
 	#[error("IAM error: {0}")]
 	IamError(#[from] IamError),
 
-	//
 	// Capabilities
 	/// Scripting is not allowed
 	#[error("Scripting functions are not allowed")]
@@ -895,7 +894,6 @@ pub enum Error {
 	#[error("Access to network target '{0}' is not allowed")]
 	NetTargetNotAllowed(String),
 
-	//
 	// Authentication / Signup
 	#[error("There was an error creating the token")]
 	TokenMakingFailed,

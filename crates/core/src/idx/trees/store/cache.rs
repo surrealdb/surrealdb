@@ -12,7 +12,12 @@ use crate::idx::trees::btree::{BTreeNode, BTreeStore};
 use crate::idx::trees::mtree::{MTreeNode, MTreeStore};
 use crate::idx::trees::store::lru::{CacheKey, ConcurrentLru};
 use crate::idx::trees::store::{
-	NodeId, StoreGeneration, StoredNode, TreeNode, TreeNodeProvider, TreeStore,
+	NodeId,
+	StoreGeneration,
+	StoredNode,
+	TreeNode,
+	TreeNodeProvider,
+	TreeStore,
 };
 use crate::kvs::{Key, Transaction, TransactionType};
 
@@ -274,6 +279,7 @@ where
 	async fn set_node(&self, node: StoredNode<N>) {
 		self.lru.insert(node.id as CacheKey, node.into()).await;
 	}
+
 	async fn remove_node(&self, node_id: &NodeId) {
 		self.lru.remove(*node_id as CacheKey).await;
 	}

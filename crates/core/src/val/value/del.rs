@@ -175,8 +175,8 @@ impl Value {
 							v.0 = new_res;
 							Ok(())
 						} else if let Some(Part::Value(_)) = path.get(1) {
-							//TODO: Figure out if the behavior here is different with this
-							//special case then without. I think this can be simplified.
+							// TODO: Figure out if the behavior here is different with this
+							// special case then without. I think this can be simplified.
 							let mut true_values = Vec::new();
 							let mut true_indecies = Vec::new();
 							// Store the elements and positions to update

@@ -150,8 +150,8 @@ impl PartialEq<Range> for RecordIdKeyRange {
 #[serde(rename = "$surrealdb::private::sql::Id")]
 pub enum RecordIdKey {
 	Number(i64),
-	//TODO: This should definitely be strand, not string as null bytes here can cause a lot of
-	//issues.
+	// TODO: This should definitely be strand, not string as null bytes here can cause a lot of
+	// issues.
 	String(String),
 	Uuid(Uuid),
 	Array(Array),
@@ -166,10 +166,12 @@ impl RecordIdKey {
 	pub fn rand() -> Self {
 		Self::String(nanoid!(20, &ID_CHARS))
 	}
+
 	/// Generate a new random ULID
 	pub fn ulid() -> Self {
 		Self::String(Ulid::new().to_string())
 	}
+
 	/// Generate a new random UUID
 	pub fn uuid() -> Self {
 		Self::Uuid(Uuid::new_v7())
@@ -185,7 +187,7 @@ impl RecordIdKey {
 		match self {
 			RecordIdKey::Number(n) => Value::Number(Number::Int(n)),
 			RecordIdKey::String(s) => {
-				//TODO: Null byte validity
+				// TODO: Null byte validity
 				let s = unsafe { Strand::new_unchecked(s) };
 				Value::Strand(s)
 			}

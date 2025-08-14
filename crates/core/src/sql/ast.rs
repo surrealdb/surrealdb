@@ -4,8 +4,13 @@ use crate::expr;
 use crate::sql::Expr;
 use crate::sql::fmt::{Fmt, Pretty};
 use crate::sql::statements::{
-	AccessStatement, AnalyzeStatement, KillStatement, LiveStatement, OptionStatement,
-	ShowStatement, UseStatement,
+	AccessStatement,
+	AnalyzeStatement,
+	KillStatement,
+	LiveStatement,
+	OptionStatement,
+	ShowStatement,
+	UseStatement,
 };
 
 #[derive(Debug)]

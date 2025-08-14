@@ -15,7 +15,14 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::access_type::BearerAccessSubject;
 use crate::expr::{
-	AccessType, Base, Cond, ControlFlow, FlowResult, FlowResultExt as _, Ident, RecordIdLit,
+	AccessType,
+	Base,
+	Cond,
+	ControlFlow,
+	FlowResult,
+	FlowResultExt as _,
+	Ident,
+	RecordIdLit,
 };
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;

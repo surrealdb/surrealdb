@@ -15,8 +15,8 @@ impl<C> IntoFuture for Cancel<C>
 where
 	C: Connection,
 {
-	type Output = Result<Surreal<C>>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
+	type Output = Result<Surreal<C>>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {

@@ -4,7 +4,12 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use crate::core::dbs::capabilities::{
-	ArbitraryQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget,
+	ArbitraryQueryTarget,
+	ExperimentalTarget,
+	FuncTarget,
+	MethodTarget,
+	NetTarget,
+	RouteTarget,
 	Targets,
 };
 use crate::core::kvs::export::TableConfig;

@@ -117,6 +117,7 @@ impl AccessType {
 			AccessType::Bearer(_) => true,
 		}
 	}
+
 	/// Returns whether or not the access method can issue tokens
 	/// In this context, tokens refers exclusively to JWT
 	pub fn can_issue_tokens(&self) -> bool {
@@ -384,6 +385,7 @@ impl BearerAccessType {
 
 impl FromStr for BearerAccessType {
 	type Err = Error;
+
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match s.to_ascii_lowercase().as_str() {
 			"bearer" => Ok(Self::Bearer),

@@ -144,8 +144,8 @@ impl Indexable {
 }
 
 impl IntoIterator for Indexable {
-	type Item = Array;
 	type IntoIter = Combinator;
+	type Item = Array;
 
 	fn into_iter(self) -> Self::IntoIter {
 		Combinator::new(self.0)

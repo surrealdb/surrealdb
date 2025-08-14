@@ -17,9 +17,18 @@ use crate::expr::statements::access::AccessGrantStore;
 use crate::expr::statements::define::config::ConfigStore;
 use crate::expr::statements::define::{ApiDefinition, BucketDefinition, DefineSequenceStatement};
 use crate::expr::statements::{
-	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement,
-	DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
-	DefineNamespaceStatement, DefineParamStore, DefineTableStatement, DefineUserStatement,
+	DefineAccessStatement,
+	DefineAnalyzerStatement,
+	DefineDatabaseStatement,
+	DefineEventStatement,
+	DefineFieldStatement,
+	DefineFunctionStatement,
+	DefineIndexStatement,
+	DefineModelStatement,
+	DefineNamespaceStatement,
+	DefineParamStore,
+	DefineTableStatement,
+	DefineUserStatement,
 	LiveStatement,
 };
 use crate::expr::{Ident, Permissions};

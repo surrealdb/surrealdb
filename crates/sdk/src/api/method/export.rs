@@ -163,8 +163,8 @@ impl<'r, Client, T> IntoFuture for Export<'r, Client, PathBuf, T>
 where
 	Client: Connection,
 {
-	type Output = Result<()>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<()>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
@@ -196,8 +196,8 @@ impl<'r, Client, T> IntoFuture for Export<'r, Client, (), T>
 where
 	Client: Connection,
 {
-	type Output = Result<Backup>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Backup>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {

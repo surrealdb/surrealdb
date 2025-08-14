@@ -23,14 +23,16 @@ pub struct Fetchs(pub Vec<Fetch>);
 
 impl Deref for Fetchs {
 	type Target = Vec<Fetch>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
 }
 
 impl IntoIterator for Fetchs {
-	type Item = Fetch;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
+	type Item = Fetch;
+
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
 	}

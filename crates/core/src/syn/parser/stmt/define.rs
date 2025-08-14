@@ -11,19 +11,43 @@ use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig
 use crate::sql::statements::define::config::{ConfigInner, graphql};
 use crate::sql::statements::define::user::PassType;
 use crate::sql::statements::define::{
-	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineDefault, DefineKind,
+	ApiAction,
+	DefineBucketStatement,
+	DefineConfigStatement,
+	DefineDefault,
+	DefineKind,
 	DefineSequenceStatement,
 };
 use crate::sql::statements::{
-	DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement,
-	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineNamespaceStatement, DefineParamStatement, DefineStatement, DefineTableStatement,
+	DefineAccessStatement,
+	DefineAnalyzerStatement,
+	DefineApiStatement,
+	DefineDatabaseStatement,
+	DefineEventStatement,
+	DefineFieldStatement,
+	DefineFunctionStatement,
+	DefineIndexStatement,
+	DefineNamespaceStatement,
+	DefineParamStatement,
+	DefineStatement,
+	DefineTableStatement,
 	DefineUserStatement,
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	AccessType, Expr, Ident, Index, Kind, Literal, Param, Permission, Permissions, Scoring,
-	TableType, access_type, table_type,
+	AccessType,
+	Expr,
+	Ident,
+	Index,
+	Kind,
+	Literal,
+	Param,
+	Permission,
+	Permissions,
+	Scoring,
+	TableType,
+	access_type,
+	table_type,
 };
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};

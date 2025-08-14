@@ -5,7 +5,7 @@ use crate::val::Value;
 pub fn encode(v: Value) -> Result<Vec<u8>, String> {
 	let encoding = convert::from_value(v)?;
 	let mut res = Vec::new();
-	//TODO: Check if this can ever panic.
+	// TODO: Check if this can ever panic.
 	ciborium::into_writer(&encoding, &mut res).unwrap();
 	Ok(res)
 }

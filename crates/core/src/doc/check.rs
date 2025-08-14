@@ -87,6 +87,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Checks that a specifically selected record
 	/// actually exists in the underlying datastore.
 	/// If the user specifies a record directly
@@ -105,6 +106,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Checks that the fields of a document are
 	/// correct. If an `id` field is specified then
 	/// it will check that the `id` field does not
@@ -292,6 +294,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Checks that the `WHERE` condition on a query
 	/// matches before proceeding with processing
 	/// the document. This ensures that records from
@@ -328,6 +331,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Checks the `PERMISSIONS` clause for viewing a
 	/// record, based on the `select` permissions for
 	/// the table that this record belongs to. This
@@ -377,6 +381,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Checks the `PERMISSIONS` clause on the table
 	/// for this record, returning immediately if the
 	/// permissions are `NONE`. This function does not
@@ -406,6 +411,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Checks the `PERMISSIONS` clause on the table for
 	/// this record, processing all advanced permissions
 	/// clauses and evaluating the expression. This

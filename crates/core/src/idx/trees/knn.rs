@@ -346,6 +346,7 @@ impl Ids64 {
 		}
 		new_doc
 	}
+
 	fn append_from(&mut self, from: &Ids64) -> Option<Self> {
 		match from {
 			Self::Empty => None,
@@ -535,6 +536,7 @@ impl KnnResultBuilder {
 			priority_list: BTreeMap::default(),
 		}
 	}
+
 	pub(super) fn check_add(&self, dist: f64) -> bool {
 		if self.docs.len() >= self.knn {
 			if let Some(pr) = self.priority_list.keys().last() {
@@ -813,6 +815,7 @@ pub(super) mod tests {
 				_ => Self::Float(-20.0, 20.0),
 			}
 		}
+
 		fn generate(&self, rng: &mut SmallRng) -> Number {
 			match self {
 				RandomItemGenerator::Int(from, to) => Number::Int(rng.gen_range(*from..*to)),

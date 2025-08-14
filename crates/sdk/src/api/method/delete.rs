@@ -74,8 +74,8 @@ impl<'r, Client> IntoFuture for Delete<'r, Client, Value>
 where
 	Client: Connection,
 {
-	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Value>;
 
 	into_future! {execute_value}
 }
@@ -85,8 +85,8 @@ where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Option<R>>;
 
 	into_future! {execute_opt}
 }
@@ -96,8 +96,8 @@ where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Vec<R>>;
 
 	into_future! {execute_vec}
 }

@@ -6,8 +6,25 @@ use crate::sql::changefeed::ChangeFeed;
 use crate::sql::index::{Distance, VectorType};
 use crate::sql::reference::{Reference, ReferenceDeleteStrategy};
 use crate::sql::{
-	Base, Cond, Data, Explain, Expr, Fetch, Fetchs, Field, Fields, Group, Groups, Ident, Idiom,
-	Output, Permission, Permissions, Timeout, View, With,
+	Base,
+	Cond,
+	Data,
+	Explain,
+	Expr,
+	Fetch,
+	Fetchs,
+	Field,
+	Fields,
+	Group,
+	Groups,
+	Ident,
+	Idiom,
+	Output,
+	Permission,
+	Permissions,
+	Timeout,
+	View,
+	With,
 };
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
@@ -581,6 +598,7 @@ impl Parser<'_> {
 		// Safety: Parser guarentees no null bytes.
 		Ok(unsafe { Ident::new_unchecked(name) })
 	}
+
 	pub(super) fn try_parse_explain(&mut self) -> ParseResult<Option<Explain>> {
 		Ok(self.eat(t!("EXPLAIN")).then(|| Explain(self.eat(t!("FULL")))))
 	}

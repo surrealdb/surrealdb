@@ -10,6 +10,7 @@ pub struct Fetchs(pub Vec<Fetch>);
 
 impl Deref for Fetchs {
 	type Target = Vec<Fetch>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}

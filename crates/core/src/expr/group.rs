@@ -13,14 +13,16 @@ pub struct Groups(pub Vec<Group>);
 
 impl Deref for Groups {
 	type Target = Vec<Group>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
 }
 
 impl IntoIterator for Groups {
-	type Item = Group;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
+	type Item = Group;
+
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
 	}
@@ -42,6 +44,7 @@ pub struct Group(pub Idiom);
 
 impl Deref for Group {
 	type Target = Idiom;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}

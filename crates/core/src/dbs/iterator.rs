@@ -13,11 +13,25 @@ use crate::doc::{CursorDoc, Document, IgnoreError};
 use crate::err::Error;
 use crate::expr::graph::ComputedGraphSubject;
 use crate::expr::{
-	self, ControlFlow, Dir, Expr, Fields, FlowResultExt, Graph, Ident, Literal, Mock, Part,
+	self,
+	ControlFlow,
+	Dir,
+	Expr,
+	Fields,
+	FlowResultExt,
+	Graph,
+	Ident,
+	Literal,
+	Mock,
+	Part,
 };
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
-	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
+	GrantedPermission,
+	IterationStage,
+	QueryPlanner,
+	RecordStrategy,
+	ScanDirection,
 	StatementContext,
 };
 use crate::val::{Object, RecordId, RecordIdKey, RecordIdKeyRange, Value};

@@ -14,7 +14,11 @@ use crate::err::Error;
 use crate::exe::try_join_all_buffered;
 use crate::expr::fmt::{Fmt, is_pretty, pretty_indent};
 use crate::expr::idiom::recursion::{
-	self, Recursion, clean_iteration, compute_idiom_recursion, is_final,
+	self,
+	Recursion,
+	clean_iteration,
+	compute_idiom_recursion,
+	is_final,
 };
 use crate::expr::{Expr, FlowResultExt as _, Graph, Ident, Idiom, Literal, Value};
 use crate::val::{Array, RecordId};
@@ -87,6 +91,7 @@ impl Part {
 			_ => true,
 		}
 	}
+
 	/// Returns a yield if an alias is specified
 	pub(crate) fn alias(&self) -> Option<&Idiom> {
 		match self {

@@ -35,7 +35,6 @@ pub struct StartCommandArguments {
 	#[arg(value_parser = super::validator::key_valid)]
 	#[arg(hide = true)] // Not currently in use
 	key: Option<String>,
-	//
 	// Tasks
 	#[arg(
 		help = "The interval at which to refresh node registration information",
@@ -68,7 +67,6 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_INDEX_COMPACTION_INTERVAL", long = "index-compaction-interval", value_parser = super::validator::duration)]
 	#[arg(default_value = "5s")]
 	index_compaction_interval: Duration,
-	//
 	// Authentication
 	#[arg(
 		help = "The username for the initial database root user. Only if no other root user exists",
@@ -94,12 +92,10 @@ pub struct StartCommandArguments {
 		requires = "username"
 	)]
 	password: Option<String>,
-	//
 	// Datastore connection
 	#[command(next_help_heading = "Datastore connection")]
 	#[command(flatten)]
 	kvs: Option<StartCommandRemoteTlsOptions>,
-	//
 	// HTTP Server
 	#[command(next_help_heading = "HTTP server")]
 	#[command(flatten)]
@@ -116,7 +112,6 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_NO_IDENTIFICATION_HEADERS", long)]
 	#[arg(default_value_t = false)]
 	no_identification_headers: bool,
-	//
 	// Database options
 	#[command(flatten)]
 	#[command(next_help_heading = "Database")]

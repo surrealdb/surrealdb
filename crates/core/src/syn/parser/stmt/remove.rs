@@ -2,12 +2,21 @@ use reblessive::Stk;
 
 use crate::sql::Param;
 use crate::sql::statements::remove::{
-	RemoveAnalyzerStatement, RemoveBucketStatement, RemoveSequenceStatement,
+	RemoveAnalyzerStatement,
+	RemoveBucketStatement,
+	RemoveSequenceStatement,
 };
 use crate::sql::statements::{
-	RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
-	RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement, RemoveParamStatement,
-	RemoveStatement, RemoveUserStatement,
+	RemoveAccessStatement,
+	RemoveDatabaseStatement,
+	RemoveEventStatement,
+	RemoveFieldStatement,
+	RemoveFunctionStatement,
+	RemoveIndexStatement,
+	RemoveNamespaceStatement,
+	RemoveParamStatement,
+	RemoveStatement,
+	RemoveUserStatement,
 };
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};

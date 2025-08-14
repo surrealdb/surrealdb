@@ -12,11 +12,23 @@ use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
 use crate::expr::statements::{DefineFieldStatement, DefineIndexStatement};
 use crate::expr::{
-	BinaryOperator, Cond, Expr, FlowResultExt as _, Ident, Idiom, Kind, Literal, Order, Part, With,
+	BinaryOperator,
+	Cond,
+	Expr,
+	FlowResultExt as _,
+	Ident,
+	Idiom,
+	Kind,
+	Literal,
+	Order,
+	Part,
+	With,
 };
 use crate::idx::planner::StatementContext;
 use crate::idx::planner::executor::{
-	KnnBruteForceExpression, KnnBruteForceExpressions, KnnExpressions,
+	KnnBruteForceExpression,
+	KnnBruteForceExpressions,
+	KnnExpressions,
 };
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::idx::planner::rewriter::KnnConditionRewriter;
@@ -79,7 +91,7 @@ struct TreeBuilder<'a> {
 	knn_brute_force_expressions: HashMap<Arc<Expr>, KnnBruteForceExpression>,
 	knn_expressions: KnnExpressions,
 	idioms_record_options: HashMap<Arc<Idiom>, RecordOptions>,
-	//group_sequence: GroupRef,
+	// group_sequence: GroupRef,
 	root: Option<Node>,
 	knn_condition: Option<Cond>,
 	leaf_nodes_count: usize,
@@ -122,7 +134,7 @@ impl<'a> TreeBuilder<'a> {
 			knn_brute_force_expressions: Default::default(),
 			knn_expressions: Default::default(),
 			idioms_record_options: Default::default(),
-			//group_sequence: 0,
+			// group_sequence: 0,
 			root: None,
 			knn_condition: None,
 			all_and: None,
