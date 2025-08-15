@@ -585,11 +585,7 @@ impl IndexRangeThingIterator {
 		let from = if let Some((_, inclusive, val)) = from.first() {
 			RangeValue {
 				value: val.as_ref().clone(),
-				inclusive: if *inclusive == 0 {
-					true
-				} else {
-					false
-				},
+				inclusive: *inclusive == 0,
 			}
 		} else {
 			RangeValue::default()
@@ -597,11 +593,7 @@ impl IndexRangeThingIterator {
 		let to = if let Some((_, inclusive, val)) = to.last() {
 			RangeValue {
 				value: val.as_ref().clone(),
-				inclusive: if *inclusive == 1 {
-					true
-				} else {
-					false
-				},
+				inclusive: *inclusive == 1,
 			}
 		} else {
 			RangeValue::default()
@@ -1229,8 +1221,8 @@ impl UniqueRangeThingIterator {
 		ns: &str,
 		db: &str,
 		ix: &IndexReference,
-		prefix: &Vec<Value>,
-		ranges: &Vec<(BinaryOperator, Arc<Value>)>,
+		prefix: &[Value],
+		ranges: &[(BinaryOperator, Arc<Value>)],
 	) -> Result<Self> {
 		let (from, to) = IndexRangeThingIterator::reduce_range(ranges)?;
 		let r = IndexRangeThingIterator::range_scan_prefix(ns, db, ix, prefix, from, to)?;
