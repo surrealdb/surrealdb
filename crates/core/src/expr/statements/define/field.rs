@@ -65,11 +65,12 @@ impl DefineFieldStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Validate reference options
 		self.validate_reference_options(ctx)?;
-		// Validate computed options
-		self.validate_computed_options()?;
 
 		// Get the NS and DB
 		let (ns, db) = opt.ns_db()?;
+		
+		// Validate computed options
+		self.validate_computed_options(ns, db, ctx.tx()).await?;
 
 		// Disallow mismatched types
 		self.disallow_mismatched_types(ctx, ns, db).await?;
@@ -272,12 +273,42 @@ impl DefineFieldStatement {
 		Ok(())
 	}
 
-	pub(crate) fn validate_computed_options(&self) -> Result<()> {
-		ensure!(self.value.is_none(), Error::RefsTypeConflict("VALUE".into(), "computed".into()));
-		ensure!(self.assert.is_none(), Error::RefsTypeConflict("ASSERT".into(), "computed".into()));
-		ensure!(matches!(self.default, DefineDefault::None), Error::RefsTypeConflict("DEFAULT".into(), "computed".into()));
-		ensure!(!self.flex, Error::RefsTypeConflict("FLEXIBLE".into(), "computed".into()));
-		ensure!(!self.readonly, Error::RefsTypeConflict("READONLY".into(), "computed".into()));
+	pub(crate) async fn validate_computed_options(
+		&self, 
+		ns: &str,
+		db: &str,
+		txn: Arc<Transaction>,
+	) -> Result<()> {
+		// Find all existing field definitions
+		let fields = txn.all_tb_fields(ns, db, &self.what, None).await?;
+		if self.computed.is_some() {
+			// Ensure the field is top-level
+			ensure!(self.name.len() == 1, Error::ComputedNestedField(self.name.to_string()));
+
+			// Ensure there are no conflicting clauses
+			ensure!(self.value.is_none(), Error::ComputedKeywordConflict("VALUE".into()));
+			ensure!(self.assert.is_none(), Error::ComputedKeywordConflict("ASSERT".into()));
+			ensure!(self.field_kind.is_none(), Error::ComputedKeywordConflict("TYPE".into()));
+			ensure!(self.reference.is_none(), Error::ComputedKeywordConflict("REFERENCE".into()));
+			ensure!(matches!(self.default, DefineDefault::None), Error::ComputedKeywordConflict("DEFAULT".into()));
+			ensure!(!self.flex, Error::ComputedKeywordConflict("FLEXIBLE".into()));
+			ensure!(!self.readonly, Error::ComputedKeywordConflict("READONLY".into()));
+
+			// Ensure no nested fields exist
+			for field in fields.iter() {
+				if field.name.starts_with(&self.name) && field.name != self.name {
+					bail!(Error::ComputedNestedFieldConflict(self.name.to_string(), field.name.to_string()));
+				}
+			}
+		} else {
+			// Ensure no parent fields are computed
+			for field in fields.iter() {
+				if self.name.starts_with(&field.name) && field.name != self.name {
+					bail!(Error::ComputedParentFieldConflict(self.name.to_string(), field.name.to_string()));
+				}
+			}
+		}
+
 		Ok(())
 	}
 
