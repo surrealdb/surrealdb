@@ -615,8 +615,8 @@ impl IndexRangeThingIterator {
 	/// Compute the begin key for a range scan over an index by scalar value.
 	///
 	/// - If `from.value` is `None`, we need the very beginning of the range for
-	///   the given `value_type` (e.g., smallest int/float/decimal), so we use the
-	///   type-specific index prefix begin.
+	///   the given `value_type` (e.g., smallest int/float/decimal), so we use
+	///   the type-specific index prefix begin.
 	/// - Otherwise, we serialize the `from` value into an index field array and
 	///   construct the boundary key. For an inclusive lower bound we use
 	///   `prefix_ids_beg` (include all records with that value), and for an
@@ -648,9 +648,9 @@ impl IndexRangeThingIterator {
 	///   type-specific index prefix end.
 	/// - Otherwise, we serialize the `to` value and construct the boundary key.
 	///   For an inclusive upper bound we use `prefix_ids_end` so the scan can
-	///   include all records with that exact value; for an exclusive upper bound
-	///   we use `prefix_ids_beg` so the scan stops just before any key matching
-	///   that exact value.
+	///   include all records with that exact value; for an exclusive upper
+	///   bound we use `prefix_ids_beg` so the scan stops just before any key
+	///   matching that exact value.
 	fn compute_end(
 		ns: &str,
 		db: &str,
@@ -712,8 +712,8 @@ impl IndexRangeThingIterator {
 	/// value applies to the next column.
 	///
 	/// Inclusive `from` uses `prefix_ids_beg` to include all rows equal to the
-	/// boundary value; exclusive `from` uses `prefix_ids_end` to start just after
-	/// all keys equal to that boundary.
+	/// boundary value; exclusive `from` uses `prefix_ids_end` to start just
+	/// after all keys equal to that boundary.
 	fn compute_beg_with_prefix(
 		ns: &str,
 		db: &str,
@@ -732,11 +732,12 @@ impl IndexRangeThingIterator {
 	}
 
 	/// Compute the end key for a composite index range when a fixed `prefix`
-	/// is provided and an optional scalar `to` value applies to the next column.
+	/// is provided and an optional scalar `to` value applies to the next
+	/// column.
 	///
 	/// Inclusive `to` uses `prefix_ids_end` so rows equal to the boundary are
-	/// still reachable by the scan; exclusive `to` uses `prefix_ids_beg` to stop
-	/// just before any key matching that boundary value.
+	/// still reachable by the scan; exclusive `to` uses `prefix_ids_beg` to
+	/// stop just before any key matching that boundary value.
 	fn compute_end_with_prefix(
 		ns: &str,
 		db: &str,
@@ -770,8 +771,9 @@ impl IndexRangeThingIterator {
 	}
 
 	/// Scan only the keys within the current range, up to `limit`, and advance
-	/// the begin key to resume on the next call without duplicates. This mirrors
-	/// `next_scan` but avoids fetching values for count-only operations.
+	/// the begin key to resume on the next call without duplicates. This
+	/// mirrors `next_scan` but avoids fetching values for count-only
+	/// operations.
 	async fn next_keys(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<Key>> {
 		let res = tx.keys(self.r.range(), limit, None).await?;
 		if let Some(key) = res.last() {

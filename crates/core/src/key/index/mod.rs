@@ -185,8 +185,9 @@ impl<'a> Index<'a> {
 
 	/// Returns the smallest possible key for the given index field prefix (fd),
 	/// used as the inclusive lower bound of a scan over all record ids matching
-	/// that prefix. This is equivalent to prefix_ids(...) followed by a 0x00 byte,
-	/// so that range scans using [beg, end) style boundaries include the first key.
+	/// that prefix. This is equivalent to prefix_ids(...) followed by a 0x00
+	/// byte, so that range scans using [beg, end) style boundaries include the
+	/// first key.
 	pub fn prefix_ids_beg(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		beg.extend_from_slice(&[0x00]);
@@ -194,19 +195,20 @@ impl<'a> Index<'a> {
 	}
 
 	/// Returns the greatest possible key for the given index field prefix (fd),
-	/// typically used as the exclusive upper bound of a scan over all record ids
-	/// matching that prefix. This is equivalent to prefix_ids(...) followed by a
-	/// 0xff byte so that range scans using [beg, end) do not include keys beyond
-	/// the intended prefix.
+	/// typically used as the exclusive upper bound of a scan over all record
+	/// ids matching that prefix. This is equivalent to prefix_ids(...)
+	/// followed by a 0xff byte so that range scans using [beg, end) do not
+	/// include keys beyond the intended prefix.
 	pub fn prefix_ids_end(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		beg.extend_from_slice(&[0xff]);
 		Ok(beg)
 	}
 
-	/// Returns the smallest key within the composite index tuple identified by `fd`.
-	/// For composite indexes, the last byte acts as a sentinel; setting it to 0x00
-	/// gives the inclusive lower bound when scanning for an exact composite match.
+	/// Returns the smallest key within the composite index tuple identified by
+	/// `fd`. For composite indexes, the last byte acts as a sentinel; setting
+	/// it to 0x00 gives the inclusive lower bound when scanning for an exact
+	/// composite match.
 	pub fn prefix_ids_composite_beg(
 		ns: &str,
 		db: &str,
@@ -219,9 +221,10 @@ impl<'a> Index<'a> {
 		Ok(beg)
 	}
 
-	/// Returns the greatest key within the composite index tuple identified by `fd`.
-	/// For composite indexes, the last byte acts as a sentinel; setting it to 0xff
-	/// yields the exclusive upper bound for scans targeting the exact composite value.
+	/// Returns the greatest key within the composite index tuple identified by
+	/// `fd`. For composite indexes, the last byte acts as a sentinel; setting
+	/// it to 0xff yields the exclusive upper bound for scans targeting the
+	/// exact composite value.
 	pub fn prefix_ids_composite_end(
 		ns: &str,
 		db: &str,
