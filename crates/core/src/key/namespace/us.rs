@@ -1,6 +1,5 @@
 //! Stores a DEFINE USER ON NAMESPACE config definition
-use crate::catalog::NamespaceId;
-use crate::expr::statements::define::DefineUserStatement;
+use crate::catalog::{self, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use anyhow::Result;
@@ -18,7 +17,7 @@ pub(crate) struct Us<'a> {
 }
 
 impl KVKey for Us<'_> {
-	type ValueType = DefineUserStatement;
+	type ValueType = catalog::UserDefinition;
 }
 
 pub fn new(ns: NamespaceId, user: &str) -> Us<'_> {

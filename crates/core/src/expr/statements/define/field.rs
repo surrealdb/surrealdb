@@ -11,7 +11,7 @@ use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::kind::KindLiteral;
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, Part, Permissions};
+use crate::expr::{Base, Expr, Ident, Idiom, Kind, Part, Permission, Permissions};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Transaction, impl_kv_value_revisioned};
 use crate::sql::ToSql;
@@ -55,6 +55,70 @@ pub struct DefineFieldStatement {
 impl_kv_value_revisioned!(DefineFieldStatement);
 
 impl DefineFieldStatement {
+	pub fn into_definition(&self) -> catalog::FieldDefinition {
+		fn convert_permission(permission: &Permission) -> catalog::Permission {
+			match permission {
+				Permission::None => catalog::Permission::None,
+				Permission::Full => catalog::Permission::Full,
+				Permission::Specific(expr) => catalog::Permission::Specific(expr.clone()),
+			}
+		}
+
+		catalog::FieldDefinition {
+			name: self.name.clone(),
+			what: self.what.clone().to_string(),
+			flexible: self.flex,
+			field_kind: self.field_kind.clone(),
+			readonly: self.readonly,
+			value: self.value.clone(),
+			assert: self.assert.clone(),
+			default: match &self.default {
+				DefineDefault::None => catalog::DefineDefault::None,
+				DefineDefault::Set(x) => catalog::DefineDefault::Set(x.clone()),
+				DefineDefault::Always(x) => catalog::DefineDefault::Always(x.clone()),
+			},
+			select_permission: convert_permission(&self.permissions.select),
+			create_permission: convert_permission(&self.permissions.create),
+			update_permission: convert_permission(&self.permissions.update),
+			comment: self.comment.clone().map(|x| x.into_string()),
+			reference: self.reference.clone(),
+		}
+	}
+
+	pub fn from_definition(def: &catalog::FieldDefinition) -> Self {
+		fn convert_permission(permission: &catalog::Permission) -> Permission {
+			match permission {
+				catalog::Permission::None => Permission::None,
+				catalog::Permission::Full => Permission::Full,
+				catalog::Permission::Specific(expr) => Permission::Specific(expr.clone()),
+			}
+		}
+
+		Self {
+			kind: DefineKind::Default,
+			name: def.name.clone(),
+			what: Ident::new(def.what.clone()).unwrap(),
+			flex: def.flexible,
+			field_kind: def.field_kind.clone(),
+			readonly: def.readonly,
+			value: def.value.clone(),
+			assert: def.assert.clone(),
+			default: match &def.default {
+				catalog::DefineDefault::None => DefineDefault::None,
+				catalog::DefineDefault::Set(x) => DefineDefault::Set(x.clone()),
+				catalog::DefineDefault::Always(x) => DefineDefault::Always(x.clone()),
+			},
+			permissions: Permissions {
+				select: convert_permission(&def.select_permission),
+				create: convert_permission(&def.create_permission),
+				update: convert_permission(&def.update_permission),
+				delete: Permission::Full,
+			},
+			comment: def.comment.clone().map(|x| Strand::new(x).unwrap()),
+			reference: def.reference.clone(),
+		}
+	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -99,23 +163,7 @@ impl DefineFieldStatement {
 			txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?
 		};
 
-		let definition = FieldDefinition {
-			name: self.name.clone(),
-			what: self.what.clone().into_string(),
-			flex: self.flex,
-			field_kind: self.field_kind.clone(),
-			readonly: self.readonly,
-			value: self.value.clone(),
-			assert: self.assert.clone(),
-			default: match &self.default {
-				DefineDefault::None => catalog::DefineDefault::None,
-				DefineDefault::Always(expr) => catalog::DefineDefault::Always(expr.clone()),
-				DefineDefault::Set(expr) => catalog::DefineDefault::Set(expr.clone()),
-			},
-			reference: self.reference.clone(),
-			permissions: self.permissions.clone(),
-			comment: self.comment.clone().map(|x| x.into_string()),
-		};
+		let definition = self.into_definition();
 
 		// Process the statement
 		let key = crate::key::table::fd::new(ns, db, &tb.name, &fd);
@@ -254,7 +302,7 @@ impl DefineFieldStatement {
 					FieldDefinition {
 						name: name.clone(),
 						what: self.what.clone().into_string(),
-						flex: self.flex,
+						flexible: self.flex,
 						field_kind: Some(cur_kind),
 						//reference: self.reference.clone(),
 						..Default::default()

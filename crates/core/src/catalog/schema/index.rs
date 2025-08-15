@@ -2,6 +2,7 @@ use revision::revisioned;
 use std::hash::{Hash, Hasher};
 
 use crate::expr::Idiom;
+use crate::kvs::impl_kv_value_revisioned;
 use crate::val::Number;
 
 #[revisioned(revision = 1)]
@@ -14,6 +15,8 @@ pub struct IndexDefinition {
 	pub comment: Option<String>,
 	pub concurrently: bool,
 }
+
+impl_kv_value_revisioned!(IndexDefinition);
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]

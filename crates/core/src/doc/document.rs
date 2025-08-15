@@ -322,10 +322,10 @@ impl Document {
 				// Loop over each field in document
 				for k in out.each(&fd.name).iter() {
 					// Process the field permissions
-					match &fd.permissions.select {
-						Permission::Full => (),
-						Permission::None => out.cut(k),
-						Permission::Specific(e) => {
+					match &fd.select_permission {
+						catalog::Permission::Full => (),
+						catalog::Permission::None => out.cut(k),
+						catalog::Permission::Specific(e) => {
 							// Disable permissions
 							let opt = &opt.new_with_perms(false);
 							// Get the initial value

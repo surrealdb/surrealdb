@@ -1,7 +1,7 @@
 //! Stores a DEFINE ANALYZER config definition
+use crate::catalog;
 use crate::catalog::DatabaseId;
 use crate::catalog::NamespaceId;
-use crate::expr::statements::define::DefineAnalyzerStatement;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use anyhow::Result;
@@ -21,7 +21,7 @@ pub(crate) struct Az<'a> {
 }
 
 impl KVKey for Az<'_> {
-	type ValueType = DefineAnalyzerStatement;
+	type ValueType = catalog::AnalyzerDefinition;
 }
 
 pub fn new(ns: NamespaceId, db: DatabaseId, az: &str) -> Az<'_> {

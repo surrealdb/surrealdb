@@ -4,8 +4,8 @@ use crate::dbs::node::Node;
 use crate::expr::statements::define::config::ConfigStore;
 use crate::expr::statements::define::{ApiDefinition, BucketDefinition, DefineSequenceStatement};
 use crate::expr::statements::{
-	DefineAnalyzerStatement, DefineEventStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineModelStatement, DefineParamStore, DefineUserStatement, LiveStatement,
+	DefineEventStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
+	DefineParamStore, LiveStatement,
 };
 use crate::val::Value;
 use anyhow::Result;
@@ -21,7 +21,7 @@ pub(crate) enum Entry {
 	/// A slice of Node specified at the root.
 	Nds(Arc<[Node]>),
 	/// A slice of DefineUserStatement specified at the root.
-	Rus(Arc<[DefineUserStatement]>),
+	Rus(Arc<[catalog::UserDefinition]>),
 	/// A slice of DefineAccessStatement specified at the root.
 	Ras(Arc<[catalog::AccessDefinition]>),
 	/// A slice of AccessGrant specified at the root.
@@ -29,7 +29,7 @@ pub(crate) enum Entry {
 	/// A slice of NamespaceDefinition specified on a namespace.
 	Nss(Arc<[NamespaceDefinition]>),
 	/// A slice of DefineUserStatement specified on a namespace.
-	Nus(Arc<[DefineUserStatement]>),
+	Nus(Arc<[catalog::UserDefinition]>),
 	/// A slice of DefineAccessStatement specified on a namespace.
 	Nas(Arc<[catalog::AccessDefinition]>),
 	/// A slice of AccessGrant specified at on a namespace.
@@ -38,8 +38,8 @@ pub(crate) enum Entry {
 	Dbs(Arc<[DatabaseDefinition]>),
 	/// A slice of ApiDefinition specified on a namespace.
 	Aps(Arc<[ApiDefinition]>),
-	/// A slice of DefineAnalyzerStatement specified on a namespace.
-	Azs(Arc<[DefineAnalyzerStatement]>),
+	/// A slice of catalog::AnalyzerDefinition specified on a namespace.
+	Azs(Arc<[catalog::AnalyzerDefinition]>),
 	/// A slice of DefineBucketStatement specified on a database.
 	Bus(Arc<[BucketDefinition]>),
 	/// A slice of DefineAccessStatement specified on a database.
@@ -47,7 +47,7 @@ pub(crate) enum Entry {
 	/// A slice of AccessGrant specified at on a database.
 	Dag(Arc<[catalog::AccessGrant]>),
 	/// A slice of DefineUserStatement specified on a database.
-	Dus(Arc<[DefineUserStatement]>),
+	Dus(Arc<[catalog::UserDefinition]>),
 	/// A slice of DefineFunctionStatement specified on a database.
 	Fcs(Arc<[DefineFunctionStatement]>),
 	/// A slice of TableDefinition specified on a database.
@@ -94,9 +94,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Nds"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`DefineUserStatement`].
+	/// Converts this cache entry into a slice of [`catalog::UserDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Rus`].
-	pub(crate) fn try_into_rus(self) -> Result<Arc<[DefineUserStatement]>> {
+	pub(crate) fn try_into_rus(self) -> Result<Arc<[catalog::UserDefinition]>> {
 		match self {
 			Entry::Rus(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Rus"),
@@ -142,9 +142,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Nag"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`DefineUserStatement`].
+	/// Converts this cache entry into a slice of [`catalog::UserDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Nus`].
-	pub(crate) fn try_into_nus(self) -> Result<Arc<[DefineUserStatement]>> {
+	pub(crate) fn try_into_nus(self) -> Result<Arc<[catalog::UserDefinition]>> {
 		match self {
 			Entry::Nus(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Nus"),
@@ -174,9 +174,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Dag"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`DefineUserStatement`].
+	/// Converts this cache entry into a slice of [`catalog::UserDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Dus`].
-	pub(crate) fn try_into_dus(self) -> Result<Arc<[DefineUserStatement]>> {
+	pub(crate) fn try_into_dus(self) -> Result<Arc<[catalog::UserDefinition]>> {
 		match self {
 			Entry::Dus(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Dus"),
@@ -190,9 +190,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Aps"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`DefineAnalyzerStatement`].
+	/// Converts this cache entry into a slice of [`catalog::AnalyzerDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Azs`].
-	pub(crate) fn try_into_azs(self) -> Result<Arc<[DefineAnalyzerStatement]>> {
+	pub(crate) fn try_into_azs(self) -> Result<Arc<[catalog::AnalyzerDefinition]>> {
 		match self {
 			Entry::Azs(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Azs"),

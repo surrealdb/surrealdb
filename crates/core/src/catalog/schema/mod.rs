@@ -10,13 +10,17 @@ mod function;
 mod index;
 mod param;
 mod sequence;
-mod table;
 mod user;
 
 pub use access::*;
+pub use analyzer::*;
 pub use field::*;
+pub use user::*;
 
-use crate::expr::Expr;
+use crate::{
+	expr::{Expr, statements::info::InfoStructure},
+	val::Value,
+};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -25,6 +29,16 @@ pub enum Permission {
 	#[default]
 	Full,
 	Specific(Expr),
+}
+
+impl InfoStructure for Permission {
+	fn structure(self) -> Value {
+		match self {
+			Permission::None => Value::Bool(false),
+			Permission::Full => Value::Bool(true),
+			Permission::Specific(v) => v.to_string().into(),
+		}
+	}
 }
 
 #[revisioned(revision = 1)]

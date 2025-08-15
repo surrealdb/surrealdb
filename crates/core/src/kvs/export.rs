@@ -10,7 +10,9 @@ use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
 use crate::expr::paths::{EDGE, IN, OUT};
-use crate::expr::{Base, DefineAccessStatement};
+use crate::expr::{
+	Base, DefineAccessStatement, DefineAnalyzerStatement, DefineFieldStatement, DefineUserStatement,
+};
 use crate::key::thing;
 use crate::sql::ToSql;
 use crate::val::{RecordId, Strand, Value};
@@ -254,7 +256,12 @@ impl Transaction {
 		// Output USERS
 		if cfg.users {
 			let users = self.all_db_users(ns, db).await?;
-			self.export_section("USERS", users.iter(), chn).await?;
+			self.export_section(
+				"USERS",
+				users.iter().map(|x| DefineUserStatement::from_definition(Base::Db, x)),
+				chn,
+			)
+			.await?;
 		}
 
 		// Output ACCESSES
@@ -283,7 +290,12 @@ impl Transaction {
 		// Output ANALYZERS
 		if cfg.analyzers {
 			let analyzers = self.all_db_analyzers(ns, db).await?;
-			self.export_section("ANALYZERS", analyzers.iter(), chn).await?;
+			self.export_section(
+				"ANALYZERS",
+				analyzers.iter().map(DefineAnalyzerStatement::from_definition),
+				chn,
+			)
+			.await?;
 		}
 
 		// Output SEQUENCES
@@ -364,7 +376,7 @@ impl Transaction {
 		// Export all table field definitions for this table
 		let fields = self.all_tb_fields(ns, db, &table.name, None).await?;
 		for field in fields.iter() {
-			chn.send(bytes!(format!("{};", field))).await?;
+			chn.send(bytes!(format!("{};", DefineFieldStatement::from_definition(field)))).await?;
 		}
 		chn.send(bytes!("")).await?;
 		// Export all table index definitions for this table

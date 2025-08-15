@@ -1,3 +1,8 @@
+use crate::{
+	expr::{Filter, Tokenizer, statements::info::InfoStructure},
+	kvs::impl_kv_value_revisioned,
+	val::{Array, Value},
+};
 use revision::revisioned;
 
 #[revisioned(revision = 1)]
@@ -10,46 +15,19 @@ pub struct AnalyzerDefinition {
 	pub comment: Option<String>,
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Tokenizer {
-	Blank,
-	Camel,
-	Class,
-	Punct,
-}
+impl_kv_value_revisioned!(AnalyzerDefinition);
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Filter {
-	Ascii,
-	EdgeNgram(u16, u16),
-	Lowercase,
-	Ngram(u16, u16),
-	Snowball(Language),
-	Uppercase,
-	Mapper(String),
-}
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub enum Language {
-	Arabic,
-	Danish,
-	Dutch,
-	English,
-	Finnish,
-	French,
-	German,
-	Greek,
-	Hungarian,
-	Italian,
-	Norwegian,
-	Portuguese,
-	Romanian,
-	Russian,
-	Spanish,
-	Swedish,
-	Tamil,
-	Turkish,
+impl InfoStructure for AnalyzerDefinition {
+	fn structure(self) -> Value {
+		Value::from(map! {
+			"name".to_string() => Value::from(self.name.clone()),
+			// TODO: Null byte validity
+			"function".to_string(), if let Some(v) = self.function => Value::from(v.clone()),
+			"tokenizers".to_string(), if let Some(v) = self.tokenizers =>
+				v.into_iter().map(|v| v.to_string().into()).collect::<Array>().into(),
+			"filters".to_string(), if let Some(v) = self.filters =>
+				v.into_iter().map(|v| v.to_string().into()).collect::<Array>().into(),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
+	}
 }

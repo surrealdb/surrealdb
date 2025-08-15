@@ -1,8 +1,7 @@
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{self, DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::index::SearchParams;
-use crate::expr::statements::DefineAnalyzerStatement;
 use crate::expr::{Idiom, Scoring};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
@@ -152,7 +151,7 @@ impl SearchIndex {
 	async fn with_analyzer(
 		ixs: &IndexStores,
 		txn: &Transaction,
-		az: Arc<DefineAnalyzerStatement>,
+		az: Arc<catalog::AnalyzerDefinition>,
 		index_key_base: IndexKeyBase,
 		p: &SearchParams,
 		tt: TransactionType,
@@ -657,9 +656,10 @@ impl MatchesHitsIterator for SearchHitsIterator {
 
 #[cfg(test)]
 mod tests {
-	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::catalog::{self, DatabaseId, NamespaceId};
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
+	use crate::expr::Ident;
 	use crate::expr::index::SearchParams;
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::idx::IndexKeyBase;
@@ -720,14 +720,14 @@ mod tests {
 		ctx: &Context,
 		ds: &Datastore,
 		tt: TransactionType,
-		az: Arc<DefineAnalyzerStatement>,
+		az: Arc<catalog::AnalyzerDefinition>,
 		order: u32,
 		hl: bool,
 	) -> (Context, Options, SearchIndex) {
 		let mut ctx = MutableContext::new(ctx);
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
 		let p = SearchParams {
-			az: az.name.clone(),
+			az: Ident::new(az.name.clone()).unwrap(),
 			doc_ids_order: order,
 			doc_lengths_order: order,
 			postings_order: order,
@@ -771,7 +771,7 @@ mod tests {
 		let DefineStatement::Analyzer(az) = *q else {
 			panic!()
 		};
-		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
+		let az = Arc::new(DefineAnalyzerStatement::from(az).into_definition());
 		let mut stack = reblessive::TreeStack::new();
 
 		let btree_order = 5;
@@ -914,7 +914,7 @@ mod tests {
 			let DefineStatement::Analyzer(az) = *q else {
 				panic!()
 			};
-			let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
+			let az = Arc::new(DefineAnalyzerStatement::from(az).into_definition());
 			let mut stack = reblessive::TreeStack::new();
 
 			let doc1 = RecordId::new("t".to_string(), strand!("doc1").to_owned());
@@ -1055,7 +1055,7 @@ mod tests {
 		let DefineStatement::Analyzer(az) = *q else {
 			panic!()
 		};
-		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
+		let az = Arc::new(DefineAnalyzerStatement::from(az).into_definition());
 		let doc = RecordId::new("t".to_string(), strand!("doc1").to_owned());
 		let content = Value::from(Array::from(vec![
 			"Enter a search term",

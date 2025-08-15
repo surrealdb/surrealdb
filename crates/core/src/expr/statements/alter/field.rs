@@ -5,7 +5,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::reference::Reference;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, Permissions};
+use crate::expr::{Base, Expr, Ident, Idiom, Kind, Permission, Permissions};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
 use anyhow::Result;
@@ -74,8 +74,8 @@ impl AlterFieldStatement {
 		};
 
 		match self.flex {
-			AlterKind::Set(_) => df.flex = true,
-			AlterKind::Drop => df.flex = false,
+			AlterKind::Set(_) => df.flexible = true,
+			AlterKind::Drop => df.flexible = false,
 			AlterKind::None => {}
 		}
 
@@ -112,8 +112,18 @@ impl AlterFieldStatement {
 			AlterDefault::Set(ref expr) => df.default = catalog::DefineDefault::Set(expr.clone()),
 		}
 
+		fn convert_permission(perm: &Permission) -> catalog::Permission {
+			match perm {
+				Permission::None => catalog::Permission::None,
+				Permission::Full => catalog::Permission::Full,
+				Permission::Specific(expr) => catalog::Permission::Specific(expr.clone()),
+			}
+		}
+
 		if let Some(permissions) = &self.permissions {
-			df.permissions = permissions.clone();
+			df.select_permission = convert_permission(&permissions.select);
+			df.create_permission = convert_permission(&permissions.create);
+			df.update_permission = convert_permission(&permissions.update);
 		}
 
 		match self.comment {
@@ -123,12 +133,12 @@ impl AlterFieldStatement {
 		}
 
 		/*
-		match self.reference {
-			AlterKind::Set(ref k) => {
-				df.reference = Some(k.clone());
-			}
-			AlterKind::Drop => df.reference = None,
-			AlterKind::None => {}
+		   match self.reference {
+		   AlterKind::Set(ref k) => {
+		   df.reference = Some(k.clone());
+		   }
+		   AlterKind::Drop => df.reference = None,
+		   AlterKind::None => {}
 		}
 		*/
 
@@ -138,7 +148,7 @@ impl AlterFieldStatement {
 		// Correct reference type
 		/*
 		if let Some(kind) = df.get_reference_kind(ctx, opt).await? {
-			df.field_kind = Some(kind);
+		df.field_kind = Some(kind);
 		}*/
 
 		// Disallow mismatched types

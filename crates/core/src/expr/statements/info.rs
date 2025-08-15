@@ -2,7 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, DefineAccessStatement, Expr, FlowResultExt, Ident};
+use crate::expr::{
+	Base, DefineAccessStatement, DefineAnalyzerStatement, DefineFieldStatement,
+	DefineUserStatement, Expr, FlowResultExt, Ident,
+};
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ToSql;
 use crate::sys::INFORMATION;
@@ -85,7 +88,7 @@ impl InfoStatement {
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_root_users().await?.iter() {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(),DefineUserStatement::from_definition(Base::Root,v).to_string().into());
 							}
 							out.into()
 						}
@@ -128,7 +131,7 @@ impl InfoStatement {
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_ns_users(ns).await?.iter() {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(),DefineUserStatement::from_definition(Base::Ns,v).to_string().into());
 							}
 							out.into()
 						},
@@ -190,7 +193,7 @@ impl InfoStatement {
 						"analyzers".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_analyzers( ns, db).await?.iter() {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(), DefineAnalyzerStatement::from_definition(v).to_string().into());
 							}
 							out.into()
 						},
@@ -232,7 +235,7 @@ impl InfoStatement {
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_users(ns, db).await?.iter() {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(),DefineUserStatement::from_definition(Base::Db,v).to_string().into());
 							}
 							out.into()
 						},
@@ -294,7 +297,7 @@ impl InfoStatement {
 						"fields".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_fields(ns, db, tb, version).await?.iter() {
-								out.insert(v.name.to_string(), v.to_string().into());
+								out.insert(v.name.to_string(), DefineFieldStatement::from_definition(v).to_string().into());
 							}
 							out.into()
 						},
@@ -369,7 +372,7 @@ impl InfoStatement {
 				Ok(if *structured {
 					res.as_ref().clone().structure()
 				} else {
-					Value::from(res.to_string())
+					Value::from(DefineUserStatement::from_definition(base, &res).to_string())
 				})
 			}
 			#[cfg_attr(target_family = "wasm", expect(unused_variables))]

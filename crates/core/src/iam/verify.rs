@@ -1,6 +1,5 @@
 use crate::dbs::Session;
 use crate::err::Error;
-use crate::expr::statements::DefineUserStatement;
 use crate::iam::access::{authenticate_generic, authenticate_record};
 use crate::iam::issue::expiration;
 use crate::iam::token::Claims;
@@ -101,12 +100,14 @@ pub async fn basic(
 		(Some(ns), Some(db)) => match verify_db_creds(kvs, ns, db, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as database user '{}'", user);
-				session.exp = expiration(u.duration.session.map(|x| x.0))?;
-				session.au = Arc::new(
-					(&u, Level::Database(ns.to_owned(), db.to_owned()))
-						.try_into()
-						.map_err(Error::from)?,
-				);
+				session.exp = expiration(u.session_duration)?;
+				let au = Auth::new(Actor::from_role_names(
+					u.name.clone(),
+					&u.roles,
+					Level::Database(ns.to_owned(), db.to_owned()),
+				)?);
+
+				session.au = Arc::new(au);
 				Ok(())
 			}
 			Err(err) => Err(err),
@@ -115,10 +116,14 @@ pub async fn basic(
 		(Some(ns), None) => match verify_ns_creds(kvs, ns, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as namespace user '{}'", user);
-				session.exp = expiration(u.duration.session.map(|x| x.0))?;
-				session.au = Arc::new(
-					(&u, Level::Namespace(ns.to_owned())).try_into().map_err(Error::from)?,
-				);
+				session.exp = expiration(u.session_duration)?;
+				let au = Auth::new(Actor::from_role_names(
+					u.name.clone(),
+					&u.roles,
+					Level::Namespace(ns.to_owned()),
+				)?);
+
+				session.au = Arc::new(au);
 				Ok(())
 			}
 			Err(err) => Err(err),
@@ -127,8 +132,10 @@ pub async fn basic(
 		(None, None) => match verify_root_creds(kvs, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as root user '{}'", user);
-				session.exp = expiration(u.duration.session.map(|x| x.0))?;
-				session.au = Arc::new((&u, Level::Root).try_into().map_err(Error::from)?);
+				session.exp = expiration(u.session_duration)?;
+				let au = Auth::new(Actor::from_role_names(u.name.clone(), &u.roles, Level::Root)?);
+
+				session.au = Arc::new(au);
 				Ok(())
 			}
 			Err(err) => Err(err),
@@ -444,7 +451,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
-			session.exp = expiration(de.duration.session.map(|x| x.0))?;
+			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles
@@ -587,7 +594,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
-			session.exp = expiration(de.duration.session.map(|x| x.0))?;
+			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles
@@ -699,7 +706,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			debug!("Authenticated to root level with user `{}` using token", id);
 			// Set the session
 			session.tk = Some(value);
-			session.exp = expiration(de.duration.session.map(|x| x.0))?;
+			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles
@@ -719,7 +726,7 @@ pub async fn verify_root_creds(
 	ds: &Datastore,
 	user: &str,
 	pass: &str,
-) -> Result<DefineUserStatement> {
+) -> Result<catalog::UserDefinition> {
 	// Create a new readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
@@ -742,7 +749,7 @@ pub async fn verify_ns_creds(
 	ns: &str,
 	user: &str,
 	pass: &str,
-) -> Result<DefineUserStatement> {
+) -> Result<catalog::UserDefinition> {
 	// Create a new readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await?;
 	let ns_def = match tx.get_ns_by_name(ns).await? {
@@ -780,7 +787,7 @@ pub async fn verify_db_creds(
 	db: &str,
 	user: &str,
 	pass: &str,
-) -> Result<DefineUserStatement> {
+) -> Result<catalog::UserDefinition> {
 	// Create a new readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await?;
 	let db_def = match tx.get_db_by_name(ns, db).await? {
