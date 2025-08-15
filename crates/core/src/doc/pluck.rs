@@ -1,6 +1,7 @@
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Statement};
-use crate::doc::{CursorDoc, Document};
+use crate::doc::compute::DocKind;
+use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::expr::output::Output;
 use crate::expr::paths::META;
@@ -198,29 +199,4 @@ impl Document {
 		// Output result
 		Ok(out)
 	}
-
-	pub(super) async fn computed_fields(&mut self, stk: &mut Stk, ctx: &Context, opt: &Options, doc_kind: DocKind) -> Result<(), IgnoreError> {
-		let fields = self.fd(ctx, opt).await?;
-		let doc = match doc_kind {
-			DocKind::Initial => &mut self.initial,
-			DocKind::Current => &mut self.current,
-			DocKind::InitialReduced => &mut self.initial_reduced,
-			DocKind::CurrentReduced => &mut self.current_reduced,
-		};
-
-		for fd in fields.iter() {
-			if let Some(computed) = &fd.computed {
-				let val = computed.compute(stk, ctx, opt, Some(&doc)).await.unwrap();
-				doc.doc.to_mut().put(&fd.name, val);
-			}
-		}
-		Ok(())
-	}
-}
-
-pub(super) enum DocKind {
-	Initial,
-	Current,
-	InitialReduced,
-	CurrentReduced,
 }

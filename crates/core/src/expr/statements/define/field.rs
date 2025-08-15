@@ -276,8 +276,8 @@ impl DefineFieldStatement {
 		ensure!(self.value.is_none(), Error::RefsTypeConflict("VALUE".into(), "computed".into()));
 		ensure!(self.assert.is_none(), Error::RefsTypeConflict("ASSERT".into(), "computed".into()));
 		ensure!(matches!(self.default, DefineDefault::None), Error::RefsTypeConflict("DEFAULT".into(), "computed".into()));
-		ensure!(self.flex, Error::RefsTypeConflict("FLEXIBLE".into(), "computed".into()));
-		ensure!(self.readonly, Error::RefsTypeConflict("READONLY".into(), "computed".into()));
+		ensure!(!self.flex, Error::RefsTypeConflict("FLEXIBLE".into(), "computed".into()));
+		ensure!(!self.readonly, Error::RefsTypeConflict("READONLY".into(), "computed".into()));
 		Ok(())
 	}
 
