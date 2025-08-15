@@ -1238,7 +1238,7 @@ impl Transaction {
 		let cached_entry =
 			cache::tx::Entry::Any(Arc::clone(&cached_tb) as Arc<dyn Any + Send + Sync>);
 
-		let qey = cache::tx::Lookup::TbById(tb.namespace_id, tb.database_id, &tb.name);
+		let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, &tb.name);
 		self.cache.insert(qey, cached_entry.clone());
 
 		let qey = cache::tx::Lookup::TbByName(ns, db, &tb.name);
@@ -1265,7 +1265,7 @@ impl Transaction {
 		}
 
 		// Clear the cache
-		let qey = cache::tx::Lookup::TbById(tb.namespace_id, tb.database_id, &tb.name);
+		let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, &tb.name);
 		self.cache.remove(qey);
 		let qey = cache::tx::Lookup::TbByName(ns, db, &tb.name);
 		self.cache.remove(qey);
@@ -1291,7 +1291,7 @@ impl Transaction {
 		}
 
 		// Clear the cache
-		let qey = cache::tx::Lookup::TbById(tb.namespace_id, tb.database_id, &tb.name);
+		let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, &tb.name);
 		self.cache.remove(qey);
 		let qey = cache::tx::Lookup::TbByName(ns, db, &tb.name);
 		self.cache.remove(qey);
@@ -1750,7 +1750,7 @@ impl Transaction {
 		db: DatabaseId,
 		tb: &str,
 	) -> Result<Option<Arc<TableDefinition>>> {
-		let qey = cache::tx::Lookup::TbById(ns, db, tb);
+		let qey = cache::tx::Lookup::Tb(ns, db, tb);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Some),
 			None => {

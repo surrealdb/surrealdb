@@ -105,7 +105,7 @@ pub(crate) enum Key {
 	/// A cache key for a table
 	TbByName(String, String, String),
 	/// A cache key for a table by id.
-	TbById(NamespaceId, DatabaseId, String),
+	Tb(NamespaceId, DatabaseId, String),
 	/// A cache key for an event (on a table)
 	Ev(NamespaceId, DatabaseId, String, String),
 	/// A cache key for a fied (on a table)
@@ -170,7 +170,7 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Cg(a, b, c) => Key::Cg(a, b, c.to_string()),
 			Lookup::Pa(a, b, c) => Key::Pa(a, b, c.to_string()),
 			Lookup::Sq(a, b,c) => Key::Sq(a, b, c.to_string()),
-			Lookup::TbById(a, b, c) => Key::TbById(a, b, c.to_string()),
+			Lookup::Tb(a, b, c) => Key::Tb(a, b, c.to_string()),
 			Lookup::TbByName(a, b, c) => Key::TbByName(a.to_string(), b.to_string(), c.to_string()),
 			Lookup::Ev(a, b, c, d) => Key::Ev(a, b, c.to_string(), d.to_string()),
 			Lookup::Fd(a, b, c, d) => Key::Fd(a, b, c.to_string(), d.to_string()),

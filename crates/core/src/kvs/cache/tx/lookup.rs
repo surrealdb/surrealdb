@@ -104,7 +104,7 @@ pub(crate) enum Lookup<'a> {
 	/// A cache key for a sequence (on a database)
 	Sq(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a table by id.
-	TbById(NamespaceId, DatabaseId, &'a str),
+	Tb(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a table by name.
 	TbByName(&'a str, &'a str, &'a str),
 	/// A cache key for an event (on a table)
@@ -170,7 +170,7 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Cg(la, lb, lc), Key::Cg(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Pa(la, lb, lc), Key::Pa(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Sq(la, lb, lc), Key::Sq(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
-			(Self::TbById(la, lb, lc), Key::TbById(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
+			(Self::Tb(la, lb, lc), Key::Tb(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::TbByName(la, lb, lc), Key::TbByName(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Ev(la, lb, lc, ld), Key::Ev(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
 			(Self::Fd(la, lb, lc, ld), Key::Fd(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
@@ -280,7 +280,7 @@ mod tests {
 	#[case(Lookup::Cg(NamespaceId(1), DatabaseId(1), "test"), Key::Cg(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::Pa(NamespaceId(1), DatabaseId(1), "test"), Key::Pa(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::Sq(NamespaceId(1), DatabaseId(1), "test"), Key::Sq(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
-	#[case(Lookup::TbById(NamespaceId(1), DatabaseId(1), "test"), Key::TbById(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Tb(NamespaceId(1), DatabaseId(1), "test"), Key::Tb(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::TbByName("test", "test", "test"), Key::TbByName("test".to_string(), "test".to_string(), "test".to_string()), true)]
 	#[case(Lookup::Ev(NamespaceId(1), DatabaseId(1), "test", "test"), Key::Ev(NamespaceId(1), DatabaseId(1), "test".to_string(), "test".to_string()), true)]
 	#[case(Lookup::Fd(NamespaceId(1), DatabaseId(1), "test", "test"), Key::Fd(NamespaceId(1), DatabaseId(1), "test".to_string(), "test".to_string()), true)]
