@@ -241,7 +241,7 @@ impl Collected {
 		} else {
 			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 			let val = txn.get_record(ns, db, &v.table, &v.key, None).await?;
-			Operable::Relate(f, val, w, o.map(|v| Record::new(v).into()))
+			Operable::Relate(f, val, w, o.map(|v| v.into()))
 		};
 		// Process the document record
 		let pro = Processed {

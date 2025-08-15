@@ -350,15 +350,15 @@ impl Document {
 		// Fetch the fields for the table
 		let fds = self.fd(ctx, opt).await?;
 		// The document to be reduced
-		let mut reduced = (*full.doc).clone();
+		let mut reduced = full.doc.clone();
 		// Loop over each field in document
 		for fd in fds.iter() {
 			// Loop over each field in document
-			for k in reduced.each(&fd.name).iter() {
+			for k in reduced.as_ref().each(&fd.name).iter() {
 				// Process the field permissions
 				match &fd.permissions.select {
 					Permission::Full => (),
-					Permission::None => reduced.cut(k),
+					Permission::None => reduced.to_mut().cut(k),
 					Permission::Specific(e) => {
 						// Disable permissions
 						let opt = &opt.new_with_perms(false);
@@ -375,7 +375,7 @@ impl Document {
 							.catch_return()?
 							.is_truthy()
 						{
-							reduced.cut(k);
+							reduced.to_mut().cut(k);
 						}
 					}
 				}

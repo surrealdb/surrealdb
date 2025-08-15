@@ -7,7 +7,6 @@ use crate::doc::Document;
 use crate::err::Error;
 use crate::expr::Dir;
 use crate::expr::paths::{IN, OUT};
-use crate::val::Value;
 use crate::val::record::RecordType;
 
 impl Document {

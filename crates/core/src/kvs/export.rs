@@ -10,7 +10,6 @@ use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
-use crate::expr::statements::DefineTableStatement;
 use crate::key::thing;
 use crate::sql::ToSql;
 use crate::val::record::Record;

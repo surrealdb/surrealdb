@@ -5,7 +5,6 @@ use anyhow::Result;
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cf::{TableMutation, TableMutations};
 use crate::doc::CursorRecord;
-use crate::expr::statements::DefineTableStatement;
 use crate::kvs::{KVKey, Key};
 use crate::val::RecordId;
 

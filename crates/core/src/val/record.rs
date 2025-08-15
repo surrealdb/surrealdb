@@ -61,7 +61,7 @@ impl Data {
 	pub(crate) fn as_ref(&self) -> &Value {
 		match self {
 			Data::Mutable(value) => value,
-			Data::ReadOnly(arc) => arc.as_ref(),
+			Data::ReadOnly(arc) => arc,
 		}
 	}
 
@@ -94,10 +94,7 @@ impl Default for Data {
 impl Revisioned for Data {
 	#[inline]
 	fn serialize_revisioned<W: std::io::Write>(&self, writer: &mut W) -> Result<(), Error> {
-		match self {
-			Data::Mutable(v) => v.serialize_revisioned(writer),
-			Data::ReadOnly(v) => v.serialize_revisioned(writer),
-		}
+		self.as_ref().serialize_revisioned(writer)
 	}
 
 	#[inline]
