@@ -95,6 +95,21 @@ pub(super) enum Collected {
 }
 
 impl Collected {
+	/// Processes a collected item and transforms it into a format ready for
+	/// query execution.
+	///
+	/// This is the main entry point for the data processing pipeline. It
+	/// handles different types of collected data from various sources
+	/// (indexes, table scans, graph traversals, etc.) and applies the
+	/// appropriate processing strategy based on the item type and execution
+	/// context.
+	///
+	/// The `rid_only` parameter optimizes performance by skipping value
+	/// fetching when only record IDs are needed (e.g., for COUNT operations or
+	/// when values will be filtered out later).
+	///
+	/// Each variant uses a specific processing strategy optimized for its data
+	/// source and use case.
 	pub(super) async fn process(
 		self,
 		ctx: &Context,
@@ -103,25 +118,38 @@ impl Collected {
 		rid_only: bool,
 	) -> Result<Processed> {
 		match self {
+			// Graph edge traversal results - requires special graph parsing and record lookup
 			Self::Edge(key) => Self::process_edge(ctx, opt, txn, key, rid_only).await,
+			// Range scan results - lightweight processing for range queries
 			Self::RangeKey(key) => Self::process_range_key(key).await,
+			// Table scan results - basic key-only processing for full table scans
 			Self::TableKey(key) => Self::process_table_key(key).await,
+			// Graph relationship records - handles complex from/via/to relationship processing
 			Self::Relatable {
 				f,
 				v,
 				w,
 				o,
 			} => Self::process_relatable(ctx, opt, txn, f, v, w, o, rid_only).await,
+			// Direct record ID references - standard record processing
 			Self::RecordId(record_id) => {
 				Self::process_thing(ctx, opt, txn, record_id, rid_only).await
 			}
+			// Table identifiers - used for table-level operations
 			Self::Yield(table) => Self::process_yield(table).await,
+			// Pre-computed values - no additional processing needed
 			Self::Value(value) => Ok(Self::process_value(value)),
+			// Deferred record processing - handles lazy evaluation scenarios
 			Self::Defer(key) => Self::process_defer(key).await,
+			// Records with merge operations - applies data merging logic
 			Self::Mergeable(v, o) => Self::process_mergeable(v, o).await,
+			// Raw key-value pairs from storage layer
 			Self::KeyVal(key, val) => Ok(Self::process_key_val(key, val)?),
+			// Count aggregation results - no record processing needed
 			Self::Count(c) => Ok(Self::process_count(c)),
+			// Index scan results with values - includes pre-fetched data
 			Self::IndexItem(i) => Self::process_index_item(ctx, opt, txn, i, rid_only).await,
+			// Index scan results key-only - lightweight index processing
 			Self::IndexItemKey(i) => Ok(Self::process_index_item_key(i)),
 		}
 	}
@@ -439,13 +467,25 @@ impl Collector for ConcurrentDistinctCollector<'_> {
 pub(super) trait Collector {
 	async fn collect(&mut self, collected: Collected) -> Result<()>;
 
+	fn max_fetch_size(&mut self) -> u32 {
+		if let Some(l) = self.iterator().start_limit() {
+			*l
+		} else {
+			*NORMAL_FETCH_SIZE
+		}
+	}
+
 	fn iterator(&mut self) -> &mut Iterator;
 
 	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b Ident) -> Cow<'b, Context> {
 		if let Some(qp) = ctx.get_query_planner() {
 			if let Some(exe) = qp.get_query_executor(table.as_str()) {
-				// We set the query executor matching the current table in the Context
-				// Avoiding search in the hashmap of the query planner for each doc
+				// Optimize executor lookup:
+				// - Attach the table-specific QueryExecutor to the Context once, so subsequent
+				//   per-record processing doesn’t need to search the QueryPlanner’s internal
+				//   map on every document.
+				// - This keeps the hot path allocation-free and avoids repeated hash lookups
+				//   inside tight iteration loops.
 				let mut ctx = MutableContext::new(ctx);
 				ctx.set_query_executor(exe.clone());
 				return Cow::Owned(ctx.freeze());
@@ -475,6 +515,8 @@ pub(super) trait Collector {
 					dir,
 					what,
 				} => self.collect_edges(ctx, opt, from, dir, what).await?,
+				// For Table and Range iterables, the RecordStrategy determines whether we
+				// collect only keys, keys+values, or just a count without materializing records.
 				Iterable::Range(tb, v, rs, sc) => match rs {
 					RecordStrategy::Count => self.collect_range_count(ctx, opt, &tb, v).await?,
 					RecordStrategy::KeysOnly => {
@@ -499,8 +541,9 @@ pub(super) trait Collector {
 				Iterable::Index(v, irf, rs) => {
 					if let Some(qp) = ctx.get_query_planner() {
 						if let Some(exe) = qp.get_query_executor(v.as_str()) {
-							// We set the query executor matching the current table in the Context
-							// Avoiding search in the hashmap of the query planner for each doc
+							// Attach the table-specific QueryExecutor to the Context to avoid
+							// per-record lookups in the QueryPlanner during index scans.
+							// This significantly reduces overhead inside tight iterator loops.
 							let mut ctx = MutableContext::new(ctx);
 							ctx.set_query_executor(exe.clone());
 							let ctx = ctx.freeze();
@@ -531,6 +574,13 @@ pub(super) trait Collector {
 		mut rng: Range<Key>,
 		sc: ScanDirection,
 	) -> Result<Option<Range<Key>>> {
+		// Fast-forward a key range by skipping the first N keys when a START clause is
+		// active.
+		//
+		// This method avoids fully materializing or processing records prior to the
+		// requested offset by streaming only keys from the underlying KV store. It
+		// updates the iterator’s internal skipped counter and returns a narrowed
+		// range to resume scanning from.
 		let ite = self.iterator();
 		let skippable = ite.skippable();
 		if skippable == 0 {
@@ -915,9 +965,9 @@ pub(super) trait Collector {
 		txn: &Transaction,
 		mut iterator: ThingIterator,
 	) -> Result<()> {
+		let fetch_size = self.max_fetch_size();
 		while !ctx.is_done(true).await? {
-			let records: Vec<IndexItemRecord> =
-				iterator.next_batch(ctx, txn, *NORMAL_FETCH_SIZE).await?;
+			let records: Vec<IndexItemRecord> = iterator.next_batch(ctx, txn, fetch_size).await?;
 			if records.is_empty() {
 				break;
 			}
@@ -937,9 +987,9 @@ pub(super) trait Collector {
 		txn: &Transaction,
 		mut iterator: ThingIterator,
 	) -> Result<()> {
+		let fetch_size = self.max_fetch_size();
 		while !ctx.is_done(true).await? {
-			let records: Vec<IndexItemRecord> =
-				iterator.next_batch(ctx, txn, *NORMAL_FETCH_SIZE).await?;
+			let records: Vec<IndexItemRecord> = iterator.next_batch(ctx, txn, fetch_size).await?;
 			if records.is_empty() {
 				break;
 			}
@@ -960,8 +1010,9 @@ pub(super) trait Collector {
 		mut iterator: ThingIterator,
 	) -> Result<()> {
 		let mut total_count = 0;
+		let fetch_size = self.max_fetch_size();
 		while !ctx.is_done(true).await? {
-			let count = iterator.next_count(ctx, txn, *NORMAL_FETCH_SIZE).await?;
+			let count = iterator.next_count(ctx, txn, fetch_size).await?;
 			if count == 0 {
 				break;
 			}
