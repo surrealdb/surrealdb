@@ -1,7 +1,8 @@
 /**
 [env]
-namespace = "foo"
-database = "foo"
+namespace = false
+database = false
+strict = true
 clean = true
 
 [test]
@@ -10,17 +11,21 @@ clean = true
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, databases: {  }, users: {  } }"
+error = "The namespace 'foo' does not exist"
 
 [[test.results]]
-value = "NONE"
+error = "Specify a namespace to use"
 
 [[test.results]]
-value = "{ accesses: {  }, databases: {  }, users: {  } }"
+error = "The namespace 'TEST' does not exist"
+
+[[test.results]]
+error = "Specify a namespace to use"
 */
 
 
 DEFINE NAMESPACE test;
+USE NAMESPACE foo;
 INFO FOR NAMESPACE;
 USE NS TEST;
 INFO FOR NAMESPACE;

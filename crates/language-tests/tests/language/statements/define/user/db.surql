@@ -2,6 +2,7 @@
 [env]
 database = false
 namespace = false
+clean = true
 
 [test]
 

@@ -57,14 +57,11 @@ pub(crate) struct StatementOptions {
 	/// - One of: `"content"`, `"replace"`, `"merge"`, `"patch"` or `"single"`.
 	/// - For the `insert`, `create`, `upsert`, `update` and `relate` methods
 	pub data: Option<RpcData>,
-	/// - A string, containing fields to select. Also works with the `VALUE`
-	///   keyword.
+	/// - A string, containing fields to select. Also works with the `VALUE` keyword.
 	/// - For the `select` method
 	pub fields: Option<Fields>,
-	/// - One of: `"none"`, `"null"`, `"diff"`, `"before"`, `"after"` or a list
-	///   of fields
-	/// - For the `insert`, `create`, `upsert`, `update`, `relate` and `delete`
-	///   methods
+	/// - One of: `"none"`, `"null"`, `"diff"`, `"before"`, `"after"` or a list of fields
+	/// - For the `insert`, `create`, `upsert`, `update`, `relate` and `delete` methods
 	pub output: Option<Output>,
 	/// - A number, stating how many records can be selected or affected
 	/// - For the `select` method
@@ -75,16 +72,13 @@ pub(crate) struct StatementOptions {
 	/// - A string, containing an expression for a `WHERE` clause
 	/// - For the `select`, `upsert`, `update` and `delete` methods
 	pub cond: Option<Cond>,
-	/// - A boolean, stating where we want to select or affect only a single
-	///   record.
-	/// - For the `select`, `create`, `upsert`, `update`, `relate` and `delete`
-	///   methods
+	/// - A boolean, stating where we want to select or affect only a single record.
+	/// - For the `select`, `create`, `upsert`, `update`, `relate` and `delete` methods
 	pub only: bool,
 	/// - A boolean, stating wether we are inserting relations.
 	/// - For the `insert` method
 	pub relation: bool,
-	/// - A boolean, stating wether the relation we are inserting needs to be
-	///   unique
+	/// - A boolean, stating wether the relation we are inserting needs to be unique
 	/// - For the `relate` method
 	pub unique: bool,
 	/// - Can contain either:
@@ -93,13 +87,10 @@ pub(crate) struct StatementOptions {
 	/// - For the `select`, `insert` and `create` methods
 	pub version: Option<Expr>,
 	/// - A duration, stating how long execution can last
-	/// - For all (`select`, `insert`, `create`, `upsert`, `update`, `relate`
-	///   and `delete`) methods
+	/// - For all (`select`, `insert`, `create`, `upsert`, `update`, `relate` and `delete`) methods
 	pub timeout: Option<Timeout>,
-	/// - An object, containing variables to define during execution of the
-	///   method
-	/// - For all (`select`, `insert`, `create`, `upsert`, `update`, `relate`
-	///   and `delete`) methods
+	/// - An object, containing variables to define during execution of the method
+	/// - For all (`select`, `insert`, `create`, `upsert`, `update`, `relate` and `delete`) methods
 	pub vars: Option<Variables>,
 	/// - A boolean, stating wether the LQ notifications should contain diffs
 	/// - For the `live` method

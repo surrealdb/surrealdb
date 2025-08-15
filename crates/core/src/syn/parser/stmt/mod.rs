@@ -36,7 +36,7 @@ mod upsert;
 impl Parser<'_> {
 	pub(super) async fn parse_stmt_list(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 	) -> ParseResult<Vec<TopLevelExpr>> {
 		let mut res = Vec::new();
 		loop {
@@ -48,7 +48,7 @@ impl Parser<'_> {
 				}
 				t!("eof") => break,
 				_ => {
-					let stmt = ctx.run(|ctx| self.parse_top_level_expr(ctx)).await?;
+					let stmt = stk.run(|ctx| self.parse_top_level_expr(ctx)).await?;
 					res.push(stmt);
 					if !self.eat(t!(";")) {
 						if self.eat(t!("eof")) {
@@ -122,7 +122,7 @@ impl Parser<'_> {
 	}
 
 	/// Parsers an access statement.
-	async fn parse_access(&mut self, ctx: &mut Stk) -> ParseResult<AccessStatement> {
+	async fn parse_access(&mut self, stk: &mut Stk) -> ParseResult<AccessStatement> {
 		let ac = self.next_token_value()?;
 		let base = self.eat(t!("ON")).then(|| self.parse_base(false)).transpose()?;
 		let peek = self.peek();
@@ -142,7 +142,7 @@ impl Parser<'_> {
 					}
 					t!("RECORD") => {
 						self.pop_peek();
-						let rid = ctx.run(|ctx| self.parse_record_id(ctx)).await?;
+						let rid = stk.run(|ctx| self.parse_record_id(ctx)).await?;
 						Ok(AccessStatement::Grant(AccessStatementGrant {
 							ac,
 							base,
@@ -174,7 +174,7 @@ impl Parser<'_> {
 						}))
 					}
 					t!("WHERE") => {
-						let cond = self.try_parse_condition(ctx).await?;
+						let cond = self.try_parse_condition(stk).await?;
 						Ok(AccessStatement::Show(AccessStatementShow {
 							ac,
 							base,
@@ -207,7 +207,7 @@ impl Parser<'_> {
 						}))
 					}
 					t!("WHERE") => {
-						let cond = self.try_parse_condition(ctx).await?;
+						let cond = self.try_parse_condition(stk).await?;
 						Ok(AccessStatement::Revoke(AccessStatementRevoke {
 							ac,
 							base,
@@ -501,10 +501,10 @@ impl Parser<'_> {
 	/// Expects `RETURN` to already be consumed.
 	pub(super) async fn parse_return_stmt(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 	) -> ParseResult<OutputStatement> {
-		let what = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
-		let fetch = self.try_parse_fetch(ctx).await?;
+		let what = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+		let fetch = self.try_parse_fetch(stk).await?;
 		Ok(OutputStatement {
 			what,
 			fetch,

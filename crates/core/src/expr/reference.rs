@@ -91,7 +91,7 @@ impl Refs {
 				let rid = match &doc.rid {
 					Some(id) => id.as_ref().to_owned(),
 					None => match &doc.doc.rid() {
-						Value::Thing(id) => id.to_owned(),
+						Value::RecordId(id) => id.to_owned(),
 						_ => bail!(Error::InvalidRefsContext),
 					},
 				};
@@ -105,7 +105,7 @@ impl Refs {
 				}
 
 				// Convert the references into values
-				Array(ids.into_iter().map(Value::Thing).collect::<Vec<_>>())
+				Array(ids.into_iter().map(Value::RecordId).collect::<Vec<_>>())
 			}
 			None => bail!(Error::InvalidRefsContext),
 		};

@@ -16,6 +16,7 @@ use roaring::treemap::IntoIter;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::index::SearchParams;
@@ -135,7 +136,8 @@ impl KVValue for SearchIndexState {
 impl SearchIndex {
 	pub(crate) async fn new(
 		ctx: &Context,
-		opt: &Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		az: &str,
 		ikb: IndexKeyBase,
 		p: &SearchParams,
@@ -143,11 +145,11 @@ impl SearchIndex {
 	) -> anyhow::Result<Self> {
 		let tx = ctx.tx();
 		let ixs = ctx.get_index_stores();
-		let (ns, db) = opt.ns_db()?;
 		let az = tx.get_db_analyzer(ns, db, az).await?;
 		ixs.mappers().check(&az).await?;
 		Self::with_analyzer(ixs, &tx, az, ikb, p, tt).await
 	}
+
 	async fn with_analyzer(
 		ixs: &IndexStores,
 		txn: &Transaction,
@@ -662,6 +664,7 @@ mod tests {
 	use reblessive::tree::Stk;
 	use test_log::test;
 
+	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
 	use crate::expr::index::SearchParams;
@@ -743,7 +746,7 @@ mod tests {
 			ctx.get_index_stores(),
 			&tx,
 			az,
-			IndexKeyBase::default(),
+			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
 			&p,
 			tt,
 		)

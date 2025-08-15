@@ -17,3 +17,5 @@ group_imports = "StdExternalCrate"
 #match_arm_blocks = true
 #reorder_impl_items = true
 wrap_comments = true
+
+comment_width = 100

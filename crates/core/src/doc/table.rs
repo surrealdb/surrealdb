@@ -3,19 +3,20 @@ use futures::future::try_join_all;
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
 
+use crate::catalog::{TableDefinition, ViewDefinition};
 use crate::ctx::Context;
 use crate::dbs::{Force, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::data::Assignment;
 use crate::expr::paths::ID;
+use crate::expr::statements::SelectStatement;
 use crate::expr::statements::delete::DeleteStatement;
 use crate::expr::statements::ifelse::IfelseStatement;
 use crate::expr::statements::upsert::UpsertStatement;
-use crate::expr::statements::{DefineTableStatement, SelectStatement};
 use crate::expr::{
 	AssignOperator, BinaryOperator, Cond, Data, Expr, Field, Fields, FlowResultExt as _, Function,
-	FunctionCall, Groups, Idiom, Literal, Part, View,
+	FunctionCall, Groups, Ident, Idiom, Literal, Part,
 };
 use crate::val::{Array, RecordId, RecordIdKey, Value};
 
@@ -33,9 +34,9 @@ enum FieldAction {
 }
 
 struct FieldDataContext<'a> {
-	ft: &'a DefineTableStatement,
+	ft: &'a TableDefinition,
 	act: FieldAction,
-	view: &'a View,
+	view: &'a ViewDefinition,
 	groups: &'a Groups,
 	group_ids: Vec<Value>,
 	doc: &'a CursorDoc,
@@ -218,7 +219,7 @@ impl Document {
 				None => {
 					// Set the current record id
 					let rid = RecordId {
-						table: ft.name.into_raw_string(),
+						table: ft.name.clone(),
 						key: rid.key.clone(),
 					};
 					// Check if a WHERE clause is specified
@@ -354,7 +355,7 @@ impl Document {
 		let (set_ops, del_ops) = self.fields(stk, ctx, opt, &fdc).await?;
 		//
 		let thg = RecordId {
-			table: fdc.ft.name.into_raw_string(),
+			table: fdc.ft.name.clone(),
 			key: RecordIdKey::Array(Array(fdc.group_ids)),
 		};
 		let what = vec![Expr::Literal(Literal::RecordId(thg.clone().into_literal()))];
@@ -422,7 +423,7 @@ impl Document {
 									val => {
 										bail!(Error::InvalidAggregation {
 											name: name.to_string(),
-											table: fdc.ft.name.into_raw_string(),
+											table: fdc.ft.name.clone(),
 											message: format!(
 												"This function expects a datetime but found {val}"
 											),
@@ -442,7 +443,7 @@ impl Document {
 									val => {
 										bail!(Error::InvalidAggregation {
 											name: name.to_string(),
-											table: fdc.ft.name.into_raw_string(),
+											table: fdc.ft.name.clone(),
 											message: format!(
 												"This function expects a datetime but found {val}"
 											),
@@ -462,7 +463,7 @@ impl Document {
 									val => {
 										bail!(Error::InvalidAggregation {
 											name: name.to_string(),
-											table: fdc.ft.name.into_raw_string(),
+											table: fdc.ft.name.clone(),
 											message: format!(
 												"This function expects a number but found {val}"
 											),
@@ -483,7 +484,7 @@ impl Document {
 									val => {
 										bail!(Error::InvalidAggregation {
 											name: name.to_string(),
-											table: fdc.ft.name.into_raw_string(),
+											table: fdc.ft.name.clone(),
 											message: format!(
 												"This function expects a number but found {val}"
 											),
@@ -503,7 +504,7 @@ impl Document {
 									val => {
 										bail!(Error::InvalidAggregation {
 											name: name.to_string(),
-											table: fdc.ft.name.into_raw_string(),
+											table: fdc.ft.name.clone(),
 											message: format!(
 												"This function expects a number but found {val}"
 											),
@@ -523,7 +524,7 @@ impl Document {
 									val => {
 										bail!(Error::InvalidAggregation {
 											name: name.to_string(),
-											table: fdc.ft.name.into_raw_string(),
+											table: fdc.ft.name.clone(),
 											message: format!(
 												"This function expects a number but found {val}"
 											),
@@ -880,7 +881,12 @@ impl Document {
 		let group_select = Expr::Select(Box::new(SelectStatement {
 			expr: Fields::Select(vec![field.clone()]),
 			cond,
-			what: fdc.view.what.iter().map(|x| Expr::Table(x.clone())).collect(),
+			what: fdc
+				.view
+				.what
+				.iter()
+				.map(|x| Expr::Table(unsafe { Ident::new_unchecked(x.clone()) }))
+				.collect(),
 			group: Some(fdc.groups.clone()),
 			..SelectStatement::default()
 		}));

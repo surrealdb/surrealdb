@@ -151,6 +151,7 @@ radix_trie.workspace = true
 rand.workspace = true
 rayon.workspace = true
 regex.workspace = true
+rstest.workspace = true
 serial_test.workspace = true
 temp-dir.workspace = true
 test-log = { workspace = true, features = ["trace"] }

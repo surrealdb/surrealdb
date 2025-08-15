@@ -8,6 +8,7 @@ use reblessive::tree::Stk;
 use rust_decimal::Decimal;
 use tokio::sync::RwLock;
 
+use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -139,7 +140,9 @@ impl IteratorEntry {
 
 impl InnerQueryExecutor {
 	#[expect(clippy::mutable_key_type)]
+	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn new(
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
@@ -168,12 +171,17 @@ impl InnerQueryExecutor {
 							}
 						}
 						Entry::Vacant(e) => {
-							let (ns, db) = opt.ns_db()?;
 							let ix: &DefineIndexStatement = e.key();
-							let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
+							let ikb = IndexKeyBase::new(
+								db.namespace_id,
+								db.database_id,
+								&ix.what,
+								&ix.name,
+							);
 							let si = SearchIndex::new(
 								ctx,
-								opt,
+								db.namespace_id,
+								db.database_id,
 								p.az.as_str(),
 								ikb,
 								p,
@@ -215,9 +223,13 @@ impl InnerQueryExecutor {
 							}
 						}
 						Entry::Vacant(e) => {
-							let (ns, db) = opt.ns_db()?;
 							let ix: &DefineIndexStatement = e.key();
-							let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
+							let ikb = IndexKeyBase::new(
+								db.namespace_id,
+								db.database_id,
+								&ix.what,
+								&ix.name,
+							);
 							let ft = FullTextIndex::new(
 								opt.id()?,
 								ctx.get_index_stores(),
@@ -258,6 +270,7 @@ impl InnerQueryExecutor {
 								if let PerIndexReferenceIndex::MTree(mti) = e.get() {
 									Some(
 										MtEntry::new(
+											db,
 											stk,
 											ctx,
 											opt,
@@ -273,16 +286,28 @@ impl InnerQueryExecutor {
 								}
 							}
 							Entry::Vacant(e) => {
-								let (ns, db) = opt.ns_db()?;
 								let ix: &DefineIndexStatement = e.key();
-								let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
+								let ikb = IndexKeyBase::new(
+									db.namespace_id,
+									db.database_id,
+									&ix.what,
+									&ix.name,
+								);
 								let tx = ctx.tx();
 								let mti =
 									MTreeIndex::new(&tx, ikb, p, TransactionType::Read).await?;
 								drop(tx);
-								let entry =
-									MtEntry::new(stk, ctx, opt, &mti, a, *k, knn_condition.clone())
-										.await?;
+								let entry = MtEntry::new(
+									db,
+									stk,
+									ctx,
+									opt,
+									&mti,
+									a,
+									*k,
+									knn_condition.clone(),
+								)
+								.await?;
 								e.insert(PerIndexReferenceIndex::MTree(mti));
 								Some(entry)
 							}
@@ -299,6 +324,7 @@ impl InnerQueryExecutor {
 								if let PerIndexReferenceIndex::Hnsw(hi) = e.get() {
 									Some(
 										HnswEntry::new(
+											db,
 											stk,
 											ctx,
 											opt,
@@ -315,12 +341,15 @@ impl InnerQueryExecutor {
 								}
 							}
 							Entry::Vacant(e) => {
-								let hi =
-									ctx.get_index_stores().get_index_hnsw(ctx, opt, ixr, p).await?;
+								let hi = ctx
+									.get_index_stores()
+									.get_index_hnsw(db.namespace_id, db.database_id, ctx, ixr, p)
+									.await?;
 								// Ensure the local HNSW index is up to date with the KVS
 								hi.write().await.check_state(&ctx.tx()).await?;
 								// Now we can execute the request
 								let entry = HnswEntry::new(
+									db,
 									stk,
 									ctx,
 									opt,
@@ -443,14 +472,15 @@ impl QueryExecutor {
 
 	pub(crate) async fn new_iterator(
 		&self,
-		opt: &Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ir: IteratorRef,
 	) -> Result<Option<ThingIterator>> {
 		if let Some(it_entry) = self.0.it_entries.get(ir) {
 			match it_entry {
-				IteratorEntry::Single(_, io) => self.new_single_iterator(opt, ir, io).await,
+				IteratorEntry::Single(_, io) => self.new_single_iterator(ns, db, ir, io).await,
 				IteratorEntry::Range(_, ixr, from, to, sc) => {
-					Ok(self.new_range_iterator(ir, opt, ixr, from, to, *sc)?)
+					Ok(self.new_range_iterator(ir, ns, db, ixr, from, to, *sc)?)
 				}
 			}
 		} else {
@@ -460,14 +490,15 @@ impl QueryExecutor {
 
 	async fn new_single_iterator(
 		&self,
-		opt: &Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		irf: IteratorRef,
 		io: &IndexOption,
 	) -> Result<Option<ThingIterator>> {
 		let ixr = io.ix_ref();
 		match ixr.index {
-			Index::Idx => Ok(self.new_index_iterator(opt, irf, ixr, io.clone()).await?),
-			Index::Uniq => Ok(self.new_unique_index_iterator(opt, irf, ixr, io.clone()).await?),
+			Index::Idx => Ok(self.new_index_iterator(ns, db, irf, ixr, io.clone()).await?),
+			Index::Uniq => Ok(self.new_unique_index_iterator(ns, db, irf, ixr, io.clone()).await?),
 			Index::Search {
 				..
 			} => self.new_search_index_iterator(irf, io.clone()).await,
@@ -481,7 +512,8 @@ impl QueryExecutor {
 
 	async fn new_index_iterator(
 		&self,
-		opt: &Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ir: IteratorRef,
 		ix: &IndexReference,
 		io: IndexOption,
@@ -490,9 +522,8 @@ impl QueryExecutor {
 			IndexOperator::Equality(value) => {
 				let variants = Self::get_equal_variants_from_value(value);
 				if variants.len() == 1 {
-					Some(Self::new_index_equal_iterator(ir, opt, ix, &variants[0])?)
+					Some(Self::new_index_equal_iterator(ir, ns, db, ix, &variants[0])?)
 				} else {
-					let (ns, db) = opt.ns_db()?;
 					Some(ThingIterator::IndexUnion(IndexUnionThingIterator::new(
 						ir, ns, db, ix, &variants,
 					)?))
@@ -500,15 +531,14 @@ impl QueryExecutor {
 			}
 			IndexOperator::Union(values) => {
 				let variants = Self::get_equal_variants_from_values(values);
-				let (ns, db) = opt.ns_db()?;
 				Some(ThingIterator::IndexUnion(IndexUnionThingIterator::new(
 					ir, ns, db, ix, &variants,
 				)?))
 			}
 			IndexOperator::Join(ios) => {
-				let iterators = self.build_iterators(opt, ir, ios).await?;
+				let iterators = self.build_iterators(ns, db, ir, ios).await?;
 				let index_join =
-					Box::new(IndexJoinThingIterator::new(ir, opt, ix.clone(), iterators)?);
+					Box::new(IndexJoinThingIterator::new(ir, ns, db, ix.clone(), iterators)?);
 				Some(ThingIterator::IndexJoin(index_join))
 			}
 			IndexOperator::Order(reverse) => {
@@ -516,22 +546,14 @@ impl QueryExecutor {
 					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 					{
 						Some(ThingIterator::IndexRangeReverse(
-							IndexRangeReverseThingIterator::full_range(
-								ir,
-								opt.ns()?,
-								opt.db()?,
-								ix,
-							)?,
+							IndexRangeReverseThingIterator::full_range(ir, ns, db, ix)?,
 						))
 					}
 					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
 					None
 				} else {
 					Some(ThingIterator::IndexRange(IndexRangeThingIterator::full_range(
-						ir,
-						opt.ns()?,
-						opt.db()?,
-						ix,
+						ir, ns, db, ix,
 					)?))
 				}
 			}
@@ -600,11 +622,11 @@ impl QueryExecutor {
 
 	fn new_index_equal_iterator(
 		irf: IteratorRef,
-		opt: &Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ix: &DefineIndexStatement,
 		array: &Array,
 	) -> Result<ThingIterator> {
-		let (ns, db) = opt.ns_db()?;
 		Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(irf, ns, db, ix, array)?))
 	}
 
@@ -619,22 +641,18 @@ impl QueryExecutor {
 	///
 	/// The function performs the following conversions based on the type of the
 	/// `Number`:
-	/// - For `Int`, it returns the original `Int` value as `Option<i64>`, the
-	///   equivalent `Float` value as `Option<f64>`, and the equivalent
+	/// - For `Int`, it returns the original `Int` value as `Option<i64>`, the equivalent `Float`
+	///   value as `Option<f64>`, and the equivalent `Decimal` value as `Option<Decimal>`.
+	/// - For `Float`, it uses the provided `float_to_int` function to convert the `Float` to
+	///   `Option<i64>`, returns the original `Float` value as `Option<f64>`, and the equivalent
 	///   `Decimal` value as `Option<Decimal>`.
-	/// - For `Float`, it uses the provided `float_to_int` function to convert
-	///   the `Float` to `Option<i64>`, returns the original `Float` value as
-	///   `Option<f64>`, and the equivalent `Decimal` value as
-	///   `Option<Decimal>`.
-	/// - For `Decimal`, it converts the `Decimal` to `Option<i64>` (if
-	///   representable as `i64`), returns the equivalent `Float` value as
-	///   `Option<f64>` (if representable as `f64`), and the original `Decimal`
-	///   value as `Option<Decimal>`.
+	/// - For `Decimal`, it converts the `Decimal` to `Option<i64>` (if representable as `i64`),
+	///   returns the equivalent `Float` value as `Option<f64>` (if representable as `f64`), and the
+	///   original `Decimal` value as `Option<Decimal>`.
 	///
 	/// # Parameters
 	/// - `n`: A reference to a `Number` enum.
-	/// - `float_to_int`: A function that converts a reference to `f64` to
-	///   `Option<i64>`.
+	/// - `float_to_int`: A function that converts a reference to `f64` to `Option<i64>`.
 	///
 	/// # Returns
 	/// A tuple of `(Option<i64>, Option<f64>, Option<Decimal>)` representing
@@ -838,10 +856,12 @@ impl QueryExecutor {
 		vec
 	}
 
+	#[expect(clippy::too_many_arguments)]
 	fn new_range_iterator(
 		&self,
 		ir: IteratorRef,
-		opt: &Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ix: &DefineIndexStatement,
 		from: &RangeValue,
 		to: &RangeValue,
@@ -853,17 +873,18 @@ impl QueryExecutor {
 				if let Some(ranges) = ranges {
 					if ranges.len() == 1 {
 						return Ok(Some(Self::new_index_range_iterator(
-							ir, opt, ix, &ranges[0], sc,
+							ir, ns, db, ix, &ranges[0], sc,
 						)?));
 					} else {
 						return Ok(Some(Self::new_multiple_index_range_iterator(
-							ir, opt, ix, &ranges,
+							ir, ns, db, ix, &ranges,
 						)?));
 					}
 				}
 				return Ok(Some(Self::new_index_range_iterator(
 					ir,
-					opt,
+					ns,
+					db,
 					ix,
 					&IteratorRange::new_ref(ValueType::None, from, to),
 					sc,
@@ -874,17 +895,18 @@ impl QueryExecutor {
 				if let Some(ranges) = ranges {
 					if ranges.len() == 1 {
 						return Ok(Some(Self::new_unique_range_iterator(
-							ir, opt, ix, &ranges[0], sc,
+							ir, ns, db, ix, &ranges[0], sc,
 						)?));
 					} else {
 						return Ok(Some(Self::new_multiple_unique_range_iterator(
-							ir, opt, ix, &ranges,
+							ir, ns, db, ix, &ranges,
 						)?));
 					}
 				}
 				return Ok(Some(Self::new_unique_range_iterator(
 					ir,
-					opt,
+					ns,
+					db,
 					ix,
 					&IteratorRange::new_ref(ValueType::None, from, to),
 					sc,
@@ -915,12 +937,12 @@ impl QueryExecutor {
 
 	fn new_index_range_iterator(
 		ir: IteratorRef,
-		opt: &Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ix: &DefineIndexStatement,
 		range: &IteratorRange,
 		sc: ScanDirection,
 	) -> Result<ThingIterator> {
-		let (ns, db) = opt.ns_db()?;
 		Ok(match sc {
 			ScanDirection::Forward => {
 				ThingIterator::IndexRange(IndexRangeThingIterator::new(ir, ns, db, ix, range)?)
@@ -934,12 +956,12 @@ impl QueryExecutor {
 
 	fn new_unique_range_iterator(
 		ir: IteratorRef,
-		opt: &Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ix: &DefineIndexStatement,
 		range: &IteratorRange<'_>,
 		sc: ScanDirection,
 	) -> Result<ThingIterator> {
-		let (ns, db) = opt.ns_db()?;
 		Ok(match sc {
 			ScanDirection::Forward => {
 				ThingIterator::UniqueRange(UniqueRangeThingIterator::new(ir, ns, db, ix, range)?)
@@ -953,7 +975,8 @@ impl QueryExecutor {
 
 	fn new_multiple_index_range_iterator(
 		ir: IteratorRef,
-		opt: &Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ix: &DefineIndexStatement,
 		ranges: &[IteratorRange],
 	) -> Result<ThingIterator> {
@@ -961,7 +984,8 @@ impl QueryExecutor {
 		for range in ranges {
 			iterators.push_back(Self::new_index_range_iterator(
 				ir,
-				opt,
+				ns,
+				db,
 				ix,
 				range,
 				ScanDirection::Forward,
@@ -972,7 +996,8 @@ impl QueryExecutor {
 
 	fn new_multiple_unique_range_iterator(
 		ir: IteratorRef,
-		opt: &Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ix: &DefineIndexStatement,
 		ranges: &[IteratorRange<'_>],
 	) -> Result<ThingIterator> {
@@ -980,7 +1005,8 @@ impl QueryExecutor {
 		for range in ranges {
 			iterators.push_back(Self::new_unique_range_iterator(
 				ir,
-				opt,
+				ns,
+				db,
 				ix,
 				range,
 				ScanDirection::Forward,
@@ -991,7 +1017,8 @@ impl QueryExecutor {
 
 	async fn new_unique_index_iterator(
 		&self,
-		opt: &Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		irf: IteratorRef,
 		ixr: &IndexReference,
 		io: IndexOption,
@@ -1000,23 +1027,23 @@ impl QueryExecutor {
 			IndexOperator::Equality(values) => {
 				let variants = Self::get_equal_variants_from_value(values);
 				if variants.len() == 1 {
-					Some(Self::new_unique_equal_iterator(irf, opt, ixr, &variants[0])?)
+					Some(Self::new_unique_equal_iterator(irf, ns, db, ixr, &variants[0])?)
 				} else {
 					Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(
-						irf, opt, ixr, &variants,
+						irf, ns, db, ixr, &variants,
 					)?))
 				}
 			}
 			IndexOperator::Union(values) => {
 				let variants = Self::get_equal_variants_from_values(values);
 				Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(
-					irf, opt, ixr, &variants,
+					irf, ns, db, ixr, &variants,
 				)?))
 			}
 			IndexOperator::Join(ios) => {
-				let iterators = self.build_iterators(opt, irf, ios).await?;
+				let iterators = self.build_iterators(ns, db, irf, ios).await?;
 				let unique_join =
-					Box::new(UniqueJoinThingIterator::new(irf, opt, ixr.clone(), iterators)?);
+					Box::new(UniqueJoinThingIterator::new(irf, ns, db, ixr.clone(), iterators)?);
 				Some(ThingIterator::UniqueJoin(unique_join))
 			}
 			IndexOperator::Order(reverse) => {
@@ -1024,22 +1051,14 @@ impl QueryExecutor {
 					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 					{
 						Some(ThingIterator::UniqueRangeReverse(
-							UniqueRangeReverseThingIterator::full_range(
-								irf,
-								opt.ns()?,
-								opt.db()?,
-								ixr,
-							)?,
+							UniqueRangeReverseThingIterator::full_range(irf, ns, db, ixr)?,
 						))
 					}
 					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
 					None
 				} else {
 					Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::full_range(
-						irf,
-						opt.ns()?,
-						opt.db()?,
-						ixr,
+						irf, ns, db, ixr,
 					)?))
 				}
 			}
@@ -1049,11 +1068,11 @@ impl QueryExecutor {
 
 	fn new_unique_equal_iterator(
 		irf: IteratorRef,
-		opt: &Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ix: &DefineIndexStatement,
 		array: &Array,
 	) -> Result<ThingIterator> {
-		let (ns, db) = opt.ns_db()?;
 		if ix.cols.len() > 1 {
 			// If the index is unique and the index is a composite index,
 			// then we have the opportunity to iterate on the first column of the index
@@ -1132,13 +1151,14 @@ impl QueryExecutor {
 
 	async fn build_iterators(
 		&self,
-		opt: &Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		irf: IteratorRef,
 		ios: &[IndexOption],
 	) -> Result<VecDeque<ThingIterator>> {
 		let mut iterators = VecDeque::with_capacity(ios.len());
 		for io in ios {
-			if let Some(it) = Box::pin(self.new_single_iterator(opt, irf, io)).await? {
+			if let Some(it) = Box::pin(self.new_single_iterator(ns, db, irf, io)).await? {
 				iterators.push_back(it);
 			}
 		}
@@ -1233,7 +1253,7 @@ impl QueryExecutor {
 		Ok(false)
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	async fn search_matches_with_value(
 		&self,
 		stk: &mut Stk,
@@ -1262,7 +1282,7 @@ impl QueryExecutor {
 		Ok(se.0.query_terms_set.is_subset(&t))
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	async fn fulltext_matches_with_value(
 		&self,
 		_stk: &mut Stk,
@@ -1499,7 +1519,9 @@ pub(super) struct MtEntry {
 }
 
 impl MtEntry {
+	#[expect(clippy::too_many_arguments)]
 	async fn new(
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
@@ -1513,7 +1535,7 @@ impl MtEntry {
 		} else {
 			MTreeConditionChecker::new(ctx)
 		};
-		let res = mt.knn_search(stk, ctx, o, k as usize, cond_checker).await?;
+		let res = mt.knn_search(db, stk, ctx, o, k as usize, cond_checker).await?;
 		Ok(Self {
 			res,
 		})
@@ -1528,6 +1550,7 @@ pub(super) struct HnswEntry {
 impl HnswEntry {
 	#[expect(clippy::too_many_arguments)]
 	async fn new(
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
@@ -1545,7 +1568,7 @@ impl HnswEntry {
 		let res = h
 			.read()
 			.await
-			.knn_search(&ctx.tx(), stk, v, n as usize, ef as usize, cond_checker)
+			.knn_search(db, &ctx.tx(), stk, v, n as usize, ef as usize, cond_checker)
 			.await?;
 		Ok(Self {
 			res,

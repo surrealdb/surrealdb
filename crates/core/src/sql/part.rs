@@ -178,7 +178,7 @@ impl fmt::Display for DestructurePart {
 			DestructurePart::Field(fd) => write!(f, "{fd}"),
 			DestructurePart::Aliased(fd, v) => write!(f, "{fd}: {v}"),
 			DestructurePart::Destructure(fd, d) => {
-				write!(f, "{fd}{}", Part::Destructure(d.clone()))
+				write!(f, "{}{}", fd, Part::Destructure(d.clone()))
 			}
 		}
 	}

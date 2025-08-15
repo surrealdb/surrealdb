@@ -26,7 +26,7 @@ use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
-use super::version::Version;
+use super::version::MajorVersion;
 use crate::buc::BucketConnections;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
@@ -459,6 +459,10 @@ impl Datastore {
 		self
 	}
 
+	pub fn is_strict_mode(&self) -> bool {
+		self.strict
+	}
+
 	/// Specify whether this datastore should enable live query notifications
 	pub fn with_notifications(mut self) -> Self {
 		self.notification_channel = Some(async_channel::bounded(LQ_CHANNEL_SIZE));
@@ -558,7 +562,7 @@ impl Datastore {
 
 	// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn check_version(&self) -> Result<Version> {
+	pub async fn check_version(&self) -> Result<MajorVersion> {
 		let version = self.get_version().await?;
 		// Check we are running the latest version
 		if !version.is_latest() {
@@ -570,7 +574,7 @@ impl Datastore {
 
 	// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn get_version(&self) -> Result<Version> {
+	pub async fn get_version(&self) -> Result<MajorVersion> {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Pessimistic).await?.enclose();
 		// Create the key where the version is stored
@@ -592,10 +596,10 @@ impl Datastore {
 				// Check the storage if there are any other keys set
 				let version = if keys.is_empty() {
 					// There are no keys set in storage, so this is a new database
-					Version::latest()
+					MajorVersion::latest()
 				} else {
 					// There were keys in storage, so this is an upgrade
-					Version::v1()
+					MajorVersion::v1()
 				};
 				// Attempt to set the current version in storage
 				catch!(txn, txn.replace(&key, &version).await);
@@ -708,8 +712,7 @@ impl Datastore {
 	/// * `delay` - Duration specifying how long the lease should be valid
 	///
 	/// # Returns
-	/// * `Ok(())` - If the operation completes successfully or if this node
-	///   doesn't have the lease
+	/// * `Ok(())` - If the operation completes successfully or if this node doesn't have the lease
 	/// * `Err` - If any step in the process fails
 	///
 	/// # Errors
@@ -760,13 +763,11 @@ impl Datastore {
 	/// required.
 	///
 	/// The process involves:
-	/// 1. Saving timestamps for current versionstamps using the provided
-	///    timestamp
+	/// 1. Saving timestamps for current versionstamps using the provided timestamp
 	/// 2. Cleaning up old changefeed data from all databases
 	///
 	/// # Parameters
-	/// * `ts` - Explicit timestamp (in seconds since UNIX epoch) to use for
-	///   cleanup operations
+	/// * `ts` - Explicit timestamp (in seconds since UNIX epoch) to use for cleanup operations
 	///
 	/// # Returns
 	/// * `Ok(())` - If the operation completes successfully
@@ -803,13 +804,13 @@ impl Datastore {
 	///
 	/// # Arguments
 	///
-	/// * `interval` - The time interval between compaction runs, used to
-	///   calculate the lease duration
+	/// * `interval` - The time interval between compaction runs, used to calculate the lease
+	///   duration
 	///
 	/// # Returns
 	///
-	/// * `Result<()>` - Ok if the compaction was successful or if another node
-	///   is handling the compaction, Error otherwise
+	/// * `Result<()>` - Ok if the compaction was successful or if another node is handling the
+	///   compaction, Error otherwise
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn index_compaction(&self, interval: Duration) -> Result<()> {
 		let lh = LeaseHandler::new(

@@ -53,7 +53,7 @@ impl Closure {
 				(_, None) => {
 					bail!(Error::InvalidArguments {
 						name: "ANONYMOUS".to_string(),
-						message: format!("Expected a value for ${}", name),
+						message: format!("Expected a value for ${name}"),
 					})
 				}
 				(kind, Some(val)) => {
@@ -63,8 +63,7 @@ impl Closure {
 						bail!(Error::InvalidArguments {
 							name: "ANONYMOUS".to_string(),
 							message: format!(
-								"Expected a value of type '{kind}' for argument ${}",
-								name
+								"Expected a value of type '{kind}' for argument ${name}"
 							),
 						});
 					}
@@ -97,8 +96,8 @@ impl fmt::Display for Closure {
 			}
 			write!(f, "${name}: ")?;
 			match kind {
-				k @ Kind::Either(_) => write!(f, "<{}>", k)?,
-				k => write!(f, "{}", k)?,
+				k @ Kind::Either(_) => write!(f, "<{k}>")?,
+				k => write!(f, "{k}")?,
 			}
 		}
 		f.write_str("|")?;

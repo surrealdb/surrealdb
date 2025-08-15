@@ -14,7 +14,7 @@ use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::t;
 
 impl Parser<'_> {
-	pub async fn parse_remove_stmt(&mut self, ctx: &mut Stk) -> ParseResult<RemoveStatement> {
+	pub async fn parse_remove_stmt(&mut self, stk: &mut Stk) -> ParseResult<RemoveStatement> {
 		let next = self.next();
 		let res = match next.kind {
 			t!("NAMESPACE") => {
@@ -160,7 +160,7 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let idiom = self.parse_local_idiom(ctx).await?;
+				let idiom = self.parse_local_idiom(stk).await?;
 				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
 				let table = self.next_token_value()?;

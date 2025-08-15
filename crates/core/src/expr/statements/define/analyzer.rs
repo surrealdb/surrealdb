@@ -41,7 +41,7 @@ impl DefineAnalyzerStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
 		if txn.get_db_analyzer(ns, db, &self.name).await.is_ok() {
 			match self.kind {
@@ -58,8 +58,6 @@ impl DefineAnalyzerStatement {
 		}
 		// Process the statement
 		let key = crate::key::database::az::new(ns, db, &self.name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
 		let az = DefineAnalyzerStatement {
 			// Don't persist the `IF NOT EXISTS` clause to schema
 			kind: DefineKind::Default,

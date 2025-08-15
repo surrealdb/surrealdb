@@ -3,6 +3,7 @@ use std::fmt;
 
 use anyhow::Result;
 
+use crate::catalog::TableDefinition;
 use crate::ctx::{Context, MutableContext};
 use crate::err::Error;
 use crate::expr::cond::Cond;
@@ -16,7 +17,6 @@ use crate::expr::order::Ordering;
 use crate::expr::output::Output;
 use crate::expr::split::Splits;
 use crate::expr::start::Start;
-use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::access::AccessStatement;
 use crate::expr::statements::create::CreateStatement;
 use crate::expr::statements::delete::DeleteStatement;
@@ -392,10 +392,10 @@ impl Statement<'_> {
 	}
 
 	/// Returns a reference to the appropriate `Permission` field within the
-	/// `DefineTableStatement` structure based on the type of the statement.
+	/// `TableDefinition` structure based on the type of the statement.
 	pub(crate) fn permissions<'b>(
 		&self,
-		table: &'b DefineTableStatement,
+		table: &'b TableDefinition,
 		doc_is_new: bool,
 	) -> &'b Permission {
 		if self.is_delete() {

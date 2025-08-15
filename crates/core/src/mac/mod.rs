@@ -5,8 +5,8 @@
 ///
 /// - `$key`: An expression representing the name of the environment variable.
 /// - `$t`: The type of the value to be parsed.
-/// - `$default`: The default value to fall back to if the environment variable
-///   is not set or parsing fails.
+/// - `$default`: The default value to fall back to if the environment variable is not set or
+///   parsing fails.
 ///
 /// # Return Value
 ///

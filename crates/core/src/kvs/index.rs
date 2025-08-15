@@ -13,6 +13,7 @@ use tokio::sync::RwLock;
 use tokio::task;
 use tokio::task::JoinHandle;
 
+use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
@@ -126,17 +127,17 @@ type IndexBuilding = (Arc<Building>, JoinHandle<()>);
 
 #[derive(Hash, PartialEq, Eq)]
 struct IndexKey {
-	ns: String,
-	db: String,
+	ns: NamespaceId,
+	db: DatabaseId,
 	tb: String,
 	ix: String,
 }
 
 impl IndexKey {
-	fn new(ns: &str, db: &str, tb: &str, ix: &str) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str) -> Self {
 		Self {
-			ns: ns.to_owned(),
-			db: db.to_owned(),
+			ns,
+			db,
 			tb: tb.to_owned(),
 			ix: ix.to_owned(),
 		}
@@ -161,10 +162,12 @@ impl IndexBuilder {
 		&self,
 		ctx: &Context,
 		opt: Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ix: Arc<DefineIndexStatement>,
 		sdr: Option<Sender<Result<()>>>,
 	) -> Result<IndexBuilding> {
-		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix)?);
+		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ns, db, ix)?);
 		let b = building.clone();
 		let jh = task::spawn(async move {
 			let r = b.run().await;
@@ -184,10 +187,11 @@ impl IndexBuilder {
 		&self,
 		ctx: &Context,
 		opt: Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ix: Arc<DefineIndexStatement>,
 		blocking: bool,
 	) -> Result<Option<Receiver<Result<()>>>> {
-		let (ns, db) = opt.ns_db()?;
 		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
 		let (rcv, sdr) = if blocking {
 			let (s, r) = channel();
@@ -204,12 +208,12 @@ impl IndexBuilder {
 						name: e.key().ix.clone(),
 					}
 				);
-				let ib = self.start_building(ctx, opt, ix, sdr)?;
+				let ib = self.start_building(ctx, opt, ns, db, ix, sdr)?;
 				e.replace_entry(ib);
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
-				let ib = self.start_building(ctx, opt, ix, sdr)?;
+				let ib = self.start_building(ctx, opt, ns, db, ix, sdr)?;
 				e.insert(ib);
 			}
 		};
@@ -218,14 +222,14 @@ impl IndexBuilder {
 
 	pub(crate) async fn consume(
 		&self,
+		db: &DatabaseDefinition,
 		ctx: &Context,
-		(ns, db): (&str, &str),
 		ix: &DefineIndexStatement,
 		old_values: Option<Vec<Value>>,
 		new_values: Option<Vec<Value>>,
 		rid: &RecordId,
 	) -> Result<ConsumeResult> {
-		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
+		let key = IndexKey::new(db.namespace_id, db.database_id, &ix.what, &ix.name);
 		if let Some(r) = self.indexes.get(&key) {
 			let (b, _) = r.value();
 			return b.maybe_consume(ctx, old_values, new_values, rid).await;
@@ -235,8 +239,8 @@ impl IndexBuilder {
 
 	pub(crate) async fn get_status(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ix: &DefineIndexStatement,
 	) -> BuildingStatus {
 		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
@@ -247,7 +251,13 @@ impl IndexBuilder {
 		}
 	}
 
-	pub(crate) fn remove_index(&self, ns: &str, db: &str, tb: &str, ix: &str) -> Result<()> {
+	pub(crate) fn remove_index(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		ix: &str,
+	) -> Result<()> {
 		let key = IndexKey::new(ns, db, tb, ix);
 		if let Some((_, b)) = self.indexes.remove(&key) {
 			b.0.abort();
@@ -314,6 +324,8 @@ impl QueueSequences {
 struct Building {
 	ctx: Context,
 	opt: Options,
+	ns: NamespaceId,
+	db: DatabaseId,
 	ikb: IndexKeyBase,
 	tf: TransactionFactory,
 	ix: Arc<DefineIndexStatement>,
@@ -327,13 +339,16 @@ impl Building {
 		ctx: &Context,
 		tf: TransactionFactory,
 		opt: Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ix: Arc<DefineIndexStatement>,
 	) -> Result<Self> {
-		let (ns, db) = opt.ns_db()?;
 		let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 		Ok(Self {
 			ctx: MutableContext::new_concurrent(ctx).freeze(),
 			opt,
+			ns,
+			db,
 			ikb,
 			tf,
 			ix,
@@ -402,20 +417,20 @@ impl Building {
 	}
 
 	async fn run(&self) -> Result<()> {
-		let (ns, db) = self.opt.ns_db()?;
 		// Remove the index data
 		{
 			self.set_status(BuildingStatus::Cleaning).await;
 			let ctx = self.new_write_tx_ctx().await?;
-			let key = crate::key::index::all::new(ns, db, self.ikb.table(), self.ikb.index());
+			let key =
+				crate::key::index::all::new(self.ns, self.db, self.ikb.table(), self.ikb.index());
 			let tx = ctx.tx();
 			tx.delp(&key).await?;
 			tx.commit().await?;
 		}
 
 		// First iteration, we index every key
-		let beg = thing::prefix(ns, db, self.ikb.table())?;
-		let end = thing::suffix(ns, db, self.ikb.table())?;
+		let beg = thing::prefix(self.ns, self.db, self.ikb.table())?;
+		let end = thing::suffix(self.ns, self.db, self.ikb.table())?;
 		let mut next = Some(beg..end);
 		let mut initial_count = 0;
 		// Set the initial status
@@ -524,7 +539,7 @@ impl Building {
 				return Ok(());
 			}
 			self.is_beyond_threshold(Some(*count))?;
-			let key = thing::Thing::decode_key(&k)?;
+			let key = thing::ThingKey::decode_key(&k)?;
 			// Parse the value
 			let val: Value = revision::from_slice(&v)?;
 			let rid: Arc<RecordId> = RecordId {
@@ -556,8 +571,16 @@ impl Building {
 			}
 
 			// Index the record
-			let mut io =
-				IndexOperation::new(ctx, &self.opt, &self.ix, None, opt_values.clone(), &rid);
+			let mut io = IndexOperation::new(
+				ctx,
+				&self.opt,
+				self.ns,
+				self.db,
+				&self.ix,
+				None,
+				opt_values.clone(),
+				&rid,
+			);
 			stack.enter(|stk| io.compute(stk, &rc)).finish().await?;
 
 			// Increment the count and update the status
@@ -597,8 +620,16 @@ impl Building {
 					table: self.ikb.table().to_string(),
 					key: a.id,
 				};
-				let mut io =
-					IndexOperation::new(ctx, &self.opt, &self.ix, a.old_values, a.new_values, &rid);
+				let mut io = IndexOperation::new(
+					ctx,
+					&self.opt,
+					self.ns,
+					self.db,
+					&self.ix,
+					a.old_values,
+					a.new_values,
+					&rid,
+				);
 				stack.enter(|stk| io.compute(stk, &rc)).finish().await?;
 
 				// We can delete the ip record if any

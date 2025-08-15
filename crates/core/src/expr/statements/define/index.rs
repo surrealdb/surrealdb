@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::DefineKind;
+use crate::catalog::TableDefinition;
 use crate::ctx::Context;
 #[cfg(target_family = "wasm")]
 use crate::dbs::Force;
@@ -17,14 +18,13 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 #[cfg(target_family = "wasm")]
 use crate::expr::Output;
-use crate::expr::fmt::Fmt;
-use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
 #[cfg(target_family = "wasm")]
 use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
 use crate::expr::{Base, Ident, Idiom, Index, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::fmt::Fmt;
 use crate::val::{Array, Strand, Value};
 
 #[revisioned(revision = 1)]
@@ -52,12 +52,14 @@ impl DefineIndexStatement {
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
-		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
 		// Fetch the transaction
 		let txn = ctx.tx();
+
+		let (ns, db) = opt.ns_db()?;
+		let tb = txn.ensure_ns_db_tb(ns, db, &self.what, opt.strict).await?;
+
 		// Check if the definition exists
-		if txn.get_tb_index(ns, db, &self.what, &self.name).await.is_ok() {
+		if txn.get_tb_index(tb.namespace_id, tb.database_id, &tb.name, &self.name).await.is_ok() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -72,36 +74,42 @@ impl DefineIndexStatement {
 			// Clear the index store cache
 			#[cfg(not(target_family = "wasm"))]
 			ctx.get_index_stores()
-				.index_removed(ctx.get_index_builder(), &txn, ns, db, &self.what, &self.name)
+				.index_removed(
+					ctx.get_index_builder(),
+					&txn,
+					tb.namespace_id,
+					tb.database_id,
+					&tb.name,
+					&self.name,
+				)
 				.await?;
 			#[cfg(target_family = "wasm")]
-			ctx.get_index_stores().index_removed(&txn, ns, db, &self.what, &self.name).await?;
+			ctx.get_index_stores()
+				.index_removed(&txn, tb.namespace_id, tb.database_id, &tb.name, &self.name)
+				.await?;
 		}
-		// Does the table exist?
-		match txn.get_tb(ns, db, &self.what).await {
-			Ok(tb) => {
-				// Are we SchemaFull?
-				if tb.full {
-					// Check that the fields exist
-					for idiom in self.cols.iter() {
-						let Some(Part::Field(first)) = idiom.0.first() else {
-							continue;
-						};
-						txn.get_tb_field(ns, db, &self.what, &first.to_string()).await?;
-					}
+
+		// If the table is schemafull, ensure that the fields exist.
+		if tb.schemafull {
+			// Check that the fields exist
+			for idiom in self.cols.iter() {
+				let Some(Part::Field(first)) = idiom.0.first() else {
+					continue;
+				};
+				if txn
+					.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, &first.as_raw_string())
+					.await?
+					.is_none()
+				{
+					bail!(Error::FdNotFound {
+						name: first.to_string(),
+					});
 				}
 			}
-			Err(e) => {
-				if !matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
-					return Err(e);
-				}
-			}
 		}
+
 		// Process the statement
-		let key = crate::key::table::ix::new(ns, db, &self.what, &self.name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-		txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?;
+		let key = crate::key::table::ix::new(tb.namespace_id, tb.database_id, &tb.name, &self.name);
 		txn.set(
 			&key,
 			&DefineIndexStatement {
@@ -114,21 +122,23 @@ impl DefineIndexStatement {
 			None,
 		)
 		.await?;
+
 		// Refresh the table cache
-		let key = crate::key::database::tb::new(ns, db, &self.what);
-		let tb = txn.get_tb(ns, db, &self.what).await?;
+
+		let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
 		txn.set(
 			&key,
-			&DefineTableStatement {
+			&TableDefinition {
 				cache_indexes_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
 			},
 			None,
 		)
 		.await?;
+
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &self.what);
+			cache.clear_tb(tb.namespace_id, tb.database_id, &tb.name);
 		}
 		// Clear the cache
 		txn.clear_cache();
@@ -184,10 +194,11 @@ impl DefineIndexStatement {
 		_doc: Option<&CursorDoc>,
 		blocking: bool,
 	) -> Result<()> {
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let rcv = ctx
 			.get_index_builder()
 			.ok_or_else(|| Error::unreachable("No Index Builder"))?
-			.build(ctx, opt.clone(), self.clone().into(), blocking)?;
+			.build(ctx, opt.clone(), ns, db, self.clone().into(), blocking)?;
 		if let Some(rcv) = rcv {
 			rcv.await.map_err(|_| Error::IndexingBuildingCancelled)?
 		} else {

@@ -22,7 +22,7 @@ fn test_excessive_size() {
 
 #[test]
 fn empty_thing() {
-	super::thing("").unwrap_err();
+	super::record_id("").unwrap_err();
 }
 
 #[test]

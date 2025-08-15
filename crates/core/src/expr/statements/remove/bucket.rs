@@ -25,17 +25,18 @@ impl RemoveBucketStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the definition
-		let (ns, db) = opt.ns_db()?;
-		let bu = match txn.get_db_bucket(ns, db, &self.name).await {
-			Ok(x) => x,
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::BuNotFound { .. })) {
-					return Ok(Value::None);
-				} else {
-					return Err(e);
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+		let Some(bu) = txn.get_db_bucket(ns, db, &self.name).await? else {
+			if self.if_exists {
+				return Ok(Value::None);
+			} else {
+				return Err(Error::BuNotFound {
+					name: self.name.as_raw_string(),
 				}
+				.into());
 			}
 		};
+
 		// Delete the definition
 		let key = crate::key::database::bu::new(ns, db, &bu.name);
 		txn.del(&key).await?;

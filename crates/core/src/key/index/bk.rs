@@ -2,6 +2,7 @@
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
@@ -10,9 +11,9 @@ use crate::kvs::KVKey;
 pub(crate) struct Bk<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -34,7 +35,7 @@ impl Categorise for Bk<'_> {
 }
 
 impl<'a> Bk<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, doc_id: DocId) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, doc_id: DocId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -61,13 +62,16 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let val = Bk::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 			7
 		);
 		let enc = Bk::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bk\0\0\0\0\0\0\0\x07");
+		assert_eq!(
+			enc,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!bk\0\0\0\0\0\0\0\x07"
+		);
 	}
 }

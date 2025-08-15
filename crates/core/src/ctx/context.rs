@@ -15,12 +15,13 @@ use url::Url;
 
 use crate::buc::store::ObjectStore;
 use crate::buc::{self, BucketConnectionKey, BucketConnections};
+use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::{Capabilities, Notification, Session, Variables};
+use crate::dbs::{Capabilities, Notification, Options, Session, Variables};
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
@@ -211,7 +212,7 @@ impl MutableContext {
 	}
 
 	/// Creates a new context from a configured datastore.
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	pub(crate) fn from_ds(
 		time_out: Option<Duration>,
 		slow_log_threshold: Option<Duration>,
@@ -262,6 +263,59 @@ impl MutableContext {
 			fail!("Tried to unfreeze a Context with multiple references")
 		};
 		Ok(x)
+	}
+
+	/// Get the namespace id for the current context.
+	/// If the namespace does not exist, it will be try to be created based on
+	/// the `strict` option.
+	pub(crate) async fn get_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
+		let ns = opt.ns()?;
+		let ns_def = self.tx().get_or_add_ns(ns, opt.strict).await?;
+		Ok(ns_def.namespace_id)
+	}
+
+	/// Get the namespace id for the current context.
+	/// If the namespace does not exist, it will return an error.
+	pub(crate) async fn expect_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
+		let ns = opt.ns()?;
+		let Some(ns_def) = self.tx().get_ns_by_name(ns).await? else {
+			return Err(Error::NsNotFound {
+				name: ns.to_string(),
+			}
+			.into());
+		};
+		Ok(ns_def.namespace_id)
+	}
+
+	/// Get the namespace and database ids for the current context.
+	/// If the namespace or database does not exist, it will be try to be
+	/// created based on the `strict` option.
+	pub(crate) async fn get_ns_db_ids(&self, opt: &Options) -> Result<(NamespaceId, DatabaseId)> {
+		let (ns, db) = opt.ns_db()?;
+		let db_def = self.tx().ensure_ns_db(ns, db, opt.strict).await?;
+		Ok((db_def.namespace_id, db_def.database_id))
+	}
+
+	/// Get the namespace and database ids for the current context.
+	/// If the namespace or database does not exist, it will return an error.
+	pub(crate) async fn expect_ns_db_ids(
+		&self,
+		opt: &Options,
+	) -> Result<(NamespaceId, DatabaseId)> {
+		let (ns, db) = opt.ns_db()?;
+		let Some(db_def) = self.tx().get_db_by_name(ns, db).await? else {
+			return Err(Error::DbNotFound {
+				name: db.to_string(),
+			}
+			.into());
+		};
+		Ok((db_def.namespace_id, db_def.database_id))
+	}
+
+	pub(crate) async fn get_db(&self, opt: &Options) -> Result<Arc<DatabaseDefinition>> {
+		let (ns, db) = opt.ns_db()?;
+		let db_def = self.tx().ensure_ns_db(ns, db, opt.strict).await?;
+		Ok(db_def)
 	}
 
 	/// Add a value to the context. It overwrites any previously set values
@@ -558,33 +612,29 @@ impl MutableContext {
 	/// The function is only available if the `http` feature is enabled.
 	///
 	/// # Parameters
-	/// - `url`: A reference to a [`Url`] object representing the target
-	///   endpoint to check.
+	/// - `url`: A reference to a [`Url`] object representing the target endpoint to check.
 	///
 	/// # Returns
 	/// This function returns a [`Result<()>`]:
-	/// - On success, it returns `Ok(())` indicating the network target is
-	///   allowed.
+	/// - On success, it returns `Ok(())` indicating the network target is allowed.
 	/// - On failure, it returns an error wrapped in the [`Error`] type:
 	///   - `NetTargetNotAllowed` if the target is not permitted.
 	///   - `InvalidUrl` if the provided URL is invalid.
 	///
 	/// # Behavior
 	/// 1. Extracts the host and port information from the URL.
-	/// 2. Constructs a [`NetTarget`] object and checks if it is allowed by the
-	///    current network capabilities.
-	/// 3. If the network target resolves to multiple targets (e.g., DNS
-	///    resolution), each target is validated individually.
-	/// 4. Logs a warning and prevents the connection if the target is denied by
-	///    the capabilities.
+	/// 2. Constructs a [`NetTarget`] object and checks if it is allowed by the current network
+	///    capabilities.
+	/// 3. If the network target resolves to multiple targets (e.g., DNS resolution), each target is
+	///    validated individually.
+	/// 4. Logs a warning and prevents the connection if the target is denied by the capabilities.
 	///
 	/// # Logging
 	/// - Logs a warning message if the network target is denied.
 	/// - Logs a trace message if the network target is permitted.
 	///
 	/// # Errors
-	/// - `NetTargetNotAllowed`: Returned if any of the resolved targets are not
-	///   allowed.
+	/// - `NetTargetNotAllowed`: Returned if any of the resolved targets are not allowed.
 	/// - `InvalidUrl`: Returned if the URL does not have a valid host.
 	#[cfg(feature = "http")]
 	pub(crate) async fn check_allowed_net(&self, url: &Url) -> Result<()> {
@@ -631,8 +681,8 @@ impl MutableContext {
 	/// Obtain the connection for a bucket
 	pub(crate) async fn get_bucket_store(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		bu: &str,
 	) -> Result<Arc<dyn ObjectStore>> {
 		// Do we have a buckets context?
@@ -644,7 +694,7 @@ impl MutableContext {
 			} else {
 				// Obtain the bucket definition
 				let tx = self.tx();
-				let bd = tx.get_db_bucket(ns, db, bu).await?;
+				let bd = tx.expect_db_bucket(ns, db, bu).await?;
 
 				// Connect to the bucket
 				let store = if let Some(ref backend) = bd.backend {

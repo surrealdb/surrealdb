@@ -52,12 +52,12 @@ impl TopLevelExpr {
 			TopLevelExpr::Begin
 			| TopLevelExpr::Cancel
 			| TopLevelExpr::Commit
-			| TopLevelExpr::Use(_)
 			| TopLevelExpr::Show(_)
 			| TopLevelExpr::Analyze(_) => true,
 			TopLevelExpr::Kill(_)
 			| TopLevelExpr::Live(_)
 			| TopLevelExpr::Option(_)
+			| TopLevelExpr::Use(_)
 			| TopLevelExpr::Access(_) => false,
 			TopLevelExpr::Expr(expr) => expr.read_only(),
 		}

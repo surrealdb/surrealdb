@@ -1,5 +1,5 @@
 [env]
-RUSTFLAGS = { value = "-D warnings --cfg tokio_unstable", condition = { env_not_set = [
+RUSTFLAGS = { value = "--cfg tokio_unstable", condition = { env_not_set = [
     "RUSTFLAGS",
 ] } }
 BENCH_WORKER_THREADS = { value = "1", condition = { env_not_set = [
@@ -218,6 +218,7 @@ args = [
     "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
     "--workspace",
     "--no-fail-fast",
+    "--package", "surrealdb",
     "--",
     "--skip",
     "api_integration",

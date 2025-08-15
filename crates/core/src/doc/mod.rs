@@ -3,8 +3,7 @@
 //! - `Thing`: name of the table and ID of the record
 //! - `current`: value after the transaction
 //! - `initial`: value before the transaction
-//! - `id`: traditionally an integer but can be an object or collection such as
-//!   an array
+//! - `id`: traditionally an integer but can be an object or collection such as an array
 
 pub(crate) use self::document::*;
 

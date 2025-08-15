@@ -1,6 +1,9 @@
 /**
 [env]
+namespace = false
+database = false
 strict = true
+clean = true
 
 [test]
 
@@ -8,20 +11,31 @@ strict = true
 error = "The namespace 'test' does not exist"
 
 [[test.results]]
-error = "The namespace 'test' does not exist"
+error = "Specify a namespace to use"
+
+[[test.results]]
+error = "Cannot use database without namespace"
 
 [[test.results]]
 error = "The namespace 'test' does not exist"
 
 [[test.results]]
-error = "The namespace 'test' does not exist"
+error = "Specify a namespace to use"
 
 [[test.results]]
-error = "The namespace 'test' does not exist"
+error = "Specify a namespace to use"
+
+[[test.results]]
+error = "Specify a namespace to use"
+
+[[test.results]]
+error = "Specify a namespace to use"
 */
 
--- DEFINE NAMESPACE test;
+USE NAMESPACE test;
 DEFINE DATABASE test;
+USE DATABASE test;
+USE NS test DB test;
 DEFINE TABLE test;
 DEFINE FIELD extra ON test VALUE true;
 CREATE test:tester;

@@ -420,7 +420,7 @@ pub async fn query_binds(new_db: impl CreateDb) {
 	assert_eq!(record.name, "John Doe");
 	let mut response = db
 		.query("SELECT * FROM $record_id")
-		.bind(("record_id", syn::thing("user:john").unwrap()))
+		.bind(("record_id", syn::record_id("user:john").unwrap()))
 		.await
 		.unwrap();
 	let Some(record): Option<RecordName> = response.take(0).unwrap() else {
@@ -1479,7 +1479,22 @@ pub async fn changefeed(new_db: impl CreateDb) {
 		"[
         {
             define_table: {
-                name: 'testuser'
+                name: 'testuser',
+				changefeed: {
+					expiry: '1h',
+					original: false
+				},
+				drop: false,
+				kind: {
+					kind: 'ANY'
+				},
+				permissions: {
+					create: false,
+					delete: false,
+					select: false,
+					update: false
+				},
+				schemafull: false
             }
         }
     ]"

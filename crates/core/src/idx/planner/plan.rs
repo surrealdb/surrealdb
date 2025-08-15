@@ -52,8 +52,7 @@ impl PlanBuilder {
 	///
 	/// The optimizer considers factors like:
 	/// - Available indexes and their selectivity
-	/// - Boolean operator types (AND vs OR affects index combination
-	///   strategies)
+	/// - Boolean operator types (AND vs OR affects index combination strategies)
 	/// - Compound index opportunities for multi-column queries
 	/// - Range query optimization with proper scan direction
 	/// - Order clause compatibility with index ordering

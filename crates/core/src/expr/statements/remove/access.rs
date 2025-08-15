@@ -29,18 +29,16 @@ impl RemoveAccessStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Get the definition
-				let ac = match txn.get_root_access(&self.name).await {
-					Ok(x) => x,
-					Err(e) => {
-						if self.if_exists
-							&& matches!(e.downcast_ref(), Some(Error::AccessRootNotFound { .. }))
-						{
-							return Ok(Value::None);
-						} else {
-							return Err(e);
-						}
+				let Some(ac) = txn.get_root_access(&self.name).await? else {
+					if self.if_exists {
+						return Ok(Value::None);
+					} else {
+						return Err(anyhow::Error::new(Error::AccessRootNotFound {
+							ac: self.name.as_raw_string(),
+						}));
 					}
 				};
+
 				// Delete the definition
 				let key = crate::key::root::ac::new(&ac.name);
 				txn.del(&key).await?;
@@ -56,23 +54,24 @@ impl RemoveAccessStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Get the definition
-				let ac = match txn.get_ns_access(opt.ns()?, &self.name).await {
-					Ok(x) => x,
-					Err(e) => {
-						if self.if_exists
-							&& matches!(e.downcast_ref(), Some(Error::AccessNsNotFound { .. }))
-						{
-							return Ok(Value::None);
-						} else {
-							return Err(e);
-						}
+				let ns = ctx.get_ns_id(opt).await?;
+				let Some(ac) = txn.get_ns_access(ns, &self.name).await? else {
+					if self.if_exists {
+						return Ok(Value::None);
+					} else {
+						let ns = opt.ns()?;
+						return Err(anyhow::Error::new(Error::AccessNsNotFound {
+							ac: self.name.as_raw_string(),
+							ns: ns.to_string(),
+						}));
 					}
 				};
+
 				// Delete the definition
-				let key = crate::key::namespace::ac::new(opt.ns()?, &ac.name);
+				let key = crate::key::namespace::ac::new(ns, &ac.name);
 				txn.del(&key).await?;
 				// Delete any associated data including access grants.
-				let key = crate::key::namespace::access::all::new(opt.ns()?, &ac.name);
+				let key = crate::key::namespace::access::all::new(ns, &ac.name);
 				txn.delp(&key).await?;
 				// Clear the cache
 				txn.clear_cache();
@@ -83,17 +82,17 @@ impl RemoveAccessStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Get the definition
-				let (ns, db) = opt.ns_db()?;
-				let ac = match txn.get_db_access(ns, db, &self.name).await {
-					Ok(x) => x,
-					Err(e) => {
-						if self.if_exists
-							&& matches!(e.downcast_ref(), Some(Error::AccessDbNotFound { .. }))
-						{
-							return Ok(Value::None);
-						} else {
-							return Err(e);
-						}
+				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+				let Some(ac) = txn.get_db_access(ns, db, &self.name).await? else {
+					if self.if_exists {
+						return Ok(Value::None);
+					} else {
+						let (ns, db) = opt.ns_db()?;
+						return Err(anyhow::Error::new(Error::AccessDbNotFound {
+							ac: self.name.as_raw_string(),
+							ns: ns.to_string(),
+							db: db.to_string(),
+						}));
 					}
 				};
 				// Delete the definition

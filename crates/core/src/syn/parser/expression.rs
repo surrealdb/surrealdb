@@ -19,9 +19,9 @@ impl Parser<'_> {
 	///
 	/// Meant to be used when parsing an expression the first time to avoid
 	/// having the depth limit be lowered unnessacrily
-	pub async fn parse_expr_start(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
+	pub async fn parse_expr_start(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		self.table_as_field = true;
-		self.pratt_parse_expr(ctx, BindingPower::Base).await
+		self.pratt_parse_expr(stk, BindingPower::Base).await
 	}
 
 	/// Parsers a generic value.
@@ -30,11 +30,11 @@ impl Parser<'_> {
 	/// different values depending on context: a table or a field the current
 	/// document. This function parses loose idents as a table, see
 	/// [`parse_expr_field`] for parsing loose idents as fields
-	pub(crate) async fn parse_expr_table(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
+	pub(crate) async fn parse_expr_table(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		let old = self.table_as_field;
 		self.table_as_field = false;
 		let res = enter_query_recursion!(this = self => {
-			this.pratt_parse_expr(ctx, BindingPower::Base).await
+			this.pratt_parse_expr(stk, BindingPower::Base).await
 		});
 		self.table_as_field = old;
 		res
@@ -46,11 +46,11 @@ impl Parser<'_> {
 	/// different values depending on context: a table or a field the current
 	/// document. This function parses loose idents as a field, see
 	/// [`parse_value`] for parsing loose idents as table
-	pub(crate) async fn parse_expr_field(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
+	pub(crate) async fn parse_expr_field(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		let old = self.table_as_field;
 		self.table_as_field = true;
 		let res = enter_query_recursion!(this = self => {
-			this.pratt_parse_expr(ctx, BindingPower::Base).await
+			this.pratt_parse_expr(stk, BindingPower::Base).await
 		});
 		self.table_as_field = old;
 		res
@@ -59,9 +59,9 @@ impl Parser<'_> {
 	/// Parsers a generic value.
 	///
 	/// Inherits how loose identifiers are parsed from it's caller.
-	pub(super) async fn parse_expr_inherit(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
+	pub(super) async fn parse_expr_inherit(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		enter_query_recursion!(this = self => {
-			this.pratt_parse_expr(ctx, BindingPower::Base).await
+			this.pratt_parse_expr(stk, BindingPower::Base).await
 		})
 	}
 
@@ -179,7 +179,7 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn parse_prefix_op(&mut self, ctx: &mut Stk, min_bp: BindingPower) -> ParseResult<Expr> {
+	async fn parse_prefix_op(&mut self, stk: &mut Stk, min_bp: BindingPower) -> ParseResult<Expr> {
 		let token = self.peek();
 		let operator = match token.kind {
 			t!("+") => {
@@ -208,7 +208,7 @@ impl Parser<'_> {
 					};
 					if self.peek_continues_idiom() {
 						return self
-							.parse_remaining_value_idiom(ctx, vec![Part::Start(expr)])
+							.parse_remaining_value_idiom(stk, vec![Part::Start(expr)])
 							.await;
 					} else {
 						return Ok(expr);
@@ -244,7 +244,7 @@ impl Parser<'_> {
 					};
 					if self.peek_continues_idiom() {
 						return self
-							.parse_remaining_value_idiom(ctx, vec![Part::Start(expr)])
+							.parse_remaining_value_idiom(stk, vec![Part::Start(expr)])
 							.await;
 					} else {
 						return Ok(expr);
@@ -261,7 +261,7 @@ impl Parser<'_> {
 			}
 			t!("<") => {
 				self.pop_peek();
-				let kind = self.parse_kind(ctx, token.span).await?;
+				let kind = self.parse_kind(stk, token.span).await?;
 				PrefixOperator::Cast(kind)
 			}
 			t!("..") => {
@@ -281,7 +281,7 @@ impl Parser<'_> {
 			_ => unreachable!(),
 		};
 
-		let v = ctx.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
+		let v = stk.run(|stk| self.pratt_parse_expr(stk, min_bp)).await?;
 
 		Ok(Expr::Prefix {
 			op: operator,
@@ -373,7 +373,7 @@ impl Parser<'_> {
 
 	async fn parse_infix_op(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		min_bp: BindingPower,
 		lhs: Expr,
 		lhs_prime: bool, /* if lhs was a prime expression, required for ensuring (a..b)..c does
@@ -459,7 +459,7 @@ impl Parser<'_> {
 		};
 		let before = self.recent_span();
 		let rhs_covered = self.peek().kind == t!("(");
-		let rhs = ctx.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
+		let rhs = stk.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
 
 		let is_relation = Self::operator_is_relation(&operator);
 		if !lhs_prime && is_relation && Self::expr_is_relation(&lhs) {
@@ -551,7 +551,7 @@ impl Parser<'_> {
 
 	async fn parse_postfix(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		lhs: Expr,
 		lhs_prime: bool,
 	) -> ParseResult<Expr> {
@@ -579,7 +579,7 @@ impl Parser<'_> {
 						break;
 					}
 
-					let arg = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+					let arg = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
 					args.push(arg);
 
 					if !self.eat(t!(",")) {
@@ -599,7 +599,7 @@ impl Parser<'_> {
 						break;
 					}
 
-					let arg = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+					let arg = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
 					args.push(arg);
 
 					if !self.eat(t!(",")) {
@@ -621,12 +621,12 @@ impl Parser<'_> {
 
 	/// The pratt parsing loop.
 	/// Parses expression according to binding power.
-	async fn pratt_parse_expr(&mut self, ctx: &mut Stk, min_bp: BindingPower) -> ParseResult<Expr> {
+	async fn pratt_parse_expr(&mut self, stk: &mut Stk, min_bp: BindingPower) -> ParseResult<Expr> {
 		let peek = self.peek();
 		let (mut lhs, mut lhs_prime) = if let Some(bp) = self.prefix_binding_power(peek.kind) {
-			(self.parse_prefix_op(ctx, bp).await?, false)
+			(self.parse_prefix_op(stk, bp).await?, false)
 		} else {
-			(self.parse_prime_expr(ctx).await?, true)
+			(self.parse_prime_expr(stk).await?, true)
 		};
 
 		loop {
@@ -637,7 +637,7 @@ impl Parser<'_> {
 					break;
 				}
 
-				lhs = self.parse_postfix(ctx, lhs, lhs_prime).await?;
+				lhs = self.parse_postfix(stk, lhs, lhs_prime).await?;
 				lhs_prime = false;
 				continue;
 			}
@@ -656,7 +656,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			lhs = self.parse_infix_op(ctx, bp, lhs, lhs_prime).await?;
+			lhs = self.parse_infix_op(stk, bp, lhs, lhs_prime).await?;
 			lhs_prime = false;
 		}
 

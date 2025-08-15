@@ -551,35 +551,43 @@ async fn permissions_checks_define_ns() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let access1 = "{ accesses: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
-	let access2 = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
-	let check_results = [vec![access1], vec![access2]];
+	let check_success = "{ accesses: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
-		((level_root(), Role::Owner), ("NS", "DB"), true),
-		((level_root(), Role::Editor), ("NS", "DB"), true),
-		((level_root(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true, check_success.replace("{{NS}}", "NS")),
+		((level_root(), Role::Editor), ("NS", "DB"), true, check_success.replace("{{NS}}", "NS")),
+		((level_root(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
 		// Namespace level
-		((level_ns(), Role::Owner), ("NS", "DB"), false),
-		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Editor), ("NS", "DB"), false),
-		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Editor), ("NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 		// Database level
-		((level_db(), Role::Owner), ("NS", "DB"), false),
-		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 	];
 
-	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	let check_anonymous_success = check_success.replace("{{NS}}", "NS");
+	let res = iam_check_cases_impl(
+		test_cases.iter(),
+		&scenario,
+		&check_anonymous_success,
+		&check_error,
+		false,
+		false,
+	)
+	.await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
 }
 
@@ -590,36 +598,46 @@ async fn permissions_checks_define_db() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_results = [
-		vec!["{ accesses: {  }, databases: { DB: 'DEFINE DATABASE DB' }, users: {  } }"],
-		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
-	];
+	let check_success =
+		"{ accesses: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}}' }, users: {  } }"
+			.to_string();
+	let check_error = "{ accesses: {  }, databases: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
-		((level_root(), Role::Owner), ("NS", "DB"), true),
-		((level_root(), Role::Editor), ("NS", "DB"), true),
-		((level_root(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true, check_success.replace("{{DB}}", "DB")),
+		((level_root(), Role::Editor), ("NS", "DB"), true, check_success.replace("{{DB}}", "DB")),
+		((level_root(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
 		// Namespace level
-		((level_ns(), Role::Owner), ("NS", "DB"), true),
-		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Editor), ("NS", "DB"), true),
-		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true, check_success.replace("{{DB}}", "DB")),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Editor), ("NS", "DB"), true, check_success.replace("{{DB}}", "DB")),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 		// Database level
-		((level_db(), Role::Owner), ("NS", "DB"), false),
-		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 	];
 
-	iam_check_cases(test_cases.iter(), &scenario, check_results).await.unwrap();
+	let check_anonymous_success = check_success.replace("{{DB}}", "DB");
+	iam_check_cases_impl(
+		test_cases.iter(),
+		&scenario,
+		&check_anonymous_success,
+		&check_error,
+		true,
+		false,
+	)
+	.await
+	.unwrap();
 }
 
 #[tokio::test]
@@ -632,40 +650,34 @@ async fn permissions_checks_define_function() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_results = [
-		vec![
-			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello' } PERMISSIONS FULL\" }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
-		],
-		vec![
-			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
-		],
-	];
+	let check_success = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello' } PERMISSIONS FULL\" }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
-		((level_root(), Role::Owner), ("NS", "DB"), true),
-		((level_root(), Role::Editor), ("NS", "DB"), true),
-		((level_root(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_root(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_root(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
 		// Namespace level
-		((level_ns(), Role::Owner), ("NS", "DB"), true),
-		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Editor), ("NS", "DB"), true),
-		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 		// Database level
-		((level_db(), Role::Owner), ("NS", "DB"), true),
-		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "DB"), true),
-		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 	];
 
-	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	let res = iam_check_cases(test_cases.iter(), &scenario, &check_success, &check_error).await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
 }
 
@@ -679,40 +691,34 @@ async fn permissions_checks_define_analyzer() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_results = [
-		vec![
-			"{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, sequences: { }, users: {  } }",
-		],
-		vec![
-			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {}, tables: {  }, users: {  } }",
-		],
-	];
+	let check_success = "{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, sequences: { }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {}, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
-		((level_root(), Role::Owner), ("NS", "DB"), true),
-		((level_root(), Role::Editor), ("NS", "DB"), true),
-		((level_root(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_root(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_root(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
 		// Namespace level
-		((level_ns(), Role::Owner), ("NS", "DB"), true),
-		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Editor), ("NS", "DB"), true),
-		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 		// Database level
-		((level_db(), Role::Owner), ("NS", "DB"), true),
-		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "DB"), true),
-		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 	];
 
-	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	let res = iam_check_cases(test_cases.iter(), &scenario, &check_success, &check_error).await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
 }
 
@@ -726,35 +732,82 @@ async fn permissions_checks_define_access_root() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let access1 = r#"{ accesses: { access: "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }"#;
-	let access2 = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
-	let check_results = [vec![access1], vec![access2]];
+	let check_success = r#"{ accesses: { access: "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }"#.to_string();
+	let check_error = "{ accesses: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
-		((level_root(), Role::Owner), ("NS", "DB"), true),
-		((level_root(), Role::Editor), ("NS", "DB"), false),
-		((level_root(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true, check_success.replace("{{NS}}", "NS")),
+		((level_root(), Role::Editor), ("NS", "DB"), false, check_error.replace("{{NS}}", "NS")),
+		((level_root(), Role::Viewer), ("NS", "DB"), false, check_error.replace("{{NS}}", "NS")),
 		// Namespace level
-		((level_ns(), Role::Owner), ("NS", "DB"), false),
-		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Editor), ("NS", "DB"), false),
-		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), false, check_error.replace("{{NS}}", "NS")),
+		(
+			(level_ns(), Role::Owner),
+			("OTHER_NS", "DB"),
+			false,
+			check_error.replace("{{NS}}", "OTHER_NS"),
+		),
+		((level_ns(), Role::Editor), ("NS", "DB"), false, check_error.replace("{{NS}}", "NS")),
+		(
+			(level_ns(), Role::Editor),
+			("OTHER_NS", "DB"),
+			false,
+			check_error.replace("{{NS}}", "OTHER_NS"),
+		),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false, check_error.replace("{{NS}}", "NS")),
+		(
+			(level_ns(), Role::Viewer),
+			("OTHER_NS", "DB"),
+			false,
+			check_error.replace("{{NS}}", "OTHER_NS"),
+		),
 		// Database level
-		((level_db(), Role::Owner), ("NS", "DB"), false),
-		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), false, check_error.replace("{{NS}}", "NS")),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false, check_error.replace("{{NS}}", "NS")),
+		(
+			(level_db(), Role::Owner),
+			("OTHER_NS", "DB"),
+			false,
+			check_error.replace("{{NS}}", "OTHER_NS"),
+		),
+		((level_db(), Role::Editor), ("NS", "DB"), false, check_error.replace("{{NS}}", "NS")),
+		(
+			(level_db(), Role::Editor),
+			("NS", "OTHER_DB"),
+			false,
+			check_error.replace("{{NS}}", "NS"),
+		),
+		(
+			(level_db(), Role::Editor),
+			("OTHER_NS", "DB"),
+			false,
+			check_error.replace("{{NS}}", "OTHER_NS"),
+		),
+		((level_db(), Role::Viewer), ("NS", "DB"), false, check_error.replace("{{NS}}", "NS")),
+		(
+			(level_db(), Role::Viewer),
+			("NS", "OTHER_DB"),
+			false,
+			check_error.replace("{{NS}}", "NS"),
+		),
+		(
+			(level_db(), Role::Viewer),
+			("OTHER_NS", "DB"),
+			false,
+			check_error.replace("{{NS}}", "OTHER_NS"),
+		),
 	];
 
-	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	let check_anonymous_success = check_success.replace("{{NS}}", "NS");
+	let check_anonymous_error = check_error.replace("{{NS}}", "NS");
+	let res = iam_check_cases(
+		test_cases.iter(),
+		&scenario,
+		&check_anonymous_success,
+		&check_anonymous_error,
+	)
+	.await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
 }
 
@@ -768,38 +821,43 @@ async fn permissions_checks_define_access_ns() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_results = [
-		vec![
-			"{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, databases: {  }, users: {  } }",
-		],
-		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
-	];
+	let check_success = "{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, databases: {  }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, databases: { }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
-		((level_root(), Role::Owner), ("NS", "DB"), true),
-		((level_root(), Role::Editor), ("NS", "DB"), false),
-		((level_root(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true, check_success.replace("{{DB}}", "DB")),
+		((level_root(), Role::Editor), ("NS", "DB"), false, check_error.clone()),
+		((level_root(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
 		// Namespace level
-		((level_ns(), Role::Owner), ("NS", "DB"), true),
-		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Editor), ("NS", "DB"), false),
-		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true, check_success.replace("{{DB}}", "DB")),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Editor), ("NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 		// Database level
-		((level_db(), Role::Owner), ("NS", "DB"), false),
-		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 	];
 
-	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	let check_anonymous_success = check_success.replace("{{DB}}", "DB");
+	let res = iam_check_cases_impl(
+		test_cases.iter(),
+		&scenario,
+		&check_anonymous_success,
+		&check_error,
+		true,
+		false,
+	)
+	.await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
 }
 
@@ -813,40 +871,34 @@ async fn permissions_checks_define_access_db() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_results = [
-		vec![
-			"{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
-		],
-		vec![
-			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
-		],
-	];
+	let check_success = "{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
-		((level_root(), Role::Owner), ("NS", "DB"), true),
-		((level_root(), Role::Editor), ("NS", "DB"), false),
-		((level_root(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_root(), Role::Editor), ("NS", "DB"), false, check_error.clone()),
+		((level_root(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
 		// Namespace level
-		((level_ns(), Role::Owner), ("NS", "DB"), true),
-		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Editor), ("NS", "DB"), false),
-		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Editor), ("NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 		// Database level
-		((level_db(), Role::Owner), ("NS", "DB"), true),
-		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 	];
 
-	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	let res = iam_check_cases(test_cases.iter(), &scenario, &check_success, &check_error).await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
 }
 
@@ -863,35 +915,84 @@ async fn permissions_checks_define_user_root() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check1 = r#"{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#;
-	let check2 = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
-	let check_results = [vec![check1], vec![check2]];
+	let check_success = r#"{ accesses: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#.to_string();
+	let check_error = "{ accesses: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
-		((level_root(), Role::Owner), ("NS", "DB"), true),
-		((level_root(), Role::Editor), ("NS", "DB"), false),
-		((level_root(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true, check_success.replace("{{NS}}", "NS")),
+		((level_root(), Role::Editor), ("NS", "DB"), false, check_error.replace("{{NS}}", "NS")),
+		((level_root(), Role::Viewer), ("NS", "DB"), false, check_error.replace("{{NS}}", "NS")),
 		// Namespace level
-		((level_ns(), Role::Owner), ("NS", "DB"), false),
-		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Editor), ("NS", "DB"), false),
-		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), false, check_error.replace("{{NS}}", "NS")),
+		(
+			(level_ns(), Role::Owner),
+			("OTHER_NS", "DB"),
+			false,
+			check_error.replace("{{NS}}", "OTHER_NS"),
+		),
+		((level_ns(), Role::Editor), ("NS", "DB"), false, check_error.replace("{{NS}}", "NS")),
+		(
+			(level_ns(), Role::Editor),
+			("OTHER_NS", "DB"),
+			false,
+			check_error.replace("{{NS}}", "OTHER_NS"),
+		),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false, check_error.replace("{{NS}}", "NS")),
+		(
+			(level_ns(), Role::Viewer),
+			("OTHER_NS", "DB"),
+			false,
+			check_error.replace("{{NS}}", "OTHER_NS"),
+		),
 		// Database level
-		((level_db(), Role::Owner), ("NS", "DB"), false),
-		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), false, check_error.replace("{{NS}}", "NS")),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false, check_error.replace("{{NS}}", "NS")),
+		(
+			(level_db(), Role::Owner),
+			("OTHER_NS", "DB"),
+			false,
+			check_error.replace("{{NS}}", "OTHER_NS"),
+		),
+		((level_db(), Role::Editor), ("NS", "DB"), false, check_error.replace("{{NS}}", "NS")),
+		(
+			(level_db(), Role::Editor),
+			("NS", "OTHER_DB"),
+			false,
+			check_error.replace("{{NS}}", "NS"),
+		),
+		(
+			(level_db(), Role::Editor),
+			("OTHER_NS", "DB"),
+			false,
+			check_error.replace("{{NS}}", "OTHER_NS"),
+		),
+		((level_db(), Role::Viewer), ("NS", "DB"), false, check_error.replace("{{NS}}", "NS")),
+		(
+			(level_db(), Role::Viewer),
+			("NS", "OTHER_DB"),
+			false,
+			check_error.replace("{{NS}}", "NS"),
+		),
+		(
+			(level_db(), Role::Viewer),
+			("OTHER_NS", "DB"),
+			false,
+			check_error.replace("{{NS}}", "OTHER_NS"),
+		),
 	];
 
-	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	let check_anonymous_success = check_success.replace("{{NS}}", "NS");
+	let check_anonymous_error = check_error.replace("{{NS}}", "NS");
+	let res = iam_check_cases_impl(
+		test_cases.iter(),
+		&scenario,
+		&check_anonymous_success,
+		&check_anonymous_error,
+		true,
+		false,
+	)
+	.await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
 }
 
@@ -908,38 +1009,79 @@ async fn permissions_checks_define_user_ns() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_results = [
-		vec![
-			"{ accesses: {  }, databases: {  }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }",
-		],
-		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
-	];
+	let check_success = r#"{ accesses: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}}' }, users: { user: "DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#.to_string();
+	let check_error =
+		"{ accesses: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}}' }, users: {  } }"
+			.to_string();
 
 	let test_cases = [
 		// Root level
-		((level_root(), Role::Owner), ("NS", "DB"), true),
-		((level_root(), Role::Editor), ("NS", "DB"), false),
-		((level_root(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true, check_success.replace("{{DB}}", "DB")),
+		((level_root(), Role::Editor), ("NS", "DB"), false, check_error.replace("{{DB}}", "DB")),
+		((level_root(), Role::Viewer), ("NS", "DB"), false, check_error.replace("{{DB}}", "DB")),
 		// Namespace level
-		((level_ns(), Role::Owner), ("NS", "DB"), true),
-		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Editor), ("NS", "DB"), false),
-		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true, check_success.replace("{{DB}}", "DB")),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.replace("{{DB}}", "DB")),
+		((level_ns(), Role::Editor), ("NS", "DB"), false, check_error.replace("{{DB}}", "DB")),
+		(
+			(level_ns(), Role::Editor),
+			("OTHER_NS", "DB"),
+			false,
+			check_error.replace("{{DB}}", "DB"),
+		),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false, check_error.replace("{{DB}}", "DB")),
+		(
+			(level_ns(), Role::Viewer),
+			("OTHER_NS", "DB"),
+			false,
+			check_error.replace("{{DB}}", "DB"),
+		),
 		// Database level
-		((level_db(), Role::Owner), ("NS", "DB"), false),
-		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), false, check_error.replace("{{DB}}", "DB")),
+		(
+			(level_db(), Role::Owner),
+			("NS", "OTHER_DB"),
+			false,
+			check_error.replace("{{DB}}", "OTHER_DB"),
+		),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.replace("{{DB}}", "DB")),
+		((level_db(), Role::Editor), ("NS", "DB"), false, check_error.replace("{{DB}}", "DB")),
+		(
+			(level_db(), Role::Editor),
+			("NS", "OTHER_DB"),
+			false,
+			check_error.replace("{{DB}}", "OTHER_DB"),
+		),
+		(
+			(level_db(), Role::Editor),
+			("OTHER_NS", "DB"),
+			false,
+			check_error.replace("{{DB}}", "DB"),
+		),
+		((level_db(), Role::Viewer), ("NS", "DB"), false, check_error.replace("{{DB}}", "DB")),
+		(
+			(level_db(), Role::Viewer),
+			("NS", "OTHER_DB"),
+			false,
+			check_error.replace("{{DB}}", "OTHER_DB"),
+		),
+		(
+			(level_db(), Role::Viewer),
+			("OTHER_NS", "DB"),
+			false,
+			check_error.replace("{{DB}}", "DB"),
+		),
 	];
 
-	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	let check_anonymous_success = check_success.replace("{{DB}}", "DB");
+	let check_anonymous_error = check_error.replace("{{DB}}", "DB");
+	let res = iam_check_cases(
+		test_cases.iter(),
+		&scenario,
+		&check_anonymous_success,
+		&check_anonymous_error,
+	)
+	.await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
 }
 
@@ -956,40 +1098,34 @@ async fn permissions_checks_define_user_db() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_results = [
-		vec![
-			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }",
-		],
-		vec![
-			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
-		],
-	];
+	let check_success = r#"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: { user: "DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#.to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
-		((level_root(), Role::Owner), ("NS", "DB"), true),
-		((level_root(), Role::Editor), ("NS", "DB"), false),
-		((level_root(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_root(), Role::Editor), ("NS", "DB"), false, check_error.clone()),
+		((level_root(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
 		// Namespace level
-		((level_ns(), Role::Owner), ("NS", "DB"), true),
-		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Editor), ("NS", "DB"), false),
-		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Editor), ("NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 		// Database level
-		((level_db(), Role::Owner), ("NS", "DB"), true),
-		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 	];
 
-	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	let res = iam_check_cases(test_cases.iter(), &scenario, &check_success, &check_error).await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
 }
 
@@ -1006,40 +1142,34 @@ async fn permissions_checks_define_access_record() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_results = [
-		vec![
-			"{ accesses: { account: \"DEFINE ACCESS account ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 15m, FOR SESSION 12h\" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
-		],
-		vec![
-			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
-		],
-	];
+	let check_success = r#"{ accesses: { account: "DEFINE ACCESS account ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 15m, FOR SESSION 12h" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }"#.to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
-		((level_root(), Role::Owner), ("NS", "DB"), true),
-		((level_root(), Role::Editor), ("NS", "DB"), false),
-		((level_root(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_root(), Role::Editor), ("NS", "DB"), false, check_error.clone()),
+		((level_root(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
 		// Namespace level
-		((level_ns(), Role::Owner), ("NS", "DB"), true),
-		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Editor), ("NS", "DB"), false),
-		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Editor), ("NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 		// Database level
-		((level_db(), Role::Owner), ("NS", "DB"), true),
-		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 	];
 
-	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	let res = iam_check_cases(test_cases.iter(), &scenario, &check_success, &check_error).await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
 }
 
@@ -1053,40 +1183,34 @@ async fn permissions_checks_define_param() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_results = [
-		vec![
-			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, sequences: { }, tables: {  }, users: {  } }",
-		],
-		vec![
-			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
-		],
-	];
+	let check_success = r#"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: { param: "DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL" }, sequences: { }, tables: {  }, users: {  } }"#.to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
-		((level_root(), Role::Owner), ("NS", "DB"), true),
-		((level_root(), Role::Editor), ("NS", "DB"), true),
-		((level_root(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_root(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_root(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
 		// Namespace level
-		((level_ns(), Role::Owner), ("NS", "DB"), true),
-		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Editor), ("NS", "DB"), true),
-		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 		// Database level
-		((level_db(), Role::Owner), ("NS", "DB"), true),
-		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "DB"), true),
-		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 	];
 
-	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	let res = iam_check_cases(test_cases.iter(), &scenario, &check_success, &check_error).await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
 }
 
@@ -1097,40 +1221,34 @@ async fn permissions_checks_define_table() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_results = [
-		vec![
-			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }",
-		],
-		vec![
-			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
-		],
-	];
+	let check_success = r#"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"#.to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
-		((level_root(), Role::Owner), ("NS", "DB"), true),
-		((level_root(), Role::Editor), ("NS", "DB"), true),
-		((level_root(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_root(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_root(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
 		// Namespace level
-		((level_ns(), Role::Owner), ("NS", "DB"), true),
-		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Editor), ("NS", "DB"), true),
-		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 		// Database level
-		((level_db(), Role::Owner), ("NS", "DB"), true),
-		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "DB"), true),
-		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 	];
 
-	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	let res = iam_check_cases(test_cases.iter(), &scenario, &check_success, &check_error).await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
 }
 
@@ -1144,38 +1262,35 @@ async fn permissions_checks_define_event() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_results = [
-		vec![
-			"{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN RETURN 'foo'\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }",
-		],
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
-	];
+	let check_success = r#"{ events: { event: "DEFINE EVENT event ON TB WHEN true THEN RETURN 'foo'" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"#.to_string();
+	let check_error =
+		"{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
-		((level_root(), Role::Owner), ("NS", "DB"), true),
-		((level_root(), Role::Editor), ("NS", "DB"), true),
-		((level_root(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_root(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_root(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
 		// Namespace level
-		((level_ns(), Role::Owner), ("NS", "DB"), true),
-		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Editor), ("NS", "DB"), true),
-		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 		// Database level
-		((level_db(), Role::Owner), ("NS", "DB"), true),
-		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "DB"), true),
-		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 	];
 
-	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	let res = iam_check_cases(test_cases.iter(), &scenario, &check_success, &check_error).await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
 }
 
@@ -1189,38 +1304,35 @@ async fn permissions_checks_define_field() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_results = [
-		vec![
-			"{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }",
-		],
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
-	];
+	let check_success = r#"{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }"#.to_string();
+	let check_error =
+		"{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
-		((level_root(), Role::Owner), ("NS", "DB"), true),
-		((level_root(), Role::Editor), ("NS", "DB"), true),
-		((level_root(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_root(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_root(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
 		// Namespace level
-		((level_ns(), Role::Owner), ("NS", "DB"), true),
-		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Editor), ("NS", "DB"), true),
-		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 		// Database level
-		((level_db(), Role::Owner), ("NS", "DB"), true),
-		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "DB"), true),
-		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 	];
 
-	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	let res = iam_check_cases(test_cases.iter(), &scenario, &check_success, &check_error).await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
 }
 
@@ -1234,38 +1346,35 @@ async fn permissions_checks_define_index() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_results = [
-		vec![
-			"{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, lives: {  }, tables: {  } }",
-		],
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
-	];
+	let check_success = r#"{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, lives: {  }, tables: {  } }"#.to_string();
+	let check_error =
+		"{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
-		((level_root(), Role::Owner), ("NS", "DB"), true),
-		((level_root(), Role::Editor), ("NS", "DB"), true),
-		((level_root(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_root(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_root(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
 		// Namespace level
-		((level_ns(), Role::Owner), ("NS", "DB"), true),
-		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Editor), ("NS", "DB"), true),
-		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("NS", "DB"), false),
-		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 		// Database level
-		((level_db(), Role::Owner), ("NS", "DB"), true),
-		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Editor), ("NS", "DB"), true),
-		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "DB"), false),
-		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true, check_success.clone()),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("NS", "DB"), true, check_success.clone()),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false, check_error.clone()),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false, check_error.clone()),
 	];
 
-	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
+	let res = iam_check_cases(test_cases.iter(), &scenario, &check_success, &check_error).await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
 }
 
@@ -1275,6 +1384,10 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	let cache = ds.get_cache();
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 
+	let txn = ds.transaction(TransactionType::Write, LockType::Pessimistic).await?;
+	let db = txn.ensure_ns_db("test", "test", false).await?;
+	drop(txn);
+
 	// Define the table, set the initial uuids
 	let sql = r"DEFINE TABLE test;".to_owned();
 	let res = &mut ds.execute(&sql, &ses, None).await?;
@@ -1282,8 +1395,9 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	res.remove(0).result.unwrap();
 	// Obtain the initial uuids
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
-	let initial = txn.get_tb("test", "test", "test").await?;
-	let initial_live_query_version = cache.get_live_queries_version("test", "test", "test")?;
+	let initial = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+	let initial_live_query_version =
+		cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
 	drop(txn);
 
 	// Define some resources to refresh the UUIDs
@@ -1305,8 +1419,9 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	assert!(matches!(lqid, Value::Uuid(_)));
 	// Obtain the uuids after definitions
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
-	let after_define = txn.get_tb("test", "test", "test").await?;
-	let after_define_live_query_version = cache.get_live_queries_version("test", "test", "test")?;
+	let after_define = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+	let after_define_live_query_version =
+		cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
 	drop(txn);
 	// Compare uuids after definitions
 	assert_ne!(initial.cache_fields_ts, after_define.cache_fields_ts);
@@ -1334,8 +1449,9 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	res.remove(0).result.unwrap();
 	// Obtain the uuids after definitions
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
-	let after_remove = txn.get_tb("test", "test", "test").await?;
-	let after_remove_live_query_version = cache.get_live_queries_version("test", "test", "test")?;
+	let after_remove = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+	let after_remove_live_query_version =
+		cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
 	drop(txn);
 	// Compare uuids after definitions
 	assert_ne!(after_define.cache_fields_ts, after_remove.cache_fields_ts);

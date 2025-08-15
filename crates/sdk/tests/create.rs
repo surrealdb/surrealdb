@@ -198,6 +198,8 @@ async fn common_permissions_checks(auth_enabled: bool) {
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
+			ds.execute(&format!("USE NS {ns} DB {db}"), &sess, None).await.unwrap();
+
 			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
 			let res = resp.remove(0).output();
 
@@ -222,6 +224,8 @@ async fn common_permissions_checks(auth_enabled: bool) {
 		// Test the CREATE statement when the table already exists
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+
+			ds.execute(&format!("USE NS {ns} DB {db}"), &sess, None).await.unwrap();
 
 			let mut resp = ds
 				.execute("CREATE person", &Session::owner().with_ns("NS").with_db("DB"), None)

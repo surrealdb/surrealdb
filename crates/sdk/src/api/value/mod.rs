@@ -289,7 +289,7 @@ impl FromStr for RecordId {
 	type Err = anyhow::Error;
 
 	fn from_str(s: &str) -> Result<Self> {
-		syn::thing(s).map(RecordId::from_inner)
+		syn::record_id(s).map(RecordId::from_inner)
 	}
 }
 

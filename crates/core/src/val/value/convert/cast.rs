@@ -641,7 +641,7 @@ impl Cast for RecordId {
 	fn can_cast(v: &Value) -> bool {
 		match v {
 			Value::RecordId(_) => true,
-			Value::Strand(x) => syn::thing(x).is_ok(),
+			Value::Strand(x) => syn::record_id(x).is_ok(),
 			_ => false,
 		}
 	}
@@ -649,7 +649,7 @@ impl Cast for RecordId {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::RecordId(x) => Ok(x),
-			Value::Strand(x) => match syn::thing(&x) {
+			Value::Strand(x) => match syn::record_id(&x) {
 				Ok(x) => Ok(x),
 				Err(_) => Err(CastError::InvalidKind {
 					from: Value::Strand(x),
@@ -888,7 +888,7 @@ impl Value {
 	fn cast_to_record(self, val: &[Ident]) -> Result<RecordId, CastError> {
 		match self {
 			Value::RecordId(v) if v.is_record_type(val) => Ok(v),
-			Value::Strand(v) => match syn::thing(v.as_str()) {
+			Value::Strand(v) => match syn::record_id(v.as_str()) {
 				Ok(x) if x.is_record_type(val) => Ok(x),
 				_ => {
 					let mut kind = "record<".to_string();

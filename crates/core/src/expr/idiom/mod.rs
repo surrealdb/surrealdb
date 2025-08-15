@@ -114,6 +114,25 @@ impl Idiom {
 
 		x.as_str() == other
 	}
+
+	/// Returns a raw string representation of this idiom without any escaping.
+	pub(crate) fn as_raw_string(&self) -> String {
+		let mut s = String::new();
+
+		let mut iter = self.0.iter();
+		match iter.next() {
+			Some(Part::Field(v)) => s.push_str(&v.as_raw_string()),
+			Some(x) => s.push_str(&x.as_raw_string()),
+			None => {}
+		};
+
+		for p in iter {
+			s.push_str(&p.as_raw_string());
+		}
+
+		s
+	}
+
 	/// Check if this is an expression with multiple yields
 	pub(crate) fn is_multi_yield(&self) -> bool {
 		self.iter().any(Self::part_is_multi_yield)
@@ -127,9 +146,7 @@ impl Idiom {
 	pub(crate) fn starts_with(&self, other: &[Part]) -> bool {
 		self.0.starts_with(other)
 	}
-}
 
-impl Idiom {
 	/// Check if we require a writeable transaction
 	pub(crate) fn read_only(&self) -> bool {
 		self.0.iter().all(|v| v.read_only())
@@ -257,4 +274,30 @@ pub(crate) enum IdiomTrieContains<T> {
 	Exact(T),
 	/// The path was not found, but an ancestor was found.
 	Ancestor(T),
+}
+
+#[cfg(test)]
+mod tests {
+	use rstest::rstest;
+
+	use super::*;
+	use crate::val::Strand;
+
+	#[rstest]
+	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("name".to_string())))]), "name")]
+	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("name".to_string())))]), "nested.nested.name")]
+	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("value".to_string())))]), "nested.nested.`value`")]
+	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("value".to_string())))]), "`value`")]
+	fn test_idiom_to_string(#[case] idiom: Idiom, #[case] expected: &'static str) {
+		assert_eq!(idiom.to_string(), expected.to_string());
+	}
+
+	#[rstest]
+	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("name".to_string())))]), "name")]
+	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("name".to_string())))]), "nested.nested.name")]
+	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("value".to_string())))]), "nested.nested.value")]
+	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("value".to_string())))]), "value")]
+	fn test_idiom_to_raw_string(#[case] idiom: Idiom, #[case] expected: &'static str) {
+		assert_eq!(idiom.as_raw_string(), expected.to_string());
+	}
 }

@@ -21,11 +21,14 @@ pub struct RemoveSequenceStatement {
 
 impl RemoveSequenceStatement {
 	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
-		let (ns, db) = opt.ns_db()?;
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
+
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+
 		// Get the transaction
 		let txn = ctx.tx();
+
 		// Get the definition
 		let sq = match txn.get_db_sequence(ns, db, &self.name).await {
 			Ok(x) => x,

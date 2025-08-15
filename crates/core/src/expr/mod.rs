@@ -50,7 +50,6 @@ pub(crate) mod scoring;
 pub(crate) mod script;
 pub(crate) mod split;
 pub(crate) mod start;
-pub(crate) mod table_type;
 pub(crate) mod timeout;
 pub(crate) mod tokenizer;
 pub(crate) mod user;
@@ -89,7 +88,7 @@ pub use self::kind::{Kind, KindLiteral};
 pub use self::limit::Limit;
 pub use self::literal::Literal;
 pub use self::mock::Mock;
-pub use self::model::Model;
+pub use self::model::{Model, get_model_path};
 pub use self::operation::Operation;
 pub use self::operator::{AssignOperator, BinaryOperator, PostfixOperator, PrefixOperator};
 pub use self::order::Order;
@@ -117,7 +116,6 @@ pub use self::statements::{
 	RemoveUserStatement, SelectStatement, SetStatement, ShowStatement, SleepStatement,
 	UpdateStatement, UpsertStatement, UseStatement,
 };
-pub use self::table_type::{Relation, TableType};
 pub use self::timeout::Timeout;
 pub use self::tokenizer::Tokenizer;
 pub use self::view::View;

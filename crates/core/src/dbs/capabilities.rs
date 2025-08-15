@@ -200,26 +200,23 @@ impl NetTarget {
 	/// there is nothing to resolve.
 	///
 	/// # Returns
-	/// - On success, this function returns a `Vec<Self>` where each resolved
-	///   `NetTarget::Host` is transformed into a `NetTarget::IPNet`.
-	/// - On error, it returns a `std::io::Error` indicating the issue during
-	///   resolution.
+	/// - On success, this function returns a `Vec<Self>` where each resolved `NetTarget::Host` is
+	///   transformed into a `NetTarget::IPNet`.
+	/// - On error, it returns a `std::io::Error` indicating the issue during resolution.
 	///
 	/// # Variants
 	/// - `NetTarget::Host(h, p)`:
-	///    - Resolves the given hostname `h` with an optional port `p` (default
-	///      is 80) to a list of IPs.
+	///    - Resolves the given hostname `h` with an optional port `p` (default is 80) to a list of
+	///      IPs.
 	///    - Each resolved IP is converted into a `NetTarget::IPNet` value.
 	/// - `NetTarget::IPNet(_)`:
 	///    - Returns an empty vector, as `IPNet` does not require resolution.
 	///
 	/// # Errors
-	/// - Returns `std::io::Error` if there is an issue in the asynchronous DNS
-	///   resolution process.
+	/// - Returns `std::io::Error` if there is an issue in the asynchronous DNS resolution process.
 	///
 	/// # Notes
-	/// - The function uses `lookup_host` for DNS resolution, which must be
-	///   awaited.
+	/// - The function uses `lookup_host` for DNS resolution, which must be awaited.
 	/// - The optional port is replaced by port 80 as a default if not provided.
 	#[cfg(not(target_family = "wasm"))]
 	pub(crate) async fn resolve(&self) -> Result<Vec<Self>, std::io::Error> {

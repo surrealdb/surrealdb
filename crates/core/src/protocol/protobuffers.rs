@@ -44,7 +44,7 @@ impl TryFrom<ValueProto> for Value {
 			ValueInner::Object(v) => Value::Object(v.try_into()?),
 			ValueInner::Geometry(v) => Value::Geometry(v.try_into()?),
 			ValueInner::Bytes(v) => Value::Bytes(v.into()),
-			ValueInner::RecordId(v) => Value::Thing(v.try_into()?),
+			ValueInner::RecordId(v) => Value::RecordId(v.try_into()?),
 			ValueInner::File(v) => Value::File(v.into()),
 		};
 
@@ -87,7 +87,7 @@ impl TryFrom<Value> for ValueProto {
 			Value::Object(object) => ValueInner::Object(object.try_into()?),
 			Value::Geometry(geometry) => ValueInner::Geometry(geometry.try_into()?),
 			Value::Bytes(bytes) => ValueInner::Bytes(bytes.0.into()),
-			Value::Thing(thing) => ValueInner::RecordId(RecordIdProto {
+			Value::RecordId(thing) => ValueInner::RecordId(RecordIdProto {
 				id: Some(thing.key.try_into()?),
 				table: thing.table,
 			}),

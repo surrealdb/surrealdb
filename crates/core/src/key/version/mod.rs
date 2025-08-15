@@ -13,7 +13,7 @@ pub(crate) struct Version {
 }
 
 impl KVKey for Version {
-	type ValueType = crate::kvs::version::Version;
+	type ValueType = crate::kvs::version::MajorVersion;
 }
 
 pub fn new() -> Version {
