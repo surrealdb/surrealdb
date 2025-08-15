@@ -17,7 +17,7 @@ impl Document {
 		// Get the record id for the document
 		// If the document has no id, it means there
 		// is no schema with computed fields for it either
-		if let Some(rid) = self.id().ok() {
+		if let Ok(rid) = self.id() {
 			// Get the fields to compute
 			let fields = self.fd(ctx, opt).await?;
 
