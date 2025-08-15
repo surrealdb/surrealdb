@@ -265,7 +265,7 @@ impl Collected {
 			Arc::new(Value::Null)
 		} else {
 			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-			txn.get_record(ns, db, &record_id.table, &record_id.key, None).await?
+			txn.get_record(ns, db, &record_id.table, &record_id.key, opt.version).await?
 		};
 		// Parse the data from the store
 		let val = Operable::Value(val);

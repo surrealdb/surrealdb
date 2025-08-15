@@ -90,6 +90,7 @@ impl SelectStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored and the version is set if specified
+
 		let version = match &self.version {
 			Some(v) => Some(
 				stk.run(|stk| v.compute(stk, ctx, opt, doc))
@@ -101,6 +102,7 @@ impl SelectStatement {
 			_ => None,
 		};
 		let opt = Arc::new(opt.clone().with_version(version));
+		tracing::warn!("version: {:?}", opt.version);
 		// Extract the limits
 		i.setup_limit(stk, ctx, &opt, &stm).await?;
 		// Fail for multiple targets without a limit

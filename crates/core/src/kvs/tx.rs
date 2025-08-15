@@ -1876,10 +1876,11 @@ impl Transaction {
 		version: Option<u64>,
 	) -> Result<Arc<Value>> {
 		// Cache is not versioned
+		tracing::warn!("get_record: {ns}/{db}/{tb}/{id} {version:?}");
 		if version.is_some() {
 			// Fetch the record from the datastore
 			let key = crate::key::thing::new(ns, db, tb, id);
-			return match self.get(&key, version).await? {
+			match self.get(&key, version).await? {
 				// The value exists in the datastore
 				Some(mut val) => {
 					// Inject the id field into the document
@@ -1893,7 +1894,7 @@ impl Transaction {
 				}
 				// The value is not in the datastore
 				None => Ok(Arc::new(Value::None)),
-			};
+			}
 		} else {
 			let qey = cache::tx::Lookup::Record(ns, db, tb, id);
 			match self.cache.get(&qey) {
