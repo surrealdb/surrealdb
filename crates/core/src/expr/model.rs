@@ -28,6 +28,10 @@ use crate::val::Value;
 #[cfg(feature = "ml")]
 const ARGUMENTS: &str = "The model expects 1 argument. The argument can be either a number, an object, or an array of numbers.";
 
+pub fn get_model_path(ns: &str, db: &str, name: &str, version: &str, hash: &str) -> String {
+	format!("ml/{ns}/{db}/{name}-{version}-{hash}.surml")
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct Model {
@@ -66,7 +70,10 @@ impl Model {
 		};
 
 		// Calculate the model path
-		let path = format!("ml/{}/{}/{}-{}-{}.surml", ns, db, self.name, self.version, val.hash);
+		let path = {
+			let (ns, db) = opt.ns_db()?;
+			get_model_path(&ns, &db, &self.name, &self.version, &val.hash)
+		};
 		// Check permissions
 		if opt.check_perms(Action::View)? {
 			match &val.permissions {

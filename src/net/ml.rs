@@ -34,7 +34,7 @@ mod implementation {
 	use crate::core::dbs::Session;
 	use crate::core::dbs::capabilities::RouteTarget;
 	use crate::core::expr::statements::{DefineModelStatement, DefineStatement};
-	use crate::core::expr::{Expr, Ident, LogicalPlan, TopLevelExpr};
+	use crate::core::expr::{Expr, Ident, LogicalPlan, TopLevelExpr, get_model_path};
 	use crate::core::iam::check::check_ns_db;
 	use crate::core::iam::{Action, ResourceKind};
 	use crate::core::kvs::{LockType, TransactionType};
@@ -82,10 +82,12 @@ mod implementation {
 		// Calculate the hash of the model file
 		let hash = crate::core::obs::hash(&data);
 		// Calculate the path of the model file
-		let path = format!(
-			"ml/{nsv}/{dbv}/{}-{}-{hash}.surml",
-			file.header.name.to_string(),
-			file.header.version.to_string()
+		let path = get_model_path(
+			&nsv,
+			&dbv,
+			&file.header.name.to_string(),
+			&file.header.version.to_string(),
+			&hash,
 		);
 		// Insert the file data in to the store
 		crate::core::obs::put(&path, data).await.map_err(ResponseError)?;

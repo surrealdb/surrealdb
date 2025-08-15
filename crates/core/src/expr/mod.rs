@@ -88,7 +88,7 @@ pub use self::kind::{Kind, KindLiteral};
 pub use self::limit::Limit;
 pub use self::literal::Literal;
 pub use self::mock::Mock;
-pub use self::model::Model;
+pub use self::model::{Model, get_model_path};
 pub use self::operation::Operation;
 pub use self::operator::{AssignOperator, BinaryOperator, PostfixOperator, PrefixOperator};
 pub use self::order::Order;
