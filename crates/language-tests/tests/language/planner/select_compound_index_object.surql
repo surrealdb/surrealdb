@@ -20,7 +20,7 @@ value = "[{ id: t:{ id: 4, r: o:2 } }]"
 value = "[{ id: t:{ id: 4, r: o:2 } }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { index: 'idx', operator: '>', value: [o:2, 2022] }, table: 't' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+value = "[{ detail: { plan: { index: 'idx', prefix: [o:2], ranges: [{ operator: '>', value: 2022 }] }, table: 't' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 */
 BEGIN;

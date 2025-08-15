@@ -104,6 +104,8 @@ impl PlanBuilder {
 					}
 				}
 			}
+
+			println!("compound_index: {:?}", compound_index);
 			if let Some((_, io)) = compound_index {
 				// Evaluate whether we can use index-only access (no table lookups needed)
 				let record_strategy =
@@ -226,6 +228,7 @@ impl PlanBuilder {
 	}
 
 	/// Check if a compound index can be used.
+	/// Returns the number of columns involved, and the index option
 	fn check_compound_index_all_and(
 		&self,
 		ixr: IndexReference,
@@ -236,54 +239,76 @@ impl PlanBuilder {
 			return None;
 		}
 		// Count contiguous values (from the left) that will be part of an equal search
-		let mut contigues_equals_values = 0;
-		// Collect ranges parts following the first equals value
+		let mut continues_equals_values = 0;
+		// Collect the range parts for any column
 		let mut range_parts = vec![];
-		for vals in &columns {
-			if vals.is_empty() || !range_parts.is_empty() {
+		for (col, vals) in columns.iter().enumerate() {
+			// If the column is empty, we can stop here.
+			if vals.is_empty() {
 				break;
 			}
-			let mut nullish = 0;
+			let mut is_equality = false;
 			for iop in vals {
+				println!("col: {col} - iop: {iop:?}");
 				match iop {
 					IndexOperator::Equality(val) => {
-						if range_parts.is_empty() && val.is_nullish() {
-							nullish += 1;
+						if !val.is_nullish() {
+							is_equality = true;
 						}
 					}
-					IndexOperator::RangePart(_, val) => {
-						if val.is_nullish() {
-							nullish += 1;
-						} else {
-							range_parts.push(iop.clone());
+					IndexOperator::RangePart(bo, val) => {
+						if !val.is_nullish() {
+							range_parts.push((bo.clone(), val.clone()));
 						}
 					}
 					_ => {
-						// Any other operator is not compatible with a compound index
-						break;
+						return None;
 					}
 				}
 			}
-			if nullish == vals.len() {
+			if !is_equality {
 				break;
 			}
-			contigues_equals_values += 1;
+			continues_equals_values += 1;
 		}
-		//
-		if contigues_equals_values == 0 && range_parts.is_empty() {
+
+		if continues_equals_values == 0 {
+			if !range_parts.is_empty() {
+				return Some((
+					continues_equals_values + 1,
+					IndexOption::new(
+						ixr,
+						None,
+						IdiomPosition::None,
+						IndexOperator::Range(vec![], range_parts),
+					),
+				));
+			}
 			return None;
 		}
-		let equal_combinations = Self::cartesian_equals_product(&columns, contigues_equals_values);
+
+		let equal_combinations = Self::cartesian_equals_product(&columns, continues_equals_values);
 		if equal_combinations.len() == 1 {
-			let val: Vec<Value> =
+			let equals: Vec<Value> =
 				equal_combinations[0].iter().map(|v| v.as_ref().clone()).collect();
+			if !range_parts.is_empty() {
+				return Some((
+					continues_equals_values + 1,
+					IndexOption::new(
+						ixr,
+						None,
+						IdiomPosition::None,
+						IndexOperator::Range(equals, range_parts),
+					),
+				));
+			}
 			return Some((
-				contigues_equals_values,
+				continues_equals_values,
 				IndexOption::new(
 					ixr,
 					None,
 					IdiomPosition::None,
-					IndexOperator::Equality(Arc::new(Value::Array(Array(val)))),
+					IndexOperator::Equality(Arc::new(Value::Array(Array(equals)))),
 				),
 			));
 		}
@@ -295,7 +320,7 @@ impl PlanBuilder {
 			})
 			.collect();
 		Some((
-			contigues_equals_values,
+			continues_equals_values,
 			IndexOption::new(
 				ixr,
 				None,
@@ -411,6 +436,7 @@ pub(super) enum IndexOperator {
 	Union(Arc<Value>),
 	Join(Vec<IndexOption>),
 	RangePart(BinaryOperator, Arc<Value>),
+	Range(Vec<Value>, Vec<(BinaryOperator, Arc<Value>)>),
 	Matches(String, MatchesOperator),
 	Knn(Arc<Vec<Number>>, u32),
 	Ann(Arc<Vec<Number>>, u32, u32),
@@ -494,6 +520,20 @@ impl IndexOption {
 			IndexOperator::RangePart(op, v) => {
 				e.insert("operator", Value::from(op.to_string()));
 				e.insert("value", v.as_ref().to_owned());
+			}
+			IndexOperator::Range(equals, ranges) => {
+				e.insert("prefix", Value::from(Array::from(equals.clone())));
+				let a: Vec<Value> = ranges
+					.iter()
+					.map(|(o, v)| {
+						let o = Object::from(BTreeMap::from([
+							("operator", Value::from(o.to_string())),
+							("value", v.as_ref().to_owned()),
+						]));
+						Value::from(o)
+					})
+					.collect();
+				e.insert("ranges", Value::from(a));
 			}
 			IndexOperator::Knn(a, k) => {
 				let expr = NearestNeighbor::KTree(*k).to_string();
