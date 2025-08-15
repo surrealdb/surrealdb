@@ -72,7 +72,7 @@ impl Model {
 		// Calculate the model path
 		let path = {
 			let (ns, db) = opt.ns_db()?;
-			get_model_path(&ns, &db, &self.name, &self.version, &val.hash)
+			get_model_path(ns, db, &self.name, &self.version, &val.hash)
 		};
 		// Check permissions
 		if opt.check_perms(Action::View)? {
