@@ -46,7 +46,6 @@ fn bench_executor(c: &mut Criterion) {
 		"CREATE person:one; CREATE person:two; CREATE person:three; CREATE person:four; CREATE person:five;",
 		"SELECT * FROM person;"
 	);
-	query!(c, select_future, "SELECT * FROM <future>{5};");
 	query!(
 		c,
 		update_simple,

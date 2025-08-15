@@ -57,6 +57,7 @@ pub struct DefineFieldStatement {
 	pub readonly: bool,
 	pub value: Option<Expr>,
 	pub assert: Option<Expr>,
+	pub computed: Option<Expr>,
 	pub default: DefineDefault,
 	pub permissions: Permissions,
 	pub comment: Option<Strand>,
@@ -98,6 +99,9 @@ impl Display for DefineFieldStatement {
 		if let Some(ref v) = self.assert {
 			write!(f, " ASSERT {v}")?
 		}
+		if let Some(ref v) = self.computed {
+			write!(f, " COMPUTED {v}")?
+		}
 		if let Some(ref v) = self.reference {
 			write!(f, " REFERENCE {v}")?
 		}
@@ -130,6 +134,7 @@ impl From<DefineFieldStatement> for crate::expr::statements::DefineFieldStatemen
 			field_kind: v.field_kind.map(Into::into),
 			value: v.value.map(Into::into),
 			assert: v.assert.map(Into::into),
+			computed: v.computed.map(Into::into),
 			default: v.default.into(),
 			permissions: v.permissions.into(),
 			comment: v.comment,
@@ -149,6 +154,7 @@ impl From<crate::expr::statements::DefineFieldStatement> for DefineFieldStatemen
 			field_kind: v.field_kind.map(Into::into),
 			value: v.value.map(Into::into),
 			assert: v.assert.map(Into::into),
+			computed: v.computed.map(Into::into),
 			default: v.default.into(),
 			permissions: v.permissions.into(),
 			comment: v.comment,

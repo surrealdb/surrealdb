@@ -6,6 +6,7 @@ use reblessive::tree::Stk;
 use super::IgnoreError;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Action, Notification, Options, Statement};
+use crate::doc::compute::DocKind;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::FlowResultExt as _;
@@ -41,6 +42,10 @@ impl Document {
 		if !self.changed() {
 			return Ok(());
 		}
+
+		// Ensure computed fields are computed in advance
+		self.computed_fields(stk, ctx, opt, DocKind::Initial).await?;
+		self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
 
 		// Get all live queries for this table
 		let lvs = self.lv(ctx, opt).await?;

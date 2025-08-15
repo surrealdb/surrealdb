@@ -653,6 +653,7 @@ async fn compute_show(
 										rid: None,
 										ir: None,
 										doc: redacted_gr.into(),
+										fields_computed: false,
 									}),
 								)
 								.await
@@ -799,6 +800,7 @@ pub async fn revoke_grant(
 										rid: None,
 										ir: None,
 										doc: redacted_gr.into(),
+										fields_computed: false,
 									}),
 								)
 								.await

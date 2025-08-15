@@ -340,6 +340,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			},
 			comment: None,
 			reference: None,
+			computed: None,
 		})))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
 			kind: DefineKind::Default,

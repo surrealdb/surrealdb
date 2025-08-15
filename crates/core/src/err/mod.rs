@@ -1397,6 +1397,26 @@ pub enum Error {
 
 	#[error("Failed to connect to bucket: {0}")]
 	BucketConnectionFailed(String),
+
+	/// The `COMPUTED` clause cannot be used with other clauses altering or
+	/// working with the value
+	#[error("Cannot use the `{0}` keyword with `COMPUTED`.")]
+	ComputedKeywordConflict(String),
+
+	/// The `COMPUTED` clause cannot be used with other nested fields
+	#[error("Cannot define field `{0}` as `COMPUTED` since a nested field `{1}` already exists.")]
+	ComputedNestedFieldConflict(String, String),
+
+	/// The `COMPUTED` clause cannot be used with other nested fields
+	#[error("Cannot define nested field `{0}` as parent field `{1}` is a `COMPUTED` field.")]
+	ComputedParentFieldConflict(String, String),
+
+	#[error("Cannot define field `{0}` as `COMPUTED` fields must be top-level.")]
+	ComputedNestedField(String),
+
+	/// Cannot use the `{0}` keyword on the `id` field
+	#[error("Cannot use the `{0}` keyword on the `id` field.")]
+	IdFieldKeywordConflict(String),
 }
 
 impl Error {
