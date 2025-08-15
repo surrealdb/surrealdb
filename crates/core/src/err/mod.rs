@@ -1398,7 +1398,8 @@ pub enum Error {
 	#[error("Failed to connect to bucket: {0}")]
 	BucketConnectionFailed(String),
 
-	/// The `COMPUTED` clause cannot be used with other clauses altering or working with the value
+	/// The `COMPUTED` clause cannot be used with other clauses altering or
+	/// working with the value
 	#[error("Cannot use the `{0}` keyword with `COMPUTED`.")]
 	ComputedKeywordConflict(String),
 

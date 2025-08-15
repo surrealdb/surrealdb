@@ -1,24 +1,25 @@
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::Document;
-use reblessive::tree::Stk;
-use crate::expr::FlowResultExt as _;
 use crate::err::Error;
+use crate::expr::FlowResultExt as _;
 
 impl Document {
 	pub(super) async fn computed_fields(
-        &mut self, 
-        stk: &mut Stk, 
-        ctx: &Context, 
-        opt: &Options, 
-        doc_kind: DocKind,
-    ) -> anyhow::Result<()> {
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc_kind: DocKind,
+	) -> anyhow::Result<()> {
 		// Get the record id for the document
 		let rid = self.id()?;
-        // Get the fields to compute
-        let fields = self.fd(ctx, opt).await?;
+		// Get the fields to compute
+		let fields = self.fd(ctx, opt).await?;
 
-        // Get the document to compute the fields for
+		// Get the document to compute the fields for
 		let doc = match doc_kind {
 			DocKind::Initial => &mut self.initial,
 			DocKind::Current => &mut self.current,
@@ -26,15 +27,15 @@ impl Document {
 			DocKind::CurrentReduced => &mut self.current_reduced,
 		};
 
-        // Check if the fields have already been computed
-        if doc.fields_computed {
-            return Ok(());
-        }
+		// Check if the fields have already been computed
+		if doc.fields_computed {
+			return Ok(());
+		}
 
-        // Compute the fields
+		// Compute the fields
 		for fd in fields.iter() {
 			if let Some(computed) = &fd.computed {
-				let mut val = computed.compute(stk, ctx, opt, Some(&doc)).await.catch_return()?;
+				let mut val = computed.compute(stk, ctx, opt, Some(doc)).await.catch_return()?;
 				if let Some(kind) = fd.field_kind.as_ref() {
 					val = val.coerce_to_kind(kind).map_err(|e| Error::FieldCoerce {
 						thing: rid.to_string(),
@@ -47,8 +48,8 @@ impl Document {
 			}
 		}
 
-        // Mark the fields as computed
-        doc.fields_computed = true;
+		// Mark the fields as computed
+		doc.fields_computed = true;
 
 		Ok(())
 	}

@@ -69,7 +69,7 @@ impl DefineFieldStatement {
 
 		// Get the NS and DB
 		let (ns, db) = opt.ns_db()?;
-		
+
 		// Validate computed options
 		self.validate_computed_options(ns, db, ctx.tx()).await?;
 
@@ -274,7 +274,7 @@ impl DefineFieldStatement {
 	}
 
 	pub(crate) async fn validate_computed_options(
-		&self, 
+		&self,
 		ns: &str,
 		db: &str,
 		txn: Arc<Transaction>,
@@ -292,21 +292,30 @@ impl DefineFieldStatement {
 			ensure!(self.value.is_none(), Error::ComputedKeywordConflict("VALUE".into()));
 			ensure!(self.assert.is_none(), Error::ComputedKeywordConflict("ASSERT".into()));
 			ensure!(self.reference.is_none(), Error::ComputedKeywordConflict("REFERENCE".into()));
-			ensure!(matches!(self.default, DefineDefault::None), Error::ComputedKeywordConflict("DEFAULT".into()));
+			ensure!(
+				matches!(self.default, DefineDefault::None),
+				Error::ComputedKeywordConflict("DEFAULT".into())
+			);
 			ensure!(!self.flex, Error::ComputedKeywordConflict("FLEXIBLE".into()));
 			ensure!(!self.readonly, Error::ComputedKeywordConflict("READONLY".into()));
 
 			// Ensure no nested fields exist
 			for field in fields.iter() {
 				if field.name.starts_with(&self.name) && field.name != self.name {
-					bail!(Error::ComputedNestedFieldConflict(self.name.to_string(), field.name.to_string()));
+					bail!(Error::ComputedNestedFieldConflict(
+						self.name.to_string(),
+						field.name.to_string()
+					));
 				}
 			}
 		} else {
 			// Ensure no parent fields are computed
 			for field in fields.iter() {
 				if self.name.starts_with(&field.name) && field.name != self.name {
-					bail!(Error::ComputedParentFieldConflict(self.name.to_string(), field.name.to_string()));
+					bail!(Error::ComputedParentFieldConflict(
+						self.name.to_string(),
+						field.name.to_string()
+					));
 				}
 			}
 		}
@@ -351,7 +360,10 @@ impl DefineFieldStatement {
 
 				ensure!(self.assert.is_none(), Error::RefsTypeConflict("ASSERT".into(), typename));
 
-				ensure!(self.computed.is_none(), Error::RefsTypeConflict("COMPUTED".into(), typename));
+				ensure!(
+					self.computed.is_none(),
+					Error::RefsTypeConflict("COMPUTED".into(), typename)
+				);
 
 				ensure!(!self.flex, Error::RefsTypeConflict("FLEXIBLE".into(), typename));
 
