@@ -82,8 +82,8 @@ pub(crate) enum Iterable {
 #[derive(Debug)]
 pub(crate) enum Operable {
 	Value(Arc<Record>),
-	Insert(Arc<Record>, Arc<Record>),
-	Relate(RecordId, Arc<Record>, RecordId, Option<Arc<Record>>),
+	Insert(Arc<Record>, Arc<Value>),
+	Relate(RecordId, Arc<Record>, RecordId, Option<Arc<Value>>),
 	Count(usize),
 }
 

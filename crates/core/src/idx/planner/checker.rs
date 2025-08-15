@@ -194,9 +194,9 @@ impl CheckerCacheEntry {
 			let txn = ctx.tx();
 			let val =
 				txn.get_record(db.namespace_id, db.database_id, &rid.table, &rid.key, None).await?;
-			if !val.data.is_nullish() {
-				let (value, truthy) = {
-					let mut cursor_doc = CursorDoc {
+			if !val.data.as_ref().is_nullish() {
+				let (record, truthy) = {
+					let cursor_doc = CursorDoc {
 						rid: Some(rid.clone()),
 						ir: None,
 						doc: val.into(),
@@ -207,10 +207,10 @@ impl CheckerCacheEntry {
 						.await
 						.catch_return()?
 						.is_truthy();
-					(cursor_doc.doc.as_arc(), truthy)
+					(cursor_doc.doc.into_read_only(), truthy)
 				};
 				return Ok(CheckerCacheEntry {
-					record: Some((rid, value)),
+					record: Some((rid, Arc::new(record))),
 					truthy,
 				});
 			}

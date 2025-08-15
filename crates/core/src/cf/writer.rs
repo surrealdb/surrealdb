@@ -98,7 +98,7 @@ impl Writer {
 							// because we cannot otherwise resolve operations such as "replace" and
 							// "remove".
 							let patches_to_create_previous =
-								current.as_ref().diff(&previous.as_ref());
+								current.as_ref().diff(previous.as_ref());
 							TableMutation::SetWithDiff(
 								id,
 								current.into_owned(),

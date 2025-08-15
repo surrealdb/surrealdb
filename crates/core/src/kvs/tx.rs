@@ -1888,7 +1888,7 @@ impl Transaction {
 						table: tb.to_owned(),
 						key: id.clone(),
 					};
-					record.data.def(&rid);
+					record.data.to_mut().def(&rid);
 					Ok(Arc::new(record))
 				}
 				// The value is not in the datastore
@@ -1911,7 +1911,7 @@ impl Transaction {
 								table: tb.to_owned(),
 								key: id.clone(),
 							};
-							record.data.def(&rid);
+							record.data.to_mut().def(&rid);
 							let record = Arc::new(record);
 							let entry = cache::tx::Entry::Val(record.clone());
 							self.cache.insert(qey, entry);

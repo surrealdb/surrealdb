@@ -168,8 +168,6 @@ impl Document {
 				out.del(stk, ctx, opt, v).await?;
 			}
 		}
-		// Remove metadata fields on output
-		out.cut(&*META);
 		// Output result
 		Ok(out)
 	}

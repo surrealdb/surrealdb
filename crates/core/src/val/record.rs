@@ -1,19 +1,66 @@
-use revision::revisioned;
+use std::mem;
+use std::sync::Arc;
+
+use revision::error::Error;
+use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
 
 use crate::val::Value;
 
-#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub(crate) enum Data {
+	Mutable(Value),
+	ReadOnly(Arc<Value>),
+}
+
+impl Data {
+	pub(crate) fn as_ref(&self) -> &Value {
+		match self {
+			Data::Mutable(value) => value,
+			Data::ReadOnly(arc) => arc.as_ref(),
+		}
+	}
+
+	pub(crate) fn to_mut(&mut self) -> &mut Value {
+		match self {
+			Data::Mutable(value) => value,
+			Data::ReadOnly(arc) => Arc::make_mut(arc),
+		}
+	}
+
+	pub(crate) fn read_only(&mut self) -> Arc<Value> {
+		match self {
+			Data::ReadOnly(arc) => arc.clone(),
+			Data::Mutable(value) => {
+				let value = mem::take(value);
+				let arc = Arc::new(value);
+				*self = Data::ReadOnly(arc.clone());
+				arc
+			}
+		}
+	}
+}
+
+impl Default for Data {
+	fn default() -> Self {
+		Self::Mutable(Value::default())
+	}
+}
+
+/// Represents a record stored in the database
+///
+/// `Data` is the type of the data stored in the record
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Record {
 	pub(crate) metadata: Option<Metadata>,
 	// TODO (DB-655): Switch to `Object`.
-	pub(crate) data: Value,
+	pub(crate) data: Data,
 }
 
 impl Record {
-	pub(crate) fn new(data: Value) -> Self {
+	pub(crate) fn new(data: Data) -> Self {
 		Self {
 			metadata: None,
 			data,
@@ -21,13 +68,13 @@ impl Record {
 	}
 
 	pub const fn is_edge(&self) -> bool {
-		match &self.metadata {
+		matches!(
+			&self.metadata,
 			Some(Metadata {
 				record_type: Some(RecordType::Edge),
 				..
-			}) => true,
-			_ => false,
-		}
+			})
+		)
 	}
 
 	pub(crate) fn set_record_type(&mut self, rtype: RecordType) {
@@ -44,15 +91,40 @@ impl Record {
 	}
 }
 
+impl Revisioned for Record {
+	#[inline]
+	fn serialize_revisioned<W: std::io::Write>(&self, writer: &mut W) -> Result<(), Error> {
+		self.metadata.serialize_revisioned(writer)?;
+		match &self.data {
+			Data::Mutable(v) => v.serialize_revisioned(writer),
+			Data::ReadOnly(v) => v.serialize_revisioned(writer),
+		}
+	}
+
+	#[inline]
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, Error> {
+		let metadata: Option<Metadata> = Revisioned::deserialize_revisioned(reader)?;
+		let data = Value::deserialize_revisioned(reader).map(Data::Mutable)?;
+		Ok(Self {
+			metadata,
+			data,
+		})
+	}
+
+	fn revision() -> u16 {
+		1
+	}
+}
+
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct Metadata {
 	record_type: Option<RecordType>,
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) enum RecordType {
 	Edge,

@@ -19,7 +19,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::idx::planner::RecordStrategy;
 use crate::idx::planner::iterators::IteratorRecord;
 use crate::kvs::cache;
-use crate::val::record::Record;
+use crate::val::record::{Data, Record};
 use crate::val::{RecordId, Value};
 
 pub(crate) struct Document {
@@ -47,42 +47,35 @@ pub(crate) struct CursorDoc {
 
 #[derive(Clone, Debug)]
 pub(crate) struct CursorRecord {
-	mutable: Record,
-	read_only: Option<Arc<Record>>,
+	record: Record,
 }
 
 impl CursorRecord {
 	pub(crate) fn to_mut(&mut self) -> &mut Value {
-		if let Some(ro) = self.read_only.take() {
-			self.mutable = ro.as_ref().clone();
-		}
-		&mut self.mutable.data
+		self.record.data.to_mut()
 	}
 
-	pub(crate) fn as_arc(&mut self) -> Arc<Record> {
-		match &self.read_only {
-			None => {
-				let v = Arc::new(mem::take(&mut self.mutable));
-				self.read_only = Some(v.clone());
-				v
-			}
-			Some(v) => v.clone(),
+	pub(crate) fn as_arc(&mut self) -> Arc<Value> {
+		self.record.data.read_only()
+	}
+
+	pub(crate) fn into_read_only(mut self) -> Record {
+		if let Data::Mutable(value) = &mut self.record.data {
+			let value = mem::take(value);
+			let arc = Arc::new(value);
+			self.record.data = Data::ReadOnly(arc);
 		}
+		self.record
 	}
 
 	pub(crate) fn as_ref(&self) -> &Value {
-		if let Some(ro) = &self.read_only {
-			&ro.data
-		} else {
-			&self.mutable.data
-		}
+		self.record.data.as_ref()
 	}
 
-	pub(crate) fn into_owned(self) -> Value {
-		if let Some(ro) = &self.read_only {
-			ro.data.clone()
-		} else {
-			self.mutable.data
+	pub(crate) fn into_owned(mut self) -> Value {
+		match self.record.data {
+			Data::ReadOnly(ref mut arc) => mem::take(Arc::make_mut(arc)),
+			Data::Mutable(value) => value,
 		}
 	}
 }
@@ -90,20 +83,13 @@ impl CursorRecord {
 impl Deref for CursorRecord {
 	type Target = Record;
 	fn deref(&self) -> &Self::Target {
-		if let Some(ro) = &self.read_only {
-			&ro
-		} else {
-			&self.mutable
-		}
+		&self.record
 	}
 }
 
 impl DerefMut for CursorRecord {
 	fn deref_mut(&mut self) -> &mut Self::Target {
-		if let Some(ro) = self.read_only.take() {
-			self.mutable = ro.as_ref().clone();
-		}
-		&mut self.mutable
+		&mut self.record
 	}
 }
 
@@ -123,10 +109,9 @@ impl CursorDoc {
 }
 
 impl From<Arc<Record>> for CursorRecord {
-	fn from(record: Arc<Record>) -> Self {
+	fn from(arc: Arc<Record>) -> Self {
 		Self {
-			mutable: Default::default(),
-			read_only: Some(record),
+			record: arc.as_ref().clone(),
 		}
 	}
 }
@@ -134,17 +119,15 @@ impl From<Arc<Record>> for CursorRecord {
 impl From<Value> for CursorRecord {
 	fn from(value: Value) -> Self {
 		Self {
-			mutable: Record::new(value),
-			read_only: None,
+			record: Record::new(Data::Mutable(value)),
 		}
 	}
 }
 
 impl From<Arc<Value>> for CursorRecord {
-	fn from(value: Arc<Value>) -> Self {
+	fn from(arc: Arc<Value>) -> Self {
 		Self {
-			mutable: Default::default(),
-			read_only: Some(Arc::new(Record::new(value.as_ref().clone()))),
+			record: Record::new(Data::ReadOnly(arc)),
 		}
 	}
 }
@@ -189,7 +172,7 @@ impl Document {
 		id: Option<Arc<RecordId>>,
 		ir: Option<Arc<IteratorRecord>>,
 		r#gen: Option<Ident>,
-		val: Arc<Value>,
+		val: Arc<Record>,
 		extras: Workable,
 		retry: bool,
 		rs: RecordStrategy,
