@@ -16,7 +16,7 @@ use crate::expr::part::{FindRecursionPlan, Next, NextMethod, Part, Skip, SplitBy
 use crate::expr::statements::select::SelectStatement;
 use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Graph, Idiom, Literal};
 use crate::fnc::idiom;
-use crate::val::{RecordId, RecordIdKey, Value};
+use crate::val::{RecordIdKey, Value};
 
 impl Value {
 	/// Asynchronous method for getting a local or remote field from a `Value`
@@ -169,27 +169,6 @@ impl Value {
 				},
 				// Current value at path is an object
 				Value::Object(v) => match p {
-					// If requesting an `id` field, check if it is a complex Record ID
-					Part::Field(f) if f.is_id() && path.len() > 1 => match v.get(f.as_str()) {
-						Some(Value::RecordId(RecordId {
-							key: RecordIdKey::Object(v),
-							..
-						})) => {
-							let v = Value::Object(v.clone());
-							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
-						}
-						Some(Value::RecordId(RecordId {
-							key: RecordIdKey::Array(v),
-							..
-						})) => {
-							let v = Value::Array(v.clone());
-							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
-						}
-						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
-						None => {
-							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
-						}
-					},
 					Part::Graph(_) => match v.rid() {
 						Some(v) => {
 							let v = Value::RecordId(v);
@@ -461,24 +440,63 @@ impl Value {
 						Part::Optional => {
 							stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await
 						}
-						// This is a remote field expression
-						_ => {
+						// This is a remote field expression with one exception
+						// If the RecordId is array-based, and we try to access an index,
+						// then we return that index of the RecordId's array.
+						p => {
+							// Discover what the path is that we need to continue with
+							let next = match (p, &val.key) {
+								// If the computed value is a number, and the RecordIdKey is an
+								// array, then we return the value at the index of the
+								// array. Otherwise, we return the computed value and the
+								// next path part.
+								(Part::Value(x), RecordIdKey::Array(_)) => {
+									match stk
+										.run(|stk| x.compute(stk, ctx, opt, doc))
+										.await
+										.catch_return()?
+									{
+										Value::Number(n) => {
+											let RecordIdKey::Array(arr) = val.key else {
+												unreachable!(
+													"Previously asserted that the RecordIdKey is an array, but it is not"
+												);
+											};
+
+											return match arr.get(n.to_usize()) {
+												Some(v) => {
+													stk.run(|stk| {
+														v.get(stk, ctx, opt, doc, path.next())
+													})
+													.await
+												}
+												None => Ok(Value::None),
+											};
+										}
+										x => &[&[Part::Value(x.into_literal())], path.next()]
+											.concat(),
+									}
+								}
+
+								// .* on a record id means fetch the record's contents
+								// The above select statement results in an object, if
+								// we apply `.*` on that, we can an array with the record's
+								// values instead of just the content. Therefore, if we
+								// encounter the first part to be `.*`, we simply skip it here
+								(Part::All, _) => path.next(),
+
+								// No special case, fetch the document and continue processing the
+								// path
+								_ => path,
+							};
+
+							// Fetch the record id's contents
 							let stm = SelectStatement {
 								expr: Fields::Select(vec![Field::All]),
 								what: vec![Expr::Literal(Literal::RecordId(val.into_literal()))],
 								..SelectStatement::default()
 							};
 							let v = stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.first();
-
-							// .* on a record id means fetch the record's contents
-							// The above select statement results in an object, if
-							// we apply `.*` on that, we can an array with the record's
-							// values instead of just the content. Therefore, if we
-							// encounter the first part to be `.*`, we simply skip it here
-							let next = match path.first() {
-								Some(Part::All) => path.next(),
-								_ => path,
-							};
 
 							// Continue processing the path on the now fetched record
 							stk.run(|stk| v.get(stk, ctx, opt, None, next)).await
@@ -532,6 +550,7 @@ mod tests {
 	use crate::expr::idiom::Idiom;
 	use crate::sql::idiom::Idiom as SqlIdiom;
 	use crate::syn;
+	use crate::val::RecordId;
 
 	#[tokio::test]
 	async fn get_none() {

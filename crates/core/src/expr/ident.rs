@@ -61,10 +61,6 @@ impl Ident {
 		self.0.to_string()
 	}
 
-	/// Checks if this field is the `id` field
-	pub(crate) fn is_id(&self) -> bool {
-		self.0.as_str() == "id"
-	}
 	/// Checks if this field is the `type` field
 	pub(crate) fn is_type(&self) -> bool {
 		self.0.as_str() == "type"
