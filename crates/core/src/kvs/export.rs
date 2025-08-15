@@ -429,18 +429,15 @@ impl Transaction {
 	/// # Arguments
 	///
 	/// * `v` - The value to be processed.
-	/// * `records_relate` - A mutable reference to a vector that holds graph
-	///   edge records.
-	/// * `records_normal` - A mutable reference to a vector that holds normal
-	///   records.
-	/// * `is_tombstone` - An optional boolean indicating if the record is a
-	///   tombstone.
+	/// * `records_relate` - A mutable reference to a vector that holds graph edge records.
+	/// * `records_normal` - A mutable reference to a vector that holds normal records.
+	/// * `is_tombstone` - An optional boolean indicating if the record is a tombstone.
 	/// * `version` - An optional version number for the record.
 	///
 	/// # Returns
 	///
-	/// * `String` - Returns the generated SQL command as a string. If no
-	///   command is generated, returns an empty string.
+	/// * `String` - Returns the generated SQL command as a string. If no command is generated,
+	///   returns an empty string.
 	fn process_value(
 		k: thing::ThingKey,
 		mut v: Value,
@@ -503,16 +500,15 @@ impl Transaction {
 	///
 	/// # Arguments
 	///
-	/// * `versioned_values` - A vector of tuples containing the versioned
-	///   values to be exported. Each tuple consists of a key, value, version,
-	///   and a boolean indicating if the record is a tombstone.
-	/// * `chn` - A reference to the channel to which the SQL commands will be
-	///   sent.
+	/// * `versioned_values` - A vector of tuples containing the versioned values to be exported.
+	///   Each tuple consists of a key, value, version, and a boolean indicating if the record is a
+	///   tombstone.
+	/// * `chn` - A reference to the channel to which the SQL commands will be sent.
 	///
 	/// # Returns
 	///
-	/// * `Result<()>` - Returns `Ok(())` if the operation is successful, or an
-	///   `Error` if an error occurs.
+	/// * `Result<()>` - Returns `Ok(())` if the operation is successful, or an `Error` if an error
+	///   occurs.
 	async fn export_versioned_data(
 		&self,
 		versioned_values: Vec<(Vec<u8>, Vec<u8>, u64, bool)>,
@@ -595,15 +591,14 @@ impl Transaction {
 	///
 	/// # Arguments
 	///
-	/// * `regular_values` - A vector of tuples containing the regular values to
-	///   be exported. Each tuple consists of a key and a value.
-	/// * `chn` - A reference to the channel to which the SQL commands will be
-	///   sent.
+	/// * `regular_values` - A vector of tuples containing the regular values to be exported. Each
+	///   tuple consists of a key and a value.
+	/// * `chn` - A reference to the channel to which the SQL commands will be sent.
 	///
 	/// # Returns
 	///
-	/// * `Result<()>` - Returns `Ok(())` if the operation is successful, or an
-	///   `Error` if an error occurs.
+	/// * `Result<()>` - Returns `Ok(())` if the operation is successful, or an `Error` if an error
+	///   occurs.
 	async fn export_regular_data(
 		&self,
 		regular_values: Vec<(Vec<u8>, Vec<u8>)>,

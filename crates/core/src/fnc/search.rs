@@ -71,10 +71,9 @@ pub async fn offsets(
 ///
 /// This tuple struct contains:
 /// - `f64`: The accumulated RRF score for the document
-/// - `Value`: The document ID used to identify the same document across
-///   different result lists
-/// - `Vec<Object>`: Collection of original objects from different search
-///   results that will be merged
+/// - `Value`: The document ID used to identify the same document across different result lists
+/// - `Vec<Object>`: Collection of original objects from different search results that will be
+///   merged
 ///
 /// The struct implements comparison traits (`Eq`, `Ord`, `PartialEq`,
 /// `PartialOrd`) based solely on the RRF score (first field) to enable
@@ -112,28 +111,25 @@ impl Ord for RrfDoc {
 ///
 /// # Parameters
 ///
-/// * `ctx` - The execution context for cancellation checking and transaction
-///   management
-/// * `results` - An array of result lists, where each list contains documents
-///   with an "id" field
+/// * `ctx` - The execution context for cancellation checking and transaction management
+/// * `results` - An array of result lists, where each list contains documents with an "id" field
 /// * `limit` - Maximum number of documents to return (must be ≥ 1)
-/// * `rrf_constant` - Optional RRF constant (k) for score calculation (defaults
-///   to 60.0, must be ≥ 0)
+/// * `rrf_constant` - Optional RRF constant (k) for score calculation (defaults to 60.0, must be ≥
+///   0)
 ///
 /// # Returns
 ///
 /// Returns a `Value::Array` containing the top `limit` documents sorted by RRF
 /// score in descending order. Each document includes:
-/// - All original fields from the input documents (merged if the same document
-///   appears in multiple lists)
+/// - All original fields from the input documents (merged if the same document appears in multiple
+///   lists)
 /// - `id`: The document identifier
 /// - `rrf_score`: The computed RRF score as a float
 ///
 /// # Errors
 ///
 /// * `Error::InvalidArguments` - If `limit` < 1 or `rrf_constant` < 0
-/// * Context cancellation errors if the operation is cancelled during
-///   processing
+/// * Context cancellation errors if the operation is cancelled during processing
 ///
 /// # Example
 ///
@@ -281,22 +277,20 @@ enum LinearNorm {
 ///
 /// # Parameters
 ///
-/// * `ctx` - The execution context for cancellation checking and transaction
-///   management
-/// * `results` - An array of result lists, where each list contains documents
-///   with an "id" field
-/// * `weights` - An array of numeric weights corresponding to each result list
-///   (must have same length as results)
+/// * `ctx` - The execution context for cancellation checking and transaction management
+/// * `results` - An array of result lists, where each list contains documents with an "id" field
+/// * `weights` - An array of numeric weights corresponding to each result list (must have same
+///   length as results)
 /// * `limit` - Maximum number of documents to return (must be ≥ 1)
-/// * `norm` - Normalization method: "minmax" for MinMax normalization or
-///   "zscore" for Z-score normalization
+/// * `norm` - Normalization method: "minmax" for MinMax normalization or "zscore" for Z-score
+///   normalization
 ///
 /// # Returns
 ///
 /// Returns a `Value::Array` containing the top `limit` documents sorted by
 /// linear score in descending order. Each document includes:
-/// - All original fields from the input documents (merged if the same document
-///   appears in multiple lists)
+/// - All original fields from the input documents (merged if the same document appears in multiple
+///   lists)
 /// - `id`: The document identifier
 /// - `linear_score`: The computed weighted linear combination score as a float
 ///
@@ -307,23 +301,20 @@ enum LinearNorm {
 ///   - `results` and `weights` arrays have different lengths
 ///   - Any weight is not a numeric value
 ///   - `norm` is not "minmax" or "zscore"
-/// * Context cancellation errors if the operation is cancelled during
-///   processing
+/// * Context cancellation errors if the operation is cancelled during processing
 ///
 /// # Score Extraction
 ///
 /// The function automatically extracts scores from documents using the
 /// following priority:
-/// 1. `distance` field - converted using `1.0 / (1.0 + distance)` (lower
-///    distance = higher score)
+/// 1. `distance` field - converted using `1.0 / (1.0 + distance)` (lower distance = higher score)
 /// 2. `ft_score` field - used directly (full-text search scores)
 /// 3. `score` field - used directly (generic scores)
 /// 4. Rank-based fallback - `1.0 / (1.0 + rank)` if no score field is found
 ///
 /// # Normalization Methods
 ///
-/// * **MinMax**: Scales scores to [0,1] range using `(score - min) / (max -
-///   min)`
+/// * **MinMax**: Scales scores to [0,1] range using `(score - min) / (max - min)`
 /// * **Z-score**: Standardizes scores using `(score - mean) / std_dev`
 ///
 /// # Example

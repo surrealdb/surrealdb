@@ -712,8 +712,7 @@ impl Datastore {
 	/// * `delay` - Duration specifying how long the lease should be valid
 	///
 	/// # Returns
-	/// * `Ok(())` - If the operation completes successfully or if this node
-	///   doesn't have the lease
+	/// * `Ok(())` - If the operation completes successfully or if this node doesn't have the lease
 	/// * `Err` - If any step in the process fails
 	///
 	/// # Errors
@@ -764,13 +763,11 @@ impl Datastore {
 	/// required.
 	///
 	/// The process involves:
-	/// 1. Saving timestamps for current versionstamps using the provided
-	///    timestamp
+	/// 1. Saving timestamps for current versionstamps using the provided timestamp
 	/// 2. Cleaning up old changefeed data from all databases
 	///
 	/// # Parameters
-	/// * `ts` - Explicit timestamp (in seconds since UNIX epoch) to use for
-	///   cleanup operations
+	/// * `ts` - Explicit timestamp (in seconds since UNIX epoch) to use for cleanup operations
 	///
 	/// # Returns
 	/// * `Ok(())` - If the operation completes successfully
@@ -807,13 +804,13 @@ impl Datastore {
 	///
 	/// # Arguments
 	///
-	/// * `interval` - The time interval between compaction runs, used to
-	///   calculate the lease duration
+	/// * `interval` - The time interval between compaction runs, used to calculate the lease
+	///   duration
 	///
 	/// # Returns
 	///
-	/// * `Result<()>` - Ok if the compaction was successful or if another node
-	///   is handling the compaction, Error otherwise
+	/// * `Result<()>` - Ok if the compaction was successful or if another node is handling the
+	///   compaction, Error otherwise
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn index_compaction(&self, interval: Duration) -> Result<()> {
 		let lh = LeaseHandler::new(

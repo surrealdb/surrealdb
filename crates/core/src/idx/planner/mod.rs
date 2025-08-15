@@ -125,10 +125,9 @@ impl<'a> StatementContext<'a> {
 	/// This function evaluates the statement shape (UPDATE/DELETE/etc.),
 	/// WHERE/GROUP/ORDER clauses, selected fields, and table permissions to
 	/// select the most efficient record retrieval strategy:
-	/// - KeysAndValues: required when values must be read (e.g., UPDATE/DELETE;
-	///   WHERE not fully covered by indexes; GROUP BY with fields; ORDER BY
-	///   with fields; non-count projections; or when table permissions are
-	///   Specific).
+	/// - KeysAndValues: required when values must be read (e.g., UPDATE/DELETE; WHERE not fully
+	///   covered by indexes; GROUP BY with fields; ORDER BY with fields; non-count projections; or
+	///   when table permissions are Specific).
 	/// - Count: when we only need COUNT(*) and GROUP ALL.
 	/// - KeysOnly: when none of the above apply, allowing index-only iteration.
 	pub(crate) fn check_record_strategy(

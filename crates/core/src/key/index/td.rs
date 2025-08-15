@@ -117,8 +117,7 @@ impl<'a> Td<'a> {
 	/// * `tb` - Table identifier
 	/// * `ix` - Index identifier
 	/// * `term` - The term being indexed
-	/// * `id` - Optional document ID (Some for specific document, None for term
-	///   prefix)
+	/// * `id` - Optional document ID (Some for specific document, None for term prefix)
 	pub(crate) fn new(
 		ns: NamespaceId,
 		db: DatabaseId,

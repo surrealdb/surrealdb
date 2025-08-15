@@ -3,7 +3,6 @@
 namespace = false
 database = false
 strict = true
-clean = true
 
 [test]
 

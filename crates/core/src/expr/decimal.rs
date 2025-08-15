@@ -30,26 +30,22 @@ use crate::err::Error;
 ///    - `0x00` for negative numbers
 ///
 /// 2. **Biased scale** (2 bytes, big-endian):
-///    - We bias the "scale" (not the raw exponent). Scale is defined as: `scale
-///      = exponent + (digit_count - 1)`, i.e., the position of the
-///      most-significant digit in a scientific-notation sense.
+///    - We bias the "scale" (not the raw exponent). Scale is defined as: `scale = exponent +
+///      (digit_count - 1)`, i.e., the position of the most-significant digit in a
+///      scientific-notation sense.
 ///    - Stored as: `biased = scale + EXP_BIAS` (unsigned 16-bit)
-///    - For negative numbers: stored as `0xFFFF - biased` (one's complement) to
-///      reverse order
-///    - EXP_BIAS = 6144. With D128, `exponent ∈ [-6143, +6144]` and
-///      `digit_count ∈ [1, 34]`, so `scale ∈ [-6143, 6177]`, which maps into
-///      `[1, 12321]` after biasing, well within `u16`.
+///    - For negative numbers: stored as `0xFFFF - biased` (one's complement) to reverse order
+///    - EXP_BIAS = 6144. With D128, `exponent ∈ [-6143, +6144]` and `digit_count ∈ [1, 34]`, so
+///      `scale ∈ [-6143, 6177]`, which maps into `[1, 12321]` after biasing, well within `u16`.
 ///
 /// 3. **Packed digit representation** (variable length):
 ///    - Digits are taken from the absolute value's base-10 representation
 ///    - Each pair of digits is packed into one byte (4 bits per digit)
 ///    - For positive numbers: stored as-is
-///    - For negative numbers: all bytes are bitwise complemented to reverse
-///      ordering
-///    - Termination: encoding stops when a nibble equals `0x0`. This naturally
-///      handles both odd and even digit counts: • odd count: the last byte has
-///      a low nibble of 0 • even count: an extra full terminator byte is
-///      appended (0x00 for positives, 0xFF for negatives)
+///    - For negative numbers: all bytes are bitwise complemented to reverse ordering
+///    - Termination: encoding stops when a nibble equals `0x0`. This naturally handles both odd and
+///      even digit counts: • odd count: the last byte has a low nibble of 0 • even count: an extra
+///      full terminator byte is appended (0x00 for positives, 0xFF for negatives)
 ///
 /// Because a terminator is always present within (or immediately after) the
 /// mantissa, any trailing type-marker byte appended by higher layers will never
@@ -57,8 +53,7 @@ use crate::err::Error;
 ///
 /// ## Properties
 /// - Preserves lexicographic ordering: if `a < b` then `encode(a) < encode(b)`
-/// - Variable length encoding (3+ bytes typical: 1 sign + 2 scale + packed
-///   digits)
+/// - Variable length encoding (3+ bytes typical: 1 sign + 2 scale + packed digits)
 /// - Handles full D128 range including extreme values
 /// - Uses packed digit encoding for efficient storage (2 digits per byte)
 pub(crate) struct DecimalLexEncoder;

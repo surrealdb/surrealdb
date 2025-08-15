@@ -138,10 +138,9 @@ pub(crate) enum ThingIterator {
 impl ThingIterator {
 	/// Fetch the next batch of index items.
 	///
-	/// - `size` is a soft upper bound on how many items to fetch. Concrete
-	///   iterators may return fewer items (e.g., due to range boundaries) or,
-	///   in rare edge-cases, one extra to honor inclusivity semantics when
-	///   scanning in reverse.
+	/// - `size` is a soft upper bound on how many items to fetch. Concrete iterators may return
+	///   fewer items (e.g., due to range boundaries) or, in rare edge-cases, one extra to honor
+	///   inclusivity semantics when scanning in reverse.
 	pub(crate) async fn next_batch<B: IteratorBatch>(
 		&mut self,
 		ctx: &Context,

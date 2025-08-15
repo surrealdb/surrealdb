@@ -31,10 +31,9 @@
 //! crate::key::node::all                /${nd}
 //! crate::key::node::lq                 /${nd}!lq{lq}{ns}{db}
 //!
-//! crate::key::catalog::ns              /ns/{ns_name} -> NamespaceDefinition
-//! crate::key::catalog::db              /ns/{ns_name}/db/{db_name} ->
-//! DatabaseDefinition crate::key::catalog::tb
-//! /ns/{ns_name}/db/{db_name}/tb/{tb_name} -> TableDefinition
+//! crate::key::catalog::ns              /?{ns_name} -> NamespaceDefinition
+//! crate::key::catalog::db              /?{ns_name}*{db_name} -> DatabaseDefinition
+//! crate::key::catalog::tb              /?{ns_name}*{db_name}*{tb_name} -> TableDefinition
 //!
 //! crate::key::root::access::all        /&{ac}
 //! crate::key::root::access::gr         /&{ac}!gr{gr}

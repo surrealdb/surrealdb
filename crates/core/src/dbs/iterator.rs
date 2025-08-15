@@ -697,10 +697,9 @@ impl Iterator {
 	///
 	/// ## Performance Impact
 	///
-	/// - **When enabled**: Significant performance improvement for large result
-	///   sets
-	/// - **When disabled**: Slight performance cost as all records must be
-	///   processed before START/LIMIT is applied
+	/// - **When enabled**: Significant performance improvement for large result sets
+	/// - **When disabled**: Slight performance cost as all records must be processed before
+	///   START/LIMIT is applied
 	///
 	/// ## Returns
 	///

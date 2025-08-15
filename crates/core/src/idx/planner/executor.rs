@@ -641,22 +641,18 @@ impl QueryExecutor {
 	///
 	/// The function performs the following conversions based on the type of the
 	/// `Number`:
-	/// - For `Int`, it returns the original `Int` value as `Option<i64>`, the
-	///   equivalent `Float` value as `Option<f64>`, and the equivalent
+	/// - For `Int`, it returns the original `Int` value as `Option<i64>`, the equivalent `Float`
+	///   value as `Option<f64>`, and the equivalent `Decimal` value as `Option<Decimal>`.
+	/// - For `Float`, it uses the provided `float_to_int` function to convert the `Float` to
+	///   `Option<i64>`, returns the original `Float` value as `Option<f64>`, and the equivalent
 	///   `Decimal` value as `Option<Decimal>`.
-	/// - For `Float`, it uses the provided `float_to_int` function to convert
-	///   the `Float` to `Option<i64>`, returns the original `Float` value as
-	///   `Option<f64>`, and the equivalent `Decimal` value as
-	///   `Option<Decimal>`.
-	/// - For `Decimal`, it converts the `Decimal` to `Option<i64>` (if
-	///   representable as `i64`), returns the equivalent `Float` value as
-	///   `Option<f64>` (if representable as `f64`), and the original `Decimal`
-	///   value as `Option<Decimal>`.
+	/// - For `Decimal`, it converts the `Decimal` to `Option<i64>` (if representable as `i64`),
+	///   returns the equivalent `Float` value as `Option<f64>` (if representable as `f64`), and the
+	///   original `Decimal` value as `Option<Decimal>`.
 	///
 	/// # Parameters
 	/// - `n`: A reference to a `Number` enum.
-	/// - `float_to_int`: A function that converts a reference to `f64` to
-	///   `Option<i64>`.
+	/// - `float_to_int`: A function that converts a reference to `f64` to `Option<i64>`.
 	///
 	/// # Returns
 	/// A tuple of `(Option<i64>, Option<f64>, Option<Decimal>)` representing

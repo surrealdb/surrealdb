@@ -44,8 +44,7 @@ impl SeqDocIds {
 	///
 	/// # Arguments
 	/// * `nid` - The node ID used for distributed sequence generation
-	/// * `ikb` - The index key base containing namespace, database, table, and
-	///   index information
+	/// * `ikb` - The index key base containing namespace, database, table, and index information
 	pub(in crate::idx) fn new(nid: Uuid, ikb: IndexKeyBase) -> Self {
 		Self {
 			nid,
@@ -120,8 +119,7 @@ impl SeqDocIds {
 	/// This is the reverse lookup of `get_doc_id`.
 	///
 	/// # Arguments
-	/// * `ikb` - The index key base containing namespace, database, table, and
-	///   index information
+	/// * `ikb` - The index key base containing namespace, database, table, and index information
 	/// * `tx` - The transaction to use for the lookup
 	/// * `doc_id` - The document ID to look up
 	///

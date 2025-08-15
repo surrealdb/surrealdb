@@ -499,8 +499,7 @@ impl Test {
 	/// # Arguments
 	///
 	/// * `val` - The expected floating-point value
-	/// * `precision` - The allowed difference between the expected and actual
-	///   value
+	/// * `precision` - The allowed difference between the expected and actual value
 	///
 	/// # Panics
 	///

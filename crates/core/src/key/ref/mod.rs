@@ -126,8 +126,7 @@ impl<'a> PrefixFf<'a> {
 // The order in this key is made so we can scan:
 // - all references for a given record
 // - all references for a given record, filtered by a origin table
-// - all references for a given record, filtered by a origin table and an origin
-//   field
+// - all references for a given record, filtered by a origin table and an origin field
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Ref<'a> {

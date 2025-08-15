@@ -10,10 +10,8 @@
 //! ```
 //!
 //! ## Purpose
-//! - **Batch Management**: Stores ranges of document IDs that can be allocated
-//!   by different nodes
-//! - **Concurrency**: Enables multiple nodes to generate unique document IDs
-//!   without conflicts
+//! - **Batch Management**: Stores ranges of document IDs that can be allocated by different nodes
+//! - **Concurrency**: Enables multiple nodes to generate unique document IDs without conflicts
 //! - **Performance**: Reduces contention by pre-allocating ID ranges in batches
 //!
 //! ## Usage in Full-Text Search
@@ -28,10 +26,8 @@
 //! - **Domain**: Full-text search document ID management
 //!
 //! ## Concurrency Benefits
-//! - **Lock-free ID Generation**: Nodes can allocate IDs from pre-allocated
-//!   batches
-//! - **Reduced Contention**: Batch-based allocation minimizes database
-//!   contention
+//! - **Lock-free ID Generation**: Nodes can allocate IDs from pre-allocated batches
+//! - **Reduced Contention**: Batch-based allocation minimizes database contention
 //! - **Scalability**: Multiple nodes can index documents concurrently
 //! - **Consistency**: Ensures unique document IDs across the entire cluster
 use std::ops::Range;

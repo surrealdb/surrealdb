@@ -54,22 +54,17 @@ impl RemoveNamespaceStatement {
 
 		// Delete the definition
 		let key = crate::key::root::ns::new(ns.namespace_id);
+		let catalog_key = crate::key::catalog::ns::new(&ns.name);
+		let namespace_root = crate::key::namespace::all::new(ns.namespace_id);
 		if self.expunge {
-			txn.clr(&key).await?
+			txn.clr(&key).await?;
+			txn.clr(&catalog_key).await?;
+			txn.clrp(&namespace_root).await?;
 		} else {
-			txn.del(&key).await?
+			txn.del(&key).await?;
+			txn.del(&catalog_key).await?;
+			txn.delp(&namespace_root).await?;
 		};
-		// Delete the resource data
-		let key = crate::key::namespace::all::new(ns.namespace_id);
-		if self.expunge {
-			txn.clrp(&key).await?
-		} else {
-			txn.delp(&key).await?
-		};
-
-		// Delete the catalog entry
-		let key = crate::key::catalog::ns::new(&ns.name);
-		txn.del(&key).await?;
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {

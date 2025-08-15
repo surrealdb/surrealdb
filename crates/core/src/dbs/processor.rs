@@ -482,10 +482,10 @@ pub(super) trait Collector {
 			if let Some(exe) = qp.get_query_executor(table.as_str()) {
 				// Optimize executor lookup:
 				// - Attach the table-specific QueryExecutor to the Context once, so subsequent
-				//   per-record processing doesn’t need to search the QueryPlanner’s internal
-				//   map on every document.
-				// - This keeps the hot path allocation-free and avoids repeated hash lookups
-				//   inside tight iteration loops.
+				//   per-record processing doesn’t need to search the QueryPlanner’s internal map on
+				//   every document.
+				// - This keeps the hot path allocation-free and avoids repeated hash lookups inside
+				//   tight iteration loops.
 				let mut ctx = MutableContext::new(ctx);
 				ctx.set_query_executor(exe.clone());
 				return Cow::Owned(ctx.freeze());

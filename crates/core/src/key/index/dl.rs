@@ -12,8 +12,7 @@
 //! This key is essential for:
 //! - Calculating accurate relevance scores for search results
 //! - Supporting document length normalization
-//! - Enabling proper ranking of search results based on term frequency and
-//!   document length
+//! - Enabling proper ranking of search results based on term frequency and document length
 //! - Providing document-specific statistics for the full-text search engine
 use serde::{Deserialize, Serialize};
 

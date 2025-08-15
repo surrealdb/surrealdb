@@ -75,8 +75,7 @@ impl<'a> Tt<'a> {
 	/// * `doc_id` - The document ID where the term appears
 	/// * `nid` - Node ID for distributed transaction tracking
 	/// * `uid` - Transaction ID for concurrency control
-	/// * `add` - Whether this is an addition (true) or removal (false)
-	///   operation
+	/// * `add` - Whether this is an addition (true) or removal (false) operation
 	#[expect(clippy::too_many_arguments)]
 	pub(crate) fn new(
 		ns: NamespaceId,

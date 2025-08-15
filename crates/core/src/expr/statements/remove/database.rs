@@ -55,22 +55,17 @@ impl RemoveDatabaseStatement {
 
 		// Delete the definition
 		let key = crate::key::namespace::db::new(db.namespace_id, db.database_id);
+		let catalog_key = crate::key::catalog::db::new(ns, &self.name);
+		let database_root = crate::key::database::all::new(db.namespace_id, db.database_id);
 		if self.expunge {
-			txn.clr(&key).await?
+			txn.clr(&key).await?;
+			txn.clr(&catalog_key).await?;
+			txn.clrp(&database_root).await?
 		} else {
-			txn.del(&key).await?
+			txn.del(&key).await?;
+			txn.del(&catalog_key).await?;
+			txn.delp(&database_root).await?
 		};
-		// Delete the resource data
-		let key = crate::key::database::all::new(db.namespace_id, db.database_id);
-		if self.expunge {
-			txn.clrp(&key).await?
-		} else {
-			txn.delp(&key).await?
-		};
-
-		// Delete the catalog entry
-		let key = crate::key::catalog::db::new(ns, &self.name);
-		txn.del(&key).await?;
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
