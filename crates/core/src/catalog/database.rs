@@ -1,7 +1,6 @@
 use std::fmt::{Display, Formatter};
 
 use revision::{Revisioned, revisioned};
-use serde::{Deserialize, Serialize};
 
 use crate::catalog::NamespaceId;
 use crate::expr::ChangeFeed;
@@ -11,7 +10,9 @@ use crate::sql::statements::define::DefineDatabaseStatement;
 use crate::sql::{Ident, ToSql};
 use crate::val::Value;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+	Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[repr(transparent)]
 pub struct DatabaseId(pub u32);
@@ -50,8 +51,7 @@ impl From<u32> for DatabaseId {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DatabaseDefinition {
 	pub namespace_id: NamespaceId,
 	pub database_id: DatabaseId,

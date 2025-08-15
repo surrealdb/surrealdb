@@ -1,7 +1,6 @@
 use std::fmt::{Display, Formatter};
 
 use revision::{Revisioned, revisioned};
-use serde::{Deserialize, Serialize};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
@@ -9,7 +8,9 @@ use crate::sql::statements::DefineNamespaceStatement;
 use crate::sql::{Ident, ToSql};
 use crate::val::Value;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+	Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[repr(transparent)]
 pub struct NamespaceId(pub u32);
@@ -48,8 +49,7 @@ impl From<u32> for NamespaceId {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub struct NamespaceDefinition {
 	pub namespace_id: NamespaceId,
 	pub name: String,

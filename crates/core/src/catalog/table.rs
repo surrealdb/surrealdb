@@ -1,5 +1,4 @@
 use revision::{Revisioned, revisioned};
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId, ViewDefinition};
@@ -10,7 +9,9 @@ use crate::sql::statements::DefineTableStatement;
 use crate::sql::{Ident, ToSql};
 use crate::val::Value;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+	Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[repr(transparent)]
 pub struct TableId(pub u32);
@@ -37,8 +38,7 @@ impl Revisioned for TableId {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct TableDefinition {
 	pub namespace_id: NamespaceId,
 	pub database_id: DatabaseId,
@@ -147,8 +147,7 @@ impl InfoStructure for TableDefinition {
 
 /// The type of records stored by a table
 #[revisioned(revision = 1)]
-#[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
-#[non_exhaustive]
+#[derive(Debug, Default, Hash, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum TableType {
 	#[default]
 	Any,
@@ -201,8 +200,7 @@ impl InfoStructure for TableType {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
-#[non_exhaustive]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Relation {
 	pub from: Option<Kind>,
 	pub to: Option<Kind>,

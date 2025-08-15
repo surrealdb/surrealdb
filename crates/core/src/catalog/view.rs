@@ -1,5 +1,4 @@
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Fields, Groups};
@@ -7,8 +6,7 @@ use crate::sql::{Ident, ToSql, View};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ViewDefinition {
 	pub expr: Fields,
 	pub what: Vec<String>,
