@@ -1198,7 +1198,7 @@ impl Transaction {
 		Ok(cached_db)
 	}
 
-	pub(crate) async fn get_tb_by_name(
+	pub async fn get_tb_by_name(
 		&self,
 		ns: &str,
 		db: &str,
