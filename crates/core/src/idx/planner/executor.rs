@@ -512,28 +512,27 @@ impl QueryExecutor {
 				Some(ThingIterator::IndexJoin(index_join))
 			}
 			IndexOperator::Order(reverse) => {
+				let (ns, db) = opt.ns_db()?;
 				if *reverse {
 					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 					{
 						Some(ThingIterator::IndexRangeReverse(
-							IndexRangeReverseThingIterator::full_range(
-								ir,
-								opt.ns()?,
-								opt.db()?,
-								ix,
-							)?,
+							IndexRangeReverseThingIterator::full_range(ir, ns, db, ix)?,
 						))
 					}
 					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
 					None
 				} else {
 					Some(ThingIterator::IndexRange(IndexRangeThingIterator::full_range(
-						ir,
-						opt.ns()?,
-						opt.db()?,
-						ix,
+						ir, ns, db, ix,
 					)?))
 				}
+			}
+			IndexOperator::Range(prefix, ranges) => {
+				let (ns, db) = opt.ns_db()?;
+				Some(ThingIterator::IndexRange(IndexRangeThingIterator::compound_range(
+					ir, ns, db, ix, prefix, ranges,
+				)?))
 			}
 			_ => None,
 		})
@@ -1020,28 +1019,27 @@ impl QueryExecutor {
 				Some(ThingIterator::UniqueJoin(unique_join))
 			}
 			IndexOperator::Order(reverse) => {
+				let (ns, db) = opt.ns_db()?;
 				if *reverse {
 					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 					{
 						Some(ThingIterator::UniqueRangeReverse(
-							UniqueRangeReverseThingIterator::full_range(
-								irf,
-								opt.ns()?,
-								opt.db()?,
-								ixr,
-							)?,
+							UniqueRangeReverseThingIterator::full_range(irf, ns, db, ixr)?,
 						))
 					}
 					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
 					None
 				} else {
 					Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::full_range(
-						irf,
-						opt.ns()?,
-						opt.db()?,
-						ixr,
+						irf, ns, db, ixr,
 					)?))
 				}
+			}
+			IndexOperator::Range(prefix, ranges) => {
+				let (ns, db) = opt.ns_db()?;
+				Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::compound_range(
+					irf, ns, db, ixr, prefix, ranges,
+				)?))
 			}
 			_ => None,
 		})
