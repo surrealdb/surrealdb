@@ -3,14 +3,15 @@ use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use radix_trie::Trie;
 use rust_decimal::Decimal;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::expr::Ident;
+use crate::err::Error;
 use crate::expr::statements::DefineIndexStatement;
+use crate::expr::{BinaryOperator, Ident};
 use crate::idx::docids::DocId;
 use crate::idx::ft::fulltext::FullTextHitsIterator;
 use crate::idx::ft::search::SearchHitsIterator;
@@ -545,8 +546,67 @@ impl IndexRangeThingIterator {
 		db: &str,
 		ix: &DefineIndexStatement,
 	) -> Result<Self> {
-		let range = full_iterator_range();
-		Self::new(irf, ns, db, ix, &range)
+		Self::new(irf, ns, db, ix, &full_iterator_range())
+	}
+
+	pub(super) fn compound_range(
+		irf: IteratorRef,
+		ns: &str,
+		db: &str,
+		ix: &IndexReference,
+		prefix: &[Value],
+		ranges: &[(BinaryOperator, Arc<Value>)],
+	) -> Result<Self> {
+		let (from, to) = Self::reduce_range(ranges)?;
+		Ok(Self {
+			irf,
+			r: Self::range_scan_prefix(ns, db, ix, prefix, from, to)?,
+		})
+	}
+
+	/// Determines the lowest and highest values in the range
+	fn reduce_range(ranges: &[(BinaryOperator, Arc<Value>)]) -> Result<(RangeValue, RangeValue)> {
+		let mut from = vec![];
+		let mut to = vec![];
+		for (op, v) in ranges {
+			let key = storekey::serialize(v.as_ref())?;
+			match op {
+				BinaryOperator::LessThan => to.push((key, 0, v.clone())),
+				BinaryOperator::LessThanEqual => to.push((key, 1, v.clone())),
+				BinaryOperator::MoreThan => from.push((key, 1, v.clone())),
+				BinaryOperator::MoreThanEqual => from.push((key, 0, v.clone())),
+				_ => {
+					bail!(Error::Unreachable(format!("Invalid operator for range extraction {op}")))
+				}
+			}
+		}
+		from.sort_unstable();
+		to.sort_unstable();
+		let from = if let Some((_, inclusive, val)) = from.first() {
+			RangeValue {
+				value: val.as_ref().clone(),
+				inclusive: if *inclusive == 0 {
+					true
+				} else {
+					false
+				},
+			}
+		} else {
+			RangeValue::default()
+		};
+		let to = if let Some((_, inclusive, val)) = to.last() {
+			RangeValue {
+				value: val.as_ref().clone(),
+				inclusive: if *inclusive == 1 {
+					true
+				} else {
+					false
+				},
+			}
+		} else {
+			RangeValue::default()
+		};
+		Ok((from, to))
 	}
 
 	fn range_scan(
@@ -591,6 +651,66 @@ impl IndexRangeThingIterator {
 			return value_type.prefix_end(ns, db, ix_what, ix_name);
 		}
 		let fd = Array::from(to.value.clone());
+		if to.inclusive {
+			Index::prefix_ids_end(ns, db, ix_what, ix_name, &fd)
+		} else {
+			Index::prefix_ids_beg(ns, db, ix_what, ix_name, &fd)
+		}
+	}
+
+	fn range_scan_prefix(
+		ns: &str,
+		db: &str,
+		ix: &DefineIndexStatement,
+		prefix: &[Value],
+		from: RangeValue,
+		to: RangeValue,
+	) -> Result<RangeScan> {
+		let prefix_array = if prefix.is_empty() {
+			Array::with_capacity(1)
+		} else {
+			Array::from(prefix.to_vec())
+		};
+		let beg = if from.value.is_none() {
+			Index::prefix_ids_composite_beg(ns, db, &ix.what, &ix.name, &prefix_array)?
+		} else {
+			Self::compute_beg_with_prefix(ns, db, &ix.what, &ix.name, &prefix_array, &from)?
+		};
+		let end = if to.value.is_none() {
+			Index::prefix_ids_composite_end(ns, db, &ix.what, &ix.name, &prefix_array)?
+		} else {
+			Self::compute_end_with_prefix(ns, db, &ix.what, &ix.name, &prefix_array, &to)?
+		};
+		Ok(RangeScan::new(beg, from.inclusive, end, to.inclusive))
+	}
+
+	fn compute_beg_with_prefix(
+		ns: &str,
+		db: &str,
+		ix_what: &Ident,
+		ix_name: &Ident,
+		prefix: &Array,
+		from: &RangeValue,
+	) -> Result<Vec<u8>> {
+		let mut fd = prefix.clone();
+		fd.push(from.value.clone());
+		if from.inclusive {
+			Index::prefix_ids_beg(ns, db, ix_what, ix_name, &fd)
+		} else {
+			Index::prefix_ids_end(ns, db, ix_what, ix_name, &fd)
+		}
+	}
+
+	fn compute_end_with_prefix(
+		ns: &str,
+		db: &str,
+		ix_what: &Ident,
+		ix_name: &Ident,
+		prefix: &Array,
+		to: &RangeValue,
+	) -> Result<Vec<u8>> {
+		let mut fd = prefix.clone();
+		fd.push(to.value.clone());
 		if to.inclusive {
 			Index::prefix_ids_end(ns, db, ix_what, ix_name, &fd)
 		} else {
@@ -1101,8 +1221,24 @@ impl UniqueRangeThingIterator {
 		db: &str,
 		ix: &DefineIndexStatement,
 	) -> Result<Self> {
-		let rng = full_iterator_range();
-		Self::new(irf, ns, db, ix, &rng)
+		Self::new(irf, ns, db, ix, &full_iterator_range())
+	}
+
+	pub(super) fn compound_range(
+		irf: IteratorRef,
+		ns: &str,
+		db: &str,
+		ix: &IndexReference,
+		prefix: &Vec<Value>,
+		ranges: &Vec<(BinaryOperator, Arc<Value>)>,
+	) -> Result<Self> {
+		let (from, to) = IndexRangeThingIterator::reduce_range(ranges)?;
+		let r = IndexRangeThingIterator::range_scan_prefix(ns, db, ix, prefix, from, to)?;
+		Ok(Self {
+			irf,
+			r,
+			done: false,
+		})
 	}
 
 	fn compute_beg(

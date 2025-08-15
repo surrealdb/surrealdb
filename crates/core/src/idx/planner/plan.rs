@@ -105,7 +105,6 @@ impl PlanBuilder {
 				}
 			}
 
-			println!("compound_index: {:?}", compound_index);
 			if let Some((_, io)) = compound_index {
 				// Evaluate whether we can use index-only access (no table lookups needed)
 				let record_strategy =
@@ -242,14 +241,13 @@ impl PlanBuilder {
 		let mut continues_equals_values = 0;
 		// Collect the range parts for any column
 		let mut range_parts = vec![];
-		for (col, vals) in columns.iter().enumerate() {
+		for vals in &columns {
 			// If the column is empty, we can stop here.
 			if vals.is_empty() {
 				break;
 			}
 			let mut is_equality = false;
 			for iop in vals {
-				println!("col: {col} - iop: {iop:?}");
 				match iop {
 					IndexOperator::Equality(val) => {
 						if !val.is_nullish() {
