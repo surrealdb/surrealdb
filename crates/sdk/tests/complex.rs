@@ -3,8 +3,8 @@
 mod helpers;
 use helpers::{new_ds, with_enough_stack};
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::err::Error;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::err::Error;
 use surrealdb_core::syn;
 use surrealdb_core::val::Value;
 

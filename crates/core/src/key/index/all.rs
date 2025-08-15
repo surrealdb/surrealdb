@@ -1,8 +1,8 @@
 //! Stores the key prefix for all keys under an index
+use serde::{Deserialize, Serialize};
+
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct AllIndexRoot<'a> {

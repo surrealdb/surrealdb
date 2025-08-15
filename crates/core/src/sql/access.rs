@@ -1,11 +1,13 @@
+use std::fmt::{self, Display, Formatter};
+
 use crate::sql::escape::EscapeIdent;
 use crate::val::Duration;
-use std::fmt::{self, Display, Formatter};
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-// Durations representing the expiration of different elements of the access method
-// In this context, the None variant represents that the element does not expire
+// Durations representing the expiration of different elements of the access
+// method In this context, the None variant represents that the element does not
+// expire
 pub struct AccessDuration {
 	// Duration after which the grants generated with the access method expire
 	// For access methods whose grants are tokens, this value is irrelevant

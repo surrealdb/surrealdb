@@ -1,10 +1,11 @@
+use js::class::Trace;
+use js::prelude::{Coerced, Opt};
+use js::{Array, Ctx, Exception, FromJs, JsLifetime, Result, Value};
+
 use crate::dbs::Variables;
 use crate::expr::Expr;
 use crate::syn;
 use crate::val::Value as SurValue;
-use js::class::Trace;
-use js::prelude::{Coerced, Opt};
-use js::{Array, Ctx, Exception, FromJs, JsLifetime, Result, Value};
 
 #[js::class]
 #[derive(Trace, Clone, JsLifetime)]

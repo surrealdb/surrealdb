@@ -1,9 +1,10 @@
 //! Stores a DEFINE TABLE config definition
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+
 use crate::expr::statements::DefineTableStatement;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Tb<'a> {

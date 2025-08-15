@@ -1,5 +1,6 @@
-use futures::lock::Mutex;
 use std::sync::LazyLock;
+
+use futures::lock::Mutex;
 use sysinfo::{Pid, System};
 
 /// The current system environment which is used to

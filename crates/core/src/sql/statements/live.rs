@@ -1,6 +1,8 @@
-use crate::sql::{Cond, Expr, Fetchs, Fields};
 use std::fmt;
+
 use uuid::Uuid;
+
+use crate::sql::{Cond, Expr, Fetchs, Fields};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

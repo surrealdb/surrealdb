@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
+use anyhow::Result;
+
 use super::{Datastore, LockType, TransactionType};
 use crate::err::Error;
 use crate::kvs::KVValue;
-use anyhow::Result;
-use std::sync::Arc;
 
 mod fixes;
 

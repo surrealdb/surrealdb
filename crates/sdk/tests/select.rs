@@ -1459,9 +1459,9 @@ async fn select_order_by_rand_large() -> Result<()> {
 		})
 		.collect();
 
-	// It is technically possible that the array was shuffeled in such a way that it ends up
-	// with the original order but, if properly shuffeled, that chance should be so small the it
-	// will effectively never happens.
+	// It is technically possible that the array was shuffeled in such a way that it
+	// ends up with the original order but, if properly shuffeled, that chance
+	// should be so small the it will effectively never happens.
 	assert!(
 		!x.iter().enumerate().all(|(idx, v)| idx as i64 == *v),
 		"array was still in original order"

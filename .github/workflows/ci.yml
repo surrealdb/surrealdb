@@ -30,7 +30,7 @@ permissions:
   contents: read
 
 env:
-  RUST_VERSION: 1.86.0
+  RUST_VERSION: 1.87.0
 
 jobs:
   # ----------------------------------------
@@ -80,14 +80,20 @@ jobs:
     name: Check format
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          components: rustfmt
-
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+
+      - name: Lookup the nightly toolchain
+        id: info
+        run: |
+          set -x
+          echo "toolchain=$(cat rust-toolchain.nightly)" >> $GITHUB_OUTPUT
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ steps.info.outputs.toolchain }}
+          components: rustfmt
 
       - name: Setup cache
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
@@ -157,7 +163,7 @@ jobs:
     name: Check workspace MSRV
     runs-on: ubuntu-latest
     env:
-      msrv: "1.85" # This should be updated if the MSRV is updated.
+      msrv: "1.87" # This should be updated if the MSRV is updated.
 
     steps:
       - name: Install MSRV toolchain
@@ -178,9 +184,6 @@ jobs:
 
       - name: Check workspace on MSRV
         run: cargo +${{ env.msrv }} make ci-check
-
-      - name: Check workspace release on MSRV
-        run: cargo +${{ env.msrv }} make ci-check-release
 
   check-fuzzing:
     name: Check fuzzing

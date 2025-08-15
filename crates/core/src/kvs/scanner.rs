@@ -1,14 +1,16 @@
-use super::tx::Transaction;
-use super::{Key, Val};
-use crate::err::Error;
-use crate::idx::planner::ScanDirection;
-use anyhow::Result;
-use futures::stream::Stream;
-use futures::{Future, FutureExt};
 use std::collections::VecDeque;
 use std::ops::Range;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+
+use anyhow::Result;
+use futures::stream::Stream;
+use futures::{Future, FutureExt};
+
+use super::tx::Transaction;
+use super::{Key, Val};
+use crate::err::Error;
+use crate::idx::planner::ScanDirection;
 
 #[cfg(not(target_family = "wasm"))]
 type FutureResult<'a, I> = Pin<Box<dyn Future<Output = Result<Vec<I>>> + 'a + Send>>;

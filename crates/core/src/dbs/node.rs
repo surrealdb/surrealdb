@@ -1,12 +1,14 @@
-use crate::expr::statements::info::InfoStructure;
-use crate::kvs::impl_kv_value_revisioned;
-use crate::val::{Object, Value};
-use revision::{Error, revisioned};
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::ops::{Add, Sub};
 use std::time::Duration;
+
+use revision::{Error, revisioned};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::expr::statements::info::InfoStructure;
+use crate::kvs::impl_kv_value_revisioned;
+use crate::val::{Object, Value};
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -102,9 +104,9 @@ impl InfoStructure for Node {
 	}
 }
 
-// This struct is meant to represent a timestamp that can be used to partially order
-// events in a cluster. It should be derived from a timestamp oracle, such as the
-// one available in TiKV via the client `TimestampExt` implementation.
+// This struct is meant to represent a timestamp that can be used to partially
+// order events in a cluster. It should be derived from a timestamp oracle, such
+// as the one available in TiKV via the client `TimestampExt` implementation.
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Deserialize, Serialize, Hash)]
 pub struct Timestamp {
@@ -151,10 +153,12 @@ impl InfoStructure for Timestamp {
 
 #[cfg(test)]
 mod test {
-	use crate::dbs::node::Timestamp;
+	use std::time::Duration;
+
 	use chrono::TimeZone;
 	use chrono::prelude::Utc;
-	use std::time::Duration;
+
+	use crate::dbs::node::Timestamp;
 
 	#[test]
 	fn timestamps_can_be_added_duration() {

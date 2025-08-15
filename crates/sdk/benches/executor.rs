@@ -1,8 +1,8 @@
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use futures::Future;
 use pprof::criterion::{Output, PProfProfiler};
-use surrealdb::dbs::{Capabilities, Session};
-use surrealdb::kvs::Datastore;
+use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_core::kvs::Datastore;
 
 macro_rules! query {
 	($c: expr, $name: ident, $query: expr) => {

@@ -1,6 +1,7 @@
+use std::cmp::Ordering;
+
 use crate::expr::part::{Next, Part};
 use crate::val::Value;
-use std::cmp::Ordering;
 
 impl Value {
 	pub(crate) fn compare(
@@ -51,7 +52,8 @@ impl Value {
 						(None, Some(_)) => Some(Ordering::Less),
 						(_, _) => Some(Ordering::Equal),
 					},
-					//TODO: It is kind of weird that a[1] works but `a[+(1)]` or `let $b = 1; a[$b]` for example doesn't as
+					//TODO: It is kind of weird that a[1] works but `a[+(1)]` or `let $b = 1;
+					// a[$b]` for example doesn't as
 					x => {
 						if let Some(idx) = x.as_old_index() {
 							match (a.get(idx), b.get(idx)) {

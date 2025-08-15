@@ -15,7 +15,8 @@ impl Variance for Vec<Number> {
 }
 
 // This function is exposed to optimise the pearson distance calculation.
-// As the mean of the vector is already calculated, we pass it as a parameter rather than recalculating it.
+// As the mean of the vector is already calculated, we pass it as a parameter
+// rather than recalculating it.
 pub(super) fn variance<T>(v: &[T], mean: f64, sample: bool) -> f64
 where
 	T: ToFloat,
@@ -25,8 +26,7 @@ where
 		1 => 0.0,
 		len => {
 			let len = (len - sample as usize) as f64;
-			let out = v.iter().map(|x| (x.to_float() - mean).powi(2)).sum::<f64>() / len;
-			out
+			v.iter().map(|x| (x.to_float() - mean).powi(2)).sum::<f64>() / len
 		}
 	}
 }

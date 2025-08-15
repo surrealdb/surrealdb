@@ -1,13 +1,14 @@
 use std::collections::btree_map::Entry;
 
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::exe::try_join_all_buffered;
 use crate::expr::part::Part;
 use crate::expr::{Expr, FlowResultExt as _, Literal};
 use crate::val::{Object, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
 
 impl Value {
 	/// Asynchronous method for setting a field on a `Value`
@@ -31,12 +32,12 @@ impl Value {
 		let mut prev = path;
 
 		// Index forward trying to find the location where to insert the value
-		// Whenever we hit an existing path in the value we update place to point to the new value.
-		// If we hit a dead end, we then assign the into that dead end. If any path is not yet
-		// matched we use that to create an object to assign.
+		// Whenever we hit an existing path in the value we update place to point to the
+		// new value. If we hit a dead end, we then assign the into that dead end. If
+		// any path is not yet matched we use that to create an object to assign.
 		while let Some(p) = iter.next() {
 			match place {
-				Value::Thing(_) | Value::Null | Value::None => {
+				Value::RecordId(_) | Value::Null | Value::None => {
 					// any index is guaranteed to fail so just assign to this place.
 					return Self::assign(stk, ctx, opt, place, val, prev).await;
 				}
@@ -258,7 +259,7 @@ impl Value {
 					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()?;
 					match v {
 						Value::Strand(x) => x.into_string(),
-						Value::Thing(x) => x.to_string(),
+						Value::RecordId(x) => x.to_string(),
 						Value::Number(x) => x.to_string(),
 						Value::Range(x) => x.to_string(),
 						_ => return Ok(()),

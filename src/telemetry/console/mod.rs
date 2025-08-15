@@ -1,15 +1,13 @@
-use crate::cnf::TOKIO_CONSOLE_RETENTION;
-use crate::cnf::TOKIO_CONSOLE_SOCKET_ADDR;
-use anyhow::Context;
-use anyhow::Result;
-use console_subscriber::ConsoleLayer;
-use std::net::IpAddr;
-use std::net::Ipv4Addr;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
+
+use anyhow::{Context, Result};
+use console_subscriber::ConsoleLayer;
 use tracing::Subscriber;
 use tracing_subscriber::Layer;
 use tracing_subscriber::registry::LookupSpan;
+
+use crate::cnf::{TOKIO_CONSOLE_RETENTION, TOKIO_CONSOLE_SOCKET_ADDR};
 
 const DEFAULT_TOKIO_CONSOLE_ADDR: SocketAddr =
 	SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 6669);

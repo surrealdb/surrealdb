@@ -1,11 +1,12 @@
 mod helpers;
-use crate::helpers::Test;
 use helpers::{new_ds, skip_ok};
 use surrealdb::Result;
-use surrealdb::dbs::{Response, Session};
-use surrealdb::kvs::Datastore;
+use surrealdb_core::dbs::{Response, Session};
+use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn;
 use surrealdb_core::val::Value;
+
+use crate::helpers::Test;
 
 #[tokio::test]
 async fn select_where_iterate_three_multi_index() -> Result<()> {
@@ -700,6 +701,7 @@ const EXPLAIN_FROM_TO: &str = r"[
 		{
 			detail: {
 				plan: {
+				    direction: 'forward',
 					from: {
 						inclusive: false,
 						value: 2000
@@ -747,6 +749,7 @@ const EXPLAIN_FROM_INCL_TO: &str = r"[
 		{
 			detail: {
 				plan: {
+				    direction: 'forward',
 					from: {
 						inclusive: true,
 						value: 2000
@@ -798,6 +801,7 @@ const EXPLAIN_FROM_TO_INCL: &str = r"[
 			{
 				detail: {
 					plan: {
+					    direction: 'forward',
 						from: {
 							inclusive: false,
 							value: 2000
@@ -849,6 +853,7 @@ const EXPLAIN_FROM_INCL_TO_INCL: &str = r"[
 			{
 				detail: {
 					plan: {
+					    direction: 'forward',
 						from: {
 							inclusive: true,
 							value: 2000
@@ -943,6 +948,7 @@ const EXPLAIN_LESS: &str = r"[
 			{
 				detail: {
 					plan: {
+					    direction: 'forward',
 						from: {
 							inclusive: false,
 							value: None
@@ -984,6 +990,7 @@ const EXPLAIN_LESS_OR_EQUAL: &str = r"[
 			{
 				detail: {
 					plan: {
+					    direction: 'forward',
 						from: {
 							inclusive: false,
 							value: None
@@ -1029,6 +1036,7 @@ const EXPLAIN_MORE: &str = r"[
 			{
 				detail: {
 					plan: {
+					    direction: 'forward',
 						from: {
 							inclusive: false,
 							value: 2015
@@ -1070,6 +1078,7 @@ const EXPLAIN_MORE_OR_EQUAL: &str = r"[
 			{
 				detail: {
 					plan: {
+					    direction: 'forward',
 						from: {
 							inclusive: true,
 							value: 2015
@@ -2584,8 +2593,9 @@ async fn select_memory_ordered_collector() -> Result<()> {
 		let a = get_array()?;
 		assert!(a.windows(2).any(|w| w[0] <= w[1]), "Values are not random: {a:?}");
 	}
-	// With an array of 1500, there is a probability of factorial 1500! that `ORDER BY RAND()` returns a sorted array
-	// At a rate of one test per minute, we're SURE that approximately 10^4,104.8 years from now a test WILL fail.
+	// With an array of 1500, there is a probability of factorial 1500! that `ORDER
+	// BY RAND()` returns a sorted array At a rate of one test per minute, we're
+	// SURE that approximately 10^4,104.8 years from now a test WILL fail.
 	// For perspective, this time frame is far longer than the age of the universe,
 	// but well, my apologies if that even happen ¯\_(ツ)_/¯
 	Ok(())
@@ -2738,6 +2748,7 @@ async fn select_count_group_all_with_or_without_index() -> Result<()> {
 			{
 				detail: {
 					plan: {
+						direction: 'forward',
 						from: {
 							inclusive: true,
 							value: 5000

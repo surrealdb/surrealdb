@@ -1,3 +1,17 @@
+use std::collections::HashSet;
+use std::sync::atomic::AtomicI64;
+
+#[allow(unused_imports, reason = "Used when a DB engine is disabled.")]
+use anyhow::bail;
+#[cfg(feature = "protocol-http")]
+use reqwest::ClientBuilder;
+use tokio::sync::watch;
+#[cfg(feature = "protocol-ws")]
+#[cfg(any(feature = "native-tls", feature = "rustls"))]
+use tokio_tungstenite::Connector;
+#[cfg(feature = "protocol-ws")]
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+
 #[allow(unused_imports, reason = "Used by the DB engines.")]
 use crate::api::ExtraFeatures;
 use crate::api::conn::Router;
@@ -13,21 +27,9 @@ use crate::api::method::BoxFuture;
 use crate::api::opt::Tls;
 use crate::api::opt::{Endpoint, EndpointKind};
 use crate::api::{Result, Surreal, conn};
+#[allow(unused_imports, reason = "Used when a DB engine is disabled.")]
+use crate::core::err::Error as DbError;
 use crate::opt::WaitFor;
-#[allow(unused_imports, reason = "Used when a DB engine is disabled.")]
-use anyhow::bail;
-#[cfg(feature = "protocol-http")]
-use reqwest::ClientBuilder;
-use std::collections::HashSet;
-use std::sync::atomic::AtomicI64;
-#[allow(unused_imports, reason = "Used when a DB engine is disabled.")]
-use surrealdb_core::err::Error as DbError;
-use tokio::sync::watch;
-#[cfg(feature = "protocol-ws")]
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
-use tokio_tungstenite::Connector;
-#[cfg(feature = "protocol-ws")]
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
 impl crate::api::Connection for Any {}
 impl conn::Sealed for Any {
@@ -148,7 +150,7 @@ impl conn::Sealed for Any {
 						let base_url = address.url;
 						let req = client.get(base_url.join("health")?).header(
 							reqwest::header::USER_AGENT,
-							&*crate::cnf::SURREALDB_USER_AGENT,
+							&*crate::core::cnf::SURREALDB_USER_AGENT,
 						);
 						http::health(req).await?;
 						tokio::spawn(http::native::run_router(base_url, client, route_rx));

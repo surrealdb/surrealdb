@@ -1,16 +1,18 @@
 //! vs is a module to handle Versionstamps.
-//! This module is supplemental to the kvs::tx module and is not intended to be used directly
-//! by applications.
+//! This module is supplemental to the kvs::tx module and is not intended to be
+//! used directly by applications.
 //! This module might be migrated into the kvs or kvs::tx module in the future.
 
 pub use std::{error, fmt, mem};
 
-use crate::kvs::KVValue;
 use revision::Revisioned;
 
-/// Versionstamp is a 10-byte array used to identify a specific version of a key.
-/// The first 8 bytes are significant (the u64), and the remaining 2 bytes are not significant, but used for extra precision.
-/// To convert to and from this module, see the conv module in this same directory.
+use crate::kvs::KVValue;
+
+/// Versionstamp is a 10-byte array used to identify a specific version of a
+/// key. The first 8 bytes are significant (the u64), and the remaining 2 bytes
+/// are not significant, but used for extra precision. To convert to and from
+/// this module, see the conv module in this same directory.
 ///
 /// You're going to want these
 /// 65536
@@ -53,8 +55,8 @@ impl<'de> serde::Deserialize<'de> for VersionStamp {
 	}
 }
 
-// Version stamp was previously a normal array so it doesn't have any kind of revision tracking and
-// is serialized just like any other array.
+// Version stamp was previously a normal array so it doesn't have any kind of
+// revision tracking and is serialized just like any other array.
 impl Revisioned for VersionStamp {
 	fn revision() -> u16 {
 		0
@@ -172,7 +174,8 @@ impl VersionStamp {
 		Some(next)
 	}
 
-	/// Returns an iterator of version stamps starting with the current version stamp.
+	/// Returns an iterator of version stamps starting with the current version
+	/// stamp.
 	pub fn iter(self) -> VersionStampIter {
 		VersionStampIter {
 			cur: Some(self),

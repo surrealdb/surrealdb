@@ -95,14 +95,16 @@ impl<T> CastErrorExt for Result<T, CastError> {
 	}
 }
 
-/// Trait for converting the value using casting rules, calling the functions on this trait results
-/// in similar behavior as casting does in surrealql like `<string> 1`.
+/// Trait for converting the value using casting rules, calling the functions on
+/// this trait results in similar behavior as casting does in surrealql like
+/// `<string> 1`.
 ///
 /// Casting rules are more loose then coercing rules.
 pub trait Cast: Sized {
 	/// Returns true if calling cast on the value will succeed.
 	///
-	/// If `T::can_cast(&v)` returns `true` then `T::cast(v) should not return an error.
+	/// If `T::can_cast(&v)` returns `true` then `T::cast(v) should not return
+	/// an error.
 	fn can_cast(v: &Value) -> bool;
 
 	/// Cast a value to the self type.
@@ -638,7 +640,7 @@ impl Cast for Point<f64> {
 impl Cast for RecordId {
 	fn can_cast(v: &Value) -> bool {
 		match v {
-			Value::Thing(_) => true,
+			Value::RecordId(_) => true,
 			Value::Strand(x) => syn::thing(x).is_ok(),
 			_ => false,
 		}
@@ -646,7 +648,7 @@ impl Cast for RecordId {
 
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
-			Value::Thing(x) => Ok(x),
+			Value::RecordId(x) => Ok(x),
 			Value::Strand(x) => match syn::thing(&x) {
 				Ok(x) => Ok(x),
 				Err(_) => Err(CastError::InvalidKind {
@@ -780,7 +782,7 @@ impl Value {
 
 	fn can_cast_to_record(&self, val: &[Ident]) -> bool {
 		match self {
-			Value::Thing(t) => t.is_record_type(val),
+			Value::RecordId(t) => t.is_record_type(val),
 			_ => false,
 		}
 	}
@@ -869,7 +871,8 @@ impl Value {
 		}
 	}
 
-	/// Try to convert this value to a Literal, returns a `Value` with the coerced value
+	/// Try to convert this value to a Literal, returns a `Value` with the
+	/// coerced value
 	pub(crate) fn cast_to_literal(self, literal: &KindLiteral) -> Result<Value, CastError> {
 		if literal.validate_value(&self) {
 			Ok(self)
@@ -884,7 +887,7 @@ impl Value {
 	/// Try to convert this value to a Record of a certain type
 	fn cast_to_record(self, val: &[Ident]) -> Result<RecordId, CastError> {
 		match self {
-			Value::Thing(v) if v.is_record_type(val) => Ok(v),
+			Value::RecordId(v) if v.is_record_type(val) => Ok(v),
 			Value::Strand(v) => match syn::thing(v.as_str()) {
 				Ok(x) if x.is_record_type(val) => Ok(x),
 				_ => {
@@ -975,7 +978,8 @@ impl Value {
 		Ok(array)
 	}
 
-	/// Try to convert this value to an `Array` of a certain type, unique values, and length
+	/// Try to convert this value to an `Array` of a certain type, unique
+	/// values, and length
 	pub(crate) fn cast_to_set_type_len(self, kind: &Kind, len: u64) -> Result<Array, CastError> {
 		let array = self.cast_to::<Array>()?;
 

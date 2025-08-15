@@ -5,6 +5,17 @@ pub(crate) mod scorer;
 pub(in crate::idx) mod termdocs;
 pub(crate) mod terms;
 
+use std::collections::HashSet;
+use std::ops::BitAnd;
+use std::sync::Arc;
+
+use reblessive::tree::Stk;
+use revision::{Revisioned, revisioned};
+use roaring::RoaringTreemap;
+use roaring::treemap::IntoIter;
+use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::index::SearchParams;
@@ -29,16 +40,6 @@ use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::IndexStores;
 use crate::kvs::{KVValue, Key, Transaction, TransactionType};
 use crate::val::{Object, RecordId, Value};
-use reblessive::tree::Stk;
-use revision::Revisioned;
-use revision::revisioned;
-use roaring::RoaringTreemap;
-use roaring::treemap::IntoIter;
-use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
-use std::ops::BitAnd;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub(in crate::idx) type TermIdList = Vec<Option<(TermId, TermLen)>>;
 
@@ -340,7 +341,8 @@ impl SearchIndex {
 					}
 				}
 			}
-			// In case of an update, w remove the offset for the terms that does not exist anymore
+			// In case of an update, w remove the offset for the terms that does not exist
+			// anymore
 			if let Some(old_term_ids) = old_term_ids {
 				for old_term_id in old_term_ids {
 					self.offsets.remove_offsets(&tx, doc_id, old_term_id).await?;
@@ -487,7 +489,8 @@ impl SearchIndex {
 		// We need to store them because everything after is zero-copy
 		let inputs =
 			self.analyzer.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;
-		// We then collect every unique term and count the frequency and extract the offsets
+		// We then collect every unique term and count the frequency and extract the
+		// offsets
 		let (dl, tfos) = Analyzer::extract_offsets(&inputs)?;
 		// Now we can resolve the term ids
 		let mut tfid = Vec::with_capacity(tfos.len());
@@ -653,6 +656,12 @@ impl MatchesHitsIterator for SearchHitsIterator {
 
 #[cfg(test)]
 mod tests {
+	use std::collections::HashMap;
+	use std::sync::Arc;
+
+	use reblessive::tree::Stk;
+	use test_log::test;
+
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
 	use crate::expr::index::SearchParams;
@@ -662,15 +671,12 @@ mod tests {
 	use crate::idx::ft::search::scorer::BM25Scorer;
 	use crate::idx::ft::search::{SearchHitsIterator, SearchIndex};
 	use crate::idx::planner::iterators::MatchesHitsIterator;
-	use crate::kvs::{Datastore, LockType::*, TransactionType};
+	use crate::kvs::LockType::*;
+	use crate::kvs::{Datastore, TransactionType};
 	use crate::sql::Expr;
 	use crate::sql::statements::DefineStatement;
 	use crate::syn;
 	use crate::val::{Array, RecordId, Value};
-	use reblessive::tree::Stk;
-	use std::collections::HashMap;
-	use std::sync::Arc;
-	use test_log::test;
 
 	async fn check_hits(
 		ctx: &Context,
@@ -896,8 +902,8 @@ mod tests {
 	async fn test_ft_index_bm_25(hl: bool) {
 		// The function `extract_sorted_terms_with_frequencies` is non-deterministic.
 		// the inner structures (BTrees) are built with the same terms and frequencies,
-		// but the insertion order is different, ending up in different BTree structures.
-		// Therefore it makes sense to do multiple runs.
+		// but the insertion order is different, ending up in different BTree
+		// structures. Therefore it makes sense to do multiple runs.
 		for _ in 0..10 {
 			let ds = Datastore::new("memory").await.unwrap();
 			let ctx = ds.setup_ctx().unwrap().freeze();

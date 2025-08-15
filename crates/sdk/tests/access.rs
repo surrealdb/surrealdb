@@ -3,11 +3,10 @@
 mod helpers;
 use helpers::new_ds;
 use regex::Regex;
-use surrealdb::dbs::capabilities::ExperimentalTarget;
-use surrealdb::dbs::{Capabilities, Session};
-use surrealdb::iam::Role;
-use surrealdb::sql::Base;
-use surrealdb_core::iam::Level;
+use surrealdb_core::dbs::capabilities::ExperimentalTarget;
+use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_core::iam::{Level, Role};
+use surrealdb_core::sql::Base;
 use surrealdb_core::val::Array;
 use tokio::time::Duration;
 

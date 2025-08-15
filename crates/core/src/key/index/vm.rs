@@ -1,7 +1,9 @@
 //! Stores MTree state and nodes
-use crate::idx::trees::{mtree::MState, store::NodeId};
-use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
+
+use crate::idx::trees::mtree::MState;
+use crate::idx::trees::store::NodeId;
+use crate::kvs::KVKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub(crate) struct VmRoot<'a> {

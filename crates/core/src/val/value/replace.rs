@@ -1,6 +1,7 @@
+use anyhow::{Result, ensure};
+
 use crate::err::Error;
 use crate::val::Value;
-use anyhow::{Result, ensure};
 
 impl Value {
 	pub(crate) fn replace(&mut self, val: Value) -> Result<()> {

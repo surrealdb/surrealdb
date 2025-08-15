@@ -1,3 +1,10 @@
+use std::fmt::{self, Display};
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -5,11 +12,6 @@ use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, FlowResultExt, Permission, Value};
 use crate::val::{Array, Object, Strand};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
 
 /// The api configuration as it is received from ast.
 #[revisioned(revision = 1)]

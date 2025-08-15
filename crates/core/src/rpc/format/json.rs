@@ -10,7 +10,8 @@ pub fn encode(value: Value) -> Result<Vec<u8>, String> {
 pub fn encode_str(value: Value) -> Result<String, String> {
 	let v =
 		value.into_json_value().ok_or_else(|| "value cannot be converted into json".to_owned())?;
-	// Because we convert to serde_json::Value first we can guarentee that serialization wont fail.
+	// Because we convert to serde_json::Value first we can guarentee that
+	// serialization wont fail.
 	Ok(serde_json::to_string(&v).unwrap())
 }
 

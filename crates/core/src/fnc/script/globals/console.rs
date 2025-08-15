@@ -1,7 +1,8 @@
 // Specify the imports
+use std::fmt;
+
 use js::prelude::Rest;
 use js::{Coerced, Ctx, Object, Result};
-use std::fmt;
 
 pub struct Printer<'a>(&'a [Coerced<String>]);
 impl fmt::Display for Printer<'_> {

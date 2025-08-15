@@ -1,17 +1,19 @@
-use crate::err::Error;
-use crate::idx::trees::bkeys::BKeys;
-use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeStore};
-use crate::kvs::{KVValue, Key, Transaction, Val};
-use crate::val::{Object, Value};
+use std::collections::VecDeque;
+use std::fmt::{Debug, Display, Formatter};
+use std::io::Cursor;
+use std::marker::PhantomData;
+
 #[cfg(debug_assertions)]
 use ahash::HashSet;
 use anyhow::{Result, bail};
 use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
-use std::fmt::{Debug, Display, Formatter};
-use std::io::Cursor;
-use std::marker::PhantomData;
+
+use crate::err::Error;
+use crate::idx::trees::bkeys::BKeys;
+use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeStore};
+use crate::kvs::{KVValue, Key, Transaction, Val};
+use crate::val::{Object, Value};
 
 pub type Payload = u64;
 
@@ -656,7 +658,8 @@ where
 
 		// CLRS: 2c
 		// Merge children
-		// The payload is set to 0. The payload does not matter, as the key will be deleted after anyway.
+		// The payload is set to 0. The payload does not matter, as the key will be
+		// deleted after anyway.
 		#[cfg(debug_assertions)]
 		{
 			left_node.n.check();
@@ -1007,19 +1010,18 @@ where
 
 #[cfg(test)]
 mod tests {
-	use std::{cmp::Ordering, collections::BTreeMap, sync::Arc};
+	use std::cmp::Ordering;
+	use std::collections::BTreeMap;
+	use std::sync::Arc;
 
-	use crate::{
-		idx::trees::{
-			bkeys::{FstKeys, TrieKeys},
-			store::TreeNodeProvider,
-		},
-		kvs::{Datastore, LockType, TransactionType},
-	};
+	use rand::seq::SliceRandom;
+	use rand::thread_rng;
+	use test_log::test;
 
 	use super::*;
-	use rand::{seq::SliceRandom, thread_rng};
-	use test_log::test;
+	use crate::idx::trees::bkeys::{FstKeys, TrieKeys};
+	use crate::idx::trees::store::TreeNodeProvider;
+	use crate::kvs::{Datastore, LockType, TransactionType};
 
 	#[test]
 	fn test_btree_state_serde() {

@@ -1,3 +1,6 @@
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+
 use crate::cnf::IDIOM_RECURSION_LIMIT;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -6,8 +9,6 @@ use crate::err::Error;
 use crate::expr::part::{RecurseInstruction, RecursionPlan};
 use crate::expr::{FlowResultExt as _, Part};
 use crate::val::{Array, Value};
-use anyhow::{Result, bail};
-use reblessive::tree::Stk;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Recursion<'a> {

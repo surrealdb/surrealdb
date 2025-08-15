@@ -1,11 +1,13 @@
+use std::sync::Arc;
+
+use uuid::Uuid;
+
 use crate::dbs::node::Timestamp;
 use crate::dbs::{Response, Session};
 use crate::kvs::clock::{FakeClock, SizedClock};
 use crate::kvs::tests::CreateDs;
 use crate::syn;
 use crate::val::Value;
-use std::sync::Arc;
-use uuid::Uuid;
 
 async fn test(new_ds: impl CreateDs, index: &str) -> Vec<Response> {
 	// Create a new datastore
@@ -17,7 +19,9 @@ async fn test(new_ds: impl CreateDs, index: &str) -> Vec<Response> {
 		"USE NS test;
 		USE DB test;
 		{index};
-		CREATE |i:1500| SET v = rand::uuid::v7() RETURN NONE;
+		FOR $i IN 1..=1500 {{ CREATE i:[$i] SET v = $i; }};
+        SELECT v FROM i WHERE v > 500 ORDER BY v DESC LIMIT 3 EXPLAIN;
+		SELECT v FROM i WHERE v > 500 ORDER BY v DESC LIMIT 3;
 		SELECT v FROM i ORDER BY v DESC LIMIT 3 EXPLAIN;
 		SELECT v FROM i ORDER BY v DESC LIMIT 3;
 		SELECT v FROM i ORDER BY v DESC EXPLAIN;
@@ -25,7 +29,7 @@ async fn test(new_ds: impl CreateDs, index: &str) -> Vec<Response> {
 	);
 
 	let mut r = ds.execute(&sql, &Session::owner(), None).await.unwrap();
-	assert_eq!(r.len(), 8);
+	assert_eq!(r.len(), 10);
 	// Check the first statements are successful
 	for _ in 0..4 {
 		r.remove(0).result.unwrap();
@@ -54,6 +58,37 @@ fn check_array_is_sorted(v: &Value, expected_len: usize) {
 
 pub async fn standard(new_ds: impl CreateDs) {
 	let r = &mut (test(new_ds, "DEFINE INDEX idx ON TABLE i COLUMNS v").await);
+	check(
+		r,
+		"[
+			{
+				detail: {
+					plan: {
+						direction: 'backward',
+						from: {
+							inclusive: false,
+							value: 500
+						},
+						index: 'idx',
+						to: {
+							inclusive: false,
+							value: NONE
+						}
+					},
+					table: 'i'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					limit: 3,
+					type: 'MemoryOrderedLimit'
+				},
+				operation: 'Collector'
+			}
+		]",
+	);
+	check_array_is_sorted(&r.remove(0).result.unwrap(), 3);
 	check(
 		r,
 		"[
@@ -103,6 +138,37 @@ pub async fn standard(new_ds: impl CreateDs) {
 
 pub async fn unique(new_ds: impl CreateDs) {
 	let r = &mut (test(new_ds, "DEFINE INDEX idx ON TABLE i COLUMNS v UNIQUE").await);
+	check(
+		r,
+		"[
+			{
+				detail: {
+					plan: {
+						direction: 'backward',
+						from: {
+							inclusive: false,
+							value: 500
+						},
+						index: 'idx',
+						to: {
+							inclusive: false,
+							value: NONE
+						}
+					},
+					table: 'i'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					limit: 3,
+					type: 'MemoryOrderedLimit'
+				},
+				operation: 'Collector'
+			}
+		]",
+	);
+	check_array_is_sorted(&r.remove(0).result.unwrap(), 3);
 	check(
 		r,
 		"[

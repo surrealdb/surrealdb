@@ -1,12 +1,14 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::val::Value;
+use std::fmt::{self, Display};
+
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::val::Value;
 
 mod field;
 mod sequence;

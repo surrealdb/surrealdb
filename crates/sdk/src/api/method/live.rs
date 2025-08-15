@@ -1,31 +1,31 @@
+use std::future::IntoFuture;
+use std::marker::PhantomData;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+use async_channel::Receiver;
+use futures::StreamExt;
+use serde::de::DeserializeOwned;
+#[cfg(not(target_family = "wasm"))]
+use tokio::spawn;
+use uuid::Uuid;
+#[cfg(target_family = "wasm")]
+use wasm_bindgen_futures::spawn_local as spawn;
+
 use crate::api::conn::{Command, Router};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::{self, Connection, ExtraFeatures, Result};
+use crate::core::dbs::{Action as CoreAction, Notification as CoreNotification};
+use crate::core::expr::{
+	BinaryOperator, Cond, Expr, Fields, Ident, Idiom, Literal, LiveStatement, TopLevelExpr,
+};
+use crate::core::val;
 use crate::engine::any::Any;
 use crate::method::{Live, OnceLockExt, Query, Select};
 use crate::opt::Resource;
 use crate::value::Notification;
 use crate::{Action, Surreal, Value};
-use async_channel::Receiver;
-use futures::StreamExt;
-use serde::de::DeserializeOwned;
-use std::future::IntoFuture;
-use std::marker::PhantomData;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use surrealdb_core::dbs::{Action as CoreAction, Notification as CoreNotification};
-use surrealdb_core::expr::{
-	BinaryOperator, Cond, Expr, Fields, Ident, Idiom, Literal, LiveStatement, TopLevelExpr,
-};
-use surrealdb_core::val;
-use uuid::Uuid;
-
-#[cfg(not(target_family = "wasm"))]
-use tokio::spawn;
-
-#[cfg(target_family = "wasm")]
-use wasm_bindgen_futures::spawn_local as spawn;
 
 fn into_future<C, O>(this: Select<C, O, Live>) -> BoxFuture<Result<Stream<O>>>
 where
@@ -75,9 +75,9 @@ where
 						left: Box::new(id.clone()),
 						op: BinaryOperator::MoreThanEqual,
 						right: Box::new(Expr::Literal(Literal::RecordId(
-							surrealdb_core::expr::RecordIdLit {
-								tb: record.table.clone(),
-								id: x.into_literal(),
+							crate::core::expr::RecordIdLit {
+								table: record.table.clone(),
+								key: x.into_literal(),
 							},
 						))),
 					}),
@@ -85,9 +85,9 @@ where
 						left: Box::new(id.clone()),
 						op: BinaryOperator::MoreThan,
 						right: Box::new(Expr::Literal(Literal::RecordId(
-							surrealdb_core::expr::RecordIdLit {
-								tb: record.table.clone(),
-								id: x.into_literal(),
+							crate::core::expr::RecordIdLit {
+								table: record.table.clone(),
+								key: x.into_literal(),
 							},
 						))),
 					}),
@@ -98,9 +98,9 @@ where
 						left: Box::new(id),
 						op: BinaryOperator::LessThanEqual,
 						right: Box::new(Expr::Literal(Literal::RecordId(
-							surrealdb_core::expr::RecordIdLit {
-								tb: record.table,
-								id: x.into_literal(),
+							crate::core::expr::RecordIdLit {
+								table: record.table,
+								key: x.into_literal(),
 							},
 						))),
 					}),
@@ -108,9 +108,9 @@ where
 						left: Box::new(id),
 						op: BinaryOperator::LessThan,
 						right: Box::new(Expr::Literal(Literal::RecordId(
-							surrealdb_core::expr::RecordIdLit {
-								tb: record.table,
-								id: x.into_literal(),
+							crate::core::expr::RecordIdLit {
+								table: record.table,
+								key: x.into_literal(),
 							},
 						))),
 					}),

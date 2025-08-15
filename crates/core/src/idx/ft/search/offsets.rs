@@ -1,9 +1,10 @@
+use anyhow::Result;
+
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::ft::offset::OffsetRecords;
 use crate::idx::ft::search::terms::TermId;
 use crate::kvs::Transaction;
-use anyhow::Result;
 
 pub(super) struct Offsets {
 	index_key_base: IndexKeyBase,

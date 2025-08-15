@@ -1,7 +1,8 @@
-use super::key::Key;
-use crate::val::RecordIdKey;
 use quick_cache::Equivalent;
 use uuid::Uuid;
+
+use super::key::Key;
+use crate::val::RecordIdKey;
 
 #[derive(Hash, Eq, PartialEq)]
 pub(crate) enum Lookup<'a> {

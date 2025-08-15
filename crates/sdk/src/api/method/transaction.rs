@@ -1,7 +1,8 @@
+use uuid::Uuid;
+
 use crate::api::method::{Cancel, Commit, Create, Delete, Insert, Query, Select, Update, Upsert};
 use crate::api::{Connection, Surreal};
 use crate::opt::{CreateResource, IntoQuery, IntoResource};
-use uuid::Uuid;
 
 /// An ongoing transaction
 #[derive(Debug)]

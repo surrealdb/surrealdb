@@ -1,9 +1,10 @@
+use anyhow::Result;
+
 use crate::fnc::util::math::vector::{
 	Add, Angle, CrossProduct, Divide, DotProduct, Magnitude, Multiply, Normalize, Project, Scale,
 	Subtract,
 };
 use crate::val::{Number, Value};
-use anyhow::Result;
 
 pub fn add((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 	Ok(a.add(&b)?.into_iter().map(Value::from).collect::<Vec<_>>().into())
@@ -50,6 +51,8 @@ pub fn scale((a, b): (Vec<Number>, Number)) -> Result<Value> {
 }
 
 pub mod distance {
+	use anyhow::Result;
+
 	use crate::ctx::Context;
 	use crate::doc::CursorDoc;
 	use crate::err::Error;
@@ -60,7 +63,6 @@ pub mod distance {
 	};
 	use crate::idx::planner::IterationStage;
 	use crate::val::{Number, Value};
-	use anyhow::Result;
 
 	pub fn chebyshev((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 		Ok(a.chebyshev_distance(&b)?.into())
@@ -115,10 +117,11 @@ pub mod distance {
 
 pub mod similarity {
 
+	use anyhow::Result;
+
 	use crate::err::Error;
 	use crate::fnc::util::math::vector::{CosineSimilarity, JaccardSimilarity, PearsonSimilarity};
 	use crate::val::{Number, Value};
-	use anyhow::Result;
 
 	pub fn cosine((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 		Ok(a.cosine_similarity(&b)?.into())
@@ -141,9 +144,10 @@ pub mod similarity {
 
 #[cfg(test)]
 mod tests {
+	use rust_decimal::Decimal;
+
 	use super::*;
 	use crate::val::Number;
-	use rust_decimal::Decimal;
 
 	#[test]
 	fn vector_scale_int() {

@@ -1,7 +1,10 @@
 //! Store state of an HNSW index
-use crate::{idx::trees::hnsw::HnswState, kvs::KVKey};
-use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+
+use serde::{Deserialize, Serialize};
+
+use crate::idx::trees::hnsw::HnswState;
+use crate::kvs::KVKey;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Hs<'a> {

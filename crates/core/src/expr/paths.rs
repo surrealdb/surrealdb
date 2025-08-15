@@ -1,5 +1,6 @@
-use crate::expr::Part;
 use std::sync::LazyLock;
+
+use crate::expr::Part;
 
 pub const OBJ_PATH_ACCESS: &str = "ac";
 pub const OBJ_PATH_AUTH: &str = "rd";

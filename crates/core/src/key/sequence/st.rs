@@ -1,11 +1,10 @@
 //! Stores sequence states
-use crate::{
-	key::category::{Categorise, Category},
-	kvs::{KVKey, sequences::SequenceState},
-};
-
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+use crate::kvs::sequences::SequenceState;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct St<'a> {

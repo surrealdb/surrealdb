@@ -1,28 +1,31 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::expr::escape::EscapeKey;
-use crate::expr::fmt::{Pretty, is_pretty, pretty_indent};
-use crate::expr::{Expr, FlowResult, RecordIdLit, fmt::Fmt};
-use crate::val::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, Regex,
-	Strand, Uuid, Value,
-};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
 use std::hash::{Hash, Hasher};
 
+use reblessive::tree::Stk;
+use revision::revisioned;
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
+
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::expr::escape::EscapeKey;
+use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
+use crate::expr::{Expr, FlowResult, RecordIdLit};
+use crate::val::{
+	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, Regex,
+	Strand, Uuid, Value,
+};
+
 /// A literal value, should be computed to get an actual value.
 ///
 /// # Note regarding equality.
-/// A literal is equal to an other literal if it is the exact same byte representation, so normal float rules
-/// regarding equality do not apply, i.e. if `a != b` then `Literal::Float(a)` could still be equal
-/// to `Literal::Float(b)` in the case of `NaN` floats for example. Also surrealql rules regarding
-/// number equality are not observed, 1f != 1dec.
+/// A literal is equal to an other literal if it is the exact same byte
+/// representation, so normal float rules regarding equality do not apply, i.e.
+/// if `a != b` then `Literal::Float(a)` could still be equal
+/// to `Literal::Float(b)` in the case of `NaN` floats for example. Also
+/// surrealql rules regarding number equality are not observed, 1f != 1dec.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
@@ -96,7 +99,7 @@ impl Literal {
 			Literal::Bytes(bytes) => Value::Bytes(bytes.clone()),
 			Literal::Regex(regex) => Value::Regex(regex.clone()),
 			Literal::RecordId(record_id_lit) => {
-				Value::Thing(record_id_lit.compute(stk, ctx, opt, doc).await?)
+				Value::RecordId(record_id_lit.compute(stk, ctx, opt, doc).await?)
 			}
 			Literal::Array(exprs) => {
 				let mut array = Vec::with_capacity(exprs.len());

@@ -1,7 +1,7 @@
-use revision::revisioned;
 use std::ops::Deref;
 use std::str::FromStr;
 
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use super::{Level, Resource, ResourceKind};

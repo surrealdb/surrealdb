@@ -1,4 +1,5 @@
 use std::sync::Arc;
+
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
@@ -53,7 +54,8 @@ pub trait RpcContext {
 	// Returns the GraphQL schema cache used in GraphQL queries
 	//#[cfg(not(target_family = "wasm"))]
 	//fn graphql_schema_cache(&self) -> &SchemaCache {
-	//unimplemented!("graphql_schema_cache function must be implemented if GQL_SUPPORT = true")
+	//unimplemented!("graphql_schema_cache function must be implemented if
+	// GQL_SUPPORT = true")
 	//}
 
 	// ------------------------------

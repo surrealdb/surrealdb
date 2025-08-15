@@ -1,10 +1,19 @@
+use std::collections::HashMap;
+use std::hash::Hash;
+use std::ops::Deref;
+use std::sync::Arc;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::dbs::Options;
-use crate::expr::FlowResultExt as _;
 use crate::expr::index::Index;
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
 use crate::expr::statements::{DefineFieldStatement, DefineIndexStatement};
-use crate::expr::{BinaryOperator, Cond, Expr, Ident, Idiom, Kind, Literal, Order, Part, With};
+use crate::expr::{
+	BinaryOperator, Cond, Expr, FlowResultExt as _, Ident, Idiom, Kind, Literal, Order, Part, With,
+};
 use crate::idx::planner::StatementContext;
 use crate::idx::planner::executor::{
 	KnnBruteForceExpression, KnnBruteForceExpressions, KnnExpressions,
@@ -13,12 +22,6 @@ use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::idx::planner::rewriter::KnnConditionRewriter;
 use crate::kvs::Transaction;
 use crate::val::{Array, Number, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::collections::HashMap;
-use std::hash::Hash;
-use std::ops::Deref;
-use std::sync::Arc;
 
 pub(super) struct Tree {
 	pub(super) root: Option<Node>,
@@ -181,7 +184,8 @@ impl<'a> TreeBuilder<'a> {
 				self.check_boolean_operator(group, op);
 				let left_node = stk.run(|stk| self.eval_value(stk, group, left)).await?;
 				let right_node = stk.run(|stk| self.eval_value(stk, group, right)).await?;
-				// If both values are computable, then we can delegate the computation to the parent
+				// If both values are computable, then we can delegate the computation to the
+				// parent
 				if left_node == Node::Computable && right_node == Node::Computable {
 					return Ok(Node::Computable);
 				}

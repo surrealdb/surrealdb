@@ -1,6 +1,7 @@
+use anyhow::Result;
+
 use crate::err::Error;
 use crate::val::{RecordId, RecordIdKey, Strand, Value};
-use anyhow::Result;
 
 impl Value {
 	pub(crate) fn generate(self, tb: Strand, retable: bool) -> Result<RecordId> {
@@ -41,7 +42,7 @@ impl Value {
 				key: RecordIdKey::rand(),
 			}),
 			// There is a record id defined
-			Value::Thing(id) => {
+			Value::RecordId(id) => {
 				if retable {
 					// Let's re-table this record id
 					Ok(RecordId {
