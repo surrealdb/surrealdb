@@ -550,6 +550,7 @@ mod tests {
 	use crate::expr::idiom::Idiom;
 	use crate::sql::idiom::Idiom as SqlIdiom;
 	use crate::syn;
+	use crate::val::RecordId;
 
 	#[tokio::test]
 	async fn get_none() {
