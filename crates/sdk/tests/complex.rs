@@ -8,7 +8,9 @@ use surrealdb::err::Error;
 use surrealdb_core::syn;
 use surrealdb_core::val::Value;
 
-/* Removed because of <future> removal, should be reintroduced after COMPUTED is added.
+/* Removed because of <future> removal, not yet relevant for the initial COMPUTED implementation.
+ * Once we start to analyze query dependencies up front we can error on cyclic dependencies again.
+
 #[test]
 fn self_referential_field() -> Result<()> {
 	// Ensure a good stack size for tests
