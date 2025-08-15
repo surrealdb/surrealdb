@@ -8,6 +8,7 @@ use crate::dbs::{Operable, Options, Processed, Statement, Workable};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::val::Value;
+use crate::val::record::{Data, Record};
 
 impl Document {
 	pub(crate) async fn process(
@@ -27,7 +28,9 @@ impl Document {
 			Operable::Value(v) => (v, Workable::Normal),
 			Operable::Insert(v, o) => (v, Workable::Insert(o)),
 			Operable::Relate(f, v, w, o) => (v, Workable::Relate(f, w, o)),
-			Operable::Count(count) => (Arc::new(count.into()), Workable::Normal),
+			Operable::Count(count) => {
+				(Arc::new(Record::new(Data::Mutable(count.into()))), Workable::Normal)
+			}
 		};
 		// Setup a new document
 		let mut doc = Document::new(pro.rid, pro.ir, pro.generate, ins.0, ins.1, false, pro.rs);

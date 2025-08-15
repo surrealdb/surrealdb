@@ -8,7 +8,6 @@ use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::expr::output::Output;
-use crate::expr::paths::META;
 use crate::expr::permission::Permission;
 use crate::expr::{FlowResultExt as _, Operation};
 use crate::iam::Action;
@@ -175,8 +174,6 @@ impl Document {
 				out.del(stk, ctx, opt, v).await?;
 			}
 		}
-		// Remove metadata fields on output
-		out.cut(&*META);
 		// Output result
 		Ok(out)
 	}

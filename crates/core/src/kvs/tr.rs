@@ -9,7 +9,7 @@ use expr::statements::DefineTableStatement;
 use super::api::Transaction;
 use super::{Key, Val, Version};
 use crate::cnf::NORMAL_FETCH_SIZE;
-use crate::doc::CursorValue;
+use crate::doc::CursorRecord;
 use crate::idg::u32::U32;
 use crate::key::debug::Sprintable;
 use crate::kvs::KVValue;
@@ -568,8 +568,8 @@ impl Transactor {
 		db: &str,
 		tb: &str,
 		id: &RecordId,
-		previous: CursorValue,
-		current: CursorValue,
+		previous: CursorRecord,
+		current: CursorRecord,
 		store_difference: bool,
 	) {
 		self.cf.record_cf_change(ns, db, tb, id.clone(), previous, current, store_difference)

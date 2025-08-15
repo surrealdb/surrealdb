@@ -20,6 +20,7 @@ use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, thing};
 use crate::kvs::{KVKey, Key, Transaction, Val};
 use crate::syn;
+use crate::val::record::{Data, Record};
 use crate::val::{RecordId, RecordIdKeyRange, Value};
 
 impl Iterable {
@@ -157,10 +158,10 @@ impl Collected {
 		rid_only: bool,
 	) -> Result<Processed> {
 		// Parse the data from the store
-		let gra: graph::Graph = graph::Graph::decode_key(&key)?;
+		let gra = graph::Graph::decode_key(&key)?;
 		// Fetch the data from the store
-		let val = if rid_only {
-			Arc::new(Value::Null)
+		let record = if rid_only {
+			Arc::new(Default::default())
 		} else {
 			let (ns, db) = opt.ns_db()?;
 			txn.get_record(ns, db, gra.ft, &gra.fk, None).await?
@@ -170,7 +171,7 @@ impl Collected {
 			key: gra.fk,
 		};
 		// Parse the data from the store
-		let val = Operable::Value(val);
+		let val = Operable::Value(record);
 		// Process the record
 		Ok(Processed {
 			rs: RecordStrategy::KeysAndValues,
@@ -183,7 +184,7 @@ impl Collected {
 
 	async fn process_range_key(key: Key) -> Result<Processed> {
 		let key = thing::Thing::decode_key(&key)?;
-		let val = Value::Null;
+		let val = Record::new(Data::Mutable(Value::Null));
 		let rid = RecordId {
 			table: key.tb.to_owned(),
 			key: key.id,
@@ -213,7 +214,7 @@ impl Collected {
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
-			val: Operable::Value(Value::Null.into()),
+			val: Operable::Value(Record::new(Data::Mutable(Value::Null)).into()),
 		};
 		Ok(pro)
 	}
@@ -229,7 +230,7 @@ impl Collected {
 	) -> Result<Processed> {
 		// if it is skippable we only need the record id
 		let val = if rid_only {
-			Operable::Value(Arc::new(Value::Null))
+			Operable::Value(Record::new(Data::Mutable(Value::Null)).into())
 		} else {
 			// Check that the table exists
 			let (ns, db) = opt.ns_db()?;
@@ -258,7 +259,7 @@ impl Collected {
 	) -> Result<Processed> {
 		// if it is skippable we only need the record id
 		let val = if rid_only {
-			Arc::new(Value::Null)
+			Record::new(Data::Mutable(Value::Null)).into()
 		} else {
 			// Check that the table exists
 			let (ns, db) = opt.ns_db()?;
@@ -298,7 +299,7 @@ impl Collected {
 			generate: Some(v),
 			rid: None,
 			ir: None,
-			val: Operable::Value(Value::None.into()),
+			val: Operable::Value(Default::default()),
 		};
 		Ok(pro)
 	}
@@ -319,7 +320,7 @@ impl Collected {
 			generate: None,
 			rid,
 			ir: None,
-			val: Operable::Value(v.into()),
+			val: Operable::Value(Record::new(Data::Mutable(v)).into()),
 		}
 	}
 
@@ -341,7 +342,7 @@ impl Collected {
 			generate: None,
 			rid: Some(v.into()),
 			ir: None,
-			val: Operable::Value(Value::None.into()),
+			val: Operable::Value(Default::default()),
 		};
 		Ok(pro)
 	}
@@ -365,7 +366,7 @@ impl Collected {
 			generate: None,
 			rid: Some(v.into()),
 			ir: None,
-			val: Operable::Insert(Value::None.into(), o.into()),
+			val: Operable::Insert(Default::default(), o.into()),
 		};
 		// Everything ok
 		Ok(pro)
@@ -373,13 +374,13 @@ impl Collected {
 
 	fn process_key_val(key: Key, val: Val) -> Result<Processed> {
 		let key = thing::Thing::decode_key(&key)?;
-		let mut val: Value = revision::from_slice(&val)?;
+		let mut val: Record = revision::from_slice(&val)?;
 		let rid = RecordId {
 			table: key.tb.to_owned(),
 			key: key.id,
 		};
 		// Inject the id field into the document
-		val.def(&rid);
+		val.data.to_mut().def(&rid);
 		// Create a new operable value
 		let val = Operable::Value(val.into());
 		// Process the record
@@ -409,7 +410,9 @@ impl Collected {
 			generate: None,
 			rid: Some(t),
 			ir: Some(Arc::new(ir)),
-			val: Operable::Value(v.unwrap_or_else(|| Value::Null.into())),
+			val: Operable::Value(
+				v.unwrap_or_else(|| Record::new(Data::Mutable(Value::Null)).into()),
+			),
 		}
 	}
 
@@ -426,7 +429,7 @@ impl Collected {
 			v
 		} else if rid_only {
 			// if it is skippable we only need the record id
-			Value::Null.into()
+			Record::new(Data::Mutable(Value::Null)).into()
 		} else {
 			Iterable::fetch_thing(txn, opt, &t).await?
 		};
@@ -1055,7 +1058,7 @@ impl Iterable {
 		txn: &Transaction,
 		opt: &Options,
 		thg: &RecordId,
-	) -> Result<Arc<Value>> {
+	) -> Result<Arc<Record>> {
 		// Fetch and parse the data from the store
 		let (ns, db) = opt.ns_db()?;
 		let val = txn.get_record(ns, db, &thg.table, &thg.key, None).await?;

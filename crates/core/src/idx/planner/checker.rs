@@ -16,7 +16,8 @@ use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::knn::Ids64;
 use crate::kvs::Transaction;
-use crate::val::{RecordId, Value};
+use crate::val::RecordId;
+use crate::val::record::Record;
 
 pub enum HnswConditionChecker<'a> {
 	Hnsw(HnswChecker),
@@ -155,7 +156,7 @@ impl MTreeChecker<'_> {
 }
 
 struct CheckerCacheEntry {
-	record: Option<(Arc<RecordId>, Arc<Value>)>,
+	record: Option<(Arc<RecordId>, Arc<Record>)>,
 	truthy: bool,
 }
 
@@ -188,9 +189,9 @@ impl CheckerCacheEntry {
 			let rid = Arc::new(rid);
 			let txn = ctx.tx();
 			let val = Iterable::fetch_thing(&txn, opt, &rid).await?;
-			if !val.is_nullish() {
-				let (value, truthy) = {
-					let mut cursor_doc = CursorDoc {
+			if !val.data.as_ref().is_nullish() {
+				let (record, truthy) = {
+					let cursor_doc = CursorDoc {
 						rid: Some(rid.clone()),
 						ir: None,
 						doc: val.into(),
@@ -200,10 +201,10 @@ impl CheckerCacheEntry {
 						.await
 						.catch_return()?
 						.is_truthy();
-					(cursor_doc.doc.as_arc(), truthy)
+					(cursor_doc.doc.into_read_only(), truthy)
 				};
 				return Ok(CheckerCacheEntry {
-					record: Some((rid, value)),
+					record: Some((rid, Arc::new(record))),
 					truthy,
 				});
 			}

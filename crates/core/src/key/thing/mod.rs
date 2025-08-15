@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-use crate::val::{RecordIdKey, Value};
+use crate::val::RecordIdKey;
+use crate::val::record::Record;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Thing<'a> {
@@ -20,7 +21,7 @@ pub(crate) struct Thing<'a> {
 }
 
 impl KVKey for Thing<'_> {
-	type ValueType = Value;
+	type ValueType = Record;
 }
 
 pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, id: &RecordIdKey) -> Thing<'a> {

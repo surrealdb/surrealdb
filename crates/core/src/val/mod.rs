@@ -17,6 +17,7 @@ use crate::expr::fmt::Pretty;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{self, Ident, Kind};
 use crate::kvs::impl_kv_value_revisioned;
+use crate::val::record::Record;
 
 pub mod array;
 pub mod bytes;
@@ -28,6 +29,7 @@ pub mod geometry;
 pub mod number;
 pub mod object;
 pub mod range;
+pub mod record;
 pub mod regex;
 pub mod strand;
 pub mod table;
@@ -88,7 +90,7 @@ pub enum Value {
 	// Add new variants here
 }
 
-impl_kv_value_revisioned!(Value);
+impl_kv_value_revisioned!(Record);
 
 impl Eq for Value {}
 

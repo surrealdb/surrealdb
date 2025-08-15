@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Formatter};
 use std::mem;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -20,6 +20,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::idx::planner::RecordStrategy;
 use crate::idx::planner::iterators::IteratorRecord;
 use crate::kvs::cache;
+use crate::val::record::{Data, Record};
 use crate::val::{RecordId, Value};
 
 pub(crate) struct Document {
@@ -41,60 +42,59 @@ pub(crate) struct Document {
 pub(crate) struct CursorDoc {
 	pub(crate) rid: Option<Arc<RecordId>>,
 	pub(crate) ir: Option<Arc<IteratorRecord>>,
-	pub(crate) doc: CursorValue,
+	pub(crate) doc: CursorRecord,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct CursorValue {
-	mutable: Value,
-	read_only: Option<Arc<Value>>,
+pub(crate) struct CursorRecord {
+	record: Record,
 }
 
-impl CursorValue {
+impl CursorRecord {
 	pub(crate) fn to_mut(&mut self) -> &mut Value {
-		if let Some(ro) = self.read_only.take() {
-			self.mutable = ro.as_ref().clone();
-		}
-		&mut self.mutable
+		self.record.data.to_mut()
 	}
 
 	pub(crate) fn as_arc(&mut self) -> Arc<Value> {
-		match &self.read_only {
-			None => {
-				let v = Arc::new(mem::take(&mut self.mutable));
-				self.read_only = Some(v.clone());
-				v
-			}
-			Some(v) => v.clone(),
+		self.record.data.read_only()
+	}
+
+	pub(crate) fn into_read_only(mut self) -> Record {
+		if let Data::Mutable(value) = &mut self.record.data {
+			let value = mem::take(value);
+			let arc = Arc::new(value);
+			self.record.data = Data::ReadOnly(arc);
 		}
+		self.record
 	}
 
 	pub(crate) fn as_ref(&self) -> &Value {
-		if let Some(ro) = &self.read_only {
-			ro.as_ref()
-		} else {
-			&self.mutable
-		}
+		self.record.data.as_ref()
 	}
 
-	pub(crate) fn into_owned(self) -> Value {
-		if let Some(ro) = &self.read_only {
-			ro.as_ref().clone()
-		} else {
-			self.mutable
+	pub(crate) fn into_owned(mut self) -> Value {
+		match self.record.data {
+			Data::ReadOnly(ref mut arc) => mem::take(Arc::make_mut(arc)),
+			Data::Mutable(value) => value,
 		}
 	}
 }
 
-impl Deref for CursorValue {
-	type Target = Value;
+impl Deref for CursorRecord {
+	type Target = Record;
 	fn deref(&self) -> &Self::Target {
-		self.as_ref()
+		&self.record
+	}
+}
+
+impl DerefMut for CursorRecord {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.record
 	}
 }
 
 impl CursorDoc {
-	pub(crate) fn new<T: Into<CursorValue>>(
+	pub(crate) fn new<T: Into<CursorRecord>>(
 		rid: Option<Arc<RecordId>>,
 		ir: Option<Arc<IteratorRecord>>,
 		doc: T,
@@ -107,20 +107,26 @@ impl CursorDoc {
 	}
 }
 
-impl From<Value> for CursorValue {
-	fn from(value: Value) -> Self {
+impl From<Arc<Record>> for CursorRecord {
+	fn from(arc: Arc<Record>) -> Self {
 		Self {
-			mutable: value,
-			read_only: None,
+			record: arc.as_ref().clone(),
 		}
 	}
 }
 
-impl From<Arc<Value>> for CursorValue {
-	fn from(value: Arc<Value>) -> Self {
+impl From<Value> for CursorRecord {
+	fn from(value: Value) -> Self {
 		Self {
-			mutable: Value::None,
-			read_only: Some(value),
+			record: Record::new(Data::Mutable(value)),
+		}
+	}
+}
+
+impl From<Arc<Value>> for CursorRecord {
+	fn from(arc: Arc<Value>) -> Self {
+		Self {
+			record: Record::new(Data::ReadOnly(arc)),
 		}
 	}
 }
@@ -130,10 +136,7 @@ impl From<Value> for CursorDoc {
 		Self {
 			rid: None,
 			ir: None,
-			doc: CursorValue {
-				mutable: val,
-				read_only: None,
-			},
+			doc: val.into(),
 		}
 	}
 }
@@ -143,10 +146,7 @@ impl From<Arc<Value>> for CursorDoc {
 		Self {
 			rid: None,
 			ir: None,
-			doc: CursorValue {
-				mutable: Value::None,
-				read_only: Some(doc),
-			},
+			doc: doc.into(),
 		}
 	}
 }
@@ -169,7 +169,7 @@ impl Document {
 		id: Option<Arc<RecordId>>,
 		ir: Option<Arc<IteratorRecord>>,
 		r#gen: Option<Ident>,
-		val: Arc<Value>,
+		val: Arc<Record>,
 		extras: Workable,
 		retry: bool,
 		rs: RecordStrategy,
@@ -252,14 +252,14 @@ impl Document {
 	}
 
 	/// Update the document for a retry to update after an insert failed.
-	pub fn modify_for_update_retry(&mut self, id: RecordId, value: Arc<Value>) {
+	pub fn modify_for_update_retry(&mut self, id: RecordId, record: Arc<Record>) {
 		let retry = Arc::new(id);
 		self.id = Some(retry.clone());
 		self.r#gen = None;
 		self.retry = true;
 		self.record_strategy = RecordStrategy::KeysAndValues;
 
-		self.current = CursorDoc::new(Some(retry), None, value);
+		self.current = CursorDoc::new(Some(retry), None, record);
 		self.initial = self.current.clone();
 	}
 
@@ -321,7 +321,7 @@ impl Document {
 			// Get the full document
 			let full = target.0;
 			// Process the full document
-			let mut out = (*full.doc).clone();
+			let mut out = full.doc.as_ref().clone();
 			// Loop over each field in document
 			for fd in fds.iter() {
 				// Loop over each field in document

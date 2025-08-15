@@ -9,7 +9,7 @@ use crate::dbs::{Action, Notification, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::FlowResultExt as _;
-use crate::expr::paths::{AC, META, RD, TK};
+use crate::expr::paths::{AC, RD, TK};
 use crate::expr::permission::Permission;
 use crate::val::Value;
 
@@ -137,9 +137,7 @@ impl Document {
 				if opt.id()? == lv.node.0 {
 					// Ensure futures are run
 					// Output the full document before any changes were applied
-					let mut result = (*doc.doc.as_ref()).clone();
-					// Remove metadata fields on output
-					result.del(stk, &lqctx, &lqopt, &*META).await?;
+					let result = doc.doc.as_ref().clone();
 					(Action::Delete, result)
 				} else {
 					// TODO: Send to message broker
