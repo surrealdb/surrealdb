@@ -1,22 +1,24 @@
-use super::MlExportConfig;
-use crate::Result;
-use crate::opt::Resource;
+use std::borrow::Cow;
+use std::io::Read;
+use std::path::PathBuf;
+
 use async_channel::Sender;
 use bincode::Options;
 use revision::Revisioned;
 use serde::Serialize;
 use serde::ser::SerializeMap as _;
-use std::borrow::Cow;
-use std::io::Read;
-use std::path::PathBuf;
-use surrealdb_core::kvs::export::Config as DbExportConfig;
-#[allow(unused_imports)]
-use surrealdb_core::val::{Array as CoreArray, Object as CoreObject, Value as CoreValue};
-use surrealdb_core::{dbs::Notification, expr::LogicalPlan};
 use uuid::Uuid;
 
+use super::MlExportConfig;
+use crate::Result;
+use crate::core::dbs::Notification;
+use crate::core::expr::LogicalPlan;
+use crate::core::kvs::export::Config as DbExportConfig;
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-use surrealdb_core::val::Table as CoreTable;
+use crate::core::val::Table as CoreTable;
+#[allow(unused_imports)]
+use crate::core::val::{Array as CoreArray, Object as CoreObject, Value as CoreValue};
+use crate::opt::Resource;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -139,11 +141,8 @@ pub(crate) enum Command {
 impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
-		use surrealdb_core::{
-			expr::{Data, Output, UpdateStatement, UpsertStatement},
-			val::{self, Strand},
-		};
-
+		use crate::core::expr::{Data, Output, UpdateStatement, UpsertStatement};
+		use crate::core::val::{self, Strand};
 		use crate::engine::resource_to_exprs;
 
 		let res = match self {
@@ -552,9 +551,10 @@ impl Command {
 	}
 }
 
-/// A struct which will be serialized as a map to behave like the previously used BTreeMap.
+/// A struct which will be serialized as a map to behave like the previously
+/// used BTreeMap.
 ///
-/// This struct serializes as if it is a surrealdb_core::expr::Value::Object.
+/// This struct serializes as if it is a crate::core::expr::Value::Object.
 #[derive(Debug)]
 pub(crate) struct RouterRequest {
 	id: Option<i64>,
@@ -776,10 +776,10 @@ mod test {
 	use std::io::Cursor;
 
 	use revision::Revisioned;
-	use surrealdb_core::val::{Number, Value};
 	use uuid::Uuid;
 
 	use super::RouterRequest;
+	use crate::core::val::{Number, Value};
 
 	fn assert_converts<S, D, I>(req: &RouterRequest, s: S, d: D)
 	where
@@ -820,8 +820,8 @@ mod test {
 
 		assert_converts(
 			&request,
-			|i| surrealdb_core::rpc::format::bincode::encode(i).unwrap(),
-			|b| surrealdb_core::rpc::format::bincode::decode(&b).unwrap(),
+			|i| crate::core::rpc::format::bincode::encode(i).unwrap(),
+			|b| crate::core::rpc::format::bincode::decode(&b).unwrap(),
 		);
 
 		println!("test convert revisioned");

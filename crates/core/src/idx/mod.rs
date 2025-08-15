@@ -1,15 +1,4 @@
-pub mod docids;
-pub(crate) mod ft;
-pub(crate) mod index;
-pub mod planner;
-pub mod trees;
-
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::idx::docids::DocId;
-use crate::idx::ft::search::terms::TermId;
-use crate::idx::trees::hnsw::ElementId;
-use crate::idx::trees::store::NodeId;
-use crate::idx::trees::vector::SerializedVector;
 use crate::key::index::bc::Bc;
 use crate::key::index::bd::{Bd, BdRoot};
 use crate::key::index::bf::Bf;
@@ -21,26 +10,21 @@ use crate::key::index::bp::{Bp, BpRoot};
 use crate::key::index::bs::Bs;
 use crate::key::index::bt::{Bt, BtRoot};
 use crate::key::index::bu::Bu;
+use crate::key::index::dc::Dc;
+use crate::key::index::dl::Dl;
 use crate::key::index::hd::{Hd, HdRoot};
 use crate::key::index::he::He;
 use crate::key::index::hi::Hi;
 use crate::key::index::hl::Hl;
 use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
+use crate::key::index::ib::Ib;
 use crate::key::index::id::Id as IdKey;
 use crate::key::index::ii::Ii;
-use crate::key::index::vm::{Vm, VmRoot};
-
-use crate::key::index::dc::Dc;
-use crate::key::index::dl::Dl;
-#[cfg(not(target_family = "wasm"))]
-use crate::key::index::ia::Ia;
-use crate::key::index::ib::Ib;
-#[cfg(not(target_family = "wasm"))]
-use crate::key::index::ip::Ip;
 use crate::key::index::is::Is;
 use crate::key::index::td::{Td, TdRoot};
 use crate::key::index::tt::Tt;
+use crate::key::index::vm::{Vm, VmRoot};
 use crate::key::root::ic::Ic;
 use crate::kvs::Key;
 use crate::val::RecordIdKey;
@@ -48,6 +32,23 @@ use anyhow::Result;
 use std::ops::Range;
 use std::sync::Arc;
 use uuid::Uuid;
+
+#[cfg(not(target_family = "wasm"))]
+use crate::key::index::ia::Ia;
+#[cfg(not(target_family = "wasm"))]
+use crate::key::index::ip::Ip;
+
+pub mod docids;
+pub(crate) mod ft;
+pub(crate) mod index;
+pub mod planner;
+pub mod trees;
+
+use crate::idx::docids::DocId;
+use crate::idx::ft::search::terms::TermId;
+use crate::idx::trees::hnsw::ElementId;
+use crate::idx::trees::store::NodeId;
+use crate::idx::trees::vector::SerializedVector;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct IndexKeyBase(Arc<Inner>);

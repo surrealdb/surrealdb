@@ -6,16 +6,15 @@
 //! # Surrealdb Core
 //!
 //! This crate is the internal core library of SurrealDB.
-//! It contains most of the database functionality on top of which the surreal binary is
-//! implemented.
+//! It contains most of the database functionality on top of which the surreal
+//! binary is implemented.
 //!
 //! <section class="warning">
 //! <h3>Unstable!</h3>
-//! This crate is <b>SurrealDB internal API</b>. It does not adhere to semver and it's API is free to
-//! change and break code even between patch versions. If you are looking for a stable interface
-//! to the Surrealdb library please have a look at <a href="https://crates.io/crates/surrealdb">the rust SDK</a>
+//! This crate is <b>SurrealDB internal API</b>. It does not adhere to semver
+//! and it's API is free to change and break code even between patch versions.
+//! If you are looking for a stable interface to the Surrealdb library please have a look at <a href="https://crates.io/crates/surrealdb">the rust SDK</a>
 //! </section>
-//!
 
 #![doc(html_favicon_url = "https://surrealdb.s3.amazonaws.com/favicon.png")]
 #![doc(html_logo_url = "https://surrealdb.s3.amazonaws.com/icon.png")]

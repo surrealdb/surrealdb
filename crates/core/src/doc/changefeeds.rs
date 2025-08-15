@@ -1,7 +1,8 @@
+use anyhow::Result;
+
 use crate::ctx::Context;
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
-use anyhow::Result;
 
 impl Document {
 	pub async fn process_changefeeds(

@@ -1,8 +1,9 @@
+use anyhow::Result;
+
 use super::args::Optional;
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::val::Value;
-use anyhow::Result;
 
 #[cfg(not(feature = "http"))]
 pub async fn head(_: &Context, (_, _): (Value, Optional<Value>)) -> Result<Value> {
@@ -128,11 +129,16 @@ pub async fn delete(
 
 #[cfg(all(not(target_family = "wasm"), feature = "http"))]
 pub mod resolver {
-	use crate::dbs::{Capabilities, capabilities::NetTarget};
+	use std::error::Error;
+	use std::net::ToSocketAddrs;
+	use std::str::FromStr;
+	use std::sync::Arc;
+
 	use ipnet::IpNet;
 	use reqwest::dns::{Addrs, Name, Resolve, Resolving};
-	use std::str::FromStr;
-	use std::{error::Error, net::ToSocketAddrs, sync::Arc};
+
+	use crate::dbs::Capabilities;
+	use crate::dbs::capabilities::NetTarget;
 
 	pub struct FilteringResolver {
 		pub cap: Arc<Capabilities>,

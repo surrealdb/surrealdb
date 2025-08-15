@@ -1,6 +1,5 @@
-use crate::sql::{Ident, Part, ToSql};
-
 use crate::sql::fmt::{Fmt, fmt_separated_by};
+use crate::sql::{Ident, Part, ToSql};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 

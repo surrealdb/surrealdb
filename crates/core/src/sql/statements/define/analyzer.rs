@@ -1,11 +1,10 @@
+use super::DefineKind;
+use crate::sql::Ident;
+use crate::sql::ToSql;
 use crate::sql::filter::Filter;
 use crate::sql::tokenizer::Tokenizer;
-use crate::sql::{Ident, ToSql};
 use crate::val::Strand;
-
 use std::fmt::{self, Display};
-
-use super::DefineKind;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

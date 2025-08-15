@@ -4,7 +4,9 @@ use crate::expr::index::Index;
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
 use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{BinaryOperator, Cond, Expr, Ident, Idiom, Kind, Literal, Order, Part, With};
+use crate::expr::{
+	BinaryOperator, Cond, Expr, FlowResultExt as _, Ident, Idiom, Kind, Literal, Order, Part, With,
+};
 use crate::idx::planner::StatementContext;
 use crate::idx::planner::executor::{
 	KnnBruteForceExpression, KnnBruteForceExpressions, KnnExpressions,
@@ -182,7 +184,8 @@ impl<'a> TreeBuilder<'a> {
 				self.check_boolean_operator(group, op);
 				let left_node = stk.run(|stk| self.eval_value(stk, group, left)).await?;
 				let right_node = stk.run(|stk| self.eval_value(stk, group, right)).await?;
-				// If both values are computable, then we can delegate the computation to the parent
+				// If both values are computable, then we can delegate the computation to the
+				// parent
 				if left_node == Node::Computable && right_node == Node::Computable {
 					return Ok(Node::Computable);
 				}

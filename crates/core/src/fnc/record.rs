@@ -1,18 +1,19 @@
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::FlowResultExt as _;
 use crate::expr::paths::ID;
 use crate::val::{RecordId, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
 
 pub async fn exists(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(arg,): (RecordId,),
 ) -> Result<Value> {
 	if let Some(opt) = opt {
-		let v = Value::Thing(arg).get(stk, ctx, opt, doc, ID.as_ref()).await.catch_return()?;
+		let v = Value::RecordId(arg).get(stk, ctx, opt, doc, ID.as_ref()).await.catch_return()?;
 		Ok(Value::Bool(!v.is_none()))
 	} else {
 		Ok(Value::None)

@@ -1,3 +1,12 @@
+use std::collections::BTreeMap;
+use std::fmt::{self, Display, Formatter, Write};
+use std::hash::{Hash, Hasher};
+
+use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+use revision::revisioned;
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
+
 use super::escape::EscapeKey;
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
@@ -7,14 +16,6 @@ use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
 	Regex, Strand, Uuid,
 };
-
-use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
-use revision::revisioned;
-use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::fmt::{self, Display, Formatter, Write};
-use std::hash::{Hash, Hasher};
 
 /// The kind, or data type, of a value or field.
 #[revisioned(revision = 1)]
@@ -55,8 +56,8 @@ pub enum Kind {
 	/// A record type.
 	Record(Vec<Ident>),
 	/// A geometry type.
-	/// The vec contains the geometry types as strings, for example `"point"` or `"polygon"`.
-	/// TODO(3.0): Change to use an enum
+	/// The vec contains the geometry types as strings, for example `"point"` or
+	/// `"polygon"`. TODO(3.0): Change to use an enum
 	Geometry(Vec<String>),
 	/// An optional type.
 	Option(Box<Kind>),
@@ -68,14 +69,16 @@ pub enum Kind {
 	/// An array type.
 	Array(Box<Kind>, Option<u64>),
 	/// A function type.
-	/// The first option is the argument types, the second is the optional return type.
+	/// The first option is the argument types, the second is the optional
+	/// return type.
 	Function(Option<Vec<Kind>>, Option<Box<Kind>>),
 	/// A range type.
 	Range,
 	/// A literal type.
-	/// The literal type is used to represent a type that can only be a single value.
-	/// For example, `"a"` is a literal type which can only ever be `"a"`.
-	/// This can be used in the `Kind::Either` type to represent an enum.
+	/// The literal type is used to represent a type that can only be a single
+	/// value. For example, `"a"` is a literal type which can only ever be
+	/// `"a"`. This can be used in the `Kind::Either` type to represent an
+	/// enum.
 	Literal(KindLiteral),
 	/// A references type representing a link to another table or field.
 	References(Option<Ident>, Option<Idiom>),
@@ -176,7 +179,8 @@ impl Kind {
 		}
 	}
 
-	/// Get the inner kind of a [`Kind::Option`] or return the original [`Kind`] if it is not the Option variant.
+	/// Get the inner kind of a [`Kind::Option`] or return the original [`Kind`]
+	/// if it is not the Option variant.
 	pub(crate) fn get_optional_inner_kind(&self) -> &Kind {
 		match self {
 			Kind::Option(k) => k.as_ref().get_optional_inner_kind(),
@@ -227,8 +231,8 @@ impl Kind {
 /// Trait for retrieving the `kind` equivalent of a rust type.
 ///
 /// Returns the most general kind for a type.
-/// For example Number could be either number or float or int or decimal but the most general is
-/// number.
+/// For example Number could be either number or float or int or decimal but the
+/// most general is number.
 ///
 /// This trait is only implemented for types which can only be retrieve from
 pub trait HasKind {

@@ -240,7 +240,8 @@ impl Document {
 		}
 	}
 
-	/// Retur true if the document has been extracted by an iterator that already matcheed the condition.
+	/// Retur true if the document has been extracted by an iterator that
+	/// already matcheed the condition.
 	pub(crate) fn is_condition_checked(&self) -> bool {
 		matches!(self.record_strategy, RecordStrategy::Count | RecordStrategy::KeysOnly)
 	}

@@ -1,7 +1,6 @@
 //! Stores a grant associated with an access method
-use crate::catalog::{DatabaseId, NamespaceId};
-
 use crate::catalog;
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use anyhow::Result;

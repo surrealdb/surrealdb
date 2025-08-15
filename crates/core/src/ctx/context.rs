@@ -24,6 +24,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use trice::Instant;
 
+#[cfg(storage)]
+use std::path::PathBuf;
+
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
 #[cfg(feature = "http")]
@@ -31,9 +34,6 @@ use url::Url;
 
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::IndexBuilder;
-
-#[cfg(storage)]
-use std::path::PathBuf;
 
 pub type Context = Arc<MutableContext>;
 
@@ -370,6 +370,11 @@ impl MutableContext {
 		self.query_planner = Some(Arc::new(qp));
 	}
 
+	/// Cache a table-specific QueryExecutor in the Context.
+	///
+	/// This is set by the collector/processor when iterating over a specific
+	/// table or index so that downstream per-record operations can access the
+	/// executor without repeatedly looking it up from the QueryPlanner.
 	pub(crate) fn set_query_executor(&mut self, qe: QueryExecutor) {
 		self.query_executor = Some(qe);
 	}
@@ -410,6 +415,8 @@ impl MutableContext {
 		self.query_planner.as_ref().map(|qp| qp.as_ref())
 	}
 
+	/// Get the cached QueryExecutor (if any) attached by the current iteration
+	/// context.
 	pub(crate) fn get_query_executor(&self) -> Option<&QueryExecutor> {
 		self.query_executor.as_ref()
 	}
@@ -483,8 +490,8 @@ impl MutableContext {
 
 	/// Check if there is some reason to stop processing the current query.
 	///
-	/// Returns true when the query is canceled or if check_deadline is true when the query
-	/// deadline is met.
+	/// Returns true when the query is canceled or if check_deadline is true
+	/// when the query deadline is met.
 	pub(crate) async fn is_done(&self, deep_check: bool) -> Result<bool> {
 		if deep_check {
 			yield_now!();
@@ -528,7 +535,8 @@ impl MutableContext {
 		)
 	}
 
-	/// Attach a session to the context and add any session variables to the context.
+	/// Attach a session to the context and add any session variables to the
+	/// context.
 	pub(crate) fn attach_session(&mut self, session: &Session) -> Result<(), Error> {
 		self.add_values(session.values());
 		if !session.variables.is_empty() {
@@ -585,43 +593,46 @@ impl MutableContext {
 		Ok(())
 	}
 
-	/// Checks if the provided URL's network target is allowed based on current capabilities.
-	///
-	/// This function performs a validation to ensure that the outgoing network connection
-	/// specified by the provided `url` is permitted. It checks the resolved network targets
-	/// associated with the URL and ensures that all targets adhere to the configured
+	/// Checks if the provided URL's network target is allowed based on current
 	/// capabilities.
+	///
+	/// This function performs a validation to ensure that the outgoing network
+	/// connection specified by the provided `url` is permitted. It checks the
+	/// resolved network targets associated with the URL and ensures that all
+	/// targets adhere to the configured capabilities.
 	///
 	/// # Features
 	/// The function is only available if the `http` feature is enabled.
 	///
 	/// # Parameters
-	/// - `url`: A reference to a [`Url`] object representing the target endpoint to check.
+	/// - `url`: A reference to a [`Url`] object representing the target
+	///   endpoint to check.
 	///
 	/// # Returns
 	/// This function returns a [`Result<()>`]:
-	/// - On success, it returns `Ok(())` indicating the network target is allowed.
+	/// - On success, it returns `Ok(())` indicating the network target is
+	///   allowed.
 	/// - On failure, it returns an error wrapped in the [`Error`] type:
 	///   - `NetTargetNotAllowed` if the target is not permitted.
 	///   - `InvalidUrl` if the provided URL is invalid.
 	///
 	/// # Behavior
 	/// 1. Extracts the host and port information from the URL.
-	/// 2. Constructs a [`NetTarget`] object and checks if it is allowed by the current
-	///    network capabilities.
-	/// 3. If the network target resolves to multiple targets (e.g., DNS resolution), each
-	///    target is validated individually.
-	/// 4. Logs a warning and prevents the connection if the target is denied by the
-	///    capabilities.
+	/// 2. Constructs a [`NetTarget`] object and checks if it is allowed by the
+	///    current network capabilities.
+	/// 3. If the network target resolves to multiple targets (e.g., DNS
+	///    resolution), each target is validated individually.
+	/// 4. Logs a warning and prevents the connection if the target is denied by
+	///    the capabilities.
 	///
 	/// # Logging
 	/// - Logs a warning message if the network target is denied.
 	/// - Logs a trace message if the network target is permitted.
 	///
 	/// # Errors
-	/// - `NetTargetNotAllowed`: Returned if any of the resolved targets are not allowed.
+	/// - `NetTargetNotAllowed`: Returned if any of the resolved targets are not
+	///   allowed.
 	/// - `InvalidUrl`: Returned if the URL does not have a valid host.
-	///
 	#[cfg(feature = "http")]
 	pub(crate) async fn check_allowed_net(&self, url: &Url) -> Result<()> {
 		let match_any_deny_net = |t| {
@@ -702,15 +713,17 @@ impl MutableContext {
 #[cfg(test)]
 mod tests {
 	#[cfg(feature = "http")]
+	use std::str::FromStr;
+
+	#[cfg(feature = "http")]
+	use url::Url;
+
+	#[cfg(feature = "http")]
 	use crate::ctx::MutableContext;
 	#[cfg(feature = "http")]
 	use crate::dbs::Capabilities;
 	#[cfg(feature = "http")]
 	use crate::dbs::capabilities::{NetTarget, Targets};
-	#[cfg(feature = "http")]
-	use std::str::FromStr;
-	#[cfg(feature = "http")]
-	use url::Url;
 
 	#[cfg(feature = "http")]
 	#[tokio::test]

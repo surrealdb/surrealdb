@@ -1,16 +1,18 @@
-use crate::idx::docids::DocId;
-use crate::idx::trees::dynamicset::DynamicSet;
-use crate::idx::trees::hnsw::ElementId;
-use crate::idx::trees::store::NodeId;
+use std::cmp::{Ordering, Reverse};
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, VecDeque};
+
 #[cfg(debug_assertions)]
 use ahash::HashMap;
 use ahash::{HashSet, HashSetExt};
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
-use std::cmp::{Ordering, Reverse};
-use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, VecDeque};
+
+use crate::idx::docids::DocId;
+use crate::idx::trees::dynamicset::DynamicSet;
+use crate::idx::trees::hnsw::ElementId;
+use crate::idx::trees::store::NodeId;
 
 #[derive(Debug, Clone, Copy, Ord, Eq, PartialEq, PartialOrd)]
 pub(super) struct PriorityNode(Reverse<FloatKey>, NodeId);
@@ -137,7 +139,8 @@ impl DoublePriorityQueue {
 }
 
 /// Treats f64 as a sortable data type.
-/// It provides an implementation so it can be used as a key in a BTreeMap or BTreeSet.
+/// It provides an implementation so it can be used as a key in a BTreeMap or
+/// BTreeSet.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct FloatKey(f64);
 
@@ -173,10 +176,10 @@ impl Ord for FloatKey {
 }
 
 /// Ids64 is a collection able to store u64 identifiers in an optimised way.
-/// The enumerations are optimised in a way that, depending on the number of identifiers,
-/// the most memory efficient variant is used.
-/// When identifiers are added or removed, the method returned the most appropriate
-/// variant (if required).
+/// The enumerations are optimised in a way that, depending on the number of
+/// identifiers, the most memory efficient variant is used.
+/// When identifiers are added or removed, the method returned the most
+/// appropriate variant (if required).
 #[derive(Debug, Clone, PartialEq)]
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize)]
@@ -614,12 +617,12 @@ pub struct KnnResult {
 
 #[cfg(test)]
 pub(super) mod tests {
-	use crate::expr::index::{Distance, VectorType};
-	use crate::idx::docids::DocId;
-	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
-	use crate::idx::trees::vector::{SharedVector, Vector};
-	use crate::syn::{self};
-	use crate::val::{Number, Value};
+	use std::cmp::Reverse;
+	use std::collections::{BTreeSet, BinaryHeap, VecDeque};
+	use std::fs::File;
+	use std::io::{BufRead, BufReader};
+	use std::time::SystemTime;
+
 	#[cfg(debug_assertions)]
 	use ahash::HashMap;
 	use ahash::HashSet;
@@ -629,12 +632,14 @@ pub(super) mod tests {
 	use rand::{Rng, SeedableRng};
 	use roaring::RoaringTreemap;
 	use rust_decimal::prelude::Zero;
-	use std::cmp::Reverse;
-	use std::collections::{BTreeSet, BinaryHeap, VecDeque};
-	use std::fs::File;
-	use std::io::{BufRead, BufReader};
-	use std::time::SystemTime;
 	use test_log::test;
+
+	use crate::expr::index::{Distance, VectorType};
+	use crate::idx::docids::DocId;
+	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
+	use crate::idx::trees::vector::{SharedVector, Vector};
+	use crate::syn;
+	use crate::val::{Number, Value};
 
 	pub(crate) fn get_seed_rnd() -> SmallRng {
 		let seed: u64 = std::env::var("TEST_SEED")
@@ -958,8 +963,8 @@ pub(super) mod tests {
 
 	#[test]
 	#[ignore]
-	// In HNSW we are maintaining a candidate list that requires both to know the first element
-	// and the last element of a set.
+	// In HNSW we are maintaining a candidate list that requires both to know the
+	// first element and the last element of a set.
 	// There is two possible options.
 	// 1. Using a BTreeSet that provide first() and last() methods.
 	// 2. Maintaining two BinaryHeap. One providing the min, and the other the max.

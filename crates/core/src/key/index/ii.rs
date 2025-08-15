@@ -2,11 +2,9 @@
 use crate::catalog::DatabaseId;
 use crate::catalog::NamespaceId;
 use crate::idx::docids::DocId;
-
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::val::RecordIdKey;
-
 use serde::{Deserialize, Serialize};
 
 /// Id inverted. DocId -> Id

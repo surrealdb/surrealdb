@@ -1,14 +1,16 @@
-use crate::err::Error;
-use crate::expr::statements::info::InfoStructure;
-use crate::syn;
-use crate::val::{Datetime, Strand, TryAdd, TrySub, Value};
-use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::iter::Sum;
 use std::ops::Deref;
 use std::str::FromStr;
 use std::{fmt, ops, time};
+
+use anyhow::Result;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use crate::err::Error;
+use crate::expr::statements::info::InfoStructure;
+use crate::syn;
+use crate::val::{Datetime, Strand, TryAdd, TrySub, Value};
 
 pub(crate) static SECONDS_PER_YEAR: u64 = 365 * SECONDS_PER_DAY;
 pub(crate) static SECONDS_PER_WEEK: u64 = 7 * SECONDS_PER_DAY;

@@ -1,7 +1,8 @@
-use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
-use crate::val::Geometry;
 use anyhow::Context;
 use surrealdb_protocol::fb::v1 as proto_fb;
+
+use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
+use crate::val::Geometry;
 
 impl ToFlatbuffers for Geometry {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Geometry<'bldr>>;

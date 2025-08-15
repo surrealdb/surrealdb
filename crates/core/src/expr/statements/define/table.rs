@@ -15,7 +15,6 @@ use crate::kvs::{Transaction, impl_kv_value_revisioned};
 use crate::sql::ToSql;
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
-
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

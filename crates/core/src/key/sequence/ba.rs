@@ -4,7 +4,6 @@ use crate::catalog::NamespaceId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::kvs::sequences::BatchValue;
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

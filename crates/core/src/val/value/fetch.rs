@@ -1,14 +1,15 @@
+use anyhow::Result;
+use futures::future::try_join_all;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::expr::{Expr, FlowResultExt as _, Graph, Idiom, Literal, Part};
 //use crate::expr::edges::Edges;
 use crate::expr::field::{Field, Fields};
 use crate::expr::part::Next;
 use crate::expr::statements::select::SelectStatement;
+use crate::expr::{Expr, FlowResultExt as _, Graph, Idiom, Literal, Part};
 use crate::val::Value;
-use anyhow::Result;
-use futures::future::try_join_all;
-use reblessive::tree::Stk;
 
 impl Value {
 	pub(crate) async fn fetch(
@@ -23,11 +24,11 @@ impl Value {
 		let mut prev = path;
 
 		// Loop over the path.
-		// If the we just need to select a sub section of a value we update this to point to the
-		// new subsection of the value. Otherwise we call into fetch again and then immediately
-		// return.
-		// If we encounter a idiom application which does not make sense, like `(1).foo` just
-		// return Ok(())
+		// If the we just need to select a sub section of a value we update this to
+		// point to the new subsection of the value. Otherwise we call into fetch
+		// again and then immediately return.
+		// If we encounter a idiom application which does not make sense, like `(1).foo`
+		// just return Ok(())
 		while let Some(p) = iter.next() {
 			match p {
 				Part::Graph(g) => match this {
@@ -36,10 +37,10 @@ impl Value {
 							return Ok(());
 						};
 
-						let mut v = Value::Thing(v);
+						let mut v = Value::RecordId(v);
 						return stk.run(|stk| v.fetch(stk, ctx, opt, iter.as_slice())).await;
 					}
-					Value::Thing(x) => {
+					Value::RecordId(x) => {
 						let what = Expr::Idiom(Idiom(vec![
 							Part::Start(Expr::Literal(Literal::RecordId(x.clone().into_literal()))),
 							Part::Graph(Graph {
@@ -237,7 +238,7 @@ impl Value {
 				.await?;
 				Ok(())
 			}
-			Value::Thing(v) => {
+			Value::RecordId(v) => {
 				// Clone the thing
 				let val = v.clone();
 				// Fetch the remote embedded record

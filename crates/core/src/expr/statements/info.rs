@@ -8,7 +8,6 @@ use crate::sql::ToSql;
 use crate::sys::INFORMATION;
 use crate::val::{Datetime, Object, Value};
 use anyhow::Result;
-
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

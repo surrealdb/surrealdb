@@ -1,11 +1,12 @@
+use std::borrow::Cow;
+use std::future::IntoFuture;
+
 use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
 use crate::opt::WaitFor;
-use std::borrow::Cow;
-use std::future::IntoFuture;
 
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
@@ -19,7 +20,8 @@ impl<C> UseDb<'_, C>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> UseDb<'static, C> {
 		UseDb {
 			client: Cow::Owned(self.client.into_owned()),

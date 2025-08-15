@@ -1,9 +1,3 @@
-pub mod cache;
-pub(crate) mod hnsw;
-mod lru;
-mod mapper;
-pub(crate) mod tree;
-
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::err::Error;
@@ -11,16 +5,24 @@ use crate::expr::Index;
 use crate::expr::index::HnswParams;
 use crate::expr::statements::DefineIndexStatement;
 use crate::idx::IndexKeyBase;
-use crate::idx::trees::store::cache::TreeCache;
-use crate::idx::trees::store::hnsw::{HnswIndexes, SharedHnswIndex};
-use crate::idx::trees::store::mapper::Mappers;
-use crate::idx::trees::store::tree::{TreeRead, TreeWrite};
-#[cfg(not(target_family = "wasm"))]
-use crate::kvs::IndexBuilder;
 use crate::kvs::{KVKey, Key, Transaction, TransactionType, Val};
 use anyhow::Result;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
+
+#[cfg(not(target_family = "wasm"))]
+use crate::kvs::IndexBuilder;
+
+pub mod cache;
+pub(crate) mod hnsw;
+mod lru;
+mod mapper;
+pub(crate) mod tree;
+
+use cache::TreeCache;
+use hnsw::{HnswIndexes, SharedHnswIndex};
+use mapper::Mappers;
+use tree::{TreeRead, TreeWrite};
 
 pub type NodeId = u64;
 pub type StoreGeneration = u64;

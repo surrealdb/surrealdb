@@ -1,7 +1,8 @@
 //! Authentication types
 
-use serde::{Deserialize, Serialize};
 use std::fmt;
+
+use serde::{Deserialize, Serialize};
 
 /// A signup action
 #[derive(Debug)]
@@ -83,16 +84,17 @@ impl<T, P> Credentials<T, Jwt> for Record<'_, P> where P: Serialize {}
 
 /// A JSON Web Token for authenticating with the server.
 ///
-/// This struct represents a JSON Web Token (JWT) that can be used for authentication purposes.
-/// It is important to note that this implementation provide some security measures to
-/// protect the token:
+/// This struct represents a JSON Web Token (JWT) that can be used for
+/// authentication purposes. It is important to note that this implementation
+/// provide some security measures to protect the token:
 /// * the debug implementation just prints `Jwt(REDACTED)`,
 /// * `Display` is not implemented so you can't call `.to_string()` on it
 ///
 /// You can still have access to the token string using either
-/// [`as_insecure_token`](Jwt::as_insecure_token) or [`into_insecure_token`](Jwt::into_insecure_token) functions.
-/// However, you should take care to ensure that only authorized users have access to the JWT.
-/// For example:
+/// [`as_insecure_token`](Jwt::as_insecure_token) or
+/// [`into_insecure_token`](Jwt::into_insecure_token) functions. However, you
+/// should take care to ensure that only authorized users have access to the
+/// JWT. For example:
 /// * it can be stored in a secure cookie,
 /// * stored in a database with restricted access,
 /// * or encrypted in conjunction with other encryption mechanisms.
@@ -102,14 +104,16 @@ pub struct Jwt(pub(crate) String);
 impl Jwt {
 	/// Returns the underlying token string.
 	///
-	/// ⚠️: It is important to note that the token should be handled securely and protected from unauthorized access.
+	/// ⚠️: It is important to note that the token should be handled securely
+	/// and protected from unauthorized access.
 	pub fn as_insecure_token(&self) -> &str {
 		&self.0
 	}
 
 	/// Returns the underlying token string.
 	///
-	/// ⚠️: It is important to note that the token should be handled securely and protected from unauthorized access.
+	/// ⚠️: It is important to note that the token should be handled securely
+	/// and protected from unauthorized access.
 	pub fn into_insecure_token(self) -> String {
 		self.0
 	}

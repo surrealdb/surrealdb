@@ -1,9 +1,10 @@
-use criterion::measurement::WallTime;
-use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
-use radix_trie::{Trie, TrieCommon, TrieKey};
 use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 use std::time::Duration;
+
+use criterion::measurement::WallTime;
+use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
+use radix_trie::{Trie, TrieCommon, TrieKey};
 use surrealdb_core::syn;
 use surrealdb_core::val::{Array, RecordId};
 

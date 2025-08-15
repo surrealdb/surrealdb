@@ -1,0 +1,9 @@
+revision-lock version:0.1.0
+Data:1(src/cmd/upgrade/process.rs)(3500925211)
+Failure:1(src/cmd/upgrade/process.rs)(4219979751)
+ProxyArray:1(src/cmd/upgrade/protocol.rs)(4209387088)
+ProxyNumber:1(src/cmd/upgrade/protocol.rs)(1364939539)
+ProxyObject:1(src/cmd/upgrade/protocol.rs)(2474217323)
+ProxyStrand:1(src/cmd/upgrade/protocol.rs)(2868445007)
+ProxyValue:1(src/cmd/upgrade/protocol.rs)(3659874570)
+Response:1(src/cmd/upgrade/process.rs)(2791491448)

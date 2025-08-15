@@ -1,10 +1,12 @@
+use std::collections::BTreeMap;
+use std::fmt::{self, Display, Formatter, Write};
+
+use rust_decimal::Decimal;
+
 use super::escape::EscapeKey;
 use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::sql::{Ident, Idiom};
 use crate::val::{Duration, Strand};
-use rust_decimal::Decimal;
-use std::collections::BTreeMap;
-use std::fmt::{self, Display, Formatter, Write};
 
 /// The kind, or data type, of a value or field.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,7 +47,8 @@ pub enum Kind {
 	/// A record type.
 	Record(Vec<Ident>),
 	/// A geometry type.
-	/// The vec contains the geometry types as strings, for example `"point"` or `"polygon"`.
+	/// The vec contains the geometry types as strings, for example `"point"` or
+	/// `"polygon"`.
 	Geometry(Vec<String>),
 	/// An optional type.
 	Option(Box<Kind>),
@@ -57,14 +60,16 @@ pub enum Kind {
 	/// An array type.
 	Array(Box<Kind>, Option<u64>),
 	/// A function type.
-	/// The first option is the argument types, the second is the optional return type.
+	/// The first option is the argument types, the second is the optional
+	/// return type.
 	Function(Option<Vec<Kind>>, Option<Box<Kind>>),
 	/// A range type.
 	Range,
 	/// A literal type.
-	/// The literal type is used to represent a type that can only be a single value.
-	/// For example, `"a"` is a literal type which can only ever be `"a"`.
-	/// This can be used in the `Kind::Either` type to represent an enum.
+	/// The literal type is used to represent a type that can only be a single
+	/// value. For example, `"a"` is a literal type which can only ever be
+	/// `"a"`. This can be used in the `Kind::Either` type to represent an
+	/// enum.
 	Literal(KindLiteral),
 	/// A references type representing a link to another table or field.
 	References(Option<Ident>, Option<Idiom>),

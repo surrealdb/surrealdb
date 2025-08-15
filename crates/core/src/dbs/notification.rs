@@ -1,7 +1,9 @@
-use crate::val::{Object, Uuid, Value};
+use std::fmt::{self, Debug, Display};
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Debug, Display};
+
+use crate::val::{Object, Uuid, Value};
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

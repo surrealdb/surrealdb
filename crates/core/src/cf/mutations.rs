@@ -73,7 +73,8 @@ pub struct ChangeSet(pub VersionStamp, pub DatabaseMutation);
 
 impl TableMutation {
 	/// Convert a stored change feed table mutation (record change) into a
-	/// Value that can be used in the storage of change feeds and their transmission to consumers
+	/// Value that can be used in the storage of change feeds and their
+	/// transmission to consumers
 	pub fn into_value(self) -> Value {
 		let mut h = BTreeMap::<String, Value>::new();
 		let h = match self {
@@ -99,7 +100,7 @@ impl TableMutation {
 				h.insert(
 					"delete".to_string(),
 					Value::Object(Object::from(map! {
-						"id".to_string() => Value::Thing(t)
+						"id".to_string() => Value::RecordId(t)
 					})),
 				);
 				h
@@ -112,7 +113,7 @@ impl TableMutation {
 				h.insert(
 					"delete".to_string(),
 					Value::Object(Object::from(map! {
-						"id".to_string() => Value::Thing(id),
+					"id".to_string() => Value::RecordId(id),
 					})),
 				);
 				h
@@ -182,16 +183,16 @@ impl Display for ChangeSet {
 	}
 }
 
-// WriteMutationSet is a set of mutations to be to a table at the specific timestamp.
+// WriteMutationSet is a set of mutations to be to a table at the specific
+// timestamp.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, Default)]
 pub struct WriteMutationSet(pub Vec<TableMutations>);
 
 #[cfg(test)]
 mod tests {
-	use crate::catalog::{DatabaseId, NamespaceId, TableId};
-
 	use super::*;
+	use crate::catalog::{DatabaseId, NamespaceId, TableId};
 	use std::collections::HashMap;
 
 	#[test]

@@ -1,11 +1,13 @@
-use crate::syn;
+use std::collections::BTreeMap;
+use std::iter::once;
+use std::ops::Bound;
+
 use ciborium::Value as CborValue;
 use geo::{LineString, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use rust_decimal::Decimal;
-use std::ops::Bound;
-use std::{collections::BTreeMap, iter::once};
 
+use crate::syn;
 use crate::val::{
 	self, Array, DecimalExt, Geometry, Number, Object, Range, RecordIdKey, RecordIdKeyRange, Table,
 	Uuid, Value,
@@ -25,7 +27,8 @@ const TAG_STRING_DECIMAL: u64 = 10;
 const TAG_CUSTOM_DATETIME: u64 = 12;
 const TAG_STRING_DURATION: u64 = 13;
 const TAG_CUSTOM_DURATION: u64 = 14;
-// unused but the for backwards compatibility kept around to maybe avoid using that tag again.
+// unused but the for backwards compatibility kept around to maybe avoid using
+// that tag again.
 const _TAG_FUTURE: u64 = 15;
 
 // Ranges (49->51 is unassigned)
@@ -173,7 +176,7 @@ pub fn to_value(val: CborValue) -> Result<Value, &'static str> {
 
 						let key = to_record_id_key(key)?;
 
-						Ok(val::Value::Thing(val::RecordId {
+						Ok(val::Value::RecordId(val::RecordId {
 							table,
 							key,
 						}))
@@ -386,7 +389,7 @@ pub fn from_value(val: Value) -> Result<CborValue, &'static str> {
 		Value::Array(v) => from_array(v),
 		Value::Object(v) => from_object(v),
 		Value::Bytes(v) => Ok(CborValue::Bytes(v.into_inner())),
-		Value::Thing(v) => Ok(CborValue::Tag(
+		Value::RecordId(v) => Ok(CborValue::Tag(
 			TAG_RECORDID,
 			Box::new(CborValue::Array(vec![
 				CborValue::Text(v.table),

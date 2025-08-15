@@ -1,6 +1,7 @@
-use crate::sql::Kind;
 use std::fmt;
 use std::fmt::Display;
+
+use crate::sql::Kind;
 
 /// The type of records stored by a table
 #[derive(Debug, Default, Clone, PartialEq, Eq)]

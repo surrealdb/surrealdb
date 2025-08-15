@@ -1,5 +1,6 @@
-use crate::sql::field::Fields;
 use std::fmt::{self, Display};
+
+use crate::sql::field::Fields;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

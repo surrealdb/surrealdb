@@ -1,3 +1,10 @@
+use std::fmt;
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -5,15 +12,8 @@ use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _, Literal};
 use crate::iam::Auth;
-use crate::kvs::Live;
-use crate::kvs::impl_kv_value_revisioned;
+use crate::kvs::{Live, impl_kv_value_revisioned};
 use crate::val::{Uuid, Value};
-use anyhow::{Result, bail};
-
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -243,7 +243,7 @@ mod tests {
 			Notification::new(
 				live_id,
 				Action::Create,
-				Value::Thing(RecordId {
+				Value::RecordId(RecordId {
 					table: tb.to_owned(),
 					key: RecordIdKey::String("test_true".to_owned())
 				}),

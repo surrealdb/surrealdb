@@ -5,7 +5,6 @@ use crate::{
 	key::category::{Categorise, Category},
 	kvs::{KVKey, sequences::SequenceState},
 };
-
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

@@ -49,6 +49,8 @@ impl From<IteratorRef> for IteratorRecord {
 	}
 }
 
+/// Abstraction over batch containers used by iterators (Vec or VecDeque),
+/// allowing the same code to accumulate records regardless of concrete type.
 pub(crate) trait IteratorBatch {
 	fn empty() -> Self;
 	fn with_capacity(capacity: usize) -> Self;
@@ -106,6 +108,12 @@ impl IteratorBatch for VecDeque<IndexItemRecord> {
 	}
 }
 
+/// High-level iterator over index-backed scans which yields RecordIds (and
+/// optionally pre-fetched Values) depending on the current RecordStrategy.
+///
+/// Each variant encapsulates a concrete scan strategy (equality, range, union,
+/// join, text search, KNN, etc). Iteration is performed in batches to cap
+/// per-IO work and allow cooperative cancellation via Context.
 pub(crate) enum ThingIterator {
 	IndexEqual(IndexEqualThingIterator),
 	IndexRange(IndexRangeThingIterator),
@@ -126,6 +134,12 @@ pub(crate) enum ThingIterator {
 }
 
 impl ThingIterator {
+	/// Fetch the next batch of index items.
+	///
+	/// - `size` is a soft upper bound on how many items to fetch. Concrete
+	///   iterators may return fewer items (e.g., due to range boundaries) or,
+	///   in rare edge-cases, one extra to honor inclusivity semantics when
+	///   scanning in reverse.
 	pub(crate) async fn next_batch<B: IteratorBatch>(
 		&mut self,
 		ctx: &Context,
@@ -152,6 +166,10 @@ impl ThingIterator {
 		}
 	}
 
+	/// Count up to the next `size` matching items without materializing values.
+	///
+	/// Used for SELECT ... COUNT and for explain paths where only cardinality
+	/// is required.
 	pub(crate) async fn next_count(
 		&mut self,
 		ctx: &Context,
@@ -179,6 +197,8 @@ impl ThingIterator {
 	}
 }
 
+/// Iterator output record. Either a key-only result (for index-only scans)
+/// or a key+value pair when values are fetched by the current RecordStrategy.
 pub(crate) enum IndexItemRecord {
 	/// We just collected the key
 	Key(Arc<RecordId>, IteratorRecord),
@@ -235,6 +255,14 @@ impl IndexEqualThingIterator {
 		})
 	}
 
+	/// Computes the begin and end keys for scanning an equality index.
+	///
+	/// For single-column indexes, uses simple prefix key generation.
+	/// For composite indexes (multiple columns), uses composite key generation
+	/// which handles the ordering and encoding of multiple index values.
+	///
+	/// Returns a tuple of (begin_key, end_key) that defines the scan range
+	/// for finding all records that exactly match the provided array values.
 	fn get_beg_end(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -242,11 +270,13 @@ impl IndexEqualThingIterator {
 		a: &Array,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		Ok(if ix.cols.len() == 1 {
+			// Single column index: straightforward key prefix generation
 			(
 				Index::prefix_ids_beg(ns, db, &ix.what, &ix.name, a)?,
 				Index::prefix_ids_end(ns, db, &ix.what, &ix.name, a)?,
 			)
 		} else {
+			// Composite index: handles multiple column values with proper ordering
 			(
 				Index::prefix_ids_composite_beg(ns, db, &ix.what, &ix.name, a)?,
 				Index::prefix_ids_composite_end(ns, db, &ix.what, &ix.name, a)?,
@@ -254,6 +284,17 @@ impl IndexEqualThingIterator {
 		})
 	}
 
+	/// Performs a key-value scan within the specified range and updates the
+	/// begin key for pagination.
+	///
+	/// This method scans the key-value store between `beg` and `end` keys,
+	/// returning up to `limit` results. After scanning, it updates the `beg`
+	/// key to continue from where this scan left off, enabling
+	/// efficient pagination through large result sets.
+	///
+	/// The key manipulation (appending 0x00) ensures that the next scan will
+	/// start after the last key returned, avoiding duplicate results while
+	/// maintaining correct lexicographic ordering.
 	async fn next_scan(
 		tx: &Transaction,
 		beg: &mut Vec<u8>,
@@ -263,9 +304,11 @@ impl IndexEqualThingIterator {
 		let min = beg.clone();
 		let max = end.to_owned();
 		let res = tx.scan(min..max, limit, None).await?;
+		// Update the begin key for the next scan to avoid duplicates and enable
+		// pagination
 		if let Some((key, _)) = res.last() {
 			let mut key = key.clone();
-			key.push(0x00);
+			key.push(0x00); // Move to the next possible key lexicographically
 			*beg = key;
 		}
 		Ok(res)
@@ -319,18 +362,29 @@ impl RangeScan {
 		self.beg.clone()..self.end.clone()
 	}
 
+	/// Determines whether a given key should be included in the range scan
+	/// results.
+	///
+	/// This method implements inclusive/exclusive boundary logic for range
+	/// scans. It tracks whether boundary keys have been encountered and
+	/// applies the appropriate inclusion/exclusion rules based on the range
+	/// configuration.
+	///
+	/// Returns `false` for keys that should be excluded (boundary keys when the
+	/// range is exclusive at that boundary), `true` for keys that should be
+	/// included.
 	fn matches(&mut self, k: &Key) -> bool {
-		// We check if we should match the key matching the beginning of the range
+		// Handle beginning boundary: exclude if this is an exclusive range start
 		if !self.beg_excl_match_checked && self.beg.eq(k) {
 			self.beg_excl_match_checked = true;
-			return false;
+			return false; // Exclude the boundary key for exclusive ranges
 		}
-		// We check if we should match the key matching the end of the range
+		// Handle ending boundary: exclude if this is an exclusive range end
 		if !self.end_excl_match_checked && self.end.eq(k) {
 			self.end_excl_match_checked = true;
-			return false;
+			return false; // Exclude the boundary key for exclusive ranges
 		}
-		true
+		true // Include all other keys within the range
 	}
 
 	fn matches_end(&mut self) -> bool {
@@ -621,6 +675,9 @@ impl IndexRangeReverseThingIterator {
 		let range = full_iterator_range();
 		Self::new(irf, ns, db, ix, &range)
 	}
+	/// When scanning in reverse, the KV range APIs do not return the inclusive
+	/// end key. We compensate by explicitly checking and returning the end key
+	/// once per iterator state, decrementing the remaining `limit` accordingly.
 	async fn check_batch_ending(
 		&mut self,
 		tx: &Transaction,
@@ -656,7 +713,8 @@ impl IndexRangeReverseThingIterator {
 		tx: &Transaction,
 		mut limit: u32,
 	) -> Result<B> {
-		// Check if we need to retrieve the key at end of the range (not returned by the scanr)
+		// Check if we need to retrieve the key at end of the range (not returned by the
+		// scanr)
 		let ending = self.check_batch_ending(tx, &mut limit).await?;
 
 		// Do we have enough limit left to collect additional records?
@@ -698,7 +756,8 @@ impl IndexRangeReverseThingIterator {
 	}
 
 	async fn next_count(&mut self, tx: &Transaction, mut limit: u32) -> Result<usize> {
-		// Check if we need to retrieve the key at end of the range (not returned by the keysr)
+		// Check if we need to retrieve the key at end of the range (not returned by the
+		// keysr)
 		let mut count = self.check_keys_ending(tx, &mut limit).await? as usize;
 
 		// Do we have enough limit left to collect additional records?
@@ -738,7 +797,8 @@ impl IndexUnionThingIterator {
 		ix: &DefineIndexStatement,
 		arrays: &[Array],
 	) -> Result<Self> {
-		// We create a VecDeque to hold the prefix keys (begin and end) for each value in the array.
+		// We create a VecDeque to hold the prefix keys (begin and end) for each value
+		// in the array.
 		let mut values: VecDeque<(Vec<u8>, Vec<u8>)> = VecDeque::with_capacity(arrays.len());
 
 		for a in arrays {
@@ -1155,6 +1215,21 @@ pub(crate) struct UniqueRangeReverseThingIterator {
 
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 impl UniqueRangeReverseThingIterator {
+	pub(super) fn new(
+		irf: IteratorRef,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix: &DefineIndexStatement,
+		range: &IteratorRange<'_>,
+	) -> Result<Self> {
+		let r = ReverseRangeScan::new(UniqueRangeThingIterator::range_scan(ns, db, ix, range)?);
+		Ok(Self {
+			irf,
+			r,
+			done: false,
+		})
+	}
+
 	pub(super) fn full_range(
 		irf: IteratorRef,
 		ns: NamespaceId,
@@ -1162,12 +1237,7 @@ impl UniqueRangeReverseThingIterator {
 		ix: &DefineIndexStatement,
 	) -> Result<Self> {
 		let r = full_iterator_range();
-		let r = ReverseRangeScan::new(UniqueRangeThingIterator::range_scan(ns, db, ix, &r)?);
-		Ok(Self {
-			irf,
-			r,
-			done: false,
-		})
+		Self::new(irf, ns, db, ix, &r)
 	}
 
 	async fn next_batch<B: IteratorBatch>(
@@ -1182,7 +1252,8 @@ impl UniqueRangeReverseThingIterator {
 		let ending_record = if self.r.end_incl {
 			// we don't include the ending key for the next batches
 			self.r.end_incl = false;
-			// tx.scanr is end exclusive, so we have to manually collect the value using a get
+			// tx.scanr is end exclusive, so we have to manually collect the value using a
+			// get
 			if let Some(v) = tx.get(&self.r.r.end, None).await? {
 				let rid: RecordId = revision::from_slice(&v)?;
 				let record = IndexItemRecord::new_key(rid, self.irf.into());

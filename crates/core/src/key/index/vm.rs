@@ -1,7 +1,8 @@
 //! Stores MTree state and nodes
 use crate::catalog::DatabaseId;
 use crate::catalog::NamespaceId;
-use crate::idx::trees::{mtree::MState, store::NodeId};
+use crate::idx::trees::mtree::MState;
+use crate::idx::trees::store::NodeId;
 use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
 

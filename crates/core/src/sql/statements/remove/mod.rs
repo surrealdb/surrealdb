@@ -13,6 +13,8 @@ mod sequence;
 mod table;
 mod user;
 
+use std::fmt::{self, Display, Formatter};
+
 pub use access::RemoveAccessStatement;
 pub use analyzer::RemoveAnalyzerStatement;
 pub use bucket::RemoveBucketStatement;
@@ -27,8 +29,6 @@ pub use param::RemoveParamStatement;
 pub use sequence::RemoveSequenceStatement;
 pub use table::RemoveTableStatement;
 pub use user::RemoveUserStatement;
-
-use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

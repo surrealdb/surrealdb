@@ -1,10 +1,12 @@
+use std::net::SocketAddr;
+
+use url::Url;
+
 use crate::api::Result;
 use crate::api::engine::local::{Db, TiKv};
 use crate::api::err::Error;
 use crate::api::opt::endpoint::into_endpoint;
 use crate::api::opt::{Config, Endpoint, IntoEndpoint};
-use std::net::SocketAddr;
-use url::Url;
 
 macro_rules! endpoints {
 	($($name:ty),*) => {

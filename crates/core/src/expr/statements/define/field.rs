@@ -1,3 +1,4 @@
+use super::DefineKind;
 use crate::catalog::{
 	self, DatabaseId, FieldDefinition, NamespaceId, Relation, TableDefinition, TableType,
 };
@@ -22,8 +23,6 @@ use std::fmt::{self, Display, Write};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use super::DefineKind;
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum DefineDefault {
@@ -40,7 +39,8 @@ pub struct DefineFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
 	/// Whether the field is marked as flexible.
-	/// Flexible allows the field to be schemaless even if the table is marked as schemafull.
+	/// Flexible allows the field to be schemaless even if the table is marked
+	/// as schemafull.
 	pub flex: bool,
 	pub field_kind: Option<Kind>,
 	pub readonly: bool,

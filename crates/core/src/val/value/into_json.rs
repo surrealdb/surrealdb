@@ -1,16 +1,18 @@
-use crate::val::{Geometry, Number, Value};
 use chrono::SecondsFormat;
 use geo::{LineString, Point, Polygon};
 use serde_json::{Map, Number as JsonNumber, Value as JsonValue, json};
 
+use crate::val::{Geometry, Number, Value};
+
 impl Value {
 	/// Converts the value into a json representation of the value.
 	/// Returns None if there are non serializable values present in the value.
-	// TODO: Remove the JsonValue intermediate and implement a json formatter for Value.
+	// TODO: Remove the JsonValue intermediate and implement a json formatter for
+	// Value.
 	pub fn into_json_value(self) -> Option<JsonValue> {
-		// This function goes through some extra length to manually implement the encoding into
-		// json value. This is done to ensure clarity and stability in regards to how the value varients are
-		// converted.
+		// This function goes through some extra length to manually implement the
+		// encoding into json value. This is done to ensure clarity and stability in
+		// regards to how the value varients are converted.
 
 		let res = match self {
 			// These value types are simple values which
@@ -60,7 +62,7 @@ impl Value {
 			Value::Bytes(bytes) => {
 				JsonValue::Array(bytes.0.into_iter().map(|x| JsonValue::Number(x.into())).collect())
 			}
-			Value::Thing(thing) => JsonValue::String(thing.to_string()),
+			Value::RecordId(thing) => JsonValue::String(thing.to_string()),
 			// TODO: Maybe remove
 			Value::Regex(regex) => JsonValue::String(regex.0.to_string()),
 			Value::File(file) => JsonValue::String(file.to_string()),
@@ -143,24 +145,17 @@ fn polygon_into_json_value(polygon: Polygon) -> JsonValue {
 
 #[cfg(test)]
 mod tests {
-	use crate::val::{self, RecordId, RecordIdKey, Value};
-
-	use chrono::DateTime;
-	use chrono::Utc;
-	use geo::MultiLineString;
-	use geo::MultiPoint;
-	use geo::MultiPolygon;
-	use geo::line_string;
-	use geo::point;
-	use geo::polygon;
-	use rust_decimal::Decimal;
-	use serde_json::Value as Json;
-	use serde_json::json;
 	use std::collections::BTreeMap;
 	use std::time::Duration;
+
+	use chrono::{DateTime, Utc};
+	use geo::{MultiLineString, MultiPoint, MultiPolygon, line_string, point, polygon};
+	use rstest::rstest;
+	use rust_decimal::Decimal;
+	use serde_json::{Value as Json, json};
 	use uuid::Uuid;
 
-	use rstest::rstest;
+	use crate::val::{self, RecordId, RecordIdKey, Value};
 
 	#[rstest]
 	#[case::none(Value::None, json!(null), Value::Null)]
@@ -272,9 +267,9 @@ mod tests {
 		])),
 	)]
 	#[case::thing(
-		Value::Thing(RecordId{ table: "foo".to_string(), key: RecordIdKey::String("bar".into())}) ,
+		Value::RecordId(RecordId{ table: "foo".to_string(), key: RecordIdKey::String("bar".into())}) ,
 		json!("foo:bar"),
-		Value::Thing(RecordId{ table: "foo".to_string(), key: RecordIdKey::String("bar".into())}) ,
+		Value::RecordId(RecordId{ table: "foo".to_string(), key: RecordIdKey::String("bar".into())}) ,
 	)]
 	#[case::array(
 		Value::Array(val::Array(vec![])),

@@ -1,10 +1,12 @@
-use crate::expr::Expr;
-use crate::val::{Number, RecordId};
-use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 use std::sync::Arc;
+
+use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use tokio::sync::Mutex;
+
+use crate::expr::Expr;
+use crate::val::{Number, RecordId};
 
 pub(super) struct KnnPriorityList(Arc<Mutex<Inner>>);
 

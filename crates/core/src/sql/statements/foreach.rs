@@ -1,5 +1,6 @@
-use crate::sql::{Block, Expr, Param};
 use std::fmt::{self, Display};
+
+use crate::sql::{Block, Expr, Param};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

@@ -1,3 +1,10 @@
+use std::borrow::Cow;
+use std::num::{ParseFloatError, ParseIntError};
+use std::str::FromStr;
+use std::time::Duration;
+
+use rust_decimal::Decimal;
+
 use crate::syn::error::{SyntaxError, bail, syntax_error};
 use crate::syn::lexer::Lexer;
 use crate::syn::token::{Span, Token, TokenKind, t};
@@ -5,11 +12,6 @@ use crate::val::DecimalExt;
 use crate::val::duration::{
 	SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK, SECONDS_PER_YEAR,
 };
-use rust_decimal::Decimal;
-use std::borrow::Cow;
-use std::num::{ParseFloatError, ParseIntError};
-use std::str::FromStr;
-use std::time::Duration;
 
 pub enum Numeric {
 	Float(f64),

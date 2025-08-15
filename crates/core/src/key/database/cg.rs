@@ -1,6 +1,5 @@
 //! Stores a DEFINE CONFIG definition
 use crate::catalog::{DatabaseId, NamespaceId};
-
 use crate::expr::statements::define::config::ConfigStore;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;

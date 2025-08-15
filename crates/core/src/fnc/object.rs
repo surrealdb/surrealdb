@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
+
+use anyhow::{Result, bail};
+
 use crate::err::Error;
 use crate::val::{Array, Object, Strand, Value};
-use anyhow::{Result, bail};
-use std::collections::BTreeMap;
 
 pub fn entries((object,): (Object,)) -> Result<Value> {
 	Ok(Value::Array(Array(

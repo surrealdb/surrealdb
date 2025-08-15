@@ -1,3 +1,10 @@
+use std::fmt;
+
+use anyhow::Result;
+use async_channel::Sender;
+use chrono::TimeZone;
+use chrono::prelude::Utc;
+
 use super::Transaction;
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cnf::EXPORT_BATCH_SIZE;
@@ -7,11 +14,6 @@ use crate::expr::{Base, DefineAccessStatement};
 use crate::key::thing;
 use crate::sql::ToSql;
 use crate::val::{RecordId, Strand, Value};
-use anyhow::Result;
-use async_channel::Sender;
-use chrono::TimeZone;
-use chrono::prelude::Utc;
-use std::fmt;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -426,20 +428,25 @@ impl Transaction {
 
 	/// Processes a value and generates the appropriate SQL command.
 	///
-	/// This function processes a value, categorizing it into either normal records or graph edge records,
-	/// and generates the appropriate SQL command based on the type of record and the presence of a version.
+	/// This function processes a value, categorizing it into either normal
+	/// records or graph edge records, and generates the appropriate SQL
+	/// command based on the type of record and the presence of a version.
 	///
 	/// # Arguments
 	///
 	/// * `v` - The value to be processed.
-	/// * `records_relate` - A mutable reference to a vector that holds graph edge records.
-	/// * `records_normal` - A mutable reference to a vector that holds normal records.
-	/// * `is_tombstone` - An optional boolean indicating if the record is a tombstone.
+	/// * `records_relate` - A mutable reference to a vector that holds graph
+	///   edge records.
+	/// * `records_normal` - A mutable reference to a vector that holds normal
+	///   records.
+	/// * `is_tombstone` - An optional boolean indicating if the record is a
+	///   tombstone.
 	/// * `version` - An optional version number for the record.
 	///
 	/// # Returns
 	///
-	/// * `String` - Returns the generated SQL command as a string. If no command is generated, returns an empty string.
+	/// * `String` - Returns the generated SQL command as a string. If no
+	///   command is generated, returns an empty string.
 	fn process_value(
 		k: thing::ThingKey,
 		mut v: Value,
@@ -454,10 +461,11 @@ impl Transaction {
 			key: k.id.clone(),
 		};
 		v.def(&rid);
-		// Match on the value to determine if it is a graph edge record or a normal record.
+		// Match on the value to determine if it is a graph edge record or a normal
+		// record.
 		match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
 			// If the value is a graph edge record (indicated by EDGE, IN, and OUT fields):
-			(Value::Bool(true), Value::Thing(_), Value::Thing(_)) => {
+			(Value::Bool(true), Value::RecordId(_), Value::RecordId(_)) => {
 				if let Some(version) = version {
 					// If a version exists, format the value as an INSERT RELATION VERSION command.
 					let ts = Utc.timestamp_nanos(version as i64);
@@ -477,12 +485,14 @@ impl Transaction {
 						// If the record is a tombstone, format it as a DELETE command.
 						format!("DELETE {}:{};", k.tb, k.id)
 					} else {
-						// If the record is not a tombstone and a version exists, format it as an INSERT VERSION command.
+						// If the record is not a tombstone and a version exists, format it as an
+						// INSERT VERSION command.
 						let ts = Utc.timestamp_nanos(version.unwrap() as i64);
 						format!("INSERT {} VERSION d'{:?}';", v, ts)
 					}
 				} else {
-					// If no tombstone or version information is provided, push the value to the records_normal vector.
+					// If no tombstone or version information is provided, push the value to the
+					// records_normal vector.
 					records_normal.push(v.to_string());
 					String::new()
 				}
@@ -492,19 +502,23 @@ impl Transaction {
 
 	/// Exports versioned data to the provided channel.
 	///
-	/// This function processes a list of versioned values, converting them into SQL commands
-	/// and sending them to the provided channel. It handles both normal records and graph edge records,
-	/// and ensures that the appropriate SQL commands are generated for each type of record.
+	/// This function processes a list of versioned values, converting them into
+	/// SQL commands and sending them to the provided channel. It handles both
+	/// normal records and graph edge records, and ensures that the appropriate
+	/// SQL commands are generated for each type of record.
 	///
 	/// # Arguments
 	///
-	/// * `versioned_values` - A vector of tuples containing the versioned values to be exported.
-	///   Each tuple consists of a key, value, version, and a boolean indicating if the record is a tombstone.
-	/// * `chn` - A reference to the channel to which the SQL commands will be sent.
+	/// * `versioned_values` - A vector of tuples containing the versioned
+	///   values to be exported. Each tuple consists of a key, value, version,
+	///   and a boolean indicating if the record is a tombstone.
+	/// * `chn` - A reference to the channel to which the SQL commands will be
+	///   sent.
 	///
 	/// # Returns
 	///
-	/// * `Result<()>` - Returns `Ok(())` if the operation is successful, or an `Error` if an error occurs.
+	/// * `Result<()>` - Returns `Ok(())` if the operation is successful, or an
+	///   `Error` if an error occurs.
 	async fn export_versioned_data(
 		&self,
 		versioned_values: Vec<(Vec<u8>, Vec<u8>, u64, bool)>,
@@ -580,19 +594,22 @@ impl Transaction {
 
 	/// Exports regular data to the provided channel.
 	///
-	/// This function processes a list of regular values, converting them into SQL commands
-	/// and sending them to the provided channel. It handles both normal records and graph edge records,
-	/// and ensures that the appropriate SQL commands are generated for each type of record.
+	/// This function processes a list of regular values, converting them into
+	/// SQL commands and sending them to the provided channel. It handles both
+	/// normal records and graph edge records, and ensures that the appropriate
+	/// SQL commands are generated for each type of record.
 	///
 	/// # Arguments
 	///
-	/// * `regular_values` - A vector of tuples containing the regular values to be exported.
-	///   Each tuple consists of a key and a value.
-	/// * `chn` - A reference to the channel to which the SQL commands will be sent.
+	/// * `regular_values` - A vector of tuples containing the regular values to
+	///   be exported. Each tuple consists of a key and a value.
+	/// * `chn` - A reference to the channel to which the SQL commands will be
+	///   sent.
 	///
 	/// # Returns
 	///
-	/// * `Result<()>` - Returns `Ok(())` if the operation is successful, or an `Error` if an error occurs.
+	/// * `Result<()>` - Returns `Ok(())` if the operation is successful, or an
+	///   `Error` if an error occurs.
 	async fn export_regular_data(
 		&self,
 		regular_values: Vec<(Vec<u8>, Vec<u8>)>,
@@ -617,7 +634,8 @@ impl Transaction {
 			chn.send(bytes!(sql)).await?;
 		}
 
-		// If there are graph edge records, generate and send the INSERT RELATION SQL command.
+		// If there are graph edge records, generate and send the INSERT RELATION SQL
+		// command.
 		if !records_relate.is_empty() {
 			let values = records_relate.join(", ");
 			let sql = format!("INSERT RELATION [ {} ];", values);

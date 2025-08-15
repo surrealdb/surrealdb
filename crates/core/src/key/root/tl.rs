@@ -1,5 +1,4 @@
 //! Stores a task lease to ensure only one node is running the task at a time
-
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::kvs::tasklease::{TaskLease, TaskLeaseType};

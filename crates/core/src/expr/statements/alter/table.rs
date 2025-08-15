@@ -1,3 +1,4 @@
+use super::AlterKind;
 use crate::catalog::TableType;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -9,14 +10,11 @@ use crate::expr::{Base, ChangeFeed, Ident, Kind, Permissions};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
 use anyhow::Result;
-
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use std::ops::Deref;
-
-use super::AlterKind;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]

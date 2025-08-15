@@ -1,8 +1,9 @@
 mod helpers;
-use crate::helpers::{Test, new_ds, skip_ok};
 use surrealdb::Result;
-use surrealdb::dbs::Session;
+use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
+
+use crate::helpers::{Test, new_ds, skip_ok};
 
 #[tokio::test]
 async fn select_where_mtree_knn() -> Result<()> {

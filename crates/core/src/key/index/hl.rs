@@ -2,7 +2,6 @@
 use crate::catalog::DatabaseId;
 use crate::catalog::NamespaceId;
 use crate::kvs::KVKey;
-
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 

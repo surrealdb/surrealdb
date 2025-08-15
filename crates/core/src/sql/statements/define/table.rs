@@ -1,11 +1,9 @@
+use super::DefineKind;
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::fmt::{is_pretty, pretty_indent};
-
 use crate::sql::{Ident, Kind, Permissions, TableType, ToSql, View};
 use crate::val::Strand;
 use std::fmt::{self, Display, Write};
-
-use super::DefineKind;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

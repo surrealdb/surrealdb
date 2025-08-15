@@ -271,8 +271,9 @@ impl Options {
 
 	/// Create a new Options object for a function/subquery/future/etc.
 	///
-	/// The parameter is the approximate cost of the operation (more concretely, the size of the
-	/// stack frame it uses relative to a simple function call). When in doubt, use a value of 1.
+	/// The parameter is the approximate cost of the operation (more concretely,
+	/// the size of the stack frame it uses relative to a simple function
+	/// call). When in doubt, use a value of 1.
 	pub fn dive(&self, cost: u8) -> Result<Self, Error> {
 		if self.dive < cost as u32 {
 			return Err(Error::ComputationDepthExceeded);
@@ -346,7 +347,8 @@ impl Options {
 		Ok(())
 	}
 
-	/// Check if the current auth is allowed to perform an action on a given resource
+	/// Check if the current auth is allowed to perform an action on a given
+	/// resource
 	pub fn is_allowed(&self, action: Action, res: ResourceKind, base: &Base) -> Result<()> {
 		// Validate the target resource and base
 		let res = match base {

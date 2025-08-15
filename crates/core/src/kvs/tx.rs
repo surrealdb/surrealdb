@@ -136,7 +136,8 @@ impl Transaction {
 
 	/// Retrieve a specific prefix of keys from the datastore.
 	///
-	/// This function fetches key-value pairs from the underlying datastore in grouped batches.
+	/// This function fetches key-value pairs from the underlying datastore in
+	/// grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn getp<K>(&self, key: &K) -> Result<Vec<(Key, Val)>>
 	where
@@ -147,7 +148,8 @@ impl Transaction {
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
-	/// This function fetches key-value pairs from the underlying datastore in grouped batches.
+	/// This function fetches key-value pairs from the underlying datastore in
+	/// grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn getr<K>(&self, rng: Range<K>, version: Option<u64>) -> Result<Vec<(Key, Val)>>
 	where
@@ -165,7 +167,8 @@ impl Transaction {
 		self.lock().await.del(key).await
 	}
 
-	/// Delete a key from the datastore if the current value matches a condition.
+	/// Delete a key from the datastore if the current value matches a
+	/// condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn delc<K>(&self, key: &K, chk: Option<&K::ValueType>) -> Result<()>
 	where
@@ -176,7 +179,8 @@ impl Transaction {
 
 	/// Delete a range of keys from the datastore.
 	///
-	/// This function deletes entries from the underlying datastore in grouped batches.
+	/// This function deletes entries from the underlying datastore in grouped
+	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn delr<K>(&self, rng: Range<K>) -> Result<()>
 	where
@@ -187,7 +191,8 @@ impl Transaction {
 
 	/// Delete a prefix of keys from the datastore.
 	///
-	/// This function deletes entries from the underlying datastore in grouped batches.
+	/// This function deletes entries from the underlying datastore in grouped
+	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn delp<K>(&self, key: &K) -> Result<()>
 	where
@@ -205,7 +210,8 @@ impl Transaction {
 		self.lock().await.clr(key).await
 	}
 
-	/// Delete all versions of a key from the datastore if the current value matches a condition.
+	/// Delete all versions of a key from the datastore if the current value
+	/// matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn clrc<K>(&self, key: &K, chk: Option<&K::ValueType>) -> Result<()>
 	where
@@ -216,7 +222,8 @@ impl Transaction {
 
 	/// Delete all versions of a range of keys from the datastore.
 	///
-	/// This function deletes entries from the underlying datastore in grouped batches.
+	/// This function deletes entries from the underlying datastore in grouped
+	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn clrr<K>(&self, rng: Range<K>) -> Result<()>
 	where
@@ -227,7 +234,8 @@ impl Transaction {
 
 	/// Delete all versions of a prefix of keys from the datastore.
 	///
-	/// This function deletes entries from the underlying datastore in grouped batches.
+	/// This function deletes entries from the underlying datastore in grouped
+	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn clrp<K>(&self, key: &K) -> Result<()>
 	where
@@ -279,7 +287,8 @@ impl Transaction {
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
-	/// This function fetches the full range of keys, in a single request to the underlying datastore.
+	/// This function fetches the full range of keys, in a single request to the
+	/// underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn keys<K>(&self, rng: Range<K>, limit: u32, version: Option<u64>) -> Result<Vec<Key>>
 	where
@@ -290,7 +299,8 @@ impl Transaction {
 
 	/// Retrieve a specific range of keys from the datastore in reverse order.
 	///
-	/// This function fetches the full range of keys, in a single request to the underlying datastore.
+	/// This function fetches the full range of keys, in a single request to the
+	/// underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn keysr<K>(
 		&self,
@@ -306,7 +316,8 @@ impl Transaction {
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
-	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
+	/// This function fetches the full range of key-value pairs, in a single
+	/// request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn scan<K>(
 		&self,
@@ -335,7 +346,8 @@ impl Transaction {
 
 	/// Count the total number of keys within a range in the datastore.
 	///
-	/// This function fetches the total count, in batches, with multiple requests to the underlying datastore.
+	/// This function fetches the total count, in batches, with multiple
+	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn count<K>(&self, rng: Range<K>) -> Result<usize>
 	where
@@ -346,7 +358,8 @@ impl Transaction {
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
-	/// This function fetches the keys in batches, with multiple requests to the underlying datastore.
+	/// This function fetches the keys in batches, with multiple requests to the
+	/// underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn batch_keys<K>(
 		&self,
@@ -362,7 +375,8 @@ impl Transaction {
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
-	/// This function fetches the key-value pairs in batches, with multiple requests to the underlying datastore.
+	/// This function fetches the key-value pairs in batches, with multiple
+	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn batch_keys_vals<K>(
 		&self,
@@ -378,7 +392,8 @@ impl Transaction {
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
-	/// This function fetches the key-value-version pairs in batches, with multiple requests to the underlying datastore.
+	/// This function fetches the key-value-version pairs in batches, with
+	/// multiple requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn batch_keys_vals_versions<K>(
 		&self,
@@ -393,7 +408,8 @@ impl Transaction {
 
 	/// Retrieve a stream over a specific range of keys in the datastore.
 	///
-	/// This function fetches the key-value pairs in batches, with multiple requests to the underlying datastore.
+	/// This function fetches the key-value pairs in batches, with multiple
+	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub fn stream(
 		&self,
@@ -1889,13 +1905,15 @@ impl Transaction {
 		Ok(())
 	}
 
-	/// Get or add a namespace with a default configuration, only if we are in dynamic mode.
+	/// Get or add a namespace with a default configuration, only if we are in
+	/// dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_or_add_ns(&self, ns: &str, strict: bool) -> Result<Arc<NamespaceDefinition>> {
 		self.get_or_add_ns_upwards(ns, strict).await
 	}
 
-	/// Get or add a database with a default configuration, only if we are in dynamic mode.
+	/// Get or add a database with a default configuration, only if we are in
+	/// dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_or_add_db(
 		&self,
@@ -1915,7 +1933,8 @@ impl Transaction {
 		self.get_or_add_db_upwards(ns, db, strict, true).await
 	}
 
-	/// Get or add a table with a default configuration, only if we are in dynamic mode.
+	/// Get or add a table with a default configuration, only if we are in
+	/// dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_or_add_tb(
 		&self,
@@ -1984,7 +2003,8 @@ impl Transaction {
 	// Private methods
 	// --------------------------------------------------
 
-	/// Get or add a namespace with a default configuration, only if we are in dynamic mode.
+	/// Get or add a namespace with a default configuration, only if we are in
+	/// dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_or_add_ns_upwards(
 		&self,
@@ -2013,7 +2033,8 @@ impl Transaction {
 		}
 	}
 
-	/// Get or add a database with a default configuration, only if we are in dynamic mode.
+	/// Get or add a database with a default configuration, only if we are in
+	/// dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_or_add_db_upwards(
 		&self,
@@ -2077,7 +2098,8 @@ impl Transaction {
 		.try_into_type()
 	}
 
-	/// Get or add a table with a default configuration, only if we are in dynamic mode.
+	/// Get or add a table with a default configuration, only if we are in
+	/// dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_or_add_tb_upwards(
 		&self,

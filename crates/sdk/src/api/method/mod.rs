@@ -1,16 +1,18 @@
 //! Methods to use when interacting with a SurrealDB instance
-use crate::api::opt::auth::{Credentials, Jwt};
-use crate::api::opt::{IntoEndpoint, auth};
-use crate::api::{Connect, Connection, OnceLockExt, Surreal, opt};
-use crate::opt::{IntoExportDestination, WaitFor};
-use serde::Serialize;
 use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
-use surrealdb_core::val;
+
+use serde::Serialize;
+
+use crate::api::opt::auth::{Credentials, Jwt};
+use crate::api::opt::{IntoEndpoint, auth};
+use crate::api::{Connect, Connection, OnceLockExt, Surreal, opt};
+use crate::core::val;
+use crate::opt::{IntoExportDestination, WaitFor};
 
 pub(crate) mod live;
 pub(crate) mod query;
@@ -80,7 +82,8 @@ pub use version::Version;
 
 use super::opt::{CreateResource, IntoResource};
 
-/// A alias for an often used type of future returned by async methods in this library.
+/// A alias for an often used type of future returned by async methods in this
+/// library.
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
 
 /// Query statistics
@@ -113,10 +116,11 @@ where
 {
 	/// Initialises a new unconnected instance of the client
 	///
-	/// This makes it easy to create a static singleton of the client. The static singleton
-	/// pattern in the example below ensures that a single database instance is available
-	/// across very large or complicated applications. With the singleton, only one connection
-	/// to the database is instantiated, and the database connection does not have to be shared
+	/// This makes it easy to create a static singleton of the client. The
+	/// static singleton pattern in the example below ensures that a single
+	/// database instance is available across very large or complicated
+	/// applications. With the singleton, only one connection to the database
+	/// is instantiated, and the database connection does not have to be shared
 	/// across components or controllers.
 	///
 	/// # Examples
@@ -1276,7 +1280,6 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	///
 	pub fn run<R>(&self, function: impl IntoFn) -> Run<C, R> {
 		Run {
 			client: Cow::Borrowed(self),
@@ -1323,7 +1326,8 @@ where
 	///
 	/// # Support
 	///
-	/// Currently only supported by HTTP and the local engines. *Not* supported on WebAssembly.
+	/// Currently only supported by HTTP and the local engines. *Not* supported
+	/// on WebAssembly.
 	///
 	/// # Examples
 	///
@@ -1368,7 +1372,8 @@ where
 	///
 	/// # Support
 	///
-	/// Currently only supported by HTTP and the local engines. *Not* supported on WebAssembly.
+	/// Currently only supported by HTTP and the local engines. *Not* supported
+	/// on WebAssembly.
 	///
 	/// # Examples
 	///

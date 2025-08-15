@@ -13,11 +13,10 @@ pub use context::RpcContext;
 pub use error::RpcError;
 pub use format::Format;
 pub use method::Method;
-pub use request::Request;
-pub use response::Data;
-
 pub use protocol::v1::RpcProtocolV1;
 pub use protocol::v2::RpcProtocolV2;
+pub use request::Request;
+pub use response::Data;
 
 use crate::cnf::PROTECTED_PARAM_NAMES;
 

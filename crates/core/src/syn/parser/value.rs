@@ -5,7 +5,6 @@ use std::ops::Bound;
 use reblessive::Stk;
 
 use super::{ParseResult, Parser};
-
 use crate::sql::Ident;
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::{self, Numeric};
@@ -66,13 +65,15 @@ impl Parser<'_> {
 				//HACK: This is an annoying hack to have geometries work.
 				//
 				// Geometries look exactly like objects and are a strict subsect of objects.
-				// However in code they are distinct and in surrealql the have different behavior.
+				// However in code they are distinct and in surrealql the have different
+				// behavior.
 				//
 				// Geom functions don't work with objects and vice-versa.
 				//
-				// The previous parse automatically converted an object to geometry if it found an
-				// matching object. Now it no longer does that and relies on the 'planning' stage
-				// to convert it. But here we still need to do it in the parser.
+				// The previous parse automatically converted an object to geometry if it found
+				// an matching object. Now it no longer does that and relies on the
+				// 'planning' stage to convert it. But here we still need to do it in the
+				// parser.
 				if let Some(geom) = Geometry::try_from_object(&object) {
 					Value::Geometry(geom)
 				} else {
@@ -193,7 +194,7 @@ impl Parser<'_> {
 					Numeric::Decimal(x) => Value::Number(Number::Decimal(x)),
 				}
 			}
-			_ => self.parse_value_record_id_inner::<SurrealQL>(stk).await.map(Value::Thing)?,
+			_ => self.parse_value_record_id_inner::<SurrealQL>(stk).await.map(Value::RecordId)?,
 		};
 
 		match self.peek_whitespace().kind {
@@ -298,13 +299,13 @@ impl Parser<'_> {
 				let glued = pop_glued!(self, Duration);
 				Ok(Value::Duration(glued))
 			}
-			_ => self.parse_value_record_id_inner::<Json>(stk).await.map(Value::Thing),
+			_ => self.parse_value_record_id_inner::<Json>(stk).await.map(Value::RecordId),
 		}
 	}
 
 	async fn reparse_json_legacy_strand(&mut self, stk: &mut Stk, strand: Strand) -> Value {
 		if let Ok(x) = Parser::new(strand.as_bytes()).parse_value_record_id(stk).await {
-			return Value::Thing(x);
+			return Value::RecordId(x);
 		}
 		if let Ok(x) = Parser::new(strand.as_bytes()).next_token_value() {
 			return Value::Datetime(x);

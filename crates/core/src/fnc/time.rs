@@ -1,10 +1,10 @@
-use crate::err::Error;
-use crate::val::{Datetime, Duration, Value};
 use anyhow::Result;
 use chrono::offset::TimeZone;
 use chrono::{DateTime, Datelike, DurationRound, Local, Timelike, Utc};
 
 use super::args::Optional;
+use crate::err::Error;
+use crate::val::{Datetime, Duration, Value};
 
 pub fn ceil((val, duration): (Datetime, Duration)) -> Result<Value> {
 	match chrono::Duration::from_std(*duration) {
@@ -253,9 +253,10 @@ pub fn year((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 }
 
 pub mod is {
+	use anyhow::Result;
+
 	use crate::fnc::args::Optional;
 	use crate::val::{Datetime, Value};
-	use anyhow::Result;
 
 	pub fn leap_year((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 		Ok(match val {
@@ -267,11 +268,12 @@ pub mod is {
 
 pub mod from {
 
-	use crate::err::Error;
-	use crate::val::{Datetime, Uuid, Value};
 	use anyhow::Result;
 	use chrono::DateTime;
 	use ulid::Ulid;
+
+	use crate::err::Error;
+	use crate::val::{Datetime, Uuid, Value};
 
 	pub fn nanos((val,): (i64,)) -> Result<Value> {
 		const NANOS_PER_SEC: i64 = 1_000_000_000;

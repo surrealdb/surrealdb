@@ -214,7 +214,8 @@ pub async fn db_access(
 											};
 											// AUTHENTICATE clause
 											if let Some(au) = &av.authenticate {
-												// Setup the system session for finding the signin record
+												// Setup the system session for finding the signin
+												// record
 												let mut sess =
 													Session::editor().with_ns(&ns).with_db(&db);
 												sess.rd = Some(rid.clone().into());
@@ -225,10 +226,12 @@ pub async fn db_access(
 												sess.or.clone_from(&session.or);
 												rid = authenticate_record(kvs, &sess, au).await?;
 											}
-											// Create refresh token if defined for the record access method
+											// Create refresh token if defined for the record access
+											// method
 											let refresh = match &at.bearer {
 												Some(_) => {
-													// TODO(gguillemas): Remove this once bearer access is no longer experimental
+													// TODO(gguillemas): Remove this once bearer
+													// access is no longer experimental
 													if !kvs.get_capabilities().allows_experimental(
 														&ExperimentalTarget::BearerAccess,
 													) {
@@ -292,17 +295,20 @@ pub async fn db_access(
 									}
 								}
 								Err(e) => match e.downcast_ref() {
-									// If the SIGNIN clause throws a specific error, authentication fails with that error
+									// If the SIGNIN clause throws a specific error, authentication
+									// fails with that error
 									Some(Error::Thrown(_)) => Err(e),
-									// If the SIGNIN clause failed due to an unexpected error, be more specific
-									// This allows clients to handle these errors, which may be retryable
+									// If the SIGNIN clause failed due to an unexpected error, be
+									// more specific This allows clients to handle these
+									// errors, which may be retryable
 									Some(Error::Tx(_) | Error::TxFailure | Error::TxRetryable) => {
 										debug!(
 											"Unexpected error found while executing a SIGNIN clause: {e}"
 										);
 										Err(anyhow::Error::new(Error::UnexpectedAuth))
 									}
-									// Otherwise, return a generic error unless it should be forwarded
+									// Otherwise, return a generic error unless it should be
+									// forwarded
 									_ => {
 										debug!("Record user signin query failed: {e}");
 										if *INSECURE_FORWARD_ACCESS_ERRORS {
@@ -923,7 +929,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -1104,7 +1111,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -1147,7 +1155,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -1432,7 +1441,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Session expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_sess_exp =
 				(Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_sess_exp =
@@ -1757,7 +1767,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -1852,7 +1863,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -3338,7 +3350,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -3414,7 +3427,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -3493,7 +3507,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -4205,7 +4220,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				)))],
 			};
 
-			// Use pre-parsed definition, which bypasses the existent role check during parsing.
+			// Use pre-parsed definition, which bypasses the existent role check during
+			// parsing.
 			ds.process(ast, &sess, None).await.unwrap();
 
 			let mut sess = Session {

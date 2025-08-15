@@ -1,8 +1,9 @@
-use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
-use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
 use std::ops::Bound;
 
 use surrealdb_protocol::fb::v1::{self as proto_fb, RecordIdKeyBound};
+
+use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
+use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
 
 impl ToFlatbuffers for RecordId {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::RecordId<'bldr>>;

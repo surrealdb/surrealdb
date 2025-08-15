@@ -13,8 +13,8 @@ arbitrary = { version = "1.3.2", features = ["derive"] }
 futures = "0.3.29"
 tokio = "1.44.2"
 
-[dependencies.surrealdb]
-path = "../sdk"
+[dependencies.surrealdb-core]
+path = "../core"
 features = ["kv-mem", "arbitrary"]
 default-features = false
 

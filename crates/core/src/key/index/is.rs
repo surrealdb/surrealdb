@@ -1,14 +1,16 @@
 //! Index Sequence State Key Structure
 //!
-//! This module defines the `Is` key structure used to store distributed sequence states
-//! for full-text search document ID generation. The key enables concurrent indexing
-//! by maintaining a sequence state per node in a distributed system.
+//! This module defines the `Is` key structure used to store distributed
+//! sequence states for full-text search document ID generation. The key enables
+//! concurrent indexing by maintaining a sequence state per node in a
+//! distributed system.
 //!
 //! # Purpose
 //!
-//! The `Is` key stores the state of distributed sequences used to provide unique numeric
-//! IDs to documents during full-text indexing operations. This allows multiple nodes
-//! to concurrently index documents while maintaining unique document identifiers.
+//! The `Is` key stores the state of distributed sequences used to provide
+//! unique numeric IDs to documents during full-text indexing operations. This
+//! allows multiple nodes to concurrently index documents while maintaining
+//! unique document identifiers.
 //!
 //! # Key Structure
 //!

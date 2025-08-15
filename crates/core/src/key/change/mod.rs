@@ -7,6 +7,7 @@ use crate::kvs::KVKey;
 use crate::vs::VersionStamp;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::str;
 
 // Cf stands for change feeds
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

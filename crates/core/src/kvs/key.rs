@@ -1,11 +1,12 @@
 //! Key and value traits for the key-value store.
 
-use anyhow::{Context, Result};
-use roaring::{RoaringBitmap, RoaringTreemap};
 use std::fmt::Debug;
 
+use anyhow::{Context, Result};
+use roaring::{RoaringBitmap, RoaringTreemap};
+
 /// KVKey is a trait that defines a key for the key-value store.
-pub(crate) trait KVKey: serde::Serialize + Debug + Sized {
+pub trait KVKey: serde::Serialize + Debug + Sized {
 	/// The associated value type for this key.
 	type ValueType: KVValue;
 
@@ -148,8 +149,9 @@ impl KVValue for RoaringTreemap {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use rstest::rstest;
+
+	use super::*;
 
 	#[rstest]
 	#[case::str("test", b"test".to_vec())]

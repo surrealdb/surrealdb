@@ -1,14 +1,15 @@
-use crate::net::headers::{Accept, ContentType};
-use crate::rpc::failure::Failure;
-use crate::rpc::response::Response;
 use axum::extract::ws::Message;
 use axum::response::Response as AxumResponse;
 use bytes::Bytes;
 use http::header::CONTENT_TYPE;
-use surrealdb::rpc::RpcError;
-use surrealdb::rpc::format::Format;
-use surrealdb::rpc::request::Request;
-use surrealdb_core::val;
+
+use crate::core::rpc::RpcError;
+use crate::core::rpc::format::Format;
+use crate::core::rpc::request::Request;
+use crate::core::val;
+use crate::net::headers::{Accept, ContentType};
+use crate::rpc::failure::Failure;
+use crate::rpc::response::Response;
 
 impl From<&Accept> for Format {
 	fn from(value: &Accept) -> Self {
@@ -59,7 +60,7 @@ impl WsFormat for Format {
 		let val = msg.into_data();
 		match self {
 			Format::Json => {
-				let val = surrealdb_core::rpc::format::json::decode(&val)
+				let val = crate::core::rpc::format::json::decode(&val)
 					.map_err(|_| RpcError::ParseError)?;
 				if let val::Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
@@ -68,7 +69,7 @@ impl WsFormat for Format {
 				}
 			}
 			Format::Cbor => {
-				let val = surrealdb_core::rpc::format::cbor::decode(&val)
+				let val = crate::core::rpc::format::cbor::decode(&val)
 					.map_err(|_| RpcError::ParseError)?;
 				if let val::Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
@@ -77,7 +78,7 @@ impl WsFormat for Format {
 				}
 			}
 			Format::Bincode => {
-				let val = surrealdb_core::rpc::format::bincode::decode(&val)
+				let val = crate::core::rpc::format::bincode::decode(&val)
 					.map_err(|_| RpcError::ParseError)?;
 				if let val::Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
@@ -86,7 +87,7 @@ impl WsFormat for Format {
 				}
 			}
 			Format::Revision => {
-				let val = surrealdb_core::rpc::format::revision::decode(&val)
+				let val = crate::core::rpc::format::revision::decode(&val)
 					.map_err(|_| RpcError::ParseError)?;
 				if let val::Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
@@ -102,22 +103,22 @@ impl WsFormat for Format {
 	fn res_ws(&self, res: Response) -> Result<(usize, Message), Failure> {
 		match self {
 			Format::Json => {
-				let val = surrealdb_core::rpc::format::json::encode_str(res.into_value())
+				let val = crate::core::rpc::format::json::encode_str(res.into_value())
 					.map_err(|_| RpcError::ParseError)?;
 				Ok((val.len(), Message::Text(val)))
 			}
 			Format::Cbor => {
-				let val = surrealdb_core::rpc::format::cbor::encode(res.into_value())
+				let val = crate::core::rpc::format::cbor::encode(res.into_value())
 					.map_err(|_| RpcError::ParseError)?;
 				Ok((val.len(), Message::Binary(val)))
 			}
 			Format::Bincode => {
-				let val = surrealdb_core::rpc::format::bincode::encode(&res)
+				let val = crate::core::rpc::format::bincode::encode(&res)
 					.map_err(|_| RpcError::ParseError)?;
 				Ok((val.len(), Message::Binary(val)))
 			}
 			Format::Revision => {
-				let val = surrealdb_core::rpc::format::revision::encode(&res)
+				let val = crate::core::rpc::format::revision::encode(&res)
 					.map_err(|_| RpcError::ParseError)?;
 				Ok((val.len(), Message::Binary(val)))
 			}
@@ -138,7 +139,7 @@ impl HttpFormat for Format {
 	fn req_http(&self, body: Bytes) -> Result<Request, RpcError> {
 		match self {
 			Format::Json => {
-				let val = surrealdb_core::rpc::format::json::decode(&body)
+				let val = crate::core::rpc::format::json::decode(&body)
 					.map_err(|_| RpcError::ParseError)?;
 				if let val::Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
@@ -147,7 +148,7 @@ impl HttpFormat for Format {
 				}
 			}
 			Format::Cbor => {
-				let val = surrealdb_core::rpc::format::cbor::decode(&body)
+				let val = crate::core::rpc::format::cbor::decode(&body)
 					.map_err(|_| RpcError::ParseError)?;
 				if let val::Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
@@ -156,7 +157,7 @@ impl HttpFormat for Format {
 				}
 			}
 			Format::Bincode => {
-				let val = surrealdb_core::rpc::format::bincode::decode(&body)
+				let val = crate::core::rpc::format::bincode::decode(&body)
 					.map_err(|_| RpcError::ParseError)?;
 				if let val::Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
@@ -165,7 +166,7 @@ impl HttpFormat for Format {
 				}
 			}
 			Format::Revision => {
-				let val = surrealdb_core::rpc::format::revision::decode(&body)
+				let val = crate::core::rpc::format::revision::decode(&body)
 					.map_err(|_| RpcError::ParseError)?;
 				if let val::Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
@@ -180,7 +181,7 @@ impl HttpFormat for Format {
 	fn res_http(&self, res: Response) -> Result<AxumResponse, RpcError> {
 		match self {
 			Format::Json => {
-				let val = surrealdb_core::rpc::format::json::encode_str(res.into_value())
+				let val = crate::core::rpc::format::json::encode_str(res.into_value())
 					.map_err(|_| RpcError::ParseError)?;
 				Ok(AxumResponse::builder()
 					.header(CONTENT_TYPE, ContentType::ApplicationJson)
@@ -188,7 +189,7 @@ impl HttpFormat for Format {
 					.unwrap())
 			}
 			Format::Cbor => {
-				let val = surrealdb_core::rpc::format::cbor::encode(res.into_value())
+				let val = crate::core::rpc::format::cbor::encode(res.into_value())
 					.map_err(|_| RpcError::ParseError)?;
 				Ok(AxumResponse::builder()
 					.header(CONTENT_TYPE, ContentType::from(self))
@@ -196,7 +197,7 @@ impl HttpFormat for Format {
 					.unwrap())
 			}
 			Format::Bincode => {
-				let val = surrealdb_core::rpc::format::bincode::encode(&res)
+				let val = crate::core::rpc::format::bincode::encode(&res)
 					.map_err(|_| RpcError::ParseError)?;
 				Ok(AxumResponse::builder()
 					.header(CONTENT_TYPE, ContentType::from(self))
@@ -204,7 +205,7 @@ impl HttpFormat for Format {
 					.unwrap())
 			}
 			Format::Revision => {
-				let val = surrealdb_core::rpc::format::revision::encode(&res)
+				let val = crate::core::rpc::format::revision::encode(&res)
 					.map_err(|_| RpcError::ParseError)?;
 				Ok(AxumResponse::builder()
 					.header(CONTENT_TYPE, ContentType::from(self))

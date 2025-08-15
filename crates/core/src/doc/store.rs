@@ -1,8 +1,9 @@
+use anyhow::Result;
+
 use crate::ctx::Context;
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err::Error;
-use anyhow::Result;
 
 impl Document {
 	pub(super) async fn store_record_data(

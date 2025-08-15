@@ -1,10 +1,11 @@
+use std::sync::Arc;
+
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::iam::{Auth, Role};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use std::sync::Arc;
 
 pub async fn mock() -> (Context, Options) {
 	let opt = Options::default().with_auth(Arc::new(Auth::for_root(Role::Owner)));

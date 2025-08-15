@@ -1,30 +1,31 @@
 //! HTTP engine
-use crate::api;
-use crate::api::conn::{Command, DbResponse, RequestData, RouterRequest};
-use crate::api::err::Error;
-use crate::api::{Connect, Result, Surreal};
-use crate::engine::remote::Response;
-use crate::headers::{AUTH_DB, AUTH_NS, DB, NS};
-use crate::opt::IntoEndpoint;
+use std::marker::PhantomData;
+#[cfg(not(target_family = "wasm"))]
+use std::path::PathBuf;
+
 use futures::TryStreamExt;
 use indexmap::IndexMap;
 use reqwest::RequestBuilder;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
-use std::marker::PhantomData;
-use surrealdb_core::{rpc, val};
-use url::Url;
-
-#[cfg(not(target_family = "wasm"))]
-use std::path::PathBuf;
 #[cfg(not(target_family = "wasm"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_family = "wasm"))]
 use tokio::io;
 #[cfg(not(target_family = "wasm"))]
 use tokio_util::compat::FuturesAsyncReadCompatExt;
+use url::Url;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local;
+
+use crate::api;
+use crate::api::conn::{Command, DbResponse, RequestData, RouterRequest};
+use crate::api::err::Error;
+use crate::api::{Connect, Result, Surreal};
+use crate::core::{rpc, val};
+use crate::engine::remote::Response;
+use crate::headers::{AUTH_DB, AUTH_NS, DB, NS};
+use crate::opt::IntoEndpoint;
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod native;
@@ -47,7 +48,8 @@ pub struct Https;
 pub struct Client(());
 
 impl Surreal<Client> {
-	/// Connects to a specific database endpoint, saving the connection on the static client
+	/// Connects to a specific database endpoint, saving the connection on the
+	/// static client
 	///
 	/// # Examples
 	///
@@ -233,7 +235,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 		}
 	} else {
 		let response: Vec<QueryMethodResponse> =
-			surrealdb_core::rpc::format::bincode::decode(&res.bytes().await?)
+			crate::core::rpc::format::bincode::decode(&res.bytes().await?)
 				.map_err(|x| format!("Failed to deserialize bincode payload: {x}"))
 				.map_err(crate::api::Error::InvalidResponse)?;
 		for res in response {
@@ -260,7 +262,7 @@ async fn send_request(
 ) -> Result<DbResponse> {
 	let url = base_url.join(RPC_PATH).unwrap();
 
-	let body = surrealdb_core::rpc::format::bincode::encode(&req)
+	let body = crate::core::rpc::format::bincode::encode(&req)
 		.map_err(|x| format!("Failed to serialized to bincode: {x}"))
 		.map_err(crate::api::Error::UnserializableValue)?;
 
@@ -268,7 +270,7 @@ async fn send_request(
 	let response = http_req.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
 
-	let response: Response = surrealdb_core::rpc::format::bincode::decode(&bytes)
+	let response: Response = crate::core::rpc::format::bincode::decode(&bytes)
 		.map_err(|x| format!("Failed to deserialize bincode payload: {x}"))
 		.map_err(crate::api::Error::InvalidResponse)?;
 
@@ -398,7 +400,7 @@ async fn router(
 			key,
 			value,
 		} => {
-			surrealdb_core::rpc::check_protected_param(&key)?;
+			crate::core::rpc::check_protected_param(&key)?;
 			vars.insert(key, value);
 			Ok(DbResponse::Other(val::Value::None))
 		}

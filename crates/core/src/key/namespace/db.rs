@@ -4,7 +4,6 @@ use crate::catalog::DatabaseId;
 use crate::catalog::NamespaceId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 

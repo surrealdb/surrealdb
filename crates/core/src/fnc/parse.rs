@@ -1,8 +1,9 @@
 pub mod email {
 
-	use crate::val::Value;
 	use addr::email::Host;
 	use anyhow::Result;
+
+	use crate::val::Value;
 
 	pub fn host((string,): (String,)) -> Result<Value> {
 		// Parse the email address
@@ -47,9 +48,10 @@ pub mod email {
 
 pub mod url {
 
-	use crate::val::Value;
 	use anyhow::Result;
 	use url::Url;
+
+	use crate::val::Value;
 
 	pub fn domain((string,): (String,)) -> Result<Value> {
 		match Url::parse(&string) {

@@ -8,11 +8,10 @@ use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use url::Url;
 
+use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 use crate::cnf::BUCKET_FOLDER_ALLOWLIST;
 use crate::err::Error;
 use crate::val::Datetime;
-
-use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 
 /// Options for configuring the FileStore
 #[derive(Clone, Debug)]

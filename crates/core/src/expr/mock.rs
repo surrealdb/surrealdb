@@ -1,8 +1,10 @@
-use crate::expr::escape::EscapeIdent;
-use crate::val::{RecordId, RecordIdKey};
+use std::fmt;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+
+use crate::expr::escape::EscapeIdent;
+use crate::val::{RecordId, RecordIdKey};
 
 pub struct IntoIter {
 	model: Mock,

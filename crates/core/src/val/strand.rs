@@ -1,15 +1,17 @@
-use crate::err::Error;
-use crate::expr::escape::QuoteStr;
-use crate::val::TryAdd;
-use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::fmt::{self, Display, Formatter};
 use std::ops::{
 	Deref, {self},
 };
 use std::str;
+
+use anyhow::Result;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use crate::err::Error;
+use crate::expr::escape::QuoteStr;
+use crate::val::TryAdd;
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Debug)]
 #[repr(transparent)]
@@ -35,7 +37,8 @@ impl ToOwned for StrandRef {
 	}
 }
 
-/// Fast way of removing null bytes in place without having to realloc the string.
+/// Fast way of removing null bytes in place without having to realloc the
+/// string.
 fn remove_null_bytes(s: String) -> String {
 	let mut bytes = s.into_bytes();
 	let mut write = 0;
@@ -82,7 +85,8 @@ impl Strand {
 	/// Create a new strand, without checking the string.
 	///
 	/// # Safety
-	/// Caller must ensure that string handed as an argument does not contain any null bytes.
+	/// Caller must ensure that string handed as an argument does not contain
+	/// any null bytes.
 	pub unsafe fn new_unchecked(s: String) -> Strand {
 		// Check in debug mode if the variants
 		debug_assert!(!s.contains('\0'));
@@ -145,7 +149,8 @@ impl crate::sql::ToSql for Strand {
 	}
 }
 
-// TODO: Dubious add implementation, concatination is not really an addition in rust.
+// TODO: Dubious add implementation, concatination is not really an addition in
+// rust.
 impl ops::Add for Strand {
 	type Output = Self;
 	fn add(mut self, other: Self) -> Self {
@@ -171,9 +176,10 @@ impl TryAdd for Strand {
 
 // serde(with = no_nul_bytes) will (de)serialize with no NUL bytes.
 pub(crate) mod no_nul_bytes {
+	use std::fmt;
+
 	use serde::de::{self, Visitor};
 	use serde::{Deserializer, Serializer};
-	use std::fmt;
 
 	pub(crate) fn serialize<S>(s: &str, serializer: S) -> Result<S::Ok, S::Error>
 	where

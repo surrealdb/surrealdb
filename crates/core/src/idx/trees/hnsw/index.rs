@@ -11,11 +11,12 @@ use crate::idx::trees::knn::{KnnResult, KnnResultBuilder};
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::Transaction;
 use crate::val::{Number, RecordIdKey, Value};
-#[cfg(debug_assertions)]
-use ahash::HashMap;
 use anyhow::Result;
 use reblessive::tree::Stk;
 use std::collections::VecDeque;
+
+#[cfg(debug_assertions)]
+use ahash::HashMap;
 
 pub struct HnswIndex {
 	dim: usize,

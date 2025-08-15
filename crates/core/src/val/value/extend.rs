@@ -1,11 +1,12 @@
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::FlowResultExt as _;
 use crate::expr::part::Part;
 use crate::val::Value;
 use crate::val::array::Uniq;
-use anyhow::Result;
-use reblessive::tree::Stk;
 
 impl Value {
 	pub(crate) async fn extend(

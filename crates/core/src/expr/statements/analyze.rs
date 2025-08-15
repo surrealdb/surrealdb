@@ -1,3 +1,10 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+
+use anyhow::{Result, bail};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -10,12 +17,6 @@ use crate::idx::ft::search::SearchIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::kvs::TransactionType;
 use crate::val::Value;
-use anyhow::{Result, bail};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::fmt::{Display, Formatter};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]

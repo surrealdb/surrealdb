@@ -1,6 +1,7 @@
 use crate::catalog::ViewDefinition;
+use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Cond, Fields, Groups, Ident, Value, fmt::Fmt};
+use crate::expr::{Cond, Fields, Groups, Ident, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;

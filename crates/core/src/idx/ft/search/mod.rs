@@ -1,10 +1,3 @@
-mod doclength;
-mod offsets;
-mod postings;
-pub(crate) mod scorer;
-pub(in crate::idx) mod termdocs;
-pub(crate) mod terms;
-
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -18,12 +11,6 @@ use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::highlighter::{HighlightParams, Highlighter, Offseter};
 use crate::idx::ft::offset::OffsetRecords;
-use crate::idx::ft::search::doclength::DocLengths;
-use crate::idx::ft::search::offsets::Offsets;
-use crate::idx::ft::search::postings::Postings;
-use crate::idx::ft::search::scorer::BM25Scorer;
-use crate::idx::ft::search::termdocs::{SearchTermDocs, SearchTermsDocs};
-use crate::idx::ft::search::terms::{SearchTerms, TermId, TermLen};
 use crate::idx::ft::{DocLength, TermFrequency};
 use crate::idx::planner::iterators::MatchesHitsIterator;
 use crate::idx::trees::btree::BStatistics;
@@ -31,8 +18,7 @@ use crate::idx::trees::store::IndexStores;
 use crate::kvs::{KVValue, Key, Transaction, TransactionType};
 use crate::val::{Object, RecordId, Value};
 use reblessive::tree::Stk;
-use revision::Revisioned;
-use revision::revisioned;
+use revision::{Revisioned, revisioned};
 use roaring::RoaringTreemap;
 use roaring::treemap::IntoIter;
 use serde::{Deserialize, Serialize};
@@ -40,6 +26,20 @@ use std::collections::HashSet;
 use std::ops::BitAnd;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+mod doclength;
+mod offsets;
+mod postings;
+pub(crate) mod scorer;
+pub(in crate::idx) mod termdocs;
+pub(crate) mod terms;
+
+use doclength::DocLengths;
+use offsets::Offsets;
+use postings::Postings;
+use scorer::BM25Scorer;
+use termdocs::{SearchTermDocs, SearchTermsDocs};
+use terms::{SearchTerms, TermId, TermLen};
 
 pub(in crate::idx) type TermIdList = Vec<Option<(TermId, TermLen)>>;
 
@@ -342,7 +342,8 @@ impl SearchIndex {
 					}
 				}
 			}
-			// In case of an update, w remove the offset for the terms that does not exist anymore
+			// In case of an update, w remove the offset for the terms that does not exist
+			// anymore
 			if let Some(old_term_ids) = old_term_ids {
 				for old_term_id in old_term_ids {
 					self.offsets.remove_offsets(&tx, doc_id, old_term_id).await?;
@@ -489,7 +490,8 @@ impl SearchIndex {
 		// We need to store them because everything after is zero-copy
 		let inputs =
 			self.analyzer.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;
-		// We then collect every unique term and count the frequency and extract the offsets
+		// We then collect every unique term and count the frequency and extract the
+		// offsets
 		let (dl, tfos) = Analyzer::extract_offsets(&inputs)?;
 		// Now we can resolve the term ids
 		let mut tfid = Vec::with_capacity(tfos.len());
@@ -665,7 +667,8 @@ mod tests {
 	use crate::idx::ft::search::scorer::BM25Scorer;
 	use crate::idx::ft::search::{SearchHitsIterator, SearchIndex};
 	use crate::idx::planner::iterators::MatchesHitsIterator;
-	use crate::kvs::{Datastore, LockType::*, TransactionType};
+	use crate::kvs::LockType::*;
+	use crate::kvs::{Datastore, TransactionType};
 	use crate::sql::Expr;
 	use crate::sql::statements::DefineStatement;
 	use crate::syn;
@@ -899,8 +902,8 @@ mod tests {
 	async fn test_ft_index_bm_25(hl: bool) {
 		// The function `extract_sorted_terms_with_frequencies` is non-deterministic.
 		// the inner structures (BTrees) are built with the same terms and frequencies,
-		// but the insertion order is different, ending up in different BTree structures.
-		// Therefore it makes sense to do multiple runs.
+		// but the insertion order is different, ending up in different BTree
+		// structures. Therefore it makes sense to do multiple runs.
 		for _ in 0..10 {
 			let ds = Datastore::new("memory").await.unwrap();
 			let ctx = ds.setup_ctx().unwrap().freeze();

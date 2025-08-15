@@ -2,6 +2,8 @@ use crate::err::Error;
 use crate::kvs::KVValue;
 use anyhow::Result;
 
+mod fixes;
+
 #[derive(Copy, Debug, Clone, PartialEq)]
 pub struct MajorVersion(u16);
 

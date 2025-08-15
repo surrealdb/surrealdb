@@ -5,7 +5,6 @@ use crate::idx::trees::btree::BState;
 use crate::idx::trees::store::NodeId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

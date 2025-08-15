@@ -16,7 +16,6 @@ use crate::idx::ft::search::scorer::BM25Scorer;
 use crate::idx::ft::search::termdocs::SearchTermsDocs;
 use crate::idx::ft::search::terms::SearchTerms;
 use crate::idx::ft::search::{SearchIndex, TermIdList, TermIdSet};
-use crate::idx::planner::IterationStage;
 use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
 	IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
@@ -25,14 +24,11 @@ use crate::idx::planner::iterators::{
 	UniqueEqualThingIterator, UniqueJoinThingIterator, UniqueRangeThingIterator,
 	UniqueUnionThingIterator, ValueType,
 };
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
-use crate::idx::planner::iterators::{
-	IndexRangeReverseThingIterator, UniqueRangeReverseThingIterator,
-};
 use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 use crate::idx::planner::tree::{IdiomPosition, IndexReference};
+use crate::idx::planner::{IterationStage, ScanDirection};
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::kvs::TransactionType;
@@ -45,6 +41,11 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+use crate::idx::planner::iterators::{
+	IndexRangeReverseThingIterator, UniqueRangeReverseThingIterator,
+};
 
 pub(super) type KnnBruteForceEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Distance);
 
@@ -73,6 +74,9 @@ pub(super) type KnnExpressions = HashSet<Arc<Expr>>;
 #[derive(Clone)]
 pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
 
+/// Concrete index handle stored per IndexReference.
+/// This maps an abstract IndexReference to the actual index implementation
+/// that will be used at execution time.
 enum PerIndexReferenceIndex {
 	Search(SearchIndex),
 	FullText(FullTextIndex),
@@ -80,6 +84,8 @@ enum PerIndexReferenceIndex {
 	Hnsw(SharedHnswIndex),
 }
 
+/// Execution-time entry per expression. Associates a parsed expression with
+/// the prepared execution structure (per index type) used to iterate results.
 enum PerExpressionEntry {
 	Search(SearchEntry),
 	FullText(FullTextEntry),
@@ -88,6 +94,8 @@ enum PerExpressionEntry {
 	KnnBruteForce(KnnBruteForceEntry),
 }
 
+/// Entry keyed by MatchRef for MATCHES queries, decoupling expression identity
+/// from the underlying search/full-text index preparation.
 enum PerMatchRefEntry {
 	Search(SearchEntry),
 	FullText(FullTextEntry),
@@ -99,7 +107,7 @@ pub(super) struct InnerQueryExecutor {
 	mr_entries: HashMap<MatchRef, PerMatchRefEntry>,
 	exp_entries: HashMap<Arc<Expr>, PerExpressionEntry>,
 	it_entries: Vec<IteratorEntry>,
-	knn_bruteforce_len: usize,
+	knn_bruteforce_len: usize, // Count of brute-force KNN expressions aggregated for later merging
 }
 
 impl From<InnerQueryExecutor> for QueryExecutor {
@@ -110,18 +118,19 @@ impl From<InnerQueryExecutor> for QueryExecutor {
 
 pub(super) enum IteratorEntry {
 	Single(Option<Arc<Expr>>, IndexOption),
-	Range(HashSet<Arc<Expr>>, IndexReference, RangeValue, RangeValue),
+	Range(HashSet<Arc<Expr>>, IndexReference, RangeValue, RangeValue, ScanDirection),
 }
 
 impl IteratorEntry {
 	pub(super) fn explain(&self) -> Value {
 		match self {
 			Self::Single(_, io) => io.explain(),
-			Self::Range(_, ir, from, to) => {
+			Self::Range(_, ir, from, to, sc) => {
 				let mut e = HashMap::default();
 				e.insert("index", Value::from(ir.name.clone().into_strand()));
 				e.insert("from", Value::from(from));
 				e.insert("to", Value::from(to));
+				e.insert("direction", Value::from(sc.to_string()));
 				Value::from(Object::from(e))
 			}
 		}
@@ -469,8 +478,8 @@ impl QueryExecutor {
 		if let Some(it_entry) = self.0.it_entries.get(ir) {
 			match it_entry {
 				IteratorEntry::Single(_, io) => self.new_single_iterator(ns, db, ir, io).await,
-				IteratorEntry::Range(_, ixr, from, to) => {
-					Ok(self.new_range_iterator(ir, ns, db, ixr, from, to)?)
+				IteratorEntry::Range(_, ixr, from, to, sc) => {
+					Ok(self.new_range_iterator(ir, ns, db, ixr, from, to, *sc)?)
 				}
 			}
 		} else {
@@ -620,25 +629,37 @@ impl QueryExecutor {
 		Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(irf, ns, db, ix, array)?))
 	}
 
-	/// This function takes a reference to a `Number` enum and a conversion function `float_to_int`.
-	/// It returns a tuple containing the variants of the `Number` as `Option<i64>`, `Option<f64>`, and `Option<Decimal>`.
+	/// This function takes a reference to a `Number` enum and a conversion
+	/// function `float_to_int`. It returns a tuple containing the variants of
+	/// the `Number` as `Option<i64>`, `Option<f64>`, and `Option<Decimal>`.
 	///
 	/// The `Number` enum can be one of the following:
 	/// - `Int(i64)`: Integer value.
 	/// - `Float(f64)`: Floating point value.
 	/// - `Decimal(Decimal)`: Decimal value.
 	///
-	/// The function performs the following conversions based on the type of the `Number`:
-	/// - For `Int`, it returns the original `Int` value as `Option<i64>`, the equivalent `Float` value as `Option<f64>`, and the equivalent `Decimal` value as `Option<Decimal>`.
-	/// - For `Float`, it uses the provided `float_to_int` function to convert the `Float` to `Option<i64>`, returns the original `Float` value as `Option<f64>`, and the equivalent `Decimal` value as `Option<Decimal>`.
-	/// - For `Decimal`, it converts the `Decimal` to `Option<i64>` (if representable as `i64`), returns the equivalent `Float` value as `Option<f64>` (if representable as `f64`), and the original `Decimal` value as `Option<Decimal>`.
+	/// The function performs the following conversions based on the type of the
+	/// `Number`:
+	/// - For `Int`, it returns the original `Int` value as `Option<i64>`, the
+	///   equivalent `Float` value as `Option<f64>`, and the equivalent
+	///   `Decimal` value as `Option<Decimal>`.
+	/// - For `Float`, it uses the provided `float_to_int` function to convert
+	///   the `Float` to `Option<i64>`, returns the original `Float` value as
+	///   `Option<f64>`, and the equivalent `Decimal` value as
+	///   `Option<Decimal>`.
+	/// - For `Decimal`, it converts the `Decimal` to `Option<i64>` (if
+	///   representable as `i64`), returns the equivalent `Float` value as
+	///   `Option<f64>` (if representable as `f64`), and the original `Decimal`
+	///   value as `Option<Decimal>`.
 	///
 	/// # Parameters
 	/// - `n`: A reference to a `Number` enum.
-	/// - `float_to_int`: A function that converts a reference to `f64` to `Option<i64>`.
+	/// - `float_to_int`: A function that converts a reference to `f64` to
+	///   `Option<i64>`.
 	///
 	/// # Returns
-	/// A tuple of `(Option<i64>, Option<f64>, Option<Decimal>)` representing the converted variants of the input `Number`.
+	/// A tuple of `(Option<i64>, Option<f64>, Option<Decimal>)` representing
+	/// the converted variants of the input `Number`.
 	fn get_number_variants<F>(
 		n: &Number,
 		float_to_int: F,
@@ -846,6 +867,7 @@ impl QueryExecutor {
 		ix: &DefineIndexStatement,
 		from: &RangeValue,
 		to: &RangeValue,
+		scan_dir: ScanDirection,
 	) -> Result<Option<ThingIterator>> {
 		match ix.index {
 			Index::Idx => {
@@ -853,7 +875,7 @@ impl QueryExecutor {
 				if let Some(ranges) = ranges {
 					if ranges.len() == 1 {
 						return Ok(Some(Self::new_index_range_iterator(
-							ir, ns, db, ix, &ranges[0],
+							ir, ns, db, ix, &ranges[0], scan_dir,
 						)?));
 					} else {
 						return Ok(Some(Self::new_multiple_index_range_iterator(
@@ -867,6 +889,7 @@ impl QueryExecutor {
 					db,
 					ix,
 					&IteratorRange::new_ref(ValueType::None, from, to),
+					scan_dir,
 				)?));
 			}
 			Index::Uniq => {
@@ -874,7 +897,7 @@ impl QueryExecutor {
 				if let Some(ranges) = ranges {
 					if ranges.len() == 1 {
 						return Ok(Some(Self::new_unique_range_iterator(
-							ir, ns, db, ix, &ranges[0],
+							ir, ns, db, ix, &ranges[0], scan_dir,
 						)?));
 					} else {
 						return Ok(Some(Self::new_multiple_unique_range_iterator(
@@ -888,6 +911,7 @@ impl QueryExecutor {
 					db,
 					ix,
 					&IteratorRange::new_ref(ValueType::None, from, to),
+					scan_dir,
 				)?));
 			}
 			_ => {}
@@ -919,8 +943,17 @@ impl QueryExecutor {
 		db: DatabaseId,
 		ix: &DefineIndexStatement,
 		range: &IteratorRange,
+		sc: ScanDirection,
 	) -> Result<ThingIterator> {
-		Ok(ThingIterator::IndexRange(IndexRangeThingIterator::new(ir, ns, db, ix, range)?))
+		Ok(match sc {
+			ScanDirection::Forward => {
+				ThingIterator::IndexRange(IndexRangeThingIterator::new(ir, ns, db, ix, range)?)
+			}
+			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+			ScanDirection::Backward => ThingIterator::IndexRangeReverse(
+				IndexRangeReverseThingIterator::new(ir, ns, db, ix, range)?,
+			),
+		})
 	}
 
 	fn new_unique_range_iterator(
@@ -929,8 +962,17 @@ impl QueryExecutor {
 		db: DatabaseId,
 		ix: &DefineIndexStatement,
 		range: &IteratorRange<'_>,
+		sc: ScanDirection,
 	) -> Result<ThingIterator> {
-		Ok(ThingIterator::UniqueRange(UniqueRangeThingIterator::new(ir, ns, db, ix, range)?))
+		Ok(match sc {
+			ScanDirection::Forward => {
+				ThingIterator::UniqueRange(UniqueRangeThingIterator::new(ir, ns, db, ix, range)?)
+			}
+			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+			ScanDirection::Backward => ThingIterator::UniqueRangeReverse(
+				UniqueRangeReverseThingIterator::new(ir, ns, db, ix, range)?,
+			),
+		})
 	}
 
 	fn new_multiple_index_range_iterator(
@@ -942,7 +984,14 @@ impl QueryExecutor {
 	) -> Result<ThingIterator> {
 		let mut iterators = VecDeque::with_capacity(ranges.len());
 		for range in ranges {
-			iterators.push_back(Self::new_index_range_iterator(ir, ns, db, ix, range)?);
+			iterators.push_back(Self::new_index_range_iterator(
+				ir,
+				ns,
+				db,
+				ix,
+				range,
+				ScanDirection::Forward,
+			)?);
 		}
 		Ok(ThingIterator::Multiples(Box::new(MultipleIterators::new(iterators))))
 	}
@@ -956,7 +1005,14 @@ impl QueryExecutor {
 	) -> Result<ThingIterator> {
 		let mut iterators = VecDeque::with_capacity(ranges.len());
 		for range in ranges {
-			iterators.push_back(Self::new_unique_range_iterator(ir, ns, db, ix, range)?);
+			iterators.push_back(Self::new_unique_range_iterator(
+				ir,
+				ns,
+				db,
+				ix,
+				range,
+				ScanDirection::Forward,
+			)?);
 		}
 		Ok(ThingIterator::Multiples(Box::new(MultipleIterators::new(iterators))))
 	}

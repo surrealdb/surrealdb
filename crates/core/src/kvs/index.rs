@@ -372,7 +372,8 @@ impl Building {
 		rid: &RecordId,
 	) -> Result<ConsumeResult> {
 		let mut queue = self.queue.write().await;
-		// Now that the queue is locked, we have the possibility to assess if the asynchronous build is done.
+		// Now that the queue is locked, we have the possibility to assess if the
+		// asynchronous build is done.
 		if queue.is_empty() {
 			// If the appending queue is empty and the index is built...
 			if self.status.read().await.is_ready() {
@@ -466,7 +467,8 @@ impl Building {
 				tx.commit().await?;
 			}
 		}
-		// Second iteration, we index/remove any records that has been added or removed since the initial indexing
+		// Second iteration, we index/remove any records that has been added or removed
+		// since the initial indexing
 		self.set_status(BuildingStatus::Indexing {
 			initial: Some(initial_count),
 			pending: Some(self.queue.read().await.pending() as usize),
@@ -487,7 +489,8 @@ impl Building {
 				}
 				if queue.is_empty() {
 					// If the batch is empty, we are done.
-					// Due to the lock on self.queue, we know that no external process can add an item to the queue.
+					// Due to the lock on self.queue, we know that no external process can add an
+					// item to the queue.
 					self.set_status(BuildingStatus::Ready {
 						initial: Some(initial_count),
 						pending: Some(queue.pending() as usize),
@@ -548,7 +551,8 @@ impl Building {
 			// Do we already have an appended value?
 			let ip = self.ikb.new_ip_key(rid.key.clone());
 			if let Some(pa) = tx.get(&ip, None).await? {
-				// Then we take the old value of the appending value as the initial indexing value
+				// Then we take the old value of the appending value as the initial indexing
+				// value
 				let ia = self.ikb.new_ia_key(pa.0);
 				let a = tx
 					.get(&ia, None)
@@ -662,8 +666,9 @@ impl Building {
 
 	/// Check if the indexing process is aborting.
 	async fn is_aborted(&self) -> bool {
-		// We use `Ordering::Relaxed` as there are no shared data that would require any synchronization.
-		// This method is only called by the single thread building the index.
+		// We use `Ordering::Relaxed` as there are no shared data that would require any
+		// synchronization. This method is only called by the single thread building
+		// the index.
 		if self.aborted.load(Ordering::Relaxed) {
 			self.set_status(BuildingStatus::Aborted).await;
 			true

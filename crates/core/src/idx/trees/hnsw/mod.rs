@@ -1,3 +1,18 @@
+use crate::catalog::DatabaseDefinition;
+use crate::expr::index::HnswParams;
+use crate::idx::IndexKeyBase;
+use crate::idx::planner::checker::HnswConditionChecker;
+use crate::idx::trees::dynamicset::DynamicSet;
+use crate::idx::trees::knn::DoublePriorityQueue;
+use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
+use crate::kvs::{KVValue, Transaction};
+use anyhow::Result;
+use rand::prelude::SmallRng;
+use rand::{Rng, SeedableRng};
+use reblessive::tree::Stk;
+use revision::{Revisioned, revisioned};
+use serde::{Deserialize, Serialize};
+
 pub(crate) mod docs;
 mod elements;
 mod flavor;
@@ -5,26 +20,11 @@ mod heuristic;
 pub mod index;
 mod layer;
 
-use crate::catalog::DatabaseDefinition;
-use crate::idx::planner::checker::HnswConditionChecker;
-use crate::idx::trees::dynamicset::DynamicSet;
-use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
-use crate::idx::trees::hnsw::elements::HnswElements;
-use crate::idx::trees::hnsw::heuristic::Heuristic;
-use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
-use anyhow::Result;
-
-use crate::expr::index::HnswParams;
-use crate::idx::IndexKeyBase;
-use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
-use crate::idx::trees::knn::DoublePriorityQueue;
-use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
-use crate::kvs::{KVValue, Transaction};
-use rand::prelude::SmallRng;
-use rand::{Rng, SeedableRng};
-use reblessive::tree::Stk;
-use revision::{Revisioned, revisioned};
-use serde::{Deserialize, Serialize};
+use docs::{HnswDocs, VecDocs};
+use elements::HnswElements;
+use heuristic::Heuristic;
+use index::HnswCheckedSearchContext;
+use layer::{HnswLayer, LayerState};
 
 struct HnswSearch {
 	pt: SharedVector,

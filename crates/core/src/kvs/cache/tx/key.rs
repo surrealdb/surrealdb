@@ -1,7 +1,8 @@
+use uuid::Uuid;
+
 use super::lookup::Lookup;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::val::RecordIdKey;
-use uuid::Uuid;
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub(crate) enum Key {

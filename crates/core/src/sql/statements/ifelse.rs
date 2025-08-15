@@ -1,11 +1,13 @@
+use std::fmt::{self, Display, Write};
+
 use crate::sql::Expr;
 use crate::sql::fmt::{Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
-use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct IfelseStatement {
-	/// The first if condition followed by a body, followed by any number of else if's
+	/// The first if condition followed by a body, followed by any number of
+	/// else if's
 	pub exprs: Vec<(Expr, Expr)>,
 	/// the final else body, if there is one
 	pub close: Option<Expr>,

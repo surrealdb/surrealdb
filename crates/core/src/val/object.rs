@@ -1,15 +1,17 @@
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::{self, Display, Formatter, Write};
+use std::ops::{Deref, DerefMut};
+
+use anyhow::Result;
+use http::{HeaderMap, HeaderName, HeaderValue};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::err::Error;
 use crate::expr::escape::EscapeKey;
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::literal::ObjectEntry;
 use crate::val::{RecordId, Value};
-use anyhow::Result;
-use http::{HeaderMap, HeaderName, HeaderValue};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
-use std::fmt::{self, Display, Formatter, Write};
-use std::ops::{Deref, DerefMut};
 
 /// Invariant: Keys never contain NUL bytes.
 /// TODO: Null byte validity
@@ -110,7 +112,7 @@ impl Object {
 	/// Fetch the record id if there is one
 	pub fn rid(&self) -> Option<RecordId> {
 		match self.get("id") {
-			Some(Value::Thing(v)) => Some(v.clone()),
+			Some(Value::RecordId(v)) => Some(v.clone()),
 			_ => None,
 		}
 	}
@@ -169,11 +171,12 @@ impl Display for Object {
 }
 
 mod no_nul_bytes_in_keys {
+	use std::collections::BTreeMap;
+	use std::fmt;
+
 	use serde::de::{self, Visitor};
 	use serde::ser::SerializeMap;
 	use serde::{Deserializer, Serializer};
-	use std::collections::BTreeMap;
-	use std::fmt;
 
 	use crate::val::Value;
 

@@ -3,8 +3,6 @@ use crate::err::Error;
 use crate::expr::statements::DefineUserStatement;
 use crate::iam::access::{authenticate_generic, authenticate_record};
 use crate::iam::issue::expiration;
-#[cfg(feature = "jwks")]
-use crate::iam::jwks;
 use crate::iam::token::Claims;
 use crate::iam::{self, Actor, Auth, Level, Role};
 use crate::kvs::Datastore;
@@ -18,6 +16,9 @@ use chrono::Utc;
 use jsonwebtoken::{DecodingKey, Validation, decode};
 use std::str::{self, FromStr};
 use std::sync::{Arc, LazyLock};
+
+#[cfg(feature = "jwks")]
+use crate::iam::jwks;
 
 /// Returns the decoding key as wel as the method by which to verify the key against
 fn decode_key(alg: catalog::Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation)> {
@@ -63,10 +64,11 @@ fn decode_key(alg: catalog::Algorithm, key: &[u8]) -> Result<(DecodingKey, Valid
 		}
 	};
 
-	// TODO(gguillemas): This keeps the existing behavior as of SurrealDB 2.0.0-alpha.9.
-	// Up to that point, a fork of the "jsonwebtoken" crate in version 8.3.0 was being used.
-	// Now that the audience claim is validated by default, we could allow users to leverage this.
-	// This will most likely involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
+	// TODO(gguillemas): This keeps the existing behavior as of SurrealDB
+	// 2.0.0-alpha.9. Up to that point, a fork of the "jsonwebtoken" crate in
+	// version 8.3.0 was being used. Now that the audience claim is validated by
+	// default, we could allow users to leverage this. This will most likely
+	// involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
 	val.validate_aud = false;
 
 	Ok((dec, val))
@@ -345,9 +347,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						Level::Database(ns.to_string(), db.to_string()),
 					)));
 				}
-				// If the access type is Record, this is record access
-				// Record access without an "id" claim is only possible if there is an AUTHENTICATE clause
-				// The clause can make up for the missing "id" claim by resolving other claims to a specific record
+				// Record access without an "id" claim is only possible if there is an AUTHENTICATE
+				// clause The clause can make up for the missing "id" claim by resolving other
+				// claims to a specific record
 				catalog::AccessType::Record(at) => match &de.authenticate {
 					Some(au) => {
 						trace!("Access method `{}` is record access with AUTHENTICATE clause", ac);
@@ -1049,7 +1051,8 @@ mod tests {
 				)))],
 			};
 
-			// Use pre-parsed definition, which bypasses the existent role check during parsing.
+			// Use pre-parsed definition, which bypasses the existent role check during
+			// parsing.
 			ds.process(ast, &sess, None).await.unwrap();
 
 			let mut sess = Session {
@@ -1458,7 +1461,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Session expiration has been set explicitly
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -1493,7 +1497,6 @@ mod tests {
 	#[cfg(feature = "jwks")]
 	#[tokio::test]
 	async fn test_token_record_jwks() {
-		use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
 		use base64::Engine;
 		use base64::engine::general_purpose::STANDARD_NO_PAD;
 		use jsonwebtoken::jwk::{Jwk, JwkSet};
@@ -1501,6 +1504,8 @@ mod tests {
 		use rand::distributions::Alphanumeric;
 		use wiremock::matchers::{method, path};
 		use wiremock::{Mock, MockServer, ResponseTemplate};
+
+		use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
 
 		// Use unique path to prevent accidental cache reuse
 		fn random_path() -> String {
@@ -2005,7 +2010,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -2086,7 +2092,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(

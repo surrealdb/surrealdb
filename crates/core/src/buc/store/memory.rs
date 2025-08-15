@@ -1,9 +1,10 @@
+use std::future::Future;
+use std::pin::Pin;
+
 use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 use crate::val::Datetime;
 use bytes::Bytes;
 use dashmap::DashMap;
-use std::future::Future;
-use std::pin::Pin;
 use url::Url;
 
 #[derive(Clone, Debug)]

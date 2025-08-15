@@ -1,8 +1,9 @@
-use crate::api::method::{BoxFuture, Cancel, Commit};
-use crate::api::{Connection, Result, Surreal};
 use std::future::IntoFuture;
 use std::ops::Deref;
-use surrealdb_core::expr::TopLevelExpr;
+
+use crate::api::method::{BoxFuture, Cancel, Commit};
+use crate::api::{Connection, Result, Surreal};
+use crate::core::expr::TopLevelExpr;
 
 /// A beginning of a transaction
 #[derive(Debug)]

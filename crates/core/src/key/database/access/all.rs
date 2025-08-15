@@ -1,7 +1,6 @@
 //! Stores the key prefix for all keys under a database access method
 use crate::catalog::DatabaseId;
 use crate::catalog::NamespaceId;
-
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};

@@ -1,5 +1,6 @@
-use crate::val::{Duration, Value};
 use anyhow::Result;
+
+use crate::val::{Duration, Value};
 
 pub fn days((val,): (Duration,)) -> Result<Value> {
 	Ok(val.days().into())
@@ -39,9 +40,10 @@ pub fn years((val,): (Duration,)) -> Result<Value> {
 
 pub mod from {
 
+	use anyhow::Result;
+
 	use crate::err::Error;
 	use crate::val::{Duration, Value};
-	use anyhow::Result;
 
 	pub fn days((val,): (i64,)) -> Result<Value> {
 		// TODO: Deal with truncation:
