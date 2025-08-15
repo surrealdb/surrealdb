@@ -1,10 +1,4 @@
-use std::collections::VecDeque;
-
-#[cfg(debug_assertions)]
-use ahash::HashMap;
-use anyhow::Result;
-use reblessive::tree::Stk;
-
+use crate::catalog::DatabaseDefinition;
 use crate::expr::index::{HnswParams, VectorType};
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
@@ -17,6 +11,12 @@ use crate::idx::trees::knn::{KnnResult, KnnResultBuilder};
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::Transaction;
 use crate::val::{Number, RecordIdKey, Value};
+use anyhow::Result;
+use reblessive::tree::Stk;
+use std::collections::VecDeque;
+
+#[cfg(debug_assertions)]
+use ahash::HashMap;
 
 pub struct HnswIndex {
 	dim: usize,
@@ -136,8 +136,10 @@ impl HnswIndex {
 		self.hnsw.check_state(tx).await
 	}
 
+	#[expect(clippy::too_many_arguments)]
 	pub async fn knn_search(
 		&self,
+		db: &DatabaseDefinition,
 		tx: &Transaction,
 		stk: &mut Stk,
 		pt: &[Number],
@@ -150,13 +152,14 @@ impl HnswIndex {
 		vector.check_dimension(self.dim)?;
 		let search = HnswSearch::new(vector, k, ef);
 		// Do the search
-		let result = self.search(tx, stk, &search, &mut chk).await?;
+		let result = self.search(db, tx, stk, &search, &mut chk).await?;
 		let res = chk.convert_result(tx, &self.docs, result.docs).await?;
 		Ok(res)
 	}
 
 	pub(super) async fn search(
 		&self,
+		db: &DatabaseDefinition,
 		tx: &Transaction,
 		stk: &mut Stk,
 		search: &HnswSearch,
@@ -167,7 +170,7 @@ impl HnswIndex {
 			HnswConditionChecker::Hnsw(_) => self.hnsw.knn_search(tx, search).await?,
 			HnswConditionChecker::HnswCondition(_) => {
 				self.hnsw
-					.knn_search_checked(tx, stk, search, &self.docs, &self.vec_docs, chk)
+					.knn_search_checked(db, tx, stk, search, &self.docs, &self.vec_docs, chk)
 					.await?
 			}
 		};

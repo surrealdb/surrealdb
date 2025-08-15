@@ -18,49 +18,47 @@
 //!   transactional key-value database
 //! - `mem`: in-memory database
 
-pub mod export;
-
 mod api;
 mod batch;
+pub(crate) mod cache;
 mod cf;
 mod clock;
 mod ds;
-mod key;
-pub(crate) mod live;
-mod node;
-mod scanner;
-mod stash;
-mod threadpool;
-mod tr;
-mod tx;
-pub(crate) mod version;
-
+pub mod export;
 mod fdb;
 mod indxdb;
+mod key;
+pub(crate) mod live;
 mod mem;
+mod node;
 mod rocksdb;
+pub(crate) mod savepoint;
+mod scanner;
+pub(crate) mod sequences;
+mod stash;
 mod surrealkv;
+pub(crate) mod tasklease;
+mod threadpool;
 mod tikv;
+mod tr;
+mod tx;
+mod util;
+pub(crate) mod version;
 
-pub(crate) mod cache;
+#[cfg(test)]
+mod tests;
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod index;
-pub(crate) mod savepoint;
-pub(crate) mod sequences;
-pub(crate) mod tasklease;
-#[cfg(test)]
-mod tests;
-mod util;
 
 pub use ds::Datastore;
-#[cfg(not(target_family = "wasm"))]
-pub(crate) use index::{ConsumeResult, IndexBuilder};
-pub(crate) use key::impl_kv_value_revisioned;
-pub use key::{KVKey, KVValue};
+pub(crate) use key::{KVKey, KVValue, impl_kv_value_revisioned};
 pub use live::Live;
 pub use tr::{Check, LockType, TransactionType, Transactor};
 pub use tx::Transaction;
+
+#[cfg(not(target_family = "wasm"))]
+pub(crate) use index::{ConsumeResult, IndexBuilder};
 
 /// The key part of a key-value pair. An alias for [`Vec<u8>`].
 pub type Key = Vec<u8>;

@@ -1,12 +1,7 @@
-use std::fmt::{self, Display, Write};
-use std::sync::Arc;
-
-use anyhow::{Result, bail, ensure};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 use super::DefineKind;
+use crate::catalog::{
+	self, DatabaseId, FieldDefinition, NamespaceId, Relation, TableDefinition, TableType,
+};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
@@ -15,12 +10,18 @@ use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::kind::KindLiteral;
 use crate::expr::reference::Reference;
-use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, Part, Permissions, Relation, TableType};
+use crate::expr::{Base, Expr, Ident, Idiom, Kind, Part, Permission, Permissions};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Transaction, impl_kv_value_revisioned};
+use crate::sql::ToSql;
 use crate::val::{Strand, Value};
+use anyhow::{Result, bail, ensure};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use std::fmt::{self, Display, Write};
+use std::sync::Arc;
+use uuid::Uuid;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -54,6 +55,70 @@ pub struct DefineFieldStatement {
 impl_kv_value_revisioned!(DefineFieldStatement);
 
 impl DefineFieldStatement {
+	pub fn into_definition(&self) -> catalog::FieldDefinition {
+		fn convert_permission(permission: &Permission) -> catalog::Permission {
+			match permission {
+				Permission::None => catalog::Permission::None,
+				Permission::Full => catalog::Permission::Full,
+				Permission::Specific(expr) => catalog::Permission::Specific(expr.clone()),
+			}
+		}
+
+		catalog::FieldDefinition {
+			name: self.name.clone(),
+			what: self.what.clone().to_string(),
+			flexible: self.flex,
+			field_kind: self.field_kind.clone(),
+			readonly: self.readonly,
+			value: self.value.clone(),
+			assert: self.assert.clone(),
+			default: match &self.default {
+				DefineDefault::None => catalog::DefineDefault::None,
+				DefineDefault::Set(x) => catalog::DefineDefault::Set(x.clone()),
+				DefineDefault::Always(x) => catalog::DefineDefault::Always(x.clone()),
+			},
+			select_permission: convert_permission(&self.permissions.select),
+			create_permission: convert_permission(&self.permissions.create),
+			update_permission: convert_permission(&self.permissions.update),
+			comment: self.comment.clone().map(|x| x.into_string()),
+			reference: self.reference.clone(),
+		}
+	}
+
+	pub fn from_definition(def: &catalog::FieldDefinition) -> Self {
+		fn convert_permission(permission: &catalog::Permission) -> Permission {
+			match permission {
+				catalog::Permission::None => Permission::None,
+				catalog::Permission::Full => Permission::Full,
+				catalog::Permission::Specific(expr) => Permission::Specific(expr.clone()),
+			}
+		}
+
+		Self {
+			kind: DefineKind::Default,
+			name: def.name.clone(),
+			what: Ident::new(def.what.clone()).unwrap(),
+			flex: def.flexible,
+			field_kind: def.field_kind.clone(),
+			readonly: def.readonly,
+			value: def.value.clone(),
+			assert: def.assert.clone(),
+			default: match &def.default {
+				catalog::DefineDefault::None => DefineDefault::None,
+				catalog::DefineDefault::Set(x) => DefineDefault::Set(x.clone()),
+				catalog::DefineDefault::Always(x) => DefineDefault::Always(x.clone()),
+			},
+			permissions: Permissions {
+				select: convert_permission(&def.select_permission),
+				create: convert_permission(&def.create_permission),
+				update: convert_permission(&def.update_permission),
+				delete: Permission::Full,
+			},
+			comment: def.comment.clone().map(|x| Strand::new(x).unwrap()),
+			reference: def.reference.clone(),
+		}
+	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -67,7 +132,7 @@ impl DefineFieldStatement {
 		self.validate_reference_options(ctx)?;
 
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 
 		// Disallow mismatched types
 		self.disallow_mismatched_types(ctx, ns, db).await?;
@@ -77,12 +142,12 @@ impl DefineFieldStatement {
 		// Get the name of the field
 		let fd = self.name.to_string();
 		// Check if the definition exists
-		if txn.get_tb_field(ns, db, &self.what, &fd).await.is_ok() {
+		if let Some(fd) = txn.get_tb_field(ns, db, &self.what, &fd).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::FdAlreadyExists {
-							name: fd,
+							name: fd.name.to_string(),
 						});
 					}
 				}
@@ -92,33 +157,26 @@ impl DefineFieldStatement {
 				}
 			}
 		}
+
+		let tb = {
+			let (ns, db) = opt.ns_db()?;
+			txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?
+		};
+
+		let definition = self.into_definition();
+
 		// Process the statement
-		let key = crate::key::table::fd::new(ns, db, &self.what, &fd);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-		txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?;
-		txn.set(
-			&key,
-			&DefineFieldStatement {
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				kind: DefineKind::Default,
-				..self.clone()
-			},
-			None,
-		)
-		.await?;
+		let key = crate::key::table::fd::new(ns, db, &tb.name, &fd);
+		txn.set(&key, &definition, None).await?;
+
 		// Refresh the table cache
+		let tb_def = TableDefinition {
+			cache_fields_ts: Uuid::now_v7(),
+			..tb.as_ref().clone()
+		};
+
 		let key = crate::key::database::tb::new(ns, db, &self.what);
-		let tb = txn.get_tb(ns, db, &self.what).await?;
-		txn.set(
-			&key,
-			&DefineTableStatement {
-				cache_fields_ts: Uuid::now_v7(),
-				..tb.as_ref().clone()
-			},
-			None,
-		)
-		.await?;
+		txn.set(&key, &tb_def, None).await?;
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
 			cache.clear_tb(ns, db, &self.what);
@@ -129,8 +187,6 @@ impl DefineFieldStatement {
 		self.process_recursive_definitions(ns, db, txn.clone()).await?;
 		// If this is an `in` field then check relation definitions
 		if fd.as_str() == "in" {
-			// Get the table definition that this field belongs to
-			let tb = txn.get_tb(ns, db, &self.what).await?;
 			// The table is marked as TYPE RELATION
 			if let TableType::Relation(ref relation) = tb.table_type {
 				// Check if a field TYPE has been specified
@@ -143,7 +199,7 @@ impl DefineFieldStatement {
 					// Add the TYPE to the DEFINE TABLE statement
 					if relation.from.as_ref() != self.field_kind.as_ref() {
 						let key = crate::key::database::tb::new(ns, db, &self.what);
-						let val = DefineTableStatement {
+						let val = TableDefinition {
 							cache_fields_ts: Uuid::now_v7(),
 							table_type: TableType::Relation(Relation {
 								from: self.field_kind.clone(),
@@ -164,8 +220,6 @@ impl DefineFieldStatement {
 		}
 		// If this is an `out` field then check relation definitions
 		if fd.as_str() == "out" {
-			// Get the table definition that this field belongs to
-			let tb = txn.get_tb(ns, db, &self.what).await?;
 			// The table is marked as TYPE RELATION
 			if let TableType::Relation(ref relation) = tb.table_type {
 				// Check if a field TYPE has been specified
@@ -178,7 +232,7 @@ impl DefineFieldStatement {
 					// Add the TYPE to the DEFINE TABLE statement
 					if relation.from.as_ref() != self.field_kind.as_ref() {
 						let key = crate::key::database::tb::new(ns, db, &self.what);
-						let val = DefineTableStatement {
+						let val = TableDefinition {
 							cache_fields_ts: Uuid::now_v7(),
 							table_type: TableType::Relation(Relation {
 								to: self.field_kind.clone(),
@@ -205,8 +259,8 @@ impl DefineFieldStatement {
 
 	pub(crate) async fn process_recursive_definitions(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		txn: Arc<Transaction>,
 	) -> Result<()> {
 		// Find all existing field definitions
@@ -239,20 +293,18 @@ impl DefineFieldStatement {
 				let val = if let Some(existing) =
 					fields.as_ref().and_then(|x| x.iter().find(|x| x.name == name))
 				{
-					DefineFieldStatement {
+					FieldDefinition {
 						field_kind: Some(cur_kind),
-						reference: self.reference.clone(),
-						kind: DefineKind::Default,
+						//reference: self.reference.clone(),
 						..existing.clone()
 					}
 				} else {
-					DefineFieldStatement {
+					FieldDefinition {
 						name: name.clone(),
-						what: self.what.clone(),
-						flex: self.flex,
+						what: self.what.clone().into_string(),
+						flexible: self.flex,
 						field_kind: Some(cur_kind),
-						kind: DefineKind::Default,
-						reference: self.reference.clone(),
+						//reference: self.reference.clone(),
 						..Default::default()
 					}
 				};
@@ -290,7 +342,7 @@ impl DefineFieldStatement {
 
 				// As the refs and dynrefs type essentially take over a field
 				// they are not allowed to be mixed with most other clauses
-				let typename = kind.to_string();
+				let typename = kind.to_sql();
 
 				ensure!(
 					self.reference.is_none(),
@@ -347,17 +399,10 @@ impl DefineFieldStatement {
 
 		if let Some(Kind::References(Some(ft), Some(ff))) = &self.field_kind {
 			// Obtain the field definition
-			let (ns, db) = opt.ns_db()?;
-			let fd = match ctx.tx().get_tb_field(ns, db, &ft.to_string(), &ff.to_string()).await {
-				Ok(fd) => fd,
-				// If the field does not exist, there is nothing to correct
-				Err(e) => {
-					if matches!(e.downcast_ref(), Some(Error::FdNotFound { .. })) {
-						return Ok(None);
-					} else {
-						return Err(e);
-					}
-				}
+			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+			let Some(fd) = ctx.tx().get_tb_field(ns, db, &ft.to_string(), &ff.to_string()).await?
+			else {
+				return Ok(None);
 			};
 
 			// Check if the field is an array-like value and thus "containing" references
@@ -380,8 +425,8 @@ impl DefineFieldStatement {
 	pub(crate) async fn disallow_mismatched_types(
 		&self,
 		ctx: &Context,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 	) -> Result<()> {
 		let fds = ctx.tx().all_tb_fields(ns, db, &self.what, None).await?;
 
@@ -393,9 +438,9 @@ impl DefineFieldStatement {
 						if !fd_kind.allows_nested_kind(&path, self_kind) {
 							bail!(Error::MismatchedFieldTypes {
 								name: self.name.to_string(),
-								kind: self_kind.to_string(),
+								kind: self_kind.to_sql(),
 								existing_name: fd.name.to_string(),
-								existing_kind: fd_kind.to_string(),
+								existing_kind: fd_kind.to_sql(),
 							});
 						}
 					}
@@ -440,7 +485,7 @@ impl Display for DefineFieldStatement {
 			write!(f, " REFERENCE {v}")?
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

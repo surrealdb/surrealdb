@@ -1,12 +1,4 @@
-use std::borrow::Cow;
-use std::ops::{Bound, Range};
-use std::sync::Arc;
-use std::vec;
-
-use anyhow::{Result, bail};
-use futures::StreamExt;
-use reblessive::tree::Stk;
-
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
@@ -21,14 +13,24 @@ use crate::key::{graph, thing};
 use crate::kvs::{KVKey, Key, Transaction, Val};
 use crate::syn;
 use crate::val::{RecordId, RecordIdKeyRange, Value};
+use anyhow::{Result, bail};
+use futures::StreamExt;
+use reblessive::tree::Stk;
+use std::borrow::Cow;
+use std::ops::{Bound, Range};
+use std::sync::Arc;
+use std::vec;
 
 impl Iterable {
+	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn iterate(
 		self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ite: &mut Iterator,
 		dis: Option<&mut SyncDistinct>,
 	) -> Result<()> {
@@ -47,9 +49,9 @@ impl Iterable {
 					coll,
 					dis,
 				};
-				coll.collect_iterable(ctx, opt, self).await?;
+				coll.collect_iterable(ns, db, ctx, opt, self).await?;
 			} else {
-				coll.collect_iterable(ctx, opt, self).await?;
+				coll.collect_iterable(ns, db, ctx, opt, self).await?;
 			}
 		}
 		Ok(())
@@ -73,23 +75,36 @@ impl Iterable {
 }
 
 pub(super) enum Collected {
+	/// Graph edge traversal results - requires special graph parsing and record lookup
 	Edge(Key),
+	/// Range scan results - lightweight processing for range queries
 	RangeKey(Key),
+	/// Table scan results - basic key-only processing for full table scans
 	TableKey(Key),
+	/// Graph relationship records - handles complex from/via/to relationship processing
 	Relatable {
 		f: RecordId,
 		v: RecordId,
 		w: RecordId,
 		o: Option<Value>,
 	},
+	/// Direct record ID references - standard record processing
 	RecordId(RecordId),
+	/// Table identifiers - used for table-level operations
 	Yield(Ident),
+	/// Pre-computed values - no additional processing needed
 	Value(Value),
+	/// Deferred record processing - handles lazy evaluation scenarios
 	Defer(RecordId),
+	/// Records with merge operations - applies data merging logic
 	Mergeable(RecordId, Value),
+	/// Raw key-value pairs from storage layer
 	KeyVal(Key, Val),
+	/// Count aggregation results - no record processing needed
 	Count(usize),
+	/// Index scan results with values - includes pre-fetched data
 	IndexItem(IndexItemRecord),
+	/// Index scan results key-only - lightweight index processing
 	IndexItemKey(IndexItemRecord),
 }
 
@@ -111,47 +126,38 @@ impl Collected {
 	/// source and use case.
 	pub(super) async fn process(
 		self,
-		opt: &Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		txn: &Transaction,
 		rid_only: bool,
 	) -> Result<Processed> {
 		match self {
-			// Graph edge traversal results - requires special graph parsing and record lookup
-			Self::Edge(key) => Self::process_edge(opt, txn, key, rid_only).await,
-			// Range scan results - lightweight processing for range queries
+			Self::Edge(key) => Self::process_edge(ns, db, txn, key, rid_only).await,
 			Self::RangeKey(key) => Self::process_range_key(key).await,
-			// Table scan results - basic key-only processing for full table scans
 			Self::TableKey(key) => Self::process_table_key(key).await,
-			// Graph relationship records - handles complex from/via/to relationship processing
 			Self::Relatable {
 				f,
 				v,
 				w,
 				o,
-			} => Self::process_relatable(opt, txn, f, v, w, o, rid_only).await,
-			// Direct record ID references - standard record processing
-			Self::RecordId(record_id) => Self::process_thing(opt, txn, record_id, rid_only).await,
-			// Table identifiers - used for table-level operations
-			Self::Yield(table) => Self::process_yield(opt, txn, table, rid_only).await,
-			// Pre-computed values - no additional processing needed
+			} => Self::process_relatable(ns, db, txn, f, v, w, o, rid_only).await,
+			Self::RecordId(record_id) => {
+				Self::process_thing(ns, db, txn, record_id, rid_only).await
+			}
+			Self::Yield(table) => Self::process_yield(table).await,
 			Self::Value(value) => Ok(Self::process_value(value)),
-			// Deferred record processing - handles lazy evaluation scenarios
-			Self::Defer(key) => Self::process_defer(opt, txn, key, rid_only).await,
-			// Records with merge operations - applies data merging logic
-			Self::Mergeable(v, o) => Self::process_mergeable(opt, txn, v, o, rid_only).await,
-			// Raw key-value pairs from storage layer
+			Self::Defer(key) => Self::process_defer(key).await,
+			Self::Mergeable(v, o) => Self::process_mergeable(v, o).await,
 			Self::KeyVal(key, val) => Ok(Self::process_key_val(key, val)?),
-			// Count aggregation results - no record processing needed
 			Self::Count(c) => Ok(Self::process_count(c)),
-			// Index scan results with values - includes pre-fetched data
-			Self::IndexItem(i) => Self::process_index_item(opt, txn, i, rid_only).await,
-			// Index scan results key-only - lightweight index processing
+			Self::IndexItem(i) => Self::process_index_item(ns, db, txn, i, rid_only).await,
 			Self::IndexItemKey(i) => Ok(Self::process_index_item_key(i)),
 		}
 	}
 
 	async fn process_edge(
-		opt: &Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		txn: &Transaction,
 		key: Key,
 		rid_only: bool,
@@ -162,7 +168,6 @@ impl Collected {
 		let val = if rid_only {
 			Arc::new(Value::Null)
 		} else {
-			let (ns, db) = opt.ns_db()?;
 			txn.get_record(ns, db, gra.ft, &gra.fk, None).await?
 		};
 		let rid = RecordId {
@@ -182,7 +187,7 @@ impl Collected {
 	}
 
 	async fn process_range_key(key: Key) -> Result<Processed> {
-		let key = thing::Thing::decode_key(&key)?;
+		let key = thing::ThingKey::decode_key(&key)?;
 		let val = Value::Null;
 		let rid = RecordId {
 			table: key.tb.to_owned(),
@@ -202,7 +207,7 @@ impl Collected {
 	}
 
 	async fn process_table_key(key: Key) -> Result<Processed> {
-		let key = thing::Thing::decode_key(&key)?;
+		let key = thing::ThingKey::decode_key(&key)?;
 		let rid = RecordId {
 			table: key.tb.to_owned(),
 			key: key.id,
@@ -218,8 +223,10 @@ impl Collected {
 		Ok(pro)
 	}
 
+	#[expect(clippy::too_many_arguments)]
 	async fn process_relatable(
-		opt: &Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		txn: &Transaction,
 		f: RecordId,
 		v: RecordId,
@@ -231,12 +238,7 @@ impl Collected {
 		let val = if rid_only {
 			Operable::Value(Arc::new(Value::Null))
 		} else {
-			// Check that the table exists
-			let (ns, db) = opt.ns_db()?;
-			txn.check_ns_db_tb(ns, db, &v.table, opt.strict).await?;
-			// Fetch the data from the store
 			let val = txn.get_record(ns, db, &v.table, &v.key, None).await?;
-			// Create a new operable value
 			Operable::Relate(f, val, w, o.map(|v| v.into()))
 		};
 		// Process the document record
@@ -251,20 +253,17 @@ impl Collected {
 	}
 
 	async fn process_thing(
-		opt: &Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		txn: &Transaction,
-		v: RecordId,
+		record_id: RecordId,
 		rid_only: bool,
 	) -> Result<Processed> {
 		// if it is skippable we only need the record id
 		let val = if rid_only {
 			Arc::new(Value::Null)
 		} else {
-			// Check that the table exists
-			let (ns, db) = opt.ns_db()?;
-			txn.check_ns_db_tb(ns, db, &v.table, opt.strict).await?;
-			// Fetch the data from the store
-			txn.get_record(ns, db, &v.table, &v.key, opt.version).await?
+			txn.get_record(ns, db, &record_id.table, &record_id.key, None).await?
 		};
 		// Parse the data from the store
 		let val = Operable::Value(val);
@@ -272,7 +271,7 @@ impl Collected {
 		let pro = Processed {
 			rs: RecordStrategy::KeysAndValues,
 			generate: None,
-			rid: Some(v.into()),
+			rid: Some(record_id.into()),
 			ir: None,
 			val,
 		};
@@ -280,18 +279,7 @@ impl Collected {
 		Ok(pro)
 	}
 
-	async fn process_yield(
-		opt: &Options,
-		txn: &Transaction,
-		v: Ident,
-		rid_only: bool,
-	) -> Result<Processed> {
-		// if it is skippable we only need the record id
-		if !rid_only {
-			// Check that the table exists
-			let (ns, db) = opt.ns_db()?;
-			txn.check_ns_db_tb(ns, db, &v, opt.strict).await?;
-		}
+	async fn process_yield(v: Ident) -> Result<Processed> {
 		// Pass the value through
 		let pro = Processed {
 			rs: RecordStrategy::KeysAndValues,
@@ -307,7 +295,7 @@ impl Collected {
 		// Try to extract the id field if present and parse as Thing
 		let rid = match &v {
 			Value::Object(obj) => match obj.get("id") {
-				Some(Value::Strand(strand)) => syn::thing(strand.as_str()).ok().map(Arc::new),
+				Some(Value::Strand(strand)) => syn::record_id(strand.as_str()).ok().map(Arc::new),
 				Some(Value::RecordId(thing)) => Some(Arc::new(thing.clone())),
 				_ => None,
 			},
@@ -323,18 +311,7 @@ impl Collected {
 		}
 	}
 
-	async fn process_defer(
-		opt: &Options,
-		txn: &Transaction,
-		v: RecordId,
-		rid_only: bool,
-	) -> Result<Processed> {
-		// if it is skippable we only need the record id
-		if !rid_only {
-			// Check that the table exists
-			let (ns, db) = opt.ns_db()?;
-			txn.check_ns_db_tb(ns, db, &v.table, opt.strict).await?;
-		}
+	async fn process_defer(v: RecordId) -> Result<Processed> {
 		// Process the document record
 		let pro = Processed {
 			rs: RecordStrategy::KeysAndValues,
@@ -346,19 +323,7 @@ impl Collected {
 		Ok(pro)
 	}
 
-	async fn process_mergeable(
-		opt: &Options,
-		txn: &Transaction,
-		v: RecordId,
-		o: Value,
-		rid_only: bool,
-	) -> Result<Processed> {
-		// if it is skippable we only need the record id
-		if !rid_only {
-			// Check that the table exists
-			let (ns, db) = opt.ns_db()?;
-			txn.check_ns_db_tb(ns, db, &v.table, opt.strict).await?;
-		}
+	async fn process_mergeable(v: RecordId, o: Value) -> Result<Processed> {
 		// Process the document record
 		let pro = Processed {
 			rs: RecordStrategy::KeysAndValues,
@@ -372,7 +337,7 @@ impl Collected {
 	}
 
 	fn process_key_val(key: Key, val: Val) -> Result<Processed> {
-		let key = thing::Thing::decode_key(&key)?;
+		let key = thing::ThingKey::decode_key(&key)?;
 		let mut val: Value = revision::from_slice(&val)?;
 		let rid = RecordId {
 			table: key.tb.to_owned(),
@@ -414,7 +379,8 @@ impl Collected {
 	}
 
 	async fn process_index_item(
-		opt: &Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		txn: &Transaction,
 		i: IndexItemRecord,
 		rid_only: bool,
@@ -428,7 +394,7 @@ impl Collected {
 			// if it is skippable we only need the record id
 			Value::Null.into()
 		} else {
-			Iterable::fetch_thing(txn, opt, &t).await?
+			txn.get_record(ns, db, &t.table, &t.key, None).await?
 		};
 		let pro = Processed {
 			rs: RecordStrategy::KeysAndValues,
@@ -450,10 +416,15 @@ pub(super) struct ConcurrentCollector<'a> {
 	ite: &'a mut Iterator,
 }
 impl Collector for ConcurrentCollector<'_> {
-	async fn collect(&mut self, collected: Collected) -> Result<()> {
+	async fn collect(
+		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		collected: Collected,
+	) -> Result<()> {
 		// if it is skippable don't need to process the document
 		if self.ite.skippable() == 0 {
-			let pro = collected.process(self.opt, self.txn, false).await?;
+			let pro = collected.process(ns, db, self.txn, false).await?;
 			self.ite.process(self.stk, self.ctx, self.opt, self.stm, pro).await?;
 		} else {
 			self.ite.skipped(1);
@@ -472,11 +443,16 @@ pub(super) struct ConcurrentDistinctCollector<'a> {
 }
 
 impl Collector for ConcurrentDistinctCollector<'_> {
-	async fn collect(&mut self, collected: Collected) -> Result<()> {
+	async fn collect(
+		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		collected: Collected,
+	) -> Result<()> {
 		let skippable = self.coll.ite.skippable() > 0;
 		// If it is skippable, we just need to collect the record id (if any)
 		// to ensure that distinct can be checked.
-		let pro = collected.process(self.coll.opt, self.coll.txn, skippable).await?;
+		let pro = collected.process(ns, db, self.coll.txn, skippable).await?;
 		if !self.dis.check_already_processed(&pro) {
 			if !skippable {
 				self.coll
@@ -496,7 +472,12 @@ impl Collector for ConcurrentDistinctCollector<'_> {
 }
 
 pub(super) trait Collector {
-	async fn collect(&mut self, collected: Collected) -> Result<()>;
+	async fn collect(
+		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		collected: Collected,
+	) -> Result<()>;
 
 	fn max_fetch_size(&mut self) -> u32 {
 		if let Some(l) = self.iterator().start_limit() {
@@ -527,6 +508,8 @@ pub(super) trait Collector {
 
 	async fn collect_iterable(
 		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ctx: &Context,
 		opt: &Options,
 		iterable: Iterable,
@@ -535,37 +518,39 @@ pub(super) trait Collector {
 			match iterable {
 				Iterable::Value(v) => {
 					if !v.is_nullish() {
-						return self.collect(Collected::Value(v)).await;
+						return self.collect(ns, db, Collected::Value(v)).await;
 					}
 				}
-				Iterable::Yield(v) => self.collect(Collected::Yield(v)).await?,
-				Iterable::Thing(v) => self.collect(Collected::RecordId(v)).await?,
-				Iterable::Defer(v) => self.collect(Collected::Defer(v)).await?,
+				Iterable::Yield(v) => self.collect(ns, db, Collected::Yield(v)).await?,
+				Iterable::Thing(v) => self.collect(ns, db, Collected::RecordId(v)).await?,
+				Iterable::Defer(v) => self.collect(ns, db, Collected::Defer(v)).await?,
 				Iterable::Edges {
 					from,
 					dir,
 					what,
-				} => self.collect_edges(ctx, opt, from, dir, what).await?,
+				} => self.collect_edges(ns, db, ctx, from, dir, what).await?,
 				// For Table and Range iterables, the RecordStrategy determines whether we
 				// collect only keys, keys+values, or just a count without materializing records.
 				Iterable::Range(tb, v, rs, sc) => match rs {
-					RecordStrategy::Count => self.collect_range_count(ctx, opt, &tb, v).await?,
+					RecordStrategy::Count => self.collect_range_count(ns, db, ctx, &tb, v).await?,
 					RecordStrategy::KeysOnly => {
-						self.collect_range_keys(ctx, opt, &tb, v, sc).await?
+						self.collect_range_keys(ns, db, ctx, &tb, v, sc).await?
 					}
 					RecordStrategy::KeysAndValues => {
-						self.collect_range(ctx, opt, &tb, v, sc).await?
+						self.collect_range(ns, db, ctx, &tb, v, sc).await?
 					}
 				},
 				Iterable::Table(v, rs, sc) => {
 					let ctx = Self::check_query_planner_context(ctx, &v);
 					match rs {
-						RecordStrategy::Count => self.collect_table_count(&ctx, opt, &v).await?,
+						RecordStrategy::Count => {
+							self.collect_table_count(ns, db, &ctx, opt, &v).await?
+						}
 						RecordStrategy::KeysOnly => {
-							self.collect_table_keys(&ctx, opt, &v, sc).await?
+							self.collect_table_keys(ns, db, &ctx, opt, &v, sc).await?
 						}
 						RecordStrategy::KeysAndValues => {
-							self.collect_table(&ctx, opt, &v, sc).await?
+							self.collect_table(ns, db, &ctx, opt, &v, sc).await?
 						}
 					}
 				}
@@ -578,19 +563,25 @@ pub(super) trait Collector {
 							let mut ctx = MutableContext::new(ctx);
 							ctx.set_query_executor(exe.clone());
 							let ctx = ctx.freeze();
-							return self.collect_index_items(&ctx, opt, &v, irf, rs).await;
+							return self.collect_index_items(ns, db, &ctx, irf, rs).await;
 						}
 					}
-					self.collect_index_items(ctx, opt, &v, irf, rs).await?
+					self.collect_index_items(ns, db, ctx, irf, rs).await?
 				}
-				Iterable::Mergeable(v, o) => self.collect(Collected::Mergeable(v, o)).await?,
+				Iterable::Mergeable(v, o) => {
+					self.collect(ns, db, Collected::Mergeable(v, o)).await?
+				}
 				Iterable::Relatable(f, v, w, o) => {
-					self.collect(Collected::Relatable {
-						f,
-						v,
-						w,
-						o,
-					})
+					self.collect(
+						ns,
+						db,
+						Collected::Relatable {
+							f,
+							v,
+							w,
+							o,
+						},
+					)
 					.await?
 				}
 			}
@@ -651,6 +642,8 @@ pub(super) trait Collector {
 
 	async fn collect_table(
 		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ctx: &Context,
 		opt: &Options,
 		v: &Ident,
@@ -659,8 +652,8 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		let (ns, db) = opt.ns_db()?;
-		txn.check_ns_db_tb(ns, db, v, opt.strict).await?;
+		txn.check_tb(ns, db, v.as_str(), opt.strict).await?;
+
 		// Prepare the start and end keys
 		let beg = thing::prefix(ns, db, v)?;
 		let end = thing::suffix(ns, db, v)?;
@@ -682,7 +675,7 @@ pub(super) trait Collector {
 			}
 			// Parse the data from the store
 			let (k, v) = res?;
-			self.collect(Collected::KeyVal(k, v)).await?;
+			self.collect(ns, db, Collected::KeyVal(k, v)).await?;
 			count += 1;
 		}
 		// Everything ok
@@ -691,6 +684,8 @@ pub(super) trait Collector {
 
 	async fn collect_table_keys(
 		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ctx: &Context,
 		opt: &Options,
 		v: &Ident,
@@ -699,8 +694,8 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		let (ns, db) = opt.ns_db()?;
-		txn.check_ns_db_tb(ns, db, v, opt.strict).await?;
+		txn.check_tb(ns, db, v.as_str(), opt.strict).await?;
+
 		// Prepare the start and end keys
 		let beg = thing::prefix(ns, db, v)?;
 		let end = thing::suffix(ns, db, v)?;
@@ -724,40 +719,42 @@ pub(super) trait Collector {
 			// Parse the data from the store
 			let k = res?;
 			// Collect the key
-			self.collect(Collected::TableKey(k)).await?;
+			self.collect(ns, db, Collected::TableKey(k)).await?;
 			count += 1;
 		}
 		// Everything ok
 		Ok(())
 	}
 
-	async fn collect_table_count(&mut self, ctx: &Context, opt: &Options, v: &Ident) -> Result<()> {
+	async fn collect_table_count(
+		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ctx: &Context,
+		opt: &Options,
+		v: &Ident,
+	) -> Result<()> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		let (ns, db) = opt.ns_db()?;
-		txn.check_ns_db_tb(ns, db, v, opt.strict).await?;
-		// Prepare the start and end keys
+		txn.check_tb(ns, db, v.as_str(), opt.strict).await?;
+
 		let beg = thing::prefix(ns, db, v)?;
 		let end = thing::suffix(ns, db, v)?;
 		// Create a new iterable range
 		let count = txn.count(beg..end).await?;
 		// Collect the count
-		self.collect(Collected::Count(count)).await?;
+		self.collect(ns, db, Collected::Count(count)).await?;
 		// Everything ok
 		Ok(())
 	}
 
 	async fn range_prepare(
-		txn: &Transaction,
-		opt: &Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
 		r: RecordIdKeyRange,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
-		// Check that the table exists
-		let (ns, db) = opt.ns_db()?;
-		txn.check_ns_db_tb(ns, db, tb, opt.strict).await?;
-		// Prepare the range start key
 		let beg = match &r.start {
 			Bound::Unbounded => thing::prefix(ns, db, tb)?,
 			Bound::Included(v) => thing::new(ns, db, tb, v).encode_key()?,
@@ -782,8 +779,9 @@ pub(super) trait Collector {
 
 	async fn collect_range(
 		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ctx: &Context,
-		opt: &Options,
 		tb: &str,
 		r: RecordIdKeyRange,
 		sc: ScanDirection,
@@ -791,7 +789,7 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Prepare
-		let (beg, end) = Self::range_prepare(&txn, opt, tb, r).await?;
+		let (beg, end) = Self::range_prepare(ns, db, tb, r).await?;
 		// Optionally skip keys
 		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end, sc).await? {
 			// Returns the next range of keys
@@ -812,7 +810,7 @@ pub(super) trait Collector {
 			// Parse the data from the store
 			let (k, v) = res?;
 			// Collect
-			self.collect(Collected::KeyVal(k, v)).await?;
+			self.collect(ns, db, Collected::KeyVal(k, v)).await?;
 			count += 1;
 		}
 		// Everything ok
@@ -821,8 +819,9 @@ pub(super) trait Collector {
 
 	async fn collect_range_keys(
 		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ctx: &Context,
-		opt: &Options,
 		tb: &str,
 		r: RecordIdKeyRange,
 		sc: ScanDirection,
@@ -830,7 +829,7 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Prepare
-		let (beg, end) = Self::range_prepare(&txn, opt, tb, r).await?;
+		let (beg, end) = Self::range_prepare(ns, db, tb, r).await?;
 		// Optionally skip keys
 		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end, sc).await? {
 			// Returns the next range of keys
@@ -850,7 +849,7 @@ pub(super) trait Collector {
 			}
 			// Parse the data from the store
 			let k = res?;
-			self.collect(Collected::RangeKey(k)).await?;
+			self.collect(ns, db, Collected::RangeKey(k)).await?;
 			count += 1;
 		}
 		// Everything ok
@@ -859,33 +858,34 @@ pub(super) trait Collector {
 
 	async fn collect_range_count(
 		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ctx: &Context,
-		opt: &Options,
 		tb: &str,
 		r: RecordIdKeyRange,
 	) -> Result<()> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Prepare
-		let (beg, end) = Self::range_prepare(&txn, opt, tb, r).await?;
+		let (beg, end) = Self::range_prepare(ns, db, tb, r).await?;
 		// Create a new iterable range
 		let count = txn.count(beg..end).await?;
 		// Collect the count
-		self.collect(Collected::Count(count)).await?;
+		self.collect(ns, db, Collected::Count(count)).await?;
 		// Everything ok
 		Ok(())
 	}
 
 	async fn collect_edges(
 		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ctx: &Context,
-		opt: &Options,
 		from: RecordId,
 		dir: Dir,
 		what: Vec<ComputedGraphSubject>,
 	) -> Result<()> {
 		// Pull out options
-		let (ns, db) = opt.ns_db()?;
 		let tb = &from.table;
 		let id = &from.key;
 		// Fetch start and end key pairs
@@ -924,7 +924,6 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		txn.check_ns_db_tb(ns, db, tb, opt.strict).await?;
 		// Loop over the chosen edge types
 		for (beg, end) in keys.into_iter() {
 			// Create a new iterable range
@@ -939,7 +938,7 @@ pub(super) trait Collector {
 				// Parse the key from the result
 				let key = res?.0;
 				// Collector the key
-				self.collect(Collected::Edge(key)).await?;
+				self.collect(ns, db, Collected::Edge(key)).await?;
 				count += 1;
 			}
 		}
@@ -949,27 +948,24 @@ pub(super) trait Collector {
 
 	async fn collect_index_items(
 		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ctx: &Context,
-		opt: &Options,
-		table: &Ident,
 		irf: IteratorRef,
 		rs: RecordStrategy,
 	) -> Result<()> {
-		// Check that the table exists
-		let (ns, db) = opt.ns_db()?;
-		ctx.tx().check_ns_db_tb(ns, db, table.as_str(), opt.strict).await?;
 		if let Some(exe) = ctx.get_query_executor() {
-			if let Some(iterator) = exe.new_iterator(opt, irf).await? {
+			if let Some(iterator) = exe.new_iterator(ns, db, irf).await? {
 				let txn = ctx.tx();
 				match rs {
 					RecordStrategy::Count => {
-						self.collect_index_item_count(ctx, &txn, iterator).await?
+						self.collect_index_item_count(ns, db, ctx, &txn, iterator).await?
 					}
 					RecordStrategy::KeysOnly => {
-						self.collect_index_item_key(ctx, &txn, iterator).await?
+						self.collect_index_item_key(ns, db, ctx, &txn, iterator).await?
 					}
 					RecordStrategy::KeysAndValues => {
-						self.collect_index_item_key_value(ctx, &txn, iterator).await?
+						self.collect_index_item_key_value(ns, db, ctx, &txn, iterator).await?
 					}
 				}
 				// Everything ok
@@ -987,6 +983,8 @@ pub(super) trait Collector {
 
 	async fn collect_index_item_key(
 		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ctx: &Context,
 		txn: &Transaction,
 		mut iterator: ThingIterator,
@@ -1001,7 +999,7 @@ pub(super) trait Collector {
 				if ctx.is_done(c % 100 == 0).await? {
 					break;
 				}
-				self.collect(Collected::IndexItemKey(r)).await?;
+				self.collect(ns, db, Collected::IndexItemKey(r)).await?;
 			}
 		}
 		Ok(())
@@ -1009,6 +1007,8 @@ pub(super) trait Collector {
 
 	async fn collect_index_item_key_value(
 		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ctx: &Context,
 		txn: &Transaction,
 		mut iterator: ThingIterator,
@@ -1023,7 +1023,7 @@ pub(super) trait Collector {
 				if ctx.is_done(c % 100 == 0).await? {
 					break;
 				}
-				self.collect(Collected::IndexItem(r)).await?;
+				self.collect(ns, db, Collected::IndexItem(r)).await?;
 			}
 		}
 		Ok(())
@@ -1031,6 +1031,8 @@ pub(super) trait Collector {
 
 	async fn collect_index_item_count(
 		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ctx: &Context,
 		txn: &Transaction,
 		mut iterator: ThingIterator,
@@ -1044,22 +1046,6 @@ pub(super) trait Collector {
 			}
 			total_count += count;
 		}
-		self.collect(Collected::Count(total_count)).await
-	}
-}
-
-impl Iterable {
-	/// Returns the value from the store, or Value::None it the value does not
-	/// exist.
-	pub(crate) async fn fetch_thing(
-		txn: &Transaction,
-		opt: &Options,
-		thg: &RecordId,
-	) -> Result<Arc<Value>> {
-		// Fetch and parse the data from the store
-		let (ns, db) = opt.ns_db()?;
-		let val = txn.get_record(ns, db, &thg.table, &thg.key, None).await?;
-		// Return the result
-		Ok(val)
+		self.collect(ns, db, Collected::Count(total_count)).await
 	}
 }

@@ -1,37 +1,39 @@
-use std::borrow::Cow;
-use std::collections::HashMap;
-use std::fmt::{self, Debug};
-#[cfg(storage)]
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
-
-use anyhow::{Result, bail};
-use async_channel::Sender;
-use trice::Instant;
-#[cfg(feature = "http")]
-use url::Url;
-
 use crate::buc::store::ObjectStore;
 use crate::buc::{self, BucketConnectionKey, BucketConnections};
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
-#[cfg(feature = "http")]
-use crate::dbs::capabilities::NetTarget;
-use crate::dbs::{Capabilities, Notification, Session, Variables};
+use crate::dbs::{Capabilities, Notification, Options, Session, Variables};
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
-#[cfg(not(target_family = "wasm"))]
-use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::sequences::Sequences;
 use crate::mem::ALLOC;
 use crate::val::Value;
+use anyhow::{Result, bail};
+use async_channel::Sender;
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::fmt::{self, Debug};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+use trice::Instant;
+
+#[cfg(storage)]
+use std::path::PathBuf;
+
+#[cfg(feature = "http")]
+use crate::dbs::capabilities::NetTarget;
+#[cfg(feature = "http")]
+use url::Url;
+
+#[cfg(not(target_family = "wasm"))]
+use crate::kvs::IndexBuilder;
 
 pub type Context = Arc<MutableContext>;
 
@@ -211,7 +213,7 @@ impl MutableContext {
 	}
 
 	/// Creates a new context from a configured datastore.
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	pub(crate) fn from_ds(
 		time_out: Option<Duration>,
 		slow_log_threshold: Option<Duration>,
@@ -262,6 +264,51 @@ impl MutableContext {
 			fail!("Tried to unfreeze a Context with multiple references")
 		};
 		Ok(x)
+	}
+
+	/// Get the namespace id for the current context.
+	/// If the namespace does not exist, it will be try to be created based on the `strict` option.
+	pub(crate) async fn get_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
+		let ns = opt.ns()?;
+		let ns_def = self.tx().get_or_add_ns(ns, opt.strict).await?;
+		Ok(ns_def.namespace_id)
+	}
+
+	/// Get the namespace id for the current context.
+	/// If the namespace does not exist, it will return an error.
+	pub(crate) async fn get_ns_id_ro(&self, opt: &Options) -> Result<NamespaceId> {
+		let ns = opt.ns()?;
+		let Some(ns_def) = self.tx().get_ns_by_name(ns).await? else {
+			return Err(Error::NsNotFound {
+				name: ns.to_string(),
+			}
+			.into());
+		};
+		Ok(ns_def.namespace_id)
+	}
+
+	/// Get the namespace and database ids for the current context.
+	/// If the namespace or database does not exist, it will be try to be created based on the `strict` option.
+	pub(crate) async fn get_ns_db_ids(&self, opt: &Options) -> Result<(NamespaceId, DatabaseId)> {
+		let (ns, db) = opt.ns_db()?;
+		let db_def = self.tx().ensure_ns_db(ns, db, opt.strict).await?;
+		Ok((db_def.namespace_id, db_def.database_id))
+	}
+
+	/// Get the namespace and database ids for the current context.
+	/// If the namespace or database does not exist, it will return an error.
+	pub(crate) async fn get_ns_db_ids_ro(
+		&self,
+		opt: &Options,
+	) -> Result<(NamespaceId, DatabaseId)> {
+		let (ns, db) = opt.ns_db()?;
+		let Some(db_def) = self.tx().get_db_by_name(ns, db).await? else {
+			return Err(Error::DbNotFound {
+				name: db.to_string(),
+			}
+			.into());
+		};
+		Ok((db_def.namespace_id, db_def.database_id))
 	}
 
 	/// Add a value to the context. It overwrites any previously set values
@@ -631,8 +678,8 @@ impl MutableContext {
 	/// Obtain the connection for a bucket
 	pub(crate) async fn get_bucket_store(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		bu: &str,
 	) -> Result<Arc<dyn ObjectStore>> {
 		// Do we have a buckets context?
@@ -644,7 +691,7 @@ impl MutableContext {
 			} else {
 				// Obtain the bucket definition
 				let tx = self.tx();
-				let bd = tx.get_db_bucket(ns, db, bu).await?;
+				let bd = tx.expect_db_bucket(ns, db, bu).await?;
 
 				// Connect to the bucket
 				let store = if let Some(ref backend) = bd.backend {

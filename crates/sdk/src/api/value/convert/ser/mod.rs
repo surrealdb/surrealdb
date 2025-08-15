@@ -202,7 +202,7 @@ mod tests {
 
 	#[test]
 	fn datetime() {
-		let datetime = val::Datetime::default();
+		let datetime = val::Datetime::now();
 		let value = to_value(datetime.clone()).unwrap();
 		let expected = val::Value::Datetime(datetime);
 		assert_eq!(value, expected);
@@ -265,7 +265,7 @@ mod tests {
 
 	#[test]
 	fn thing() {
-		let record_id = syn::thing("foo:bar").unwrap();
+		let record_id = syn::record_id("foo:bar").unwrap();
 		let value = to_value(record_id.clone()).unwrap();
 		let expected = val::Value::RecordId(record_id);
 		assert_eq!(value, expected);

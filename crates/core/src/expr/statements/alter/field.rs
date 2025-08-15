@@ -1,23 +1,20 @@
-use std::fmt::{self, Display};
-use std::ops::Deref;
-
-use anyhow::Result;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 use super::AlterKind;
+use crate::catalog::{self, TableDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::reference::Reference;
-use crate::expr::statements::DefineTableStatement;
-use crate::expr::statements::define::DefineDefault;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, Permissions};
+use crate::expr::{Base, Expr, Ident, Idiom, Kind, Permission, Permissions};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use std::fmt::{self, Display};
+use std::ops::Deref;
+use uuid::Uuid;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -57,25 +54,28 @@ impl AlterFieldStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the table definition
 		let name = self.name.to_string();
-		let mut df = match txn.get_tb_field(ns, db, &self.what, &name).await {
-			Ok(tb) => tb.deref().clone(),
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::FdNotFound { .. })) {
+		let mut df = match txn.get_tb_field(ns, db, &self.what, &name).await? {
+			Some(tb) => tb.deref().clone(),
+			None => {
+				if self.if_exists {
 					return Ok(Value::None);
-				} else {
-					return Err(e);
 				}
+
+				return Err(Error::FdNotFound {
+					name,
+				}
+				.into());
 			}
 		};
 
 		match self.flex {
-			AlterKind::Set(_) => df.flex = true,
-			AlterKind::Drop => df.flex = false,
+			AlterKind::Set(_) => df.flexible = true,
+			AlterKind::Drop => df.flexible = false,
 			AlterKind::None => {}
 		}
 
@@ -105,50 +105,69 @@ impl AlterFieldStatement {
 
 		match self.default {
 			AlterDefault::None => {}
-			AlterDefault::Drop => df.default = DefineDefault::None,
-			AlterDefault::Always(ref expr) => df.default = DefineDefault::Always(expr.clone()),
-			AlterDefault::Set(ref expr) => df.default = DefineDefault::Set(expr.clone()),
+			AlterDefault::Drop => df.default = catalog::DefineDefault::None,
+			AlterDefault::Always(ref expr) => {
+				df.default = catalog::DefineDefault::Always(expr.clone())
+			}
+			AlterDefault::Set(ref expr) => df.default = catalog::DefineDefault::Set(expr.clone()),
+		}
+
+		fn convert_permission(perm: &Permission) -> catalog::Permission {
+			match perm {
+				Permission::None => catalog::Permission::None,
+				Permission::Full => catalog::Permission::Full,
+				Permission::Specific(expr) => catalog::Permission::Specific(expr.clone()),
+			}
 		}
 
 		if let Some(permissions) = &self.permissions {
-			df.permissions = permissions.clone();
+			df.select_permission = convert_permission(&permissions.select);
+			df.create_permission = convert_permission(&permissions.create);
+			df.update_permission = convert_permission(&permissions.update);
 		}
 
 		match self.comment {
-			AlterKind::Set(ref k) => df.comment = Some(k.clone()),
+			AlterKind::Set(ref k) => df.comment = Some(k.clone().into_string()),
 			AlterKind::Drop => df.comment = None,
 			AlterKind::None => {}
 		}
 
-		match self.reference {
-			AlterKind::Set(ref k) => {
-				df.reference = Some(k.clone());
-			}
-			AlterKind::Drop => df.reference = None,
-			AlterKind::None => {}
+		/*
+		   match self.reference {
+		   AlterKind::Set(ref k) => {
+		   df.reference = Some(k.clone());
+		   }
+		   AlterKind::Drop => df.reference = None,
+		   AlterKind::None => {}
 		}
+		*/
 
 		// Validate reference options
-		df.validate_reference_options(ctx)?;
+		//df.validate_reference_options(ctx)?;
 
 		// Correct reference type
 		/*
 		if let Some(kind) = df.get_reference_kind(ctx, opt).await? {
-			df.field_kind = Some(kind);
+		df.field_kind = Some(kind);
 		}*/
 
 		// Disallow mismatched types
-		df.disallow_mismatched_types(ctx, ns, db).await?;
+		//df.disallow_mismatched_types(ctx, ns, db).await?;
 
 		// Set the table definition
 		let key = crate::key::table::fd::new(ns, db, &self.what, &name);
 		txn.set(&key, &df, None).await?;
 		// Refresh the table cache
 		let key = crate::key::database::tb::new(ns, db, &self.what);
-		let tb = txn.get_tb(ns, db, &self.what).await?;
+		let Some(tb) = txn.get_tb(ns, db, &self.what).await? else {
+			return Err(Error::TbNotFound {
+				name: self.what.to_string(),
+			}
+			.into());
+		};
 		txn.set(
 			&key,
-			&DefineTableStatement {
+			&TableDefinition {
 				cache_fields_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
 			},
@@ -158,7 +177,7 @@ impl AlterFieldStatement {
 		// Clear the cache
 		txn.clear_cache();
 		// Process possible recursive defitions
-		df.process_recursive_definitions(ns, db, txn.clone()).await?;
+		//df.process_recursive_definitions(ns, db, txn.clone()).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

@@ -260,7 +260,10 @@ impl ObjectStore for FileStore {
 			let size = metadata.len();
 
 			// Get modified time if available
-			let updated = metadata.modified().map(|time| Datetime(time.into())).unwrap_or_default();
+			let updated = metadata
+				.modified()
+				.map(|time| Datetime(time.into()))
+				.unwrap_or_else(|_| Datetime::now());
 
 			Ok(Some(ObjectMeta {
 				size,
@@ -438,8 +441,10 @@ impl ObjectStore for FileStore {
 				}
 
 				let size = metadata.len();
-				let updated =
-					metadata.modified().map(|time| Datetime(time.into())).unwrap_or_default();
+				let updated = metadata
+					.modified()
+					.map(|time| Datetime(time.into()))
+					.unwrap_or_else(|_| Datetime::now());
 				return Ok(vec![ObjectMeta {
 					key: base_key,
 					size,
@@ -507,8 +512,10 @@ impl ObjectStore for FileStore {
 				.into_iter()
 				.map(|(entry_key, metadata)| {
 					let size = metadata.len();
-					let updated =
-						metadata.modified().map(|time| Datetime(time.into())).unwrap_or_default();
+					let updated = metadata
+						.modified()
+						.map(|time| Datetime(time.into()))
+						.unwrap_or_else(|_| Datetime::now());
 					ObjectMeta {
 						key: entry_key,
 						size,

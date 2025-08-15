@@ -1,9 +1,4 @@
-use std::mem;
-use std::sync::Arc;
-
-use anyhow::{Result, bail, ensure};
-use reblessive::tree::Stk;
-
+use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::ctx::{Canceller, Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
@@ -21,6 +16,10 @@ use crate::idx::planner::{
 	StatementContext,
 };
 use crate::val::{Object, RecordId, RecordIdKey, RecordIdKeyRange, Value};
+use anyhow::{Result, bail, ensure};
+use reblessive::tree::Stk;
+use std::mem;
+use std::sync::Arc;
 
 const TARGET: &str = "surrealdb::core::dbs";
 
@@ -160,6 +159,7 @@ impl Iterator {
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn prepare(
 		&mut self,
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
@@ -171,20 +171,26 @@ impl Iterator {
 		// Match the values
 		match val {
 			Expr::Mock(v) => self.prepare_mock(stm_ctx, v).await?,
-			Expr::Table(v) => self.prepare_table(stk, planner, stm_ctx, v.clone()).await?,
+			Expr::Table(v) => self.prepare_table(db, stk, planner, stm_ctx, v.clone()).await?,
 			Expr::Idiom(x) => {
 				// TODO: This needs to be structured better.
 				// match against what previously would be an edge.
 				if x.len() != 2 {
-					return self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, val).await;
+					return self
+						.prepare_computed(db, stk, ctx, opt, doc, planner, stm_ctx, val)
+						.await;
 				}
 
 				let Part::Start(Expr::Literal(Literal::RecordId(ref from))) = x[0] else {
-					return self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, val).await;
+					return self
+						.prepare_computed(db, stk, ctx, opt, doc, planner, stm_ctx, val)
+						.await;
 				};
 
 				let Part::Graph(ref graph) = x[1] else {
-					return self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, val).await;
+					return self
+						.prepare_computed(db, stk, ctx, opt, doc, planner, stm_ctx, val)
+						.await;
 				};
 
 				if graph.alias.is_none()
@@ -213,9 +219,9 @@ impl Iterator {
 				}
 			}
 			Expr::Literal(Literal::Array(array)) => {
-				self.prepare_array(stk, ctx, opt, doc, planner, stm_ctx, array).await?
+				self.prepare_array(db, stk, ctx, opt, doc, planner, stm_ctx, array).await?
 			}
-			x => self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, x).await?,
+			x => self.prepare_computed(db, stk, ctx, opt, doc, planner, stm_ctx, x).await?,
 		};
 		// All ingested ok
 		Ok(())
@@ -224,6 +230,7 @@ impl Iterator {
 	/// Prepares a value for processing
 	pub(crate) async fn prepare_table(
 		&mut self,
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		planner: &mut QueryPlanner,
 		ctx: &StatementContext<'_>,
@@ -241,7 +248,7 @@ impl Iterator {
 			if ctx.stm.is_guaranteed() {
 				self.guaranteed = Some(Iterable::Yield(table.clone()));
 			}
-			planner.add_iterables(stk, ctx, table, p, self).await?;
+			planner.add_iterables(db, stk, ctx, table, p, self).await?;
 		}
 		// All ingested ok
 		Ok(())
@@ -384,6 +391,7 @@ impl Iterator {
 	#[allow(clippy::too_many_arguments)]
 	async fn prepare_computed(
 		&mut self,
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
@@ -397,7 +405,7 @@ impl Iterator {
 			Value::Object(o) if !stm_ctx.stm.is_select() => {
 				self.prepare_object(stm_ctx.stm, o)?;
 			}
-			Value::Table(v) => self.prepare_table(stk, planner, stm_ctx, v.into()).await?,
+			Value::Table(v) => self.prepare_table(db, stk, planner, stm_ctx, v.into()).await?,
 			Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
 			Value::Array(a) => a.into_iter().for_each(|x| self.ingest(Iterable::Value(x))),
 			v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
@@ -414,6 +422,7 @@ impl Iterator {
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn prepare_array(
 		&mut self,
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
@@ -427,24 +436,24 @@ impl Iterator {
 		for v in v {
 			match v {
 				Expr::Mock(v) => self.prepare_mock(stm_ctx, v).await?,
-				Expr::Table(v) => self.prepare_table(stk, planner, stm_ctx, v.clone()).await?,
+				Expr::Table(v) => self.prepare_table(db, stk, planner, stm_ctx, v.clone()).await?,
 				Expr::Idiom(x) => {
 					// match against what previously would be an edge.
 					if x.len() != 2 {
 						return self
-							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
+							.prepare_computed(db, stk, ctx, opt, doc, planner, stm_ctx, v)
 							.await;
 					}
 
 					let Part::Start(Expr::Literal(Literal::RecordId(ref from))) = x[0] else {
 						return self
-							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
+							.prepare_computed(db, stk, ctx, opt, doc, planner, stm_ctx, v)
 							.await;
 					};
 
 					let Part::Graph(ref graph) = x[0] else {
 						return self
-							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
+							.prepare_computed(db, stk, ctx, opt, doc, planner, stm_ctx, v)
 							.await;
 					};
 
@@ -473,9 +482,9 @@ impl Iterator {
 						return self.prepare_edges(stm_ctx.stm, from, graph.dir.clone(), what);
 					}
 
-					self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v).await?
+					self.prepare_computed(db, stk, ctx, opt, doc, planner, stm_ctx, v).await?
 				}
-				v => self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v).await?,
+				v => self.prepare_computed(db, stk, ctx, opt, doc, planner, stm_ctx, v).await?,
 			}
 		}
 		// All ingested ok
@@ -483,9 +492,12 @@ impl Iterator {
 	}
 
 	/// Process the records and output
+	#[expect(clippy::too_many_arguments)]
 	pub async fn output(
 		&mut self,
 		stk: &mut Stk,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
@@ -519,23 +531,44 @@ impl Iterator {
 				e.add_record_strategy(rs);
 			}
 			// Process prepared values
-			let sp = if let Some(qp) = ctx.get_query_planner() {
-				let sp = qp.is_any_specific_permission();
+			let is_specific_permission = if let Some(qp) = ctx.get_query_planner() {
+				let is_specific_permission = qp.is_any_specific_permission();
 				while let Some(s) = qp.next_iteration_stage().await {
 					let is_last = matches!(s, IterationStage::Iterate(_));
 					let mut c = MutableContext::unfreeze(cancel_ctx)?;
 					c.set_iteration_stage(s);
 					cancel_ctx = c.freeze();
 					if !is_last {
-						self.clone().iterate(stk, &cancel_ctx, opt, stm, sp, None).await?;
+						self.clone()
+							.iterate(
+								stk,
+								ns,
+								db,
+								&cancel_ctx,
+								opt,
+								stm,
+								is_specific_permission,
+								None,
+							)
+							.await?;
 					};
 				}
-				sp
+				is_specific_permission
 			} else {
 				false
 			};
 			// Process all documents
-			self.iterate(stk, &cancel_ctx, opt, stm, sp, plan.explanation.as_mut()).await?;
+			self.iterate(
+				stk,
+				ns,
+				db,
+				&cancel_ctx,
+				opt,
+				stm,
+				is_specific_permission,
+				plan.explanation.as_mut(),
+			)
+			.await?;
 			// Return any document errors
 			if let Some(e) = self.error.take() {
 				return Err(e);
@@ -547,7 +580,8 @@ impl Iterator {
 					// Ingest the pre-defined guaranteed record yield
 					self.ingest(guaranteed);
 					// Process the pre-defined guaranteed document
-					self.iterate(stk, &cancel_ctx, opt, stm, sp, None).await?;
+					self.iterate(stk, ns, db, &cancel_ctx, opt, stm, is_specific_permission, None)
+						.await?;
 				}
 			}
 			// Process any SPLIT AT clause
@@ -858,9 +892,12 @@ impl Iterator {
 		Ok(())
 	}
 
+	#[expect(clippy::too_many_arguments)]
 	async fn iterate(
 		&mut self,
 		stk: &mut Stk,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
@@ -881,7 +918,7 @@ impl Iterator {
 		let mut distinct = SyncDistinct::new(ctx);
 		// Process all prepared values
 		for (count, v) in mem::take(&mut self.entries).into_iter().enumerate() {
-			v.iterate(stk, ctx, &opt, stm, self, distinct.as_mut()).await?;
+			v.iterate(stk, ctx, &opt, stm, ns, db, self, distinct.as_mut()).await?;
 			// MOCK can create a large collection of iterators,
 			// we need to make space for possible cancellations
 			if ctx.is_done(count % 100 == 0).await? {

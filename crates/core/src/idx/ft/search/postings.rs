@@ -93,13 +93,13 @@ impl Postings {
 
 #[cfg(test)]
 mod tests {
-	use test_log::test;
-
+	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::search::postings::Postings;
 	use crate::kvs::LockType::*;
 	use crate::kvs::TransactionType::*;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
+	use test_log::test;
 
 	async fn new_operation(
 		ds: &Datastore,
@@ -107,7 +107,15 @@ mod tests {
 		tt: TransactionType,
 	) -> (Transaction, Postings) {
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		let p = Postings::new(&tx, IndexKeyBase::default(), order, tt, 100).await.unwrap();
+		let p = Postings::new(
+			&tx,
+			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
+			order,
+			tt,
+			100,
+		)
+		.await
+		.unwrap();
 		(tx, p)
 	}
 

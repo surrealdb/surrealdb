@@ -9,7 +9,7 @@ use rand::rngs::OsRng;
 use super::DefineKind;
 use crate::sql::escape::QuoteStr;
 use crate::sql::fmt::Fmt;
-use crate::sql::{Base, Ident};
+use crate::sql::{Base, Ident, ToSql};
 use crate::val::{Duration, Strand};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -80,7 +80,7 @@ impl Display for DefineUserStatement {
 			}
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		Ok(())
 	}

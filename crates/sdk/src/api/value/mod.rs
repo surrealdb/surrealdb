@@ -1,12 +1,11 @@
-use std::cmp::{Ordering, PartialEq, PartialOrd};
-use std::fmt;
-use std::ops::{Deref, Index};
-use std::str::FromStr;
-
 use chrono::{DateTime, Utc};
 use revision::revisioned;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::cmp::{Ordering, PartialEq, PartialOrd};
+use std::fmt;
+use std::ops::{Deref, Index};
+use std::str::FromStr;
 use uuid::Uuid;
 
 use crate::Result;
@@ -74,10 +73,16 @@ impl From<Vec<u8>> for Bytes {
 }
 
 transparent_wrapper!(
-	#[derive(Clone, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
+	#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 	pub struct Datetime(val::Datetime)
 );
 impl_serialize_wrapper!(Datetime);
+
+impl Datetime {
+	pub fn now() -> Self {
+		Datetime(val::Datetime::now())
+	}
+}
 
 impl From<DateTime<Utc>> for Datetime {
 	fn from(v: DateTime<Utc>) -> Self {
@@ -289,7 +294,7 @@ impl FromStr for RecordId {
 	type Err = anyhow::Error;
 
 	fn from_str(s: &str) -> Result<Self> {
-		syn::thing(s).map(RecordId::from_inner)
+		syn::record_id(s).map(RecordId::from_inner)
 	}
 }
 

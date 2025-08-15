@@ -5,6 +5,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use super::DefineKind;
+use crate::catalog;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -15,6 +16,7 @@ use crate::expr::tokenizer::Tokenizer;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::ToSql;
 use crate::val::{Array, Strand};
 
 #[revisioned(revision = 1)]
@@ -31,6 +33,27 @@ pub struct DefineAnalyzerStatement {
 impl_kv_value_revisioned!(DefineAnalyzerStatement);
 
 impl DefineAnalyzerStatement {
+	pub(crate) fn into_definition(&self) -> catalog::AnalyzerDefinition {
+		catalog::AnalyzerDefinition {
+			name: self.name.clone().into_string(),
+			function: self.function.clone(),
+			tokenizers: self.tokenizers.clone(),
+			filters: self.filters.clone(),
+			comment: self.comment.as_ref().map(|x| x.clone().into_string()),
+		}
+	}
+
+	pub fn from_definition(def: &catalog::AnalyzerDefinition) -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Ident::new(def.name.clone()).unwrap(),
+			function: def.function.clone(),
+			tokenizers: def.tokenizers.clone(),
+			filters: def.filters.clone(),
+			comment: def.comment.as_ref().map(|x| Strand::new(x.clone()).unwrap()),
+		}
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context,
@@ -41,7 +64,7 @@ impl DefineAnalyzerStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
 		if txn.get_db_analyzer(ns, db, &self.name).await.is_ok() {
 			match self.kind {
@@ -58,13 +81,7 @@ impl DefineAnalyzerStatement {
 		}
 		// Process the statement
 		let key = crate::key::database::az::new(ns, db, &self.name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-		let az = DefineAnalyzerStatement {
-			// Don't persist the `IF NOT EXISTS` clause to schema
-			kind: DefineKind::Default,
-			..self.clone()
-		};
+		let az = self.into_definition();
 		ctx.get_index_stores().mappers().load(&az).await?;
 		txn.set(&key, &az, None).await?;
 		// Clear the cache
@@ -95,7 +112,7 @@ impl Display for DefineAnalyzerStatement {
 			write!(f, " FILTERS {}", tokens.join(","))?;
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		Ok(())
 	}

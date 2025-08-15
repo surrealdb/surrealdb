@@ -6,11 +6,15 @@ use chrono::TimeZone;
 use chrono::prelude::Utc;
 
 use super::Transaction;
+use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
 use crate::expr::paths::{EDGE, IN, OUT};
-use crate::expr::statements::DefineTableStatement;
+use crate::expr::{
+	Base, DefineAccessStatement, DefineAnalyzerStatement, DefineFieldStatement, DefineUserStatement,
+};
 use crate::key::thing;
+use crate::sql::ToSql;
 use crate::val::{RecordId, Strand, Value};
 
 #[derive(Clone, Debug)]
@@ -226,10 +230,16 @@ impl Transaction {
 		cfg: Config,
 		chn: Sender<Vec<u8>>,
 	) -> Result<()> {
+		let db = self.get_db_by_name(ns, db).await?.ok_or_else(|| {
+			anyhow::Error::new(Error::DbNotFound {
+				name: db.to_owned(),
+			})
+		})?;
+
 		// Output USERS, ACCESSES, PARAMS, FUNCTIONS, ANALYZERS
-		self.export_metadata(&cfg, &chn, ns, db).await?;
+		self.export_metadata(&cfg, &chn, db.namespace_id, db.database_id).await?;
 		// Output TABLES
-		self.export_tables(ns, db, &cfg, &chn).await?;
+		self.export_tables(&cfg, &chn, db.namespace_id, db.database_id).await?;
 		Ok(())
 	}
 
@@ -237,46 +247,61 @@ impl Transaction {
 		&self,
 		cfg: &Config,
 		chn: &Sender<Vec<u8>>,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 	) -> Result<()> {
 		// Output OPTIONS
-		self.export_section("OPTION", vec!["OPTION IMPORT"], chn).await?;
+		self.export_section("OPTION", ["OPTION IMPORT"].iter(), chn).await?;
 
 		// Output USERS
 		if cfg.users {
 			let users = self.all_db_users(ns, db).await?;
-			self.export_section("USERS", users.to_vec(), chn).await?;
+			self.export_section(
+				"USERS",
+				users.iter().map(|x| DefineUserStatement::from_definition(Base::Db, x)),
+				chn,
+			)
+			.await?;
 		}
 
 		// Output ACCESSES
 		if cfg.accesses {
 			let accesses = self.all_db_accesses(ns, db).await?;
-			self.export_section("ACCESSES", accesses.to_vec(), chn).await?;
+			self.export_section(
+				"ACCESSES",
+				accesses.iter().map(|x| DefineAccessStatement::from_definition(Base::Db, x)),
+				chn,
+			)
+			.await?;
 		}
 
 		// Output PARAMS
 		if cfg.params {
 			let params = self.all_db_params(ns, db).await?;
-			self.export_section("PARAMS", params.to_vec(), chn).await?;
+			self.export_section("PARAMS", params.iter(), chn).await?;
 		}
 
 		// Output FUNCTIONS
 		if cfg.functions {
 			let functions = self.all_db_functions(ns, db).await?;
-			self.export_section("FUNCTIONS", functions.to_vec(), chn).await?;
+			self.export_section("FUNCTIONS", functions.iter(), chn).await?;
 		}
 
 		// Output ANALYZERS
 		if cfg.analyzers {
 			let analyzers = self.all_db_analyzers(ns, db).await?;
-			self.export_section("ANALYZERS", analyzers.to_vec(), chn).await?;
+			self.export_section(
+				"ANALYZERS",
+				analyzers.iter().map(DefineAnalyzerStatement::from_definition),
+				chn,
+			)
+			.await?;
 		}
 
 		// Output SEQUENCES
 		if cfg.sequences {
 			let sequences = self.all_db_sequences(ns, db).await?;
-			self.export_section("SEQUENCES", sequences.to_vec(), chn).await?;
+			self.export_section("SEQUENCES", sequences.iter(), chn).await?;
 		}
 
 		Ok(())
@@ -285,10 +310,10 @@ impl Transaction {
 	async fn export_section<T: ToString>(
 		&self,
 		title: &str,
-		items: Vec<T>,
+		items: impl ExactSizeIterator<Item = T>,
 		chn: &Sender<Vec<u8>>,
 	) -> Result<()> {
-		if items.is_empty() {
+		if items.len() == 0 {
 			return Ok(());
 		}
 
@@ -307,10 +332,10 @@ impl Transaction {
 
 	async fn export_tables(
 		&self,
-		ns: &str,
-		db: &str,
 		cfg: &Config,
 		chn: &Sender<Vec<u8>>,
+		ns: NamespaceId,
+		db: DatabaseId,
 	) -> Result<()> {
 		// Check if tables are included in the export config
 		if !cfg.tables.is_any() {
@@ -337,21 +362,21 @@ impl Transaction {
 
 	async fn export_table_structure(
 		&self,
-		ns: &str,
-		db: &str,
-		table: &DefineTableStatement,
+		ns: NamespaceId,
+		db: DatabaseId,
+		table: &TableDefinition,
 		chn: &Sender<Vec<u8>>,
 	) -> Result<()> {
 		chn.send(bytes!("-- ------------------------------")).await?;
 		chn.send(bytes!(format!("-- TABLE: {}", InlineCommentDisplay(&table.name)))).await?;
 		chn.send(bytes!("-- ------------------------------")).await?;
 		chn.send(bytes!("")).await?;
-		chn.send(bytes!(format!("{};", table))).await?;
+		chn.send(bytes!(format!("{};", table.to_sql()))).await?;
 		chn.send(bytes!("")).await?;
 		// Export all table field definitions for this table
 		let fields = self.all_tb_fields(ns, db, &table.name, None).await?;
 		for field in fields.iter() {
-			chn.send(bytes!(format!("{};", field))).await?;
+			chn.send(bytes!(format!("{};", DefineFieldStatement::from_definition(field)))).await?;
 		}
 		chn.send(bytes!("")).await?;
 		// Export all table index definitions for this table
@@ -372,9 +397,9 @@ impl Transaction {
 
 	async fn export_table_data(
 		&self,
-		ns: &str,
-		db: &str,
-		table: &DefineTableStatement,
+		ns: NamespaceId,
+		db: DatabaseId,
+		table: &TableDefinition,
 		cfg: &Config,
 		chn: &Sender<Vec<u8>>,
 	) -> Result<()> {
@@ -435,7 +460,7 @@ impl Transaction {
 	/// * `String` - Returns the generated SQL command as a string. If no
 	///   command is generated, returns an empty string.
 	fn process_value(
-		k: thing::Thing,
+		k: thing::ThingKey,
 		mut v: Value,
 		records_relate: &mut Vec<String>,
 		records_normal: &mut Vec<String>,
@@ -524,7 +549,7 @@ impl Transaction {
 				chn.send(bytes!("BEGIN;")).await?;
 			}
 
-			let k = thing::Thing::decode_key(&k)?;
+			let k = thing::ThingKey::decode_key(&k)?;
 			let v: Value = if v.is_empty() {
 				Value::None
 			} else {
@@ -608,7 +633,7 @@ impl Transaction {
 
 		// Process each regular value.
 		for (k, v) in regular_values {
-			let k = thing::Thing::decode_key(&k)?;
+			let k = thing::ThingKey::decode_key(&k)?;
 			let v: Value = revision::from_slice(&v)?;
 			// Process the value and categorize it into records_relate or records_normal.
 			Self::process_value(k, v, &mut records_relate, &mut records_normal, None, None);

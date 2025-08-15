@@ -1,67 +1,64 @@
-use std::str::{self, FromStr};
-use std::sync::{Arc, LazyLock};
-
+use crate::dbs::Session;
+use crate::err::Error;
+use crate::iam::access::{authenticate_generic, authenticate_record};
+use crate::iam::issue::expiration;
+use crate::iam::token::Claims;
+use crate::iam::{self, Actor, Auth, Level, Role};
+use crate::kvs::Datastore;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
+use crate::val::Value;
+use crate::{catalog, syn};
 use anyhow::{Result, bail};
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
 use jsonwebtoken::{DecodingKey, Validation, decode};
+use std::str::{self, FromStr};
+use std::sync::{Arc, LazyLock};
 
-use crate::dbs::Session;
-use crate::err::Error;
-use crate::expr::Algorithm;
-use crate::expr::access_type::{AccessType, Jwt, JwtAccessVerify};
-use crate::expr::statements::DefineUserStatement;
-use crate::iam::access::{authenticate_generic, authenticate_record};
-use crate::iam::issue::expiration;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks;
-use crate::iam::token::Claims;
-use crate::iam::{Actor, Auth, Level, Role};
-use crate::kvs::Datastore;
-use crate::kvs::LockType::*;
-use crate::kvs::TransactionType::*;
-use crate::syn;
-use crate::val::Value;
 
-fn config(alg: Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation)> {
+/// Returns the decoding key as wel as the method by which to verify the key against
+fn decode_key(alg: catalog::Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation)> {
 	let (dec, mut val) = match alg {
-		Algorithm::Hs256 => {
+		catalog::Algorithm::Hs256 => {
 			(DecodingKey::from_secret(key), Validation::new(jsonwebtoken::Algorithm::HS256))
 		}
-		Algorithm::Hs384 => {
+		catalog::Algorithm::Hs384 => {
 			(DecodingKey::from_secret(key), Validation::new(jsonwebtoken::Algorithm::HS384))
 		}
-		Algorithm::Hs512 => {
+		catalog::Algorithm::Hs512 => {
 			(DecodingKey::from_secret(key), Validation::new(jsonwebtoken::Algorithm::HS512))
 		}
-		Algorithm::EdDSA => {
+		catalog::Algorithm::EdDSA => {
 			(DecodingKey::from_ed_pem(key)?, Validation::new(jsonwebtoken::Algorithm::EdDSA))
 		}
-		Algorithm::Es256 => {
+		catalog::Algorithm::Es256 => {
 			(DecodingKey::from_ec_pem(key)?, Validation::new(jsonwebtoken::Algorithm::ES256))
 		}
-		Algorithm::Es384 => {
+		catalog::Algorithm::Es384 => {
 			(DecodingKey::from_ec_pem(key)?, Validation::new(jsonwebtoken::Algorithm::ES384))
 		}
-		Algorithm::Es512 => {
+		catalog::Algorithm::Es512 => {
 			(DecodingKey::from_ec_pem(key)?, Validation::new(jsonwebtoken::Algorithm::ES384))
 		}
-		Algorithm::Ps256 => {
+		catalog::Algorithm::Ps256 => {
 			(DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::PS256))
 		}
-		Algorithm::Ps384 => {
+		catalog::Algorithm::Ps384 => {
 			(DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::PS384))
 		}
-		Algorithm::Ps512 => {
+		catalog::Algorithm::Ps512 => {
 			(DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::PS512))
 		}
-		Algorithm::Rs256 => {
+		catalog::Algorithm::Rs256 => {
 			(DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::RS256))
 		}
-		Algorithm::Rs384 => {
+		catalog::Algorithm::Rs384 => {
 			(DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::RS384))
 		}
-		Algorithm::Rs512 => {
+		catalog::Algorithm::Rs512 => {
 			(DecodingKey::from_rsa_pem(key)?, Validation::new(jsonwebtoken::Algorithm::RS512))
 		}
 	};
@@ -103,12 +100,14 @@ pub async fn basic(
 		(Some(ns), Some(db)) => match verify_db_creds(kvs, ns, db, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as database user '{}'", user);
-				session.exp = expiration(u.duration.session)?;
-				session.au = Arc::new(
-					(&u, Level::Database(ns.to_owned(), db.to_owned()))
-						.try_into()
-						.map_err(Error::from)?,
-				);
+				session.exp = expiration(u.session_duration)?;
+				let au = Auth::new(Actor::from_role_names(
+					u.name.clone(),
+					&u.roles,
+					Level::Database(ns.to_owned(), db.to_owned()),
+				)?);
+
+				session.au = Arc::new(au);
 				Ok(())
 			}
 			Err(err) => Err(err),
@@ -117,10 +116,14 @@ pub async fn basic(
 		(Some(ns), None) => match verify_ns_creds(kvs, ns, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as namespace user '{}'", user);
-				session.exp = expiration(u.duration.session)?;
-				session.au = Arc::new(
-					(&u, Level::Namespace(ns.to_owned())).try_into().map_err(Error::from)?,
-				);
+				session.exp = expiration(u.session_duration)?;
+				let au = Auth::new(Actor::from_role_names(
+					u.name.clone(),
+					&u.roles,
+					Level::Namespace(ns.to_owned()),
+				)?);
+
+				session.au = Arc::new(au);
 				Ok(())
 			}
 			Err(err) => Err(err),
@@ -129,8 +132,10 @@ pub async fn basic(
 		(None, None) => match verify_root_creds(kvs, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as root user '{}'", user);
-				session.exp = expiration(u.duration.session)?;
-				session.au = Arc::new((&u, Level::Root).try_into().map_err(Error::from)?);
+				session.exp = expiration(u.session_duration)?;
+				let au = Auth::new(Actor::from_role_names(u.name.clone(), &u.roles, Level::Root)?);
+
+				session.au = Arc::new(au);
 				Ok(())
 			}
 			Err(err) => Err(err),
@@ -179,16 +184,35 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating with record access method `{}`", ac);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
+			let db_def = match tx.get_db_by_name(ns, db).await? {
+				Some(db) => db,
+				None => {
+					return Err(Error::DbNotFound {
+						name: db.to_string(),
+					}
+					.into());
+				}
+			};
 			// Parse the record id
-			let mut rid = syn::thing(id)?;
+			let mut rid = syn::record_id(id)?;
 			// Get the database access method
-			let de = tx.get_db_access(ns, db, ac).await?;
+			let Some(de) = tx.get_db_access(db_def.namespace_id, db_def.database_id, ac).await?
+			else {
+				return Err(Error::AccessDbNotFound {
+					ac: ac.to_string(),
+					ns: ns.to_string(),
+					db: db.to_string(),
+				}
+				.into());
+			};
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
 			let cf = match &de.access_type {
-				AccessType::Record(at) => match &at.jwt.verify {
-					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
+				catalog::AccessType::Record(at) => match &at.jwt.verify {
+					catalog::JwtAccessVerify::Key(key) => {
+						iam::verify::decode_key(key.alg, key.key.as_bytes())
+					}
 					#[cfg(feature = "jwks")]
 					JwtAccessVerify::Jwks(jwks) => {
 						if let Some(kid) = token_data.header.kid {
@@ -222,7 +246,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.db = Some(db.to_owned());
 			session.ac = Some(ac.to_owned());
 			session.rd = Some(Value::from(rid.clone()));
-			session.exp = expiration(de.duration.session)?;
+			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_string(),
 				Default::default(),
@@ -242,18 +266,44 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to database `{}` with access method `{}`", db, ac);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
+			let db_def = match tx.get_db_by_name(ns, db).await? {
+				Some(db) => db,
+				None => {
+					return Err(Error::DbNotFound {
+						name: db.to_string(),
+					}
+					.into());
+				}
+			};
+
 			// Get the database access method
-			let de = tx.get_db_access(ns, db, ac).await?;
+			let de = tx.get_db_access(db_def.namespace_id, db_def.database_id, ac).await?;
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
+
+			let Some(de) = de else {
+				return Err(Error::AccessDbNotFound {
+					ac: ac.to_string(),
+					ns: ns.to_string(),
+					db: db.to_string(),
+				}
+				.into());
+			};
+
 			// Obtain the configuration to verify the token based on the access method
 			match &de.access_type {
 				// If the access type is Jwt or Bearer, this is database access
-				AccessType::Jwt(_) | AccessType::Bearer(_) => {
-					let cf = match &de.access_type.jwt().verify {
-						JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
+				catalog::AccessType::Jwt(jwt)
+				| catalog::AccessType::Bearer(catalog::BearerAccess {
+					jwt,
+					..
+				}) => {
+					let cf = match &jwt.verify {
+						catalog::JwtAccessVerify::Key(key) => {
+							decode_key(key.alg, key.key.as_bytes())
+						}
 						#[cfg(feature = "jwks")]
-						JwtAccessVerify::Jwks(jwks) => {
+						catalog::JwtAccessVerify::Jwks(jwks) => {
 							if let Some(kid) = token_data.header.kid {
 								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 							} else {
@@ -297,24 +347,25 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					session.ns = Some(ns.to_owned());
 					session.db = Some(db.to_owned());
 					session.ac = Some(ac.to_owned());
-					session.exp = expiration(de.duration.session)?;
+					session.exp = expiration(de.session_duration)?;
 					session.au = Arc::new(Auth::new(Actor::new(
 						de.name.to_string(),
 						roles,
 						Level::Database(ns.to_string(), db.to_string()),
 					)));
 				}
-				// If the access type is Record, this is record access
 				// Record access without an "id" claim is only possible if there is an AUTHENTICATE
 				// clause The clause can make up for the missing "id" claim by resolving other
 				// claims to a specific record
-				AccessType::Record(at) => match &de.authenticate {
+				catalog::AccessType::Record(at) => match &de.authenticate {
 					Some(au) => {
 						trace!("Access method `{}` is record access with AUTHENTICATE clause", ac);
 						let cf = match &at.jwt.verify {
-							JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
+							catalog::JwtAccessVerify::Key(key) => {
+								decode_key(key.alg, key.key.as_bytes())
+							}
 							#[cfg(feature = "jwks")]
-							JwtAccessVerify::Jwks(jwks) => {
+							catalog::JwtAccessVerify::Jwks(jwks) => {
 								if let Some(kid) = token_data.header.kid {
 									jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 								} else {
@@ -344,7 +395,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						session.db = Some(db.to_owned());
 						session.ac = Some(ac.to_owned());
 						session.rd = Some(Value::from(rid.clone()));
-						session.exp = expiration(de.duration.session)?;
+						session.exp = expiration(de.session_duration)?;
 						session.au = Arc::new(Auth::new(Actor::new(
 							rid.to_string(),
 							Default::default(),
@@ -367,15 +418,31 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to database `{}` with user `{}`", db, id);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
+			let db_def = match tx.get_db_by_name(ns, db).await? {
+				Some(db) => db,
+				None => {
+					return Err(Error::DbNotFound {
+						name: db.to_string(),
+					}
+					.into());
+				}
+			};
+
 			// Get the database user
-			let de = tx.get_db_user(ns, db, id).await.map_err(|e| {
-				debug!("Error while authenticating to database `{db}`: {e}");
-				Error::InvalidAuth
-			})?;
+			let de = match tx
+				.get_db_user(db_def.namespace_id, db_def.database_id, id)
+				.await
+				.map_err(|e| {
+					debug!("Error while authenticating to database `{db}`: {e}");
+					Error::InvalidAuth
+				})? {
+				Some(de) => de,
+				None => return Err(Error::InvalidAuth.into()),
+			};
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Check the algorithm
-			let cf = config(Algorithm::Hs512, de.code.as_bytes())?;
+			let cf = decode_key(catalog::Algorithm::Hs512, de.code.as_bytes())?;
 			// Verify the token
 			verify_token(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -384,7 +451,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
-			session.exp = expiration(de.duration.session)?;
+			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles
@@ -405,16 +472,39 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to namespace `{}` with access method `{}`", ns, ac);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
+			let ns_def = match tx.get_ns_by_name(ns).await? {
+				Some(ns) => ns,
+				None => {
+					return Err(Error::NsNotFound {
+						name: ns.to_string(),
+					}
+					.into());
+				}
+			};
+
 			// Get the namespace access method
-			let de = tx.get_ns_access(ns, ac).await?;
+			let de = tx.get_ns_access(ns_def.namespace_id, ac).await?;
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
+
+			let Some(de) = de else {
+				return Err(Error::AccessNsNotFound {
+					ac: ac.to_string(),
+					ns: ns.to_string(),
+				}
+				.into());
+			};
+
 			// Obtain the configuration to verify the token based on the access method
 			let cf = match &de.access_type {
-				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.access_type.jwt().verify {
-					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
+				catalog::AccessType::Jwt(jwt)
+				| catalog::AccessType::Bearer(catalog::BearerAccess {
+					jwt,
+					..
+				}) => match &jwt.verify {
+					catalog::JwtAccessVerify::Key(key) => decode_key(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
-					JwtAccessVerify::Jwks(jwks) => {
+					catalog::JwtAccessVerify::Jwks(jwks) => {
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
@@ -457,7 +547,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
 			session.ac = Some(ac.to_owned());
-			session.exp = expiration(de.duration.session)?;
+			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				de.name.to_string(),
 				roles,
@@ -475,15 +565,28 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to namespace `{}` with user `{}`", ns, id);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
+			let ns_def = match tx.get_ns_by_name(ns).await? {
+				Some(ns) => ns,
+				None => {
+					return Err(Error::NsNotFound {
+						name: ns.to_string(),
+					}
+					.into());
+				}
+			};
 			// Get the namespace user
-			let de = tx.get_ns_user(ns, id).await.map_err(|e| {
-				debug!("Error while authenticating to namespace `{ns}`: {e}");
-				Error::InvalidAuth
-			})?;
+			let de = tx
+				.get_ns_user(ns_def.namespace_id, id)
+				.await
+				.map_err(|e| {
+					debug!("Error while authenticating to namespace `{ns}`: {e}");
+					Error::InvalidAuth
+				})?
+				.ok_or(Error::InvalidAuth)?;
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Check the algorithm
-			let cf = config(Algorithm::Hs512, de.code.as_bytes())?;
+			let cf = decode_key(catalog::Algorithm::Hs512, de.code.as_bytes())?;
 			// Verify the token
 			verify_token(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -491,7 +594,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
-			session.exp = expiration(de.duration.session)?;
+			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles
@@ -513,14 +616,27 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace access method
 			let de = tx.get_root_access(ac).await?;
+
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
+
+			let Some(de) = de else {
+				return Err(Error::AccessRootNotFound {
+					ac: ac.to_string(),
+				}
+				.into());
+			};
+
 			// Obtain the configuration to verify the token based on the access method
 			let cf = match &de.access_type {
-				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.access_type.jwt().verify {
-					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
+				catalog::AccessType::Jwt(jwt)
+				| catalog::AccessType::Bearer(catalog::BearerAccess {
+					jwt,
+					..
+				}) => match &jwt.verify {
+					catalog::JwtAccessVerify::Key(key) => decode_key(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
-					JwtAccessVerify::Jwks(jwks) => {
+					catalog::JwtAccessVerify::Jwks(jwks) => {
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
@@ -562,7 +678,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Set the session
 			session.tk = Some(value);
 			session.ac = Some(ac.to_owned());
-			session.exp = expiration(de.duration.session)?;
+			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(de.name.to_string(), roles, Level::Root)));
 			Ok(())
 		}
@@ -576,21 +692,21 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace user
-			let de = tx.get_root_user(id).await.map_err(|e| {
+			let de = tx.expect_root_user(id).await.map_err(|e| {
 				debug!("Error while authenticating to root: {e}");
 				Error::InvalidAuth
 			})?;
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Check the algorithm
-			let cf = config(Algorithm::Hs512, de.code.as_bytes())?;
+			let cf = decode_key(catalog::Algorithm::Hs512, de.code.as_bytes())?;
 			// Verify the token
 			verify_token(token, &cf.0, &cf.1)?;
 			// Log the success
 			debug!("Authenticated to root level with user `{}` using token", id);
 			// Set the session
 			session.tk = Some(value);
-			session.exp = expiration(de.duration.session)?;
+			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles
@@ -610,11 +726,11 @@ pub async fn verify_root_creds(
 	ds: &Datastore,
 	user: &str,
 	pass: &str,
-) -> Result<DefineUserStatement> {
+) -> Result<catalog::UserDefinition> {
 	// Create a new readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
-	let user = tx.get_root_user(user).await.map_err(|e| {
+	let user = tx.expect_root_user(user).await.map_err(|e| {
 		debug!("Error retrieving user for authentication to root: {e}");
 		Error::InvalidAuth
 	})?;
@@ -633,14 +749,28 @@ pub async fn verify_ns_creds(
 	ns: &str,
 	user: &str,
 	pass: &str,
-) -> Result<DefineUserStatement> {
+) -> Result<catalog::UserDefinition> {
 	// Create a new readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await?;
+	let ns_def = match tx.get_ns_by_name(ns).await? {
+		Some(ns) => ns,
+		None => {
+			return Err(Error::NsNotFound {
+				name: ns.to_string(),
+			}
+			.into());
+		}
+	};
+
 	// Fetch the specified user from storage
-	let user = tx.get_ns_user(ns, user).await.map_err(|e| {
-		debug!("Error retrieving user for authentication to namespace `{ns}`: {e}");
-		Error::InvalidAuth
-	})?;
+	let user = tx
+		.get_ns_user(ns_def.namespace_id, user)
+		.await
+		.map_err(|e| {
+			debug!("Error retrieving user for authentication to namespace `{ns}`: {e}");
+			Error::InvalidAuth
+		})?
+		.ok_or(Error::InvalidAuth)?;
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
 	// Verify the specified password for the user
@@ -657,14 +787,27 @@ pub async fn verify_db_creds(
 	db: &str,
 	user: &str,
 	pass: &str,
-) -> Result<DefineUserStatement> {
+) -> Result<catalog::UserDefinition> {
 	// Create a new readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await?;
+	let db_def = match tx.get_db_by_name(ns, db).await? {
+		Some(db) => db,
+		None => {
+			return Err(Error::DbNotFound {
+				name: db.to_string(),
+			}
+			.into());
+		}
+	};
 	// Fetch the specified user from storage
-	let user = tx.get_db_user(ns, db, user).await.map_err(|e| {
-		debug!("Error retrieving user for authentication to database `{ns}/{db}`: {e}");
-		Error::InvalidAuth
-	})?;
+	let user = tx
+		.get_db_user(db_def.namespace_id, db_def.database_id, user)
+		.await
+		.map_err(|e| {
+			debug!("Error retrieving user for authentication to database `{ns}/{db}`: {e}");
+			Error::InvalidAuth
+		})?
+		.ok_or(Error::InvalidAuth)?;
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
 	// Verify the specified password for the user
@@ -705,15 +848,14 @@ fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Resu
 
 #[cfg(test)]
 mod tests {
-	use argon2::password_hash::{PasswordHasher, SaltString};
-	use chrono::Duration;
-	use jsonwebtoken::{EncodingKey, encode};
-
 	use super::*;
 	use crate::iam::token::{Audience, HEADER};
 	use crate::sql::statements::define::DefineKind;
 	use crate::sql::statements::define::user::PassType;
 	use crate::sql::{Ast, Ident};
+	use argon2::password_hash::{PasswordHasher, SaltString};
+	use chrono::Duration;
+	use jsonwebtoken::{EncodingKey, encode};
 
 	struct TestLevel {
 		level: &'static str,

@@ -1,10 +1,10 @@
-use std::fmt::{self, Display};
-
 use super::DefineKind;
 use crate::sql::Ident;
+use crate::sql::ToSql;
 use crate::sql::filter::Filter;
 use crate::sql::tokenizer::Tokenizer;
 use crate::val::Strand;
+use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -38,7 +38,7 @@ impl Display for DefineAnalyzerStatement {
 			write!(f, " FILTERS {}", tokens.join(","))?;
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		Ok(())
 	}

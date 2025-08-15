@@ -1,12 +1,3 @@
-use std::collections::HashMap;
-use std::fmt::{self, Display, Formatter};
-use std::ops::Deref;
-
-use md5::{Digest, Md5};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -15,6 +6,14 @@ use crate::expr::part::{Next, NextMethod};
 use crate::expr::paths::{ID, IN, META, OUT};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{FlowResult, Ident, Part, Value};
+use crate::sql::ToSql;
+use md5::{Digest, Md5};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fmt::{self, Display, Formatter};
+use std::ops::Deref;
 
 pub mod recursion;
 
@@ -166,8 +165,8 @@ impl Display for Idiom {
 		let mut iter = self.0.iter();
 		// TODO: Look at why the first Part::Field is formatted differently.
 		match iter.next() {
-			Some(Part::Field(v)) => v.fmt(f)?,
-			Some(x) => x.fmt(f)?,
+			Some(Part::Field(v)) => f.write_str(&v.to_sql())?,
+			Some(x) => f.write_str(&x.to_string())?,
 			None => {}
 		};
 		for p in iter {

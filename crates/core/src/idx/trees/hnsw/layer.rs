@@ -1,11 +1,4 @@
-use std::mem;
-
-use ahash::HashSet;
-use anyhow::Result;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-
+use crate::catalog::DatabaseDefinition;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
@@ -17,6 +10,12 @@ use crate::idx::trees::hnsw::{ElementId, HnswElements};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
 use crate::kvs::Transaction;
+use ahash::HashSet;
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use std::mem;
 
 #[revisioned(revision = 1)]
 #[derive(Default, Debug, Serialize, Deserialize)]
@@ -105,6 +104,7 @@ where
 	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn search_single_checked(
 		&self,
+		db: &DatabaseDefinition,
 		tx: &Transaction,
 		stk: &mut Stk,
 		search: &HnswCheckedSearchContext<'_>,
@@ -116,8 +116,8 @@ where
 		let visited = HashSet::from_iter([ep_id]);
 		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
 		let mut w = DoublePriorityQueue::default();
-		Self::add_if_truthy(tx, stk, search, &mut w, ep_pt, ep_dist, ep_id, chk).await?;
-		self.search_checked(tx, stk, search, candidates, visited, w, chk).await
+		Self::add_if_truthy(db, tx, stk, search, &mut w, ep_pt, ep_dist, ep_id, chk).await?;
+		self.search_checked(db, tx, stk, search, candidates, visited, w, chk).await
 	}
 
 	pub(super) async fn search_multi(
@@ -194,6 +194,7 @@ where
 	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn search_checked(
 		&self,
+		db: &DatabaseDefinition,
 		tx: &Transaction,
 		stk: &mut Stk,
 		search: &HnswCheckedSearchContext<'_>,
@@ -223,7 +224,7 @@ where
 						if e_dist < f_dist || w.len() < ef {
 							candidates.push(e_dist, e_id);
 							if Self::add_if_truthy(
-								tx, stk, search, &mut w, &e_pt, e_dist, e_id, chk,
+								db, tx, stk, search, &mut w, &e_pt, e_dist, e_id, chk,
 							)
 							.await?
 							{
@@ -239,6 +240,7 @@ where
 
 	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn add_if_truthy(
+		db: &DatabaseDefinition,
 		tx: &Transaction,
 		stk: &mut Stk,
 		search: &HnswCheckedSearchContext<'_>,
@@ -249,7 +251,7 @@ where
 		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<bool> {
 		if let Some(docs) = search.vec_docs().get_docs(tx, e_pt).await? {
-			if chk.check_truthy(tx, stk, search.docs(), docs).await? {
+			if chk.check_truthy(db, tx, stk, search.docs(), docs).await? {
 				w.push(e_dist, e_id);
 				if w.len() > search.ef() {
 					if let Some((_, id)) = w.pop_last() {

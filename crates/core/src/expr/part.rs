@@ -17,6 +17,7 @@ use crate::expr::idiom::recursion::{
 	self, Recursion, clean_iteration, compute_idiom_recursion, is_final,
 };
 use crate::expr::{Expr, FlowResultExt as _, Graph, Ident, Idiom, Literal, Value};
+use crate::sql::ToSql;
 use crate::val::{Array, RecordId};
 
 #[revisioned(revision = 1)]
@@ -149,7 +150,7 @@ impl fmt::Display for Part {
 			Part::Last => f.write_str("[$]"),
 			Part::First => f.write_str("[0]"),
 			Part::Start(v) => write!(f, "{v}"),
-			Part::Field(v) => write!(f, ".{v}"),
+			Part::Field(v) => write!(f, ".{}", v.to_sql()),
 			Part::Flatten => f.write_str("…"),
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
 			Part::Graph(v) => write!(f, "{v}"),
@@ -441,7 +442,7 @@ impl fmt::Display for DestructurePart {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			DestructurePart::All(fd) => write!(f, "{fd}.*"),
-			DestructurePart::Field(fd) => write!(f, "{fd}"),
+			DestructurePart::Field(fd) => write!(f, "{}", fd.to_sql()),
 			DestructurePart::Aliased(fd, v) => write!(f, "{fd}: {v}"),
 			DestructurePart::Destructure(fd, d) => {
 				write!(f, "{fd}{}", Part::Destructure(d.clone()))

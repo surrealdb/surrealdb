@@ -101,17 +101,20 @@ impl LiveStatement {
 				// Store the current Node ID
 				stm.node = nid.into();
 				// Get the NS and DB
-				let (ns, db) = opt.ns_db()?;
+				let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 				// Store the live info
 				let lq = Live {
-					ns: ns.to_string(),
-					db: db.to_string(),
+					ns,
+					db,
 					tb: tb.to_string(),
 				};
 				// Get the transaction
 				let txn = ctx.tx();
 				// Ensure that the table definition exists
-				txn.ensure_ns_db_tb(ns, db, &tb, opt.strict).await?;
+				{
+					let (ns, db) = opt.ns_db()?;
+					txn.ensure_ns_db_tb(ns, db, &tb, opt.strict).await?;
+				}
 				// Insert the node live query
 				let key = crate::key::node::lq::new(nid, id);
 				txn.replace(&key, &lq).await?;
@@ -162,8 +165,7 @@ impl InfoStructure for LiveStatement {
 
 #[cfg(test)]
 mod tests {
-	use anyhow::Result;
-
+	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::dbs::{Action, Capabilities, Notification, Session};
 	use crate::expr::Value;
 	use crate::kvs::Datastore;
@@ -171,6 +173,7 @@ mod tests {
 	use crate::kvs::TransactionType::Write;
 	use crate::syn;
 	use crate::val::{RecordId, RecordIdKey};
+	use anyhow::Result;
 
 	pub async fn new_ds() -> Result<Datastore> {
 		Ok(Datastore::new("memory")
@@ -185,9 +188,11 @@ mod tests {
 		let (ns, db, tb) = ("test", "test", "person");
 		let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
 
+		let (ns_id, db_id) = (NamespaceId(1), DatabaseId(2));
+
 		// Create a new transaction and verify that there are no tables defined.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns_id, db_id, None).await.unwrap());
 		assert!(table_occurrences.is_empty());
 		tx.cancel().await.unwrap();
 
@@ -203,9 +208,9 @@ mod tests {
 
 		// Verify that the table definition has been created.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns_id, db_id, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
-		assert_eq!(table_occurrences[0].name.as_str(), tb);
+		assert_eq!(table_occurrences[0].name, tb);
 		tx.cancel().await.unwrap();
 
 		// Initiate a Create record
@@ -225,9 +230,9 @@ mod tests {
 
 		// Create a new transaction to verify that the same table was used.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns_id, db_id, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
-		assert_eq!(table_occurrences[0].name.as_str(), tb);
+		assert_eq!(table_occurrences[0].name, tb);
 		tx.cancel().await.unwrap();
 
 		// Validate notification
@@ -259,9 +264,11 @@ mod tests {
 		let (ns, db, tb) = ("test", "test", "person");
 		let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
 
+		let (ns_id, db_id) = (NamespaceId(1), DatabaseId(2));
+
 		// Create a new transaction and verify that there are no tables defined.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns_id, db_id, None).await.unwrap());
 		assert!(table_occurrences.is_empty());
 		tx.cancel().await.unwrap();
 
@@ -271,9 +278,9 @@ mod tests {
 
 		// Create a new transaction and confirm that a new table is created.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns_id, db_id, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
-		assert_eq!(table_occurrences[0].name.as_str(), tb);
+		assert_eq!(table_occurrences[0].name, tb);
 		tx.cancel().await.unwrap();
 
 		// Initiate a live query statement
@@ -282,9 +289,9 @@ mod tests {
 
 		// Verify that the old table definition was used.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
+		let table_occurrences = &*(tx.all_tb(ns_id, db_id, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
-		assert_eq!(table_occurrences[0].name.as_str(), tb);
+		assert_eq!(table_occurrences[0].name, tb);
 		tx.cancel().await.unwrap();
 	}
 }

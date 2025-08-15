@@ -1,9 +1,9 @@
-use std::fmt::{self, Display};
-
 use super::DefineKind;
 use crate::sql::Ident;
+use crate::sql::ToSql;
 use crate::sql::changefeed::ChangeFeed;
 use crate::val::Strand;
+use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -25,12 +25,31 @@ impl Display for DefineDatabaseStatement {
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		if let Some(ref v) = self.changefeed {
 			write!(f, " {v}")?;
 		}
 		Ok(())
+	}
+}
+
+impl crate::sql::ToSql for DefineDatabaseStatement {
+	fn to_sql(&self) -> String {
+		let mut out = "DEFINE DATABASE".to_string();
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => out.push_str(" OVERWRITE"),
+			DefineKind::IfNotExists => out.push_str(" IF NOT EXISTS"),
+		}
+		out.push_str(&format!(" {}", self.name));
+		if let Some(ref v) = self.comment {
+			out.push_str(&format!(" COMMENT {}", v.to_sql()));
+		}
+		if let Some(ref v) = self.changefeed {
+			out.push_str(&format!(" {v}"));
+		}
+		out
 	}
 }
 

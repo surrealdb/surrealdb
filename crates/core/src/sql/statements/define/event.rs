@@ -1,9 +1,9 @@
-use std::fmt::{self, Display};
-
 use super::DefineKind;
+use crate::sql::ToSql;
 use crate::sql::fmt::Fmt;
 use crate::sql::{Expr, Ident};
 use crate::val::Strand;
+use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -33,7 +33,7 @@ impl Display for DefineEventStatement {
 			Fmt::comma_separated(&self.then)
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		Ok(())
 	}

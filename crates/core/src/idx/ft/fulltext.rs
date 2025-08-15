@@ -9,6 +9,7 @@ use roaring::RoaringTreemap;
 use roaring::treemap::IntoIter;
 use uuid::Uuid;
 
+use crate::catalog;
 /// This module implements a concurrent full-text search index.
 ///
 /// The full-text index allows for efficient text search operations with support
@@ -23,7 +24,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::index::FullTextParams;
 use crate::expr::operator::BooleanOperator;
-use crate::expr::statements::DefineAnalyzerStatement;
 use crate::expr::{Idiom, Scoring};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
@@ -119,7 +119,7 @@ impl FullTextIndex {
 		ikb: IndexKeyBase,
 		p: &FullTextParams,
 	) -> Result<Self> {
-		let az = tx.get_db_analyzer(&ikb.0.ns, &ikb.0.db, &p.analyzer).await?;
+		let az = tx.get_db_analyzer(ikb.0.ns, ikb.0.db, &p.analyzer).await?;
 		ixs.mappers().check(&az).await?;
 		Self::with_analyzer(nid, ixs, az, ikb, p)
 	}
@@ -131,7 +131,7 @@ impl FullTextIndex {
 	fn with_analyzer(
 		nid: Uuid,
 		ixs: &IndexStores,
-		az: Arc<DefineAnalyzerStatement>,
+		az: Arc<catalog::AnalyzerDefinition>,
 		ikb: IndexKeyBase,
 		p: &FullTextParams,
 	) -> Result<Self> {
@@ -900,8 +900,10 @@ mod tests {
 	use uuid::Uuid;
 
 	use super::{FullTextIndex, TermDocument};
+	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
+	use crate::expr::Ident;
 	use crate::expr::index::FullTextParams;
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::idx::IndexKeyBase;
@@ -936,7 +938,7 @@ mod tests {
 			let DefineStatement::Analyzer(az) = *q else {
 				panic!()
 			};
-			let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
+			let az = Arc::new(DefineAnalyzerStatement::from(az).into_definition());
 			let content = Arc::new(Value::from(Array::from(vec![
 				"Enter a search term",
 				"Welcome",
@@ -965,12 +967,12 @@ mod tests {
 				"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet",
 			])));
 			let ft_params = Arc::new(FullTextParams {
-				analyzer: az.name.clone(),
+				analyzer: Ident::new(az.name.clone()).unwrap(),
 				scoring: Default::default(),
 				highlight: true,
 			});
 			let nid = Uuid::from_u128(1);
-			let ikb = IndexKeyBase::new("testns", "testdb", "t", "i");
+			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t", "i");
 			let opt = Options::default()
 				.with_id(nid)
 				.with_ns(Some("testns".into()))

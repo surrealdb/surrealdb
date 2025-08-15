@@ -151,7 +151,7 @@ pub fn to_value(val: CborValue) -> Result<Value, &'static str> {
 				},
 				// A literal recordid
 				TAG_RECORDID => match *v {
-					CborValue::Text(v) => match syn::thing(v.as_str()) {
+					CborValue::Text(v) => match syn::record_id(v.as_str()) {
 						Ok(v) => Ok(v.into()),
 						_ => Err("Expected a valid RecordID value"),
 					},

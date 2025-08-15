@@ -11,8 +11,8 @@ impl Value {
 				}
 			}
 			Value::Array(v) => match val {
-				Value::Array(x) => self.put(path, Value::from(v + x)),
-				x => self.put(path, Value::from(v + x)),
+				Value::Array(x) => self.put(path, Value::from(v.concat(x))),
+				x => self.put(path, Value::from(v.with_push(x))),
 			},
 			Value::None => match val {
 				Value::Number(x) => self.put(path, Value::Number(Number::Int(0) + x)),

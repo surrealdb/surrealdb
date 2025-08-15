@@ -1,9 +1,7 @@
+use crate::sql::fmt::{Fmt, is_pretty, pretty_indent};
+use crate::sql::{Expr, Graph, Ident, Idiom, ToSql};
 use std::fmt;
 use std::fmt::Write;
-
-use super::fmt::{is_pretty, pretty_indent};
-use crate::sql::fmt::Fmt;
-use crate::sql::{Expr, Graph, Ident, Idiom};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -92,7 +90,7 @@ impl fmt::Display for Part {
 			Part::Last => f.write_str("[$]"),
 			Part::First => f.write_str("[0]"),
 			Part::Start(v) => write!(f, "{v}"),
-			Part::Field(v) => write!(f, ".{v}"),
+			Part::Field(v) => write!(f, ".{}", v.to_sql()),
 			Part::Flatten => f.write_str("…"),
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
 			Part::Graph(v) => write!(f, "{v}"),
@@ -174,11 +172,11 @@ impl DestructurePart {
 impl fmt::Display for DestructurePart {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			DestructurePart::All(fd) => write!(f, "{fd}.*"),
-			DestructurePart::Field(fd) => write!(f, "{fd}"),
-			DestructurePart::Aliased(fd, v) => write!(f, "{fd}: {v}"),
+			DestructurePart::All(fd) => write!(f, "{}.*", fd.to_sql()),
+			DestructurePart::Field(fd) => write!(f, "{}", fd.to_sql()),
+			DestructurePart::Aliased(fd, v) => write!(f, "{}: {}", fd.to_sql(), v),
 			DestructurePart::Destructure(fd, d) => {
-				write!(f, "{fd}{}", Part::Destructure(d.clone()))
+				write!(f, "{}{}", fd.to_sql(), Part::Destructure(d.clone()))
 			}
 		}
 	}

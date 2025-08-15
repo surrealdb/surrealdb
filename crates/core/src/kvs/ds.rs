@@ -26,7 +26,7 @@ use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
-use super::version::Version;
+use super::version::MajorVersion;
 use crate::buc::BucketConnections;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
@@ -558,7 +558,7 @@ impl Datastore {
 
 	// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn check_version(&self) -> Result<Version> {
+	pub async fn check_version(&self) -> Result<MajorVersion> {
 		let version = self.get_version().await?;
 		// Check we are running the latest version
 		if !version.is_latest() {
@@ -570,7 +570,7 @@ impl Datastore {
 
 	// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn get_version(&self) -> Result<Version> {
+	pub async fn get_version(&self) -> Result<MajorVersion> {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Pessimistic).await?.enclose();
 		// Create the key where the version is stored
@@ -592,10 +592,10 @@ impl Datastore {
 				// Check the storage if there are any other keys set
 				let version = if keys.is_empty() {
 					// There are no keys set in storage, so this is a new database
-					Version::latest()
+					MajorVersion::latest()
 				} else {
 					// There were keys in storage, so this is an upgrade
-					Version::v1()
+					MajorVersion::v1()
 				};
 				// Attempt to set the current version in storage
 				catch!(txn, txn.replace(&key, &version).await);

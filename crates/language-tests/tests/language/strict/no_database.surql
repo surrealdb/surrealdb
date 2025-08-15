@@ -1,5 +1,6 @@
 /**
 [env]
+database = false
 strict = true
 
 [test]
@@ -20,8 +21,7 @@ error = "The database 'test' does not exist"
 error = "The database 'test' does not exist"
 */
 
-DEFINE NAMESPACE test;
--- DEFINE DATABASE test;
+USE DB test;
 DEFINE TABLE test;
 DEFINE FIELD extra ON test VALUE true;
 CREATE test:tester;

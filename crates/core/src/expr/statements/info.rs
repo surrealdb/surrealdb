@@ -1,19 +1,21 @@
-use std::fmt;
-use std::sync::Arc;
-
-use anyhow::{Result, bail};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Expr, FlowResultExt, Ident};
+use crate::expr::{
+	Base, DefineAccessStatement, DefineAnalyzerStatement, DefineFieldStatement,
+	DefineUserStatement, Expr, FlowResultExt, Ident,
+};
 use crate::iam::{Action, ResourceKind};
+use crate::sql::ToSql;
 use crate::sys::INFORMATION;
 use crate::val::{Datetime, Object, Value};
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::sync::Arc;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -51,7 +53,7 @@ impl InfoStatement {
 				// Create the result set
 				if *structured {
 					let object = map! {
-						"accesses".to_string() => process(txn.all_root_accesses().await?.iter().map(|v| v.redacted()).collect()),
+						"accesses".to_string() => process(txn.all_root_accesses().await?),
 						"namespaces".to_string() => process(txn.all_ns().await?),
 						"nodes".to_string() => process(txn.all_nodes().await?),
 						"system".to_string() => system().await,
@@ -62,15 +64,16 @@ impl InfoStatement {
 					let object = map! {
 						"accesses".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_root_accesses().await?.iter().map(|v| v.redacted()) {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+							for v in txn.all_root_accesses().await?.iter() {
+								let def = DefineAccessStatement::from_definition(Base::Root, v);
+								out.insert(def.name.into_raw_string(), def.to_string().into());
 							}
 							out.into()
 						},
 						"namespaces".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_ns().await?.iter() {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -85,7 +88,7 @@ impl InfoStatement {
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_root_users().await?.iter() {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(),DefineUserStatement::from_definition(Base::Root,v).to_string().into());
 							}
 							out.into()
 						}
@@ -97,13 +100,13 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Ns)?;
 				// Get the NS
-				let ns = opt.ns()?;
+				let ns = ctx.get_ns_id_ro(opt).await?;
 				// Get the transaction
 				let txn = ctx.tx();
 				// Create the result set
 				if *structured {
 					let object = map! {
-						"accesses".to_string() => process(txn.all_ns_accesses(ns).await?.iter().map(|v| v.redacted()).collect()),
+						"accesses".to_string() => process(txn.all_ns_accesses(ns).await?),
 						"databases".to_string() => process(txn.all_db(ns).await?),
 						"users".to_string() => process(txn.all_ns_users(ns).await?),
 					};
@@ -112,22 +115,23 @@ impl InfoStatement {
 					let object = map! {
 						"accesses".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_ns_accesses(ns).await?.iter().map(|v| v.redacted()) {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+							for v in txn.all_ns_accesses(ns).await?.iter() {
+								let def = DefineAccessStatement::from_definition(Base::Ns, v);
+								out.insert(def.name.into_raw_string(), def.to_string().into());
 							}
 							out.into()
 						},
 						"databases".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db(ns).await?.iter() {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_ns_users(ns).await?.iter() {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(),DefineUserStatement::from_definition(Base::Ns,v).to_string().into());
 							}
 							out.into()
 						},
@@ -139,7 +143,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Get the NS and DB
-				let (ns, db) = opt.ns_db()?;
+				let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 				// Convert the version to u64 if present
 				let version = match version {
 					Some(v) => Some(
@@ -156,7 +160,7 @@ impl InfoStatement {
 				// Create the result set
 				let res = if *structured {
 					let object = map! {
-						"accesses".to_string() => process(txn.all_db_accesses(ns, db).await?.iter().map(|v| v.redacted()).collect()),
+						"accesses".to_string() => process(txn.all_db_accesses(ns, db).await?),
 						"apis".to_string() => process(txn.all_db_apis(ns, db).await?),
 						"analyzers".to_string() => process(txn.all_db_analyzers(ns, db).await?),
 						"buckets".to_string() => process(txn.all_db_buckets(ns, db).await?),
@@ -173,8 +177,9 @@ impl InfoStatement {
 					let object = map! {
 						"accesses".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_db_accesses(ns, db).await?.iter().map(|v| v.redacted()) {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+							for v in txn.all_db_accesses(ns, db).await?.iter() {
+								let def = DefineAccessStatement::from_definition(Base::Db, v);
+								out.insert(def.name.into_raw_string(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -188,7 +193,7 @@ impl InfoStatement {
 						"analyzers".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_analyzers( ns, db).await?.iter() {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(), DefineAnalyzerStatement::from_definition(v).to_string().into());
 							}
 							out.into()
 						},
@@ -223,14 +228,14 @@ impl InfoStatement {
 						"tables".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb(ns, db, version).await?.iter() {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_users(ns, db).await?.iter() {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(),DefineUserStatement::from_definition(Base::Db,v).to_string().into());
 							}
 							out.into()
 						},
@@ -257,7 +262,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Get the NS and DB
-				let (ns, db) = opt.ns_db()?;
+				let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 				// Convert the version to u64 if present
 				let version = match version {
 					Some(v) => Some(
@@ -292,7 +297,7 @@ impl InfoStatement {
 						"fields".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_fields(ns, db, tb, version).await?.iter() {
-								out.insert(v.name.to_string(), v.to_string().into());
+								out.insert(v.name.to_string(), DefineFieldStatement::from_definition(v).to_string().into());
 							}
 							out.into()
 						},
@@ -313,7 +318,7 @@ impl InfoStatement {
 						"tables".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_views(ns, db, tb).await?.iter() {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -323,25 +328,51 @@ impl InfoStatement {
 			InfoStatement::User(user, base, structured) => {
 				// Get the base type
 				let base = base.clone().unwrap_or(opt.selected_base()?);
+
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Actor, &base)?;
 				// Get the transaction
 				let txn = ctx.tx();
 				// Process the user
 				let res = match base {
-					Base::Root => txn.get_root_user(user).await?,
-					Base::Ns => txn.get_ns_user(opt.ns()?, user).await?,
+					Base::Root => txn.expect_root_user(user).await?,
+					Base::Ns => {
+						let ns = txn.expect_ns_by_name(opt.ns()?).await?;
+						match txn.get_ns_user(ns.namespace_id, user).await? {
+							Some(user) => user,
+							None => {
+								return Err(Error::UserNsNotFound {
+									name: user.to_string(),
+									ns: ns.name.clone(),
+								}
+								.into());
+							}
+						}
+					}
 					Base::Db => {
 						let (ns, db) = opt.ns_db()?;
-						txn.get_db_user(ns, db, user).await?
+						let Some(db_def) = txn.get_db_by_name(ns, db).await? else {
+							return Err(Error::UserDbNotFound {
+								name: user.to_string(),
+								ns: ns.to_string(),
+								db: db.to_string(),
+							}
+							.into());
+						};
+						txn.get_db_user(db_def.namespace_id, db_def.database_id, user)
+							.await?
+							.ok_or_else(|| Error::UserDbNotFound {
+								name: user.to_string(),
+								ns: ns.to_string(),
+								db: db.to_string(),
+							})?
 					}
-					_ => bail!(Error::InvalidLevel(base.to_string())),
 				};
 				// Ok all good
 				Ok(if *structured {
 					res.as_ref().clone().structure()
 				} else {
-					Value::from(res.to_string())
+					Value::from(DefineUserStatement::from_definition(base, &res).to_string())
 				})
 			}
 			#[cfg_attr(target_family = "wasm", expect(unused_variables))]
@@ -357,7 +388,7 @@ impl InfoStatement {
 
 					if let Some(ib) = ctx.get_index_builder() {
 						// Obtain the index
-						let (ns, db) = opt.ns_db()?;
+						let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 						let res = txn.get_tb_index(ns, db, table, index).await?;
 						let status = ib.get_status(ns, db, &res).await;
 						let mut out = Object::default();

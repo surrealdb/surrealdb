@@ -1,22 +1,21 @@
-use std::collections::BTreeMap;
-use std::fmt::{self, Write as _};
-use std::hash::{Hash, Hasher};
-
-use reblessive::tree::Stk;
-use revision::revisioned;
-use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
-
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::escape::EscapeKey;
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::{Expr, FlowResult, RecordIdLit};
+use crate::sql::ToSql;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, Regex,
 	Strand, Uuid, Value,
 };
+use reblessive::tree::Stk;
+use revision::revisioned;
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::fmt::{self, Write as _};
+use std::hash::{Hash, Hasher};
 
 /// A literal value, should be computed to get an actual value.
 ///
@@ -204,7 +203,7 @@ impl fmt::Display for Literal {
 			}
 			Literal::Integer(x) => write!(f, "{x}"),
 			Literal::Decimal(d) => write!(f, "{d}dec"),
-			Literal::Strand(strand) => write!(f, "{strand}"),
+			Literal::Strand(strand) => write!(f, "{}", strand.to_sql()),
 			Literal::Bytes(bytes) => write!(f, "{bytes}"),
 			Literal::Regex(regex) => write!(f, "{regex}"),
 			Literal::RecordId(record_id_lit) => write!(f, "{record_id_lit}"),

@@ -1,8 +1,8 @@
-use std::fmt;
-use std::ops::Deref;
-
 use crate::sql::escape::EscapeIdent;
 use crate::val::Strand;
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::ops::Deref;
 
 /// An identifier.
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash)]
@@ -77,8 +77,21 @@ impl From<Ident> for crate::expr::Ident {
 	}
 }
 
-impl fmt::Display for Ident {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		EscapeIdent(&self.0).fmt(f)
+impl Ident {
+	/// Convert the Ident to a raw String
+	pub fn to_raw(&self) -> String {
+		self.0.to_string()
+	}
+}
+
+impl Display for Ident {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		f.write_str(&self.0)
+	}
+}
+
+impl crate::sql::ToSql for Ident {
+	fn to_sql(&self) -> String {
+		EscapeIdent(&self.0).to_string()
 	}
 }

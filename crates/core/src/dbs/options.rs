@@ -1,15 +1,14 @@
-use std::sync::Arc;
-
-use anyhow::{Result, bail};
-use async_channel::Sender;
-use uuid::Uuid;
-
+use crate::catalog::TableDefinition;
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::dbs::Notification;
 use crate::err::Error;
 use crate::expr::Base;
-use crate::expr::statements::define::{DefineIndexStatement, DefineTableStatement};
+use crate::expr::statements::define::DefineIndexStatement;
 use crate::iam::{Action, Auth, ResourceKind};
+use anyhow::{Result, bail};
+use async_channel::Sender;
+use std::sync::Arc;
+use uuid::Uuid;
 
 /// An Options is passed around when processing a set of query
 /// statements.
@@ -53,7 +52,7 @@ pub struct Options {
 pub enum Force {
 	All,
 	None,
-	Table(Arc<[DefineTableStatement]>),
+	Table(Arc<[TableDefinition]>),
 	Index(Arc<[DefineIndexStatement]>),
 }
 
@@ -358,13 +357,6 @@ impl Options {
 			Base::Db => {
 				let (ns, db) = self.ns_db()?;
 				res.on_db(ns, db)
-			}
-			// TODO(gguillemas): This variant is kept in 2.0.0 for backward compatibility. Drop in
-			// 3.0.0.
-			Base::Sc(_) => {
-				// We should not get here, the scope base is only used in parsing for backward
-				// compatibility.
-				bail!(Error::InvalidAuth);
 			}
 		};
 

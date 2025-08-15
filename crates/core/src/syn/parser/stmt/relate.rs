@@ -55,24 +55,24 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_relate_kind(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
+	pub async fn parse_relate_kind(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		match self.peek_kind() {
 			t!("$param") => self.next_token_value().map(Expr::Param),
 			t!("(") => {
 				let span = self.pop_peek().span;
-				let res = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+				let res = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
 				self.expect_closing_delimiter(t!(")"), span)?;
 				Ok(res)
 			}
-			_ => self.parse_thing_or_table(ctx).await,
+			_ => self.parse_thing_or_table(stk).await,
 		}
 	}
 
-	pub async fn parse_relate_expr(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
+	pub async fn parse_relate_expr(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		match self.peek_kind() {
 			t!("[") => {
 				let start = self.pop_peek().span;
-				self.parse_array(ctx, start).await.map(|x| Expr::Literal(Literal::Array(x)))
+				self.parse_array(stk, start).await.map(|x| Expr::Literal(Literal::Array(x)))
 			}
 			t!("$param") => self.next_token_value().map(Expr::Param),
 			t!("RETURN")
@@ -87,20 +87,20 @@ impl Parser<'_> {
 			| t!("REMOVE")
 			| t!("REBUILD")
 			| t!("INFO")
-			| t!("IF") => self.parse_expr_field(ctx).await,
+			| t!("IF") => self.parse_expr_field(stk).await,
 			t!("(") => {
 				let open = self.pop_peek().span;
-				let res = self.parse_expr_field(ctx).await?;
+				let res = self.parse_expr_field(stk).await?;
 				self.expect_closing_delimiter(t!(")"), open)?;
 				Ok(res)
 			}
-			_ => self.parse_record_id(ctx).await.map(|x| Expr::Literal(Literal::RecordId(x))),
+			_ => self.parse_record_id(stk).await.map(|x| Expr::Literal(Literal::RecordId(x))),
 		}
 	}
 
-	pub async fn parse_thing_or_table(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
+	pub async fn parse_thing_or_table(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		if self.peek_whitespace1().kind == t!(":") {
-			self.parse_record_id(ctx).await.map(|x| Expr::Literal(Literal::RecordId(x)))
+			self.parse_record_id(stk).await.map(|x| Expr::Literal(Literal::RecordId(x)))
 		} else {
 			self.next_token_value().map(Expr::Table)
 		}

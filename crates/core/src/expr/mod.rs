@@ -50,7 +50,6 @@ pub(crate) mod scoring;
 pub(crate) mod script;
 pub(crate) mod split;
 pub(crate) mod start;
-pub(crate) mod table_type;
 pub(crate) mod timeout;
 pub(crate) mod tokenizer;
 pub(crate) mod user;
@@ -62,7 +61,6 @@ pub(crate) mod decimal;
 pub mod index;
 pub mod statements;
 
-pub use self::access::{Access, Accesses};
 pub use self::access_type::{AccessType, JwtAccess, RecordAccess};
 pub use self::algorithm::Algorithm;
 pub use self::base::Base;
@@ -117,7 +115,6 @@ pub use self::statements::{
 	RemoveUserStatement, SelectStatement, SetStatement, ShowStatement, SleepStatement,
 	UpdateStatement, UpsertStatement, UseStatement,
 };
-pub use self::table_type::{Relation, TableType};
 pub use self::timeout::Timeout;
 pub use self::tokenizer::Tokenizer;
 pub use self::view::View;

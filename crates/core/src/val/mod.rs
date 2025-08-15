@@ -1,22 +1,21 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
-use std::fmt::{self, Write};
-use std::ops::Bound;
-
+use crate::err::Error;
+use crate::expr::fmt::Pretty;
+use crate::expr::statements::info::InfoStructure;
+use crate::expr::{self, Ident, Kind};
+use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::ToSql;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use geo::Point;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
-
-use crate::err::Error;
-use crate::expr::fmt::Pretty;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{self, Ident, Kind};
-use crate::kvs::impl_kv_value_revisioned;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::{self, Write};
+use std::ops::Bound;
 
 pub mod array;
 pub mod bytes;
@@ -28,10 +27,10 @@ pub mod geometry;
 pub mod number;
 pub mod object;
 pub mod range;
+pub mod record_id;
 pub mod regex;
 pub mod strand;
 pub mod table;
-pub mod thing;
 pub mod uuid;
 pub mod value;
 
@@ -45,10 +44,10 @@ pub use self::geometry::Geometry;
 pub use self::number::{DecimalExt, Number};
 pub use self::object::Object;
 pub use self::range::Range;
+pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::regex::Regex;
 pub use self::strand::{Strand, StrandRef};
 pub use self::table::Table;
-pub use self::thing::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::uuid::Uuid;
 pub use self::value::{CastError, CoerceError};
 
@@ -632,7 +631,7 @@ impl fmt::Display for Value {
 			Value::Object(v) => write!(f, "{v}"),
 			Value::Range(v) => write!(f, "{v}"),
 			Value::Regex(v) => write!(f, "{v}"),
-			Value::Strand(v) => write!(f, "{v}"),
+			Value::Strand(v) => write!(f, "{}", v.to_sql()),
 			Value::RecordId(v) => write!(f, "{v}"),
 			Value::Uuid(v) => write!(f, "{v}"),
 			Value::Closure(v) => write!(f, "{v}"),
@@ -667,7 +666,7 @@ impl TryAdd for Value {
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_add(v)?),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),
 			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_add(w)?),
-			(Self::Array(v), Self::Array(w)) => Self::Array(v.add(w)),
+			(Self::Array(v), Self::Array(w)) => Self::Array(v.concat(w)),
 			(Self::Object(v), Self::Object(w)) => Self::Object(v.add(w)),
 			(v, w) => bail!(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
 		})

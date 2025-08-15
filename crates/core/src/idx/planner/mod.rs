@@ -1,3 +1,15 @@
+use crate::catalog::DatabaseDefinition;
+use crate::ctx::Context;
+use crate::dbs::{Iterable, Iterator, Options, Statement};
+use crate::expr::order::Ordering;
+use crate::expr::with::With;
+use crate::expr::{Cond, Fields, Groups, Ident};
+use anyhow::Result;
+use reblessive::tree::Stk;
+use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
+use std::sync::atomic::{self, AtomicU8};
+
 pub mod checker;
 pub(crate) mod executor;
 pub(crate) mod iterators;
@@ -6,24 +18,11 @@ pub(crate) mod plan;
 pub(in crate::idx) mod rewriter;
 pub(in crate::idx) mod tree;
 
-use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
-use std::sync::atomic::{self, AtomicU8};
-
-use anyhow::Result;
-use reblessive::tree::Stk;
-
-use crate::ctx::Context;
-use crate::dbs::{Iterable, Iterator, Options, Statement};
-use crate::err::Error;
-use crate::expr::order::Ordering;
-use crate::expr::with::With;
-use crate::expr::{Cond, Fields, Groups, Ident};
-use crate::idx::planner::executor::{InnerQueryExecutor, IteratorEntry, QueryExecutor};
-use crate::idx::planner::iterators::IteratorRef;
-use crate::idx::planner::knn::KnnBruteForceResults;
-use crate::idx::planner::plan::{Plan, PlanBuilder, PlanBuilderParameters};
-use crate::idx::planner::tree::Tree;
+use executor::{InnerQueryExecutor, IteratorEntry, QueryExecutor};
+use iterators::IteratorRef;
+use knn::KnnBruteForceResults;
+use plan::{Plan, PlanBuilder, PlanBuilderParameters};
+use tree::Tree;
 
 /// The goal of this structure is to cache parameters so they can be easily
 /// passed from one function to the other, so we don't pass too many arguments.
@@ -31,8 +30,6 @@ use crate::idx::planner::tree::Tree;
 pub(crate) struct StatementContext<'a> {
 	pub(crate) ctx: &'a Context,
 	pub(crate) opt: &'a Options,
-	pub(crate) ns: &'a str,
-	pub(crate) db: &'a str,
 	pub(crate) stm: &'a Statement<'a>,
 	pub(crate) fields: Option<&'a Fields>,
 	pub(crate) with: Option<&'a With>,
@@ -76,13 +73,10 @@ pub(crate) enum GrantedPermission {
 impl<'a> StatementContext<'a> {
 	pub(crate) fn new(ctx: &'a Context, opt: &'a Options, stm: &'a Statement<'a>) -> Result<Self> {
 		let is_perm = opt.check_perms(stm.into())?;
-		let (ns, db) = opt.ns_db()?;
 		Ok(Self {
 			ctx,
 			opt,
 			stm,
-			ns,
-			db,
 			fields: stm.expr(),
 			with: stm.with(),
 			order: stm.order(),
@@ -97,8 +91,9 @@ impl<'a> StatementContext<'a> {
 			return Ok(GrantedPermission::Full);
 		}
 		// Get the table for this planner
-		match self.ctx.tx().get_tb(self.ns, self.db, tb).await {
-			Ok(table) => {
+		let (ns, db) = self.ctx.get_ns_db_ids_ro(self.opt).await?;
+		match self.ctx.tx().get_tb(ns, db, tb).await? {
+			Some(table) => {
 				// TODO(tobiemh): we should really
 				// not even get here if the table
 				// permissions are NONE, because
@@ -116,13 +111,8 @@ impl<'a> StatementContext<'a> {
 					return Ok(GrantedPermission::None);
 				}
 			}
-			Err(e) => {
-				if !matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
-					// We can safely ignore this error,
-					// as it just means that there is no
-					// table and no permissions defined.
-					return Err(e);
-				}
+			None => {
+				// Fall through to full permissions.
 			}
 		}
 		Ok(GrantedPermission::Full)
@@ -282,6 +272,7 @@ impl QueryPlanner {
 
 	pub(crate) async fn add_iterables(
 		&mut self,
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		ctx: &StatementContext<'_>,
 		t: Ident,
@@ -294,6 +285,7 @@ impl QueryPlanner {
 
 		let is_knn = !tree.knn_expressions.is_empty();
 		let mut exe = InnerQueryExecutor::new(
+			db,
 			stk,
 			ctx.ctx,
 			ctx.opt,

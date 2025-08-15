@@ -1,19 +1,8 @@
-use std::fmt::{Debug, Formatter};
-use std::mem;
-use std::ops::Deref;
-use std::sync::Arc;
-
-use anyhow::Result;
-use reblessive::tree::Stk;
-
+use crate::catalog::{self, DatabaseDefinition, TableDefinition};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Workable};
-use crate::err::Error;
 use crate::expr::permission::Permission;
-use crate::expr::statements::define::{
-	DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement, DefineIndexStatement,
-	DefineTableStatement,
-};
+use crate::expr::statements::define::{DefineEventStatement, DefineIndexStatement};
 use crate::expr::statements::live::LiveStatement;
 use crate::expr::{Base, FlowResultExt as _, Ident};
 use crate::iam::{Action, ResourceKind};
@@ -21,6 +10,12 @@ use crate::idx::planner::RecordStrategy;
 use crate::idx::planner::iterators::IteratorRecord;
 use crate::kvs::cache;
 use crate::val::{RecordId, Value};
+use anyhow::Result;
+use reblessive::tree::Stk;
+use std::fmt::{Debug, Formatter};
+use std::mem;
+use std::ops::Deref;
+use std::sync::Arc;
 
 pub(crate) struct Document {
 	/// The record id of this document
@@ -327,10 +322,10 @@ impl Document {
 				// Loop over each field in document
 				for k in out.each(&fd.name).iter() {
 					// Process the field permissions
-					match &fd.permissions.select {
-						Permission::Full => (),
-						Permission::None => out.cut(k),
-						Permission::Specific(e) => {
+					match &fd.select_permission {
+						catalog::Permission::Full => (),
+						catalog::Permission::None => out.cut(k),
+						catalog::Permission::Specific(e) => {
 							// Disable permissions
 							let opt = &opt.new_with_perms(false);
 							// Get the initial value
@@ -376,7 +371,7 @@ impl Document {
 	}
 
 	/// Get the database for this document
-	pub async fn db(&self, ctx: &Context, opt: &Options) -> Result<Arc<DefineDatabaseStatement>> {
+	pub async fn db(&self, ctx: &Context, opt: &Options) -> Result<Arc<DatabaseDefinition>> {
 		// Get the NS + DB
 		let (ns, db) = opt.ns_db()?;
 		// Get transaction
@@ -405,9 +400,9 @@ impl Document {
 	}
 
 	/// Get the table for this document
-	pub async fn tb(&self, ctx: &Context, opt: &Options) -> Result<Arc<DefineTableStatement>> {
+	pub async fn tb(&self, ctx: &Context, opt: &Options) -> Result<Arc<TableDefinition>> {
 		// Get the NS + DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 		// Get the record id
 		let id = self.id()?;
 		// Get transaction
@@ -422,54 +417,43 @@ impl Document {
 				match cache.get(&key) {
 					Some(val) => val.try_into_type(),
 					None => {
-						let val = match txn.get_tb(ns, db, &id.table).await {
-							Err(e) => {
-								// The table doesn't exist
-								if matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
-									// Allowed to run?
-									opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
-									// We can create the table automatically
-									txn.ensure_ns_db_tb(ns, db, &id.table, opt.strict).await
-								} else {
-									// There was an error
-									Err(e)
-								}
+						let val = match txn.get_tb(ns, db, &id.table).await? {
+							Some(tb) => tb,
+							None => {
+								// Allowed to run?
+								opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
+								// We can create the table automatically
+								let (ns, db) = opt.ns_db()?;
+								txn.ensure_ns_db_tb(ns, db, &id.table, opt.strict).await?
 							}
-							// The table exists
-							Ok(tb) => Ok(tb),
-						}?;
-						cache.insert(key, cache::ds::Entry::Any(val.clone()));
-						Ok(val)
+						};
+						let val = cache::ds::Entry::Any(val.clone());
+						cache.insert(key, val.clone());
+						val.try_into_type()
 					}
 				}
 			}
 			// No cache is present on the context
 			_ => {
 				// Return the table or attempt to define it
-				match txn.get_tb(ns, db, &id.table).await {
-					Err(e) => {
-						// The table doesn't exist
-						if matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
-							// Allowed to run?
-							opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
-							// We can create the table automatically
-							txn.ensure_ns_db_tb(ns, db, &id.table, opt.strict).await
-						} else {
-							// There was an error
-							Err(e)
-						}
+				match txn.get_tb(ns, db, &id.table).await? {
+					Some(tb) => Ok(tb),
+					None => {
+						// Allowed to run?
+						opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
+						// We can create the table automatically
+						let (ns, db) = opt.ns_db()?;
+						txn.ensure_ns_db_tb(ns, db, &id.table, opt.strict).await
 					}
-					// The table exists
-					Ok(tb) => Ok(tb),
 				}
 			}
 		}
 	}
 
 	/// Get the foreign tables for this document
-	pub async fn ft(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineTableStatement]>> {
+	pub async fn ft(&self, ctx: &Context, opt: &Options) -> Result<Arc<[TableDefinition]>> {
 		// Get the NS + DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context
@@ -498,7 +482,7 @@ impl Document {
 	/// Get the events for this document
 	pub async fn ev(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineEventStatement]>> {
 		// Get the NS + DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context
@@ -525,9 +509,13 @@ impl Document {
 	}
 
 	/// Get the fields for this document
-	pub async fn fd(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineFieldStatement]>> {
+	pub async fn fd(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Arc<[catalog::FieldDefinition]>> {
 		// Get the NS + DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context
@@ -538,16 +526,14 @@ impl Document {
 				let key = cache::ds::Lookup::Fds(ns, db, &tb.name, tb.cache_fields_ts);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_fds(),
 					None => {
 						let val = ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await?;
-						let val = cache::ds::Entry::Fds(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Fds(val.clone()));
+						Ok(val)
 					}
 				}
 			}
-			.try_into_fds(),
 			// No cache is present on the context
 			None => ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await,
 		}
@@ -556,7 +542,7 @@ impl Document {
 	/// Get the indexes for this document
 	pub async fn ix(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineIndexStatement]>> {
 		// Get the NS + DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context
@@ -585,7 +571,7 @@ impl Document {
 	// Get the lives for this document
 	pub async fn lv(&self, ctx: &Context, opt: &Options) -> Result<Arc<[LiveStatement]>> {
 		// Get the NS + DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context

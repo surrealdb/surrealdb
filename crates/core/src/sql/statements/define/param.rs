@@ -1,9 +1,8 @@
-use std::fmt::{self, Display, Write};
-
 use super::DefineKind;
 use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::{Expr, Ident, Permission};
+use crate::sql::{Expr, Ident, Permission, ToSql};
 use crate::val::Strand;
+use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -25,7 +24,7 @@ impl Display for DefineParamStatement {
 		}
 		write!(f, " ${} VALUE {}", self.name, self.value)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

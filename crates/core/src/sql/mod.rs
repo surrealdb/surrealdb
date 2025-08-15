@@ -115,3 +115,8 @@ pub use self::timeout::Timeout;
 pub use self::tokenizer::Tokenizer;
 pub use self::view::View;
 pub use self::with::With;
+
+/// Trait for types that can be converted to SQL representation
+pub trait ToSql {
+	fn to_sql(&self) -> String;
+}

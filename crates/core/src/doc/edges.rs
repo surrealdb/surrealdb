@@ -1,12 +1,12 @@
-use anyhow::{Result, ensure};
-
+use crate::catalog::{Relation, TableType};
 use crate::ctx::Context;
 use crate::dbs::{Options, Statement, Workable};
 use crate::doc::Document;
 use crate::err::Error;
+use crate::expr::Dir;
 use crate::expr::paths::{EDGE, IN, OUT};
-use crate::expr::{Dir, Relation, TableType};
 use crate::val::Value;
+use anyhow::{Result, ensure};
 
 impl Document {
 	pub(super) async fn store_edges_data(
@@ -24,7 +24,7 @@ impl Document {
 		// Store the record edges
 		if let Workable::Relate(l, r, _) = &self.extras {
 			// Get the namespace / database
-			let (ns, db) = opt.ns_db()?;
+			let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
 			// Get the record id
 			let rid = self.id()?;
 			// Get the transaction

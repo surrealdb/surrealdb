@@ -1,9 +1,8 @@
-use std::fmt::{self, Display};
-
 use super::DefineKind;
 use crate::sql::access::AccessDuration;
-use crate::sql::{AccessType, Base, Expr, Ident};
+use crate::sql::{AccessType, Base, Expr, Ident, ToSql as _};
 use crate::val::Strand;
+use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -67,8 +66,9 @@ impl Display for DefineAccessStatement {
 				None => "NONE".to_string(),
 			}
 		)?;
+
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		Ok(())
 	}
