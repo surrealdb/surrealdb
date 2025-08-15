@@ -11,7 +11,7 @@ use crate::err::Error;
 use crate::expr::data::Data;
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::{AssignOperator, FlowResultExt};
-use crate::val::record::{Record, RecordType};
+use crate::val::record::RecordType;
 use crate::val::{RecordId, Value};
 
 impl Document {
