@@ -612,6 +612,16 @@ impl IndexRangeThingIterator {
 		Ok(RangeScan::new(beg, range.from.inclusive, end, range.to.inclusive))
 	}
 
+	/// Compute the begin key for a range scan over an index by scalar value.
+	///
+	/// - If `from.value` is `None`, we need the very beginning of the range for
+	///   the given `value_type` (e.g., smallest int/float/decimal), so we use the
+	///   type-specific index prefix begin.
+	/// - Otherwise, we serialize the `from` value into an index field array and
+	///   construct the boundary key. For an inclusive lower bound we use
+	///   `prefix_ids_beg` (include all records with that value), and for an
+	///   exclusive lower bound we use `prefix_ids_end` so the scan starts after
+	///   all records with that exact value.
 	fn compute_beg(
 		ns: &str,
 		db: &str,
@@ -631,6 +641,16 @@ impl IndexRangeThingIterator {
 		}
 	}
 
+	/// Compute the end key for a range scan over an index by scalar value.
+	///
+	/// - If `to.value` is `None`, we need the very end of the range for the
+	///   given `value_type` (e.g., greatest int/float/decimal), so we use the
+	///   type-specific index prefix end.
+	/// - Otherwise, we serialize the `to` value and construct the boundary key.
+	///   For an inclusive upper bound we use `prefix_ids_end` so the scan can
+	///   include all records with that exact value; for an exclusive upper bound
+	///   we use `prefix_ids_beg` so the scan stops just before any key matching
+	///   that exact value.
 	fn compute_end(
 		ns: &str,
 		db: &str,
@@ -650,6 +670,14 @@ impl IndexRangeThingIterator {
 		}
 	}
 
+	/// Build a range scan over a composite index using a fixed `prefix` and
+	/// optional scalar range on the next column.
+	///
+	/// - When `from` or `to` values are `None`, we scan the full extent of the
+	///   composite tuple starting at `prefix` by using the composite begin/end
+	///   sentinels.
+	/// - When values are provided, we append them to the prefix and construct
+	///   inclusive/exclusive boundaries using the appropriate prefix functions.
 	fn range_scan_prefix(
 		ns: &str,
 		db: &str,
@@ -658,16 +686,19 @@ impl IndexRangeThingIterator {
 		from: RangeValue,
 		to: RangeValue,
 	) -> Result<RangeScan> {
+		// Prepare the fixed composite prefix (may be empty for the leading column)
 		let prefix_array = if prefix.is_empty() {
 			Array::with_capacity(1)
 		} else {
 			Array::from(prefix.to_vec())
 		};
+		// Compute the lower bound for the scan
 		let beg = if from.value.is_none() {
 			Index::prefix_ids_composite_beg(ns, db, &ix.what, &ix.name, &prefix_array)?
 		} else {
 			Self::compute_beg_with_prefix(ns, db, &ix.what, &ix.name, &prefix_array, &from)?
 		};
+		// Compute the upper bound for the scan
 		let end = if to.value.is_none() {
 			Index::prefix_ids_composite_end(ns, db, &ix.what, &ix.name, &prefix_array)?
 		} else {
@@ -676,6 +707,13 @@ impl IndexRangeThingIterator {
 		Ok(RangeScan::new(beg, from.inclusive, end, to.inclusive))
 	}
 
+	/// Compute the begin key for a composite index range when a fixed `prefix`
+	/// (values for leading columns) is provided and an optional scalar `from`
+	/// value applies to the next column.
+	///
+	/// Inclusive `from` uses `prefix_ids_beg` to include all rows equal to the
+	/// boundary value; exclusive `from` uses `prefix_ids_end` to start just after
+	/// all keys equal to that boundary.
 	fn compute_beg_with_prefix(
 		ns: &str,
 		db: &str,
@@ -693,6 +731,12 @@ impl IndexRangeThingIterator {
 		}
 	}
 
+	/// Compute the end key for a composite index range when a fixed `prefix`
+	/// is provided and an optional scalar `to` value applies to the next column.
+	///
+	/// Inclusive `to` uses `prefix_ids_end` so rows equal to the boundary are
+	/// still reachable by the scan; exclusive `to` uses `prefix_ids_beg` to stop
+	/// just before any key matching that boundary value.
 	fn compute_end_with_prefix(
 		ns: &str,
 		db: &str,
@@ -710,6 +754,12 @@ impl IndexRangeThingIterator {
 		}
 	}
 
+	/// Scan key-value pairs within the current range, up to `limit`, and
+	/// advance the begin key to resume pagination without duplicates.
+	///
+	/// We update `self.r.beg` to be one byte past the last returned key
+	/// (by appending 0x00), which works with lexicographic ordering to ensure
+	/// the next call starts strictly after the last result.
 	async fn next_scan(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<(Key, Val)>> {
 		let res = tx.scan(self.r.range(), limit, None).await?;
 		if let Some((key, _)) = res.last() {
@@ -719,6 +769,9 @@ impl IndexRangeThingIterator {
 		Ok(res)
 	}
 
+	/// Scan only the keys within the current range, up to `limit`, and advance
+	/// the begin key to resume on the next call without duplicates. This mirrors
+	/// `next_scan` but avoids fetching values for count-only operations.
 	async fn next_keys(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<Key>> {
 		let res = tx.keys(self.r.range(), limit, None).await?;
 		if let Some(key) = res.last() {
