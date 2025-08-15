@@ -1,15 +1,7 @@
-use std::collections::HashMap;
-use std::collections::hash_map::Entry;
-use std::sync::Arc;
-
-use anyhow::{Result, bail};
-use filter::Filter;
-use reblessive::tree::Stk;
-
+use crate::catalog;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::statements::DefineAnalyzerStatement;
 use crate::expr::{FlowResultExt as _, Function};
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::{Tokenizer, Tokens};
@@ -17,6 +9,12 @@ use crate::idx::ft::offset::Offset;
 use crate::idx::ft::{DocLength, TermFrequency};
 use crate::idx::trees::store::IndexStores;
 use crate::val::{Strand, Value};
+use anyhow::{Result, bail};
+use filter::Filter;
+use reblessive::tree::Stk;
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::sync::Arc;
 
 pub(in crate::idx::ft) mod filter;
 pub(in crate::idx) mod mapper;
@@ -24,12 +22,12 @@ pub(in crate::idx::ft) mod tokenizer;
 
 #[derive(Clone)]
 pub(crate) struct Analyzer {
-	az: Arc<DefineAnalyzerStatement>,
+	az: Arc<catalog::AnalyzerDefinition>,
 	filters: Arc<Option<Vec<Filter>>>,
 }
 
 impl Analyzer {
-	pub(crate) fn new(ixs: &IndexStores, az: Arc<DefineAnalyzerStatement>) -> Result<Self> {
+	pub(crate) fn new(ixs: &IndexStores, az: Arc<catalog::AnalyzerDefinition>) -> Result<Self> {
 		Ok(Self {
 			filters: Arc::new(Filter::try_from(ixs, &az.filters)?),
 			az,
@@ -184,6 +182,7 @@ mod tests {
 	use super::Analyzer;
 	use crate::ctx::MutableContext;
 	use crate::dbs::Options;
+	use crate::expr::DefineAnalyzerStatement;
 	use crate::idx::ft::analyzer::filter::FilteringStage;
 	use crate::idx::ft::analyzer::tokenizer::{Token, Tokens};
 	use crate::kvs::{Datastore, LockType, TransactionType};
@@ -205,7 +204,11 @@ mod tests {
 			panic!()
 		};
 
-		let a = Analyzer::new(ctx.get_index_stores(), Arc::new(az.into())).unwrap();
+		let a = Analyzer::new(
+			ctx.get_index_stores(),
+			Arc::new(DefineAnalyzerStatement::from(az).into_definition()),
+		)
+		.unwrap();
 
 		let mut stack = reblessive::TreeStack::new();
 

@@ -57,7 +57,7 @@ impl Document {
 
 			// Loop through all field definitions
 			for fd in self.fd(ctx, opt).await?.iter() {
-				let is_flex = fd.flex;
+				let is_flex = fd.flexible;
 				let is_literal = fd.field_kind.as_ref().is_some_and(Kind::contains_literal);
 				for k in self.current.doc.each(&fd.name).into_iter() {
 					defined_field_names.insert(&k, is_flex || is_literal);
@@ -567,20 +567,20 @@ impl FieldEditContext<'_> {
 		if self.opt.check_perms(Action::Edit)? {
 			// Get the permission clause
 			let perms = if self.doc.is_new() {
-				&self.def.permissions.create
+				&self.def.create_permission
 			} else {
-				&self.def.permissions.update
+				&self.def.update_permission
 			};
 			// Match the permission clause
 			let val = match perms {
 				// The field PERMISSIONS clause
 				// is FULL, enabling this field
 				// to be updated without checks.
-				Permission::Full => val,
+				catalog::Permission::Full => val,
 				// The field PERMISSIONS clause
 				// is NONE, meaning that this
 				// change will be reverted.
-				Permission::None => {
+				catalog::Permission::None => {
 					if val != *self.old {
 						self.old.as_ref().clone()
 					} else {
@@ -591,7 +591,7 @@ impl FieldEditContext<'_> {
 				// is a custom expression, so
 				// we check the expression and
 				// revert the field if denied.
-				Permission::Specific(expr) => {
+				catalog::Permission::Specific(expr) => {
 					// Arc the current value
 					let now = Arc::new(val.clone());
 					// Get the current document

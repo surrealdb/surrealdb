@@ -5,6 +5,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use super::DefineKind;
+use crate::catalog;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -31,6 +32,27 @@ pub struct DefineAnalyzerStatement {
 impl_kv_value_revisioned!(DefineAnalyzerStatement);
 
 impl DefineAnalyzerStatement {
+	pub(crate) fn into_definition(&self) -> catalog::AnalyzerDefinition {
+		catalog::AnalyzerDefinition {
+			name: self.name.clone().into_string(),
+			function: self.function.clone(),
+			tokenizers: self.tokenizers.clone(),
+			filters: self.filters.clone(),
+			comment: self.comment.as_ref().map(|x| x.clone().into_string()),
+		}
+	}
+
+	pub fn from_definition(def: &catalog::AnalyzerDefinition) -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Ident::new(def.name.clone()).unwrap(),
+			function: def.function.clone(),
+			tokenizers: def.tokenizers.clone(),
+			filters: def.filters.clone(),
+			comment: def.comment.as_ref().map(|x| Strand::new(x.clone()).unwrap()),
+		}
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context,
@@ -58,11 +80,7 @@ impl DefineAnalyzerStatement {
 		}
 		// Process the statement
 		let key = crate::key::database::az::new(ns, db, &self.name);
-		let az = DefineAnalyzerStatement {
-			// Don't persist the `IF NOT EXISTS` clause to schema
-			kind: DefineKind::Default,
-			..self.clone()
-		};
+		let az = self.into_definition();
 		ctx.get_index_stores().mappers().load(&az).await?;
 		txn.set(&key, &az, None).await?;
 		// Clear the cache

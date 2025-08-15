@@ -21,8 +21,8 @@ use crate::err::Error;
 use crate::expr::statements::define::config::ConfigStore;
 use crate::expr::statements::define::{ApiDefinition, BucketDefinition, DefineSequenceStatement};
 use crate::expr::statements::{
-	DefineAnalyzerStatement, DefineEventStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineModelStatement, DefineParamStore, DefineUserStatement, LiveStatement,
+	DefineEventStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
+	DefineParamStore, LiveStatement,
 };
 use crate::idx::planner::ScanDirection;
 use crate::idx::trees::store::cache::IndexTreeCaches;
@@ -479,7 +479,7 @@ impl Transaction {
 
 	/// Retrieve all ROOT level users in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_root_users(&self) -> Result<Arc<[DefineUserStatement]>> {
+	pub async fn all_root_users(&self) -> Result<Arc<[catalog::UserDefinition]>> {
 		let qey = cache::tx::Lookup::Rus;
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_rus(),
@@ -551,7 +551,7 @@ impl Transaction {
 
 	/// Retrieve all namespace user definitions for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_ns_users(&self, ns: NamespaceId) -> Result<Arc<[DefineUserStatement]>> {
+	pub async fn all_ns_users(&self, ns: NamespaceId) -> Result<Arc<[catalog::UserDefinition]>> {
 		let qey = cache::tx::Lookup::Nus(ns);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_nus(),
@@ -634,7 +634,7 @@ impl Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-	) -> Result<Arc<[DefineUserStatement]>> {
+	) -> Result<Arc<[catalog::UserDefinition]>> {
 		let qey = cache::tx::Lookup::Dus(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_dus(),
@@ -724,7 +724,7 @@ impl Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-	) -> Result<Arc<[DefineAnalyzerStatement]>> {
+	) -> Result<Arc<[catalog::AnalyzerDefinition]>> {
 		let qey = cache::tx::Lookup::Azs(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_azs(),
@@ -1032,7 +1032,7 @@ impl Transaction {
 
 	/// Retrieve a specific root user definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_root_user(&self, us: &str) -> Result<Option<Arc<DefineUserStatement>>> {
+	pub async fn get_root_user(&self, us: &str) -> Result<Option<Arc<catalog::UserDefinition>>> {
 		let qey = cache::tx::Lookup::Ru(us);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Some),
@@ -1049,7 +1049,7 @@ impl Transaction {
 		}
 	}
 
-	pub async fn expect_root_user(&self, us: &str) -> Result<Arc<DefineUserStatement>> {
+	pub async fn expect_root_user(&self, us: &str) -> Result<Arc<catalog::UserDefinition>> {
 		match self.get_root_user(us).await? {
 			Some(val) => Ok(val),
 			None => anyhow::bail!(Error::UserRootNotFound {
@@ -1310,7 +1310,7 @@ impl Transaction {
 		&self,
 		ns: NamespaceId,
 		us: &str,
-	) -> Result<Option<Arc<DefineUserStatement>>> {
+	) -> Result<Option<Arc<catalog::UserDefinition>>> {
 		let qey = cache::tx::Lookup::Nu(ns, us);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Some),
@@ -1451,7 +1451,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		us: &str,
-	) -> Result<Option<Arc<DefineUserStatement>>> {
+	) -> Result<Option<Arc<catalog::UserDefinition>>> {
 		let qey = cache::tx::Lookup::Du(ns, db, us);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Some),
@@ -1613,7 +1613,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		az: &str,
-	) -> Result<Arc<DefineAnalyzerStatement>> {
+	) -> Result<Arc<catalog::AnalyzerDefinition>> {
 		let qey = cache::tx::Lookup::Az(ns, db, az);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),

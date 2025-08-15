@@ -35,18 +35,6 @@ pub struct SigninData {
 	pub refresh: Option<String>,
 }
 
-impl SigninData {
-	/// Returns the signin data as a surrealql struct.
-	fn into_value(self) -> Value {
-		let mut out = Object::default();
-		out.insert("token".to_string(), self.token.into());
-		if let Some(refresh) = self.refresh {
-			out.insert("refresh".to_string(), refresh.into());
-		}
-		out.into()
-	}
-}
-
 pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Result<SigninData> {
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
@@ -336,6 +324,17 @@ pub async fn db_access(
 	}
 }
 
+fn auth_from_level_user(level: Level, user: &catalog::UserDefinition) -> Result<Auth> {
+	let roles = user
+		.roles
+		.iter()
+		.map(|x| Role::from_str(x))
+		.collect::<Result<Vec<_>, _>>()
+		.map_err(Error::from)?;
+	let actor = Actor::new(user.name.clone(), roles, level);
+	Ok(Auth::new(actor))
+}
+
 pub async fn db_user(
 	kvs: &Datastore,
 	session: &mut Session,
@@ -353,7 +352,7 @@ pub async fn db_user(
 				iss: Some(SERVER_NAME.to_owned()),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
-				exp: expiration(u.duration.token.map(|x| x.0))?,
+				exp: expiration(u.token_duration)?,
 				jti: Some(Uuid::new_v4().to_string()),
 				ns: Some(ns.clone()),
 				db: Some(db.clone()),
@@ -364,14 +363,15 @@ pub async fn db_user(
 			trace!("Signing in to database `{ns}/{db}`");
 			// Create the authentication token
 			let enc = encode(&HEADER, &val, &key);
+
+			let au = auth_from_level_user(Level::Database(ns.clone(), db.clone()), &u)?;
+
 			// Set the authentication on the session
 			session.tk = Some(val.into_claims_object().into());
 			session.ns = Some(ns.clone());
 			session.db = Some(db.clone());
-			session.exp = expiration(u.duration.session.map(|x| x.0))?;
-			session.au = Arc::new(
-				(&u, Level::Database(ns.clone(), db.clone())).try_into().map_err(Error::from)?,
-			);
+			session.exp = expiration(u.session_duration)?;
+			session.au = Arc::new(au);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -444,7 +444,8 @@ pub async fn ns_user(
 				iss: Some(SERVER_NAME.to_owned()),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
-				exp: expiration(u.duration.token.map(|x| x.0))?,
+				exp: expiration(u.token_duration)?,
+
 				jti: Some(Uuid::new_v4().to_string()),
 				ns: Some(ns.clone()),
 				id: Some(user),
@@ -454,12 +455,14 @@ pub async fn ns_user(
 			trace!("Signing in to namespace `{ns}`");
 			// Create the authentication token
 			let enc = encode(&HEADER, &val, &key);
+
+			let au = auth_from_level_user(Level::Namespace(ns.clone()), &u)?;
+
 			// Set the authentication on the session
 			session.tk = Some(val.into_claims_object().into());
 			session.ns = Some(ns.clone());
-			session.exp = expiration(u.duration.session.map(|x| x.0))?;
-			session.au =
-				Arc::new((&u, Level::Namespace(ns.clone())).try_into().map_err(Error::from)?);
+			session.exp = expiration(u.session_duration)?;
+			session.au = Arc::new(au);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -495,7 +498,7 @@ pub async fn root_user(
 				iss: Some(SERVER_NAME.to_owned()),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
-				exp: expiration(u.duration.token.map(|x| x.0))?,
+				exp: expiration(u.token_duration)?,
 				jti: Some(Uuid::new_v4().to_string()),
 				id: Some(user),
 				..Claims::default()
@@ -504,10 +507,13 @@ pub async fn root_user(
 			trace!("Signing in as root");
 			// Create the authentication token
 			let enc = encode(&HEADER, &val, &key);
+
+			let au = auth_from_level_user(Level::Root, &u)?;
+
 			// Set the authentication on the session
 			session.tk = Some(val.into_claims_object().into());
-			session.exp = expiration(u.duration.session.map(|x| x.0))?;
-			session.au = Arc::new((&u, Level::Root).try_into().map_err(Error::from)?);
+			session.exp = expiration(u.session_duration)?;
+			session.au = Arc::new(au);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully

@@ -1,9 +1,7 @@
+use super::{Action, Actor, Level, Resource, Role, is_allowed};
 use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-
-use super::{Action, Actor, Error, Level, Resource, Role, is_allowed};
-use crate::expr::statements::{DefineAccessStatement, DefineUserStatement};
 
 /// Specifies the current authentication for the datastore execution context.
 #[revisioned(revision = 1)]
@@ -124,8 +122,11 @@ impl Auth {
 	pub fn has_viewer_role(&self) -> bool {
 		self.actor.has_viewer_role()
 	}
+
+	//pub fn from_user_definition(level: Level, user: &catalog::UserDefinition) -> Self {}
 }
 
+/*
 impl std::convert::TryFrom<(&DefineUserStatement, Level)> for Auth {
 	type Error = Error;
 	fn try_from(val: (&DefineUserStatement, Level)) -> Result<Self, Self::Error> {
@@ -138,3 +139,4 @@ impl std::convert::From<(&DefineAccessStatement, Level)> for Auth {
 		Self::new((val.0, val.1).into())
 	}
 }
+*/

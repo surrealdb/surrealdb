@@ -1,11 +1,11 @@
 //! Stores a DEFINE ANALYZER config definition
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
-
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::expr::statements::define::DefineAnalyzerStatement;
+use crate::catalog;
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Az<'a> {
@@ -21,7 +21,7 @@ pub(crate) struct Az<'a> {
 }
 
 impl KVKey for Az<'_> {
-	type ValueType = DefineAnalyzerStatement;
+	type ValueType = catalog::AnalyzerDefinition;
 }
 
 pub fn new(ns: NamespaceId, db: DatabaseId, az: &str) -> Az<'_> {

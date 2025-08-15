@@ -10,6 +10,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use super::DefineKind;
+use crate::catalog::{self, UserDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -20,8 +21,8 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::user::UserDuration;
 use crate::expr::{Base, Ident};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::impl_kv_value_revisioned;
-use crate::val::{Strand, Value};
+use crate::sql::ToSql;
+use crate::val::{self, Strand, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -35,8 +36,6 @@ pub struct DefineUserStatement {
 	pub duration: UserDuration,
 	pub comment: Option<Strand>,
 }
-
-impl_kv_value_revisioned!(DefineUserStatement);
 
 impl DefineUserStatement {
 	pub fn new_with_password(base: Base, user: Strand, pass: &str, role: Ident) -> Self {
@@ -56,6 +55,34 @@ impl DefineUserStatement {
 			roles: vec![role],
 			duration: UserDuration::default(),
 			comment: None,
+		}
+	}
+
+	pub fn into_definition(&self) -> catalog::UserDefinition {
+		UserDefinition {
+			name: self.name.clone().to_string(),
+			hash: self.hash.clone(),
+			code: self.code.clone(),
+			roles: self.roles.iter().map(|x| x.clone().into_string()).collect(),
+			token_duration: self.duration.token.map(|x| x.0),
+			session_duration: self.duration.session.map(|x| x.0),
+			comment: self.comment.as_ref().map(|x| x.clone().into_string()),
+		}
+	}
+
+	pub fn from_definition(base: Base, def: &catalog::UserDefinition) -> Self {
+		Self {
+			kind: DefineKind::Default,
+			base,
+			name: Ident::new(def.name.clone()).unwrap(),
+			hash: def.hash.clone(),
+			code: def.code.clone(),
+			roles: def.roles.iter().map(|x| Ident::new(x.clone()).unwrap()).collect(),
+			duration: UserDuration {
+				token: def.token_duration.map(val::Duration),
+				session: def.session_duration.map(val::Duration),
+			},
+			comment: def.comment.as_ref().map(|x| Strand::new(x.clone()).unwrap()),
 		}
 	}
 
@@ -89,16 +116,7 @@ impl DefineUserStatement {
 				}
 				// Process the statement
 				let key = crate::key::root::us::new(&self.name);
-				txn.set(
-					&key,
-					&DefineUserStatement {
-						// Don't persist the `IF NOT EXISTS` clause to schema
-						kind: DefineKind::Default,
-						..self.clone()
-					},
-					None,
-				)
-				.await?;
+				txn.set(&key, &self.into_definition(), None).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -131,16 +149,7 @@ impl DefineUserStatement {
 
 				// Process the statement
 				let key = crate::key::namespace::us::new(ns.namespace_id, &self.name);
-				txn.set(
-					&key,
-					&DefineUserStatement {
-						// Don't persist the `IF NOT EXISTS` clause to schema
-						kind: DefineKind::Default,
-						..self.clone()
-					},
-					None,
-				)
-				.await?;
+				txn.set(&key, &self.into_definition(), None).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -175,16 +184,7 @@ impl DefineUserStatement {
 				// Process the statement
 				let key =
 					crate::key::database::us::new(db.namespace_id, db.database_id, &self.name);
-				txn.set(
-					&key,
-					&DefineUserStatement {
-						// Don't persist the `IF NOT EXISTS` clause to schema
-						kind: DefineKind::Default,
-						..self.clone()
-					},
-					None,
-				)
-				.await?;
+				txn.set(&key, &self.into_definition(), None).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -233,7 +233,7 @@ impl Display for DefineUserStatement {
 			}
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v.to_sql())?
 		}
 		Ok(())
 	}
