@@ -2,8 +2,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::Document;
 use reblessive::tree::Stk;
-
-use super::IgnoreError;
+use crate::expr::FlowResultExt as _;
+use crate::err::Error;
 
 impl Document {
 	pub(super) async fn computed_fields(
@@ -12,7 +12,9 @@ impl Document {
         ctx: &Context, 
         opt: &Options, 
         doc_kind: DocKind,
-    ) -> Result<(), IgnoreError> {
+    ) -> anyhow::Result<()> {
+		// Get the record id for the document
+		let rid = self.id()?;
         // Get the fields to compute
         let fields = self.fd(ctx, opt).await?;
 
@@ -32,7 +34,15 @@ impl Document {
         // Compute the fields
 		for fd in fields.iter() {
 			if let Some(computed) = &fd.computed {
-				let val = computed.compute(stk, ctx, opt, Some(&doc)).await.unwrap();
+				let mut val = computed.compute(stk, ctx, opt, Some(&doc)).await.catch_return()?;
+				if let Some(kind) = fd.field_kind.as_ref() {
+					val = val.coerce_to_kind(kind).map_err(|e| Error::FieldCoerce {
+						thing: rid.to_string(),
+						field_name: fd.name.to_string(),
+						error: Box::new(e),
+					})?;
+				}
+
 				doc.doc.to_mut().put(&fd.name, val);
 			}
 		}

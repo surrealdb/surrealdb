@@ -282,13 +282,15 @@ impl DefineFieldStatement {
 		// Find all existing field definitions
 		let fields = txn.all_tb_fields(ns, db, &self.what, None).await?;
 		if self.computed.is_some() {
+			// Ensure the field is not the `id` field
+			ensure!(!self.name.is_id(), Error::IdFieldKeywordConflict("COMPUTED".into()));
+
 			// Ensure the field is top-level
 			ensure!(self.name.len() == 1, Error::ComputedNestedField(self.name.to_string()));
 
 			// Ensure there are no conflicting clauses
 			ensure!(self.value.is_none(), Error::ComputedKeywordConflict("VALUE".into()));
 			ensure!(self.assert.is_none(), Error::ComputedKeywordConflict("ASSERT".into()));
-			ensure!(self.field_kind.is_none(), Error::ComputedKeywordConflict("TYPE".into()));
 			ensure!(self.reference.is_none(), Error::ComputedKeywordConflict("REFERENCE".into()));
 			ensure!(matches!(self.default, DefineDefault::None), Error::ComputedKeywordConflict("DEFAULT".into()));
 			ensure!(!self.flex, Error::ComputedKeywordConflict("FLEXIBLE".into()));

@@ -1412,6 +1412,10 @@ pub enum Error {
 
 	#[error("Cannot define field `{0}` as `COMPUTED` fields must be top-level.")]
 	ComputedNestedField(String),
+
+	/// Cannot use the `{0}` keyword on the `id` field
+	#[error("Cannot use the `{0}` keyword on the `id` field.")]
+	IdFieldKeywordConflict(String),
 }
 
 impl Error {

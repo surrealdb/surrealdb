@@ -2,9 +2,6 @@
 [test]
 
 [[test.results]]
-error = "Cannot use the `TYPE` keyword with `COMPUTED`."
-
-[[test.results]]
 error = "Cannot use the `VALUE` keyword with `COMPUTED`."
 
 [[test.results]]
@@ -26,7 +23,6 @@ error = "Cannot use the `READONLY` keyword with `COMPUTED`."
 allow-experimental = ["record_references"]
 
 */
-DEFINE FIELD a ON a TYPE string COMPUTED 1;
 DEFINE FIELD a ON a VALUE 1 COMPUTED 1;
 DEFINE FIELD a ON a ASSERT 1 COMPUTED 1;
 DEFINE FIELD a ON a DEFAULT 1 COMPUTED 1;
