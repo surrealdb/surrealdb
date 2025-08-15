@@ -311,7 +311,10 @@ impl DefineFieldStatement {
 		} else {
 			// Ensure no parent fields are computed
 			for field in fields.iter() {
-				if field.computed.is_some() && self.name.starts_with(&field.name) && field.name != self.name {
+				if field.computed.is_some()
+					&& self.name.starts_with(&field.name)
+					&& field.name != self.name
+				{
 					bail!(Error::ComputedParentFieldConflict(
 						self.name.to_string(),
 						field.name.to_string()
