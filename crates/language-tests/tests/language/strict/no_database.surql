@@ -2,6 +2,7 @@
 [env]
 database = false
 strict = true
+clean = true
 
 [test]
 

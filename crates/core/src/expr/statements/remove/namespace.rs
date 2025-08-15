@@ -59,10 +59,12 @@ impl RemoveNamespaceStatement {
 		if self.expunge {
 			txn.clr(&key).await?;
 			txn.clr(&catalog_key).await?;
+			txn.clrp(&catalog_key).await?;
 			txn.clrp(&namespace_root).await?;
 		} else {
 			txn.del(&key).await?;
 			txn.del(&catalog_key).await?;
+			txn.delp(&catalog_key).await?;
 			txn.delp(&namespace_root).await?;
 		};
 

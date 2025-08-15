@@ -60,10 +60,12 @@ impl RemoveDatabaseStatement {
 		if self.expunge {
 			txn.clr(&key).await?;
 			txn.clr(&catalog_key).await?;
-			txn.clrp(&database_root).await?
+			txn.clrp(&catalog_key).await?;
+			txn.clrp(&database_root).await?;
 		} else {
 			txn.del(&key).await?;
 			txn.del(&catalog_key).await?;
+			txn.delp(&catalog_key).await?;
 			txn.delp(&database_root).await?
 		};
 
