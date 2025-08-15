@@ -68,7 +68,7 @@ DefineConfigStatement:1(crates/core/src/expr/statements/define/config/mod.rs)(64
 DefineDatabaseStatement:1(crates/core/src/expr/statements/define/database.rs)(3181979855)
 DefineDefault:1(crates/core/src/expr/statements/define/field.rs)(976902257)
 DefineEventStatement:1(crates/core/src/expr/statements/define/event.rs)(716937013)
-DefineFieldStatement:1(crates/core/src/expr/statements/define/field.rs)(3642980565)
+DefineFieldStatement:1(crates/core/src/expr/statements/define/field.rs)(4234924363)
 DefineFunctionStatement:1(crates/core/src/expr/statements/define/function.rs)(3720053814)
 DefineIndexStatement:1(crates/core/src/expr/statements/define/index.rs)(2296212790)
 DefineKind:1(crates/core/src/expr/statements/define/mod.rs)(2932573431)
