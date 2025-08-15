@@ -240,12 +240,14 @@ impl Iterator {
 		}
 		// Add the record to the iterator
 		if stm_ctx.stm.is_deferable() {
+			ctx.get_db(opt).await?;
 			self.ingest(Iterable::Yield(table))
 		} else {
 			if stm_ctx.stm.is_guaranteed() {
 				self.guaranteed = Some(Iterable::Yield(table.clone()));
 			}
 			let db = ctx.get_db(opt).await?;
+
 			planner.add_iterables(&db, stk, stm_ctx, table, p, self).await?;
 		}
 		// All ingested ok

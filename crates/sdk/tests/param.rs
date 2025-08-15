@@ -57,8 +57,7 @@ async fn define_global_param() -> Result<()> {
 #[tokio::test]
 async fn define_protected_param() -> Result<()> {
 	let sql = "
-		DEFINE NS test;
-		DEFINE DB test;
+		USE NS test DB test;
 		LET $test = { some: 'thing', other: true };
 		SELECT * FROM $test WHERE some = 'thing';
 		LET $auth = { ID: admin:tester };
@@ -66,17 +65,14 @@ async fn define_protected_param() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
-	//
+	assert_eq!(res.len(), 4);
+	// USE NS test DB test;
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
-	//
+	// LET $test = { some: 'thing', other: true };
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
+	// SELECT * FROM $test WHERE some = 'thing';
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
 		"[
@@ -88,7 +84,7 @@ async fn define_protected_param() -> Result<()> {
 	)
 	.unwrap();
 	assert_eq!(tmp, val);
-	//
+	// LET $auth = { ID: admin:tester };
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),

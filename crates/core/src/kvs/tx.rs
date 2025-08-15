@@ -1432,6 +1432,10 @@ impl Transaction {
 				self.expect_ns_by_name(ns).await?;
 
 				// Return a database not found error.
+				eprintln!(
+					"expect_db_by_name: db not found: {ns}/{db}: {}",
+					std::backtrace::Backtrace::force_capture()
+				);
 				Err(anyhow::anyhow!(Error::DbNotFound {
 					name: db.to_owned()
 				}))
@@ -2046,6 +2050,10 @@ impl Transaction {
 		let db = match self.get_db_by_name(ns, db).await? {
 			Some(db) => db,
 			None => {
+				eprintln!(
+					"check_ns_db_tb: db not found: {ns}/{db}: {}",
+					std::backtrace::Backtrace::force_capture()
+				);
 				return Err(Error::DbNotFound {
 					name: db.to_owned(),
 				}
@@ -2161,6 +2169,10 @@ impl Transaction {
 					.into());
 				}
 
+				eprintln!(
+					"get_or_add_db_upwards: db not found: {ns}/{db}: {}",
+					std::backtrace::Backtrace::force_capture()
+				);
 				return Err(Error::DbNotFound {
 					name: db.to_owned(),
 				}
@@ -2215,6 +2227,10 @@ impl Transaction {
 					match self.get_db_by_name(ns, db).await? {
 						Some(db_def) => db_def,
 						None => {
+							eprintln!(
+								"get_or_add_tb_upwards: db not found: {ns}/{db}: {}",
+								std::backtrace::Backtrace::force_capture()
+							);
 							return Err(Error::DbNotFound {
 								name: db.to_owned(),
 							}

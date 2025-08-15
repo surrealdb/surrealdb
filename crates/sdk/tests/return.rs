@@ -42,7 +42,7 @@ async fn return_subquery_only() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 27);
+	assert_eq!(res.len(), 28);
 
 	// USE NS test DB test;
 	let tmp = res.remove(0).result;
@@ -56,107 +56,107 @@ async fn return_subquery_only() -> Result<()> {
 	// LET $single = person:tobie;
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
-	//
+	// SELECT name FROM person;
 	let tmp = res.remove(0).result?;
 	let val = syn::value("[{ name: 'Jaime' }, { name: 'Tobie' }]").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// SELECT VALUE name FROM person;
 	let tmp = res.remove(0).result?;
 	let val = syn::value("['Jaime', 'Tobie']").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// SELECT name FROM ONLY person;
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"Expected a single result output when using the ONLY keyword"#
 	));
-	//
+	// SELECT VALUE name FROM ONLY person;
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"Expected a single result output when using the ONLY keyword"#
 	));
-	//
+	// SELECT name FROM person:tobie;
 	let tmp = res.remove(0).result?;
 	let val = syn::value("[{ name: 'Tobie' }]").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// SELECT VALUE name FROM person:tobie;
 	let tmp = res.remove(0).result?;
 	let val = syn::value("['Tobie']").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// SELECT name FROM ONLY person:tobie;
 	let tmp = res.remove(0).result?;
 	let val = syn::value("{ name: 'Tobie' }").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// SELECT VALUE name FROM person:tobie;
 	let tmp = res.remove(0).result?;
 	let val = Value::from(strand!("Tobie").to_owned());
 	assert_eq!(tmp, val);
-	//
+	// SELECT name FROM $single;
 	let tmp = res.remove(0).result?;
 	let val = syn::value("[{ name: 'Tobie' }]").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// SELECT VALUE name FROM ONLY $single;
 	let tmp = res.remove(0).result?;
 	let val = syn::value("['Tobie']").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// SELECT VALUE name FROM $single;
 	let tmp = res.remove(0).result?;
 	let val = syn::value("{ name: 'Tobie' }").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// SELECT name FROM ONLY $single;
 	let tmp = res.remove(0).result?;
 	let val = Value::from(strand!("Tobie").to_owned());
 	assert_eq!(tmp, val);
-	//
+	// SELECT VALUE name FROM ONLY $single;
 	let tmp = res.remove(0).result?;
 	let val = syn::value("[{ name: 'Jaime' }, { name: 'Tobie' }]").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// RETURN SELECT name FROM ONLY person;
 	let tmp = res.remove(0).result?;
 	let val = syn::value("['Jaime', 'Tobie']").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// RETURN SELECT name FROM person;
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"Expected a single result output when using the ONLY keyword"#
 	));
-	//
+	// RETURN SELECT VALUE name FROM person;
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"Expected a single result output when using the ONLY keyword"#
 	));
-	//
+	// RETURN SELECT name FROM person:tobie;
 	let tmp = res.remove(0).result?;
 	let val = syn::value("[{ name: 'Tobie' }]").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// RETURN SELECT VALUE name FROM person:tobie;
 	let tmp = res.remove(0).result?;
 	let val = syn::value("['Tobie']").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// RETURN SELECT name FROM $single;
 	let tmp = res.remove(0).result?;
 	let val = syn::value("{ name: 'Tobie' }").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// RETURN SELECT name FROM ONLY person:tobie;
 	let tmp = res.remove(0).result?;
 	let val = Value::from(strand!("Tobie").to_owned());
 	assert_eq!(tmp, val);
-	//
+	// RETURN SELECT VALUE name FROM ONLY person:tobie;
 	let tmp = res.remove(0).result?;
 	let val = syn::value("[{ name: 'Tobie' }]").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// RETURN SELECT VALUE name FROM $single;
 	let tmp = res.remove(0).result?;
 	let val = syn::value("['Tobie']").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// RETURN SELECT name FROM ONLY $single;
 	let tmp = res.remove(0).result?;
 	let val = syn::value("{ name: 'Tobie' }").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// RETURN SELECT VALUE name FROM ONLY $single;
 	let tmp = res.remove(0).result?;
 	let val = Value::from(strand!("Tobie").to_owned());
 	assert_eq!(tmp, val);

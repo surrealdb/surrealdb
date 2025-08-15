@@ -112,13 +112,14 @@ impl DefineFieldStatement {
 		.await?;
 
 		// Refresh the table cache
-		let tb_def = TableDefinition {
-			cache_fields_ts: Uuid::now_v7(),
-			..tb.as_ref().clone()
-		};
-
-		let key = crate::key::database::tb::new(ns, db, &self.what);
-		txn.set(&key, &tb_def, None).await?;
+		{
+			let tb_def = TableDefinition {
+				cache_fields_ts: Uuid::now_v7(),
+				..tb.as_ref().clone()
+			};
+			let (ns, db) = opt.ns_db()?;
+			txn.put_tb(ns, db, tb_def).await?;
+		}
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
@@ -130,8 +131,10 @@ impl DefineFieldStatement {
 		self.process_recursive_definitions(ns, db, txn.clone()).await?;
 		// If this is an `in` field then check relation definitions
 		if fd.as_str() == "in" {
+			// Get the table definition that this field belongs to
+			let relation_tb = txn.expect_tb(ns, db, &self.what).await?;
 			// The table is marked as TYPE RELATION
-			if let TableType::Relation(ref relation) = tb.table_type {
+			if let TableType::Relation(ref relation) = relation_tb.table_type {
 				// Check if a field TYPE has been specified
 				if let Some(kind) = self.field_kind.as_ref() {
 					// The `in` field must be a record type
@@ -148,7 +151,7 @@ impl DefineFieldStatement {
 								from: self.field_kind.clone(),
 								..relation.to_owned()
 							}),
-							..tb.as_ref().to_owned()
+							..relation_tb.as_ref().to_owned()
 						};
 						txn.set(&key, &val, None).await?;
 						// Clear the cache
@@ -163,8 +166,10 @@ impl DefineFieldStatement {
 		}
 		// If this is an `out` field then check relation definitions
 		if fd.as_str() == "out" {
+			// Get the table definition that this field belongs to
+			let relation_tb = txn.expect_tb(ns, db, &self.what).await?;
 			// The table is marked as TYPE RELATION
-			if let TableType::Relation(ref relation) = tb.table_type {
+			if let TableType::Relation(ref relation) = relation_tb.table_type {
 				// Check if a field TYPE has been specified
 				if let Some(kind) = self.field_kind.as_ref() {
 					// The `out` field must be a record type
@@ -181,7 +186,7 @@ impl DefineFieldStatement {
 								to: self.field_kind.clone(),
 								..relation.to_owned()
 							}),
-							..tb.as_ref().to_owned()
+							..relation_tb.as_ref().to_owned()
 						};
 						txn.set(&key, &val, None).await?;
 						// Clear the cache

@@ -777,8 +777,9 @@ async fn check_permissions_auth_enabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 
-		assert!(
-			res.unwrap() == Array::new().into(),
+		assert_eq!(
+			res.unwrap(),
+			Array::new().into(),
 			"{}",
 			"anonymous user should not be able to select if the table has no permissions"
 		);
