@@ -43,6 +43,10 @@ impl Document {
 			return Ok(());
 		}
 
+		// Ensure computed fields are computed in advance
+		self.computed_fields(stk, ctx, opt, DocKind::Initial).await?;
+		self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
+
 		// Get all live queries for this table
 		let lvs = self.lv(ctx, opt).await?;
 		// Loop through all index statements
@@ -70,10 +74,8 @@ impl Document {
 			let initial = self.initial.doc.as_arc();
 			// Check if this is a delete statement
 			let doc = if stm.is_delete() {
-				self.computed_fields(stk, ctx, opt, DocKind::Initial).await?;
 				&self.initial
 			} else {
-				self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
 				&self.current
 			};
 			// Ensure that a session exists on the LIVE query
