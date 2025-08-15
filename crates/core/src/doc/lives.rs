@@ -6,6 +6,7 @@ use reblessive::tree::Stk;
 use super::IgnoreError;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Action, Notification, Options, Statement};
+use crate::doc::compute::DocKind;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::FlowResultExt as _;
@@ -69,8 +70,10 @@ impl Document {
 			let initial = self.initial.doc.as_arc();
 			// Check if this is a delete statement
 			let doc = if stm.is_delete() {
+				self.computed_fields(stk, ctx, opt, DocKind::Initial).await?;
 				&self.initial
 			} else {
+				self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
 				&self.current
 			};
 			// Ensure that a session exists on the LIVE query
