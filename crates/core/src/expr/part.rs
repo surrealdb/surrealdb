@@ -57,7 +57,7 @@ impl Part {
 	}
 
 	/// Returns a raw string representation of this part without any escaping.
-	pub(crate) fn as_raw_string(&self) -> String {
+	pub(crate) fn to_raw_string(&self) -> String {
 		match self {
 			Part::All => "[*]".to_string(),
 			Part::Last => "[$]".to_string(),

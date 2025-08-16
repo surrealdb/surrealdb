@@ -6,16 +6,16 @@ use revision::revisioned;
 use std::fmt;
 use std::time::Duration;
 
+/// Durations representing the expiration of different elements of the access method
+/// In this context, the None variant represents that the element does not expire
 #[revisioned(revision = 1)]
 #[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]
-// Durations representing the expiration of different elements of the access method
-// In this context, the None variant represents that the element does not expire
 pub struct AccessDuration {
-	// Duration after which the grants generated with the access method expire
-	// For access methods whose grants are tokens, this value is irrelevant
+	/// Duration after which the grants generated with the access method expire
+	/// For access methods whose grants are tokens, this value is irrelevant
 	pub grant: Option<Duration>,
-	// Duration after which the tokens obtained with the access method expire
-	// For access methods that cannot issue tokens, this value is irrelevant
+	/// Duration after which the tokens obtained with the access method expire
+	/// For access methods that cannot issue tokens, this value is irrelevant
 	pub token: Option<Duration>,
 	// Duration after which the session authenticated with the access method expires
 	pub session: Option<Duration>,

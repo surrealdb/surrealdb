@@ -12,7 +12,6 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Ident, Idiom, Kind, Output, Permissions, View};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Transaction, impl_kv_value_revisioned};
-use crate::sql::ToSql;
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
@@ -287,8 +286,8 @@ impl Display for DefineTableStatement {
 		} else {
 			" SCHEMALESS"
 		})?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+		if let Some(ref comment) = self.comment {
+			write!(f, " COMMENT {comment}")?
 		}
 		if let Some(ref v) = self.view {
 			write!(f, " {v}")?

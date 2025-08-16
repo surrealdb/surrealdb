@@ -145,7 +145,7 @@ impl Sequences {
 		let seq = ctx.tx().get_db_sequence(ns, db, sq).await?;
 		let key = Arc::new(SequenceDomain::new_user(ns, db, sq));
 		self.next_val(ctx, opt.id()?, key, seq.batch, move || {
-			(seq.start, seq.timeout.clone().map(|d| d.0.0))
+			(seq.start, seq.timeout.clone())
 		})
 		.await
 	}

@@ -11,7 +11,6 @@ use crate::expr::access_type::{
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{AccessType, Algorithm, Base, Expr, Ident, JwtAccess, RecordAccess};
 use crate::iam::{Action, ResourceKind};
-use crate::sql::ToSql;
 use crate::val::{self, Strand, Value};
 use anyhow::{Result, bail};
 
@@ -199,7 +198,7 @@ impl DefineAccessStatement {
 		}
 
 		AccessDefinition {
-			name: self.name.clone().into_raw_string(),
+			name: self.name.clone().as_raw_string(),
 			grant_duration: self.duration.grant.map(|x| x.0),
 			token_duration: self.duration.token.map(|x| x.0),
 			session_duration: self.duration.session.map(|x| x.0),
@@ -368,8 +367,8 @@ impl Display for DefineAccessStatement {
 				None => "NONE".to_string(),
 			}
 		)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+		if let Some(ref comment) = self.comment {
+			write!(f, " COMMENT {comment}")?
 		}
 		Ok(())
 	}

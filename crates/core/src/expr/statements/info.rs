@@ -67,7 +67,7 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_root_accesses().await?.iter() {
 								let def = DefineAccessStatement::from_definition(Base::Root, v);
-								out.insert(def.name.into_raw_string(), def.to_string().into());
+								out.insert(def.name.as_raw_string(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -101,7 +101,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Ns)?;
 				// Get the NS
-				let ns = ctx.get_ns_id_ro(opt).await?;
+				let ns = ctx.expect_ns_id(opt).await?;
 				// Get the transaction
 				let txn = ctx.tx();
 				// Create the result set
@@ -118,7 +118,7 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_ns_accesses(ns).await?.iter() {
 								let def = DefineAccessStatement::from_definition(Base::Ns, v);
-								out.insert(def.name.into_raw_string(), def.to_string().into());
+								out.insert(def.name.as_raw_string(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -144,7 +144,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Get the NS and DB
-				let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
+				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 				// Convert the version to u64 if present
 				let version = match version {
 					Some(v) => Some(
@@ -180,7 +180,7 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_db_accesses(ns, db).await?.iter() {
 								let def = DefineAccessStatement::from_definition(Base::Db, v);
-								out.insert(def.name.into_raw_string(), def.to_string().into());
+								out.insert(def.name.as_raw_string(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -208,21 +208,21 @@ impl InfoStatement {
 						"functions".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_functions(ns, db).await?.iter() {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+								out.insert(v.name.as_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
 						"models".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_models(ns, db).await?.iter() {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+								out.insert(v.name.as_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
 						"params".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_params(ns, db).await?.iter() {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+								out.insert(v.name.as_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
@@ -250,7 +250,7 @@ impl InfoStatement {
 						"sequences".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_sequences( ns, db).await?.iter() {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -263,7 +263,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Get the NS and DB
-				let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
+				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 				// Convert the version to u64 if present
 				let version = match version {
 					Some(v) => Some(
@@ -291,7 +291,7 @@ impl InfoStatement {
 						"events".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_events(ns, db, tb).await?.iter() {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+								out.insert(v.name.as_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
@@ -305,7 +305,7 @@ impl InfoStatement {
 						"indexes".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_indexes(ns, db, tb).await?.iter() {
-								out.insert(v.name.into_raw_string(), v.to_string().into());
+								out.insert(v.name.as_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
@@ -389,7 +389,7 @@ impl InfoStatement {
 
 					if let Some(ib) = ctx.get_index_builder() {
 						// Obtain the index
-						let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
+						let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 						let res = txn.get_tb_index(ns, db, table, index).await?;
 						let status = ib.get_status(ns, db, &res).await;
 						let mut out = Object::default();

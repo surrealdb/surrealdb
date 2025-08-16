@@ -19,7 +19,7 @@ use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::expr::statements::define::config::ConfigStore;
-use crate::expr::statements::define::{ApiDefinition, BucketDefinition, DefineSequenceStatement};
+use crate::expr::statements::define::{ApiDefinition, BucketDefinition};
 use crate::expr::statements::{
 	DefineEventStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
 	DefineParamStore, LiveStatement,
@@ -768,7 +768,7 @@ impl Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-	) -> Result<Arc<[DefineSequenceStatement]>> {
+	) -> Result<Arc<[catalog::SequenceDefinition]>> {
 		let qey = cache::tx::Lookup::Sqs(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_sqs(),
@@ -1636,7 +1636,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		sq: &str,
-	) -> Result<Arc<DefineSequenceStatement>> {
+	) -> Result<Arc<catalog::SequenceDefinition>> {
 		let qey = cache::tx::Lookup::Sq(ns, db, sq);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),

@@ -13,7 +13,6 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Ident, Idiom, Kind, Part, Permission, Permissions};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Transaction, impl_kv_value_revisioned};
-use crate::sql::ToSql;
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail, ensure};
 use revision::revisioned;
@@ -342,7 +341,7 @@ impl DefineFieldStatement {
 
 				// As the refs and dynrefs type essentially take over a field
 				// they are not allowed to be mixed with most other clauses
-				let typename = kind.to_sql();
+				let typename = kind.to_string();
 
 				ensure!(
 					self.reference.is_none(),
@@ -438,9 +437,9 @@ impl DefineFieldStatement {
 						if !fd_kind.allows_nested_kind(&path, self_kind) {
 							bail!(Error::MismatchedFieldTypes {
 								name: self.name.to_string(),
-								kind: self_kind.to_sql(),
+								kind: self_kind.to_string(),
 								existing_name: fd.name.to_string(),
-								existing_kind: fd_kind.to_sql(),
+								existing_kind: fd_kind.to_string(),
 							});
 						}
 					}
@@ -484,8 +483,8 @@ impl Display for DefineFieldStatement {
 		if let Some(ref v) = self.reference {
 			write!(f, " REFERENCE {v}")?
 		}
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+		if let Some(ref comment) = self.comment {
+			write!(f, " COMMENT {comment}")?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

@@ -122,12 +122,12 @@ impl Idiom {
 		let mut iter = self.0.iter();
 		match iter.next() {
 			Some(Part::Field(v)) => s.push_str(&v.as_raw_string()),
-			Some(x) => s.push_str(&x.as_raw_string()),
+			Some(x) => s.push_str(&x.to_raw_string()),
 			None => {}
 		};
 
 		for p in iter {
-			s.push_str(&p.as_raw_string());
+			s.push_str(&p.to_raw_string());
 		}
 
 		s

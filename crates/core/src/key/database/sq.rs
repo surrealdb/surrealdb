@@ -2,8 +2,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::expr::statements::define::DefineSequenceStatement;
+use crate::catalog::{DatabaseId, NamespaceId, SequenceDefinition};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
@@ -21,7 +20,7 @@ pub(crate) struct Sq<'a> {
 }
 
 impl KVKey for Sq<'_> {
-	type ValueType = DefineSequenceStatement;
+	type ValueType = SequenceDefinition;
 }
 
 pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {

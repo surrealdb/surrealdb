@@ -1,7 +1,7 @@
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 
-use crate::sql::{Ident, Kind, Permissions, TableType, ToSql, View};
+use crate::sql::{Ident, Kind, Permissions, TableType, View};
 use crate::val::Strand;
 use std::fmt::{self, Display, Write};
 
@@ -30,7 +30,7 @@ impl Display for DefineTableStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name.to_sql())?;
+		write!(f, " {}", self.name)?;
 		write!(f, " TYPE")?;
 		match &self.table_type {
 			TableType::Normal => {
@@ -73,8 +73,8 @@ impl Display for DefineTableStatement {
 		} else {
 			" SCHEMALESS"
 		})?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+		if let Some(ref comment) = self.comment {
+			write!(f, " COMMENT {comment}")?
 		}
 		if let Some(ref v) = self.view {
 			write!(f, " {v}")?

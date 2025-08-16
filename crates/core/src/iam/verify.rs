@@ -212,7 +212,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						iam::verify::decode_key(key.alg, key.key.as_bytes())
 					}
 					#[cfg(feature = "jwks")]
-					JwtAccessVerify::Jwks(jwks) => {
+					catalog::JwtAccessVerify::Jwks(jwks) => {
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {

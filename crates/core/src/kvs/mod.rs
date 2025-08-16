@@ -51,7 +51,7 @@ mod util;
 pub(crate) use key::{KVKey, KVValue, impl_kv_value_revisioned};
 
 pub use ds::Datastore;
-pub use live::Live;
+pub(crate) use live::Live;
 pub use tr::{Check, LockType, TransactionType, Transactor};
 pub use tx::Transaction;
 

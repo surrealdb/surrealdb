@@ -307,12 +307,15 @@ impl Transaction {
 		Ok(())
 	}
 
-	async fn export_section<T: ToString>(
+	async fn export_section<T>(
 		&self,
 		title: &str,
 		items: impl ExactSizeIterator<Item = T>,
 		chn: &Sender<Vec<u8>>,
-	) -> Result<()> {
+	) -> Result<()> 
+	where
+		T: ToSql,
+	{
 		if items.len() == 0 {
 			return Ok(());
 		}
@@ -323,7 +326,7 @@ impl Transaction {
 		chn.send(bytes!("")).await?;
 
 		for item in items {
-			chn.send(bytes!(format!("{};", item.to_string()))).await?;
+			chn.send(bytes!(format!("{};", item.to_sql()))).await?;
 		}
 
 		chn.send(bytes!("")).await?;

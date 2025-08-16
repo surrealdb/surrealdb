@@ -15,6 +15,7 @@ mod user;
 pub use access::*;
 pub use analyzer::*;
 pub use field::*;
+pub use sequence::*;
 pub use user::*;
 
 use crate::{

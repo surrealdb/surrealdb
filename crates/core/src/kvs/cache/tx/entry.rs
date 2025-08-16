@@ -2,7 +2,7 @@ use crate::catalog;
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition, TableDefinition};
 use crate::dbs::node::Node;
 use crate::expr::statements::define::config::ConfigStore;
-use crate::expr::statements::define::{ApiDefinition, BucketDefinition, DefineSequenceStatement};
+use crate::expr::statements::define::{ApiDefinition, BucketDefinition};
 use crate::expr::statements::{
 	DefineEventStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
 	DefineParamStore, LiveStatement,
@@ -59,7 +59,7 @@ pub(crate) enum Entry {
 	/// A slice of DefineParamStatement specified on a database.
 	Pas(Arc<[DefineParamStore]>),
 	/// A slice of DefineSequenceStatement specified on a namespace.
-	Sqs(Arc<[DefineSequenceStatement]>),
+	Sqs(Arc<[catalog::SequenceDefinition]>),
 	/// A slice of DefineEventStatement specified on a table.
 	Evs(Arc<[DefineEventStatement]>),
 	/// A slice of DefineFieldStatement specified on a table.
@@ -206,9 +206,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Bus"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`DefineSequenceStatement`].
+	/// Converts this cache entry into a slice of [`catalog::SequenceDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Sqs`].
-	pub(crate) fn try_into_sqs(self) -> Result<Arc<[DefineSequenceStatement]>> {
+	pub(crate) fn try_into_sqs(self) -> Result<Arc<[catalog::SequenceDefinition]>> {
 		match self {
 			Entry::Sqs(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Sqs"),

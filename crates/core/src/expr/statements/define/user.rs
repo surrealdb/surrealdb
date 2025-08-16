@@ -21,7 +21,6 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::user::UserDuration;
 use crate::expr::{Base, Ident};
 use crate::iam::{Action, ResourceKind};
-use crate::sql::ToSql;
 use crate::val::{self, Strand, Value};
 
 #[revisioned(revision = 1)]
@@ -232,8 +231,8 @@ impl Display for DefineUserStatement {
 				None => "NONE".to_string(),
 			}
 		)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v.to_sql())?
+		if let Some(ref comment) = self.comment {
+			write!(f, " COMMENT {comment}")?
 		}
 		Ok(())
 	}

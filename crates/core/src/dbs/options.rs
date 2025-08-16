@@ -23,9 +23,9 @@ pub struct Options {
 	/// The current Node ID of the datastore instance
 	id: Option<Uuid>,
 	/// The currently selected Namespace
-	ns: Option<Arc<str>>,
+	pub(crate) ns: Option<Arc<str>>,
 	/// The currently selected Database
-	db: Option<Arc<str>>,
+	pub(crate) db: Option<Arc<str>>,
 	/// Approximately how large is the current call stack?
 	dive: u32,
 	/// Connection authentication data

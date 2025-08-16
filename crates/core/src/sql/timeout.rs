@@ -31,3 +31,9 @@ impl From<crate::expr::Timeout> for Timeout {
 		Self(v.0)
 	}
 }
+
+impl From<std::time::Duration> for Timeout {
+	fn from(v: std::time::Duration) -> Self {
+		Self(crate::val::Duration::from(v))
+	}
+}

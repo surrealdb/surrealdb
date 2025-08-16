@@ -133,7 +133,7 @@ impl<'a> TreeBuilder<'a> {
 		if self.schemas.contains_key(table) {
 			return Ok(());
 		}
-		let (ns, db) = self.ctx.ctx.get_ns_db_ids_ro(self.ctx.opt).await?;
+		let (ns, db) = self.ctx.ctx.expect_ns_db_ids(self.ctx.opt).await?;
 		let l = SchemaCache::new(ns, db, table, tx).await?;
 		self.schemas.insert(table.clone(), l);
 		Ok(())

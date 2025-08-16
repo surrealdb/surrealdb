@@ -217,7 +217,7 @@ impl From<RecordIdKey> for Value {
 
 impl From<RecordId> for Value {
 	fn from(key: RecordId) -> Self {
-		Value::from_inner(val::Value::Thing(key.0))
+		Value::from_inner(val::Value::RecordId(key.0))
 	}
 }
 

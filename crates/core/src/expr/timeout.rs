@@ -10,6 +10,12 @@ use crate::val::Duration;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct Timeout(pub Duration);
 
+impl Timeout {
+	pub fn as_std_duration(&self) -> &std::time::Duration {
+		&self.0.0
+	}
+}
+
 impl Deref for Timeout {
 	type Target = Duration;
 	fn deref(&self) -> &Self::Target {

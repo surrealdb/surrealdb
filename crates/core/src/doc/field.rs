@@ -7,7 +7,6 @@ use crate::err::Error;
 use crate::expr::data::Data;
 use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
 use crate::expr::kind::Kind;
-use crate::expr::permission::Permission;
 use crate::expr::{FlowResultExt as _, Part};
 use crate::iam::Action;
 use crate::val::value::CoerceError;
@@ -377,7 +376,7 @@ impl FieldEditContext<'_> {
 			// Check if this is the `id` field
 			if self.def.name.is_id() {
 				// Ensure that the outer value is a record
-				if let Value::Thing(ref id) = val {
+				if let Value::RecordId(ref id) = val {
 					// See if we should check the inner type
 					if !kind.is_record() {
 						// Get the value of the ID only
@@ -658,7 +657,7 @@ impl FieldEditContext<'_> {
 			let action = if val == old {
 				RefAction::Ignore
 				// Check if the old value was a record id
-			} else if let Value::Thing(thing) = old {
+			} else if let Value::RecordId(thing) = old {
 				// We need to check if this reference is contained in an array
 				let others = self
 					.doc
@@ -688,7 +687,7 @@ impl FieldEditContext<'_> {
 							// If the record id is still present in the new array, we do not remove the reference
 							if newarr.contains(v) {
 								None
-							} else if let Value::Thing(thing) = v {
+							} else if let Value::RecordId(thing) = v {
 								Some(thing)
 							} else {
 								None
@@ -701,7 +700,7 @@ impl FieldEditContext<'_> {
 					oldarr
 						.iter()
 						.filter_map(|v| {
-							if let Value::Thing(thing) = v {
+							if let Value::RecordId(thing) = v {
 								Some(thing)
 							} else {
 								None
@@ -712,7 +711,7 @@ impl FieldEditContext<'_> {
 
 				RefAction::Delete(removed, self.def.name.clone().push(Part::All).to_string())
 				// We found a new reference, let's create the link
-			} else if let Value::Thing(thing) = val {
+			} else if let Value::RecordId(thing) = val {
 				RefAction::Set(thing)
 			} else {
 				// This value is not a record id, nothing to process
@@ -726,7 +725,7 @@ impl FieldEditContext<'_> {
 				RefAction::Ignore => Ok(()),
 				// Create the reference, if it does not exist yet.
 				RefAction::Set(thing) => {
-					let (ns, db) = self.ctx.get_ns_db_ids_ro(self.opt).await?;
+					let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
 					let name = self.def.name.to_string();
 					let key = crate::key::r#ref::new(
 						ns,
@@ -744,7 +743,7 @@ impl FieldEditContext<'_> {
 				}
 				// Delete the reference, if it exists
 				RefAction::Delete(things, ff) => {
-					let (ns, db) = self.ctx.get_ns_db_ids_ro(self.opt).await?;
+					let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
 					for thing in things {
 						let key = crate::key::r#ref::new(
 							ns,
@@ -768,6 +767,7 @@ impl FieldEditContext<'_> {
 	}
 
 	// Process any `TYPE reference` clause for the field definition
+	/*
 	async fn process_refs_type(&mut self) -> Result<Option<Refs>> {
 		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(None);
@@ -806,4 +806,5 @@ impl FieldEditContext<'_> {
 
 		Ok(Some(refs))
 	}
+	*/
 }

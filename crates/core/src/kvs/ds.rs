@@ -934,6 +934,28 @@ impl Datastore {
 		self.transaction_factory.transaction(write, lock).await
 	}
 
+	pub async fn health_check(&self) -> Result<()> {
+		let tx = self.transaction(Read, Optimistic).await?;
+		
+		// Cancel the transaction
+		trace!("Cancelling health check transaction");
+		// Attempt to fetch data
+		match tx.get(&vec![0x00], None).await {
+			Err(err) => {
+				// Ensure the transaction is cancelled
+				let _ = tx.cancel().await;
+				// Return an error for this endpoint
+				Err(err)
+			}
+			Ok(_) => {
+				// Ensure the transaction is cancelled
+				let _ = tx.cancel().await;
+				// Return success for this endpoint
+				Ok(())
+			}
+		}
+	}
+
 	/// Parse and execute an SQL query
 	///
 	/// ```rust,no_run

@@ -1,12 +1,10 @@
-use crate::expr::escape::QuoteStr;
-use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Idiom, Kind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::Value;
 use revision::revisioned;
-use std::fmt::{self, Write as _};
+use std::fmt::Write as _;
 
 use super::Permission;
 
