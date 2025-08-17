@@ -4,6 +4,7 @@ mod access;
 mod analyzer;
 mod api;
 mod bucket;
+mod config;
 mod event;
 mod field;
 mod function;
@@ -12,16 +13,22 @@ mod param;
 mod sequence;
 mod user;
 
+use std::fmt::{Display, Formatter};
+
 pub use access::*;
 pub use analyzer::*;
+pub use api::*;
+pub use bucket::*;
+pub use config::*;
 pub use field::*;
+pub use param::*;
 pub use sequence::*;
 pub use user::*;
 
-use crate::{
-	expr::{Expr, statements::info::InfoStructure},
-	val::Value,
-};
+use crate::expr::Expr;
+use crate::expr::statements::info::InfoStructure;
+use crate::sql::ToSql;
+use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -29,7 +36,31 @@ pub enum Permission {
 	None,
 	#[default]
 	Full,
+
+	// TODO: This should not be stored on disk as an Expr.
 	Specific(Expr),
+}
+
+impl Permission {
+	pub fn is_none(&self) -> bool {
+		matches!(self, Self::None)
+	}
+
+	pub fn is_full(&self) -> bool {
+		matches!(self, Self::Full)
+	}
+
+	pub fn is_specific(&self) -> bool {
+		matches!(self, Self::Specific(_))
+	}
+
+	fn to_sql_definition(&self) -> crate::sql::Permission {
+		match self {
+			Permission::None => crate::sql::Permission::None,
+			Permission::Full => crate::sql::Permission::Full,
+			Permission::Specific(v) => crate::sql::Permission::Specific(v.clone().into()),
+		}
+	}
 }
 
 impl InfoStructure for Permission {
@@ -42,6 +73,20 @@ impl InfoStructure for Permission {
 	}
 }
 
+impl Display for Permission {
+	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+		self.to_sql_definition().fmt(f)
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum Base {
+	Root,
+	Ns,
+	Db,
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Permissions {
@@ -51,10 +96,93 @@ pub struct Permissions {
 	pub delete: Permission,
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Base {
-	Root,
-	Ns,
-	Db,
+impl Permissions {
+	pub fn none() -> Self {
+		Permissions {
+			select: Permission::None,
+			create: Permission::None,
+			update: Permission::None,
+			delete: Permission::None,
+		}
+	}
+
+	pub fn full() -> Self {
+		Permissions {
+			select: Permission::Full,
+			create: Permission::Full,
+			update: Permission::Full,
+			delete: Permission::Full,
+		}
+	}
+
+	pub fn is_none(&self) -> bool {
+		self.select == Permission::None
+			&& self.create == Permission::None
+			&& self.update == Permission::None
+			&& self.delete == Permission::None
+	}
+
+	pub fn is_full(&self) -> bool {
+		self.select == Permission::Full
+			&& self.create == Permission::Full
+			&& self.update == Permission::Full
+			&& self.delete == Permission::Full
+	}
+
+	pub fn to_sql_definition(&self) -> crate::sql::Permissions {
+		todo!("STU")
+		// crate::sql::Permissions {
+		// 	select: self.select.into(),
+		// 	create: self.create.into(),
+		// 	update: self.update.into(),
+		// 	delete: self.delete.into(),
+		// }
+	}
+}
+
+// impl ToSql for Permissions {
+// 	fn to_sql(&self) -> String {
+// 		self.to_sql_definition().to_string()
+// 	}
+// }
+
+impl Display for Permissions {
+	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+		write!(f, "{}", self.to_sql())
+	}
+}
+
+impl InfoStructure for Permissions {
+	fn structure(self) -> Value {
+		Value::from(map! {
+			"select".to_string() => self.select.structure(),
+			"create".to_string() => self.create.structure(),
+			"update".to_string() => self.update.structure(),
+		})
+	}
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+pub enum PermissionKind {
+	Select,
+	Create,
+	Update,
+	Delete,
+}
+
+impl PermissionKind {
+	fn as_str(&self) -> &str {
+		match self {
+			PermissionKind::Select => "select",
+			PermissionKind::Create => "create",
+			PermissionKind::Update => "update",
+			PermissionKind::Delete => "delete",
+		}
+	}
+}
+
+impl Display for PermissionKind {
+	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+		f.write_str(self.as_str())
+	}
 }

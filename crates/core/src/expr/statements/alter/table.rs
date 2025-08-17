@@ -4,22 +4,21 @@ use std::ops::Deref;
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use super::AlterKind;
-use crate::catalog::TableType;
+use crate::catalog::{Permissions, TableType};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::DefineTableStatement;
-use crate::expr::{Base, ChangeFeed, Ident, Kind, Permissions};
+use crate::expr::{Base, ChangeFeed, Ident, Kind};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AlterTableStatement {
 	pub name: Ident,
 	pub if_exists: bool,

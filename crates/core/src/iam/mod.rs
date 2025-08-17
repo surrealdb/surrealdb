@@ -17,10 +17,9 @@ pub mod signup;
 pub mod token;
 pub mod verify;
 
-use crate::catalog;
-
 pub use self::auth::*;
 pub use self::entities::*;
+use crate::catalog;
 
 #[derive(Error, Debug)]
 #[non_exhaustive]

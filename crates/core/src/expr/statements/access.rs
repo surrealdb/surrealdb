@@ -1,3 +1,13 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+
+use anyhow::{Result, bail, ensure};
+use md5::Digest;
+use rand::Rng;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use sha2::Sha256;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -6,15 +16,6 @@ use crate::expr::{Base, Cond, ControlFlow, FlowResult, FlowResultExt as _, Ident
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Array, Datetime, Duration, Object, Strand, Uuid, Value};
 use crate::{catalog, val};
-use anyhow::{Result, bail, ensure};
-use md5::Digest;
-use rand::Rng;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use sha2::Sha256;
-use std::fmt;
-use std::fmt::{Display, Formatter};
 
 // Keys and their identifiers are generated randomly from a 62-character pool.
 pub static GRANT_BEARER_CHARACTER_POOL: &[u8] =
@@ -22,13 +23,14 @@ pub static GRANT_BEARER_CHARACTER_POOL: &[u8] =
 // The key identifier should not have collisions to prevent confusion.
 // However, collisions should be handled gracefully when issuing grants.
 // The first character of the key identifier will not be a digit to prevent parsing issues.
-// With 12 characters from the pool, one alphabetic, the key identifier part has ~68 bits of entropy.
+// With 12 characters from the pool, one alphabetic, the key identifier part has ~68 bits of
+// entropy.
 pub static GRANT_BEARER_ID_LENGTH: usize = 12;
 // With 24 characters from the pool, the key part has ~140 bits of entropy.
 pub static GRANT_BEARER_KEY_LENGTH: usize = 24;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum AccessStatement {
 	Grant(AccessStatementGrant),   // Create access grant.
 	Show(AccessStatementShow),     // Show access grants.
@@ -37,7 +39,7 @@ pub enum AccessStatement {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AccessStatementGrant {
 	pub ac: Ident,
 	pub base: Option<Base>,
@@ -45,7 +47,7 @@ pub struct AccessStatementGrant {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AccessStatementShow {
 	pub ac: Ident,
 	pub base: Option<Base>,
@@ -54,7 +56,7 @@ pub struct AccessStatementShow {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AccessStatementRevoke {
 	pub ac: Ident,
 	pub base: Option<Base>,
@@ -63,7 +65,7 @@ pub struct AccessStatementRevoke {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AccessStatementPurge {
 	pub ac: Ident,
 	pub base: Option<Base>,
@@ -103,7 +105,7 @@ impl AccessGrant {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Subject {
 	Record(RecordIdLit),
 	User(Ident),
@@ -121,13 +123,13 @@ impl Subject {
 			Subject::Record(record_id_lit) => {
 				Ok(catalog::Subject::Record(record_id_lit.compute(stk, ctx, opt, doc).await?))
 			}
-			Subject::User(ident) => Ok(catalog::Subject::User(ident.clone().as_raw_string())),
+			Subject::User(ident) => Ok(catalog::Subject::User(ident.clone().to_raw_string())),
 		}
 	}
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Grant {
 	Jwt(GrantJwt),
 	Record(GrantRecord),
@@ -146,14 +148,14 @@ impl Grant {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct GrantJwt {
 	pub jti: Uuid,             // JWT ID
 	pub token: Option<Strand>, // JWT. Will not be stored after being returned.
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct GrantRecord {
 	pub rid: Uuid,             // Record ID
 	pub jti: Uuid,             // JWT ID
@@ -161,7 +163,7 @@ pub struct GrantRecord {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct GrantBearer {
 	pub id: Ident, // Key ID
 	// Key. Will not be stored and be returned as redacted.
@@ -192,8 +194,8 @@ impl GrantBearer {
 	pub fn hashed(self) -> Self {
 		// The hash of the bearer key is stored to mitigate the impact of a read-only compromise.
 		// We use SHA-256 as the key needs to be verified performantly for every operation.
-		// Unlike with passwords, brute force and rainbow tables are infeasable due to the key length.
-		// When hashing the bearer keys, the prefix and key identifier are kept as salt.
+		// Unlike with passwords, brute force and rainbow tables are infeasable due to the key
+		// length. When hashing the bearer keys, the prefix and key identifier are kept as salt.
 		let mut hasher = Sha256::new();
 		hasher.update(self.key.as_str());
 		let hash = hasher.finalize();
@@ -419,7 +421,8 @@ pub async fn create_grant(
 			let res = txn.put(&key, &gr, None).await;
 
 			// Check if a collision was found in order to log a specific error on the server.
-			// For an access method with a billion grants, this chance is of only one in 295 billion.
+			// For an access method with a billion grants, this chance is of only one in 295
+			// billion.
 			match res {
 				Ok(_) => {}
 				Err(e) => {
@@ -536,7 +539,8 @@ pub async fn create_grant(
 			};
 
 			// Check if a collision was found in order to log a specific error on the server.
-			// For an access method with a billion grants, this chance is of only one in 295 billion.
+			// For an access method with a billion grants, this chance is of only one in 295
+			// billion.
 			match res {
 				Ok(_) => {}
 				Err(e) => {
@@ -615,8 +619,8 @@ async fn compute_show(
 				Base::Root => match txn.get_root_access_grant(&stmt.ac, gr).await? {
 					Some(val) => val.clone(),
 					None => bail!(Error::AccessGrantRootNotFound {
-						ac: stmt.ac.as_raw_string(),
-						gr: gr.as_raw_string(),
+						ac: stmt.ac.to_raw_string(),
+						gr: gr.to_raw_string(),
 					}),
 				},
 				Base::Ns => {
@@ -624,8 +628,8 @@ async fn compute_show(
 					match txn.get_ns_access_grant(ns, &stmt.ac, gr).await? {
 						Some(val) => val.clone(),
 						None => bail!(Error::AccessGrantNsNotFound {
-							ac: stmt.ac.as_raw_string(),
-							gr: gr.as_raw_string(),
+							ac: stmt.ac.to_raw_string(),
+							gr: gr.to_raw_string(),
 							ns: ns.to_string(),
 						}),
 					}
@@ -635,8 +639,8 @@ async fn compute_show(
 					match txn.get_db_access_grant(ns, db, &stmt.ac, gr).await? {
 						Some(val) => val.clone(),
 						None => bail!(Error::AccessGrantDbNotFound {
-							ac: stmt.ac.as_raw_string(),
-							gr: gr.as_raw_string(),
+							ac: stmt.ac.to_raw_string(),
+							gr: gr.to_raw_string(),
 							ns: ns.to_string(),
 							db: db.to_string(),
 						}),
@@ -736,8 +740,8 @@ pub async fn revoke_grant(
 				Base::Root => match txn.get_root_access_grant(&stmt.ac, gr).await? {
 					Some(val) => (*val).clone(),
 					None => bail!(Error::AccessGrantRootNotFound {
-						ac: stmt.ac.as_raw_string(),
-						gr: gr.as_raw_string(),
+						ac: stmt.ac.to_raw_string(),
+						gr: gr.to_raw_string(),
 					}),
 				},
 				Base::Ns => {
@@ -747,8 +751,8 @@ pub async fn revoke_grant(
 						None => {
 							let ns = opt.ns()?;
 							bail!(Error::AccessGrantNsNotFound {
-								ac: stmt.ac.as_raw_string(),
-								gr: gr.as_raw_string(),
+								ac: stmt.ac.to_raw_string(),
+								gr: gr.to_raw_string(),
 								ns: ns.to_string(),
 							})
 						}
@@ -761,8 +765,8 @@ pub async fn revoke_grant(
 						None => {
 							let (ns, db) = opt.ns_db()?;
 							bail!(Error::AccessGrantDbNotFound {
-								ac: stmt.ac.as_raw_string(),
-								gr: gr.as_raw_string(),
+								ac: stmt.ac.to_raw_string(),
+								gr: gr.to_raw_string(),
 								ns: ns.to_string(),
 								db: db.to_string(),
 							})
@@ -1042,7 +1046,7 @@ impl Display for AccessStatement {
 				}
 				write!(f, " GRANT")?;
 				match &stmt.subject {
-					Subject::User(x) => write!(f, " FOR USER {}", x.as_raw_string())?,
+					Subject::User(x) => write!(f, " FOR USER {}", x.to_raw_string())?,
 					Subject::Record(x) => write!(f, " FOR RECORD {}", x)?,
 				}
 				Ok(())

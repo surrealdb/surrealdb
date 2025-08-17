@@ -1,5 +1,14 @@
+use std::fmt::{self, Display, Write};
+use std::sync::Arc;
+
+use anyhow::{Result, bail, ensure};
+use revision::revisioned;
+use uuid::Uuid;
+
+use super::DefineKind;
 use crate::catalog::{
-	self, DatabaseId, FieldDefinition, NamespaceId, Relation, TableDefinition, TableType,
+	self, DatabaseId, FieldDefinition, NamespaceId, Permission, Permissions, Relation,
+	TableDefinition, TableType,
 };
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -10,21 +19,13 @@ use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::kind::KindLiteral;
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, Part, Permission, Permissions};
+use crate::expr::{Base, Expr, Ident, Idiom, Kind, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Transaction, impl_kv_value_revisioned};
 use crate::val::{Strand, Value};
-use anyhow::{Result, bail, ensure};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
-use std::sync::Arc;
-use uuid::Uuid;
-
-use super::DefineKind;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum DefineDefault {
 	#[default]
 	None,
@@ -33,7 +34,7 @@ pub enum DefineDefault {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineFieldStatement {
 	pub kind: DefineKind,
 	pub name: Idiom,
@@ -54,7 +55,7 @@ pub struct DefineFieldStatement {
 impl_kv_value_revisioned!(DefineFieldStatement);
 
 impl DefineFieldStatement {
-	pub fn into_definition(&self) -> catalog::FieldDefinition {
+	pub(crate) fn into_definition(&self) -> catalog::FieldDefinition {
 		fn convert_permission(permission: &Permission) -> catalog::Permission {
 			match permission {
 				Permission::None => catalog::Permission::None,
@@ -84,7 +85,7 @@ impl DefineFieldStatement {
 		}
 	}
 
-	pub fn from_definition(def: &catalog::FieldDefinition) -> Self {
+	pub(crate) fn from_definition(def: &catalog::FieldDefinition) -> Self {
 		fn convert_permission(permission: &catalog::Permission) -> Permission {
 			match permission {
 				catalog::Permission::None => Permission::None,

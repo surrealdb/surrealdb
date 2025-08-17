@@ -1,16 +1,16 @@
-use crate::catalog;
-use crate::catalog::{DatabaseDefinition, NamespaceDefinition, TableDefinition};
-use crate::dbs::node::Node;
-use crate::expr::statements::define::config::ConfigStore;
-use crate::expr::statements::define::{ApiDefinition, BucketDefinition};
-use crate::expr::statements::{
-	DefineEventStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
-	DefineParamStore, LiveStatement,
-};
-use crate::val::Value;
-use anyhow::Result;
 use std::any::Any;
 use std::sync::Arc;
+
+use anyhow::Result;
+
+use crate::catalog;
+use crate::catalog::{ConfigStore, DatabaseDefinition, NamespaceDefinition, TableDefinition};
+use crate::dbs::node::Node;
+use crate::expr::statements::{
+	DefineEventStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
+	LiveStatement,
+};
+use crate::val::Value;
 
 #[derive(Clone)]
 pub(crate) enum Entry {
@@ -35,13 +35,13 @@ pub(crate) enum Entry {
 	/// A slice of AccessGrant specified at on a namespace.
 	Nag(Arc<[catalog::AccessGrant]>),
 	/// A slice of DatabaseDefinition specified on a namespace.
-	Dbs(Arc<[DatabaseDefinition]>),
+	Dbs(Arc<[catalog::DatabaseDefinition]>),
 	/// A slice of ApiDefinition specified on a namespace.
-	Aps(Arc<[ApiDefinition]>),
+	Aps(Arc<[catalog::ApiDefinition]>),
 	/// A slice of catalog::AnalyzerDefinition specified on a namespace.
 	Azs(Arc<[catalog::AnalyzerDefinition]>),
 	/// A slice of DefineBucketStatement specified on a database.
-	Bus(Arc<[BucketDefinition]>),
+	Bus(Arc<[catalog::BucketDefinition]>),
 	/// A slice of DefineAccessStatement specified on a database.
 	Das(Arc<[catalog::AccessDefinition]>),
 	/// A slice of AccessGrant specified at on a database.
@@ -51,13 +51,13 @@ pub(crate) enum Entry {
 	/// A slice of DefineFunctionStatement specified on a database.
 	Fcs(Arc<[DefineFunctionStatement]>),
 	/// A slice of TableDefinition specified on a database.
-	Tbs(Arc<[TableDefinition]>),
+	Tbs(Arc<[catalog::TableDefinition]>),
 	/// A slice of DefineModelStatement specified on a database.
 	Mls(Arc<[DefineModelStatement]>),
 	/// A slice of DefineConfigStatement specified on a database.
-	Cgs(Arc<[ConfigStore]>),
+	Cgs(Arc<[catalog::ConfigStore]>),
 	/// A slice of DefineParamStatement specified on a database.
-	Pas(Arc<[DefineParamStore]>),
+	Pas(Arc<[catalog::ParamDefinition]>),
 	/// A slice of DefineSequenceStatement specified on a namespace.
 	Sqs(Arc<[catalog::SequenceDefinition]>),
 	/// A slice of DefineEventStatement specified on a table.
@@ -65,7 +65,7 @@ pub(crate) enum Entry {
 	/// A slice of DefineFieldStatement specified on a table.
 	Fds(Arc<[catalog::FieldDefinition]>),
 	/// A slice of TableDefinition specified on a table.
-	Fts(Arc<[TableDefinition]>),
+	Fts(Arc<[catalog::TableDefinition]>),
 	/// A slice of DefineIndexStatement specified on a table.
 	Ixs(Arc<[DefineIndexStatement]>),
 	/// A slice of LiveStatement specified on a table.
@@ -184,7 +184,7 @@ impl Entry {
 	}
 	/// Converts this cache entry into a slice of [`ApiDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Aps`].
-	pub(crate) fn try_into_aps(self) -> Result<Arc<[ApiDefinition]>> {
+	pub(crate) fn try_into_aps(self) -> Result<Arc<[catalog::ApiDefinition]>> {
 		match self {
 			Entry::Aps(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Aps"),
@@ -200,7 +200,7 @@ impl Entry {
 	}
 	/// Converts this cache entry into a slice of [`DefineBucketStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Bus`].
-	pub(crate) fn try_into_bus(self) -> Result<Arc<[BucketDefinition]>> {
+	pub(crate) fn try_into_bus(self) -> Result<Arc<[catalog::BucketDefinition]>> {
 		match self {
 			Entry::Bus(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Bus"),
@@ -225,7 +225,7 @@ impl Entry {
 	}
 	/// Converts this cache entry into a slice of [`DefineParamStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Pas`].
-	pub(crate) fn try_into_pas(self) -> Result<Arc<[DefineParamStore]>> {
+	pub(crate) fn try_into_pas(self) -> Result<Arc<[catalog::ParamDefinition]>> {
 		match self {
 			Entry::Pas(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Pas"),

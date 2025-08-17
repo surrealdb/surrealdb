@@ -144,10 +144,8 @@ impl Sequences {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let seq = ctx.tx().get_db_sequence(ns, db, sq).await?;
 		let key = Arc::new(SequenceDomain::new_user(ns, db, sq));
-		self.next_val(ctx, opt.id()?, key, seq.batch, move || {
-			(seq.start, seq.timeout.clone())
-		})
-		.await
+		self.next_val(ctx, opt.id()?, key, seq.batch, move || (seq.start, seq.timeout.clone()))
+			.await
 	}
 
 	pub(crate) async fn next_val_fts_idx(

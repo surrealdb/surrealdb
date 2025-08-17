@@ -2,7 +2,6 @@ use std::fmt;
 
 use anyhow::Result;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -13,7 +12,7 @@ use crate::val::Datetime;
 use crate::vs::VersionStamp;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ShowSince {
 	Timestamp(Datetime),
 	Versionstamp(u64),
@@ -34,7 +33,7 @@ impl ShowSince {
 
 /// A SHOW CHANGES statement for displaying changes made to a table or database.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ShowStatement {
 	pub table: Option<Ident>,
 	pub since: ShowSince,

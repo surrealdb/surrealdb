@@ -1,3 +1,9 @@
+use std::sync::Arc;
+
+use anyhow::{Result, bail};
+use async_channel::Sender;
+use uuid::Uuid;
+
 use crate::catalog::TableDefinition;
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::dbs::Notification;
@@ -5,10 +11,6 @@ use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::statements::define::DefineIndexStatement;
 use crate::iam::{Action, Auth, ResourceKind};
-use anyhow::{Result, bail};
-use async_channel::Sender;
-use std::sync::Arc;
-use uuid::Uuid;
 
 /// An Options is passed around when processing a set of query
 /// statements.

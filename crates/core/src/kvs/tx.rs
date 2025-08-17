@@ -13,16 +13,15 @@ use super::tr::Check;
 use super::{Key, Val, Version, util};
 use crate::catalog;
 use crate::catalog::{
-	DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId, TableDefinition,
+	ApiDefinition, ConfigStore, DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId,
+	TableDefinition,
 };
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
-use crate::expr::statements::define::config::ConfigStore;
-use crate::expr::statements::define::{ApiDefinition, BucketDefinition};
 use crate::expr::statements::{
 	DefineEventStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
-	DefineParamStore, LiveStatement,
+	LiveStatement,
 };
 use crate::idx::planner::ScanDirection;
 use crate::idx::trees::store::cache::IndexTreeCaches;
@@ -746,7 +745,7 @@ impl Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-	) -> Result<Arc<[BucketDefinition]>> {
+	) -> Result<Arc<[catalog::BucketDefinition]>> {
 		let qey = cache::tx::Lookup::Bus(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_bus(),
@@ -812,7 +811,7 @@ impl Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-	) -> Result<Arc<[DefineParamStore]>> {
+	) -> Result<Arc<[catalog::ParamDefinition]>> {
 		let qey = cache::tx::Lookup::Pas(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_pas(),
@@ -1575,7 +1574,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		bu: &str,
-	) -> Result<Option<Arc<BucketDefinition>>> {
+	) -> Result<Option<Arc<catalog::BucketDefinition>>> {
 		let qey = cache::tx::Lookup::Bu(ns, db, bu);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Some),
@@ -1597,7 +1596,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		bu: &str,
-	) -> Result<Arc<BucketDefinition>> {
+	) -> Result<Arc<catalog::BucketDefinition>> {
 		match self.get_db_bucket(ns, db, bu).await? {
 			Some(val) => Ok(val),
 			None => anyhow::bail!(Error::BuNotFound {
@@ -1684,7 +1683,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		pa: &str,
-	) -> Result<Arc<DefineParamStore>> {
+	) -> Result<Arc<catalog::ParamDefinition>> {
 		let qey = cache::tx::Lookup::Pa(ns, db, pa);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),

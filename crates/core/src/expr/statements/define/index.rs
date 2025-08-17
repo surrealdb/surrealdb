@@ -5,7 +5,6 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::DefineKind;
@@ -28,7 +27,7 @@ use crate::sql::fmt::Fmt;
 use crate::val::{Array, Strand, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineIndexStatement {
 	pub kind: DefineKind,
 	pub name: Ident,
@@ -97,7 +96,7 @@ impl DefineIndexStatement {
 					continue;
 				};
 				if txn
-					.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, &first.as_raw_string())
+					.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, &first.to_raw_string())
 					.await?
 					.is_none()
 				{

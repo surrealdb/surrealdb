@@ -5,7 +5,6 @@ use std::hash::{Hash, Hasher};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -27,8 +26,7 @@ use crate::val::{
 /// to `Literal::Float(b)` in the case of `NaN` floats for example. Also
 /// surrealql rules regarding number equality are not observed, 1f != 1dec.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename = "$surrealdb::private::sql::Value")]
+#[derive(Clone, Debug)]
 pub enum Literal {
 	None,
 	Null,
@@ -252,7 +250,7 @@ impl fmt::Display for Literal {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ObjectEntry {
 	pub key: String,
 	pub value: Expr,

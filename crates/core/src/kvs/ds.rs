@@ -936,7 +936,7 @@ impl Datastore {
 
 	pub async fn health_check(&self) -> Result<()> {
 		let tx = self.transaction(Read, Optimistic).await?;
-		
+
 		// Cancel the transaction
 		trace!("Cancelling health check transaction");
 		// Attempt to fetch data

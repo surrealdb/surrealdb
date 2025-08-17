@@ -1,10 +1,9 @@
 use std::fmt;
 
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 /// ChangeFeedInclude statements are an appendix
 pub enum ChangeFeedInclude {
 	Original,

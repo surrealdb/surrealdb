@@ -1,17 +1,15 @@
-use crate::catalog::{DatabaseId, NamespaceId};
+use revision::{Revisioned, revisioned};
+use uuid::Uuid;
+
+use crate::catalog::{DatabaseId, NamespaceId, Permissions, ViewDefinition};
+use crate::expr::statements::info::InfoStructure;
+use crate::expr::{ChangeFeed, Kind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::{Ident, ToSql};
-use revision::{Revisioned, revisioned};
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
-use crate::catalog::ViewDefinition;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{ChangeFeed, Kind, Permissions};
 use crate::val::Value;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct TableId(pub u32);
 
@@ -37,7 +35,7 @@ impl Revisioned for TableId {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TableDefinition {
 	pub namespace_id: NamespaceId,
 	pub database_id: DatabaseId,
@@ -108,7 +106,8 @@ impl TableDefinition {
 	fn to_sql_definition(&self) -> DefineTableStatement {
 		DefineTableStatement {
 			id: Some(self.table_id.0),
-			// SAFETY: we know the name is valid because it was validated when the table was created.
+			// SAFETY: we know the name is valid because it was validated when the table was
+			// created.
 			name: unsafe { Ident::new_unchecked(self.name.clone()) },
 			drop: self.drop,
 			full: self.schemafull,
@@ -145,7 +144,7 @@ impl InfoStructure for TableDefinition {
 
 /// The type of records stored by a table
 #[revisioned(revision = 1)]
-#[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Hash, Clone, Eq, PartialEq)]
 pub enum TableType {
 	#[default]
 	Any,
@@ -198,7 +197,7 @@ impl InfoStructure for TableType {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct Relation {
 	pub from: Option<Kind>,
 	pub to: Option<Kind>,

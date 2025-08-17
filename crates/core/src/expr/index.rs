@@ -3,7 +3,6 @@ use std::fmt::{Display, Formatter};
 
 use anyhow::Result;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::expr::ident::Ident;
 use crate::expr::scoring::Scoring;
@@ -15,7 +14,7 @@ use crate::fnc::util::math::vector::{
 use crate::val::{Number, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum Index {
 	/// (Basic) non unique
 	#[default]
@@ -33,7 +32,7 @@ pub enum Index {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SearchParams {
 	pub az: Ident,
 	pub hl: bool,
@@ -49,7 +48,7 @@ pub struct SearchParams {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct FullTextParams {
 	pub analyzer: Ident,
 	pub highlight: bool,
@@ -57,7 +56,7 @@ pub struct FullTextParams {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct MTreeParams {
 	pub dimension: u16,
 	pub distance: Distance,
@@ -69,7 +68,7 @@ pub struct MTreeParams {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Default, Debug, Eq, PartialEq, Hash)]
 pub enum Distance1 {
 	#[default]
 	Euclidean,
@@ -80,7 +79,7 @@ pub enum Distance1 {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct HnswParams {
 	pub dimension: u16,
 	pub distance: Distance,
@@ -121,7 +120,7 @@ impl HnswParams {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Default, Debug, Eq, PartialEq, Hash)]
 pub enum Distance {
 	Chebyshev,
 	Cosine,
@@ -165,7 +164,7 @@ impl Display for Distance {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Hash)]
 pub enum VectorType {
 	#[default]
 	F64,

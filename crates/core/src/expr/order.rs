@@ -2,14 +2,13 @@ use std::ops::Deref;
 use std::{cmp, fmt};
 
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::expr::Value;
 use crate::expr::fmt::Fmt;
 use crate::expr::idiom::Idiom;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Ordering {
 	Random,
 	Order(OrderList),
@@ -25,7 +24,7 @@ impl fmt::Display for Ordering {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct OrderList(pub Vec<Order>);
 
 impl Deref for OrderList {
@@ -63,7 +62,7 @@ impl OrderList {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Order {
 	/// The value to order by
 	pub value: Idiom,

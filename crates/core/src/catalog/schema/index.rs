@@ -1,5 +1,6 @@
-use revision::revisioned;
 use std::hash::{Hash, Hasher};
+
+use revision::revisioned;
 
 use crate::expr::Idiom;
 use crate::kvs::impl_kv_value_revisioned;

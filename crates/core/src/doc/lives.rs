@@ -4,13 +4,13 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
+use crate::catalog::Permission;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Action, Notification, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::FlowResultExt as _;
 use crate::expr::paths::{AC, META, RD, TK};
-use crate::expr::permission::Permission;
 use crate::val::Value;
 
 impl Document {

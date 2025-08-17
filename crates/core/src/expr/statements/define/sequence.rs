@@ -2,7 +2,6 @@ use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use super::DefineKind;
 use crate::catalog::SequenceDefinition;
@@ -16,7 +15,7 @@ use crate::key::sequence::Prefix;
 use crate::kvs::impl_kv_value_revisioned;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineSequenceStatement {
 	pub kind: DefineKind,
 	pub name: Ident,
@@ -59,7 +58,7 @@ impl DefineSequenceStatement {
 		// Process the statement
 		let key = Sq::new(db.namespace_id, db.database_id, &self.name);
 		let sq = SequenceDefinition {
-			name: self.name.as_raw_string(),
+			name: self.name.to_raw_string(),
 			batch: self.batch,
 			start: self.start,
 			timeout: self.timeout.as_ref().map(|t| t.as_std_duration().clone()),

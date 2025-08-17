@@ -1,3 +1,11 @@
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::sync::Arc;
+
+use anyhow::{Result, bail};
+use filter::Filter;
+use reblessive::tree::Stk;
+
 use crate::catalog;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -9,12 +17,6 @@ use crate::idx::ft::offset::Offset;
 use crate::idx::ft::{DocLength, TermFrequency};
 use crate::idx::trees::store::IndexStores;
 use crate::val::{Strand, Value};
-use anyhow::{Result, bail};
-use filter::Filter;
-use reblessive::tree::Stk;
-use std::collections::HashMap;
-use std::collections::hash_map::Entry;
-use std::sync::Arc;
 
 pub(in crate::idx::ft) mod filter;
 pub(in crate::idx) mod mapper;

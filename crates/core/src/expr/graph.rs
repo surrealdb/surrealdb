@@ -4,7 +4,6 @@ use std::ops::Bound;
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
@@ -18,7 +17,7 @@ use crate::kvs::KVKey;
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Graph {
 	pub dir: Dir,
 	pub expr: Option<Fields>,
@@ -88,7 +87,7 @@ impl Display for Graph {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum GraphSubject {
 	Table(Ident),
 	Range {
@@ -118,7 +117,7 @@ impl GraphSubject {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ComputedGraphSubject {
 	Table(Ident),
 	Range {

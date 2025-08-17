@@ -1,10 +1,12 @@
-use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
-use crate::val::Datetime;
-use bytes::Bytes;
-use dashmap::DashMap;
 use std::future::Future;
 use std::pin::Pin;
+
+use bytes::Bytes;
+use dashmap::DashMap;
 use url::Url;
+
+use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
+use crate::val::Datetime;
 
 #[derive(Clone, Debug)]
 pub struct Entry {

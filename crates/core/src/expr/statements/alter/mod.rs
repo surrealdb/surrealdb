@@ -3,7 +3,6 @@ use std::fmt::{self, Display};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::{Revisioned, revisioned};
-use serde::{Deserialize, Serialize};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -18,7 +17,7 @@ pub use field::{AlterDefault, AlterFieldStatement};
 pub use sequence::AlterSequenceStatement;
 pub use table::AlterTableStatement;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum AlterKind<T> {
 	#[default]
 	None,
@@ -73,7 +72,7 @@ impl<T: Revisioned> Revisioned for AlterKind<T> {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum AlterStatement {
 	Table(AlterTableStatement),
 	Sequence(AlterSequenceStatement),

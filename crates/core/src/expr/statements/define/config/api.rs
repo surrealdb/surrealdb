@@ -1,21 +1,19 @@
-use std::fmt::{self, Display};
+use std::fmt;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
+use crate::catalog::{ApiConfigStore, MiddlewareStore, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::fmt::Fmt;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Expr, FlowResultExt, Permission, Value};
-use crate::val::{Array, Object, Strand};
+use crate::expr::{Expr, FlowResultExt};
 
 /// The api configuration as it is received from ast.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct ApiConfig {
 	pub middleware: Vec<Middleware>,
 	pub permissions: Permission,
@@ -23,26 +21,10 @@ pub struct ApiConfig {
 
 /// The api middleware as it is received from ast.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Middleware {
 	pub name: String,
 	pub args: Vec<Expr>,
-}
-
-/// The api config as it is stored on disk.
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-pub struct ApiConfigStore {
-	pub middleware: Vec<MiddlewareStore>,
-	pub permissions: Permission,
-}
-
-/// The api middleware as it is stored on disk.
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-pub struct MiddlewareStore {
-	pub name: String,
-	pub args: Vec<Value>,
 }
 
 impl ApiConfig {
@@ -76,7 +58,7 @@ impl ApiConfig {
 	}
 }
 
-impl Display for ApiConfig {
+impl fmt::Display for ApiConfig {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, " API")?;
 
@@ -95,73 +77,5 @@ impl Display for ApiConfig {
 
 		write!(f, " PERMISSIONS {}", self.permissions)?;
 		Ok(())
-	}
-}
-
-impl Display for ApiConfigStore {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, " API")?;
-
-		if !self.middleware.is_empty() {
-			write!(f, " MIDDLEWARE ")?;
-			write!(
-				f,
-				"{}",
-				Fmt::pretty_comma_separated(self.middleware.iter().map(|m| format!(
-					"{}({})",
-					m.name,
-					Fmt::pretty_comma_separated(m.args.iter())
-				)))
-			)?
-		}
-
-		write!(f, " PERMISSIONS {}", self.permissions)?;
-		Ok(())
-	}
-}
-
-impl InfoStructure for ApiConfig {
-	fn structure(self) -> Value {
-		Value::from(map!(
-			"permissions" => self.permissions.structure(),
-			"middleware", if !self.middleware.is_empty() => {
-				Value::Object(Object(
-						self.middleware
-						.into_iter()
-						.map(|m| {
-							let value = m.args
-								.iter()
-								.map(|x| Value::Strand(Strand::new(x.to_string()).unwrap()))
-								.collect();
-
-							(m.name.clone(), Value::Array(Array(value)))
-						})
-						.collect(),
-				))
-			}
-		))
-	}
-}
-
-impl InfoStructure for ApiConfigStore {
-	fn structure(self) -> Value {
-		Value::from(map!(
-			"permissions" => self.permissions.structure(),
-			"middleware", if !self.middleware.is_empty() => {
-				Value::Object(Object(
-						self.middleware
-						.into_iter()
-						.map(|m| {
-							let value = m.args
-								.iter()
-								.map(|x| Value::Strand(Strand::new(x.to_string()).unwrap()))
-								.collect();
-
-							(m.name.clone(), Value::Array(Array(value)))
-						})
-						.collect(),
-				))
-			}
-		))
 	}
 }

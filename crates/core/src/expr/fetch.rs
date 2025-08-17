@@ -4,7 +4,6 @@ use std::ops::Deref;
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use super::FlowResultExt as _;
 use crate::ctx::Context;
@@ -18,7 +17,7 @@ use crate::syn;
 use crate::val::{Strand, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Fetchs(pub Vec<Fetch>);
 
 impl Deref for Fetchs {
@@ -49,7 +48,7 @@ impl InfoStructure for Fetchs {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Fetch(pub Expr);
 
 impl Fetch {

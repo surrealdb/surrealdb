@@ -1,3 +1,11 @@
+use std::fmt::{Debug, Formatter};
+use std::mem;
+use std::ops::Deref;
+use std::sync::Arc;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::catalog::{self, DatabaseDefinition, TableDefinition};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Workable};
@@ -9,12 +17,6 @@ use crate::idx::planner::RecordStrategy;
 use crate::idx::planner::iterators::IteratorRecord;
 use crate::kvs::cache;
 use crate::val::{RecordId, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::fmt::{Debug, Formatter};
-use std::mem;
-use std::ops::Deref;
-use std::sync::Arc;
 
 pub(crate) struct Document {
 	/// The record id of this document
@@ -239,7 +241,8 @@ impl Document {
 		}
 	}
 
-	/// Retur true if the document has been extracted by an iterator that already matcheed the condition.
+	/// Retur true if the document has been extracted by an iterator that already matcheed the
+	/// condition.
 	pub(crate) fn is_condition_checked(&self) -> bool {
 		matches!(self.record_strategy, RecordStrategy::Count | RecordStrategy::KeysOnly)
 	}

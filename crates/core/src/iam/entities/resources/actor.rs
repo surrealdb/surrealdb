@@ -1,9 +1,12 @@
-use super::{Level, Resource, ResourceKind};
-use crate::iam::Role;
+use std::ops::Deref;
+use std::str::FromStr as _;
+
 use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::{ops::Deref, str::FromStr as _};
+
+use super::{Level, Resource, ResourceKind};
+use crate::iam::Role;
 
 //
 // User

@@ -1,12 +1,11 @@
 use std::fmt;
 
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::expr::ident::Ident;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct OptionStatement {
 	pub name: Ident,
 	pub what: bool,

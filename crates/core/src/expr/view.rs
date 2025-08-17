@@ -1,7 +1,6 @@
 use std::fmt;
 
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::catalog::ViewDefinition;
 use crate::expr::fmt::Fmt;
@@ -9,7 +8,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Fields, Groups, Ident, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct View {
 	pub expr: Fields,
 	pub what: Vec<Ident>,
@@ -21,7 +20,7 @@ impl View {
 	pub(crate) fn to_definition(&self) -> ViewDefinition {
 		ViewDefinition {
 			expr: self.expr.clone(),
-			what: self.what.iter().map(|s| s.as_raw_string()).collect(),
+			what: self.what.iter().map(|s| s.to_raw_string()).collect(),
 			cond: self.cond.clone(),
 			group: self.group.clone(),
 		}

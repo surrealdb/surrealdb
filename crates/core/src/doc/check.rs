@@ -2,6 +2,7 @@ use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
+use crate::catalog::Permission;
 use crate::ctx::Context;
 use crate::dbs::{Options, Statement, Workable};
 use crate::doc::Document;
@@ -9,7 +10,6 @@ use crate::doc::Permitted::*;
 use crate::err::Error;
 use crate::expr::FlowResultExt as _;
 use crate::expr::paths::{ID, IN, OUT};
-use crate::expr::permission::Permission;
 use crate::iam::Action;
 use crate::sql::ToSql;
 use crate::val::Value;

@@ -4,7 +4,6 @@ use std::fmt;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 #[cfg(feature = "ml")]
 use surrealml::errors::error::SurrealError;
 #[cfg(feature = "ml")]
@@ -14,12 +13,12 @@ use surrealml::ndarray as mlNdarray;
 #[cfg(feature = "ml")]
 use surrealml::storage::surml_file::SurMlFile;
 
+#[cfg(feature = "ml")]
+use crate::catalog::Permission;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-#[cfg(feature = "ml")]
-use crate::expr::Permission;
 use crate::expr::{ControlFlow, FlowResult};
 #[cfg(feature = "ml")]
 use crate::iam::Action;
@@ -33,7 +32,7 @@ pub fn get_model_path(ns: &str, db: &str, name: &str, version: &str, hash: &str)
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Model {
 	pub name: String,
 	pub version: String,

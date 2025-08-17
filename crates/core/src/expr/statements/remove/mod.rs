@@ -29,7 +29,6 @@ pub use namespace::RemoveNamespaceStatement;
 pub use param::RemoveParamStatement;
 use revision::revisioned;
 pub use sequence::RemoveSequenceStatement;
-use serde::{Deserialize, Serialize};
 pub use table::RemoveTableStatement;
 pub use user::RemoveUserStatement;
 
@@ -39,7 +38,7 @@ use crate::doc::CursorDoc;
 use crate::expr::Value;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RemoveStatement {
 	Namespace(RemoveNamespaceStatement),
 	Database(RemoveDatabaseStatement),

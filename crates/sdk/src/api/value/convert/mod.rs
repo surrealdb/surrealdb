@@ -50,7 +50,7 @@ fn into_content(this: val::Value) -> Result<Content<'static>> {
 		val::Value::Table(v) => serializer.serialize(v.into_string()).map_err(Into::into),
 		val::Value::RecordId(v) => serializer.serialize(v).map_err(Into::into),
 		val::Value::Range(v) => serializer.serialize(v).map_err(Into::into),
-		val::Value::Closure(v) => serializer.serialize(v).map_err(Into::into),
+		val::Value::Closure(v) => unimplemented!("STU"),
 		val::Value::File(v) => serializer.serialize(v).map_err(Into::into),
 		val::Value::Regex(v) => serializer.serialize(v).map_err(Into::into),
 	}

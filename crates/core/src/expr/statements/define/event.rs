@@ -2,7 +2,6 @@ use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::DefineKind;
@@ -19,7 +18,7 @@ use crate::sql::fmt::Fmt;
 use crate::val::{Strand, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineEventStatement {
 	pub kind: DefineKind,
 	pub name: Ident,

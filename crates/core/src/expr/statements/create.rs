@@ -3,7 +3,6 @@ use std::fmt;
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
@@ -15,7 +14,7 @@ use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::{Datetime, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct CreateStatement {
 	// A keyword modifier indicating if we are expecting a single result or several
 	pub only: bool,

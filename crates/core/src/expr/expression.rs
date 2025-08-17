@@ -3,7 +3,6 @@ use std::ops::Bound;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use super::SleepStatement;
 use crate::ctx::{Context, MutableContext};
@@ -27,8 +26,7 @@ use crate::fnc;
 use crate::val::{Array, Closure, Range, Strand, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Value")]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Expr {
 	Literal(Literal),
 	Param(Param),

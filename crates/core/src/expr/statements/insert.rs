@@ -3,7 +3,6 @@ use std::fmt;
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
@@ -15,7 +14,7 @@ use crate::idx::planner::RecordStrategy;
 use crate::val::{Datetime, RecordId, Table};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct InsertStatement {
 	pub into: Option<Expr>,
 	pub data: Data,

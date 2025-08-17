@@ -1,12 +1,12 @@
+
+use revision::revisioned;
+
+use super::Permission;
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Idiom, Kind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::Value;
-use revision::revisioned;
-use std::fmt::Write as _;
-
-use super::Permission;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]

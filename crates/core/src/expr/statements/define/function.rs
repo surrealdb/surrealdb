@@ -2,22 +2,22 @@ use std::fmt::{self, Display, Write};
 
 use anyhow::{Result, bail};
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use super::DefineKind;
+use crate::catalog::Permission;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Block, Ident, Kind, Permission};
+use crate::expr::{Base, Block, Ident, Kind};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Strand, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineFunctionStatement {
 	pub kind: DefineKind,
 	pub name: Ident,

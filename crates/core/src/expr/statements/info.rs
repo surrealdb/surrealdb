@@ -1,3 +1,10 @@
+use std::fmt;
+use std::sync::Arc;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -10,16 +17,9 @@ use crate::iam::{Action, ResourceKind};
 use crate::sql::ToSql;
 use crate::sys::INFORMATION;
 use crate::val::{Datetime, Object, Value};
-use anyhow::Result;
-
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::sync::Arc;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum InfoStatement {
 	// revision discriminant override accounting for previous behavior when adding variants and
 	// removing not at the end of the enum definition.
@@ -67,7 +67,7 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_root_accesses().await?.iter() {
 								let def = DefineAccessStatement::from_definition(Base::Root, v);
-								out.insert(def.name.as_raw_string(), def.to_string().into());
+								out.insert(def.name.to_raw_string(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -118,7 +118,7 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_ns_accesses(ns).await?.iter() {
 								let def = DefineAccessStatement::from_definition(Base::Ns, v);
-								out.insert(def.name.as_raw_string(), def.to_string().into());
+								out.insert(def.name.to_raw_string(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -180,14 +180,14 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_db_accesses(ns, db).await?.iter() {
 								let def = DefineAccessStatement::from_definition(Base::Db, v);
-								out.insert(def.name.as_raw_string(), def.to_string().into());
+								out.insert(def.name.to_raw_string(), def.to_string().into());
 							}
 							out.into()
 						},
 						"apis".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_apis(ns, db).await?.iter() {
-								out.insert(v.path.to_string(), v.to_string().into());
+								out.insert(v.path.to_string(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -201,28 +201,28 @@ impl InfoStatement {
 						"buckets".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_buckets(ns, db).await?.iter() {
-								out.insert(v.name.to_string(), v.to_string().into());
+								out.insert(v.name.to_string(), v.to_sql().into());
 							}
 							out.into()
 						},
 						"functions".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_functions(ns, db).await?.iter() {
-								out.insert(v.name.as_raw_string(), v.to_string().into());
+								out.insert(v.name.to_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
 						"models".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_models(ns, db).await?.iter() {
-								out.insert(v.name.as_raw_string(), v.to_string().into());
+								out.insert(v.name.to_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
 						"params".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_params(ns, db).await?.iter() {
-								out.insert(v.name.as_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -291,7 +291,7 @@ impl InfoStatement {
 						"events".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_events(ns, db, tb).await?.iter() {
-								out.insert(v.name.as_raw_string(), v.to_string().into());
+								out.insert(v.name.to_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
@@ -305,7 +305,7 @@ impl InfoStatement {
 						"indexes".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_indexes(ns, db, tb).await?.iter() {
-								out.insert(v.name.as_raw_string(), v.to_string().into());
+								out.insert(v.name.to_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},

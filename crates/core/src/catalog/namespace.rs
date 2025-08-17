@@ -1,8 +1,7 @@
 use std::fmt::{Display, Formatter};
 
-use serde::{Deserialize, Serialize};
-
 use revision::{Revisioned, revisioned};
+use serde::{Deserialize, Serialize};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
@@ -49,7 +48,7 @@ impl From<u32> for NamespaceId {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub struct NamespaceDefinition {
 	pub namespace_id: NamespaceId,
 	pub name: String,
@@ -60,7 +59,8 @@ impl_kv_value_revisioned!(NamespaceDefinition);
 impl NamespaceDefinition {
 	fn to_sql_definition(&self) -> DefineNamespaceStatement {
 		DefineNamespaceStatement {
-			// SAFETY: we know the name is valid because it was validated when the namespace was created.
+			// SAFETY: we know the name is valid because it was validated when the namespace was
+			// created.
 			name: unsafe { Ident::new_unchecked(self.name.clone()) },
 			comment: self.comment.clone().map(|v| v.into()),
 			..Default::default()

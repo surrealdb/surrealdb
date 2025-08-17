@@ -3,20 +3,20 @@ use std::fmt;
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use super::{ControlFlow, FlowResult, FlowResultExt as _, Kind};
+use crate::catalog::Permission;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::Fmt;
-use crate::expr::{Expr, Ident, Idiom, Model, Permission, Script, Value};
+use crate::expr::{Expr, Ident, Idiom, Model, Script, Value};
 use crate::fnc;
 use crate::iam::Action;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Function {
 	Normal(String),
 	Custom(String),
@@ -166,7 +166,7 @@ impl Function {
 				// Process the function arguments
 				for (val, (name, kind)) in args.into_iter().zip(&val.args) {
 					ctx.add_value(
-						name.as_raw_string(),
+						name.to_raw_string(),
 						val.coerce_to_kind(kind)
 							.map_err(Error::from)
 							.map_err(anyhow::Error::new)?
@@ -214,8 +214,7 @@ impl Function {
 
 ///TODO(3.0): Remove after proper first class function support?
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Function")]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct FunctionCall {
 	pub receiver: Function,
 	pub arguments: Vec<Expr>,

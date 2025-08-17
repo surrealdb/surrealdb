@@ -1,11 +1,11 @@
 //! Stores a DEFINE ANALYZER config definition
-use crate::catalog;
-use crate::catalog::DatabaseId;
-use crate::catalog::NamespaceId;
-use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+
+use crate::catalog;
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Az<'a> {

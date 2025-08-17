@@ -1,10 +1,12 @@
+use std::fmt;
+use std::time::Duration;
+
+use revision::revisioned;
+
 use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::Value;
-use revision::revisioned;
-use std::fmt;
-use std::time::Duration;
 
 /// Durations representing the expiration of different elements of the access method
 /// In this context, the None variant represents that the element does not expire

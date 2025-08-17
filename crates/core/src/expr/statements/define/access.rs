@@ -1,3 +1,11 @@
+use std::fmt::{self, Display};
+
+use anyhow::{Result, bail};
+use rand::Rng;
+use rand::distributions::Alphanumeric;
+use revision::revisioned;
+
+use super::DefineKind;
 use crate::catalog::{self, AccessDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -12,18 +20,9 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{AccessType, Algorithm, Base, Expr, Ident, JwtAccess, RecordAccess};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Strand, Value};
-use anyhow::{Result, bail};
-
-use rand::Rng;
-use rand::distributions::Alphanumeric;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
-
-use super::DefineKind;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Default, Debug, Eq, PartialEq, Hash)]
 pub struct DefineAccessStatement {
 	pub kind: DefineKind,
 	pub name: Ident,
@@ -198,7 +197,7 @@ impl DefineAccessStatement {
 		}
 
 		AccessDefinition {
-			name: self.name.clone().as_raw_string(),
+			name: self.name.clone().to_raw_string(),
 			grant_duration: self.duration.grant.map(|x| x.0),
 			token_duration: self.duration.token.map(|x| x.0),
 			session_duration: self.duration.session.map(|x| x.0),

@@ -1,16 +1,18 @@
-use crate::Result;
-use crate::error::Api as ApiError;
-use chrono::{DateTime, Utc};
-use revision::revisioned;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 use std::cmp::{Ordering, PartialEq, PartialOrd};
 use std::fmt;
 use std::ops::{Deref, Index};
 use std::str::FromStr;
+
+use chrono::{DateTime, Utc};
+use revision::revisioned;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use surrealdb_core::dbs::Action as CoreAction;
 use surrealdb_core::{syn, val};
 use uuid::Uuid;
+
+use crate::Result;
+use crate::error::Api as ApiError;
 
 mod convert;
 pub(crate) use convert::{from_value as from_core_value, to_value as to_core_value};
@@ -471,9 +473,10 @@ impl Action {
 
 /// A live query notification
 ///
-/// Live queries return a stream of notifications. The notification contains an `action` that triggered the change in the database record and `data` itself.
-/// For deletions the data is the record before it was deleted. For everything else, it's the newly created record or updated record depending on whether
-/// the action is create or update.
+/// Live queries return a stream of notifications. The notification contains an `action` that
+/// triggered the change in the database record and `data` itself. For deletions the data is the
+/// record before it was deleted. For everything else, it's the newly created record or updated
+/// record depending on whether the action is create or update.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
 pub struct Notification<R> {

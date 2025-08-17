@@ -1,3 +1,14 @@
+use std::str::FromStr;
+use std::sync::Arc;
+
+use anyhow::{Result, bail, ensure};
+use chrono::Utc;
+use jsonwebtoken::{EncodingKey, Header, encode};
+use md5::Digest;
+use sha2::Sha256;
+use subtle::ConstantTimeEq;
+use uuid::Uuid;
+
 use super::access::{
 	authenticate_generic, authenticate_record, create_refresh_token_record,
 	revoke_refresh_token_record,
@@ -19,15 +30,6 @@ use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::val::{Datetime, Object, Value};
-use anyhow::{Result, bail, ensure};
-use chrono::Utc;
-use jsonwebtoken::{EncodingKey, Header, encode};
-use md5::Digest;
-use sha2::Sha256;
-use std::str::FromStr;
-use std::sync::Arc;
-use subtle::ConstantTimeEq;
-use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SigninData {
@@ -202,7 +204,8 @@ pub async fn db_access(
 											};
 											// AUTHENTICATE clause
 											if let Some(au) = &av.authenticate {
-												// Setup the system session for finding the signin record
+												// Setup the system session for finding the signin
+												// record
 												let mut sess =
 													Session::editor().with_ns(&ns).with_db(&db);
 												sess.rd = Some(rid.clone().into());
@@ -213,10 +216,12 @@ pub async fn db_access(
 												sess.or.clone_from(&session.or);
 												rid = authenticate_record(kvs, &sess, au).await?;
 											}
-											// Create refresh token if defined for the record access method
+											// Create refresh token if defined for the record access
+											// method
 											let refresh = match &at.bearer {
 												Some(_) => {
-													// TODO(gguillemas): Remove this once bearer access is no longer experimental
+													// TODO(gguillemas): Remove this once bearer
+													// access is no longer experimental
 													if !kvs.get_capabilities().allows_experimental(
 														&ExperimentalTarget::BearerAccess,
 													) {
@@ -280,17 +285,20 @@ pub async fn db_access(
 									}
 								}
 								Err(e) => match e.downcast_ref() {
-									// If the SIGNIN clause throws a specific error, authentication fails with that error
+									// If the SIGNIN clause throws a specific error, authentication
+									// fails with that error
 									Some(Error::Thrown(_)) => Err(e),
-									// If the SIGNIN clause failed due to an unexpected error, be more specific
-									// This allows clients to handle these errors, which may be retryable
+									// If the SIGNIN clause failed due to an unexpected error, be
+									// more specific This allows clients to handle these
+									// errors, which may be retryable
 									Some(Error::Tx(_) | Error::TxFailure | Error::TxRetryable) => {
 										debug!(
 											"Unexpected error found while executing a SIGNIN clause: {e}"
 										);
 										Err(anyhow::Error::new(Error::UnexpectedAuth))
 									}
-									// Otherwise, return a generic error unless it should be forwarded
+									// Otherwise, return a generic error unless it should be
+									// forwarded
 									_ => {
 										debug!("Record user signin query failed: {e}");
 										if *INSECURE_FORWARD_ACCESS_ERRORS {
@@ -844,6 +852,12 @@ pub fn verify_grant_bearer(
 
 #[cfg(test)]
 mod tests {
+	use std::collections::HashMap;
+
+	use chrono::Duration;
+	use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
+	use regex::Regex;
+
 	use super::*;
 	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::dbs::Capabilities;
@@ -851,10 +865,6 @@ mod tests {
 	use crate::sql::statements::define::DefineKind;
 	use crate::sql::statements::define::user::PassType;
 	use crate::sql::{Ast, Expr, Ident, TopLevelExpr};
-	use chrono::Duration;
-	use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
-	use regex::Regex;
-	use std::collections::HashMap;
 
 	struct TestLevel {
 		level: &'static str,

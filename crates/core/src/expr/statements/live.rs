@@ -3,7 +3,6 @@ use std::fmt;
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -16,7 +15,7 @@ use crate::kvs::{Live, impl_kv_value_revisioned};
 use crate::val::{Uuid, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct LiveStatement {
 	pub id: Uuid,
 	pub node: Uuid,

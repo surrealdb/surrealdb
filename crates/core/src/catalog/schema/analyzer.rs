@@ -1,9 +1,9 @@
-use crate::{
-	expr::{Filter, Tokenizer, statements::info::InfoStructure},
-	kvs::impl_kv_value_revisioned,
-	val::{Array, Value},
-};
 use revision::revisioned;
+
+use crate::expr::statements::info::InfoStructure;
+use crate::expr::{Filter, Tokenizer};
+use crate::kvs::impl_kv_value_revisioned;
+use crate::val::{Array, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]

@@ -2,7 +2,6 @@ use std::fmt;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::{Context, MutableContext};
@@ -12,7 +11,7 @@ use crate::err::Error;
 use crate::expr::{ControlFlow, Expr, FlowResult, Ident, Kind, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SetStatement {
 	pub name: Ident,
 	pub what: Expr,

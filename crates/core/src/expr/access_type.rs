@@ -4,7 +4,6 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use revision::{Error as RevisionError, revisioned};
-use serde::{Deserialize, Serialize};
 
 use super::Value;
 use crate::err::Error;
@@ -15,7 +14,7 @@ use crate::expr::{Algorithm, Expr};
 
 /// The type of access methods available
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub enum AccessType {
 	Record(RecordAccess),
 	Jwt(JwtAccess),
@@ -129,7 +128,7 @@ impl AccessType {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct JwtAccess {
 	// Verify is required
 	pub verify: JwtAccessVerify,
@@ -227,7 +226,7 @@ impl JwtAccess {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct JwtAccessIssue {
 	pub alg: Algorithm,
 	pub key: String,
@@ -245,7 +244,7 @@ impl Default for JwtAccessIssue {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub enum JwtAccessVerify {
 	Key(JwtAccessVerifyKey),
 	Jwks(JwtAccessVerifyJwks),
@@ -274,7 +273,7 @@ impl InfoStructure for JwtAccessVerify {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct JwtAccessVerifyKey {
 	pub alg: Algorithm,
 	pub key: String,
@@ -292,13 +291,13 @@ impl Default for JwtAccessVerifyKey {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct JwtAccessVerifyJwks {
 	pub url: String,
 }
 
 #[revisioned(revision = 4)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct RecordAccess {
 	pub signup: Option<Expr>,
 	pub signin: Option<Expr>,
@@ -341,7 +340,7 @@ impl Jwt for RecordAccess {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct BearerAccess {
 	pub kind: BearerAccessType,
 	pub subject: BearerAccessSubject,
@@ -367,7 +366,7 @@ impl Jwt for BearerAccess {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub enum BearerAccessType {
 	Bearer,
 	Refresh,
@@ -394,7 +393,7 @@ impl FromStr for BearerAccessType {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub enum BearerAccessSubject {
 	Record,
 	User,

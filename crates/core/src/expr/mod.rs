@@ -94,7 +94,7 @@ pub use self::order::Order;
 pub use self::output::Output;
 pub use self::param::Param;
 pub use self::part::Part;
-pub use self::permission::{Permission, Permissions};
+pub use self::permission::Permission;
 pub use self::plan::{LogicalPlan, TopLevelExpr};
 pub use self::record_id::{RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit};
 pub use self::scoring::Scoring;
@@ -106,14 +106,14 @@ pub use self::statements::{
 	CreateStatement, DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement,
 	DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
 	DefineIndexStatement, DefineModelStatement, DefineNamespaceStatement, DefineParamStatement,
-	DefineParamStore, DefineStatement, DefineTableStatement, DefineUserStatement, DeleteStatement,
-	ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
-	LiveStatement, OptionStatement, OutputStatement, RebuildStatement, RelateStatement,
-	RemoveAccessStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
-	RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement, RemoveModelStatement,
-	RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
-	RemoveUserStatement, SelectStatement, SetStatement, ShowStatement, SleepStatement,
-	UpdateStatement, UpsertStatement, UseStatement,
+	DefineStatement, DefineTableStatement, DefineUserStatement, DeleteStatement, ForeachStatement,
+	IfelseStatement, InfoStatement, InsertStatement, KillStatement, LiveStatement, OptionStatement,
+	OutputStatement, RebuildStatement, RelateStatement, RemoveAccessStatement,
+	RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
+	RemoveFunctionStatement, RemoveIndexStatement, RemoveModelStatement, RemoveNamespaceStatement,
+	RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
+	SelectStatement, SetStatement, ShowStatement, SleepStatement, UpdateStatement, UpsertStatement,
+	UseStatement,
 };
 pub use self::timeout::Timeout;
 pub use self::tokenizer::Tokenizer;

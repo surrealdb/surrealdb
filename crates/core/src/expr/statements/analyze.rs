@@ -3,7 +3,6 @@ use std::fmt::{Display, Formatter};
 
 use anyhow::{Result, bail};
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -19,7 +18,7 @@ use crate::kvs::TransactionType;
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum AnalyzeStatement {
 	Idx(Ident, Ident),
 }

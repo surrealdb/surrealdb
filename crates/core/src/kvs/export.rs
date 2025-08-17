@@ -312,7 +312,7 @@ impl Transaction {
 		title: &str,
 		items: impl ExactSizeIterator<Item = T>,
 		chn: &Sender<Vec<u8>>,
-	) -> Result<()> 
+	) -> Result<()>
 	where
 		T: ToSql,
 	{

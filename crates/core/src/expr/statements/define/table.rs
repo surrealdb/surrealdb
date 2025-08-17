@@ -1,5 +1,15 @@
+use std::fmt::{self, Display, Write};
+use std::sync::Arc;
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use uuid::Uuid;
+
 use super::DefineKind;
-use crate::catalog::{DatabaseId, FieldDefinition, NamespaceId, TableDefinition, TableType};
+use crate::catalog::{
+	DatabaseId, FieldDefinition, NamespaceId, Permissions, TableDefinition, TableType,
+};
 use crate::ctx::Context;
 use crate::dbs::{Force, Options};
 use crate::doc::CursorDoc;
@@ -9,21 +19,13 @@ use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::UpdateStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, Output, Permissions, View};
+use crate::expr::{Base, Expr, Ident, Idiom, Kind, Output, View};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Transaction, impl_kv_value_revisioned};
 use crate::val::{Strand, Value};
-use anyhow::{Result, bail};
-
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
-use std::sync::Arc;
-use uuid::Uuid;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineTableStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,

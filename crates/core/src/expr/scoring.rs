@@ -2,10 +2,9 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialOrd)]
 pub enum Scoring {
 	Bm {
 		k1: f32,

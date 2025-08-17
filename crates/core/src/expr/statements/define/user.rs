@@ -7,7 +7,6 @@ use rand::Rng as _;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use super::DefineKind;
 use crate::catalog::{self, UserDefinition};
@@ -24,7 +23,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Strand, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineUserStatement {
 	pub kind: DefineKind,
 	pub name: Ident,

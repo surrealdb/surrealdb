@@ -2,7 +2,6 @@ use std::fmt;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -12,7 +11,7 @@ use crate::expr::{ControlFlow, Expr, FlowResult};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct OutputStatement {
 	pub what: Expr,
 	pub fetch: Option<Fetchs>,

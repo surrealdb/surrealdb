@@ -2,7 +2,6 @@ use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::catalog::TableDefinition;
@@ -13,7 +12,7 @@ use crate::expr::{Base, Ident, Idiom, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveFieldStatement {
 	pub name: Idiom,
 	pub table_name: Ident,

@@ -1,7 +1,6 @@
 use std::fmt;
 
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::expr::fmt::Fmt;
 use crate::expr::index::Distance;
@@ -9,7 +8,7 @@ use crate::expr::{Expr, Ident, Kind};
 use crate::idx::ft::MatchRef;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum PrefixOperator {
 	/// `!`
 	Not,
@@ -38,7 +37,7 @@ impl fmt::Display for PrefixOperator {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum PostfixOperator {
 	Range,
 	RangeSkip,
@@ -63,7 +62,7 @@ impl fmt::Display for PostfixOperator {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum BinaryOperator {
 	/// `-`
 	Subtract,
@@ -148,7 +147,7 @@ pub enum BinaryOperator {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct MatchesOperator {
 	pub rf: Option<MatchRef>,
 	pub operator: BooleanOperator,
@@ -172,7 +171,7 @@ impl fmt::Display for MatchesOperator {
 
 /// Boolean operation executed by the full-text index
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum BooleanOperator {
 	And,
 	Or,
@@ -188,7 +187,7 @@ impl fmt::Display for BooleanOperator {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum NearestNeighbor {
 	/// `<|k, dist|>`
 	K(u32, Distance),
@@ -259,7 +258,7 @@ impl fmt::Display for BinaryOperator {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum AssignOperator {
 	Assign,
 	Add,

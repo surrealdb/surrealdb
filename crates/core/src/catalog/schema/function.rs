@@ -1,10 +1,11 @@
+use revision::revisioned;
+
 use crate::catalog::Permission;
 use crate::expr::{Expr, Kind};
-use revision::revisioned;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineFunctionStatement {
+pub struct FunctionDefinition {
 	pub name: String,
 	pub args: Vec<(String, Kind)>,
 	pub block: Expr,

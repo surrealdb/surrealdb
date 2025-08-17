@@ -3,7 +3,6 @@ use std::ops::Deref;
 use std::str::FromStr;
 
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::err::Error;
 use crate::expr::Kind;
@@ -12,7 +11,7 @@ use crate::syn;
 use crate::val::{Array, Object, Strand, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Path(pub Vec<Segment>);
 
 impl<'a> Path {
@@ -227,7 +226,7 @@ impl FromStr for Path {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Segment {
 	Fixed(String),
 	Dynamic(String, Option<Kind>),

@@ -2,7 +2,6 @@ use std::fmt;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -17,7 +16,7 @@ pub mod range;
 pub use range::RecordIdKeyRangeLit;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RecordIdLit {
 	/// Table name
 	pub table: String,

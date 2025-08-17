@@ -1,25 +1,24 @@
-use crate::catalog::{self, TableDefinition};
+use std::fmt::{self, Display};
+use std::ops::Deref;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use uuid::Uuid;
+
+use super::AlterKind;
+use crate::catalog::{self, Permission, Permissions, TableDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::reference::Reference;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, Permission, Permissions};
+use crate::expr::{Base, Expr, Ident, Idiom, Kind};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
 
-use anyhow::Result;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
-use std::ops::Deref;
-use uuid::Uuid;
-
-use super::AlterKind;
-
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum AlterDefault {
 	#[default]
 	None,
@@ -29,7 +28,7 @@ pub enum AlterDefault {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AlterFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,

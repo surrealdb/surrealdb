@@ -1,3 +1,6 @@
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+
 use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::{Force, Options, Statement};
@@ -15,8 +18,6 @@ use crate::key;
 use crate::kvs::ConsumeResult;
 use crate::kvs::TransactionType;
 use crate::val::{Array, RecordId, Value};
-use anyhow::{Result, bail};
-use reblessive::tree::Stk;
 
 impl Document {
 	pub(super) async fn store_index_data(
@@ -81,8 +82,9 @@ impl Document {
 		#[cfg(not(target_family = "wasm"))]
 		let (o, n) = if let Some(ib) = ctx.get_index_builder() {
 			match ib.consume(db, ctx, ix, o, n, rid).await? {
-				// The index builder consumed the value, which means it is currently building the index asynchronously,
-				// we don't index the document and let the index builder do it later.
+				// The index builder consumed the value, which means it is currently building the
+				// index asynchronously, we don't index the document and let the index builder
+				// do it later.
 				ConsumeResult::Enqueued => return Ok(()),
 				// The index builder is done, the index has been built; we can proceed normally
 				ConsumeResult::Ignored(o, n) => (o, n),

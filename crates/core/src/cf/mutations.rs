@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Display, Formatter};
 
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::catalog::TableDefinition;
 use crate::expr::Operation;
@@ -14,7 +13,7 @@ use crate::vs::VersionStamp;
 
 // Mutation is a single mutation to a table.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum TableMutation {
 	// Although the Value is supposed to contain a field "id" of [`RecordId`],
 	// we do include it in the first field for convenience.
@@ -42,7 +41,7 @@ impl From<TableDefinition> for Value {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TableMutations(pub String, pub Vec<TableMutation>);
 
 impl_kv_value_revisioned!(TableMutations);
@@ -54,7 +53,7 @@ impl TableMutations {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DatabaseMutation(pub Vec<TableMutations>);
 
 impl DatabaseMutation {
@@ -71,7 +70,7 @@ impl Default for DatabaseMutation {
 
 // Change is a set of mutations made to a table at the specific timestamp.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ChangeSet(pub VersionStamp, pub DatabaseMutation);
 
 impl TableMutation {
@@ -189,7 +188,7 @@ impl Display for ChangeSet {
 // WriteMutationSet is a set of mutations to be to a table at the specific
 // timestamp.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, Default)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Default)]
 pub struct WriteMutationSet(pub Vec<TableMutations>);
 
 #[cfg(test)]

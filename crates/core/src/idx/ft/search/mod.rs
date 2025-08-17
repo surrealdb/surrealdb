@@ -1,3 +1,14 @@
+use std::collections::HashSet;
+use std::ops::BitAnd;
+use std::sync::Arc;
+
+use reblessive::tree::Stk;
+use revision::{Revisioned, revisioned};
+use roaring::RoaringTreemap;
+use roaring::treemap::IntoIter;
+use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
+
 use crate::catalog::{self, DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -16,15 +27,6 @@ use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::IndexStores;
 use crate::kvs::{KVValue, Key, Transaction, TransactionType};
 use crate::val::{Object, RecordId, Value};
-use reblessive::tree::Stk;
-use revision::{Revisioned, revisioned};
-use roaring::RoaringTreemap;
-use roaring::treemap::IntoIter;
-use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
-use std::ops::BitAnd;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 mod doclength;
 mod offsets;
@@ -656,6 +658,12 @@ impl MatchesHitsIterator for SearchHitsIterator {
 
 #[cfg(test)]
 mod tests {
+	use std::collections::HashMap;
+	use std::sync::Arc;
+
+	use reblessive::tree::Stk;
+	use test_log::test;
+
 	use crate::catalog::{self, DatabaseId, NamespaceId};
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
@@ -673,10 +681,6 @@ mod tests {
 	use crate::sql::statements::DefineStatement;
 	use crate::syn;
 	use crate::val::{Array, RecordId, Value};
-	use reblessive::tree::Stk;
-	use std::collections::HashMap;
-	use std::sync::Arc;
-	use test_log::test;
 
 	async fn check_hits(
 		ctx: &Context,

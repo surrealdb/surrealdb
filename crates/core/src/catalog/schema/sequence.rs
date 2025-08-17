@@ -3,10 +3,10 @@ use std::time::Duration;
 use revision::revisioned;
 
 use crate::expr::statements::info::InfoStructure;
+use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::define::{DefineKind, DefineSequenceStatement};
 use crate::sql::{Ident, ToSql};
 use crate::val::Value;
-use crate::kvs::impl_kv_value_revisioned;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]

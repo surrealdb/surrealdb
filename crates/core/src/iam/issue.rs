@@ -1,10 +1,11 @@
 use std::time::Duration;
 
-use crate::catalog;
-use crate::err::Error;
 use anyhow::{Result, bail};
 use chrono::{Duration as ChronoDuration, Utc};
 use jsonwebtoken::EncodingKey;
+
+use crate::catalog;
+use crate::err::Error;
 
 pub(crate) fn config(alg: catalog::Algorithm, key: &str) -> Result<EncodingKey> {
 	match alg {
