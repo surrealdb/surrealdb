@@ -6,11 +6,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::{self, DatabaseId, NamespaceId};
-use crate::expr::index::Index;
+use crate::catalog::{self, DatabaseId, Index, IndexDefinition, NamespaceId};
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
-use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{
 	BinaryOperator, Cond, Expr, FlowResultExt as _, Ident, Idiom, Kind, Literal, Order, Part, With,
 };
@@ -679,12 +677,12 @@ impl IndexesMap {
 
 #[derive(Debug, Clone)]
 pub(super) struct IndexReference {
-	indexes: Arc<[DefineIndexStatement]>,
+	indexes: Arc<[IndexDefinition]>,
 	idx: usize,
 }
 
 impl IndexReference {
-	pub(super) fn new(indexes: Arc<[DefineIndexStatement]>, idx: usize) -> Self {
+	pub(super) fn new(indexes: Arc<[IndexDefinition]>, idx: usize) -> Self {
 		Self {
 			indexes,
 			idx,
@@ -707,7 +705,7 @@ impl PartialEq for IndexReference {
 impl Eq for IndexReference {}
 
 impl Deref for IndexReference {
-	type Target = DefineIndexStatement;
+	type Target = IndexDefinition;
 
 	fn deref(&self) -> &Self::Target {
 		&self.indexes[self.idx]
@@ -716,7 +714,7 @@ impl Deref for IndexReference {
 
 #[derive(Clone)]
 struct SchemaCache {
-	indexes: Arc<[DefineIndexStatement]>,
+	indexes: Arc<[IndexDefinition]>,
 	fields: Arc<[catalog::FieldDefinition]>,
 }
 

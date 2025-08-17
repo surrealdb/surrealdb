@@ -8,14 +8,14 @@ use reblessive::tree::Stk;
 use rust_decimal::Decimal;
 use tokio::sync::RwLock;
 
-use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
+use crate::catalog::{
+	DatabaseDefinition, DatabaseId, Distance, Index, IndexDefinition, NamespaceId,
+};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::index::{Distance, Index};
 use crate::expr::operator::{BooleanOperator, MatchesOperator};
-use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{Cond, Expr, FlowResultExt as _, Ident, Idiom};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::btdocids::BTreeDocIds;
@@ -128,7 +128,7 @@ impl IteratorEntry {
 			Self::Single(_, io) => io.explain(),
 			Self::Range(_, ir, from, to, sc) => {
 				let mut e = HashMap::default();
-				e.insert("index", Value::from(ir.name.clone().into_strand()));
+				e.insert("index", Value::from(ir.name.clone()));
 				e.insert("from", Value::from(from));
 				e.insert("to", Value::from(to));
 				e.insert("direction", Value::from(sc.to_string()));
@@ -171,7 +171,7 @@ impl InnerQueryExecutor {
 							}
 						}
 						Entry::Vacant(e) => {
-							let ix: &DefineIndexStatement = e.key();
+							let ix: &IndexDefinition = e.key();
 							let ikb = IndexKeyBase::new(
 								db.namespace_id,
 								db.database_id,
@@ -223,7 +223,7 @@ impl InnerQueryExecutor {
 							}
 						}
 						Entry::Vacant(e) => {
-							let ix: &DefineIndexStatement = e.key();
+							let ix: &IndexDefinition = e.key();
 							let ikb = IndexKeyBase::new(
 								db.namespace_id,
 								db.database_id,
@@ -286,7 +286,7 @@ impl InnerQueryExecutor {
 								}
 							}
 							Entry::Vacant(e) => {
-								let ix: &DefineIndexStatement = e.key();
+								let ix: &IndexDefinition = e.key();
 								let ikb = IndexKeyBase::new(
 									db.namespace_id,
 									db.database_id,
@@ -624,7 +624,7 @@ impl QueryExecutor {
 		irf: IteratorRef,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix: &DefineIndexStatement,
+		ix: &IndexDefinition,
 		array: &Array,
 	) -> Result<ThingIterator> {
 		Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(irf, ns, db, ix, array)?))
@@ -862,7 +862,7 @@ impl QueryExecutor {
 		ir: IteratorRef,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix: &DefineIndexStatement,
+		ix: &IndexDefinition,
 		from: &RangeValue,
 		to: &RangeValue,
 		sc: ScanDirection,
@@ -939,7 +939,7 @@ impl QueryExecutor {
 		ir: IteratorRef,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix: &DefineIndexStatement,
+		ix: &IndexDefinition,
 		range: &IteratorRange,
 		sc: ScanDirection,
 	) -> Result<ThingIterator> {
@@ -958,7 +958,7 @@ impl QueryExecutor {
 		ir: IteratorRef,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix: &DefineIndexStatement,
+		ix: &IndexDefinition,
 		range: &IteratorRange<'_>,
 		sc: ScanDirection,
 	) -> Result<ThingIterator> {
@@ -977,7 +977,7 @@ impl QueryExecutor {
 		ir: IteratorRef,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix: &DefineIndexStatement,
+		ix: &IndexDefinition,
 		ranges: &[IteratorRange],
 	) -> Result<ThingIterator> {
 		let mut iterators = VecDeque::with_capacity(ranges.len());
@@ -998,7 +998,7 @@ impl QueryExecutor {
 		ir: IteratorRef,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix: &DefineIndexStatement,
+		ix: &IndexDefinition,
 		ranges: &[IteratorRange<'_>],
 	) -> Result<ThingIterator> {
 		let mut iterators = VecDeque::with_capacity(ranges.len());
@@ -1070,7 +1070,7 @@ impl QueryExecutor {
 		irf: IteratorRef,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix: &DefineIndexStatement,
+		ix: &IndexDefinition,
 		array: &Array,
 	) -> Result<ThingIterator> {
 		if ix.cols.len() > 1 {

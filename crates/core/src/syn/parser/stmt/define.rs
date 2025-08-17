@@ -759,7 +759,7 @@ impl Parser<'_> {
 		let mut res = DefineEventStatement {
 			kind,
 			name,
-			what,
+			target_table: what,
 			when: Expr::Literal(Literal::Bool(true)),
 			then: Vec::new(),
 			comment: None,

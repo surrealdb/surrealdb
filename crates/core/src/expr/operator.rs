@@ -2,8 +2,8 @@ use std::fmt;
 
 use revision::revisioned;
 
+use crate::catalog::Distance;
 use crate::expr::fmt::Fmt;
-use crate::expr::index::Distance;
 use crate::expr::{Expr, Ident, Kind};
 use crate::idx::ft::MatchRef;
 

@@ -10,6 +10,7 @@ use roaring::treemap::IntoIter;
 use uuid::Uuid;
 
 use crate::catalog;
+use crate::catalog::{FullTextParams, Scoring};
 /// This module implements a concurrent full-text search index.
 ///
 /// The full-text index allows for efficient text search operations with support
@@ -22,9 +23,8 @@ use crate::catalog;
 /// - Compaction of index data
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::expr::index::FullTextParams;
+use crate::expr::Idiom;
 use crate::expr::operator::BooleanOperator;
-use crate::expr::{Idiom, Scoring};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::docids::seqdocids::SeqDocIds;
@@ -900,11 +900,10 @@ mod tests {
 	use uuid::Uuid;
 
 	use super::{FullTextIndex, TermDocument};
-	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::catalog::{DatabaseId, FullTextParams, NamespaceId};
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
 	use crate::expr::Ident;
-	use crate::expr::index::FullTextParams;
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::offset::Offset;
@@ -967,7 +966,7 @@ mod tests {
 				"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet",
 			])));
 			let ft_params = Arc::new(FullTextParams {
-				analyzer: Ident::new(az.name.clone()).unwrap(),
+				analyzer: az.name.clone(),
 				scoring: Default::default(),
 				highlight: true,
 			});

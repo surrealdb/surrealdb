@@ -9,7 +9,6 @@ use reblessive::tree::Stk;
 use crate::catalog::{self, DatabaseDefinition, TableDefinition};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Workable};
-use crate::expr::statements::define::{DefineEventStatement, DefineIndexStatement};
 use crate::expr::statements::live::LiveStatement;
 use crate::expr::{Base, FlowResultExt as _, Ident};
 use crate::iam::{Action, ResourceKind};
@@ -481,7 +480,11 @@ impl Document {
 	}
 
 	/// Get the events for this document
-	pub async fn ev(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineEventStatement]>> {
+	pub async fn ev(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Arc<[catalog::EventDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
@@ -541,7 +544,11 @@ impl Document {
 	}
 
 	/// Get the indexes for this document
-	pub async fn ix(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineIndexStatement]>> {
+	pub async fn ix(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Arc<[catalog::IndexDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table

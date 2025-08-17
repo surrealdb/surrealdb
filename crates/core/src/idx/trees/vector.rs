@@ -13,8 +13,8 @@ use revision::{Revisioned, revisioned};
 use rust_decimal::prelude::FromPrimitive;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::catalog::{Distance, VectorType};
 use crate::err::Error;
-use crate::expr::index::{Distance, VectorType};
 use crate::fnc::util::math::ToFloat;
 use crate::kvs::KVValue;
 use crate::val::{Number, Value};
@@ -569,7 +569,7 @@ impl Distance {
 
 #[cfg(test)]
 mod tests {
-	use crate::expr::index::{Distance, VectorType};
+	use crate::catalog::{Distance, VectorType};
 	use crate::idx::trees::knn::tests::{RandomItemGenerator, get_seed_rnd, new_random_vec};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 

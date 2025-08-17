@@ -5,12 +5,11 @@ use revision::revisioned;
 use uuid::Uuid;
 
 use super::DefineKind;
-use crate::catalog::TableDefinition;
+use crate::catalog::{EventDefinition, TableDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
@@ -69,9 +68,12 @@ impl DefineEventStatement {
 		let key = crate::key::table::ev::new(ns, db, &self.target_table, &self.name);
 		txn.set(
 			&key,
-			&DefineEventStatement {
-				kind: DefineKind::Default,
-				..self.clone()
+			&EventDefinition {
+				name: self.name.to_raw_string(),
+				target_table: self.target_table.to_raw_string(),
+				when: self.when.clone(),
+				then: self.then.clone(),
+				comment: self.comment.clone().map(|x| x.to_raw_string()),
 			},
 			None,
 		)
@@ -117,17 +119,5 @@ impl Display for DefineEventStatement {
 			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineEventStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"what".to_string() => self.target_table.structure(),
-			"when".to_string() => self.when.structure(),
-			"then".to_string() => self.then.into_iter().map(|x| x.structure()).collect(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
 	}
 }

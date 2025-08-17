@@ -4,10 +4,10 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use crate::catalog;
-use crate::catalog::{ConfigStore, DatabaseDefinition, NamespaceDefinition, TableDefinition};
+use crate::catalog::{ConfigStore, DatabaseDefinition, NamespaceDefinition};
 use crate::dbs::node::Node;
 use crate::expr::statements::{
-	DefineEventStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
+	DefineFunctionStatement,
 	LiveStatement,
 };
 use crate::val::Value;
@@ -27,7 +27,7 @@ pub(crate) enum Entry {
 	/// A slice of AccessGrant specified at the root.
 	Rag(Arc<[catalog::AccessGrant]>),
 	/// A slice of NamespaceDefinition specified on a namespace.
-	Nss(Arc<[NamespaceDefinition]>),
+	Nss(Arc<[catalog::NamespaceDefinition]>),
 	/// A slice of DefineUserStatement specified on a namespace.
 	Nus(Arc<[catalog::UserDefinition]>),
 	/// A slice of DefineAccessStatement specified on a namespace.
@@ -53,7 +53,7 @@ pub(crate) enum Entry {
 	/// A slice of TableDefinition specified on a database.
 	Tbs(Arc<[catalog::TableDefinition]>),
 	/// A slice of DefineModelStatement specified on a database.
-	Mls(Arc<[DefineModelStatement]>),
+	Mls(Arc<[catalog::MlModelDefinition]>),
 	/// A slice of DefineConfigStatement specified on a database.
 	Cgs(Arc<[catalog::ConfigStore]>),
 	/// A slice of DefineParamStatement specified on a database.
@@ -61,13 +61,13 @@ pub(crate) enum Entry {
 	/// A slice of DefineSequenceStatement specified on a namespace.
 	Sqs(Arc<[catalog::SequenceDefinition]>),
 	/// A slice of DefineEventStatement specified on a table.
-	Evs(Arc<[DefineEventStatement]>),
+	Evs(Arc<[catalog::EventDefinition]>),
 	/// A slice of DefineFieldStatement specified on a table.
 	Fds(Arc<[catalog::FieldDefinition]>),
 	/// A slice of TableDefinition specified on a table.
 	Fts(Arc<[catalog::TableDefinition]>),
 	/// A slice of DefineIndexStatement specified on a table.
-	Ixs(Arc<[DefineIndexStatement]>),
+	Ixs(Arc<[catalog::IndexDefinition]>),
 	/// A slice of LiveStatement specified on a table.
 	Lvs(Arc<[LiveStatement]>),
 }
@@ -233,7 +233,7 @@ impl Entry {
 	}
 	/// Converts this cache entry into a slice of [`DefineModelStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Mls`].
-	pub(crate) fn try_into_mls(self) -> Result<Arc<[DefineModelStatement]>> {
+	pub(crate) fn try_into_mls(self) -> Result<Arc<[catalog::MlModelDefinition]>> {
 		match self {
 			Entry::Mls(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Mls"),
@@ -247,9 +247,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Cgs"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`TableDefinition`].
+	/// Converts this cache entry into a slice of [`catalog::TableDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Tbs`].
-	pub(crate) fn try_into_tbs(self) -> Result<Arc<[TableDefinition]>> {
+	pub(crate) fn try_into_tbs(self) -> Result<Arc<[catalog::TableDefinition]>> {
 		match self {
 			Entry::Tbs(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Tbs"),
@@ -257,7 +257,7 @@ impl Entry {
 	}
 	/// Converts this cache entry into a slice of [`DefineEventStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Evs`].
-	pub(crate) fn try_into_evs(self) -> Result<Arc<[DefineEventStatement]>> {
+	pub(crate) fn try_into_evs(self) -> Result<Arc<[catalog::EventDefinition]>> {
 		match self {
 			Entry::Evs(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Evs"),
@@ -271,17 +271,17 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Fds"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`DefineIndexStatement`].
+	/// Converts this cache entry into a slice of [`catalog::IndexDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Ixs`].
-	pub(crate) fn try_into_ixs(self) -> Result<Arc<[DefineIndexStatement]>> {
+	pub(crate) fn try_into_ixs(self) -> Result<Arc<[catalog::IndexDefinition]>> {
 		match self {
 			Entry::Ixs(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Ixs"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`TableDefinition`].
+	/// Converts this cache entry into a slice of [`catalog::TableDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Fts`].
-	pub(crate) fn try_into_fts(self) -> Result<Arc<[TableDefinition]>> {
+	pub(crate) fn try_into_fts(self) -> Result<Arc<[catalog::TableDefinition]>> {
 		match self {
 			Entry::Fts(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Fts"),

@@ -3,8 +3,8 @@ use revision::revisioned;
 use crate::catalog::Permission;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::statements::define::DefineParamStatement;
 use crate::sql::ToSql;
+use crate::sql::statements::define::DefineParamStatement;
 use crate::val::Value;
 
 #[revisioned(revision = 1)]

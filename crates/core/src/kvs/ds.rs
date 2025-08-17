@@ -28,6 +28,7 @@ use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::MajorVersion;
 use crate::buc::BucketConnections;
+use crate::catalog::Index;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
@@ -38,7 +39,7 @@ use crate::dbs::node::Timestamp;
 use crate::dbs::{Capabilities, Executor, Notification, Options, Response, Session, Variables};
 use crate::err::Error;
 use crate::expr::statements::DefineUserStatement;
-use crate::expr::{Base, Expr, FlowResultExt as _, Ident, Index, LogicalPlan};
+use crate::expr::{Base, Expr, FlowResultExt as _, Ident, LogicalPlan};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};

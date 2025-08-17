@@ -4,13 +4,12 @@ use anyhow::{Result, bail};
 use revision::revisioned;
 
 use super::DefineKind;
-use crate::catalog::Permission;
+use crate::catalog::{MlModelDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
@@ -61,10 +60,12 @@ impl DefineModelStatement {
 		let key = crate::key::database::ml::new(ns, db, &self.name, &self.version);
 		txn.set(
 			&key,
-			&DefineModelStatement {
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				kind: DefineKind::Default,
-				..self.clone()
+			&MlModelDefinition {
+				hash: self.hash.clone(),
+				name: self.name.to_raw_string(),
+				version: self.version.clone(),
+				comment: self.comment.clone().map(|x| x.to_raw_string()),
+				permissions: self.permissions.clone(),
 			},
 			None,
 		)
@@ -96,16 +97,5 @@ impl fmt::Display for DefineModelStatement {
 		};
 		write!(f, "PERMISSIONS {}", self.permissions)?;
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineModelStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"version".to_string() => self.version.into(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
 	}
 }

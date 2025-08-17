@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use crate::catalog::Permission;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::statements::define::DefineBucketStatement;
 use crate::sql::ToSql;
+use crate::sql::statements::define::DefineBucketStatement;
 use crate::val::{Strand, Value};
 
 #[revisioned(revision = 1)]

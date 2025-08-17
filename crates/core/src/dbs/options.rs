@@ -4,12 +4,11 @@ use anyhow::{Result, bail};
 use async_channel::Sender;
 use uuid::Uuid;
 
-use crate::catalog::TableDefinition;
+use crate::catalog;
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::dbs::Notification;
 use crate::err::Error;
 use crate::expr::Base;
-use crate::expr::statements::define::DefineIndexStatement;
 use crate::iam::{Action, Auth, ResourceKind};
 
 /// An Options is passed around when processing a set of query
@@ -54,8 +53,8 @@ pub struct Options {
 pub enum Force {
 	All,
 	None,
-	Table(Arc<[TableDefinition]>),
-	Index(Arc<[DefineIndexStatement]>),
+	Table(Arc<[catalog::TableDefinition]>),
+	Index(Arc<[catalog::IndexDefinition]>),
 }
 
 impl Default for Options {

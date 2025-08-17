@@ -20,7 +20,7 @@ use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::expr::statements::{
-	DefineEventStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
+	DefineFunctionStatement,
 	LiveStatement,
 };
 use crate::idx::planner::ScanDirection;
@@ -833,7 +833,7 @@ impl Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-	) -> Result<Arc<[DefineModelStatement]>> {
+	) -> Result<Arc<[catalog::MlModelDefinition]>> {
 		let qey = cache::tx::Lookup::Mls(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_mls(),
@@ -901,7 +901,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &str,
-	) -> Result<Arc<[DefineEventStatement]>> {
+	) -> Result<Arc<[catalog::EventDefinition]>> {
 		let qey = cache::tx::Lookup::Evs(ns, db, tb);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_evs(),
@@ -948,7 +948,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &str,
-	) -> Result<Arc<[DefineIndexStatement]>> {
+	) -> Result<Arc<[catalog::IndexDefinition]>> {
 		let qey = cache::tx::Lookup::Ixs(ns, db, tb);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_ixs(),
@@ -971,7 +971,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &str,
-	) -> Result<Arc<[TableDefinition]>> {
+	) -> Result<Arc<[catalog::TableDefinition]>> {
 		let qey = cache::tx::Lookup::Fts(ns, db, tb);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_fts(),
@@ -1525,7 +1525,7 @@ impl Transaction {
 		db: DatabaseId,
 		ml: &str,
 		vn: &str,
-	) -> Result<Option<Arc<DefineModelStatement>>> {
+	) -> Result<Option<Arc<catalog::MlModelDefinition>>> {
 		let qey = cache::tx::Lookup::Ml(ns, db, ml, vn);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Some),
@@ -1802,7 +1802,7 @@ impl Transaction {
 		db: DatabaseId,
 		tb: &str,
 		ev: &str,
-	) -> Result<Arc<DefineEventStatement>> {
+	) -> Result<Arc<catalog::EventDefinition>> {
 		let qey = cache::tx::Lookup::Ev(ns, db, tb, ev);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1852,7 +1852,7 @@ impl Transaction {
 		db: DatabaseId,
 		tb: &str,
 		ix: &str,
-	) -> Result<Arc<DefineIndexStatement>> {
+	) -> Result<Arc<catalog::IndexDefinition>> {
 		let qey = cache::tx::Lookup::Ix(ns, db, tb, ix);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),

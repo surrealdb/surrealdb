@@ -1626,7 +1626,7 @@ fn parse_define_event() {
 		Expr::Define(Box::new(DefineStatement::Event(DefineEventStatement {
 			kind: DefineKind::Default,
 			name: Ident::from_strand(strand!("event").to_owned()),
-			what: Ident::from_strand(strand!("table").to_owned()),
+			target_table: Ident::from_strand(strand!("table").to_owned()),
 			when: Expr::Literal(Literal::Null),
 			then: vec![Expr::Literal(Literal::Null), Expr::Literal(Literal::None)],
 			comment: None,

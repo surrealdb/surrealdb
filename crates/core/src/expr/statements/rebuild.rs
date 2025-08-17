@@ -11,7 +11,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::ident::Ident;
-use crate::expr::statements::define::DefineKind;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -76,13 +75,17 @@ impl RebuildIndexStatement {
 				}
 			}
 		};
-		let mut ix = ix.as_ref().clone();
-		ix.kind = DefineKind::Overwrite;
+		let ix = ix.as_ref().clone();
+
+		todo!(
+			"STU: Factor out the index creation code and call it both here and in the define index statement compute function."
+		);
+		// ix.kind = DefineKind::Overwrite;
 
 		// Rebuild the index
-		ix.compute(stk, ctx, opt, doc).await?;
+		// ix.compute(stk, ctx, opt, doc).await?;
 		// Ok all good
-		Ok(Value::None)
+		// Ok(Value::None)
 	}
 }
 

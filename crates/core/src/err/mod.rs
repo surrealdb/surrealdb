@@ -19,7 +19,7 @@ use thiserror::Error;
 
 use crate::api::err::ApiError;
 use crate::buc::BucketOperation;
-use crate::expr::index::Distance;
+use crate::catalog::Distance;
 use crate::expr::operation::PatchError;
 use crate::expr::{Expr, Idiom};
 use crate::iam::Error as IamError;

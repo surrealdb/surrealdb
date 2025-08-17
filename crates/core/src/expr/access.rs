@@ -1,4 +1,3 @@
-
 use revision::revisioned;
 
 use crate::val::Duration;

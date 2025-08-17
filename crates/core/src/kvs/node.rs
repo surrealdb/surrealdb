@@ -107,7 +107,7 @@ impl Datastore {
 			nds.iter()
 				.filter_map(|n| {
 					// Check that the node is active and has expired
-					match n.is_active() && n.hb < now - Duration::from_secs(30) {
+					match n.is_active() && n.heartbeat < now - Duration::from_secs(30) {
 						true => Some(n.to_owned()),
 						false => None,
 					}

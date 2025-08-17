@@ -1,5 +1,5 @@
-use std::fmt::Write;
 use std::fmt;
+use std::fmt::Write;
 
 use anyhow::Result;
 use reblessive::tree::Stk;

@@ -4,12 +4,12 @@ use std::fmt::{Display, Formatter};
 use anyhow::{Result, bail};
 use revision::revisioned;
 
+use crate::catalog::Index;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::ident::Ident;
-use crate::expr::index::Index;
 use crate::iam::{Action, ResourceKind};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::search::SearchIndex;

@@ -46,7 +46,6 @@ pub(crate) mod permission;
 pub(crate) mod plan;
 pub(crate) mod record_id;
 pub(crate) mod reference;
-pub(crate) mod scoring;
 pub(crate) mod script;
 pub(crate) mod split;
 pub(crate) mod start;
@@ -58,7 +57,6 @@ pub(crate) mod with;
 
 pub(crate) mod decimal;
 
-pub mod index;
 pub mod statements;
 
 pub use self::access_type::{AccessType, JwtAccess, RecordAccess};
@@ -82,7 +80,6 @@ pub use self::graph::Graph;
 pub use self::group::{Group, Groups};
 pub use self::ident::Ident;
 pub use self::idiom::{Idiom, Idioms};
-pub use self::index::Index;
 pub use self::kind::{Kind, KindLiteral};
 pub use self::limit::Limit;
 pub use self::literal::Literal;
@@ -97,7 +94,6 @@ pub use self::part::Part;
 pub use self::permission::Permission;
 pub use self::plan::{LogicalPlan, TopLevelExpr};
 pub use self::record_id::{RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit};
-pub use self::scoring::Scoring;
 pub use self::script::Script;
 pub use self::split::{Split, Splits};
 pub use self::start::Start;

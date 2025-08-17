@@ -1,13 +1,14 @@
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
-use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
+use crate::catalog::{
+	DatabaseDefinition, DatabaseId, FullTextParams, HnswParams, Index, IndexDefinition,
+	MTreeParams, NamespaceId, SearchParams,
+};
 use crate::ctx::Context;
 use crate::dbs::{Force, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
-use crate::expr::index::{FullTextParams, HnswParams, Index, MTreeParams, SearchParams};
-use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{FlowResultExt as _, Part};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
@@ -74,7 +75,7 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		ix: &DefineIndexStatement,
+		ix: &IndexDefinition,
 		o: Option<Vec<Value>>,
 		n: Option<Vec<Value>>,
 		rid: &RecordId,
@@ -116,7 +117,7 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		ix: &DefineIndexStatement,
+		ix: &IndexDefinition,
 		doc: &CursorDoc,
 	) -> Result<Option<Vec<Value>>> {
 		if doc.doc.as_ref().is_nullish() {
@@ -138,7 +139,7 @@ impl Document {
 struct Indexable(Vec<(Value, bool)>);
 
 impl Indexable {
-	fn new(vals: Vec<Value>, ix: &DefineIndexStatement) -> Self {
+	fn new(vals: Vec<Value>, ix: &IndexDefinition) -> Self {
 		let mut source = Vec::with_capacity(vals.len());
 		for (v, i) in vals.into_iter().zip(ix.cols.iter()) {
 			let f = matches!(i.0.last(), Some(&Part::Flatten));
@@ -274,7 +275,7 @@ struct IndexOperation<'a> {
 	opt: &'a Options,
 	ns: NamespaceId,
 	db: DatabaseId,
-	ix: &'a DefineIndexStatement,
+	ix: &'a IndexDefinition,
 	/// The old values (if existing)
 	o: Option<Vec<Value>>,
 	/// The new values (if existing)
@@ -287,7 +288,7 @@ impl<'a> IndexOperation<'a> {
 		opt: &'a Options,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix: &'a DefineIndexStatement,
+		ix: &'a IndexDefinition,
 		o: Option<Vec<Value>>,
 		n: Option<Vec<Value>>,
 		rid: &'a RecordId,

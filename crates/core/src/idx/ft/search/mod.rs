@@ -9,11 +9,10 @@ use roaring::treemap::IntoIter;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use crate::catalog::{self, DatabaseId, NamespaceId};
+use crate::catalog::{self, DatabaseId, NamespaceId, Scoring, SearchParams};
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::expr::index::SearchParams;
-use crate::expr::{Idiom, Scoring};
+use crate::expr::Idiom;
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::docids::btdocids::BTreeDocIds;
@@ -664,11 +663,10 @@ mod tests {
 	use reblessive::tree::Stk;
 	use test_log::test;
 
-	use crate::catalog::{self, DatabaseId, NamespaceId};
+	use crate::catalog::{self, DatabaseId, NamespaceId, SearchParams};
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
 	use crate::expr::Ident;
-	use crate::expr::index::SearchParams;
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::Score;
@@ -731,7 +729,7 @@ mod tests {
 		let mut ctx = MutableContext::new(ctx);
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
 		let p = SearchParams {
-			az: Ident::new(az.name.clone()).unwrap(),
+			az: az.name.clone(),
 			doc_ids_order: order,
 			doc_lengths_order: order,
 			postings_order: order,
