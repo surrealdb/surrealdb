@@ -216,7 +216,7 @@ impl DefineTableStatement {
 					&key,
 					&DefineFieldStatement {
 						name: Idiom::from(IN.to_vec()),
-						what: Ident::new(tb.name.clone()).expect("Table name to be valid"),
+						what: unsafe { Ident::new_unchecked(tb.name.clone()) },
 						field_kind: Some(val),
 						..Default::default()
 					},
@@ -232,7 +232,7 @@ impl DefineTableStatement {
 					&key,
 					&DefineFieldStatement {
 						name: Idiom::from(OUT.to_vec()),
-						what: Ident::new(tb.name.clone()).expect("Table name to be valid"),
+						what: unsafe { Ident::new_unchecked(tb.name.clone()) },
 						field_kind: Some(val),
 						..Default::default()
 					},
