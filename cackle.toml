@@ -248,9 +248,6 @@ allow_proc_macro = true
 allow_proc_macro = true
 build.allow_apis = ["process"]
 
-[pkg.surrealdb-derive]
-allow_proc_macro = true
-
 [pkg.surrealdb-macros]
 allow_proc_macro = true
 
