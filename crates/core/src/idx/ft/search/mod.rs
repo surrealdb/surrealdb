@@ -666,7 +666,6 @@ mod tests {
 	use crate::catalog::{self, DatabaseId, NamespaceId, SearchParams};
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
-	use crate::expr::Ident;
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::Score;

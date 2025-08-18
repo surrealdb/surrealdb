@@ -1,4 +1,3 @@
-
 use revision::revisioned;
 
 use crate::catalog::Permission;

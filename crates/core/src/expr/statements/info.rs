@@ -10,8 +10,8 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{
-	Base, DefineAccessStatement, DefineAnalyzerStatement, DefineFieldStatement,
-	DefineUserStatement, Expr, FlowResultExt, Ident,
+	Base, DefineAccessStatement, DefineAnalyzerStatement, DefineUserStatement, Expr, FlowResultExt,
+	Ident,
 };
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ToSql;
@@ -208,7 +208,7 @@ impl InfoStatement {
 						"functions".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_functions(ns, db).await?.iter() {
-								out.insert(v.name.to_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -298,7 +298,7 @@ impl InfoStatement {
 						"fields".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_fields(ns, db, tb, version).await?.iter() {
-								out.insert(v.name.to_string(), DefineFieldStatement::from_definition(v).to_string().into());
+								out.insert(v.name.to_string(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -312,7 +312,7 @@ impl InfoStatement {
 						"lives".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_lives(ns, db, tb).await?.iter() {
-								out.insert(v.id.to_raw(), v.to_string().into());
+								out.insert(v.id.to_string(), v.to_sql().into());
 							}
 							out.into()
 						},

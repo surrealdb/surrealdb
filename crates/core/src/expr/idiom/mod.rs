@@ -115,7 +115,7 @@ impl Idiom {
 	}
 
 	/// Returns a raw string representation of this idiom without any escaping.
-	#[expect(dead_code)]
+	#[allow(dead_code)]
 	pub(crate) fn to_raw_string(&self) -> String {
 		let mut s = String::new();
 

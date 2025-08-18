@@ -85,40 +85,6 @@ impl DefineFieldStatement {
 		}
 	}
 
-	pub(crate) fn from_definition(def: &catalog::FieldDefinition) -> Self {
-		fn convert_permission(permission: &catalog::Permission) -> Permission {
-			match permission {
-				catalog::Permission::None => Permission::None,
-				catalog::Permission::Full => Permission::Full,
-				catalog::Permission::Specific(expr) => Permission::Specific(expr.clone()),
-			}
-		}
-
-		Self {
-			kind: DefineKind::Default,
-			name: def.name.clone(),
-			what: Ident::new(def.what.clone()).unwrap(),
-			flex: def.flexible,
-			field_kind: def.field_kind.clone(),
-			readonly: def.readonly,
-			value: def.value.clone(),
-			assert: def.assert.clone(),
-			default: match &def.default {
-				catalog::DefineDefault::None => DefineDefault::None,
-				catalog::DefineDefault::Set(x) => DefineDefault::Set(x.clone()),
-				catalog::DefineDefault::Always(x) => DefineDefault::Always(x.clone()),
-			},
-			permissions: Permissions {
-				select: convert_permission(&def.select_permission),
-				create: convert_permission(&def.create_permission),
-				update: convert_permission(&def.update_permission),
-				delete: Permission::Full,
-			},
-			comment: def.comment.clone().map(|x| Strand::new(x).unwrap()),
-			reference: def.reference.clone(),
-		}
-	}
-
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

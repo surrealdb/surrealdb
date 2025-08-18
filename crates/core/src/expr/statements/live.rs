@@ -8,7 +8,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _, Literal};
 use crate::iam::Auth;
 use crate::kvs::{Live, impl_kv_value_revisioned};
@@ -148,17 +147,6 @@ impl fmt::Display for LiveStatement {
 			write!(f, " {v}")?
 		}
 		Ok(())
-	}
-}
-
-impl InfoStructure for LiveStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"expr".to_string() => self.expr.structure(),
-			"what".to_string() => self.what.structure(),
-			"cond".to_string(), if let Some(v) = self.cond => v.0.structure(),
-			"fetch".to_string(), if let Some(v) = self.fetch => v.structure(),
-		})
 	}
 }
 

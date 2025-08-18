@@ -2,6 +2,7 @@ mod access;
 mod database;
 mod namespace;
 mod schema;
+mod subscription;
 mod table;
 mod view;
 
@@ -14,5 +15,6 @@ pub use schema::{ApiDefinition, ApiMethod};
 pub use schema::{
 	Distance, FullTextParams, HnswParams, MTreeParams, Scoring, SearchParams, VectorType,
 };
+pub(crate) use subscription::*;
 pub(crate) use table::*;
 pub(crate) use view::*;

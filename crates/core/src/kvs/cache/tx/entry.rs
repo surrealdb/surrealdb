@@ -4,12 +4,7 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use crate::catalog;
-use crate::catalog::{ConfigStore, DatabaseDefinition, NamespaceDefinition};
 use crate::dbs::node::Node;
-use crate::expr::statements::{
-	DefineFunctionStatement,
-	LiveStatement,
-};
 use crate::val::Value;
 
 #[derive(Clone)]
@@ -49,7 +44,7 @@ pub(crate) enum Entry {
 	/// A slice of DefineUserStatement specified on a database.
 	Dus(Arc<[catalog::UserDefinition]>),
 	/// A slice of DefineFunctionStatement specified on a database.
-	Fcs(Arc<[DefineFunctionStatement]>),
+	Fcs(Arc<[catalog::FunctionDefinition]>),
 	/// A slice of TableDefinition specified on a database.
 	Tbs(Arc<[catalog::TableDefinition]>),
 	/// A slice of DefineModelStatement specified on a database.
@@ -69,7 +64,7 @@ pub(crate) enum Entry {
 	/// A slice of DefineIndexStatement specified on a table.
 	Ixs(Arc<[catalog::IndexDefinition]>),
 	/// A slice of LiveStatement specified on a table.
-	Lvs(Arc<[LiveStatement]>),
+	Lvs(Arc<[catalog::SubscriptionDefinition]>),
 }
 
 impl Entry {
@@ -118,9 +113,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Rag"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`NamespaceDefinition`].
+	/// Converts this cache entry into a slice of [`catalog::NamespaceDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Nss`].
-	pub(crate) fn try_into_nss(self) -> Result<Arc<[NamespaceDefinition]>> {
+	pub(crate) fn try_into_nss(self) -> Result<Arc<[catalog::NamespaceDefinition]>> {
 		match self {
 			Entry::Nss(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Nss"),
@@ -150,9 +145,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Nus"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`DatabaseDefinition`].
+	/// Converts this cache entry into a slice of [`catalog::DatabaseDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Dbs`].
-	pub(crate) fn try_into_dbs(self) -> Result<Arc<[DatabaseDefinition]>> {
+	pub(crate) fn try_into_dbs(self) -> Result<Arc<[catalog::DatabaseDefinition]>> {
 		match self {
 			Entry::Dbs(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Dbs"),
@@ -215,9 +210,9 @@ impl Entry {
 		}
 	}
 
-	/// Converts this cache entry into a slice of [`DefineFunctionStatement`].
+	/// Converts this cache entry into a slice of [`catalog::FunctionDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Fcs`].
-	pub(crate) fn try_into_fcs(self) -> Result<Arc<[DefineFunctionStatement]>> {
+	pub(crate) fn try_into_fcs(self) -> Result<Arc<[catalog::FunctionDefinition]>> {
 		match self {
 			Entry::Fcs(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Fcs"),
@@ -241,7 +236,7 @@ impl Entry {
 	}
 	/// Converts this cache entry into a slice of [`DefineConfigStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Cgs`].
-	pub(crate) fn try_into_cgs(self) -> Result<Arc<[ConfigStore]>> {
+	pub(crate) fn try_into_cgs(self) -> Result<Arc<[catalog::ConfigStore]>> {
 		match self {
 			Entry::Cgs(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Cgs"),
@@ -287,9 +282,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Fts"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`LiveStatement`].
+	/// Converts this cache entry into a slice of [`catalog::SubscriptionDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Lvs`].
-	pub(crate) fn try_into_lvs(self) -> Result<Arc<[LiveStatement]>> {
+	pub(crate) fn try_into_lvs(self) -> Result<Arc<[catalog::SubscriptionDefinition]>> {
 		match self {
 			Entry::Lvs(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Lvs"),

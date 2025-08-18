@@ -18,7 +18,7 @@ pub struct ApiDefinition {
 	pub actions: Vec<ApiActionStore>,
 	pub fallback: Option<Expr>,
 	pub config: ApiConfigStore,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl_kv_value_revisioned!(ApiDefinition);
@@ -50,15 +50,14 @@ impl ApiDefinition {
 	}
 
 	fn to_sql_definition(&self) -> crate::sql::statements::DefineApiStatement {
-		todo!("STU")
-		// crate::sql::statements::DefineApiStatement {
-		// 	kind: DefineKind::Default,
-		// 	path: self.path.into(),
-		// 	actions: self.actions.iter().map(|x| x.to_sql_action()).collect(),
-		// 	fallback: self.fallback.clone(),
-		// 	config: self.config.to_sql_config(),
-		// 	comment: self.comment.clone(),
-		// }
+		crate::sql::statements::DefineApiStatement {
+			kind: crate::sql::statements::define::DefineKind::Default,
+			path: self.path.into(),
+			actions: self.actions.iter().map(|x| x.to_sql_action()).collect(),
+			fallback: self.fallback.clone().map(|x| x.into()),
+			config: self.config.to_sql_config(),
+			comment: self.comment.clone().map(|x| unsafe { Strand::new_unchecked(x) }),
+		}
 	}
 }
 

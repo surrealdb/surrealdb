@@ -219,26 +219,6 @@ fn random_string(length: usize, pool: &[u8]) -> String {
 	string
 }
 
-pub fn new_grant_bearer(ty: catalog::BearerAccessType) -> catalog::GrantBearer {
-	let id = format!(
-		"{}{}",
-		// The pool for the first character of the key identifier excludes digits.
-		random_string(1, &GRANT_BEARER_CHARACTER_POOL[10..]),
-		random_string(GRANT_BEARER_ID_LENGTH - 1, GRANT_BEARER_CHARACTER_POOL)
-	);
-	let secret = random_string(GRANT_BEARER_KEY_LENGTH, GRANT_BEARER_CHARACTER_POOL);
-	let prefix = match ty {
-		catalog::BearerAccessType::Bearer => "surreal-bearer",
-		catalog::BearerAccessType::Refresh => "surreal-refresh",
-	};
-
-	let key = format!("{prefix}-{id}-{secret}");
-	catalog::GrantBearer {
-		id,
-		key,
-	}
-}
-
 pub fn new_grant_bearer_hashed(ty: catalog::BearerAccessType) -> catalog::GrantBearer {
 	let id = format!(
 		"{}{}",
@@ -262,22 +242,6 @@ pub fn new_grant_bearer_hashed(ty: catalog::BearerAccessType) -> catalog::GrantB
 	catalog::GrantBearer {
 		id,
 		key,
-	}
-}
-
-pub fn hash_grant_bearer(grant: catalog::GrantBearer) -> catalog::GrantBearer {
-	// The hash of the bearer key is stored to mitigate the impact of a read-only compromise.
-	// We use SHA-256 as the key needs to be verified performantly for every operation.
-	// Unlike with passwords, brute force and rainbow tables are infeasable due to the key length.
-	// When hashing the bearer keys, the prefix and key identifier are kept as salt.
-	let mut hasher = Sha256::new();
-	hasher.update(grant.key.as_str());
-	let hash = hasher.finalize();
-	let hash_hex = format!("{hash:x}").into();
-
-	catalog::GrantBearer {
-		key: hash_hex,
-		..grant
 	}
 }
 

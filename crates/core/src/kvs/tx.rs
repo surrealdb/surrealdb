@@ -19,10 +19,6 @@ use crate::catalog::{
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
-use crate::expr::statements::{
-	DefineFunctionStatement,
-	LiveStatement,
-};
 use crate::idx::planner::ScanDirection;
 use crate::idx::trees::store::cache::IndexTreeCaches;
 use crate::key::database::sq::Sq;
@@ -789,7 +785,7 @@ impl Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-	) -> Result<Arc<[DefineFunctionStatement]>> {
+	) -> Result<Arc<[catalog::FunctionDefinition]>> {
 		let qey = cache::tx::Lookup::Fcs(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_fcs(),
@@ -994,7 +990,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &str,
-	) -> Result<Arc<[LiveStatement]>> {
+	) -> Result<Arc<[catalog::SubscriptionDefinition]>> {
 		let qey = cache::tx::Lookup::Lvs(ns, db, tb);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_lvs(),
@@ -1659,7 +1655,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		fc: &str,
-	) -> Result<Arc<DefineFunctionStatement>> {
+	) -> Result<Arc<catalog::FunctionDefinition>> {
 		let qey = cache::tx::Lookup::Fc(ns, db, fc);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),

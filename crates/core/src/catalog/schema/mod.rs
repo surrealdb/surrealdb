@@ -23,6 +23,7 @@ pub use bucket::*;
 pub use config::*;
 pub use event::*;
 pub use field::*;
+pub use function::*;
 pub use index::*;
 pub use ml::*;
 pub use param::*;

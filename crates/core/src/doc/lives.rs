@@ -43,11 +43,12 @@ impl Document {
 		}
 
 		// Get all live queries for this table
-		let lvs = self.lv(ctx, opt).await?;
+		let live_subscriptions = self.lv(ctx, opt).await?;
 		// Loop through all index statements
-		for lv in lvs.iter() {
+		for live_subscription in live_subscriptions.iter() {
 			// Create a new statement
-			let lq = Statement::from(lv);
+			let live_subscription = live_subscription.to_expr_definition();
+			let lq = Statement::from(&live_subscription);
 			// Get the event action
 			let met = if stm.is_delete() {
 				Value::from("DELETE")
@@ -74,12 +75,12 @@ impl Document {
 				&self.current
 			};
 			// Ensure that a session exists on the LIVE query
-			let sess = match lv.session.as_ref() {
+			let sess = match live_subscription.session.as_ref() {
 				Some(v) => v,
 				None => continue,
 			};
 			// Ensure that auth info exists on the LIVE query
-			let auth = match lv.auth.clone() {
+			let auth = match live_subscription.auth.clone() {
 				Some(v) => v,
 				None => continue,
 			};
@@ -134,7 +135,7 @@ impl Document {
 			// the relevant result.
 			let (action, mut result) = if stm.is_delete() {
 				// Prepare a DELETE notification
-				if opt.id()? == lv.node.0 {
+				if opt.id()? == live_subscription.node.0 {
 					// Ensure futures are run
 					// Output the full document before any changes were applied
 					let mut result = (*doc.doc.as_ref()).clone();
@@ -147,7 +148,7 @@ impl Document {
 				}
 			} else if self.is_new() {
 				// Prepare a CREATE notification
-				if opt.id()? == lv.node.0 {
+				if opt.id()? == live_subscription.node.0 {
 					// An error ignore here is about livequery not the query which invoked the
 					// livequery trigger. So we should catch the ignore and skip this entry in this
 					// case.
@@ -163,7 +164,7 @@ impl Document {
 				}
 			} else {
 				// Prepare a UPDATE notification
-				if opt.id()? == lv.node.0 {
+				if opt.id()? == live_subscription.node.0 {
 					// An error ignore here is about livequery not the query which invoked the
 					// livequery trigger. So we should catch the ignore and skip this entry in this
 					// case.
@@ -180,7 +181,7 @@ impl Document {
 			};
 
 			// Process any potential `FETCH` clause on the live statement
-			if let Some(fetchs) = &lv.fetch {
+			if let Some(fetchs) = &live_subscription.fetch {
 				let mut idioms = Vec::with_capacity(fetchs.0.len());
 				for fetch in fetchs.iter() {
 					fetch.compute(stk, &lqctx, &lqopt, &mut idioms).await?;
@@ -193,7 +194,7 @@ impl Document {
 			// Send the notification
 			let res = chn
 				.send(Notification {
-					id: lv.id,
+					id: live_subscription.id,
 					action,
 					record: Value::RecordId(rid.as_ref().clone()),
 					result,

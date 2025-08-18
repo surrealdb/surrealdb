@@ -173,11 +173,11 @@ impl Display for DefineIndexStatement {
 	}
 }
 
-async fn run_indexing(
-	stk: &mut Stk,
+pub(in crate::expr::statements) async fn run_indexing(
+	#[cfg_attr(not(target_family = "wasm"), expect(unused_variables))] stk: &mut Stk,
 	ctx: &Context,
 	opt: &Options,
-	doc: Option<&CursorDoc>,
+	#[cfg_attr(not(target_family = "wasm"), expect(unused_variables))] doc: Option<&CursorDoc>,
 	index: &IndexDefinition,
 	blocking: bool,
 ) -> Result<()> {

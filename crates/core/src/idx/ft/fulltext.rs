@@ -903,7 +903,6 @@ mod tests {
 	use crate::catalog::{DatabaseId, FullTextParams, NamespaceId};
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
-	use crate::expr::Ident;
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::offset::Offset;

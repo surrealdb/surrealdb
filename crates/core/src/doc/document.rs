@@ -9,7 +9,6 @@ use reblessive::tree::Stk;
 use crate::catalog::{self, DatabaseDefinition, TableDefinition};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Workable};
-use crate::expr::statements::live::LiveStatement;
 use crate::expr::{Base, FlowResultExt as _, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::idx::planner::RecordStrategy;
@@ -577,7 +576,11 @@ impl Document {
 	}
 
 	// Get the lives for this document
-	pub async fn lv(&self, ctx: &Context, opt: &Options) -> Result<Arc<[LiveStatement]>> {
+	pub async fn lv(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Arc<[catalog::SubscriptionDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table

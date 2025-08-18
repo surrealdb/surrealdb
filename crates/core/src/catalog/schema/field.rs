@@ -5,7 +5,8 @@ use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Idiom, Kind};
 use crate::kvs::impl_kv_value_revisioned;
-use crate::val::Value;
+use crate::sql::{DefineFieldStatement, ToSql};
+use crate::val::{Strand, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -40,6 +41,38 @@ pub(crate) struct FieldDefinition {
 }
 impl_kv_value_revisioned!(FieldDefinition);
 
+impl FieldDefinition {
+	pub fn to_sql_definition(&self) -> DefineFieldStatement {
+		DefineFieldStatement {
+			kind: crate::sql::statements::define::DefineKind::Default,
+			name: self.name.clone().into(),
+			what: unsafe { crate::sql::Ident::new_unchecked(self.what.clone()) },
+			flex: self.flexible,
+			field_kind: self.field_kind.clone().map(|x| x.into()),
+			readonly: self.readonly,
+			value: self.value.clone().map(|x| x.into()),
+			assert: self.assert.clone().map(|x| x.into()),
+			default: match &self.default {
+				DefineDefault::None => crate::sql::statements::define::DefineDefault::None,
+				DefineDefault::Set(x) => {
+					crate::sql::statements::define::DefineDefault::Set(x.clone().into())
+				}
+				DefineDefault::Always(x) => {
+					crate::sql::statements::define::DefineDefault::Always(x.clone().into())
+				}
+			},
+			permissions: crate::sql::Permissions {
+				select: self.select_permission.to_sql_definition(),
+				create: self.create_permission.to_sql_definition(),
+				update: self.update_permission.to_sql_definition(),
+				delete: crate::sql::Permission::Full,
+			},
+			comment: self.comment.clone().map(|x| unsafe { Strand::new_unchecked(x) }),
+			reference: self.reference.clone().map(|x| x.into()),
+		}
+	}
+}
+
 impl InfoStructure for FieldDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
@@ -60,5 +93,11 @@ impl InfoStructure for FieldDefinition {
 			}),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})
+	}
+}
+
+impl ToSql for FieldDefinition {
+	fn to_sql(&self) -> String {
+		self.to_sql_definition().to_string()
 	}
 }

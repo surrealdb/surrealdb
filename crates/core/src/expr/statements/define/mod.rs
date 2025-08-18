@@ -28,6 +28,7 @@ pub use event::DefineEventStatement;
 pub use field::{DefineDefault, DefineFieldStatement};
 pub use function::DefineFunctionStatement;
 pub use index::DefineIndexStatement;
+pub(in crate::expr::statements) use index::run_indexing;
 pub use model::DefineModelStatement;
 pub use namespace::DefineNamespaceStatement;
 pub use param::DefineParamStatement;

@@ -6,7 +6,6 @@ use uuid::Uuid;
 
 use crate::catalog::{self};
 use crate::err::Error;
-use crate::expr::statements::LiveStatement;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Entry {
@@ -21,7 +20,7 @@ pub(crate) enum Entry {
 	/// A slice of DefineIndexStatement specified on a table.
 	Ixs(Arc<[catalog::IndexDefinition]>),
 	/// A slice of LiveStatement specified on a table.
-	Lvs(Arc<[LiveStatement]>),
+	Lvs(Arc<[catalog::SubscriptionDefinition]>),
 	/// An Uuid.
 	Lvv(Uuid),
 }
@@ -70,17 +69,17 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Fts"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`LiveStatement`].
+	/// Converts this cache entry into a slice of [`catalog::SubscriptionDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Lvs`].
-	pub(crate) fn try_into_lvs(self) -> Result<Arc<[LiveStatement]>> {
+	pub(crate) fn try_into_lvs(self) -> Result<Arc<[catalog::SubscriptionDefinition]>> {
 		match self {
 			Entry::Lvs(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Lvs"),
 		}
 	}
 
-	/// Converts this cache entry into a slice of [`LiveStatement`].
-	/// This panics if called on a cache entry that is not an [`Entry::Lvs`].
+	/// Converts this cache entry into a uuid.
+	/// This panics if called on a cache entry that is not an [`Entry::Lvv`].
 	pub(crate) fn try_info_lvv(self) -> Result<Uuid> {
 		match self {
 			Entry::Lvv(v) => Ok(v),

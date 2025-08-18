@@ -3,8 +3,6 @@ use axum::{Extension, Router};
 
 use super::AppState;
 use crate::core::dbs::capabilities::RouteTarget;
-use crate::core::kvs::LockType::*;
-use crate::core::kvs::TransactionType::*;
 use crate::net::error::Error as NetError;
 
 pub(super) fn router<S>() -> Router<S>

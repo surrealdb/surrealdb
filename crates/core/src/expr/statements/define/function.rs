@@ -4,14 +4,13 @@ use anyhow::{Result, bail};
 use revision::revisioned;
 
 use super::DefineKind;
-use crate::catalog::Permission;
+use crate::catalog::{FunctionDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Block, Ident, Kind};
+use crate::expr::{Base, Block, Expr, Ident, Kind};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Strand, Value};
@@ -68,10 +67,13 @@ impl DefineFunctionStatement {
 		let key = crate::key::database::fc::new(ns, db, &self.name);
 		txn.set(
 			&key,
-			&DefineFunctionStatement {
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				kind: DefineKind::Default,
-				..self.clone()
+			&FunctionDefinition {
+				name: self.name.to_raw_string(),
+				args: self.args.clone().into_iter().map(|(n, k)| (n.to_raw_string(), k)).collect(),
+				block: Expr::Block(Box::new(self.block.clone())),
+				comment: self.comment.clone().map(|c| c.into_string()),
+				permissions: self.permissions.clone(),
+				returns: self.returns.clone(),
 			},
 			None,
 		)
@@ -114,22 +116,5 @@ impl fmt::Display for DefineFunctionStatement {
 		};
 		write!(f, "PERMISSIONS {}", self.permissions)?;
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineFunctionStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"args".to_string() => self.args
-				.into_iter()
-				.map(|(n, k)| vec![n.structure(), k.structure()].into())
-				.collect::<Vec<Value>>()
-				.into(),
-			"block".to_string() => self.block.structure(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-			"returns".to_string(), if let Some(v) = self.returns => v.structure(),
-		})
 	}
 }
