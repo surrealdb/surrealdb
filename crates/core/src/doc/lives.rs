@@ -43,12 +43,18 @@ impl Document {
 			return Ok(());
 		}
 
+		// Get all live queries for this table
+		let lvs = self.lv(ctx, opt).await?;
+
+		// If there are no live queries, we can skip the rest of the function
+		// if lvs.is_empty() {
+		// 	return Ok(());
+		// }
+
 		// Ensure computed fields are computed in advance
 		self.computed_fields(stk, ctx, opt, DocKind::Initial).await?;
 		self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
 
-		// Get all live queries for this table
-		let lvs = self.lv(ctx, opt).await?;
 		// Loop through all index statements
 		for lv in lvs.iter() {
 			// Create a new statement
