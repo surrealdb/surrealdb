@@ -297,6 +297,33 @@ impl Document {
 		opt: &Options,
 		permitted: Permitted,
 	) -> Result<bool> {
+		// Check if reduction is required
+		if !self.check_reduction_required(opt)? {
+			return Ok(false);
+		}
+
+		match permitted {
+			Permitted::Initial => {
+				self.initial_reduced =
+					self.compute_reduced_target(stk, ctx, opt, &self.initial).await?;
+			}
+			Permitted::Current => {
+				self.current_reduced =
+					self.compute_reduced_target(stk, ctx, opt, &self.current).await?;
+			}
+			Permitted::Both => {
+				self.initial_reduced =
+					self.compute_reduced_target(stk, ctx, opt, &self.initial).await?;
+				self.current_reduced =
+					self.compute_reduced_target(stk, ctx, opt, &self.current).await?;
+			}
+		}
+
+		// Document has been reduced
+		Ok(true)
+	}
+
+	pub(crate) fn check_reduction_required(&self, opt: &Options) -> Result<bool> {
 		// Check if this record exists
 		if self.id.is_none() {
 			return Ok(false);
@@ -305,58 +332,54 @@ impl Document {
 		if !opt.check_perms(Action::View)? {
 			return Ok(false);
 		}
+
+		// Reduction is required
+		Ok(true)
+	}
+
+	pub(crate) async fn compute_reduced_target(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		full: &CursorDoc,
+	) -> Result<CursorDoc> {
 		// Fetch the fields for the table
 		let fds = self.fd(ctx, opt).await?;
-		// Fetch the targets to process
-		let targets = match permitted {
-			Permitted::Initial => vec![(&self.initial, &mut self.initial_reduced)],
-			Permitted::Current => vec![(&self.current, &mut self.current_reduced)],
-			Permitted::Both => vec![
-				(&self.initial, &mut self.initial_reduced),
-				(&self.current, &mut self.current_reduced),
-			],
-		};
-		// Loop over the targets to process
-		for target in targets {
-			// Get the full document
-			let full = target.0;
-			// Process the full document
-			let mut out = (*full.doc).clone();
+		// The document to be reduced
+		let mut reduced = (*full.doc).clone();
+		// Loop over each field in document
+		for fd in fds.iter() {
 			// Loop over each field in document
-			for fd in fds.iter() {
-				// Loop over each field in document
-				for k in out.each(&fd.name).iter() {
-					// Process the field permissions
-					match &fd.permissions.select {
-						Permission::Full => (),
-						Permission::None => out.cut(k),
-						Permission::Specific(e) => {
-							// Disable permissions
-							let opt = &opt.new_with_perms(false);
-							// Get the initial value
-							let val = Arc::new(full.doc.as_ref().pick(k));
-							// Configure the context
-							let mut ctx = MutableContext::new(ctx);
-							ctx.add_value("value", val);
-							let ctx = ctx.freeze();
-							// Process the PERMISSION clause
-							if !stk
-								.run(|stk| e.compute(stk, &ctx, opt, Some(full)))
-								.await
-								.catch_return()?
-								.is_truthy()
-							{
-								out.cut(k);
-							}
+			for k in reduced.each(&fd.name).iter() {
+				// Process the field permissions
+				match &fd.permissions.select {
+					Permission::Full => (),
+					Permission::None => reduced.cut(k),
+					Permission::Specific(e) => {
+						// Disable permissions
+						let opt = &opt.new_with_perms(false);
+						// Get the initial value
+						let val = Arc::new(full.doc.as_ref().pick(k));
+						// Configure the context
+						let mut ctx = MutableContext::new(ctx);
+						ctx.add_value("value", val);
+						let ctx = ctx.freeze();
+						// Process the PERMISSION clause
+						if !stk
+							.run(|stk| e.compute(stk, &ctx, opt, Some(full)))
+							.await
+							.catch_return()?
+							.is_truthy()
+						{
+							reduced.cut(k);
 						}
 					}
 				}
 			}
-			// Update the permitted document
-			target.1.doc = out.into();
 		}
-		// Return the permitted document
-		Ok(true)
+		// Ok
+		Ok(CursorDoc::new(full.rid.clone(), full.ir.clone(), reduced))
 	}
 
 	/// Retrieve the record id for this document
