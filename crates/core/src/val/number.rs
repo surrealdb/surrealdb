@@ -32,53 +32,6 @@ impl Default for Number {
 	}
 }
 
-// Possible Serialiser keeping the lexical number ordering on Number
-//
-// impl Serialize for Number {
-// 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-// 	where
-// 		S: SerdeSerializer,
-// 	{
-// 		let buf = self.as_decimal_buf().map_err(serde::ser::Error::custom)?;
-// 		serializer.serialize_bytes(&buf)
-// 	}
-// }
-//
-// impl<'de> Deserialize<'de> for Number {
-// 	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-// 	where
-// 		D: SerdeDeserializer<'de>,
-// 	{
-// 		// A small visitor that accepts both borrowed and owned byte
-// 		// buffers and forwards them to `from_decimal_buf`.
-// 		struct NumberVisitor;
-//
-// 		impl serde::de::Visitor<'_> for NumberVisitor {
-// 			type Value = Number;
-//
-// 			fn expecting(&self, f: &mut Formatter) -> fmt::Result {
-// 				f.write_str("SurrealDB binary-encoded Number")
-// 			}
-//
-// 			fn visit_bytes<E>(self, v: &[u8]) -> Result<Number, E>
-// 			where
-// 				E: serde::de::Error,
-// 			{
-// 				Number::from_decimal_buf(v).map_err(E::custom)
-// 			}
-//
-// 			fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Number, E>
-// 			where
-// 				E: serde::de::Error,
-// 			{
-// 				self.visit_bytes(&v)
-// 			}
-// 		}
-//
-// 		deserializer.deserialize_bytes(NumberVisitor)
-// 	}
-// }
-
 macro_rules! from_prim_ints {
 	($($int: ty),*) => {
 		$(

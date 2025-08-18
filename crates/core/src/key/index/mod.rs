@@ -37,8 +37,8 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::key::category::{Categorise, Category};
+use crate::key::value::{KeyArray, KeyRecordId, KeyRecordIdKey};
 use crate::kvs::KVKey;
-use crate::val::{Array, RecordId, RecordIdKey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 struct Prefix<'a> {
@@ -75,7 +75,7 @@ impl<'a> Prefix<'a> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
 struct PrefixIds<'a> {
 	__: u8,
 	_a: u8,
@@ -87,7 +87,7 @@ struct PrefixIds<'a> {
 	_d: u8,
 	pub ix: &'a str,
 	_e: u8,
-	pub fd: Cow<'a, Array>,
+	pub fd: Cow<'a, KeyArray>,
 }
 
 impl KVKey for PrefixIds<'_> {
@@ -95,7 +95,7 @@ impl KVKey for PrefixIds<'_> {
 }
 
 impl<'a> PrefixIds<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, fd: &'a Array) -> Self {
+	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, fd: &'a KeyArray) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -112,7 +112,7 @@ impl<'a> PrefixIds<'a> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Index<'a> {
 	__: u8,
 	_a: u8,
@@ -124,12 +124,12 @@ pub(crate) struct Index<'a> {
 	_d: u8,
 	pub ix: &'a str,
 	_e: u8,
-	pub fd: Cow<'a, Array>,
-	pub id: Option<Cow<'a, RecordIdKey>>,
+	pub fd: Cow<'a, KeyArray>,
+	pub id: Option<Cow<'a, KeyRecordIdKey>>,
 }
 
 impl KVKey for Index<'_> {
-	type ValueType = RecordId;
+	type ValueType = KeyRecordId;
 }
 
 impl Categorise for Index<'_> {
@@ -144,8 +144,8 @@ impl<'a> Index<'a> {
 		db: &'a str,
 		tb: &'a str,
 		ix: &'a str,
-		fd: &'a Array,
-		id: Option<&'a RecordIdKey>,
+		fd: &'a KeyArray,
+		id: Option<&'a KeyRecordIdKey>,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -179,17 +179,29 @@ impl<'a> Index<'a> {
 		Ok(beg)
 	}
 
-	fn prefix_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Result<Vec<u8>> {
+	fn prefix_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &KeyArray) -> Result<Vec<u8>> {
 		PrefixIds::new(ns, db, tb, ix, fd).encode_key()
 	}
 
-	pub fn prefix_ids_beg(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Result<Vec<u8>> {
+	pub fn prefix_ids_beg(
+		ns: &str,
+		db: &str,
+		tb: &str,
+		ix: &str,
+		fd: &KeyArray,
+	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		beg.extend_from_slice(&[0x00]);
 		Ok(beg)
 	}
 
-	pub fn prefix_ids_end(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Result<Vec<u8>> {
+	pub fn prefix_ids_end(
+		ns: &str,
+		db: &str,
+		tb: &str,
+		ix: &str,
+		fd: &KeyArray,
+	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		beg.extend_from_slice(&[0xff]);
 		Ok(beg)
@@ -200,7 +212,7 @@ impl<'a> Index<'a> {
 		db: &str,
 		tb: &str,
 		ix: &str,
-		fd: &Array,
+		fd: &KeyArray,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		*beg.last_mut().unwrap() = 0x00;
@@ -212,7 +224,7 @@ impl<'a> Index<'a> {
 		db: &str,
 		tb: &str,
 		ix: &str,
-		fd: &Array,
+		fd: &KeyArray,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		*beg.last_mut().unwrap() = 0xff;
