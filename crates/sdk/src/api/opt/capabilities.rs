@@ -60,7 +60,8 @@ impl From<&ExperimentalFeature> for ExperimentalTarget {
 /// allow-list and in the deny-list it will be disallowed.
 ///
 /// With the combination of both these lists you can filter subgroups. For
-/// example: ```
+/// example:
+/// ```
 /// # use surrealdb::opt::capabilities::Capabilities;
 /// # fn cap() -> surrealdb::Result<Capabilities>{
 /// # let cap =
@@ -72,7 +73,7 @@ impl From<&ExperimentalFeature> for ExperimentalTarget {
 ///  # Ok(cap)
 /// # }
 /// ```
-/// 
+///
 /// Will allow all and only all `http::*` functions except the function
 /// `http::post`.
 ///

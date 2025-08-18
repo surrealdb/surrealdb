@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
 use crate::sql::escape::EscapeIdent;
@@ -77,8 +77,15 @@ impl From<Ident> for crate::expr::Ident {
 	}
 }
 
-impl fmt::Display for Ident {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Ident {
+	/// Convert the Ident to a raw String
+	pub fn to_raw(&self) -> String {
+		self.0.to_string()
+	}
+}
+
+impl Display for Ident {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		EscapeIdent(&self.0).fmt(f)
 	}
 }

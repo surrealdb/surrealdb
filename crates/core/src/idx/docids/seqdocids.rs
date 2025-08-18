@@ -44,8 +44,7 @@ impl SeqDocIds {
 	///
 	/// # Arguments
 	/// * `nid` - The node ID used for distributed sequence generation
-	/// * `ikb` - The index key base containing namespace, database, table, and
-	///   index information
+	/// * `ikb` - The index key base containing namespace, database, table, and index information
 	pub(in crate::idx) fn new(nid: Uuid, ikb: IndexKeyBase) -> Self {
 		Self {
 			nid,
@@ -120,8 +119,7 @@ impl SeqDocIds {
 	/// This is the reverse lookup of `get_doc_id`.
 	///
 	/// # Arguments
-	/// * `ikb` - The index key base containing namespace, database, table, and
-	///   index information
+	/// * `ikb` - The index key base containing namespace, database, table, and index information
 	/// * `tx` - The transaction to use for the lookup
 	/// * `doc_id` - The document ID to look up
 	///
@@ -162,6 +160,7 @@ impl SeqDocIds {
 mod tests {
 	use uuid::Uuid;
 
+	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::ctx::Context;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::seqdocids::SeqDocIds;
@@ -170,17 +169,17 @@ mod tests {
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::{Read, Write};
 	use crate::kvs::{Datastore, TransactionType};
-	use crate::val::{RecordIdKey, Strand};
+	use crate::val::RecordIdKey;
 
-	const TEST_NS: &str = "test_ns";
-	const TEST_DB: &str = "test_db";
+	const TEST_NS_ID: NamespaceId = NamespaceId(1);
+	const TEST_DB_ID: DatabaseId = DatabaseId(1);
 	const TEST_TB: &str = "test_tb";
 	const TEST_IX: &str = "test_ix";
 
 	async fn new_operation(ds: &Datastore, tt: TransactionType) -> (Context, SeqDocIds) {
 		let mut ctx = ds.setup_ctx().unwrap();
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		let ikb = IndexKeyBase::new(TEST_NS, TEST_DB, TEST_TB, TEST_IX);
+		let ikb = IndexKeyBase::new(TEST_NS_ID, TEST_DB_ID, TEST_TB, TEST_IX);
 		ctx.set_transaction(tx.into());
 		let d = SeqDocIds::new(Uuid::nil(), ikb);
 		(ctx.freeze(), d)
@@ -423,16 +422,16 @@ mod tests {
 			let tx = ctx.tx();
 			for id in ["Foo", "Bar", "Hello", "World"] {
 				let id = crate::key::index::id::Id::new(
-					TEST_NS,
-					TEST_DB,
+					TEST_NS_ID,
+					TEST_DB_ID,
 					TEST_TB,
 					TEST_IX,
-					Strand::new(id.to_owned()).unwrap().into(),
+					RecordIdKey::String(id.to_owned()),
 				);
 				assert!(!tx.exists(&id, None).await.unwrap());
 			}
 			for doc_id in 0..=3 {
-				let bi = Bi::new(TEST_NS, TEST_DB, TEST_TB, TEST_IX, doc_id);
+				let bi = Bi::new(TEST_NS_ID, TEST_DB_ID, TEST_TB, TEST_IX, doc_id);
 				assert!(!tx.exists(&bi, None).await.unwrap());
 			}
 		}

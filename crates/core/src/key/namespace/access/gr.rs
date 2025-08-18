@@ -2,6 +2,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::NamespaceId;
 use crate::expr::statements::access::AccessGrantStore;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
@@ -10,7 +11,7 @@ use crate::kvs::KVKey;
 pub(crate) struct Gr<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
 	pub ac: &'a str,
 	_c: u8,
@@ -23,17 +24,17 @@ impl KVKey for Gr<'_> {
 	type ValueType = AccessGrantStore;
 }
 
-pub fn new<'a>(ns: &'a str, ac: &'a str, gr: &'a str) -> Gr<'a> {
+pub fn new<'a>(ns: NamespaceId, ac: &'a str, gr: &'a str) -> Gr<'a> {
 	Gr::new(ns, ac, gr)
 }
 
-pub fn prefix(ns: &str, ac: &str) -> Result<Vec<u8>> {
+pub fn prefix(ns: NamespaceId, ac: &str) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, ac).encode_key()?;
 	k.extend_from_slice(b"!gr\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, ac: &str) -> Result<Vec<u8>> {
+pub fn suffix(ns: NamespaceId, ac: &str) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, ac).encode_key()?;
 	k.extend_from_slice(b"!gr\xff");
 	Ok(k)
@@ -46,7 +47,7 @@ impl Categorise for Gr<'_> {
 }
 
 impl<'a> Gr<'a> {
-	pub fn new(ns: &'a str, ac: &'a str, gr: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, ac: &'a str, gr: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -69,23 +70,23 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let val = Gr::new(
-			"testns",
+			NamespaceId(1),
 			"testac",
 			"testgr",
 		);
 		let enc = Gr::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0&testac\0!grtestgr\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01&testac\0!grtestgr\0");
 	}
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix("testns", "testac").unwrap();
-		assert_eq!(val, b"/*testns\0&testac\0!gr\0");
+		let val = super::prefix(NamespaceId(1), "testac").unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01&testac\0!gr\0");
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::suffix("testns", "testac").unwrap();
-		assert_eq!(val, b"/*testns\0&testac\0!gr\xff");
+		let val = super::suffix(NamespaceId(1), "testac").unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01&testac\0!gr\xff");
 	}
 }

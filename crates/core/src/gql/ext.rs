@@ -131,7 +131,7 @@ pub trait TryAsExt {
 impl TryAsExt for Value {
 	fn try_as_thing(self) -> Result<RecordId, Self> {
 		match self {
-			Value::Thing(t) => Ok(t),
+			Value::RecordId(t) => Ok(t),
 			v => Err(v),
 		}
 	}
