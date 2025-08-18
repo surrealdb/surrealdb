@@ -15,10 +15,10 @@ use crate::val::Strand;
 impl Parser<'_> {
 	pub(crate) async fn parse_record_string(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		double: bool,
 	) -> ParseResult<RecordIdLit> {
-		let thing = self.parse_record_id(ctx).await?;
+		let thing = self.parse_record_id(stk).await?;
 
 		if double {
 			expected_whitespace!(self, t!("\""));
@@ -161,27 +161,27 @@ impl Parser<'_> {
 		}
 	}
 
-	pub(crate) async fn parse_thing_with_range(
+	pub(crate) async fn parse_record_id_with_range(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 	) -> ParseResult<RecordIdLit> {
 		let ident = self.next_token_value::<Ident>()?;
-		self.parse_record_id_or_range(ctx, ident).await
+		self.parse_record_id_or_range(stk, ident).await
 	}
 
-	pub(crate) async fn parse_record_id(&mut self, ctx: &mut Stk) -> ParseResult<RecordIdLit> {
+	pub(crate) async fn parse_record_id(&mut self, stk: &mut Stk) -> ParseResult<RecordIdLit> {
 		let ident = self.next_token_value::<Ident>()?.into_string();
-		self.parse_record_id_from_ident(ctx, ident).await
+		self.parse_record_id_from_ident(stk, ident).await
 	}
 
 	pub(crate) async fn parse_record_id_from_ident(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		ident: String,
 	) -> ParseResult<RecordIdLit> {
 		expected!(self, t!(":"));
 
-		let id = ctx.run(|ctx| self.parse_record_id_key(ctx)).await?;
+		let id = stk.run(|ctx| self.parse_record_id_key(ctx)).await?;
 
 		Ok(RecordIdLit {
 			table: ident,

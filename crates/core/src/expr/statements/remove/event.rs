@@ -5,10 +5,10 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::catalog::TableDefinition;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::statements::define::DefineTableStatement;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
 
@@ -16,7 +16,7 @@ use crate::iam::{Action, ResourceKind};
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct RemoveEventStatement {
 	pub name: Ident,
-	pub what: Ident,
+	pub table_name: Ident,
 	pub if_exists: bool,
 }
 
@@ -26,11 +26,12 @@ impl RemoveEventStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the definition
-		let ev = match txn.get_tb_event(ns, db, &self.what, &self.name).await {
+		let ev = match txn.get_tb_event(ns, db, &self.table_name, &self.name).await {
 			Ok(x) => x,
 			Err(e) => {
 				if self.if_exists && matches!(e.downcast_ref(), Some(Error::EvNotFound { .. })) {
@@ -43,12 +44,19 @@ impl RemoveEventStatement {
 		// Delete the definition
 		let key = crate::key::table::ev::new(ns, db, &ev.target_table, &ev.name);
 		txn.del(&key).await?;
+
+		let Some(tb) = txn.get_tb(ns, db, &self.table_name).await? else {
+			return Err(Error::TbNotFound {
+				name: self.table_name.to_string(),
+			}
+			.into());
+		};
+
 		// Refresh the table cache for events
-		let key = crate::key::database::tb::new(ns, db, &self.what);
-		let tb = txn.get_tb(ns, db, &self.what).await?;
+		let key = crate::key::database::tb::new(ns, db, &self.table_name);
 		txn.set(
 			&key,
-			&DefineTableStatement {
+			&TableDefinition {
 				cache_events_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
 			},
@@ -57,7 +65,7 @@ impl RemoveEventStatement {
 		.await?;
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &self.what);
+			cache.clear_tb(ns, db, &self.table_name);
 		}
 		// Clear the cache
 		txn.clear_cache();
@@ -72,7 +80,7 @@ impl Display for RemoveEventStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", self.name, self.table_name)?;
 		Ok(())
 	}
 }

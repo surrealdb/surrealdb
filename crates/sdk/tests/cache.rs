@@ -7,6 +7,7 @@ use surrealdb_core::syn;
 #[tokio::test]
 async fn clear_transaction_cache_table() -> Result<()> {
 	let sql = "
+		USE NS test DB test;
 		BEGIN;
 		CREATE person:one CONTENT { x: 0 };
 		SELECT * FROM person;
@@ -17,7 +18,11 @@ async fn clear_transaction_cache_table() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 4);
+	assert_eq!(res.len(), 5);
+
+	// USE NS test DB test;
+	let tmp = res.remove(0).result;
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(

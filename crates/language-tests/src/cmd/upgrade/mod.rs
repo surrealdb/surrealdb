@@ -15,7 +15,7 @@ use clap::ArgMatches;
 use process::SurrealProcess;
 use protocol::{ProxyObject, ProxyValue};
 use semver::Version;
-use surrealdb_core::kvs::Datastore;
+use surrealdb_core::kvs::{Datastore, LockType, TransactionType};
 use tokio::task::JoinSet;
 
 use crate::{
@@ -240,6 +240,10 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let ds = Datastore::new("memory")
 		.await
 		.expect("failed to create datastore for running matching expressions");
+
+	let txn = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	txn.ensure_ns_db("match", "match", false).await.unwrap();
+	txn.commit().await.unwrap();
 
 	// Port distribution variables.
 	let mut start_port = 9000u16;

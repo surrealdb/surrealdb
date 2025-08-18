@@ -179,18 +179,18 @@ pub fn duration(input: &str) -> Result<Duration> {
 
 /// Parse a record id.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn thing(input: &str) -> Result<RecordId> {
-	trace!(target: TARGET, "Parsing SurrealQL thing");
+pub fn record_id(input: &str) -> Result<RecordId> {
+	trace!(target: TARGET, "Parsing SurrealQL record id");
 
 	parse_with(input.as_bytes(), async |parser, stk| parser.parse_value_record_id(stk).await)
 }
 
 /// Parse a record id including ranges.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn thing_with_range(input: &str) -> Result<RecordIdLit> {
-	trace!(target: TARGET, "Parsing SurrealQL thing");
+pub fn record_id_with_range(input: &str) -> Result<RecordIdLit> {
+	trace!(target: TARGET, "Parsing SurrealQL record id with range");
 
-	parse_with(input.as_bytes(), async |parser, stk| parser.parse_thing_with_range(stk).await)
+	parse_with(input.as_bytes(), async |parser, stk| parser.parse_record_id_with_range(stk).await)
 }
 
 /// Parse a block, expects the value to be wrapped in `{}`.

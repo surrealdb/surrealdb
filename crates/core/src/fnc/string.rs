@@ -373,7 +373,7 @@ pub mod is {
 	}
 
 	pub fn record((arg, Optional(tb)): (String, Optional<Value>)) -> Result<Value> {
-		let res = match syn::thing(&arg) {
+		let res = match syn::record_id(&arg) {
 			Ok(t) => match tb {
 				Some(Value::Strand(tb)) => t.table.as_str() == tb.as_str(),
 				Some(Value::Table(tb)) => t.table.as_str() == tb.as_str(),

@@ -81,7 +81,7 @@ impl Parser<'_> {
 
 	pub(crate) async fn try_parse_split(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		fields: &Fields,
 		fields_span: Span,
 	) -> ParseResult<Option<Splits>> {
@@ -94,7 +94,7 @@ impl Parser<'_> {
 		let has_all = fields.contains_all();
 
 		let before = self.peek().span;
-		let split = self.parse_basic_idiom(ctx).await?;
+		let split = self.parse_basic_idiom(stk).await?;
 		let split_span = before.covers(self.last_span());
 		if !has_all {
 			Self::check_idiom(MissingKind::Split, fields, fields_span, &split, split_span)?;
@@ -103,7 +103,7 @@ impl Parser<'_> {
 		let mut res = vec![Split(split)];
 		while self.eat(t!(",")) {
 			let before = self.peek().span;
-			let split = self.parse_basic_idiom(ctx).await?;
+			let split = self.parse_basic_idiom(stk).await?;
 			let split_span = before.covers(self.last_span());
 			if !has_all {
 				Self::check_idiom(MissingKind::Split, fields, fields_span, &split, split_span)?;
@@ -115,7 +115,7 @@ impl Parser<'_> {
 
 	pub(crate) async fn try_parse_orders(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		fields: &Fields,
 		fields_span: Span,
 	) -> ParseResult<Option<Ordering>> {
@@ -135,7 +135,7 @@ impl Parser<'_> {
 		let has_all = fields.contains_all();
 
 		let before = self.recent_span();
-		let order = self.parse_order(ctx).await?;
+		let order = self.parse_order(stk).await?;
 		let order_span = before.covers(self.last_span());
 		if !has_all {
 			Self::check_idiom(MissingKind::Order, fields, fields_span, &order.value, order_span)?;
@@ -144,7 +144,7 @@ impl Parser<'_> {
 		let mut orders = vec![order];
 		while self.eat(t!(",")) {
 			let before = self.recent_span();
-			let order = self.parse_order(ctx).await?;
+			let order = self.parse_order(stk).await?;
 			let order_span = before.covers(self.last_span());
 			if !has_all {
 				Self::check_idiom(
@@ -161,8 +161,8 @@ impl Parser<'_> {
 		Ok(Some(Ordering::Order(OrderList(orders))))
 	}
 
-	async fn parse_order(&mut self, ctx: &mut Stk) -> ParseResult<Order> {
-		let start = self.parse_basic_idiom(ctx).await?;
+	async fn parse_order(&mut self, stk: &mut Stk) -> ParseResult<Order> {
+		let start = self.parse_basic_idiom(stk).await?;
 		let collate = self.eat(t!("COLLATE"));
 		let numeric = self.eat(t!("NUMERIC"));
 		let direction = match self.peek_kind() {
@@ -184,21 +184,21 @@ impl Parser<'_> {
 		})
 	}
 
-	pub(crate) async fn try_parse_limit(&mut self, ctx: &mut Stk) -> ParseResult<Option<Limit>> {
+	pub(crate) async fn try_parse_limit(&mut self, stk: &mut Stk) -> ParseResult<Option<Limit>> {
 		if !self.eat(t!("LIMIT")) {
 			return Ok(None);
 		}
 		self.eat(t!("BY"));
-		let value = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
+		let value = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		Ok(Some(Limit(value)))
 	}
 
-	pub(crate) async fn try_parse_start(&mut self, ctx: &mut Stk) -> ParseResult<Option<Start>> {
+	pub(crate) async fn try_parse_start(&mut self, stk: &mut Stk) -> ParseResult<Option<Start>> {
 		if !self.eat(t!("START")) {
 			return Ok(None);
 		}
 		self.eat(t!("AT"));
-		let value = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
+		let value = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		Ok(Some(Start(value)))
 	}
 }
