@@ -25,7 +25,6 @@ use crate::expr::{
 use crate::fnc;
 use crate::val::{Array, Closure, Range, Strand, Value};
 
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Expr {
 	Literal(Literal),

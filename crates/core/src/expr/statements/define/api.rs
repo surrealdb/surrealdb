@@ -7,7 +7,7 @@ use revision::revisioned;
 use super::config::api::ApiConfig;
 use super::{CursorDoc, DefineKind};
 use crate::api::path::Path;
-use crate::catalog::{ApiActionStore, ApiDefinition, ApiMethod};
+use crate::catalog::{ApiActionDefinition, ApiDefinition, ApiMethod};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -67,7 +67,7 @@ impl DefineApiStatement {
 		let key = crate::key::database::ap::new(ns, db, &name);
 		let mut actions = Vec::new();
 		for action in self.actions.iter() {
-			actions.push(ApiActionStore {
+			actions.push(ApiActionDefinition {
 				methods: action.methods.clone(),
 				action: action.action.clone(),
 				config: action.config.compute(stk, ctx, opt, doc).await?,
@@ -79,7 +79,7 @@ impl DefineApiStatement {
 			actions,
 			fallback: self.fallback.clone(),
 			config,
-			comment: self.comment.clone(),
+			comment: self.comment.as_ref().map(|c| c.clone().into_string()),
 		};
 		txn.set(&key, &ap, None).await?;
 		// Clear the cache

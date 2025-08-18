@@ -13,11 +13,22 @@ use crate::val::{Array, Object, Strand, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+pub struct ApiActionDefinitionStore {
+	pub path: String,
+	pub actions: Vec<ApiActionDefinition>,
+	pub fallback: Option<Expr>,
+	pub config: ApiConfigDefinition,
+	pub comment: Option<String>,
+}
+
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct ApiDefinition {
 	pub path: Path,
-	pub actions: Vec<ApiActionStore>,
+	pub actions: Vec<ApiActionDefinition>,
 	pub fallback: Option<Expr>,
-	pub config: ApiConfigStore,
+	pub config: ApiConfigDefinition,
 	pub comment: Option<String>,
 }
 
@@ -131,15 +142,15 @@ impl InfoStructure for ApiMethod {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct ApiActionStore {
+pub struct ApiActionDefinition {
 	pub methods: Vec<ApiMethod>,
 	pub action: Expr,
-	pub config: ApiConfigStore,
+	pub config: ApiConfigDefinition,
 }
 
-impl_kv_value_revisioned!(ApiActionStore);
+impl_kv_value_revisioned!(ApiActionDefinition);
 
-impl InfoStructure for ApiActionStore {
+impl InfoStructure for ApiActionDefinition {
 	fn structure(self) -> Value {
 		Value::from(map!(
 			"methods" => Value::from(self.methods.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
@@ -151,12 +162,12 @@ impl InfoStructure for ApiActionStore {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct ApiConfigStore {
-	pub middleware: Vec<MiddlewareStore>,
+pub struct ApiConfigDefinition {
+	pub middleware: Vec<MiddlewareDefinition>,
 	pub permissions: Permission,
 }
 
-impl InfoStructure for ApiConfigStore {
+impl InfoStructure for ApiConfigDefinition {
 	fn structure(self) -> Value {
 		Value::from(map!(
 			"permissions" => self.permissions.structure(),
@@ -179,7 +190,7 @@ impl InfoStructure for ApiConfigStore {
 	}
 }
 
-impl Display for ApiConfigStore {
+impl Display for ApiConfigDefinition {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, " API")?;
 
@@ -203,7 +214,7 @@ impl Display for ApiConfigStore {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct MiddlewareStore {
+pub struct MiddlewareDefinition {
 	pub name: String,
 	pub args: Vec<Value>,
 }

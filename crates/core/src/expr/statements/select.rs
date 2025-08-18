@@ -101,7 +101,7 @@ impl SelectStatement {
 			_ => None,
 		};
 		let opt = Arc::new(opt.clone().with_version(version));
-		tracing::warn!("version: {:?}", opt.version);
+
 		// Extract the limits
 		i.setup_limit(stk, ctx, &opt, &stm).await?;
 		// Fail for multiple targets without a limit

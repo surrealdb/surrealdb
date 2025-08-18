@@ -4,7 +4,7 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 
-use crate::catalog::{ApiConfigStore, MiddlewareStore, Permission};
+use crate::catalog::{ApiConfigDefinition, MiddlewareDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -34,20 +34,20 @@ impl ApiConfig {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<ApiConfigStore> {
+	) -> Result<ApiConfigDefinition> {
 		let mut middleware = Vec::new();
 		for m in self.middleware.iter() {
 			let mut args = Vec::new();
 			for arg in m.args.iter() {
 				args.push(stk.run(|stk| arg.compute(stk, ctx, opt, doc)).await.catch_return()?)
 			}
-			middleware.push(MiddlewareStore {
+			middleware.push(MiddlewareDefinition {
 				name: m.name.clone(),
 				args,
 			});
 		}
 
-		Ok(ApiConfigStore {
+		Ok(ApiConfigDefinition {
 			middleware,
 			permissions: self.permissions.clone(),
 		})

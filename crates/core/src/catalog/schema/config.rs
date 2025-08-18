@@ -3,7 +3,7 @@ use std::fmt::{self, Display, Write};
 use anyhow::Result;
 use revision::revisioned;
 
-use crate::catalog::ApiConfigStore;
+use crate::catalog::ApiConfigDefinition;
 use crate::expr::fmt::{Fmt, Pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
 use crate::iam::ConfigKind;
@@ -15,7 +15,7 @@ use crate::val::Value;
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ConfigStore {
 	GraphQL(GraphQLConfig),
-	Api(ApiConfigStore),
+	Api(ApiConfigDefinition),
 }
 impl_kv_value_revisioned!(ConfigStore);
 
@@ -34,7 +34,7 @@ impl ConfigStore {
 		}
 	}
 
-	pub fn try_as_api(&self) -> Result<&ApiConfigStore> {
+	pub fn try_as_api(&self) -> Result<&ApiConfigDefinition> {
 		match self {
 			ConfigStore::Api(a) => Ok(a),
 			c => fail!("found {c} when a api config was expected"),
