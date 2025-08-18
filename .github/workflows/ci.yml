@@ -130,9 +130,6 @@ jobs:
       - name: Run clippy
         run: cargo make ci-clippy
 
-      - name: Run clippy release
-        run: cargo make ci-clippy-release
-
   check:
     name: Check workspace
     runs-on: ubuntu-latest
