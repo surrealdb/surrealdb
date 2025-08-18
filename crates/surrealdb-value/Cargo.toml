@@ -1,0 +1,25 @@
+[package]
+name = "surrealdb-value"
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+publish.workspace = true
+version.workspace = true
+rust-version.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+bytes.workspace = true
+chrono.workspace = true
+geo.workspace = true
+geo-types.workspace = true
+rust_decimal.workspace = true
+serde.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/core", "crates/macros", "crates/sdk"]
+members = [".", "crates/core", "crates/macros", "crates/sdk", "crates/surrealdb-value"]
 
 [workspace.package]
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]

@@ -5958,6 +5958,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-value"
+version = "3.0.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "geo",
+ "geo-types",
+ "rust_decimal",
+ "serde",
+ "uuid",
+]
+
+[[package]]
 name = "surrealkv"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
