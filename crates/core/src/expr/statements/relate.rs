@@ -177,6 +177,7 @@ impl RelateStatement {
 
 		// Assign the statement
 		let stm = Statement::from(self);
+
 		// Process the statement
 		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout

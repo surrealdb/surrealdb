@@ -46,8 +46,10 @@ impl UpsertStatement {
 		let stm = Statement::from(self);
 		// Check if there is a timeout
 		let ctx = stm.setup_timeout(ctx)?;
+
 		// Get a query planner
 		let mut planner = QueryPlanner::new();
+
 		let stm_ctx = StatementContext::new(&ctx, opt, &stm)?;
 		// Loop over the upsert targets
 		for w in self.what.iter() {
@@ -69,6 +71,10 @@ impl UpsertStatement {
 		}
 		// Attach the query planner to the context
 		let ctx = stm.setup_query_planner(planner, ctx);
+
+		// Ensure the database exists.
+		ctx.get_db(opt).await?;
+
 		// Process the statement
 		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout

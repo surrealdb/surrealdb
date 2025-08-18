@@ -1,35 +1,30 @@
-use std::sync::Arc;
-
 use anyhow::Result;
 
-use super::{Datastore, LockType, TransactionType};
 use crate::err::Error;
 use crate::kvs::KVValue;
 
-mod fixes;
-
 #[derive(Copy, Debug, Clone, PartialEq)]
-pub struct Version(u16);
+pub struct MajorVersion(u16);
 
-impl From<u16> for Version {
+impl From<u16> for MajorVersion {
 	fn from(version: u16) -> Self {
-		Version(version)
+		MajorVersion(version)
 	}
 }
 
-impl From<Option<u16>> for Version {
+impl From<Option<u16>> for MajorVersion {
 	fn from(v: Option<u16>) -> Self {
 		v.unwrap_or(0).into()
 	}
 }
 
-impl From<Version> for u16 {
-	fn from(v: Version) -> Self {
+impl From<MajorVersion> for u16 {
+	fn from(v: MajorVersion) -> Self {
 		v.0
 	}
 }
 
-impl KVValue for Version {
+impl KVValue for MajorVersion {
 	#[inline]
 	fn kv_encode_value(&self) -> Result<Vec<u8>> {
 		Ok(self.0.to_be_bytes().to_vec())
@@ -43,7 +38,7 @@ impl KVValue for Version {
 	}
 }
 
-impl Version {
+impl MajorVersion {
 	/// The latest version
 	pub const LATEST: u16 = 2;
 	/// The latest version
@@ -62,56 +57,6 @@ impl Version {
 	pub fn is_latest(&self) -> bool {
 		self.0 == Self::LATEST
 	}
-	/// Fix
-	pub async fn fix(&self, ds: Arc<Datastore>) -> Result<()> {
-		// We iterate through each version from the current to the latest
-		// and apply the fixes for each version. We update storage version
-		// and commit changes each iteration, to keep transactions as small
-		// as possible.
-		//
-		// We commit all fixes and the storage version update in one transaction,
-		// because we never want to leave storage in a broken state where half of
-		// the fixes are applied and the storage version is not updated.
-		//
-		for v in self.0..Version::LATEST {
-			// Create a new transaction
-			let tx = Arc::new(ds.transaction(TransactionType::Write, LockType::Pessimistic).await?);
-
-			/*
-			// Easy shortcut to apply a fix
-			macro_rules! apply_fix {
-				($name:ident) => {{
-					match fixes::$name(tx.clone()).await {
-						// Fail early and cancel transaction if the fix failed
-						Err(e) => {
-							tx.cancel().await?;
-							return Err(e);
-						}
-						_ => {}
-					};
-				}};
-			}
-			*/
-
-			// Apply fixes based on the current version
-			if v == 1 {
-				todo!()
-				//apply_fix!(v1_to_2_id_uuid);
-				//apply_fix!(v1_to_2_migrate_to_access);
-			}
-
-			// Obtain storage version key and value
-			let key = crate::key::version::new();
-			let version = Version::from(v + 1);
-			// Attempt to set the current version in storage
-			tx.replace(&key, &version).await?;
-
-			// Commit the transaction
-			tx.commit().await?;
-		}
-
-		Ok(())
-	}
 }
 
 #[cfg(test)]
@@ -120,10 +65,10 @@ mod tests {
 
 	#[test]
 	fn test_version_encode_decode() {
-		let version = Version::v2();
+		let version = MajorVersion::v2();
 		let encoded = version.kv_encode_value().unwrap();
 		assert_eq!(encoded, vec![0, 2]);
-		let decoded = Version::kv_decode_value(encoded).unwrap();
+		let decoded = MajorVersion::kv_decode_value(encoded).unwrap();
 		assert_eq!(decoded, version);
 	}
 }

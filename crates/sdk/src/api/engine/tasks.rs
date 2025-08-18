@@ -190,8 +190,7 @@ fn spawn_task_changefeed_cleanup(
 /// # Arguments
 ///
 /// * `dbs` - The datastore instance
-/// * `canceller` - Token used to cancel the task when the engine is shutting
-///   down
+/// * `canceller` - Token used to cancel the task when the engine is shutting down
 /// * `opts` - Engine options containing the compaction interval
 ///
 /// # Returns

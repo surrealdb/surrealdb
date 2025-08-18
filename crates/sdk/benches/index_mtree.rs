@@ -56,7 +56,7 @@ async fn mtree_index(
 		doc_ids_cache: cache_size as u32,
 		mtree_cache: cache_size as u32,
 	};
-	MTreeIndex::new(tx, IndexKeyBase::default(), &p, tt).await.unwrap()
+	MTreeIndex::new(tx, IndexKeyBase::new(0, 0, "test", "test"), &p, tt).await.unwrap()
 }
 
 fn runtime() -> Runtime {
@@ -166,6 +166,7 @@ async fn knn_lookup_objects(
 	knn: usize,
 ) {
 	let txn = ds.transaction(Read, Optimistic).await.unwrap();
+	let db = txn.ensure_ns_db("myns", "mydb", false).await.unwrap();
 	let mt = Arc::new(mtree_index(&txn, vector_size, cache_size, Read).await);
 	let ctx = Arc::new(MutableContext::from(txn));
 
@@ -173,7 +174,7 @@ async fn knn_lookup_objects(
 
 	let mut consumers = Vec::with_capacity(4);
 	for _ in 0..4 {
-		let (ctx, mt, counter) = (ctx.clone(), mt.clone(), counter.clone());
+		let (ctx, mt, counter, db) = (ctx.clone(), mt.clone(), counter.clone(), db.clone());
 		let c = task::spawn(async move {
 			let mut rng = StdRng::from_entropy();
 			let mut stack = TreeStack::new();
@@ -182,7 +183,7 @@ async fn knn_lookup_objects(
 					while counter.fetch_add(1, Ordering::Relaxed) < samples_size {
 						let object = random_object(&mut rng, vector_size);
 						let chk = MTreeConditionChecker::new(&ctx);
-						let r = mt.knn_search(stk, &ctx, &object, knn, chk).await.unwrap();
+						let r = mt.knn_search(&db, stk, &ctx, &object, knn, chk).await.unwrap();
 						assert_eq!(r.len(), knn);
 					}
 				})

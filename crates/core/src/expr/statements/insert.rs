@@ -126,6 +126,10 @@ impl InsertStatement {
 		}
 		// Assign the statement
 		let stm = Statement::from(self);
+
+		// Ensure the database exists.
+		ctx.get_db(opt).await?;
+
 		// Process the statement
 		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout

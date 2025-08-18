@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::DefineKind;
+use crate::catalog::{DatabaseId, NamespaceId, Relation, TableDefinition, TableType};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
@@ -15,9 +16,8 @@ use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::kind::KindLiteral;
 use crate::expr::reference::Reference;
-use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, Part, Permissions, Relation, TableType};
+use crate::expr::{Base, Expr, Ident, Idiom, Kind, Part, Permissions};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Transaction, impl_kv_value_revisioned};
 use crate::val::{Strand, Value};
@@ -67,7 +67,7 @@ impl DefineFieldStatement {
 		self.validate_reference_options(ctx)?;
 
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 
 		// Disallow mismatched types
 		self.disallow_mismatched_types(ctx, ns, db).await?;
@@ -75,14 +75,14 @@ impl DefineFieldStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the name of the field
-		let fd = self.name.to_string();
+		let fd = self.name.as_raw_string();
 		// Check if the definition exists
-		if txn.get_tb_field(ns, db, &self.what, &fd).await.is_ok() {
+		if let Some(fd) = txn.get_tb_field(ns, db, &self.what, &fd).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::FdAlreadyExists {
-							name: fd,
+							name: fd.name.to_string(),
 						});
 					}
 				}
@@ -92,11 +92,14 @@ impl DefineFieldStatement {
 				}
 			}
 		}
+
+		let tb = {
+			let (ns, db) = opt.ns_db()?;
+			txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?
+		};
+
 		// Process the statement
-		let key = crate::key::table::fd::new(ns, db, &self.what, &fd);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-		txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?;
+		let key = crate::key::table::fd::new(ns, db, &tb.name, &fd);
 		txn.set(
 			&key,
 			&DefineFieldStatement {
@@ -107,18 +110,17 @@ impl DefineFieldStatement {
 			None,
 		)
 		.await?;
+
 		// Refresh the table cache
-		let key = crate::key::database::tb::new(ns, db, &self.what);
-		let tb = txn.get_tb(ns, db, &self.what).await?;
-		txn.set(
-			&key,
-			&DefineTableStatement {
+		{
+			let tb_def = TableDefinition {
 				cache_fields_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
-			},
-			None,
-		)
-		.await?;
+			};
+			let (ns, db) = opt.ns_db()?;
+			txn.put_tb(ns, db, tb_def).await?;
+		}
+
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
 			cache.clear_tb(ns, db, &self.what);
@@ -130,9 +132,9 @@ impl DefineFieldStatement {
 		// If this is an `in` field then check relation definitions
 		if fd.as_str() == "in" {
 			// Get the table definition that this field belongs to
-			let tb = txn.get_tb(ns, db, &self.what).await?;
+			let relation_tb = txn.expect_tb(ns, db, &self.what).await?;
 			// The table is marked as TYPE RELATION
-			if let TableType::Relation(ref relation) = tb.table_type {
+			if let TableType::Relation(ref relation) = relation_tb.table_type {
 				// Check if a field TYPE has been specified
 				if let Some(kind) = self.field_kind.as_ref() {
 					// The `in` field must be a record type
@@ -143,13 +145,13 @@ impl DefineFieldStatement {
 					// Add the TYPE to the DEFINE TABLE statement
 					if relation.from.as_ref() != self.field_kind.as_ref() {
 						let key = crate::key::database::tb::new(ns, db, &self.what);
-						let val = DefineTableStatement {
+						let val = TableDefinition {
 							cache_fields_ts: Uuid::now_v7(),
 							table_type: TableType::Relation(Relation {
 								from: self.field_kind.clone(),
 								..relation.to_owned()
 							}),
-							..tb.as_ref().to_owned()
+							..relation_tb.as_ref().to_owned()
 						};
 						txn.set(&key, &val, None).await?;
 						// Clear the cache
@@ -165,9 +167,9 @@ impl DefineFieldStatement {
 		// If this is an `out` field then check relation definitions
 		if fd.as_str() == "out" {
 			// Get the table definition that this field belongs to
-			let tb = txn.get_tb(ns, db, &self.what).await?;
+			let relation_tb = txn.expect_tb(ns, db, &self.what).await?;
 			// The table is marked as TYPE RELATION
-			if let TableType::Relation(ref relation) = tb.table_type {
+			if let TableType::Relation(ref relation) = relation_tb.table_type {
 				// Check if a field TYPE has been specified
 				if let Some(kind) = self.field_kind.as_ref() {
 					// The `out` field must be a record type
@@ -178,13 +180,13 @@ impl DefineFieldStatement {
 					// Add the TYPE to the DEFINE TABLE statement
 					if relation.from.as_ref() != self.field_kind.as_ref() {
 						let key = crate::key::database::tb::new(ns, db, &self.what);
-						let val = DefineTableStatement {
+						let val = TableDefinition {
 							cache_fields_ts: Uuid::now_v7(),
 							table_type: TableType::Relation(Relation {
 								to: self.field_kind.clone(),
 								..relation.to_owned()
 							}),
-							..tb.as_ref().to_owned()
+							..relation_tb.as_ref().to_owned()
 						};
 						txn.set(&key, &val, None).await?;
 						// Clear the cache
@@ -205,8 +207,8 @@ impl DefineFieldStatement {
 
 	pub(crate) async fn process_recursive_definitions(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		txn: Arc<Transaction>,
 	) -> Result<()> {
 		// Find all existing field definitions
@@ -347,17 +349,10 @@ impl DefineFieldStatement {
 
 		if let Some(Kind::References(Some(ft), Some(ff))) = &self.field_kind {
 			// Obtain the field definition
-			let (ns, db) = opt.ns_db()?;
-			let fd = match ctx.tx().get_tb_field(ns, db, &ft.to_string(), &ff.to_string()).await {
-				Ok(fd) => fd,
-				// If the field does not exist, there is nothing to correct
-				Err(e) => {
-					if matches!(e.downcast_ref(), Some(Error::FdNotFound { .. })) {
-						return Ok(None);
-					} else {
-						return Err(e);
-					}
-				}
+			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+			let Some(fd) = ctx.tx().get_tb_field(ns, db, &ft.to_string(), &ff.to_string()).await?
+			else {
+				return Ok(None);
 			};
 
 			// Check if the field is an array-like value and thus "containing" references
@@ -380,8 +375,8 @@ impl DefineFieldStatement {
 	pub(crate) async fn disallow_mismatched_types(
 		&self,
 		ctx: &Context,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 	) -> Result<()> {
 		let fds = ctx.tx().all_tb_fields(ns, db, &self.what, None).await?;
 

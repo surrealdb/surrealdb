@@ -39,6 +39,7 @@ mod key;
 mod sys;
 
 pub mod api;
+pub mod catalog;
 pub mod cnf;
 pub mod ctx;
 pub mod dbs;

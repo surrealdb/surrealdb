@@ -34,16 +34,23 @@ pub async fn generate_schema(
 	let ns = session.ns.as_ref().ok_or(GqlError::UnspecifiedNamespace)?;
 	let db = session.db.as_ref().ok_or(GqlError::UnspecifiedDatabase)?;
 
-	let cg = tx.get_db_config(ns, db, "graphql").await.map_err(|e| {
-		if matches!(e.downcast_ref(), Some(crate::err::Error::CgNotFound { .. })) {
-			GqlError::NotConfigured
-		} else {
-			GqlError::DbError(e)
-		}
-	})?;
+	let db_def = match tx.get_db_by_name(ns, db).await? {
+		Some(db) => db,
+		None => return Err(GqlError::DbError(anyhow::anyhow!("Database not found: {ns} {db}"))),
+	};
+
+	let cg = tx.get_db_config(db_def.namespace_id, db_def.database_id, "graphql").await.map_err(
+		|e| {
+			if matches!(e.downcast_ref(), Some(crate::err::Error::CgNotFound { .. })) {
+				GqlError::NotConfigured
+			} else {
+				GqlError::DbError(e)
+			}
+		},
+	)?;
 	let config = cg.inner.clone().try_into_graphql()?;
 
-	let tbs = tx.all_tb(ns, db, None).await?;
+	let tbs = tx.all_tb(db_def.namespace_id, db_def.database_id, None).await?;
 
 	let tbs = match config.tables {
 		TablesConfig::None => None,
@@ -56,7 +63,7 @@ pub async fn generate_schema(
 		}
 	};
 
-	let fns = tx.all_db_functions(ns, db).await?;
+	let fns = tx.all_db_functions(db_def.namespace_id, db_def.database_id).await?;
 
 	let fns = match config.functions {
 		FunctionsConfig::None => None,
@@ -90,7 +97,17 @@ pub async fn generate_schema(
 
 	match tbs {
 		Some(tbs) if !tbs.is_empty() => {
-			query = process_tbs(tbs, query, &mut types, &tx, ns, db, session, datastore).await?;
+			query = process_tbs(
+				tbs,
+				query,
+				&mut types,
+				&tx,
+				db_def.namespace_id,
+				db_def.database_id,
+				session,
+				datastore,
+			)
+			.await?;
 		}
 		_ => {}
 	}
@@ -207,7 +224,7 @@ pub fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> {
 		),
 		SurValue::Geometry(_) => return Err(resolver_error("unimplemented: Geometry types")),
 		SurValue::Bytes(b) => GqlValue::Binary(b.into_inner().into()),
-		SurValue::Thing(t) => GqlValue::String(t.to_string()),
+		SurValue::RecordId(t) => GqlValue::String(t.to_string()),
 		v => return Err(internal_error(format!("found unsupported value variant: {v:?}"))),
 	};
 	Ok(out)
@@ -571,7 +588,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 		Kind::Record(ref ts) => match val {
 			GqlValue::String(s) => match syn::thing(s) {
 				Ok(t) => match ts.contains(&t.tb.as_str().into()) {
-					true => Ok(SurValue::Thing(t.into())),
+					true => Ok(SurValue::RecordId(t.into())),
 					false => Err(type_error(kind, val)),
 				},
 				Err(_) => Err(type_error(kind, val)),

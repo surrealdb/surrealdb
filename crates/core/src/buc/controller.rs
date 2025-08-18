@@ -44,8 +44,8 @@ impl<'a> BucketController<'a> {
 		doc: Option<&'a CursorDoc>,
 		buc: &str,
 	) -> Result<Self> {
-		let (ns, db) = opt.ns_db()?;
-		let bucket = ctx.tx().get_db_bucket(ns, db, buc).await?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+		let bucket = ctx.tx().expect_db_bucket(ns, db, buc).await?;
 		let store = ctx.get_bucket_store(ns, db, buc).await?;
 
 		Ok(Self {
@@ -64,7 +64,7 @@ impl<'a> BucketController<'a> {
 	fn require_writeable(&self) -> Result<()> {
 		ensure!(
 			!self.bucket.readonly,
-			err::Error::ReadonlyBucket(self.bucket.name.into_raw_string())
+			err::Error::ReadonlyBucket(self.bucket.name.as_raw_string())
 		);
 		Ok(())
 	}
@@ -79,7 +79,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Put, Some(key), None).await?;
 
 		self.store.put(key, payload).await.map_err(|e| {
-			err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+			err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 		})?;
 
 		Ok(())
@@ -95,7 +95,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Put, Some(key), None).await?;
 
 		self.store.put_if_not_exists(key, payload).await.map_err(|e| {
-			err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+			err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 		})?;
 
 		Ok(())
@@ -108,7 +108,7 @@ impl<'a> BucketController<'a> {
 			.head(key)
 			.await
 			.map_err(|e| {
-				err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+				err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 			})
 			.map_err(anyhow::Error::new)
 	}
@@ -117,7 +117,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Get, Some(key), None).await?;
 
 		let bytes = match self.store.get(key).await.map_err(|e| {
-			err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+			err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 		})? {
 			Some(v) => v,
 			None => return Ok(None),
@@ -131,7 +131,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Delete, Some(key), None).await?;
 
 		self.store.delete(key).await.map_err(|e| {
-			err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+			err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 		})?;
 
 		Ok(())
@@ -142,7 +142,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Copy, Some(key), Some(&target)).await?;
 
 		self.store.copy(key, &target).await.map_err(|e| {
-			err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+			err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 		})?;
 
 		Ok(())
@@ -157,7 +157,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Copy, Some(key), Some(&target)).await?;
 
 		self.store.copy_if_not_exists(key, &target).await.map_err(|e| {
-			err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+			err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 		})?;
 
 		Ok(())
@@ -168,7 +168,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Rename, Some(key), Some(&target)).await?;
 
 		self.store.rename(key, &target).await.map_err(|e| {
-			err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+			err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 		})?;
 
 		Ok(())
@@ -183,7 +183,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Rename, Some(key), Some(&target)).await?;
 
 		self.store.rename_if_not_exists(key, &target).await.map_err(|e| {
-			err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+			err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 		})?;
 
 		Ok(())
@@ -195,7 +195,7 @@ impl<'a> BucketController<'a> {
 			.exists(key)
 			.await
 			.map_err(|e| {
-				err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+				err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 			})
 			.map_err(anyhow::Error::new)
 	}
@@ -206,7 +206,7 @@ impl<'a> BucketController<'a> {
 			.list(opts)
 			.await
 			.map_err(|e| {
-				err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+				err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 			})
 			.map_err(anyhow::Error::new)
 	}
@@ -222,7 +222,7 @@ impl<'a> BucketController<'a> {
 			ensure!(
 				!op.is_list(),
 				err::Error::BucketPermissions {
-					name: self.bucket.name.into_raw_string(),
+					name: self.bucket.name.as_raw_string(),
 					op,
 				}
 			);
@@ -230,7 +230,7 @@ impl<'a> BucketController<'a> {
 			match &self.bucket.permissions {
 				Permission::None => {
 					bail!(err::Error::BucketPermissions {
-						name: self.bucket.name.into_raw_string(),
+						name: self.bucket.name.as_raw_string(),
 						op,
 					})
 				}
@@ -246,7 +246,7 @@ impl<'a> BucketController<'a> {
 						ctx.add_value(
 							"file",
 							Value::File(File {
-								bucket: self.bucket.name.into_raw_string(),
+								bucket: self.bucket.name.as_raw_string(),
 								key: key.to_string(),
 							})
 							.into(),
@@ -256,7 +256,7 @@ impl<'a> BucketController<'a> {
 						ctx.add_value(
 							"target",
 							Value::File(File {
-								bucket: self.bucket.name.into_raw_string(),
+								bucket: self.bucket.name.as_raw_string(),
 								key: target.to_string(),
 							})
 							.into(),
@@ -273,7 +273,7 @@ impl<'a> BucketController<'a> {
 					ensure!(
 						res.is_truthy(),
 						err::Error::BucketPermissions {
-							name: self.bucket.name.into_raw_string(),
+							name: self.bucket.name.as_raw_string(),
 							op,
 						}
 					);

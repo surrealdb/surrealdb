@@ -321,7 +321,7 @@ impl Parser<'_> {
 	/// argument.
 	pub(crate) async fn parse_array(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		start: Span,
 	) -> ParseResult<Vec<Expr>> {
 		let mut exprs = Vec::new();
@@ -331,7 +331,7 @@ impl Parser<'_> {
 					break;
 				}
 
-				let value = ctx.run(|ctx| this.parse_expr_inherit(ctx)).await?;
+				let value = stk.run(|ctx| this.parse_expr_inherit(ctx)).await?;
 				exprs.push(value);
 
 				if !this.eat(t!(",")) {
@@ -364,16 +364,16 @@ impl Parser<'_> {
 
 	pub(super) async fn parse_closure_or_mock(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		start: Span,
 	) -> ParseResult<Expr> {
 		match self.peek_kind() {
-			t!("$param") => ctx.run(|ctx| self.parse_closure(ctx, start)).await,
+			t!("$param") => stk.run(|ctx| self.parse_closure(ctx, start)).await,
 			_ => self.parse_mock(start).map(Expr::Mock),
 		}
 	}
 
-	pub(super) async fn parse_closure(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Expr> {
+	pub(super) async fn parse_closure(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Expr> {
 		let mut args = Vec::new();
 		loop {
 			if self.eat(t!("|")) {
@@ -384,9 +384,9 @@ impl Parser<'_> {
 			let kind = if self.eat(t!(":")) {
 				if self.eat(t!("<")) {
 					let delim = self.last_span();
-					ctx.run(|ctx| self.parse_kind(ctx, delim)).await?
+					stk.run(|stk| self.parse_kind(stk, delim)).await?
 				} else {
-					ctx.run(|ctx| self.parse_inner_single_kind(ctx)).await?
+					stk.run(|stk| self.parse_inner_single_kind(stk)).await?
 				}
 			} else {
 				Kind::Any
@@ -400,21 +400,21 @@ impl Parser<'_> {
 			}
 		}
 
-		self.parse_closure_after_args(ctx, args).await
+		self.parse_closure_after_args(stk, args).await
 	}
 
 	pub(super) async fn parse_closure_after_args(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		args: Vec<(Ident, Kind)>,
 	) -> ParseResult<Expr> {
 		let (returns, body) = if self.eat(t!("->")) {
-			let returns = Some(ctx.run(|ctx| self.parse_inner_kind(ctx)).await?);
+			let returns = Some(stk.run(|ctx| self.parse_inner_kind(ctx)).await?);
 			let start = expected!(self, t!("{")).span;
-			let body = Expr::Block(Box::new(ctx.run(|ctx| self.parse_block(ctx, start)).await?));
+			let body = Expr::Block(Box::new(stk.run(|ctx| self.parse_block(ctx, start)).await?));
 			(returns, body)
 		} else {
-			let body = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+			let body = stk.run(|stk| self.parse_expr_inherit(stk)).await?;
 			(None, body)
 		};
 
@@ -427,7 +427,7 @@ impl Parser<'_> {
 
 	async fn parse_covered_expr_or_coordinate(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		start: Span,
 	) -> ParseResult<Expr> {
 		let peek = self.peek();
@@ -458,10 +458,10 @@ impl Parser<'_> {
 						geo::Point::new(x, y),
 					))));
 				} else {
-					ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?
+					stk.run(|ctx| self.parse_expr_inherit(ctx)).await?
 				}
 			}
-			_ => ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?,
+			_ => stk.run(|ctx| self.parse_expr_inherit(ctx)).await?,
 		};
 		let token = self.peek();
 		if token.kind != t!(")") && Self::starts_disallowed_subquery_statement(peek.kind) {
@@ -479,8 +479,8 @@ impl Parser<'_> {
 
 	/// Parses a strand with legacy rules, parsing to a record id, datetime or
 	/// uuid if the string matches.
-	pub(super) async fn reparse_legacy_strand(&mut self, ctx: &mut Stk, text: Strand) -> Literal {
-		if let Ok(x) = Parser::new(text.as_bytes()).parse_record_id(ctx).await {
+	pub(super) async fn reparse_legacy_strand(&mut self, stk: &mut Stk, text: Strand) -> Literal {
+		if let Ok(x) = Parser::new(text.as_bytes()).parse_record_id(stk).await {
 			return Literal::RecordId(x);
 		}
 		if let Ok(x) = Parser::new(text.as_bytes()).next_token_value() {
@@ -492,7 +492,7 @@ impl Parser<'_> {
 		Literal::Strand(text)
 	}
 
-	async fn parse_script(&mut self, ctx: &mut Stk) -> ParseResult<FunctionCall> {
+	async fn parse_script(&mut self, stk: &mut Stk) -> ParseResult<FunctionCall> {
 		let start = expected!(self, t!("(")).span;
 		let mut args = Vec::new();
 		loop {
@@ -500,7 +500,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let arg = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+			let arg = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
 			args.push(arg);
 
 			if !self.eat(t!(",")) {

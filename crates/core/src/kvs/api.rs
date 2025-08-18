@@ -513,6 +513,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		let mut k: Vec<u8> = prefix;
 		k.extend_from_slice(&ts.as_bytes());
 		k.extend_from_slice(&suffix);
+
 		self.set(k, val, None).await
 	}
 

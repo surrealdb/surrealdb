@@ -18,22 +18,22 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// expects the first `<` to already be eaten
-	pub(crate) async fn parse_kind(&mut self, ctx: &mut Stk, delim: Span) -> ParseResult<Kind> {
-		let kind = self.parse_inner_kind(ctx).await?;
+	pub(crate) async fn parse_kind(&mut self, stk: &mut Stk, delim: Span) -> ParseResult<Kind> {
+		let kind = self.parse_inner_kind(stk).await?;
 		self.expect_closing_delimiter(t!(">"), delim)?;
 		Ok(kind)
 	}
 
 	/// Parse an inner kind, a kind without enclosing `<` `>`.
-	pub(crate) async fn parse_inner_kind(&mut self, ctx: &mut Stk) -> ParseResult<Kind> {
-		match self.parse_inner_single_kind(ctx).await? {
+	pub(crate) async fn parse_inner_kind(&mut self, stk: &mut Stk) -> ParseResult<Kind> {
+		match self.parse_inner_single_kind(stk).await? {
 			Kind::Any => Ok(Kind::Any),
 			Kind::Option(k) => Ok(Kind::Option(k)),
 			first => {
 				if self.peek_kind() == t!("|") {
 					let mut kind = vec![first];
 					while self.eat(t!("|")) {
-						kind.push(ctx.run(|ctx| self.parse_concrete_kind(ctx)).await?);
+						kind.push(stk.run(|ctx| self.parse_concrete_kind(ctx)).await?);
 					}
 					let kind = Kind::Either(kind);
 					Ok(kind)
@@ -45,7 +45,7 @@ impl Parser<'_> {
 	}
 
 	/// Parse a single inner kind, a kind without enclosing `<` `>`.
-	pub(super) async fn parse_inner_single_kind(&mut self, ctx: &mut Stk) -> ParseResult<Kind> {
+	pub(super) async fn parse_inner_single_kind(&mut self, stk: &mut Stk) -> ParseResult<Kind> {
 		match self.peek_kind() {
 			t!("ANY") => {
 				self.pop_peek();
@@ -55,11 +55,11 @@ impl Parser<'_> {
 				self.pop_peek();
 
 				let delim = expected!(self, t!("<")).span;
-				let mut first = ctx.run(|ctx| self.parse_concrete_kind(ctx)).await?;
+				let mut first = stk.run(|ctx| self.parse_concrete_kind(ctx)).await?;
 				if self.peek_kind() == t!("|") {
 					let mut kind = vec![first];
 					while self.eat(t!("|")) {
-						kind.push(ctx.run(|ctx| self.parse_concrete_kind(ctx)).await?);
+						kind.push(stk.run(|ctx| self.parse_concrete_kind(ctx)).await?);
 					}
 
 					first = Kind::Either(kind);
@@ -67,14 +67,14 @@ impl Parser<'_> {
 				self.expect_closing_delimiter(t!(">"), delim)?;
 				Ok(Kind::Option(Box::new(first)))
 			}
-			_ => ctx.run(|ctx| self.parse_concrete_kind(ctx)).await,
+			_ => stk.run(|ctx| self.parse_concrete_kind(ctx)).await,
 		}
 	}
 
 	/// Parse a single kind which is not any, option, or either.
-	async fn parse_concrete_kind(&mut self, ctx: &mut Stk) -> ParseResult<Kind> {
+	async fn parse_concrete_kind(&mut self, stk: &mut Stk) -> ParseResult<Kind> {
 		if Self::token_can_be_literal_kind(self.peek_kind()) {
-			let literal = self.parse_literal_kind(ctx).await?;
+			let literal = self.parse_literal_kind(stk).await?;
 			return Ok(Kind::Literal(literal));
 		}
 
@@ -125,7 +125,7 @@ impl Parser<'_> {
 			t!("ARRAY") => {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {
-					let kind = ctx.run(|ctx| self.parse_inner_kind(ctx)).await?;
+					let kind = stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
 					let size = self.eat(t!(",")).then(|| self.next_token_value()).transpose()?;
 					self.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::Array(Box::new(kind), size))
@@ -136,7 +136,7 @@ impl Parser<'_> {
 			t!("SET") => {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {
-					let kind = ctx.run(|ctx| self.parse_inner_kind(ctx)).await?;
+					let kind = stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
 					let size = self.eat(t!(",")).then(|| self.next_token_value()).transpose()?;
 					self.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::Set(Box::new(kind), size))
@@ -156,7 +156,7 @@ impl Parser<'_> {
 				let (table, path) = if self.eat(t!("<")) {
 					let table: Option<Ident> = Some(self.next_token_value()?);
 					let path: Option<Idiom> = if self.eat(t!(",")) {
-						Some(self.parse_local_idiom(ctx).await?)
+						Some(self.parse_local_idiom(stk).await?)
 					} else {
 						None
 					};
@@ -208,7 +208,7 @@ impl Parser<'_> {
 	}
 
 	/// Parse a literal kind
-	async fn parse_literal_kind(&mut self, ctx: &mut Stk) -> ParseResult<KindLiteral> {
+	async fn parse_literal_kind(&mut self, stk: &mut Stk) -> ParseResult<KindLiteral> {
 		let peek = self.peek();
 		match peek.kind {
 			t!("true") => {
@@ -250,7 +250,7 @@ impl Parser<'_> {
 				while !self.eat(t!("}")) {
 					let key = self.parse_object_key()?;
 					expected!(self, t!(":"));
-					let kind = ctx.run(|ctx| self.parse_inner_kind(ctx)).await?;
+					let kind = stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
 					obj.insert(key, kind);
 					self.eat(t!(","));
 				}
@@ -260,7 +260,7 @@ impl Parser<'_> {
 				self.pop_peek();
 				let mut arr = Vec::new();
 				while !self.eat(t!("]")) {
-					let kind = ctx.run(|ctx| self.parse_inner_kind(ctx)).await?;
+					let kind = stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
 					arr.push(kind);
 					self.eat(t!(","));
 				}
