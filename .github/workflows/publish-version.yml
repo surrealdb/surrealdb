@@ -233,10 +233,10 @@ jobs:
           path: target/llvm-cov/html/
           retention-days: 5
 
-  lint:
-    name: Lint
+  format:
+    name: Check format
     needs: [ prepare-vars ]
-    runs-on: [ runner-amd64-2xlarge ]
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -253,8 +253,28 @@ jobs:
         uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
         with:
           toolchain: ${{ steps.info.outputs.toolchain }}
-          targets: wasm32-unknown-unknown
-          components: rustfmt, clippy
+          components: rustfmt
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Check format
+        run: cargo make ci-format
+
+  check:
+    name: Check workspace
+    needs: [ prepare-vars ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        with:
+          ref: ${{ needs.prepare-vars.outputs.release-branch }}
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
+        with:
+          toolchain: ${{ inputs.rust-version }}
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -262,11 +282,46 @@ jobs:
       - name: Check workspace
         run: cargo make ci-check
 
-      - name: Check format
-        run: cargo make ci-format
+  check-wasm:
+    name: Check wasm
+    needs: [ prepare-vars ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        with:
+          ref: ${{ needs.prepare-vars.outputs.release-branch }}
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
+        with:
+          toolchain: ${{ inputs.rust-version }}
+          targets: wasm32-unknown-unknown
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
 
       - name: Check wasm
         run: cargo make ci-check-wasm
+
+  clippy:
+    name: Check clippy
+    needs: [ prepare-vars ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        with:
+          ref: ${{ needs.prepare-vars.outputs.release-branch }}
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
+        with:
+          toolchain: ${{ inputs.rust-version }}
+          components: clippy
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
 
       - name: Check clippy
         run: cargo make ci-clippy
@@ -289,7 +344,7 @@ jobs:
     name: Publish crate and artifacts binaries
     permissions:
       contents: write
-    needs: [ prepare-vars, test, lint, build ]
+    needs: [ prepare-vars, test, format, check, check-wasm, clippy, build ]
     runs-on: [ runner-amd64-2xlarge ]
     steps:
       - name: Checkout sources
