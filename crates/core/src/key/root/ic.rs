@@ -12,6 +12,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
@@ -29,8 +30,8 @@ pub(crate) struct Ic<'a> {
 	_a: u8,
 	_b: u8,
 	_c: u8,
-	pub ns: &'a str,
-	pub db: &'a str,
+	pub ns: NamespaceId,
+	pub db: DatabaseId,
 	pub tb: &'a str,
 	pub ix: &'a str,
 	#[serde(with = "uuid::serde::compact")]
@@ -55,8 +56,8 @@ impl<'a> Ic<'a> {
 	}
 
 	pub(crate) fn new(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
 		nid: Uuid,
@@ -94,8 +95,8 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Ic::new("testns", "testdb", "testtb", "testix", Uuid::from_u128(1), Uuid::from_u128(2));
+		let val = Ic::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", Uuid::from_u128(1), Uuid::from_u128(2));
 		let enc = Ic::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/!ictestns\0testdb\0testtb\0testix\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
+		assert_eq!(enc, b"/!ic\x00\x00\x00\x01\x00\x00\x00\x02testtb\0testix\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
 	}
 }

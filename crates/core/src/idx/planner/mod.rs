@@ -13,9 +13,9 @@ use std::sync::atomic::{self, AtomicU8};
 use anyhow::Result;
 use reblessive::tree::Stk;
 
+use crate::catalog::DatabaseDefinition;
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
-use crate::err::Error;
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
 use crate::expr::{Cond, Fields, Groups, Ident};
@@ -31,8 +31,6 @@ use crate::idx::planner::tree::Tree;
 pub(crate) struct StatementContext<'a> {
 	pub(crate) ctx: &'a Context,
 	pub(crate) opt: &'a Options,
-	pub(crate) ns: &'a str,
-	pub(crate) db: &'a str,
 	pub(crate) stm: &'a Statement<'a>,
 	pub(crate) fields: Option<&'a Fields>,
 	pub(crate) with: Option<&'a With>,
@@ -76,13 +74,10 @@ pub(crate) enum GrantedPermission {
 impl<'a> StatementContext<'a> {
 	pub(crate) fn new(ctx: &'a Context, opt: &'a Options, stm: &'a Statement<'a>) -> Result<Self> {
 		let is_perm = opt.check_perms(stm.into())?;
-		let (ns, db) = opt.ns_db()?;
 		Ok(Self {
 			ctx,
 			opt,
 			stm,
-			ns,
-			db,
 			fields: stm.expr(),
 			with: stm.with(),
 			order: stm.order(),
@@ -96,9 +91,10 @@ impl<'a> StatementContext<'a> {
 		if !self.is_perm {
 			return Ok(GrantedPermission::Full);
 		}
+		let (ns, db) = self.ctx.get_ns_db_ids(self.opt).await?;
 		// Get the table for this planner
-		match self.ctx.tx().get_tb(self.ns, self.db, tb).await {
-			Ok(table) => {
+		match self.ctx.tx().get_tb(ns, db, tb).await? {
+			Some(table) => {
 				// TODO(tobiemh): we should really
 				// not even get here if the table
 				// permissions are NONE, because
@@ -116,13 +112,8 @@ impl<'a> StatementContext<'a> {
 					return Ok(GrantedPermission::None);
 				}
 			}
-			Err(e) => {
-				if !matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
-					// We can safely ignore this error,
-					// as it just means that there is no
-					// table and no permissions defined.
-					return Err(e);
-				}
+			None => {
+				// Fall through to full permissions.
 			}
 		}
 		Ok(GrantedPermission::Full)
@@ -134,10 +125,9 @@ impl<'a> StatementContext<'a> {
 	/// This function evaluates the statement shape (UPDATE/DELETE/etc.),
 	/// WHERE/GROUP/ORDER clauses, selected fields, and table permissions to
 	/// select the most efficient record retrieval strategy:
-	/// - KeysAndValues: required when values must be read (e.g., UPDATE/DELETE;
-	///   WHERE not fully covered by indexes; GROUP BY with fields; ORDER BY
-	///   with fields; non-count projections; or when table permissions are
-	///   Specific).
+	/// - KeysAndValues: required when values must be read (e.g., UPDATE/DELETE; WHERE not fully
+	///   covered by indexes; GROUP BY with fields; ORDER BY with fields; non-count projections; or
+	///   when table permissions are Specific).
 	/// - Count: when we only need COUNT(*) and GROUP ALL.
 	/// - KeysOnly: when none of the above apply, allowing index-only iteration.
 	pub(crate) fn check_record_strategy(
@@ -282,6 +272,7 @@ impl QueryPlanner {
 
 	pub(crate) async fn add_iterables(
 		&mut self,
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		ctx: &StatementContext<'_>,
 		t: Ident,
@@ -294,6 +285,7 @@ impl QueryPlanner {
 
 		let is_knn = !tree.knn_expressions.is_empty();
 		let mut exe = InnerQueryExecutor::new(
+			db,
 			stk,
 			ctx.ctx,
 			ctx.opt,

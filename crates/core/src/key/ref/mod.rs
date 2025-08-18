@@ -2,21 +2,22 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
+use crate::key::value::KeyRecordIdKey;
 use crate::kvs::KVKey;
-use crate::val::RecordIdKey;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct Prefix<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: RecordIdKey,
+	pub id: KeyRecordIdKey,
 }
 
 impl KVKey for Prefix<'_> {
@@ -24,7 +25,7 @@ impl KVKey for Prefix<'_> {
 }
 
 impl<'a> Prefix<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &RecordIdKey) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &KeyRecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -39,17 +40,17 @@ impl<'a> Prefix<'a> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct PrefixFt<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: RecordIdKey,
+	pub id: KeyRecordIdKey,
 	pub ft: &'a str,
 }
 
@@ -60,8 +61,7 @@ impl KVKey for PrefixFt<'_> {
 // Code here is used in references which is temporarly disabled
 #[allow(dead_code)]
 impl<'a> PrefixFt<'a> {
-	#[allow(dead_code)]
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &RecordIdKey, ft: &'a str) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &KeyRecordIdKey, ft: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -77,17 +77,17 @@ impl<'a> PrefixFt<'a> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct PrefixFf<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: RecordIdKey,
+	pub id: KeyRecordIdKey,
 	pub ft: &'a str,
 	pub ff: &'a str,
 }
@@ -99,12 +99,11 @@ impl KVKey for PrefixFf<'_> {
 // Code here is used in references which is temporarly removed
 #[allow(dead_code)]
 impl<'a> PrefixFf<'a> {
-	#[allow(dead_code)]
 	fn new(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
-		id: &RecordIdKey,
+		id: &KeyRecordIdKey,
 		ft: &'a str,
 		ff: &'a str,
 	) -> Self {
@@ -127,23 +126,22 @@ impl<'a> PrefixFf<'a> {
 // The order in this key is made so we can scan:
 // - all references for a given record
 // - all references for a given record, filtered by a origin table
-// - all references for a given record, filtered by a origin table and an origin
-//   field
+// - all references for a given record, filtered by a origin table and an origin field
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Ref<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: RecordIdKey,
+	pub id: KeyRecordIdKey,
 	pub ft: &'a str,
 	pub ff: &'a str,
-	pub fk: RecordIdKey,
+	pub fk: KeyRecordIdKey,
 }
 
 impl KVKey for Ref<'_> {
@@ -157,69 +155,25 @@ impl Ref<'_> {
 }
 
 pub fn new<'a>(
-	ns: &'a str,
-	db: &'a str,
+	ns: NamespaceId,
+	db: DatabaseId,
 	tb: &'a str,
-	id: &RecordIdKey,
+	id: &KeyRecordIdKey,
 	ft: &'a str,
 	ff: &'a str,
-	fk: &RecordIdKey,
+	fk: &KeyRecordIdKey,
 ) -> Ref<'a> {
 	Ref::new(ns, db, tb, id.to_owned(), ft, ff, fk.to_owned())
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str, id: &RecordIdKey) -> Result<Vec<u8>> {
+pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &KeyRecordIdKey) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str, id: &RecordIdKey) -> Result<Vec<u8>> {
+pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &KeyRecordIdKey) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode_key()?;
-	k.extend_from_slice(&[0xff]);
-	Ok(k)
-}
-
-// All these functions are related to record references which were temporarly
-// deleted during the value inversion PR.
-#[allow(dead_code)]
-pub fn ftprefix(ns: &str, db: &str, tb: &str, id: &RecordIdKey, ft: &str) -> Result<Vec<u8>> {
-	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_key()?;
-	k.extend_from_slice(&[0x00]);
-	Ok(k)
-}
-
-#[allow(dead_code)]
-pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &RecordIdKey, ft: &str) -> Result<Vec<u8>> {
-	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_key()?;
-	k.extend_from_slice(&[0xff]);
-	Ok(k)
-}
-
-#[allow(dead_code)]
-pub fn ffprefix(
-	ns: &str,
-	db: &str,
-	tb: &str,
-	id: &RecordIdKey,
-	ft: &str,
-	ff: &str,
-) -> Result<Vec<u8>> {
-	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode_key()?;
-	k.extend_from_slice(&[0x00]);
-	Ok(k)
-}
-
-#[allow(dead_code)]
-pub fn ffsuffix(
-	ns: &str,
-	db: &str,
-	tb: &str,
-	id: &RecordIdKey,
-	ft: &str,
-	ff: &str,
-) -> Result<Vec<u8>> {
-	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
@@ -232,13 +186,13 @@ impl Categorise for Ref<'_> {
 
 impl<'a> Ref<'a> {
 	pub fn new(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
-		id: RecordIdKey,
+		id: KeyRecordIdKey,
 		ft: &'a str,
 		ff: &'a str,
-		fk: RecordIdKey,
+		fk: KeyRecordIdKey,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -265,18 +219,18 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let val = Ref::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
-			RecordIdKey::String("testid".to_owned()),
+			KeyRecordIdKey::String("testid".to_owned()),
 			"othertb",
 			"test.*",
-			RecordIdKey::String("otherid".to_owned()),
+			KeyRecordIdKey::String("otherid".to_owned()),
 		);
 		let enc = Ref::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\0*testdb\0*testtb\x00&\0\0\0\x01testid\0othertb\0test.*\0\0\0\0\x01otherid\0"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\x00&\0\0\0\x01testid\0othertb\0test.*\0\0\0\0\x01otherid\0"
 		);
 	}
 }

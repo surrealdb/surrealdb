@@ -1,11 +1,15 @@
+use std::collections::{BTreeMap, Bound};
+use std::fmt;
+use std::fmt::Formatter;
+
+use revision::revisioned;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
 	RecordIdKey, RecordIdKeyRange, Regex, Strand, Table, Uuid, Value,
 };
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::collections::{BTreeMap, Bound};
-use std::fmt;
-use std::fmt::Formatter;
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::Value")]
@@ -114,11 +118,14 @@ impl From<KeyObject> for Object {
 	}
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub(crate) struct KeyRecordId {
-	table: String,
-	key: KeyRecordIdKey,
+	pub(super) table: String,
+	pub(super) key: KeyRecordIdKey,
 }
+
+impl_kv_value_revisioned!(KeyRecordId);
 
 impl From<RecordId> for KeyRecordId {
 	fn from(r: RecordId) -> Self {
@@ -138,6 +145,7 @@ impl From<KeyRecordId> for RecordId {
 	}
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub(crate) enum KeyRecordIdKey {
 	Number(i64),
@@ -149,6 +157,8 @@ pub(crate) enum KeyRecordIdKey {
 	Object(KeyObject),
 	Range(Box<RecordIdKeyRange>),
 }
+
+impl_kv_value_revisioned!(KeyRecordIdKey);
 
 impl From<RecordIdKey> for KeyRecordIdKey {
 	fn from(r: RecordIdKey) -> Self {

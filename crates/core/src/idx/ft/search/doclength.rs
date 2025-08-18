@@ -95,6 +95,7 @@ impl DocLengths {
 
 #[cfg(test)]
 mod tests {
+	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::search::doclength::DocLengths;
 	use crate::kvs::LockType::*;
@@ -106,7 +107,15 @@ mod tests {
 		tt: TransactionType,
 	) -> (Transaction, DocLengths) {
 		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
-		let dl = DocLengths::new(&tx, IndexKeyBase::default(), order, tt, 100).await.unwrap();
+		let dl = DocLengths::new(
+			&tx,
+			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
+			order,
+			tt,
+			100,
+		)
+		.await
+		.unwrap();
 		(tx, dl)
 	}
 

@@ -350,10 +350,8 @@ impl Number {
 	/// # Format
 	///
 	/// The returned buffer consists of:
-	/// - Variable-length lexicographic encoding of the numeric value (see
-	///   DecimalLexEncoder)
-	/// - Single-byte type marker suffix to distinguish the original Number
-	///   variant
+	/// - Variable-length lexicographic encoding of the numeric value (see DecimalLexEncoder)
+	/// - Single-byte type marker suffix to distinguish the original Number variant
 	///
 	/// The mantissa encoding always contains an explicit terminator
 	/// nibble/byte, ensuring a trailing type marker cannot be misinterpreted
@@ -363,12 +361,9 @@ impl Number {
 	///
 	/// The following fixed encodings are used to place special float values at
 	/// the extremes:
-	/// - **Positive Infinity**: `[0xFF, 0xFF,
-	///   NUMBER_MARKER_FLOAT_INFINITE_POSITIVE]` (largest)
-	/// - **Negative Infinity**: `[0x00, 0x00,
-	///   NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE]` (smallest)
-	/// - **NaN**: `[0xFF, 0xFF, NUMBER_MARKER_FLOAT_NAN]` (treated as larger
-	///   than all other values)
+	/// - **Positive Infinity**: `[0xFF, 0xFF, NUMBER_MARKER_FLOAT_INFINITE_POSITIVE]` (largest)
+	/// - **Negative Infinity**: `[0x00, 0x00, NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE]` (smallest)
+	/// - **NaN**: `[0xFF, 0xFF, NUMBER_MARKER_FLOAT_NAN]` (treated as larger than all other values)
 	///
 	/// # Returns
 	///
@@ -428,8 +423,7 @@ impl Number {
 	///
 	/// # Parameters
 	///
-	/// - `b`: Byte slice containing the lexicographically-encoded number with
-	///   trailing type marker
+	/// - `b`: Byte slice containing the lexicographically-encoded number with trailing type marker
 	///
 	/// # Buffer Format
 	///
@@ -455,17 +449,14 @@ impl Number {
 	///
 	/// # Returns
 	///
-	/// - `Ok(Number)`: Successfully reconstructed Number with original type and
-	///   value
-	/// - `Err(Error)`: If buffer is empty, has unknown marker, or decoding
-	///   fails
+	/// - `Ok(Number)`: Successfully reconstructed Number with original type and value
+	/// - `Err(Error)`: If buffer is empty, has unknown marker, or decoding fails
 	///
 	/// # Errors
 	///
 	/// - **Empty buffer**: Input slice has no bytes
 	/// - **Unknown marker**: Last byte is not a recognized type marker
-	/// - **Decode failure**: Lexicographic decoding fails or type conversion
-	///   fails
+	/// - **Decode failure**: Lexicographic decoding fails or type conversion fails
 	pub fn from_decimal_buf(b: &[u8]) -> Result<Self> {
 		// Examine the type marker (last byte) to determine decoding strategy
 		match b.last().copied() {

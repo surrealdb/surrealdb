@@ -379,27 +379,27 @@ impl Display for Kind {
 			Kind::Option(k) => write!(f, "option<{}>", k),
 			Kind::Record(k) => {
 				if k.is_empty() {
-					write!(f, "record")
+					f.write_str("record")
 				} else {
 					write!(f, "record<{}>", Fmt::verbar_separated(k))
 				}
 			}
 			Kind::Geometry(k) => {
 				if k.is_empty() {
-					write!(f, "geometry")
+					f.write_str("geometry")
 				} else {
 					write!(f, "geometry<{}>", Fmt::verbar_separated(k))
 				}
 			}
 			Kind::Set(k, l) => match (k, l) {
-				(k, None) if k.is_any() => write!(f, "set"),
-				(k, None) => write!(f, "set<{k}>"),
-				(k, Some(l)) => write!(f, "set<{k}, {l}>"),
+				(k, None) if k.is_any() => f.write_str("set"),
+				(k, None) => write!(f, "set<{}>", k),
+				(k, Some(l)) => write!(f, "set<{}, {}>", k, l),
 			},
 			Kind::Array(k, l) => match (k, l) {
-				(k, None) if k.is_any() => write!(f, "array"),
-				(k, None) => write!(f, "array<{k}>"),
-				(k, Some(l)) => write!(f, "array<{k}, {l}>"),
+				(k, None) if k.is_any() => f.write_str("array"),
+				(k, None) => write!(f, "array<{}>", k),
+				(k, Some(l)) => write!(f, "array<{}, {}>", k, l),
 			},
 			Kind::Either(k) => write!(f, "{}", Fmt::verbar_separated(k)),
 			Kind::Range => f.write_str("range"),
@@ -411,7 +411,7 @@ impl Display for Kind {
 			},
 			Kind::File(k) => {
 				if k.is_empty() {
-					write!(f, "file")
+					f.write_str("file")
 				} else {
 					write!(f, "file<{}>", Fmt::verbar_separated(k))
 				}
@@ -716,7 +716,7 @@ impl KindLiteral {
 impl Display for KindLiteral {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			KindLiteral::String(s) => write!(f, "{}", s),
+			KindLiteral::String(s) => write!(f, "{s}"),
 			KindLiteral::Integer(n) => write!(f, "{}", n),
 			KindLiteral::Float(n) => write!(f, "{}f", n),
 			KindLiteral::Decimal(n) => write!(f, "{}dec", n),

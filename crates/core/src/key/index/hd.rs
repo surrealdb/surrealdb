@@ -1,18 +1,19 @@
 //! Stores the DocIds -> Thing of an HNSW index
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::docs::HnswDocsState;
+use crate::key::value::KeyRecordIdKey;
 use crate::kvs::KVKey;
-use crate::val::RecordIdKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct HdRoot<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -27,7 +28,7 @@ impl KVKey for HdRoot<'_> {
 }
 
 impl<'a> HdRoot<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -49,9 +50,9 @@ impl<'a> HdRoot<'a> {
 pub(crate) struct Hd<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -63,11 +64,11 @@ pub(crate) struct Hd<'a> {
 }
 
 impl KVKey for Hd<'_> {
-	type ValueType = RecordIdKey;
+	type ValueType = KeyRecordIdKey;
 }
 
 impl<'a> Hd<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, doc_id: DocId) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, doc_id: DocId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -92,22 +93,25 @@ mod tests {
 
 	#[test]
 	fn root() {
-		let val = HdRoot::new("testns", "testdb", "testtb", "testix");
+		let val = HdRoot::new(NamespaceId(1), DatabaseId(2), "testtb", "testix");
 		let enc = HdRoot::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!hd");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!hd");
 	}
 
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
 		let val = Hd::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 			7
 		);
 		let enc = Hd::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!hd\0\0\0\0\0\0\0\x07");
+		assert_eq!(
+			enc,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!hd\0\0\0\0\0\0\0\x07"
+		);
 	}
 }

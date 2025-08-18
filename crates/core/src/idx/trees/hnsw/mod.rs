@@ -12,6 +12,7 @@ use reblessive::tree::Stk;
 use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::DatabaseDefinition;
 use crate::expr::index::HnswParams;
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
@@ -354,8 +355,10 @@ where
 		}
 	}
 
+	#[expect(clippy::too_many_arguments)]
 	async fn knn_search_checked(
 		&self,
+		db: &DatabaseDefinition,
 		tx: &Transaction,
 		stk: &mut Stk,
 		search: &HnswSearch,
@@ -374,7 +377,7 @@ where
 				);
 				let w = self
 					.layer0
-					.search_single_checked(tx, stk, &search_ctx, &ep_pt, ep_dist, ep_id, chk)
+					.search_single_checked(db, tx, stk, &search_ctx, &ep_pt, ep_dist, ep_id, chk)
 					.await?;
 				return Ok(w.to_vec_limit(search.k));
 			}
@@ -444,6 +447,7 @@ mod tests {
 	use roaring::RoaringTreemap;
 	use test_log::test;
 
+	use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 	use crate::ctx::{Context, MutableContext};
 	use crate::expr::index::{Distance, HnswParams, VectorType};
 	use crate::idx::IndexKeyBase;
@@ -531,7 +535,9 @@ mod tests {
 
 	async fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut h = HnswFlavor::new(IndexKeyBase::default(), p).unwrap();
+		let mut h =
+			HnswFlavor::new(IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"), p)
+				.unwrap();
 		let map = {
 			let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
 			let map = insert_collection_hnsw(&tx, &mut h, collection).await;
@@ -645,6 +651,7 @@ mod tests {
 
 	async fn find_collection_hnsw_index(
 		tx: &Transaction,
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		h: &mut HnswIndex,
 		collection: &TestCollection,
@@ -654,7 +661,7 @@ mod tests {
 			for knn in 1..max_knn {
 				let mut chk = HnswConditionChecker::new();
 				let search = HnswSearch::new(obj.clone(), knn, 500);
-				let res = h.search(tx, stk, &search, &mut chk).await.unwrap();
+				let res = h.search(db, tx, stk, &search, &mut chk).await.unwrap();
 				if knn == 1 && res.docs.len() == 1 && res.docs[0].1 > 0.0 {
 					let docs: Vec<DocId> = res.docs.iter().map(|(d, _)| *d).collect();
 					if collection.is_unique() {
@@ -728,8 +735,14 @@ mod tests {
 		let (mut h, map) = {
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
-			let mut h =
-				HnswIndex::new(&tx, IndexKeyBase::default(), "test".to_string(), &p).await.unwrap();
+			let mut h = HnswIndex::new(
+				&tx,
+				IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
+				"test".to_string(),
+				&p,
+			)
+			.await
+			.unwrap();
 			// Fill index
 			let map = insert_collection_hnsw_index(&tx, &mut h, &collection).await.unwrap();
 			tx.commit().await.unwrap();
@@ -739,11 +752,14 @@ mod tests {
 		// Search index
 		{
 			let mut stack = reblessive::tree::TreeStack::new();
-			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
+
+			let db = tx.ensure_ns_db("myns", "mydb", false).await.unwrap();
+
 			stack
 				.enter(|stk| async {
-					find_collection_hnsw_index(&tx, stk, &mut h, &collection).await;
+					find_collection_hnsw_index(&tx, &db, stk, &mut h, &collection).await;
 				})
 				.finish()
 				.await;
@@ -810,7 +826,7 @@ mod tests {
 			(9, new_i16_vec(-4, -2)),
 			(10, new_i16_vec(0, 3)),
 		]);
-		let ikb = IndexKeyBase::default();
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix");
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true);
 		let mut h = HnswFlavor::new(ikb, &p).unwrap();
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
@@ -838,6 +854,9 @@ mod tests {
 		info!("Build data collection");
 
 		let ds = Arc::new(Datastore::new("memory").await?);
+		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
+		let db = tx.ensure_ns_db("myns", "mydb", false).await.unwrap();
+		tx.commit().await.unwrap();
 
 		let collection: Arc<TestCollection> =
 			Arc::new(TestCollection::NonUnique(new_vectors_from_file(
@@ -848,7 +867,13 @@ mod tests {
 
 		let ctx = new_ctx(&ds, TransactionType::Write).await;
 		let tx = ctx.tx();
-		let mut h = HnswIndex::new(&tx, IndexKeyBase::default(), "Index".to_string(), &p).await?;
+		let mut h = HnswIndex::new(
+			&tx,
+			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
+			"Index".to_string(),
+			&p,
+		)
+		.await?;
 		info!("Insert collection");
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
@@ -872,6 +897,7 @@ mod tests {
 			let collection = collection.clone();
 			let h = h.clone();
 			let ds = ds.clone();
+			let db = db.clone();
 			let f = tokio::spawn(async move {
 				let mut stack = reblessive::tree::TreeStack::new();
 				stack
@@ -881,9 +907,11 @@ mod tests {
 							let knn = 10;
 							let mut chk = HnswConditionChecker::new();
 							let search = HnswSearch::new(pt.clone(), knn, efs);
+
 							let ctx = new_ctx(&ds, TransactionType::Read).await;
 							let tx = ctx.tx();
-							let hnsw_res = h.search(&tx, stk, &search, &mut chk).await.unwrap();
+							let hnsw_res =
+								h.search(&db, &tx, stk, &search, &mut chk).await.unwrap();
 							assert_eq!(hnsw_res.docs.len(), knn, "Different size - knn: {knn}",);
 							let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
 							let rec = brute_force_res.recall(&hnsw_res);
