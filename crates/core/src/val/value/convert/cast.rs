@@ -6,7 +6,7 @@ use geo::Point;
 use rust_decimal::Decimal;
 
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
-use crate::expr::kind::{HasKind, KindLiteral};
+use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::expr::Kind;
 use crate::syn;
 use crate::val::array::Uniq;
@@ -785,7 +785,7 @@ impl Value {
 		}
 	}
 
-	fn can_cast_to_geometry(&self, val: &[String]) -> bool {
+	fn can_cast_to_geometry(&self, val: &[GeometryKind]) -> bool {
 		self.is_geometry_type(val)
 	}
 
@@ -918,7 +918,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to a `Geometry` of a certain type
-	fn cast_to_geometry(self, val: &[String]) -> Result<Geometry, CastError> {
+	fn cast_to_geometry(self, val: &[GeometryKind]) -> Result<Geometry, CastError> {
 		match self {
 			// Geometries are allowed if correct type
 			Value::Geometry(v) if self.is_geometry_type(val) => Ok(v),

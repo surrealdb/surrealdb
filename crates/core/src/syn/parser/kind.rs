@@ -5,7 +5,7 @@ use reblessive::Stk;
 use super::basic::NumberToken;
 use super::mac::unexpected;
 use super::{ParseResult, Parser};
-use crate::sql::kind::KindLiteral;
+use crate::sql::kind::{GeometryKind, KindLiteral};
 use crate::sql::{Ident, Kind};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::expected;
@@ -89,7 +89,7 @@ impl Parser<'_> {
 			t!("INT") => Ok(Kind::Int),
 			t!("NUMBER") => Ok(Kind::Number),
 			t!("OBJECT") => Ok(Kind::Object),
-			t!("POINT") => Ok(Kind::Geometry(vec!["point".to_string()])),
+			t!("POINT") => Ok(Kind::Geometry(vec![GeometryKind::Point])),
 			t!("STRING") => Ok(Kind::String),
 			t!("UUID") => Ok(Kind::Uuid),
 			t!("RANGE") => Ok(Kind::Range),
@@ -164,19 +164,19 @@ impl Parser<'_> {
 	}
 
 	/// Parse the kind of gemoetry
-	fn parse_geometry_kind(&mut self) -> ParseResult<String> {
+	fn parse_geometry_kind(&mut self) -> ParseResult<GeometryKind> {
 		let next = self.next();
 		match next.kind {
-			TokenKind::Keyword(
-				x @ (Keyword::Feature
-				| Keyword::Point
-				| Keyword::Line
-				| Keyword::Polygon
-				| Keyword::MultiPoint
-				| Keyword::MultiLine
-				| Keyword::MultiPolygon
-				| Keyword::Collection),
-			) => Ok(x.as_str().to_ascii_lowercase()),
+			TokenKind::Keyword(keyword) => match keyword {
+				Keyword::Point => Ok(GeometryKind::Point),
+				Keyword::Line => Ok(GeometryKind::Line),
+				Keyword::Polygon => Ok(GeometryKind::Polygon),
+				Keyword::MultiPoint => Ok(GeometryKind::MultiPoint),
+				Keyword::MultiLine => Ok(GeometryKind::MultiLine),
+				Keyword::MultiPolygon => Ok(GeometryKind::MultiPolygon),
+				Keyword::Collection => Ok(GeometryKind::Collection),
+				_ => unexpected!(self, next, "a geometry kind name"),
+			}
 			_ => unexpected!(self, next, "a geometry kind name"),
 		}
 	}
@@ -263,7 +263,6 @@ mod tests {
 	use reblessive::Stack;
 
 	use super::*;
-	use crate::sql::Ident;
 
 	fn kind(i: &str) -> ParseResult<Kind> {
 		let mut parser = Parser::new(i.as_bytes());
@@ -367,7 +366,7 @@ mod tests {
 		let res = kind(sql);
 		let out = res.unwrap();
 		assert_eq!("point", format!("{}", out));
-		assert_eq!(out, Kind::Geometry(vec!["point".to_string()]));
+		assert_eq!(out, Kind::Geometry(vec![GeometryKind::Point]));
 	}
 
 	#[test]
@@ -445,7 +444,7 @@ mod tests {
 		let res = kind(sql);
 		let out = res.unwrap();
 		assert_eq!("geometry<point>", format!("{}", out));
-		assert_eq!(out, Kind::Geometry(vec![String::from("point")]));
+		assert_eq!(out, Kind::Geometry(vec![GeometryKind::Point]));
 	}
 
 	#[test]
@@ -454,7 +453,7 @@ mod tests {
 		let res = kind(sql);
 		let out = res.unwrap();
 		assert_eq!("geometry<point | multipoint>", format!("{}", out));
-		assert_eq!(out, Kind::Geometry(vec![String::from("point"), String::from("multipoint")]));
+		assert_eq!(out, Kind::Geometry(vec![GeometryKind::Point, GeometryKind::MultiPoint]));
 	}
 
 	#[test]

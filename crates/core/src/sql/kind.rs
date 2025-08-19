@@ -7,6 +7,59 @@ use super::escape::EscapeKey;
 use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::val::{Duration, Strand};
 
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum GeometryKind {
+	Point,
+	Line,
+	Polygon,
+	MultiPoint,
+	MultiLine,
+	MultiPolygon,
+	Collection,
+}
+
+impl Display for GeometryKind {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		match self {
+			GeometryKind::Point => write!(f, "point"),
+			GeometryKind::Line => write!(f, "line"),
+			GeometryKind::Polygon => write!(f, "polygon"),
+			GeometryKind::MultiPoint => write!(f, "multipoint"),
+			GeometryKind::MultiLine => write!(f, "multiline"),
+			GeometryKind::MultiPolygon => write!(f, "multipolygon"),
+			GeometryKind::Collection => write!(f, "collection"),
+		}
+	}
+}
+
+impl From<GeometryKind> for crate::expr::kind::GeometryKind {
+	fn from(v: GeometryKind) -> Self {
+		match v {
+			GeometryKind::Point => crate::expr::kind::GeometryKind::Point,
+			GeometryKind::Line => crate::expr::kind::GeometryKind::Line,
+			GeometryKind::Polygon => crate::expr::kind::GeometryKind::Polygon,
+			GeometryKind::MultiPoint => crate::expr::kind::GeometryKind::MultiPoint,
+			GeometryKind::MultiLine => crate::expr::kind::GeometryKind::MultiLine,
+			GeometryKind::MultiPolygon => crate::expr::kind::GeometryKind::MultiPolygon,
+			GeometryKind::Collection => crate::expr::kind::GeometryKind::Collection,
+		}
+	}
+}
+
+impl From<crate::expr::kind::GeometryKind> for GeometryKind {
+	fn from(v: crate::expr::kind::GeometryKind) -> Self {
+		match v {
+			crate::expr::kind::GeometryKind::Point => GeometryKind::Point,
+			crate::expr::kind::GeometryKind::Line => GeometryKind::Line,
+			crate::expr::kind::GeometryKind::Polygon => GeometryKind::Polygon,
+			crate::expr::kind::GeometryKind::MultiPoint => GeometryKind::MultiPoint,
+			crate::expr::kind::GeometryKind::MultiLine => GeometryKind::MultiLine,
+			crate::expr::kind::GeometryKind::MultiPolygon => GeometryKind::MultiPolygon,
+			crate::expr::kind::GeometryKind::Collection => GeometryKind::Collection,
+		}
+	}
+}
+
 /// The kind, or data type, of a value or field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -45,7 +98,7 @@ pub enum Kind {
 	/// A geometry type.
 	/// The vec contains the geometry types as strings, for example `"point"` or
 	/// `"polygon"`.
-	Geometry(Vec<String>),
+	Geometry(Vec<GeometryKind>),
 	/// An optional type.
 	Option(Box<Kind>),
 	/// An either type.
@@ -100,7 +153,7 @@ impl From<Kind> for crate::expr::Kind {
 				crate::expr::Kind::Record(tables)
 			}
 			Kind::Geometry(geometries) => {
-				crate::expr::Kind::Geometry(geometries.into_iter().collect())
+				crate::expr::Kind::Geometry(geometries.into_iter().map(Into::into).collect())
 			}
 			Kind::Option(k) => crate::expr::Kind::Option(Box::new(k.as_ref().clone().into())),
 			Kind::Either(kinds) => {
@@ -140,7 +193,7 @@ impl From<crate::expr::Kind> for Kind {
 				Kind::Record(tables)
 			}
 			crate::expr::Kind::Geometry(geometries) => {
-				Kind::Geometry(geometries.into_iter().collect())
+				Kind::Geometry(geometries.into_iter().map(Into::into).collect())
 			}
 			crate::expr::Kind::Option(k) => Kind::Option(Box::new((*k).into())),
 			crate::expr::Kind::Either(kinds) => {

@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
+use std::str::FromStr;
 
 use rust_decimal::Decimal;
 use surrealdb_protocol::fb::v1 as proto_fb;
 
-use crate::expr::kind::KindLiteral;
+use crate::expr::kind::{GeometryKind, KindLiteral};
 use crate::expr::Kind;
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use crate::val::{Duration, Strand, Table};
@@ -134,7 +135,7 @@ impl ToFlatbuffers for Kind {
 			}
 			Self::Geometry(types) => {
 				let type_offsets: Vec<_> =
-					types.iter().map(|t| builder.create_string(t.as_str())).collect();
+					types.iter().map(|t| builder.create_string(t.to_string().as_str())).collect();
 				let types = builder.create_vector(&type_offsets);
 
 				proto_fb::KindArgs {
@@ -428,12 +429,15 @@ impl FromFlatbuffers for Kind {
 				let Some(geometry) = input.kind_as_geometry() else {
 					return Err(anyhow::anyhow!("Missing geometry kind"));
 				};
-				let types = if let Some(types) = geometry.types() {
-					types.iter().map(|t| t.to_string()).collect()
-				} else {
-					Vec::new()
-				};
-				Ok(Kind::Geometry(types))
+				let mut geo_kinds = Vec::new();
+
+				if let Some(types) = geometry.types() {
+					for geometry_type in types.iter() {
+						geo_kinds.push(GeometryKind::from_str(geometry_type)?);
+					}
+				}
+
+				Ok(Kind::Geometry(geo_kinds))
 			}
 			KindType::Set => {
 				let Some(set) = input.kind_as_set() else {
@@ -619,7 +623,7 @@ mod tests {
 	#[case::regex(Kind::Regex)]
 	#[case::range(Kind::Range)]
 	#[case::record(Kind::Record(vec!["test_table".to_string()]))]
-	#[case::geometry(Kind::Geometry(vec!["point".to_string(), "polygon".to_string()]))]
+	#[case::geometry(Kind::Geometry(vec![GeometryKind::Point, GeometryKind::Polygon]))]
 	#[case::option(Kind::Option(Box::new(Kind::String)))]
 	#[case::either(Kind::Either(vec![Kind::String, Kind::Number]))]
 	#[case::set(Kind::Set(Box::new(Kind::String), Some(10)))]

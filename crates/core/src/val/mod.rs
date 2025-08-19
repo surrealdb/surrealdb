@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::err::Error;
 use crate::expr::fmt::Pretty;
+use crate::expr::kind::GeometryKind;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{self, Kind};
 use crate::kvs::impl_kv_value_revisioned;
@@ -214,28 +215,28 @@ impl Value {
 	}
 
 	/// Check if this Value is a Geometry of a specific type
-	pub fn is_geometry_type(&self, types: &[String]) -> bool {
+	pub fn is_geometry_type(&self, types: &[GeometryKind]) -> bool {
 		match self {
 			Value::Geometry(Geometry::Point(_)) => {
-				types.iter().any(|t| matches!(t.as_str(), "feature" | "point"))
+				types.iter().any(|t| matches!(t, GeometryKind::Point))
 			}
 			Value::Geometry(Geometry::Line(_)) => {
-				types.iter().any(|t| matches!(t.as_str(), "feature" | "line"))
+				types.iter().any(|t| matches!(t, GeometryKind::Line))
 			}
 			Value::Geometry(Geometry::Polygon(_)) => {
-				types.iter().any(|t| matches!(t.as_str(), "feature" | "polygon"))
+				types.iter().any(|t| matches!(t, GeometryKind::Polygon))
 			}
 			Value::Geometry(Geometry::MultiPoint(_)) => {
-				types.iter().any(|t| matches!(t.as_str(), "feature" | "multipoint"))
+				types.iter().any(|t| matches!(t, GeometryKind::MultiPoint))
 			}
 			Value::Geometry(Geometry::MultiLine(_)) => {
-				types.iter().any(|t| matches!(t.as_str(), "feature" | "multiline"))
+				types.iter().any(|t| matches!(t, GeometryKind::MultiLine))
 			}
 			Value::Geometry(Geometry::MultiPolygon(_)) => {
-				types.iter().any(|t| matches!(t.as_str(), "feature" | "multipolygon"))
+				types.iter().any(|t| matches!(t, GeometryKind::MultiPolygon))
 			}
 			Value::Geometry(Geometry::Collection(_)) => {
-				types.iter().any(|t| matches!(t.as_str(), "feature" | "collection"))
+				types.iter().any(|t| matches!(t, GeometryKind::Collection))
 			}
 			_ => false,
 		}
@@ -284,7 +285,7 @@ impl Value {
 				None,
 			)),
 			Value::Object(_) => Some(Kind::Object),
-			Value::Geometry(geo) => Some(Kind::Geometry(vec![geo.as_type().to_string()])),
+			Value::Geometry(geo) => Some(Kind::Geometry(vec![geo.kind()])),
 			Value::Bytes(_) => Some(Kind::Bytes),
 			Value::Regex(_) => Some(Kind::Regex),
 			Value::RecordId(thing) => {

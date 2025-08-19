@@ -5,7 +5,7 @@ use std::hash::BuildHasher;
 use geo::Point;
 use rust_decimal::Decimal;
 
-use crate::expr::kind::{HasKind, KindLiteral};
+use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::expr::Kind;
 use crate::val::array::Uniq;
 use crate::val::{
@@ -506,7 +506,7 @@ impl Value {
 		}
 	}
 
-	fn can_coerce_to_geometry(&self, val: &[String]) -> bool {
+	fn can_coerce_to_geometry(&self, val: &[GeometryKind]) -> bool {
 		self.is_geometry_type(val)
 	}
 
@@ -641,7 +641,7 @@ impl Value {
 	}
 
 	/// Try to coerce this value to a `Geometry` of a certain type
-	pub(crate) fn coerce_to_geometry_kind(self, val: &[String]) -> Result<Geometry, CoerceError> {
+	pub(crate) fn coerce_to_geometry_kind(self, val: &[GeometryKind]) -> Result<Geometry, CoerceError> {
 		if self.is_geometry_type(val) {
 			let Value::Geometry(x) = self else {
 				// Checked above in is_geometry_type

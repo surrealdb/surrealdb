@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter, Write};
 use std::hash::{Hash, Hasher};
+use std::str::FromStr;
 
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use revision::revisioned;
@@ -26,6 +27,37 @@ pub enum GeometryKind {
 	MultiLine,
 	MultiPolygon,
 	Collection,
+}
+
+impl Display for GeometryKind {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		match self {
+			GeometryKind::Point => write!(f, "point"),
+			GeometryKind::Line => write!(f, "line"),
+			GeometryKind::Polygon => write!(f, "polygon"),
+			GeometryKind::MultiPoint => write!(f, "multipoint"),
+			GeometryKind::MultiLine => write!(f, "multiline"),
+			GeometryKind::MultiPolygon => write!(f, "multipolygon"),
+			GeometryKind::Collection => write!(f, "collection"),
+		}
+	}
+}
+
+impl FromStr for GeometryKind {
+	type Err = anyhow::Error;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s {
+			"point" => Ok(GeometryKind::Point),
+			"line" => Ok(GeometryKind::Line),
+			"polygon" => Ok(GeometryKind::Polygon),
+			"multipoint" => Ok(GeometryKind::MultiPoint),
+			"multiline" => Ok(GeometryKind::MultiLine),
+			"multipolygon" => Ok(GeometryKind::MultiPolygon),
+			"collection" => Ok(GeometryKind::Collection),
+			_ => Err(anyhow::anyhow!("invalid geometry kind: {s}")),
+		}
+	}
 }
 
 /// The kind, or data type, of a value or field.
@@ -65,8 +97,8 @@ pub enum Kind {
 	Record(Vec<String>),
 	/// A geometry type.
 	/// The vec contains the geometry types as strings, for example `"point"` or
-	/// `"polygon"`. TODO(3.0): Change to use an enum
-	Geometry(Vec<String>),
+	/// `"polygon"`.
+	Geometry(Vec<GeometryKind>),
 	/// An optional type.
 	Option(Box<Kind>),
 	/// An either type.
@@ -180,15 +212,6 @@ impl Kind {
 					return Some(Kind::Either(kinds));
 				}
 			}
-		}
-	}
-
-	/// Get the inner kind of a [`Kind::Option`] or return the original [`Kind`]
-	/// if it is not the Option variant.
-	pub(crate) fn get_optional_inner_kind(&self) -> &Kind {
-		match self {
-			Kind::Option(k) => k.as_ref().get_optional_inner_kind(),
-			_ => self,
 		}
 	}
 
@@ -336,23 +359,23 @@ impl_basic_has_kind! {
 }
 
 macro_rules! impl_geometry_has_kind{
-	($($name:ty => $kind:literal),*$(,)?) => {
+	($($name:ty => $kind:expr),*$(,)?) => {
 		$(
 			impl HasKind for $name{
 				fn kind() -> Kind{
-					Kind::Geometry(vec![$kind.to_string()])
+					Kind::Geometry(vec![$kind])
 				}
 			}
 		)*
 	}
 }
 impl_geometry_has_kind! {
-	Point<f64> => "point",
-	LineString<f64> => "line",
-	MultiPoint<f64> => "multipoint",
-	Polygon<f64> => "polygon",
-	MultiLineString<f64> => "multiline",
-	MultiPolygon<f64> => "multipolygon",
+	Point<f64> => GeometryKind::Point,
+	LineString<f64> => GeometryKind::Line,
+	MultiPoint<f64> => GeometryKind::MultiPoint,
+	Polygon<f64> => GeometryKind::Polygon,
+	MultiLineString<f64> => GeometryKind::MultiLine,
+	MultiPolygon<f64> => GeometryKind::MultiPolygon,
 }
 
 impl From<&Kind> for Box<Kind> {
