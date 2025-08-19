@@ -2,7 +2,7 @@ use revision::revisioned;
 
 use crate::val::Duration;
 
-#[revisioned(revision = 1)]
+
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 // Durations representing the expiration of different elements of user
 // authentication In this context, the None variant represents that the element

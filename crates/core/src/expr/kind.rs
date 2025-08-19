@@ -16,7 +16,6 @@ use crate::val::{
 };
 
 /// The kind, or data type, of a value or field.
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Kind {
 	/// The most generic type, can be anything.
@@ -52,7 +51,7 @@ pub enum Kind {
 	/// Regular expression type.
 	Regex,
 	/// A record type.
-	Record(Vec<Ident>),
+	Record(Vec<String>),
 	/// A geometry type.
 	/// The vec contains the geometry types as strings, for example `"point"` or
 	/// `"polygon"`. TODO(3.0): Change to use an enum
@@ -424,6 +423,7 @@ impl InfoStructure for Kind {
 		self.to_string().into()
 	}
 }
+
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug)]

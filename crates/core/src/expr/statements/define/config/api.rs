@@ -12,7 +12,7 @@ use crate::expr::fmt::Fmt;
 use crate::expr::{Expr, FlowResultExt};
 
 /// The api configuration as it is received from ast.
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct ApiConfig {
 	pub middleware: Vec<Middleware>,
@@ -20,7 +20,7 @@ pub struct ApiConfig {
 }
 
 /// The api middleware as it is received from ast.
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Middleware {
 	pub name: String,

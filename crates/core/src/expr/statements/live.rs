@@ -4,16 +4,17 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
 
+use crate::catalog::NodeLiveQuery;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _, Literal};
 use crate::iam::Auth;
-use crate::kvs::{Live, impl_kv_value_revisioned};
+use crate::kvs::{impl_kv_value_revisioned};
 use crate::val::{Uuid, Value};
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct LiveStatement {
 	pub id: Uuid,
@@ -101,7 +102,7 @@ impl LiveStatement {
 				// Get the NS and DB
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 				// Store the live info
-				let lq = Live {
+				let lq = NodeLiveQuery {
 					ns,
 					db,
 					tb: tb.to_string(),

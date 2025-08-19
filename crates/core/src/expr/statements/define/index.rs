@@ -26,7 +26,7 @@ use crate::sql::ToSql;
 use crate::sql::fmt::Fmt;
 use crate::val::{Strand, Value};
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineIndexStatement {
 	pub kind: DefineKind,

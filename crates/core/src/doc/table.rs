@@ -122,7 +122,7 @@ impl Document {
 							// What do we do with the initial value on UPDATE and DELETE?
 							if !targeted_force
 								&& act != Action::Create && stk
-								.run(|stk| cond.0.compute(stk, ctx, opt, Some(&self.initial)))
+								.run(|stk| cond.compute(stk, ctx, opt, Some(&self.initial)))
 								.await
 								.catch_return()?
 								.is_truthy()
@@ -148,7 +148,7 @@ impl Document {
 							// What do we do with the current value on CREATE and UPDATE?
 							if act != Action::Delete
 								&& stk
-									.run(|stk| cond.0.compute(stk, ctx, opt, Some(&self.current)))
+									.run(|stk| cond.compute(stk, ctx, opt, Some(&self.current)))
 									.await
 									.catch_return()?
 									.is_truthy()
@@ -227,7 +227,7 @@ impl Document {
 						// There is a WHERE clause specified
 						Some(cond) => {
 							match stk
-								.run(|stk| cond.0.compute(stk, ctx, opt, Some(&self.current)))
+								.run(|stk| cond.compute(stk, ctx, opt, Some(&self.current)))
 								.await
 								.catch_return()?
 							{
@@ -870,12 +870,12 @@ impl Document {
 				root = Expr::Binary {
 					left: Box::new(root),
 					op: BinaryOperator::And,
-					right: Box::new(c.0.clone()),
+					right: Box::new(c.clone()),
 				};
 			}
 			Some(Cond(root))
 		} else {
-			fdc.view.cond.clone()
+			fdc.view.cond.clone().map(Cond)
 		};
 
 		let group_select = Expr::Select(Box::new(SelectStatement {

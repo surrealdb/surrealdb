@@ -31,7 +31,7 @@ pub fn get_model_path(ns: &str, db: &str, name: &str, version: &str, hash: &str)
 	format!("ml/{ns}/{db}/{name}-{version}-{hash}.surml")
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Model {
 	pub name: String,

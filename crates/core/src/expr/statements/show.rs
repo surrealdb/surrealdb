@@ -11,7 +11,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::Datetime;
 use crate::vs::VersionStamp;
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ShowSince {
 	Timestamp(Datetime),
@@ -32,7 +32,7 @@ impl ShowSince {
 }
 
 /// A SHOW CHANGES statement for displaying changes made to a table or database.
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ShowStatement {
 	pub table: Option<Ident>,

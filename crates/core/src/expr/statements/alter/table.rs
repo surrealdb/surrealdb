@@ -17,7 +17,7 @@ use crate::expr::{Base, ChangeFeed, Ident, Kind};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AlterTableStatement {
 	pub name: Ident,

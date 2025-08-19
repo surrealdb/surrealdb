@@ -11,7 +11,7 @@ use crate::err::Error;
 use crate::expr::{Expr, FlowResultExt as _};
 use crate::val::{Uuid, Value};
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct KillStatement {
 	// Uuid of Live Query

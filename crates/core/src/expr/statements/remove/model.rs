@@ -9,12 +9,12 @@ use crate::err::Error;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
 
-#[revisioned(revision = 2)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveModelStatement {
 	pub name: Ident,
 	pub version: String,
-	#[revision(start = 2)]
+	
 	pub if_exists: bool,
 }
 

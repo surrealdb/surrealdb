@@ -16,6 +16,7 @@ impl fmt::Display for PatchError {
 }
 
 /// A type representing an delta change to a value.
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Operation {

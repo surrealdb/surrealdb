@@ -29,7 +29,7 @@ pub static GRANT_BEARER_ID_LENGTH: usize = 12;
 // With 24 characters from the pool, the key part has ~140 bits of entropy.
 pub static GRANT_BEARER_KEY_LENGTH: usize = 24;
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum AccessStatement {
 	Grant(AccessStatementGrant),   // Create access grant.
@@ -38,7 +38,7 @@ pub enum AccessStatement {
 	Purge(AccessStatementPurge),   // Purge access grants.
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AccessStatementGrant {
 	pub ac: Ident,
@@ -46,7 +46,7 @@ pub struct AccessStatementGrant {
 	pub subject: Subject,
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AccessStatementShow {
 	pub ac: Ident,
@@ -55,7 +55,7 @@ pub struct AccessStatementShow {
 	pub cond: Option<Cond>,
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AccessStatementRevoke {
 	pub ac: Ident,
@@ -64,7 +64,7 @@ pub struct AccessStatementRevoke {
 	pub cond: Option<Cond>,
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AccessStatementPurge {
 	pub ac: Ident,
@@ -104,7 +104,7 @@ impl AccessGrant {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Subject {
 	Record(RecordIdLit),
@@ -128,7 +128,7 @@ impl Subject {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Grant {
 	Jwt(GrantJwt),
@@ -147,14 +147,14 @@ impl Grant {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct GrantJwt {
 	pub jti: Uuid,             // JWT ID
 	pub token: Option<Strand>, // JWT. Will not be stored after being returned.
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct GrantRecord {
 	pub rid: Uuid,             // Record ID
@@ -162,7 +162,7 @@ pub struct GrantRecord {
 	pub token: Option<Strand>, // JWT. Will not be stored after being returned.
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct GrantBearer {
 	pub id: Ident, // Key ID

@@ -20,6 +20,12 @@ use crate::val::{Strand, Value};
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Fetchs(pub Vec<Fetch>);
 
+impl Fetchs {
+	fn len(&self) -> usize {
+		self.0.len()
+	}
+}
+
 impl Deref for Fetchs {
 	type Target = Vec<Fetch>;
 	fn deref(&self) -> &Self::Target {

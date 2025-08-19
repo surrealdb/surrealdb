@@ -18,7 +18,7 @@ use crate::sql::ToSql;
 use crate::sys::INFORMATION;
 use crate::val::{Datetime, Object, Value};
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum InfoStatement {
 	// revision discriminant override accounting for previous behavior when adding variants and

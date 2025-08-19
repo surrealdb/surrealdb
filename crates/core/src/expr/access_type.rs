@@ -13,7 +13,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Algorithm, Expr};
 
 /// The type of access methods available
-#[revisioned(revision = 1)]
+
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub enum AccessType {
 	Record(RecordAccess),
@@ -127,7 +127,7 @@ impl AccessType {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct JwtAccess {
 	// Verify is required
@@ -225,7 +225,7 @@ impl JwtAccess {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct JwtAccessIssue {
 	pub alg: Algorithm,
@@ -243,7 +243,7 @@ impl Default for JwtAccessIssue {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub enum JwtAccessVerify {
 	Key(JwtAccessVerifyKey),
@@ -272,7 +272,7 @@ impl InfoStructure for JwtAccessVerify {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct JwtAccessVerifyKey {
 	pub alg: Algorithm,
@@ -290,21 +290,18 @@ impl Default for JwtAccessVerifyKey {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct JwtAccessVerifyJwks {
 	pub url: String,
 }
 
-#[revisioned(revision = 4)]
+
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct RecordAccess {
 	pub signup: Option<Expr>,
 	pub signin: Option<Expr>,
-	pub jwt: JwtAccess,
-	#[revision(start = 2, end = 3, convert_fn = "authenticate_revision")]
-	pub authenticate: Option<Value>,
-	#[revision(start = 4)]
+	pub jwt: JwtAccess,	
 	pub bearer: Option<BearerAccess>,
 }
 
@@ -339,7 +336,7 @@ impl Jwt for RecordAccess {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct BearerAccess {
 	pub kind: BearerAccessType,
@@ -365,7 +362,7 @@ impl Jwt for BearerAccess {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub enum BearerAccessType {
 	Bearer,
@@ -392,7 +389,7 @@ impl FromStr for BearerAccessType {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub enum BearerAccessSubject {
 	Record,

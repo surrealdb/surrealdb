@@ -17,7 +17,7 @@ use crate::expr::{Base, Expr, Ident, Idiom, Kind};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum AlterDefault {
 	#[default]
@@ -27,7 +27,7 @@ pub enum AlterDefault {
 	Set(Expr),
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AlterFieldStatement {
 	pub name: Idiom,

@@ -22,7 +22,7 @@ use crate::expr::{Base, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Strand, Value};
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineUserStatement {
 	pub kind: DefineKind,

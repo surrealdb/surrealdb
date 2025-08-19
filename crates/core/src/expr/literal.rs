@@ -25,7 +25,7 @@ use crate::val::{
 /// if `a != b` then `Literal::Float(a)` could still be equal
 /// to `Literal::Float(b)` in the case of `NaN` floats for example. Also
 /// surrealql rules regarding number equality are not observed, 1f != 1dec.
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug)]
 pub enum Literal {
 	None,
@@ -249,7 +249,7 @@ impl fmt::Display for Literal {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ObjectEntry {
 	pub key: String,

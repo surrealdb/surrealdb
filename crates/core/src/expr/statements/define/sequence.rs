@@ -14,7 +14,7 @@ use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
 use crate::kvs::impl_kv_value_revisioned;
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineSequenceStatement {
 	pub kind: DefineKind,

@@ -17,6 +17,7 @@ pub enum DefineDefault {
 	Set(Expr),
 }
 
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct FieldDefinition {

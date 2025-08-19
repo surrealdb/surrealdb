@@ -2,7 +2,7 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str::FromStr;
 
-use revision::revisioned;
+use revision::{Revisioned, revisioned};
 
 use crate::err::Error;
 use crate::expr::Kind;
@@ -10,7 +10,6 @@ use crate::expr::fmt::{Fmt, fmt_separated_by};
 use crate::syn;
 use crate::val::{Array, Object, Strand, Value};
 
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Path(pub Vec<Segment>);
 
@@ -225,7 +224,29 @@ impl FromStr for Path {
 	}
 }
 
-#[revisioned(revision = 1)]
+impl Revisioned for Path {
+	fn revision() -> u16 {
+		1
+	}
+
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
+		writer.write_all(self.to_string().as_bytes()).map_err(revision::Error::Io)?;
+		Ok(())
+	}
+
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		let mut buf = Vec::new();
+		reader.read_to_end(&mut buf).map_err(revision::Error::Io)?;
+		std::str::from_utf8(&buf)
+			.map_err(|err| revision::Error::Utf8Error(err))?
+			.parse()
+			.map_err(|err: Error| revision::Error::Conversion(err.to_string()))
+	}
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Segment {
 	Fixed(String),

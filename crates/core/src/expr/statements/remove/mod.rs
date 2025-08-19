@@ -37,7 +37,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::Value;
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RemoveStatement {
 	Namespace(RemoveNamespaceStatement),

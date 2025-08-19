@@ -3,7 +3,7 @@ use std::fmt;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, PartialOrd, Deserialize, Hash)]
 pub enum Dir {
 	/// `<-`

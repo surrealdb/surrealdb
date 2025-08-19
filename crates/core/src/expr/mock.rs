@@ -39,7 +39,7 @@ impl Iterator for IntoIter {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Mock {
 	Count(String, u64),

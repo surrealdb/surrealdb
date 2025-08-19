@@ -4,7 +4,7 @@ use revision::revisioned;
 
 use crate::expr::field::Fields;
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Output {
 	None,

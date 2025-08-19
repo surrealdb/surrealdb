@@ -2,6 +2,7 @@ use anyhow::Result;
 use revision::revisioned;
 use uuid::Uuid;
 
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Expr, Fetchs, Fields};
 use crate::iam::Auth;
@@ -11,24 +12,12 @@ use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct SubscriptionDefinitionStore {
-	pub id: Uuid,
-	pub node: Uuid,
-	pub fields: Fields,
-	pub what: Expr,
-	pub cond: Option<Cond>,
-	pub fetch: Option<Fetchs>,
-}
-
-impl_kv_value_revisioned!(SubscriptionDefinitionStore);
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SubscriptionDefinition {
 	pub id: Uuid,
 	pub node: Uuid,
 	pub fields: Fields,
 	pub what: Expr,
-	pub cond: Option<Cond>,
+	pub cond: Option<Expr>,
 	pub fetch: Option<Fetchs>,
 	// When a live query is created, we must also store the
 	// authenticated session of the user who made the query,
@@ -44,33 +33,15 @@ pub struct SubscriptionDefinition {
 	pub(crate) session: Option<Value>,
 }
 
+impl_kv_value_revisioned!(SubscriptionDefinition);
+
 impl SubscriptionDefinition {
-	fn to_store(&self) -> SubscriptionDefinitionStore {
-		todo!("STU")
-	}
-
-	fn from_store(store: SubscriptionDefinitionStore) -> Result<Self> {
-		todo!("STU")
-	}
-
 	pub(crate) fn to_expr_definition(&self) -> crate::expr::LiveStatement {
 		todo!("STU")
 	}
 
 	fn to_sql_definition(&self) -> crate::sql::LiveStatement {
 		todo!("STU")
-	}
-}
-
-impl KVValue for SubscriptionDefinition {
-	fn kv_encode_value(&self) -> Result<Vec<u8>> {
-		let store = self.to_store();
-		Ok(store.kv_encode_value()?)
-	}
-
-	fn kv_decode_value(bytes: Vec<u8>) -> Result<Self> {
-		let store = SubscriptionDefinitionStore::kv_decode_value(bytes)?;
-		SubscriptionDefinition::from_store(store)
 	}
 }
 
@@ -81,7 +52,7 @@ impl InfoStructure for SubscriptionDefinition {
 			"node".to_string() => crate::val::Uuid(self.node).into(),
 			"expr".to_string() => self.fields.structure(),
 			"what".to_string() => self.what.structure(),
-			"cond".to_string(), if let Some(v) = self.cond => v.0.structure(),
+			"cond".to_string(), if let Some(v) = self.cond => v.structure(),
 			"fetch".to_string(), if let Some(v) = self.fetch => v.structure(),
 		})
 	}
@@ -92,3 +63,14 @@ impl ToSql for &SubscriptionDefinition {
 		self.to_sql_definition().to_string()
 	}
 }
+
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub(crate) struct NodeLiveQuery {
+	pub(crate) ns: NamespaceId,
+	pub(crate) db: DatabaseId,
+	pub(crate) tb: String,
+}
+impl_kv_value_revisioned!(NodeLiveQuery);

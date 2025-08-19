@@ -15,7 +15,7 @@ use crate::expr::statements::define::run_indexing;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RebuildStatement {
 	Index(RebuildIndexStatement),
@@ -44,7 +44,7 @@ impl Display for RebuildStatement {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RebuildIndexStatement {
 	pub name: Ident,

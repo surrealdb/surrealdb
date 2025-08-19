@@ -16,7 +16,7 @@ use crate::expr::ident::Ident;
 use crate::iam::Action;
 use crate::val::{Strand, Value};
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Param(String);
 

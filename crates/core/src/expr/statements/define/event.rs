@@ -16,7 +16,7 @@ use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::fmt::Fmt;
 use crate::val::{Strand, Value};
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineEventStatement {
 	pub kind: DefineKind,

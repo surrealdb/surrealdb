@@ -7,7 +7,7 @@ use crate::expr::Value;
 use crate::expr::fmt::Fmt;
 use crate::expr::idiom::Idiom;
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Ordering {
 	Random,
@@ -23,7 +23,7 @@ impl fmt::Display for Ordering {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct OrderList(pub Vec<Order>);
 
@@ -61,7 +61,7 @@ impl OrderList {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Order {
 	/// The value to order by

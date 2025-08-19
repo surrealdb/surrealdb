@@ -7,7 +7,7 @@ use crate::expr::fmt::Fmt;
 use crate::expr::{Expr, Ident, Kind};
 use crate::idx::ft::MatchRef;
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum PrefixOperator {
 	/// `!`
@@ -36,7 +36,7 @@ impl fmt::Display for PrefixOperator {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum PostfixOperator {
 	Range,
@@ -61,7 +61,7 @@ impl fmt::Display for PostfixOperator {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum BinaryOperator {
 	/// `-`
@@ -146,7 +146,7 @@ pub enum BinaryOperator {
 	NearestNeighbor(Box<NearestNeighbor>),
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct MatchesOperator {
 	pub rf: Option<MatchRef>,
@@ -170,7 +170,7 @@ impl fmt::Display for MatchesOperator {
 }
 
 /// Boolean operation executed by the full-text index
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum BooleanOperator {
 	And,
@@ -186,7 +186,7 @@ impl fmt::Display for BooleanOperator {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum NearestNeighbor {
 	/// `<|k, dist|>`
@@ -257,7 +257,7 @@ impl fmt::Display for BinaryOperator {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum AssignOperator {
 	Assign,

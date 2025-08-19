@@ -14,7 +14,7 @@ use crate::expr::{Base, Expr, FlowResultExt, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineBucketStatement {
 	pub kind: DefineKind,

@@ -24,7 +24,6 @@ mod cf;
 mod clock;
 mod ds;
 mod key;
-pub(crate) mod live;
 mod node;
 mod scanner;
 mod stash;
@@ -55,7 +54,6 @@ pub use ds::Datastore;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) use index::{ConsumeResult, IndexBuilder};
 pub(crate) use key::{KVKey, KVValue, impl_kv_value_revisioned};
-pub(crate) use live::Live;
 pub use tr::{Check, LockType, TransactionType, Transactor};
 pub use tx::Transaction;
 

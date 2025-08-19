@@ -10,7 +10,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{ControlFlow, Expr, FlowResult, Ident, Kind, Value};
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SetStatement {
 	pub name: Ident,

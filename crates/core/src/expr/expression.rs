@@ -2,7 +2,8 @@ use std::fmt;
 use std::ops::Bound;
 
 use reblessive::tree::Stk;
-use revision::revisioned;
+use reblessive::Stack;
+use revision::Revisioned;
 
 use super::SleepStatement;
 use crate::ctx::{Context, MutableContext};
@@ -724,5 +725,29 @@ impl InfoStructure for Expr {
 	fn structure(self) -> Value {
 		// TODO: null byte validity
 		Strand::new(self.to_string()).unwrap().into()
+	}
+}
+
+impl Revisioned for Expr {
+	fn revision() -> u16 {
+		1
+	}
+
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
+		writer.write_all(self.to_string().as_bytes()).map_err(revision::Error::Io)?;
+		Ok(())
+	}
+
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		let mut buf = Vec::new();
+		reader.read_to_end(&mut buf).map_err(revision::Error::Io)?;
+
+		let mut stack = Stack::new();
+		let mut parser = crate::syn::parser::Parser::new(&buf);
+		let expr = stack.enter(|stk| parser.parse_expr(&mut stk)).finish().map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
+		Ok(expr.into())
 	}
 }

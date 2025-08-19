@@ -2,7 +2,7 @@ use std::fmt;
 
 use revision::revisioned;
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Explain(pub bool);
 

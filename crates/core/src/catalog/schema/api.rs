@@ -1,27 +1,18 @@
 use std::fmt::{self, Display};
-
+use anyhow::Result;
 use revision::revisioned;
 
 use crate::api::path::Path;
 use crate::catalog::Permission;
-use crate::expr::Expr;
+use crate::expr::{Expr, Literal};
 use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
-use crate::kvs::impl_kv_value_revisioned;
+use crate::kvs::{impl_kv_value_revisioned, KVValue};
 use crate::sql::ToSql;
 use crate::val::{Array, Object, Strand, Value};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct ApiActionDefinitionStore {
-	pub path: String,
-	pub actions: Vec<ApiActionDefinition>,
-	pub fallback: Option<Expr>,
-	pub config: ApiConfigDefinition,
-	pub comment: Option<String>,
-}
 
-
+/// The API definition.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct ApiDefinition {
@@ -63,7 +54,7 @@ impl ApiDefinition {
 	fn to_sql_definition(&self) -> crate::sql::statements::DefineApiStatement {
 		crate::sql::statements::DefineApiStatement {
 			kind: crate::sql::statements::define::DefineKind::Default,
-			path: self.path.into(),
+			path: crate::sql::Expr::Literal(crate::sql::Literal::Strand(unsafe { Strand::new_unchecked(self.path.to_string()) })),
 			actions: self.actions.iter().map(|x| x.to_sql_action()).collect(),
 			fallback: self.fallback.clone().map(|x| x.into()),
 			config: self.config.to_sql_config(),
@@ -141,6 +132,7 @@ impl InfoStructure for ApiMethod {
 }
 
 #[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ApiActionDefinition {
 	pub methods: Vec<ApiMethod>,
@@ -149,6 +141,16 @@ pub struct ApiActionDefinition {
 }
 
 impl_kv_value_revisioned!(ApiActionDefinition);
+
+impl ApiActionDefinition {
+	pub fn to_sql_action(&self) -> crate::sql::statements::define::ApiAction {
+		crate::sql::statements::define::ApiAction {
+			methods: self.methods.clone(),
+			action: self.action.clone().into(),
+			config: self.config.to_sql_config(),
+		}
+	}
+}
 
 impl InfoStructure for ApiActionDefinition {
 	fn structure(self) -> Value {
@@ -165,6 +167,15 @@ impl InfoStructure for ApiActionDefinition {
 pub struct ApiConfigDefinition {
 	pub middleware: Vec<MiddlewareDefinition>,
 	pub permissions: Permission,
+}
+
+impl ApiConfigDefinition {
+	pub fn to_sql_config(&self) -> crate::sql::statements::define::config::api::ApiConfig {
+		crate::sql::statements::define::config::api::ApiConfig {
+			middleware: self.middleware.iter().map(|mw| mw.to_sql_middleware()).collect(),
+			permissions: self.permissions.clone().into(),
+		}
+	}
 }
 
 impl InfoStructure for ApiConfigDefinition {
@@ -217,4 +228,13 @@ impl Display for ApiConfigDefinition {
 pub struct MiddlewareDefinition {
 	pub name: String,
 	pub args: Vec<Value>,
+}
+
+impl MiddlewareDefinition {
+	pub fn to_sql_middleware(&self) -> crate::sql::statements::define::config::api::Middleware {
+		crate::sql::statements::define::config::api::Middleware {
+			name: self.name.clone(),
+			args: self.args.clone().into_iter().map(crate::sql::Expr::from_value).collect(),
+		}
+	}
 }

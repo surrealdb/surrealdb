@@ -71,7 +71,7 @@ impl<T: Revisioned> Revisioned for AlterKind<T> {
 	}
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum AlterStatement {
 	Table(AlterTableStatement),

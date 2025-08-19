@@ -4,7 +4,7 @@ use revision::revisioned;
 
 use crate::expr::ident::Ident;
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct OptionStatement {
 	pub name: Ident,

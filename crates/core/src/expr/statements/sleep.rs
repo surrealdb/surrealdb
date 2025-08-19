@@ -10,7 +10,7 @@ use crate::expr::Base;
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Duration, Value};
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct SleepStatement {
 	pub(crate) duration: Duration,

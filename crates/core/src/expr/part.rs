@@ -401,7 +401,7 @@ impl<'a> NextMethod<'a> for &'a Idiom {
 
 // ------------------------------
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum DestructurePart {
 	All(Ident),
@@ -451,7 +451,7 @@ impl fmt::Display for DestructurePart {
 
 // ------------------------------
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Recurse {
 	Fixed(u32),
@@ -502,7 +502,7 @@ impl fmt::Display for Recurse {
 
 // ------------------------------
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RecurseInstruction {
 	Path {

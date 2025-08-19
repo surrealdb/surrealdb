@@ -9,7 +9,6 @@ use crate::expr::escape::EscapeIdent;
 use crate::expr::statements::info::InfoStructure;
 use crate::val::{Strand, Table};
 
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Ident(String);

@@ -2,7 +2,7 @@ use std::fmt;
 
 use revision::revisioned;
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 /// ChangeFeedInclude statements are an appendix
 pub enum ChangeFeedInclude {

@@ -13,7 +13,7 @@ use crate::expr::{Cond, Explain, Expr, Output, Timeout, With};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DeleteStatement {
 	pub only: bool,

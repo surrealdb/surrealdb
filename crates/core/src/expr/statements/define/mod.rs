@@ -43,7 +43,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::val::Value;
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 pub enum DefineKind {
 	#[default]
@@ -52,7 +52,7 @@ pub enum DefineKind {
 	IfNotExists,
 }
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),

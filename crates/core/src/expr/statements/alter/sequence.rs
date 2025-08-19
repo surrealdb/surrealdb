@@ -12,7 +12,7 @@ use crate::expr::{Base, Ident, Timeout, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AlterSequenceStatement {
 	pub name: Ident,

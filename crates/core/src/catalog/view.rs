@@ -1,7 +1,7 @@
 use revision::revisioned;
 
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Cond, Fields, Groups};
+use crate::expr::{Expr, Fields, Groups};
 use crate::sql::{Ident, ToSql, View};
 use crate::val::Value;
 
@@ -10,7 +10,7 @@ use crate::val::Value;
 pub struct ViewDefinition {
 	pub expr: Fields,
 	pub what: Vec<String>,
-	pub cond: Option<Cond>,
+	pub cond: Option<Expr>,
 	pub group: Option<Groups>,
 }
 
@@ -26,7 +26,7 @@ impl ViewDefinition {
 				.into_iter()
 				.map(|s| unsafe { Ident::new_unchecked(s) })
 				.collect(),
-			cond: self.cond.clone().map(Into::into),
+			cond: self.cond.clone().map(|e| crate::sql::Cond(e.into())),
 			group: self.group.clone().map(Into::into),
 		}
 	}

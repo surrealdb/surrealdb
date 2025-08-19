@@ -15,7 +15,7 @@ use crate::expr::{Expr, Ident, Idiom, Model, Script, Value};
 use crate::fnc;
 use crate::iam::Action;
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Function {
 	Normal(String),
@@ -213,7 +213,7 @@ impl Function {
 }
 
 ///TODO(3.0): Remove after proper first class function support?
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct FunctionCall {
 	pub receiver: Function,

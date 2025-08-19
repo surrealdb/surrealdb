@@ -15,7 +15,7 @@ pub use key::{RecordIdKeyGen, RecordIdKeyLit};
 pub mod range;
 pub use range::RecordIdKeyRangeLit;
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RecordIdLit {
 	/// Table name

@@ -13,7 +13,7 @@ use crate::expr::{Cond, Data, Explain, Expr, Output, Timeout, With};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, PartialEq, Default, Hash)]
 pub struct UpdateStatement {
 	pub only: bool,

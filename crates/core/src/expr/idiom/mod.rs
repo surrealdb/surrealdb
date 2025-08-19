@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
+use std::str::FromStr;
 
 use md5::{Digest, Md5};
 use reblessive::tree::Stk;
-use revision::revisioned;
+use reblessive::Stack;
+use revision::{revisioned, Revisioned};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -17,7 +19,7 @@ use crate::expr::{FlowResult, Ident, Part, Value};
 
 pub mod recursion;
 
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Idioms(pub Vec<Idiom>);
 
@@ -48,7 +50,8 @@ impl InfoStructure for Idioms {
 	}
 }
 
-#[revisioned(revision = 1)]
+
+/// An idiom defines a way to reference a field, reference, or other part of the document graph.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Idiom(pub Vec<Part>);
 
@@ -191,6 +194,41 @@ impl Display for Idiom {
 			p.fmt(f)?;
 		}
 		Ok(())
+	}
+}
+
+impl FromStr for Idiom {
+	type Err = revision::Error;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		let buf = s.as_bytes();
+		let mut stack = Stack::new();
+		let mut parser = crate::syn::parser::Parser::new(&buf);
+		let expr = stack.enter(|stk| parser.parse_expr(&mut stk)).finish().map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
+
+
+		match expr {
+			crate::sql::Expr::Idiom(idiom) => Ok(idiom.into()),
+			_ => Err(revision::Error::Conversion("Expected an idiom".to_string())),
+		}
+	}
+}
+
+impl Revisioned for Idiom {
+	fn revision() -> u16 {
+		1
+	}
+
+	fn serialize_revisioned<W: std::io::Write>(&self, writer: &mut W) -> Result<(), revision::Error> {
+		writer.write_all(self.to_string().as_bytes()).map_err(revision::Error::Io)?;
+		Ok(())
+	}
+
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		let mut buf = Vec::new();
+		reader.read_to_end(&mut buf).map_err(revision::Error::Io)?;
+		let s = std::str::from_utf8(&buf).map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
+		let idiom = Idiom::from_str(s).map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
+		Ok(idiom)
 	}
 }
 
