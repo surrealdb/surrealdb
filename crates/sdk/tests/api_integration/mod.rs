@@ -229,7 +229,7 @@ mod mem {
 	use surrealdb::engine::local::{Db, Mem};
 	use surrealdb::error::Db as DbError;
 	use surrealdb::opt::auth::Root;
-	use surrealdb::opt::capabilities::{Capabilities, ExperimentalFeature};
+	use surrealdb::opt::capabilities::Capabilities;
 	use surrealdb::opt::{Config, Resource};
 	use surrealdb::{RecordIdKey, Surreal};
 	use surrealdb_core::iam;
