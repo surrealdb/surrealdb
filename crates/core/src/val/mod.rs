@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::err::Error;
 use crate::expr::fmt::Pretty;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{self, Ident, Kind};
+use crate::expr::{self, Kind};
 use crate::kvs::impl_kv_value_revisioned;
 
 pub mod array;
@@ -206,7 +206,7 @@ impl Value {
 	}
 
 	/// Check if this Value is a Thing of a specific type
-	pub fn is_record_type(&self, types: &[Ident]) -> bool {
+	pub fn is_record_type(&self, types: &[String]) -> bool {
 		match self {
 			Value::RecordId(v) => v.is_record_type(types),
 			_ => false,
@@ -288,9 +288,7 @@ impl Value {
 			Value::Bytes(_) => Some(Kind::Bytes),
 			Value::Regex(_) => Some(Kind::Regex),
 			Value::RecordId(thing) => {
-				// TODO: Null byte validity
-				let str = unsafe { Ident::new_unchecked(thing.table.clone()) };
-				Some(Kind::Record(vec![str]))
+				Some(Kind::Record(vec![thing.table.clone()]))
 			}
 			Value::Closure(closure) => {
 				let args_kinds =
@@ -301,9 +299,7 @@ impl Value {
 			}
 			//Value::Refs(_) => None,
 			Value::File(file) => {
-				// TODO: Null byte validity
-				let str = unsafe { Ident::new_unchecked(file.bucket.clone()) };
-				Some(Kind::File(vec![str]))
+				Some(Kind::File(vec![file.bucket.clone()]))
 			}
 			_ => None,
 		}

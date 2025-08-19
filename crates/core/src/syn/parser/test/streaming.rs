@@ -324,7 +324,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			field_kind: Some(Kind::Option(Box::new(Kind::Either(vec![
 				Kind::Number,
 				Kind::Array(
-					Box::new(Kind::Record(vec![Ident::from_strand(strand!("foo").to_owned())])),
+					Box::new(Kind::Record(vec!["foo".to_owned()])),
 					Some(10),
 				),
 			])))),

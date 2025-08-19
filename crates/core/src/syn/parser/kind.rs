@@ -6,8 +6,7 @@ use super::basic::NumberToken;
 use super::mac::unexpected;
 use super::{ParseResult, Parser};
 use crate::sql::kind::KindLiteral;
-use crate::sql::{Ident, Idiom, Kind};
-use crate::syn::error::bail;
+use crate::sql::{Ident, Kind};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::expected;
 use crate::syn::token::{Glued, Keyword, Span, TokenKind, t};
@@ -90,7 +89,7 @@ impl Parser<'_> {
 			t!("INT") => Ok(Kind::Int),
 			t!("NUMBER") => Ok(Kind::Number),
 			t!("OBJECT") => Ok(Kind::Object),
-			t!("POINT") => Ok(Kind::Point),
+			t!("POINT") => Ok(Kind::Geometry(vec!["point".to_string()])),
 			t!("STRING") => Ok(Kind::String),
 			t!("UUID") => Ok(Kind::Uuid),
 			t!("RANGE") => Ok(Kind::Range),
@@ -99,9 +98,9 @@ impl Parser<'_> {
 			t!("RECORD") => {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {
-					let mut tables = vec![self.next_token_value()?];
+					let mut tables = vec![self.next_token_value::<Ident>().map(|i| i.into_string())?];
 					while self.eat(t!("|")) {
-						tables.push(self.next_token_value()?);
+						tables.push(self.next_token_value::<Ident>().map(|i| i.into_string())?);
 					}
 					self.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::Record(tables))
@@ -144,40 +143,15 @@ impl Parser<'_> {
 					Ok(Kind::Set(Box::new(Kind::Any), None))
 				}
 			}
-			t!("REFERENCES") => {
-				if !self.settings.references_enabled {
-					bail!(
-						"Experimental capability `record_references` is not enabled",
-						@self.last_span() => "Use of `REFERENCES` keyword is still experimental"
-					)
-				}
-
-				let span = self.peek().span;
-				let (table, path) = if self.eat(t!("<")) {
-					let table: Option<Ident> = Some(self.next_token_value()?);
-					let path: Option<Idiom> = if self.eat(t!(",")) {
-						Some(self.parse_local_idiom(stk).await?)
-					} else {
-						None
-					};
-
-					self.expect_closing_delimiter(t!(">"), span)?;
-					(table, path)
-				} else {
-					(None, None)
-				};
-
-				Ok(Kind::References(table, path))
-			}
 			t!("NONE") => {
 				unexpected!(self, next, "a kind name.", => "to define a field that can be NONE, use option<type_name> instead.")
 			}
 			t!("FILE") => {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {
-					let mut buckets = vec![self.next_token_value()?];
+					let mut buckets = vec![self.next_token_value::<Ident>().map(|i| i.into_string())?];
 					while self.eat(t!("|")) {
-						buckets.push(self.next_token_value()?);
+						buckets.push(self.next_token_value::<Ident>().map(|i| i.into_string())?);
 					}
 					self.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::File(buckets))
@@ -297,10 +271,6 @@ mod tests {
 		stack.enter(|ctx| parser.parse_inner_kind(ctx)).finish()
 	}
 
-	fn i(i: &str) -> Ident {
-		Ident::new(i.to_owned()).unwrap()
-	}
-
 	#[test]
 	fn kind_any() {
 		let sql = "any";
@@ -397,7 +367,7 @@ mod tests {
 		let res = kind(sql);
 		let out = res.unwrap();
 		assert_eq!("point", format!("{}", out));
-		assert_eq!(out, Kind::Point);
+		assert_eq!(out, Kind::Geometry(vec!["point".to_string()]));
 	}
 
 	#[test]
@@ -442,7 +412,7 @@ mod tests {
 		let res = kind(sql);
 		let out = res.unwrap();
 		assert_eq!("record<person>", format!("{}", out));
-		assert_eq!(out, Kind::Record(vec![Ident::new("person".to_owned()).unwrap()]));
+		assert_eq!(out, Kind::Record(vec!["person".to_owned()]));
 	}
 
 	#[test]
@@ -454,8 +424,8 @@ mod tests {
 		assert_eq!(
 			out,
 			Kind::Record(vec![
-				Ident::new("person".to_owned()).unwrap(),
-				Ident::new("animal".to_owned()).unwrap()
+				"person".to_owned(),
+				"animal".to_owned()
 			])
 		);
 	}
@@ -598,7 +568,7 @@ mod tests {
 		let res = kind(sql);
 		let out = res.unwrap();
 		assert_eq!("file<one>", format!("{}", out));
-		assert_eq!(out, Kind::File(vec![i("one")]));
+		assert_eq!(out, Kind::File(vec!["one".to_owned()]));
 	}
 
 	#[test]
@@ -607,6 +577,6 @@ mod tests {
 		let res = kind(sql);
 		let out = res.unwrap();
 		assert_eq!("file<one | two>", format!("{}", out));
-		assert_eq!(out, Kind::File(vec![i("one"), i("two")]));
+		assert_eq!(out, Kind::File(vec!["one".to_string(), "two".to_string()]));
 	}
 }

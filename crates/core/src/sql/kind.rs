@@ -5,7 +5,6 @@ use rust_decimal::Decimal;
 
 use super::escape::EscapeKey;
 use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
-use crate::sql::{Ident, Idiom};
 use crate::val::{Duration, Strand};
 
 /// The kind, or data type, of a value or field.
@@ -35,9 +34,6 @@ pub enum Kind {
 	Number,
 	/// Object type.
 	Object,
-	/// Geometric 2D point type with longitude *then* latitude coordinates.
-	/// This follows the GeoJSON spec.
-	Point,
 	/// String type.
 	String,
 	/// UUID type.
@@ -45,7 +41,7 @@ pub enum Kind {
 	/// Regular expression type.
 	Regex,
 	/// A record type.
-	Record(Vec<Ident>),
+	Record(Vec<String>),
 	/// A geometry type.
 	/// The vec contains the geometry types as strings, for example `"point"` or
 	/// `"polygon"`.
@@ -71,12 +67,10 @@ pub enum Kind {
 	/// `"a"`. This can be used in the `Kind::Either` type to represent an
 	/// enum.
 	Literal(KindLiteral),
-	/// A references type representing a link to another table or field.
-	References(Option<Ident>, Option<Idiom>),
 	/// A file type.
 	/// If the kind was specified without a bucket the vec will be empty.
 	/// So `<file>` is just `Kind::File(Vec::new())`
-	File(Vec<Ident>),
+	File(Vec<String>),
 }
 
 impl Default for Kind {
@@ -99,12 +93,11 @@ impl From<Kind> for crate::expr::Kind {
 			Kind::Int => crate::expr::Kind::Int,
 			Kind::Number => crate::expr::Kind::Number,
 			Kind::Object => crate::expr::Kind::Object,
-			Kind::Point => crate::expr::Kind::Point,
 			Kind::String => crate::expr::Kind::String,
 			Kind::Uuid => crate::expr::Kind::Uuid,
 			Kind::Regex => crate::expr::Kind::Regex,
 			Kind::Record(tables) => {
-				crate::expr::Kind::Record(tables.into_iter().map(Into::into).collect())
+				crate::expr::Kind::Record(tables)
 			}
 			Kind::Geometry(geometries) => {
 				crate::expr::Kind::Geometry(geometries.into_iter().collect())
@@ -121,10 +114,7 @@ impl From<Kind> for crate::expr::Kind {
 			),
 			Kind::Range => crate::expr::Kind::Range,
 			Kind::Literal(l) => crate::expr::Kind::Literal(l.into()),
-			Kind::References(t, i) => {
-				crate::expr::Kind::References(t.map(Into::into), i.map(Into::into))
-			}
-			Kind::File(k) => crate::expr::Kind::File(k.into_iter().map(Into::into).collect()),
+			Kind::File(k) => crate::expr::Kind::File(k),
 		}
 	}
 }
@@ -143,12 +133,11 @@ impl From<crate::expr::Kind> for Kind {
 			crate::expr::Kind::Int => Kind::Int,
 			crate::expr::Kind::Number => Kind::Number,
 			crate::expr::Kind::Object => Kind::Object,
-			crate::expr::Kind::Point => Kind::Point,
 			crate::expr::Kind::String => Kind::String,
 			crate::expr::Kind::Uuid => Kind::Uuid,
 			crate::expr::Kind::Regex => Kind::Regex,
 			crate::expr::Kind::Record(tables) => {
-				Kind::Record(tables.into_iter().map(From::from).collect())
+				Kind::Record(tables)
 			}
 			crate::expr::Kind::Geometry(geometries) => {
 				Kind::Geometry(geometries.into_iter().collect())
@@ -169,12 +158,7 @@ impl From<crate::expr::Kind> for Kind {
 			),
 			crate::expr::Kind::Range => Self::Range,
 			crate::expr::Kind::Literal(l) => Self::Literal(l.into()),
-			crate::expr::Kind::References(t, i) => {
-				Self::References(t.map(From::from), i.map(From::from))
-			}
-			crate::expr::Kind::File(k) => {
-				Kind::File(k.into_iter().map(Into::<Ident>::into).collect())
-			}
+			crate::expr::Kind::File(k) => Kind::File(k),
 		}
 	}
 }
@@ -193,7 +177,6 @@ impl Display for Kind {
 			Kind::Int => f.write_str("int"),
 			Kind::Number => f.write_str("number"),
 			Kind::Object => f.write_str("object"),
-			Kind::Point => f.write_str("point"),
 			Kind::String => f.write_str("string"),
 			Kind::Uuid => f.write_str("uuid"),
 			Kind::Regex => f.write_str("regex"),
@@ -226,11 +209,6 @@ impl Display for Kind {
 			Kind::Either(k) => write!(f, "{}", Fmt::verbar_separated(k)),
 			Kind::Range => f.write_str("range"),
 			Kind::Literal(l) => write!(f, "{}", l),
-			Kind::References(t, i) => match (t, i) {
-				(Some(t), None) => write!(f, "references<{}>", t),
-				(Some(t), Some(i)) => write!(f, "references<{}, {}>", t, i),
-				(None, _) => f.write_str("references"),
-			},
 			Kind::File(k) => {
 				if k.is_empty() {
 					write!(f, "file")

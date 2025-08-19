@@ -8,7 +8,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{FlowResultExt as _, Ident, Idiom, Kind};
+use crate::expr::{FlowResultExt as _, Idiom, Kind};
 use crate::syn;
 use crate::val::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, RecordIdKey,
@@ -109,7 +109,7 @@ pub fn record((rid, Optional(tb)): (Value, Optional<Value>)) -> Result<Value> {
 					value: tb.into_string(),
 				}))
 			} else {
-				rid.cast_to_kind(&Kind::Record(vec![Ident::from_strand(tb)])).map_err(From::from)
+				rid.cast_to_kind(&Kind::Record(vec![tb.into_string()])).map_err(From::from)
 			}
 		}
 
@@ -119,7 +119,7 @@ pub fn record((rid, Optional(tb)): (Value, Optional<Value>)) -> Result<Value> {
 					value: tb.into_string(),
 				}))
 			} else {
-				rid.cast_to_kind(&Kind::Record(vec![tb.into()])).map_err(From::from)
+				rid.cast_to_kind(&Kind::Record(vec![tb.into_string()])).map_err(From::from)
 			}
 		}
 		Some(_) => Err(anyhow::Error::new(Error::InvalidArguments {
@@ -213,7 +213,7 @@ pub fn uuid((val,): (Value,)) -> Result<Value> {
 pub mod is {
 	use anyhow::Result;
 
-	use crate::expr::Ident;
+	
 	use crate::fnc::args::Optional;
 	use crate::val::{Geometry, Strand, Value};
 
@@ -303,7 +303,7 @@ pub mod is {
 
 	pub fn record((arg, Optional(table)): (Value, Optional<Strand>)) -> Result<Value> {
 		let res = match table {
-			Some(tb) => arg.is_record_type(&[Ident::from_strand(tb)]).into(),
+			Some(tb) => arg.is_record_type(&[tb.into_string()]).into(),
 			None => arg.is_thing().into(),
 		};
 		Ok(res)

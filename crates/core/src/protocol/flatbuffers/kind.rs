@@ -4,7 +4,7 @@ use rust_decimal::Decimal;
 use surrealdb_protocol::fb::v1 as proto_fb;
 
 use crate::expr::kind::KindLiteral;
-use crate::expr::{Ident, Kind};
+use crate::expr::Kind;
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use crate::val::{Duration, Strand, Table};
 
@@ -92,13 +92,6 @@ impl ToFlatbuffers for Kind {
 						.as_union_value(),
 				),
 			},
-			Self::Point => proto_fb::KindArgs {
-				kind_type: proto_fb::KindType::Point,
-				kind: Some(
-					proto_fb::PointKind::create(builder, &proto_fb::PointKindArgs {})
-						.as_union_value(),
-				),
-			},
 			Self::String => proto_fb::KindArgs {
 				kind_type: proto_fb::KindType::String,
 				kind: Some(
@@ -123,7 +116,7 @@ impl ToFlatbuffers for Kind {
 			Self::Record(tables) => {
 				let table_offsets: Vec<_> = tables
 					.iter()
-					.map(|t| Table::from(t.clone()).to_fb(builder))
+					.map(|t| unsafe { Table::new_unchecked(t.clone()) }.to_fb(builder))
 					.collect::<anyhow::Result<Vec<_>>>()?;
 				let tables = builder.create_vector(&table_offsets);
 				proto_fb::KindArgs {
@@ -289,10 +282,6 @@ impl ToFlatbuffers for Kind {
 					),
 				}
 			}
-
-			Self::References(_, _) => {
-				todo!("The references type will be removed, no need to implement it");
-			}
 		};
 
 		Ok(proto_fb::Kind::create(builder, &args))
@@ -415,7 +404,6 @@ impl FromFlatbuffers for Kind {
 			KindType::Datetime => Ok(Kind::Datetime),
 			KindType::Uuid => Ok(Kind::Uuid),
 			KindType::Bytes => Ok(Kind::Bytes),
-			KindType::Point => Ok(Kind::Point),
 			KindType::Object => Ok(Kind::Object),
 			KindType::Record => {
 				let Some(record) = input.kind_as_record() else {
@@ -428,8 +416,7 @@ impl FromFlatbuffers for Kind {
 							let Some(name) = t.name() else {
 								return Err(anyhow::anyhow!("Missing table name"));
 							};
-							Ident::new(name.to_string())
-								.ok_or_else(|| anyhow::anyhow!("Invalid table name"))
+							Ok(name.to_string())
 						})
 						.collect::<anyhow::Result<Vec<_>>>()?
 				} else {
@@ -502,11 +489,8 @@ impl FromFlatbuffers for Kind {
 				let buckets = if let Some(buckets) = file.buckets() {
 					buckets
 						.iter()
-						.map(|b| -> anyhow::Result<_> {
-							Ident::new(b.to_string())
-								.ok_or_else(|| anyhow::anyhow!("Invalid bucket name"))
-						})
-						.collect::<anyhow::Result<Vec<_>>>()?
+						.map(|b| b.to_string())
+						.collect::<Vec<_>>()
 				} else {
 					Vec::new()
 				};
@@ -615,7 +599,7 @@ mod tests {
 	use surrealdb_protocol::fb::v1 as proto_fb;
 
 	use super::*;
-	use crate::expr::{Ident, Kind, KindLiteral};
+	use crate::expr::{Kind, KindLiteral};
 	use crate::val::{Duration, Strand};
 
 	#[rstest]
@@ -630,19 +614,18 @@ mod tests {
 	#[case::int(Kind::Int)]
 	#[case::number(Kind::Number)]
 	#[case::object(Kind::Object)]
-	#[case::point(Kind::Point)]
 	#[case::string(Kind::String)]
 	#[case::uuid(Kind::Uuid)]
 	#[case::regex(Kind::Regex)]
 	#[case::range(Kind::Range)]
-	#[case::record(Kind::Record(vec![Ident::new("test_table".to_string()).unwrap()]))]
+	#[case::record(Kind::Record(vec!["test_table".to_string()]))]
 	#[case::geometry(Kind::Geometry(vec!["point".to_string(), "polygon".to_string()]))]
 	#[case::option(Kind::Option(Box::new(Kind::String)))]
 	#[case::either(Kind::Either(vec![Kind::String, Kind::Number]))]
 	#[case::set(Kind::Set(Box::new(Kind::String), Some(10)))]
 	#[case::array(Kind::Array(Box::new(Kind::String), Some(5)))]
 	#[case::function(Kind::Function(Some(vec![Kind::String, Kind::Number]), Some(Box::new(Kind::Bool))))]
-	#[case::file(Kind::File(vec![Ident::new("bucket1".to_string()).unwrap(), Ident::new("bucket2".to_string()).unwrap()]))]
+	#[case::file(Kind::File(vec!["bucket1".to_string(), "bucket2".to_string()]))]
 	// KindLiteral variants
 	#[case::literal_bool(Kind::Literal(KindLiteral::Bool(true)))]
 	#[case::literal_bool_false(Kind::Literal(KindLiteral::Bool(false)))]

@@ -9,7 +9,7 @@ use ulid::Ulid;
 
 use crate::cnf::ID_CHARS;
 use crate::expr::escape::EscapeRid;
-use crate::expr::{self, Ident};
+use crate::expr::{self};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, Number, Object, Range, Strand, Uuid, Value};
 
@@ -365,8 +365,8 @@ impl RecordId {
 		}
 	}
 
-	pub fn is_record_type(&self, val: &[Ident]) -> bool {
-		val.is_empty() || val.iter().any(|x| self.table == **x)
+	pub fn is_record_type(&self, val: &[String]) -> bool {
+		val.is_empty() || val.iter().any(|x| self.table == *x)
 	}
 }
 

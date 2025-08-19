@@ -10,11 +10,23 @@ use serde::{Deserialize, Serialize};
 use super::escape::EscapeKey;
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Expr, Ident, Idiom, Literal, Part, Value};
+use crate::expr::{Expr, Literal, Part, Value};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
 	Regex, Strand, Uuid,
 };
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+pub enum GeometryKind {
+	Point,
+	Line,
+	Polygon,
+	MultiPoint,
+	MultiLine,
+	MultiPolygon,
+	Collection,
+}
 
 /// The kind, or data type, of a value or field.
 #[revisioned(revision = 1)]
@@ -43,9 +55,6 @@ pub enum Kind {
 	Number,
 	/// Object type.
 	Object,
-	/// Geometric 2D point type with longitude *then* latitude coordinates.
-	/// This follows the GeoJSON spec.
-	Point,
 	/// String type.
 	String,
 	/// UUID type.
@@ -53,7 +62,7 @@ pub enum Kind {
 	/// Regular expression type.
 	Regex,
 	/// A record type.
-	Record(Vec<Ident>),
+	Record(Vec<String>),
 	/// A geometry type.
 	/// The vec contains the geometry types as strings, for example `"point"` or
 	/// `"polygon"`. TODO(3.0): Change to use an enum
@@ -79,12 +88,10 @@ pub enum Kind {
 	/// `"a"`. This can be used in the `Kind::Either` type to represent an
 	/// enum.
 	Literal(KindLiteral),
-	/// A references type representing a link to another table or field.
-	References(Option<Ident>, Option<Idiom>),
 	/// A file type.
 	/// If the kind was specified without a bucket the vec will be empty.
 	/// So `<file>` is just `Kind::File(Vec::new())`
-	File(Vec<Ident>),
+	File(Vec<String>),
 }
 
 impl Default for Kind {
@@ -150,7 +157,6 @@ impl Kind {
 				| Kind::Int
 				| Kind::Number
 				| Kind::Object
-				| Kind::Point
 				| Kind::String
 				| Kind::Uuid
 				| Kind::Regex
@@ -159,7 +165,6 @@ impl Kind {
 				| Kind::Function(_, _)
 				| Kind::Range
 				| Kind::Literal(_)
-				| Kind::References(_, _)
 				| Kind::File(_) => return None,
 				Kind::Option(x) => {
 					this = x;
@@ -371,7 +376,6 @@ impl Display for Kind {
 			Kind::Int => f.write_str("int"),
 			Kind::Number => f.write_str("number"),
 			Kind::Object => f.write_str("object"),
-			Kind::Point => f.write_str("point"),
 			Kind::String => f.write_str("string"),
 			Kind::Uuid => f.write_str("uuid"),
 			Kind::Regex => f.write_str("regex"),
@@ -404,11 +408,6 @@ impl Display for Kind {
 			Kind::Either(k) => write!(f, "{}", Fmt::verbar_separated(k)),
 			Kind::Range => f.write_str("range"),
 			Kind::Literal(l) => write!(f, "{}", l),
-			Kind::References(t, i) => match (t, i) {
-				(Some(t), None) => write!(f, "references<{}>", t),
-				(Some(t), Some(i)) => write!(f, "references<{}, {}>", t, i),
-				(None, _) => f.write_str("references"),
-			},
 			Kind::File(k) => {
 				if k.is_empty() {
 					f.write_str("file")
