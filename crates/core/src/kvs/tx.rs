@@ -1889,7 +1889,7 @@ impl Transaction {
 						key: id.clone(),
 					};
 					record.data.to_mut().def(&rid);
-					Ok(Arc::new(record))
+					Ok(Arc::new(record.into_read_only()))
 				}
 				// The value is not in the datastore
 				None => Ok(Arc::new(Default::default())),
@@ -1912,7 +1912,7 @@ impl Transaction {
 								key: id.clone(),
 							};
 							record.data.to_mut().def(&rid);
-							let record = Arc::new(record);
+							let record = Arc::new(record.into_read_only());
 							let entry = cache::tx::Entry::Val(record.clone());
 							self.cache.insert(qey, entry);
 							Ok(record)
