@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
-use crate::{Bytes, Datetime, Duration, Number, Object, Value};
+use crate::{Bytes, Datetime, Duration, File, KindGeometry, Number, Object, Range, RecordId, Value};
 use chrono::{DateTime, Utc};
+use geo::Geometry;
 use rust_decimal::Decimal;
 
 use crate::{Kind, Strand, SurrealNone, SurrealNull, Uuid};
@@ -10,128 +11,117 @@ pub trait KindOf {
     fn kind_of() -> Kind;
 }
 
-// NONE
+macro_rules! impl_basic_kind_of {
+	($($type:ty => $kind:expr),*$(,)?) => {
+		$(
+			impl KindOf for $type {
+				fn kind_of() -> Kind {
+					$kind
+				}
+			}
+		)*
+	}
+}
 
-impl KindOf for () {
+impl_basic_kind_of! {
+    // None, Null, Bool
+    () => Kind::None,
+    SurrealNone => Kind::None,
+    SurrealNull => Kind::Null,
+    bool => Kind::Bool,
+
+    // Bytes
+    Vec<u8> => Kind::Bytes,
+    Bytes => Kind::Bytes,
+    bytes::Bytes => Kind::Bytes,
+
+    // Datetime
+    Datetime => Kind::Datetime,
+    DateTime<Utc> => Kind::Datetime,
+
+    // Decimal
+    Decimal => Kind::Decimal,
+
+    // Duration
+    Duration => Kind::Duration,
+    std::time::Duration => Kind::Duration,
+
+    // Numbers
+    f64 => Kind::Float,
+    i64 => Kind::Int,
+    Number => Kind::Number,
+
+    // Object
+    BTreeMap<String, Value> => Kind::Object,
+    Object => Kind::Object,
+
+    // String
+    String => Kind::String,
+    Strand => Kind::String,
+
+    // UUID
+    Uuid => Kind::Uuid,
+    uuid::Uuid => Kind::Uuid,
+
+    // Record
+    RecordId => Kind::Record(Vec::new()),
+
+    // Geometry
+    Geometry => Kind::Geometry(Vec::new()),
+    geo::Point => Kind::Geometry(vec![KindGeometry::Point]),
+    geo::LineString => Kind::Geometry(vec![KindGeometry::Line]),
+    geo::Polygon => Kind::Geometry(vec![KindGeometry::Polygon]),
+    geo::MultiPoint => Kind::Geometry(vec![KindGeometry::MultiPoint]),
+    geo::MultiLineString => Kind::Geometry(vec![KindGeometry::MultiLine]),
+    geo::MultiPolygon => Kind::Geometry(vec![KindGeometry::MultiPolygon]),
+
+    // Range
+    Range => Kind::Range,
+
+    // File
+    File => Kind::File(Vec::new()),
+}
+
+impl<T: KindOf> KindOf for Option<T> {
     fn kind_of() -> Kind {
-        Kind::None
+        Kind::Option(Box::new(T::kind_of()))
     }
 }
 
-impl KindOf for SurrealNone {
+impl<T: KindOf> KindOf for Vec<T> {
     fn kind_of() -> Kind {
-        Kind::None
+        Kind::Array(Box::new(T::kind_of()), None)
     }
 }
 
-// NULL
 
-impl KindOf for SurrealNull {
+impl<T: KindOf> KindOf for std::ops::Range<T> {
     fn kind_of() -> Kind {
-        Kind::Null
+        Kind::Range
     }
 }
 
-// BOOL
-
-impl KindOf for bool {
+impl<T: KindOf> KindOf for std::ops::RangeFrom<T> {
     fn kind_of() -> Kind {
-        Kind::Bool
+        Kind::Range
     }
 }
 
-// BYTES
-
-impl KindOf for Vec<u8> {
+impl<T: KindOf> KindOf for std::ops::RangeTo<T> {
     fn kind_of() -> Kind {
-        Kind::Bytes
+        Kind::Range
     }
 }
 
-impl KindOf for Bytes {
+impl<T: KindOf> KindOf for std::ops::RangeInclusive<T> {
     fn kind_of() -> Kind {
-        Kind::Bytes
+        Kind::Range
     }
 }
 
-impl KindOf for bytes::Bytes {
+impl<T: KindOf> KindOf for std::ops::RangeToInclusive<T> {
     fn kind_of() -> Kind {
-        Kind::Bytes
+        Kind::Range
     }
 }
 
-// DATETIME
-
-impl KindOf for Datetime {
-    fn kind_of() -> Kind {
-        Kind::Datetime
-    }
-}
-
-impl KindOf for DateTime<Utc> {
-    fn kind_of() -> Kind {
-        Kind::Datetime
-    }
-}
-
-// DECIMAL
-
-impl KindOf for Decimal {
-    fn kind_of() -> Kind {
-        Kind::Decimal
-    }
-}
-
-// DURATION
-
-impl KindOf for Duration {
-    fn kind_of() -> Kind {
-        Kind::Duration
-    }
-}
-
-impl KindOf for std::time::Duration {
-    fn kind_of() -> Kind {
-        Kind::Duration
-    }
-}
-
-// FLOAT
-
-impl KindOf for f64 {
-    fn kind_of() -> Kind {
-        Kind::Float
-    }
-}
-
-// INT
-
-impl KindOf for i64 {
-    fn kind_of() -> Kind {
-        Kind::Int
-    }
-}
-
-// NUMBER
-
-impl KindOf for Number {
-    fn kind_of() -> Kind {
-        Kind::Number
-    }
-}
-
-// OBJECT
-
-impl KindOf for BTreeMap<String, Value> {
-    fn kind_of() -> Kind {
-        Kind::Object
-    }
-}
-
-impl KindOf for Object {
-    fn kind_of() -> Kind {
-        Kind::Object
-    }
-}
-
-// 

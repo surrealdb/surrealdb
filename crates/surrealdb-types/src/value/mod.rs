@@ -61,3 +61,58 @@ impl Ord for Value {
 		self.partial_cmp(other).unwrap_or(Ordering::Equal)
 	}
 }
+
+macro_rules! impl_value {
+    ($($variant:ident => $is:ident),*$(,)?) => {
+        impl Value {
+            $(
+                pub fn $is(&self) -> bool {
+                    matches!(self, Value::$variant)
+                }
+            )*
+        }
+    };
+
+    ($($variant:ident($type:ty) => ($is:ident, $from:ident, $into:ident)),*$(,)?) => {
+        impl Value {
+            $(
+                pub fn $is(&self) -> bool {
+                    matches!(self, Value::$variant(_))
+                }
+
+                pub fn $from(x: $type) -> Self {
+                    Value::$variant(x)
+                }
+
+                pub fn $into(self) -> Option<$type> {
+                    if let Value::$variant(x) = self {
+						Some(x)
+					} else {
+						None
+					}
+                }
+            )*
+        }
+    };
+}
+
+impl_value! {
+	None => is_none,
+	Null => is_null,
+	Bool(bool) => (is_bool, from_bool, into_bool),
+	Number(Number) => (is_number, from_number, into_number),
+	Strand(Strand) => (is_strand, from_strand, into_strand),
+	Duration(Duration) => (is_duration, from_duration, into_duration),
+	Datetime(Datetime) => (is_datetime, from_datetime, into_datetime),
+	Uuid(Uuid) => (is_uuid, from_uuid, into_uuid),
+	Array(Array) => (is_array, from_array, into_array),
+	Object(Object) => (is_object, from_object, into_object),
+	Geometry(Geometry) => (is_geometry, from_geometry, into_geometry),
+	Bytes(Bytes) => (is_bytes, from_bytes, into_bytes),
+	RecordId(RecordId) => (is_thing, from_thing, into_thing),
+	File(File) => (is_file, from_file, into_file),
+	Range(Box<Range>) => (is_range, from_range, into_range),
+	Closure(Box<Closure>) => (is_closure, from_closure, into_closure),
+	Refs(Refs) => (is_refs, from_refs, into_refs),
+	File(File) => (is_file, from_file, into_file),
+}

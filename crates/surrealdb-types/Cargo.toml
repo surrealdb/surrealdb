@@ -13,6 +13,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+anyhow.workspace = true
 bytes.workspace = true
 chrono.workspace = true
 geo.workspace = true

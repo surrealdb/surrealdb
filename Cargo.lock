@@ -5961,6 +5961,7 @@ dependencies = [
 name = "surrealdb-types"
 version = "3.0.0"
 dependencies = [
+ "anyhow",
  "bytes",
  "chrono",
  "geo",
