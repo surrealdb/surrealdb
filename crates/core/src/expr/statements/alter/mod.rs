@@ -71,7 +71,6 @@ impl<T: Revisioned> Revisioned for AlterKind<T> {
 	}
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum AlterStatement {
 	Table(AlterTableStatement),
@@ -103,43 +102,5 @@ impl Display for AlterStatement {
 			Self::Sequence(v) => Display::fmt(v, f),
 			Self::Field(v) => Display::fmt(v, f),
 		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-	use crate::expr::{Ident, Idiom};
-
-	#[test]
-	fn check_alter_serialize_table() {
-		let stm = AlterStatement::Table(AlterTableStatement {
-			name: Ident::new("test".to_owned()).unwrap(),
-			..Default::default()
-		});
-		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();
-		assert_eq!(18, enc.len());
-	}
-
-	#[test]
-	fn check_alter_serialize_sequence() {
-		let stm = AlterStatement::Sequence(AlterSequenceStatement {
-			name: Ident::new("test".to_owned()).unwrap(),
-			..Default::default()
-		});
-		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();
-		assert_eq!(11, enc.len());
-	}
-
-	#[test]
-	fn check_alter_serialize_field() {
-		let stm = AlterStatement::Field(AlterFieldStatement {
-			name: Idiom::field(Ident::new("test".to_owned()).unwrap()),
-			what: Ident::new("test".to_owned()).unwrap(),
-			..Default::default()
-		});
-		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();
-		assert_eq!(37, enc.len());
 	}
 }

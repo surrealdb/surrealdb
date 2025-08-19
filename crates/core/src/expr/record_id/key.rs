@@ -13,7 +13,6 @@ use crate::expr::literal::ObjectEntry;
 use crate::expr::{Expr, FlowResultExt as _, RecordIdKeyRangeLit};
 use crate::val::{Array, Object, RecordIdKey, Strand, Uuid};
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RecordIdKeyGen {
 	Rand,
@@ -30,7 +29,6 @@ impl RecordIdKeyGen {
 		}
 	}
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RecordIdKeyLit {

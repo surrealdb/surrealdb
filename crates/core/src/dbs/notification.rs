@@ -3,8 +3,7 @@ use std::fmt::{self, Debug, Display};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::val::{Object, Value};
-use uuid::Uuid;
+use crate::val::{Object, Uuid, Value};
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -29,7 +29,6 @@ pub static GRANT_BEARER_ID_LENGTH: usize = 12;
 // With 24 characters from the pool, the key part has ~140 bits of entropy.
 pub static GRANT_BEARER_KEY_LENGTH: usize = 24;
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum AccessStatement {
 	Grant(AccessStatementGrant),   // Create access grant.
@@ -38,14 +37,12 @@ pub enum AccessStatement {
 	Purge(AccessStatementPurge),   // Purge access grants.
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AccessStatementGrant {
 	pub ac: Ident,
 	pub base: Option<Base>,
 	pub subject: Subject,
 }
-
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AccessStatementShow {
@@ -55,7 +52,6 @@ pub struct AccessStatementShow {
 	pub cond: Option<Cond>,
 }
 
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AccessStatementRevoke {
 	pub ac: Ident,
@@ -63,7 +59,6 @@ pub struct AccessStatementRevoke {
 	pub gr: Option<Ident>,
 	pub cond: Option<Cond>,
 }
-
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AccessStatementPurge {
@@ -104,7 +99,6 @@ impl AccessGrant {
 	}
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Subject {
 	Record(RecordIdLit),
@@ -128,7 +122,6 @@ impl Subject {
 	}
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Grant {
 	Jwt(GrantJwt),
@@ -147,13 +140,11 @@ impl Grant {
 	}
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct GrantJwt {
 	pub jti: Uuid,             // JWT ID
 	pub token: Option<Strand>, // JWT. Will not be stored after being returned.
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct GrantRecord {
@@ -161,7 +152,6 @@ pub struct GrantRecord {
 	pub jti: Uuid,             // JWT ID
 	pub token: Option<Strand>, // JWT. Will not be stored after being returned.
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct GrantBearer {

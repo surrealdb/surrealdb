@@ -17,7 +17,6 @@ use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, Strand};
 
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineAnalyzerStatement {
 	pub kind: DefineKind,
@@ -27,8 +26,6 @@ pub struct DefineAnalyzerStatement {
 	pub filters: Option<Vec<Filter>>,
 	pub comment: Option<Strand>,
 }
-
-impl_kv_value_revisioned!(DefineAnalyzerStatement);
 
 impl DefineAnalyzerStatement {
 	pub(crate) fn into_definition(&self) -> catalog::AnalyzerDefinition {

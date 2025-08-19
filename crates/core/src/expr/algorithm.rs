@@ -5,7 +5,6 @@ use revision::revisioned;
 use crate::expr::Value;
 use crate::expr::statements::info::InfoStructure;
 
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum Algorithm {
 	EdDSA,

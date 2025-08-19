@@ -11,7 +11,6 @@ use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
 
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveSequenceStatement {
 	pub name: Ident,

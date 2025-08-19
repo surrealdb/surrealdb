@@ -10,7 +10,6 @@ use crate::err::Error;
 use crate::expr::{Block, ControlFlow, Expr, FlowResult, Param, Value};
 use crate::val::range::IntegerRangeIter;
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ForeachStatement {
 	pub param: Param,

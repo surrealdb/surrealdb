@@ -9,7 +9,6 @@ use crate::doc::CursorDoc;
 use crate::expr::fmt::{Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
 use crate::expr::{Expr, FlowResult, Value};
 
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct IfelseStatement {
 	/// The first if condition followed by a body, followed by any number of

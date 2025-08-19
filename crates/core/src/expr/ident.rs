@@ -2,6 +2,7 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
+use anyhow::Result;
 use revision::revisioned;
 
 use crate::expr::Value;
@@ -9,6 +10,7 @@ use crate::expr::escape::EscapeIdent;
 use crate::expr::statements::info::InfoStructure;
 use crate::val::{Strand, Table};
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Ident(String);
@@ -23,6 +25,17 @@ impl Ident {
 			return None;
 		}
 		Some(Ident(str))
+	}
+
+	/// Create a new identifier
+	///
+	/// This function checks if the string has a null byte, returns an error if it
+	/// has.
+	pub fn try_new(str: String) -> Result<Self> {
+		if str.contains('\0') {
+			return Err(anyhow::anyhow!("String contains null byte"));
+		}
+		Ok(Ident(str))
 	}
 
 	/// Create a new identifier

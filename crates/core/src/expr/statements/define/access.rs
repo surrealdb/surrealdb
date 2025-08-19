@@ -21,7 +21,6 @@ use crate::expr::{AccessType, Algorithm, Base, Expr, Ident, JwtAccess, RecordAcc
 use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Strand, Value};
 
-
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash)]
 pub struct DefineAccessStatement {
 	pub kind: DefineKind,

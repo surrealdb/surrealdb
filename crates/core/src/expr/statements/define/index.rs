@@ -26,7 +26,6 @@ use crate::sql::ToSql;
 use crate::sql::fmt::Fmt;
 use crate::val::{Strand, Value};
 
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineIndexStatement {
 	pub kind: DefineKind,
@@ -37,8 +36,6 @@ pub struct DefineIndexStatement {
 	pub comment: Option<Strand>,
 	pub concurrently: bool,
 }
-
-impl_kv_value_revisioned!(DefineIndexStatement);
 
 impl DefineIndexStatement {
 	/// Process this type returning a computed simple Value

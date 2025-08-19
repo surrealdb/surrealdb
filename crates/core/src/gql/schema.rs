@@ -248,7 +248,6 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 		Kind::Int => TypeRef::named(TypeRef::INT),
 		Kind::Number => TypeRef::named("number"),
 		Kind::Object => TypeRef::named("object"),
-		Kind::Point => return Err(schema_error("Kind::Point is not yet supported")),
 		Kind::Regex => return Err(schema_error("Kind::Regex is not yet supported")),
 		Kind::String => TypeRef::named(TypeRef::STRING),
 		Kind::Uuid => TypeRef::named("uuid"),
@@ -332,14 +331,6 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 		// TODO(raphaeldarley): check if union is of literals and generate enum
 		// generate custom scalar from other literals?
 		Kind::Literal(_) => return Err(schema_error("Kind::Literal is not yet supported")),
-		Kind::References(ft, _) => {
-			let inner = match ft.clone() {
-				Some(ft) => Kind::Record(vec![ft]),
-				None => Kind::Record(vec![]),
-			};
-
-			TypeRef::List(Box::new(kind_to_type(inner, types)?))
-		}
 		Kind::File(_) => return Err(schema_error("Kind::File is not yet supported")),
 	};
 
@@ -563,16 +554,6 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 			},
 			_ => Err(type_error(kind, val)),
 		},
-		Kind::Point => match val {
-			GqlValue::List(l) => match l.as_slice() {
-				[GqlValue::Number(x), GqlValue::Number(y)] => match (x.as_f64(), y.as_f64()) {
-					(Some(x), Some(y)) => Ok(SurValue::Geometry(Geometry::Point((x, y).into()))),
-					_ => Err(type_error(kind, val)),
-				},
-				_ => Err(type_error(kind, val)),
-			},
-			_ => Err(type_error(kind, val)),
-		},
 		Kind::String => match val {
 			GqlValue::String(s) => Ok(SurValue::Strand(s.to_owned().into())),
 			GqlValue::Enum(s) => Ok(SurValue::Strand(s.as_str().into())),
@@ -672,7 +653,6 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 		Kind::Range => Err(resolver_error("Ranges are not yet supported")),
 		Kind::Literal(_) => Err(resolver_error("Literals are not yet supported")),
 		Kind::Regex => Err(resolver_error("Regexes are not yet supported")),
-		Kind::References(_, _) => Err(resolver_error("Cannot convert value into references")),
 		Kind::File(_) => Err(resolver_error("Files are not yet supported")),
 	}
 }

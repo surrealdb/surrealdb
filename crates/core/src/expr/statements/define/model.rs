@@ -15,7 +15,6 @@ use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Strand, Value};
 
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineModelStatement {
 	pub kind: DefineKind,
@@ -25,8 +24,6 @@ pub struct DefineModelStatement {
 	pub comment: Option<Strand>,
 	pub permissions: Permission,
 }
-
-impl_kv_value_revisioned!(DefineModelStatement);
 
 impl DefineModelStatement {
 	/// Process this type returning a computed simple Value

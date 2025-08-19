@@ -11,7 +11,6 @@ use crate::err::Error;
 use crate::expr::{Base, Ident, Idiom, Value};
 use crate::iam::{Action, ResourceKind};
 
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveFieldStatement {
 	pub name: Idiom,

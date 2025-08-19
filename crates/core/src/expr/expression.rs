@@ -1,8 +1,8 @@
 use std::fmt;
 use std::ops::Bound;
 
-use reblessive::tree::Stk;
 use reblessive::Stack;
+use reblessive::tree::Stk;
 use revision::Revisioned;
 
 use super::SleepStatement;
@@ -747,7 +747,10 @@ impl Revisioned for Expr {
 
 		let mut stack = Stack::new();
 		let mut parser = crate::syn::parser::Parser::new(&buf);
-		let expr = stack.enter(|stk| parser.parse_expr(&mut stk)).finish().map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
+		let expr = stack
+			.enter(|stk| parser.parse_expr(stk))
+			.finish()
+			.map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
 		Ok(expr.into())
 	}
 }

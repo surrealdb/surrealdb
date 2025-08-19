@@ -14,7 +14,6 @@ use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Strand, Value};
 
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineNamespaceStatement {
 	pub kind: DefineKind,
@@ -22,8 +21,6 @@ pub struct DefineNamespaceStatement {
 	pub name: Ident,
 	pub comment: Option<Strand>,
 }
-
-impl_kv_value_revisioned!(DefineNamespaceStatement);
 
 impl DefineNamespaceStatement {
 	/// Process this type returning a computed simple Value

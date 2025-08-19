@@ -16,7 +16,6 @@ use crate::expr::statements::define::DefineKind;
 use crate::expr::{Base, Value};
 use crate::iam::{Action, ConfigKind, ResourceKind};
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineConfigStatement {
 	pub kind: DefineKind,

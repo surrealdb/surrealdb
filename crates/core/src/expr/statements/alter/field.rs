@@ -17,7 +17,6 @@ use crate::expr::{Base, Expr, Ident, Idiom, Kind};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
 
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum AlterDefault {
 	#[default]
@@ -26,7 +25,6 @@ pub enum AlterDefault {
 	Always(Expr),
 	Set(Expr),
 }
-
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AlterFieldStatement {
@@ -132,25 +130,6 @@ impl AlterFieldStatement {
 			AlterKind::Drop => df.comment = None,
 			AlterKind::None => {}
 		}
-
-		/*
-		   match self.reference {
-		   AlterKind::Set(ref k) => {
-		   df.reference = Some(k.clone());
-		   }
-		   AlterKind::Drop => df.reference = None,
-		   AlterKind::None => {}
-		}
-		*/
-
-		// Validate reference options
-		//df.validate_reference_options(ctx)?;
-
-		// Correct reference type
-		/*
-		if let Some(kind) = df.get_reference_kind(ctx, opt).await? {
-		df.field_kind = Some(kind);
-		}*/
 
 		// Disallow mismatched types
 		//df.disallow_mismatched_types(ctx, ns, db).await?;

@@ -2,16 +2,14 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use crate::catalog::NodeLiveQuery;
-use crate::catalog::SubscriptionDefinition;
+use crate::catalog::{NodeLiveQuery, SubscriptionDefinition};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::expr::statements::LiveStatement;
-use crate::kvs::KVValue;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::kvs::{Datastore};
+use crate::kvs::{Datastore, KVValue};
 
 const TARGET: &str = "surrealdb::core::kvs::node";
 

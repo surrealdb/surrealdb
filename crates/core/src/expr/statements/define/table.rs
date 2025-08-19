@@ -24,7 +24,6 @@ use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Transaction, impl_kv_value_revisioned};
 use crate::val::{Strand, Value};
 
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineTableStatement {
 	pub kind: DefineKind,
@@ -38,8 +37,6 @@ pub struct DefineTableStatement {
 	pub comment: Option<Strand>,
 	pub table_type: TableType,
 }
-
-impl_kv_value_revisioned!(DefineTableStatement);
 
 impl DefineTableStatement {
 	pub(crate) async fn compute(

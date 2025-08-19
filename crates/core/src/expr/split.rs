@@ -6,7 +6,6 @@ use revision::revisioned;
 use crate::expr::fmt::Fmt;
 use crate::expr::idiom::Idiom;
 
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Splits(pub Vec<Split>);
 
@@ -30,7 +29,6 @@ impl fmt::Display for Splits {
 		write!(f, "SPLIT ON {}", Fmt::comma_separated(&self.0))
 	}
 }
-
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Split(pub Idiom);

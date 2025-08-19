@@ -10,7 +10,6 @@ use crate::expr::fetch::Fetchs;
 use crate::expr::{ControlFlow, Expr, FlowResult};
 use crate::val::Value;
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct OutputStatement {
 	pub what: Expr,

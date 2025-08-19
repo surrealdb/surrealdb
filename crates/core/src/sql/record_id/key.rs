@@ -1,10 +1,11 @@
 use std::fmt::{self, Display, Formatter, Write as _};
+use std::ops::Bound;
 
 use crate::sql::escape::{EscapeKey, EscapeRid};
 use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{Expr, RecordIdKeyRangeLit};
-use crate::val::{Strand, Uuid};
+use crate::val::{RecordIdKey, RecordIdKeyRange, Strand, Uuid};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -44,6 +45,39 @@ pub enum RecordIdKeyLit {
 	Object(Vec<ObjectEntry>),
 	Generate(RecordIdKeyGen),
 	Range(Box<RecordIdKeyRangeLit>),
+}
+
+impl RecordIdKeyLit {
+	pub fn from_record_id_key(key: RecordIdKey) -> Self {
+		match key {
+			RecordIdKey::Number(x) => RecordIdKeyLit::Number(x),
+			RecordIdKey::String(x) => RecordIdKeyLit::String(Strand::new_lossy(x)),
+			RecordIdKey::Uuid(x) => RecordIdKeyLit::Uuid(x),
+			RecordIdKey::Array(x) => {
+				RecordIdKeyLit::Array(x.into_iter().map(Expr::from_value).collect())
+			}
+			RecordIdKey::Object(x) => RecordIdKeyLit::Object(
+				x.into_iter()
+					.map(|(k, v)| ObjectEntry {
+						key: k,
+						value: Expr::from_value(v),
+					})
+					.collect(),
+			),
+			RecordIdKey::Range(x) => RecordIdKeyLit::Range(Box::new(RecordIdKeyRangeLit {
+				start: match x.start {
+					Bound::Included(x) => Bound::Included(Self::from_record_id_key(x)),
+					Bound::Excluded(x) => Bound::Excluded(Self::from_record_id_key(x)),
+					Bound::Unbounded => Bound::Unbounded,
+				},
+				end: match x.end {
+					Bound::Included(x) => Bound::Included(Self::from_record_id_key(x)),
+					Bound::Excluded(x) => Bound::Excluded(Self::from_record_id_key(x)),
+					Bound::Unbounded => Bound::Unbounded,
+				},
+			})),
+		}
+	}
 }
 
 impl From<RecordIdKeyLit> for crate::expr::RecordIdKeyLit {

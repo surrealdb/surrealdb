@@ -14,7 +14,6 @@ use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
 use crate::kvs::impl_kv_value_revisioned;
 
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineSequenceStatement {
 	pub kind: DefineKind,
@@ -23,8 +22,6 @@ pub struct DefineSequenceStatement {
 	pub start: i64,
 	pub timeout: Option<Timeout>,
 }
-
-impl_kv_value_revisioned!(DefineSequenceStatement);
 
 impl DefineSequenceStatement {
 	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {

@@ -2,7 +2,6 @@ use revision::revisioned;
 
 use crate::val::Duration;
 
-
 #[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]
 // Durations representing the expiration of different elements of the access method
 // In this context, the None variant represents that the element does not expire

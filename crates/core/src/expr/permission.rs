@@ -8,7 +8,6 @@ use crate::expr::fmt::{is_pretty, pretty_indent, pretty_sequence_item};
 use crate::expr::statements::info::InfoStructure;
 use crate::val::Value;
 
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Permissions {
 	pub select: Permission,
@@ -154,7 +153,6 @@ impl Display for PermissionKind {
 		f.write_str(self.as_str())
 	}
 }
-
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum Permission {

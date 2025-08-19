@@ -4,9 +4,9 @@ use std::ops::Deref;
 use std::str::FromStr;
 
 use md5::{Digest, Md5};
-use reblessive::tree::Stk;
 use reblessive::Stack;
-use revision::{revisioned, Revisioned};
+use reblessive::tree::Stk;
+use revision::{Revisioned, revisioned};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -18,7 +18,6 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{FlowResult, Ident, Part, Value};
 
 pub mod recursion;
-
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Idioms(pub Vec<Idiom>);
@@ -49,7 +48,6 @@ impl InfoStructure for Idioms {
 		self.to_string().into()
 	}
 }
-
 
 /// An idiom defines a way to reference a field, reference, or other part of the document graph.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -203,8 +201,10 @@ impl FromStr for Idiom {
 		let buf = s.as_bytes();
 		let mut stack = Stack::new();
 		let mut parser = crate::syn::parser::Parser::new(&buf);
-		let expr = stack.enter(|stk| parser.parse_expr(&mut stk)).finish().map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
-
+		let expr = stack
+			.enter(|stk| parser.parse_expr(stk))
+			.finish()
+			.map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
 
 		match expr {
 			crate::sql::Expr::Idiom(idiom) => Ok(idiom.into()),
@@ -218,7 +218,10 @@ impl Revisioned for Idiom {
 		1
 	}
 
-	fn serialize_revisioned<W: std::io::Write>(&self, writer: &mut W) -> Result<(), revision::Error> {
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
 		writer.write_all(self.to_string().as_bytes()).map_err(revision::Error::Io)?;
 		Ok(())
 	}
@@ -226,8 +229,10 @@ impl Revisioned for Idiom {
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
 		let mut buf = Vec::new();
 		reader.read_to_end(&mut buf).map_err(revision::Error::Io)?;
-		let s = std::str::from_utf8(&buf).map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
-		let idiom = Idiom::from_str(s).map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
+		let s = std::str::from_utf8(&buf)
+			.map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
+		let idiom =
+			Idiom::from_str(s).map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
 		Ok(idiom)
 	}
 }

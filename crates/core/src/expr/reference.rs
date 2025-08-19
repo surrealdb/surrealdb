@@ -11,7 +11,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Expr, Ident};
 
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Reference {
@@ -32,7 +31,6 @@ impl InfoStructure for Reference {
 		.into()
 	}
 }
-
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -61,7 +59,6 @@ impl InfoStructure for ReferenceDeleteStrategy {
 		self.to_string().into()
 	}
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Refs(pub Vec<(Option<Ident>, Option<Idiom>)>);

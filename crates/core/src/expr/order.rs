@@ -7,7 +7,6 @@ use crate::expr::Value;
 use crate::expr::fmt::Fmt;
 use crate::expr::idiom::Idiom;
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Ordering {
 	Random,
@@ -22,7 +21,6 @@ impl fmt::Display for Ordering {
 		}
 	}
 }
-
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct OrderList(pub Vec<Order>);
@@ -60,7 +58,6 @@ impl OrderList {
 		cmp::Ordering::Equal
 	}
 }
-
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Order {

@@ -16,7 +16,6 @@ use crate::expr::{Base, Expr, FlowResultExt as _, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Strand;
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineApiStatement {
 	pub kind: DefineKind,
@@ -125,7 +124,6 @@ impl fmt::Display for DefineApiStatement {
 		Ok(())
 	}
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ApiAction {

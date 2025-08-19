@@ -7,7 +7,6 @@ use crate::expr::fmt::Fmt;
 use crate::expr::{Expr, Ident, Kind};
 use crate::idx::ft::MatchRef;
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum PrefixOperator {
 	/// `!`
@@ -36,7 +35,6 @@ impl fmt::Display for PrefixOperator {
 	}
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum PostfixOperator {
 	Range,
@@ -60,7 +58,6 @@ impl fmt::Display for PostfixOperator {
 		}
 	}
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum BinaryOperator {
@@ -146,7 +143,6 @@ pub enum BinaryOperator {
 	NearestNeighbor(Box<NearestNeighbor>),
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct MatchesOperator {
 	pub rf: Option<MatchRef>,
@@ -185,7 +181,6 @@ impl fmt::Display for BooleanOperator {
 		}
 	}
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum NearestNeighbor {
@@ -256,7 +251,6 @@ impl fmt::Display for BinaryOperator {
 		}
 	}
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum AssignOperator {

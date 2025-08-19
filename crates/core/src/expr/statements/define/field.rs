@@ -12,18 +12,15 @@ use crate::catalog::{
 };
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::kind::KindLiteral;
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Ident, Idiom, Kind, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Transaction, impl_kv_value_revisioned};
 use crate::val::{Strand, Value};
-
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum DefineDefault {
@@ -32,7 +29,6 @@ pub enum DefineDefault {
 	Always(Expr),
 	Set(Expr),
 }
-
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineFieldStatement {
@@ -51,8 +47,6 @@ pub struct DefineFieldStatement {
 	pub comment: Option<Strand>,
 	pub reference: Option<Reference>,
 }
-
-impl_kv_value_revisioned!(DefineFieldStatement);
 
 impl DefineFieldStatement {
 	pub(crate) fn into_definition(&self) -> catalog::FieldDefinition {
@@ -94,8 +88,6 @@ impl DefineFieldStatement {
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
-		// Validate reference options
-		self.validate_reference_options(ctx)?;
 
 		// Get the NS and DB
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
@@ -286,107 +278,6 @@ impl DefineFieldStatement {
 
 		Ok(())
 	}
-
-	pub(crate) fn validate_reference_options(&self, ctx: &Context) -> Result<()> {
-		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-			return Ok(());
-		}
-
-		if let Some(kind) = &self.field_kind {
-			let kinds = match kind {
-				Kind::Either(kinds) => kinds,
-				kind => &vec![kind.to_owned()],
-			};
-
-			// Check if any of the kinds are references
-			if kinds.iter().any(|k| matches!(k, Kind::References(_, _))) {
-				// If any of the kinds are references, all of them must be
-				ensure!(
-					kinds.iter().all(|k| matches!(k, Kind::References(_, _))),
-					Error::RefsMismatchingVariants
-				);
-
-				// As the refs and dynrefs type essentially take over a field
-				// they are not allowed to be mixed with most other clauses
-				let typename = kind.to_string();
-
-				ensure!(
-					self.reference.is_none(),
-					Error::RefsTypeConflict("REFERENCE".into(), typename)
-				);
-
-				ensure!(
-					matches!(self.default, DefineDefault::None),
-					Error::RefsTypeConflict("DEFAULT".into(), typename)
-				);
-
-				ensure!(self.value.is_none(), Error::RefsTypeConflict("VALUE".into(), typename));
-
-				ensure!(self.assert.is_none(), Error::RefsTypeConflict("ASSERT".into(), typename));
-
-				ensure!(!self.flex, Error::RefsTypeConflict("FLEXIBLE".into(), typename));
-
-				ensure!(!self.readonly, Error::RefsTypeConflict("READONLY".into(), typename));
-			}
-
-			// If a reference is defined, the field must be a record
-			if self.reference.is_some() {
-				let is_record_id = match kind.get_optional_inner_kind() {
-					Kind::Either(kinds) => kinds.iter().all(|k| matches!(k, Kind::Record(_))),
-					Kind::Array(kind, _) | Kind::Set(kind, _) => match kind.as_ref() {
-						Kind::Either(kinds) => kinds.iter().all(|k| matches!(k, Kind::Record(_))),
-						Kind::Record(_) => true,
-						_ => false,
-					},
-					Kind::Literal(KindLiteral::Array(kinds)) => {
-						kinds.iter().all(|k| matches!(k, Kind::Record(_)))
-					}
-					Kind::Record(_) => true,
-					_ => false,
-				};
-
-				ensure!(is_record_id, Error::ReferenceTypeConflict(kind.to_string()));
-			}
-		}
-
-		Ok(())
-	}
-
-	/*
-	/// Get the correct reference type if needed.
-	pub(crate) async fn get_reference_kind(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-	) -> Result<Option<Kind>> {
-		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-			return Ok(None);
-		}
-
-		if let Some(Kind::References(Some(ft), Some(ff))) = &self.field_kind {
-			// Obtain the field definition
-			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-			let Some(fd) = ctx.tx().get_tb_field(ns, db, &ft.to_string(), &ff.to_string()).await?
-			else {
-				return Ok(None);
-			};
-
-			// Check if the field is an array-like value and thus "containing" references
-			let is_array_like = fd
-				.field_kind
-				.as_ref()
-				.map(|kind| kind.get_optional_inner_kind().is_array_like())
-				.unwrap_or_default();
-
-			// If the field is an array-like value, add the `.*` part
-			if is_array_like {
-				let ff = ff.clone().push(Part::All);
-				return Ok(Some(Kind::References(Some(ft.clone()), Some(ff))));
-			}
-		}
-
-		Ok(None)
-	}*/
 
 	pub(crate) async fn disallow_mismatched_types(
 		&self,

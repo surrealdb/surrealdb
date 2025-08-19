@@ -16,7 +16,6 @@ use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::fmt::Fmt;
 use crate::val::{Strand, Value};
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineEventStatement {
 	pub kind: DefineKind,
@@ -26,8 +25,6 @@ pub struct DefineEventStatement {
 	pub then: Vec<Expr>,
 	pub comment: Option<Strand>,
 }
-
-impl_kv_value_revisioned!(DefineEventStatement);
 
 impl DefineEventStatement {
 	/// Process this type returning a computed simple Value

@@ -5,7 +5,6 @@ use revision::revisioned;
 use crate::expr::Ident;
 use crate::expr::escape::EscapeIdent;
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct UseStatement {
 	pub ns: Option<Ident>,

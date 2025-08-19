@@ -12,7 +12,6 @@ use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
 use crate::idx::planner::RecordStrategy;
 use crate::val::RecordId;
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RelateStatement {
 	pub only: bool,

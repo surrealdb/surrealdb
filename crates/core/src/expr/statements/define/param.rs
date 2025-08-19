@@ -15,7 +15,6 @@ use crate::expr::{Base, Expr, FlowResultExt as _, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineParamStatement {
 	pub kind: DefineKind,

@@ -10,7 +10,6 @@ use crate::dbs::Options;
 use crate::expr::fmt::Fmt;
 use crate::expr::{AssignOperator, Expr, Idiom, Literal, Part, Value};
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Data {
 	EmptyExpression,
@@ -24,7 +23,6 @@ pub enum Data {
 	ValuesExpression(Vec<Vec<(Idiom, Expr)>>),
 	UpdateExpression(Vec<Assignment>),
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Assignment {

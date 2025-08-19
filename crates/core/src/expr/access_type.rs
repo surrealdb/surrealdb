@@ -127,7 +127,6 @@ impl AccessType {
 	}
 }
 
-
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct JwtAccess {
 	// Verify is required
@@ -225,7 +224,6 @@ impl JwtAccess {
 	}
 }
 
-
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct JwtAccessIssue {
 	pub alg: Algorithm,
@@ -242,7 +240,6 @@ impl Default for JwtAccessIssue {
 		}
 	}
 }
-
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub enum JwtAccessVerify {
@@ -272,7 +269,6 @@ impl InfoStructure for JwtAccessVerify {
 	}
 }
 
-
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct JwtAccessVerifyKey {
 	pub alg: Algorithm,
@@ -290,18 +286,16 @@ impl Default for JwtAccessVerifyKey {
 	}
 }
 
-
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct JwtAccessVerifyJwks {
 	pub url: String,
 }
 
-
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct RecordAccess {
 	pub signup: Option<Expr>,
 	pub signin: Option<Expr>,
-	pub jwt: JwtAccess,	
+	pub jwt: JwtAccess,
 	pub bearer: Option<BearerAccess>,
 }
 
@@ -336,7 +330,6 @@ impl Jwt for RecordAccess {
 	}
 }
 
-
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct BearerAccess {
 	pub kind: BearerAccessType,
@@ -361,7 +354,6 @@ impl Jwt for BearerAccess {
 		&self.jwt
 	}
 }
-
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub enum BearerAccessType {
@@ -388,7 +380,6 @@ impl FromStr for BearerAccessType {
 		}
 	}
 }
-
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub enum BearerAccessSubject {

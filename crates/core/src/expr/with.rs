@@ -2,7 +2,6 @@ use std::fmt::{Display, Formatter, Result};
 
 use revision::revisioned;
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum With {
 	NoIndex,

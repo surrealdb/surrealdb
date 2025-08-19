@@ -6,8 +6,8 @@ use geo::Point;
 use rust_decimal::Decimal;
 
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
-use crate::expr::kind::{HasKind, KindLiteral};
-use crate::expr::{Ident, Kind};
+use crate::expr::Kind;
+use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::syn;
 use crate::val::array::Uniq;
 use crate::val::{
@@ -721,7 +721,6 @@ impl Value {
 			Kind::Datetime => self.can_cast_to::<Datetime>(),
 			Kind::Duration => self.can_cast_to::<Duration>(),
 			Kind::Object => self.can_cast_to::<Object>(),
-			Kind::Point => self.can_cast_to::<Point<f64>>(),
 			Kind::Bytes => self.can_cast_to::<Bytes>(),
 			Kind::Uuid => self.can_cast_to::<Uuid>(),
 			Kind::Regex => self.can_cast_to::<Regex>(),
@@ -755,7 +754,6 @@ impl Value {
 			},
 			Kind::Either(k) => k.iter().any(|x| self.can_cast_to_kind(x)),
 			Kind::Literal(lit) => self.can_cast_to_literal(lit),
-			Kind::References(_, _) => false,
 			Kind::File(buckets) => {
 				if buckets.is_empty() {
 					self.can_cast_to::<File>()
@@ -780,14 +778,14 @@ impl Value {
 		}
 	}
 
-	fn can_cast_to_record(&self, val: &[Ident]) -> bool {
+	fn can_cast_to_record(&self, val: &[String]) -> bool {
 		match self {
 			Value::RecordId(t) => t.is_record_type(val),
 			_ => false,
 		}
 	}
 
-	fn can_cast_to_geometry(&self, val: &[String]) -> bool {
+	fn can_cast_to_geometry(&self, val: &[GeometryKind]) -> bool {
 		self.is_geometry_type(val)
 	}
 
@@ -795,7 +793,7 @@ impl Value {
 		val.validate_value(self)
 	}
 
-	fn can_cast_to_file_buckets(&self, buckets: &[Ident]) -> bool {
+	fn can_cast_to_file_buckets(&self, buckets: &[String]) -> bool {
 		matches!(self, Value::File(f) if f.is_bucket_type(buckets))
 	}
 
@@ -818,7 +816,6 @@ impl Value {
 			Kind::Datetime => self.cast_to::<Datetime>().map(Value::from),
 			Kind::Duration => self.cast_to::<Duration>().map(Value::from),
 			Kind::Object => self.cast_to::<Object>().map(Value::from),
-			Kind::Point => self.cast_to::<Point<f64>>().map(Value::from),
 			Kind::Bytes => self.cast_to::<Bytes>().map(Value::from),
 			Kind::Uuid => self.cast_to::<Uuid>().map(Value::from),
 			Kind::Regex => self.cast_to::<Regex>().map(Value::from),
@@ -857,10 +854,6 @@ impl Value {
 				))
 			}
 			Kind::Literal(lit) => self.cast_to_literal(lit),
-			Kind::References(_, _) => Err(CastError::InvalidKind {
-				from: self,
-				into: kind.to_string(),
-			}),
 			Kind::File(buckets) => {
 				if buckets.is_empty() {
 					self.cast_to::<File>().map(Value::from)
@@ -885,7 +878,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to a Record of a certain type
-	fn cast_to_record(self, val: &[Ident]) -> Result<RecordId, CastError> {
+	fn cast_to_record(self, val: &[String]) -> Result<RecordId, CastError> {
 		match self {
 			Value::RecordId(v) if v.is_record_type(val) => Ok(v),
 			Value::Strand(v) => match syn::record_id(v.as_str()) {
@@ -925,7 +918,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to a `Geometry` of a certain type
-	fn cast_to_geometry(self, val: &[String]) -> Result<Geometry, CastError> {
+	fn cast_to_geometry(self, val: &[GeometryKind]) -> Result<Geometry, CastError> {
 		match self {
 			// Geometries are allowed if correct type
 			Value::Geometry(v) if self.is_geometry_type(val) => Ok(v),
@@ -1000,7 +993,7 @@ impl Value {
 		Ok(array)
 	}
 
-	pub(crate) fn cast_to_file_buckets(self, buckets: &[Ident]) -> Result<File, CastError> {
+	pub(crate) fn cast_to_file_buckets(self, buckets: &[String]) -> Result<File, CastError> {
 		let v = self.cast_to::<File>()?;
 
 		if v.is_bucket_type(buckets) {

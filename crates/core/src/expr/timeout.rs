@@ -5,7 +5,6 @@ use revision::revisioned;
 
 use crate::val::Duration;
 
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Timeout(pub Duration);
 

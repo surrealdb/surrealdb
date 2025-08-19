@@ -3,9 +3,9 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::catalog::NodeLiveQuery;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-use crate::catalog::NodeLiveQuery;
 
 /// The Lq key is used to quickly discover which live queries belong to which
 /// nodes This is used in networking for clustered environments such as

@@ -249,7 +249,6 @@ impl fmt::Display for Literal {
 	}
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ObjectEntry {
 	pub key: String,

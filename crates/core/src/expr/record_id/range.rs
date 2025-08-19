@@ -11,7 +11,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::val::RecordIdKeyRange;
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RecordIdKeyRangeLit {
 	pub start: Bound<RecordIdKeyLit>,

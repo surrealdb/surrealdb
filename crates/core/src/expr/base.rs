@@ -5,7 +5,6 @@ use revision::revisioned;
 use crate::expr::Value;
 use crate::expr::statements::info::InfoStructure;
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Base {
 	Root,

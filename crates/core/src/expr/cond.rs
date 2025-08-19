@@ -4,7 +4,6 @@ use revision::revisioned;
 
 use super::Expr;
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Cond(pub Expr);
 

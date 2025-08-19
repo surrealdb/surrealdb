@@ -4,7 +4,6 @@ use std::str;
 
 use revision::revisioned;
 
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 pub struct Script(pub String);
 

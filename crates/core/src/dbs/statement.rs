@@ -250,7 +250,7 @@ impl Statement<'_> {
 	pub(crate) fn expr(&self) -> Option<&Fields> {
 		match self {
 			Statement::Select(v) => Some(&v.expr),
-			Statement::Live(v) => Some(&v.expr),
+			Statement::Live(v) => Some(&v.fields),
 			_ => None,
 		}
 	}

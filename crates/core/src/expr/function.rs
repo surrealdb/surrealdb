@@ -15,7 +15,6 @@ use crate::expr::{Expr, Ident, Idiom, Model, Script, Value};
 use crate::fnc;
 use crate::iam::Action;
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Function {
 	Normal(String),

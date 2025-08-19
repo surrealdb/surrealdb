@@ -7,7 +7,6 @@ use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Fields, Groups, Ident, Value};
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct View {
 	pub expr: Fields,
@@ -21,7 +20,7 @@ impl View {
 		ViewDefinition {
 			expr: self.expr.clone(),
 			what: self.what.iter().map(|s| s.to_raw_string()).collect(),
-			cond: self.cond.clone(),
+			cond: self.cond.clone().map(|c| c.0),
 			group: self.group.clone(),
 		}
 	}

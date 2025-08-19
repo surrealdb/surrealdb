@@ -382,9 +382,10 @@ impl<'a> TreeBuilder<'a> {
 					let remote_field = Arc::new(Idiom(remote_field.to_vec()));
 					let mut remotes = vec![];
 					for table in tables {
-						self.lazy_load_schema_resolver(tx, table).await?;
-						if let Some(schema) = self.schemas.get(table).cloned() {
-							let remote_irs = self.resolve_indexes(table, &remote_field, &schema);
+						let table = Ident::try_new(table.clone())?;
+						self.lazy_load_schema_resolver(tx, &table).await?;
+						if let Some(schema) = self.schemas.get(&table).cloned() {
+							let remote_irs = self.resolve_indexes(&table, &remote_field, &schema);
 							remotes.push((remote_field.clone(), remote_irs));
 						} else {
 							return Ok(None);

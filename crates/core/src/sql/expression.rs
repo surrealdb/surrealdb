@@ -11,9 +11,9 @@ use crate::sql::statements::{
 };
 use crate::sql::{
 	BinaryOperator, Block, Closure, Constant, FunctionCall, Ident, Idiom, Literal, Mock, Param,
-	PostfixOperator, PrefixOperator,
+	PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit,
 };
-use crate::val::{Number, Value};
+use crate::val::{Number, RecordIdKey, Strand, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -94,22 +94,32 @@ impl Expr {
 			Value::Strand(x) => Expr::Literal(Literal::Strand(x)),
 			Value::Bytes(x) => Expr::Literal(Literal::Bytes(x)),
 			Value::Regex(x) => Expr::Literal(Literal::Regex(x)),
-			Value::RecordId(x) => Expr::Literal(Literal::RecordId(x.into())),
-			Value::Array(x) => Expr::Literal(Literal::Array(x.into_iter().map(Expr::Literal(Literal::from_value)).collect())),
-			Value::Object(x) => Expr::Literal(Literal::Object(x.into_iter().map(|(k, v)| {
-				ObjectEntry {
-					key: k,
-					value: Expr::from_value(v),
-				}
-			}).collect())),
+			Value::RecordId(x) => Expr::Literal(Literal::RecordId(RecordIdLit {
+				table: x.table.clone(),
+				key: RecordIdKeyLit::from_record_id_key(x.key),
+			})),
+			Value::Array(x) => {
+				Expr::Literal(Literal::Array(x.into_iter().map(Expr::from_value).collect()))
+			}
+			Value::Object(x) => Expr::Literal(Literal::Object(
+				x.into_iter()
+					.map(|(k, v)| ObjectEntry {
+						key: k,
+						value: Expr::from_value(v),
+					})
+					.collect(),
+			)),
 			Value::Duration(x) => Expr::Literal(Literal::Duration(x)),
 			Value::Datetime(x) => Expr::Literal(Literal::Datetime(x)),
 			Value::Uuid(x) => Expr::Literal(Literal::Uuid(x)),
 			Value::Geometry(x) => Expr::Literal(Literal::Geometry(x)),
 			Value::File(x) => Expr::Literal(Literal::File(x)),
-			Value::Closure(x) => Expr::Literal(Literal::Closure(Box::new(x.into()))),
-
-			Value::Table(x) => Expr::Table(unsafe { Ident::new_unchecked(x.0.clone()) }),
+			Value::Closure(x) => Expr::Literal(Literal::Closure(Box::new(Closure {
+				args: x.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
+				returns: x.returns.map(|k| k.into()),
+				body: x.body.into(),
+			}))),
+			Value::Table(x) => Expr::Table(unsafe { Ident::new_unchecked(x.into_string()) }),
 			Value::Range(x) => todo!("STU"),
 		}
 	}

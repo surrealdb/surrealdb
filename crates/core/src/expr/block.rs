@@ -13,7 +13,6 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Value};
 use crate::val::Strand;
 
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Block(pub Vec<Expr>);
 

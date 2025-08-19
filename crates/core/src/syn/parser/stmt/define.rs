@@ -1576,9 +1576,9 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_tables(&mut self) -> ParseResult<Kind> {
-		let mut names = vec![self.next_token_value()?];
+		let mut names = vec![self.next_token_value::<Ident>()?.into_string()];
 		while self.eat(t!("|")) {
-			names.push(self.next_token_value()?);
+			names.push(self.next_token_value::<Ident>()?.into_string());
 		}
 		Ok(Kind::Record(names))
 	}

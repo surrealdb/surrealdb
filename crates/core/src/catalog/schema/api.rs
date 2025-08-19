@@ -1,16 +1,16 @@
 use std::fmt::{self, Display};
+
 use anyhow::Result;
 use revision::revisioned;
 
 use crate::api::path::Path;
 use crate::catalog::Permission;
-use crate::expr::{Expr, Literal};
 use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
-use crate::kvs::{impl_kv_value_revisioned, KVValue};
+use crate::expr::{Expr, Literal};
+use crate::kvs::{KVValue, impl_kv_value_revisioned};
 use crate::sql::ToSql;
 use crate::val::{Array, Object, Strand, Value};
-
 
 /// The API definition.
 #[revisioned(revision = 1)]
@@ -54,7 +54,9 @@ impl ApiDefinition {
 	fn to_sql_definition(&self) -> crate::sql::statements::DefineApiStatement {
 		crate::sql::statements::DefineApiStatement {
 			kind: crate::sql::statements::define::DefineKind::Default,
-			path: crate::sql::Expr::Literal(crate::sql::Literal::Strand(unsafe { Strand::new_unchecked(self.path.to_string()) })),
+			path: crate::sql::Expr::Literal(crate::sql::Literal::Strand(unsafe {
+				Strand::new_unchecked(self.path.to_string())
+			})),
 			actions: self.actions.iter().map(|x| x.to_sql_action()).collect(),
 			fallback: self.fallback.clone().map(|x| x.into()),
 			config: self.config.to_sql_config(),
@@ -132,7 +134,6 @@ impl InfoStructure for ApiMethod {
 }
 
 #[revisioned(revision = 1)]
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ApiActionDefinition {
 	pub methods: Vec<ApiMethod>,

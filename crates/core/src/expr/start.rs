@@ -12,7 +12,6 @@ use crate::err::Error;
 use crate::expr::Expr;
 use crate::val::{Number, Value};
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Start(pub Expr);
 

@@ -15,7 +15,6 @@ use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Strand, Value};
 
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineFunctionStatement {
 	pub kind: DefineKind,
@@ -26,8 +25,6 @@ pub struct DefineFunctionStatement {
 	pub permissions: Permission,
 	pub returns: Option<Kind>,
 }
-
-impl_kv_value_revisioned!(DefineFunctionStatement);
 
 impl DefineFunctionStatement {
 	/// Process this type returning a computed simple Value

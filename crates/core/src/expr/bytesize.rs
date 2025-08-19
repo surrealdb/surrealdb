@@ -9,7 +9,6 @@ use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::val::{TryAdd, TrySub, Value};
 
-
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Hash, Ord)]
 pub struct Bytesize(pub u64);
 

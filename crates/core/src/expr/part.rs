@@ -18,7 +18,6 @@ use crate::expr::idiom::recursion::{
 use crate::expr::{Expr, FlowResultExt as _, Graph, Ident, Idiom, Literal, Value};
 use crate::val::{Array, RecordId};
 
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Part {
 	All,
@@ -401,7 +400,6 @@ impl<'a> NextMethod<'a> for &'a Idiom {
 
 // ------------------------------
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum DestructurePart {
 	All(Ident),
@@ -450,7 +448,6 @@ impl fmt::Display for DestructurePart {
 }
 
 // ------------------------------
-
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Recurse {
@@ -501,7 +498,6 @@ impl fmt::Display for Recurse {
 }
 
 // ------------------------------
-
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RecurseInstruction {

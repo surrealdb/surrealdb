@@ -64,7 +64,6 @@ impl ToSql for &SubscriptionDefinition {
 	}
 }
 
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

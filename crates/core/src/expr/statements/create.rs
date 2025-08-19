@@ -13,7 +13,6 @@ use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::{Datetime, Value};
 
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct CreateStatement {
 	// A keyword modifier indicating if we are expecting a single result or several

@@ -16,7 +16,6 @@ use crate::expr::{Cond, Dir, Fields, Groups, Ident, Idiom, Limit, RecordIdKeyRan
 use crate::kvs::KVKey;
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
 
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Graph {
 	pub dir: Dir,
@@ -85,7 +84,6 @@ impl Display for Graph {
 		}
 	}
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum GraphSubject {

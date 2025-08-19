@@ -43,7 +43,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::val::Value;
 
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 pub enum DefineKind {
 	#[default]
@@ -51,7 +50,6 @@ pub enum DefineKind {
 	Overwrite,
 	IfNotExists,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum DefineStatement {
@@ -123,22 +121,5 @@ impl Display for DefineStatement {
 			Self::Bucket(v) => Display::fmt(v, f),
 			Self::Sequence(v) => Display::fmt(v, f),
 		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-	use crate::expr::Ident;
-
-	#[test]
-	fn check_define_serialize() {
-		let stm = DefineStatement::Namespace(DefineNamespaceStatement {
-			name: Ident::new("test".to_owned()).unwrap(),
-			..Default::default()
-		});
-		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();
-		assert_eq!(13, enc.len());
 	}
 }

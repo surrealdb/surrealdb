@@ -13,7 +13,6 @@ use crate::expr::{Cond, Data, Explain, Expr, Output, Timeout, With};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Default, Hash)]
 pub struct UpsertStatement {
 	pub only: bool,

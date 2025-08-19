@@ -3,7 +3,6 @@ use std::fmt::Display;
 
 use revision::revisioned;
 
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum Language {

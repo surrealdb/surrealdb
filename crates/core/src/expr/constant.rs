@@ -6,7 +6,6 @@ use revision::revisioned;
 
 use crate::val::{Datetime, Duration, Value};
 
-
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub enum Constant {
 	MathE,

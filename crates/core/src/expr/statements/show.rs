@@ -11,7 +11,6 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::Datetime;
 use crate::vs::VersionStamp;
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ShowSince {
 	Timestamp(Datetime),
