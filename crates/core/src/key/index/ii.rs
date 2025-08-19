@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
-use crate::key::value::KeyRecordIdKey;
 use crate::kvs::KVKey;
+use crate::val::RecordIdKey;
 
 /// Id inverted. DocId -> Id
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -26,7 +26,7 @@ pub(crate) struct Ii<'a> {
 }
 
 impl KVKey for Ii<'_> {
-	type ValueType = KeyRecordIdKey;
+	type ValueType = RecordIdKey;
 }
 
 impl Categorise for Ii<'_> {

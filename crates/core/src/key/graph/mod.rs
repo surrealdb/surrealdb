@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::expr::dir::Dir;
 use crate::key::category::{Categorise, Category};
-use crate::key::value::{KeyRecordId, KeyRecordIdKey};
 use crate::kvs::KVKey;
+use crate::val::{RecordId, RecordIdKey};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct Prefix<'a> {
 	__: u8,
 	_a: u8,
@@ -18,7 +18,7 @@ struct Prefix<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: KeyRecordIdKey,
+	pub id: RecordIdKey,
 }
 
 impl KVKey for Prefix<'_> {
@@ -26,7 +26,7 @@ impl KVKey for Prefix<'_> {
 }
 
 impl<'a> Prefix<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &KeyRecordIdKey) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -41,7 +41,7 @@ impl<'a> Prefix<'a> {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct PrefixEg<'a> {
 	__: u8,
 	_a: u8,
@@ -51,7 +51,7 @@ struct PrefixEg<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: KeyRecordIdKey,
+	pub id: RecordIdKey,
 	pub eg: Dir,
 }
 
@@ -60,7 +60,7 @@ impl KVKey for PrefixEg<'_> {
 }
 
 impl<'a> PrefixEg<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &KeyRecordIdKey, eg: &Dir) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &RecordIdKey, eg: &Dir) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -76,7 +76,7 @@ impl<'a> PrefixEg<'a> {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct PrefixFt<'a> {
 	__: u8,
 	_a: u8,
@@ -86,7 +86,7 @@ struct PrefixFt<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: KeyRecordIdKey,
+	pub id: RecordIdKey,
 	pub eg: Dir,
 	pub ft: &'a str,
 }
@@ -100,7 +100,7 @@ impl<'a> PrefixFt<'a> {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &'a str,
-		id: &KeyRecordIdKey,
+		id: &RecordIdKey,
 		eg: &Dir,
 		ft: &'a str,
 	) -> Self {
@@ -120,7 +120,7 @@ impl<'a> PrefixFt<'a> {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Graph<'a> {
 	__: u8,
 	_a: u8,
@@ -130,10 +130,10 @@ pub(crate) struct Graph<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: KeyRecordIdKey,
+	pub id: RecordIdKey,
 	pub eg: Dir,
 	pub ft: &'a str,
-	pub fk: KeyRecordIdKey,
+	pub fk: RecordIdKey,
 }
 
 impl KVKey for Graph<'_> {
@@ -150,20 +150,20 @@ pub fn new<'a>(
 	ns: NamespaceId,
 	db: DatabaseId,
 	tb: &'a str,
-	id: &KeyRecordIdKey,
+	id: &RecordIdKey,
 	eg: &Dir,
-	fk: &'a KeyRecordId,
+	fk: &'a RecordId,
 ) -> Graph<'a> {
 	Graph::new(ns, db, tb, id.to_owned(), eg.to_owned(), fk)
 }
 
-pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &KeyRecordIdKey) -> Result<Vec<u8>> {
+pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &KeyRecordIdKey) -> Result<Vec<u8>> {
+pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
@@ -173,7 +173,7 @@ pub fn egprefix(
 	ns: NamespaceId,
 	db: DatabaseId,
 	tb: &str,
-	id: &KeyRecordIdKey,
+	id: &RecordIdKey,
 	eg: &Dir,
 ) -> Result<Vec<u8>> {
 	let mut k = PrefixEg::new(ns, db, tb, id, eg).encode_key()?;
@@ -185,7 +185,7 @@ pub fn egsuffix(
 	ns: NamespaceId,
 	db: DatabaseId,
 	tb: &str,
-	id: &KeyRecordIdKey,
+	id: &RecordIdKey,
 	eg: &Dir,
 ) -> Result<Vec<u8>> {
 	let mut k = PrefixEg::new(ns, db, tb, id, eg).encode_key()?;
@@ -197,7 +197,7 @@ pub fn ftprefix(
 	ns: NamespaceId,
 	db: DatabaseId,
 	tb: &str,
-	id: &KeyRecordIdKey,
+	id: &RecordIdKey,
 	eg: &Dir,
 	ft: &str,
 ) -> Result<Vec<u8>> {
@@ -210,7 +210,7 @@ pub fn ftsuffix(
 	ns: NamespaceId,
 	db: DatabaseId,
 	tb: &str,
-	id: &KeyRecordIdKey,
+	id: &RecordIdKey,
 	eg: &Dir,
 	ft: &str,
 ) -> Result<Vec<u8>> {
@@ -230,9 +230,9 @@ impl<'a> Graph<'a> {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &'a str,
-		id: KeyRecordIdKey,
+		id: RecordIdKey,
 		eg: Dir,
-		fk: &'a KeyRecordId,
+		fk: &'a RecordId,
 	) -> Self {
 		Self {
 			__: b'/',

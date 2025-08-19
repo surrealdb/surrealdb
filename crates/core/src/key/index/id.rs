@@ -43,8 +43,8 @@ use serde::{Deserialize, Serialize};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
-use crate::key::value::KeyRecordIdKey;
 use crate::kvs::KVKey;
+use crate::val::RecordIdKey;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Id<'a> {
@@ -60,7 +60,7 @@ pub(crate) struct Id<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub id: KeyRecordIdKey,
+	pub id: RecordIdKey,
 }
 
 impl KVKey for Id<'_> {
@@ -75,13 +75,7 @@ impl Categorise for Id<'_> {
 
 impl<'a> Id<'a> {
 	#[cfg_attr(target_family = "wasm", allow(dead_code))]
-	pub fn new(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a str,
-		ix: &'a str,
-		id: KeyRecordIdKey,
-	) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, id: RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -111,7 +105,7 @@ mod tests {
 			DatabaseId(2),
 			"testtb",
 			"testix",
-			KeyRecordIdKey::from(strand!("id").to_owned()),
+			RecordIdKey::from(strand!("id").to_owned()),
 		);
 		let enc = Id::encode_key(&val).unwrap();
 		assert_eq!(

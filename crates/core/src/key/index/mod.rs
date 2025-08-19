@@ -38,8 +38,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::key::value::{KeyArray, KeyRecordId, KeyRecordIdKey};
+use crate::key::value::StoreKeyArray;
 use crate::kvs::KVKey;
+use crate::val::{RecordId, RecordIdKey};
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
 struct Prefix<'a> {
@@ -88,7 +89,7 @@ struct PrefixIds<'a> {
 	_d: u8,
 	pub ix: &'a str,
 	_e: u8,
-	pub fd: Cow<'a, KeyArray>,
+	pub fd: Cow<'a, StoreKeyArray>,
 }
 
 impl KVKey for PrefixIds<'_> {
@@ -96,7 +97,13 @@ impl KVKey for PrefixIds<'_> {
 }
 
 impl<'a> PrefixIds<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, fd: &'a KeyArray) -> Self {
+	fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a str,
+		ix: &'a str,
+		fd: &'a StoreKeyArray,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -125,12 +132,12 @@ pub(crate) struct Index<'a> {
 	_d: u8,
 	pub ix: &'a str,
 	_e: u8,
-	pub fd: Cow<'a, KeyArray>,
-	pub id: Option<Cow<'a, KeyRecordIdKey>>,
+	pub fd: Cow<'a, StoreKeyArray>,
+	pub id: Option<Cow<'a, RecordIdKey>>,
 }
 
 impl KVKey for Index<'_> {
-	type ValueType = KeyRecordId;
+	type ValueType = RecordId;
 }
 
 impl Categorise for Index<'_> {
@@ -145,8 +152,8 @@ impl<'a> Index<'a> {
 		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
-		fd: &'a KeyArray,
-		id: Option<&'a KeyRecordIdKey>,
+		fd: &'a StoreKeyArray,
+		id: Option<&'a RecordIdKey>,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -185,7 +192,7 @@ impl<'a> Index<'a> {
 		db: DatabaseId,
 		tb: &str,
 		ix: &str,
-		fd: &KeyArray,
+		fd: &StoreKeyArray,
 	) -> Result<Vec<u8>> {
 		PrefixIds::new(ns, db, tb, ix, fd).encode_key()
 	}
@@ -195,7 +202,7 @@ impl<'a> Index<'a> {
 		db: DatabaseId,
 		tb: &str,
 		ix: &str,
-		fd: &KeyArray,
+		fd: &StoreKeyArray,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		beg.extend_from_slice(&[0x00]);
@@ -207,7 +214,7 @@ impl<'a> Index<'a> {
 		db: DatabaseId,
 		tb: &str,
 		ix: &str,
-		fd: &KeyArray,
+		fd: &StoreKeyArray,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		beg.extend_from_slice(&[0xff]);
@@ -219,7 +226,7 @@ impl<'a> Index<'a> {
 		db: DatabaseId,
 		tb: &str,
 		ix: &str,
-		fd: &KeyArray,
+		fd: &StoreKeyArray,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		*beg.last_mut().unwrap() = 0x00;
@@ -231,7 +238,7 @@ impl<'a> Index<'a> {
 		db: DatabaseId,
 		tb: &str,
 		ix: &str,
-		fd: &KeyArray,
+		fd: &StoreKeyArray,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		*beg.last_mut().unwrap() = 0xff;
@@ -247,7 +254,7 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let fd = vec!["testfd1", "testfd2"].into();
-		let id = KeyRecordIdKey::String("testid".to_owned());
+		let id = RecordIdKey::String("testid".to_owned());
 		let val = Index::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", &fd, Some(&id));
 		let enc = Index::encode_key(&val).unwrap();
 		assert_eq!(

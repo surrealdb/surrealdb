@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::docs::HnswDocsState;
-use crate::key::value::KeyRecordIdKey;
 use crate::kvs::KVKey;
+use crate::val::RecordIdKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct HdRoot<'a> {
@@ -64,7 +64,7 @@ pub(crate) struct Hd<'a> {
 }
 
 impl KVKey for Hd<'_> {
-	type ValueType = KeyRecordIdKey;
+	type ValueType = RecordIdKey;
 }
 
 impl<'a> Hd<'a> {

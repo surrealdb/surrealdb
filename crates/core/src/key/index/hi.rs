@@ -2,10 +2,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::key::value::KeyRecordIdKey;
 use crate::kvs::KVKey;
+use crate::val::RecordIdKey;
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Hi<'a> {
 	__: u8,
 	_a: u8,
@@ -19,7 +19,7 @@ pub(crate) struct Hi<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub id: KeyRecordIdKey,
+	pub id: RecordIdKey,
 }
 
 impl KVKey for Hi<'_> {
@@ -27,13 +27,7 @@ impl KVKey for Hi<'_> {
 }
 
 impl<'a> Hi<'a> {
-	pub fn new(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a str,
-		ix: &'a str,
-		id: KeyRecordIdKey,
-	) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, id: RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -63,7 +57,7 @@ mod tests {
 			DatabaseId(2),
 			"testtb",
 			"testix",
-			KeyRecordIdKey::String("testid".to_string()),
+			RecordIdKey::String("testid".to_string()),
 		);
 		let enc = Hi::encode_key(&val).unwrap();
 		assert_eq!(

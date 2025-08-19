@@ -14,6 +14,7 @@ use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::ft::search::SearchIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
+use crate::key::value::StoreKeyArray;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::ConsumeResult;
 use crate::kvs::TransactionType;
@@ -304,11 +305,11 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
-	fn get_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
+	fn get_unique_index_key(&self, v: &'a StoreKeyArray) -> Result<key::index::Index> {
 		Ok(key::index::Index::new(self.ns, self.db, &self.ix.what, &self.ix.name, v, None))
 	}
 
-	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
+	fn get_non_unique_index_key(&self, v: &'a StoreKeyArray) -> Result<key::index::Index> {
 		Ok(key::index::Index::new(
 			self.ns,
 			self.db,
@@ -328,6 +329,7 @@ impl<'a> IndexOperation<'a> {
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
 			for o in i {
+				let o = o.into();
 				let key = self.get_unique_index_key(&o)?;
 				match txn.delc(&key, Some(self.rid)).await {
 					Err(e) => {
@@ -346,8 +348,9 @@ impl<'a> IndexOperation<'a> {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
 				if !n.is_all_none_or_null() {
+					let n = n.into();
 					let key = self.get_unique_index_key(&n)?;
-					if txn.putc(&key, self.rid, None).await.is_err() {
+					if txn.putc(&key, &self.rid, None).await.is_err() {
 						let key = self.get_unique_index_key(&n)?;
 						let rid = txn.get(&key, None).await?.unwrap();
 						return self.err_index_exists(rid, n);
@@ -367,8 +370,9 @@ impl<'a> IndexOperation<'a> {
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
 			for o in i {
+				let o = o.into();
 				let key = self.get_non_unique_index_key(&o)?;
-				match txn.delc(&key, Some(self.rid)).await {
+				match txn.delc(&key, Some(&self.rid)).await {
 					Err(e) => {
 						if matches!(e.downcast_ref(), Some(Error::TxConditionNotMet)) {
 							Ok(())
@@ -384,19 +388,20 @@ impl<'a> IndexOperation<'a> {
 		if let Some(n) = self.n.take() {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
+				let n = n.into();
 				let key = self.get_non_unique_index_key(&n)?;
-				txn.set(&key, self.rid, None).await?;
+				txn.set(&key, &self.rid, None).await?;
 			}
 		}
 		Ok(())
 	}
 
-	fn err_index_exists(&self, rid: RecordId, n: Array) -> Result<()> {
+	fn err_index_exists(&self, rid: RecordId, n: StoreKeyArray) -> Result<()> {
 		bail!(Error::IndexExists {
 			thing: rid,
 			index: self.ix.name.to_string(),
-			value: match n.len() {
-				1 => n.first().unwrap().to_string(),
+			value: match n.0.len() {
+				1 => n.0.first().unwrap().to_string(),
 				_ => n.to_string(),
 			},
 		})

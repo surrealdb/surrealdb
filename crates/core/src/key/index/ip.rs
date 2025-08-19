@@ -4,9 +4,9 @@ use std::fmt::Debug;
 use serde::{Deserialize, Serialize};
 
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::key::value::KeyRecordIdKey;
 use crate::kvs::KVKey;
 use crate::kvs::index::PrimaryAppending;
+use crate::val::RecordIdKey;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Ip<'a> {
@@ -22,7 +22,7 @@ pub(crate) struct Ip<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub id: KeyRecordIdKey,
+	pub id: RecordIdKey,
 }
 
 impl KVKey for Ip<'_> {
@@ -30,13 +30,7 @@ impl KVKey for Ip<'_> {
 }
 
 impl<'a> Ip<'a> {
-	pub fn new(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a str,
-		ix: &'a str,
-		id: KeyRecordIdKey,
-	) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, id: RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -66,7 +60,7 @@ mod tests {
 			DatabaseId(2),
 			"testtb",
 			"testix",
-			KeyRecordIdKey::String("id".to_string()),
+			RecordIdKey::String("id".to_string()),
 		);
 		let enc = Ip::encode_key(&val).unwrap();
 		assert_eq!(

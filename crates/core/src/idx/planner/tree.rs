@@ -738,7 +738,7 @@ impl SchemaCache {
 
 pub(super) type GroupRef = u16;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) enum Node {
 	Expression {
 		group: GroupRef,
