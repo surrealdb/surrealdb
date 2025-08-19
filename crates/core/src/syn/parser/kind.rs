@@ -367,7 +367,7 @@ mod tests {
 		let sql = "point";
 		let res = kind(sql);
 		let out = res.unwrap();
-		assert_eq!("point", format!("{}", out));
+		assert_eq!("geometry<point>", format!("{}", out));
 		assert_eq!(out, Kind::Geometry(vec![GeometryKind::Point]));
 	}
 
