@@ -1,5 +1,5 @@
 [package]
-name = "surrealdb-value"
+name = "surrealdb-types"
 authors.workspace = true
 edition.workspace = true
 license-file.workspace = true
