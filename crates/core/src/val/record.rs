@@ -36,6 +36,15 @@ impl Record {
 		)
 	}
 
+	pub(crate) fn into_read_only(mut self) -> Self {
+		if let Data::Mutable(value) = &mut self.data {
+			let value = mem::take(value);
+			let arc = Arc::new(value);
+			self.data = Data::ReadOnly(arc);
+		}
+		self
+	}
+
 	pub(crate) fn set_record_type(&mut self, rtype: RecordType) {
 		match &mut self.metadata {
 			Some(metadata) => {

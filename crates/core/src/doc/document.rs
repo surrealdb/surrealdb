@@ -59,13 +59,8 @@ impl CursorRecord {
 		self.record.data.read_only()
 	}
 
-	pub(crate) fn into_read_only(mut self) -> Record {
-		if let Data::Mutable(value) = &mut self.record.data {
-			let value = mem::take(value);
-			let arc = Arc::new(value);
-			self.record.data = Data::ReadOnly(arc);
-		}
-		self.record
+	pub(crate) fn into_read_only(self) -> Record {
+		self.record.into_read_only()
 	}
 
 	pub(crate) fn as_ref(&self) -> &Value {
