@@ -8,6 +8,7 @@ use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::val::{Duration, Strand};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum GeometryKind {
 	Point,
 	Line,
