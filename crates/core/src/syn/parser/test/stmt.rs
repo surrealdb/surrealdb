@@ -1654,10 +1654,7 @@ fn parse_define_field() {
 				flex: true,
 				field_kind: Some(Kind::Option(Box::new(Kind::Either(vec![
 					Kind::Number,
-					Kind::Array(
-						Box::new(Kind::Record(vec!["foo".to_owned()])),
-						Some(10)
-					)
+					Kind::Array(Box::new(Kind::Record(vec!["foo".to_owned()])), Some(10))
 				])))),
 				readonly: false,
 				value: Some(Expr::Literal(Literal::Null)),

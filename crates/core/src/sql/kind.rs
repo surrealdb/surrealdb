@@ -149,9 +149,7 @@ impl From<Kind> for crate::expr::Kind {
 			Kind::String => crate::expr::Kind::String,
 			Kind::Uuid => crate::expr::Kind::Uuid,
 			Kind::Regex => crate::expr::Kind::Regex,
-			Kind::Record(tables) => {
-				crate::expr::Kind::Record(tables)
-			}
+			Kind::Record(tables) => crate::expr::Kind::Record(tables),
 			Kind::Geometry(geometries) => {
 				crate::expr::Kind::Geometry(geometries.into_iter().map(Into::into).collect())
 			}
@@ -189,9 +187,7 @@ impl From<crate::expr::Kind> for Kind {
 			crate::expr::Kind::String => Kind::String,
 			crate::expr::Kind::Uuid => Kind::Uuid,
 			crate::expr::Kind::Regex => Kind::Regex,
-			crate::expr::Kind::Record(tables) => {
-				Kind::Record(tables)
-			}
+			crate::expr::Kind::Record(tables) => Kind::Record(tables),
 			crate::expr::Kind::Geometry(geometries) => {
 				Kind::Geometry(geometries.into_iter().map(Into::into).collect())
 			}

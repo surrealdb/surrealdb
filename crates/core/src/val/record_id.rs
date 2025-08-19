@@ -366,7 +366,7 @@ impl RecordId {
 	}
 
 	pub fn is_record_type(&self, val: &[String]) -> bool {
-		val.is_empty() || val.iter().any(|x| self.table == *x)
+		val.is_empty() || val.contains(&self.table)
 	}
 }
 

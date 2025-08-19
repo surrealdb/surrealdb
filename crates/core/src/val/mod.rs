@@ -288,9 +288,7 @@ impl Value {
 			Value::Geometry(geo) => Some(Kind::Geometry(vec![geo.kind()])),
 			Value::Bytes(_) => Some(Kind::Bytes),
 			Value::Regex(_) => Some(Kind::Regex),
-			Value::RecordId(thing) => {
-				Some(Kind::Record(vec![thing.table.clone()]))
-			}
+			Value::RecordId(thing) => Some(Kind::Record(vec![thing.table.clone()])),
 			Value::Closure(closure) => {
 				let args_kinds =
 					closure.args.iter().map(|(_, kind)| kind.clone()).collect::<Vec<_>>();
@@ -299,9 +297,7 @@ impl Value {
 				Some(Kind::Function(Some(args_kinds), returns_kind))
 			}
 			//Value::Refs(_) => None,
-			Value::File(file) => {
-				Some(Kind::File(vec![file.bucket.clone()]))
-			}
+			Value::File(file) => Some(Kind::File(vec![file.bucket.clone()])),
 			_ => None,
 		}
 	}

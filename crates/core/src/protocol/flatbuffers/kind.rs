@@ -4,8 +4,8 @@ use std::str::FromStr;
 use rust_decimal::Decimal;
 use surrealdb_protocol::fb::v1 as proto_fb;
 
-use crate::expr::kind::{GeometryKind, KindLiteral};
 use crate::expr::Kind;
+use crate::expr::kind::{GeometryKind, KindLiteral};
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use crate::val::{Duration, Strand, Table};
 
@@ -491,10 +491,7 @@ impl FromFlatbuffers for Kind {
 					return Err(anyhow::anyhow!("Missing file kind"));
 				};
 				let buckets = if let Some(buckets) = file.buckets() {
-					buckets
-						.iter()
-						.map(|b| b.to_string())
-						.collect::<Vec<_>>()
+					buckets.iter().map(|b| b.to_string()).collect::<Vec<_>>()
 				} else {
 					Vec::new()
 				};

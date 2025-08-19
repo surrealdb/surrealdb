@@ -98,7 +98,8 @@ impl Parser<'_> {
 			t!("RECORD") => {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {
-					let mut tables = vec![self.next_token_value::<Ident>().map(|i| i.into_string())?];
+					let mut tables =
+						vec![self.next_token_value::<Ident>().map(|i| i.into_string())?];
 					while self.eat(t!("|")) {
 						tables.push(self.next_token_value::<Ident>().map(|i| i.into_string())?);
 					}
@@ -149,7 +150,8 @@ impl Parser<'_> {
 			t!("FILE") => {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {
-					let mut buckets = vec![self.next_token_value::<Ident>().map(|i| i.into_string())?];
+					let mut buckets =
+						vec![self.next_token_value::<Ident>().map(|i| i.into_string())?];
 					while self.eat(t!("|")) {
 						buckets.push(self.next_token_value::<Ident>().map(|i| i.into_string())?);
 					}
@@ -176,7 +178,7 @@ impl Parser<'_> {
 				Keyword::MultiPolygon => Ok(GeometryKind::MultiPolygon),
 				Keyword::Collection => Ok(GeometryKind::Collection),
 				_ => unexpected!(self, next, "a geometry kind name"),
-			}
+			},
 			_ => unexpected!(self, next, "a geometry kind name"),
 		}
 	}
@@ -420,13 +422,7 @@ mod tests {
 		let res = kind(sql);
 		let out = res.unwrap();
 		assert_eq!("record<person | animal>", format!("{}", out));
-		assert_eq!(
-			out,
-			Kind::Record(vec![
-				"person".to_owned(),
-				"animal".to_owned()
-			])
-		);
+		assert_eq!(out, Kind::Record(vec!["person".to_owned(), "animal".to_owned()]));
 	}
 
 	#[test]

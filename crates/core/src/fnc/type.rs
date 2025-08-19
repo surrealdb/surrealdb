@@ -213,7 +213,6 @@ pub fn uuid((val,): (Value,)) -> Result<Value> {
 pub mod is {
 	use anyhow::Result;
 
-	
 	use crate::fnc::args::Optional;
 	use crate::val::{Geometry, Strand, Value};
 

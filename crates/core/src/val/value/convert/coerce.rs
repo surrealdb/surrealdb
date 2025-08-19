@@ -5,8 +5,8 @@ use std::hash::BuildHasher;
 use geo::Point;
 use rust_decimal::Decimal;
 
-use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::expr::Kind;
+use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range,
@@ -499,9 +499,7 @@ impl Value {
 
 	fn can_coerce_to_record(&self, val: &[String]) -> bool {
 		match self {
-			Value::RecordId(t) => {
-				val.is_empty() || val.iter().any(|x| t.table == *x)
-			}
+			Value::RecordId(t) => val.is_empty() || val.contains(&t.table),
 			_ => false,
 		}
 	}
@@ -617,7 +615,7 @@ impl Value {
 		let this = match self {
 			// Records are allowed if correct type
 			Value::RecordId(v) => {
-				if val.is_empty() || val.iter().any(|x| *x == v.table) {
+				if val.is_empty() || val.contains(&v.table) {
 					return Ok(v);
 				} else {
 					Value::RecordId(v)
@@ -641,7 +639,10 @@ impl Value {
 	}
 
 	/// Try to coerce this value to a `Geometry` of a certain type
-	pub(crate) fn coerce_to_geometry_kind(self, val: &[GeometryKind]) -> Result<Geometry, CoerceError> {
+	pub(crate) fn coerce_to_geometry_kind(
+		self,
+		val: &[GeometryKind],
+	) -> Result<Geometry, CoerceError> {
 		if self.is_geometry_type(val) {
 			let Value::Geometry(x) = self else {
 				// Checked above in is_geometry_type

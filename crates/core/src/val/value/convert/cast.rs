@@ -6,8 +6,8 @@ use geo::Point;
 use rust_decimal::Decimal;
 
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
-use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::expr::Kind;
+use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::syn;
 use crate::val::array::Uniq;
 use crate::val::{
