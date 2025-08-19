@@ -97,8 +97,6 @@ pub enum Kind {
 	/// A record type.
 	Record(Vec<String>),
 	/// A geometry type.
-	/// The vec contains the geometry types as strings, for example `"point"` or
-	/// `"polygon"`.
 	Geometry(Vec<GeometryKind>),
 	/// An optional type.
 	Option(Box<Kind>),
