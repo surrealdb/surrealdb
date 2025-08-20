@@ -455,7 +455,7 @@ impl Transaction {
 		record.data.to_mut().def(&rid);
 		// Match on the value to determine if it is a graph edge record or a normal
 		// record.
-		match (record.is_edge(), record.data.to_mut().pick(&*IN), record.data.to_mut().pick(&*OUT))
+		match (record.is_edge(), record.data.as_ref().pick(&*IN), record.data.as_ref().pick(&*OUT))
 		{
 			// If the value is a graph edge record (indicated by EDGE, IN, and OUT fields):
 			(true, Value::RecordId(_), Value::RecordId(_)) => {

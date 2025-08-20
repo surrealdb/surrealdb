@@ -1,9 +1,12 @@
+use std::cmp::Ordering;
+use std::hash::{Hash, Hasher};
 use std::mem;
 use std::sync::Arc;
 
 use revision::error::Error;
 use revision::{Revisioned, revisioned};
-use serde::{Deserialize, Serialize};
+use serde::de::Deserializer;
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::val::Value;
 
@@ -14,7 +17,6 @@ use crate::val::Value;
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Record {
 	pub(crate) metadata: Option<Metadata>,
-	// TODO (DB-655): Switch to `Object`.
 	pub(crate) data: Data,
 }
 
@@ -59,9 +61,9 @@ impl Record {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[serde(untagged)]
+#[derive(Clone, Debug)]
 pub(crate) enum Data {
+	// TODO (DB-655): Switch to `Object`.
 	Mutable(Value),
 	ReadOnly(Arc<Value>),
 }
@@ -113,6 +115,42 @@ impl Revisioned for Data {
 
 	fn revision() -> u16 {
 		1
+	}
+}
+
+impl PartialEq for Data {
+	fn eq(&self, other: &Self) -> bool {
+		self.as_ref() == other.as_ref()
+	}
+}
+
+impl PartialOrd for Data {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		self.as_ref().partial_cmp(other.as_ref())
+	}
+}
+
+impl Hash for Data {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		self.as_ref().hash(state);
+	}
+}
+
+impl Serialize for Data {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
+		self.as_ref().serialize(serializer)
+	}
+}
+
+impl<'de> Deserialize<'de> for Data {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		Value::deserialize(deserializer).map(Self::Mutable)
 	}
 }
 
