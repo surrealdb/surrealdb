@@ -27,15 +27,17 @@ impl RemoveModelStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the defined model
-		let (ns, db) = opt.ns_db()?;
-		let ml = match txn.get_db_model(ns, db, &self.name, &self.version).await {
-			Ok(x) => x,
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::MlNotFound { .. })) {
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+		let ml = match txn.get_db_model(ns, db, &self.name, &self.version).await? {
+			Some(x) => x,
+			None => {
+				if self.if_exists {
 					return Ok(Value::None);
-				} else {
-					return Err(e);
 				}
+				return Err(Error::MlNotFound {
+					name: format!("{}<{}>", self.name, self.version),
+				}
+				.into());
 			}
 		};
 		// Delete the definition

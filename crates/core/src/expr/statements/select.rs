@@ -90,6 +90,7 @@ impl SelectStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored and the version is set if specified
+
 		let version = match &self.version {
 			Some(v) => Some(
 				stk.run(|stk| v.compute(stk, ctx, opt, doc))
@@ -110,8 +111,10 @@ impl SelectStatement {
 		);
 		// Check if there is a timeout
 		let ctx = stm.setup_timeout(ctx)?;
+
 		// Get a query planner
 		let mut planner = QueryPlanner::new();
+
 		let stm_ctx = StatementContext::new(&ctx, &opt, &stm)?;
 		// Loop over the select targets
 		for w in self.what.iter() {
@@ -119,6 +122,7 @@ impl SelectStatement {
 		}
 		// Attach the query planner to the context
 		let ctx = stm.setup_query_planner(planner, ctx);
+
 		// Process the statement
 		let res = i.output(stk, &ctx, &opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout

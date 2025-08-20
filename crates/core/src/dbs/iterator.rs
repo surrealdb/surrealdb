@@ -171,7 +171,9 @@ impl Iterator {
 		// Match the values
 		match val {
 			Expr::Mock(v) => self.prepare_mock(stm_ctx, v).await?,
-			Expr::Table(v) => self.prepare_table(stk, planner, stm_ctx, v.clone()).await?,
+			Expr::Table(v) => {
+				self.prepare_table(ctx, opt, stk, planner, stm_ctx, v.clone()).await?
+			}
 			Expr::Idiom(x) => {
 				// TODO: This needs to be structured better.
 				// match against what previously would be an edge.
@@ -224,24 +226,29 @@ impl Iterator {
 	/// Prepares a value for processing
 	pub(crate) async fn prepare_table(
 		&mut self,
+		ctx: &Context,
+		opt: &Options,
 		stk: &mut Stk,
 		planner: &mut QueryPlanner,
-		ctx: &StatementContext<'_>,
+		stm_ctx: &StatementContext<'_>,
 		table: Ident,
 	) -> Result<()> {
 		// We add the iterable only if we have a permission
-		let p = planner.check_table_permission(ctx, &table).await?;
+		let p = planner.check_table_permission(stm_ctx, &table).await?;
 		if matches!(p, GrantedPermission::None) {
 			return Ok(());
 		}
 		// Add the record to the iterator
-		if ctx.stm.is_deferable() {
+		if stm_ctx.stm.is_deferable() {
+			ctx.get_db(opt).await?;
 			self.ingest(Iterable::Yield(table))
 		} else {
-			if ctx.stm.is_guaranteed() {
+			if stm_ctx.stm.is_guaranteed() {
 				self.guaranteed = Some(Iterable::Yield(table.clone()));
 			}
-			planner.add_iterables(stk, ctx, table, p, self).await?;
+			let db = ctx.get_db(opt).await?;
+
+			planner.add_iterables(&db, stk, stm_ctx, table, p, self).await?;
 		}
 		// All ingested ok
 		Ok(())
@@ -397,7 +404,9 @@ impl Iterator {
 			Value::Object(o) if !stm_ctx.stm.is_select() => {
 				self.prepare_object(stm_ctx.stm, o)?;
 			}
-			Value::Table(v) => self.prepare_table(stk, planner, stm_ctx, v.into()).await?,
+			Value::Table(v) => {
+				self.prepare_table(ctx, opt, stk, planner, stm_ctx, v.into()).await?
+			}
 			Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
 			Value::Array(a) => a.into_iter().for_each(|x| self.ingest(Iterable::Value(x))),
 			v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
@@ -427,7 +436,9 @@ impl Iterator {
 		for v in v {
 			match v {
 				Expr::Mock(v) => self.prepare_mock(stm_ctx, v).await?,
-				Expr::Table(v) => self.prepare_table(stk, planner, stm_ctx, v.clone()).await?,
+				Expr::Table(v) => {
+					self.prepare_table(ctx, opt, stk, planner, stm_ctx, v.clone()).await?
+				}
 				Expr::Idiom(x) => {
 					// match against what previously would be an edge.
 					if x.len() != 2 {
@@ -519,23 +530,33 @@ impl Iterator {
 				e.add_record_strategy(rs);
 			}
 			// Process prepared values
-			let sp = if let Some(qp) = ctx.get_query_planner() {
-				let sp = qp.is_any_specific_permission();
+			let is_specific_permission = if let Some(qp) = ctx.get_query_planner() {
+				let is_specific_permission = qp.is_any_specific_permission();
 				while let Some(s) = qp.next_iteration_stage().await {
 					let is_last = matches!(s, IterationStage::Iterate(_));
 					let mut c = MutableContext::unfreeze(cancel_ctx)?;
 					c.set_iteration_stage(s);
 					cancel_ctx = c.freeze();
 					if !is_last {
-						self.clone().iterate(stk, &cancel_ctx, opt, stm, sp, None).await?;
+						self.clone()
+							.iterate(stk, &cancel_ctx, opt, stm, is_specific_permission, None)
+							.await?;
 					};
 				}
-				sp
+				is_specific_permission
 			} else {
 				false
 			};
 			// Process all documents
-			self.iterate(stk, &cancel_ctx, opt, stm, sp, plan.explanation.as_mut()).await?;
+			self.iterate(
+				stk,
+				&cancel_ctx,
+				opt,
+				stm,
+				is_specific_permission,
+				plan.explanation.as_mut(),
+			)
+			.await?;
 			// Return any document errors
 			if let Some(e) = self.error.take() {
 				return Err(e);
@@ -547,7 +568,7 @@ impl Iterator {
 					// Ingest the pre-defined guaranteed record yield
 					self.ingest(guaranteed);
 					// Process the pre-defined guaranteed document
-					self.iterate(stk, &cancel_ctx, opt, stm, sp, None).await?;
+					self.iterate(stk, ctx, opt, stm, is_specific_permission, None).await?;
 				}
 			}
 			// Process any SPLIT AT clause
@@ -676,10 +697,9 @@ impl Iterator {
 	///
 	/// ## Performance Impact
 	///
-	/// - **When enabled**: Significant performance improvement for large result
-	///   sets
-	/// - **When disabled**: Slight performance cost as all records must be
-	///   processed before START/LIMIT is applied
+	/// - **When enabled**: Significant performance improvement for large result sets
+	/// - **When disabled**: Slight performance cost as all records must be processed before
+	///   START/LIMIT is applied
 	///
 	/// ## Returns
 	///

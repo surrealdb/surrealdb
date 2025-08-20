@@ -10,11 +10,11 @@ use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::t;
 
 impl Parser<'_> {
-	pub(crate) async fn parse_alter_stmt(&mut self, ctx: &mut Stk) -> ParseResult<AlterStatement> {
+	pub(crate) async fn parse_alter_stmt(&mut self, stk: &mut Stk) -> ParseResult<AlterStatement> {
 		let next = self.next();
 		match next.kind {
-			t!("TABLE") => self.parse_alter_table(ctx).await.map(AlterStatement::Table),
-			t!("FIELD") => self.parse_alter_field(ctx).await.map(AlterStatement::Field),
+			t!("TABLE") => self.parse_alter_table(stk).await.map(AlterStatement::Table),
+			t!("FIELD") => self.parse_alter_field(stk).await.map(AlterStatement::Field),
 			t!("SEQUENCE") => self.parse_alter_sequence().await.map(AlterStatement::Sequence),
 			_ => unexpected!(self, next, "a alter statement keyword"),
 		}
@@ -22,7 +22,7 @@ impl Parser<'_> {
 
 	pub(crate) async fn parse_alter_table(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 	) -> ParseResult<AlterTableStatement> {
 		let if_exists = if self.eat(t!("IF")) {
 			expected!(self, t!("EXISTS"));
@@ -89,7 +89,7 @@ impl Parser<'_> {
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
-					res.permissions = Some(ctx.run(|ctx| self.parse_permission(ctx, false)).await?);
+					res.permissions = Some(stk.run(|stk| self.parse_permission(stk, false)).await?);
 				}
 				t!("CHANGEFEED") => {
 					self.pop_peek();
@@ -104,7 +104,7 @@ impl Parser<'_> {
 
 	pub(crate) async fn parse_alter_field(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 	) -> ParseResult<AlterFieldStatement> {
 		let if_exists = if self.eat(t!("IF")) {
 			expected!(self, t!("EXISTS"));
@@ -112,7 +112,7 @@ impl Parser<'_> {
 		} else {
 			false
 		};
-		let name = self.parse_local_idiom(ctx).await?;
+		let name = self.parse_local_idiom(stk).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
 		let what = self.next_token_value()?;
@@ -183,7 +183,7 @@ impl Parser<'_> {
 				}
 				t!("TYPE") => {
 					self.pop_peek();
-					res.kind = AlterKind::Set(ctx.run(|ctx| self.parse_inner_kind(ctx)).await?);
+					res.kind = AlterKind::Set(stk.run(|stk| self.parse_inner_kind(stk)).await?);
 				}
 				t!("READONLY") => {
 					self.pop_peek();
@@ -191,25 +191,25 @@ impl Parser<'_> {
 				}
 				t!("VALUE") => {
 					self.pop_peek();
-					res.value = AlterKind::Set(ctx.run(|ctx| self.parse_expr_field(ctx)).await?);
+					res.value = AlterKind::Set(stk.run(|stk| self.parse_expr_field(stk)).await?);
 				}
 				t!("ASSERT") => {
 					self.pop_peek();
-					res.assert = AlterKind::Set(ctx.run(|ctx| self.parse_expr_field(ctx)).await?);
+					res.assert = AlterKind::Set(stk.run(|stk| self.parse_expr_field(stk)).await?);
 				}
 				t!("DEFAULT") => {
 					self.pop_peek();
 					if self.eat(t!("ALWAYS")) {
 						res.default =
-							AlterDefault::Always(ctx.run(|ctx| self.parse_expr_field(ctx)).await?);
+							AlterDefault::Always(stk.run(|stk| self.parse_expr_field(stk)).await?);
 					} else {
 						res.default =
-							AlterDefault::Set(ctx.run(|ctx| self.parse_expr_field(ctx)).await?);
+							AlterDefault::Set(stk.run(|stk| self.parse_expr_field(stk)).await?);
 					}
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
-					res.permissions = Some(ctx.run(|ctx| self.parse_permission(ctx, false)).await?);
+					res.permissions = Some(stk.run(|stk| self.parse_permission(stk, false)).await?);
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
@@ -224,7 +224,7 @@ impl Parser<'_> {
 					}
 
 					self.pop_peek();
-					res.reference = AlterKind::Set(self.parse_reference(ctx).await?);
+					res.reference = AlterKind::Set(self.parse_reference(stk).await?);
 				}
 				_ => break,
 			}

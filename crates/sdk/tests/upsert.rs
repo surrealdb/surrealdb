@@ -697,7 +697,8 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				let res = res.unwrap().to_string();
 				assert!(res.contains("Name"), "{}: {:?}", msg, res);
 			} else {
-				assert!(res.unwrap() == Array::new().into(), "{}", msg);
+				let res = res.unwrap();
+				assert!(res == Array::new().into(), "{}: {:?}", msg, res);
 
 				// Verify the update was not persisted
 				let mut resp = ds
@@ -776,8 +777,9 @@ async fn check_permissions_auth_enabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 
-		assert!(
-			res.unwrap() == Array::new().into(),
+		assert_eq!(
+			res.unwrap(),
+			Array::new().into(),
 			"{}",
 			"anonymous user should not be able to select if the table has no permissions"
 		);

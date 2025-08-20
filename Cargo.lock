@@ -5751,6 +5751,7 @@ dependencies = [
  "reqwest",
  "revision 0.11.0",
  "ring",
+ "rstest",
  "rust_decimal",
  "rustls 0.23.25",
  "rustls-pki-types",
