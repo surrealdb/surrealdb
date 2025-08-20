@@ -12,6 +12,8 @@ pub mod uuid;
 
 use std::cmp::Ordering;
 
+use crate::{Kind, SurrealValue};
+
 pub use self::array::Array;
 pub use self::bytes::Bytes;
 pub use self::datetime::Datetime;
@@ -57,5 +59,39 @@ impl Eq for Value {}
 impl Ord for Value {
 	fn cmp(&self, other: &Self) -> Ordering {
 		self.partial_cmp(other).unwrap_or(Ordering::Equal)
+	}
+}
+
+impl Value {
+	pub fn value_kind(&self) -> Kind {
+		match self {
+			Value::None => Kind::None,
+			Value::Null => Kind::Null,
+			Value::Bool(_) => Kind::Bool,
+			Value::Number(_) => Kind::Number,
+			Value::String(_) => Kind::String,
+			Value::Duration(_) => Kind::Duration,
+			Value::Datetime(_) => Kind::Datetime,
+			Value::Uuid(_) => Kind::Uuid,
+			Value::Array(_) => Kind::Array(Box::new(Kind::Any), None),
+			Value::Object(_) => Kind::Object,
+			Value::Geometry(_) => Kind::Geometry(Vec::new()),
+			Value::Bytes(_) => Kind::Bytes,
+			Value::RecordId(_) => Kind::Record(Vec::new()),
+			Value::File(_) => Kind::File(Vec::new()),
+			Value::Range(_) => Kind::Range,
+		}
+	}
+
+	pub fn is<T: SurrealValue>(&self) -> bool {
+		T::is_value(self)
+	}
+
+	pub fn into<T: SurrealValue>(self) -> Option<T> {
+		T::from_value(self)
+	}
+
+	pub fn from<T: SurrealValue>(value: T) -> Value {
+		value.into_value()
 	}
 }
