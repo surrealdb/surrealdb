@@ -487,7 +487,6 @@ fn filter_from_type(
 		Kind::Int => {}
 		Kind::Number => {}
 		Kind::Object => {}
-		Kind::Point => {}
 		Kind::String => {}
 		Kind::Uuid => {}
 		Kind::Regex => {}
@@ -500,7 +499,6 @@ fn filter_from_type(
 		Kind::Function(_, _) => {}
 		Kind::Range => {}
 		Kind::Literal(_) => {}
-		Kind::References(_, _) => {}
 		Kind::File(_) => {}
 	};
 	Ok(filter)
