@@ -82,7 +82,7 @@ impl DecimalLexEncoder {
 	/// comparison must match numeric comparison.
 	pub(crate) fn encode(dec: D128) -> Vec<u8> {
 		if dec.is_nan() {
-			return vec![Self::NAN_MARKER];
+			return vec![Self::NAN_MARKER, 0x00];
 		}
 
 		// Extract sign
@@ -90,15 +90,15 @@ impl DecimalLexEncoder {
 
 		if dec.is_infinite() {
 			if is_negative {
-				return vec![Self::INFINITE_NEGATIVE_MARKER];
+				return vec![Self::INFINITE_NEGATIVE_MARKER, 0x00];
 			} else {
-				return vec![Self::INFINITE_POSITIVE_MAKER];
+				return vec![Self::INFINITE_POSITIVE_MAKER, 0x00];
 			}
 		}
 		// Special case: zero gets a fixed encoding that sorts between negative and
 		// positive
 		if dec.is_zero() {
-			return vec![Self::ZERO_MARKER];
+			return vec![Self::ZERO_MARKER, 0x00];
 		}
 
 		// Work with absolute value
@@ -113,6 +113,12 @@ impl DecimalLexEncoder {
 		// Apply bias to map the scale range to unsigned 16-bit space
 		// For D128, scale ∈ [-6143, 6177] → [1, 12321] after adding EXP_BIAS.
 		let biased_exponent = (scale + Self::EXP_BIAS) as u16;
+
+		let encode_exponent = |e: u16| {
+			let q = (e / 255) as u8;
+			let r = (e % 255) as u8;
+			[q + 1, r + 1]
+		};
 
 		// Build the final encoded result
 		// Capacity: 1 sign + 2 exponent + packed digits (2 digits per byte) + potential
@@ -129,7 +135,7 @@ impl DecimalLexEncoder {
 			// Complement of biased scale: reverses ordering so that more negative values
 			// sort first This maintains total ordering for negatives when compared
 			// bytewise.
-			result.extend((0xFFFF - biased_exponent).to_be_bytes());
+			result.extend(encode_exponent(0xFFFF - biased_exponent));
 			// Complement all packed digit bytes to reverse their ordering for negative
 			// numbers
 			Self::pack_digits_negative(radix10, &mut result);
@@ -137,10 +143,11 @@ impl DecimalLexEncoder {
 			// Sign marker: 0xFF ensures positive numbers sort after negative ones
 			result.push(Self::FINITE_POSITIVE_MARKER);
 			// Biased scale: larger scales (greater magnitude) sort later for positives
-			result.extend(biased_exponent.to_be_bytes());
+			result.extend(encode_exponent(biased_exponent));
 			// Store packed digit bytes directly for positive numbers
 			Self::pack_digits_positive(radix10, &mut result);
 		}
+		result.push(0x00);
 		//
 		result
 	}
@@ -176,9 +183,8 @@ impl DecimalLexEncoder {
 			return Err(Error::Serialization(format!("Buffer too short: {}", bytes.len())).into());
 		}
 
-		// Extract biased exponent (2 bytes, big-endian)
-		let exp_bytes = [bytes[1], bytes[2]];
-		let biased_exponent = u16::from_be_bytes(exp_bytes);
+		// Extract biased exponent (2 bytes with shift to avoid 0x00)
+		let biased_exponent = (bytes[1] - 1) as u16 * 255 + (bytes[2] - 1) as u16;
 		// Unbias the scale, handling negative number complement
 		let biased_exponent = if is_negative {
 			// For negative numbers, undo the complement applied during encoding
@@ -240,7 +246,7 @@ impl DecimalLexEncoder {
 			buf.push(!packed);
 		} else {
 			// Set the termination byte (inverted)
-			buf.push(0xFF);
+			buf.push(0xF0); // !0x0F
 		}
 	}
 
@@ -270,7 +276,7 @@ impl DecimalLexEncoder {
 			buf.push(packed);
 		} else {
 			// Set the termination byte
-			buf.push(0x00);
+			buf.push(0x0F);
 		}
 	}
 
@@ -319,7 +325,7 @@ impl DecimalLexEncoder {
 	fn unpack_digit(pack: u8, m: &mut U128) -> Result<u8> {
 		let hi = pack >> 4;
 		let lo = pack & 0x0F;
-		if hi == 0 {
+		if hi == 0x0 {
 			return Ok(0);
 		}
 		if !(1..=10).contains(&hi) {
@@ -371,7 +377,7 @@ impl DecimalLexEncoder {
 mod tests {
 	use super::*;
 
-	fn test_cases() -> [D128; 30] {
+	fn test_cases() -> [D128; 32] {
 		[
 			D128::from(f64::NEG_INFINITY),
 			D128::from(f64::MIN),
@@ -385,9 +391,11 @@ mod tests {
 			D128::from(-9),
 			D128::from(-3.15),
 			D128::from(-std::f64::consts::PI),
+			D128::from(-1.5f64),
 			-D128::ONE,
 			D128::ZERO,
 			D128::ONE,
+			D128::from(1.5f64),
 			D128::from(2),
 			D128::from(std::f64::consts::PI),
 			D128::from(3.15),
@@ -417,6 +425,24 @@ mod tests {
 			} else {
 				assert_eq!(case, decoded, "Roundtrip failed for {i}: {case} != {decoded}");
 			}
+		}
+	}
+
+	#[test]
+	fn test_encode_terminate_with_zero() {
+		let cases = test_cases();
+		for (i, case) in cases.into_iter().enumerate() {
+			let encoded = DecimalLexEncoder::encode(case);
+			assert_eq!(
+				encoded.iter().filter(|&b| *b == 0x00).count(),
+				1,
+				"Encoded buffer should contains only one 0x00 - {i}: {case} {encoded:?}"
+			);
+			assert_eq!(
+				encoded.iter().position(|&b| b == 0x00).unwrap(),
+				encoded.len() - 1,
+				"Encoded buffer should terminate with 0x00 - {i}: {case} {encoded:?}"
+			);
 		}
 	}
 
@@ -460,7 +486,7 @@ mod tests {
 	fn test_decode_empty_mantissa() {
 		// Create a buffer that starts correctly but is truncated during mantissa
 		// decoding
-		let result = DecimalLexEncoder::decode(&[0xA0, 0x00, 0x00, 0x00]); // Missing mantissa data
+		let result = DecimalLexEncoder::decode(&[0xA0, 0x01, 0x01, 0x00]); // Missing mantissa data
 		assert!(result.is_err());
 		let err = result.unwrap_err();
 		assert!(err.to_string().contains("Empty mantissa"), "{err:?}");

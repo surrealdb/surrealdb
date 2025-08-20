@@ -363,20 +363,22 @@ impl Number {
 	/// - `Ok(Vec<u8>)`: Lexicographically-ordered byte buffer
 	/// - `Err(Error)`: If Decimal conversion fails (for Decimal variant)
 	pub(crate) fn as_decimal_buf(&self) -> Result<Vec<u8>> {
-		match self {
+		let b = match self {
 			Self::Int(v) => {
 				// Convert integer to decimal for consistent encoding across all numeric types
-				Ok(DecimalLexEncoder::encode(D128::from(*v)))
+				DecimalLexEncoder::encode(D128::from(*v))
 			}
 			Self::Float(v) => {
 				// Convert float to decimal for lexicographic encoding
-				Ok(DecimalLexEncoder::encode(D128::from_f64(*v)))
+				DecimalLexEncoder::encode(D128::from_f64(*v))
 			}
 			Self::Decimal(v) => {
 				// Direct encoding of decimal values using lexicographic encoder
-				Ok(DecimalLexEncoder::encode(DecimalLexEncoder::to_d128(*v)?))
+				DecimalLexEncoder::encode(DecimalLexEncoder::to_d128(*v)?)
 			}
-		}
+		};
+		println!("{self} as_decimal_buf: {b:?}");
+		Ok(b)
 	}
 
 	/// Reconstructs a Number from a lexicographically-ordered byte buffer.
@@ -420,6 +422,7 @@ impl Number {
 	/// - **Unknown marker**: Last byte is not a recognized type marker
 	/// - **Decode failure**: Lexicographic decoding fails or type conversion fails
 	pub(crate) fn from_decimal_buf(b: &[u8]) -> Result<Self> {
+		println!("from_decimal_buf: {b:?}");
 		let dec = DecimalLexEncoder::decode(b)?;
 		if dec.is_finite() {
 			match DecimalLexEncoder::to_decimal(dec) {

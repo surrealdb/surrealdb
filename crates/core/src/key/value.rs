@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, Bound};
 use std::fmt;
 use std::fmt::{Debug, Formatter};
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::de::{SeqAccess, Visitor};
+use serde::ser::SerializeSeq;
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
@@ -273,7 +275,11 @@ impl Serialize for StoreKeyNumber {
 		S: Serializer,
 	{
 		let buf = self.0.as_decimal_buf().map_err(serde::ser::Error::custom)?;
-		serializer.serialize_bytes(&buf)
+		let mut seq = serializer.serialize_seq(None)?;
+		for b in buf {
+			seq.serialize_element(&b)?
+		}
+		seq.end()
 	}
 }
 
@@ -282,32 +288,61 @@ impl<'de> Deserialize<'de> for StoreKeyNumber {
 	where
 		D: Deserializer<'de>,
 	{
-		// A small visitor that accepts both borrowed and owned byte
-		// buffers and forwards them to `from_decimal_buf`.
 		struct NumberVisitor;
 
-		impl serde::de::Visitor<'_> for NumberVisitor {
+		impl<'de> Visitor<'de> for NumberVisitor {
 			type Value = StoreKeyNumber;
 
 			fn expecting(&self, f: &mut Formatter) -> fmt::Result {
-				f.write_str("SurrealDB binary-encoded Number")
+				f.write_str("zero-terminated sequence of u8 encoding a StoreKeyNumber")
 			}
 
-			fn visit_bytes<E>(self, v: &[u8]) -> Result<StoreKeyNumber, E>
+			// Primary path: we serialized as a sequence of u8 (no length prefix),
+			// so deserialize by streaming u8s until the first 0x00 terminator.
+			fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
 			where
-				E: serde::de::Error,
+				A: SeqAccess<'de>,
 			{
-				Ok(Number::from_decimal_buf(v).map_err(E::custom)?.into())
+				let mut buf = Vec::with_capacity(16);
+				while let Some(b) = seq.next_element::<u8>()? {
+					buf.push(b);
+					if b == 0x00 {
+						break; // stop at the terminator
+					}
+				}
+
+				// Require terminator to ensure we didn’t split across fields.
+				match buf.last() {
+					Some(0x00) => {}
+					_ => {
+						return Err(de::Error::custom(
+							"unterminated numeric encoding (missing 0x00)",
+						));
+					}
+				}
+
+				crate::val::Number::from_decimal_buf(&buf)
+					.map(StoreKeyNumber)
+					.map_err(de::Error::custom)
 			}
 
-			fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<StoreKeyNumber, E>
+			// Compatibility path: if deserializer offers a contiguous byte slice.
+			fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
 			where
-				E: serde::de::Error,
+				E: de::Error,
+			{
+				crate::val::Number::from_decimal_buf(v).map(StoreKeyNumber).map_err(E::custom)
+			}
+
+			fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+			where
+				E: de::Error,
 			{
 				self.visit_bytes(&v)
 			}
 		}
 
-		deserializer.deserialize_bytes(NumberVisitor)
+		// Allow both sequence and bytes forms.
+		deserializer.deserialize_any(NumberVisitor)
 	}
 }
