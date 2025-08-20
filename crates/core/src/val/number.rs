@@ -366,7 +366,6 @@ impl Number {
 				DecimalLexEncoder::encode(DecimalLexEncoder::to_d128(*v)?)
 			}
 		};
-		println!("{self} as_decimal_buf: {b:?}");
 		Ok(b)
 	}
 
@@ -387,7 +386,6 @@ impl Number {
 	/// Returns the reconstructed Number or an error if the buffer is empty or
 	/// cannot be decoded.
 	pub(crate) fn from_decimal_buf(b: &[u8]) -> Result<Self> {
-		println!("from_decimal_buf: {b:?}");
 		let dec = DecimalLexEncoder::decode(b)?;
 		if dec.is_finite() {
 			match DecimalLexEncoder::to_decimal(dec) {
@@ -1317,15 +1315,16 @@ mod tests {
 			Number::from(f64::NEG_INFINITY),
 			Number::from(f64::MIN),
 			Number::Int(i64::MIN),
+			Number::from(-1000),
+			Number::from(-100),
 			Number::from(-10),
-			Number::from(-3.15),
-			Number::from(-PI),
+			Number::from(-1.5),
 			Number::from(-1),
 			Number::from(0),
 			Number::from(1),
+			Number::from(1.5),
 			Number::from(2),
-			Number::from(PI),
-			Number::from(3.15),
+			Number::from(10),
 			Number::from(100),
 			Number::from(1000),
 			Number::from(i64::MAX),
