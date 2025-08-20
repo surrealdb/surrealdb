@@ -47,7 +47,7 @@ pub(crate) enum Key {
 	/// A cache key for tables
 	Tbs(NamespaceId, DatabaseId),
 	/// A cache key for sequences (on a database)
-	Seq(NamespaceId, DatabaseId),
+	Sqs(NamespaceId, DatabaseId),
 	/// A cache key for events (on a table)
 	Evs(NamespaceId, DatabaseId, String),
 	/// A cache key for fieds (on a table)
@@ -140,7 +140,7 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Mls(a, b) => Key::Mls(a, b),
 			Lookup::Cgs(a, b) => Key::Cgs(a, b),
 			Lookup::Pas(a, b) => Key::Pas(a, b),
-			Lookup::Sqs(a, b) => Key::Seq(a, b),
+			Lookup::Sqs(a, b) => Key::Sqs(a, b),
 			Lookup::Tbs(a, b) => Key::Tbs(a, b),
 			Lookup::Evs(a, b, c) => Key::Evs(a, b, c.to_string()),
 			Lookup::Fds(a, b, c) => Key::Fds(a, b, c.to_string()),

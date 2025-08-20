@@ -141,6 +141,7 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Mls(la, lb), Key::Mls(ka, kb)) => la == ka && lb == kb,
 			(Self::Cgs(la, lb), Key::Cgs(ka, kb)) => la == ka && lb == kb,
 			(Self::Pas(la, lb), Key::Pas(ka, kb)) => la == ka && lb == kb,
+			(Self::Sqs(la, lb), Key::Sqs(ka, kb)) => la == ka && lb == kb,
 			(Self::Tbs(la, lb), Key::Tbs(ka, kb)) => la == ka && lb == kb,
 			(Self::Evs(la, lb, lc), Key::Evs(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Fds(la, lb, lc), Key::Fds(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
