@@ -325,7 +325,7 @@ mod mem {
 	async fn experimental_features() {
 		let surql = "
 		    USE NAMESPACE namespace DATABASE database;
-			DEFINE FIELD using ON house TYPE references<utility>;
+			DEFINE FIELD using ON house TYPE record<utility> REFERENCE ON DELETE CASCADE;
 		";
 		// Experimental features are rejected by default
 		let db = Surreal::new::<Mem>(()).await.unwrap();

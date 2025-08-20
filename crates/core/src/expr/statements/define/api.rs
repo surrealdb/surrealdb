@@ -42,7 +42,7 @@ impl DefineApiStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Api, &Base::Db)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
 		if txn.get_db_api(ns, db, &self.path.to_string()).await.is_ok() {
 			match self.kind {
@@ -68,9 +68,6 @@ impl DefineApiStatement {
 		let config = self.config.compute(stk, ctx, opt, doc).await?;
 
 		let key = crate::key::database::ap::new(ns, db, &name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-
 		let mut actions = Vec::new();
 		for action in self.actions.iter() {
 			actions.push(ApiActionStore {

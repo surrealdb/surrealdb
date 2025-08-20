@@ -493,10 +493,14 @@ async fn select_with_no_index_unary_operator() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let mut res = dbs
-		.execute("SELECT * FROM table WITH NOINDEX WHERE !param.subparam EXPLAIN", &ses, None)
+		.execute(
+			"DEFINE TABLE table; SELECT * FROM table WITH NOINDEX WHERE !param.subparam EXPLAIN",
+			&ses,
+			None,
+		)
 		.await?;
-	assert_eq!(res.len(), 1);
-	let tmp = res.remove(0).result?;
+	assert_eq!(res.len(), 2);
+	let tmp = res.remove(1).result?;
 	let val = syn::value(
 		r#"[
 				{
@@ -529,10 +533,15 @@ async fn select_with_no_index_unary_operator() -> Result<()> {
 async fn select_unsupported_unary_operator() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let mut res =
-		dbs.execute("SELECT * FROM table WHERE !param.subparam EXPLAIN", &ses, None).await?;
-	assert_eq!(res.len(), 1);
-	let tmp = res.remove(0).result?;
+	let mut res = dbs
+		.execute(
+			"DEFINE TABLE table; SELECT * FROM table WHERE !param.subparam EXPLAIN",
+			&ses,
+			None,
+		)
+		.await?;
+	assert_eq!(res.len(), 2);
+	let tmp = res.remove(1).result?;
 	let val = syn::value(
 		r#"[
 				{
@@ -701,6 +710,7 @@ const EXPLAIN_FROM_TO: &str = r"[
 		{
 			detail: {
 				plan: {
+				    direction: 'forward',
 					from: {
 						inclusive: false,
 						value: 2000
@@ -748,6 +758,7 @@ const EXPLAIN_FROM_INCL_TO: &str = r"[
 		{
 			detail: {
 				plan: {
+				    direction: 'forward',
 					from: {
 						inclusive: true,
 						value: 2000
@@ -799,6 +810,7 @@ const EXPLAIN_FROM_TO_INCL: &str = r"[
 			{
 				detail: {
 					plan: {
+					    direction: 'forward',
 						from: {
 							inclusive: false,
 							value: 2000
@@ -850,6 +862,7 @@ const EXPLAIN_FROM_INCL_TO_INCL: &str = r"[
 			{
 				detail: {
 					plan: {
+					    direction: 'forward',
 						from: {
 							inclusive: true,
 							value: 2000
@@ -944,6 +957,7 @@ const EXPLAIN_LESS: &str = r"[
 			{
 				detail: {
 					plan: {
+					    direction: 'forward',
 						from: {
 							inclusive: false,
 							value: None
@@ -985,6 +999,7 @@ const EXPLAIN_LESS_OR_EQUAL: &str = r"[
 			{
 				detail: {
 					plan: {
+					    direction: 'forward',
 						from: {
 							inclusive: false,
 							value: None
@@ -1030,6 +1045,7 @@ const EXPLAIN_MORE: &str = r"[
 			{
 				detail: {
 					plan: {
+					    direction: 'forward',
 						from: {
 							inclusive: false,
 							value: 2015
@@ -1071,6 +1087,7 @@ const EXPLAIN_MORE_OR_EQUAL: &str = r"[
 			{
 				detail: {
 					plan: {
+					    direction: 'forward',
 						from: {
 							inclusive: true,
 							value: 2015
@@ -2740,6 +2757,7 @@ async fn select_count_group_all_with_or_without_index() -> Result<()> {
 			{
 				detail: {
 					plan: {
+						direction: 'forward',
 						from: {
 							inclusive: true,
 							value: 5000

@@ -72,13 +72,22 @@ pub async fn db_access(
 ) -> Result<SignupData> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
+	let db_def = match tx.get_db_by_name(&ns, &db).await? {
+		Some(db) => db,
+		None => {
+			return Err(Error::DbNotFound {
+				name: db.to_string(),
+			}
+			.into());
+		}
+	};
 	// Fetch the specified access method from storage
-	let access = tx.get_db_access(&ns, &db, &ac).await;
+	let access = tx.get_db_access(db_def.namespace_id, db_def.database_id, &ac).await;
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
 
 	// Check the provided access method exists
-	let Ok(av) = access else {
+	let Ok(Some(av)) = access else {
 		bail!(Error::AccessNotFound)
 	};
 
