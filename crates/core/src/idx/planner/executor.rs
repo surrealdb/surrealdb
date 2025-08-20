@@ -28,9 +28,8 @@ use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
 	IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
 	IndexUnionThingIterator, IteratorRange, IteratorRecord, IteratorRef, KnnIterator,
-	KnnIteratorResult, MatchesThingIterator, MultipleIterators, ThingIterator,
-	UniqueEqualThingIterator, UniqueJoinThingIterator, UniqueRangeThingIterator,
-	UniqueUnionThingIterator,
+	KnnIteratorResult, MatchesThingIterator, ThingIterator, UniqueEqualThingIterator,
+	UniqueJoinThingIterator, UniqueRangeThingIterator, UniqueUnionThingIterator,
 };
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 use crate::idx::planner::iterators::{
@@ -509,6 +508,31 @@ impl QueryExecutor {
 		}
 	}
 
+	/// Converts a value from an IndexOperator to a `fd`.
+	/// Values from `IndexOperator::Equality` can be either single values or arrays.
+	/// When it is an array id describe the composite values of one item in the compound index.
+	/// When it is not an array, it is the first column of the compound index.
+	fn equality_to_fd(value: &Value) -> StoreKeyArray {
+		if let Value::Array(a) = value {
+			let a: Vec<_> = a.iter().map(|v| StoreKeyValue::from(v.clone())).collect();
+			StoreKeyArray(a)
+		} else {
+			StoreKeyArray::from(StoreKeyValue::from(value.clone()))
+		}
+	}
+
+	/// Converts a value from an `IndexOperator::Union` to a vector of `fd`.
+	/// Values fron IndexOperator can be either single values or arrays.
+	/// When it is an array it is different possible values. Each of then needs to be converted to
+	/// an fd. When it is not an array, it is a unique value.
+	fn union_to_fds(value: &Value) -> Vec<StoreKeyArray> {
+		if let Value::Array(a) = value {
+			a.iter().map(Self::equality_to_fd).collect()
+		} else {
+			vec![Self::equality_to_fd(value)]
+		}
+	}
+
 	async fn new_index_iterator(
 		&self,
 		ns: NamespaceId,
@@ -519,21 +543,12 @@ impl QueryExecutor {
 	) -> Result<Option<ThingIterator>> {
 		Ok(match io.op() {
 			IndexOperator::Equality(value) => {
-				let fd = StoreKeyArray::from(StoreKeyValue::from(value.as_ref().clone()));
+				let fd = Self::equality_to_fd(value);
 				Some(Self::new_index_equal_iterator(ir, ns, db, ix, &fd)?)
 			}
 			IndexOperator::Union(values) => {
-				if let Value::Array(a) = values.as_ref() {
-					let fds: Vec<StoreKeyArray> = a
-						.iter()
-						.map(|v| StoreKeyArray::from(StoreKeyValue::from(v.clone())))
-						.collect();
-					Some(ThingIterator::IndexUnion(IndexUnionThingIterator::new(
-						ir, ns, db, ix, &fds,
-					)?))
-				} else {
-					None
-				}
+				let fds = Self::union_to_fds(values);
+				Some(ThingIterator::IndexUnion(IndexUnionThingIterator::new(ir, ns, db, ix, &fds)?))
 			}
 			IndexOperator::Join(ios) => {
 				let iterators = self.build_iterators(ns, db, ir, ios).await?;
@@ -589,7 +604,7 @@ impl QueryExecutor {
 					ns,
 					db,
 					ix,
-					&IteratorRange::new_ref(from, to),
+					&IteratorRange::new(from, to),
 					sc,
 				)?));
 			}
@@ -599,7 +614,7 @@ impl QueryExecutor {
 					ns,
 					db,
 					ix,
-					&IteratorRange::new_ref(from, to),
+					&IteratorRange::new(from, to),
 					sc,
 				)?));
 			}
@@ -646,48 +661,6 @@ impl QueryExecutor {
 		})
 	}
 
-	fn new_multiple_index_range_iterator(
-		ir: IteratorRef,
-		ns: NamespaceId,
-		db: DatabaseId,
-		ix: &DefineIndexStatement,
-		ranges: &[IteratorRange],
-	) -> Result<ThingIterator> {
-		let mut iterators = VecDeque::with_capacity(ranges.len());
-		for range in ranges {
-			iterators.push_back(Self::new_index_range_iterator(
-				ir,
-				ns,
-				db,
-				ix,
-				range,
-				ScanDirection::Forward,
-			)?);
-		}
-		Ok(ThingIterator::Multiples(Box::new(MultipleIterators::new(iterators))))
-	}
-
-	fn new_multiple_unique_range_iterator(
-		ir: IteratorRef,
-		ns: NamespaceId,
-		db: DatabaseId,
-		ix: &DefineIndexStatement,
-		ranges: &[IteratorRange<'_>],
-	) -> Result<ThingIterator> {
-		let mut iterators = VecDeque::with_capacity(ranges.len());
-		for range in ranges {
-			iterators.push_back(Self::new_unique_range_iterator(
-				ir,
-				ns,
-				db,
-				ix,
-				range,
-				ScanDirection::Forward,
-			)?);
-		}
-		Ok(ThingIterator::Multiples(Box::new(MultipleIterators::new(iterators))))
-	}
-
 	async fn new_unique_index_iterator(
 		&self,
 		ns: NamespaceId,
@@ -698,21 +671,14 @@ impl QueryExecutor {
 	) -> Result<Option<ThingIterator>> {
 		Ok(match io.op() {
 			IndexOperator::Equality(value) => {
-				let fd = StoreKeyArray::from(StoreKeyValue::from(value.as_ref().clone()));
+				let fd = Self::equality_to_fd(value);
 				Some(Self::new_unique_equal_iterator(irf, ns, db, ixr, &fd)?)
 			}
 			IndexOperator::Union(values) => {
-				if let Value::Array(a) = values.as_ref() {
-					let fds: Vec<StoreKeyArray> = a
-						.iter()
-						.map(|v| StoreKeyArray::from(StoreKeyValue::from(v.clone())))
-						.collect();
-					Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(
-						irf, ns, db, ixr, &fds,
-					)?))
-				} else {
-					None
-				}
+				let fds = Self::union_to_fds(values);
+				Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(
+					irf, ns, db, ixr, &fds,
+				)?))
 			}
 			IndexOperator::Join(ios) => {
 				let iterators = self.build_iterators(ns, db, irf, ios).await?;
@@ -753,7 +719,7 @@ impl QueryExecutor {
 			// and consider it as a standard index (rather than a unique one)
 			Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(irf, ns, db, ix, fd)?))
 		} else {
-			Ok(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(irf, ns, db, ix, &fd)?))
+			Ok(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(irf, ns, db, ix, fd)?))
 		}
 	}
 

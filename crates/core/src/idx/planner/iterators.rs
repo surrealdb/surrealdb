@@ -132,7 +132,6 @@ pub(crate) enum ThingIterator {
 	SearchMatches(MatchesThingIterator<SearchHitsIterator>),
 	FullTextMatches(MatchesThingIterator<FullTextHitsIterator>),
 	Knn(KnnIterator),
-	Multiples(Box<MultipleIterators>),
 }
 
 impl ThingIterator {
@@ -163,7 +162,6 @@ impl ThingIterator {
 			Self::Knn(i) => i.next_batch(ctx, size).await,
 			Self::IndexJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
-			Self::Multiples(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
 		}
 	}
 
@@ -193,7 +191,6 @@ impl ThingIterator {
 			Self::Knn(i) => i.next_count(ctx, size).await,
 			Self::IndexJoin(i) => Box::pin(i.next_count(ctx, txn, size)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_count(ctx, txn, size)).await,
-			Self::Multiples(i) => Box::pin(i.next_count(ctx, txn, size)).await,
 		}
 	}
 }
@@ -435,14 +432,7 @@ pub(super) struct IteratorRange<'a> {
 }
 
 impl<'a> IteratorRange<'a> {
-	pub(super) fn new(from: RangeValue, to: RangeValue) -> Self {
-		IteratorRange {
-			from: Cow::Owned(from),
-			to: Cow::Owned(to),
-		}
-	}
-
-	pub(super) fn new_ref(from: &'a RangeValue, to: &'a RangeValue) -> Self {
+	pub(super) fn new(from: &'a RangeValue, to: &'a RangeValue) -> Self {
 		IteratorRange {
 			from: Cow::Borrowed(from),
 			to: Cow::Borrowed(to),
@@ -720,7 +710,7 @@ impl IndexUnionThingIterator {
 		let mut values: VecDeque<(Vec<u8>, Vec<u8>)> = VecDeque::with_capacity(fds.len());
 
 		for fd in fds {
-			let (beg, end) = IndexEqualThingIterator::get_beg_end(ns, db, ix, &fd)?;
+			let (beg, end) = IndexEqualThingIterator::get_beg_end(ns, db, ix, fd)?;
 			values.push_back((beg, end));
 		}
 		let current = values.pop_front();
@@ -1277,7 +1267,7 @@ impl UniqueUnionThingIterator {
 		// We create a VecDeque to hold the key for each value in the array.
 		let mut keys = VecDeque::with_capacity(fds.len());
 		for fd in fds {
-			let key = Index::new(ns, db, &ix.what, &ix.name, &fd, None).encode_key()?;
+			let key = Index::new(ns, db, &ix.what, &ix.name, fd, None).encode_key()?;
 			keys.push_back(key);
 		}
 		Ok(Self {
@@ -1497,64 +1487,5 @@ impl KnnIterator {
 			}
 		}
 		Ok(count)
-	}
-}
-
-pub(crate) struct MultipleIterators {
-	iterators: VecDeque<ThingIterator>,
-	current: Option<ThingIterator>,
-}
-
-impl MultipleIterators {
-	pub(super) fn new(iterators: VecDeque<ThingIterator>) -> Self {
-		Self {
-			iterators,
-			current: None,
-		}
-	}
-
-	async fn next_batch<B: IteratorBatch>(
-		&mut self,
-		ctx: &Context,
-		txn: &Transaction,
-		limit: u32,
-	) -> Result<B> {
-		loop {
-			// Do we have an iterator
-			if let Some(i) = &mut self.current {
-				// If so, take the next batch
-				let b: B = i.next_batch(ctx, txn, limit).await?;
-				// Return the batch if it is not empty
-				if !b.is_empty() {
-					return Ok(b);
-				}
-			}
-			// Otherwise check if there is another iterator
-			self.current = self.iterators.pop_front();
-			if self.current.is_none() {
-				// If none, we are done
-				return Ok(B::empty());
-			}
-		}
-	}
-
-	async fn next_count(&mut self, ctx: &Context, txn: &Transaction, limit: u32) -> Result<usize> {
-		loop {
-			// Do we have an iterator
-			if let Some(i) = &mut self.current {
-				// If so, take the next batch
-				let count = i.next_count(ctx, txn, limit).await?;
-				// Return the batch if it is not empty
-				if count > 0 {
-					return Ok(count);
-				}
-			}
-			// Otherwise check if there is another iterator
-			self.current = self.iterators.pop_front();
-			if self.current.is_none() {
-				// If none, we are done
-				return Ok(0);
-			}
-		}
 	}
 }

@@ -350,7 +350,7 @@ impl<'a> IndexOperation<'a> {
 				if !n.is_all_none_or_null() {
 					let n = n.into();
 					let key = self.get_unique_index_key(&n)?;
-					if txn.putc(&key, &self.rid, None).await.is_err() {
+					if txn.putc(&key, self.rid, None).await.is_err() {
 						let key = self.get_unique_index_key(&n)?;
 						let rid = txn.get(&key, None).await?.unwrap();
 						return self.err_index_exists(rid, n);
@@ -372,7 +372,7 @@ impl<'a> IndexOperation<'a> {
 			for o in i {
 				let o = o.into();
 				let key = self.get_non_unique_index_key(&o)?;
-				match txn.delc(&key, Some(&self.rid)).await {
+				match txn.delc(&key, Some(self.rid)).await {
 					Err(e) => {
 						if matches!(e.downcast_ref(), Some(Error::TxConditionNotMet)) {
 							Ok(())
@@ -390,19 +390,19 @@ impl<'a> IndexOperation<'a> {
 			for n in i {
 				let n = n.into();
 				let key = self.get_non_unique_index_key(&n)?;
-				txn.set(&key, &self.rid, None).await?;
+				txn.set(&key, self.rid, None).await?;
 			}
 		}
 		Ok(())
 	}
 
-	fn err_index_exists(&self, rid: RecordId, n: StoreKeyArray) -> Result<()> {
+	fn err_index_exists(&self, rid: RecordId, mut n: StoreKeyArray) -> Result<()> {
 		bail!(Error::IndexExists {
 			thing: rid,
 			index: self.ix.name.to_string(),
 			value: match n.0.len() {
-				1 => n.0.first().unwrap().to_string(),
-				_ => n.to_string(),
+				1 => Value::from(n.0.remove(0)).to_string(),
+				_ => Array::from(n).to_string(),
 			},
 		})
 	}

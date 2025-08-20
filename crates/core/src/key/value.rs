@@ -1,14 +1,14 @@
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, Bound};
 use std::fmt;
-use std::fmt::{Debug, Display, Formatter, Write};
+use std::fmt::{Debug, Formatter};
 
-use crate::expr::escape::EscapeRid;
-use crate::expr::fmt::Pretty;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
 	RecordIdKey, RecordIdKeyRange, Regex, Strand, Table, Uuid, Value,
 };
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::Value")]
@@ -35,32 +35,6 @@ pub(crate) enum StoreKeyValue {
 	#[serde(skip)]
 	Closure(Box<Closure>),
 	// Add new variants here
-}
-
-impl Display for StoreKeyValue {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		let mut f = Pretty::from(f);
-		match &self {
-			Self::None => write!(f, "NONE"),
-			Self::Null => write!(f, "NULL"),
-			Self::Array(v) => write!(f, "{v}"),
-			Self::Bool(v) => write!(f, "{v}"),
-			Self::Bytes(v) => write!(f, "{v}"),
-			Self::Datetime(v) => write!(f, "{v}"),
-			Self::Duration(v) => write!(f, "{v}"),
-			Self::Geometry(v) => write!(f, "{v}"),
-			Self::Number(v) => write!(f, "{v}"),
-			Self::Object(v) => write!(f, "{v}"),
-			Self::Range(v) => write!(f, "{v}"),
-			Self::Regex(v) => write!(f, "{v}"),
-			Self::Strand(v) => write!(f, "{v}"),
-			Self::RecordId(v) => write!(f, "{v}"),
-			Self::Uuid(v) => write!(f, "{v}"),
-			Self::Closure(v) => write!(f, "{v}"),
-			Self::File(v) => write!(f, "{v}"),
-			Self::Table(v) => write!(f, "{v}"),
-		}
-	}
 }
 
 impl From<Value> for StoreKeyValue {
@@ -122,12 +96,6 @@ impl From<StoreKeyValue> for StoreKeyArray {
 	}
 }
 
-impl Display for StoreKeyArray {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		Array::display(&self.0, f)
-	}
-}
-
 impl From<Array> for StoreKeyArray {
 	fn from(a: Array) -> Self {
 		Self(a.0.into_iter().map(|i| i.into()).collect())
@@ -142,12 +110,6 @@ impl From<StoreKeyArray> for Array {
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub(crate) struct StoreKeyObject(BTreeMap<String, StoreKeyValue>);
-
-impl Display for StoreKeyObject {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		Object::display(f, &self.0)
-	}
-}
 
 impl From<Object> for StoreKeyObject {
 	fn from(o: Object) -> Self {
@@ -167,11 +129,6 @@ pub(crate) struct StoreKeyRecordId {
 	pub(crate) key: StoreKeyRecordIdKey,
 }
 
-impl Display for StoreKeyRecordId {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		write!(f, "{}:{}", EscapeRid(&self.table), self.key)
-	}
-}
 impl From<RecordId> for StoreKeyRecordId {
 	fn from(r: RecordId) -> Self {
 		Self {
@@ -199,20 +156,7 @@ pub(crate) enum StoreKeyRecordIdKey {
 	Uuid(Uuid),
 	Array(StoreKeyArray),
 	Object(StoreKeyObject),
-	Range(Box<RecordIdKeyRange>),
-}
-
-impl Display for StoreKeyRecordIdKey {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		match self {
-			Self::Number(n) => write!(f, "{n}"),
-			Self::String(v) => EscapeRid(v).fmt(f),
-			Self::Uuid(uuid) => Display::fmt(uuid, f),
-			Self::Object(object) => Display::fmt(object, f),
-			Self::Array(array) => Display::fmt(array, f),
-			Self::Range(rid) => Display::fmt(rid, f),
-		}
-	}
+	Range(Box<StoreKeyRecordIdKeyRange>),
 }
 
 impl From<RecordIdKey> for StoreKeyRecordIdKey {
@@ -241,19 +185,75 @@ impl From<StoreKeyRecordIdKey> for RecordIdKey {
 	}
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Hash)]
 pub(crate) struct StoreKeyRecordIdKeyRange {
 	pub start: Bound<StoreKeyRecordIdKey>,
 	pub end: Bound<StoreKeyRecordIdKey>,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
-pub(crate) struct StoreKeyNumber(pub Number);
-
-impl Display for StoreKeyNumber {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		Display::fmt(&self.0, f)
+impl From<RecordIdKeyRange> for StoreKeyRecordIdKeyRange {
+	fn from(r: RecordIdKeyRange) -> Self {
+		fn map_bound(b: Bound<RecordIdKey>) -> Bound<StoreKeyRecordIdKey> {
+			match b {
+				Bound::Included(v) => Bound::Included(v.into()),
+				Bound::Excluded(v) => Bound::Excluded(v.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			}
+		}
+		Self {
+			start: map_bound(r.start),
+			end: map_bound(r.end),
+		}
 	}
 }
+
+impl From<StoreKeyRecordIdKeyRange> for RecordIdKeyRange {
+	fn from(r: StoreKeyRecordIdKeyRange) -> Self {
+		fn map_bound(b: Bound<StoreKeyRecordIdKey>) -> Bound<RecordIdKey> {
+			match b {
+				Bound::Included(v) => Bound::Included(v.into()),
+				Bound::Excluded(v) => Bound::Excluded(v.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			}
+		}
+		Self {
+			start: map_bound(r.start),
+			end: map_bound(r.end),
+		}
+	}
+}
+
+impl PartialOrd for StoreKeyRecordIdKeyRange {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		fn compare_bounds(
+			a: &Bound<StoreKeyRecordIdKey>,
+			b: &Bound<StoreKeyRecordIdKey>,
+		) -> Option<Ordering> {
+			match a {
+				Bound::Unbounded => match b {
+					Bound::Unbounded => Some(Ordering::Equal),
+					_ => Some(Ordering::Less),
+				},
+				Bound::Included(a) => match b {
+					Bound::Unbounded => Some(Ordering::Greater),
+					Bound::Included(b) => a.partial_cmp(b),
+					Bound::Excluded(_) => Some(Ordering::Less),
+				},
+				Bound::Excluded(a) => match b {
+					Bound::Excluded(b) => a.partial_cmp(b),
+					_ => Some(Ordering::Greater),
+				},
+			}
+		}
+		match compare_bounds(&self.start, &other.end) {
+			Some(Ordering::Equal) => compare_bounds(&self.end, &other.end),
+			x => x,
+		}
+	}
+}
+
+#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Hash)]
+pub(crate) struct StoreKeyNumber(pub Number);
 
 impl From<Number> for StoreKeyNumber {
 	fn from(n: Number) -> Self {

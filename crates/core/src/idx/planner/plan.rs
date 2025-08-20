@@ -359,7 +359,7 @@ pub(super) enum Plan {
 	SingleIndexRange(IndexReference, UnionRangeQueryBuilder, RecordStrategy, ScanDirection, bool),
 }
 
-#[derive(Debug, PartialEq, Hash, Clone)]
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub(super) struct IndexOption {
 	/// A reference to the index definition
 	ixr: IndexReference,
@@ -371,7 +371,7 @@ pub(super) struct IndexOption {
 	op: Arc<IndexOperator>,
 }
 
-#[derive(Debug, PartialEq, Hash)]
+#[derive(Debug, Eq, PartialEq, Hash)]
 pub(super) enum IndexOperator {
 	Equality(Arc<Value>),
 	Union(Arc<Value>),
@@ -490,7 +490,7 @@ impl IndexOption {
 	}
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Hash)]
+#[derive(Debug, Clone, Default, Eq, PartialEq, Hash)]
 pub(super) struct RangeValue {
 	pub(super) value: Value,
 	pub(super) inclusive: bool,
