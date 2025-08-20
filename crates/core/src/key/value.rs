@@ -1,3 +1,14 @@
+//! StoreKeyValue and StoreKeyNumber encode Values for KV store keys.
+//!
+//! Numbers are serialized using a lexicographic encoding (see DecimalLexEncoder)
+//! such that byte-wise ordering matches numeric ordering. This ensures index
+//! scans and uniqueness checks behave consistently across Int/Float/Decimal
+//! representations of the same value. Serialization is stream-friendly: the
+//! numeric encoding guarantees an in-band terminator and additionally appends a
+//! 0x00 byte so deserializers can read until the first zero.
+//!
+//! Some Value variants (eg Regex, Closure) are skipped for serde because they
+//! are not used in key material.
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, Bound};
 use std::fmt;
@@ -269,6 +280,8 @@ impl From<StoreKeyNumber> for Number {
 	}
 }
 
+/// Serializes as a zero-terminated sequence of u8 bytes produced by
+/// Number::as_decimal_buf(), which preserves lexicographic order for numbers.
 impl Serialize for StoreKeyNumber {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
@@ -283,6 +296,9 @@ impl Serialize for StoreKeyNumber {
 	}
 }
 
+/// Deserializes a zero-terminated sequence of u8 bytes into a StoreKeyNumber.
+/// The visitor reads until the first 0x00 terminator, then delegates to
+/// Number::from_decimal_buf() which understands the DecimalLexEncoder format.
 impl<'de> Deserialize<'de> for StoreKeyNumber {
 	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
 	where

@@ -305,6 +305,10 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
+	/// Build the KV key for a unique index. The StoreKeyArray encodes values in
+	/// a canonical, lexicographically ordered byte form which normalizes numeric
+	/// types (Int/Float/Decimal). This means equal numeric values like 0, 0.0 and
+	/// 0dec map to the same index key and therefore conflict on UNIQUE indexes.
 	fn get_unique_index_key(&self, v: &'a StoreKeyArray) -> Result<key::index::Index> {
 		Ok(key::index::Index::new(self.ns, self.db, &self.ix.what, &self.ix.name, v, None))
 	}

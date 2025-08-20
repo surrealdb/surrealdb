@@ -326,42 +326,31 @@ impl Number {
 		}
 	}
 
-	/// Converts this Number to a lexicographically-ordered byte buffer.
+	/// Converts this Number to a lexicographically ordered byte buffer.
 	///
-	/// This method serializes the Number into a byte representation that
-	/// preserves numeric ordering when compared lexicographically. This is
-	/// essential for database indexing where byte-level comparison must match
-	/// numeric comparison.
+	/// This serializes the Number using DecimalLexEncoder so that byte-wise
+	/// comparison preserves numeric ordering. This is essential for database
+	/// indexes where key bytes must sort the same way as their numeric values.
 	///
-	/// # Ordering Guarantees
+	/// Ordering guarantees:
+	/// - If `a < b` numerically, then `a.as_decimal_buf() < b.as_decimal_buf()` lexicographically.
 	///
-	/// If `a < b` numerically, then `a.as_decimal_buf() < b.as_decimal_buf()`
-	/// lexicographically (byte-wise comparison).
-	/// Equal numerics across different variants are ordered by their trailing
-	/// type marker (Int < Float < Decimal) to establish a total ordering.
+	/// Encoding format:
+	/// - A leading class/marker byte indicates zero, finite negative, finite positive, negative
+	///   infinity, positive infinity, or NaN.
+	/// - Two bytes encode a biased scale for finite values.
+	/// - Packed base-10 digits follow (2 digits per byte), with an in-band terminator ensured by
+	///   the packing scheme; the encoder also appends a trailing 0x00 terminator byte for
+	///   stream-friendly decoding.
 	///
-	/// # Format
+	/// Notes:
+	/// - There is no extra "type marker" for Int/Float/Decimal variants; all variants are
+	///   normalized through D128 for ordering.
+	/// - Special float values (NaN/±∞) are mapped to fixed encodings at the extremes to preserve a
+	///   total order.
 	///
-	/// The returned buffer consists of:
-	/// - Variable-length lexicographic encoding of the numeric value (see DecimalLexEncoder)
-	/// - Single-byte type marker suffix to distinguish the original Number variant
-	///
-	/// The mantissa encoding always contains an explicit terminator
-	/// nibble/byte, ensuring a trailing type marker cannot be misinterpreted
-	/// as additional digits.
-	///
-	/// # Special Value Handling (Float)
-	///
-	/// The following fixed encodings are used to place special float values at
-	/// the extremes:
-	/// - **Positive Infinity**: `[0xFF, 0xFF, NUMBER_MARKER_FLOAT_INFINITE_POSITIVE]` (largest)
-	/// - **Negative Infinity**: `[0x00, 0x00, NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE]` (smallest)
-	/// - **NaN**: `[0xFF, 0xFF, NUMBER_MARKER_FLOAT_NAN]` (treated as larger than all other values)
-	///
-	/// # Returns
-	///
-	/// - `Ok(Vec<u8>)`: Lexicographically-ordered byte buffer
-	/// - `Err(Error)`: If Decimal conversion fails (for Decimal variant)
+	/// Returns an ordered byte buffer or an error if Decimal conversion fails
+	/// for Decimal variant values.
 	pub(crate) fn as_decimal_buf(&self) -> Result<Vec<u8>> {
 		let b = match self {
 			Self::Int(v) => {
@@ -381,46 +370,22 @@ impl Number {
 		Ok(b)
 	}
 
-	/// Reconstructs a Number from a lexicographically-ordered byte buffer.
+	/// Reconstructs a Number from a lexicographically ordered byte buffer.
 	///
-	/// This method deserializes a byte buffer created by `as_decimal_buf()`
-	/// back into the original Number, preserving both the numeric value and
-	/// the original type variant (Int, Float, or Decimal).
+	/// This deserializes a buffer produced by `as_decimal_buf()` using
+	/// DecimalLexEncoder, recovering the numeric value. All Number variants are
+	/// normalized through the same encoding, so the original variant (Int/Float/
+	/// Decimal) is not preserved; only the value (and special cases like NaN/±∞)
+	/// matters for ordering and equality in keys.
 	///
-	/// # Parameters
+	/// The decoder recognizes:
+	/// - Zero, finite negatives, finite positives (via marker and biased scale)
+	/// - Negative/positive infinity, NaN (fixed encodings)
+	/// - An explicit in-band terminator added by the encoder, which ensures the mantissa decoder
+	///   stops before any following data in the stream.
 	///
-	/// - `b`: Byte slice containing the lexicographically-encoded number with trailing type marker
-	///
-	/// # Buffer Format
-	///
-	/// The input buffer must have the format produced by `as_decimal_buf()`:
-	/// - Variable-length lexicographic encoding of the numeric value
-	/// - Single-byte type marker suffix indicating the original Number variant
-	///
-	/// # Type Reconstruction
-	///
-	/// The method examines the last byte (type marker) to determine how to
-	/// decode:
-	/// - `NUMBER_MARKER_FINITE`: Decode
-	/// - `NUMBER_MARKER_FLOAT_INFINITE_POSITIVE`: Return f64::INFINITY
-	/// - `NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE`: Return f64::NEG_INFINITY
-	/// - `NUMBER_MARKER_FLOAT_NAN`: Return f64::NAN
-	///
-	/// It is safe to pass the whole buffer (including the trailing marker) to
-	/// the decimal decoder because the mantissa encoding always includes an
-	/// internal terminator nibble/byte. The decoder will stop before reaching
-	/// the marker.
-	///
-	/// # Returns
-	///
-	/// - `Ok(Number)`: Successfully reconstructed Number with original type and value
-	/// - `Err(Error)`: If buffer is empty, has unknown marker, or decoding fails
-	///
-	/// # Errors
-	///
-	/// - **Empty buffer**: Input slice has no bytes
-	/// - **Unknown marker**: Last byte is not a recognized type marker
-	/// - **Decode failure**: Lexicographic decoding fails or type conversion fails
+	/// Returns the reconstructed Number or an error if the buffer is empty or
+	/// cannot be decoded.
 	pub(crate) fn from_decimal_buf(b: &[u8]) -> Result<Self> {
 		println!("from_decimal_buf: {b:?}");
 		let dec = DecimalLexEncoder::decode(b)?;

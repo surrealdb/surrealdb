@@ -89,6 +89,9 @@ struct PrefixIds<'a> {
 	_d: u8,
 	pub ix: &'a str,
 	_e: u8,
+	/// Encoded index field values. Uses StoreKeyArray which normalizes numeric
+	/// types (Int/Float/Decimal) into a lexicographically ordered byte form so
+	/// equal numeric values compare equal in index keys.
 	pub fd: Cow<'a, StoreKeyArray>,
 }
 
@@ -132,6 +135,9 @@ pub(crate) struct Index<'a> {
 	_d: u8,
 	pub ix: &'a str,
 	_e: u8,
+	/// Encoded index field values. Uses StoreKeyArray which normalizes numeric
+	/// types (Int/Float/Decimal) into a lexicographically ordered byte form so
+	/// equal numeric values compare equal in index keys.
 	pub fd: Cow<'a, StoreKeyArray>,
 	pub id: Option<Cow<'a, RecordIdKey>>,
 }

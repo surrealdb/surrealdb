@@ -25,9 +25,13 @@ use crate::err::Error;
 ///
 /// ### Non-Zero Values
 /// The format consists of:
-/// 1. **Sign marker** (1 byte):
-///    - `0xFF` for positive numbers
-///    - `0x00` for negative numbers
+/// 1. **Class/marker byte** (1 byte):
+///    - `0x80` Zero
+///    - `0x40` Finite negative
+///    - `0xA0` Finite positive
+///    - `0x20` Negative infinity
+///    - `0xC0` Positive infinity
+///    - `0xFF` NaN
 ///
 /// 2. **Biased scale** (2 bytes, big-endian):
 ///    - We bias the "scale" (not the raw exponent). Scale is defined as: `scale = exponent +
