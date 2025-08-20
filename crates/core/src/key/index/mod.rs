@@ -194,18 +194,25 @@ impl<'a> Index<'a> {
 		Prefix::new(ns, db, tb, ix).encode_key()
 	}
 
+	/// Start of the index keyspace: prefix + 0x00. Used as the lower bound
+	/// when iterating all entries for a given index.
 	pub fn prefix_beg(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix(ns, db, tb, ix)?;
 		beg.extend_from_slice(&[0x00]);
 		Ok(beg)
 	}
 
+	/// End of the index keyspace: prefix + 0xFF. Used as the upper bound (exclusive)
+	/// when iterating all entries for a given index.
 	pub fn prefix_end(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix(ns, db, tb, ix)?;
 		beg.extend_from_slice(&[0xff]);
 		Ok(beg)
 	}
 
+	/// Build the base prefix for an index including the encoded field values.
+	/// Field values are encoded using StoreKeyArray which zero-terminates
+	/// components so that composite keys can be parsed unambiguously.
 	fn prefix_ids(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -216,6 +223,8 @@ impl<'a> Index<'a> {
 		PrefixIds::new(ns, db, tb, ix, fd).encode_key()
 	}
 
+	/// Start of the subspace for a specific set of field values: prefix_ids + 0x00.
+	/// This is the lower bound when scanning all record ids matching those values.
 	pub fn prefix_ids_beg(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -228,6 +237,8 @@ impl<'a> Index<'a> {
 		Ok(beg)
 	}
 
+	/// End of the subspace for a specific set of field values: prefix_ids + 0xFF
+	/// (exclusive upper bound).
 	pub fn prefix_ids_end(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -240,6 +251,9 @@ impl<'a> Index<'a> {
 		Ok(beg)
 	}
 
+	/// For composite indexes, adjust the last terminator to 0x00 to form the
+	/// inclusive lower bound of the composite range. The last 0x00 ensures any
+	/// following id component compares greater.
 	pub fn prefix_ids_composite_beg(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -252,6 +266,8 @@ impl<'a> Index<'a> {
 		Ok(beg)
 	}
 
+	/// For composite indexes, adjust the last terminator to 0xFF to form the
+	/// exclusive upper bound of the composite range.
 	pub fn prefix_ids_composite_end(
 		ns: NamespaceId,
 		db: DatabaseId,

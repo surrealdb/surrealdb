@@ -329,6 +329,9 @@ impl<'a> IndexOperation<'a> {
 		Ok(key::index::Index::new(self.ns, self.db, &self.ix.what, &self.ix.name, v, None))
 	}
 
+	/// Build the KV key for a non-unique index. The record id is appended
+	/// to the encoded field values so multiple records can share the same field
+	/// bytes; numeric values inside fd are normalized via StoreKeyArray.
 	fn get_non_unique_index_key(&self, v: &'a StoreKeyArray) -> Result<key::index::Index> {
 		Ok(key::index::Index::new(
 			self.ns,
@@ -416,6 +419,9 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
+	/// Construct a consistent uniqueness violation error message.
+	/// Formats the conflicting value as a single value or array depending on
+	/// the number of indexed fields.
 	fn err_index_exists(&self, rid: RecordId, mut n: StoreKeyArray) -> Result<()> {
 		bail!(Error::IndexExists {
 			thing: rid,

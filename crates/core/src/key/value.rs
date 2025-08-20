@@ -100,6 +100,10 @@ impl From<StoreKeyValue> for Value {
 	}
 }
 
+/// Ordered collection of values serialized for index keys and prefixes.
+/// Numeric values are normalized via StoreKeyNumber’s lexicographic encoding
+/// when present, and components are zero-terminated to allow safe concatenation
+/// in composite keys.
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub(crate) struct StoreKeyArray(pub(crate) Vec<StoreKeyValue>);
 
@@ -121,6 +125,9 @@ impl From<StoreKeyArray> for Array {
 	}
 }
 
+/// Map-like structure for object values used in keys.
+/// Field values use StoreKeyValue encoding; numeric fields are normalized so
+/// that lexicographic byte order matches numeric order in indexes.
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub(crate) struct StoreKeyObject(BTreeMap<String, StoreKeyValue>);
 
@@ -136,6 +143,9 @@ impl From<StoreKeyObject> for Object {
 	}
 }
 
+/// Record identifier encoding for use inside keys.
+/// Table and key are encoded as zero-terminated components so that the
+/// concatenated key stream can be parsed unambiguously.
 #[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub(crate) struct StoreKeyRecordId {
 	pub(super) table: String,
@@ -160,6 +170,8 @@ impl From<StoreKeyRecordId> for RecordId {
 	}
 }
 
+/// Key component for RecordId when serialized inside keys.
+/// Variants preserve ordering semantics; composite types reuse StoreKey encodings.
 #[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub(crate) enum StoreKeyRecordIdKey {
 	Number(i64),
@@ -198,6 +210,8 @@ impl From<StoreKeyRecordIdKey> for RecordIdKey {
 	}
 }
 
+/// Range of RecordIdKey values used in key encoding. Bounds are expressed
+/// with Included/Excluded/Unbounded and follow the same StoreKey encoding.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Hash)]
 pub(crate) struct StoreKeyRecordIdKeyRange {
 	pub start: Bound<StoreKeyRecordIdKey>,
@@ -236,6 +250,8 @@ impl From<StoreKeyRecordIdKeyRange> for RecordIdKeyRange {
 	}
 }
 
+// Custom partial comparison for ranges: compares start bound first, then end
+// bound, respecting Included/Excluded/Unbounded semantics.
 impl PartialOrd for StoreKeyRecordIdKeyRange {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 		fn compare_bounds(
