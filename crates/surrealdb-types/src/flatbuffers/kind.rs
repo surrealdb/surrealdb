@@ -404,6 +404,7 @@ impl FromFlatbuffers for Kind {
 
 		match kind_type {
 			KindType::Any => Ok(Kind::Any),
+			KindType::NONE => Ok(Kind::None),
 			KindType::Null => Ok(Kind::Null),
 			KindType::Bool => Ok(Kind::Bool),
 			KindType::Int => Ok(Kind::Int),
