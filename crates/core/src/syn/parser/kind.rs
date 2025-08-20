@@ -5,9 +5,8 @@ use reblessive::Stk;
 use super::basic::NumberToken;
 use super::mac::unexpected;
 use super::{ParseResult, Parser};
-use crate::sql::kind::KindLiteral;
-use crate::sql::{Ident, Idiom, Kind};
-use crate::syn::error::bail;
+use crate::sql::kind::{GeometryKind, KindLiteral};
+use crate::sql::{Ident, Kind};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::expected;
 use crate::syn::token::{Glued, Keyword, Span, TokenKind, t};
@@ -90,7 +89,7 @@ impl Parser<'_> {
 			t!("INT") => Ok(Kind::Int),
 			t!("NUMBER") => Ok(Kind::Number),
 			t!("OBJECT") => Ok(Kind::Object),
-			t!("POINT") => Ok(Kind::Point),
+			t!("POINT") => Ok(Kind::Geometry(vec![GeometryKind::Point])),
 			t!("STRING") => Ok(Kind::String),
 			t!("UUID") => Ok(Kind::Uuid),
 			t!("RANGE") => Ok(Kind::Range),
@@ -99,9 +98,10 @@ impl Parser<'_> {
 			t!("RECORD") => {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {
-					let mut tables = vec![self.next_token_value()?];
+					let mut tables =
+						vec![self.next_token_value::<Ident>().map(|i| i.into_string())?];
 					while self.eat(t!("|")) {
-						tables.push(self.next_token_value()?);
+						tables.push(self.next_token_value::<Ident>().map(|i| i.into_string())?);
 					}
 					self.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::Record(tables))
@@ -144,40 +144,16 @@ impl Parser<'_> {
 					Ok(Kind::Set(Box::new(Kind::Any), None))
 				}
 			}
-			t!("REFERENCES") => {
-				if !self.settings.references_enabled {
-					bail!(
-						"Experimental capability `record_references` is not enabled",
-						@self.last_span() => "Use of `REFERENCES` keyword is still experimental"
-					)
-				}
-
-				let span = self.peek().span;
-				let (table, path) = if self.eat(t!("<")) {
-					let table: Option<Ident> = Some(self.next_token_value()?);
-					let path: Option<Idiom> = if self.eat(t!(",")) {
-						Some(self.parse_local_idiom(stk).await?)
-					} else {
-						None
-					};
-
-					self.expect_closing_delimiter(t!(">"), span)?;
-					(table, path)
-				} else {
-					(None, None)
-				};
-
-				Ok(Kind::References(table, path))
-			}
 			t!("NONE") => {
 				unexpected!(self, next, "a kind name.", => "to define a field that can be NONE, use option<type_name> instead.")
 			}
 			t!("FILE") => {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {
-					let mut buckets = vec![self.next_token_value()?];
+					let mut buckets =
+						vec![self.next_token_value::<Ident>().map(|i| i.into_string())?];
 					while self.eat(t!("|")) {
-						buckets.push(self.next_token_value()?);
+						buckets.push(self.next_token_value::<Ident>().map(|i| i.into_string())?);
 					}
 					self.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::File(buckets))
@@ -190,19 +166,19 @@ impl Parser<'_> {
 	}
 
 	/// Parse the kind of gemoetry
-	fn parse_geometry_kind(&mut self) -> ParseResult<String> {
+	fn parse_geometry_kind(&mut self) -> ParseResult<GeometryKind> {
 		let next = self.next();
 		match next.kind {
-			TokenKind::Keyword(
-				x @ (Keyword::Feature
-				| Keyword::Point
-				| Keyword::Line
-				| Keyword::Polygon
-				| Keyword::MultiPoint
-				| Keyword::MultiLine
-				| Keyword::MultiPolygon
-				| Keyword::Collection),
-			) => Ok(x.as_str().to_ascii_lowercase()),
+			TokenKind::Keyword(keyword) => match keyword {
+				Keyword::Point => Ok(GeometryKind::Point),
+				Keyword::Line => Ok(GeometryKind::Line),
+				Keyword::Polygon => Ok(GeometryKind::Polygon),
+				Keyword::MultiPoint => Ok(GeometryKind::MultiPoint),
+				Keyword::MultiLine => Ok(GeometryKind::MultiLine),
+				Keyword::MultiPolygon => Ok(GeometryKind::MultiPolygon),
+				Keyword::Collection => Ok(GeometryKind::Collection),
+				_ => unexpected!(self, next, "a geometry kind name"),
+			},
 			_ => unexpected!(self, next, "a geometry kind name"),
 		}
 	}
@@ -289,16 +265,11 @@ mod tests {
 	use reblessive::Stack;
 
 	use super::*;
-	use crate::sql::Ident;
 
 	fn kind(i: &str) -> ParseResult<Kind> {
 		let mut parser = Parser::new(i.as_bytes());
 		let mut stack = Stack::new();
 		stack.enter(|ctx| parser.parse_inner_kind(ctx)).finish()
-	}
-
-	fn i(i: &str) -> Ident {
-		Ident::new(i.to_owned()).unwrap()
 	}
 
 	#[test]
@@ -396,8 +367,8 @@ mod tests {
 		let sql = "point";
 		let res = kind(sql);
 		let out = res.unwrap();
-		assert_eq!("point", format!("{}", out));
-		assert_eq!(out, Kind::Point);
+		assert_eq!("geometry<point>", format!("{}", out));
+		assert_eq!(out, Kind::Geometry(vec![GeometryKind::Point]));
 	}
 
 	#[test]
@@ -442,7 +413,7 @@ mod tests {
 		let res = kind(sql);
 		let out = res.unwrap();
 		assert_eq!("record<person>", format!("{}", out));
-		assert_eq!(out, Kind::Record(vec![Ident::new("person".to_owned()).unwrap()]));
+		assert_eq!(out, Kind::Record(vec!["person".to_owned()]));
 	}
 
 	#[test]
@@ -451,13 +422,7 @@ mod tests {
 		let res = kind(sql);
 		let out = res.unwrap();
 		assert_eq!("record<person | animal>", format!("{}", out));
-		assert_eq!(
-			out,
-			Kind::Record(vec![
-				Ident::new("person".to_owned()).unwrap(),
-				Ident::new("animal".to_owned()).unwrap()
-			])
-		);
+		assert_eq!(out, Kind::Record(vec!["person".to_owned(), "animal".to_owned()]));
 	}
 
 	#[test]
@@ -475,7 +440,7 @@ mod tests {
 		let res = kind(sql);
 		let out = res.unwrap();
 		assert_eq!("geometry<point>", format!("{}", out));
-		assert_eq!(out, Kind::Geometry(vec![String::from("point")]));
+		assert_eq!(out, Kind::Geometry(vec![GeometryKind::Point]));
 	}
 
 	#[test]
@@ -484,7 +449,7 @@ mod tests {
 		let res = kind(sql);
 		let out = res.unwrap();
 		assert_eq!("geometry<point | multipoint>", format!("{}", out));
-		assert_eq!(out, Kind::Geometry(vec![String::from("point"), String::from("multipoint")]));
+		assert_eq!(out, Kind::Geometry(vec![GeometryKind::Point, GeometryKind::MultiPoint]));
 	}
 
 	#[test]
@@ -598,7 +563,7 @@ mod tests {
 		let res = kind(sql);
 		let out = res.unwrap();
 		assert_eq!("file<one>", format!("{}", out));
-		assert_eq!(out, Kind::File(vec![i("one")]));
+		assert_eq!(out, Kind::File(vec!["one".to_owned()]));
 	}
 
 	#[test]
@@ -607,6 +572,6 @@ mod tests {
 		let res = kind(sql);
 		let out = res.unwrap();
 		assert_eq!("file<one | two>", format!("{}", out));
-		assert_eq!(out, Kind::File(vec![i("one"), i("two")]));
+		assert_eq!(out, Kind::File(vec!["one".to_string(), "two".to_string()]));
 	}
 }

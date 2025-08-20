@@ -131,15 +131,6 @@ impl AlterFieldStatement {
 			AlterKind::None => {}
 		}
 
-		// Validate reference options
-		df.validate_reference_options(ctx)?;
-
-		// Correct reference type
-		/*
-		if let Some(kind) = df.get_reference_kind(ctx, opt).await? {
-			df.field_kind = Some(kind);
-		}*/
-
 		// Disallow mismatched types
 		df.disallow_mismatched_types(ctx, ns, db).await?;
 

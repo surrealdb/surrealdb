@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use super::Object;
 use crate::expr::fmt::Fmt;
+use crate::expr::kind::GeometryKind;
 use crate::val::{Array, Value};
 
 #[revisioned(revision = 1)]
@@ -64,6 +65,19 @@ impl Geometry {
 	pub fn is_collection(&self) -> bool {
 		matches!(self, Self::Collection(_))
 	}
+
+	pub fn kind(&self) -> GeometryKind {
+		match self {
+			Geometry::Point(_) => GeometryKind::Point,
+			Geometry::Line(_) => GeometryKind::Line,
+			Geometry::Polygon(_) => GeometryKind::Polygon,
+			Geometry::MultiPoint(_) => GeometryKind::MultiPoint,
+			Geometry::MultiLine(_) => GeometryKind::MultiLine,
+			Geometry::MultiPolygon(_) => GeometryKind::MultiPolygon,
+			Geometry::Collection(_) => GeometryKind::Collection,
+		}
+	}
+
 	/// Check if this has valid latitude and longitude points:
 	/// * -90 <= lat <= 90
 	/// * -180 <= lng <= 180
