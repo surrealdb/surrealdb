@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, ops::Bound};
 
-use crate::{Array, Number, Object, Range, Strand, Uuid, Value};
+use crate::{Array, Number, Object, Range, Uuid, Value};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct RecordIdKeyRange {
@@ -81,7 +81,7 @@ impl PartialEq<Range> for RecordIdKeyRange {
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum RecordIdKey {
 	Number(i64),
-	String(Strand),
+	String(String),
 	Uuid(Uuid),
 	Array(Array),
 	Object(Object),
@@ -93,7 +93,7 @@ impl PartialEq<Value> for RecordIdKey {
 		match self {
 			RecordIdKey::Number(a) => Value::Number(Number::Int(*a)) == *other,
 			RecordIdKey::String(a) => {
-				if let Value::Strand(b) = other {
+				if let Value::String(b) = other {
 					a.as_str() == b.as_str()
 				} else {
 					false

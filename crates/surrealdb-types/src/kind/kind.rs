@@ -1,4 +1,4 @@
-use crate::{KindGeometry, KindLiteral, Strand};
+use crate::{KindGeometry, KindLiteral};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Kind {
@@ -27,9 +27,6 @@ pub enum Kind {
 	Number,
 	/// Object type.
 	Object,
-	/// Geometric 2D point type with longitude *then* latitude coordinates.
-	/// This follows the GeoJSON spec.
-	Point,
 	/// String type.
 	String,
 	/// UUID type.
@@ -37,7 +34,7 @@ pub enum Kind {
 	/// Regular expression type.
 	Regex,
 	/// A record type.
-	Record(Vec<Strand>),
+	Record(Vec<String>),
 	/// A geometry type.
 	/// The vec contains the geometry types as strings, for example `"point"` or
 	/// `"polygon"`. TODO(3.0): Change to use an enum
@@ -66,7 +63,7 @@ pub enum Kind {
 	/// A file type.
 	/// If the kind was specified without a bucket the vec will be empty.
 	/// So `<file>` is just `Kind::File(Vec::new())`
-	File(Vec<Strand>),
+	File(Vec<String>),
 }
 
 impl Default for Kind {

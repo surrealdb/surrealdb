@@ -2,11 +2,11 @@ use std::{collections::BTreeMap, hash};
 
 use rust_decimal::Decimal;
 
-use crate::{Duration, Kind, Strand};
+use crate::{Duration, Kind};
 
 #[derive(Clone, Debug)]
 pub enum KindLiteral {
-	String(Strand),
+	String(String),
 	Integer(i64),
 	Float(f64),
 	Decimal(Decimal),
