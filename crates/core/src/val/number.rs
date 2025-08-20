@@ -326,13 +326,6 @@ impl Number {
 		}
 	}
 
-	const NUMBER_MARKER_INT: u8 = 0;
-	const NUMBER_MARKER_FLOAT: u8 = 64;
-	const NUMBER_MARKER_FLOAT_INFINITE_POSITIVE: u8 = 65;
-	const NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE: u8 = 66;
-	const NUMBER_MARKER_FLOAT_NAN: u8 = 67;
-	const NUMBER_MARKER_DECIMAL: u8 = 128;
-
 	/// Converts this Number to a lexicographically-ordered byte buffer.
 	///
 	/// This method serializes the Number into a byte representation that
@@ -369,48 +362,19 @@ impl Number {
 	///
 	/// - `Ok(Vec<u8>)`: Lexicographically-ordered byte buffer
 	/// - `Err(Error)`: If Decimal conversion fails (for Decimal variant)
-	pub fn as_decimal_buf(&self) -> Result<Vec<u8>> {
+	pub(crate) fn as_decimal_buf(&self) -> Result<Vec<u8>> {
 		match self {
 			Self::Int(v) => {
 				// Convert integer to decimal for consistent encoding across all numeric types
-				let mut b = DecimalLexEncoder::encode(D128::from(*v));
-				// Append type marker to preserve original Number variant for round-trip
-				// conversion
-				b.push(Self::NUMBER_MARKER_INT);
-				Ok(b)
+				Ok(DecimalLexEncoder::encode(D128::from(*v)))
 			}
 			Self::Float(v) => {
-				// Handle extreme float values that can't be converted to Decimal
-				if v.is_infinite() {
-					if v.is_sign_positive() {
-						// Positive infinity - largest possible value in ordering
-						// Uses 0xFF prefix to ensure it sorts after all finite numbers
-						Ok(vec![0xFF, 0xFF, Self::NUMBER_MARKER_FLOAT_INFINITE_POSITIVE])
-					} else {
-						// Negative infinity - smallest possible value in ordering
-						// Uses 0x00 prefix to ensure it sorts before all finite numbers
-						Ok(vec![0x00, 0x00, Self::NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE])
-					}
-				} else if v.is_nan() {
-					// NaN - treat as largest value for consistent ordering
-					// Uses same prefix as positive infinity but different marker
-					Ok(vec![0xFF, 0xFF, Self::NUMBER_MARKER_FLOAT_NAN])
-				} else {
-					// Convert finite float to decimal for lexicographic encoding
-					let dec = D128::from_f64(*v);
-					let mut b = DecimalLexEncoder::encode(dec);
-					// Append float marker to distinguish from native decimals
-					b.push(Self::NUMBER_MARKER_FLOAT);
-					Ok(b)
-				}
+				// Convert float to decimal for lexicographic encoding
+				Ok(DecimalLexEncoder::encode(D128::from_f64(*v)))
 			}
 			Self::Decimal(v) => {
 				// Direct encoding of decimal values using lexicographic encoder
-				let dec = DecimalLexEncoder::to_d128(*v)?;
-				let mut b = DecimalLexEncoder::encode(dec);
-				// Append decimal marker for type preservation
-				b.push(Self::NUMBER_MARKER_DECIMAL);
-				Ok(b)
+				Ok(DecimalLexEncoder::encode(DecimalLexEncoder::to_d128(*v)?))
 			}
 		}
 	}
@@ -435,9 +399,7 @@ impl Number {
 	///
 	/// The method examines the last byte (type marker) to determine how to
 	/// decode:
-	/// - `NUMBER_MARKER_INT`: Decode as decimal, convert to i64
-	/// - `NUMBER_MARKER_FLOAT`: Decode as decimal, convert to f64
-	/// - `NUMBER_MARKER_DECIMAL`: Decode directly as Decimal
+	/// - `NUMBER_MARKER_FINITE`: Decode
 	/// - `NUMBER_MARKER_FLOAT_INFINITE_POSITIVE`: Return f64::INFINITY
 	/// - `NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE`: Return f64::NEG_INFINITY
 	/// - `NUMBER_MARKER_FLOAT_NAN`: Return f64::NAN
@@ -457,52 +419,23 @@ impl Number {
 	/// - **Empty buffer**: Input slice has no bytes
 	/// - **Unknown marker**: Last byte is not a recognized type marker
 	/// - **Decode failure**: Lexicographic decoding fails or type conversion fails
-	pub fn from_decimal_buf(b: &[u8]) -> Result<Self> {
-		// Examine the type marker (last byte) to determine decoding strategy
-		match b.last().copied() {
-			Some(Self::NUMBER_MARKER_INT) => {
-				// Decode lexicographic encoding and convert back to i64
-				// The decoder automatically ignores the type marker at the end
-				let decimal = DecimalLexEncoder::decode(b)?;
-				match decimal.to_i64() {
-					Ok(value) => Ok(Number::Int(value)),
-					Err(e) => {
-						// Handle overflow or precision loss during i64 conversion
-						Err(Error::Serialization(format!("Decoded decimal {decimal} error: {e}"))
-							.into())
-					}
-				}
+	pub(crate) fn from_decimal_buf(b: &[u8]) -> Result<Self> {
+		let dec = DecimalLexEncoder::decode(b)?;
+		if dec.is_finite() {
+			match DecimalLexEncoder::to_decimal(dec) {
+				Ok(dec) => Ok(Number::Decimal(dec)),
+				Err(_) => Ok(Number::Float(dec.to_f64())),
 			}
-			Some(Self::NUMBER_MARKER_FLOAT) => {
-				// Decode as decimal representation of the original float
-				// The decoder automatically ignores the type marker at the end
-				let dec = DecimalLexEncoder::decode(b)?;
-				// Convert back to f64, preserving the original float precision
-				Ok(Number::Float(dec.to_f64()))
-			}
-			// Handle special float values that were encoded with fixed byte patterns
-			Some(Self::NUMBER_MARKER_FLOAT_INFINITE_POSITIVE) => Ok(Number::Float(f64::INFINITY)),
-			Some(Self::NUMBER_MARKER_FLOAT_INFINITE_NEGATIVE) => {
+		} else if dec.is_nan() {
+			Ok(Number::Float(f64::NAN))
+		} else if dec.is_infinite() {
+			if dec.is_negative() {
 				Ok(Number::Float(f64::NEG_INFINITY))
+			} else {
+				Ok(Number::Float(f64::INFINITY))
 			}
-			Some(Self::NUMBER_MARKER_FLOAT_NAN) => Ok(Number::Float(f64::NAN)),
-			Some(Self::NUMBER_MARKER_DECIMAL) => {
-				// Decode lexicographic encoding back to D128
-				// The decoder automatically ignores the type marker at the end
-				let dec = DecimalLexEncoder::decode(b)?;
-				// Convert D128 back to rust_decimal::Decimal for native representation
-				let dec = DecimalLexEncoder::to_decimal(dec)?;
-				// Direct decoding for native Decimal values
-				Ok(Number::Decimal(dec))
-			}
-			Some(m) => {
-				// Unknown type marker - indicates corrupted data or version mismatch
-				Err(Error::Serialization(format!("Unknown number marker: {m}")).into())
-			}
-			None => {
-				// Empty buffer is invalid input
-				Err(Error::Serialization("Empty buffer".to_string()).into())
-			}
+		} else {
+			bail!(Error::Serialization(format!("Invalid decimal value: {dec}")))
 		}
 	}
 
@@ -1240,6 +1173,7 @@ impl DecimalExt for Decimal {
 mod tests {
 	use std::cmp::Ordering;
 
+	use ahash::HashSet;
 	use rand::seq::SliceRandom;
 	use rand::{Rng, thread_rng};
 	use rust_decimal::Decimal;
@@ -1443,5 +1377,23 @@ mod tests {
 			assert!(r1.eq(n1), "{r1:?} = {n1:?} (after deserialization)");
 			assert!(r2.eq(n2), "{r2:?} = {n2:?} (after deserialization)");
 		}
+	}
+
+	#[test]
+	fn serialised_test() {
+		let check = |numbers: &[Number]| {
+			let mut buffers = HashSet::default();
+			for n1 in numbers {
+				let b = n1.as_decimal_buf().unwrap();
+				let n2 = Number::from_decimal_buf(&b).unwrap();
+				buffers.insert(b);
+				assert!(n1.eq(&n2), "{n1:?} = {n2:?} (after deserialization)");
+			}
+			assert_eq!(buffers.len(), 1, "{numbers:?}");
+		};
+		check(&[Number::Int(0), Number::Float(0.0), Number::Decimal(Decimal::ZERO)]);
+		check(&[Number::Int(1), Number::Float(1.0), Number::Decimal(Decimal::ONE)]);
+		check(&[Number::Int(-1), Number::Float(-1.0), Number::Decimal(Decimal::NEGATIVE_ONE)]);
+		check(&[Number::Float(1.5), Number::Decimal(Decimal::from_str_normalized("1.5").unwrap())]);
 	}
 }

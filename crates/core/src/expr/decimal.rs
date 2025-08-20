@@ -65,20 +65,43 @@ impl DecimalLexEncoder {
 	/// maps this into [1, 12321], comfortably within u16.
 	const EXP_BIAS: i32 = 6144; // bias used for mapping signed scale into u16 space
 
+	const FINITE_NEGATIVE_MARKER: u8 = 0x40;
+	const FINITE_POSITIVE_MARKER: u8 = 0xA0;
+
+	// 0x80 = 128, middle value for proper ordering
+	const ZERO_MARKER: u8 = 0x80;
+
+	const INFINITE_NEGATIVE_MARKER: u8 = 0x20;
+	const INFINITE_POSITIVE_MAKER: u8 = 0xC0;
+	const NAN_MARKER: u8 = 0xFF;
+
 	/// Encodes a D128 value into a lexicographically ordered byte sequence.
 	///
 	/// The encoding preserves sort order: if `a < b` then `encode(a) <
 	/// encode(b)`. This is essential for database indexing where byte-level
 	/// comparison must match numeric comparison.
 	pub(crate) fn encode(dec: D128) -> Vec<u8> {
+		if dec.is_nan() {
+			return vec![Self::NAN_MARKER];
+		}
+
+		// Extract sign
+		let is_negative = dec.is_negative();
+
+		if dec.is_infinite() {
+			if is_negative {
+				return vec![Self::INFINITE_NEGATIVE_MARKER];
+			} else {
+				return vec![Self::INFINITE_POSITIVE_MAKER];
+			}
+		}
 		// Special case: zero gets a fixed encoding that sorts between negative and
 		// positive
 		if dec.is_zero() {
-			return vec![0x80]; // 0x80 = 128, middle value for proper ordering
+			return vec![Self::ZERO_MARKER];
 		}
 
-		// Extract sign and work with absolute value
-		let is_negative = dec.is_negative();
+		// Work with absolute value
 		let normalized = dec.abs(); // Get absolute value
 		let e = -normalized.fractional_digits_count() as i32; // Exponent: negative of fractional digits
 		let digit_count = normalized.digits_count();
@@ -102,7 +125,7 @@ impl DecimalLexEncoder {
 		// Encode sign marker and biased scale based on sign
 		if is_negative {
 			// Sign marker: 0x00 ensures negative numbers sort before positive ones
-			result.push(0x00);
+			result.push(Self::FINITE_NEGATIVE_MARKER);
 			// Complement of biased scale: reverses ordering so that more negative values
 			// sort first This maintains total ordering for negatives when compared
 			// bytewise.
@@ -112,7 +135,7 @@ impl DecimalLexEncoder {
 			Self::pack_digits_negative(radix10, &mut result);
 		} else {
 			// Sign marker: 0xFF ensures positive numbers sort after negative ones
-			result.push(0xFF);
+			result.push(Self::FINITE_POSITIVE_MARKER);
 			// Biased scale: larger scales (greater magnitude) sort later for positives
 			result.extend(biased_exponent.to_be_bytes());
 			// Store packed digit bytes directly for positive numbers
@@ -133,26 +156,25 @@ impl DecimalLexEncoder {
 			return Err(Error::Serialization("Cannot decode from empty buffer".to_string()).into());
 		}
 
-		// Special case: zero
-		if bytes[0] == 0x80 {
-			return Ok(D128::ZERO);
-		}
+		// Special cases
+		let is_negative = match bytes[0] {
+			Self::ZERO_MARKER => {
+				return Ok(D128::ZERO);
+			}
+			Self::INFINITE_NEGATIVE_MARKER => return Ok(D128::NEG_INFINITY),
+			Self::INFINITE_POSITIVE_MAKER => return Ok(D128::INFINITY),
+			Self::NAN_MARKER => return Ok(D128::NAN),
+			Self::FINITE_NEGATIVE_MARKER => true,
+			Self::FINITE_POSITIVE_MARKER => false,
+			marker => {
+				return Err(Error::Serialization(format!("Invalid marker byte: {marker}")).into());
+			}
+		};
 
-		// Need at least 3 bytes: sign (1) + exponent (2)
+		// Need at least 3 bytes: marker (1) + exponent (2)
 		if bytes.len() < 3 {
 			return Err(Error::Serialization(format!("Buffer too short: {}", bytes.len())).into());
 		}
-
-		let sign_byte = bytes[0];
-		let is_negative = match sign_byte {
-			0x00 => true,  // Negative
-			0xFF => false, // Positive
-			_ => {
-				return Err(
-					Error::Serialization(format!("Invalid sentinel byte: {sign_byte}")).into()
-				);
-			}
-		};
 
 		// Extract biased exponent (2 bytes, big-endian)
 		let exp_bytes = [bytes[1], bytes[2]];
@@ -349,8 +371,9 @@ impl DecimalLexEncoder {
 mod tests {
 	use super::*;
 
-	fn test_cases() -> [D128; 27] {
+	fn test_cases() -> [D128; 30] {
 		[
+			D128::from(f64::NEG_INFINITY),
 			D128::from(f64::MIN),
 			D128::from_i128(i128::MIN).unwrap(),
 			D128::from(i64::MIN),
@@ -378,6 +401,8 @@ mod tests {
 			D128::from_i128(i128::MAX).unwrap(),
 			D128::from_u128(u128::MAX).unwrap(),
 			D128::from(f64::MAX),
+			D128::from(f64::INFINITY),
+			D128::from(f64::NAN),
 		]
 	}
 
@@ -387,7 +412,11 @@ mod tests {
 		for (i, case) in cases.into_iter().enumerate() {
 			let encoded = DecimalLexEncoder::encode(case);
 			let decoded = DecimalLexEncoder::decode(&encoded).expect("Decode should succeed");
-			assert_eq!(case, decoded, "Roundtrip failed for {i}: {case} != {decoded}");
+			if case.is_nan() {
+				assert!(decoded.is_nan(), "Roundtrip failed for {i}: {case} != {decoded}");
+			} else {
+				assert_eq!(case, decoded, "Roundtrip failed for {i}: {case} != {decoded}");
+			}
 		}
 	}
 
@@ -413,25 +442,25 @@ mod tests {
 
 	#[test]
 	fn test_decode_buffer_too_short() {
-		let result = DecimalLexEncoder::decode(&[0xFF]);
+		let result = DecimalLexEncoder::decode(&[0xA0]);
 		assert!(result.is_err());
 		let err = result.unwrap_err();
 		assert!(err.to_string().contains("Buffer too short"), "{err:?}");
 	}
 
 	#[test]
-	fn test_decode_invalid_sentinel() {
+	fn test_decode_invalid_marker() {
 		let result = DecimalLexEncoder::decode(&[0x42, 0x00, 0x00, 0x00]);
 		assert!(result.is_err());
 		let err = result.unwrap_err();
-		assert!(err.to_string().contains("Invalid sentinel byte"), "{err:?}");
+		assert_eq!(err.to_string(), "Serialization error: Invalid marker byte: 66", "{err:?}");
 	}
 
 	#[test]
 	fn test_decode_empty_mantissa() {
 		// Create a buffer that starts correctly but is truncated during mantissa
 		// decoding
-		let result = DecimalLexEncoder::decode(&[0xFF, 0x00, 0x00, 0x00]); // Missing mantissa data
+		let result = DecimalLexEncoder::decode(&[0xA0, 0x00, 0x00, 0x00]); // Missing mantissa data
 		assert!(result.is_err());
 		let err = result.unwrap_err();
 		assert!(err.to_string().contains("Empty mantissa"), "{err:?}");
