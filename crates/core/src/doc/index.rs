@@ -1,3 +1,19 @@
+//! Index operation helpers for constructing and maintaining KV index entries.
+//!
+//! This module orchestrates index mutations for a single document: removing old
+//! entries and inserting new ones across different index types (UNIQUE, regular,
+//! search, fulltext, etc.). Index keys are built with key::index and field
+//! values are encoded via key::value::StoreKeyArray.
+//!
+//! Numeric normalization in keys:
+//! - StoreKeyArray normalizes Number values (Int/Float/Decimal) using a lexicographic numeric
+//!   encoding so that byte-wise order matches numeric order. As a result, numerically equal values
+//!   (e.g., 0, 0.0, 0dec) map to the same key bytes.
+//! - UNIQUE index behavior leverages this: equal numerics across variants will collide on the same
+//!   index key and cause a uniqueness violation.
+//!
+//! Range scans and lookups benefit because a single probe/range can be used for
+//! numeric predicates without fanning out per numeric variant.
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 

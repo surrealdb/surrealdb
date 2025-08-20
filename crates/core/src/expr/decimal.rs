@@ -1,4 +1,21 @@
 //! Decimal functionality and extension traits.
+//!
+//! This module provides DecimalLexEncoder, a variable-length, lexicographic
+//! byte encoding for fastnum::D128 values. The encoding ensures that
+//! byte-wise ordering preserves numeric ordering, which is critical for key
+//! construction in indexes. The encoder is stream-friendly: it guarantees an
+//! in-band terminator within the mantissa encoding and appends a trailing 0x00
+//! so decoders can read until the first zero when values are concatenated in
+//! composite keys.
+//!
+//! Where it’s used:
+//! - val::number::Number::{as_decimal_buf, from_decimal_buf}
+//! - key::value::StoreKeyNumber serde impls used in index key material
+//!
+//! Ordering overview:
+//! - Finite negatives < zero < finite positives
+//! - −∞ < all finite < +∞ < NaN
+//! See the struct-level documentation below for the precise byte format.
 
 use anyhow::Result;
 use fastnum::decimal::{Context, Sign};

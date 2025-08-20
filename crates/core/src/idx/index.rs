@@ -1,5 +1,22 @@
 #![cfg(not(target_family = "wasm"))]
 
+//! Index operation implementation for non-WASM targets.
+//!
+//! This module applies index mutations for a single document across different
+//! index types (UNIQUE, regular, search, fulltext, MTree, Hnsw). Index keys are
+//! constructed via key::index and field values are encoded using
+//! key::value::StoreKeyArray.
+//!
+//! Numeric normalization in keys:
+//! - StoreKeyArray normalizes Number values (Int/Float/Decimal) through a lexicographic numeric
+//!   encoding so that byte order mirrors numeric order.
+//! - Numerically equal values (e.g., 0, 0.0, 0dec) map to the same key bytes. On UNIQUE indexes,
+//!   such inserts collide and produce a uniqueness error.
+//!
+//! Planner/executor simplification:
+//! - Numeric predicates need a single probe/range in the index; per-variant fan-out is no longer
+//!   required.
+
 use std::sync::atomic::AtomicBool;
 
 use anyhow::Result;

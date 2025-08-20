@@ -1,3 +1,21 @@
+//! Numeric value type used throughout SurrealDB.
+//!
+//! This module defines Number, a discriminated union over Int (i64), Float (f64),
+//! and Decimal (rust_decimal::Decimal), and implements arithmetic, comparison,
+//! and conversions. For storage in index keys, Numbers are serialized with a
+//! canonical, lexicographic encoding (via expr::decimal::DecimalLexEncoder)
+//! so that byte-wise ordering matches numeric ordering and numerically-equal
+//! values across variants normalize to identical bytes.
+//!
+//! Key points:
+//! - Ordering: PartialOrd/Ord behavior aims to reflect mathematical ordering across variants; for
+//!   index keys we rely on DecimalLexEncoder to preserve ordering at the byte level.
+//! - Normalization in keys: 0 (Int), 0.0 (Float) and 0dec (Decimal) encode to the same byte
+//!   sequence for keys, so UNIQUE indexes treat them as equal.
+//! - Special float values: NaN, +∞ and −∞ are given fixed encodings that fit in the total ordering
+//!   used by keys (see DecimalLexEncoder docs).
+//! - Stream-friendly: the numeric encoding contains an in-band terminator and appends a 0x00 byte,
+//!   allowing concatenation in composite keys without ambiguity during decoding.
 use std::cmp::Ordering;
 use std::f64::consts::PI;
 use std::fmt::{self, Debug, Display, Formatter};

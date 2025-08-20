@@ -1,4 +1,17 @@
-//! Stores an index entry
+//! Index key encoding and prefixes for the KV store.
+//!
+//! This module defines the on-disk key layout for secondary indexes and helpers
+//! to construct prefixes and full keys. Field values are serialized via
+//! key::value::StoreKeyArray, which normalizes numeric values across Number
+//! variants (Int/Float/Decimal) using a lexicographic encoding so that byte
+//! order aligns with numeric order. As a consequence, numerically-equal values
+//! (e.g., 0, 0.0, 0dec) map to identical key bytes and are treated as equal by
+//! UNIQUE indexes and during scans.
+//!
+//! Helper functions like prefix_beg/prefix_end/prefix_ids_* build range bounds
+//! for scanning the KV store. Keys are designed to be concatenation-friendly,
+//! using zero-terminated components where appropriate to ensure parsers stop at
+//! the correct boundaries when decoding.
 pub mod all;
 pub mod bc;
 pub mod bd;
