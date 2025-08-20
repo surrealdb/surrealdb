@@ -44,8 +44,10 @@ impl DeleteStatement {
 		let stm = Statement::from(self);
 		// Check if there is a timeout
 		let ctx = stm.setup_timeout(ctx)?;
+
 		// Get a query planner
 		let mut planner = QueryPlanner::new();
+
 		let stm_ctx = StatementContext::new(&ctx, opt, &stm)?;
 		// Loop over the delete targets
 		for w in self.what.iter() {
@@ -67,6 +69,7 @@ impl DeleteStatement {
 		}
 		// Attach the query planner to the context
 		let ctx = stm.setup_query_planner(planner, ctx);
+
 		// Process the statement
 		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout

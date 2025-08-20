@@ -74,29 +74,6 @@ impl From<crate::expr::Idiom> for Idiom {
 	}
 }
 
-impl Idiom {
-	/*
-	/// Appends a part to the end of this Idiom
-	pub(crate) fn push(mut self, n: Part) -> Idiom {
-		self.0.push(n);
-		self
-	}
-	/// Convert this Idiom to a JSON Path string
-	pub(crate) fn to_path(&self) -> String {
-		format!("/{self}").replace(']', "").replace(&['.', '['][..], "/")
-	}
-	/// Simplifies this Idiom for use in object keys
-	pub(crate) fn simplify(&self) -> Idiom {
-		self.0
-			.iter()
-			.filter(|&p| matches!(p, Part::Field(_) | Part::Start(_) | Part::Graph(_)))
-			.cloned()
-			.collect::<Vec<_>>()
-			.into()
-	}
-	*/
-}
-
 impl Display for Idiom {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		Display::fmt(

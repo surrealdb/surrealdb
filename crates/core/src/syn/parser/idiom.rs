@@ -23,11 +23,11 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects the next tokens to be of a field set.
-	pub(crate) async fn parse_fields(&mut self, ctx: &mut Stk) -> ParseResult<Fields> {
+	pub(crate) async fn parse_fields(&mut self, stk: &mut Stk) -> ParseResult<Fields> {
 		if self.eat(t!("VALUE")) {
-			let expr = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
+			let expr = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 			let alias = if self.eat(t!("AS")) {
-				Some(self.parse_plain_idiom(ctx).await?)
+				Some(self.parse_plain_idiom(stk).await?)
 			} else {
 				None
 			};
@@ -41,9 +41,9 @@ impl Parser<'_> {
 				let field = if self.eat(t!("*")) {
 					Field::All
 				} else {
-					let expr = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
+					let expr = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 					let alias = if self.eat(t!("AS")) {
-						Some(self.parse_plain_idiom(ctx).await?)
+						Some(self.parse_plain_idiom(stk).await?)
 					} else {
 						None
 					};
@@ -62,10 +62,10 @@ impl Parser<'_> {
 	}
 
 	/// Parses a list of idioms separated by a `,`
-	pub(super) async fn parse_idiom_list(&mut self, ctx: &mut Stk) -> ParseResult<Vec<Idiom>> {
-		let mut res = vec![self.parse_plain_idiom(ctx).await?];
+	pub(super) async fn parse_idiom_list(&mut self, stk: &mut Stk) -> ParseResult<Vec<Idiom>> {
+		let mut res = vec![self.parse_plain_idiom(stk).await?];
 		while self.eat(t!(",")) {
-			res.push(self.parse_plain_idiom(ctx).await?);
+			res.push(self.parse_plain_idiom(stk).await?);
 		}
 		Ok(res)
 	}
@@ -142,7 +142,7 @@ impl Parser<'_> {
 	/// to a Edge depending on what is parsed next.
 	pub(super) async fn parse_remaining_value_idiom(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		start: Vec<Part>,
 	) -> ParseResult<Expr> {
 		let mut res = start;
@@ -158,16 +158,16 @@ impl Parser<'_> {
 				}
 				t!(".") => {
 					self.pop_peek();
-					res.push(self.parse_dot_part(ctx).await?)
+					res.push(self.parse_dot_part(stk).await?)
 				}
 				t!("[") => {
 					let span = self.pop_peek().span;
-					let part = self.parse_bracket_part(ctx, span).await?;
+					let part = self.parse_bracket_part(stk, span).await?;
 					res.push(part)
 				}
 				t!("->") => {
 					self.pop_peek();
-					let x = self.parse_graph(ctx, Dir::Out).await?;
+					let x = self.parse_graph(stk, Dir::Out).await?;
 					res.push(Part::Graph(x))
 				}
 				t!("<") => {
@@ -176,13 +176,13 @@ impl Parser<'_> {
 						self.pop_peek();
 						self.pop_peek();
 
-						let graph = self.parse_graph(ctx, Dir::In).await?;
+						let graph = self.parse_graph(stk, Dir::In).await?;
 						res.push(Part::Graph(graph));
 					} else if peek.kind == t!("->") {
 						self.pop_peek();
 						self.pop_peek();
 
-						let graph = self.parse_graph(ctx, Dir::Both).await?;
+						let graph = self.parse_graph(stk, Dir::Both).await?;
 						res.push(Part::Graph(graph));
 					} else {
 						break;
@@ -200,19 +200,19 @@ impl Parser<'_> {
 
 	/// Parse a idiom which can only start with a graph or an identifier.
 	/// Other expressions are not allowed as start of this idiom
-	pub async fn parse_plain_idiom(&mut self, ctx: &mut Stk) -> ParseResult<Idiom> {
+	pub async fn parse_plain_idiom(&mut self, stk: &mut Stk) -> ParseResult<Idiom> {
 		let start = match self.peek_kind() {
 			t!("->") => {
 				self.pop_peek();
-				let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::Out)).await?;
+				let graph = stk.run(|ctx| self.parse_graph(ctx, Dir::Out)).await?;
 				Part::Graph(graph)
 			}
 			t!("<") => {
 				let t = self.pop_peek();
 				let graph = if self.eat_whitespace(t!("-")) {
-					ctx.run(|ctx| self.parse_graph(ctx, Dir::In)).await?
+					stk.run(|ctx| self.parse_graph(ctx, Dir::In)).await?
 				} else if self.eat_whitespace(t!("->")) {
-					ctx.run(|ctx| self.parse_graph(ctx, Dir::Both)).await?
+					stk.run(|ctx| self.parse_graph(ctx, Dir::Both)).await?
 				} else {
 					unexpected!(self, t, "either `<-` `<->` or `->`")
 				};
@@ -221,11 +221,11 @@ impl Parser<'_> {
 			_ => Part::Field(self.next_token_value()?),
 		};
 		let start = vec![start];
-		self.parse_remaining_idiom(ctx, start).await
+		self.parse_remaining_idiom(stk, start).await
 	}
 
 	/// Parse the part after the `.` in a idiom
-	pub(super) async fn parse_dot_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
+	pub(super) async fn parse_dot_part(&mut self, stk: &mut Stk) -> ParseResult<Part> {
 		let res = match self.peek_kind() {
 			t!("*") => {
 				self.pop_peek();
@@ -237,12 +237,12 @@ impl Parser<'_> {
 			}
 			t!("{") => {
 				self.pop_peek();
-				ctx.run(|ctx| self.parse_curly_part(ctx)).await?
+				stk.run(|ctx| self.parse_curly_part(ctx)).await?
 			}
 			_ => {
 				let ident: Ident = self.next_token_value()?;
 				if self.eat(t!("(")) {
-					self.parse_function_part(ctx, ident).await?
+					self.parse_function_part(stk, ident).await?
 				} else {
 					Part::Field(ident)
 				}
@@ -252,21 +252,21 @@ impl Parser<'_> {
 	}
 	pub(super) async fn parse_function_part(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		name: Ident,
 	) -> ParseResult<Part> {
-		let args = self.parse_function_args(ctx).await?;
+		let args = self.parse_function_args(stk).await?;
 		Ok(Part::Method(name.into_string(), args))
 	}
 	/// Parse the part after the `.{` in an idiom
-	pub(super) async fn parse_curly_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
+	pub(super) async fn parse_curly_part(&mut self, stk: &mut Stk) -> ParseResult<Part> {
 		match self.peek_kind() {
-			t!("*") | t!("..") | TokenKind::Digits => self.parse_recurse_part(ctx).await,
-			_ => self.parse_destructure_part(ctx).await,
+			t!("*") | t!("..") | TokenKind::Digits => self.parse_recurse_part(stk).await,
+			_ => self.parse_destructure_part(stk).await,
 		}
 	}
 	/// Parse a destructure part, expects `.{` to already be parsed
-	pub(super) async fn parse_destructure_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
+	pub(super) async fn parse_destructure_part(&mut self, stk: &mut Stk) -> ParseResult<Part> {
 		let start = self.last_span();
 		let mut destructured: Vec<DestructurePart> = Vec::new();
 		loop {
@@ -279,7 +279,7 @@ impl Parser<'_> {
 			let part = match self.peek_kind() {
 				t!(":") => {
 					self.pop_peek();
-					let idiom = match self.parse_expr_field(ctx).await? {
+					let idiom = match self.parse_expr_field(stk).await? {
 						Expr::Idiom(x) => x,
 						v => Idiom(vec![Part::Start(v)]),
 					};
@@ -288,7 +288,7 @@ impl Parser<'_> {
 				t!(".") => {
 					self.pop_peek();
 					let found = self.peek_kind();
-					match self.parse_dot_part(ctx).await? {
+					match self.parse_dot_part(stk).await? {
 						Part::All => DestructurePart::All(field),
 						Part::Destructure(v) => DestructurePart::Destructure(field, v),
 						_ => {
@@ -342,7 +342,7 @@ impl Parser<'_> {
 	/// Parse a recursion instruction following the inner recurse part, if any
 	pub(super) async fn parse_recurse_instruction(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 	) -> ParseResult<Option<RecurseInstruction>> {
 		let instruction = if self.eat(t!("+")) {
 			let kind = self.next_token_value::<Ident>()?;
@@ -386,7 +386,7 @@ impl Parser<'_> {
 				let expects = match token.kind {
 					TokenKind::Parameter => Expr::Param(self.next_token_value::<Param>()?),
 					x if Parser::kind_is_identifier(x) => {
-						Expr::Literal(Literal::RecordId(self.parse_record_id(ctx).await?))
+						Expr::Literal(Literal::RecordId(self.parse_record_id(stk).await?))
 					}
 					_ => {
 						unexpected!(self, token, "a param or record-id");
@@ -419,15 +419,15 @@ impl Parser<'_> {
 		Ok(instruction)
 	}
 	/// Parse a recurse part, expects `.{` to already be parsed
-	pub(super) async fn parse_recurse_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
+	pub(super) async fn parse_recurse_part(&mut self, stk: &mut Stk) -> ParseResult<Part> {
 		let start = self.last_span();
 		let recurse = self.parse_recurse_inner()?;
-		let instruction = self.parse_recurse_instruction(ctx).await?;
+		let instruction = self.parse_recurse_instruction(stk).await?;
 		self.expect_closing_delimiter(t!("}"), start)?;
 
 		let nest = if self.eat(t!("(")) {
 			let start = self.last_span();
-			let idiom = self.parse_remaining_idiom(ctx, vec![]).await?;
+			let idiom = self.parse_remaining_idiom(stk, vec![]).await?;
 			self.expect_closing_delimiter(t!(")"), start)?;
 			Some(idiom)
 		} else {
@@ -440,7 +440,7 @@ impl Parser<'_> {
 	/// Parse the part after the `[` in a idiom
 	pub(super) async fn parse_bracket_part(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		start: Span,
 	) -> ParseResult<Part> {
 		let peek = self.peek();
@@ -455,11 +455,11 @@ impl Parser<'_> {
 			}
 			t!("?") | t!("WHERE") => {
 				self.pop_peek();
-				let value = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
+				let value = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 				Part::Where(value)
 			}
 			_ => {
-				let value = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+				let value = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
 				Part::Value(value)
 			}
 		};
@@ -472,7 +472,7 @@ impl Parser<'_> {
 	/// Basic idioms differ from normal idioms in that they are more
 	/// restrictive. Flatten, graphs, conditions and indexing by param is not
 	/// allowed.
-	pub(super) async fn parse_basic_idiom(&mut self, ctx: &mut Stk) -> ParseResult<Idiom> {
+	pub(super) async fn parse_basic_idiom(&mut self, stk: &mut Stk) -> ParseResult<Idiom> {
 		let start = self.next_token_value::<Ident>()?;
 		let mut parts = vec![Part::Field(start)];
 		loop {
@@ -480,7 +480,7 @@ impl Parser<'_> {
 			let part = match token.kind {
 				t!(".") => {
 					self.pop_peek();
-					self.parse_dot_part(ctx).await?
+					self.parse_dot_part(stk).await?
 				}
 				t!("[") => {
 					self.pop_peek();
@@ -528,7 +528,7 @@ impl Parser<'_> {
 	/// Basic idioms differ from local idioms in that they are more restrictive.
 	/// Only field, all and number indexing is allowed. Flatten is also allowed
 	/// but only at the end.
-	pub(super) async fn parse_local_idiom(&mut self, ctx: &mut Stk) -> ParseResult<Idiom> {
+	pub(super) async fn parse_local_idiom(&mut self, stk: &mut Stk) -> ParseResult<Idiom> {
 		let start = self.next_token_value()?;
 		let mut parts = vec![Part::Field(start)];
 		loop {
@@ -536,7 +536,7 @@ impl Parser<'_> {
 			let part = match token.kind {
 				t!(".") => {
 					self.pop_peek();
-					self.parse_dot_part(ctx).await?
+					self.parse_dot_part(stk).await?
 				}
 				t!("[") => {
 					self.pop_peek();
@@ -605,10 +605,10 @@ impl Parser<'_> {
 	///
 	/// # Parser state
 	/// Expects to be at the start of a what list.
-	pub(super) async fn parse_what_list(&mut self, ctx: &mut Stk) -> ParseResult<Vec<Expr>> {
-		let mut res = vec![ctx.run(|ctx| self.parse_expr_table(ctx)).await?];
+	pub(super) async fn parse_what_list(&mut self, stk: &mut Stk) -> ParseResult<Vec<Expr>> {
+		let mut res = vec![stk.run(|ctx| self.parse_expr_table(ctx)).await?];
 		while self.eat(t!(",")) {
-			res.push(ctx.run(|ctx| self.parse_expr_table(ctx)).await?)
+			res.push(stk.run(|ctx| self.parse_expr_table(ctx)).await?)
 		}
 		Ok(res)
 	}
@@ -618,7 +618,7 @@ impl Parser<'_> {
 	/// # Parser state
 	/// Expects to just have eaten a direction (e.g. <-, <->, or ->) and be at
 	/// the field like part of the graph
-	pub(super) async fn parse_graph(&mut self, ctx: &mut Stk, dir: Dir) -> ParseResult<Graph> {
+	pub(super) async fn parse_graph(&mut self, stk: &mut Stk, dir: Dir) -> ParseResult<Graph> {
 		let token = self.peek();
 		match token.kind {
 			t!("?") => {
@@ -632,7 +632,7 @@ impl Parser<'_> {
 				let span = self.pop_peek().span;
 				let expr = if self.eat(t!("SELECT")) {
 					let before = self.peek().span;
-					let expr = self.parse_fields(ctx).await?;
+					let expr = self.parse_fields(stk).await?;
 					let fields_span = before.covers(self.last_span());
 					expected!(self, t!("FROM"));
 					Some((expr, fields_span))
@@ -647,38 +647,38 @@ impl Parser<'_> {
 						Vec::new()
 					}
 					x if Self::kind_is_identifier(x) => {
-						let subject = self.parse_graph_subject(ctx).await?;
+						let subject = self.parse_graph_subject(stk).await?;
 						let mut subjects = vec![subject];
 						while self.eat(t!(",")) {
-							subjects.push(self.parse_graph_subject(ctx).await?);
+							subjects.push(self.parse_graph_subject(stk).await?);
 						}
 						subjects
 					}
 					_ => unexpected!(self, token, "`?`, an identifier or a range"),
 				};
 
-				let cond = self.try_parse_condition(ctx).await?;
+				let cond = self.try_parse_condition(stk).await?;
 				let (split, group, order) = if let Some((ref expr, fields_span)) = expr {
-					let split = self.try_parse_split(ctx, expr, fields_span).await?;
-					let group = self.try_parse_group(ctx, expr, fields_span).await?;
-					let order = self.try_parse_orders(ctx, expr, fields_span).await?;
+					let split = self.try_parse_split(stk, expr, fields_span).await?;
+					let group = self.try_parse_group(stk, expr, fields_span).await?;
+					let order = self.try_parse_orders(stk, expr, fields_span).await?;
 					(split, group, order)
 				} else {
 					(None, None, None)
 				};
 
 				let (limit, start) = if let t!("START") = self.peek_kind() {
-					let start = self.try_parse_start(ctx).await?;
-					let limit = self.try_parse_limit(ctx).await?;
+					let start = self.try_parse_start(stk).await?;
+					let limit = self.try_parse_limit(stk).await?;
 					(limit, start)
 				} else {
-					let limit = self.try_parse_limit(ctx).await?;
-					let start = self.try_parse_start(ctx).await?;
+					let limit = self.try_parse_limit(stk).await?;
+					let start = self.try_parse_start(stk).await?;
 					(limit, start)
 				};
 
 				let alias = if self.eat(t!("AS")) {
-					Some(self.parse_plain_idiom(ctx).await?)
+					Some(self.parse_plain_idiom(stk).await?)
 				} else {
 					None
 				};
@@ -701,7 +701,7 @@ impl Parser<'_> {
 			x if Self::kind_is_identifier(x) => {
 				// The following function should always succeed here,
 				// returning an error here would be a bug, so unwrap.
-				let subject = self.parse_graph_subject(ctx).await?;
+				let subject = self.parse_graph_subject(stk).await?;
 				Ok(Graph {
 					dir,
 					what: vec![subject],

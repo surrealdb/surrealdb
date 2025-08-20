@@ -25,7 +25,7 @@ impl RemoveParamStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the definition
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let pa = match txn.get_db_param(ns, db, &self.name).await {
 			Ok(x) => x,
 			Err(e) => {

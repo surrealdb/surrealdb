@@ -4,11 +4,12 @@ use anyhow::{Result, bail};
 use async_channel::Sender;
 use uuid::Uuid;
 
+use crate::catalog::TableDefinition;
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::dbs::Notification;
 use crate::err::Error;
 use crate::expr::Base;
-use crate::expr::statements::define::{DefineIndexStatement, DefineTableStatement};
+use crate::expr::statements::define::DefineIndexStatement;
 use crate::iam::{Action, Auth, ResourceKind};
 
 /// An Options is passed around when processing a set of query
@@ -24,9 +25,9 @@ pub struct Options {
 	/// The current Node ID of the datastore instance
 	id: Option<Uuid>,
 	/// The currently selected Namespace
-	ns: Option<Arc<str>>,
+	pub(crate) ns: Option<Arc<str>>,
 	/// The currently selected Database
-	db: Option<Arc<str>>,
+	pub(crate) db: Option<Arc<str>>,
 	/// Approximately how large is the current call stack?
 	dive: u32,
 	/// Connection authentication data
@@ -50,10 +51,11 @@ pub struct Options {
 }
 
 #[derive(Clone, Debug)]
-pub enum Force {
+pub(crate) enum Force {
 	All,
 	None,
-	Table(Arc<[DefineTableStatement]>),
+	Table(Arc<[TableDefinition]>),
+	#[cfg_attr(not(target_family = "wasm"), expect(dead_code))]
 	Index(Arc<[DefineIndexStatement]>),
 }
 
@@ -147,12 +149,6 @@ impl Options {
 		self
 	}
 
-	/// Specify wether tables/events should re-run
-	pub fn with_force(mut self, force: Force) -> Self {
-		self.force = force;
-		self
-	}
-
 	/// Sepecify if we should error when a table does not exist
 	pub fn with_strict(mut self, strict: bool) -> Self {
 		self.strict = strict;
@@ -211,7 +207,7 @@ impl Options {
 	}
 
 	/// Create a new Options object for a subquery
-	pub fn new_with_force(&self, force: Force) -> Self {
+	pub(crate) fn new_with_force(&self, force: Force) -> Self {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),

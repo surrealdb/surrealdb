@@ -21,19 +21,34 @@ pub async fn new_ds() -> Result<Datastore> {
 }
 
 #[allow(dead_code)]
+#[expect(clippy::too_many_arguments)]
 pub async fn iam_run_case(
+	test_index: i32,
 	prepare: &str,
 	test: &str,
 	check: &str,
-	check_expected_result: &[&str],
+	check_expected_result: &str,
 	ds: &Datastore,
 	sess: &Session,
+	use_ns: bool,
+	use_db: bool,
 	should_succeed: bool,
 ) -> Result<()> {
 	// Use the session as the test statement, but change the Auth to run the check
 	// with full permissions
 	let mut owner_sess = sess.clone();
 	owner_sess.au = Arc::new(Auth::for_root(Role::Owner));
+
+	if use_ns {
+		if let Some(ns) = &sess.ns {
+			ds.execute(&format!("USE NS {ns}"), &owner_sess, None).await.unwrap();
+		}
+	}
+	if use_db {
+		if let Some(db) = &sess.db {
+			ds.execute(&format!("USE DB {db}"), &owner_sess, None).await.unwrap();
+		}
+	}
 
 	// Prepare statement
 	{
@@ -51,36 +66,44 @@ pub async fn iam_run_case(
 
 	// Check datastore state first
 	{
-		let resp = ds.execute(check, &owner_sess, None).await.unwrap();
-		ensure!(
-			resp.len() == check_expected_result.len(),
-			"Check statement failed for test: expected {} results, got {}",
-			check_expected_result.len(),
+		let mut resp = ds.execute(check, &owner_sess, None).await.unwrap();
+		assert_eq!(
+			resp.len(),
+			1,
+			"Check statement failed for test {test_index} ({test}): expected 1 result, got {}",
 			resp.len()
 		);
 
-		for (i, r) in resp.into_iter().enumerate() {
-			let tmp = r.output();
-			ensure!(tmp.is_ok(), "Check statement errored for test: {}", tmp.unwrap_err());
+		let tmp = resp.pop().unwrap().output();
+		ensure!(
+			tmp.is_ok(),
+			"Check statement errored for test {test_index} ({test}): {}",
+			tmp.unwrap_err()
+		);
 
-			let tmp = tmp.unwrap();
-			let expected = syn::value(check_expected_result[i])?;
-			ensure!(
-				tmp == expected,
-				"Check statement failed for test: expected value '{:#}' doesn't match '{:#}'",
-				expected,
-				tmp
-			)
-		}
+		let tmp = tmp.unwrap();
+		let expected = syn::value(check_expected_result)?;
+		ensure!(
+			tmp == expected,
+			"Check statement failed for test {test_index} ({test}): expected value \n'{expected:#}' \ndoesn't match \n'{tmp:#}'",
+		)
 	}
 
 	// Check statement result. If the statement should succeed, check that the
 	// result is Ok, otherwise check that the result is a 'Not Allowed' error
 	let res = resp.pop().unwrap().output();
 	if should_succeed {
-		ensure!(res.is_ok(), "Test statement failed: {}", res.unwrap_err());
+		ensure!(
+			res.is_ok(),
+			"Test statement failed for test {test_index} ({test}): {}",
+			res.unwrap_err()
+		);
 	} else {
-		ensure!(res.is_err(), "Test statement succeeded when it should have failed: {:?}", res);
+		ensure!(
+			res.is_err(),
+			"Test statement succeeded for test {test_index} ({test}) when it should have failed: {:?}",
+			res
+		);
 
 		let err = res.unwrap_err().to_string();
 		ensure!(
@@ -92,38 +115,79 @@ pub async fn iam_run_case(
 	Ok(())
 }
 
-type CaseIter<'a> = std::slice::Iter<'a, ((Level, Role), (&'a str, &'a str), bool)>;
+type CaseIter<'a> = std::slice::Iter<'a, ((Level, Role), (&'a str, &'a str), bool, String)>;
 
 #[allow(dead_code)]
 pub async fn iam_check_cases(
 	cases: CaseIter<'_>,
 	scenario: &HashMap<&str, &str>,
-	check_results: [Vec<&str>; 2],
+	expected_anonymous_success_result: &str,
+	expected_anonymous_failure_result: &str,
+) -> Result<()> {
+	iam_check_cases_impl(
+		cases,
+		scenario,
+		expected_anonymous_success_result,
+		expected_anonymous_failure_result,
+		true,
+		true,
+	)
+	.await
+}
+
+#[allow(dead_code)]
+pub async fn iam_check_cases_impl(
+	cases: CaseIter<'_>,
+	scenario: &HashMap<&str, &str>,
+	expected_anonymous_success_result: &str,
+	expected_anonymous_failure_result: &str,
+	use_ns: bool,
+	use_db: bool,
 ) -> Result<()> {
 	let prepare = scenario.get("prepare").unwrap();
 	let test = scenario.get("test").unwrap();
 	let check = scenario.get("check").unwrap();
 
-	for ((level, role), (ns, db), should_succeed) in cases {
-		println!("* Testing '{test}' for '{level}Actor({role})' on '({ns}, {db})'");
+	for (test_index, ((level, role), (ns, db), should_succeed, expected_result)) in
+		cases.enumerate()
+	{
+		println!("* Testing '{test}' for '{level}Actor({role})' on '({ns}, {db})' - {test_index}");
 		let sess = Session::for_level(level.to_owned(), role.to_owned()).with_ns(ns).with_db(db);
-		let expected_result = if *should_succeed {
-			check_results.first().unwrap()
-		} else {
-			&check_results[1]
-		};
+
 		// Auth enabled
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(true);
-			iam_run_case(prepare, test, check, expected_result, &ds, &sess, *should_succeed)
-				.await?;
+			iam_run_case(
+				test_index as i32,
+				prepare,
+				test,
+				check,
+				expected_result,
+				&ds,
+				&sess,
+				use_ns,
+				use_db,
+				*should_succeed,
+			)
+			.await?;
 		}
 
 		// Auth disabled
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(false);
-			iam_run_case(prepare, test, check, expected_result, &ds, &sess, *should_succeed)
-				.await?;
+			iam_run_case(
+				test_index as i32,
+				prepare,
+				test,
+				check,
+				expected_result,
+				&ds,
+				&sess,
+				use_ns,
+				use_db,
+				*should_succeed,
+			)
+			.await?;
 		}
 	}
 
@@ -142,17 +206,20 @@ pub async fn iam_check_cases(
 			);
 			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 			let expected_result = if auth_enabled {
-				&check_results[1]
+				expected_anonymous_failure_result
 			} else {
-				check_results.first().unwrap()
+				expected_anonymous_success_result
 			};
 			iam_run_case(
+				-1,
 				prepare,
 				test,
 				check,
 				expected_result,
 				&ds,
 				&Session::default().with_ns(ns).with_db(db),
+				use_ns,
+				use_db,
 				!auth_enabled,
 			)
 			.await?;
@@ -432,8 +499,7 @@ impl Test {
 	/// # Arguments
 	///
 	/// * `val` - The expected floating-point value
-	/// * `precision` - The allowed difference between the expected and actual
-	///   value
+	/// * `precision` - The allowed difference between the expected and actual value
 	///
 	/// # Panics
 	///

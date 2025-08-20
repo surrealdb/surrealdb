@@ -3,6 +3,7 @@ use std::fmt::Debug;
 
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::trees::hnsw::HnswState;
 use crate::kvs::KVKey;
 
@@ -10,9 +11,9 @@ use crate::kvs::KVKey;
 pub(crate) struct Hs<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -27,7 +28,7 @@ impl KVKey for Hs<'_> {
 }
 
 impl<'a> Hs<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -51,11 +52,11 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Hs::new("testns", "testdb", "testtb", "testix");
+		let val = Hs::new(NamespaceId(1), DatabaseId(2), "testtb", "testix");
 		let enc = Hs::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\0*testdb\0*testtb\0+testix\0!hs",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!hs",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);
