@@ -1,10 +1,11 @@
 use std::{collections::BTreeMap, hash};
 
 use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
 
 use crate::{Duration, Kind};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum KindLiteral {
 	String(String),
 	Integer(i64),

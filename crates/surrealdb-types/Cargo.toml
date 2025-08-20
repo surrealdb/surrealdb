@@ -15,12 +15,22 @@ categories.workspace = true
 [dependencies]
 anyhow.workspace = true
 bytes.workspace = true
-chrono.workspace = true
-geo.workspace = true
-geo-types.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+flatbuffers.workspace = true
+geo = { workspace = true, features = ["use-serde"] }
+rstest.workspace = true
 rust_decimal.workspace = true
-serde.workspace = true
-uuid.workspace = true
+serde = { workspace = true, features = ["derive"] }
+
+# WASM DEPENDENCY CONFIGURATION
+[target.'cfg(target_family = "wasm")'.dependencies]
+surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers"] }
+uuid = { workspace = true, features = ["serde", "v4", "v7", "js"] }
+
+# NON-WASM DEPENDENCY CONFIGURATION
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers", "rpc"] }
+uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
 [lints]
 workspace = true

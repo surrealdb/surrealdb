@@ -1,6 +1,7 @@
 use crate::{KindGeometry, KindLiteral};
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Kind {
 	/// The most generic type, can be anything.
 	Any,

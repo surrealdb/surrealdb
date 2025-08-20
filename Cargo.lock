@@ -5964,10 +5964,12 @@ dependencies = [
  "anyhow",
  "bytes",
  "chrono",
+ "flatbuffers",
  "geo",
- "geo-types",
+ "rstest",
  "rust_decimal",
  "serde",
+ "surrealdb-protocol",
  "uuid",
 ]
 

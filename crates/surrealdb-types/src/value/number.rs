@@ -1,10 +1,10 @@
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::hash;
-
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum Number {
 	Int(i64),
 	Float(f64),

@@ -4,7 +4,9 @@ use std::hash;
 
 use geo::{Coord, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 
-#[derive(Clone, Debug, PartialEq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Geometry {
 	Point(Point<f64>),
 	Line(LineString<f64>),

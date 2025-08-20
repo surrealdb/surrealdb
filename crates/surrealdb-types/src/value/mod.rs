@@ -12,6 +12,8 @@ pub mod uuid;
 
 use std::cmp::Ordering;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{Kind, SurrealValue};
 
 pub use self::array::Array;
@@ -34,7 +36,7 @@ pub struct SurrealNone;
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SurrealNull;
 
-#[derive(Clone, Debug, Default, Hash, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Default, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum Value {
 	#[default]
 	None,

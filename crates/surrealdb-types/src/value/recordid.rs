@@ -1,8 +1,9 @@
+use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, ops::Bound};
 
 use crate::{Array, Number, Object, Range, Uuid, Value};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct RecordIdKeyRange {
 	pub start: Bound<RecordIdKey>,
 	pub end: Bound<RecordIdKey>,
@@ -78,7 +79,7 @@ impl PartialEq<Range> for RecordIdKeyRange {
 	}
 }
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum RecordIdKey {
 	Number(i64),
 	String(String),
@@ -131,7 +132,7 @@ impl PartialEq<Value> for RecordIdKey {
 	}
 }
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct RecordId {
 	pub table: String,
 	pub key: RecordIdKey,
