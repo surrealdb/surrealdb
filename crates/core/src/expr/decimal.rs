@@ -15,6 +15,7 @@
 //! Ordering overview:
 //! - Finite negatives < zero < finite positives
 //! - −∞ < all finite < +∞ < NaN
+//!
 //! See the struct-level documentation below for the precise byte format.
 
 use anyhow::Result;
