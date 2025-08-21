@@ -10,7 +10,6 @@ use surrealdb::err::Error;
 use surrealdb::sql::Thing;
 use surrealdb::sql::Value;
 use surrealdb_core::dbs::Action;
-use surrealdb_core::sql::Kind;
 
 #[tokio::test]
 async fn live_permissions() -> Result<(), Error> {
