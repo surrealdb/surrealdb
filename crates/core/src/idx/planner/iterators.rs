@@ -582,10 +582,10 @@ impl IndexRangeThingIterator {
 		for (op, v) in ranges {
 			let key = storekey::serialize(v.as_ref())?;
 			match op {
-				BinaryOperator::LessThan => to.push((key, 0, v.clone())),
-				BinaryOperator::LessThanEqual => to.push((key, 1, v.clone())),
-				BinaryOperator::MoreThan => from.push((key, 1, v.clone())),
-				BinaryOperator::MoreThanEqual => from.push((key, 0, v.clone())),
+				BinaryOperator::LessThan => to.push((key, 0u8, v.clone())),
+				BinaryOperator::LessThanEqual => to.push((key, 1u8, v.clone())),
+				BinaryOperator::MoreThan => from.push((key, 1u8, v.clone())),
+				BinaryOperator::MoreThanEqual => from.push((key, 0u8, v.clone())),
 				_ => {
 					bail!(Error::Unreachable(format!("Invalid operator for range extraction {op}")))
 				}
@@ -596,7 +596,7 @@ impl IndexRangeThingIterator {
 		let from = if let Some((_, inclusive, val)) = from.first() {
 			RangeValue {
 				value: val.as_ref().clone(),
-				inclusive: *inclusive == 0,
+				inclusive: *inclusive == 0u8,
 			}
 		} else {
 			RangeValue::default()
