@@ -84,7 +84,7 @@ pub use self::group::{Group, Groups};
 pub use self::ident::Ident;
 pub use self::idiom::{Idiom, Idioms};
 pub use self::index::Index;
-pub use self::kind::{Kind, KindLiteral};
+pub use self::kind::{GeometryKind, Kind, KindLiteral};
 pub use self::limit::Limit;
 pub use self::literal::Literal;
 pub use self::mock::Mock;
