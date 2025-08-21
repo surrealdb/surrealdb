@@ -440,10 +440,7 @@ impl FromFlatbuffers for Kind {
 					return Err(anyhow::anyhow!("Missing geometry kind"));
 				};
 				let types = if let Some(types) = geometry.types() {
-					types
-						.iter()
-						.map(GeometryKind::from_fb)
-						.collect::<anyhow::Result<Vec<_>>>()?
+					types.iter().map(GeometryKind::from_fb).collect::<anyhow::Result<Vec<_>>>()?
 				} else {
 					Vec::new()
 				};

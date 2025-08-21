@@ -3,7 +3,6 @@ mod literal;
 
 pub use geometry::*;
 pub use literal::*;
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
