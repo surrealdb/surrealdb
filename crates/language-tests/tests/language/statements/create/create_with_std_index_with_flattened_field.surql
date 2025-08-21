@@ -14,6 +14,12 @@ value = "[{ id: student:2, marks: [{ mark: 40, subject: 'maths' }, { mark: 40, s
 value = "[{ detail: { plan: { index: 'mark_idx', operator: '=', value: 40 }, table: 'student' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 [[test.results]]
+value = "[{ detail: { plan: { index: 'mark_idx', operator: '=', value: 40 }, table: 'student' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+
+[[test.results]]
+value = "[{ id: student:1, marks: [{ mark: 40, subject: 'english' }] }, { id: student:2, marks: [{ mark: 40, subject: 'maths' }, { mark: 40, subject: 'english' }, { mark: 45, subject: 'hindi' }]}]"
+
+[[test.results]]
 value = "[{ id: student:1, marks: [{ mark: 40, subject: 'english' }] }, { id: student:2, marks: [{ mark: 40, subject: 'maths' }, { mark: 40, subject: 'english' }, { mark: 45, subject: 'hindi' }]}]"
 
 [[test.results]]
@@ -21,6 +27,9 @@ value = "[{ id: student:1, marks: [{ mark: 40, subject: 'english' }] }, { id: st
 
 [[test.results]]
 value = "[]"
+
+[[test.results]]
+value = "[{ id: student:1, marks: [{ mark: 40, subject: 'english' }] }]"
 
 [[test.results]]
 value = "[{ id: student:1, marks: [{ mark: 40, subject: 'english' }] }]"
@@ -43,8 +52,12 @@ CREATE student:2 CONTENT {
     ]
 };
 SELECT * FROM student WHERE marks.*.mark = 40 EXPLAIN;
+SELECT * FROM student WHERE 40 INSIDE marks.*.mark EXPLAIN;
 SELECT * FROM student WITH NOINDEX WHERE marks.*.mark CONTAINS 40;
 SELECT * FROM student WHERE marks.*.mark CONTAINS 40;
+SELECT * FROM student WHERE 40 INSIDE marks.*.mark;
+
 DELETE student:2;
 SELECT * FROM student WITH NOINDEX WHERE marks.*.mark CONTAINS 40;
 SELECT * FROM student WHERE marks.*.mark CONTAINS 40;
+SELECT * FROM student WHERE 40 INSIDE marks.*.mark;

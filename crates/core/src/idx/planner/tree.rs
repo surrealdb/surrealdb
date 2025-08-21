@@ -607,12 +607,12 @@ impl<'a> TreeBuilder<'a> {
 					}
 				}
 				(BinaryOperator::Contain, v, IdiomPosition::Left) => {
-					if col == 0 {
+					if col == 0 && ixr.cols[0].contains(&Part::All) {
 						return Some(IndexOperator::Equality(v));
 					}
 				}
 				(BinaryOperator::Inside, v, IdiomPosition::Right) => {
-					if col == 0 {
+					if col == 0 && ixr.cols[0].contains(&Part::All) {
 						return Some(IndexOperator::Equality(v));
 					}
 				}
