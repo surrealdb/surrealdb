@@ -1,7 +1,5 @@
-use crate::dbs;
 use anyhow::Result;
 use clap::Args;
-use surrealdb::engine::any;
 
 #[derive(Args, Debug)]
 pub struct FixCommandArguments {
@@ -14,18 +12,9 @@ pub struct FixCommandArguments {
 
 pub async fn init(
 	FixCommandArguments {
-		path,
+		path: _,
 	}: FixCommandArguments,
 ) -> Result<()> {
-	// Clean the path
-	let endpoint = any::__into_endpoint(path)?;
-	let path = if endpoint.path.is_empty() {
-		endpoint.url.to_string()
-	} else {
-		endpoint.path
-	};
-	// Fix the datastore, if applicable
-	dbs::fix(path).await?;
 	// All ok
-	Ok(())
+	Err(anyhow::anyhow!("Fix is not implemented"))
 }

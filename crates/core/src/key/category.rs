@@ -143,7 +143,8 @@ pub enum Category {
 	IndexDocLength,
 	/// crate::key::index::td                /*{ns}*{db}*{tb}+{ix}!td{term}{id}
 	IndexTermDocument,
-	/// crate::key::index::tt                /*{ns}*{db}*{tb}+{ix}!td{term}{uuid}{uuid}
+	/// crate::key::index::tt
+	/// /*{ns}*{db}*{tb}+{ix}!td{term}{uuid}{uuid}
 	IndexTermDocuments,
 	/// crate::key::index::he                /*{ns}*{db}*{tb}+{ix}!he{id}
 	IndexHnswElements,

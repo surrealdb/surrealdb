@@ -1,6 +1,7 @@
-use crate::sql::Kind;
 use std::fmt;
 use std::fmt::Display;
+
+use crate::sql::Kind;
 
 /// The type of records stored by a table
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -38,22 +39,22 @@ impl Display for TableType {
 	}
 }
 
-impl From<TableType> for crate::expr::TableType {
+impl From<TableType> for crate::catalog::TableType {
 	fn from(v: TableType) -> Self {
 		match v {
-			TableType::Any => crate::expr::TableType::Any,
-			TableType::Normal => crate::expr::TableType::Normal,
-			TableType::Relation(rel) => crate::expr::TableType::Relation(rel.into()),
+			TableType::Any => Self::Any,
+			TableType::Normal => Self::Normal,
+			TableType::Relation(rel) => Self::Relation(rel.into()),
 		}
 	}
 }
 
-impl From<crate::expr::TableType> for TableType {
-	fn from(v: crate::expr::TableType) -> Self {
+impl From<crate::catalog::TableType> for TableType {
+	fn from(v: crate::catalog::TableType) -> Self {
 		match v {
-			crate::expr::TableType::Any => TableType::Any,
-			crate::expr::TableType::Normal => TableType::Normal,
-			crate::expr::TableType::Relation(rel) => TableType::Relation(rel.into()),
+			crate::catalog::TableType::Any => Self::Any,
+			crate::catalog::TableType::Normal => Self::Normal,
+			crate::catalog::TableType::Relation(rel) => Self::Relation(rel.into()),
 		}
 	}
 }
@@ -66,9 +67,9 @@ pub struct Relation {
 	pub enforced: bool,
 }
 
-impl From<Relation> for crate::expr::Relation {
+impl From<Relation> for crate::catalog::Relation {
 	fn from(v: Relation) -> Self {
-		crate::expr::Relation {
+		Self {
 			from: v.from.map(Into::into),
 			to: v.to.map(Into::into),
 			enforced: v.enforced,
@@ -76,9 +77,9 @@ impl From<Relation> for crate::expr::Relation {
 	}
 }
 
-impl From<crate::expr::Relation> for Relation {
-	fn from(v: crate::expr::Relation) -> Self {
-		Relation {
+impl From<crate::catalog::Relation> for Relation {
+	fn from(v: crate::catalog::Relation) -> Self {
+		Self {
 			from: v.from.map(Into::into),
 			to: v.to.map(Into::into),
 			enforced: v.enforced,

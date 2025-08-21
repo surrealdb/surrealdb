@@ -1,3 +1,18 @@
+use std::fmt::Display;
+use std::pin::{Pin, pin};
+use std::sync::Arc;
+use std::time::Duration;
+
+use anyhow::{Result, anyhow, bail};
+use futures::{Stream, StreamExt, stream};
+use reblessive::TreeStack;
+#[cfg(not(target_family = "wasm"))]
+use tokio::spawn;
+use tracing::{instrument, warn};
+use trice::Instant;
+#[cfg(target_family = "wasm")]
+use wasm_bindgen_futures::spawn_local as spawn;
+
 use crate::ctx::Context;
 use crate::ctx::reason::Reason;
 use crate::dbs::response::Response;
@@ -5,26 +20,13 @@ use crate::dbs::{Force, Options, QueryType};
 use crate::err::Error;
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
-use crate::expr::statements::{OptionStatement, UseStatement};
+use crate::expr::statements::OptionStatement;
 use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 use crate::sql::{self, Ast};
 use crate::val::Value;
 use crate::{err, expr};
-use anyhow::{Result, anyhow, bail};
-use futures::{Stream, StreamExt, stream};
-use reblessive::TreeStack;
-use std::fmt::Display;
-use std::pin::{Pin, pin};
-use std::sync::Arc;
-use std::time::Duration;
-#[cfg(not(target_family = "wasm"))]
-use tokio::spawn;
-use tracing::{instrument, warn};
-use trice::Instant;
-#[cfg(target_family = "wasm")]
-use wasm_bindgen_futures::spawn_local as spawn;
 
 const TARGET: &str = "surrealdb::core::dbs";
 
@@ -43,26 +45,6 @@ impl Executor {
 			opt,
 			ctx,
 		}
-	}
-
-	fn execute_use_statement(&mut self, stmt: UseStatement) -> Result<()> {
-		let ctx_ref = Arc::get_mut(&mut self.ctx).ok_or_else(|| {
-			Error::unreachable(format_args!("Tried to unfreeze a Context with multiple references"))
-		})?;
-
-		if let Some(ns) = stmt.ns {
-			let mut session = ctx_ref.value("session").unwrap_or(&Value::None).clone();
-			self.opt.set_ns(Some(ns.as_str().into()));
-			session.put(NS.as_ref(), ns.into_strand().into());
-			ctx_ref.add_value("session", session.into());
-		}
-		if let Some(db) = stmt.db {
-			let mut session = ctx_ref.value("session").unwrap_or(&Value::None).clone();
-			self.opt.set_db(Some(db.as_str().into()));
-			session.put(DB.as_ref(), db.into_strand().into());
-			ctx_ref.add_value("session", session.into());
-		}
-		Ok(())
 	}
 
 	fn execute_option_statement(&mut self, stmt: OptionStatement) -> Result<()> {
@@ -92,7 +74,8 @@ impl Executor {
 		}
 	}
 
-	/// Executes a statement which needs a transaction with the supplied transaction.
+	/// Executes a statement which needs a transaction with the supplied
+	/// transaction.
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	async fn execute_plan_in_transaction(
 		&mut self,
@@ -101,10 +84,37 @@ impl Executor {
 		plan: TopLevelExpr,
 	) -> FlowResult<Value> {
 		let res = match plan {
-			TopLevelExpr::Use(_) => {
-				return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
-					"TopLevelExpr::Use should have been handled by a calling function",
-				))));
+			TopLevelExpr::Use(stmt) => {
+				// Avoid moving in and out of the context via Arc::get_mut
+				let ctx = Arc::get_mut(&mut self.ctx)
+					.ok_or_else(|| {
+						Error::unreachable("Tried to unfreeze a Context with multiple references")
+					})
+					.map_err(anyhow::Error::new)?;
+
+				if let Some(ns) = stmt.ns {
+					txn.get_or_add_ns(&ns, self.opt.strict).await?;
+
+					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+					self.opt.set_ns(Some(ns.as_str().into()));
+					session.put(NS.as_ref(), ns.into_strand().into());
+					ctx.add_value("session", session.into());
+				}
+				if let Some(db) = stmt.db {
+					let Some(ns) = &self.opt.ns else {
+						return Err(ControlFlow::Err(anyhow::anyhow!(
+							"Cannot use database without namespace"
+						)));
+					};
+
+					txn.ensure_ns_db(ns, &db, self.opt.strict).await?;
+
+					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+					self.opt.set_db(Some(db.as_str().into()));
+					session.put(DB.as_ref(), db.into_strand().into());
+					ctx.add_value("session", session.into());
+				}
+				Ok(Value::None)
 			}
 			TopLevelExpr::Option(_) => {
 				return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
@@ -284,11 +294,7 @@ impl Executor {
 			}
 		}
 
-		match stmt {
-			// These statements don't need a transaction.
-			TopLevelExpr::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
-			stmt => self.execute_plan_impl(kvs, start, stmt).await,
-		}
+		self.execute_plan_impl(kvs, start, stmt).await
 	}
 
 	async fn execute_plan_impl(
@@ -361,7 +367,8 @@ impl Executor {
 		}
 	}
 
-	/// Execute the begin statement and all statements after which are within a transaction block.
+	/// Execute the begin statement and all statements after which are within a
+	/// transaction block.
 	async fn execute_begin_statement<S>(
 		&mut self,
 		kvs: &Datastore,
@@ -393,7 +400,8 @@ impl Executor {
 			return Ok(());
 		};
 
-		// Create a sender for this transaction only if the context allows for notifications.
+		// Create a sender for this transaction only if the context allows for
+		// notifications.
 		let receiver = self.ctx.has_notifications().then(|| {
 			let (send, recv) = async_channel::unbounded();
 			self.opt.sender = Some(send);
@@ -563,7 +571,6 @@ impl Executor {
 					}
 					Err(e) => Err(e),
 				},
-				TopLevelExpr::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
 				stmt => {
 					skip_remaining = matches!(stmt, TopLevelExpr::Expr(Expr::Return(_)));
 
@@ -586,7 +593,8 @@ impl Executor {
 								res.result = Err(anyhow!(Error::QueryNotExecuted));
 							}
 
-							// statement return an error. Consume all the other statement until we hit a cancel or commit.
+							// statement return an error. Consume all the other statement until we
+							// hit a cancel or commit.
 							self.results.push(Response {
 								time: before.elapsed(),
 								result: Err(e),

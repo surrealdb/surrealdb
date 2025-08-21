@@ -1,3 +1,7 @@
+use anyhow::{Result, bail};
+use futures::StreamExt;
+use reblessive::tree::Stk;
+
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Options, Statement};
@@ -13,9 +17,6 @@ use crate::expr::{AssignOperator, Data, Expr, FlowResultExt as _, Graph, Idiom, 
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
 use crate::val::{RecordId, Value};
-use anyhow::{Result, bail};
-use futures::StreamExt;
-use reblessive::tree::Stk;
 
 impl Document {
 	pub(super) async fn purge(
@@ -34,7 +35,7 @@ impl Document {
 		// Get the record id
 		if let Some(rid) = &self.id {
 			// Get the namespace / database
-			let (ns, db) = opt.ns_db()?;
+			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 			// Purge the record data
 			txn.del_record(ns, db, &rid.table, &rid.key).await?;
 			// Purge the record edges
@@ -98,9 +99,14 @@ impl Document {
 					yield_now!();
 					// Decode the key
 					let key = res?;
-					let r#ref = Ref::decode_key(&key)?;
+					let ref_key = Ref::decode_key(&key)?;
 					// Obtain the remote field definition
-					let fd = txn.get_tb_field(ns, db, r#ref.ft, r#ref.ff).await?;
+					let Some(fd) = txn.get_tb_field(ns, db, ref_key.ft, ref_key.ff).await? else {
+						return Err(Error::FdNotFound {
+							name: ref_key.ff.to_string(),
+						}
+						.into());
+					};
 					// Check if there is a reference defined on the field
 					if let Some(reference) = &fd.reference {
 						match &reference.on_delete {
@@ -109,8 +115,8 @@ impl Document {
 							// Reject the delete operation, as indicated by the reference
 							ReferenceDeleteStrategy::Reject => {
 								let thing = RecordId {
-									table: r#ref.ft.to_string(),
-									key: r#ref.fk.clone(),
+									table: ref_key.ft.to_string(),
+									key: ref_key.fk.clone(),
 								};
 
 								bail!(Error::DeleteRejectedByReference(
@@ -121,8 +127,8 @@ impl Document {
 							// Delete the remote record which referenced this record
 							ReferenceDeleteStrategy::Cascade => {
 								let record_id = RecordId {
-									table: r#ref.ft.to_string(),
-									key: r#ref.fk.clone(),
+									table: ref_key.ft.to_string(),
+									key: ref_key.fk.clone(),
 								};
 
 								// Setup the delete statement
@@ -143,8 +149,8 @@ impl Document {
 							// Delete only the reference on the remote record
 							ReferenceDeleteStrategy::Unset => {
 								let thing = RecordId {
-									table: r#ref.ft.to_string(),
-									key: r#ref.fk.clone(),
+									table: ref_key.ft.to_string(),
+									key: ref_key.fk.clone(),
 								};
 
 								// Determine how we perform the update
@@ -186,8 +192,8 @@ impl Document {
 								let reference = Value::from(rid.as_ref().clone());
 								// Value for the document is the remote record
 								let this = RecordId {
-									table: r#ref.ft.to_string(),
-									key: r#ref.fk.clone(),
+									table: ref_key.ft.to_string(),
+									key: ref_key.fk.clone(),
 								};
 
 								// Set the `$reference` variable in the context

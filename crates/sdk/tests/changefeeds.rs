@@ -1,12 +1,11 @@
-use chrono::DateTime;
-
 use anyhow::anyhow;
+use chrono::DateTime;
 use helpers::new_ds;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::kvs::Datastore;
-use surrealdb::kvs::LockType::Optimistic;
-use surrealdb::kvs::TransactionType::Write;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::kvs::Datastore;
+use surrealdb_core::kvs::LockType::Optimistic;
+use surrealdb_core::kvs::TransactionType::Write;
 use surrealdb_core::syn;
 use surrealdb_core::val::{Array, Value};
 use surrealdb_core::vs::VersionStamp;
@@ -304,10 +303,11 @@ async fn table_change_feeds() -> Result<()> {
 					vs5.into_u128(),
 					vs6.into_u128(),
 				);
+				// define_table: { changefeed: { expiry: '1h', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'person', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }
 				syn::value(
 					format!(
 						r#"[
-						{{ versionstamp: {vs1}, changes: [ {{ define_table: {{ name: 'person' }} }} ] }},
+						{{ versionstamp: {vs1}, changes: [ {{ define_table: {{ name: 'person', changefeed: {{ expiry: '1h', original: false }}, drop: false, kind: {{ kind: 'ANY' }}, permissions: {{ create: false, delete: false, select: false, update: false }}, schemafull: false }} }} ] }},
 						{{ versionstamp: {vs2}, changes: [ {{ update: {{ id: person:test, name: 'Name: Tobie' }} }} ] }},
 						{{ versionstamp: {vs3}, changes: [ {{ update: {{ id: person:test, name: 'Name: Jaime' }} }} ] }},
 						{{ versionstamp: {vs4}, changes: [ {{ update: {{ id: person:test, name: 'Name: Tobie' }} }} ] }},
@@ -422,7 +422,22 @@ async fn changefeed_with_ts() -> Result<()> {
 			"[
 		{
 			define_table: {
-				name: 'user'
+				name: 'user',
+				changefeed: {
+					expiry: '1h',
+					original: false,
+				},
+				drop: false,
+				kind: {
+					kind: 'ANY',
+				},
+				permissions: {
+					create: false,
+					delete: false,
+					select: false,
+					update: false,
+				},
+				schemafull: false,
 			}
 		}
 	]"

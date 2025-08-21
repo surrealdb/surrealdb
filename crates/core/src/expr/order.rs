@@ -1,10 +1,12 @@
+use std::ops::Deref;
+use std::{cmp, fmt};
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::expr::Value;
 use crate::expr::fmt::Fmt;
 use crate::expr::idiom::Idiom;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::ops::Deref;
-use std::{cmp, fmt};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]

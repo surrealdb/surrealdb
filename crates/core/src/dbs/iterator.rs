@@ -1,3 +1,9 @@
+use std::mem;
+use std::sync::Arc;
+
+use anyhow::{Result, bail, ensure};
+use reblessive::tree::Stk;
+
 use crate::ctx::{Canceller, Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
@@ -15,10 +21,6 @@ use crate::idx::planner::{
 	StatementContext,
 };
 use crate::val::{Object, RecordId, RecordIdKey, RecordIdKeyRange, Value};
-use anyhow::{Result, bail, ensure};
-use reblessive::tree::Stk;
-use std::mem;
-use std::sync::Arc;
 
 const TARGET: &str = "surrealdb::core::dbs";
 
@@ -65,8 +67,9 @@ pub(crate) enum Iterable {
 	/// is used in INSERT RELATION statements, where each value
 	/// passed in to the iterable is unique for each record.
 	///
-	/// The first field is the rid from which we create, the second is the rid which is the
-	/// relation itself and the third is the target of the relation
+	/// The first field is the rid from which we create, the second is the rid
+	/// which is the relation itself and the third is the target of the
+	/// relation
 	Relatable(RecordId, RecordId, RecordId, Option<Value>),
 	/// An iterable which iterates over an index range for a
 	/// table, which then fetches the corresponding records
@@ -168,7 +171,9 @@ impl Iterator {
 		// Match the values
 		match val {
 			Expr::Mock(v) => self.prepare_mock(stm_ctx, v).await?,
-			Expr::Table(v) => self.prepare_table(stk, planner, stm_ctx, v.clone()).await?,
+			Expr::Table(v) => {
+				self.prepare_table(ctx, opt, stk, planner, stm_ctx, v.clone()).await?
+			}
 			Expr::Idiom(x) => {
 				// TODO: This needs to be structured better.
 				// match against what previously would be an edge.
@@ -221,24 +226,29 @@ impl Iterator {
 	/// Prepares a value for processing
 	pub(crate) async fn prepare_table(
 		&mut self,
+		ctx: &Context,
+		opt: &Options,
 		stk: &mut Stk,
 		planner: &mut QueryPlanner,
-		ctx: &StatementContext<'_>,
+		stm_ctx: &StatementContext<'_>,
 		table: Ident,
 	) -> Result<()> {
 		// We add the iterable only if we have a permission
-		let p = planner.check_table_permission(ctx, &table).await?;
+		let p = planner.check_table_permission(stm_ctx, &table).await?;
 		if matches!(p, GrantedPermission::None) {
 			return Ok(());
 		}
 		// Add the record to the iterator
-		if ctx.stm.is_deferable() {
+		if stm_ctx.stm.is_deferable() {
+			ctx.get_db(opt).await?;
 			self.ingest(Iterable::Yield(table))
 		} else {
-			if ctx.stm.is_guaranteed() {
+			if stm_ctx.stm.is_guaranteed() {
 				self.guaranteed = Some(Iterable::Yield(table.clone()));
 			}
-			planner.add_iterables(stk, ctx, table, p, self).await?;
+			let db = ctx.get_db(opt).await?;
+
+			planner.add_iterables(&db, stk, stm_ctx, table, p, self).await?;
 		}
 		// All ingested ok
 		Ok(())
@@ -394,7 +404,9 @@ impl Iterator {
 			Value::Object(o) if !stm_ctx.stm.is_select() => {
 				self.prepare_object(stm_ctx.stm, o)?;
 			}
-			Value::Table(v) => self.prepare_table(stk, planner, stm_ctx, v.into()).await?,
+			Value::Table(v) => {
+				self.prepare_table(ctx, opt, stk, planner, stm_ctx, v.into()).await?
+			}
 			Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
 			Value::Array(a) => a.into_iter().for_each(|x| self.ingest(Iterable::Value(x))),
 			v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
@@ -424,7 +436,9 @@ impl Iterator {
 		for v in v {
 			match v {
 				Expr::Mock(v) => self.prepare_mock(stm_ctx, v).await?,
-				Expr::Table(v) => self.prepare_table(stk, planner, stm_ctx, v.clone()).await?,
+				Expr::Table(v) => {
+					self.prepare_table(ctx, opt, stk, planner, stm_ctx, v.clone()).await?
+				}
 				Expr::Idiom(x) => {
 					// match against what previously would be an edge.
 					if x.len() != 2 {
@@ -454,8 +468,8 @@ impl Iterator {
 						&& graph.start.is_none()
 						&& graph.expr.is_none()
 					{
-						// TODO: Do we support `RETURN a:b` here? What do we do when it is not of the
-						// right type?
+						// TODO: Do we support `RETURN a:b` here? What do we do when it is not of
+						// the right type?
 						let from = match from.compute(stk, ctx, opt, doc).await {
 							Ok(x) => x,
 							Err(ControlFlow::Err(e)) => return Err(e),
@@ -507,7 +521,8 @@ impl Iterator {
 			self.limit,
 		)?;
 
-		// Extract the expected behaviour depending on the presence of EXPLAIN with or without FULL
+		// Extract the expected behaviour depending on the presence of EXPLAIN with or
+		// without FULL
 		let mut plan = Plan::new(ctx, stm, &self.entries, &self.results);
 		// Check if we actually need to process and iterate over the results
 		if plan.do_iterate {
@@ -515,23 +530,33 @@ impl Iterator {
 				e.add_record_strategy(rs);
 			}
 			// Process prepared values
-			let sp = if let Some(qp) = ctx.get_query_planner() {
-				let sp = qp.is_any_specific_permission();
+			let is_specific_permission = if let Some(qp) = ctx.get_query_planner() {
+				let is_specific_permission = qp.is_any_specific_permission();
 				while let Some(s) = qp.next_iteration_stage().await {
 					let is_last = matches!(s, IterationStage::Iterate(_));
 					let mut c = MutableContext::unfreeze(cancel_ctx)?;
 					c.set_iteration_stage(s);
 					cancel_ctx = c.freeze();
 					if !is_last {
-						self.clone().iterate(stk, &cancel_ctx, opt, stm, sp, None).await?;
+						self.clone()
+							.iterate(stk, &cancel_ctx, opt, stm, is_specific_permission, None)
+							.await?;
 					};
 				}
-				sp
+				is_specific_permission
 			} else {
 				false
 			};
 			// Process all documents
-			self.iterate(stk, &cancel_ctx, opt, stm, sp, plan.explanation.as_mut()).await?;
+			self.iterate(
+				stk,
+				&cancel_ctx,
+				opt,
+				stm,
+				is_specific_permission,
+				plan.explanation.as_mut(),
+			)
+			.await?;
 			// Return any document errors
 			if let Some(e) = self.error.take() {
 				return Err(e);
@@ -543,7 +568,7 @@ impl Iterator {
 					// Ingest the pre-defined guaranteed record yield
 					self.ingest(guaranteed);
 					// Process the pre-defined guaranteed document
-					self.iterate(stk, &cancel_ctx, opt, stm, sp, None).await?;
+					self.iterate(stk, ctx, opt, stm, is_specific_permission, None).await?;
 				}
 			}
 			// Process any SPLIT AT clause
@@ -617,11 +642,13 @@ impl Iterator {
 		Ok(())
 	}
 
-	/// Determines whether START/LIMIT clauses can be optimized at the storage level.
+	/// Determines whether START/LIMIT clauses can be optimized at the storage
+	/// level.
 	///
-	/// This method enables a critical performance optimization where START and LIMIT clauses
-	/// can be applied directly at the storage/iterator level (using `start_skip` and
-	/// `cancel_on_limit`) rather than after all query processing is complete.
+	/// This method enables a critical performance optimization where START and
+	/// LIMIT clauses can be applied directly at the storage/iterator level
+	/// (using `start_skip` and `cancel_on_limit`) rather than after all query
+	/// processing is complete.
 	///
 	/// ## The Optimization
 	///
@@ -629,26 +656,30 @@ impl Iterator {
 	/// - Skip records at the storage level before any processing (`start_skip`)
 	/// - Cancel iteration early when the limit is reached (`cancel_on_limit`)
 	///
-	/// This provides significant performance benefits for queries with large result sets,
-	/// as it avoids unnecessary processing of records that would be filtered out anyway.
+	/// This provides significant performance benefits for queries with large
+	/// result sets, as it avoids unnecessary processing of records that would
+	/// be filtered out anyway.
 	///
 	/// ## Safety Conditions
 	///
-	/// The optimization is only safe when the order of records at the storage level
-	/// matches the order of records in the final result set. This method returns `false`
-	/// when any of the following conditions would change the record order or filtering:
+	/// The optimization is only safe when the order of records at the storage
+	/// level matches the order of records in the final result set. This method
+	/// returns `false` when any of the following conditions would change the
+	/// record order or filtering:
 	///
 	/// ### GROUP BY clauses
-	/// Grouping operations fundamentally change the result structure and record count,
-	/// making storage-level limiting meaningless.
+	/// Grouping operations fundamentally change the result structure and record
+	/// count, making storage-level limiting meaningless.
 	///
 	/// ### Multiple iterators
-	/// When multiple iterators are involved (e.g., JOINs, UNIONs), records from different
-	/// sources need to be merged, so individual iterator limits would be incorrect.
+	/// When multiple iterators are involved (e.g., JOINs, UNIONs), records from
+	/// different sources need to be merged, so individual iterator limits
+	/// would be incorrect.
 	///
 	/// ### WHERE clauses
-	/// Filtering operations change which records appear in the final result set.
-	/// START should skip records from the filtered set, not from the raw storage.
+	/// Filtering operations change which records appear in the final result
+	/// set. START should skip records from the filtered set, not from the raw
+	/// storage.
 	///
 	/// Example problem:
 	/// ```sql
@@ -667,8 +698,8 @@ impl Iterator {
 	/// ## Performance Impact
 	///
 	/// - **When enabled**: Significant performance improvement for large result sets
-	/// - **When disabled**: Slight performance cost as all records must be processed
-	///   before START/LIMIT is applied
+	/// - **When disabled**: Slight performance cost as all records must be processed before
+	///   START/LIMIT is applied
 	///
 	/// ## Returns
 	///
@@ -731,9 +762,13 @@ impl Iterator {
 	) {
 		if self.check_set_start_limit(ctx, stm) {
 			if let Some(l) = self.limit {
+				// If we have a LIMIT, allow the collector to cancel the iteration once
+				// this many items have been produced. This keeps long scans bounded.
 				self.cancel_on_limit = Some(l);
 			}
-			// Check if we can skip processing the document below "start".
+			// Only skip over the first N records (START/OFFSET) when there are no
+			// specific per-record permission checks. When specific permissions are in play,
+			// each record must be evaluated and cannot be blindly skipped.
 			if !is_specific_permission {
 				let s = self.start.unwrap_or(0) as usize;
 				if s > 0 {
@@ -741,6 +776,10 @@ impl Iterator {
 				}
 			}
 		}
+	}
+
+	pub(super) fn start_limit(&self) -> Option<&u32> {
+		self.cancel_on_limit.as_ref()
 	}
 
 	/// Return the number of record that should be skipped
@@ -857,7 +896,8 @@ impl Iterator {
 		}
 		// Prevent deep recursion
 		let opt = opt.dive(4)?;
-		// If any iterator requires distinct, we need to create a global distinct instance
+		// If any iterator requires distinct, we need to create a global distinct
+		// instance
 		let mut distinct = SyncDistinct::new(ctx);
 		// Process all prepared values
 		for (count, v) in mem::take(&mut self.entries).into_iter().enumerate() {

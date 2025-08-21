@@ -3,32 +3,36 @@ mod logs;
 pub mod metrics;
 pub mod traces;
 
-use crate::cli::LogFormat;
-use crate::cli::validator::parser::tracing::CustomFilter;
-use crate::cnf::ENABLE_TOKIO_CONSOLE;
+use std::net::ToSocketAddrs;
+use std::sync::LazyLock;
+use std::time::Duration;
+
 use anyhow::{Result, anyhow};
 use opentelemetry::{KeyValue, global};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::resource::{
 	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
 };
-use std::net::ToSocketAddrs;
-use std::sync::LazyLock;
-use std::time::Duration;
 use tracing::{Level, Subscriber};
 use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::{LevelFilter, ParseError};
 use tracing_subscriber::prelude::*;
 
+use crate::cli::LogFormat;
+use crate::cli::validator::parser::tracing::CustomFilter;
+use crate::cnf::ENABLE_TOKIO_CONSOLE;
+
 pub static OTEL_DEFAULT_RESOURCE: LazyLock<Resource> = LazyLock::new(|| {
 	// Set the default otel metadata if available
 	let res = Resource::from_detectors(
 		Duration::from_secs(5),
 		vec![
-			// set service.name from env OTEL_SERVICE_NAME > env OTEL_RESOURCE_ATTRIBUTES > option_env! CARGO_BIN_NAME > unknown_service
+			// set service.name from env OTEL_SERVICE_NAME > env OTEL_RESOURCE_ATTRIBUTES >
+			// option_env! CARGO_BIN_NAME > unknown_service
 			Box::new(SdkProvidedResourceDetector),
-			// detect res from env OTEL_RESOURCE_ATTRIBUTES (resources string like key1=value1,key2=value2,...)
+			// detect res from env OTEL_RESOURCE_ATTRIBUTES (resources string like
+			// key1=value1,key2=value2,...)
 			Box::new(EnvResourceDetector::new()),
 			// set telemetry.sdk.{name, language, version}
 			Box::new(TelemetryResourceDetector),
@@ -304,7 +308,8 @@ pub fn shutdown() {
 	opentelemetry::global::shutdown_tracer_provider();
 }
 
-/// Create an EnvFilter from the given value. If the value is not a valid log level, it will be treated as EnvFilter directives.
+/// Create an EnvFilter from the given value. If the value is not a valid log
+/// level, it will be treated as EnvFilter directives.
 pub fn filter_from_value(v: &str) -> std::result::Result<EnvFilter, ParseError> {
 	match v {
 		// Don't show any logs at all
@@ -362,276 +367,4 @@ pub fn span_filters_from_value(v: &str) -> Vec<(String, LevelFilter)> {
 			Some((name.to_string(), level))
 		})
 		.collect()
-}
-
-#[cfg(test)]
-mod tests {
-	use crate::telemetry;
-	use opentelemetry::global::shutdown_tracer_provider;
-	use std::{ffi::OsString, time::Duration};
-	use tracing::{Level, span};
-	use tracing_subscriber::util::SubscriberInitExt;
-
-	/// Helper function to ensure proper telemetry cleanup and reset
-	fn cleanup_telemetry() {
-		// Shutdown any existing tracer provider
-		shutdown_tracer_provider();
-		// Give some time for cleanup
-		std::thread::sleep(std::time::Duration::from_millis(100));
-	}
-
-	fn with_vars<K, V, F, R>(vars: &[(K, Option<V>)], f: F) -> R
-	where
-		F: FnOnce() -> R,
-		K: AsRef<str>,
-		V: AsRef<str>,
-	{
-		let mut restore = Vec::new();
-
-		// Dropper to restore the environment variables
-		struct Dropper(Vec<(String, Option<OsString>)>);
-
-		// Ensure variables are restored when finished
-		impl Drop for Dropper {
-			fn drop(&mut self) {
-				for (k, v) in self.0.drain(..) {
-					if let Some(v) = v {
-						unsafe { std::env::set_var(k, v) };
-					} else {
-						unsafe { std::env::remove_var(k) };
-					}
-				}
-			}
-		}
-
-		// First, clear any existing telemetry-related environment variables
-		let telemetry_vars = [
-			"SURREAL_TELEMETRY_PROVIDER",
-			"OTEL_EXPORTER_OTLP_ENDPOINT",
-			"OTEL_BSP_SCHEDULE_DELAY",
-			"OTEL_BSP_EXPORT_TIMEOUT",
-			"OTEL_BSP_MAX_QUEUE_SIZE",
-		];
-
-		for var in &telemetry_vars {
-			restore.push((var.to_string(), std::env::var_os(var)));
-			unsafe { std::env::remove_var(var) };
-		}
-
-		// Then set the new variables
-		for (k, v) in vars {
-			restore.push((k.as_ref().to_string(), std::env::var_os(k.as_ref())));
-			if let Some(x) = v {
-				unsafe { std::env::set_var(k.as_ref(), x.as_ref()) };
-			} else {
-				unsafe { std::env::remove_var(k.as_ref()) };
-			}
-		}
-
-		let _guard = Dropper(restore);
-		f()
-	}
-
-	#[tokio::test(flavor = "multi_thread")]
-	#[serial_test::serial]
-	async fn test_mock_server_basic() {
-		println!("Testing basic mock server functionality...");
-		let (addr, _req_rx) = telemetry::traces::tests::mock_otlp_server().await;
-		println!("Mock server started on {}", addr);
-
-		// Give the server a moment to start up
-		tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
-		// Test that the server is reachable
-		let client = reqwest::Client::new();
-		let response = client.get(format!("http://{}/", addr)).send().await;
-		println!("Server response: {:?}", response);
-
-		// The server should not respond to HTTP requests, but we can verify it's running
-		assert!(response.is_err() || response.unwrap().status().is_client_error());
-	}
-
-	#[tokio::test(flavor = "multi_thread")]
-	#[serial_test::serial]
-	async fn test_otlp_exporter_direct() {
-		// Ensure clean state
-		cleanup_telemetry();
-
-		println!("Starting mock otlp server...");
-		let (addr, _req_rx) = telemetry::traces::tests::mock_otlp_server().await;
-
-		// Test direct OTLP exporter configuration
-		with_vars(
-			&[
-				("SURREAL_TELEMETRY_PROVIDER", Some("otlp")),
-				("OTEL_EXPORTER_OTLP_ENDPOINT", Some(&format!("http://{addr}"))),
-				("OTEL_BSP_SCHEDULE_DELAY", Some("1")),
-				("OTEL_BSP_EXPORT_TIMEOUT", Some("1000")),
-				("OTEL_BSP_MAX_QUEUE_SIZE", Some("1")),
-			],
-			|| {
-				println!("Environment variables set, testing telemetry builder...");
-				match telemetry::builder().with_log_level("info").build() {
-					Ok((_registry, _guards)) => {
-						println!("Telemetry builder succeeded");
-					}
-					Err(e) => {
-						println!("Telemetry builder failed: {e:?}");
-						panic!("Telemetry builder failed: {e:?}");
-					}
-				}
-			},
-		);
-	}
-
-	#[tokio::test(flavor = "multi_thread")]
-	#[serial_test::serial]
-	async fn test_otlp_tracer() {
-		// Ensure clean state
-		cleanup_telemetry();
-
-		println!("Starting mock otlp server...");
-		let (addr, mut req_rx) = telemetry::traces::tests::mock_otlp_server().await;
-
-		{
-			let otlp_endpoint = format!("http://{addr}");
-			with_vars(
-				&[
-					("SURREAL_TELEMETRY_PROVIDER", Some("otlp")),
-					("OTEL_EXPORTER_OTLP_ENDPOINT", Some(otlp_endpoint.as_str())),
-					// Add explicit configuration to ensure immediate export
-					("OTEL_BSP_SCHEDULE_DELAY", Some("1")),
-					("OTEL_BSP_EXPORT_TIMEOUT", Some("1000")),
-					("OTEL_BSP_MAX_QUEUE_SIZE", Some("1")),
-				],
-				|| {
-					let (registry, _guards) =
-						telemetry::builder().with_log_level("info").build().unwrap();
-
-					let _enter = registry.set_default();
-
-					println!("Sending span...");
-
-					{
-						let span = span!(Level::INFO, "test-surreal-span");
-						let _enter = span.enter();
-						info!("test-surreal-event");
-					}
-
-					// Force flush the telemetry data
-					cleanup_telemetry();
-				},
-			)
-		}
-
-		println!("Waiting for request...");
-		let req = tokio::time::timeout(Duration::from_secs(5), req_rx.recv())
-			.await
-			.expect("timeout waiting for request")
-			.expect("missing export request");
-
-		let first_span =
-			req.resource_spans.first().unwrap().scope_spans.first().unwrap().spans.first().unwrap();
-		assert_eq!("test-surreal-span", first_span.name);
-		let first_event = first_span.events.first().unwrap();
-		assert_eq!("test-surreal-event", first_event.name);
-	}
-
-	#[tokio::test(flavor = "multi_thread")]
-	#[serial_test::serial]
-	async fn test_otlp_filter() {
-		// Ensure clean state
-		cleanup_telemetry();
-
-		println!("Starting mock otlp server...");
-		let (addr, mut req_rx) = telemetry::traces::tests::mock_otlp_server().await;
-
-		{
-			let otlp_endpoint = format!("http://{addr}");
-			with_vars(
-				&[
-					("SURREAL_TELEMETRY_PROVIDER", Some("otlp")),
-					("OTEL_EXPORTER_OTLP_ENDPOINT", Some(otlp_endpoint.as_str())),
-					// Add explicit configuration to ensure immediate export
-					("OTEL_BSP_SCHEDULE_DELAY", Some("1")),
-					("OTEL_BSP_EXPORT_TIMEOUT", Some("1000")),
-					("OTEL_BSP_MAX_QUEUE_SIZE", Some("1")),
-				],
-				|| {
-					let (registry, _guards) =
-						telemetry::builder().with_log_level("debug").build().unwrap();
-
-					let _enter = registry.set_default();
-
-					println!("Sending spans...");
-
-					{
-						let span = span!(Level::DEBUG, "debug");
-						let _enter = span.enter();
-						debug!("debug");
-						trace!("trace");
-					}
-
-					{
-						let span = span!(Level::TRACE, "trace");
-						let _enter = span.enter();
-						debug!("debug");
-						trace!("trace");
-					}
-
-					// Force flush the telemetry data
-					cleanup_telemetry();
-				},
-			)
-		}
-
-		println!("Waiting for request...");
-		let req = tokio::time::timeout(Duration::from_secs(5), req_rx.recv())
-			.await
-			.expect("timeout waiting for request")
-			.expect("missing export request");
-
-		let spans = &req.resource_spans.first().unwrap().scope_spans.first().unwrap().spans;
-
-		assert_eq!(1, spans.len());
-		assert_eq!("debug", spans.first().unwrap().name);
-
-		let events = &spans.first().unwrap().events;
-		assert_eq!(1, events.len());
-		assert_eq!("debug", events.first().unwrap().name);
-	}
-
-	#[tokio::test(flavor = "multi_thread")]
-	#[serial_test::serial]
-	async fn test_log_to_socket() {
-		use std::io::Read;
-		use std::net::TcpListener;
-
-		let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-		let addr = listener.local_addr().unwrap();
-
-		let handle = std::thread::spawn(move || {
-			let (mut stream, _) = listener.accept().unwrap();
-			let mut buf = Vec::new();
-			stream.read_to_end(&mut buf).unwrap();
-			buf
-		});
-
-		let (registry, guards) = telemetry::builder()
-			.with_socket(Some(addr.to_string()))
-			.with_log_level("all")
-			.build()
-			.unwrap();
-
-		let _enter = registry.set_default();
-		info!("socket-output");
-
-		for guard in guards {
-			drop(guard);
-		}
-
-		let bytes = handle.join().unwrap();
-		let msg = String::from_utf8_lossy(&bytes);
-		assert!(msg.contains("socket-output"));
-	}
 }

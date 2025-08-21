@@ -2,21 +2,22 @@
 
 mod cnf;
 
-use crate::err::Error;
-use crate::key::debug::Sprintable;
-use crate::kvs::{Check, Key, Val};
-use anyhow::{Result, bail, ensure};
-use rocksdb::{
-	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel,
-	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
-};
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+use anyhow::{Result, bail, ensure};
+use rocksdb::{
+	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel,
+	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
+};
+
 use super::savepoint::SavePoints;
+use crate::err::Error;
+use crate::key::debug::Sprintable;
+use crate::kvs::{Check, Key, Val};
 
 const TARGET: &str = "surrealdb::core::kvs::rocksdb";
 

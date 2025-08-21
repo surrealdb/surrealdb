@@ -1,9 +1,36 @@
+use std::fmt;
+#[cfg(storage)]
+use std::path::PathBuf;
+use std::pin::pin;
+use std::sync::Arc;
+use std::task::{Poll, ready};
+use std::time::Duration;
+#[cfg(not(target_family = "wasm"))]
+use std::time::{SystemTime, UNIX_EPOCH};
+
+#[allow(unused_imports)]
+use anyhow::bail;
+use anyhow::{Result, ensure};
+use async_channel::{Receiver, Sender};
+use bytes::{Bytes, BytesMut};
+use dashmap::DashMap;
+use futures::{Future, Stream};
+use reblessive::TreeStack;
+#[cfg(feature = "jwks")]
+use tokio::sync::RwLock;
+use tracing::{instrument, trace};
+use uuid::Uuid;
+#[cfg(target_family = "wasm")]
+use wasmtimer::std::{SystemTime, UNIX_EPOCH};
+
 use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
-use super::version::Version;
+use super::version::MajorVersion;
 use crate::buc::BucketConnections;
 use crate::ctx::MutableContext;
+#[cfg(feature = "jwks")]
+use crate::dbs::capabilities::NetTarget;
 use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
@@ -12,6 +39,8 @@ use crate::dbs::{Capabilities, Executor, Notification, Options, Response, Sessio
 use crate::err::Error;
 use crate::expr::statements::DefineUserStatement;
 use crate::expr::{Base, Expr, FlowResultExt as _, Ident, Index, LogicalPlan};
+#[cfg(feature = "jwks")]
+use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
@@ -21,6 +50,10 @@ use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SizedClock;
+#[expect(unused_imports)]
+use crate::kvs::clock::SystemClock;
+#[cfg(not(target_family = "wasm"))]
+use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 use crate::kvs::{LockType, TransactionType};
@@ -28,49 +61,15 @@ use crate::sql::Ast;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use crate::val::{Strand, Value};
 use crate::{cf, syn};
-use anyhow::{Result, ensure};
-use async_channel::{Receiver, Sender};
-use bytes::{Bytes, BytesMut};
-use dashmap::DashMap;
-use futures::{Future, Stream};
-use reblessive::TreeStack;
-use std::fmt;
-use std::pin::pin;
-use std::sync::Arc;
-use std::task::{Poll, ready};
-use std::time::Duration;
-use tracing::{instrument, trace};
-use uuid::Uuid;
-
-#[expect(unused_imports)]
-use crate::kvs::clock::SystemClock;
-#[allow(unused_imports)]
-use anyhow::bail;
-
-#[cfg(storage)]
-use std::path::PathBuf;
-
-#[cfg(not(target_family = "wasm"))]
-use crate::kvs::index::IndexBuilder;
-#[cfg(not(target_family = "wasm"))]
-use std::time::{SystemTime, UNIX_EPOCH};
-
-#[cfg(target_family = "wasm")]
-use wasmtimer::std::{SystemTime, UNIX_EPOCH};
-
-#[cfg(feature = "jwks")]
-use crate::dbs::capabilities::NetTarget;
-#[cfg(feature = "jwks")]
-use crate::iam::jwks::JwksCache;
-#[cfg(feature = "jwks")]
-use tokio::sync::RwLock;
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
 
-// If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
+// If there are an infinite number of heartbeats, then we want to go
+// batch-by-batch spread over several checks
 const LQ_CHANNEL_SIZE: usize = 15_000;
 
-// The role assigned to the initial user created when starting the server with credentials for the first time
+// The role assigned to the initial user created when starting the server with
+// credentials for the first time
 const INITIAL_USER_ROLE: &str = "owner";
 
 /// The underlying datastore instance which stores the dataset.
@@ -86,7 +85,8 @@ pub struct Datastore {
 	query_timeout: Option<Duration>,
 	/// The duration threshold determining when a query should be logged
 	slow_log_threshold: Option<Duration>,
-	/// The maximum duration timeout for running multiple statements in a transaction.
+	/// The maximum duration timeout for running multiple statements in a
+	/// transaction.
 	transaction_timeout: Option<Duration>,
 	/// The security and feature capabilities for this datastore.
 	capabilities: Arc<Capabilities>,
@@ -421,8 +421,8 @@ impl Datastore {
 		})
 	}
 
-	/// Create a new datastore with the same persistent data (inner), with flushed cache.
-	/// Simulating a server restart
+	/// Create a new datastore with the same persistent data (inner), with
+	/// flushed cache. Simulating a server restart
 	pub fn restart(self) -> Self {
 		Self {
 			id: self.id,
@@ -457,6 +457,10 @@ impl Datastore {
 	pub fn with_strict_mode(mut self, strict: bool) -> Self {
 		self.strict = strict;
 		self
+	}
+
+	pub fn is_strict_mode(&self) -> bool {
+		self.strict
 	}
 
 	/// Specify whether this datastore should enable live query notifications
@@ -558,7 +562,7 @@ impl Datastore {
 
 	// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn check_version(&self) -> Result<Version> {
+	pub async fn check_version(&self) -> Result<MajorVersion> {
 		let version = self.get_version().await?;
 		// Check we are running the latest version
 		if !version.is_latest() {
@@ -570,7 +574,7 @@ impl Datastore {
 
 	// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn get_version(&self) -> Result<Version> {
+	pub async fn get_version(&self) -> Result<MajorVersion> {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Pessimistic).await?.enclose();
 		// Create the key where the version is stored
@@ -592,10 +596,10 @@ impl Datastore {
 				// Check the storage if there are any other keys set
 				let version = if keys.is_empty() {
 					// There are no keys set in storage, so this is a new database
-					Version::latest()
+					MajorVersion::latest()
 				} else {
 					// There were keys in storage, so this is an upgrade
-					Version::v1()
+					MajorVersion::v1()
 				};
 				// Attempt to set the current version in storage
 				catch!(txn, txn.replace(&key, &version).await);
@@ -693,10 +697,10 @@ impl Datastore {
 
 	/// Performs changefeed garbage collection as a background task.
 	///
-	/// This method is responsible for cleaning up old changefeed data across all databases.
-	/// It uses a distributed task lease mechanism to ensure that only one node in a cluster
-	/// performs this maintenance operation at a time, preventing duplicate work and potential
-	/// conflicts.
+	/// This method is responsible for cleaning up old changefeed data across
+	/// all databases. It uses a distributed task lease mechanism to ensure
+	/// that only one node in a cluster performs this maintenance operation at
+	/// a time, preventing duplicate work and potential conflicts.
 	///
 	/// The process involves:
 	/// 1. Acquiring a lease for the ChangeFeedCleanup task
@@ -748,13 +752,15 @@ impl Datastore {
 
 	/// Performs changefeed garbage collection using a specified timestamp.
 	///
-	/// This method is similar to `changefeed_process` but accepts an explicit timestamp
-	/// instead of calculating the current time. This allows for more controlled testing
-	/// and specific cleanup operations at predetermined points in time.
+	/// This method is similar to `changefeed_process` but accepts an explicit
+	/// timestamp instead of calculating the current time. This allows for more
+	/// controlled testing and specific cleanup operations at predetermined
+	/// points in time.
 	///
-	/// Unlike `changefeed_process`, this method does not use the task lease mechanism,
-	/// making it suitable for direct invocation in controlled environments or testing
-	/// scenarios where lease coordination is not required.
+	/// Unlike `changefeed_process`, this method does not use the task lease
+	/// mechanism, making it suitable for direct invocation in controlled
+	/// environments or testing scenarios where lease coordination is not
+	/// required.
 	///
 	/// The process involves:
 	/// 1. Saving timestamps for current versionstamps using the provided timestamp
@@ -784,26 +790,27 @@ impl Datastore {
 
 	/// Processes the index compaction queue
 	///
-	/// This method is called periodically by the index compaction thread to process
-	/// indexes that have been marked for compaction. It acquires a distributed lease
-	/// to ensure only one node in a cluster performs the compaction at a time.
+	/// This method is called periodically by the index compaction thread to
+	/// process indexes that have been marked for compaction. It acquires a
+	/// distributed lease to ensure only one node in a cluster performs the
+	/// compaction at a time.
 	///
-	/// The method scans the index compaction queue (stored as `Ic` keys) and processes
-	/// each index that needs compaction. Currently, only full-text indexes support
-	/// compaction, which helps optimize their performance by consolidating changes
-	/// and removing unnecessary data.
+	/// The method scans the index compaction queue (stored as `Ic` keys) and
+	/// processes each index that needs compaction. Currently, only full-text
+	/// indexes support compaction, which helps optimize their performance by
+	/// consolidating changes and removing unnecessary data.
 	///
 	/// After processing an index, it is removed from the compaction queue.
 	///
 	/// # Arguments
 	///
-	/// * `interval` - The time interval between compaction runs, used to calculate
-	///   the lease duration
+	/// * `interval` - The time interval between compaction runs, used to calculate the lease
+	///   duration
 	///
 	/// # Returns
 	///
-	/// * `Result<()>` - Ok if the compaction was successful or if another node
-	///   is handling the compaction, Error otherwise
+	/// * `Result<()>` - Ok if the compaction was successful or if another node is handling the
+	///   compaction, Error otherwise
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn index_compaction(&self, interval: Duration) -> Result<()> {
 		let lh = LeaseHandler::new(
@@ -1031,8 +1038,8 @@ impl Datastore {
 					filling = buffer.len() < parse_size
 				}
 
-				// if we finished streaming we can parse with complete so that the parser can be sure
-				// of it's results.
+				// if we finished streaming we can parse with complete so that the parser can be
+				// sure of it's results.
 				if complete {
 					return match statements_stream.parse_complete(&mut buffer) {
 						Err(e) => {
@@ -1053,8 +1060,8 @@ impl Datastore {
 						// Couldn't parse a statement for sure.
 						if buffer.len() >= parse_size && parse_size < u32::MAX as usize {
 							// the buffer already contained more or equal to parse_size bytes
-							// this means we are trying to parse a statement of more then buffer size.
-							// so we need to increase the buffer size.
+							// this means we are trying to parse a statement of more then buffer
+							// size. so we need to increase the buffer size.
 							parse_size = (parse_size + 1).next_power_of_two();
 						}
 						// start filling the buffer again.
@@ -1385,16 +1392,15 @@ impl Datastore {
 
 #[cfg(test)]
 mod test {
-	use crate::expr::FlowResultExt as _;
-
 	use super::*;
 
 	#[tokio::test]
 	pub async fn very_deep_query() -> Result<()> {
+		use reblessive::{Stack, Stk};
+
 		use crate::expr::{BinaryOperator, Expr, Literal};
 		use crate::kvs::Datastore;
 		use crate::val::{Number, Value};
-		use reblessive::{Stack, Stk};
 
 		// build query manually to bypass query limits.
 		let mut stack = Stack::new();

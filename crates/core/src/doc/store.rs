@@ -1,8 +1,9 @@
+use anyhow::Result;
+
 use crate::ctx::Context;
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err::Error;
-use anyhow::Result;
 
 impl Document {
 	pub(super) async fn store_record_data(
@@ -22,7 +23,7 @@ impl Document {
 		// Get the record id
 		let rid = self.id()?;
 		// Get NS & DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Store the record data
 		let key = crate::key::thing::new(ns, db, &rid.table, &rid.key);
 		// Remove the id field from the doc so that it's not duplicated,

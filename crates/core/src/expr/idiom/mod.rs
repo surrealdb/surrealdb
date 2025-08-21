@@ -1,3 +1,12 @@
+use std::collections::HashMap;
+use std::fmt::{self, Display, Formatter};
+use std::ops::Deref;
+
+use md5::{Digest, Md5};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -6,13 +15,6 @@ use crate::expr::part::{Next, NextMethod};
 use crate::expr::paths::{ID, IN, META, OUT};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{FlowResult, Ident, Part, Value};
-use md5::{Digest, Md5};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fmt::{self, Display, Formatter};
-use std::ops::Deref;
 
 pub mod recursion;
 
@@ -95,7 +97,8 @@ impl Idiom {
 	pub(crate) fn is_id(&self) -> bool {
 		self.0.len() == 1 && self.0[0].eq(&ID[0])
 	}
-	/// Check if this Idiom is a special field such as `id`, `in`, `out` or `meta`.
+	/// Check if this Idiom is a special field such as `id`, `in`, `out` or
+	/// `meta`.
 	pub(crate) fn is_special(&self) -> bool {
 		self.0.len() == 1 && [&ID[0], &IN[0], &OUT[0], &META[0]].contains(&&self.0[0])
 	}
@@ -111,6 +114,25 @@ impl Idiom {
 
 		x.as_str() == other
 	}
+
+	/// Returns a raw string representation of this idiom without any escaping.
+	pub(crate) fn as_raw_string(&self) -> String {
+		let mut s = String::new();
+
+		let mut iter = self.0.iter();
+		match iter.next() {
+			Some(Part::Field(v)) => s.push_str(&v.as_raw_string()),
+			Some(x) => s.push_str(&x.as_raw_string()),
+			None => {}
+		};
+
+		for p in iter {
+			s.push_str(&p.as_raw_string());
+		}
+
+		s
+	}
+
 	/// Check if this is an expression with multiple yields
 	pub(crate) fn is_multi_yield(&self) -> bool {
 		self.iter().any(Self::part_is_multi_yield)
@@ -124,9 +146,7 @@ impl Idiom {
 	pub(crate) fn starts_with(&self, other: &[Part]) -> bool {
 		self.0.starts_with(other)
 	}
-}
 
-impl Idiom {
 	/// Check if we require a writeable transaction
 	pub(crate) fn read_only(&self) -> bool {
 		self.0.iter().all(|v| v.read_only())
@@ -182,9 +202,11 @@ impl InfoStructure for Idiom {
 
 /// A trie structure for storing idioms.
 ///
-/// This is used for efficient searching and retrieval of idioms based on their path parts.
+/// This is used for efficient searching and retrieval of idioms based on their
+/// path parts.
 ///
-/// Note: This is a simplified version of a trie and does not implement all the features of a full trie.
+/// Note: This is a simplified version of a trie and does not implement all the
+/// features of a full trie.
 #[derive(Debug)]
 pub(crate) struct IdiomTrie<T> {
 	/// The children of this node, indexed by their path part.
@@ -214,8 +236,9 @@ impl<T: Clone + std::fmt::Debug> IdiomTrie<T> {
 	/// Checks if the trie contains a path and returns the associated data.
 	///
 	/// If the path is found, it returns [`IdiomTrieContains::Exact`].
-	/// If the path is not found but an ancestor is found, it returns [`IdiomTrieContains::Ancestor`].
-	/// If an ancestor is not found, it returns [`IdiomTrieContains::None`].
+	/// If the path is not found but an ancestor is found, it returns
+	/// [`IdiomTrieContains::Ancestor`]. If an ancestor is not found, it
+	/// returns [`IdiomTrieContains::None`].
 	pub(crate) fn contains(&self, path: &[Part]) -> IdiomTrieContains<T> {
 		let mut node = self;
 		let mut last_node_had_data = false;
@@ -251,4 +274,30 @@ pub(crate) enum IdiomTrieContains<T> {
 	Exact(T),
 	/// The path was not found, but an ancestor was found.
 	Ancestor(T),
+}
+
+#[cfg(test)]
+mod tests {
+	use rstest::rstest;
+
+	use super::*;
+	use crate::val::Strand;
+
+	#[rstest]
+	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("name".to_string())))]), "name")]
+	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("name".to_string())))]), "nested.nested.name")]
+	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("value".to_string())))]), "nested.nested.`value`")]
+	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("value".to_string())))]), "`value`")]
+	fn test_idiom_to_string(#[case] idiom: Idiom, #[case] expected: &'static str) {
+		assert_eq!(idiom.to_string(), expected.to_string());
+	}
+
+	#[rstest]
+	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("name".to_string())))]), "name")]
+	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("name".to_string())))]), "nested.nested.name")]
+	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("value".to_string())))]), "nested.nested.value")]
+	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("value".to_string())))]), "value")]
+	fn test_idiom_to_raw_string(#[case] idiom: Idiom, #[case] expected: &'static str) {
+		assert_eq!(idiom.as_raw_string(), expected.to_string());
+	}
 }

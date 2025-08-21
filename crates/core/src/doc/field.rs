@@ -1,3 +1,8 @@
+use std::sync::Arc;
+
+use anyhow::{Result, bail, ensure};
+use reblessive::tree::Stk;
+
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Options, Statement};
@@ -14,11 +19,9 @@ use crate::iam::Action;
 use crate::val::value::CoerceError;
 use crate::val::value::every::ArrayBehaviour;
 use crate::val::{RecordId, Value};
-use anyhow::{Result, bail, ensure};
-use reblessive::tree::Stk;
-use std::sync::Arc;
 
-/// Removes `NONE` values recursively from objects, but not when `NONE` is a direct child of an array
+/// Removes `NONE` values recursively from objects, but not when `NONE` is a
+/// direct child of an array
 fn clean_none(v: &mut Value) -> bool {
 	match v {
 		Value::None => false,
@@ -50,8 +53,9 @@ impl Document {
 		// Get the table
 		let tb = self.tb(ctx, opt).await?;
 		// This table is schemafull
-		if tb.full {
-			// Prune unspecified fields from the document that are not defined via `DefineFieldStatement`s.
+		if tb.schemafull {
+			// Prune unspecified fields from the document that are not defined via
+			// `DefineFieldStatement`s.
 
 			// Create a vector to store the keys
 			let mut defined_field_names = IdiomTrie::new();
@@ -81,9 +85,11 @@ impl Document {
 						continue;
 					}
 					IdiomTrieContains::Ancestor(true) => {
-						// This field is not explicitly defined in the schema, but it is a child of a flex or literal field.
-						// If the field is a child of a flex field, then any nested fields are allowed.
-						// If the field is a child of a literal field, then allow any fields as they will be caught during coercion.
+						// This field is not explicitly defined in the schema, but it is a child of
+						// a flex or literal field. If the field is a child of a flex field,
+						// then any nested fields are allowed. If the field is a child of a
+						// literal field, then allow any fields as they will be caught during
+						// coercion.
 						continue;
 					}
 					IdiomTrieContains::Ancestor(false) => {
@@ -95,12 +101,13 @@ impl Document {
 							}
 						}
 
-						// This field is not explicitly defined in the schema or it is not a child of a flex field.
+						// This field is not explicitly defined in the schema or it is not a child
+						// of a flex field.
 						ensure!(
 							!opt.strict,
 							// If strict, then throw an error on an undefined field
 							Error::FieldUndefined {
-								table: tb.name.into_raw_string(),
+								table: tb.name.clone(),
 								field: current_doc_field_idiom.to_owned(),
 							}
 						);
@@ -110,12 +117,13 @@ impl Document {
 					}
 
 					IdiomTrieContains::None => {
-						// This field is not explicitly defined in the schema or it is not a child of a flex field.
+						// This field is not explicitly defined in the schema or it is not a child
+						// of a flex field.
 						ensure!(
 							!opt.strict,
 							// If strict, then throw an error on an undefined field
 							Error::FieldUndefined {
-								table: tb.name.into_raw_string(),
+								table: tb.name.clone(),
 								field: current_doc_field_idiom.to_owned(),
 							}
 						);
@@ -681,12 +689,14 @@ impl FieldEditContext<'_> {
 					RefAction::Delete(vec![thing], self.def.name.to_string())
 				}
 			} else if let Value::Array(oldarr) = old {
-				// If the new value is still an array, we only filter out the record ids that are not present in the new array
+				// If the new value is still an array, we only filter out the record ids that
+				// are not present in the new array
 				let removed = if let Value::Array(newarr) = val {
 					oldarr
 						.iter()
 						.filter_map(|v| {
-							// If the record id is still present in the new array, we do not remove the reference
+							// If the record id is still present in the new array, we do not remove
+							// the reference
 							if newarr.contains(v) {
 								None
 							} else if let Value::RecordId(thing) = v {
@@ -697,7 +707,8 @@ impl FieldEditContext<'_> {
 						})
 						.collect()
 
-				// If the new value is not an array, then all record ids in the old array are removed
+				// If the new value is not an array, then all record ids in the
+				// old array are removed
 				} else {
 					oldarr
 						.iter()
@@ -727,7 +738,7 @@ impl FieldEditContext<'_> {
 				RefAction::Ignore => Ok(()),
 				// Create the reference, if it does not exist yet.
 				RefAction::Set(thing) => {
-					let (ns, db) = self.opt.ns_db()?;
+					let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
 					let name = self.def.name.to_string();
 					let key = crate::key::r#ref::new(
 						ns,
@@ -745,7 +756,7 @@ impl FieldEditContext<'_> {
 				}
 				// Delete the reference, if it exists
 				RefAction::Delete(things, ff) => {
-					let (ns, db) = self.opt.ns_db()?;
+					let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
 					for thing in things {
 						let key = crate::key::r#ref::new(
 							ns,
@@ -767,46 +778,4 @@ impl FieldEditContext<'_> {
 			Ok(())
 		}
 	}
-
-	// Process any `TYPE reference` clause for the field definition
-	/*
-	async fn process_refs_type(&mut self) -> Result<Option<Refs>> {
-		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-			return Ok(None);
-		}
-
-		let refs = match &self.def.field_kind {
-			// We found a reference type for this field
-			// In this case, we force the value to be a reference
-			Some(Kind::References(ft, ff)) => Refs(vec![(ft.clone(), ff.clone())]),
-			Some(Kind::Either(kinds)) => {
-				if !kinds.iter().all(|k| matches!(k, Kind::References(_, _))) {
-					return Ok(None);
-				}
-
-				// Extract all reference types
-				let pairs: Vec<_> = kinds
-					.iter()
-					.filter_map(|k| {
-						if let Kind::References(ft, ff) = k {
-							Some((ft.clone(), ff.clone()))
-						} else {
-							None
-						}
-					})
-					.collect();
-
-				// If the length does not match, there were non-reference types
-				ensure!(pairs.len() == kinds.len(), Error::RefsMismatchingVariants);
-
-				// All ok
-				Refs(pairs)
-			}
-			// This is not a reference type, continue as normal
-			_ => return Ok(None),
-		};
-
-		Ok(Some(refs))
-	}
-	*/
 }

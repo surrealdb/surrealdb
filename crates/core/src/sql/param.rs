@@ -1,7 +1,8 @@
+use std::fmt;
+
 use crate::sql::Ident;
 use crate::sql::escape::EscapeIdent;
 use crate::val::Strand;
-use std::fmt;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -10,7 +11,8 @@ pub struct Param(String);
 impl Param {
 	/// Create a new identifier
 	///
-	/// This function checks if the string has a null byte, returns None if it has.
+	/// This function checks if the string has a null byte, returns None if it
+	/// has.
 	pub fn new(str: String) -> Option<Self> {
 		if str.contains('\0') {
 			return None;

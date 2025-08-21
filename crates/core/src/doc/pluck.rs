@@ -1,3 +1,8 @@
+use std::sync::Arc;
+
+use reblessive::tree::Stk;
+
+use super::IgnoreError;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
@@ -8,15 +13,12 @@ use crate::expr::permission::Permission;
 use crate::expr::{FlowResultExt as _, Operation};
 use crate::iam::Action;
 use crate::val::Value;
-use reblessive::tree::Stk;
-use std::sync::Arc;
-
-use super::IgnoreError;
 
 impl Document {
-	/// Evaluates a doc that has been modified so that it can be further computed into a result Value
-	/// This includes some permissions handling, output format handling (as specified in statement),
-	/// field handling (like params, links etc).
+	/// Evaluates a doc that has been modified so that it can be further
+	/// computed into a result Value This includes some permissions handling,
+	/// output format handling (as specified in statement), field handling
+	/// (like params, links etc).
 	pub(super) async fn pluck(
 		&mut self,
 		stk: &mut Stk,
@@ -75,34 +77,9 @@ impl Document {
 				}
 			},
 			None => match stm {
-				Statement::Live(s) => {
-					// There was a if here which tested if the live statement had no selectors,
-					// which seems like it should never happen so I removed it.
-					/*
-					if s.expr.is_empty() {
-						// Process the permitted documents
-						let (initial, current) = if self.reduced(stk, ctx, opt, Both).await? {
-							(&self.initial_reduced, &self.current_reduced)
-						} else {
-							(&self.initial, &self.current)
-						};
-						// Output a DIFF of any changes applied to the document
-						let ops = initial.doc.as_ref().diff(current.doc.as_ref(), Idiom::default());
-						Ok(Operation::operations_to_value(ops))
-					} else {
-					*/
-					// Process the permitted documents
-					let current = if self.reduced(stk, ctx, opt, Current).await? {
-						&self.current_reduced
-					} else {
-						&self.current
-					};
-					// Process the LIVE SELECT statement fields
-					s.expr
-						.compute(stk, ctx, opt, Some(current), false)
-						.await
-						.map_err(IgnoreError::from)
-				}
+				Statement::Live(_) => Err(IgnoreError::Error(anyhow::anyhow!(
+					".lives() uses .lq_pluck(), not .pluck()"
+				))),
 				Statement::Select(s) => {
 					// Process the permitted documents
 					let current = if self.reduced(stk, ctx, opt, Current).await? {

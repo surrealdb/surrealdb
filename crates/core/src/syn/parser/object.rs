@@ -1,5 +1,6 @@
 use reblessive::Stk;
 
+use super::mac::unexpected;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{Block, Expr, Literal};
 use crate::syn::lexer::compound;
@@ -8,15 +9,13 @@ use crate::syn::parser::{ParseResult, Parser, enter_object_recursion};
 use crate::syn::token::{Glued, Span, TokenKind, t};
 use crate::val::Strand;
 
-use super::mac::unexpected;
-
 impl Parser<'_> {
 	/// Parse an production which starts with an `{`
 	///
 	/// Either a block statemnt, a object or geometry.
 	pub(super) async fn parse_object_like(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		start: Span,
 	) -> ParseResult<Expr> {
 		if self.eat(t!("}")) {
@@ -28,11 +27,11 @@ impl Parser<'_> {
 
 		// Now check first if it can be an object.
 		if self.glue_and_peek1()?.kind == t!(":") {
-			return self.parse_object(ctx, start).await.map(Literal::Object).map(Expr::Literal);
+			return self.parse_object(stk, start).await.map(Literal::Object).map(Expr::Literal);
 		}
 
 		// not an object so instead parse as a block.
-		self.parse_block(ctx, start).await.map(Box::new).map(Expr::Block)
+		self.parse_block(stk, start).await.map(Box::new).map(Expr::Block)
 	}
 
 	/// Parses an object.
@@ -43,17 +42,17 @@ impl Parser<'_> {
 	/// Expects the first `{` to already have been eaten.
 	pub(super) async fn parse_object(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		start: Span,
 	) -> ParseResult<Vec<ObjectEntry>> {
 		enter_object_recursion!(this = self => {
-		   return this.parse_object_inner(ctx, start).await;
+		   return this.parse_object_inner(stk, start).await;
 		})
 	}
 
 	async fn parse_object_inner(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		start: Span,
 	) -> ParseResult<Vec<ObjectEntry>> {
 		let mut res = Vec::new();
@@ -62,7 +61,7 @@ impl Parser<'_> {
 				return Ok(res);
 			}
 
-			let (key, value) = self.parse_object_entry(ctx).await?;
+			let (key, value) = self.parse_object_entry(stk).await?;
 			// TODO: Error on duplicate key?
 			res.push(ObjectEntry {
 				key,
@@ -79,9 +78,9 @@ impl Parser<'_> {
 	/// Parses a block of statements
 	///
 	/// # Parser State
-	/// Expects the starting `{` to have already been eaten and its span to be handed to this
-	/// functions as the `start` parameter.
-	pub async fn parse_block(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Block> {
+	/// Expects the starting `{` to have already been eaten and its span to be
+	/// handed to this functions as the `start` parameter.
+	pub async fn parse_block(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Block> {
 		let mut statements = Vec::new();
 		loop {
 			while self.eat(t!(";")) {}
@@ -89,7 +88,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let stmt = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+			let stmt = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
 			statements.push(stmt);
 			if !self.eat(t!(";")) {
 				self.expect_closing_delimiter(t!("}"), start)?;
@@ -99,12 +98,12 @@ impl Parser<'_> {
 		Ok(Block(statements))
 	}
 
-	/// Parse a single entry in the object, i.e. `field: value + 1` in the object `{ field: value +
-	/// 1 }`
-	async fn parse_object_entry(&mut self, ctx: &mut Stk) -> ParseResult<(String, Expr)> {
+	/// Parse a single entry in the object, i.e. `field: value + 1` in the
+	/// object `{ field: value + 1 }`
+	async fn parse_object_entry(&mut self, stk: &mut Stk) -> ParseResult<(String, Expr)> {
 		let text = self.parse_object_key()?;
 		expected!(self, t!(":"));
-		let value = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+		let value = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
 		Ok((text, value))
 	}
 

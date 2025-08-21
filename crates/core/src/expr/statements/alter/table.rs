@@ -1,21 +1,22 @@
+use std::fmt::{self, Display, Write};
+use std::ops::Deref;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::AlterKind;
+use crate::catalog::TableType;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::DefineTableStatement;
-use crate::expr::{Base, ChangeFeed, Ident, Kind, Permissions, TableType};
+use crate::expr::{Base, ChangeFeed, Ident, Kind, Permissions};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
-use anyhow::Result;
-
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
-use std::ops::Deref;
-
-use super::AlterKind;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -40,26 +41,29 @@ impl AlterTableStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 
 		// Get the table definition
-		let mut dt = match txn.get_tb(ns, db, &self.name).await {
-			Ok(tb) => tb.deref().clone(),
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
+		let mut dt = match txn.get_tb(ns, db, &self.name).await? {
+			Some(tb) => tb.deref().clone(),
+			None => {
+				if self.if_exists {
 					return Ok(Value::None);
 				} else {
-					return Err(e);
+					return Err(Error::TbNotFound {
+						name: self.name.to_string(),
+					}
+					.into());
 				}
 			}
 		};
 		// Process the statement
 		let key = crate::key::database::tb::new(ns, db, &self.name);
 		match self.schemafull {
-			AlterKind::Set(_) => dt.full = true,
-			AlterKind::Drop => dt.full = false,
+			AlterKind::Set(_) => dt.schemafull = true,
+			AlterKind::Drop => dt.schemafull = false,
 			AlterKind::None => {}
 		}
 
@@ -78,7 +82,7 @@ impl AlterTableStatement {
 		}
 
 		match self.comment {
-			AlterKind::Set(ref x) => dt.comment = Some(x.clone()),
+			AlterKind::Set(ref x) => dt.comment = Some(x.clone().into_string()),
 
 			AlterKind::Drop => dt.comment = None,
 			AlterKind::None => {}

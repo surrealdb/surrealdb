@@ -1,19 +1,19 @@
+use std::fmt::{self, Display};
+
+use anyhow::{Result, bail};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::DefineKind;
+use crate::catalog::NamespaceDefinition;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Strand, Value};
-use anyhow::{Result, bail};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
-
-use super::DefineKind;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -39,7 +39,7 @@ impl DefineNamespaceStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
-		if txn.get_ns(&self.name).await.is_ok() {
+		let namespace_id = if let Some(ns) = txn.get_ns_by_name(&self.name).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -51,23 +51,22 @@ impl DefineNamespaceStatement {
 				DefineKind::Overwrite => {}
 				DefineKind::IfNotExists => return Ok(Value::None),
 			}
-		}
+			ns.namespace_id
+		} else {
+			txn.lock().await.get_next_ns_id().await?
+		};
+
 		// Process the statement
-		let key = crate::key::root::ns::new(&self.name);
-		txn.set(
-			&key,
-			&DefineNamespaceStatement {
-				id: match self.id {
-					Some(id) => Some(id),
-					None => Some(txn.lock().await.get_next_ns_id().await?),
-				},
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				kind: DefineKind::Default,
-				..self.clone()
-			},
-			None,
-		)
-		.await?;
+		let catalog_key = crate::key::catalog::ns::new(&self.name);
+		let ns_def = NamespaceDefinition {
+			namespace_id,
+			name: self.name.to_string(),
+			comment: self.comment.clone().map(|c| c.into_string()),
+		};
+		txn.set(&catalog_key, &ns_def, None).await?;
+
+		let key = crate::key::root::ns::new(namespace_id);
+		txn.set(&key, &ns_def, None).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good
@@ -88,14 +87,5 @@ impl Display for DefineNamespaceStatement {
 			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineNamespaceStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
 	}
 }

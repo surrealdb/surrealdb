@@ -1,4 +1,12 @@
-use crate::dbs::Options;
+use std::collections::HashMap;
+use std::hash::Hash;
+use std::ops::Deref;
+use std::sync::Arc;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::expr::index::Index;
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
@@ -14,12 +22,6 @@ use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::idx::planner::rewriter::KnnConditionRewriter;
 use crate::kvs::Transaction;
 use crate::val::{Array, Number, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::collections::HashMap;
-use std::hash::Hash;
-use std::ops::Deref;
-use std::sync::Arc;
 
 pub(super) struct Tree {
 	pub(super) root: Option<Node>,
@@ -134,7 +136,8 @@ impl<'a> TreeBuilder<'a> {
 		if self.schemas.contains_key(table) {
 			return Ok(());
 		}
-		let l = SchemaCache::new(self.ctx.opt, table, tx).await?;
+		let (ns, db) = self.ctx.ctx.expect_ns_db_ids(self.ctx.opt).await?;
+		let l = SchemaCache::new(ns, db, table, tx).await?;
 		self.schemas.insert(table.clone(), l);
 		Ok(())
 	}
@@ -182,7 +185,8 @@ impl<'a> TreeBuilder<'a> {
 				self.check_boolean_operator(group, op);
 				let left_node = stk.run(|stk| self.eval_value(stk, group, left)).await?;
 				let right_node = stk.run(|stk| self.eval_value(stk, group, right)).await?;
-				// If both values are computable, then we can delegate the computation to the parent
+				// If both values are computable, then we can delegate the computation to the
+				// parent
 				if left_node == Node::Computable && right_node == Node::Computable {
 					return Ok(Node::Computable);
 				}
@@ -381,9 +385,10 @@ impl<'a> TreeBuilder<'a> {
 					let remote_field = Arc::new(Idiom(remote_field.to_vec()));
 					let mut remotes = vec![];
 					for table in tables {
-						self.lazy_load_schema_resolver(tx, table).await?;
-						if let Some(schema) = self.schemas.get(table).cloned() {
-							let remote_irs = self.resolve_indexes(table, &remote_field, &schema);
+						let table = Ident::try_new(table.clone())?;
+						self.lazy_load_schema_resolver(tx, &table).await?;
+						if let Some(schema) = self.schemas.get(&table).cloned() {
+							let remote_irs = self.resolve_indexes(&table, &remote_field, &schema);
 							remotes.push((remote_field.clone(), remote_irs));
 						} else {
 							return Ok(None);
@@ -718,8 +723,7 @@ struct SchemaCache {
 }
 
 impl SchemaCache {
-	async fn new(opt: &Options, table: &Ident, tx: &Transaction) -> Result<Self> {
-		let (ns, db) = opt.ns_db()?;
+	async fn new(ns: NamespaceId, db: DatabaseId, table: &Ident, tx: &Transaction) -> Result<Self> {
 		let indexes = tx.all_tb_indexes(ns, db, table).await?;
 		let fields = tx.all_tb_fields(ns, db, table, None).await?;
 		Ok(Self {

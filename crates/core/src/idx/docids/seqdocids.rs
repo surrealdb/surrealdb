@@ -1,22 +1,26 @@
+use std::sync::Arc;
+
+use anyhow::Result;
+use uuid::Uuid;
+
 use crate::ctx::Context;
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::{DocId, Resolved};
 use crate::kvs::Transaction;
 use crate::kvs::sequences::SequenceDomain;
 use crate::val::RecordIdKey;
-use anyhow::Result;
-use std::sync::Arc;
-use uuid::Uuid;
 
 /// Sequence-based DocIds store for concurrent full-text search
 ///
-/// This module implements a document ID management system for the concurrent full-text search
-/// implementation. It uses the distributed sequence mechanism to provide concurrent document ID
-/// creation, which is essential for the inverted index.
+/// This module implements a document ID management system for the concurrent
+/// full-text search implementation. It uses the distributed sequence mechanism
+/// to provide concurrent document ID creation, which is essential for the
+/// inverted index.
 ///
-/// The `SeqDocIds` struct maintains bidirectional mappings between document IDs (numeric identifiers
-/// used internally by the full-text index) and record IDs (the actual identifiers of the documents
-/// being indexed). This allows for efficient lookup in both directions.
+/// The `SeqDocIds` struct maintains bidirectional mappings between document IDs
+/// (numeric identifiers used internally by the full-text index) and record IDs
+/// (the actual identifiers of the documents being indexed). This allows for
+/// efficient lookup in both directions.
 ///
 /// Key features:
 /// - Uses distributed sequences for concurrent ID generation
@@ -34,8 +38,9 @@ pub(crate) struct SeqDocIds {
 impl SeqDocIds {
 	/// Creates a new SeqDocIds instance
 	///
-	/// Initializes a new document ID manager with the specified node ID and index key base.
-	/// Sets up the sequence domain for generating unique document IDs.
+	/// Initializes a new document ID manager with the specified node ID and
+	/// index key base. Sets up the sequence domain for generating unique
+	/// document IDs.
 	///
 	/// # Arguments
 	/// * `nid` - The node ID used for distributed sequence generation
@@ -153,6 +158,9 @@ impl SeqDocIds {
 
 #[cfg(test)]
 mod tests {
+	use uuid::Uuid;
+
+	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::ctx::Context;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::seqdocids::SeqDocIds;
@@ -161,18 +169,17 @@ mod tests {
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::{Read, Write};
 	use crate::kvs::{Datastore, TransactionType};
-	use crate::val::{RecordIdKey, Strand};
-	use uuid::Uuid;
+	use crate::val::RecordIdKey;
 
-	const TEST_NS: &str = "test_ns";
-	const TEST_DB: &str = "test_db";
+	const TEST_NS_ID: NamespaceId = NamespaceId(1);
+	const TEST_DB_ID: DatabaseId = DatabaseId(1);
 	const TEST_TB: &str = "test_tb";
 	const TEST_IX: &str = "test_ix";
 
 	async fn new_operation(ds: &Datastore, tt: TransactionType) -> (Context, SeqDocIds) {
 		let mut ctx = ds.setup_ctx().unwrap();
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		let ikb = IndexKeyBase::new(TEST_NS, TEST_DB, TEST_TB, TEST_IX);
+		let ikb = IndexKeyBase::new(TEST_NS_ID, TEST_DB_ID, TEST_TB, TEST_IX);
 		ctx.set_transaction(tx.into());
 		let d = SeqDocIds::new(Uuid::nil(), ikb);
 		(ctx.freeze(), d)
@@ -415,16 +422,16 @@ mod tests {
 			let tx = ctx.tx();
 			for id in ["Foo", "Bar", "Hello", "World"] {
 				let id = crate::key::index::id::Id::new(
-					TEST_NS,
-					TEST_DB,
+					TEST_NS_ID,
+					TEST_DB_ID,
 					TEST_TB,
 					TEST_IX,
-					Strand::new(id.to_owned()).unwrap().into(),
+					RecordIdKey::String(id.to_owned()),
 				);
 				assert!(!tx.exists(&id, None).await.unwrap());
 			}
 			for doc_id in 0..=3 {
-				let bi = Bi::new(TEST_NS, TEST_DB, TEST_TB, TEST_IX, doc_id);
+				let bi = Bi::new(TEST_NS_ID, TEST_DB_ID, TEST_TB, TEST_IX, doc_id);
 				assert!(!tx.exists(&bi, None).await.unwrap());
 			}
 		}

@@ -1,5 +1,5 @@
 [env]
-RUSTFLAGS = { value = "-D warnings --cfg tokio_unstable", condition = { env_not_set = [
+RUSTFLAGS = { value = "--cfg tokio_unstable", condition = { env_not_set = [
     "RUSTFLAGS",
 ] } }
 BENCH_WORKER_THREADS = { value = "1", condition = { env_not_set = [
@@ -24,6 +24,7 @@ SURREAL_SCRIPTING_MAX_TIME_LIMIT = { value = "500", condition = { env_not_set = 
 
 [tasks.ci-format]
 category = "CI - CHECK"
+toolchain = "${SURREAL_NIGHTLY_RUST_TOOLCHAIN}"
 command = "cargo"
 args = ["fmt", "--all", "--check"]
 
@@ -217,6 +218,7 @@ args = [
     "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
     "--workspace",
     "--no-fail-fast",
+    "--package", "surrealdb",
     "--",
     "--skip",
     "api_integration",

@@ -1,13 +1,13 @@
 //! Embedded database instance
 //!
-//! `SurrealDB` itself can be embedded in this library, allowing you to query it using the same
-//! crate and API that you would use when connecting to it remotely via WebSockets or HTTP.
-//! All storage engines are supported but you have to activate their feature
-//! flags first.
+//! `SurrealDB` itself can be embedded in this library, allowing you to query it
+//! using the same crate and API that you would use when connecting to it
+//! remotely via WebSockets or HTTP. All storage engines are supported but you
+//! have to activate their feature flags first.
 //!
-//! **NB**: Some storage engines like `TiKV` and `RocksDB` depend on non-Rust libraries so you need
-//! to install those libraries before you can build this crate when you activate their feature
-//! flags. Please refer to [these instructions](https://github.com/surrealdb/surrealdb/blob/main/doc/BUILDING.md)
+//! **NB**: Some storage engines like `TiKV` and `RocksDB` depend on non-Rust
+//! libraries so you need to install those libraries before you can build this
+//! crate when you activate their feature flags. Please refer to [these instructions](https://github.com/surrealdb/surrealdb/blob/main/doc/BUILDING.md)
 //! for more details on how to install them. If you are on Linux and you use
 //! [the Nix package manager](https://github.com/surrealdb/surrealdb/tree/main/pkg/nix#installing-nix)
 //! you can just run
@@ -16,17 +16,20 @@
 //! nix develop github:surrealdb/surrealdb
 //! ```
 //!
-//! which will drop you into a shell with all the dependencies available. One tip you may find
-//! useful is to only enable the in-memory engine (`kv-mem`) during development. Besides letting you not
-//! worry about those dependencies on your dev machine, it allows you to keep compile times low
+//! which will drop you into a shell with all the dependencies available. One
+//! tip you may find useful is to only enable the in-memory engine (`kv-mem`)
+//! during development. Besides letting you not worry about those dependencies
+//! on your dev machine, it allows you to keep compile times low
 //! during development while allowing you to test your code fully.
 //!
-//! When running SurrealDB as an embedded database within Rust, using the correct release profile and
-//! memory allocator can greatly improve the performance of the database core engine. In addition using
-//! an optimised asynchronous runtime configuration can help speed up concurrent queries and increase
-//! database throughput.
+//! When running SurrealDB as an embedded database within Rust, using the
+//! correct release profile and memory allocator can greatly improve the
+//! performance of the database core engine. In addition using an optimised
+//! asynchronous runtime configuration can help speed up concurrent queries and
+//! increase database throughput.
 //!
-//! In your project’s Cargo.toml file, ensure that the release profile uses the following configuration:
+//! In your project’s Cargo.toml file, ensure that the release profile uses the
+//! following configuration:
 //!
 //! ```toml
 //! [profile.release]
@@ -37,16 +40,17 @@
 //! codegen-units = 1
 //! ```
 //!
-//! In your project’s Cargo.toml file, ensure that the allocator feature is among those enabled on the
-//! surrealdb dependency:
+//! In your project’s Cargo.toml file, ensure that the allocator feature is
+//! among those enabled on the surrealdb dependency:
 //!
 //! ```toml
 //! [dependencies]
 //! surrealdb = { version = "2", features = ["allocator", "storage-rocksdb"] }
 //! ```
 //!
-//! When running SurrealDB within your Rust code, ensure that the asynchronous runtime is configured
-//! correctly, making use of multiple threads, an increased stack size, and an optimised number of threads:
+//! When running SurrealDB within your Rust code, ensure that the asynchronous
+//! runtime is configured correctly, making use of multiple threads, an
+//! increased stack size, and an optimised number of threads:
 //!
 //! ```toml
 //! [dependencies]
@@ -144,44 +148,47 @@
 //! }
 //! ```
 
-use crate::Result;
-use crate::api::conn::{Command, DbResponse, RequestData};
-use crate::api::err::Error;
-use crate::api::{Connect, Response as QueryResponse, Surreal};
-use crate::method::Stats;
-use crate::opt::IntoEndpoint;
-use async_channel::Sender;
-use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::mem;
+#[cfg(not(target_family = "wasm"))]
+use std::pin::pin;
 use std::sync::Arc;
+#[cfg(not(target_family = "wasm"))]
+use std::task::{Poll, ready};
+#[cfg(not(target_family = "wasm"))]
+use std::{future::Future, path::PathBuf};
+
+#[cfg(not(target_family = "wasm"))]
+use anyhow::bail;
+use async_channel::Sender;
+#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
+use futures::StreamExt;
+#[cfg(not(target_family = "wasm"))]
+use futures::stream::poll_fn;
+use indexmap::IndexMap;
 use surrealdb_core::dbs::{Notification, Response, Session, Variables};
+#[cfg(not(target_family = "wasm"))]
+use surrealdb_core::err::Error as CoreError;
+#[cfg(feature = "ml")]
+use surrealdb_core::expr::Model;
 use surrealdb_core::expr::statements::DeleteStatement;
 use surrealdb_core::expr::{
 	CreateStatement, Data, Expr, Fields, Function, Ident, InsertStatement, KillStatement, Literal,
 	LogicalPlan, Output, SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
 use surrealdb_core::iam;
-use surrealdb_core::kvs::Datastore;
-use surrealdb_core::val::{self, Strand};
-use tokio::sync::RwLock;
-use uuid::Uuid;
-
-#[cfg(not(target_family = "wasm"))]
-use anyhow::bail;
-#[cfg(not(target_family = "wasm"))]
-use futures::stream::poll_fn;
-#[cfg(not(target_family = "wasm"))]
-use std::pin::pin;
-#[cfg(not(target_family = "wasm"))]
-use std::task::{Poll, ready};
-#[cfg(not(target_family = "wasm"))]
-use std::{future::Future, path::PathBuf};
-#[cfg(not(target_family = "wasm"))]
-use surrealdb_core::err::Error as CoreError;
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
+use surrealdb_core::kvs::{Datastore, LockType, TransactionType};
+use surrealdb_core::val::{self, Strand};
+#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
+use surrealdb_core::{
+	expr::statements::{DefineModelStatement, DefineStatement},
+	iam::{Action, ResourceKind, check::check_ns_db},
+	ml::storage::surml_file::SurMlFile,
+};
+use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
 use tokio::{
 	fs::OpenOptions,
@@ -189,23 +196,17 @@ use tokio::{
 };
 #[cfg(not(target_family = "wasm"))]
 use tokio_util::bytes::BytesMut;
-
-#[cfg(feature = "ml")]
-use surrealdb_core::expr::Model;
-
-#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-use crate::api::conn::MlExportConfig;
-#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-use futures::StreamExt;
-#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-use surrealdb_core::{
-	expr::statements::{DefineModelStatement, DefineStatement},
-	iam::{Action, ResourceKind, check::check_ns_db},
-	kvs::{LockType, TransactionType},
-	ml::storage::surml_file::SurMlFile,
-};
+use uuid::Uuid;
 
 use super::resource_to_exprs;
+use crate::Result;
+#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
+use crate::api::conn::MlExportConfig;
+use crate::api::conn::{Command, DbResponse, RequestData};
+use crate::api::err::Error;
+use crate::api::{Connect, Response as QueryResponse, Surreal};
+use crate::method::Stats;
+use crate::opt::IntoEndpoint;
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod native;
@@ -453,7 +454,8 @@ pub struct SurrealKv;
 pub struct Db(());
 
 impl Surreal<Db> {
-	/// Connects to a specific database endpoint, saving the connection on the static client
+	/// Connects to a specific database endpoint, saving the connection on the
+	/// static client
 	pub fn connect<P>(&self, address: impl IntoEndpoint<P, Client = Db>) -> Connect<Db, ()> {
 		Connect {
 			surreal: self.inner.clone().into(),
@@ -542,16 +544,25 @@ async fn export_ml(
 		version,
 	}: MlExportConfig,
 ) -> Result<()> {
-	// Ensure a NS and DB are set
 	let (nsv, dbv) = check_ns_db(sess)?;
 	// Check the permissions level
 	kvs.check(sess, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))?;
-	// Start a new readonly transaction
+
+	// Ensure a NS and DB are set
 	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
+	let Some(db) = tx.get_db_by_name(&nsv, &dbv).await? else {
+		anyhow::bail!("Database not found".to_string());
+	};
+	tx.cancel().await?;
+
 	// Attempt to get the model definition
-	let info = tx.get_db_model(&nsv, &dbv, &name, &version).await?;
+	let Some(model) = tx.get_db_model(db.namespace_id, db.database_id, &name, &version).await?
+	else {
+		// Attempt to get the model definition
+		anyhow::bail!("Model not found".to_string());
+	};
 	// Export the file data in to the store
-	let mut data = crate::obs::stream(info.hash.clone()).await?;
+	let mut data = surrealdb_core::obs::stream(model.hash.clone()).await?;
 	// Process all stream values
 	while let Some(Ok(bytes)) = data.next().await {
 		if chn.send(bytes.to_vec()).await.is_err() {
@@ -610,9 +621,16 @@ async fn router(
 			database,
 		} => {
 			if let Some(ns) = namespace {
+				let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
+				tx.get_or_add_ns(&ns, kvs.is_strict_mode()).await?;
+				tx.commit().await?;
 				session.write().await.ns = Some(ns);
 			}
 			if let Some(db) = database {
+				let ns = session.read().await.ns.clone().unwrap();
+				let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
+				tx.ensure_ns_db(&ns, &db, kvs.is_strict_mode()).await?;
+				tx.commit().await?;
 				session.write().await.db = Some(db);
 			}
 			Ok(DbResponse::Other(val::Value::None))
@@ -1134,8 +1152,8 @@ async fn router(
 
 			let stream = poll_fn(|ctx| {
 				// Doing it this way optimizes allocation.
-				// It is highly likely that the buffer we return from this stream will be dropped
-				// between calls to this function.
+				// It is highly likely that the buffer we return from this stream will be
+				// dropped between calls to this function.
 				// If this is the case than instead of allocating new memory the call to reserve
 				// will instead reclaim the existing used memory.
 				if buffer.capacity() == 0 {
@@ -1209,9 +1227,9 @@ async fn router(
 			// Convert the file back in to raw bytes
 			let data = file.to_bytes();
 			// Calculate the hash of the model file
-			let hash = crate::obs::hash(&data);
+			let hash = surrealdb_core::obs::hash(&data);
 			// Insert the file data in to the store
-			crate::obs::put(&hash, data).await?;
+			surrealdb_core::obs::put(&hash, data).await?;
 			// Insert the model in to the database
 			let model = DefineModelStatement {
 				name: Ident::new(file.header.name.to_string()).unwrap(),
@@ -1244,8 +1262,8 @@ async fn router(
 			value,
 		} => {
 			surrealdb_core::rpc::check_protected_param(&key)?;
-			// Need to compute because certain keys might not be allowed to be set and those should
-			// be rejected by an error.
+			// Need to compute because certain keys might not be allowed to be set and those
+			// should be rejected by an error.
 			match value {
 				val::Value::None => vars.write().await.remove(&key),
 				v => vars.write().await.insert(key, v),

@@ -1,11 +1,12 @@
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::FlowResultExt as _;
 use crate::expr::paths::ID;
 use crate::val::{RecordId, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
 
 pub async fn exists(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
@@ -61,24 +62,17 @@ pub async fn refs(
 	// Get the references
 	let ids = id.refs(ctx, opt, ft.as_ref(), ff.as_ref()).await?;
 	// Convert the references into a value
-	let val = ids.into_iter().map(Value::Thing).collect();
+	let val = ids.into_iter().map(Value::RecordId).collect();
 
 	Ok(Value::Array(val))
 }
 
 async fn correct_refs_field(ctx: &Context, opt: &Options, ft: &Table, ff: Idiom) -> Result<Idiom> {
 	// Obtain the field definition
-	let (ns, db) = opt.ns_db()?;
-	let fd = match ctx.tx().get_tb_field(ns, db, &ft.to_string(), &ff.to_string()).await {
-		Ok(fd) => fd,
-		Err(e) => {
-			// If the field does not exist, there is nothing to correct
-			if matches!(e.downcast_ref(), Some(Error::FdNotFound { .. })) {
-				return Ok(ff);
-			} else {
-				return Err(e);
-			}
-		}
+	let (ns, db) = ctx.get_ns_db_ids_ro(opt).await?;
+	let Some(fd) = ctx.tx().get_tb_field(ns, db, &ft.to_string(), &ff.to_string()).await? else {
+		// If the field does not exist, there is nothing to correct
+		return Ok(ff);
 	};
 
 	// Check if the field is an array-like value and thus "containing" references

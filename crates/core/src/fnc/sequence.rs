@@ -1,8 +1,9 @@
+use anyhow::Result;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::val::Value;
-use anyhow::Result;
 
 /// Return the next value for a given sequence.
 pub async fn nextval((ctx, opt): (&Context, &Options), (seq,): (Value,)) -> Result<Value> {

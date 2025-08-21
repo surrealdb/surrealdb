@@ -1,5 +1,6 @@
-use crate::sql::escape::EscapeRid;
 use std::fmt;
+
+use crate::sql::escape::EscapeRid;
 
 pub mod key;
 pub use key::{RecordIdKeyGen, RecordIdKeyLit};

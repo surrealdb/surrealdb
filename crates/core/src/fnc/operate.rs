@@ -1,11 +1,12 @@
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::Expr;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::val::{RecordId, TryAdd, TryDiv, TryMul, TryNeg, TryPow, TryRem, TrySub, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
 
 pub fn neg(a: Value) -> Result<Value> {
 	a.try_neg()

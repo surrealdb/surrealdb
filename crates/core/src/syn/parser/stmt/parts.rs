@@ -65,15 +65,16 @@ impl Parser<'_> {
 	}
 
 	/// Parses a statement output if the next token is `return`.
-	pub async fn try_parse_output(&mut self, ctx: &mut Stk) -> ParseResult<Option<Output>> {
+	pub async fn try_parse_output(&mut self, stk: &mut Stk) -> ParseResult<Option<Output>> {
 		if !self.eat(t!("RETURN")) {
 			return Ok(None);
 		}
-		self.parse_output(ctx).await.map(Some)
+		self.parse_output(stk).await.map(Some)
 	}
 
-	/// Needed because some part of the RPC needs to call into the parser for this specific part.
-	pub async fn parse_output(&mut self, ctx: &mut Stk) -> ParseResult<Output> {
+	/// Needed because some part of the RPC needs to call into the parser for
+	/// this specific part.
+	pub async fn parse_output(&mut self, stk: &mut Stk) -> ParseResult<Output> {
 		let res = match self.peek_kind() {
 			t!("NONE") => {
 				self.pop_peek();
@@ -95,7 +96,7 @@ impl Parser<'_> {
 				self.pop_peek();
 				Output::Before
 			}
-			_ => Output::Fields(self.parse_fields(ctx).await?),
+			_ => Output::Fields(self.parse_fields(stk).await?),
 		};
 		Ok(res)
 	}
@@ -109,29 +110,29 @@ impl Parser<'_> {
 		Ok(Some(Timeout(duration)))
 	}
 
-	pub async fn try_parse_fetch(&mut self, ctx: &mut Stk) -> ParseResult<Option<Fetchs>> {
+	pub async fn try_parse_fetch(&mut self, stk: &mut Stk) -> ParseResult<Option<Fetchs>> {
 		if !self.eat(t!("FETCH")) {
 			return Ok(None);
 		}
-		Ok(Some(self.parse_fetchs(ctx).await?))
+		Ok(Some(self.parse_fetchs(stk).await?))
 	}
 
-	pub async fn parse_fetchs(&mut self, ctx: &mut Stk) -> ParseResult<Fetchs> {
-		let mut fetchs = self.try_parse_param_or_idiom_or_fields(ctx).await?;
+	pub async fn parse_fetchs(&mut self, stk: &mut Stk) -> ParseResult<Fetchs> {
+		let mut fetchs = self.try_parse_param_or_idiom_or_fields(stk).await?;
 		while self.eat(t!(",")) {
-			fetchs.append(&mut self.try_parse_param_or_idiom_or_fields(ctx).await?);
+			fetchs.append(&mut self.try_parse_param_or_idiom_or_fields(stk).await?);
 		}
 		Ok(Fetchs(fetchs))
 	}
 
 	pub async fn try_parse_param_or_idiom_or_fields(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 	) -> ParseResult<Vec<Fetch>> {
 		match self.peek().kind {
 			t!("$param") => Ok(vec![Fetch(Expr::Param(self.next_token_value()?))]),
 			t!("TYPE") => {
-				let fields = self.parse_fields(ctx).await?;
+				let fields = self.parse_fields(stk).await?;
 
 				let fetches = match fields {
 					Fields::Value(field) => match *field {
@@ -155,15 +156,15 @@ impl Parser<'_> {
 
 				Ok(fetches)
 			}
-			_ => Ok(vec![Fetch(Expr::Idiom(self.parse_plain_idiom(ctx).await?))]),
+			_ => Ok(vec![Fetch(Expr::Idiom(self.parse_plain_idiom(stk).await?))]),
 		}
 	}
 
-	pub async fn try_parse_condition(&mut self, ctx: &mut Stk) -> ParseResult<Option<Cond>> {
+	pub async fn try_parse_condition(&mut self, stk: &mut Stk) -> ParseResult<Option<Cond>> {
 		if !self.eat(t!("WHERE")) {
 			return Ok(None);
 		}
-		let v = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
+		let v = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		Ok(Some(Cond(v)))
 	}
 
@@ -271,7 +272,7 @@ impl Parser<'_> {
 
 	pub async fn try_parse_group(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		fields: &Fields,
 		fields_span: Span,
 	) -> ParseResult<Option<Groups>> {
@@ -288,7 +289,7 @@ impl Parser<'_> {
 		let has_all = fields.contains_all();
 
 		let before = self.peek().span;
-		let group = self.parse_basic_idiom(ctx).await?;
+		let group = self.parse_basic_idiom(stk).await?;
 		let group_span = before.covers(self.last_span());
 		if !has_all {
 			Self::check_idiom(MissingKind::Group, fields, fields_span, &group, group_span)?;
@@ -297,7 +298,7 @@ impl Parser<'_> {
 		let mut groups = Groups(vec![Group(group)]);
 		while self.eat(t!(",")) {
 			let before = self.peek().span;
-			let group = self.parse_basic_idiom(ctx).await?;
+			let group = self.parse_basic_idiom(stk).await?;
 			let group_span = before.covers(self.last_span());
 			if !has_all {
 				Self::check_idiom(MissingKind::Group, fields, fields_span, &group, group_span)?;
@@ -342,7 +343,8 @@ impl Parser<'_> {
 
 	/// Parse a specific permission for a type of query
 	///
-	/// Sets the permission for a specific query on the given permission keyword.
+	/// Sets the permission for a specific query on the given permission
+	/// keyword.
 	///
 	/// # Parser State
 	/// Expects the parser to just have eaten the `FOR` keyword.
@@ -408,7 +410,8 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	///
-	/// Expects the parser to just have eaten either `SELECT`, `CREATE`, `UPDATE` or `DELETE`.
+	/// Expects the parser to just have eaten either `SELECT`, `CREATE`,
+	/// `UPDATE` or `DELETE`.
 	pub async fn parse_permission_value(&mut self, stk: &mut Stk) -> ParseResult<Permission> {
 		let next = self.next();
 		match next.kind {
@@ -421,10 +424,12 @@ impl Parser<'_> {
 		}
 	}
 
-	// TODO(gguillemas): Deprecated in 2.0.0. Kept for backward compatibility. Drop it in 3.0.0.
+	// TODO(gguillemas): Deprecated in 2.0.0. Kept for backward compatibility. Drop
+	// it in 3.0.0.
 	/// Parses a base
 	///
-	/// So either `NAMESPACE`, `DATABASE`, `ROOT`, or `SCOPE` if `scope_allowed` is true.
+	/// So either `NAMESPACE`, `DATABASE`, `ROOT`, or `SCOPE` if `scope_allowed`
+	/// is true.
 	///
 	/// # Parser state
 	/// Expects the next keyword to be a base.
@@ -474,7 +479,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects the parser to have already eating the `REFERENCE` keyword
-	pub async fn parse_reference(&mut self, ctx: &mut Stk) -> ParseResult<Reference> {
+	pub async fn parse_reference(&mut self, stk: &mut Stk) -> ParseResult<Reference> {
 		let on_delete = if self.eat(t!("ON")) {
 			expected!(self, t!("DELETE"));
 			let next = self.next();
@@ -484,7 +489,7 @@ impl Parser<'_> {
 				t!("IGNORE") => ReferenceDeleteStrategy::Ignore,
 				t!("UNSET") => ReferenceDeleteStrategy::Unset,
 				t!("THEN") => ReferenceDeleteStrategy::Custom(
-					ctx.run(|ctx| self.parse_expr_field(ctx)).await?,
+					stk.run(|stk| self.parse_expr_field(stk)).await?,
 				),
 				_ => {
 					unexpected!(self, next, "`REJECT`, `CASCASE`, `IGNORE`, `UNSET` or `THEN`")
@@ -502,8 +507,8 @@ impl Parser<'_> {
 	/// Parses a view production
 	///
 	/// # Parse State
-	/// Expects the parser to have already eaten the possible `(` if the view was wrapped in
-	/// parens. Expects the next keyword to be `SELECT`.
+	/// Expects the parser to have already eaten the possible `(` if the view
+	/// was wrapped in parens. Expects the next keyword to be `SELECT`.
 	pub async fn parse_view(&mut self, stk: &mut Stk) -> ParseResult<View> {
 		expected!(self, t!("SELECT"));
 		let before_fields = self.peek().span;

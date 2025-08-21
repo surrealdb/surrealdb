@@ -1,10 +1,10 @@
+use anyhow::{Result, ensure};
+
+use super::args::{Any, Cast, Optional};
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
 use crate::fnc::util::string;
 use crate::val::{Regex, Strand, Value};
-use anyhow::{Result, ensure};
-
-use super::args::{Any, Cast, Optional};
 
 /// Returns `true` if a string of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<()> {
@@ -193,11 +193,11 @@ pub fn words((string,): (String,)) -> Result<Value> {
 
 pub mod distance {
 
+	use anyhow::Result;
+	use strsim;
+
 	use crate::err::Error;
 	use crate::val::Value;
-	use anyhow::Result;
-
-	use strsim;
 
 	/// Calculate the Damerau-Levenshtein distance between two strings
 	/// via [`strsim::damerau_levenshtein`].
@@ -205,8 +205,8 @@ pub mod distance {
 		Ok(strsim::damerau_levenshtein(&a, &b).into())
 	}
 
-	/// Calculate the normalized Damerau-Levenshtein distance between two strings
-	/// via [`strsim::normalized_damerau_levenshtein`].
+	/// Calculate the normalized Damerau-Levenshtein distance between two
+	/// strings via [`strsim::normalized_damerau_levenshtein`].
 	pub fn normalized_damerau_levenshtein((a, b): (String, String)) -> Result<Value> {
 		Ok(strsim::normalized_damerau_levenshtein(&a, &b).into())
 	}
@@ -214,7 +214,8 @@ pub mod distance {
 	/// Calculate the Hamming distance between two strings
 	/// via [`strsim::hamming`].
 	///
-	/// Will result in an [`Error::InvalidArguments`] if the given strings are of different lengths.
+	/// Will result in an [`Error::InvalidArguments`] if the given strings are
+	/// of different lengths.
 	pub fn hamming((a, b): (String, String)) -> Result<Value> {
 		match strsim::hamming(&a, &b) {
 			Ok(v) => Ok(v.into()),
@@ -238,16 +239,17 @@ pub mod distance {
 	}
 
 	/// Calculate the OSA distance &ndash; a variant of the Levenshtein distance
-	/// that allows for transposition of adjacent characters &ndash; between two strings
-	/// via [`strsim::osa_distance`].
+	/// that allows for transposition of adjacent characters &ndash; between two
+	/// strings via [`strsim::osa_distance`].
 	pub fn osa_distance((a, b): (String, String)) -> Result<Value> {
 		Ok(strsim::osa_distance(&a, &b).into())
 	}
 }
 
 pub mod html {
-	use crate::val::Value;
 	use anyhow::Result;
+
+	use crate::val::Value;
 
 	pub fn encode((arg,): (String,)) -> Result<Value> {
 		Ok(ammonia::clean_text(&arg).into())
@@ -259,20 +261,22 @@ pub mod html {
 }
 
 pub mod is {
-	use crate::err::Error;
-	use crate::fnc::args::Optional;
-	use crate::syn;
-	use crate::val::{Datetime, Value};
+	use std::char;
+	use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+	use std::sync::LazyLock;
+
 	use anyhow::{Result, bail};
 	use chrono::NaiveDateTime;
 	use regex::Regex;
 	use semver::Version;
-	use std::char;
-	use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-	use std::sync::LazyLock;
 	use ulid::Ulid;
 	use url::Url;
 	use uuid::Uuid;
+
+	use crate::err::Error;
+	use crate::fnc::args::Optional;
+	use crate::syn;
+	use crate::val::{Datetime, Value};
 
 	#[rustfmt::skip] static LATITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
 	#[rustfmt::skip] static LONGITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?(180(\\.0+)?|((1[0-7]\\d)|([1-9]?\\d))(\\.\\d+)?)$").unwrap());
@@ -369,7 +373,7 @@ pub mod is {
 	}
 
 	pub fn record((arg, Optional(tb)): (String, Optional<Value>)) -> Result<Value> {
-		let res = match syn::thing(&arg) {
+		let res = match syn::record_id(&arg) {
 			Ok(t) => match tb {
 				Some(Value::Strand(tb)) => t.table.as_str() == tb.as_str(),
 				Some(Value::Table(tb)) => t.table.as_str() == tb.as_str(),
@@ -391,11 +395,13 @@ pub mod is {
 }
 
 pub mod similarity {
-	use crate::val::Value;
+	use std::sync::LazyLock;
+
 	use anyhow::Result;
 	use fuzzy_matcher::FuzzyMatcher;
 	use fuzzy_matcher::skim::SkimMatcherV2;
-	use std::sync::LazyLock;
+
+	use crate::val::Value;
 	static MATCHER: LazyLock<SkimMatcherV2> =
 		LazyLock::new(|| SkimMatcherV2::default().ignore_case());
 
@@ -430,10 +436,11 @@ pub mod similarity {
 
 pub mod semver {
 
-	use crate::err::Error;
-	use crate::val::Value;
 	use anyhow::Result;
 	use semver::Version;
+
+	use crate::err::Error;
+	use crate::val::Value;
 
 	fn parse_version(ver: &str, func: &str, msg: &str) -> Result<Version> {
 		Version::parse(ver)
@@ -475,9 +482,10 @@ pub mod semver {
 	}
 
 	pub mod inc {
+		use anyhow::Result;
+
 		use crate::fnc::string::semver::parse_version;
 		use crate::val::Value;
-		use anyhow::Result;
 
 		pub fn major((version,): (String,)) -> Result<Value> {
 			parse_version(&version, "string::semver::inc::major", "Invalid semantic version").map(
@@ -511,9 +519,10 @@ pub mod semver {
 	}
 
 	pub mod set {
+		use anyhow::Result;
+
 		use crate::fnc::string::semver::parse_version;
 		use crate::val::Value;
-		use anyhow::Result;
 
 		pub fn major((version, value): (String, i64)) -> Result<Value> {
 			// TODO: Deal with negative trunc:

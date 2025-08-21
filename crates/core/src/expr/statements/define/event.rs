@@ -1,22 +1,22 @@
+use std::fmt::{self, Display};
+
+use anyhow::{Result, bail};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use super::DefineKind;
+use crate::catalog::TableDefinition;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::Fmt;
-use crate::expr::statements::define::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::fmt::Fmt;
 use crate::val::{Strand, Value};
-use anyhow::{Result, bail};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
-use uuid::Uuid;
-
-use super::DefineKind;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -42,7 +42,7 @@ impl DefineEventStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
@@ -59,11 +59,15 @@ impl DefineEventStatement {
 				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 		}
+
+		// Ensure the table exists
+		let tb = {
+			let (ns, db) = opt.ns_db()?;
+			txn.get_or_add_tb(ns, db, &self.target_table, opt.strict).await?
+		};
+
 		// Process the statement
 		let key = crate::key::table::ev::new(ns, db, &self.target_table, &self.name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-		txn.get_or_add_tb(ns, db, &self.target_table, opt.strict).await?;
 		txn.set(
 			&key,
 			&DefineEventStatement {
@@ -73,18 +77,16 @@ impl DefineEventStatement {
 			None,
 		)
 		.await?;
+
 		// Refresh the table cache
+		let tb_def = TableDefinition {
+			cache_events_ts: Uuid::now_v7(),
+			..tb.as_ref().clone()
+		};
+
 		let key = crate::key::database::tb::new(ns, db, &self.target_table);
-		let tb = txn.get_tb(ns, db, &self.target_table).await?;
-		txn.set(
-			&key,
-			&DefineTableStatement {
-				cache_events_ts: Uuid::now_v7(),
-				..tb.as_ref().clone()
-			},
-			None,
-		)
-		.await?;
+		txn.set(&key, &tb_def, None).await?;
+
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
 			cache.clear_tb(ns, db, &self.target_table);

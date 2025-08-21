@@ -1,11 +1,5 @@
-use super::AppState;
-use super::error::ResponseError;
-use super::headers::Accept;
-use super::output::Output;
-use crate::cnf::HTTP_MAX_KEY_BODY_SIZE;
-use crate::net::error::Error as NetError;
-use crate::net::input::bytes_to_utf8;
-use crate::net::params::Params;
+use std::str;
+
 use anyhow::Context as _;
 use axum::extract::{DefaultBodyLimit, Path};
 use axum::response::IntoResponse;
@@ -15,15 +9,23 @@ use axum_extra::TypedHeader;
 use axum_extra::extract::Query;
 use bytes::Bytes;
 use serde::Deserialize;
-use std::str;
-use surrealdb::dbs::Session;
-use surrealdb::dbs::capabilities::RouteTarget;
-use surrealdb::iam::check::check_ns_db;
-use surrealdb_core::dbs::Variables;
-use surrealdb_core::kvs::Datastore;
-use surrealdb_core::val::{Strand, Value};
-use surrealdb_core::{sql, syn};
+use surrealdb_core::kvs::{LockType, TransactionType};
 use tower_http::limit::RequestBodyLimitLayer;
+
+use super::AppState;
+use super::error::ResponseError;
+use super::headers::Accept;
+use super::output::Output;
+use crate::cnf::HTTP_MAX_KEY_BODY_SIZE;
+use crate::core::dbs::capabilities::RouteTarget;
+use crate::core::dbs::{Session, Variables};
+use crate::core::iam::check::check_ns_db;
+use crate::core::kvs::Datastore;
+use crate::core::val::{Strand, Value};
+use crate::core::{sql, syn};
+use crate::net::error::Error as NetError;
+use crate::net::input::bytes_to_utf8;
+use crate::net::params::Params;
 
 #[derive(Default, Deserialize, Debug, Clone)]
 struct QueryOptions {
@@ -130,10 +132,19 @@ async fn select_all(
 	Query(query): Query<QueryOptions>,
 ) -> Result<impl IntoResponse, ResponseError> {
 	// Get the datastore reference
-	let db = &state.datastore;
-	assert_capabilities(db, &session).map_err(ResponseError)?;
+	let ds = &state.datastore;
+	assert_capabilities(ds, &session).map_err(ResponseError)?;
 	// Ensure a NS and DB are set
-	let _ = check_ns_db(&session).map_err(ResponseError)?;
+	let (ns, db) = check_ns_db(&session).map_err(ResponseError)?;
+
+	// Check if the table exists
+	let tx =
+		ds.transaction(TransactionType::Read, LockType::Optimistic).await.map_err(ResponseError)?;
+	if tx.get_tb_by_name(&ns, &db, &table).await.map_err(ResponseError)?.is_none() {
+		return Err(ResponseError(anyhow::anyhow!("Table `{table}` not found")));
+	}
+	tx.cancel().await.map_err(ResponseError)?;
+
 	// Specify the request statement
 	let sql = match query.fields {
 		None => "SELECT * FROM type::table($table) LIMIT $limit START $start",
@@ -146,7 +157,7 @@ async fn select_all(
 		String::from("limit") => Value::from(query.limit.unwrap_or(100)),
 		String::from("fields") => query.fields.unwrap_or_default().into_iter().map(|x| unsafe{ Strand::new_unchecked(x) }).map(Value::from).collect(),
 	});
-	execute_and_return(db, sql, &session, vars, accept.as_deref(), None)
+	execute_and_return(ds, sql, &session, vars, accept.as_deref(), None)
 		.await
 		.map_err(ResponseError)
 }

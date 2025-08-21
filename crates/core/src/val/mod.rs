@@ -1,20 +1,23 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
-use crate::err::Error;
-use crate::expr::fmt::Pretty;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{self, Ident, Kind};
-use crate::kvs::impl_kv_value_revisioned;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::{self, Write};
+use std::ops::Bound;
+
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use geo::Point;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
-use std::fmt::{self, Write};
-use std::ops::Bound;
+
+use crate::err::Error;
+use crate::expr::fmt::Pretty;
+use crate::expr::kind::GeometryKind;
+use crate::expr::statements::info::InfoStructure;
+use crate::expr::{self, Kind};
+use crate::kvs::impl_kv_value_revisioned;
 
 pub mod array;
 pub mod bytes;
@@ -26,10 +29,10 @@ pub mod geometry;
 pub mod number;
 pub mod object;
 pub mod range;
+pub mod record_id;
 pub mod regex;
 pub mod strand;
 pub mod table;
-pub mod thing;
 pub mod uuid;
 pub mod value;
 
@@ -43,10 +46,10 @@ pub use self::geometry::Geometry;
 pub use self::number::{DecimalExt, Number};
 pub use self::object::Object;
 pub use self::range::Range;
+pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::regex::Regex;
 pub use self::strand::{Strand, StrandRef};
 pub use self::table::Table;
-pub use self::thing::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::uuid::Uuid;
 pub use self::value::{CastError, CoerceError};
 
@@ -204,7 +207,7 @@ impl Value {
 	}
 
 	/// Check if this Value is a Thing of a specific type
-	pub fn is_record_type(&self, types: &[Ident]) -> bool {
+	pub fn is_record_type(&self, types: &[String]) -> bool {
 		match self {
 			Value::RecordId(v) => v.is_record_type(types),
 			_ => false,
@@ -212,28 +215,28 @@ impl Value {
 	}
 
 	/// Check if this Value is a Geometry of a specific type
-	pub fn is_geometry_type(&self, types: &[String]) -> bool {
+	pub fn is_geometry_type(&self, types: &[GeometryKind]) -> bool {
 		match self {
 			Value::Geometry(Geometry::Point(_)) => {
-				types.iter().any(|t| matches!(t.as_str(), "feature" | "point"))
+				types.iter().any(|t| matches!(t, GeometryKind::Point))
 			}
 			Value::Geometry(Geometry::Line(_)) => {
-				types.iter().any(|t| matches!(t.as_str(), "feature" | "line"))
+				types.iter().any(|t| matches!(t, GeometryKind::Line))
 			}
 			Value::Geometry(Geometry::Polygon(_)) => {
-				types.iter().any(|t| matches!(t.as_str(), "feature" | "polygon"))
+				types.iter().any(|t| matches!(t, GeometryKind::Polygon))
 			}
 			Value::Geometry(Geometry::MultiPoint(_)) => {
-				types.iter().any(|t| matches!(t.as_str(), "feature" | "multipoint"))
+				types.iter().any(|t| matches!(t, GeometryKind::MultiPoint))
 			}
 			Value::Geometry(Geometry::MultiLine(_)) => {
-				types.iter().any(|t| matches!(t.as_str(), "feature" | "multiline"))
+				types.iter().any(|t| matches!(t, GeometryKind::MultiLine))
 			}
 			Value::Geometry(Geometry::MultiPolygon(_)) => {
-				types.iter().any(|t| matches!(t.as_str(), "feature" | "multipolygon"))
+				types.iter().any(|t| matches!(t, GeometryKind::MultiPolygon))
 			}
 			Value::Geometry(Geometry::Collection(_)) => {
-				types.iter().any(|t| matches!(t.as_str(), "feature" | "collection"))
+				types.iter().any(|t| matches!(t, GeometryKind::Collection))
 			}
 			_ => false,
 		}
@@ -282,14 +285,10 @@ impl Value {
 				None,
 			)),
 			Value::Object(_) => Some(Kind::Object),
-			Value::Geometry(geo) => Some(Kind::Geometry(vec![geo.as_type().to_string()])),
+			Value::Geometry(geo) => Some(Kind::Geometry(vec![geo.kind()])),
 			Value::Bytes(_) => Some(Kind::Bytes),
 			Value::Regex(_) => Some(Kind::Regex),
-			Value::RecordId(thing) => {
-				// TODO: Null byte validity
-				let str = unsafe { Ident::new_unchecked(thing.table.clone()) };
-				Some(Kind::Record(vec![str]))
-			}
+			Value::RecordId(thing) => Some(Kind::Record(vec![thing.table.clone()])),
 			Value::Closure(closure) => {
 				let args_kinds =
 					closure.args.iter().map(|(_, kind)| kind.clone()).collect::<Vec<_>>();
@@ -298,11 +297,7 @@ impl Value {
 				Some(Kind::Function(Some(args_kinds), returns_kind))
 			}
 			//Value::Refs(_) => None,
-			Value::File(file) => {
-				// TODO: Null byte validity
-				let str = unsafe { Ident::new_unchecked(file.bucket.clone()) };
-				Some(Kind::File(vec![str]))
-			}
+			Value::File(file) => Some(Kind::File(vec![file.bucket.clone()])),
 			_ => None,
 		}
 	}
@@ -310,11 +305,12 @@ impl Value {
 	/// Returns the surql representation of the kind of the value as a string.
 	///
 	/// # Warning
-	/// This function is not fully implement for all variants, make sure you don't accidentally use
-	/// it where it can return an invalid value.
+	/// This function is not fully implement for all variants, make sure you
+	/// don't accidentally use it where it can return an invalid value.
 	pub fn kind_of(&self) -> &'static str {
-		// TODO: Look at this function, there are a whole bunch of options for which this returns
-		// "incorrect type" which might sneak into the results where it shouldn.t
+		// TODO: Look at this function, there are a whole bunch of options for which
+		// this returns "incorrect type" which might sneak into the results where it
+		// shouldn.t
 		match self {
 			Self::None => "none",
 			Self::Null => "null",
@@ -401,7 +397,7 @@ impl Value {
 			Value::Regex(v) => match other {
 				Value::Regex(w) => v == w,
 				// TODO(3.0.0): Decide if we want to keep this behavior.
-				//Value::Thing(w) => v.regex().is_match(w.to_raw().as_str()),
+				//Value::RecordId(w) => v.regex().is_match(w.to_raw().as_str()),
 				Value::Strand(w) => v.regex().is_match(w.as_str()),
 				_ => false,
 			},
@@ -573,7 +569,8 @@ impl Value {
 		}
 	}
 
-	/// Compare this Value to another Value lexicographically and using natural numerical comparison
+	/// Compare this Value to another Value lexicographically and using natural
+	/// numerical comparison
 	pub fn natural_lexical_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
 			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_lexical_cmp(a, b)),
@@ -1025,10 +1022,10 @@ impl FromIterator<(String, Value)> for Value {
 
 #[cfg(test)]
 mod tests {
-	use crate::syn;
+	use chrono::TimeZone;
 
 	use super::*;
-	use chrono::TimeZone;
+	use crate::syn;
 
 	#[test]
 	fn check_none() {

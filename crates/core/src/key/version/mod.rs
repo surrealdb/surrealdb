@@ -1,9 +1,10 @@
 //! Stores a record document
-use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use std::ops::Range;
 
 use serde::{Deserialize, Serialize};
-use std::ops::Range;
+
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Version {
@@ -12,7 +13,7 @@ pub(crate) struct Version {
 }
 
 impl KVKey for Version {
-	type ValueType = crate::kvs::version::Version;
+	type ValueType = crate::kvs::version::MajorVersion;
 }
 
 pub fn new() -> Version {

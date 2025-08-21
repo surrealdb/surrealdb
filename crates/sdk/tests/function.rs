@@ -1,12 +1,13 @@
 mod helpers;
-use crate::helpers::Test;
 use helpers::new_ds;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::err::Error;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::err::Error;
 use surrealdb_core::sql::{Expr, FunctionCall};
 use surrealdb_core::val::{Array, Number, Table, Value};
 use surrealdb_core::{sql, strand, syn};
+
+use crate::helpers::Test;
 
 async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<()> {
 	Test::new(sql).await?.expect_vals(desired_responses)?;
@@ -91,6 +92,7 @@ async fn function_rand_ulid() -> Result<()> {
 #[tokio::test]
 async fn function_rand_ulid_from_datetime() -> Result<()> {
 	let sql = r#"
+		USE NS test DB test;
         CREATE ONLY test:[rand::ulid()] SET created = time::now(), num = 1;
         SLEEP 100ms;
         LET $rec = CREATE ONLY test:[rand::ulid()] SET created = time::now(), num = 2;
@@ -99,6 +101,9 @@ async fn function_rand_ulid_from_datetime() -> Result<()> {
 		SELECT VALUE num FROM test:[rand::ulid($rec.created - 50ms)]..;
 	"#;
 	let mut test = Test::new(sql).await?;
+	// USE NS test DB test;
+	let tmp = test.next()?.result;
+	tmp.unwrap();
 	//
 	let tmp = test.next()?.result?;
 	assert!(tmp.is_object());
@@ -137,6 +142,7 @@ async fn function_rand_uuid() -> Result<()> {
 #[tokio::test]
 async fn function_rand_uuid_from_datetime() -> Result<()> {
 	let sql = r#"
+		USE NS test DB test;
         CREATE ONLY test:[rand::uuid()] SET created = time::now(), num = 1;
         SLEEP 100ms;
         LET $rec = CREATE ONLY test:[rand::uuid()] SET created = time::now(), num = 2;
@@ -145,6 +151,9 @@ async fn function_rand_uuid_from_datetime() -> Result<()> {
 		SELECT VALUE num FROM test:[rand::uuid($rec.created - 50ms)]..;
 	"#;
 	let mut test = Test::new(sql).await?;
+	// USE NS test DB test;
+	let tmp = test.next()?.result;
+	tmp.unwrap();
 	//
 	let tmp = test.next()?.result?;
 	assert!(tmp.is_object());
@@ -196,6 +205,7 @@ async fn function_rand_uuid_v7() -> Result<()> {
 #[tokio::test]
 async fn function_rand_uuid_v7_from_datetime() -> Result<()> {
 	let sql = r#"
+		USE NS test DB test;
         CREATE ONLY test:[rand::uuid::v7()] SET created = time::now(), num = 1;
         SLEEP 100ms;
         LET $rec = CREATE ONLY test:[rand::uuid::v7()] SET created = time::now(), num = 2;
@@ -204,6 +214,9 @@ async fn function_rand_uuid_v7_from_datetime() -> Result<()> {
 		SELECT VALUE num FROM test:[rand::uuid::v7($rec.created - 50ms)]..;
 	"#;
 	let mut test = Test::new(sql).await?;
+	// USE NS test DB test;
+	let tmp = test.next()?.result;
+	tmp.unwrap();
 	//
 	let tmp = test.next()?.result?;
 	assert!(tmp.is_object());
@@ -233,19 +246,23 @@ async fn function_rand_uuid_v7_from_datetime() -> Result<()> {
 #[tokio::test]
 async fn function_record_exists() -> Result<()> {
 	let sql = r#"
+		USE NS test DB test;
 		RETURN record::exists(r"person:tobie");
 		CREATE ONLY person:tobie;
 		RETURN record::exists(r"person:tobie");
 	"#;
 	let mut test = Test::new(sql).await?;
-	//
+	// USE NS test DB test;
+	let tmp = test.next()?.result;
+	tmp.unwrap();
+	// RETURN record::exists(r"person:tobie");
 	let tmp = test.next()?.result?;
 	let val = Value::from(false);
 	assert_eq!(tmp, val);
-	//
+	// CREATE ONLY person:tobie;
 	let tmp = test.next()?.result?;
 	assert!(tmp.is_object());
-	//
+	// RETURN record::exists(r"person:tobie");
 	let tmp = test.next()?.result?;
 	let val = Value::from(true);
 	assert_eq!(tmp, val);
@@ -3114,6 +3131,7 @@ async fn function_type_table() -> Result<()> {
 #[tokio::test]
 async fn function_type_thing() -> Result<()> {
 	let sql = r#"
+		USE NS test DB test;
 		CREATE type::thing('person', 'test');
 		CREATE type::thing('person', 1434619);
 		CREATE type::thing(<string> person:john);
@@ -3121,6 +3139,9 @@ async fn function_type_thing() -> Result<()> {
 		CREATE type::thing('temperature', ['London', '2022-09-30T20:25:01.406828Z']);
 	"#;
 	let mut test = Test::new(sql).await?;
+	// USE NS test DB test;
+	let tmp = test.next()?.result;
+	tmp.unwrap();
 	//
 	let tmp = test.next()?.result?;
 	let val = syn::value(

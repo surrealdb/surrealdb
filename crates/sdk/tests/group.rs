@@ -1,10 +1,11 @@
 mod helpers;
-use crate::helpers::Test;
 use helpers::{new_ds, skip_ok};
 use surrealdb::Result;
-use surrealdb::dbs::Session;
+use surrealdb_core::dbs::Session;
 use surrealdb_core::val::RecordId;
 use surrealdb_core::{strand, syn};
+
+use crate::helpers::Test;
 
 #[tokio::test]
 async fn select_multi_aggregate_composed() -> Result<()> {
@@ -565,6 +566,7 @@ async fn select_count_range_keys_only_permissions(
 	// Define the permissions and create some records
 	let sql = format!(
 		r"
+			USE NS test DB test;
 			SELECT COUNT() FROM table:a..z GROUP ALL;
 			SELECT COUNT() FROM table:a..z;
 			DEFINE TABLE table PERMISSIONS {perms};
@@ -573,12 +575,14 @@ async fn select_count_range_keys_only_permissions(
 		"
 	);
 	let mut t = Test::new(&sql).await?;
+	t.skip_ok(1)?;
 	// The first select should be successful
 	t.expect_vals(&["[{count: 0}]", "[]"])?;
 	//
 	t.skip_ok(3)?;
 	// Create and select as a record user
 	let sql = r"
+			USE NS test DB test;
 			SELECT COUNT() FROM table:a..z GROUP ALL EXPLAIN;
 			SELECT COUNT() FROM table:a..z GROUP ALL;
 			SELECT COUNT() FROM table:a..z EXPLAIN;
@@ -595,7 +599,10 @@ async fn select_count_range_keys_only_permissions(
 		sql,
 	)
 	.await?;
-	t.expect_size(4)?;
+	t.expect_size(5)?;
+	//
+	t.skip_ok(1)?;
+	//
 	// The explain plan is still accessible
 	let operation = match expect_count_optim {
 		None => "",

@@ -1,3 +1,6 @@
+use std::cmp::Ordering;
+use std::ops::Bound;
+
 use reblessive::Stk;
 
 use super::{ParseResult, Parser};
@@ -8,16 +11,14 @@ use crate::syn::lexer::compound;
 use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
 use crate::syn::token::{Glued, TokenKind, t};
 use crate::val::Strand;
-use std::cmp::Ordering;
-use std::ops::Bound;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_record_string(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		double: bool,
 	) -> ParseResult<RecordIdLit> {
-		let thing = self.parse_record_id(ctx).await?;
+		let thing = self.parse_record_id(stk).await?;
 
 		if double {
 			expected_whitespace!(self, t!("\""));
@@ -160,27 +161,27 @@ impl Parser<'_> {
 		}
 	}
 
-	pub(crate) async fn parse_thing_with_range(
+	pub(crate) async fn parse_record_id_with_range(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 	) -> ParseResult<RecordIdLit> {
 		let ident = self.next_token_value::<Ident>()?;
-		self.parse_record_id_or_range(ctx, ident).await
+		self.parse_record_id_or_range(stk, ident).await
 	}
 
-	pub(crate) async fn parse_record_id(&mut self, ctx: &mut Stk) -> ParseResult<RecordIdLit> {
+	pub(crate) async fn parse_record_id(&mut self, stk: &mut Stk) -> ParseResult<RecordIdLit> {
 		let ident = self.next_token_value::<Ident>()?.into_string();
-		self.parse_record_id_from_ident(ctx, ident).await
+		self.parse_record_id_from_ident(stk, ident).await
 	}
 
 	pub(crate) async fn parse_record_id_from_ident(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 		ident: String,
 	) -> ParseResult<RecordIdLit> {
 		expected!(self, t!(":"));
 
-		let id = ctx.run(|ctx| self.parse_record_id_key(ctx)).await?;
+		let id = stk.run(|ctx| self.parse_record_id_key(ctx)).await?;
 
 		Ok(RecordIdLit {
 			table: ident,
@@ -296,9 +297,10 @@ impl Parser<'_> {
 				Ok(RecordIdKeyLit::String(text))
 			}
 			TokenKind::Glued(_) => {
-				// If we glue before a parsing a record id, for example 123s456z would return an error as it is
-				// an invalid duration, however it is a valid flexible record id identifier.
-				// So calling glue before using that token to create a record id is not allowed.
+				// If we glue before a parsing a record id, for example 123s456z would return an
+				// error as it is an invalid duration, however it is a valid flexible record
+				// id identifier. So calling glue before using that token to create a record
+				// id is not allowed.
 				panic!(
 					"Glueing tokens used in parsing a record id would result in inproper parsing"
 				)

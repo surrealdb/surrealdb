@@ -1,9 +1,8 @@
+use super::RpcError;
 use crate::dbs::{Capabilities, Variables};
 use crate::sql::{Cond, Data, Expr, Fetchs, Fields, Limit, Literal, Output, Start, Timeout};
 use crate::syn;
 use crate::val::{Number, Object, Value};
-
-use super::RpcError;
 
 #[derive(Clone, Debug)]
 pub(crate) enum RpcData {
@@ -51,7 +50,8 @@ impl RpcData {
 	}
 }
 
-/// Statement Options for the `select`, `insert`, `create`, `upsert`, `update`, `relate` and `delete` methods.
+/// Statement Options for the `select`, `insert`, `create`, `upsert`, `update`,
+/// `relate` and `delete` methods.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct StatementOptions {
 	/// - One of: `"content"`, `"replace"`, `"merge"`, `"patch"` or `"single"`.

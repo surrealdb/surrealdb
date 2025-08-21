@@ -1,6 +1,11 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use anyhow::Result;
+use http::HeaderMap;
+use reblessive::TreeStack;
+use reblessive::tree::Stk;
+
 use super::body::ApiBody;
 use super::context::InvocationContext;
 use super::convert;
@@ -13,10 +18,6 @@ use crate::expr::FlowResultExt as _;
 use crate::expr::statements::define::ApiDefinition;
 use crate::kvs::{Datastore, Transaction};
 use crate::val::{Object, Value};
-use anyhow::Result;
-use http::HeaderMap;
-use reblessive::TreeStack;
-use reblessive::tree::Stk;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ApiInvocation {
@@ -68,8 +69,8 @@ impl ApiInvocation {
 		api: &ApiDefinition,
 		body: ApiBody,
 	) -> Result<Option<(ApiResponse, ResponseInstruction)>> {
-		// TODO: Figure out if it is possible if multiple actions can have the same method, and if
-		// so should they all be run?
+		// TODO: Figure out if it is possible if multiple actions can have the same
+		// method, and if so should they all be run?
 		let method_action = api.actions.iter().find(|x| x.methods.contains(&self.method));
 
 		if method_action.is_none() && api.fallback.is_none() {
@@ -80,7 +81,8 @@ impl ApiInvocation {
 		let mut inv_ctx = InvocationContext::default();
 
 		// first run the middleware which is globally configured for the database.
-		let global = ctx.tx().get_db_optional_config(opt.ns()?, opt.db()?, "api").await?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+		let global = ctx.tx().get_db_optional_config(ns, db, "api").await?;
 		if let Some(config) = global.as_ref().map(|v| v.try_as_api()).transpose()? {
 			for m in config.middleware.iter() {
 				invoke::invoke(&mut inv_ctx, &m.name, m.args.clone())?;

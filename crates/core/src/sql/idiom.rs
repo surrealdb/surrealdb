@@ -1,7 +1,8 @@
-use crate::sql::fmt::{Fmt, fmt_separated_by};
-use crate::sql::{Ident, Part};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
+
+use crate::sql::fmt::{Fmt, fmt_separated_by};
+use crate::sql::{Ident, Part};
 
 // TODO: Remove unnessacry newtype.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -71,29 +72,6 @@ impl From<crate::expr::Idiom> for Idiom {
 	fn from(v: crate::expr::Idiom) -> Self {
 		Idiom(v.0.into_iter().map(Into::into).collect())
 	}
-}
-
-impl Idiom {
-	/*
-	/// Appends a part to the end of this Idiom
-	pub(crate) fn push(mut self, n: Part) -> Idiom {
-		self.0.push(n);
-		self
-	}
-	/// Convert this Idiom to a JSON Path string
-	pub(crate) fn to_path(&self) -> String {
-		format!("/{self}").replace(']', "").replace(&['.', '['][..], "/")
-	}
-	/// Simplifies this Idiom for use in object keys
-	pub(crate) fn simplify(&self) -> Idiom {
-		self.0
-			.iter()
-			.filter(|&p| matches!(p, Part::Field(_) | Part::Start(_) | Part::Graph(_)))
-			.cloned()
-			.collect::<Vec<_>>()
-			.into()
-	}
-	*/
 }
 
 impl Display for Idiom {

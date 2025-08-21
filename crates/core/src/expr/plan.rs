@@ -1,11 +1,11 @@
+use std::fmt::{self, Display, Formatter};
+
 use crate::expr::Expr;
 use crate::expr::fmt::Fmt;
 use crate::expr::statements::{
 	AccessStatement, AnalyzeStatement, KillStatement, LiveStatement, OptionStatement,
 	ShowStatement, UseStatement,
 };
-
-use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug)]
 pub struct LogicalPlan {
@@ -52,12 +52,12 @@ impl TopLevelExpr {
 			TopLevelExpr::Begin
 			| TopLevelExpr::Cancel
 			| TopLevelExpr::Commit
-			| TopLevelExpr::Use(_)
 			| TopLevelExpr::Show(_)
 			| TopLevelExpr::Analyze(_) => true,
 			TopLevelExpr::Kill(_)
 			| TopLevelExpr::Live(_)
 			| TopLevelExpr::Option(_)
+			| TopLevelExpr::Use(_)
 			| TopLevelExpr::Access(_) => false,
 			TopLevelExpr::Expr(expr) => expr.read_only(),
 		}

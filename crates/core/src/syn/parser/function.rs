@@ -1,11 +1,10 @@
 use reblessive::Stk;
 
+use super::{ParseResult, Parser};
 use crate::sql::{Expr, Function, FunctionCall, Ident, Model};
 use crate::syn::error::syntax_error;
 use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
 use crate::syn::token::{TokenKind, t};
-
-use super::{ParseResult, Parser};
 
 impl Parser<'_> {
 	/// Parse a custom function function call
@@ -13,7 +12,7 @@ impl Parser<'_> {
 	/// Expects `fn` to already be called.
 	pub(super) async fn parse_custom_function(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 	) -> ParseResult<FunctionCall> {
 		expected!(self, t!("::"));
 		let mut name = self.next_token_value::<Ident>()?.into_string();
@@ -22,7 +21,7 @@ impl Parser<'_> {
 			name.push_str(&self.next_token_value::<Ident>()?)
 		}
 		expected!(self, t!("(")).span;
-		let args = self.parse_function_args(ctx).await?;
+		let args = self.parse_function_args(stk).await?;
 		let name = Function::Custom(name);
 		Ok(FunctionCall {
 			receiver: name,
@@ -30,7 +29,7 @@ impl Parser<'_> {
 		})
 	}
 
-	pub(super) async fn parse_function_args(&mut self, ctx: &mut Stk) -> ParseResult<Vec<Expr>> {
+	pub(super) async fn parse_function_args(&mut self, stk: &mut Stk) -> ParseResult<Vec<Expr>> {
 		let start = self.last_span();
 		let mut args = Vec::new();
 		loop {
@@ -38,7 +37,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let arg = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+			let arg = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
 			args.push(arg);
 
 			if !self.eat(t!(",")) {
@@ -52,7 +51,7 @@ impl Parser<'_> {
 	/// Parse a model invocation
 	///
 	/// Expects `ml` to already be called.
-	pub(super) async fn parse_model(&mut self, ctx: &mut Stk) -> ParseResult<FunctionCall> {
+	pub(super) async fn parse_model(&mut self, stk: &mut Stk) -> ParseResult<FunctionCall> {
 		expected!(self, t!("::"));
 		let mut name = self.next_token_value::<Ident>()?.into_string();
 		while self.eat(t!("::")) {
@@ -101,7 +100,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let arg = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+			let arg = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
 			args.push(arg);
 
 			if !self.eat(t!(",")) {
@@ -124,9 +123,8 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod test {
-	use crate::{sql, syn};
-
 	use super::*;
+	use crate::{sql, syn};
 
 	#[test]
 	fn function_single() {

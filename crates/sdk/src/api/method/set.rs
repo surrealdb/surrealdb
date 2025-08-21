@@ -1,12 +1,12 @@
-use surrealdb_core::val;
+use std::borrow::Cow;
+use std::future::IntoFuture;
 
 use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Result};
+use crate::core::val;
 use crate::method::OnceLockExt;
-use std::borrow::Cow;
-use std::future::IntoFuture;
 
 /// A set future
 #[derive(Debug)]
@@ -21,7 +21,8 @@ impl<C> Set<'_, C>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Set<'static, C> {
 		Set {
 			client: Cow::Owned(self.client.into_owned()),

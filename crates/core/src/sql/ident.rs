@@ -1,7 +1,8 @@
+use std::fmt::{self, Display, Formatter};
+use std::ops::Deref;
+
 use crate::sql::escape::EscapeIdent;
 use crate::val::Strand;
-use std::fmt::{self};
-use std::ops::Deref;
 
 /// An identifier.
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash)]
@@ -11,7 +12,8 @@ pub struct Ident(String);
 impl Ident {
 	/// Create a new identifier
 	///
-	/// This function checks if the string has a null byte, returns None if it has.
+	/// This function checks if the string has a null byte, returns None if it
+	/// has.
 	pub fn new(str: String) -> Option<Self> {
 		if str.contains('\0') {
 			return None;
@@ -75,8 +77,15 @@ impl From<Ident> for crate::expr::Ident {
 	}
 }
 
-impl fmt::Display for Ident {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Ident {
+	/// Convert the Ident to a raw String
+	pub fn to_raw(&self) -> String {
+		self.0.to_string()
+	}
+}
+
+impl Display for Ident {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		EscapeIdent(&self.0).fmt(f)
 	}
 }

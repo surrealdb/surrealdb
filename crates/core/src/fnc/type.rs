@@ -1,19 +1,19 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::{FlowResultExt as _, Ident, Idiom, Kind};
-use crate::syn;
-use crate::val::{
-	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, RecordIdKey,
-	RecordIdKeyRange, Strand, Table, Uuid, Value,
-};
 use anyhow::{Result, bail, ensure};
 use geo::Point;
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
 
 use super::args::Optional;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::expr::{FlowResultExt as _, Idiom, Kind};
+use crate::syn;
+use crate::val::{
+	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, RecordIdKey,
+	RecordIdKeyRange, Strand, Table, Uuid, Value,
+};
 
 pub fn array((val,): (Value,)) -> Result<Value> {
 	Ok(val.cast_to::<Array>()?.into())
@@ -109,7 +109,7 @@ pub fn record((rid, Optional(tb)): (Value, Optional<Value>)) -> Result<Value> {
 					value: tb.into_string(),
 				}))
 			} else {
-				rid.cast_to_kind(&Kind::Record(vec![Ident::from_strand(tb)])).map_err(From::from)
+				rid.cast_to_kind(&Kind::Record(vec![tb.into_string()])).map_err(From::from)
 			}
 		}
 
@@ -119,7 +119,7 @@ pub fn record((rid, Optional(tb)): (Value, Optional<Value>)) -> Result<Value> {
 					value: tb.into_string(),
 				}))
 			} else {
-				rid.cast_to_kind(&Kind::Record(vec![tb.into()])).map_err(From::from)
+				rid.cast_to_kind(&Kind::Record(vec![tb.into_string()])).map_err(From::from)
 			}
 		}
 		Some(_) => Err(anyhow::Error::new(Error::InvalidArguments {
@@ -211,10 +211,10 @@ pub fn uuid((val,): (Value,)) -> Result<Value> {
 }
 
 pub mod is {
-	use crate::expr::Ident;
+	use anyhow::Result;
+
 	use crate::fnc::args::Optional;
 	use crate::val::{Geometry, Strand, Value};
-	use anyhow::Result;
 
 	pub fn array((arg,): (Value,)) -> Result<Value> {
 		Ok((arg).is_array().into())
@@ -302,7 +302,7 @@ pub mod is {
 
 	pub fn record((arg, Optional(table)): (Value, Optional<Strand>)) -> Result<Value> {
 		let res = match table {
-			Some(tb) => arg.is_record_type(&[Ident::from_strand(tb)]).into(),
+			Some(tb) => arg.is_record_type(&[tb.into_string()]).into(),
 			None => arg.is_thing().into(),
 		};
 		Ok(res)

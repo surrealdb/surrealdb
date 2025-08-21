@@ -1,4 +1,5 @@
-//! This file defines the endpoints for the ML API for importing and exporting SurrealML models.
+//! This file defines the endpoints for the ML API for importing and exporting
+//! SurrealML models.
 
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
@@ -29,15 +30,15 @@ mod implementation {
 	use bytes::Bytes;
 	use futures_util::StreamExt;
 	use http::StatusCode;
-	use surrealdb_core::dbs::Session;
-	use surrealdb_core::dbs::capabilities::RouteTarget;
-	use surrealdb_core::expr::statements::{DefineModelStatement, DefineStatement};
-	use surrealdb_core::expr::{Expr, Ident, LogicalPlan, TopLevelExpr};
-	use surrealdb_core::iam::check::check_ns_db;
-	use surrealdb_core::iam::{Action, ResourceKind};
-	use surrealdb_core::kvs::{LockType, TransactionType};
-	use surrealdb_core::ml::storage::surml_file::SurMlFile;
 
+	use crate::core::dbs::Session;
+	use crate::core::dbs::capabilities::RouteTarget;
+	use crate::core::expr::statements::{DefineModelStatement, DefineStatement};
+	use crate::core::expr::{Expr, Ident, LogicalPlan, TopLevelExpr, get_model_path};
+	use crate::core::iam::check::check_ns_db;
+	use crate::core::iam::{Action, ResourceKind};
+	use crate::core::kvs::{LockType, TransactionType};
+	use crate::core::ml::storage::surml_file::SurMlFile;
 	use crate::net::AppState;
 	use crate::net::error::{Error as NetError, ResponseError};
 	use crate::net::output::Output;
@@ -79,15 +80,17 @@ mod implementation {
 		// Convert the file back in to raw bytes
 		let data = file.to_bytes();
 		// Calculate the hash of the model file
-		let hash = surrealdb::obs::hash(&data);
+		let hash = crate::core::obs::hash(&data);
 		// Calculate the path of the model file
-		let path = format!(
-			"ml/{nsv}/{dbv}/{}-{}-{hash}.surml",
-			file.header.name.to_string(),
-			file.header.version.to_string()
+		let path = get_model_path(
+			&nsv,
+			&dbv,
+			&file.header.name.to_string(),
+			&file.header.version.to_string(),
+			&hash,
 		);
 		// Insert the file data in to the store
-		surrealdb::obs::put(&path, data).await.map_err(ResponseError)?;
+		crate::core::obs::put(&path, data).await.map_err(ResponseError)?;
 		// Insert the model in to the database
 		let model = DefineModelStatement {
 			name: Ident::new(file.header.name.to_string()).unwrap(),
@@ -132,12 +135,23 @@ mod implementation {
 			.transaction(TransactionType::Read, LockType::Optimistic)
 			.await
 			.map_err(ResponseError)?;
+
+		let db = tx.ensure_ns_db(&nsv, &dbv, false).await.map_err(ResponseError)?;
 		// Attempt to get the model definition
-		let info = tx.get_db_model(&nsv, &dbv, &name, &version).await.map_err(ResponseError)?;
+		let info = match tx
+			.get_db_model(db.namespace_id, db.database_id, &name, &version)
+			.await
+			.map_err(ResponseError)?
+		{
+			Some(info) => info,
+			None => {
+				return Err(NetError::NotFound(format!("Model {name} {version} not found")).into());
+			}
+		};
 		// Calculate the path of the model file
 		let path = format!("ml/{nsv}/{dbv}/{name}-{version}-{}.surml", info.hash);
 		// Export the file data in to the store
-		let mut data = surrealdb::obs::stream(path)
+		let mut data = crate::core::obs::stream(path)
 			.await
 			.context("Failed to read model file")
 			.map_err(ResponseError)?;
@@ -160,9 +174,9 @@ mod implementation {
 	use axum::Extension;
 	use axum::body::Body;
 	use axum::extract::Path;
-	use surrealdb_core::dbs::Session;
-	use surrealdb_core::dbs::capabilities::RouteTarget;
 
+	use crate::core::dbs::Session;
+	use crate::core::dbs::capabilities::RouteTarget;
 	use crate::net::AppState;
 	use crate::net::error::{Error as NetError, ResponseError};
 

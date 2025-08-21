@@ -1,9 +1,9 @@
-use crate::sql::fmt::Fmt;
-use crate::sql::{Expr, Graph, Ident, Idiom};
 use std::fmt;
 use std::fmt::Write;
 
 use super::fmt::{is_pretty, pretty_indent};
+use crate::sql::fmt::Fmt;
+use crate::sql::{Expr, Graph, Ident, Idiom};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -178,7 +178,7 @@ impl fmt::Display for DestructurePart {
 			DestructurePart::Field(fd) => write!(f, "{fd}"),
 			DestructurePart::Aliased(fd, v) => write!(f, "{fd}: {v}"),
 			DestructurePart::Destructure(fd, d) => {
-				write!(f, "{fd}{}", Part::Destructure(d.clone()))
+				write!(f, "{}{}", fd, Part::Destructure(d.clone()))
 			}
 		}
 	}

@@ -1,15 +1,16 @@
+use std::fmt;
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::{Action, Notification, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Expr, FlowResultExt as _};
 use crate::val::{Uuid, Value};
-use anyhow::{Result, bail};
-
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -56,16 +57,16 @@ impl KillStatement {
 		let key = crate::key::node::lq::new(nid, lid);
 		// Fetch the live query key if it exists
 		match txn.get(&key, None).await? {
-			Some(val) => {
+			Some(live) => {
 				// Delete the node live query
 				let key = crate::key::node::lq::new(nid, lid);
 				txn.clr(&key).await?;
 				// Delete the table live query
-				let key = crate::key::table::lq::new(&val.ns, &val.db, &val.tb, lid);
+				let key = crate::key::table::lq::new(live.ns, live.db, &live.tb, lid);
 				txn.clr(&key).await?;
 				// Refresh the table cache for lives
 				if let Some(cache) = ctx.get_cache() {
-					cache.new_live_queries_version(&val.ns, &val.db, &val.tb);
+					cache.new_live_queries_version(live.ns, live.db, &live.tb);
 				}
 				// Clear the cache
 				txn.clear_cache();

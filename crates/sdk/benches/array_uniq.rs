@@ -1,6 +1,7 @@
-use criterion::{Criterion, criterion_group, criterion_main};
 use std::collections::HashSet;
 use std::hint::black_box;
+
+use criterion::{Criterion, criterion_group, criterion_main};
 use surrealdb_core::val::{Array, Number, Value};
 
 // Current implementation as of https://github.com/surrealdb/surrealdb/pull/6047

@@ -1,16 +1,17 @@
+use std::fmt::{self, Display, Write};
+use std::ops::Deref;
+
+use anyhow::Result;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::{Base, Ident, Timeout, Value};
 use crate::iam::{Action, ResourceKind};
-use anyhow::Result;
-
 use crate::key::database::sq::Sq;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
-use std::ops::Deref;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -25,7 +26,7 @@ impl AlterSequenceStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the sequence definition

@@ -1,15 +1,17 @@
-use crate::cnf::ID_CHARS;
-use crate::expr::escape::EscapeRid;
-use crate::expr::{self, Ident};
-use crate::kvs::impl_kv_value_revisioned;
-use crate::val::{Array, Number, Object, Range, Strand, Uuid, Value};
-use nanoid::nanoid;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Bound;
+
+use nanoid::nanoid;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
 use ulid::Ulid;
+
+use crate::cnf::ID_CHARS;
+use crate::expr::escape::EscapeRid;
+use crate::expr::{self};
+use crate::kvs::impl_kv_value_revisioned;
+use crate::val::{Array, Number, Object, Range, Strand, Uuid, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -201,14 +203,16 @@ impl RecordIdKey {
 	///
 	/// Returns None if the value cannot be converted.
 	pub fn from_value(value: Value) -> Option<Self> {
-		// NOTE: This method dictates how coversion between values and record id keys behave. This
-		// method is reimplementing previous (before expr inversion pr) behavior but I am not sure
-		// if it is the right one, float and decimal generaly implicitly convert to other number
-		// types but here they are rejected.
+		// NOTE: This method dictates how coversion between values and record id keys
+		// behave. This method is reimplementing previous (before expr inversion pr)
+		// behavior but I am not sure if it is the right one, float and decimal
+		// generaly implicitly convert to other number types but here they are
+		// rejected.
 		match value {
 			Value::Number(Number::Int(i)) => Some(RecordIdKey::Number(i)),
 			Value::Strand(strand) => Some(RecordIdKey::String(strand.into_string())),
-			// NOTE: This was previously (before expr inversion pr) also rejected in this conversion, a bug I assume.
+			// NOTE: This was previously (before expr inversion pr) also rejected in this
+			// conversion, a bug I assume.
 			Value::Uuid(uuid) => Some(RecordIdKey::Uuid(uuid)),
 			Value::Array(array) => Some(RecordIdKey::Array(array)),
 			Value::Object(object) => Some(RecordIdKey::Object(object)),
@@ -361,8 +365,8 @@ impl RecordId {
 		}
 	}
 
-	pub fn is_record_type(&self, val: &[Ident]) -> bool {
-		val.is_empty() || val.iter().any(|x| self.table == **x)
+	pub fn is_record_type(&self, val: &[String]) -> bool {
+		val.is_empty() || val.contains(&self.table)
 	}
 }
 

@@ -1,14 +1,13 @@
+use anyhow::Result;
 use http::header::{ACCEPT, CONTENT_TYPE};
 use http::{HeaderMap, StatusCode};
-
-use crate::err::Error;
-use crate::rpc::format::Format;
-use crate::val::{Object, Value};
-use anyhow::Result;
 
 use super::convert;
 use super::err::ApiError;
 use super::invocation::ApiInvocation;
+use crate::err::Error;
+use crate::rpc::format::Format;
+use crate::val::{Object, Value};
 
 #[derive(Debug)]
 pub struct ApiResponse {
@@ -19,7 +18,8 @@ pub struct ApiResponse {
 }
 
 impl ApiResponse {
-	/// Try to create a ApiResponse from the value as it should be returned from an API action.
+	/// Try to create a ApiResponse from the value as it should be returned from
+	/// an API action.
 	pub fn from_action_result(value: Value) -> Result<Self, Error> {
 		if let Value::Object(mut opts) = value {
 			let raw = opts.remove("raw").map(|v| v.cast_to()).transpose()?;

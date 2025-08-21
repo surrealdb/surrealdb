@@ -1,25 +1,24 @@
+use std::fmt;
+use std::fmt::Debug;
+use std::ops::Range;
+
+use anyhow::Result;
+
 #[allow(unused_imports, reason = "Not used when none of the storage backends are enabled.")]
 use super::api::Transaction;
 use super::{Key, Val, Version};
+use crate::catalog::{DatabaseId, NamespaceId, TableDefinition, TableId};
 use crate::cf;
-
+use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::doc::CursorValue;
 use crate::idg::u32::U32;
 use crate::key::debug::Sprintable;
-use crate::kvs::batch::Batch;
-
-use crate::cnf::NORMAL_FETCH_SIZE;
-use crate::expr;
 use crate::kvs::KVValue;
+use crate::kvs::batch::Batch;
 use crate::kvs::key::KVKey;
 use crate::kvs::stash::Stash;
 use crate::val::RecordId;
 use crate::vs::VersionStamp;
-use anyhow::Result;
-use expr::statements::DefineTableStatement;
-use std::fmt;
-use std::fmt::Debug;
-use std::ops::Range;
 
 const TARGET: &str = "surrealdb::core::kvs::tr";
 
@@ -156,7 +155,8 @@ impl Transactor {
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
-	/// This function fetches all matching key-value pairs from the underlying datastore in grouped batches.
+	/// This function fetches all matching key-value pairs from the underlying
+	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = TARGET, skip_all)]
 	pub async fn getr<K>(&mut self, rng: Range<K>, version: Option<u64>) -> Result<Vec<(Key, Val)>>
 	where
@@ -171,7 +171,8 @@ impl Transactor {
 
 	/// Retrieve a specific prefixed range of keys from the datastore.
 	///
-	/// This function fetches all matching key-value pairs from the underlying datastore in grouped batches.
+	/// This function fetches all matching key-value pairs from the underlying
+	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = TARGET, skip_all)]
 	pub async fn getp<K>(&mut self, key: &K) -> Result<Vec<(Key, Val)>>
 	where
@@ -243,7 +244,8 @@ impl Transactor {
 		self.inner.del(key).await
 	}
 
-	/// Delete a key from the datastore if the current value matches a condition.
+	/// Delete a key from the datastore if the current value matches a
+	/// condition.
 	#[instrument(level = "trace", target = TARGET, skip_all)]
 	pub async fn delc<K>(&mut self, key: &K, chk: Option<&K::ValueType>) -> Result<()>
 	where
@@ -257,7 +259,8 @@ impl Transactor {
 
 	/// Delete a range of keys from the datastore.
 	///
-	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	/// This function deletes all matching key-value pairs from the underlying
+	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = TARGET, skip_all)]
 	pub async fn delr<K>(&mut self, rng: Range<K>) -> Result<()>
 	where
@@ -272,7 +275,8 @@ impl Transactor {
 
 	/// Delete a prefixed range of keys from the datastore.
 	///
-	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	/// This function deletes all matching key-value pairs from the underlying
+	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = TARGET, skip_all)]
 	pub async fn delp<K>(&mut self, key: &K) -> Result<()>
 	where
@@ -294,7 +298,8 @@ impl Transactor {
 		self.inner.clr(key).await
 	}
 
-	/// Delete all versions of a key from the datastore if the current value matches a condition.
+	/// Delete all versions of a key from the datastore if the current value
+	/// matches a condition.
 	#[instrument(level = "trace", target = TARGET, skip_all)]
 	pub async fn clrc<K>(&mut self, key: &K, chk: Option<&K::ValueType>) -> Result<()>
 	where
@@ -308,7 +313,8 @@ impl Transactor {
 
 	/// Delete all versions of a range of keys from the datastore.
 	///
-	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	/// This function deletes all matching key-value pairs from the underlying
+	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = TARGET, skip_all)]
 	pub async fn clrr<K>(&mut self, rng: Range<K>) -> Result<()>
 	where
@@ -323,7 +329,8 @@ impl Transactor {
 
 	/// Delete all versions of a prefixed range of keys from the datastore.
 	///
-	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	/// This function deletes all matching key-value pairs from the underlying
+	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = TARGET, skip_all)]
 	pub async fn clrp<K>(&mut self, key: &K) -> Result<()>
 	where
@@ -336,7 +343,8 @@ impl Transactor {
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
-	/// This function fetches the full range of keys without values, in a single request to the underlying datastore.
+	/// This function fetches the full range of keys without values, in a single
+	/// request to the underlying datastore.
 	#[instrument(level = "trace", target = TARGET, skip_all)]
 	pub async fn keys<K>(
 		&mut self,
@@ -359,7 +367,8 @@ impl Transactor {
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
-	/// This function fetches the full range of keys without values, in a single request to the underlying datastore.
+	/// This function fetches the full range of keys without values, in a single
+	/// request to the underlying datastore.
 	#[instrument(level = "trace", target = TARGET, skip_all)]
 	pub async fn keysr<K>(
 		&mut self,
@@ -382,7 +391,8 @@ impl Transactor {
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
-	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
+	/// This function fetches the full range of key-value pairs, in a single
+	/// request to the underlying datastore.
 	#[instrument(level = "trace", target = TARGET, skip_all)]
 	pub async fn scan<K>(
 		&mut self,
@@ -425,7 +435,8 @@ impl Transactor {
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
-	/// This function fetches keys, in batches, with multiple requests to the underlying datastore.
+	/// This function fetches keys, in batches, with multiple requests to the
+	/// underlying datastore.
 	#[instrument(level = "trace", target = TARGET, skip_all)]
 	pub async fn batch_keys<K>(
 		&mut self,
@@ -445,7 +456,8 @@ impl Transactor {
 
 	/// Count the total number of keys within a range in the datastore.
 	///
-	/// This function fetches the total count, in batches, with multiple requests to the underlying datastore.
+	/// This function fetches the total count, in batches, with multiple
+	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn count<K>(&mut self, rng: Range<K>) -> Result<usize>
 	where
@@ -460,7 +472,8 @@ impl Transactor {
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
-	/// This function fetches key-value pairs, in batches, with multiple requests to the underlying datastore.
+	/// This function fetches key-value pairs, in batches, with multiple
+	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = TARGET, skip_all)]
 	pub async fn batch_keys_vals<K>(
 		&mut self,
@@ -478,9 +491,11 @@ impl Transactor {
 		self.inner.batch_keys_vals(rng, batch, version).await
 	}
 
-	/// Retrieve a batched scan of all versions over a specific range of keys in the datastore.
+	/// Retrieve a batched scan of all versions over a specific range of keys in
+	/// the datastore.
 	///
-	/// This function fetches key-value-version pairs, in batches, with multiple requests to the underlying datastore.
+	/// This function fetches key-value-version pairs, in batches, with multiple
+	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = TARGET, skip_all)]
 	pub async fn batch_keys_vals_versions<K>(
 		&mut self,
@@ -498,10 +513,11 @@ impl Transactor {
 	}
 
 	/// Obtain a new change timestamp for a key
-	/// which is replaced with the current timestamp when the transaction is committed.
-	/// NOTE: This should be called when composing the change feed entries for this transaction,
-	/// which should be done immediately before the transaction commit.
-	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
+	/// which is replaced with the current timestamp when the transaction is
+	/// committed. NOTE: This should be called when composing the change feed
+	/// entries for this transaction, which should be done immediately before
+	/// the transaction commit. That is to keep other transactions commit
+	/// delay(pessimistic) or conflict(optimistic) as less as possible.
 	pub async fn get_timestamp(&mut self, key: Key) -> Result<VersionStamp> {
 		self.inner.get_timestamp(key).await
 	}
@@ -543,12 +559,13 @@ impl Transactor {
 impl Transactor {
 	// change will record the change in the changefeed if enabled.
 	// To actually persist the record changes into the underlying kvs,
-	// you must call the `complete_changes` function and then commit the transaction.
+	// you must call the `complete_changes` function and then commit the
+	// transaction.
 	#[expect(clippy::too_many_arguments)]
 	pub(crate) fn record_change(
 		&mut self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
 		id: &RecordId,
 		previous: CursorValue,
@@ -561,10 +578,10 @@ impl Transactor {
 	// Records the table (re)definition in the changefeed if enabled.
 	pub(crate) fn record_table_change(
 		&mut self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
-		dt: &DefineTableStatement,
+		dt: &TableDefinition,
 	) {
 		self.cf.define_table(ns, db, tb, dt)
 	}
@@ -583,90 +600,63 @@ impl Transactor {
 	}
 
 	/// Gets the next namespace id
-	pub(crate) async fn get_next_ns_id(&mut self) -> Result<u32> {
+	pub(crate) async fn get_next_ns_id(&mut self) -> Result<NamespaceId> {
 		let key = crate::key::root::ni::Ni::default().encode_key()?;
 		let mut seq = self.get_idg(&key).await?;
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
 		self.replace(&k, &v).await?;
-		Ok(nid)
+		Ok(NamespaceId(nid))
 	}
 
 	/// Gets the next database id for the given namespace
-	pub(crate) async fn get_next_db_id(&mut self, ns: u32) -> Result<u32> {
+	pub(crate) async fn get_next_db_id(&mut self, ns: NamespaceId) -> Result<DatabaseId> {
 		let key = crate::key::namespace::di::new(ns).encode_key()?;
 		let mut seq = self.get_idg(&key).await?;
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
 		self.replace(&k, &v).await?;
-		Ok(nid)
+		Ok(DatabaseId(nid))
 	}
 
 	/// Gets the next table id for the given namespace and database
-	pub(crate) async fn get_next_tb_id(&mut self, ns: u32, db: u32) -> Result<u32> {
+	pub(crate) async fn get_next_tb_id(
+		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<TableId> {
 		let key = crate::key::database::ti::new(ns, db).encode_key()?;
 		let mut seq = self.get_idg(&key).await?;
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
 		self.replace(&k, &v).await?;
-		Ok(nid)
+		Ok(TableId(nid))
 	}
 
-	/// Removes the given namespace from the sequence.
-	#[expect(unused)]
-	pub(crate) async fn remove_ns_id(&mut self, ns: u32) -> Result<()> {
-		let key = crate::key::root::ni::Ni::default().encode_key()?;
-		let mut seq = self.get_idg(&key).await?;
-		seq.remove_id(ns);
-		self.stash.set(key, seq.clone());
-		let (k, v) = seq.finish().unwrap();
-		self.replace(&k, &v).await?;
-		Ok(())
-	}
-
-	/// Removes the given database from the sequence.
-	#[expect(unused)]
-	pub(crate) async fn remove_db_id(&mut self, ns: u32, db: u32) -> Result<()> {
-		let key = crate::key::namespace::di::new(ns).encode_key()?;
-		let mut seq = self.get_idg(&key).await?;
-		seq.remove_id(db);
-		self.stash.set(key, seq.clone());
-		let (k, v) = seq.finish().unwrap();
-		self.replace(&k, &v).await?;
-		Ok(())
-	}
-
-	/// Removes the given table from the sequence.
-	#[expect(unused)]
-	pub(crate) async fn remove_tb_id(&mut self, ns: u32, db: u32, tb: u32) -> Result<()> {
-		let key = crate::key::database::ti::new(ns, db).encode_key()?;
-		let mut seq = self.get_idg(&key).await?;
-		seq.remove_id(tb);
-		self.stash.set(key, seq.clone());
-		let (k, v) = seq.finish().unwrap();
-		self.replace(&k, &v).await?;
-		Ok(())
-	}
-
-	// complete_changes will complete the changefeed recording for the given namespace and database.
+	// complete_changes will complete the changefeed recording for the given
+	// namespace and database.
 	//
-	// Under the hood, this function calls the transaction's `set_versionstamped_key` for each change.
-	// Every change must be recorded by calling this struct's `record_change` function beforehand.
-	// If there were no preceding `record_change` function calls for this transaction, this function will do nothing.
+	// Under the hood, this function calls the transaction's
+	// `set_versionstamped_key` for each change. Every change must be recorded by
+	// calling this struct's `record_change` function beforehand. If there were no
+	// preceding `record_change` function calls for this transaction, this function
+	// will do nothing.
 	//
-	// This function should be called only after all the changes have been made to the transaction.
-	// Otherwise, changes are missed in the change feed.
+	// This function should be called only after all the changes have been made to
+	// the transaction. Otherwise, changes are missed in the change feed.
 	//
-	// This function should be called immediately before calling the commit function to guarantee that
-	// the lock, if needed by lock=true, is held only for the duration of the commit, not the entire transaction.
+	// This function should be called immediately before calling the commit function
+	// to guarantee that the lock, if needed by lock=true, is held only for the
+	// duration of the commit, not the entire transaction.
 	//
-	// This function is here because it needs access to mutably borrow the transaction.
+	// This function is here because it needs access to mutably borrow the
+	// transaction.
 	//
-	// Lastly, you should set lock=true if you want the changefeed to be correctly ordered for
-	// non-FDB backends.
+	// Lastly, you should set lock=true if you want the changefeed to be correctly
+	// ordered for non-FDB backends.
 	pub(crate) async fn complete_changes(&mut self, _lock: bool) -> Result<()> {
 		let changes = self.cf.get()?;
 		for (tskey, prefix, suffix, v) in changes {
@@ -675,16 +665,18 @@ impl Transactor {
 		Ok(())
 	}
 
-	// set_timestamp_for_versionstamp correlates the given timestamp with the current versionstamp.
-	// This allows get_versionstamp_from_timestamp to obtain the versionstamp from the timestamp later.
+	// set_timestamp_for_versionstamp correlates the given timestamp with the
+	// current versionstamp. This allows get_versionstamp_from_timestamp to obtain
+	// the versionstamp from the timestamp later.
 	pub(crate) async fn set_timestamp_for_versionstamp(
 		&mut self,
 		ts: u64,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 	) -> Result<VersionStamp> {
 		// This also works as an advisory lock on the ts keys so that there is
-		// on other concurrent transactions that can write to the ts_key or the keys after it.
+		// on other concurrent transactions that can write to the ts_key or the keys
+		// after it.
 		let key = crate::key::database::vs::new(ns, db).encode_key()?;
 		let vst = self.get_timestamp(key).await?;
 		trace!(
@@ -726,8 +718,8 @@ impl Transactor {
 	pub(crate) async fn get_versionstamp_from_timestamp(
 		&mut self,
 		ts: u64,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 	) -> Result<Option<VersionStamp>> {
 		let start = crate::key::database::ts::prefix(ns, db)?;
 		let ts_key = crate::key::database::ts::new(ns, db, ts + 1).encode_key()?;

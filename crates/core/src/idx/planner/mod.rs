@@ -6,9 +6,16 @@ pub(crate) mod plan;
 pub(in crate::idx) mod rewriter;
 pub(in crate::idx) mod tree;
 
+use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
+use std::sync::atomic::{self, AtomicU8};
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+
+use crate::catalog::DatabaseDefinition;
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
-use crate::err::Error;
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
 use crate::expr::{Cond, Fields, Groups, Ident};
@@ -17,20 +24,13 @@ use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::knn::KnnBruteForceResults;
 use crate::idx::planner::plan::{Plan, PlanBuilder, PlanBuilderParameters};
 use crate::idx::planner::tree::Tree;
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
-use std::sync::atomic::{self, AtomicU8};
 
-/// The goal of this structure is to cache parameters so they can be easily passed
-/// from one function to the other, so we don't pass too many arguments.
+/// The goal of this structure is to cache parameters so they can be easily
+/// passed from one function to the other, so we don't pass too many arguments.
 /// It also caches evaluated fields (like is_keys_only)
 pub(crate) struct StatementContext<'a> {
 	pub(crate) ctx: &'a Context,
 	pub(crate) opt: &'a Options,
-	pub(crate) ns: &'a str,
-	pub(crate) db: &'a str,
 	pub(crate) stm: &'a Statement<'a>,
 	pub(crate) fields: Option<&'a Fields>,
 	pub(crate) with: Option<&'a With>,
@@ -74,13 +74,10 @@ pub(crate) enum GrantedPermission {
 impl<'a> StatementContext<'a> {
 	pub(crate) fn new(ctx: &'a Context, opt: &'a Options, stm: &'a Statement<'a>) -> Result<Self> {
 		let is_perm = opt.check_perms(stm.into())?;
-		let (ns, db) = opt.ns_db()?;
 		Ok(Self {
 			ctx,
 			opt,
 			stm,
-			ns,
-			db,
 			fields: stm.expr(),
 			with: stm.with(),
 			order: stm.order(),
@@ -94,9 +91,10 @@ impl<'a> StatementContext<'a> {
 		if !self.is_perm {
 			return Ok(GrantedPermission::Full);
 		}
+		let (ns, db) = self.ctx.get_ns_db_ids(self.opt).await?;
 		// Get the table for this planner
-		match self.ctx.tx().get_tb(self.ns, self.db, tb).await {
-			Ok(table) => {
+		match self.ctx.tx().get_tb(ns, db, tb).await? {
+			Some(table) => {
 				// TODO(tobiemh): we should really
 				// not even get here if the table
 				// permissions are NONE, because
@@ -114,18 +112,24 @@ impl<'a> StatementContext<'a> {
 					return Ok(GrantedPermission::None);
 				}
 			}
-			Err(e) => {
-				if !matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
-					// We can safely ignore this error,
-					// as it just means that there is no
-					// table and no permissions defined.
-					return Err(e);
-				}
+			None => {
+				// Fall through to full permissions.
 			}
 		}
 		Ok(GrantedPermission::Full)
 	}
 
+	/// Decide whether to fetch just record keys, keys and values, or only a
+	/// COUNT.
+	///
+	/// This function evaluates the statement shape (UPDATE/DELETE/etc.),
+	/// WHERE/GROUP/ORDER clauses, selected fields, and table permissions to
+	/// select the most efficient record retrieval strategy:
+	/// - KeysAndValues: required when values must be read (e.g., UPDATE/DELETE; WHERE not fully
+	///   covered by indexes; GROUP BY with fields; ORDER BY with fields; non-count projections; or
+	///   when table permissions are Specific).
+	/// - Count: when we only need COUNT(*) and GROUP ALL.
+	/// - KeysOnly: when none of the above apply, allowing index-only iteration.
 	pub(crate) fn check_record_strategy(
 		&self,
 		all_expressions_with_index: bool,
@@ -199,8 +203,13 @@ impl<'a> StatementContext<'a> {
 
 	/// Determines the scan direction.
 	/// This is used for Table and Range iterators.
-	/// The direction is reversed if the first element of order is ID descending.
-	/// Typically: `ORDER BY id DESC`
+	/// The direction is reversed if the first element of order is ID
+	/// descending. Typically: `ORDER BY id DESC`
+	/// Determine forward/backward scan direction for table/range iterators.
+	///
+	/// On backends that support reverse scans (e.g., RocksDB/TiKV), we reverse
+	/// the direction when the first ORDER BY is `id DESC`. Otherwise, we
+	/// default to forward.
 	pub(crate) fn check_scan_direction(&self) -> ScanDirection {
 		#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 		if let Some(Ordering::Order(o)) = self.order {
@@ -263,6 +272,7 @@ impl QueryPlanner {
 
 	pub(crate) async fn add_iterables(
 		&mut self,
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		ctx: &StatementContext<'_>,
 		t: Ident,
@@ -275,6 +285,7 @@ impl QueryPlanner {
 
 		let is_knn = !tree.knn_expressions.is_empty();
 		let mut exe = InnerQueryExecutor::new(
+			db,
 			stk,
 			ctx.ctx,
 			ctx.opt,
@@ -314,15 +325,16 @@ impl QueryPlanner {
 					it.ingest(Iterable::Index(t.clone(), ir, rs));
 				}
 				for (ixr, rq) in ranges_indexes {
-					let ie = IteratorEntry::Range(rq.exps, ixr, rq.from, rq.to);
+					let ie =
+						IteratorEntry::Range(rq.exps, ixr, rq.from, rq.to, ScanDirection::Forward);
 					let ir = exe.add_iterator(ie);
 					it.ingest(Iterable::Index(t.clone(), ir, rs));
 				}
 				self.requires_distinct = true;
 				self.add(t.clone(), None, exe, it, rs);
 			}
-			Plan::SingleIndexRange(ixn, rq, keys_only, is_order) => {
-				let ir = exe.add_iterator(IteratorEntry::Range(rq.exps, ixn, rq.from, rq.to));
+			Plan::SingleIndexRange(ixn, rq, keys_only, sc, is_order) => {
+				let ir = exe.add_iterator(IteratorEntry::Range(rq.exps, ixn, rq.from, rq.to, sc));
 				if is_order {
 					self.ordering_indexes.push(ir);
 				}

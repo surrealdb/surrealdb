@@ -1,3 +1,12 @@
+use std::fmt;
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::config::api::{ApiConfig, ApiConfigStore};
+use super::{CursorDoc, DefineKind};
 use crate::api::method::Method;
 use crate::api::path::Path;
 use crate::ctx::Context;
@@ -9,14 +18,6 @@ use crate::expr::{Base, Expr, FlowResultExt as _, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Object, Strand};
-use anyhow::{Result, bail};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self};
-
-use super::config::api::{ApiConfig, ApiConfigStore};
-use super::{CursorDoc, DefineKind};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -41,7 +42,7 @@ impl DefineApiStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Api, &Base::Db)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
 		if txn.get_db_api(ns, db, &self.path.to_string()).await.is_ok() {
 			match self.kind {
@@ -67,9 +68,6 @@ impl DefineApiStatement {
 		let config = self.config.compute(stk, ctx, opt, doc).await?;
 
 		let key = crate::key::database::ap::new(ns, db, &name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-
 		let mut actions = Vec::new();
 		for action in self.actions.iter() {
 			actions.push(ApiActionStore {
@@ -158,7 +156,8 @@ pub struct ApiDefinition {
 impl_kv_value_revisioned!(ApiDefinition);
 
 impl ApiDefinition {
-	/// Finds the api definition which most closely matches the segments of the path.
+	/// Finds the api definition which most closely matches the segments of the
+	/// path.
 	pub fn find_definition<'a>(
 		definitions: &'a [ApiDefinition],
 		segments: Vec<&str>,

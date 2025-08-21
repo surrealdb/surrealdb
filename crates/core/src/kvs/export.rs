@@ -1,15 +1,18 @@
-use super::Transaction;
-use crate::cnf::EXPORT_BATCH_SIZE;
-use crate::err::Error;
-use crate::expr::paths::{EDGE, IN, OUT};
-use crate::expr::statements::DefineTableStatement;
-use crate::key::thing;
-use crate::val::{RecordId, Strand, Value};
+use std::fmt;
+
 use anyhow::Result;
 use async_channel::Sender;
 use chrono::TimeZone;
 use chrono::prelude::Utc;
-use std::fmt;
+
+use super::Transaction;
+use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
+use crate::cnf::EXPORT_BATCH_SIZE;
+use crate::err::Error;
+use crate::expr::paths::{EDGE, IN, OUT};
+use crate::key::thing;
+use crate::sql::ToSql;
+use crate::val::{RecordId, Strand, Value};
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -224,10 +227,16 @@ impl Transaction {
 		cfg: Config,
 		chn: Sender<Vec<u8>>,
 	) -> Result<()> {
+		let db = self.get_db_by_name(ns, db).await?.ok_or_else(|| {
+			anyhow::Error::new(Error::DbNotFound {
+				name: db.to_owned(),
+			})
+		})?;
+
 		// Output USERS, ACCESSES, PARAMS, FUNCTIONS, ANALYZERS
-		self.export_metadata(&cfg, &chn, ns, db).await?;
+		self.export_metadata(&cfg, &chn, db.namespace_id, db.database_id).await?;
 		// Output TABLES
-		self.export_tables(ns, db, &cfg, &chn).await?;
+		self.export_tables(&cfg, &chn, db.namespace_id, db.database_id).await?;
 		Ok(())
 	}
 
@@ -235,8 +244,8 @@ impl Transaction {
 		&self,
 		cfg: &Config,
 		chn: &Sender<Vec<u8>>,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 	) -> Result<()> {
 		// Output OPTIONS
 		self.export_section("OPTION", vec!["OPTION IMPORT"], chn).await?;
@@ -305,10 +314,10 @@ impl Transaction {
 
 	async fn export_tables(
 		&self,
-		ns: &str,
-		db: &str,
 		cfg: &Config,
 		chn: &Sender<Vec<u8>>,
+		ns: NamespaceId,
+		db: DatabaseId,
 	) -> Result<()> {
 		// Check if tables are included in the export config
 		if !cfg.tables.is_any() {
@@ -335,16 +344,16 @@ impl Transaction {
 
 	async fn export_table_structure(
 		&self,
-		ns: &str,
-		db: &str,
-		table: &DefineTableStatement,
+		ns: NamespaceId,
+		db: DatabaseId,
+		table: &TableDefinition,
 		chn: &Sender<Vec<u8>>,
 	) -> Result<()> {
 		chn.send(bytes!("-- ------------------------------")).await?;
 		chn.send(bytes!(format!("-- TABLE: {}", InlineCommentDisplay(&table.name)))).await?;
 		chn.send(bytes!("-- ------------------------------")).await?;
 		chn.send(bytes!("")).await?;
-		chn.send(bytes!(format!("{};", table))).await?;
+		chn.send(bytes!(format!("{};", table.to_sql()))).await?;
 		chn.send(bytes!("")).await?;
 		// Export all table field definitions for this table
 		let fields = self.all_tb_fields(ns, db, &table.name, None).await?;
@@ -370,9 +379,9 @@ impl Transaction {
 
 	async fn export_table_data(
 		&self,
-		ns: &str,
-		db: &str,
-		table: &DefineTableStatement,
+		ns: NamespaceId,
+		db: DatabaseId,
+		table: &TableDefinition,
 		cfg: &Config,
 		chn: &Sender<Vec<u8>>,
 	) -> Result<()> {
@@ -413,8 +422,9 @@ impl Transaction {
 
 	/// Processes a value and generates the appropriate SQL command.
 	///
-	/// This function processes a value, categorizing it into either normal records or graph edge records,
-	/// and generates the appropriate SQL command based on the type of record and the presence of a version.
+	/// This function processes a value, categorizing it into either normal
+	/// records or graph edge records, and generates the appropriate SQL
+	/// command based on the type of record and the presence of a version.
 	///
 	/// # Arguments
 	///
@@ -426,9 +436,10 @@ impl Transaction {
 	///
 	/// # Returns
 	///
-	/// * `String` - Returns the generated SQL command as a string. If no command is generated, returns an empty string.
+	/// * `String` - Returns the generated SQL command as a string. If no command is generated,
+	///   returns an empty string.
 	fn process_value(
-		k: thing::Thing,
+		k: thing::ThingKey,
 		mut v: Value,
 		records_relate: &mut Vec<String>,
 		records_normal: &mut Vec<String>,
@@ -441,7 +452,8 @@ impl Transaction {
 			key: k.id.clone(),
 		};
 		v.def(&rid);
-		// Match on the value to determine if it is a graph edge record or a normal record.
+		// Match on the value to determine if it is a graph edge record or a normal
+		// record.
 		match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
 			// If the value is a graph edge record (indicated by EDGE, IN, and OUT fields):
 			(Value::Bool(true), Value::RecordId(_), Value::RecordId(_)) => {
@@ -464,12 +476,14 @@ impl Transaction {
 						// If the record is a tombstone, format it as a DELETE command.
 						format!("DELETE {}:{};", k.tb, k.id)
 					} else {
-						// If the record is not a tombstone and a version exists, format it as an INSERT VERSION command.
+						// If the record is not a tombstone and a version exists, format it as an
+						// INSERT VERSION command.
 						let ts = Utc.timestamp_nanos(version.unwrap() as i64);
 						format!("INSERT {} VERSION d'{:?}';", v, ts)
 					}
 				} else {
-					// If no tombstone or version information is provided, push the value to the records_normal vector.
+					// If no tombstone or version information is provided, push the value to the
+					// records_normal vector.
 					records_normal.push(v.to_string());
 					String::new()
 				}
@@ -479,19 +493,22 @@ impl Transaction {
 
 	/// Exports versioned data to the provided channel.
 	///
-	/// This function processes a list of versioned values, converting them into SQL commands
-	/// and sending them to the provided channel. It handles both normal records and graph edge records,
-	/// and ensures that the appropriate SQL commands are generated for each type of record.
+	/// This function processes a list of versioned values, converting them into
+	/// SQL commands and sending them to the provided channel. It handles both
+	/// normal records and graph edge records, and ensures that the appropriate
+	/// SQL commands are generated for each type of record.
 	///
 	/// # Arguments
 	///
 	/// * `versioned_values` - A vector of tuples containing the versioned values to be exported.
-	///   Each tuple consists of a key, value, version, and a boolean indicating if the record is a tombstone.
+	///   Each tuple consists of a key, value, version, and a boolean indicating if the record is a
+	///   tombstone.
 	/// * `chn` - A reference to the channel to which the SQL commands will be sent.
 	///
 	/// # Returns
 	///
-	/// * `Result<()>` - Returns `Ok(())` if the operation is successful, or an `Error` if an error occurs.
+	/// * `Result<()>` - Returns `Ok(())` if the operation is successful, or an `Error` if an error
+	///   occurs.
 	async fn export_versioned_data(
 		&self,
 		versioned_values: Vec<(Vec<u8>, Vec<u8>, u64, bool)>,
@@ -510,7 +527,7 @@ impl Transaction {
 				chn.send(bytes!("BEGIN;")).await?;
 			}
 
-			let k = thing::Thing::decode_key(&k)?;
+			let k = thing::ThingKey::decode_key(&k)?;
 			let v: Value = if v.is_empty() {
 				Value::None
 			} else {
@@ -567,19 +584,21 @@ impl Transaction {
 
 	/// Exports regular data to the provided channel.
 	///
-	/// This function processes a list of regular values, converting them into SQL commands
-	/// and sending them to the provided channel. It handles both normal records and graph edge records,
-	/// and ensures that the appropriate SQL commands are generated for each type of record.
+	/// This function processes a list of regular values, converting them into
+	/// SQL commands and sending them to the provided channel. It handles both
+	/// normal records and graph edge records, and ensures that the appropriate
+	/// SQL commands are generated for each type of record.
 	///
 	/// # Arguments
 	///
-	/// * `regular_values` - A vector of tuples containing the regular values to be exported.
-	///   Each tuple consists of a key and a value.
+	/// * `regular_values` - A vector of tuples containing the regular values to be exported. Each
+	///   tuple consists of a key and a value.
 	/// * `chn` - A reference to the channel to which the SQL commands will be sent.
 	///
 	/// # Returns
 	///
-	/// * `Result<()>` - Returns `Ok(())` if the operation is successful, or an `Error` if an error occurs.
+	/// * `Result<()>` - Returns `Ok(())` if the operation is successful, or an `Error` if an error
+	///   occurs.
 	async fn export_regular_data(
 		&self,
 		regular_values: Vec<(Vec<u8>, Vec<u8>)>,
@@ -591,7 +610,7 @@ impl Transaction {
 
 		// Process each regular value.
 		for (k, v) in regular_values {
-			let k = thing::Thing::decode_key(&k)?;
+			let k = thing::ThingKey::decode_key(&k)?;
 			let v: Value = revision::from_slice(&v)?;
 			// Process the value and categorize it into records_relate or records_normal.
 			Self::process_value(k, v, &mut records_relate, &mut records_normal, None, None);
@@ -604,7 +623,8 @@ impl Transaction {
 			chn.send(bytes!(sql)).await?;
 		}
 
-		// If there are graph edge records, generate and send the INSERT RELATION SQL command.
+		// If there are graph edge records, generate and send the INSERT RELATION SQL
+		// command.
 		if !records_relate.is_empty() {
 			let values = records_relate.join(", ");
 			let sql = format!("INSERT RELATION [ {} ];", values);

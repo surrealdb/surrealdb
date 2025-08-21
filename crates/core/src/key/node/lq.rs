@@ -1,16 +1,19 @@
 //! Stores a LIVE SELECT query definition on the cluster
-use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
-use crate::kvs::live::Live;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// The Lq key is used to quickly discover which live queries belong to which nodes
-/// This is used in networking for clustered environments such as discovering if an event is remote or local
-/// as well as garbage collection after dead nodes
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+use crate::kvs::live::Live;
+
+/// The Lq key is used to quickly discover which live queries belong to which
+/// nodes This is used in networking for clustered environments such as
+/// discovering if an event is remote or local as well as garbage collection
+/// after dead nodes
 ///
-/// The value is just the table of the live query as a Strand, which is the missing information from the key path
+/// The value is just the table of the live query as a Strand, which is the
+/// missing information from the key path
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Lq {
 	__: u8,

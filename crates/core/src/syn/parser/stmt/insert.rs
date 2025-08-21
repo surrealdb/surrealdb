@@ -10,7 +10,7 @@ use crate::syn::token::t;
 impl Parser<'_> {
 	pub(crate) async fn parse_insert_stmt(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 	) -> ParseResult<InsertStatement> {
 		let relation = self.eat(t!("RELATION"));
 		let ignore = self.eat(t!("IGNORE"));
@@ -30,17 +30,17 @@ impl Parser<'_> {
 			None
 		};
 
-		let data = self.parse_insert_values(ctx).await?;
+		let data = self.parse_insert_values(stk).await?;
 
 		let update = if self.eat(t!("ON")) {
-			Some(self.parse_insert_update(ctx).await?)
+			Some(self.parse_insert_update(stk).await?)
 		} else {
 			None
 		};
-		let output = self.try_parse_output(ctx).await?;
+		let output = self.try_parse_output(stk).await?;
 
 		let version = if self.eat(t!("VERSION")) {
-			Some(ctx.run(|ctx| self.parse_expr_field(ctx)).await?)
+			Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
 		} else {
 			None
 		};
@@ -59,17 +59,17 @@ impl Parser<'_> {
 		})
 	}
 
-	async fn parse_insert_values(&mut self, ctx: &mut Stk) -> ParseResult<Data> {
+	async fn parse_insert_values(&mut self, stk: &mut Stk) -> ParseResult<Data> {
 		let token = self.peek();
 		// not a `(` so it cant be `(a,b) VALUES (c,d)`
 		if token.kind != t!("(") {
-			let value = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
+			let value = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 			return Ok(Data::SingleExpression(value));
 		}
 
 		self.pop_peek();
 		// might still be a subquery `(select foo from ...`
-		let subquery = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
+		let subquery = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 
 		let mut idioms = Vec::new();
 		let select_span = if self.eat(t!(",")) {
@@ -82,7 +82,7 @@ impl Parser<'_> {
 			idioms.push(idiom);
 
 			loop {
-				idioms.push(self.parse_plain_idiom(ctx).await?);
+				idioms.push(self.parse_plain_idiom(stk).await?);
 
 				if !self.eat(t!(",")) {
 					break;
@@ -119,7 +119,7 @@ impl Parser<'_> {
 			let mut values = Vec::new();
 			let start = expected!(self, t!("(")).span;
 			loop {
-				values.push(ctx.run(|ctx| self.parse_expr_field(ctx)).await?);
+				values.push(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 
 				if !self.eat(t!(",")) {
 					break;

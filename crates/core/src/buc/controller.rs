@@ -1,18 +1,18 @@
+use core::fmt;
+use std::sync::Arc;
+
+use anyhow::{Result, bail, ensure};
+use reblessive::tree::Stk;
+
+use super::store::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err;
 use crate::expr::statements::define::BucketDefinition;
 use crate::expr::{FlowResultExt, Permission};
-
 use crate::iam::Action;
 use crate::val::{Bytes, File, Value};
-use anyhow::{Result, bail, ensure};
-use core::fmt;
-use reblessive::tree::Stk;
-use std::sync::Arc;
-
-use super::store::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 
 fn accept_payload(value: Value) -> Result<bytes::Bytes> {
 	value
@@ -35,7 +35,8 @@ pub(crate) struct BucketController<'a> {
 
 impl<'a> BucketController<'a> {
 	/// Create a `FileController` for a specified file
-	/// Will obtain a bucket connection and return back a `FileController` or `Error`
+	/// Will obtain a bucket connection and return back a `FileController` or
+	/// `Error`
 	pub(crate) async fn new(
 		stk: &'a mut Stk,
 		ctx: &'a Context,
@@ -43,8 +44,8 @@ impl<'a> BucketController<'a> {
 		doc: Option<&'a CursorDoc>,
 		buc: &str,
 	) -> Result<Self> {
-		let (ns, db) = opt.ns_db()?;
-		let bucket = ctx.tx().get_db_bucket(ns, db, buc).await?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+		let bucket = ctx.tx().expect_db_bucket(ns, db, buc).await?;
 		let store = ctx.get_bucket_store(ns, db, buc).await?;
 
 		Ok(Self {
@@ -58,40 +59,43 @@ impl<'a> BucketController<'a> {
 		})
 	}
 
-	/// Checks if the bucket allows writes, and if not, return an `Error::ReadonlyBucket`
+	/// Checks if the bucket allows writes, and if not, return an
+	/// `Error::ReadonlyBucket`
 	fn require_writeable(&self) -> Result<()> {
 		ensure!(
 			!self.bucket.readonly,
-			err::Error::ReadonlyBucket(self.bucket.name.into_raw_string())
+			err::Error::ReadonlyBucket(self.bucket.name.as_raw_string())
 		);
 		Ok(())
 	}
 
 	/// Attempt to put a file
-	/// `Bytes` and `Strand` values are supported, and will be converted into `Bytes`
-	/// Create or update permissions will be used, based on if the remote file already exists
+	/// `Bytes` and `Strand` values are supported, and will be converted into
+	/// `Bytes` Create or update permissions will be used, based on if the
+	/// remote file already exists
 	pub(crate) async fn put(&mut self, key: &ObjectKey, value: Value) -> Result<()> {
 		let payload = accept_payload(value)?;
 		self.require_writeable()?;
 		self.check_permission(BucketOperation::Put, Some(key), None).await?;
 
 		self.store.put(key, payload).await.map_err(|e| {
-			err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+			err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 		})?;
 
 		Ok(())
 	}
 
 	/// Attempt to put a file
-	/// `Bytes` and `Strand` values are supported, and will be converted into `Bytes`
-	/// Create or update permissions will be used, based on if the remote file already exists
+	/// `Bytes` and `Strand` values are supported, and will be converted into
+	/// `Bytes` Create or update permissions will be used, based on if the
+	/// remote file already exists
 	pub(crate) async fn put_if_not_exists(&mut self, key: &ObjectKey, value: Value) -> Result<()> {
 		let payload = accept_payload(value)?;
 		self.require_writeable()?;
 		self.check_permission(BucketOperation::Put, Some(key), None).await?;
 
 		self.store.put_if_not_exists(key, payload).await.map_err(|e| {
-			err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+			err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 		})?;
 
 		Ok(())
@@ -104,7 +108,7 @@ impl<'a> BucketController<'a> {
 			.head(key)
 			.await
 			.map_err(|e| {
-				err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+				err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 			})
 			.map_err(anyhow::Error::new)
 	}
@@ -113,7 +117,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Get, Some(key), None).await?;
 
 		let bytes = match self.store.get(key).await.map_err(|e| {
-			err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+			err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 		})? {
 			Some(v) => v,
 			None => return Ok(None),
@@ -127,7 +131,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Delete, Some(key), None).await?;
 
 		self.store.delete(key).await.map_err(|e| {
-			err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+			err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 		})?;
 
 		Ok(())
@@ -138,7 +142,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Copy, Some(key), Some(&target)).await?;
 
 		self.store.copy(key, &target).await.map_err(|e| {
-			err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+			err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 		})?;
 
 		Ok(())
@@ -153,7 +157,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Copy, Some(key), Some(&target)).await?;
 
 		self.store.copy_if_not_exists(key, &target).await.map_err(|e| {
-			err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+			err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 		})?;
 
 		Ok(())
@@ -164,7 +168,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Rename, Some(key), Some(&target)).await?;
 
 		self.store.rename(key, &target).await.map_err(|e| {
-			err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+			err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 		})?;
 
 		Ok(())
@@ -179,7 +183,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Rename, Some(key), Some(&target)).await?;
 
 		self.store.rename_if_not_exists(key, &target).await.map_err(|e| {
-			err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+			err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 		})?;
 
 		Ok(())
@@ -191,7 +195,7 @@ impl<'a> BucketController<'a> {
 			.exists(key)
 			.await
 			.map_err(|e| {
-				err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+				err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 			})
 			.map_err(anyhow::Error::new)
 	}
@@ -202,7 +206,7 @@ impl<'a> BucketController<'a> {
 			.list(opts)
 			.await
 			.map_err(|e| {
-				err::Error::ObjectStoreFailure(self.bucket.name.into_raw_string(), e.to_string())
+				err::Error::ObjectStoreFailure(self.bucket.name.as_raw_string(), e.to_string())
 			})
 			.map_err(anyhow::Error::new)
 	}
@@ -218,7 +222,7 @@ impl<'a> BucketController<'a> {
 			ensure!(
 				!op.is_list(),
 				err::Error::BucketPermissions {
-					name: self.bucket.name.into_raw_string(),
+					name: self.bucket.name.as_raw_string(),
 					op,
 				}
 			);
@@ -226,7 +230,7 @@ impl<'a> BucketController<'a> {
 			match &self.bucket.permissions {
 				Permission::None => {
 					bail!(err::Error::BucketPermissions {
-						name: self.bucket.name.into_raw_string(),
+						name: self.bucket.name.as_raw_string(),
 						op,
 					})
 				}
@@ -242,7 +246,7 @@ impl<'a> BucketController<'a> {
 						ctx.add_value(
 							"file",
 							Value::File(File {
-								bucket: self.bucket.name.into_raw_string(),
+								bucket: self.bucket.name.as_raw_string(),
 								key: key.to_string(),
 							})
 							.into(),
@@ -252,7 +256,7 @@ impl<'a> BucketController<'a> {
 						ctx.add_value(
 							"target",
 							Value::File(File {
-								bucket: self.bucket.name.into_raw_string(),
+								bucket: self.bucket.name.as_raw_string(),
 								key: target.to_string(),
 							})
 							.into(),
@@ -269,7 +273,7 @@ impl<'a> BucketController<'a> {
 					ensure!(
 						res.is_truthy(),
 						err::Error::BucketPermissions {
-							name: self.bucket.name.into_raw_string(),
+							name: self.bucket.name.as_raw_string(),
 							op,
 						}
 					);

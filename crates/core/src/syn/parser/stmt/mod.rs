@@ -1,5 +1,7 @@
 use reblessive::Stk;
 
+use super::mac::expected;
+use super::{ParseResult, Parser};
 use crate::sql::data::Assignment;
 use crate::sql::statements::access::{
 	AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
@@ -18,9 +20,6 @@ use crate::syn::parser::mac::unexpected;
 use crate::syn::token::{Glued, TokenKind, t};
 use crate::val::Duration;
 
-use super::mac::expected;
-use super::{ParseResult, Parser};
-
 mod alter;
 mod create;
 mod define;
@@ -37,7 +36,7 @@ mod upsert;
 impl Parser<'_> {
 	pub(super) async fn parse_stmt_list(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 	) -> ParseResult<Vec<TopLevelExpr>> {
 		let mut res = Vec::new();
 		loop {
@@ -49,7 +48,7 @@ impl Parser<'_> {
 				}
 				t!("eof") => break,
 				_ => {
-					let stmt = ctx.run(|ctx| self.parse_top_level_expr(ctx)).await?;
+					let stmt = stk.run(|ctx| self.parse_top_level_expr(ctx)).await?;
 					res.push(stmt);
 					if !self.eat(t!(";")) {
 						if self.eat(t!("eof")) {
@@ -123,7 +122,7 @@ impl Parser<'_> {
 	}
 
 	/// Parsers an access statement.
-	async fn parse_access(&mut self, ctx: &mut Stk) -> ParseResult<AccessStatement> {
+	async fn parse_access(&mut self, stk: &mut Stk) -> ParseResult<AccessStatement> {
 		let ac = self.next_token_value()?;
 		let base = self.eat(t!("ON")).then(|| self.parse_base(false)).transpose()?;
 		let peek = self.peek();
@@ -143,7 +142,7 @@ impl Parser<'_> {
 					}
 					t!("RECORD") => {
 						self.pop_peek();
-						let rid = ctx.run(|ctx| self.parse_record_id(ctx)).await?;
+						let rid = stk.run(|ctx| self.parse_record_id(ctx)).await?;
 						Ok(AccessStatement::Grant(AccessStatementGrant {
 							ac,
 							base,
@@ -175,7 +174,7 @@ impl Parser<'_> {
 						}))
 					}
 					t!("WHERE") => {
-						let cond = self.try_parse_condition(ctx).await?;
+						let cond = self.try_parse_condition(stk).await?;
 						Ok(AccessStatement::Show(AccessStatementShow {
 							ac,
 							base,
@@ -208,7 +207,7 @@ impl Parser<'_> {
 						}))
 					}
 					t!("WHERE") => {
-						let cond = self.try_parse_condition(ctx).await?;
+						let cond = self.try_parse_condition(stk).await?;
 						Ok(AccessStatement::Revoke(AccessStatementRevoke {
 							ac,
 							base,
@@ -435,7 +434,7 @@ impl Parser<'_> {
 		expected!(self, t!("FROM"));
 		let what = match self.peek().kind {
 			t!("$param") => Expr::Param(self.next_token_value()?),
-			_ => Expr::Table(self.next_token_value()?),
+			_ => self.parse_expr_table(stk).await?,
 		};
 		let cond = self.try_parse_condition(stk).await?;
 		let fetch = self.try_parse_fetch(stk).await?;
@@ -502,10 +501,10 @@ impl Parser<'_> {
 	/// Expects `RETURN` to already be consumed.
 	pub(super) async fn parse_return_stmt(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 	) -> ParseResult<OutputStatement> {
-		let what = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
-		let fetch = self.try_parse_fetch(ctx).await?;
+		let what = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+		let fetch = self.try_parse_fetch(stk).await?;
 		Ok(OutputStatement {
 			what,
 			fetch,
@@ -516,8 +515,8 @@ impl Parser<'_> {
 	///
 	/// SurrealQL has support for `LET` less let statements.
 	/// These are not parsed here but after a statement is fully parsed.
-	/// A expression statement which matches a let-less let statement is then refined into a let
-	/// statement.
+	/// A expression statement which matches a let-less let statement is then
+	/// refined into a let statement.
 	///
 	/// # Parser State
 	/// Expects `LET` to already be consumed.

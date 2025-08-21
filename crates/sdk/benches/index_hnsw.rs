@@ -1,13 +1,13 @@
+use std::fs::File;
+use std::io::{BufRead, BufReader};
+use std::time::Duration;
+
 use criterion::measurement::WallTime;
 use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use flate2::read::GzDecoder;
 use reblessive::TreeStack;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-use std::time::Duration;
-use surrealdb::expr::index::Distance;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::expr::index::{HnswParams, VectorType};
+use surrealdb_core::expr::index::{Distance, HnswParams, VectorType};
 use surrealdb_core::idx::IndexKeyBase;
 use surrealdb_core::idx::planner::checker::{HnswChecker, HnswConditionChecker};
 use surrealdb_core::idx::trees::hnsw::index::HnswIndex;
@@ -218,7 +218,9 @@ async fn hnsw(tx: &Transaction) -> HnswIndex {
 		false,
 		false,
 	);
-	HnswIndex::new(tx, IndexKeyBase::default(), "test".to_string(), &p).await.unwrap()
+	HnswIndex::new(tx, IndexKeyBase::new(0, 0, "test", "test"), "test".to_string(), &p)
+		.await
+		.unwrap()
 }
 
 async fn insert_objects(samples: &[(RecordId, Vec<Value>)]) -> (Datastore, HnswIndex) {
@@ -241,6 +243,9 @@ async fn insert_objects_db(session: &Session, create_index: bool, inserts: &[Str
 }
 
 async fn knn_lookup_objects(ds: &Datastore, h: &HnswIndex, samples: &[Vec<Number>]) {
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
+	let db = tx.ensure_ns_db("ns", "db", false).await.unwrap();
+	drop(tx);
 	let mut stack = TreeStack::new();
 	stack
 		.enter(|stk| async {
@@ -248,6 +253,7 @@ async fn knn_lookup_objects(ds: &Datastore, h: &HnswIndex, samples: &[Vec<Number
 			for v in samples {
 				let r = h
 					.knn_search(
+						&db,
 						&tx,
 						stk,
 						v,

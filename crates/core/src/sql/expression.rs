@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::sql::fmt::Pretty;
 use crate::sql::operator::BindingPower;
 use crate::sql::statements::{
@@ -10,7 +12,6 @@ use crate::sql::{
 	BinaryOperator, Block, Closure, Constant, FunctionCall, Ident, Idiom, Literal, Mock, Param,
 	PostfixOperator, PrefixOperator,
 };
-use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

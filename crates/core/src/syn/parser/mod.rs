@@ -1,14 +1,15 @@
 //! Module implementing the SurrealQL parser.
 //!
 //! The SurrealQL parse is a relatively simple recursive decent parser.
-//! Most of the functions of the SurrealQL parser peek a token from the lexer and then decide to
-//! take a path depending on which token is next.
+//! Most of the functions of the SurrealQL parser peek a token from the lexer
+//! and then decide to take a path depending on which token is next.
 //!
 //! # Implementation Details
 //!
-//! There are a bunch of common patterns for which this module has some confinence functions.
-//! - Whenever only one token can be next you should use the `expected!` macro. This macro
-//!   ensures that the given token type is next and if not returns a parser error.
+//! There are a bunch of common patterns for which this module has some
+//! confinence functions.
+//! - Whenever only one token can be next you should use the `expected!` macro. This macro ensures
+//!   that the given token type is next and if not returns a parser error.
 //! - Whenever a limited set of tokens can be next it is common to match the token kind and then
 //!   have a catch all arm which calles the macro `unexpected!`. This macro will raise an parse
 //!   error with information about the type of token it recieves and what it expected.
@@ -21,37 +22,46 @@
 //! ## Far Token Peek
 //!
 //! Occasionally the parser needs to check further ahead than peeking allows.
-//! This is done with the [`Parser::peek1`] function. This function peeks one token further then
-//! peek.
+//! This is done with the [`Parser::peek1`] function. This function peeks one
+//! token further then peek.
 //!
 //! ## WhiteSpace Tokens
 //!
-//! The lexer produces whitespace tokens, these are tokens which are normally ignored in most place
-//! in the syntax as they have no bearing on the meaning of a statements. [`Parser::next`] and
-//! [`Parser::peek`] automatically skip over any whitespace tokens. However in some places, like
-//! in a record-id and when gluing tokens, these white-space tokens are required for correct
-//! parsing. In which case the function [`Parser::next_whitespace`] and others with `_whitespace`
-//! are used. These functions don't skip whitespace tokens. However these functions do not undo
-//! whitespace tokens which might have been skipped. Implementers must be carefull to not call a
-//! functions which requires whitespace tokens when they may already have been skipped.
+//! The lexer produces whitespace tokens, these are tokens which are normally
+//! ignored in most place in the syntax as they have no bearing on the meaning
+//! of a statements. [`Parser::next`] and [`Parser::peek`] automatically skip
+//! over any whitespace tokens. However in some places, like in a record-id and
+//! when gluing tokens, these white-space tokens are required for correct
+//! parsing. In which case the function [`Parser::next_whitespace`] and others
+//! with `_whitespace` are used. These functions don't skip whitespace tokens.
+//! However these functions do not undo whitespace tokens which might have been
+//! skipped. Implementers must be carefull to not call a functions which
+//! requires whitespace tokens when they may already have been skipped.
 //!
 //! ## Compound tokens and token gluing.
 //!
-//! SurrealQL has a bunch of tokens which have complex rules for when they are allowed and the
-//! value they contain. Such tokens are named compound tokens, and examples include a javascript
-//! body, strand-like tokens, regex, numbers, etc.
+//! SurrealQL has a bunch of tokens which have complex rules for when they are
+//! allowed and the value they contain. Such tokens are named compound tokens,
+//! and examples include a javascript body, strand-like tokens, regex, numbers,
+//! etc.
 //!
-//! These tokens need to be manually requested from the lexer with the [`Lexer::lex_compound`]
-//! function.
+//! These tokens need to be manually requested from the lexer with the
+//! [`Lexer::lex_compound`] function.
 //!
-//! This manually request of tokens leads to a problems when used in conjunction with peeking. Take
-//! for instance the production `{ "foo": "bar"}`. `"foo"` is a compound token so when intially
-//! encountered the lexer only returns a `"` token and then that token needs to be collected into a
-//! the full strand token. However the parser needs to figure out if we are parsing an object
-//! or a block so it needs to look past the compound token to see if the next token is `:`. This is
-//! where gluing comes in. Calling `Parser::glue` checks if the next token could start a compound
-//! token and combines them into a single token. This can only be done in places where we know if
-//! we encountered a leading token of a compound token it will result in the 'default' compound token.
+//! This manually request of tokens leads to a problems when used in conjunction
+//! with peeking. Take for instance the production `{ "foo": "bar"}`. `"foo"` is
+//! a compound token so when intially encountered the lexer only returns a `"`
+//! token and then that token needs to be collected into a the full strand
+//! token. However the parser needs to figure out if we are parsing an object or
+//! a block so it needs to look past the compound token to see if the next token
+//! is `:`. This is where gluing comes in. Calling `Parser::glue` checks if the
+//! next token could start a compound token and combines them into a single
+//! token. This can only be done in places where we know if we encountered a
+//! leading token of a compound token it will result in the 'default' compound
+//! token.
+
+use bytes::BytesMut;
+use reblessive::{Stack, Stk};
 
 use self::token_buffer::TokenBuffer;
 use crate::sql;
@@ -60,8 +70,6 @@ use crate::syn::lexer::Lexer;
 use crate::syn::lexer::compound::NumberKind;
 use crate::syn::token::{Span, Token, TokenKind, t};
 use crate::val::{Bytes, Datetime, Duration, File, Strand, Uuid};
-use bytes::BytesMut;
-use reblessive::{Stack, Stk};
 
 mod basic;
 mod builtin;
@@ -73,8 +81,8 @@ mod kind;
 pub(crate) mod mac;
 mod object;
 mod prime;
+mod record_id;
 mod stmt;
-mod thing;
 mod token;
 mod token_buffer;
 mod value;
@@ -122,19 +130,21 @@ pub enum GluedValue {
 
 #[derive(Clone, Debug)]
 pub struct ParserSettings {
-	/// Parse strand like the old parser where a strand which looks like a UUID, Record-Id, Or a
-	/// DateTime will be parsed as a date-time.
+	/// Parse strand like the old parser where a strand which looks like a UUID,
+	/// Record-Id, Or a DateTime will be parsed as a date-time.
 	pub legacy_strands: bool,
-	/// Set whether to allow record-id's which don't adheare to regular ident rules.
-	/// Setting this to true will allow parsing of, for example, `foo:0bar`. This would be rejected
-	/// by normal identifier rules as most identifiers can't start with a number.
+	/// Set whether to allow record-id's which don't adheare to regular ident
+	/// rules. Setting this to true will allow parsing of, for example,
+	/// `foo:0bar`. This would be rejected by normal identifier rules as most
+	/// identifiers can't start with a number.
 	pub flexible_record_id: bool,
 	/// Disallow a query to have objects deeper that limit.
 	/// Arrays also count towards objects. So `[{foo: [] }]` would be 3 deep.
 	pub object_recursion_limit: usize,
 	/// Disallow a query from being deeper than the give limit.
-	/// A query recurses when a statement contains another statement within itself.
-	/// Examples are subquery and blocks like block statements and if statements and such.
+	/// A query recurses when a statement contains another statement within
+	/// itself. Examples are subquery and blocks like block statements and if
+	/// statements and such.
 	pub query_recursion_limit: usize,
 	/// Whether record references are enabled.
 	pub references_enabled: bool,
@@ -209,19 +219,22 @@ impl<'a> Parser<'a> {
 
 	/// Returns the next token and advance the parser one token forward.
 	///
-	/// This function is like next but returns whitespace tokens which are normally skipped
+	/// This function is like next but returns whitespace tokens which are
+	/// normally skipped
 	pub fn next_whitespace(&mut self) -> Token {
 		let res = self.token_buffer.pop().unwrap_or_else(|| self.lexer.next_token());
 		self.last_span = res.span;
 		res
 	}
 
-	/// Returns if there is a token in the token buffer, meaning that a token was peeked.
+	/// Returns if there is a token in the token buffer, meaning that a token
+	/// was peeked.
 	pub fn has_peek(&self) -> bool {
 		self.token_buffer.is_empty()
 	}
 
-	/// Consume the current peeked value and advance the parser one token forward.
+	/// Consume the current peeked value and advance the parser one token
+	/// forward.
 	///
 	/// Should only be called after peeking a value.
 	pub fn pop_peek(&mut self) -> Token {
@@ -253,8 +266,9 @@ impl<'a> Parser<'a> {
 
 	/// Returns the next token without consuming it.
 	///
-	/// This function is like peek but returns whitespace tokens which are normally skipped
-	/// Does not undo tokens skipped in a previous normal peek.
+	/// This function is like peek but returns whitespace tokens which are
+	/// normally skipped Does not undo tokens skipped in a previous normal
+	/// peek.
 	pub fn peek_whitespace(&mut self) -> Token {
 		let Some(x) = self.token_buffer.first() else {
 			let res = self.lexer.next_token();
@@ -310,8 +324,8 @@ impl<'a> Parser<'a> {
 		self.peek_whitespace_token_at(2)
 	}
 
-	/// Returns the span of the next token if it was already peeked, otherwise returns the token of
-	/// the last consumed token.
+	/// Returns the span of the next token if it was already peeked, otherwise
+	/// returns the token of the last consumed token.
 	pub fn recent_span(&mut self) -> Span {
 		self.token_buffer.first().map(|x| x.span).unwrap_or(self.last_span)
 	}
@@ -363,8 +377,8 @@ impl<'a> Parser<'a> {
 		self.token_buffer.push_front(token);
 	}
 
-	/// Checks if the next token is of the given kind. If it isn't it returns a UnclosedDelimiter
-	/// error.
+	/// Checks if the next token is of the given kind. If it isn't it returns a
+	/// UnclosedDelimiter error.
 	fn expect_closing_delimiter(&mut self, kind: TokenKind, should_close: Span) -> ParseResult<()> {
 		let peek = self.peek();
 		if peek.kind != kind {
@@ -387,16 +401,16 @@ impl<'a> Parser<'a> {
 	/// Parse a full query.
 	///
 	/// This is the primary entry point of the parser.
-	pub async fn parse_query(&mut self, ctx: &mut Stk) -> ParseResult<sql::Ast> {
-		let statements = self.parse_stmt_list(ctx).await?;
+	pub async fn parse_query(&mut self, stk: &mut Stk) -> ParseResult<sql::Ast> {
+		let statements = self.parse_stmt_list(stk).await?;
 		Ok(sql::Ast {
 			expressions: statements,
 		})
 	}
 
 	/// Parse a single statement.
-	pub async fn parse_statement(&mut self, ctx: &mut Stk) -> ParseResult<sql::TopLevelExpr> {
-		self.parse_top_level_expr(ctx).await
+	pub async fn parse_statement(&mut self, stk: &mut Stk) -> ParseResult<sql::TopLevelExpr> {
+		self.parse_top_level_expr(stk).await
 	}
 }
 
@@ -426,8 +440,8 @@ impl StatementStream {
 	/// updates the line and column offset after consuming bytes.
 	fn accumulate_line_col(&mut self, bytes: &[u8]) {
 		// The parser should have ensured that bytes is a valid utf-8 string.
-		// TODO: Maybe change this to unsafe cast once we have more convidence in the parsers
-		// correctness.
+		// TODO: Maybe change this to unsafe cast once we have more convidence in the
+		// parsers correctness.
 		let (line_num, remaining) =
 			std::str::from_utf8(bytes).unwrap().lines().enumerate().last().unwrap_or((0, ""));
 
@@ -438,14 +452,16 @@ impl StatementStream {
 		self.col_offset += remaining.chars().count();
 	}
 
-	/// Parses a statement if the buffer contains sufficient data to parse a statement.
+	/// Parses a statement if the buffer contains sufficient data to parse a
+	/// statement.
 	///
-	/// When it will have done so the it will remove the read bytes from the buffer and return
-	/// Ok(Some(_)). In case of a parsing error it will return Err(_), this will not consume data.
+	/// When it will have done so the it will remove the read bytes from the
+	/// buffer and return Ok(Some(_)). In case of a parsing error it will
+	/// return Err(_), this will not consume data.
 	///
-	/// If the function returns Ok(None), not enough data was in the buffer to fully parse a
-	/// statement, the function might still consume data from the buffer, like whitespace between statements,
-	/// when a none is returned.
+	/// If the function returns Ok(None), not enough data was in the buffer to
+	/// fully parse a statement, the function might still consume data from the
+	/// buffer, like whitespace between statements, when a none is returned.
 	pub fn parse_partial(
 		&mut self,
 		buffer: &mut BytesMut,
@@ -462,8 +478,9 @@ impl StatementStream {
 		while parser.eat(t!(";")) {}
 
 		if parser.peek().span.offset != 0 && buffer.len() > u32::MAX as usize {
-			// we ate some bytes statements, so in order to ensure whe can parse a full statement
-			// of 4gigs we need recreate the parser starting with the empty bytes removed.
+			// we ate some bytes statements, so in order to ensure whe can parse a full
+			// statement of 4gigs we need recreate the parser starting with the empty
+			// bytes removed.
 			let eaten = buffer.split_to(parser.peek().span.offset as usize);
 			self.accumulate_line_col(&eaten);
 			slice = &**buffer;
@@ -474,7 +491,8 @@ impl StatementStream {
 			parser = Parser::new_with_settings(slice, self.settings.clone())
 		}
 
-		// test if the buffer is now empty, which would cause the parse_statement function to fail.
+		// test if the buffer is now empty, which would cause the parse_statement
+		// function to fail.
 		if parser.peek().is_eof() {
 			return Ok(None);
 		}
@@ -489,8 +507,8 @@ impl StatementStream {
 			}
 
 			// finished on an eof token.
-			// We can't know if this is an actual result, or if it would change when more data
-			// is available.
+			// We can't know if this is an actual result, or if it would change when more
+			// data is available.
 			return Ok(None);
 		}
 

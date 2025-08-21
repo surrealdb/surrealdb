@@ -1,18 +1,19 @@
 //! Stores a DEFINE EVENT config definition
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::expr::statements::define::DefineEventStatement;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
-
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Ev<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -25,17 +26,17 @@ impl KVKey for Ev<'_> {
 	type ValueType = DefineEventStatement;
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, ev: &'a str) -> Ev<'a> {
+pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, ev: &'a str) -> Ev<'a> {
 	Ev::new(ns, db, tb, ev)
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
+pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"!ev\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
+pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"!ev\xff");
 	Ok(k)
@@ -48,7 +49,7 @@ impl Categorise for Ev<'_> {
 }
 
 impl<'a> Ev<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ev: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ev: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -73,24 +74,24 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let val = Ev::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testev",
 		);
 		let enc = Ev::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\x00*testdb\x00*testtb\x00!evtestev\x00");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!evtestev\0");
 	}
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix("testns", "testdb", "testtb").unwrap();
-		assert_eq!(val, b"/*testns\0*testdb\0*testtb\0!ev\0");
+		let val = super::prefix(NamespaceId(1), DatabaseId(2), "testtb").unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!ev\0");
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::suffix("testns", "testdb", "testtb").unwrap();
-		assert_eq!(val, b"/*testns\0*testdb\0*testtb\0!ev\xff");
+		let val = super::suffix(NamespaceId(1), DatabaseId(2), "testtb").unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!ev\xff");
 	}
 }

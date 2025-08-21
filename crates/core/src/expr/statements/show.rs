@@ -1,3 +1,9 @@
+use std::fmt;
+
+use anyhow::Result;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -5,11 +11,6 @@ use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Datetime;
 use crate::vs::VersionStamp;
-use anyhow::Result;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -53,7 +54,7 @@ impl ShowStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Process the show query
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let r =
 			crate::cf::read(&txn, ns, db, self.table.as_deref(), self.since.clone(), self.limit)
 				.await?;

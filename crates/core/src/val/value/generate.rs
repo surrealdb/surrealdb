@@ -1,6 +1,7 @@
+use anyhow::Result;
+
 use crate::err::Error;
 use crate::val::{RecordId, RecordIdKey, Strand, Value};
-use anyhow::Result;
 
 impl Value {
 	pub(crate) fn generate(self, tb: Strand, retable: bool) -> Result<RecordId> {

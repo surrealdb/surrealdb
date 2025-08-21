@@ -1,12 +1,13 @@
-use crate::syn;
-use ciborium::Value as CborValue;
-use geo::{LineString, Point, Polygon};
-use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
-use rust_decimal::Decimal;
 use std::collections::BTreeMap;
 use std::iter::once;
 use std::ops::Bound;
 
+use ciborium::Value as CborValue;
+use geo::{LineString, Point, Polygon};
+use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
+use rust_decimal::Decimal;
+
+use crate::syn;
 use crate::val::{
 	self, Array, DecimalExt, Geometry, Number, Object, Range, RecordIdKey, RecordIdKeyRange, Table,
 	Uuid, Value,
@@ -26,7 +27,8 @@ const TAG_STRING_DECIMAL: u64 = 10;
 const TAG_CUSTOM_DATETIME: u64 = 12;
 const TAG_STRING_DURATION: u64 = 13;
 const TAG_CUSTOM_DURATION: u64 = 14;
-// unused but the for backwards compatibility kept around to maybe avoid using that tag again.
+// unused but the for backwards compatibility kept around to maybe avoid using
+// that tag again.
 const _TAG_FUTURE: u64 = 15;
 
 // Ranges (49->51 is unassigned)
@@ -149,7 +151,7 @@ pub fn to_value(val: CborValue) -> Result<Value, &'static str> {
 				},
 				// A literal recordid
 				TAG_RECORDID => match *v {
-					CborValue::Text(v) => match syn::thing(v.as_str()) {
+					CborValue::Text(v) => match syn::record_id(v.as_str()) {
 						Ok(v) => Ok(v.into()),
 						_ => Err("Expected a valid RecordID value"),
 					},

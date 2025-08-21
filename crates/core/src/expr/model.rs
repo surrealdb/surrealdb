@@ -1,21 +1,10 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::{ControlFlow, FlowResult};
-use crate::val::Value;
+#[cfg(feature = "ml")]
+use std::collections::HashMap;
+use std::fmt;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-
-#[cfg(feature = "ml")]
-use crate::expr::Permission;
-#[cfg(feature = "ml")]
-use crate::iam::Action;
-#[cfg(feature = "ml")]
-use std::collections::HashMap;
 #[cfg(feature = "ml")]
 use surrealml::errors::error::SurrealError;
 #[cfg(feature = "ml")]
@@ -25,8 +14,23 @@ use surrealml::ndarray as mlNdarray;
 #[cfg(feature = "ml")]
 use surrealml::storage::surml_file::SurMlFile;
 
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+#[cfg(feature = "ml")]
+use crate::expr::Permission;
+use crate::expr::{ControlFlow, FlowResult};
+#[cfg(feature = "ml")]
+use crate::iam::Action;
+use crate::val::Value;
+
 #[cfg(feature = "ml")]
 const ARGUMENTS: &str = "The model expects 1 argument. The argument can be either a number, an object, or an array of numbers.";
+
+pub fn get_model_path(ns: &str, db: &str, name: &str, version: &str, hash: &str) -> String {
+	format!("ml/{ns}/{db}/{name}-{version}-{hash}.surml")
+}
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -58,11 +62,18 @@ impl Model {
 		// Check this function is allowed
 		ctx.check_allowed_function(name.as_str())?;
 		// Get the model definition
-		let (ns, db) = opt.ns_db()?;
-		let val = ctx.tx().get_db_model(ns, db, &self.name, &self.version).await?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+		let Some(val) = ctx.tx().get_db_model(ns, db, &self.name, &self.version).await? else {
+			return Err(ControlFlow::from(anyhow::Error::new(Error::MlNotFound {
+				name: format!("{}<{}>", self.name, self.version),
+			})));
+		};
+
 		// Calculate the model path
-		let (ns, db) = opt.ns_db()?;
-		let path = format!("ml/{}/{}/{}-{}-{}.surml", ns, db, self.name, self.version, val.hash);
+		let path = {
+			let (ns, db) = opt.ns_db()?;
+			get_model_path(ns, db, &self.name, &self.version, &val.hash)
+		};
 		// Check permissions
 		if opt.check_perms(Action::View)? {
 			match &val.permissions {

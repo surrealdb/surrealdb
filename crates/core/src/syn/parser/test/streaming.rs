@@ -1,3 +1,7 @@
+use bytes::BytesMut;
+use chrono::offset::TimeZone;
+use chrono::{NaiveDate, Offset, Utc};
+
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey};
 use crate::sql::changefeed::ChangeFeed;
@@ -30,9 +34,6 @@ use crate::sql::{
 };
 use crate::syn::parser::StatementStream;
 use crate::val::{Datetime, Duration, Number, Regex, Strand, Uuid};
-use bytes::BytesMut;
-use chrono::offset::TimeZone;
-use chrono::{NaiveDate, Offset, Utc};
 
 fn ident_field(name: &str) -> Expr {
 	Expr::Idiom(Idiom(vec![Part::Field(Ident::new(name.to_string()).unwrap())]))
@@ -322,10 +323,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			flex: true,
 			field_kind: Some(Kind::Option(Box::new(Kind::Either(vec![
 				Kind::Number,
-				Kind::Array(
-					Box::new(Kind::Record(vec![Ident::from_strand(strand!("foo").to_owned())])),
-					Some(10),
-				),
+				Kind::Array(Box::new(Kind::Record(vec!["foo".to_owned()])), Some(10)),
 			])))),
 			readonly: false,
 			value: Some(Expr::Literal(Literal::Null)),

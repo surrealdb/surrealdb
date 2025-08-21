@@ -1,4 +1,5 @@
-//! Module containing the implementation of the surrealql tokens, lexer, and parser.
+//! Module containing the implementation of the surrealql tokens, lexer, and
+//! parser.
 
 use crate::cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH};
 use crate::dbs::Capabilities;
@@ -28,7 +29,8 @@ use token::t;
 
 const TARGET: &str = "surrealdb::core::syn";
 
-/// Takes a string and returns if it could be a reserved keyword in certain contexts.
+/// Takes a string and returns if it could be a reserved keyword in certain
+/// contexts.
 pub fn could_be_reserved_keyword(s: &str) -> bool {
 	lexer::keywords::could_be_reserved(s)
 }
@@ -55,8 +57,8 @@ where
 		.map_err(anyhow::Error::new)
 }
 
-/// Creates the parser settings struct from the global configuration values as wel as the
-/// capabilities  struct.
+/// Creates the parser settings struct from the global configuration values as
+/// wel as the capabilities  struct.
 pub fn settings_from_capabilities(cap: &Capabilities) -> ParserSettings {
 	ParserSettings {
 		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
@@ -71,11 +73,11 @@ pub fn settings_from_capabilities(cap: &Capabilities) -> ParserSettings {
 
 /// Parses a SurrealQL [`Query`]
 ///
-/// During query parsing, the total depth of calls to parse values (including arrays, expressions,
-/// functions, objects, sub-queries), Javascript values, and geometry collections count against
-/// a computation depth limit. If the limit is reached, parsing will return
-/// [`Error::ComputationDepthExceeded`], as opposed to spending more time and potentially
-/// overflowing the call stack.
+/// During query parsing, the total depth of calls to parse values (including
+/// arrays, expressions, functions, objects, sub-queries), Javascript values,
+/// and geometry collections count against a computation depth limit. If the
+/// limit is reached, parsing will return [`Error::ComputationDepthExceeded`],
+/// as opposed to spending more time and potentially overflowing the call stack.
 ///
 /// If you encounter this limit and believe that it should be increased,
 /// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
@@ -87,11 +89,11 @@ pub fn parse(input: &str) -> Result<Ast> {
 
 /// Parses a SurrealQL [`Query`]
 ///
-/// During query parsing, the total depth of calls to parse values (including arrays, expressions,
-/// functions, objects, sub-queries), Javascript values, and geometry collections count against
-/// a computation depth limit. If the limit is reached, parsing will return
-/// [`Error::ComputationDepthExceeded`], as opposed to spending more time and potentially
-/// overflowing the call stack.
+/// During query parsing, the total depth of calls to parse values (including
+/// arrays, expressions, functions, objects, sub-queries), Javascript values,
+/// and geometry collections count against a computation depth limit. If the
+/// limit is reached, parsing will return [`Error::ComputationDepthExceeded`],
+/// as opposed to spending more time and potentially overflowing the call stack.
 ///
 /// If you encounter this limit and believe that it should be increased,
 /// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
@@ -177,18 +179,18 @@ pub fn duration(input: &str) -> Result<Duration> {
 
 /// Parse a record id.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn thing(input: &str) -> Result<RecordId> {
-	trace!(target: TARGET, "Parsing SurrealQL thing");
+pub fn record_id(input: &str) -> Result<RecordId> {
+	trace!(target: TARGET, "Parsing SurrealQL record id");
 
 	parse_with(input.as_bytes(), async |parser, stk| parser.parse_value_record_id(stk).await)
 }
 
 /// Parse a record id including ranges.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn thing_with_range(input: &str) -> Result<RecordIdLit> {
-	trace!(target: TARGET, "Parsing SurrealQL thing");
+pub fn record_id_with_range(input: &str) -> Result<RecordIdLit> {
+	trace!(target: TARGET, "Parsing SurrealQL record id with range");
 
-	parse_with(input.as_bytes(), async |parser, stk| parser.parse_thing_with_range(stk).await)
+	parse_with(input.as_bytes(), async |parser, stk| parser.parse_record_id_with_range(stk).await)
 }
 
 /// Parse a block, expects the value to be wrapped in `{}`.
@@ -299,7 +301,8 @@ pub fn value_legacy_strand(input: &str) -> Result<Value> {
 	})
 }
 
-/// Parses JSON into an inert SurrealQL [`Value`] and parses values within strings.
+/// Parses JSON into an inert SurrealQL [`Value`] and parses values within
+/// strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn json_legacy_strand(input: &str) -> Result<Value> {
 	trace!(target: TARGET, "Parsing inert JSON value, with legacy strings");

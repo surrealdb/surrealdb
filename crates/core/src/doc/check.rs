@@ -1,3 +1,7 @@
+use anyhow::{Result, bail, ensure};
+use reblessive::tree::Stk;
+
+use super::IgnoreError;
 use crate::ctx::Context;
 use crate::dbs::{Options, Statement, Workable};
 use crate::doc::Document;
@@ -7,11 +11,8 @@ use crate::expr::FlowResultExt as _;
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::permission::Permission;
 use crate::iam::Action;
+use crate::sql::ToSql;
 use crate::val::Value;
-use anyhow::{Result, bail, ensure};
-use reblessive::tree::Stk;
-
-use super::IgnoreError;
 
 impl Document {
 	/// Checks whether this operation is allowed on
@@ -36,7 +37,7 @@ impl Document {
 					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: false,
-						target_type: tb.table_type.to_string(),
+						target_type: tb.table_type.to_sql(),
 					}
 				);
 			}
@@ -46,7 +47,7 @@ impl Document {
 					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: false,
-						target_type: tb.table_type.to_string(),
+						target_type: tb.table_type.to_sql(),
 					}
 				);
 			}
@@ -56,7 +57,7 @@ impl Document {
 					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: true,
-						target_type: tb.table_type.to_string(),
+						target_type: tb.table_type.to_sql(),
 					}
 				);
 			}
@@ -67,7 +68,7 @@ impl Document {
 						Error::TableCheck {
 							thing: self.id()?.to_string(),
 							relation: true,
-							target_type: tb.table_type.to_string(),
+							target_type: tb.table_type.to_sql(),
 						}
 					);
 				}
@@ -77,7 +78,7 @@ impl Document {
 						Error::TableCheck {
 							thing: self.id()?.to_string(),
 							relation: false,
-							target_type: tb.table_type.to_string(),
+							target_type: tb.table_type.to_sql(),
 						}
 					);
 				}

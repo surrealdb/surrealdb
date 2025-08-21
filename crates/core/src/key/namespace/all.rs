@@ -1,31 +1,36 @@
 //! Stores the key prefix for all keys under a namespace
-use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::NamespaceId;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub(crate) struct All<'a> {
+pub(crate) struct NamespaceRoot {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 }
 
-impl KVKey for All<'_> {
+/// When querying all keys under a namespace, the output value could be any
+/// value.
+impl KVKey for NamespaceRoot {
 	type ValueType = Vec<u8>;
 }
 
-pub fn new(ns: &str) -> All<'_> {
-	All::new(ns)
+pub fn new(ns: NamespaceId) -> NamespaceRoot {
+	NamespaceRoot::new(ns)
 }
 
-impl Categorise for All<'_> {
+impl Categorise for NamespaceRoot {
 	fn categorise(&self) -> Category {
 		Category::NamespaceRoot
 	}
 }
 
-impl<'a> All<'a> {
-	pub fn new(ns: &'a str) -> Self {
+impl NamespaceRoot {
+	#[inline]
+	pub fn new(ns: NamespaceId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -41,10 +46,10 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = All::new(
-			"testns",
+		let val = NamespaceRoot::new(
+			NamespaceId(1),
 		);
-		let enc = All::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0");
+		let enc = NamespaceRoot::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01");
 	}
 }

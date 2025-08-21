@@ -1,13 +1,14 @@
+use std::fmt::{self, Display, Formatter};
+
+use anyhow::Result;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
-use anyhow::Result;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -28,18 +29,20 @@ impl RemoveUserStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Get the definition
-				let us = match txn.get_root_user(&self.name).await {
-					Ok(x) => x,
-					Err(e) => {
-						if self.if_exists
-							&& matches!(e.downcast_ref(), Some(Error::UserRootNotFound { .. }))
-						{
+				let us = match txn.get_root_user(&self.name).await? {
+					Some(x) => x,
+					None => {
+						if self.if_exists {
 							return Ok(Value::None);
-						} else {
-							return Err(e);
 						}
+
+						return Err(Error::UserRootNotFound {
+							name: self.name.to_string(),
+						}
+						.into());
 					}
 				};
+
 				// Process the statement
 				let key = crate::key::root::us::new(&us.name);
 				txn.del(&key).await?;
@@ -52,20 +55,23 @@ impl RemoveUserStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Get the definition
-				let us = match txn.get_ns_user(opt.ns()?, &self.name).await {
-					Ok(x) => x,
-					Err(e) => {
-						if self.if_exists
-							&& matches!(e.downcast_ref(), Some(Error::UserNsNotFound { .. }))
-						{
+				let ns = ctx.get_ns_id(opt).await?;
+				let us = match txn.get_ns_user(ns, &self.name).await? {
+					Some(x) => x,
+					None => {
+						if self.if_exists {
 							return Ok(Value::None);
-						} else {
-							return Err(e);
 						}
+
+						return Err(Error::UserNsNotFound {
+							ns: opt.ns()?.to_string(),
+							name: self.name.to_string(),
+						}
+						.into());
 					}
 				};
 				// Delete the definition
-				let key = crate::key::namespace::us::new(opt.ns()?, &us.name);
+				let key = crate::key::namespace::us::new(ns, &us.name);
 				txn.del(&key).await?;
 				// Clear the cache
 				txn.clear_cache();
@@ -76,17 +82,20 @@ impl RemoveUserStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Get the definition
-				let (ns, db) = opt.ns_db()?;
-				let us = match txn.get_db_user(ns, db, &self.name).await {
-					Ok(x) => x,
-					Err(e) => {
-						if self.if_exists
-							&& matches!(e.downcast_ref(), Some(Error::UserDbNotFound { .. }))
-						{
+				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+				let us = match txn.get_db_user(ns, db, &self.name).await? {
+					Some(x) => x,
+					None => {
+						if self.if_exists {
 							return Ok(Value::None);
-						} else {
-							return Err(e);
 						}
+
+						return Err(Error::UserDbNotFound {
+							ns: opt.ns()?.to_string(),
+							db: opt.db()?.to_string(),
+							name: self.name.to_string(),
+						}
+						.into());
 					}
 				};
 				// Delete the definition

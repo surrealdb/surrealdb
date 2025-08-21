@@ -1,13 +1,14 @@
 pub mod base64 {
-	use crate::err::Error;
-	use crate::fnc::args::Optional;
-	use crate::val::{Bytes, Value};
 	use anyhow::Result;
 	use base64::engine::DecodePaddingMode;
 	use base64::engine::general_purpose::{
 		GeneralPurpose, GeneralPurposeConfig, STANDARD, STANDARD_NO_PAD,
 	};
 	use base64::{Engine, alphabet};
+
+	use crate::err::Error;
+	use crate::fnc::args::Optional;
+	use crate::val::{Bytes, Value};
 
 	/// Base64 configuration which supports decoding with or without padding.
 	const STANDARD_GENERIC_DECODER: GeneralPurpose = GeneralPurpose::new(
@@ -40,10 +41,11 @@ pub mod base64 {
 	}
 }
 pub mod cbor {
+	use anyhow::Result;
+
 	use crate::err::Error;
 	use crate::rpc::format::cbor;
 	use crate::val::{Bytes, Value};
-	use anyhow::Result;
 
 	pub fn encode((arg,): (Value,)) -> Result<Value> {
 		let val = cbor::encode(arg).map_err(|_| Error::InvalidArguments {
@@ -67,7 +69,6 @@ pub mod cbor {
 #[cfg(test)]
 mod tests {
 	use super::*;
-
 	use crate::fnc::args::Optional;
 	use crate::val::{Bytes, Value};
 

@@ -1,3 +1,10 @@
+use std::collections::hash_map::Entry;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::hash::Hash;
+use std::sync::Arc;
+
+use anyhow::Result;
+
 use crate::expr::operator::{MatchesOperator, NearestNeighbor};
 use crate::expr::with::With;
 use crate::expr::{BinaryOperator, Expr, Idiom};
@@ -6,11 +13,6 @@ use crate::idx::planner::tree::{
 };
 use crate::idx::planner::{GrantedPermission, RecordStrategy, ScanDirection, StatementContext};
 use crate::val::{Array, Number, Object, Value};
-use anyhow::Result;
-use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::hash::Hash;
-use std::sync::Arc;
 
 /// The `PlanBuilder` struct represents a builder for constructing query plans.
 pub(super) struct PlanBuilder {
@@ -21,7 +23,8 @@ pub(super) struct PlanBuilder {
 	/// List of indexes allowed in this plan
 	with_indexes: Option<Vec<IndexReference>>,
 	/// Group each possible optimisations local to a SubQuery
-	groups: BTreeMap<GroupRef, Group>, // The order matters because we want the plan to be consistent across repeated queries.
+	groups: BTreeMap<GroupRef, Group>, /* The order matters because we want the plan to be
+	                                    * consistent across repeated queries. */
 }
 
 pub(super) struct PlanBuilderParameters {
@@ -37,6 +40,22 @@ pub(super) struct PlanBuilderParameters {
 }
 
 impl PlanBuilder {
+	/// Builds an optimal query execution plan by analyzing available indexes
+	/// and query conditions.
+	///
+	/// This method implements a sophisticated cost-based optimizer that chooses
+	/// between different execution strategies:
+	/// 1. Table scan (fallback when no indexes are suitable)
+	/// 2. Single index scan (most common, using one optimal index)
+	/// 3. Multi-index scan (when multiple indexes can be combined)
+	/// 4. Range scan (for range queries with optional ordering)
+	///
+	/// The optimizer considers factors like:
+	/// - Available indexes and their selectivity
+	/// - Boolean operator types (AND vs OR affects index combination strategies)
+	/// - Compound index opportunities for multi-column queries
+	/// - Range query optimization with proper scan direction
+	/// - Order clause compatibility with index ordering
 	pub(super) async fn build(
 		ctx: &StatementContext<'_>,
 		p: PlanBuilderParameters,
@@ -48,58 +67,78 @@ impl PlanBuilder {
 			with_indexes: p.with_indexes,
 		};
 
+		// Handle explicit NO INDEX directive
 		if let Some(With::NoIndex) = ctx.with {
 			return Self::table_iterator(ctx, Some("WITH NOINDEX"), p.gp).await;
 		}
 
-		// Browse the AST and collect information
+		// Analyze the query AST to discover indexable conditions and collect
+		// optimization opportunities
 		if let Some(root) = &p.root {
 			if let Err(e) = b.eval_node(root) {
+				// Fall back to table scan if analysis fails
 				return Self::table_iterator(ctx, Some(&e), p.gp).await;
 			}
 		}
 
-		// If all boolean operators are AND, we can use the single index plan
+		// Optimization path 1: All conditions connected by AND operators
+		// This enables single-index optimizations and compound index usage
 		if p.all_and {
-			// We try first the largest compound indexed
+			// Priority 1: Find the best compound index that covers multiple query
+			// conditions Compound indexes are highly efficient as they can satisfy
+			// multiple WHERE clauses in a single index scan, significantly reducing I/O
+			// operations
 			let mut compound_index = None;
 			for (ixr, vals) in p.compound_indexes {
 				if let Some((cols, io)) = b.check_compound_index(ixr, vals) {
+					// Prefer indexes that cover more columns (higher selectivity)
 					if let Some((c, _)) = &compound_index {
 						if cols <= *c {
-							continue;
+							continue; // Skip if this index covers fewer columns
 						}
 					}
+					// Only consider true compound indexes (multiple columns)
 					if cols > 1 {
 						compound_index = Some((cols, io));
 					}
 				}
 			}
 			if let Some((_, io)) = compound_index {
-				// Evaluate if we can use keys only
+				// Evaluate whether we can use index-only access (no table lookups needed)
 				let record_strategy =
 					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
-				// Return the plan
+				// Return optimized single compound index plan
 				return Ok(Plan::SingleIndex(None, io, record_strategy));
 			}
 
-			// We take the "first" range query if one is available
+			// Select the first available range query (deterministic group order)
 			if let Some((_, group)) = b.groups.into_iter().next() {
 				if let Some((ir, rq)) = group.take_first_range() {
 					// Evaluate the record strategy
 					let record_strategy =
 						ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
-					let is_order = if let Some(io) = p.order_limit {
-						io.ixr == ir
+					let (is_order, sc) = if let Some(io) = p.order_limit {
+						#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
+						{
+							(io.ixr == ir, ScanDirection::Forward)
+						}
+						#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+						{
+							(
+								io.ixr == ir,
+								Self::check_range_scan_direction(p.reverse_scan, io.op()),
+							)
+						}
 					} else {
-						false
+						(false, ScanDirection::Forward)
 					};
 					// Return the plan
-					return Ok(Plan::SingleIndexRange(ir, rq, record_strategy, is_order));
+					return Ok(Plan::SingleIndexRange(ir, rq, record_strategy, sc, is_order));
 				}
 			}
 
-			// Otherwise, we try to find the most interesting (todo: TBD) single index option
+			// Otherwise, pick a non-range single-index
+			// option (heuristic)
 			if let Some((e, i)) = b.non_range_indexes.pop() {
 				// Evaluate the record strategy
 				let record_strategy =
@@ -112,14 +151,14 @@ impl PlanBuilder {
 				// Evaluate the record strategy
 				let record_strategy =
 					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
-				// Check it is compatible with the reverse scan capability
+				// Check compatibility with reverse-scan capability
 				if Self::check_order_scan(p.reverse_scan, o.op()) {
 					// Return the plan
 					return Ok(Plan::SingleIndex(None, o.clone(), record_strategy));
 				}
 			}
 		}
-		// If every expression is backed by an index with can use the MultiIndex plan
+		// If every expression is backed by an index we can use the MultiIndex plan
 		else if p.all_expressions_with_index {
 			let mut ranges = Vec::with_capacity(b.groups.len());
 			for (gr, group) in b.groups {
@@ -151,7 +190,7 @@ impl PlanBuilder {
 		Ok(Plan::TableIterator(reason, rs, sc))
 	}
 
-	/// Check if we have an explicit list of index that we should use
+	/// Check if we have an explicit list of indices that we should use
 	fn filter_index_option(&self, io: Option<&IndexOption>) -> Option<IndexOption> {
 		if let Some(io) = io {
 			if !self.allowed_index(io.ix_ref()) {
@@ -171,9 +210,18 @@ impl PlanBuilder {
 		true
 	}
 
-	/// Check if the ordering is compatible with the datastore transaction capabilities
+	/// Check if the ordering is compatible with the datastore transaction
+	/// capabilities
 	fn check_order_scan(has_reverse_scan: bool, op: &IndexOperator) -> bool {
 		has_reverse_scan || matches!(op, IndexOperator::Order(false))
+	}
+
+	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+	fn check_range_scan_direction(has_reverse_scan: bool, op: &IndexOperator) -> ScanDirection {
+		if has_reverse_scan && matches!(op, IndexOperator::Order(true)) {
+			return ScanDirection::Backward;
+		}
+		ScanDirection::Forward
 	}
 
 	/// Check if a compound index can be used.
@@ -186,7 +234,7 @@ impl PlanBuilder {
 		if !self.allowed_index(&ixr) {
 			return None;
 		}
-		// Count continues values (from the left)
+		// Count contiguous values (from the left)
 		let mut cont = 0;
 		for vals in &columns {
 			if vals.is_empty() {
@@ -302,19 +350,20 @@ pub(super) enum Plan {
 		Vec<(IndexReference, UnionRangeQueryBuilder)>,
 		RecordStrategy,
 	),
-	/// Index scan for record matching a given range
-	/// 1. The reference to index
+	/// Index scan for records matching a given range
+	/// 1. The index reference
 	/// 2. The index range
 	/// 3. A record strategy
-	/// 4. True if it matches an order option
-	SingleIndexRange(IndexReference, UnionRangeQueryBuilder, RecordStrategy, bool),
+	/// 4. The scan direction
+	/// 5. True if it matches an order option
+	SingleIndexRange(IndexReference, UnionRangeQueryBuilder, RecordStrategy, ScanDirection, bool),
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub(super) struct IndexOption {
 	/// A reference to the index definition
 	ixr: IndexReference,
-	/// The idiom matching this index and its index
+	/// The idiom matched by this index
 	id: Option<Arc<Idiom>>,
 	/// The position of the idiom in the expression (Left or Right)
 	id_pos: IdiomPosition,
@@ -590,12 +639,13 @@ impl UnionRangeQueryBuilder {
 
 #[cfg(test)]
 mod tests {
+	use std::collections::HashSet;
+	use std::sync::Arc;
+
 	use crate::expr::{Ident, Idiom};
 	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 	use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 	use crate::val::{Array, Value};
-	use std::collections::HashSet;
-	use std::sync::Arc;
 
 	#[expect(clippy::mutable_key_type)]
 	#[test]

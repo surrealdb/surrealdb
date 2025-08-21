@@ -1,23 +1,26 @@
 //! Index Compaction Queue
 //!
 //! This module defines the key structure used for the index compaction queue.
-//! The index compaction system periodically processes indexes that need optimization,
-//! particularly full-text indexes that accumulate changes over time.
+//! The index compaction system periodically processes indexes that need
+//! optimization, particularly full-text indexes that accumulate changes over
+//! time.
 //!
-//! The `Ic` struct represents an entry in the compaction queue, identifying an index
-//! that needs to be compacted. The compaction thread processes these entries at regular
-//! intervals defined by the `index_compaction_interval` configuration option.
-use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
-
+//! The `Ic` struct represents an entry in the compaction queue, identifying an
+//! index that needs to be compacted. The compaction thread processes these
+//! entries at regular intervals defined by the `index_compaction_interval`
+//! configuration option.
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
 
 /// Represents an entry in the index compaction queue
 ///
 /// When an index (particularly a full-text index) needs compaction, an `Ic` key
-/// is created and stored in the database. The index compaction thread periodically
-/// scans for these keys and processes the corresponding indexes.
+/// is created and stored in the database. The index compaction thread
+/// periodically scans for these keys and processes the corresponding indexes.
 ///
 /// Compaction helps optimize index performance by consolidating changes and
 /// removing unnecessary data.
@@ -27,8 +30,8 @@ pub(crate) struct Ic<'a> {
 	_a: u8,
 	_b: u8,
 	_c: u8,
-	pub ns: &'a str,
-	pub db: &'a str,
+	pub ns: NamespaceId,
+	pub db: DatabaseId,
 	pub tb: &'a str,
 	pub ix: &'a str,
 	#[serde(with = "uuid::serde::compact")]
@@ -53,8 +56,8 @@ impl<'a> Ic<'a> {
 	}
 
 	pub(crate) fn new(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
 		nid: Uuid,
@@ -92,8 +95,8 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Ic::new("testns", "testdb", "testtb", "testix", Uuid::from_u128(1), Uuid::from_u128(2));
+		let val = Ic::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", Uuid::from_u128(1), Uuid::from_u128(2));
 		let enc = Ic::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/!ictestns\0testdb\0testtb\0testix\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
+		assert_eq!(enc, b"/!ic\x00\x00\x00\x01\x00\x00\x00\x02testtb\0testix\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
 	}
 }

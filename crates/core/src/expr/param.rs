@@ -1,3 +1,12 @@
+use std::ops::Deref;
+use std::{fmt, str};
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::FlowResultExt as _;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -7,14 +16,6 @@ use crate::expr::escape::EscapeKwFreeIdent;
 use crate::expr::ident::Ident;
 use crate::iam::Action;
 use crate::val::{Strand, Value};
-use anyhow::{Result, bail};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::ops::Deref;
-use std::{fmt, str};
-
-use super::FlowResultExt as _;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -23,7 +24,8 @@ pub struct Param(String);
 impl Param {
 	/// Create a new identifier
 	///
-	/// This function checks if the string has a null byte, returns None if it has.
+	/// This function checks if the string has a null byte, returns None if it
+	/// has.
 	pub fn new(str: String) -> Option<Self> {
 		if str.contains('\0') {
 			return None;
@@ -93,7 +95,7 @@ impl Param {
 					// Ensure a database is set
 					opt.valid_for_db()?;
 					// Fetch a defined param if set
-					let (ns, db) = opt.ns_db()?;
+					let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 					let val = ctx.tx().get_db_param(ns, db, v).await;
 					// Check if the param has been set globally
 					let val = match val {

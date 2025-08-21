@@ -1,3 +1,11 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -7,13 +15,6 @@ use crate::expr::ident::Ident;
 use crate::expr::statements::define::DefineKind;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
-use anyhow::Result;
-
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::fmt::{Display, Formatter};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -64,7 +65,7 @@ impl RebuildIndexStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Get the index definition
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let res = ctx.tx().get_tb_index(ns, db, &self.what, &self.name).await;
 		let ix = match res {
 			Ok(x) => x,

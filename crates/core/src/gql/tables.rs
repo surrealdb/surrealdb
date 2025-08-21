@@ -1,6 +1,7 @@
 use std::fmt::Display;
 use std::sync::Arc;
 
+use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::dbs::Session;
 use crate::expr::order::{OrderList, Ordering};
 use crate::expr::statements::{DefineFieldStatement, DefineTableStatement, SelectStatement};
@@ -66,12 +67,12 @@ fn filter_name_from_table(tb_name: impl Display) -> String {
 
 #[expect(clippy::too_many_arguments)]
 pub async fn process_tbs(
-	tbs: Arc<[DefineTableStatement]>,
+	tbs: Arc<[TableDefinition]>,
 	mut query: Object,
 	types: &mut Vec<Type>,
 	tx: &Transaction,
-	ns: &str,
-	db: &str,
+	ns: NamespaceId,
+	db: DatabaseId,
 	session: &Session,
 	datastore: &Arc<Datastore>,
 ) -> Result<Object, GqlError> {
@@ -107,7 +108,7 @@ pub async fn process_tbs(
 		types.push(Type::InputObject(filter_id()));
 
 		let sess1 = session.to_owned();
-		let fds = tx.all_tb_fields(ns, db, &tb.name.0, None).await?;
+		let fds = tx.all_tb_fields(ns, db, &tb.name, None).await?;
 		let fds1 = fds.clone();
 		let kvs1 = datastore.clone();
 
@@ -239,7 +240,7 @@ pub async fn process_tbs(
                 })
             },
         )
-        .description(if let Some(c) = &tb.comment { format!("{c}") } else { format!("Generated from table `{}`\nallows querying a table with filters", tb.name) })
+        .description(if let Some(c) = &tb.comment { c.to_string() } else { format!("Generated from table `{}`\nallows querying a table with filters", tb.name) })
         .argument(limit_input!())
         .argument(start_input!())
         .argument(InputValue::new("order", TypeRef::named(&table_order_name)))
@@ -280,7 +281,7 @@ pub async fn process_tbs(
 							};
 
 							match gtx.get_record_field(thing, Part::Field("id".to_owned())).await? {
-								SqlValue::Thing(t) => {
+								SqlValue::RecordId(t) => {
 									let erased: ErasedRecord = (gtx, t);
 									Ok(Some(field_val_erase_owned(erased)))
 								}
@@ -291,7 +292,7 @@ pub async fn process_tbs(
 				},
 			)
 			.description(if let Some(c) = &tb.comment {
-				format!("{c}")
+				c.to_string()
 			} else {
 				format!(
 					"Generated from table `{}`\nallows querying a single record in a table by ID",
@@ -380,7 +381,7 @@ pub async fn process_tbs(
 					};
 
 					match gtx.get_record_field(thing, "id").await? {
-						SqlValue::Thing(t) => {
+						SqlValue::RecordId(t) => {
 							let ty = t.tb.to_string();
 							let out = field_val_erase_owned((gtx, t)).with_type(ty);
 							Ok(Some(out))
@@ -415,7 +416,7 @@ fn make_table_field_resolver(
 				let val = gtx.get_record_field(rid.clone(), fd_name.as_str()).await?;
 
 				match val {
-					SqlValue::Thing(rid) if fd_name != "id" => {
+					SqlValue::RecordId(rid) if fd_name != "id" => {
 						let mut tmp = field_val_erase_owned((gtx.clone(), rid.clone()));
 						match field_kind {
 							Some(Kind::Record(ts)) if ts.len() != 1 => {
@@ -486,7 +487,6 @@ fn filter_from_type(
 		Kind::Int => {}
 		Kind::Number => {}
 		Kind::Object => {}
-		Kind::Point => {}
 		Kind::String => {}
 		Kind::Uuid => {}
 		Kind::Regex => {}
@@ -499,7 +499,6 @@ fn filter_from_type(
 		Kind::Function(_, _) => {}
 		Kind::Range => {}
 		Kind::Literal(_) => {}
-		Kind::References(_, _) => {}
 		Kind::File(_) => {}
 	};
 	Ok(filter)

@@ -1,8 +1,10 @@
+use std::borrow::Cow;
+
 use revision::{Revisioned, revisioned};
 use serde::Serialize;
-use std::borrow::Cow;
-use surrealdb::rpc::RpcError;
-use surrealdb_core::val::Value;
+
+use crate::core::rpc::RpcError;
+use crate::core::val::Value;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Failure {

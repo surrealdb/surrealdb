@@ -1,3 +1,7 @@
+use std::time::Duration;
+
+use anyhow::Result;
+
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
@@ -5,8 +9,6 @@ use crate::expr::statements::LiveStatement;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::kvs::{Datastore, Live};
-use anyhow::Result;
-use std::time::Duration;
 
 const TARGET: &str = "surrealdb::core::kvs::node";
 
@@ -177,7 +179,7 @@ impl Datastore {
 						// Check that the node for this query is archived
 						if archived.contains(&nlq.nd) {
 							// Get the key for this table live query
-							let tlq = crate::key::table::lq::new(&val.ns, &val.db, &val.tb, nlq.lq);
+							let tlq = crate::key::table::lq::new(val.ns, val.db, &val.tb, nlq.lq);
 							// Delete the table live query
 							catch!(txn, txn.clr(&tlq).await);
 							// Delete the node live query
@@ -236,7 +238,7 @@ impl Datastore {
 			// Fetch all databases
 			let dbs = {
 				let txn = self.transaction(Read, Optimistic).await?;
-				catch!(txn, txn.all_db(&ns.name).await)
+				catch!(txn, txn.all_db(ns.namespace_id).await)
 			};
 			// Loop over all databases
 			for db in dbs.iter() {
@@ -245,15 +247,17 @@ impl Datastore {
 				// Fetch all tables
 				let tbs = {
 					let txn = self.transaction(Read, Optimistic).await?;
-					catch!(txn, txn.all_tb(&ns.name, &db.name, None).await)
+					catch!(txn, txn.all_tb(ns.namespace_id, db.database_id, None).await)
 				};
 				// Loop over all tables
 				for tb in tbs.iter() {
 					// Log the namespace
 					trace!(target: TARGET, "Garbage collecting data in table {}/{}/{}", ns.name, db.name, tb.name);
 					// Iterate over the table live queries
-					let beg = crate::key::table::lq::prefix(&ns.name, &db.name, &tb.name)?;
-					let end = crate::key::table::lq::suffix(&ns.name, &db.name, &tb.name)?;
+					let beg =
+						crate::key::table::lq::prefix(db.namespace_id, db.database_id, &tb.name)?;
+					let end =
+						crate::key::table::lq::suffix(db.namespace_id, db.database_id, &tb.name)?;
 					let mut next = Some(beg..end);
 					let txn = self.transaction(Write, Optimistic).await?;
 					while let Some(rng) = next {
@@ -313,7 +317,7 @@ impl Datastore {
 				// Get the key for this node live query
 				let nlq = crate::key::node::lq::new(self.id(), id);
 				// Get the key for this table live query
-				let tlq = crate::key::table::lq::new(&lq.ns, &lq.db, &lq.tb, id);
+				let tlq = crate::key::table::lq::new(lq.ns, lq.db, &lq.tb, id);
 				// Delete the table live query
 				catch!(txn, txn.clr(&tlq).await);
 				// Delete the node live query

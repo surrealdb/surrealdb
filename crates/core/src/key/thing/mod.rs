@@ -1,51 +1,53 @@
 //! Stores a record document
-use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
-use crate::val::{RecordIdKey, Value};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+use crate::val::{RecordIdKey, Value};
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub(crate) struct Thing<'a> {
+pub(crate) struct ThingKey<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
 	pub id: RecordIdKey,
 }
 
-impl KVKey for Thing<'_> {
+impl KVKey for ThingKey<'_> {
 	type ValueType = Value;
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, id: &RecordIdKey) -> Thing<'a> {
-	Thing::new(ns, db, tb, id.to_owned())
+pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &RecordIdKey) -> ThingKey<'a> {
+	ThingKey::new(ns, db, tb, id.to_owned())
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
+pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
 	let mut k = crate::key::table::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"*\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
+pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
 	let mut k = crate::key::table::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"*\xff");
 	Ok(k)
 }
 
-impl Categorise for Thing<'_> {
+impl Categorise for ThingKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::Thing
 	}
 }
 
-impl<'a> Thing<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: RecordIdKey) -> Self {
+impl<'a> ThingKey<'a> {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -59,7 +61,7 @@ impl<'a> Thing<'a> {
 		}
 	}
 
-	pub fn decode_key(k: &[u8]) -> Result<Thing<'_>> {
+	pub fn decode_key(k: &[u8]) -> Result<ThingKey<'_>> {
 		Ok(storekey::deserialize(k)?)
 	}
 }
@@ -73,33 +75,33 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Thing::new(
-			"testns",
-			"testdb",
+		let val = ThingKey::new(
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			RecordIdKey::String("testid".to_owned()),
 		);
-		let enc = Thing::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0*\0\0\0\x01testid\0");
+		let enc = ThingKey::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\0\0\0\x01testid\0");
 	}
 	#[test]
 	fn key_complex() {
 		//
 		let id1 = "foo:['test']";
-		let thing = syn::thing(id1).expect("Failed to parse the ID");
-		let id1 = thing.key;
-		let val = Thing::new("testns", "testdb", "testtb", id1);
-		let enc = Thing::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0*\0\0\0\x03\0\0\0\x04test\0\x01");
+		let record_id = syn::record_id(id1).expect("Failed to parse the ID");
+		let id1 = record_id.key;
+		let val = ThingKey::new(NamespaceId(1), DatabaseId(2), "testtb", id1);
+		let enc = ThingKey::encode_key(&val).unwrap();
+		assert_eq!(
+			enc,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\0\0\0\x03\0\0\0\x04test\0\x01"
+		);
 
-		println!("---");
 		let id2 = "foo:[u'f8e238f2-e734-47b8-9a16-476b291bd78a']";
-		let thing = syn::thing(id2).expect("Failed to parse the ID");
-		let id2 = thing.key;
-		let val = Thing::new("testns", "testdb", "testtb", id2);
-		let enc = Thing::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0*\0\0\0\x03\0\0\0\x07\0\0\0\0\0\0\0\x10\xf8\xe2\x38\xf2\xe7\x34\x47\xb8\x9a\x16\x47\x6b\x29\x1b\xd7\x8a\x01");
-
-		println!("---");
+		let record_id = syn::record_id(id2).expect("Failed to parse the ID");
+		let id2 = record_id.key;
+		let val = ThingKey::new(NamespaceId(1), DatabaseId(2), "testtb", id2);
+		let enc = ThingKey::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\0\0\0\x03\0\0\0\x07\0\0\0\0\0\0\0\x10\xf8\xe2\x38\xf2\xe7\x34\x47\xb8\x9a\x16\x47\x6b\x29\x1b\xd7\x8a\x01");
 	}
 }

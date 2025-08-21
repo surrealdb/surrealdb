@@ -1,39 +1,42 @@
-use crate::expr::Operation;
-use crate::expr::statements::DefineTableStatement;
-use crate::kvs::impl_kv_value_revisioned;
-use crate::val::{Array, Object, RecordId, Value};
-use crate::vs::VersionStamp;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Display, Formatter};
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use crate::catalog::TableDefinition;
+use crate::expr::Operation;
+use crate::expr::statements::info::InfoStructure;
+use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::ToSql;
+use crate::val::{Array, Number, Object, RecordId, Strand, Value};
+use crate::vs::VersionStamp;
 
 // Mutation is a single mutation to a table.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum TableMutation {
-	// Although the Value is supposed to contain a field "id" of Thing,
+	// Although the Value is supposed to contain a field "id" of [`RecordId`],
 	// we do include it in the first field for convenience.
 	Set(RecordId, Value),
 	Del(RecordId),
-	Def(DefineTableStatement),
-	/// Includes the ID, current value (after change), changes that can be applied to get the original
-	/// value
-	/// Example, ("mytb:tobie", {{"note": "surreal"}}, [{"op": "add", "path": "/note", "value": "surreal"}], false)
-	/// Means that we have already applied the add "/note" operation to achieve the recorded result
+	Def(TableDefinition),
+	/// Includes the ID, current value (after change), changes that can be
+	/// applied to get the original value
+	/// Example, ("mytb:tobie", {{"note": "surreal"}}, [{"op": "add", "path":
+	/// "/note", "value": "surreal"}], false) Means that we have already
+	/// applied the add "/note" operation to achieve the recorded result
 	SetWithDiff(RecordId, Value, Vec<Operation>),
 	/// Delete a record where the ID is stored, and the now-deleted value
 	DelWithOriginal(RecordId, Value),
 }
 
-impl From<DefineTableStatement> for Value {
+impl From<TableDefinition> for Value {
 	#[inline]
-	fn from(v: DefineTableStatement) -> Self {
+	fn from(v: TableDefinition) -> Self {
 		let mut h = HashMap::<&str, Value>::new();
-		if let Some(id) = v.id {
-			h.insert("id", id.into());
-		}
-		h.insert("name", v.name.into_strand().into());
+		h.insert("id", Value::Number(Number::Int(v.table_id.0 as i64)));
+		h.insert("name", Value::Strand(Strand::from(v.name.clone())));
 		Value::Object(Object::from(h))
 	}
 }
@@ -73,7 +76,8 @@ pub struct ChangeSet(pub VersionStamp, pub DatabaseMutation);
 
 impl TableMutation {
 	/// Convert a stored change feed table mutation (record change) into a
-	/// Value that can be used in the storage of change feeds and their transmission to consumers
+	/// Value that can be used in the storage of change feeds and their
+	/// transmission to consumers
 	pub fn into_value(self) -> Value {
 		let mut h = BTreeMap::<String, Value>::new();
 		let h = match self {
@@ -105,14 +109,14 @@ impl TableMutation {
 				h
 			}
 			TableMutation::Def(t) => {
-				h.insert("define_table".to_string(), Value::from(t));
+				h.insert("define_table".to_string(), t.structure());
 				h
 			}
 			TableMutation::DelWithOriginal(id, _val) => {
 				h.insert(
 					"delete".to_string(),
 					Value::Object(Object::from(map! {
-					"id".to_string() => Value::RecordId(id),
+						"id".to_string() => Value::RecordId(id),
 					})),
 				);
 				h
@@ -152,7 +156,7 @@ impl Display for TableMutation {
 			TableMutation::SetWithDiff(id, _previous, v) => write!(f, "SET {} {:?}", id, v),
 			TableMutation::Del(id) => write!(f, "DEL {}", id),
 			TableMutation::DelWithOriginal(id, _) => write!(f, "DEL {}", id),
-			TableMutation::Def(t) => write!(f, "{}", t),
+			TableMutation::Def(t) => write!(f, "{}", t.to_sql()),
 		}
 	}
 }
@@ -182,7 +186,8 @@ impl Display for ChangeSet {
 	}
 }
 
-// WriteMutationSet is a set of mutations to be to a table at the specific timestamp.
+// WriteMutationSet is a set of mutations to be to a table at the specific
+// timestamp.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct WriteMutationSet(pub Vec<TableMutations>);
@@ -201,10 +206,10 @@ impl Default for WriteMutationSet {
 
 #[cfg(test)]
 mod tests {
-	use crate::expr::Ident;
+	use std::collections::HashMap;
 
 	use super::*;
-	use std::collections::HashMap;
+	use crate::catalog::{DatabaseId, NamespaceId, TableId};
 
 	#[test]
 	fn serialization() {
@@ -230,10 +235,12 @@ mod tests {
 						"mytb".to_owned(),
 						strand!("tobie").to_owned(),
 					)),
-					TableMutation::Def(DefineTableStatement {
-						name: Ident::new("mytb".to_owned()).unwrap(),
-						..DefineTableStatement::default()
-					}),
+					TableMutation::Def(TableDefinition::new(
+						NamespaceId(1),
+						DatabaseId(2),
+						TableId(3),
+						"mytb".to_string(),
+					)),
 				],
 			)]),
 		);
@@ -241,7 +248,7 @@ mod tests {
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,
-			r#"{"changes":[{"update":{"id":"mytb:tobie","note":"surreal"}},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":65536}"#
+			r#"{"changes":[{"update":{"id":"mytb:tobie","note":"surreal"}},{"delete":{"id":"mytb:tobie"}},{"define_table":{"drop":false,"kind":{"kind":"ANY"},"name":"mytb","permissions":{"create":false,"delete":false,"select":false,"update":false},"schemafull":false}}],"versionstamp":65536}"#
 		);
 	}
 
@@ -296,18 +303,20 @@ mod tests {
 								"note" => Value::from("surreal"),
 						})),
 					),
-					TableMutation::Def(DefineTableStatement {
-						name: Ident::new("mytb".to_owned()).unwrap(),
-						..DefineTableStatement::default()
-					}),
+					TableMutation::Def(TableDefinition::new(
+						NamespaceId(1),
+						DatabaseId(2),
+						TableId(3),
+						"mytb".to_string(),
+					)),
 				],
 			)]),
 		);
 		let v = cs.into_value().into_json_value().unwrap();
 		let s = serde_json::to_string(&v).unwrap();
-		let cmp = r#"{"changes":[{"current":{"id":"mytb:tobie","note":"surreal"},"update":[{"op":"add","path":"/note","value":"surreal"}]},{"current":{"id":"mytb:tobie2","note":"surreal"},"update":[{"op":"remove","path":"/temp"}]},{"delete":{"id":"mytb:tobie"}},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":65536}"#;
-		println!("{s}");
-		println!("{cmp}");
-		assert_eq!(s, cmp);
+		assert_eq!(
+			s,
+			r#"{"changes":[{"current":{"id":"mytb:tobie","note":"surreal"},"update":[{"op":"add","path":"/note","value":"surreal"}]},{"current":{"id":"mytb:tobie2","note":"surreal"},"update":[{"op":"remove","path":"/temp"}]},{"delete":{"id":"mytb:tobie"}},{"delete":{"id":"mytb:tobie"}},{"define_table":{"drop":false,"kind":{"kind":"ANY"},"name":"mytb","permissions":{"create":false,"delete":false,"select":false,"update":false},"schemafull":false}}],"versionstamp":65536}"#
+		);
 	}
 }

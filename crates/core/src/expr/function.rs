@@ -1,3 +1,11 @@
+use std::fmt;
+
+use futures::future::try_join_all;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::{ControlFlow, FlowResult, FlowResultExt as _, Kind};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -6,13 +14,6 @@ use crate::expr::fmt::Fmt;
 use crate::expr::{Expr, Ident, Idiom, Model, Permission, Script, Value};
 use crate::fnc;
 use crate::iam::Action;
-use futures::future::try_join_all;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-
-use super::{ControlFlow, FlowResult, FlowResultExt as _, Kind};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -105,7 +106,7 @@ impl Function {
 				// Check this function is allowed
 				ctx.check_allowed_function(name.as_str())?;
 				// Get the function definition
-				let (ns, db) = opt.ns_db()?;
+				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 				let val = ctx.tx().get_db_function(ns, db, s).await?;
 				// Check permissions
 				if opt.check_perms(Action::View)? {
@@ -165,7 +166,7 @@ impl Function {
 				// Process the function arguments
 				for (val, (name, kind)) in args.into_iter().zip(&val.args) {
 					ctx.add_value(
-						name.into_raw_string(),
+						name.as_raw_string(),
 						val.coerce_to_kind(kind)
 							.map_err(Error::from)
 							.map_err(anyhow::Error::new)?

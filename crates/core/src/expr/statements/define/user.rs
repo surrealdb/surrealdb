@@ -1,3 +1,15 @@
+use std::fmt::{self, Display};
+
+use anyhow::{Result, bail};
+use argon2::Argon2;
+use argon2::password_hash::{PasswordHasher, SaltString};
+use rand::Rng as _;
+use rand::distributions::Alphanumeric;
+use rand::rngs::OsRng;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::DefineKind;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -10,17 +22,6 @@ use crate::expr::{Base, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Strand, Value};
-use anyhow::{Result, bail};
-use argon2::Argon2;
-use argon2::password_hash::{PasswordHasher, SaltString};
-use rand::Rng as _;
-use rand::distributions::Alphanumeric;
-use rand::rngs::OsRng;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
-
-use super::DefineKind;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -73,12 +74,12 @@ impl DefineUserStatement {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if the definition exists
-				if txn.get_root_user(&self.name).await.is_ok() {
+				if let Some(user) = txn.get_root_user(&self.name).await? {
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::UserRootAlreadyExists {
-									name: self.name.to_string(),
+									name: user.name.to_string(),
 								});
 							}
 						}
@@ -106,13 +107,14 @@ impl DefineUserStatement {
 			Base::Ns => {
 				// Fetch the transaction
 				let txn = ctx.tx();
+				let ns = ctx.get_ns_id(opt).await?;
 				// Check if the definition exists
-				if txn.get_ns_user(opt.ns()?, &self.name).await.is_ok() {
+				if let Some(user) = txn.get_ns_user(ns, &self.name).await? {
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::UserNsAlreadyExists {
-									name: self.name.to_string(),
+									name: user.name.to_string(),
 									ns: opt.ns()?.into(),
 								});
 							}
@@ -121,9 +123,14 @@ impl DefineUserStatement {
 						DefineKind::IfNotExists => return Ok(Value::None),
 					}
 				}
+
+				let ns = {
+					let ns = opt.ns()?;
+					txn.get_or_add_ns(ns, opt.strict).await?
+				};
+
 				// Process the statement
-				let key = crate::key::namespace::us::new(opt.ns()?, &self.name);
-				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+				let key = crate::key::namespace::us::new(ns.namespace_id, &self.name);
 				txn.set(
 					&key,
 					&DefineUserStatement {
@@ -143,15 +150,15 @@ impl DefineUserStatement {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if the definition exists
-				let (ns, db) = opt.ns_db()?;
-				if txn.get_db_user(ns, db, &self.name).await.is_ok() {
+				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+				if let Some(user) = txn.get_db_user(ns, db, &self.name).await? {
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::UserDbAlreadyExists {
-									name: self.name.to_string(),
-									ns: ns.into(),
-									db: db.into(),
+									name: user.name.to_string(),
+									ns: opt.ns()?.to_string(),
+									db: opt.db()?.to_string(),
 								});
 							}
 						}
@@ -159,10 +166,15 @@ impl DefineUserStatement {
 						DefineKind::IfNotExists => return Ok(Value::None),
 					}
 				}
+
+				let db = {
+					let (ns, db) = opt.ns_db()?;
+					txn.get_or_add_db(ns, db, opt.strict).await?
+				};
+
 				// Process the statement
-				let key = crate::key::database::us::new(ns, db, &self.name);
-				txn.get_or_add_ns(ns, opt.strict).await?;
-				txn.get_or_add_db(ns, db, opt.strict).await?;
+				let key =
+					crate::key::database::us::new(db.namespace_id, db.database_id, &self.name);
 				txn.set(
 					&key,
 					&DefineUserStatement {

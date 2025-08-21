@@ -1,3 +1,10 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+
+use anyhow::{Result, bail};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -10,12 +17,6 @@ use crate::idx::ft::search::SearchIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::kvs::TransactionType;
 use crate::val::Value;
-use anyhow::{Result, bail};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::fmt::{Display, Formatter};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -31,7 +32,7 @@ impl AnalyzeStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Index, &Base::Db)?;
 				// Read the index
-				let (ns, db) = opt.ns_db()?;
+				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 				let ix = ctx.tx().get_tb_index(ns, db, tb, idx).await?;
 				let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 				// Index operation dispatching
@@ -39,7 +40,8 @@ impl AnalyzeStatement {
 					Index::Search(p) => {
 						let ft = SearchIndex::new(
 							ctx,
-							opt,
+							ns,
+							db,
 							p.az.as_str(),
 							ikb,
 							p,

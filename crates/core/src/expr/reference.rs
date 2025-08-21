@@ -1,3 +1,9 @@
+use std::fmt;
+
+use anyhow::{Result, bail};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use super::statements::info::InfoStructure;
 use super::{Idiom, Value};
 use crate::ctx::Context;
@@ -5,10 +11,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Expr, Ident};
-use anyhow::{Result, bail};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -89,7 +91,7 @@ impl Refs {
 				let rid = match &doc.rid {
 					Some(id) => id.as_ref().to_owned(),
 					None => match &doc.doc.rid() {
-						Value::Thing(id) => id.to_owned(),
+						Value::RecordId(id) => id.to_owned(),
 						_ => bail!(Error::InvalidRefsContext),
 					},
 				};
@@ -103,7 +105,7 @@ impl Refs {
 				}
 
 				// Convert the references into values
-				Array(ids.into_iter().map(Value::Thing).collect::<Vec<_>>())
+				Array(ids.into_iter().map(Value::RecordId).collect::<Vec<_>>())
 			}
 			None => bail!(Error::InvalidRefsContext),
 		};

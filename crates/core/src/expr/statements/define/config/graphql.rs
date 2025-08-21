@@ -1,11 +1,11 @@
 use std::fmt::{self, Display, Write};
 
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::expr::fmt::{Fmt, Pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Ident, Value};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -189,10 +189,10 @@ impl InfoStructure for FunctionsConfig {
 			FunctionsConfig::None => Value::None,
 			FunctionsConfig::Auto => Value::Strand("AUTO".into()),
 			FunctionsConfig::Include(fs) => Value::from(map!(
-				"include" => Value::Array(fs.into_iter().map(|i| Value::from(i.into_raw_string())).collect()),
+				"include" => Value::Array(fs.into_iter().map(|i| Value::from(i.as_raw_string())).collect()),
 			)),
 			FunctionsConfig::Exclude(fs) => Value::from(map!(
-				"exclude" => Value::Array(fs.into_iter().map(|i| Value::from(i.into_raw_string())).collect()),
+				"exclude" => Value::Array(fs.into_iter().map(|i| Value::from(i.as_raw_string())).collect()),
 			)),
 		}
 	}

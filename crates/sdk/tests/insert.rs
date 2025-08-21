@@ -2,12 +2,13 @@ use surrealdb_core::iam::Level;
 use surrealdb_core::syn;
 use surrealdb_core::val::{Array, Strand, Value};
 mod helpers;
-use crate::helpers::Test;
 use helpers::new_ds;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::expr::Part;
-use surrealdb::iam::Role;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::expr::Part;
+use surrealdb_core::iam::Role;
+
+use crate::helpers::Test;
 
 #[tokio::test]
 async fn insert_statement_object_single() -> Result<()> {
@@ -804,10 +805,15 @@ async fn insert_relation() -> Result<()> {
 #[tokio::test]
 async fn insert_ignore() -> Result<()> {
 	let sql = "
+		USE NS test DB test;
 		INSERT INTO user { id: 1, name: 'foo' };
 		INSERT IGNORE INTO user { id: 1, name: 'bar' };
 		";
 	let mut t = Test::new(sql).await?;
+	// USE NS test DB test;
+	let tmp = t.next()?.result;
+	tmp.unwrap();
+	//
 	t.expect_size(2)?;
 	t.expect_vals(&["[{ id: user:1, name: 'foo' }]", "[]"])?;
 	Ok(())

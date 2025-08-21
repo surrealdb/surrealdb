@@ -32,7 +32,8 @@ mod purge; // Deletes this document, and any edges or indexes
 mod store; // Writes the document content to the storage engine
 mod table; // Processes any foreign tables relevant for this document'
 
-/// Error result used when a function can result in the value being processed being ignored.
+/// Error result used when a function can result in the value being processed
+/// being ignored.
 #[derive(Debug)]
 pub enum IgnoreError {
 	Ignore,

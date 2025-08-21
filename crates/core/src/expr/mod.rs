@@ -1,8 +1,9 @@
 //! The type definitions for the computation format of the surreaql executor.
 
+use anyhow::Result;
+
 use crate::err::Error;
 use crate::val::Value;
-use anyhow::Result;
 
 pub(crate) mod access;
 pub(crate) mod access_type;
@@ -49,7 +50,6 @@ pub(crate) mod scoring;
 pub(crate) mod script;
 pub(crate) mod split;
 pub(crate) mod start;
-pub(crate) mod table_type;
 pub(crate) mod timeout;
 pub(crate) mod tokenizer;
 pub(crate) mod user;
@@ -84,12 +84,11 @@ pub use self::group::{Group, Groups};
 pub use self::ident::Ident;
 pub use self::idiom::{Idiom, Idioms};
 pub use self::index::Index;
-pub use self::kind::Kind;
-pub use self::kind::KindLiteral;
+pub use self::kind::{GeometryKind, Kind, KindLiteral};
 pub use self::limit::Limit;
 pub use self::literal::Literal;
 pub use self::mock::Mock;
-pub use self::model::Model;
+pub use self::model::{Model, get_model_path};
 pub use self::operation::Operation;
 pub use self::operator::{AssignOperator, BinaryOperator, PostfixOperator, PrefixOperator};
 pub use self::order::Order;
@@ -117,7 +116,6 @@ pub use self::statements::{
 	RemoveUserStatement, SelectStatement, SetStatement, ShowStatement, SleepStatement,
 	UpdateStatement, UpsertStatement, UseStatement,
 };
-pub use self::table_type::{Relation, TableType};
 pub use self::timeout::Timeout;
 pub use self::tokenizer::Tokenizer;
 pub use self::view::View;
@@ -145,10 +143,12 @@ impl From<anyhow::Error> for ControlFlow {
 
 /// Helper trait to catch controlflow return unwinding.
 pub trait FlowResultExt {
-	/// Function which catches `ControlFlow::Return(x)` and turns it into `Ok(x)`.
+	/// Function which catches `ControlFlow::Return(x)` and turns it into
+	/// `Ok(x)`.
 	///
-	/// If the error value is either `ControlFlow::Break` or `ControlFlow::Continue` it will
-	/// instead create an error that break/continue was used within an invalid location.
+	/// If the error value is either `ControlFlow::Break` or
+	/// `ControlFlow::Continue` it will instead create an error that
+	/// break/continue was used within an invalid location.
 	fn catch_return(self) -> Result<Value, anyhow::Error>;
 }
 

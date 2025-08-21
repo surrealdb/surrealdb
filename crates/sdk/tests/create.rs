@@ -2,11 +2,12 @@ use surrealdb_core::iam::Level;
 use surrealdb_core::val::{Array, RecordId};
 use surrealdb_core::{strand, syn};
 mod helpers;
-use crate::helpers::skip_ok;
 use helpers::new_ds;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::iam::Role;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::iam::Role;
+
+use crate::helpers::skip_ok;
 
 #[tokio::test]
 async fn create_or_insert_with_permissions() -> Result<()> {
@@ -197,6 +198,8 @@ async fn common_permissions_checks(auth_enabled: bool) {
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
+			ds.execute(&format!("USE NS {ns} DB {db}"), &sess, None).await.unwrap();
+
 			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
 			let res = resp.remove(0).output();
 
@@ -221,6 +224,8 @@ async fn common_permissions_checks(auth_enabled: bool) {
 		// Test the CREATE statement when the table already exists
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+
+			ds.execute(&format!("USE NS {ns} DB {db}"), &sess, None).await.unwrap();
 
 			let mut resp = ds
 				.execute("CREATE person", &Session::owner().with_ns("NS").with_db("DB"), None)

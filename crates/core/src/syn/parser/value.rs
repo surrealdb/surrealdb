@@ -5,7 +5,6 @@ use std::ops::Bound;
 use reblessive::Stk;
 
 use super::{ParseResult, Parser};
-
 use crate::sql::Ident;
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::{self, Numeric};
@@ -17,21 +16,21 @@ use crate::val::{
 };
 
 trait ValueParseFunc {
-	async fn parse(parser: &mut Parser<'_>, ctx: &mut Stk) -> ParseResult<Value>;
+	async fn parse(parser: &mut Parser<'_>, stk: &mut Stk) -> ParseResult<Value>;
 }
 
 struct SurrealQL;
 struct Json;
 
 impl ValueParseFunc for SurrealQL {
-	async fn parse(parser: &mut Parser<'_>, ctx: &mut Stk) -> ParseResult<Value> {
-		parser.parse_value(ctx).await
+	async fn parse(parser: &mut Parser<'_>, stk: &mut Stk) -> ParseResult<Value> {
+		parser.parse_value(stk).await
 	}
 }
 
 impl ValueParseFunc for Json {
-	async fn parse(parser: &mut Parser<'_>, ctx: &mut Stk) -> ParseResult<Value> {
-		parser.parse_json(ctx).await
+	async fn parse(parser: &mut Parser<'_>, stk: &mut Stk) -> ParseResult<Value> {
+		parser.parse_json(stk).await
 	}
 }
 
@@ -66,13 +65,15 @@ impl Parser<'_> {
 				//HACK: This is an annoying hack to have geometries work.
 				//
 				// Geometries look exactly like objects and are a strict subsect of objects.
-				// However in code they are distinct and in surrealql the have different behavior.
+				// However in code they are distinct and in surrealql the have different
+				// behavior.
 				//
 				// Geom functions don't work with objects and vice-versa.
 				//
-				// The previous parse automatically converted an object to geometry if it found an
-				// matching object. Now it no longer does that and relies on the 'planning' stage
-				// to convert it. But here we still need to do it in the parser.
+				// The previous parse automatically converted an object to geometry if it found
+				// an matching object. Now it no longer does that and relies on the
+				// 'planning' stage to convert it. But here we still need to do it in the
+				// parser.
 				if let Some(geom) = Geometry::try_from_object(&object) {
 					Value::Geometry(geom)
 				} else {
@@ -249,7 +250,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_json(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+	pub async fn parse_json(&mut self, stk: &mut Stk) -> ParseResult<Value> {
 		let token = self.peek();
 		match token.kind {
 			t!("NULL") => {
@@ -266,16 +267,16 @@ impl Parser<'_> {
 			}
 			t!("{") => {
 				self.pop_peek();
-				self.parse_value_object::<Json>(ctx, token.span).await.map(Value::Object)
+				self.parse_value_object::<Json>(stk, token.span).await.map(Value::Object)
 			}
 			t!("[") => {
 				self.pop_peek();
-				self.parse_value_array::<Json>(ctx, token.span).await.map(Value::Array)
+				self.parse_value_array::<Json>(stk, token.span).await.map(Value::Array)
 			}
 			t!("\"") | t!("'") => {
 				let strand: Strand = self.next_token_value()?;
 				if self.settings.legacy_strands {
-					Ok(self.reparse_json_legacy_strand(ctx, strand).await)
+					Ok(self.reparse_json_legacy_strand(stk, strand).await)
 				} else {
 					Ok(Value::Strand(strand))
 				}
@@ -298,7 +299,7 @@ impl Parser<'_> {
 				let glued = pop_glued!(self, Duration);
 				Ok(Value::Duration(glued))
 			}
-			_ => self.parse_value_record_id_inner::<Json>(ctx).await.map(Value::RecordId),
+			_ => self.parse_value_record_id_inner::<Json>(stk).await.map(Value::RecordId),
 		}
 	}
 
@@ -318,7 +319,7 @@ impl Parser<'_> {
 		Value::Strand(strand)
 	}
 
-	async fn parse_value_object<VP>(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Object>
+	async fn parse_value_object<VP>(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Object>
 	where
 		VP: ValueParseFunc,
 	{
@@ -329,7 +330,7 @@ impl Parser<'_> {
 			}
 			let key = self.parse_object_key()?;
 			expected!(self, t!(":"));
-			let value = ctx.run(|ctx| VP::parse(self, ctx)).await?;
+			let value = stk.run(|ctx| VP::parse(self, ctx)).await?;
 			obj.insert(key, value);
 
 			if !self.eat(t!(",")) {
@@ -339,7 +340,7 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn parse_value_array<VP>(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Array>
+	async fn parse_value_array<VP>(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Array>
 	where
 		VP: ValueParseFunc,
 	{
@@ -348,7 +349,7 @@ impl Parser<'_> {
 			if self.eat(t!("]")) {
 				return Ok(Array(array));
 			}
-			let value = ctx.run(|ctx| VP::parse(self, ctx)).await?;
+			let value = stk.run(|stk| VP::parse(self, stk)).await?;
 			array.push(value);
 
 			if !self.eat(t!(",")) {
@@ -358,11 +359,11 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_value_record_id(&mut self, ctx: &mut Stk) -> ParseResult<RecordId> {
-		self.parse_value_record_id_inner::<SurrealQL>(ctx).await
+	pub async fn parse_value_record_id(&mut self, stk: &mut Stk) -> ParseResult<RecordId> {
+		self.parse_value_record_id_inner::<SurrealQL>(stk).await
 	}
 
-	async fn parse_value_record_id_inner<VP>(&mut self, ctx: &mut Stk) -> ParseResult<RecordId>
+	async fn parse_value_record_id_inner<VP>(&mut self, stk: &mut Stk) -> ParseResult<RecordId>
 	where
 		VP: ValueParseFunc,
 	{
@@ -373,11 +374,11 @@ impl Parser<'_> {
 			t!("u'") | t!("u\"") => RecordIdKey::Uuid(self.next_token_value::<val::Uuid>()?),
 			t!("{") => {
 				let peek = self.pop_peek();
-				RecordIdKey::Object(self.parse_value_object::<VP>(ctx, peek.span).await?)
+				RecordIdKey::Object(self.parse_value_object::<VP>(stk, peek.span).await?)
 			}
 			t!("[") => {
 				let peek = self.pop_peek();
-				RecordIdKey::Array(self.parse_value_array::<VP>(ctx, peek.span).await?)
+				RecordIdKey::Array(self.parse_value_array::<VP>(stk, peek.span).await?)
 			}
 			t!("+") => {
 				self.pop_peek();

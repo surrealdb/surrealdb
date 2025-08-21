@@ -1,5 +1,6 @@
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
 
 use crate::val::{Object, Value};
 

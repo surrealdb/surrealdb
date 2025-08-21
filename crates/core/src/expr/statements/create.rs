@@ -1,3 +1,10 @@
+use std::fmt;
+
+use anyhow::{Result, ensure};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
@@ -6,12 +13,6 @@ use crate::expr::fmt::Fmt;
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::{Datetime, Value};
-use anyhow::{Result, ensure};
-
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -62,8 +63,10 @@ impl CreateStatement {
 		let opt = &opt.clone().with_version(version);
 		// Check if there is a timeout
 		let ctx = stm.setup_timeout(ctx)?;
+
 		// Get a query planner
 		let mut planner = QueryPlanner::new();
+
 		let stm_ctx = StatementContext::new(&ctx, opt, &stm)?;
 		// Loop over the create targets
 		for w in self.what.iter() {
@@ -86,6 +89,10 @@ impl CreateStatement {
 		}
 		// Attach the query planner to the context
 		let ctx = stm.setup_query_planner(planner, ctx);
+
+		// Ensure the database exists.
+		ctx.get_db(opt).await?;
+
 		// Process the statement
 		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout

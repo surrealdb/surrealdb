@@ -55,7 +55,8 @@ mod http_integration {
 			assert!(body.contains(r#"[{"result":[{"id":"foo:"#), "body: {body}");
 		}
 
-		// Prepare users with identical credentials on ROOT, NAMESPACE and DATABASE levels
+		// Prepare users with identical credentials on ROOT, NAMESPACE and DATABASE
+		// levels
 		{
 			let res =
 				client.post(url).basic_auth(USER, Some(PASS))
@@ -743,7 +744,8 @@ mod http_integration {
 			assert_eq!(res.status(), 401, "body: {}", res.text().await?);
 		}
 
-		// Signin with valid ROOT credentials without specifying NS nor DB and get the token
+		// Signin with valid ROOT credentials without specifying NS nor DB and get the
+		// token
 		{
 			let req_body = serde_json::to_string(
 				json!({
@@ -1170,7 +1172,7 @@ mod http_integration {
 			// Verify there are no records
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {body}");
+			assert_eq!(body["information"], "Table `table` not found", "body: {body}");
 
 			// Try to create the record
 			let res = client
@@ -1203,7 +1205,7 @@ mod http_integration {
 			// Verify the table is empty
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {body}");
+			assert_eq!(body["information"], "Table `table_noauth` not found", "body: {body}");
 		}
 
 		Ok(())

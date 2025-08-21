@@ -6,9 +6,10 @@ use crate::val::Value;
 impl Value {
 	/// Returns a list of idioms for then entries of a possibly nested value.
 	///
-	/// Exact behavior of this function is dictated by the ArrayBehaviour param and steps.
-	/// Steps enables intermediate idioms instead of only the leaf values.
-	/// For the changes in behavior with ArrayBehaviour see the docs for that enum.
+	/// Exact behavior of this function is dictated by the ArrayBehaviour param
+	/// and steps. Steps enables intermediate idioms instead of only the leaf
+	/// values. For the changes in behavior with ArrayBehaviour see the docs
+	/// for that enum.
 	pub(crate) fn every(
 		&self,
 		path: Option<&[Part]>,
