@@ -11,6 +11,7 @@ use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
 use crate::key::thing;
+use crate::kvs::KVValue;
 use crate::sql::ToSql;
 use crate::val::record::Record;
 use crate::val::{RecordId, Strand, Value};
@@ -531,10 +532,10 @@ impl Transaction {
 			}
 
 			let k = thing::ThingKey::decode_key(&k)?;
-			let v = if v.is_empty() {
+			let v: Record = if v.is_empty() {
 				Default::default()
 			} else {
-				revision::from_slice(&v)?
+				KVValue::kv_decode_value(v)?
 			};
 			// Process the value and generate the appropriate SQL command.
 			let sql = Self::process_record(
@@ -614,7 +615,7 @@ impl Transaction {
 		// Process each regular value.
 		for (k, v) in regular_values {
 			let k = thing::ThingKey::decode_key(&k)?;
-			let v = revision::from_slice(&v)?;
+			let v = Record::kv_decode_value(v)?;
 			// Process the value and categorize it into records_relate or records_normal.
 			Self::process_record(k, v, &mut records_relate, &mut records_normal, None, None);
 		}

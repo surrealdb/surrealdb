@@ -8,6 +8,7 @@ use revision::{Revisioned, revisioned};
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize, Serializer};
 
+use crate::kvs::impl_kv_value_revisioned;
 use crate::val::Value;
 
 /// Represents a record stored in the database
@@ -19,6 +20,8 @@ pub struct Record {
 	pub(crate) metadata: Option<Metadata>,
 	pub(crate) data: Data,
 }
+
+impl_kv_value_revisioned!(Record);
 
 impl Record {
 	pub(crate) fn new(data: Data) -> Self {

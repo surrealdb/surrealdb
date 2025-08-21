@@ -103,6 +103,14 @@ impl CursorDoc {
 	}
 }
 
+impl From<Record> for CursorRecord {
+	fn from(record: Record) -> Self {
+		Self {
+			record,
+		}
+	}
+}
+
 impl From<Arc<Record>> for CursorRecord {
 	fn from(arc: Arc<Record>) -> Self {
 		Self {

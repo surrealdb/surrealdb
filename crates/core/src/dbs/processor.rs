@@ -19,7 +19,7 @@ use crate::expr::graph::ComputedGraphSubject;
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, thing};
-use crate::kvs::{KVKey, Key, Transaction, Val};
+use crate::kvs::{KVKey, KVValue, Key, Transaction, Val};
 use crate::syn;
 use crate::val::record::{Data, Record};
 use crate::val::{RecordId, RecordIdKeyRange, Value};
@@ -341,7 +341,7 @@ impl Collected {
 
 	fn process_key_val(key: Key, val: Val) -> Result<Processed> {
 		let key = thing::ThingKey::decode_key(&key)?;
-		let mut val: Record = revision::from_slice(&val)?;
+		let mut val = Record::kv_decode_value(val)?;
 		let rid = RecordId {
 			table: key.tb.to_owned(),
 			key: key.id,
