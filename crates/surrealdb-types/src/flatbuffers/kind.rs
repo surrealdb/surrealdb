@@ -4,7 +4,7 @@ use rust_decimal::Decimal;
 use surrealdb_protocol::fb::v1 as proto_fb;
 
 use super::{FromFlatbuffers, ToFlatbuffers};
-use crate::{Duration, Kind, KindLiteral};
+use crate::{Duration, GeometryKind, Kind, KindLiteral};
 
 impl ToFlatbuffers for Kind {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Kind<'bldr>>;
@@ -142,24 +142,23 @@ impl ToFlatbuffers for Kind {
 					),
 				}
 			}
-			Self::Geometry(_types) => {
-				todo!();
-				// let type_offsets: Vec<_> =
-				// 	types.iter().map(|t| builder.create_string(t.as_str())).collect();
-				// let types = builder.create_vector(&type_offsets);
+			Self::Geometry(types) => {
+				let type_offsets: Vec<_> =
+					types.iter().map(|t| t.to_fb(builder)).collect::<anyhow::Result<Vec<_>>>()?;
+				let types = builder.create_vector(&type_offsets);
 
-				// proto_fb::KindArgs {
-				// 	kind_type: proto_fb::KindType::Geometry,
-				// 	kind: Some(
-				// 		proto_fb::GeometryKind::create(
-				// 			builder,
-				// 			&proto_fb::GeometryKindArgs {
-				// 				types: Some(types),
-				// 			},
-				// 		)
-				// 		.as_union_value(),
-				// 	),
-				// }
+				proto_fb::KindArgs {
+					kind_type: proto_fb::KindType::Geometry,
+					kind: Some(
+						proto_fb::GeometryKind::create(
+							builder,
+							&proto_fb::GeometryKindArgs {
+								types: Some(types),
+							},
+						)
+						.as_union_value(),
+					),
+				}
 			}
 			Self::Option(kind) => {
 				let inner = kind.to_fb(builder)?;
@@ -437,16 +436,15 @@ impl FromFlatbuffers for Kind {
 				Ok(Kind::Record(tables))
 			}
 			KindType::Geometry => {
-				todo!();
-				// let Some(geometry) = input.kind_as_geometry() else {
-				// 	return Err(anyhow::anyhow!("Missing geometry kind"));
-				// };
-				// let types = if let Some(types) = geometry.types() {
-				// 	types.iter().map(|t| t.to_string()).collect()
-				// } else {
-				// 	Vec::new()
-				// };
-				// Ok(Kind::Geometry(types))
+				let Some(geometry) = input.kind_as_geometry() else {
+					return Err(anyhow::anyhow!("Missing geometry kind"));
+				};
+				let types = if let Some(types) = geometry.types() {
+					types.iter().map(|t| GeometryKind::from_fb(t)).collect::<anyhow::Result<Vec<_>>>()?
+				} else {
+					Vec::new()
+				};
+				Ok(Kind::Geometry(types))
 			}
 			KindType::Set => {
 				let Some(set) = input.kind_as_set() else {
@@ -604,6 +602,43 @@ impl FromFlatbuffers for KindLiteral {
 	}
 }
 
+impl ToFlatbuffers for GeometryKind {
+	type Output<'bldr> = proto_fb::GeometryKindType;
+
+	fn to_fb<'bldr>(
+		&self,
+		_builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> anyhow::Result<Self::Output<'bldr>> {
+		Ok(match self {
+			GeometryKind::Point => proto_fb::GeometryKindType::Point,
+			GeometryKind::Line => proto_fb::GeometryKindType::Line,
+			GeometryKind::Polygon => proto_fb::GeometryKindType::Polygon,
+			GeometryKind::MultiPoint => proto_fb::GeometryKindType::MultiPoint,
+			GeometryKind::MultiLine => proto_fb::GeometryKindType::MultiLineString,
+			GeometryKind::MultiPolygon => proto_fb::GeometryKindType::MultiPolygon,
+			GeometryKind::Collection => proto_fb::GeometryKindType::Collection,
+		})
+	}
+}
+
+impl FromFlatbuffers for GeometryKind {
+	type Input<'a> = proto_fb::GeometryKindType;
+
+	#[inline]
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		match input {
+			proto_fb::GeometryKindType::Point => Ok(GeometryKind::Point),
+			proto_fb::GeometryKindType::Line => Ok(GeometryKind::Line),
+			proto_fb::GeometryKindType::Polygon => Ok(GeometryKind::Polygon),
+			proto_fb::GeometryKindType::MultiPoint => Ok(GeometryKind::MultiPoint),
+			proto_fb::GeometryKindType::MultiLineString => Ok(GeometryKind::MultiLine),
+			proto_fb::GeometryKindType::MultiPolygon => Ok(GeometryKind::MultiPolygon),
+			proto_fb::GeometryKindType::Collection => Ok(GeometryKind::Collection),
+			_ => Err(anyhow::anyhow!("Unknown geometry kind type: {:?}", input)),
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use std::collections::BTreeMap;
@@ -632,7 +667,7 @@ mod tests {
 	#[case::regex(Kind::Regex)]
 	#[case::range(Kind::Range)]
 	#[case::record(Kind::Record(vec!["test_table".to_string()]))]
-	// #[case::geometry(Kind::Geometry(vec![KindGeometry::Point, KindGeometry::Polygon]))]
+	#[case::geometry(Kind::Geometry(vec![GeometryKind::Point, GeometryKind::Polygon]))]
 	#[case::option(Kind::Option(Box::new(Kind::String)))]
 	#[case::either(Kind::Either(vec![Kind::String, Kind::Number]))]
 	#[case::set(Kind::Set(Box::new(Kind::String), Some(10)))]

@@ -22,15 +22,14 @@ regex.workspace = true
 rstest.workspace = true
 rust_decimal.workspace = true
 serde = { workspace = true, features = ["derive"] }
+surrealdb-protocol = { workspace = true, features = ["flatbuffers"] }
 
 # WASM DEPENDENCY CONFIGURATION
 [target.'cfg(target_family = "wasm")'.dependencies]
-surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers"] }
 uuid = { workspace = true, features = ["serde", "v4", "v7", "js"] }
 
 # NON-WASM DEPENDENCY CONFIGURATION
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers", "rpc"] }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
 [lints]

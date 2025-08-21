@@ -1,4 +1,4 @@
-use crate::{KindGeometry, KindLiteral};
+use crate::{GeometryKind, KindLiteral};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -39,7 +39,7 @@ pub enum Kind {
 	/// A geometry type.
 	/// The vec contains the geometry types as strings, for example `"point"` or
 	/// `"polygon"`. TODO(3.0): Change to use an enum
-	Geometry(Vec<KindGeometry>),
+	Geometry(Vec<GeometryKind>),
 	/// An optional type.
 	Option(Box<Kind>),
 	/// An either type.

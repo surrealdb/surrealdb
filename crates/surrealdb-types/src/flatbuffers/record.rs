@@ -251,7 +251,10 @@ impl ToFlatbuffers for Bound<RecordIdKey> {
 				let id_value = id.to_fb(builder)?.as_union_value();
 				(proto_fb::RecordIdKeyBound::Exclusive, Some(id_value))
 			}
-			Bound::Unbounded => (proto_fb::RecordIdKeyBound::Unbounded, None),
+			Bound::Unbounded => {
+				let null_value = proto_fb::NullValue::create(builder, &proto_fb::NullValueArgs {});
+				(proto_fb::RecordIdKeyBound::Unbounded, Some(null_value.as_union_value()))
+			}
 		})
 	}
 }

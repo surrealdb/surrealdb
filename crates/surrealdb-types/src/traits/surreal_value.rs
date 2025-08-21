@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use rust_decimal::Decimal;
-use crate::{Array, Bytes, Datetime, Duration, File, Geometry, Kind, KindGeometry, KindLiteral, Number, Object, Range, RecordId, SurrealNone, SurrealNull, Uuid, Value};
+use crate::{Array, Bytes, Datetime, Duration, File, Geometry, Kind, GeometryKind, KindLiteral, Number, Object, Range, RecordId, SurrealNone, SurrealNull, Uuid, Value};
 
 pub trait SurrealValue {
     fn kind_of() -> Kind;
@@ -492,7 +492,7 @@ impl_surreal_value_generic!(
 
 // Geometry implementations
 impl_surreal_value_concrete!(
-    geo::Point as Kind::Geometry(vec![KindGeometry::Point]),
+    geo::Point as Kind::Geometry(vec![GeometryKind::Point]),
     is_point(value) => matches!(value, Value::Geometry(Geometry::Point(_))),
     from_point(self) => Value::Geometry(Geometry::Point(self)),
     into_point(value) => {
@@ -504,7 +504,7 @@ impl_surreal_value_concrete!(
 );
 
 impl_surreal_value_concrete!(
-    geo::LineString as Kind::Geometry(vec![KindGeometry::Line]),
+    geo::LineString as Kind::Geometry(vec![GeometryKind::Line]),
     is_line(value) => matches!(value, Value::Geometry(Geometry::Line(_))),
     from_line(self) => Value::Geometry(Geometry::Line(self)),
     into_line(value) => {
@@ -516,7 +516,7 @@ impl_surreal_value_concrete!(
 );
 
 impl_surreal_value_concrete!(
-    geo::Polygon as Kind::Geometry(vec![KindGeometry::Polygon]),
+    geo::Polygon as Kind::Geometry(vec![GeometryKind::Polygon]),
     is_polygon(value) => matches!(value, Value::Geometry(Geometry::Polygon(_))),
     from_polygon(self) => Value::Geometry(Geometry::Polygon(self)),
     into_polygon(value) => {
@@ -528,7 +528,7 @@ impl_surreal_value_concrete!(
 );
 
 impl_surreal_value_concrete!(
-    geo::MultiPoint as Kind::Geometry(vec![KindGeometry::MultiPoint]),
+    geo::MultiPoint as Kind::Geometry(vec![GeometryKind::MultiPoint]),
     is_multipoint(value) => matches!(value, Value::Geometry(Geometry::MultiPoint(_))),
     from_multipoint(self) => Value::Geometry(Geometry::MultiPoint(self)),
     into_multipoint(value) => {
@@ -540,7 +540,7 @@ impl_surreal_value_concrete!(
 );
 
 impl_surreal_value_concrete!(
-    geo::MultiLineString as Kind::Geometry(vec![KindGeometry::MultiLine]),
+    geo::MultiLineString as Kind::Geometry(vec![GeometryKind::MultiLine]),
     is_multiline(value) => matches!(value, Value::Geometry(Geometry::MultiLine(_))),
     from_multiline(self) => Value::Geometry(Geometry::MultiLine(self)),
     into_multiline(value) => {
@@ -552,7 +552,7 @@ impl_surreal_value_concrete!(
 );
 
 impl_surreal_value_concrete!(
-    geo::MultiPolygon as Kind::Geometry(vec![KindGeometry::MultiPolygon]),
+    geo::MultiPolygon as Kind::Geometry(vec![GeometryKind::MultiPolygon]),
     is_multipolygon(value) => matches!(value, Value::Geometry(Geometry::MultiPolygon(_))),
     from_multipolygon(self) => Value::Geometry(Geometry::MultiPolygon(self)),
     into_multipolygon(value) => {

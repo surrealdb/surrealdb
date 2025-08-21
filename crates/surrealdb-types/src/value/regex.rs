@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
+use regex::RegexBuilder;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -9,6 +10,26 @@ pub(crate) const REGEX_TOKEN: &str = "$surrealdb::public::Regex";
 
 #[derive(Clone)]
 pub struct Regex(pub regex::Regex);
+
+impl Regex {
+	// Deref would expose `regex::Regex::as_str` which wouldn't have the '/'
+	// delimiters.
+	pub fn regex(&self) -> &regex::Regex {
+		&self.0
+	}
+}
+
+impl FromStr for Regex {
+	type Err = <regex::Regex as FromStr>::Err;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		if s.contains('\0') {
+			Err(regex::Error::Syntax("regex contained NUL byte".to_owned()))
+		} else {
+			Ok(Regex(RegexBuilder::new(&s.replace("\\/", "/")).build()?))
+		}
+	}
+}
 
 impl PartialEq for Regex {
 	fn eq(&self, other: &Self) -> bool {
