@@ -28,11 +28,6 @@ pub mod geometry;
 pub mod number;
 pub mod object;
 pub mod range;
-/// Record module for database records with metadata support
-///
-/// This module provides the `Record` type which wraps database values with optional metadata.
-/// Records can contain information about their type (e.g., whether they represent graph edges)
-/// and can store data in either mutable or read-only form for performance optimization.
 pub mod record;
 pub mod record_id;
 pub mod regex;
