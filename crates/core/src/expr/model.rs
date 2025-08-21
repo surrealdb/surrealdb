@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::fmt;
 
 use reblessive::tree::Stk;
-use revision::revisioned;
 #[cfg(feature = "ml")]
 use surrealml::errors::error::SurrealError;
 #[cfg(feature = "ml")]

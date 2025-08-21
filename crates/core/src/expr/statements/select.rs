@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
-use revision::revisioned;
 
 use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};

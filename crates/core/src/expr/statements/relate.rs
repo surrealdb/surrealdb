@@ -2,7 +2,6 @@ use std::fmt;
 
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
-use revision::revisioned;
 
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};

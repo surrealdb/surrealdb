@@ -5,9 +5,8 @@ use std::fmt::{self, Display};
 use anyhow::{Result, bail};
 use api::ApiConfig;
 use reblessive::tree::Stk;
-use revision::revisioned;
 
-use crate::catalog::{ConfigStore, GraphQLConfig};
+use crate::catalog::{ConfigDefinition, GraphQLConfig};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -65,8 +64,8 @@ impl DefineConfigStatement {
 		}
 
 		let store = match &self.inner {
-			ConfigInner::GraphQL(g) => ConfigStore::GraphQL(g.clone().into()),
-			ConfigInner::Api(a) => ConfigStore::Api(a.compute(stk, ctx, opt, doc).await?),
+			ConfigInner::GraphQL(g) => ConfigDefinition::GraphQL(g.clone().into()),
+			ConfigInner::Api(a) => ConfigDefinition::Api(a.compute(stk, ctx, opt, doc).await?),
 		};
 
 		// Process the statement

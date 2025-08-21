@@ -2,7 +2,6 @@ use std::fmt;
 
 use anyhow::Result;
 use chrono::{TimeZone, Utc};
-use revision::revisioned;
 
 use crate::val::{Datetime, Duration, Value};
 

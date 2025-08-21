@@ -1,7 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
-use revision::revisioned;
 use uuid::Uuid;
 
 use crate::catalog::TableDefinition;

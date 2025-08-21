@@ -3,7 +3,6 @@ use std::{fmt, str};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use revision::revisioned;
 
 use super::FlowResultExt as _;
 use crate::catalog::Permission;

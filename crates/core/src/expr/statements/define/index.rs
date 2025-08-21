@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use revision::revisioned;
 use uuid::Uuid;
 
 use super::DefineKind;
@@ -21,7 +20,6 @@ use crate::expr::Output;
 use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
 use crate::expr::{Base, Ident, Idiom, Part};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::ToSql;
 use crate::sql::fmt::Fmt;
 use crate::val::{Strand, Value};

@@ -1,7 +1,5 @@
 use std::fmt;
 
-use revision::revisioned;
-
 use crate::expr::escape::EscapeIdent;
 use crate::val::{RecordId, RecordIdKey};
 

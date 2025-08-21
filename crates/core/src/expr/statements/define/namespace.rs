@@ -1,7 +1,6 @@
 use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
-use revision::revisioned;
 
 use super::DefineKind;
 use crate::catalog::NamespaceDefinition;
@@ -11,7 +10,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Ident};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Strand, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]

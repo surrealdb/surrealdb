@@ -135,13 +135,7 @@ impl Permissions {
 	}
 
 	pub fn to_sql_definition(&self) -> crate::sql::Permissions {
-		todo!("STU")
-		// crate::sql::Permissions {
-		// 	select: self.select.into(),
-		// 	create: self.create.into(),
-		// 	update: self.update.into(),
-		// 	delete: self.delete.into(),
-		// }
+		self.clone().into()
 	}
 }
 

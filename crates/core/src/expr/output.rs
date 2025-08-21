@@ -1,7 +1,5 @@
 use std::fmt::{self, Display};
 
-use revision::revisioned;
-
 use crate::expr::field::Fields;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

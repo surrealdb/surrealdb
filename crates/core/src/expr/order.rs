@@ -1,8 +1,6 @@
 use std::ops::Deref;
 use std::{cmp, fmt};
 
-use revision::revisioned;
-
 use crate::expr::Value;
 use crate::expr::fmt::Fmt;
 use crate::expr::idiom::Idiom;

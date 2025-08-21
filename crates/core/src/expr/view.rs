@@ -1,7 +1,5 @@
 use std::fmt;
 
-use revision::revisioned;
-
 use crate::catalog::ViewDefinition;
 use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
@@ -18,10 +16,10 @@ pub struct View {
 impl View {
 	pub(crate) fn to_definition(&self) -> ViewDefinition {
 		ViewDefinition {
-			expr: self.expr.clone(),
+			fields: self.expr.clone(),
 			what: self.what.iter().map(|s| s.to_raw_string()).collect(),
 			cond: self.cond.clone().map(|c| c.0),
-			group: self.group.clone(),
+			groups: self.group.clone(),
 		}
 	}
 }

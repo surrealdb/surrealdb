@@ -3,7 +3,6 @@ use std::str::FromStr;
 use std::{fmt, ops};
 
 use anyhow::{Result, bail, ensure};
-use revision::revisioned;
 
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;

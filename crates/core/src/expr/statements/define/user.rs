@@ -6,7 +6,6 @@ use argon2::password_hash::{PasswordHasher, SaltString};
 use rand::Rng as _;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
-use revision::revisioned;
 
 use super::DefineKind;
 use crate::catalog::{self, UserDefinition};

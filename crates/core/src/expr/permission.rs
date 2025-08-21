@@ -1,8 +1,6 @@
 use std::fmt::{self, Display, Formatter, Write};
 use std::str;
 
-use revision::revisioned;
-
 use crate::expr::Expr;
 use crate::expr::fmt::{is_pretty, pretty_indent, pretty_sequence_item};
 use crate::expr::statements::info::InfoStructure;
@@ -17,24 +15,6 @@ pub struct Permissions {
 }
 
 impl Permissions {
-	pub fn none() -> Self {
-		Permissions {
-			select: Permission::None,
-			create: Permission::None,
-			update: Permission::None,
-			delete: Permission::None,
-		}
-	}
-
-	pub fn full() -> Self {
-		Permissions {
-			select: Permission::Full,
-			create: Permission::Full,
-			update: Permission::Full,
-			delete: Permission::Full,
-		}
-	}
-
 	pub fn is_none(&self) -> bool {
 		self.select == Permission::None
 			&& self.create == Permission::None

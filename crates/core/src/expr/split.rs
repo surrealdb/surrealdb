@@ -1,8 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
-use revision::revisioned;
-
 use crate::expr::fmt::Fmt;
 use crate::expr::idiom::Idiom;
 

@@ -3,7 +3,6 @@ use std::fmt::{Display, Formatter};
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::revisioned;
 
 use crate::ctx::Context;
 use crate::dbs::Options;

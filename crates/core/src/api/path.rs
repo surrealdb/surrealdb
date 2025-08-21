@@ -2,7 +2,7 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str::FromStr;
 
-use revision::{Revisioned, revisioned};
+use revision::Revisioned;
 
 use crate::err::Error;
 use crate::expr::Kind;
@@ -233,17 +233,13 @@ impl Revisioned for Path {
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		writer.write_all(self.to_string().as_bytes()).map_err(revision::Error::Io)?;
+		self.to_string().serialize_revisioned(writer)?;
 		Ok(())
 	}
 
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		let mut buf = Vec::new();
-		reader.read_to_end(&mut buf).map_err(revision::Error::Io)?;
-		std::str::from_utf8(&buf)
-			.map_err(|err| revision::Error::Utf8Error(err))?
-			.parse()
-			.map_err(|err: Error| revision::Error::Conversion(err.to_string()))
+		let path: String = Revisioned::deserialize_revisioned(reader)?;
+		path.parse().map_err(|err: Error| revision::Error::Conversion(err.to_string()))
 	}
 }
 

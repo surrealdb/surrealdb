@@ -2,7 +2,6 @@ use std::fmt;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use revision::revisioned;
 
 use super::config::api::ApiConfig;
 use super::{CursorDoc, DefineKind};

@@ -3,7 +3,6 @@ use std::ops::Deref;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::revisioned;
 
 use super::AlterKind;
 use crate::catalog::{Permissions, TableType};

@@ -1,7 +1,5 @@
 use std::fmt;
 
-use revision::revisioned;
-
 use crate::catalog::Distance;
 use crate::expr::fmt::Fmt;
 use crate::expr::{Expr, Ident, Kind};

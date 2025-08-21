@@ -8,16 +8,16 @@ use crate::val::Value;
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ViewDefinition {
-	pub expr: Fields,
+	pub fields: Fields,
 	pub what: Vec<String>,
 	pub cond: Option<Expr>,
-	pub group: Option<Groups>,
+	pub groups: Option<Groups>,
 }
 
 impl ViewDefinition {
 	pub(crate) fn to_sql_definition(&self) -> View {
 		View {
-			expr: self.expr.clone().into(),
+			expr: self.fields.clone().into(),
 			// SAFETY: we know the names are valid because they were validated when the view was
 			// created.
 			what: self
@@ -27,7 +27,7 @@ impl ViewDefinition {
 				.map(|s| unsafe { Ident::new_unchecked(s) })
 				.collect(),
 			cond: self.cond.clone().map(|e| crate::sql::Cond(e.into())),
-			group: self.group.clone().map(Into::into),
+			group: self.groups.clone().map(Into::into),
 		}
 	}
 }

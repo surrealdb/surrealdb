@@ -1,7 +1,5 @@
 use std::fmt;
 
-use revision::revisioned;
-
 use super::Expr;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

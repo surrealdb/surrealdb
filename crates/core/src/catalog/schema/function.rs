@@ -1,82 +1,44 @@
-use anyhow::Result;
-use reblessive::Stack;
 use revision::revisioned;
 
 use crate::catalog::Permission;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Expr, Kind};
-use crate::kvs::{KVValue, impl_kv_value_revisioned};
+use crate::expr::{Block, Kind};
+use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::statements::define::DefineKind;
 use crate::sql::{DefineFunctionStatement, ToSql};
-use crate::syn::parser::Parser;
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-struct FunctionDefinitionStore {
-	pub name: String,
-	pub args: Vec<(String, Kind)>,
-	pub block: String,
-	pub comment: Option<String>,
-	pub permissions: Permission,
-	pub returns: Option<Kind>,
-}
-
-impl_kv_value_revisioned!(FunctionDefinitionStore);
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct FunctionDefinition {
 	pub name: String,
 	pub args: Vec<(String, Kind)>,
-	pub block: Expr,
+	pub block: Block,
 	pub comment: Option<String>,
 	pub permissions: Permission,
 	pub returns: Option<Kind>,
 }
 
+impl_kv_value_revisioned!(FunctionDefinition);
+
 impl FunctionDefinition {
-	fn to_store(&self) -> FunctionDefinitionStore {
-		FunctionDefinitionStore {
-			name: self.name.clone(),
-			args: self.args.clone(),
-			block: self.block.to_string(),
-			comment: self.comment.clone(),
-			permissions: self.permissions.clone(),
-			returns: self.returns.clone(),
-		}
-	}
-
-	fn from_store(store: FunctionDefinitionStore) -> Result<Self> {
-		let mut stack = Stack::new();
-		let mut parser = Parser::new(&store.block.as_bytes());
-		let block = stack
-			.enter(|stk| parser.parse_expr(stk))
-			.finish()
-			.map_err(|err| anyhow::anyhow!("Failed to parse function block: {err:?}"))?;
-
-		Ok(FunctionDefinition {
-			name: store.name,
-			args: store.args,
-			block: block.into(),
-			comment: store.comment,
-			permissions: store.permissions,
-			returns: store.returns,
-		})
-	}
-
 	fn to_sql_definition(&self) -> DefineFunctionStatement {
-		todo!("STU")
-	}
-}
-
-impl KVValue for FunctionDefinition {
-	fn kv_encode_value(&self) -> Result<Vec<u8>> {
-		let store = self.to_store();
-		Ok(store.kv_encode_value()?)
-	}
-
-	fn kv_decode_value(bytes: Vec<u8>) -> Result<Self> {
-		let store = FunctionDefinitionStore::kv_decode_value(bytes)?;
-		FunctionDefinition::from_store(store)
+		DefineFunctionStatement {
+			kind: DefineKind::Default,
+			name: unsafe { crate::sql::Ident::new_unchecked(self.name.clone()) },
+			args: self
+				.args
+				.clone()
+				.into_iter()
+				.map(|(n, k)| {
+					(unsafe { crate::sql::Ident::new_unchecked(n) }, crate::sql::Kind::from(k))
+				})
+				.collect(),
+			block: self.block.clone().into(),
+			permissions: self.permissions.clone().into(),
+			returns: self.returns.clone().map(|k| k.into()),
+			comment: self.comment.clone().map(Into::into),
+		}
 	}
 }
 

@@ -1,7 +1,5 @@
 use std::fmt;
 
-use revision::revisioned;
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Explain(pub bool);
 

@@ -4,6 +4,7 @@ use crate::catalog::Permission;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::ToSql;
+use crate::sql::statements::define::DefineKind;
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
@@ -20,7 +21,14 @@ impl_kv_value_revisioned!(MlModelDefinition);
 
 impl MlModelDefinition {
 	fn to_sql_definition(&self) -> crate::sql::DefineModelStatement {
-		todo!("STU")
+		crate::sql::DefineModelStatement {
+			kind: DefineKind::Default,
+			hash: self.hash.clone(),
+			name: unsafe { crate::sql::Ident::new_unchecked(self.name.clone()) },
+			version: self.version.clone(),
+			permissions: self.permissions.clone().into(),
+			comment: self.comment.clone().map(Into::into),
+		}
 	}
 }
 

@@ -2,7 +2,6 @@ use std::fmt::{self, Display, Write};
 use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
-use revision::revisioned;
 use uuid::Uuid;
 
 use super::DefineKind;
@@ -19,7 +18,7 @@ use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Ident, Idiom, Kind, Part};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::{Transaction, impl_kv_value_revisioned};
+use crate::kvs::Transaction;
 use crate::val::{Strand, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -60,7 +59,7 @@ impl DefineFieldStatement {
 
 		catalog::FieldDefinition {
 			name: self.name.clone(),
-			what: self.what.clone().to_string(),
+			what: self.what.clone().to_raw_string(),
 			flexible: self.flex,
 			field_kind: self.field_kind.clone(),
 			readonly: self.readonly,
@@ -262,7 +261,7 @@ impl DefineFieldStatement {
 						what: self.what.clone().into_string(),
 						flexible: self.flex,
 						field_kind: Some(cur_kind),
-						//reference: self.reference.clone(),
+						reference: self.reference.clone(),
 						..Default::default()
 					}
 				};

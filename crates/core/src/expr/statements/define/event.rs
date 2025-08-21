@@ -1,7 +1,6 @@
 use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
-use revision::revisioned;
 use uuid::Uuid;
 
 use super::DefineKind;
@@ -12,7 +11,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Expr, Ident};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::fmt::Fmt;
 use crate::val::{Strand, Value};
 

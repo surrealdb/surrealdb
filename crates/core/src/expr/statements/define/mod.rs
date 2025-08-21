@@ -33,7 +33,6 @@ pub use model::DefineModelStatement;
 pub use namespace::DefineNamespaceStatement;
 pub use param::DefineParamStatement;
 use reblessive::tree::Stk;
-use revision::revisioned;
 pub use sequence::DefineSequenceStatement;
 pub use table::DefineTableStatement;
 pub use user::DefineUserStatement;

@@ -1,7 +1,6 @@
 use std::fmt;
 
 use anyhow::Result;
-use revision::revisioned;
 
 use crate::ctx::Context;
 use crate::dbs::Options;

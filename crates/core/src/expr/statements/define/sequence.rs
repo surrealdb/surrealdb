@@ -1,7 +1,6 @@
 use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
-use revision::revisioned;
 
 use super::DefineKind;
 use crate::catalog::SequenceDefinition;
@@ -12,7 +11,6 @@ use crate::expr::{Base, Ident, Timeout, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
-use crate::kvs::impl_kv_value_revisioned;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineSequenceStatement {

@@ -3,7 +3,6 @@ use std::fmt::{self, Write as _};
 use std::hash::{Hash, Hasher};
 
 use reblessive::tree::Stk;
-use revision::revisioned;
 use rust_decimal::Decimal;
 
 use crate::ctx::Context;

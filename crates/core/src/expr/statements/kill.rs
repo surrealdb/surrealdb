@@ -2,7 +2,6 @@ use std::fmt;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use revision::revisioned;
 
 use crate::ctx::Context;
 use crate::dbs::{Action, Notification, Options};

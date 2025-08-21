@@ -1,7 +1,6 @@
 use std::fmt::{self, Display, Write};
 
 use anyhow::{Result, bail};
-use revision::revisioned;
 
 use super::DefineKind;
 use crate::catalog::{FunctionDefinition, Permission};
@@ -10,9 +9,8 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::{Base, Block, Expr, Ident, Kind};
+use crate::expr::{Base, Block, Ident, Kind};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Strand, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -67,7 +65,7 @@ impl DefineFunctionStatement {
 			&FunctionDefinition {
 				name: self.name.to_raw_string(),
 				args: self.args.clone().into_iter().map(|(n, k)| (n.to_raw_string(), k)).collect(),
-				block: Expr::Block(Box::new(self.block.clone())),
+				block: self.block.clone(),
 				comment: self.comment.clone().map(|c| c.into_string()),
 				permissions: self.permissions.clone(),
 				returns: self.returns.clone(),

@@ -3,7 +3,6 @@ use std::ops::Bound;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::revisioned;
 
 use super::RecordIdKeyLit;
 use crate::ctx::Context;

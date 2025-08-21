@@ -4,7 +4,7 @@ use crate::catalog::Permission;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::ToSql;
-use crate::sql::statements::define::DefineParamStatement;
+use crate::sql::statements::define::{DefineKind, DefineParamStatement};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
@@ -19,14 +19,13 @@ impl_kv_value_revisioned!(ParamDefinition);
 
 impl ParamDefinition {
 	pub fn to_sql_definition(&self) -> DefineParamStatement {
-		todo!("STU");
-		// DefineParamStatement {
-		// 	kind: DefineKind::Default,
-		// 	name: unsafe { Ident::new_unchecked(self.name.clone()) },
-		// 	value: Expr::Literal(Literal::Value(self.value.into())),
-		// 	comment: self.comment.clone().map(|c| c.into()),
-		// 	permissions: self.permissions.into(),
-		// }
+		DefineParamStatement {
+			kind: DefineKind::Default,
+			name: unsafe { crate::sql::Ident::new_unchecked(self.name.clone()) },
+			value: crate::sql::Expr::from_value(self.value.clone().into()),
+			comment: self.comment.clone().map(Into::into),
+			permissions: self.permissions.clone().into(),
+		}
 	}
 }
 

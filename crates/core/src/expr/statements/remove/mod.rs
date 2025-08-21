@@ -27,7 +27,6 @@ pub use index::RemoveIndexStatement;
 pub use model::RemoveModelStatement;
 pub use namespace::RemoveNamespaceStatement;
 pub use param::RemoveParamStatement;
-use revision::revisioned;
 pub use sequence::RemoveSequenceStatement;
 pub use table::RemoveTableStatement;
 pub use user::RemoveUserStatement;

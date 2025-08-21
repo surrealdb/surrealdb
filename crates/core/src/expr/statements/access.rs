@@ -5,7 +5,6 @@ use anyhow::{Result, bail, ensure};
 use md5::Digest;
 use rand::Rng;
 use reblessive::tree::Stk;
-use revision::revisioned;
 use sha2::Sha256;
 
 use crate::ctx::Context;

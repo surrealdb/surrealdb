@@ -13,7 +13,7 @@ use super::tr::Check;
 use super::{Key, Val, Version, util};
 use crate::catalog;
 use crate::catalog::{
-	ApiDefinition, ConfigStore, DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId,
+	ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId,
 	TableDefinition,
 };
 use crate::cnf::NORMAL_FETCH_SIZE;
@@ -851,7 +851,7 @@ impl Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-	) -> Result<Arc<[ConfigStore]>> {
+	) -> Result<Arc<[ConfigDefinition]>> {
 		let qey = cache::tx::Lookup::Cgs(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_cgs(),
@@ -1703,7 +1703,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		cg: &str,
-	) -> Result<Arc<ConfigStore>> {
+	) -> Result<Arc<ConfigDefinition>> {
 		if let Some(val) = self.get_db_optional_config(ns, db, cg).await? {
 			Ok(val)
 		} else {
@@ -1720,7 +1720,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		cg: &str,
-	) -> Result<Option<Arc<ConfigStore>>> {
+	) -> Result<Option<Arc<ConfigDefinition>>> {
 		let qey = cache::tx::Lookup::Cg(ns, db, cg);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Option::Some),

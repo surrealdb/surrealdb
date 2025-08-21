@@ -6,7 +6,7 @@ use std::str::FromStr;
 use md5::{Digest, Md5};
 use reblessive::Stack;
 use reblessive::tree::Stk;
-use revision::{Revisioned, revisioned};
+use revision::Revisioned;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -222,17 +222,13 @@ impl Revisioned for Idiom {
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		writer.write_all(self.to_string().as_bytes()).map_err(revision::Error::Io)?;
+		self.to_string().serialize_revisioned(writer)?;
 		Ok(())
 	}
 
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		let mut buf = Vec::new();
-		reader.read_to_end(&mut buf).map_err(revision::Error::Io)?;
-		let s = std::str::from_utf8(&buf)
-			.map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
-		let idiom =
-			Idiom::from_str(s).map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
+		let s: String = Revisioned::deserialize_revisioned(reader)?;
+		let idiom = Idiom::from_str(&s).map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
 		Ok(idiom)
 	}
 }

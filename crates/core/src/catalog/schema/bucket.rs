@@ -5,7 +5,7 @@ use crate::catalog::Permission;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::ToSql;
-use crate::sql::statements::define::DefineBucketStatement;
+use crate::sql::statements::define::{DefineBucketStatement, DefineKind};
 use crate::val::{Strand, Value};
 
 #[revisioned(revision = 1)]
@@ -27,16 +27,18 @@ impl_kv_value_revisioned!(BucketDefinition);
 
 impl BucketDefinition {
 	pub fn to_sql_definition(&self) -> DefineBucketStatement {
-		todo!("STU")
-		// DefineBucketStatement {
-		// 	kind: DefineKind::Default,
-		// 	name: unsafe { Ident::new_unchecked(self.name.clone()) },
-		// 	backend: self.backend.map(|v|
-		// crate::sql::Expr::Literal(crate::sql::Literal::Strand(unsafe { Strand::new_unchecked(v)
-		// }))), 	permissions: self.permissions.into(),
-		// 	readonly: self.readonly,
-		// 	comment: self.comment.clone().map(Into::into),
-		// }
+		DefineBucketStatement {
+			kind: DefineKind::Default,
+			name: unsafe { crate::sql::Ident::new_unchecked(self.name.clone()) },
+			backend: self.backend.clone().map(|v| {
+				crate::sql::Expr::Literal(crate::sql::Literal::Strand(unsafe {
+					Strand::new_unchecked(v)
+				}))
+			}),
+			permissions: self.permissions.clone().into(),
+			readonly: self.readonly,
+			comment: self.comment.clone().map(Into::into),
+		}
 	}
 }
 

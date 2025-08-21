@@ -1,7 +1,6 @@
 use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
-use revision::revisioned;
 
 use super::DefineKind;
 use crate::catalog;
@@ -14,7 +13,6 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::tokenizer::Tokenizer;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, Strand};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]

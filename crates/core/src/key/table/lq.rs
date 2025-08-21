@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId, SubscriptionDefinition};
-use crate::expr::LiveStatement;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 

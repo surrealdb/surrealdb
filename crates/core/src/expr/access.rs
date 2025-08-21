@@ -1,5 +1,3 @@
-use revision::revisioned;
-
 use crate::val::Duration;
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]

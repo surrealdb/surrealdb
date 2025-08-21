@@ -2,7 +2,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::{ConfigStore, DatabaseId, NamespaceId};
+use crate::catalog::{ConfigDefinition, DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
@@ -20,7 +20,7 @@ pub(crate) struct Cg<'a> {
 }
 
 impl KVKey for Cg<'_> {
-	type ValueType = ConfigStore;
+	type ValueType = ConfigDefinition;
 }
 
 pub fn new(ns: NamespaceId, db: DatabaseId, ty: &str) -> Cg<'_> {

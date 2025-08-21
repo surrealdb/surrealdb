@@ -1,12 +1,11 @@
-use anyhow::Result;
 use revision::revisioned;
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Cond, Expr, Fetchs, Fields};
+use crate::expr::{Expr, Fetchs, Fields};
 use crate::iam::Auth;
-use crate::kvs::{KVValue, impl_kv_value_revisioned};
+use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::ToSql;
 use crate::val::Value;
 
@@ -36,12 +35,13 @@ pub struct SubscriptionDefinition {
 impl_kv_value_revisioned!(SubscriptionDefinition);
 
 impl SubscriptionDefinition {
-	pub(crate) fn to_expr_definition(&self) -> crate::expr::LiveStatement {
-		todo!("STU")
-	}
-
 	fn to_sql_definition(&self) -> crate::sql::LiveStatement {
-		todo!("STU")
+		crate::sql::LiveStatement {
+			fields: self.fields.clone().into(),
+			what: self.what.clone().into(),
+			cond: self.cond.clone().map(|c| crate::sql::Cond(c.into())),
+			fetch: self.fetch.clone().map(|f| f.into()),
+		}
 	}
 }
 

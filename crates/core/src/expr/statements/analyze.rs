@@ -2,7 +2,6 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 
 use anyhow::{Result, bail};
-use revision::revisioned;
 
 use crate::catalog::Index;
 use crate::ctx::Context;

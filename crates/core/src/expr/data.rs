@@ -2,7 +2,6 @@ use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::revisioned;
 
 use super::FlowResultExt as _;
 use crate::ctx::Context;

@@ -1,7 +1,6 @@
 use std::fmt::{self, Display};
 
 use reblessive::tree::Stk;
-use revision::revisioned;
 
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;

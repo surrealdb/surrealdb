@@ -3,7 +3,6 @@ use std::ops::Deref;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::revisioned;
 use uuid::Uuid;
 
 use super::AlterKind;
@@ -128,6 +127,12 @@ impl AlterFieldStatement {
 		match self.comment {
 			AlterKind::Set(ref k) => df.comment = Some(k.clone().into_string()),
 			AlterKind::Drop => df.comment = None,
+			AlterKind::None => {}
+		}
+
+		match self.reference {
+			AlterKind::Set(ref k) => df.reference = Some(k.clone()),
+			AlterKind::Drop => df.reference = None,
 			AlterKind::None => {}
 		}
 

@@ -1,7 +1,6 @@
 use std::fmt;
 
 use reblessive::tree::Stk;
-use revision::revisioned;
 
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::{Context, MutableContext};

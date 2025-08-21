@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use revision::revisioned;
 use uuid::Uuid;
 
 use super::DefineKind;
@@ -21,7 +20,7 @@ use crate::expr::statements::UpdateStatement;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Ident, Idiom, Kind, Output, View};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::{Transaction, impl_kv_value_revisioned};
+use crate::kvs::Transaction;
 use crate::val::{Strand, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -77,13 +76,13 @@ impl DefineTableStatement {
 			namespace_id: ns,
 			database_id: db,
 			table_id,
-			name: self.name.to_string(),
+			name: self.name.to_raw_string(),
 			drop: self.drop,
 			schemafull: self.full,
 			table_type: self.table_type.clone(),
 			view: self.view.clone().map(|v| v.to_definition()),
 			permissions: self.permissions.clone(),
-			comment: self.comment.clone().map(|c| c.to_string()),
+			comment: self.comment.clone().map(|c| c.to_raw_string()),
 			changefeed: self.changefeed,
 
 			cache_fields_ts: cache_ts,

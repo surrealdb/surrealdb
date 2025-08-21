@@ -2,7 +2,6 @@ use std::fmt;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use revision::revisioned;
 use uuid::Uuid;
 
 use crate::catalog::{NodeLiveQuery, SubscriptionDefinition};
@@ -12,7 +11,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _, Literal};
 use crate::iam::Auth;
-use crate::kvs::impl_kv_value_revisioned;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

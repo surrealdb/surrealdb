@@ -50,7 +50,7 @@ pub(crate) enum Entry {
 	/// A slice of DefineModelStatement specified on a database.
 	Mls(Arc<[catalog::MlModelDefinition]>),
 	/// A slice of DefineConfigStatement specified on a database.
-	Cgs(Arc<[catalog::ConfigStore]>),
+	Cgs(Arc<[catalog::ConfigDefinition]>),
 	/// A slice of DefineParamStatement specified on a database.
 	Pas(Arc<[catalog::ParamDefinition]>),
 	/// A slice of DefineSequenceStatement specified on a namespace.
@@ -236,7 +236,7 @@ impl Entry {
 	}
 	/// Converts this cache entry into a slice of [`DefineConfigStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Cgs`].
-	pub(crate) fn try_into_cgs(self) -> Result<Arc<[catalog::ConfigStore]>> {
+	pub(crate) fn try_into_cgs(self) -> Result<Arc<[catalog::ConfigDefinition]>> {
 		match self {
 			Entry::Cgs(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Cgs"),

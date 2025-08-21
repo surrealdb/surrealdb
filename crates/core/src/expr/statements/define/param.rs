@@ -2,7 +2,6 @@ use std::fmt::{self, Display, Write};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use revision::revisioned;
 
 use super::DefineKind;
 use crate::catalog::{ParamDefinition, Permission};

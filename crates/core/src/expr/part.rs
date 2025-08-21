@@ -3,7 +3,6 @@ use std::fmt::Write;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::revisioned;
 
 use crate::cnf::IDIOM_RECURSION_LIMIT;
 use crate::ctx::Context;

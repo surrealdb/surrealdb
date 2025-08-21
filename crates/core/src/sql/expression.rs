@@ -11,9 +11,9 @@ use crate::sql::statements::{
 };
 use crate::sql::{
 	BinaryOperator, Block, Closure, Constant, FunctionCall, Ident, Idiom, Literal, Mock, Param,
-	PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit,
+	PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
-use crate::val::{Number, RecordIdKey, Strand, Value};
+use crate::val::{Number, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -120,7 +120,7 @@ impl Expr {
 				body: x.body.into(),
 			}))),
 			Value::Table(x) => Expr::Table(unsafe { Ident::new_unchecked(x.into_string()) }),
-			Value::Range(x) => todo!("STU"),
+			Value::Range(x) => x.into_literal().into(),
 		}
 	}
 }
@@ -204,7 +204,7 @@ impl fmt::Display for Expr {
 			Expr::Closure(closure) => write!(f, "{closure}"),
 			Expr::Break => write!(f, "BREAK"),
 			Expr::Continue => write!(f, "CONTINUE"),
-			Expr::Return(x) => write!(f, "RETURN {x}"),
+			Expr::Return(x) => write!(f, "{x}"),
 			Expr::Throw(expr) => write!(f, "THROW {expr}"),
 			Expr::If(s) => write!(f, "{s}"),
 			Expr::Select(s) => write!(f, "{s}"),

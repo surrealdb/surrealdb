@@ -1,8 +1,6 @@
 use std::fmt;
 use std::ops::Deref;
 
-use revision::revisioned;
-
 use crate::val::Duration;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]

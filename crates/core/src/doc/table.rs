@@ -112,7 +112,7 @@ impl Document {
 				fail!("Table stored as view table did not have a view");
 			};
 			// Check if there is a GROUP BY clause
-			match &tb.group {
+			match &tb.groups {
 				// There is a GROUP BY clause specified
 				Some(group) => {
 					// Check if a WHERE clause is specified
@@ -252,7 +252,7 @@ impl Document {
 													rid.into_literal(),
 												))],
 												data: Some(
-													self.full(stk, ctx, opt, &tb.expr).await?,
+													self.full(stk, ctx, opt, &tb.fields).await?,
 												),
 												..UpsertStatement::default()
 											};
@@ -295,7 +295,7 @@ impl Document {
 										what: vec![Expr::Literal(Literal::RecordId(
 											rid.into_literal(),
 										))],
-										data: Some(self.full(stk, ctx, opt, &tb.expr).await?),
+										data: Some(self.full(stk, ctx, opt, &tb.fields).await?),
 										..UpsertStatement::default()
 									};
 									// Execute the statement
@@ -388,7 +388,7 @@ impl Document {
 		let mut set_ops = Vec::new();
 		let mut del_ops = None;
 		//
-		for field in fdc.view.expr.iter_non_all_fields() {
+		for field in fdc.view.fields.iter_non_all_fields() {
 			// Process the field
 			if let Field::Single {
 				expr,

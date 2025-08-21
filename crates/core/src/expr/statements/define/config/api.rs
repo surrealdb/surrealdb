@@ -2,7 +2,6 @@ use std::fmt;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::revisioned;
 
 use crate::catalog::{ApiConfigDefinition, MiddlewareDefinition, Permission};
 use crate::ctx::Context;

@@ -2470,7 +2470,7 @@ fn parse_live() {
 	let TopLevelExpr::Live(stmt) = res else {
 		panic!()
 	};
-	assert_eq!(stmt.expr, Fields::Select(vec![Field::All]));
+	assert_eq!(stmt.fields, Fields::Select(vec![Field::All]));
 	assert_eq!(stmt.what, Expr::Param(Param::from_strand(strand!("foo").to_owned())));
 
 	let res = syn::parse_with(
@@ -2482,7 +2482,7 @@ fn parse_live() {
 		panic!()
 	};
 	assert_eq!(
-		stmt.expr,
+		stmt.fields,
 		Fields::Select(vec![Field::Single {
 			expr: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(
 				strand!("foo").to_owned()

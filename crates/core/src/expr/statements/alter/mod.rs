@@ -2,7 +2,7 @@ use std::fmt::{self, Display};
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::{Revisioned, revisioned};
+use revision::Revisioned;
 
 use crate::ctx::Context;
 use crate::dbs::Options;

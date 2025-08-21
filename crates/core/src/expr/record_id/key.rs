@@ -2,7 +2,6 @@ use std::fmt::{self, Display, Formatter, Write as _};
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::revisioned;
 
 use crate::ctx::Context;
 use crate::dbs::Options;

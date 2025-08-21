@@ -32,7 +32,7 @@ impl IndexDefinition {
 			cols: self.cols.iter().cloned().map(Into::into).collect(),
 			index: self.index.to_sql_definition(),
 			comment: self.comment.clone().map(|x| Strand::new_lossy(x)),
-			concurrently: true,
+			concurrently: false,
 		}
 	}
 }

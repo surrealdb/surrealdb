@@ -1,7 +1,7 @@
 use std::fmt;
 
 use crate::sql::Ident;
-use crate::sql::escape::EscapeIdent;
+use crate::sql::escape::{EscapeIdent, EscapeKwFreeIdent};
 use crate::val::Strand;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -50,7 +50,7 @@ impl From<Ident> for Param {
 
 impl fmt::Display for Param {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "${}", EscapeIdent(&self.0))
+		write!(f, "${}", EscapeKwFreeIdent(&self.0))
 	}
 }
 

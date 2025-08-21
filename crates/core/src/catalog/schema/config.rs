@@ -13,51 +13,51 @@ use crate::val::Value;
 /// The config struct as it is stored on disk.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum ConfigStore {
+pub enum ConfigDefinition {
 	GraphQL(GraphQLConfig),
 	Api(ApiConfigDefinition),
 }
-impl_kv_value_revisioned!(ConfigStore);
+impl_kv_value_revisioned!(ConfigDefinition);
 
-impl ConfigStore {
+impl ConfigDefinition {
 	pub fn name(&self) -> String {
 		match self {
-			ConfigStore::GraphQL(_) => ConfigKind::GraphQL.to_string(),
-			ConfigStore::Api(_) => ConfigKind::Api.to_string(),
+			ConfigDefinition::GraphQL(_) => ConfigKind::GraphQL.to_string(),
+			ConfigDefinition::Api(_) => ConfigKind::Api.to_string(),
 		}
 	}
 
 	pub fn try_into_graphql(self) -> Result<GraphQLConfig> {
 		match self {
-			ConfigStore::GraphQL(g) => Ok(g),
+			ConfigDefinition::GraphQL(g) => Ok(g),
 			c => fail!("found {c} when a graphql config was expected"),
 		}
 	}
 
 	pub fn try_as_api(&self) -> Result<&ApiConfigDefinition> {
 		match self {
-			ConfigStore::Api(a) => Ok(a),
+			ConfigDefinition::Api(a) => Ok(a),
 			c => fail!("found {c} when a api config was expected"),
 		}
 	}
 }
 
-impl Display for ConfigStore {
+impl Display for ConfigDefinition {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match &self {
-			ConfigStore::GraphQL(v) => Display::fmt(v, f),
-			ConfigStore::Api(v) => Display::fmt(v, f),
+			ConfigDefinition::GraphQL(v) => Display::fmt(v, f),
+			ConfigDefinition::Api(v) => Display::fmt(v, f),
 		}
 	}
 }
 
-impl InfoStructure for ConfigStore {
+impl InfoStructure for ConfigDefinition {
 	fn structure(self) -> Value {
 		match self {
-			ConfigStore::GraphQL(v) => Value::from(map!(
+			ConfigDefinition::GraphQL(v) => Value::from(map!(
 				"graphql" => v.structure()
 			)),
-			ConfigStore::Api(v) => Value::from(map!(
+			ConfigDefinition::Api(v) => Value::from(map!(
 				"api" => v.structure()
 			)),
 		}

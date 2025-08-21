@@ -1,7 +1,5 @@
 use std::fmt;
 
-use revision::revisioned;
-
 use crate::expr::Value;
 use crate::expr::statements::info::InfoStructure;
 

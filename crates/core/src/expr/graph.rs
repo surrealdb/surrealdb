@@ -3,7 +3,6 @@ use std::ops::Bound;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::revisioned;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;

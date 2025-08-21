@@ -3,7 +3,6 @@ use std::fmt::{self, Display};
 use anyhow::{Result, bail};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
-use revision::revisioned;
 
 use super::DefineKind;
 use crate::catalog::{self, AccessDefinition};

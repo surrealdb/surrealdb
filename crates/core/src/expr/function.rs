@@ -2,7 +2,6 @@ use std::fmt;
 
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
-use revision::revisioned;
 
 use super::{ControlFlow, FlowResult, FlowResultExt as _, Kind};
 use crate::catalog::Permission;

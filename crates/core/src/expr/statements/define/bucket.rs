@@ -2,7 +2,6 @@ use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use revision::revisioned;
 
 use super::{CursorDoc, DefineKind};
 use crate::buc::{self, BucketConnectionKey};

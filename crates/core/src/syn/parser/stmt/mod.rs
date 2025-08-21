@@ -440,7 +440,7 @@ impl Parser<'_> {
 		let fetch = self.try_parse_fetch(stk).await?;
 
 		Ok(LiveStatement {
-			expr,
+			fields: expr,
 			what,
 			cond,
 			fetch,

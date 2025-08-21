@@ -2,7 +2,6 @@ use std::fmt::{self, Display, Write};
 use std::ops::Deref;
 
 use anyhow::Result;
-use revision::revisioned;
 
 use crate::ctx::Context;
 use crate::dbs::Options;

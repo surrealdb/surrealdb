@@ -5,10 +5,10 @@ use revision::revisioned;
 
 use crate::api::path::Path;
 use crate::catalog::Permission;
+use crate::expr::Expr;
 use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Expr, Literal};
-use crate::kvs::{KVValue, impl_kv_value_revisioned};
+use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::ToSql;
 use crate::val::{Array, Object, Strand, Value};
 

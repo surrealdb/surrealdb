@@ -1,7 +1,5 @@
 use std::fmt;
 
-use revision::revisioned;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 /// ChangeFeedInclude statements are an appendix
 pub enum ChangeFeedInclude {

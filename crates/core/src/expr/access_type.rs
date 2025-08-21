@@ -3,7 +3,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 use anyhow::Result;
-use revision::{Error as RevisionError, revisioned};
+use revision::Error as RevisionError;
 
 use super::Value;
 use crate::err::Error;
@@ -297,18 +297,6 @@ pub struct RecordAccess {
 	pub signin: Option<Expr>,
 	pub jwt: JwtAccess,
 	pub bearer: Option<BearerAccess>,
-}
-
-impl RecordAccess {
-	fn authenticate_revision(
-		&self,
-		_revision: u16,
-		_value: Option<Value>,
-	) -> Result<(), RevisionError> {
-		Err(RevisionError::Conversion(
-			"The \"AUTHENTICATE\" clause has been moved to \"DEFINE ACCESS\"".to_string(),
-		))
-	}
 }
 
 impl Default for RecordAccess {

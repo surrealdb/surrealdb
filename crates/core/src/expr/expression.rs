@@ -737,16 +737,15 @@ impl Revisioned for Expr {
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		writer.write_all(self.to_string().as_bytes()).map_err(revision::Error::Io)?;
+		self.to_string().serialize_revisioned(writer)?;
 		Ok(())
 	}
 
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		let mut buf = Vec::new();
-		reader.read_to_end(&mut buf).map_err(revision::Error::Io)?;
+		let query: String = Revisioned::deserialize_revisioned(reader)?;
 
 		let mut stack = Stack::new();
-		let mut parser = crate::syn::parser::Parser::new(&buf);
+		let mut parser = crate::syn::parser::Parser::new(query.as_bytes());
 		let expr = stack
 			.enter(|stk| parser.parse_expr(stk))
 			.finish()
