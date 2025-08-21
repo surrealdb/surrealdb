@@ -204,7 +204,7 @@ impl FromFlatbuffers for Value {
 
 #[cfg(test)]
 mod tests {
-	use std::collections::BTreeMap;
+	use std::{collections::BTreeMap, ops::Bound, str::FromStr};
 
 	use chrono::{DateTime, Utc};
 	use rstest::rstest;
@@ -235,6 +235,8 @@ mod tests {
 	#[case::string(Value::Strand(Strand::new("Hello, World!".to_string()).unwrap()))]
 	#[case::bytes(Value::Bytes(Bytes(vec![1, 2, 3, 4, 5])))]
 	#[case::thing(Value::RecordId(RecordId{ table: "test_table".to_string(), key: RecordIdKey::Number(42) }))] // Example Thing
+	// thing range
+	#[case::thing_range(Value::RecordId(RecordId{ table: "test_table".to_string(), key: RecordIdKey::Range(Box::new(RecordIdKeyRange { start: Bound::Included(RecordIdKey::String("a".to_string())), end: Bound::Unbounded })) }))]
 	#[case::object(Value::Object(Object(BTreeMap::from([("key".to_string(), Value::Strand(Strand::new("value".to_owned()).unwrap()))]))))]
 	#[case::array(Value::Array(Array(vec![Value::Number(Number::Int(1)), Value::Number(Number::Float(2.0))])))]
 	#[case::geometry::point(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))))]
@@ -250,6 +252,11 @@ mod tests {
 		vec![geo::LineString(vec![geo::Coord { x: 0.5, y: 0.5 }, geo::Coord { x: 0.75, y: 0.75 }])]
 	)]))))]
 	#[case::file(Value::File(File { bucket: "test_bucket".to_string(), key: "test_key".to_string() }))]
+	#[case::range(Value::Range(Box::new(Range { start: Bound::Included(Value::Strand(Strand::new("Hello, World!".to_string()).unwrap())), end: Bound::Excluded(Value::Strand(Strand::new("Hello, World!".to_string()).unwrap())) })))]
+	#[case::range(Value::Range(Box::new(Range { start: Bound::Unbounded, end: Bound::Excluded(Value::Strand(Strand::new("Hello, World!".to_string()).unwrap())) })))]
+	#[case::range(Value::Range(Box::new(Range { start: Bound::Included(Value::Strand(Strand::new("Hello, World!".to_string()).unwrap())), end: Bound::Unbounded })))]
+	#[case::regex(Value::Regex(Regex::from_str("/^[a-z]+$/").unwrap()))]
+
 	fn test_flatbuffers_roundtrip_value(#[case] input: Value) {
 		let mut builder = flatbuffers::FlatBufferBuilder::new();
 		let input_fb = input.to_fb(&mut builder).expect("Failed to convert to FlatBuffer");

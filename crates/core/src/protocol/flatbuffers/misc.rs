@@ -69,14 +69,20 @@ impl FromFlatbuffers for Table {
 }
 
 impl ToFlatbuffers for Regex {
-	type Output<'bldr> = flatbuffers::WIPOffset<&'bldr str>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::StringValue<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> anyhow::Result<Self::Output<'bldr>> {
-		Ok(builder.create_string(&self.to_string()))
+		let value = builder.create_string(self.regex().as_str());
+		Ok(proto_fb::StringValue::create(
+			builder,
+			&proto_fb::StringValueArgs {
+				value: Some(value),
+			},
+		))
 	}
 }
 
@@ -85,7 +91,8 @@ impl FromFlatbuffers for Regex {
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
-		Ok(Regex::from_str(input.value().ok_or_else(|| anyhow::anyhow!("Missing regex value"))?)?)
+		let pattern = input.value().ok_or_else(|| anyhow::anyhow!("Missing regex value"))?;
+		Ok(Regex::from_str(pattern)?)
 	}
 }
 
@@ -183,7 +190,10 @@ impl ToFlatbuffers for Bound<Value> {
 				let value = value.to_fb(builder)?.as_union_value();
 				(proto_fb::ValueBound::Exclusive, Some(value))
 			}
-			Bound::Unbounded => (proto_fb::ValueBound::Unbounded, None),
+			Bound::Unbounded => {
+				let null_value = proto_fb::NullValue::create(builder, &proto_fb::NullValueArgs {});
+				(proto_fb::ValueBound::Unbounded, Some(null_value.as_union_value()))
+			}
 		})
 	}
 }
