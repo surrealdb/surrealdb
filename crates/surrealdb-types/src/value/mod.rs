@@ -8,6 +8,7 @@ pub mod number;
 pub mod object;
 pub mod range;
 pub mod recordid;
+pub mod regex;
 pub mod uuid;
 
 use std::cmp::Ordering;
@@ -26,14 +27,15 @@ pub use self::number::Number;
 pub use self::object::Object;
 pub use self::range::Range;
 pub use self::recordid::{RecordId, RecordIdKey, RecordIdKeyRange};
+pub use self::regex::Regex;
 pub use self::uuid::Uuid;
 
 /// Marker type for value conversions from Value::None
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct SurrealNone;
 
 /// Marker type for value conversions from Value::Null
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct SurrealNull;
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -54,6 +56,7 @@ pub enum Value {
 	RecordId(RecordId),
 	File(File),
 	Range(Box<Range>),
+	Regex(Regex),
 }
 
 impl Eq for Value {}
@@ -82,6 +85,7 @@ impl Value {
 			Value::RecordId(_) => Kind::Record(Vec::new()),
 			Value::File(_) => Kind::File(Vec::new()),
 			Value::Range(_) => Kind::Range,
+			Value::Regex(_) => Kind::Regex,
 		}
 	}
 

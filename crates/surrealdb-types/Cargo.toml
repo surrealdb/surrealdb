@@ -18,6 +18,7 @@ bytes.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 flatbuffers.workspace = true
 geo = { workspace = true, features = ["use-serde"] }
+regex.workspace = true
 rstest.workspace = true
 rust_decimal.workspace = true
 serde = { workspace = true, features = ["derive"] }

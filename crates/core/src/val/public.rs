@@ -2,6 +2,7 @@ use anyhow::bail;
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::ops::Bound;
+use std::str::FromStr;
 use crate::val::Strand;
 
 use super::Value as InternalValue;
@@ -18,6 +19,7 @@ use super::RecordId as InternalRecordId;
 use super::RecordIdKey as InternalRecordIdKey;
 use super::RecordIdKeyRange as InternalRecordIdKeyRange;
 use super::Array as InternalArray;
+use super::Regex as InternalRegex;
 
 use surrealdb_types::Value as PublicValue;
 use surrealdb_types::Number as PublicNumber;
@@ -33,6 +35,7 @@ use surrealdb_types::RecordId as PublicRecordId;
 use surrealdb_types::RecordIdKey as PublicRecordIdKey;
 use surrealdb_types::RecordIdKeyRange as PublicRecordIdKeyRange;
 use surrealdb_types::Array as PublicArray;
+use surrealdb_types::Regex as PublicRegex;
 
 impl TryFrom<PublicValue> for InternalValue {
 	type Error = anyhow::Error;
@@ -54,6 +57,7 @@ impl TryFrom<PublicValue> for InternalValue {
 			PublicValue::RecordId(r) => Ok(InternalValue::RecordId(r.try_into()?)),
 			PublicValue::File(f) => Ok(InternalValue::File(f.into())),
 			PublicValue::Range(r) => Ok(InternalValue::Range(Box::new((*r).try_into()?))),
+			PublicValue::Regex(r) => Ok(InternalValue::Regex(r.into())),
 		}
 	}
 }
@@ -77,6 +81,7 @@ impl TryFrom<InternalValue> for PublicValue {
 			InternalValue::RecordId(r) => PublicValue::RecordId(r.try_into()?),
 			InternalValue::File(f) => PublicValue::File(f.into()),
 			InternalValue::Range(r) => PublicValue::Range(Box::new((*r).try_into()?)),
+			InternalValue::Regex(r) => PublicValue::Regex(r.into()),
             _ => bail!("Could not convert internal value of type {:?} to public value", v)
         })
     }
@@ -321,5 +326,17 @@ impl TryFrom<InternalRecordIdKeyRange> for PublicRecordIdKeyRange {
             start: convert_bound(r.start)?,
             end: convert_bound(r.end)?,
         })
+    }
+}
+
+impl From<PublicRegex> for InternalRegex {
+    fn from(r: PublicRegex) -> Self {
+        InternalRegex(r.0)
+    }
+}
+
+impl From<InternalRegex> for PublicRegex {
+    fn from(r: InternalRegex) -> Self {
+        PublicRegex(r.0)
     }
 }
