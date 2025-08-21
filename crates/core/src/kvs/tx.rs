@@ -1889,6 +1889,7 @@ impl Transaction {
 						key: id.clone(),
 					};
 					record.data.to_mut().def(&rid);
+					// Convert to read-only format for better sharing and performance
 					Ok(Arc::new(record.into_read_only()))
 				}
 				// The value is not in the datastore
@@ -1912,6 +1913,7 @@ impl Transaction {
 								key: id.clone(),
 							};
 							record.data.to_mut().def(&rid);
+							// Convert to read-only format for better sharing and performance
 							let record = Arc::new(record.into_read_only());
 							let entry = cache::tx::Entry::Val(record.clone());
 							self.cache.insert(qey, entry);

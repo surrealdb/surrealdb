@@ -45,28 +45,49 @@ pub(crate) struct CursorDoc {
 	pub(crate) fields_computed: bool,
 }
 
+/// Wrapper around a Record for cursor operations
+///
+/// This struct provides a convenient interface for working with records in cursor contexts.
+/// It implements Deref and DerefMut to allow direct access to the underlying Record's methods.
 #[derive(Clone, Debug)]
 pub(crate) struct CursorRecord {
+	/// The underlying record containing data and metadata
 	record: Record,
 }
 
 impl CursorRecord {
+	/// Returns a mutable reference to the underlying value
+	///
+	/// This method delegates to the Record's data, converting read-only data to mutable if
+	/// necessary.
 	pub(crate) fn to_mut(&mut self) -> &mut Value {
 		self.record.data.to_mut()
 	}
 
+	/// Converts the data to read-only format and returns an Arc reference
+	///
+	/// This method delegates to the Record's data, ensuring the data is in read-only format.
 	pub(crate) fn as_arc(&mut self) -> Arc<Value> {
 		self.record.data.read_only()
 	}
 
+	/// Converts the cursor record to a read-only record
+	///
+	/// This method ensures the underlying data is in read-only format for better sharing.
 	pub(crate) fn into_read_only(self) -> Record {
 		self.record.into_read_only()
 	}
 
+	/// Returns a reference to the underlying value
+	///
+	/// This method provides uniform access to the value regardless of its storage format.
 	pub(crate) fn as_ref(&self) -> &Value {
 		self.record.data.as_ref()
 	}
 
+	/// Converts the cursor record to an owned Value
+	///
+	/// This method extracts the underlying value, taking ownership of the data.
 	pub(crate) fn into_owned(mut self) -> Value {
 		match self.record.data {
 			Data::ReadOnly(ref mut arc) => mem::take(Arc::make_mut(arc)),

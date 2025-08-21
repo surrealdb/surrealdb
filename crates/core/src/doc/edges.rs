@@ -72,6 +72,7 @@ impl Document {
 			let key = crate::key::graph::new(ns, db, &r.table, &r.key, i, &rid);
 			txn.set(&key, &(), opt.version).await?;
 			// Store the edges on the record
+			// Mark this record as an edge type in its metadata for efficient identification
 			self.current.doc.set_record_type(RecordType::Edge);
 			self.current.doc.to_mut().put(&*IN, l.clone().into());
 			self.current.doc.to_mut().put(&*OUT, r.clone().into());
