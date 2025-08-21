@@ -1,4 +1,17 @@
-//! Stores an index entry
+//! Index key encoding and prefixes for the KV store.
+//!
+//! This module defines the on-disk key layout for secondary indexes and helpers
+//! to construct prefixes and full keys. Field values are serialized via
+//! key::value::StoreKeyArray, which normalizes numeric values across Number
+//! variants (Int/Float/Decimal) using a lexicographic encoding so that byte
+//! order aligns with numeric order. As a consequence, numerically-equal values
+//! (e.g., 0, 0.0, 0dec) map to identical key bytes and are treated as equal by
+//! UNIQUE indexes and during scans.
+//!
+//! Helper functions like prefix_beg/prefix_end/prefix_ids_* build range bounds
+//! for scanning the KV store. Keys are designed to be concatenation-friendly,
+//! using zero-terminated components where appropriate to ensure parsers stop at
+//! the correct boundaries when decoding.
 pub mod all;
 pub mod bc;
 pub mod bd;
@@ -38,10 +51,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
+use crate::key::value::StoreKeyArray;
 use crate::kvs::KVKey;
-use crate::val::{Array, RecordId, RecordIdKey};
+use crate::val::{RecordId, RecordIdKey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
 struct Prefix<'a> {
 	__: u8,
 	_a: u8,
@@ -76,7 +90,7 @@ impl<'a> Prefix<'a> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
 struct PrefixIds<'a> {
 	__: u8,
 	_a: u8,
@@ -88,7 +102,10 @@ struct PrefixIds<'a> {
 	_d: u8,
 	pub ix: &'a str,
 	_e: u8,
-	pub fd: Cow<'a, Array>,
+	/// Encoded index field values. Uses StoreKeyArray which normalizes numeric
+	/// types (Int/Float/Decimal) into a lexicographically ordered byte form so
+	/// equal numeric values compare equal in index keys.
+	pub fd: Cow<'a, StoreKeyArray>,
 }
 
 impl KVKey for PrefixIds<'_> {
@@ -96,7 +113,13 @@ impl KVKey for PrefixIds<'_> {
 }
 
 impl<'a> PrefixIds<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, fd: &'a Array) -> Self {
+	fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a str,
+		ix: &'a str,
+		fd: &'a StoreKeyArray,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -113,7 +136,7 @@ impl<'a> PrefixIds<'a> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Index<'a> {
 	__: u8,
 	_a: u8,
@@ -125,7 +148,10 @@ pub(crate) struct Index<'a> {
 	_d: u8,
 	pub ix: &'a str,
 	_e: u8,
-	pub fd: Cow<'a, Array>,
+	/// Encoded index field values. Uses StoreKeyArray which normalizes numeric
+	/// types (Int/Float/Decimal) into a lexicographically ordered byte form so
+	/// equal numeric values compare equal in index keys.
+	pub fd: Cow<'a, StoreKeyArray>,
 	pub id: Option<Cow<'a, RecordIdKey>>,
 }
 
@@ -145,7 +171,7 @@ impl<'a> Index<'a> {
 		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
-		fd: &'a Array,
+		fd: &'a StoreKeyArray,
 		id: Option<&'a RecordIdKey>,
 	) -> Self {
 		Self {
@@ -168,24 +194,31 @@ impl<'a> Index<'a> {
 		Prefix::new(ns, db, tb, ix).encode_key()
 	}
 
+	/// Start of the index keyspace: prefix + 0x00. Used as the lower bound
+	/// when iterating all entries for a given index.
 	pub fn prefix_beg(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix(ns, db, tb, ix)?;
 		beg.extend_from_slice(&[0x00]);
 		Ok(beg)
 	}
 
+	/// End of the index keyspace: prefix + 0xFF. Used as the upper bound (exclusive)
+	/// when iterating all entries for a given index.
 	pub fn prefix_end(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix(ns, db, tb, ix)?;
 		beg.extend_from_slice(&[0xff]);
 		Ok(beg)
 	}
 
+	/// Build the base prefix for an index including the encoded field values.
+	/// Field values are encoded using StoreKeyArray which zero-terminates
+	/// components so that composite keys can be parsed unambiguously.
 	fn prefix_ids(
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &str,
 		ix: &str,
-		fd: &Array,
+		fd: &StoreKeyArray,
 	) -> Result<Vec<u8>> {
 		PrefixIds::new(ns, db, tb, ix, fd).encode_key()
 	}
@@ -200,7 +233,7 @@ impl<'a> Index<'a> {
 		db: DatabaseId,
 		tb: &str,
 		ix: &str,
-		fd: &Array,
+		fd: &StoreKeyArray,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		beg.extend_from_slice(&[0x00]);
@@ -217,7 +250,7 @@ impl<'a> Index<'a> {
 		db: DatabaseId,
 		tb: &str,
 		ix: &str,
-		fd: &Array,
+		fd: &StoreKeyArray,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		beg.extend_from_slice(&[0xff]);
@@ -233,7 +266,7 @@ impl<'a> Index<'a> {
 		db: DatabaseId,
 		tb: &str,
 		ix: &str,
-		fd: &Array,
+		fd: &StoreKeyArray,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		*beg.last_mut().unwrap() = 0x00;
@@ -249,7 +282,7 @@ impl<'a> Index<'a> {
 		db: DatabaseId,
 		tb: &str,
 		ix: &str,
-		fd: &Array,
+		fd: &StoreKeyArray,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		*beg.last_mut().unwrap() = 0xff;
@@ -260,11 +293,13 @@ impl<'a> Index<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::val::Array;
 
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let fd = vec!["testfd1", "testfd2"].into();
+		let fd: Array = vec!["testfd1", "testfd2"].into();
+		let fd = fd.into();
 		let id = RecordIdKey::String("testid".to_owned());
 		let val = Index::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", &fd, Some(&id));
 		let enc = Index::encode_key(&val).unwrap();
@@ -276,7 +311,8 @@ mod tests {
 
 	#[test]
 	fn key_none() {
-		let fd = vec!["testfd1", "testfd2"].into();
+		let fd: Array = vec!["testfd1", "testfd2"].into();
+		let fd = fd.into();
 		let val = Index::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", &fd, None);
 		let enc = Index::encode_key(&val).unwrap();
 		assert_eq!(
@@ -287,7 +323,8 @@ mod tests {
 
 	#[test]
 	fn check_composite() {
-		let fd = vec!["testfd1"].into();
+		let fd: Array = vec!["testfd1"].into();
+		let fd = fd.into();
 
 		let enc =
 			Index::prefix_ids_composite_beg(NamespaceId(1), DatabaseId(2), "testtb", "testix", &fd)
