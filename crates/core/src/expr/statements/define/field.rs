@@ -97,7 +97,7 @@ impl DefineFieldStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the name of the field
-		let fd = self.name.to_string();
+		let fd = self.name.to_raw_string();
 		// Check if the definition exists
 		if let Some(fd) = txn.get_tb_field(ns, db, &self.what, &fd).await? {
 			match self.kind {

@@ -1,7 +1,7 @@
 use std::fmt;
 
 use crate::sql::Ident;
-use crate::sql::escape::{EscapeIdent, EscapeKwFreeIdent};
+use crate::sql::escape::EscapeKwFreeIdent;
 use crate::val::Strand;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

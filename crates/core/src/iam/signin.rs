@@ -141,6 +141,10 @@ pub async fn db_access(
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
 	// Check the provided access method exists
+	eprintln!("access: {:?}", access);
+	eprintln!("access: {:?}", access);
+	eprintln!("access: {:?}", access);
+	eprintln!("access: {:?}", access);
 	match access {
 		Ok(Some(av)) => {
 			// Check the access method type
@@ -546,10 +550,12 @@ pub async fn root_access(
 	ac: String,
 	vars: Object,
 ) -> Result<SigninData> {
+	eprintln!("ac: {:?}", ac);
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
 	let access = tx.get_root_access(&ac).await;
+	eprintln!("access: {:?}", access);
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
 	// Check the provided access method exists
@@ -563,6 +569,8 @@ pub async fn root_access(
 						Some(key) => key.to_raw_string(),
 						None => return Err(anyhow::Error::new(Error::AccessBearerMissingKey)),
 					};
+
+					eprintln!("key: {:?}", key);
 
 					signin_bearer(kvs, session, None, None, av, &at, key).await
 				}
@@ -791,6 +799,7 @@ pub async fn signin_bearer(
 }
 
 pub fn validate_grant_bearer(key: &str) -> Result<String> {
+	eprintln!("key: {:?}", key);
 	let parts: Vec<&str> = key.split("-").collect();
 	ensure!(parts.len() == 4, Error::AccessGrantBearerInvalid);
 	// Check that the prefix type exists.

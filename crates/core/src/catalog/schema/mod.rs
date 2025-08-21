@@ -139,12 +139,6 @@ impl Permissions {
 	}
 }
 
-// impl ToSql for Permissions {
-// 	fn to_sql(&self) -> String {
-// 		self.to_sql_definition().to_string()
-// 	}
-// }
-
 impl Display for Permissions {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
 		write!(f, "{}", self.to_sql())

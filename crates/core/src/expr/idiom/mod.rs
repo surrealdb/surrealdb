@@ -116,7 +116,6 @@ impl Idiom {
 	}
 
 	/// Returns a raw string representation of this idiom without any escaping.
-	#[allow(dead_code)]
 	pub(crate) fn to_raw_string(&self) -> String {
 		let mut s = String::new();
 
@@ -222,7 +221,7 @@ impl Revisioned for Idiom {
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		self.to_string().serialize_revisioned(writer)?;
+		self.to_raw_string().serialize_revisioned(writer)?;
 		Ok(())
 	}
 

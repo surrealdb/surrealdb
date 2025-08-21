@@ -3,7 +3,6 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 use anyhow::Result;
-use revision::Error as RevisionError;
 
 use super::Value;
 use crate::err::Error;

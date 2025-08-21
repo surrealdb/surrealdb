@@ -303,11 +303,11 @@ async fn table_change_feeds() -> Result<()> {
 					vs5.into_u128(),
 					vs6.into_u128(),
 				);
-				// define_table: { changefeed: { expiry: '1h', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'person', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }
+				// define_table: { changefeed: { expiry: '1h', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'person', permissions: { create: false, select: false, update: false }, schemafull: false }
 				syn::value(
 					format!(
 						r#"[
-						{{ versionstamp: {vs1}, changes: [ {{ define_table: {{ name: 'person', changefeed: {{ expiry: '1h', original: false }}, drop: false, kind: {{ kind: 'ANY' }}, permissions: {{ create: false, delete: false, select: false, update: false }}, schemafull: false }} }} ] }},
+						{{ versionstamp: {vs1}, changes: [ {{ define_table: {{ name: 'person', changefeed: {{ expiry: '1h', original: false }}, drop: false, kind: {{ kind: 'ANY' }}, permissions: {{ create: false, select: false, update: false }}, schemafull: false }} }} ] }},
 						{{ versionstamp: {vs2}, changes: [ {{ update: {{ id: person:test, name: 'Name: Tobie' }} }} ] }},
 						{{ versionstamp: {vs3}, changes: [ {{ update: {{ id: person:test, name: 'Name: Jaime' }} }} ] }},
 						{{ versionstamp: {vs4}, changes: [ {{ update: {{ id: person:test, name: 'Name: Tobie' }} }} ] }},
