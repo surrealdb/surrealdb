@@ -582,10 +582,10 @@ impl IndexRangeThingIterator {
 		for (op, v) in ranges {
 			let key = storekey::serialize(v.as_ref())?;
 			match op {
-				BinaryOperator::LessThan => to.push((key, 0u8, v.clone())),
-				BinaryOperator::LessThanEqual => to.push((key, 1u8, v.clone())),
-				BinaryOperator::MoreThan => from.push((key, 1u8, v.clone())),
-				BinaryOperator::MoreThanEqual => from.push((key, 0u8, v.clone())),
+				BinaryOperator::LessThan => to.push((key, false, v.clone())),
+				BinaryOperator::LessThanEqual => to.push((key, true, v.clone())),
+				BinaryOperator::MoreThan => from.push((key, true, v.clone())),
+				BinaryOperator::MoreThanEqual => from.push((key, false, v.clone())),
 				_ => {
 					bail!(Error::Unreachable(format!("Invalid operator for range extraction {op}")))
 				}
@@ -593,18 +593,18 @@ impl IndexRangeThingIterator {
 		}
 		from.sort_unstable();
 		to.sort_unstable();
-		let from = if let Some((_, inclusive, val)) = from.first() {
+		let from = if let Some((_, inclusivity, val)) = from.first() {
 			RangeValue {
 				value: val.as_ref().clone(),
-				inclusive: *inclusive == 0u8,
+				inclusive: *inclusivity == false,
 			}
 		} else {
 			RangeValue::default()
 		};
-		let to = if let Some((_, inclusive, val)) = to.last() {
+		let to = if let Some((_, inclusivity, val)) = to.last() {
 			RangeValue {
 				value: val.as_ref().clone(),
-				inclusive: *inclusive == 1,
+				inclusive: *inclusivity == true,
 			}
 		} else {
 			RangeValue::default()
