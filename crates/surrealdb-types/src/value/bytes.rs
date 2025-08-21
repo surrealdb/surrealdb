@@ -1,6 +1,7 @@
 use std::fmt;
 
-use serde::{de::{self, SeqAccess, Visitor}, Deserialize, Serialize};
+use serde::de::{self, SeqAccess, Visitor};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Bytes(pub Vec<u8>);

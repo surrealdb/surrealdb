@@ -1,8 +1,9 @@
-use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::hash;
-use rust_decimal::prelude::ToPrimitive;
+
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum Number {

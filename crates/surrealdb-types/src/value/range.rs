@@ -1,6 +1,9 @@
-use crate::Value;
+use std::cmp::Ordering;
+use std::ops::Bound;
+
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, ops::Bound};
+
+use crate::Value;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Range {

@@ -1,4 +1,5 @@
-use std::{ops::Bound, str::FromStr};
+use std::ops::Bound;
+use std::str::FromStr;
 
 use surrealdb_protocol::fb::v1::{self as proto_fb, ValueBound};
 

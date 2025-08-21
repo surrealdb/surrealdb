@@ -5,7 +5,8 @@ use surrealdb_protocol::fb::v1 as proto_fb;
 
 use super::{FromFlatbuffers, ToFlatbuffers};
 use crate::{
-	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId, Regex, Uuid, Value
+	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId, Regex, Uuid,
+	Value,
 };
 
 impl ToFlatbuffers for Value {

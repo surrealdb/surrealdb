@@ -440,7 +440,10 @@ impl FromFlatbuffers for Kind {
 					return Err(anyhow::anyhow!("Missing geometry kind"));
 				};
 				let types = if let Some(types) = geometry.types() {
-					types.iter().map(|t| GeometryKind::from_fb(t)).collect::<anyhow::Result<Vec<_>>>()?
+					types
+						.iter()
+						.map(|t| GeometryKind::from_fb(t))
+						.collect::<anyhow::Result<Vec<_>>>()?
 				} else {
 					Vec::new()
 				};
@@ -494,15 +497,11 @@ impl FromFlatbuffers for Kind {
 				Ok(Kind::Function(args, return_type))
 			}
 			KindType::File => {
-
 				let Some(file) = input.kind_as_file() else {
 					return Err(anyhow::anyhow!("Missing file kind"));
 				};
 				let buckets = if let Some(buckets) = file.buckets() {
-					buckets
-						.iter()
-						.map(|x| x.to_string())
-						.collect::<Vec<_>>()
+					buckets.iter().map(|x| x.to_string()).collect::<Vec<_>>()
 				} else {
 					Vec::new()
 				};

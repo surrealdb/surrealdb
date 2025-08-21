@@ -1,4 +1,5 @@
-use std::{collections::BTreeMap, hash};
+use std::collections::BTreeMap;
+use std::hash;
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};

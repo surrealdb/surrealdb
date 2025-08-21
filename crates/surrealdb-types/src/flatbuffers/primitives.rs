@@ -275,7 +275,9 @@ impl FromFlatbuffers for Uuid {
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		let bytes_vector = input.bytes().ok_or_else(|| anyhow::anyhow!("Missing bytes in Uuid"))?;
-		uuid::Uuid::from_slice(bytes_vector.bytes()).map(Uuid).map_err(|_| anyhow::anyhow!("Invalid UUID format"))
+		uuid::Uuid::from_slice(bytes_vector.bytes())
+			.map(Uuid)
+			.map_err(|_| anyhow::anyhow!("Invalid UUID format"))
 	}
 }
 

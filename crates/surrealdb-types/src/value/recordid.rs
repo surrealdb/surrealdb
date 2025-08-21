@@ -1,5 +1,7 @@
+use std::cmp::Ordering;
+use std::ops::Bound;
+
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, ops::Bound};
 
 use crate::{Array, Number, Object, Range, Uuid, Value};
 

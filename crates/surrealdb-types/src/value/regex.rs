@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
+
 use regex::RegexBuilder;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -113,8 +114,8 @@ impl<'de> Deserialize<'de> for Regex {
 						E: de::Error,
 					{
 						regex::Regex::from_str(value)
-                            .map(Regex)
-                            .map_err(|_| de::Error::custom("invalid regex"))
+							.map(Regex)
+							.map_err(|_| de::Error::custom("invalid regex"))
 					}
 				}
 

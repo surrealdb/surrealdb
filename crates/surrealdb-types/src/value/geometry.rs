@@ -1,9 +1,8 @@
 use std::cmp::Ordering;
-use std::iter::once;
 use std::hash;
+use std::iter::once;
 
 use geo::{Coord, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

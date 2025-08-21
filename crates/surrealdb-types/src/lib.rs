@@ -1,9 +1,9 @@
-mod kind;
-mod value;
-mod traits;
 mod flatbuffers;
+mod kind;
+mod traits;
+mod value;
 
+pub use flatbuffers::*;
 pub use kind::*;
 pub use traits::*;
 pub use value::*;
-pub use flatbuffers::*;

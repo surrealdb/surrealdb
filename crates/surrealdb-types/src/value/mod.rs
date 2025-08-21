@@ -15,8 +15,6 @@ use std::cmp::Ordering;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Kind, SurrealValue};
-
 pub use self::array::Array;
 pub use self::bytes::Bytes;
 pub use self::datetime::Datetime;
@@ -29,13 +27,18 @@ pub use self::range::Range;
 pub use self::recordid::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::regex::Regex;
 pub use self::uuid::Uuid;
+use crate::{Kind, SurrealValue};
 
 /// Marker type for value conversions from Value::None
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(
+	Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
+)]
 pub struct SurrealNone;
 
 /// Marker type for value conversions from Value::Null
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(
+	Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
+)]
 pub struct SurrealNull;
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
