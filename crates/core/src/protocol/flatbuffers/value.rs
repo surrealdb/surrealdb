@@ -204,7 +204,9 @@ impl FromFlatbuffers for Value {
 
 #[cfg(test)]
 mod tests {
-	use std::{collections::BTreeMap, ops::Bound, str::FromStr};
+	use std::collections::BTreeMap;
+	use std::ops::Bound;
+	use std::str::FromStr;
 
 	use chrono::{DateTime, Utc};
 	use rstest::rstest;
