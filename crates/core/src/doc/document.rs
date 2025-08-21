@@ -74,7 +74,7 @@ impl CursorRecord {
 	/// Converts the cursor record to a read-only record
 	///
 	/// This method ensures the underlying data is in read-only format for better sharing.
-	pub(crate) fn into_read_only(self) -> Record {
+	pub(crate) fn into_read_only(self) -> Arc<Record> {
 		self.record.into_read_only()
 	}
 
@@ -143,7 +143,7 @@ impl From<Arc<Record>> for CursorRecord {
 impl From<Value> for CursorRecord {
 	fn from(value: Value) -> Self {
 		Self {
-			record: Record::new(Data::Mutable(value)),
+			record: Record::new(value.into()),
 		}
 	}
 }
@@ -151,7 +151,7 @@ impl From<Value> for CursorRecord {
 impl From<Arc<Value>> for CursorRecord {
 	fn from(arc: Arc<Value>) -> Self {
 		Self {
-			record: Record::new(Data::ReadOnly(arc)),
+			record: Record::new(arc.into()),
 		}
 	}
 }

@@ -83,7 +83,7 @@ impl Record {
 		)
 	}
 
-	/// Converts the record's data to read-only format
+	/// Converts the record's data to read-only format and returns an Arc reference
 	///
 	/// If the data is currently mutable, it will be wrapped in an `Arc` to make it
 	/// read-only. This is useful for performance optimization when the data won't
@@ -91,14 +91,14 @@ impl Record {
 	///
 	/// # Returns
 	///
-	/// The record with read-only data
-	pub(crate) fn into_read_only(mut self) -> Self {
+	/// An Arc reference to the record with read-only data
+	pub(crate) fn into_read_only(mut self) -> Arc<Self> {
 		if let Data::Mutable(value) = &mut self.data {
 			let value = mem::take(value);
 			let arc = Arc::new(value);
 			self.data = Data::ReadOnly(arc);
 		}
-		self
+		Arc::new(self)
 	}
 
 	/// Sets the record type in the metadata
@@ -277,6 +277,18 @@ impl<'de> Deserialize<'de> for Data {
 		D: Deserializer<'de>,
 	{
 		Value::deserialize(deserializer).map(Self::Mutable)
+	}
+}
+
+impl From<Value> for Data {
+	fn from(value: Value) -> Self {
+		Self::Mutable(value)
+	}
+}
+
+impl From<Arc<Value>> for Data {
+	fn from(value: Arc<Value>) -> Self {
+		Self::ReadOnly(value)
 	}
 }
 

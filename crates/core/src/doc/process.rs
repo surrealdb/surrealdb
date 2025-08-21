@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
@@ -8,7 +6,7 @@ use crate::dbs::{Operable, Options, Processed, Statement, Workable};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::val::Value;
-use crate::val::record::{Data, Record};
+use crate::val::record::Record;
 
 impl Document {
 	pub(crate) async fn process(
@@ -29,7 +27,7 @@ impl Document {
 			Operable::Insert(v, o) => (v, Workable::Insert(o)),
 			Operable::Relate(f, v, w, o) => (v, Workable::Relate(f, w, o)),
 			Operable::Count(count) => {
-				(Arc::new(Record::new(Data::Mutable(count.into()))), Workable::Normal)
+				(Record::new(Value::from(count).into()).into_read_only(), Workable::Normal)
 			}
 		};
 		// Setup a new document

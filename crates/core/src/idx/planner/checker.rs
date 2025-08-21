@@ -210,7 +210,7 @@ impl CheckerCacheEntry {
 					(cursor_doc.doc.into_read_only(), truthy)
 				};
 				return Ok(CheckerCacheEntry {
-					record: Some((rid, Arc::new(record))),
+					record: Some((rid, record)),
 					truthy,
 				});
 			}

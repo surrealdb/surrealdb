@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use anyhow::Result;
 
 use crate::ctx::Context;
@@ -112,13 +110,7 @@ impl Document {
 			_ => ctx.tx().set(&key, &doc_without_id, opt.version).await,
 		}?;
 		// Update the cache
-		ctx.tx().set_record_cache(
-			ns,
-			db,
-			&rid.table,
-			&rid.key,
-			Arc::new(doc_without_id.into_read_only()),
-		)?;
+		ctx.tx().set_record_cache(ns, db, &rid.table, &rid.key, doc_without_id.into_read_only())?;
 		// Carry on
 		Ok(())
 	}

@@ -1890,7 +1890,7 @@ impl Transaction {
 					};
 					record.data.to_mut().def(&rid);
 					// Convert to read-only format for better sharing and performance
-					Ok(Arc::new(record.into_read_only()))
+					Ok(record.into_read_only())
 				}
 				// The value is not in the datastore
 				None => Ok(Arc::new(Default::default())),
@@ -1914,7 +1914,7 @@ impl Transaction {
 							};
 							record.data.to_mut().def(&rid);
 							// Convert to read-only format for better sharing and performance
-							let record = Arc::new(record.into_read_only());
+							let record = record.into_read_only();
 							let entry = cache::tx::Entry::Val(record.clone());
 							self.cache.insert(qey, entry);
 							Ok(record)
@@ -1941,7 +1941,7 @@ impl Transaction {
 		self.set(&key, &record, None).await?;
 		// Set the value in the cache
 		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
-		self.cache.insert(qey, cache::tx::Entry::Val(Arc::new(record)));
+		self.cache.insert(qey, cache::tx::Entry::Val(record.into_read_only()));
 		// Return nothing
 		Ok(())
 	}
