@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::str::FromStr;
 
 use rust_decimal::Decimal;
 use surrealdb_protocol::fb::v1 as proto_fb;
@@ -135,7 +134,7 @@ impl ToFlatbuffers for Kind {
 			}
 			Self::Geometry(types) => {
 				let type_offsets: Vec<_> =
-					types.iter().map(|t| builder.create_string(t.to_string().as_str())).collect();
+					types.iter().map(|t| t.to_fb(builder)).collect::<anyhow::Result<Vec<_>>>()?;
 				let types = builder.create_vector(&type_offsets);
 
 				proto_fb::KindArgs {
@@ -433,7 +432,7 @@ impl FromFlatbuffers for Kind {
 
 				if let Some(types) = geometry.types() {
 					for geometry_type in types.iter() {
-						geo_kinds.push(GeometryKind::from_str(geometry_type)?);
+						geo_kinds.push(GeometryKind::from_fb(geometry_type)?);
 					}
 				}
 
@@ -587,6 +586,43 @@ impl FromFlatbuffers for KindLiteral {
 				Ok(KindLiteral::Object(map))
 			}
 			_ => Err(anyhow::anyhow!("Unknown literal type")),
+		}
+	}
+}
+
+impl ToFlatbuffers for GeometryKind {
+	type Output<'bldr> = proto_fb::GeometryKindType;
+
+	fn to_fb<'bldr>(
+		&self,
+		_builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> anyhow::Result<Self::Output<'bldr>> {
+		Ok(match self {
+			GeometryKind::Point => proto_fb::GeometryKindType::Point,
+			GeometryKind::Line => proto_fb::GeometryKindType::Line,
+			GeometryKind::Polygon => proto_fb::GeometryKindType::Polygon,
+			GeometryKind::MultiPoint => proto_fb::GeometryKindType::MultiPoint,
+			GeometryKind::MultiLine => proto_fb::GeometryKindType::MultiLineString,
+			GeometryKind::MultiPolygon => proto_fb::GeometryKindType::MultiPolygon,
+			GeometryKind::Collection => proto_fb::GeometryKindType::Collection,
+		})
+	}
+}
+
+impl FromFlatbuffers for GeometryKind {
+	type Input<'a> = proto_fb::GeometryKindType;
+
+	#[inline]
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		match input {
+			proto_fb::GeometryKindType::Point => Ok(GeometryKind::Point),
+			proto_fb::GeometryKindType::Line => Ok(GeometryKind::Line),
+			proto_fb::GeometryKindType::Polygon => Ok(GeometryKind::Polygon),
+			proto_fb::GeometryKindType::MultiPoint => Ok(GeometryKind::MultiPoint),
+			proto_fb::GeometryKindType::MultiLineString => Ok(GeometryKind::MultiLine),
+			proto_fb::GeometryKindType::MultiPolygon => Ok(GeometryKind::MultiPolygon),
+			proto_fb::GeometryKindType::Collection => Ok(GeometryKind::Collection),
+			_ => Err(anyhow::anyhow!("Unknown geometry kind type: {:?}", input)),
 		}
 	}
 }
