@@ -596,7 +596,7 @@ impl IndexRangeThingIterator {
 		let from = if let Some((_, inclusivity, val)) = from.first() {
 			RangeValue {
 				value: val.as_ref().clone(),
-				inclusive: *inclusivity == false,
+				inclusive: !*inclusivity,
 			}
 		} else {
 			RangeValue::default()
@@ -604,7 +604,7 @@ impl IndexRangeThingIterator {
 		let to = if let Some((_, inclusivity, val)) = to.last() {
 			RangeValue {
 				value: val.as_ref().clone(),
-				inclusive: *inclusivity == true,
+				inclusive: *inclusivity,
 			}
 		} else {
 			RangeValue::default()
