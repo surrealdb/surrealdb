@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::ops::Bound;
-use std::str::FromStr;
 
 use anyhow::bail;
 use surrealdb_types::{
@@ -62,7 +61,7 @@ impl TryFrom<InternalValue> for PublicValue {
 			InternalValue::Uuid(u) => PublicValue::Uuid(u.into()),
 			InternalValue::Array(a) => PublicValue::Array(a.try_into()?),
 			InternalValue::Object(o) => PublicValue::Object(o.try_into()?),
-			InternalValue::Geometry(g) => PublicValue::Geometry(g.try_into()?),
+			InternalValue::Geometry(g) => PublicValue::Geometry(g.into()),
 			InternalValue::Bytes(b) => PublicValue::Bytes(b.into()),
 			InternalValue::RecordId(r) => PublicValue::RecordId(r.try_into()?),
 			InternalValue::File(f) => PublicValue::File(f.into()),
@@ -285,8 +284,8 @@ impl TryFrom<PublicRecordIdKey> for InternalRecordIdKey {
 	type Error = anyhow::Error;
 	fn try_from(r: PublicRecordIdKey) -> anyhow::Result<Self> {
 		match r {
-			PublicRecordIdKey::Number(n) => Ok(InternalRecordIdKey::Number(n.into())),
-			PublicRecordIdKey::String(s) => Ok(InternalRecordIdKey::String(s.into())),
+			PublicRecordIdKey::Number(n) => Ok(InternalRecordIdKey::Number(n)),
+			PublicRecordIdKey::String(s) => Ok(InternalRecordIdKey::String(s)),
 			PublicRecordIdKey::Uuid(u) => Ok(InternalRecordIdKey::Uuid(u.into())),
 			PublicRecordIdKey::Array(a) => Ok(InternalRecordIdKey::Array(a.try_into()?)),
 			PublicRecordIdKey::Object(o) => Ok(InternalRecordIdKey::Object(o.try_into()?)),
@@ -301,8 +300,8 @@ impl TryFrom<InternalRecordIdKey> for PublicRecordIdKey {
 	type Error = anyhow::Error;
 	fn try_from(r: InternalRecordIdKey) -> anyhow::Result<Self> {
 		match r {
-			InternalRecordIdKey::Number(n) => Ok(PublicRecordIdKey::Number(n.into())),
-			InternalRecordIdKey::String(s) => Ok(PublicRecordIdKey::String(s.into())),
+			InternalRecordIdKey::Number(n) => Ok(PublicRecordIdKey::Number(n)),
+			InternalRecordIdKey::String(s) => Ok(PublicRecordIdKey::String(s)),
 			InternalRecordIdKey::Uuid(u) => Ok(PublicRecordIdKey::Uuid(u.into())),
 			InternalRecordIdKey::Array(a) => Ok(PublicRecordIdKey::Array(a.try_into()?)),
 			InternalRecordIdKey::Object(o) => Ok(PublicRecordIdKey::Object(o.try_into()?)),

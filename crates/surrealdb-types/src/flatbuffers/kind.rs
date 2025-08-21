@@ -442,7 +442,7 @@ impl FromFlatbuffers for Kind {
 				let types = if let Some(types) = geometry.types() {
 					types
 						.iter()
-						.map(|t| GeometryKind::from_fb(t))
+						.map(GeometryKind::from_fb)
 						.collect::<anyhow::Result<Vec<_>>>()?
 				} else {
 					Vec::new()

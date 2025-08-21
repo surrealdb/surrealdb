@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{DeriveInput, parse_macro_input, Data, Fields, Ident, Type};
+use syn::{Data, DeriveInput, Fields, Ident, Type, parse_macro_input};
 
 #[proc_macro_derive(SurrealValue)]
 pub fn surreal_value(input: TokenStream) -> TokenStream {
@@ -17,9 +17,10 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 
 	match fields {
 		Fields::Named(named_fields) => {
-			let field_names: Vec<&Ident> = named_fields.named.iter().filter_map(|f| f.ident.as_ref()).collect();
+			let field_names: Vec<&Ident> =
+				named_fields.named.iter().filter_map(|f| f.ident.as_ref()).collect();
 			let field_types: Vec<&Type> = named_fields.named.iter().map(|f| &f.ty).collect();
-			
+
 			let is_value_checks: Vec<_> = field_names.iter().zip(field_types.iter()).map(|(field_name, field_type)| {
 				let field_name_str = field_name.to_string();
 				quote! {
@@ -27,27 +28,39 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 				}
 			}).collect();
 
-			let into_value_fields: Vec<_> = field_names.iter().zip(field_types.iter()).map(|(field_name, _field_type)| {
-				let field_name_str = field_name.to_string();
-				quote! {
-					(#field_name_str.to_string(), self.#field_name.into_value())
-				}
-			}).collect();
+			let into_value_fields: Vec<_> = field_names
+				.iter()
+				.zip(field_types.iter())
+				.map(|(field_name, _field_type)| {
+					let field_name_str = field_name.to_string();
+					quote! {
+						(#field_name_str.to_string(), self.#field_name.into_value())
+					}
+				})
+				.collect();
 
-			let from_value_fields: Vec<_> = field_names.iter().zip(field_types.iter()).map(|(field_name, field_type)| {
-				let field_name_str = field_name.to_string();
-				quote! {
-					let #field_name = obj.get(#field_name_str)
-						.and_then(|v| <#field_type as surrealdb_types::SurrealValue>::from_value(v.clone()))?;
-				}
-			}).collect();
+			let from_value_fields: Vec<_> = field_names
+				.iter()
+				.zip(field_types.iter())
+				.map(|(field_name, field_type)| {
+					let field_name_str = field_name.to_string();
+					quote! {
+						let #field_name = obj.get(#field_name_str)
+							.and_then(|v| <#field_type as surrealdb_types::SurrealValue>::from_value(v.clone()))?;
+					}
+				})
+				.collect();
 
-			let field_kinds: Vec<_> = field_names.iter().zip(field_types.iter()).map(|(field_name, field_type)| {
-				let field_name_str = field_name.to_string();
-				quote! {
-					(#field_name_str.to_string(), <#field_type as surrealdb_types::SurrealValue>::kind_of())
-				}
-			}).collect();
+			let field_kinds: Vec<_> = field_names
+				.iter()
+				.zip(field_types.iter())
+				.map(|(field_name, field_type)| {
+					let field_name_str = field_name.to_string();
+					quote! {
+						(#field_name_str.to_string(), <#field_type as surrealdb_types::SurrealValue>::kind_of())
+					}
+				})
+				.collect();
 
 			let output = quote! {
 				impl #impl_generics surrealdb_types::SurrealValue for #name #ty_generics #where_clause {
@@ -75,9 +88,9 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 						let surrealdb_types::Value::Object(surrealdb_types::Object(obj)) = value else {
 							return None;
 						};
-						
+
 						#(#from_value_fields)*
-						
+
 						Some(Self {
 							#(#field_names),*
 						})
@@ -90,42 +103,54 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 		Fields::Unnamed(unnamed_fields) => {
 			let field_types: Vec<&Type> = unnamed_fields.unnamed.iter().map(|f| &f.ty).collect();
 			let field_count = field_types.len();
-			
-			let is_value_checks: Vec<_> = (0..field_count).map(|i| {
-				let i_lit = syn::Index::from(i);
-				let field_type = &field_types[i];
-				quote! {
-					values.get(#i).map_or(false, |v| <#field_type as surrealdb_types::SurrealValue>::is_value(v))
-				}
-			}).collect();
 
-			let into_value_fields: Vec<_> = (0..field_count).map(|i| {
-				let i_lit = syn::Index::from(i);
-				quote! {
-					self.#i_lit.into_value()
-				}
-			}).collect();
+			let is_value_checks: Vec<_> = (0..field_count)
+				.map(|i| {
+					let field_type = &field_types[i];
+					quote! {
+						values.get(#i).map_or(false, |v| <#field_type as surrealdb_types::SurrealValue>::is_value(v))
+					}
+				})
+				.collect();
 
-			let from_value_fields: Vec<_> = (0..field_count).map(|i| {
-				let _i_lit = syn::Index::from(i);
-				let field_type = &field_types[i];
-				let field_ident = syn::Ident::new(&format!("field_{}", i), proc_macro2::Span::call_site());
-				quote! {
-					let #field_ident = values.get(#i)
-						.and_then(|v| <#field_type as surrealdb_types::SurrealValue>::from_value(v.clone()))?;
-				}
-			}).collect();
+			let into_value_fields: Vec<_> = (0..field_count)
+				.map(|i| {
+					let i_lit = syn::Index::from(i);
+					quote! {
+						self.#i_lit.into_value()
+					}
+				})
+				.collect();
 
-			let field_assignments: Vec<_> = (0..field_count).map(|i| {
-				let field_ident = syn::Ident::new(&format!("field_{}", i), proc_macro2::Span::call_site());
-				quote! { #field_ident }
-			}).collect();
+			let from_value_fields: Vec<_> = (0..field_count)
+				.map(|i| {
+					let _i_lit = syn::Index::from(i);
+					let field_type = &field_types[i];
+					let field_ident =
+						syn::Ident::new(&format!("field_{}", i), proc_macro2::Span::call_site());
+					quote! {
+						let #field_ident = values.get(#i)
+							.and_then(|v| <#field_type as surrealdb_types::SurrealValue>::from_value(v.clone()))?;
+					}
+				})
+				.collect();
 
-			let field_kinds: Vec<_> = field_types.iter().map(|field_type| {
-				quote! {
-					<#field_type as surrealdb_types::SurrealValue>::kind_of()
-				}
-			}).collect();
+			let field_assignments: Vec<_> = (0..field_count)
+				.map(|i| {
+					let field_ident =
+						syn::Ident::new(&format!("field_{}", i), proc_macro2::Span::call_site());
+					quote! { #field_ident }
+				})
+				.collect();
+
+			let field_kinds: Vec<_> = field_types
+				.iter()
+				.map(|field_type| {
+					quote! {
+						<#field_type as surrealdb_types::SurrealValue>::kind_of()
+					}
+				})
+				.collect();
 
 			let output = quote! {
 				impl #impl_generics surrealdb_types::SurrealValue for #name #ty_generics #where_clause {
@@ -153,13 +178,13 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 						let surrealdb_types::Value::Array(surrealdb_types::Array(values)) = value else {
 							return None;
 						};
-						
+
 						if values.len() != #field_count {
 							return None;
 						}
-						
+
 						#(#from_value_fields)*
-						
+
 						Some(Self(
 							#(#field_assignments),*
 						))
