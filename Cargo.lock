@@ -5870,6 +5870,7 @@ dependencies = [
  "subtle",
  "surrealdb-protocol",
  "surrealdb-tikv-client",
+ "surrealdb-types",
  "surrealkv",
  "surrealml-core",
  "sysinfo",

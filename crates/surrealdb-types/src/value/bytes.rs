@@ -3,7 +3,7 @@ use std::fmt;
 use serde::{de::{self, SeqAccess, Visitor}, Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct Bytes(pub(crate) Vec<u8>);
+pub struct Bytes(pub Vec<u8>);
 
 impl Serialize for Bytes {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
