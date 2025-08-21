@@ -5,7 +5,8 @@ use surrealdb_protocol::fb::v1 as proto_fb;
 
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use crate::val::{
-	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, RecordId, Strand, Uuid, Value,
+	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId, Regex,
+	Strand, Uuid, Value,
 };
 
 impl ToFlatbuffers for Value {
@@ -86,9 +87,18 @@ impl ToFlatbuffers for Value {
 				value_type: proto_fb::ValueType::File,
 				value: Some(file.to_fb(builder)?.as_union_value()),
 			},
+			Self::Regex(regex) => proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::Regex,
+				value: Some(regex.to_fb(builder)?.as_union_value()),
+			},
+			Self::Range(range) => proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::Range,
+				value: Some(range.to_fb(builder)?.as_union_value()),
+			},
 			_ => {
 				// TODO: DO NOT PANIC, we just need to modify the Value enum which Mees is
 				// currently working on.
+				// Table and Closure need to be removed from the Value enum.
 				panic!("Unsupported value type for Flatbuffers serialization: {:?}", self);
 			}
 		};
@@ -174,6 +184,16 @@ impl FromFlatbuffers for Value {
 				let file = File::from_fb(file_value)?;
 				Ok(Value::File(file))
 			}
+			proto_fb::ValueType::Regex => {
+				let regex_value = input.value_as_regex().expect("Guaranteed to be a Regex");
+				let regex = Regex::from_fb(regex_value)?;
+				Ok(Value::Regex(regex))
+			}
+			proto_fb::ValueType::Range => {
+				let range_value = input.value_as_range().expect("Guaranteed to be a Range");
+				let range = Range::from_fb(range_value)?;
+				Ok(Value::Range(Box::new(range)))
+			}
 			_ => Err(anyhow!(
 				"Unsupported value type for Flatbuffers deserialization: {:?}",
 				input.value_type()
@@ -185,6 +205,8 @@ impl FromFlatbuffers for Value {
 #[cfg(test)]
 mod tests {
 	use std::collections::BTreeMap;
+	use std::ops::Bound;
+	use std::str::FromStr;
 
 	use chrono::{DateTime, Utc};
 	use rstest::rstest;
@@ -215,6 +237,8 @@ mod tests {
 	#[case::string(Value::Strand(Strand::new("Hello, World!".to_string()).unwrap()))]
 	#[case::bytes(Value::Bytes(Bytes(vec![1, 2, 3, 4, 5])))]
 	#[case::thing(Value::RecordId(RecordId{ table: "test_table".to_string(), key: RecordIdKey::Number(42) }))] // Example Thing
+	// thing range
+	#[case::thing_range(Value::RecordId(RecordId{ table: "test_table".to_string(), key: RecordIdKey::Range(Box::new(RecordIdKeyRange { start: Bound::Included(RecordIdKey::String("a".to_string())), end: Bound::Unbounded })) }))]
 	#[case::object(Value::Object(Object(BTreeMap::from([("key".to_string(), Value::Strand(Strand::new("value".to_owned()).unwrap()))]))))]
 	#[case::array(Value::Array(Array(vec![Value::Number(Number::Int(1)), Value::Number(Number::Float(2.0))])))]
 	#[case::geometry::point(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))))]
@@ -230,6 +254,11 @@ mod tests {
 		vec![geo::LineString(vec![geo::Coord { x: 0.5, y: 0.5 }, geo::Coord { x: 0.75, y: 0.75 }])]
 	)]))))]
 	#[case::file(Value::File(File { bucket: "test_bucket".to_string(), key: "test_key".to_string() }))]
+	#[case::range(Value::Range(Box::new(Range { start: Bound::Included(Value::Strand(Strand::new("Hello, World!".to_string()).unwrap())), end: Bound::Excluded(Value::Strand(Strand::new("Hello, World!".to_string()).unwrap())) })))]
+	#[case::range(Value::Range(Box::new(Range { start: Bound::Unbounded, end: Bound::Excluded(Value::Strand(Strand::new("Hello, World!".to_string()).unwrap())) })))]
+	#[case::range(Value::Range(Box::new(Range { start: Bound::Included(Value::Strand(Strand::new("Hello, World!".to_string()).unwrap())), end: Bound::Unbounded })))]
+	#[case::regex(Value::Regex(Regex::from_str("/^[a-z]+$/").unwrap()))]
+
 	fn test_flatbuffers_roundtrip_value(#[case] input: Value) {
 		let mut builder = flatbuffers::FlatBufferBuilder::new();
 		let input_fb = input.to_fb(&mut builder).expect("Failed to convert to FlatBuffer");
