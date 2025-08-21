@@ -1,4 +1,22 @@
 //! Decimal functionality and extension traits.
+//!
+//! This module provides DecimalLexEncoder, a variable-length, lexicographic
+//! byte encoding for fastnum::D128 values. The encoding ensures that
+//! byte-wise ordering preserves numeric ordering, which is critical for key
+//! construction in indexes. The encoder is stream-friendly: it guarantees an
+//! in-band terminator within the mantissa encoding and appends a trailing 0x00
+//! so decoders can read until the first zero when values are concatenated in
+//! composite keys.
+//!
+//! Where it’s used:
+//! - val::number::Number::{as_decimal_buf, from_decimal_buf}
+//! - key::value::StoreKeyNumber serde impls used in index key material
+//!
+//! Ordering overview:
+//! - Finite negatives < zero < finite positives
+//! - −∞ < all finite < +∞ < NaN
+//!
+//! See the struct-level documentation below for the precise byte format.
 
 use anyhow::Result;
 use fastnum::decimal::{Context, Sign};
@@ -25,9 +43,13 @@ use crate::err::Error;
 ///
 /// ### Non-Zero Values
 /// The format consists of:
-/// 1. **Sign marker** (1 byte):
-///    - `0xFF` for positive numbers
-///    - `0x00` for negative numbers
+/// 1. **Class/marker byte** (1 byte):
+///    - `0x80` Zero
+///    - `0x40` Finite negative
+///    - `0xA0` Finite positive
+///    - `0x20` Negative infinity
+///    - `0xC0` Positive infinity
+///    - `0xFF` NaN
 ///
 /// 2. **Biased scale** (2 bytes, big-endian):
 ///    - We bias the "scale" (not the raw exponent). Scale is defined as: `scale = exponent +
@@ -65,20 +87,43 @@ impl DecimalLexEncoder {
 	/// maps this into [1, 12321], comfortably within u16.
 	const EXP_BIAS: i32 = 6144; // bias used for mapping signed scale into u16 space
 
+	const FINITE_NEGATIVE_MARKER: u8 = 0x40;
+	const FINITE_POSITIVE_MARKER: u8 = 0xA0;
+
+	// 0x80 = 128, middle value for proper ordering
+	const ZERO_MARKER: u8 = 0x80;
+
+	const INFINITE_NEGATIVE_MARKER: u8 = 0x20;
+	const INFINITE_POSITIVE_MAKER: u8 = 0xC0;
+	const NAN_MARKER: u8 = 0xFF;
+
 	/// Encodes a D128 value into a lexicographically ordered byte sequence.
 	///
 	/// The encoding preserves sort order: if `a < b` then `encode(a) <
 	/// encode(b)`. This is essential for database indexing where byte-level
 	/// comparison must match numeric comparison.
 	pub(crate) fn encode(dec: D128) -> Vec<u8> {
+		if dec.is_nan() {
+			return vec![Self::NAN_MARKER, 0x00];
+		}
+
+		// Extract sign
+		let is_negative = dec.is_negative();
+
+		if dec.is_infinite() {
+			if is_negative {
+				return vec![Self::INFINITE_NEGATIVE_MARKER, 0x00];
+			} else {
+				return vec![Self::INFINITE_POSITIVE_MAKER, 0x00];
+			}
+		}
 		// Special case: zero gets a fixed encoding that sorts between negative and
 		// positive
 		if dec.is_zero() {
-			return vec![0x80]; // 0x80 = 128, middle value for proper ordering
+			return vec![Self::ZERO_MARKER, 0x00];
 		}
 
-		// Extract sign and work with absolute value
-		let is_negative = dec.is_negative();
+		// Work with absolute value
 		let normalized = dec.abs(); // Get absolute value
 		let e = -normalized.fractional_digits_count() as i32; // Exponent: negative of fractional digits
 		let digit_count = normalized.digits_count();
@@ -91,6 +136,12 @@ impl DecimalLexEncoder {
 		// For D128, scale ∈ [-6143, 6177] → [1, 12321] after adding EXP_BIAS.
 		let biased_exponent = (scale + Self::EXP_BIAS) as u16;
 
+		let encode_exponent = |e: u16| {
+			let q = (e / 255) as u8;
+			let r = (e % 255) as u8;
+			[q + 1, r + 1]
+		};
+
 		// Build the final encoded result
 		// Capacity: 1 sign + 2 exponent + packed digits (2 digits per byte) + potential
 		// terminator
@@ -102,22 +153,23 @@ impl DecimalLexEncoder {
 		// Encode sign marker and biased scale based on sign
 		if is_negative {
 			// Sign marker: 0x00 ensures negative numbers sort before positive ones
-			result.push(0x00);
+			result.push(Self::FINITE_NEGATIVE_MARKER);
 			// Complement of biased scale: reverses ordering so that more negative values
 			// sort first This maintains total ordering for negatives when compared
 			// bytewise.
-			result.extend((0xFFFF - biased_exponent).to_be_bytes());
+			result.extend(encode_exponent(0xFFFF - biased_exponent));
 			// Complement all packed digit bytes to reverse their ordering for negative
 			// numbers
 			Self::pack_digits_negative(radix10, &mut result);
 		} else {
 			// Sign marker: 0xFF ensures positive numbers sort after negative ones
-			result.push(0xFF);
+			result.push(Self::FINITE_POSITIVE_MARKER);
 			// Biased scale: larger scales (greater magnitude) sort later for positives
-			result.extend(biased_exponent.to_be_bytes());
+			result.extend(encode_exponent(biased_exponent));
 			// Store packed digit bytes directly for positive numbers
 			Self::pack_digits_positive(radix10, &mut result);
 		}
+		result.push(0x00);
 		//
 		result
 	}
@@ -133,30 +185,28 @@ impl DecimalLexEncoder {
 			return Err(Error::Serialization("Cannot decode from empty buffer".to_string()).into());
 		}
 
-		// Special case: zero
-		if bytes[0] == 0x80 {
-			return Ok(D128::ZERO);
-		}
+		// Special cases
+		let is_negative = match bytes[0] {
+			Self::ZERO_MARKER => {
+				return Ok(D128::ZERO);
+			}
+			Self::INFINITE_NEGATIVE_MARKER => return Ok(D128::NEG_INFINITY),
+			Self::INFINITE_POSITIVE_MAKER => return Ok(D128::INFINITY),
+			Self::NAN_MARKER => return Ok(D128::NAN),
+			Self::FINITE_NEGATIVE_MARKER => true,
+			Self::FINITE_POSITIVE_MARKER => false,
+			marker => {
+				return Err(Error::Serialization(format!("Invalid marker byte: {marker}")).into());
+			}
+		};
 
-		// Need at least 3 bytes: sign (1) + exponent (2)
+		// Need at least 3 bytes: marker (1) + exponent (2)
 		if bytes.len() < 3 {
 			return Err(Error::Serialization(format!("Buffer too short: {}", bytes.len())).into());
 		}
 
-		let sign_byte = bytes[0];
-		let is_negative = match sign_byte {
-			0x00 => true,  // Negative
-			0xFF => false, // Positive
-			_ => {
-				return Err(
-					Error::Serialization(format!("Invalid sentinel byte: {sign_byte}")).into()
-				);
-			}
-		};
-
-		// Extract biased exponent (2 bytes, big-endian)
-		let exp_bytes = [bytes[1], bytes[2]];
-		let biased_exponent = u16::from_be_bytes(exp_bytes);
+		// Extract biased exponent (2 bytes with shift to avoid 0x00)
+		let biased_exponent = (bytes[1] - 1) as u16 * 255 + (bytes[2] - 1) as u16;
 		// Unbias the scale, handling negative number complement
 		let biased_exponent = if is_negative {
 			// For negative numbers, undo the complement applied during encoding
@@ -218,7 +268,7 @@ impl DecimalLexEncoder {
 			buf.push(!packed);
 		} else {
 			// Set the termination byte (inverted)
-			buf.push(0xFF);
+			buf.push(0xF0); // !0x0F
 		}
 	}
 
@@ -248,7 +298,7 @@ impl DecimalLexEncoder {
 			buf.push(packed);
 		} else {
 			// Set the termination byte
-			buf.push(0x00);
+			buf.push(0x0F);
 		}
 	}
 
@@ -297,7 +347,7 @@ impl DecimalLexEncoder {
 	fn unpack_digit(pack: u8, m: &mut U128) -> Result<u8> {
 		let hi = pack >> 4;
 		let lo = pack & 0x0F;
-		if hi == 0 {
+		if hi == 0x0 {
 			return Ok(0);
 		}
 		if !(1..=10).contains(&hi) {
@@ -349,8 +399,9 @@ impl DecimalLexEncoder {
 mod tests {
 	use super::*;
 
-	fn test_cases() -> [D128; 27] {
+	fn test_cases() -> [D128; 32] {
 		[
+			D128::from(f64::NEG_INFINITY),
 			D128::from(f64::MIN),
 			D128::from_i128(i128::MIN).unwrap(),
 			D128::from(i64::MIN),
@@ -362,9 +413,11 @@ mod tests {
 			D128::from(-9),
 			D128::from(-3.15),
 			D128::from(-std::f64::consts::PI),
+			D128::from(-1.5f64),
 			-D128::ONE,
 			D128::ZERO,
 			D128::ONE,
+			D128::from(1.5f64),
 			D128::from(2),
 			D128::from(std::f64::consts::PI),
 			D128::from(3.15),
@@ -378,6 +431,8 @@ mod tests {
 			D128::from_i128(i128::MAX).unwrap(),
 			D128::from_u128(u128::MAX).unwrap(),
 			D128::from(f64::MAX),
+			D128::from(f64::INFINITY),
+			D128::from(f64::NAN),
 		]
 	}
 
@@ -387,7 +442,29 @@ mod tests {
 		for (i, case) in cases.into_iter().enumerate() {
 			let encoded = DecimalLexEncoder::encode(case);
 			let decoded = DecimalLexEncoder::decode(&encoded).expect("Decode should succeed");
-			assert_eq!(case, decoded, "Roundtrip failed for {i}: {case} != {decoded}");
+			if case.is_nan() {
+				assert!(decoded.is_nan(), "Roundtrip failed for {i}: {case} != {decoded}");
+			} else {
+				assert_eq!(case, decoded, "Roundtrip failed for {i}: {case} != {decoded}");
+			}
+		}
+	}
+
+	#[test]
+	fn test_encode_terminate_with_zero() {
+		let cases = test_cases();
+		for (i, case) in cases.into_iter().enumerate() {
+			let encoded = DecimalLexEncoder::encode(case);
+			assert_eq!(
+				encoded.iter().filter(|&b| *b == 0x00).count(),
+				1,
+				"Encoded buffer should contains only one 0x00 - {i}: {case} {encoded:?}"
+			);
+			assert_eq!(
+				encoded.iter().position(|&b| b == 0x00).unwrap(),
+				encoded.len() - 1,
+				"Encoded buffer should terminate with 0x00 - {i}: {case} {encoded:?}"
+			);
 		}
 	}
 
@@ -413,25 +490,25 @@ mod tests {
 
 	#[test]
 	fn test_decode_buffer_too_short() {
-		let result = DecimalLexEncoder::decode(&[0xFF]);
+		let result = DecimalLexEncoder::decode(&[0xA0]);
 		assert!(result.is_err());
 		let err = result.unwrap_err();
 		assert!(err.to_string().contains("Buffer too short"), "{err:?}");
 	}
 
 	#[test]
-	fn test_decode_invalid_sentinel() {
+	fn test_decode_invalid_marker() {
 		let result = DecimalLexEncoder::decode(&[0x42, 0x00, 0x00, 0x00]);
 		assert!(result.is_err());
 		let err = result.unwrap_err();
-		assert!(err.to_string().contains("Invalid sentinel byte"), "{err:?}");
+		assert_eq!(err.to_string(), "Serialization error: Invalid marker byte: 66", "{err:?}");
 	}
 
 	#[test]
 	fn test_decode_empty_mantissa() {
 		// Create a buffer that starts correctly but is truncated during mantissa
 		// decoding
-		let result = DecimalLexEncoder::decode(&[0xFF, 0x00, 0x00, 0x00]); // Missing mantissa data
+		let result = DecimalLexEncoder::decode(&[0xA0, 0x01, 0x01, 0x00]); // Missing mantissa data
 		assert!(result.is_err());
 		let err = result.unwrap_err();
 		assert!(err.to_string().contains("Empty mantissa"), "{err:?}");
