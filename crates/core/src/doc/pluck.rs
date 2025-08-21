@@ -88,9 +88,9 @@ impl Document {
 				}
 			},
 			None => match stm {
-				Statement::Live(_) => Err(Error::unreachable(
-					".lives() uses .lq_pluck(), not .pluck()",
-				)),
+				Statement::Live(_) => {
+					Err(Error::unreachable(".lives() uses .lq_pluck(), not .pluck()"))
+				}
 				Statement::Select(s) => {
 					// Process the permitted documents
 					let current = match self.reduced(stk, ctx, opt, Current).await? {

@@ -85,13 +85,9 @@ async fn live_document_reduction() -> Result<(), Error> {
 
 	// Create sessions for owner and record user
 	let ses_owner = Session::owner().with_ns("test").with_db("test").with_rt(true);
-	let ses_record = Session::for_record(
-		"test",
-		"test",
-		"test",
-		Thing::from(("user", "test")).into(),
-	)
-	.with_rt(true);
+	let ses_record =
+		Session::for_record("test", "test", "test", Thing::from(("user", "test")).into())
+			.with_rt(true);
 
 	// Setup the scenario
 	let sql = "
@@ -206,9 +202,7 @@ async fn live_document_reduction() -> Result<(), Error> {
 
 	// Kill the live query
 	let sql = "KILL $uuid";
-	let res = &mut dbs
-		.execute(sql, &ses_owner, Some(map!("uuid".to_string() => lqid)))
-		.await?;
+	let res = &mut dbs.execute(sql, &ses_owner, Some(map!("uuid".to_string() => lqid))).await?;
 	assert_eq!(res.len(), 1);
 	skip_ok(res, 1)?;
 

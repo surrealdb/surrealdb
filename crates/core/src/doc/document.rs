@@ -358,7 +358,8 @@ impl Document {
 						ctx.add_value("value", val);
 						let ctx = ctx.freeze();
 						// Process the PERMISSION clause
-						if !stk.run(|stk| e.compute(stk, &ctx, opt, Some(full))).await?.is_truthy() {
+						if !stk.run(|stk| e.compute(stk, &ctx, opt, Some(full))).await?.is_truthy()
+						{
 							reduced.cut(k);
 						}
 					}
