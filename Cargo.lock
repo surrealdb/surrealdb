@@ -5973,7 +5973,18 @@ dependencies = [
  "rust_decimal",
  "serde",
  "surrealdb-protocol",
+ "surrealdb-types-derive",
  "uuid",
+]
+
+[[package]]
+name = "surrealdb-types-derive"
+version = "3.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "surrealdb-types",
+ "syn 2.0.100",
 ]
 
 [[package]]
