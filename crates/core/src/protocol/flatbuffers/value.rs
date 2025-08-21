@@ -5,7 +5,8 @@ use surrealdb_protocol::fb::v1 as proto_fb;
 
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use crate::val::{
-	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, RecordId, Strand, Uuid, Value,
+	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId, Regex,
+	Strand, Uuid, Value,
 };
 
 impl ToFlatbuffers for Value {
@@ -86,9 +87,18 @@ impl ToFlatbuffers for Value {
 				value_type: proto_fb::ValueType::File,
 				value: Some(file.to_fb(builder)?.as_union_value()),
 			},
+			Self::Regex(regex) => proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::Regex,
+				value: Some(regex.to_fb(builder)?.as_union_value()),
+			},
+			Self::Range(range) => proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::Range,
+				value: Some(range.to_fb(builder)?.as_union_value()),
+			},
 			_ => {
 				// TODO: DO NOT PANIC, we just need to modify the Value enum which Mees is
 				// currently working on.
+				// Table and Closure need to be removed from the Value enum.
 				panic!("Unsupported value type for Flatbuffers serialization: {:?}", self);
 			}
 		};
@@ -173,6 +183,16 @@ impl FromFlatbuffers for Value {
 				let file_value = input.value_as_file().expect("Guaranteed to be a File");
 				let file = File::from_fb(file_value)?;
 				Ok(Value::File(file))
+			}
+			proto_fb::ValueType::Regex => {
+				let regex_value = input.value_as_regex().expect("Guaranteed to be a Regex");
+				let regex = Regex::from_fb(regex_value)?;
+				Ok(Value::Regex(regex))
+			}
+			proto_fb::ValueType::Range => {
+				let range_value = input.value_as_range().expect("Guaranteed to be a Range");
+				let range = Range::from_fb(range_value)?;
+				Ok(Value::Range(Box::new(range)))
 			}
 			_ => Err(anyhow!(
 				"Unsupported value type for Flatbuffers deserialization: {:?}",
