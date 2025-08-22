@@ -72,7 +72,7 @@ impl GrantBearer {
 		let mut hasher = Sha256::new();
 		hasher.update(self.key.as_str());
 		let hash = hasher.finalize();
-		let hash_hex = format!("{hash:x}").into();
+		let hash_hex = format!("{hash:x}");
 
 		Self {
 			key: hash_hex,

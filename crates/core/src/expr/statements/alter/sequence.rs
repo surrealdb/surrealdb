@@ -42,7 +42,7 @@ impl AlterSequenceStatement {
 			if timeout.is_zero() {
 				sq.timeout = None;
 			} else {
-				sq.timeout = Some(timeout.as_std_duration().clone());
+				sq.timeout = Some(*timeout.as_std_duration());
 			}
 		}
 		// Set the table definition

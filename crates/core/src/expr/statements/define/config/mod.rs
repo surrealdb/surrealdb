@@ -64,7 +64,7 @@ impl DefineConfigStatement {
 		}
 
 		let store = match &self.inner {
-			ConfigInner::GraphQL(g) => ConfigDefinition::GraphQL(g.clone().into()),
+			ConfigInner::GraphQL(g) => ConfigDefinition::GraphQL(g.clone()),
 			ConfigInner::Api(a) => ConfigDefinition::Api(a.compute(stk, ctx, opt, doc).await?),
 		};
 

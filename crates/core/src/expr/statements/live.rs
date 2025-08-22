@@ -78,8 +78,8 @@ impl LiveStatement {
 		let nid = opt.id()?;
 		// Check that auth has been set
 		let mut subscription_definition = SubscriptionDefinition {
-			id: self.id.clone(),
-			node: self.node.clone(),
+			id: self.id,
+			node: self.node,
 			fields: self.fields.clone(),
 			what: self.what.clone(),
 			cond: self.cond.clone().map(|c| c.0),
@@ -102,7 +102,7 @@ impl LiveStatement {
 		{
 			Value::Table(tb) => {
 				// Store the current Node ID
-				subscription_definition.node = nid.into();
+				subscription_definition.node = nid;
 				// Get the NS and DB
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 				// Get the transaction

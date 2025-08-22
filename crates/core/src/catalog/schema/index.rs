@@ -31,7 +31,7 @@ impl IndexDefinition {
 			what: unsafe { Ident::new_unchecked(self.what.clone()) },
 			cols: self.cols.iter().cloned().map(Into::into).collect(),
 			index: self.index.to_sql_definition(),
-			comment: self.comment.clone().map(|x| Strand::new_lossy(x)),
+			comment: self.comment.clone().map(Strand::new_lossy),
 			concurrently: false,
 		}
 	}

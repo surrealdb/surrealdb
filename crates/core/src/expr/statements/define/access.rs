@@ -139,7 +139,7 @@ impl DefineAccessStatement {
 		das
 	}
 
-	fn into_definition(&self) -> AccessDefinition {
+	fn to_definition(&self) -> AccessDefinition {
 		fn convert_algorithm(access: &Algorithm) -> catalog::Algorithm {
 			match access {
 				Algorithm::EdDSA => catalog::Algorithm::EdDSA,
@@ -252,7 +252,7 @@ impl DefineAccessStatement {
 				}
 				// Process the statement
 				let key = crate::key::root::ac::new(&self.name);
-				txn.set(&key, &self.into_definition(), None).await?;
+				txn.set(&key, &self.to_definition(), None).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -280,7 +280,7 @@ impl DefineAccessStatement {
 				// Process the statement
 				let key = crate::key::namespace::ac::new(ns, &self.name);
 				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-				txn.set(&key, &self.into_definition(), None).await?;
+				txn.set(&key, &self.to_definition(), None).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -308,7 +308,7 @@ impl DefineAccessStatement {
 				}
 				// Process the statement
 				let key = crate::key::database::ac::new(ns, db, &self.name);
-				txn.set(&key, &self.into_definition(), None).await?;
+				txn.set(&key, &self.to_definition(), None).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good

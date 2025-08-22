@@ -67,10 +67,10 @@ impl<'a> IndexOperation<'a> {
 		match &self.ix.index {
 			Index::Uniq => self.index_unique().await,
 			Index::Idx => self.index_non_unique().await,
-			Index::Search(p) => self.index_search(stk, &p).await,
-			Index::FullText(p) => self.index_fulltext(stk, &p, require_compaction).await,
-			Index::MTree(p) => self.index_mtree(stk, &p).await,
-			Index::Hnsw(p) => self.index_hnsw(&p).await,
+			Index::Search(p) => self.index_search(stk, p).await,
+			Index::FullText(p) => self.index_fulltext(stk, p, require_compaction).await,
+			Index::MTree(p) => self.index_mtree(stk, p).await,
+			Index::Hnsw(p) => self.index_hnsw(p).await,
 		}
 	}
 

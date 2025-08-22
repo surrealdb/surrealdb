@@ -27,7 +27,7 @@ impl EventDefinition {
 			target_table: unsafe { Ident::new_unchecked(self.target_table.clone()) },
 			when: self.when.clone().into(),
 			then: self.then.iter().cloned().map(Into::into).collect(),
-			comment: self.comment.clone().map(|x| Strand::new_lossy(x)),
+			comment: self.comment.clone().map(Strand::new_lossy),
 		}
 	}
 }

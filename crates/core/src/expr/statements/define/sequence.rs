@@ -56,7 +56,7 @@ impl DefineSequenceStatement {
 			name: self.name.to_raw_string(),
 			batch: self.batch,
 			start: self.start,
-			timeout: self.timeout.as_ref().map(|t| t.as_std_duration().clone()),
+			timeout: self.timeout.as_ref().map(|t| *t.as_std_duration()),
 		};
 		// Set the definition
 		txn.set(&key, &sq, None).await?;

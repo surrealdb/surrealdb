@@ -208,7 +208,7 @@ mod tests {
 
 		let a = Analyzer::new(
 			ctx.get_index_stores(),
-			Arc::new(DefineAnalyzerStatement::from(az).into_definition()),
+			Arc::new(DefineAnalyzerStatement::from(az).to_definition()),
 		)
 		.unwrap();
 

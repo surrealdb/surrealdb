@@ -122,7 +122,7 @@ impl Document {
 			// First of all, let's check to see if the WHERE
 			// clause of the LIVE query is matched by this
 			// document. If it is then we can continue.
-			match self.lq_check(stk, &lqctx, &lqopt, &live_subscription, doc).await {
+			match self.lq_check(stk, &lqctx, &lqopt, live_subscription, doc).await {
 				Err(IgnoreError::Ignore) => continue,
 				Err(IgnoreError::Error(e)) => return Err(e),
 				Ok(_) => (),
@@ -159,7 +159,7 @@ impl Document {
 					// livequery trigger. So we should catch the ignore and skip this entry in this
 					// case.
 					let result =
-						match self.lq_pluck(stk, &lqctx, &lqopt, &live_subscription, doc).await {
+						match self.lq_pluck(stk, &lqctx, &lqopt, live_subscription, doc).await {
 							Err(IgnoreError::Ignore) => continue,
 							Err(IgnoreError::Error(e)) => return Err(e),
 							Ok(x) => x,
@@ -176,7 +176,7 @@ impl Document {
 					// livequery trigger. So we should catch the ignore and skip this entry in this
 					// case.
 					let result =
-						match self.lq_pluck(stk, &lqctx, &lqopt, &live_subscription, doc).await {
+						match self.lq_pluck(stk, &lqctx, &lqopt, live_subscription, doc).await {
 							Err(IgnoreError::Ignore) => continue,
 							Err(IgnoreError::Error(e)) => return Err(e),
 							Ok(x) => x,

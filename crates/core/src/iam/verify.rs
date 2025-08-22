@@ -1075,7 +1075,7 @@ mod tests {
 
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				Error::IamError(IamError::InvalidRole(_)) => {}
+				IamError::InvalidRole(_) => {}
 				e => panic!("Unexpected error, expected IamError(InvalidRole) found {e}"),
 			}
 		}

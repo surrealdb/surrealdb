@@ -38,7 +38,7 @@ impl InfoStructure for SequenceDefinition {
 				"batch".to_string() => Value::from(self.batch).structure(),
 				"start".to_string() => Value::from(self.start).structure(),
 				"timeout".to_string() => self.timeout.as_ref().map(|d| {
-					Value::Duration(d.clone().into())
+					Value::Duration((*d).into())
 				}).unwrap_or(Value::None),
 		})
 	}

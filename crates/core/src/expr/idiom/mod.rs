@@ -199,7 +199,7 @@ impl FromStr for Idiom {
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		let buf = s.as_bytes();
 		let mut stack = Stack::new();
-		let mut parser = crate::syn::parser::Parser::new(&buf);
+		let mut parser = crate::syn::parser::Parser::new(buf);
 		let expr = stack
 			.enter(|stk| parser.parse_expr(stk))
 			.finish()

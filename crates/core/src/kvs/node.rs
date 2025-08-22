@@ -173,7 +173,7 @@ impl Datastore {
 					next = res.next;
 					for (k, v) in res.result.iter() {
 						// Decode the data for this live query
-						let val: NodeLiveQuery = KVValue::kv_decode_value(v.to_vec())?;
+						let val: NodeLiveQuery = KVValue::kv_decode_value(v.clone())?;
 						// Get the key for this node live query
 						let nlq = catch!(txn, crate::key::node::lq::Lq::decode_key(k.clone()));
 						// Check that the node for this query is archived
@@ -267,7 +267,7 @@ impl Datastore {
 						next = res.next;
 						for (k, v) in res.result.iter() {
 							// Decode the LIVE query statement
-							let stm: SubscriptionDefinition = KVValue::kv_decode_value(v.to_vec())?;
+							let stm: SubscriptionDefinition = KVValue::kv_decode_value(v.clone())?;
 							// Get the node id and the live query id
 							let (nid, lid) = (stm.node, stm.id);
 							// Check that the node for this query is archived

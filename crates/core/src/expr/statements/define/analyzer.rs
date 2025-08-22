@@ -26,7 +26,7 @@ pub struct DefineAnalyzerStatement {
 }
 
 impl DefineAnalyzerStatement {
-	pub(crate) fn into_definition(&self) -> catalog::AnalyzerDefinition {
+	pub(crate) fn to_definition(&self) -> catalog::AnalyzerDefinition {
 		catalog::AnalyzerDefinition {
 			name: self.name.clone().into_string(),
 			function: self.function.clone(),
@@ -74,7 +74,7 @@ impl DefineAnalyzerStatement {
 		}
 		// Process the statement
 		let key = crate::key::database::az::new(ns, db, &self.name);
-		let az = self.into_definition();
+		let az = self.to_definition();
 		ctx.get_index_stores().mappers().load(&az).await?;
 		txn.set(&key, &az, None).await?;
 		// Clear the cache

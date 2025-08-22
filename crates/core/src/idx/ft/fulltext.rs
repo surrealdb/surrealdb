@@ -936,7 +936,7 @@ mod tests {
 			let DefineStatement::Analyzer(az) = *q else {
 				panic!()
 			};
-			let az = Arc::new(DefineAnalyzerStatement::from(az).into_definition());
+			let az = Arc::new(DefineAnalyzerStatement::from(az).to_definition());
 			let content = Arc::new(Value::from(Array::from(vec![
 				"Enter a search term",
 				"Welcome",

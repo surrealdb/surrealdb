@@ -772,7 +772,7 @@ mod tests {
 		let DefineStatement::Analyzer(az) = *q else {
 			panic!()
 		};
-		let az = Arc::new(DefineAnalyzerStatement::from(az).into_definition());
+		let az = Arc::new(DefineAnalyzerStatement::from(az).to_definition());
 		let mut stack = reblessive::TreeStack::new();
 
 		let btree_order = 5;
@@ -915,7 +915,7 @@ mod tests {
 			let DefineStatement::Analyzer(az) = *q else {
 				panic!()
 			};
-			let az = Arc::new(DefineAnalyzerStatement::from(az).into_definition());
+			let az = Arc::new(DefineAnalyzerStatement::from(az).to_definition());
 			let mut stack = reblessive::TreeStack::new();
 
 			let doc1 = RecordId::new("t".to_string(), strand!("doc1").to_owned());
@@ -1056,7 +1056,7 @@ mod tests {
 		let DefineStatement::Analyzer(az) = *q else {
 			panic!()
 		};
-		let az = Arc::new(DefineAnalyzerStatement::from(az).into_definition());
+		let az = Arc::new(DefineAnalyzerStatement::from(az).to_definition());
 		let doc = RecordId::new("t".to_string(), strand!("doc1").to_owned());
 		let content = Value::from(Array::from(vec![
 			"Enter a search term",

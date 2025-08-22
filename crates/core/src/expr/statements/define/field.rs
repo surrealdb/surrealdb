@@ -48,7 +48,7 @@ pub struct DefineFieldStatement {
 }
 
 impl DefineFieldStatement {
-	pub(crate) fn into_definition(&self) -> catalog::FieldDefinition {
+	pub(crate) fn to_definition(&self) -> catalog::FieldDefinition {
 		fn convert_permission(permission: &Permission) -> catalog::Permission {
 			match permission {
 				Permission::None => catalog::Permission::None,
@@ -120,7 +120,7 @@ impl DefineFieldStatement {
 			txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?
 		};
 
-		let definition = self.into_definition();
+		let definition = self.to_definition();
 
 		// Process the statement
 		let key = crate::key::table::fd::new(ns, db, &tb.name, &fd);
