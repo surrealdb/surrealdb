@@ -20,6 +20,8 @@ pub enum Index {
 	Hnsw(HnswParams),
 	/// Index with Full-Text search capabilities supporting multiple writers
 	FullText(FullTextParams),
+	/// Track the number of records in the table
+	RecordCount,
 }
 
 impl From<Index> for crate::expr::index::Index {
@@ -31,6 +33,7 @@ impl From<Index> for crate::expr::index::Index {
 			Index::MTree(p) => Self::MTree(p.into()),
 			Index::Hnsw(p) => Self::Hnsw(p.into()),
 			Index::FullText(p) => Self::FullText(p.into()),
+			Index::RecordCount => Self::RecordCount,
 		}
 	}
 }
@@ -44,6 +47,7 @@ impl From<crate::expr::index::Index> for Index {
 			crate::expr::index::Index::MTree(p) => Self::MTree(p.into()),
 			crate::expr::index::Index::Hnsw(p) => Self::Hnsw(p.into()),
 			crate::expr::index::Index::FullText(p) => Self::FullText(p.into()),
+			crate::expr::index::Index::RecordCount => Self::RecordCount,
 		}
 	}
 }
@@ -353,6 +357,7 @@ impl Display for Index {
 				}
 				Ok(())
 			}
+			Self::RecordCount => f.write_str("COUNT"),
 		}
 	}
 }

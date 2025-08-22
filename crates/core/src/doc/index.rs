@@ -121,6 +121,7 @@ impl Document {
 			Index::FullText(p) => ic.index_fulltext(stk, ctx, p).await?,
 			Index::MTree(p) => ic.index_mtree(stk, ctx, p).await?,
 			Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
+			Index::RecordCount => ic.index_record_count(ctx).await?,
 		}
 		Ok(())
 	}
@@ -417,6 +418,10 @@ impl<'a> IndexOperation<'a> {
 			}
 		}
 		Ok(())
+	}
+
+	async fn index_record_count(&mut self, _ctx: &Context) -> Result<()> {
+		todo!()
 	}
 
 	/// Construct a consistent uniqueness violation error message.

@@ -88,6 +88,7 @@ impl<'a> IndexOperation<'a> {
 			Index::FullText(p) => self.index_fulltext(stk, p, require_compaction).await,
 			Index::MTree(p) => self.index_mtree(stk, p).await,
 			Index::Hnsw(p) => self.index_hnsw(p).await,
+			Index::RecordCount => self.index_record_count().await,
 		}
 	}
 
@@ -185,6 +186,10 @@ impl<'a> IndexOperation<'a> {
 			}
 		}
 		Ok(())
+	}
+
+	async fn index_record_count(&mut self) -> Result<()> {
+		todo!()
 	}
 
 	/// Construct a consistent uniqueness violation error message.

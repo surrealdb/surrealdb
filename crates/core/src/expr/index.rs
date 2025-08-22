@@ -30,6 +30,8 @@ pub enum Index {
 	Hnsw(HnswParams),
 	/// Index with Full-Text search capabilities supporting multiple writers
 	FullText(FullTextParams),
+	/// Track the number of records in the table
+	RecordCount,
 }
 
 #[revisioned(revision = 1)]
@@ -246,6 +248,7 @@ impl Display for Index {
 				}
 				Ok(())
 			}
+			Self::RecordCount => f.write_str("COUNT"),
 		}
 	}
 }
