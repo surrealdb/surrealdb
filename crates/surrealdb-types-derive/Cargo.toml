@@ -21,4 +21,4 @@ quote = "1.0"
 proc-macro2 = "1.0"
 
 [dev-dependencies]
-surrealdb-types = { path = "../surrealdb-types" }
+surrealdb-types.workspace = true

@@ -25,6 +25,7 @@ categories = ["database-implementations", "data-structures", "embedded"]
 surrealdb = { version = "=3.0.0", package = "surrealdb", path = "./crates/sdk" }
 surrealdb-core = { version = "=3.0.0", package = "surrealdb-core", path = "./crates/core", default-features = false }
 surrealdb-types = { version = "=3.0.0", package = "surrealdb-types", path = "./crates/surrealdb-types" }
+surrealdb-types-derive = { version = "=3.0.0", package = "surrealdb-types-derive", path = "./crates/surrealdb-types-derive" }
 
 # External surreal crates
 affinitypool = { version = "0.3.1" }

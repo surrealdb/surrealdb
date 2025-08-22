@@ -2,6 +2,144 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields, Ident, Type, parse_macro_input};
 
+/// Derive macro for implementing the `SurrealValue` trait on structs.
+///
+/// This macro automatically implements the `SurrealValue` trait for structs, providing
+/// seamless conversion between Rust structs and SurrealDB `Value` types. The implementation
+/// supports named fields, tuple structs, and unit structs.
+///
+/// # Examples
+///
+/// ## Named Fields Struct
+///
+/// ```rust
+/// use surrealdb_types::{SurrealValue, Value};
+///
+/// #[derive(SurrealValue)]
+/// struct Person {
+///     name: String,
+///     age: i64,
+///     active: bool,
+/// }
+///
+/// // Convert struct to SurrealDB Value
+/// let person = Person {
+///     name: "Alice".to_string(),
+///     age: 30,
+///     active: true,
+/// };
+/// 
+/// // Converted to Value::Object as { "name": "Alice", "age": 30, "active": true }
+/// let value: Value = person.into_value();
+///
+/// // Convert SurrealDB Value back to struct
+/// let restored_person = Person::from_value(value).unwrap();
+/// assert_eq!(restored_person.name, "Alice");
+/// assert_eq!(restored_person.age, 30);
+/// assert_eq!(restored_person.active, true);
+///
+/// // Check if a Value represents this type
+/// assert!(Person::is_value(&value));
+/// ```
+///
+/// ## Tuple Struct
+///
+/// ```rust
+/// use surrealdb_types::{SurrealValue, Value};
+///
+/// #[derive(SurrealValue)]
+/// struct Point(i64, i64);
+///
+/// let point = Point(10, 20);
+/// let value: Value = point.into_value();
+///
+/// let restored_point = Point::from_value(value).unwrap();
+/// assert_eq!(restored_point.0, 10);
+/// assert_eq!(restored_point.1, 20);
+/// ```
+///
+/// ## Unit Struct
+///
+/// ```rust
+/// use surrealdb_types::{SurrealValue, Value};
+///
+/// #[derive(SurrealValue)]
+/// struct Empty;
+///
+/// let empty = Empty;
+/// let value: Value = empty.into_value();
+///
+/// let restored_empty = Empty::from_value(value).unwrap();
+/// ```
+///
+/// ## Nested Structs
+///
+/// ```rust
+/// use surrealdb_types::{SurrealValue, Value};
+///
+/// #[derive(SurrealValue)]
+/// struct Address {
+///     street: String,
+///     city: String,
+/// }
+///
+/// #[derive(SurrealValue)]
+/// struct Employee {
+///     name: String,
+///     address: Address,
+///     skills: Vec<String>,
+/// }
+///
+/// let employee = Employee {
+///     name: "Bob".to_string(),
+///     address: Address {
+///         street: "123 Main St".to_string(),
+///         city: "Anytown".to_string(),
+///     },
+///     skills: vec!["Rust".to_string(), "SurrealDB".to_string()],
+/// };
+///
+/// let value: Value = employee.into_value();
+/// let restored_employee = Employee::from_value(value).unwrap();
+/// ```
+///
+/// ## Generic Structs
+///
+/// ```rust
+/// use surrealdb_types::{SurrealValue, Value};
+///
+/// #[derive(SurrealValue)]
+/// struct Container<T> {
+///     data: T,
+///     metadata: String,
+/// }
+///
+/// // Works with any type that implements SurrealValue
+/// let container = Container {
+///     data: vec![1, 2, 3],
+///     metadata: "numbers".to_string(),
+/// };
+///
+/// let value: Value = container.into_value();
+/// let restored_container = Container::<Vec<i64>>::from_value(value).unwrap();
+/// ```
+///
+/// # Generated Methods
+///
+/// The derive macro generates implementations for all four methods of the `SurrealValue` trait:
+///
+/// - `kind_of()` - Returns the `Kind` that represents this type's structure
+/// - `is_value(value)` - Checks if a `Value` can be converted to this type
+/// - `into_value(self)` - Converts the struct into a `Value`
+/// - `from_value(value)` - Attempts to convert a `Value` back to the struct
+///
+/// # Limitations
+///
+/// - Only works with structs (not enums)
+/// - All field types must implement `SurrealValue`
+/// - Named fields are converted to/from SurrealDB objects
+/// - Tuple structs are converted to/from SurrealDB arrays
+/// - Unit structs are converted to/from empty SurrealDB objects
 #[proc_macro_derive(SurrealValue)]
 pub fn surreal_value(input: TokenStream) -> TokenStream {
 	let input = parse_macro_input!(input as DeriveInput);
