@@ -27,9 +27,9 @@ use crate::idx::ft::search::{SearchIndex, TermIdList, TermIdSet};
 use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
 	IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
-	IndexUnionThingIterator, IteratorRange, IteratorRecord, IteratorRef, KnnIterator,
-	KnnIteratorResult, MatchesThingIterator, ThingIterator, UniqueEqualThingIterator,
-	UniqueJoinThingIterator, UniqueRangeThingIterator, UniqueUnionThingIterator,
+	IndexUnionThingIterator, IteratorRecord, IteratorRef, KnnIterator, KnnIteratorResult,
+	MatchesThingIterator, ThingIterator, UniqueEqualThingIterator, UniqueJoinThingIterator,
+	UniqueRangeThingIterator, UniqueUnionThingIterator,
 };
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 use crate::idx::planner::iterators::{
@@ -37,7 +37,7 @@ use crate::idx::planner::iterators::{
 };
 use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
-use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
+use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue, StoreRangeValue};
 use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 use crate::idx::planner::{IterationStage, ScanDirection};
 use crate::idx::trees::mtree::MTreeIndex;
@@ -478,7 +478,7 @@ impl QueryExecutor {
 			match it_entry {
 				IteratorEntry::Single(_, io) => self.new_single_iterator(ns, db, ir, io).await,
 				IteratorEntry::Range(_, ixr, from, to, sc) => {
-					Ok(self.new_range_iterator(ir, ns, db, ixr, from, to, *sc)?)
+					Ok(self.new_range_iterator(ir, ns, db, ixr, from.into(), to.into(), *sc)?)
 				}
 			}
 		} else {
@@ -572,6 +572,9 @@ impl QueryExecutor {
 					)?))
 				}
 			}
+			IndexOperator::Range(prefix, ranges) => Some(ThingIterator::IndexRange(
+				IndexRangeThingIterator::compound_range(ir, ns, db, ix, prefix, ranges)?,
+			)),
 			_ => None,
 		})
 	}
@@ -593,30 +596,16 @@ impl QueryExecutor {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &DefineIndexStatement,
-		from: &RangeValue,
-		to: &RangeValue,
+		from: StoreRangeValue,
+		to: StoreRangeValue,
 		sc: ScanDirection,
 	) -> Result<Option<ThingIterator>> {
 		match ix.index {
 			Index::Idx => {
-				return Ok(Some(Self::new_index_range_iterator(
-					ir,
-					ns,
-					db,
-					ix,
-					&IteratorRange::new(from, to),
-					sc,
-				)?));
+				return Ok(Some(Self::new_index_range_iterator(ir, ns, db, ix, from, to, sc)?));
 			}
 			Index::Uniq => {
-				return Ok(Some(Self::new_unique_range_iterator(
-					ir,
-					ns,
-					db,
-					ix,
-					&IteratorRange::new(from, to),
-					sc,
-				)?));
+				return Ok(Some(Self::new_unique_range_iterator(ir, ns, db, ix, from, to, sc)?));
 			}
 			_ => {}
 		}
@@ -628,16 +617,17 @@ impl QueryExecutor {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &DefineIndexStatement,
-		range: &IteratorRange,
+		from: StoreRangeValue,
+		to: StoreRangeValue,
 		sc: ScanDirection,
 	) -> Result<ThingIterator> {
 		Ok(match sc {
 			ScanDirection::Forward => {
-				ThingIterator::IndexRange(IndexRangeThingIterator::new(ir, ns, db, ix, range)?)
+				ThingIterator::IndexRange(IndexRangeThingIterator::new(ir, ns, db, ix, from, to)?)
 			}
 			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 			ScanDirection::Backward => ThingIterator::IndexRangeReverse(
-				IndexRangeReverseThingIterator::new(ir, ns, db, ix, range)?,
+				IndexRangeReverseThingIterator::new(ir, ns, db, ix, from, to)?,
 			),
 		})
 	}
@@ -647,16 +637,17 @@ impl QueryExecutor {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &DefineIndexStatement,
-		range: &IteratorRange<'_>,
+		from: StoreRangeValue,
+		to: StoreRangeValue,
 		sc: ScanDirection,
 	) -> Result<ThingIterator> {
 		Ok(match sc {
 			ScanDirection::Forward => {
-				ThingIterator::UniqueRange(UniqueRangeThingIterator::new(ir, ns, db, ix, range)?)
+				ThingIterator::UniqueRange(UniqueRangeThingIterator::new(ir, ns, db, ix, from, to)?)
 			}
 			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 			ScanDirection::Backward => ThingIterator::UniqueRangeReverse(
-				UniqueRangeReverseThingIterator::new(ir, ns, db, ix, range)?,
+				UniqueRangeReverseThingIterator::new(ir, ns, db, ix, from, to)?,
 			),
 		})
 	}
@@ -702,6 +693,9 @@ impl QueryExecutor {
 					)?))
 				}
 			}
+			IndexOperator::Range(prefix, ranges) => Some(ThingIterator::UniqueRange(
+				UniqueRangeThingIterator::compound_range(irf, ns, db, ixr, prefix, ranges)?,
+			)),
 			_ => None,
 		})
 	}

@@ -18,6 +18,7 @@ use serde::de::{SeqAccess, Visitor};
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
+use crate::kvs::KVKey;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
 	RecordIdKey, RecordIdKeyRange, Regex, Strand, Table, Uuid, Value,
@@ -97,6 +98,16 @@ impl From<StoreKeyValue> for Value {
 			StoreKeyValue::Range(r) => Self::Range(r),
 			StoreKeyValue::Closure(c) => Self::Closure(c),
 		}
+	}
+}
+
+impl KVKey for StoreKeyValue {
+	type ValueType = ();
+}
+
+impl StoreKeyValue {
+	pub(crate) fn is_none(&self) -> bool {
+		matches!(self, Self::None)
 	}
 }
 
