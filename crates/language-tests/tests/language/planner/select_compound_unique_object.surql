@@ -24,7 +24,7 @@ value = "[{ detail: { plan: { index: 'idx', prefix: [o:2], ranges: [{ operator: 
 
 */
 BEGIN;
-    DEFINE INDEX idx ON t FIELDS id.r,b UNIQUE;
+    DEFINE INDEX idx ON t FIELDS id.id().r,b UNIQUE;
     CREATE t:{ id: 1, r: o:1 } SET b=2021;
     CREATE t:{ id: 2, r: o:2 } SET b=2021;
     CREATE t:{ id: 3, r: o:1 } SET b=2025;
@@ -33,10 +33,10 @@ BEGIN;
     RETURN "OK";
 COMMIT;
 
-SELECT id FROM t WHERE id.r=o:1 AND b=2025;
-SELECT id FROM t WITH NO INDEX WHERE id.r=o:1 AND b=2025;
-SELECT id FROM t WHERE id.r=o:1 AND b=2025 EXPLAIN;
+SELECT id FROM t WHERE id.id().r=o:1 AND b=2025;
+SELECT id FROM t WITH NO INDEX WHERE id.id().r=o:1 AND b=2025;
+SELECT id FROM t WHERE id.id().r=o:1 AND b=2025 EXPLAIN;
 
-SELECT id FROM t WHERE id.r=o:2 AND b>2022;
-SELECT id FROM t WITH NO INDEX WHERE id.r=o:2 AND b>2022;
-SELECT id FROM t WHERE id.r=o:2 AND b>2022 EXPLAIN;
+SELECT id FROM t WHERE id.id().r=o:2 AND b>2022;
+SELECT id FROM t WITH NO INDEX WHERE id.id().r=o:2 AND b>2022;
+SELECT id FROM t WHERE id.id().r=o:2 AND b>2022 EXPLAIN;
