@@ -424,6 +424,16 @@ impl QueryExecutor {
 					)?))
 				}
 			}
+			IndexOperator::Range(prefix, ranges) => {
+				Some(ThingIterator::IndexRange(IndexRangeThingIterator::compound_range(
+					ir,
+					opt.ns()?,
+					opt.db()?,
+					ix,
+					prefix,
+					ranges,
+				)?))
+			}
 			_ => None,
 		})
 	}
@@ -581,11 +591,11 @@ impl QueryExecutor {
 			vec.push(IteratorRange::new(
 				ValueType::NumberInt,
 				RangeValue {
-					value: Number::Int(from).into(),
+					value: Arc::new(Number::Int(from).into()),
 					inclusive: from_inc,
 				},
 				RangeValue {
-					value: Value::None,
+					value: Arc::new(Value::None),
 					inclusive: false,
 				},
 			));
@@ -594,11 +604,11 @@ impl QueryExecutor {
 			vec.push(IteratorRange::new(
 				ValueType::NumberFloat,
 				RangeValue {
-					value: Number::Float(from).into(),
+					value: Arc::new(Number::Float(from).into()),
 					inclusive: from_inc,
 				},
 				RangeValue {
-					value: Value::None,
+					value: Arc::new(Value::None),
 					inclusive: false,
 				},
 			));
@@ -607,11 +617,11 @@ impl QueryExecutor {
 			vec.push(IteratorRange::new(
 				ValueType::NumberDecimal,
 				RangeValue {
-					value: Number::Decimal(from).into(),
+					value: Arc::new(Number::Decimal(from).into()),
 					inclusive: from_inc,
 				},
 				RangeValue {
-					value: Value::None,
+					value: Arc::new(Value::None),
 					inclusive: false,
 				},
 			));
@@ -626,11 +636,11 @@ impl QueryExecutor {
 			vec.push(IteratorRange::new(
 				ValueType::NumberInt,
 				RangeValue {
-					value: Value::None,
+					value: Arc::new(Value::None),
 					inclusive: false,
 				},
 				RangeValue {
-					value: Number::Int(to).into(),
+					value: Arc::new(Number::Int(to).into()),
 					inclusive: to_inc,
 				},
 			));
@@ -639,11 +649,11 @@ impl QueryExecutor {
 			vec.push(IteratorRange::new(
 				ValueType::NumberFloat,
 				RangeValue {
-					value: Value::None,
+					value: Arc::new(Value::None),
 					inclusive: false,
 				},
 				RangeValue {
-					value: Number::Float(to).into(),
+					value: Arc::new(Number::Float(to).into()),
 					inclusive: to_inc,
 				},
 			));
@@ -652,11 +662,11 @@ impl QueryExecutor {
 			vec.push(IteratorRange::new(
 				ValueType::NumberDecimal,
 				RangeValue {
-					value: Value::None,
+					value: Arc::new(Value::None),
 					inclusive: false,
 				},
 				RangeValue {
-					value: Number::Decimal(to).into(),
+					value: Arc::new(Number::Decimal(to).into()),
 					inclusive: to_inc,
 				},
 			));
@@ -677,11 +687,11 @@ impl QueryExecutor {
 			vec.push(IteratorRange::new(
 				ValueType::NumberInt,
 				RangeValue {
-					value: Number::Int(from).into(),
+					value: Arc::new(Number::Int(from).into()),
 					inclusive: from_inc,
 				},
 				RangeValue {
-					value: Number::Int(to).into(),
+					value: Arc::new(Number::Int(to).into()),
 					inclusive: to_inc,
 				},
 			));
@@ -690,11 +700,11 @@ impl QueryExecutor {
 			vec.push(IteratorRange::new(
 				ValueType::NumberFloat,
 				RangeValue {
-					value: Number::Float(from).into(),
+					value: Arc::new(Number::Float(from).into()),
 					inclusive: from_inc,
 				},
 				RangeValue {
-					value: Number::Float(to).into(),
+					value: Arc::new(Number::Float(to).into()),
 					inclusive: to_inc,
 				},
 			));
@@ -703,11 +713,11 @@ impl QueryExecutor {
 			vec.push(IteratorRange::new(
 				ValueType::NumberDecimal,
 				RangeValue {
-					value: Number::Decimal(from).into(),
+					value: Arc::new(Number::Decimal(from).into()),
 					inclusive: from_inc,
 				},
 				RangeValue {
-					value: Number::Decimal(to).into(),
+					value: Arc::new(Number::Decimal(to).into()),
 					inclusive: to_inc,
 				},
 			));
@@ -769,7 +779,7 @@ impl QueryExecutor {
 		from: &'a RangeValue,
 		to: &'a RangeValue,
 	) -> Option<Vec<IteratorRange<'a>>> {
-		match (&from.value, &to.value) {
+		match (&from.value.as_ref(), &to.value.as_ref()) {
 			(Value::Number(from_n), Value::Number(to_n)) => {
 				Some(Self::get_ranges_number_variants(from_n, from.inclusive, to_n, to.inclusive))
 			}
@@ -797,7 +807,7 @@ impl QueryExecutor {
 		ir: IteratorRef,
 		opt: &Options,
 		ix: &DefineIndexStatement,
-		range: &IteratorRange<'_>,
+		range: &IteratorRange,
 	) -> Result<ThingIterator, Error> {
 		let (ns, db) = opt.ns_db()?;
 		Ok(ThingIterator::UniqueRange(UniqueRangeThingIterator::new(ir, ns, db, ix, range)?))
@@ -882,6 +892,16 @@ impl QueryExecutor {
 						ixr,
 					)?))
 				}
+			}
+			IndexOperator::Range(prefix, ranges) => {
+				Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::compound_range(
+					irf,
+					opt.ns()?,
+					opt.db()?,
+					ixr,
+					prefix,
+					ranges,
+				)?))
 			}
 			_ => None,
 		})
