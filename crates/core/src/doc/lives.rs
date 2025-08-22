@@ -44,6 +44,12 @@ impl Document {
 
 		// Get all live queries for this table
 		let lvs = self.lv(ctx, opt).await?;
+
+		// If there are no live queries, we can skip the rest of the function
+		if lvs.is_empty() {
+			return Ok(());
+		}
+
 		// Loop through all index statements
 		for lv in lvs.iter() {
 			// Create a new statement
@@ -110,21 +116,37 @@ impl Document {
 			let lqopt = opt.new_with_perms(true).with_auth(Arc::from(auth));
 
 			// Get the document to check against and to return based on lq context
-			let doc = match (self.check_reduction_required(&lqopt)?, stm.is_delete()) {
+			// We need to clone the document as we will potentially modify it with computed fields
+			// The outcome for every computed field can be different based on the context of the
+			// user
+			let mut doc = match (self.check_reduction_required(&lqopt)?, stm.is_delete()) {
 				(true, true) => {
-					&self.compute_reduced_target(stk, &lqctx, &lqopt, &self.initial).await?
+					self.compute_reduced_target(stk, &lqctx, &lqopt, &self.initial).await?
 				}
 				(true, false) => {
-					&self.compute_reduced_target(stk, &lqctx, &lqopt, &self.current).await?
+					self.compute_reduced_target(stk, &lqctx, &lqopt, &self.current).await?
 				}
-				(false, true) => &self.initial,
-				(false, false) => &self.current,
+				(false, true) => self.initial.clone(),
+				(false, false) => self.current.clone(),
+			};
+
+			if let Ok(rid) = self.id() {
+				let fields = self.fd(ctx, opt).await?;
+				Document::computed_fields_inner(
+					stk,
+					ctx,
+					opt,
+					rid.as_ref(),
+					fields.as_ref(),
+					&mut doc,
+				)
+				.await?;
 			};
 
 			// First of all, let's check to see if the WHERE
 			// clause of the LIVE query is matched by this
 			// document. If it is then we can continue.
-			match self.lq_check(stk, &lqctx, &lqopt, &lq, doc).await {
+			match self.lq_check(stk, &lqctx, &lqopt, &lq, &doc).await {
 				Err(IgnoreError::Ignore) => continue,
 				Err(IgnoreError::Error(e)) => return Err(e),
 				Ok(_) => (),
@@ -160,7 +182,7 @@ impl Document {
 					// An error ignore here is about livequery not the query which invoked the
 					// livequery trigger. So we should catch the ignore and skip this entry in this
 					// case.
-					let result = match self.lq_pluck(stk, &lqctx, &lqopt, lv, doc).await {
+					let result = match self.lq_pluck(stk, &lqctx, &lqopt, lv, &doc).await {
 						Err(IgnoreError::Ignore) => continue,
 						Err(IgnoreError::Error(e)) => return Err(e),
 						Ok(x) => x,
@@ -176,7 +198,7 @@ impl Document {
 					// An error ignore here is about livequery not the query which invoked the
 					// livequery trigger. So we should catch the ignore and skip this entry in this
 					// case.
-					let result = match self.lq_pluck(stk, &lqctx, &lqopt, lv, doc).await {
+					let result = match self.lq_pluck(stk, &lqctx, &lqopt, lv, &doc).await {
 						Err(IgnoreError::Ignore) => continue,
 						Err(IgnoreError::Error(e)) => return Err(e),
 						Ok(x) => x,

@@ -199,6 +199,7 @@ impl CheckerCacheEntry {
 						rid: Some(rid.clone()),
 						ir: None,
 						doc: val.into(),
+						fields_computed: false,
 					};
 					let truthy = stk
 						.run(|stk| cond.0.compute(stk, ctx, opt, Some(&cursor_doc)))

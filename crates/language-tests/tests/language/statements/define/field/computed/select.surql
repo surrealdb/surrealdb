@@ -1,7 +1,4 @@
 /**
-[test]
-wip = true
-
 [[test.results]]
 value = "NONE"
 
@@ -47,7 +44,7 @@ CREATE faz:3 CONTENT { baz: 3 };
 SELECT * FROM faz;
 
 DEFINE TABLE foo;
-DEFINE FIELD bar ON foo VALUE COMPUTED { RETURN SELECT * FROM faz; };
+DEFINE FIELD bar ON foo COMPUTED { RETURN SELECT * FROM faz; };
 
 CREATE foo:1;
 

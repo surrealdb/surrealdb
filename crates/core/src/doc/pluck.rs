@@ -7,6 +7,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::doc::Permitted::*;
+use crate::doc::compute::DocKind;
 use crate::expr::output::Output;
 use crate::expr::paths::META;
 use crate::expr::permission::Permission;
@@ -36,9 +37,15 @@ impl Document {
 				Output::Diff => {
 					// Process the permitted documents
 					let (initial, current) = if self.reduced(stk, ctx, opt, Both).await? {
-						(&self.initial_reduced, &self.current_reduced)
+						// Compute the computed fields
+						self.computed_fields(stk, ctx, opt, DocKind::InitialReduced).await?;
+						self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced).await?;
+						(&mut self.initial_reduced, &mut self.current_reduced)
 					} else {
-						(&self.initial, &self.current)
+						// Compute the computed fields
+						self.computed_fields(stk, ctx, opt, DocKind::Initial).await?;
+						self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
+						(&mut self.initial, &mut self.current)
 					};
 					// Output a DIFF of any changes applied to the document
 					let ops = initial.doc.as_ref().diff(current.doc.as_ref());
@@ -47,24 +54,32 @@ impl Document {
 				Output::After => {
 					// Process the permitted documents
 					if self.reduced(stk, ctx, opt, Current).await? {
+						self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced).await?;
 						Ok(self.current_reduced.doc.as_ref().to_owned())
 					} else {
+						self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
 						Ok(self.current.doc.as_ref().to_owned())
 					}
 				}
 				Output::Before => {
 					// Process the permitted documents
 					if self.reduced(stk, ctx, opt, Initial).await? {
+						self.computed_fields(stk, ctx, opt, DocKind::InitialReduced).await?;
 						Ok(self.initial_reduced.doc.as_ref().to_owned())
 					} else {
+						self.computed_fields(stk, ctx, opt, DocKind::Initial).await?;
 						Ok(self.initial.doc.as_ref().to_owned())
 					}
 				}
 				Output::Fields(v) => {
 					// Process the permitted documents
 					let (initial, current) = if self.reduced(stk, ctx, opt, Both).await? {
+						self.computed_fields(stk, ctx, opt, DocKind::InitialReduced).await?;
+						self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced).await?;
 						(&mut self.initial_reduced, &mut self.current_reduced)
 					} else {
+						self.computed_fields(stk, ctx, opt, DocKind::Initial).await?;
+						self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
 						(&mut self.initial, &mut self.current)
 					};
 					// Configure the context
@@ -83,8 +98,10 @@ impl Document {
 				Statement::Select(s) => {
 					// Process the permitted documents
 					let current = if self.reduced(stk, ctx, opt, Current).await? {
+						self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced).await?;
 						&self.current_reduced
 					} else {
+						self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
 						&self.current
 					};
 					// Process the SELECT statement fields
@@ -100,8 +117,10 @@ impl Document {
 				| Statement::Insert(_) => {
 					// Process the permitted documents
 					if self.reduced(stk, ctx, opt, Current).await? {
+						self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced).await?;
 						Ok(self.current_reduced.doc.as_ref().to_owned())
 					} else {
+						self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
 						Ok(self.current.doc.as_ref().to_owned())
 					}
 				}

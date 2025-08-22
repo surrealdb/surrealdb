@@ -64,6 +64,7 @@ keyword! {
 	Config => "CONFIG",
 	Content => "CONTENT",
 	Continue => "CONTINUE",
+	Computed => "COMPUTED",
 	Create => "CREATE",
 	Database => "DATABASE",
 	Default => "DEFAULT",
