@@ -6,6 +6,7 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Statement, Workable};
 use crate::doc::Document;
 use crate::doc::Permitted::*;
+use crate::doc::compute::DocKind;
 use crate::err::Error;
 use crate::expr::FlowResultExt as _;
 use crate::expr::paths::{ID, IN, OUT};
@@ -310,9 +311,12 @@ impl Document {
 			// Check if a WHERE condition is specified
 			if let Some(cond) = stm.cond() {
 				// Process the permitted documents
-				let current = match self.reduced(stk, ctx, opt, Current).await? {
-					true => &self.current_reduced,
-					false => &self.current,
+				let current = if self.reduced(stk, ctx, opt, Current).await? {
+					self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced).await?;
+					&self.current_reduced
+				} else {
+					self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
+					&self.current
 				};
 				// Check if the expression is truthy
 				if !stk

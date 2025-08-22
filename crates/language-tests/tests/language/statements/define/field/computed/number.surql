@@ -1,7 +1,4 @@
 /**
-[test]
-wip = true
-
 [[test.results]]
 value = "NONE"
 
@@ -20,7 +17,7 @@ value = "[{ bar: 1 }]"
 */
 
 DEFINE TABLE foo;
-DEFINE FIELD bar ON foo VALUE COMPUTED { 1 };
+DEFINE FIELD bar ON foo COMPUTED { 1 };
 
 CREATE foo:1;
 
