@@ -733,6 +733,7 @@ pub async fn verify_root_creds(
 	// Fetch the specified user from storage
 	let user = tx.expect_root_user(user).await.map_err(|e| {
 		debug!("Error retrieving user for authentication to root: {e}");
+
 		Error::InvalidAuth
 	})?;
 	// Ensure that the transaction is cancelled

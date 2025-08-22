@@ -137,6 +137,14 @@ impl Part {
 			_ => None,
 		}
 	}
+
+	pub(crate) fn to_raw_string(&self) -> String {
+		match self {
+			Part::Start(v) => v.to_raw_string(),
+			Part::Field(v) => format!(".{}", v.to_raw_string()),
+			_ => self.to_string(),
+		}
+	}
 }
 
 impl fmt::Display for Part {

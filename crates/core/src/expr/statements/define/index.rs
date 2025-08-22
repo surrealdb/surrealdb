@@ -87,13 +87,12 @@ impl DefineIndexStatement {
 		if tb.schemafull {
 			// Check that the fields exist
 			for idiom in self.cols.iter() {
-				eprintln!("idiom: {:?}", idiom);
 				// TODO: Was this correct? Can users not index data on sub-fields?
 				let Some(Part::Field(first)) = idiom.0.first() else {
 					continue;
 				};
 
-				// eprintln!("first: {:?}", first);
+				//
 				if txn
 					.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, &first.to_raw_string())
 					.await?

@@ -208,7 +208,7 @@ fn random_string(length: usize, pool: &[u8]) -> String {
 	string
 }
 
-pub fn new_grant_bearer_hashed(ty: catalog::BearerAccessType) -> catalog::GrantBearer {
+pub fn new_grant_bearer(ty: catalog::BearerAccessType) -> catalog::GrantBearer {
 	let id = format!(
 		"{}{}",
 		// The pool for the first character of the key identifier excludes digits.
@@ -222,11 +222,6 @@ pub fn new_grant_bearer_hashed(ty: catalog::BearerAccessType) -> catalog::GrantB
 	};
 
 	let key = format!("{prefix}-{id}-{secret}");
-
-	let mut hasher = Sha256::new();
-	hasher.update(key.as_str());
-	let hash = hasher.finalize();
-	let key = format!("{hash:x}");
 
 	catalog::GrantBearer {
 		id,
@@ -318,6 +313,7 @@ pub async fn create_grant(
 			})?
 		}
 	};
+
 	// Verify the access type.
 	match &ac.access_type {
 		catalog::AccessType::Jwt(_) => {
@@ -339,7 +335,7 @@ pub async fn create_grant(
 				None => bail!(Error::AccessMethodMismatch),
 			};
 			// Create a new bearer key.
-			let grant = new_grant_bearer_hashed(atb.kind);
+			let grant = new_grant_bearer(atb.kind);
 
 			let expiration = ac.grant_duration.map(|d| val::Duration(d) + Datetime::now());
 
@@ -360,18 +356,20 @@ pub async fn create_grant(
 				grant: catalog::Grant::Bearer(grant.clone()),
 			};
 
-			ensure!(matches!(base, Base::Db), Error::AccessLevelMismatch);
-
 			// Create the grant.
 			// On the very unlikely event of a collision, "put" will return an error.
-			// Create a hashed version of the grant for storage.
-			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_ns(ns, opt.strict).await?;
-			txn.get_or_add_db(ns, db, opt.strict).await?;
+			let res = match base {
+				Base::Db => {
+					// Create a hashed version of the grant for storage.
+					let mut gr_store = gr.clone();
+					gr_store.grant = catalog::Grant::Bearer(grant.hashed());
 
-			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-			let key = crate::key::database::access::gr::new(ns, db, &gr.ac, &gr.id);
-			let res = txn.put(&key, &gr, None).await;
+					let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+					let key = crate::key::database::access::gr::new(ns, db, &gr.ac, &gr.id);
+					txn.put(&key, &gr_store, None).await
+				}
+				_ => bail!(Error::AccessLevelMismatch),
+			};
 
 			// Check if a collision was found in order to log a specific error on the server.
 			// For an access method with a billion grants, this chance is of only one in 295
@@ -409,6 +407,7 @@ pub async fn create_grant(
 						matches!(&at.subject, catalog::BearerAccessSubject::User),
 						Error::AccessGrantInvalidSubject
 					);
+
 					// If the grant is being created for a user, the user must exist.
 					match base {
 						Base::Root => txn.expect_root_user(user).await?,
@@ -445,7 +444,7 @@ pub async fn create_grant(
 				}
 			};
 			// Create a new bearer key.
-			let grant = new_grant_bearer_hashed(at.kind);
+			let grant = new_grant_bearer(at.kind);
 			let gr = catalog::AccessGrant {
 				ac: ac.name.clone(),
 				// Unique grant identifier.
@@ -460,22 +459,24 @@ pub async fn create_grant(
 				// Subject associated with the grant.
 				subject,
 				// The contents of the grant.
-				grant: catalog::Grant::Bearer(grant),
+				grant: catalog::Grant::Bearer(grant.clone()),
 			};
 
 			// Create the grant.
 			// On the very unlikely event of a collision, "put" will return an error.
 			// Create a hashed version of the grant for storage.
+			let mut gr_store = gr.clone();
+			gr_store.grant = catalog::Grant::Bearer(grant.hashed());
 			let res = match base {
 				Base::Root => {
 					let key = crate::key::root::access::gr::new(&gr.ac, &gr.id);
-					txn.put(&key, &gr, None).await
+					txn.put(&key, &gr_store, None).await
 				}
 				Base::Ns => {
 					let ns = txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 					let key =
 						crate::key::namespace::access::gr::new(ns.namespace_id, &gr.ac, &gr.id);
-					txn.put(&key, &gr, None).await
+					txn.put(&key, &gr_store, None).await
 				}
 				Base::Db => {
 					let (ns, db) = opt.ns_db()?;
@@ -487,7 +488,7 @@ pub async fn create_grant(
 						&gr.ac,
 						&gr.id,
 					);
-					txn.put(&key, &gr, None).await
+					txn.put(&key, &gr_store, None).await
 				}
 			};
 
@@ -532,6 +533,7 @@ async fn compute_grant(
 	let subject = stmt.subject.compute(stk, ctx, opt, doc).await?;
 
 	let grant = create_grant(stmt.ac.clone(), stmt.base.clone(), subject, ctx, opt).await?;
+
 	Ok(Value::Object(access_object_from_grant(&grant)))
 }
 

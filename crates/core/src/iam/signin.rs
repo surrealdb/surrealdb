@@ -141,10 +141,7 @@ pub async fn db_access(
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
 	// Check the provided access method exists
-	eprintln!("access: {:?}", access);
-	eprintln!("access: {:?}", access);
-	eprintln!("access: {:?}", access);
-	eprintln!("access: {:?}", access);
+
 	match access {
 		Ok(Some(av)) => {
 			// Check the access method type
@@ -550,12 +547,11 @@ pub async fn root_access(
 	ac: String,
 	vars: Object,
 ) -> Result<SigninData> {
-	eprintln!("ac: {:?}", ac);
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
 	let access = tx.get_root_access(&ac).await;
-	eprintln!("access: {:?}", access);
+
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
 	// Check the provided access method exists
@@ -569,8 +565,6 @@ pub async fn root_access(
 						Some(key) => key.to_raw_string(),
 						None => return Err(anyhow::Error::new(Error::AccessBearerMissingKey)),
 					};
-
-					eprintln!("key: {:?}", key);
 
 					signin_bearer(kvs, session, None, None, av, &at, key).await
 				}
@@ -604,6 +598,7 @@ pub async fn signin_bearer(
 	};
 	// Extract key identifier and key from the provided key.
 	let kid = validate_grant_bearer(&key)?;
+
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access grant from storage
@@ -616,15 +611,18 @@ pub async fn signin_bearer(
 		(None, Some(_)) => bail!(Error::NsEmpty),
 	}
 	.ok_or(Error::InvalidAuth)?;
+
 	// Ensure that the transaction is cancelled.
 	tx.cancel().await?;
 	// Authenticate bearer key against stored grant.
 	verify_grant_bearer(&gr, key)?;
+
 	// If the subject of the grant is a system user, get their roles.
 	let roles = if let catalog::Subject::User(user) = &gr.subject {
 		// Create a new readonly transaction.
 		let tx = kvs.transaction(Read, Optimistic).await?;
 		// Fetch the specified user from storage.
+
 		let user = match (&ns, &db) {
 			(Some(ns), Some(db)) => tx
 				.get_db_user(ns.namespace_id, db.database_id, user)
@@ -799,7 +797,6 @@ pub async fn signin_bearer(
 }
 
 pub fn validate_grant_bearer(key: &str) -> Result<String> {
-	eprintln!("key: {:?}", key);
 	let parts: Vec<&str> = key.split("-").collect();
 	ensure!(parts.len() == 4, Error::AccessGrantBearerInvalid);
 	// Check that the prefix type exists.
@@ -821,12 +818,14 @@ pub fn verify_grant_bearer(
 	key: String,
 ) -> Result<&catalog::GrantBearer> {
 	// Check if the grant is revoked or expired.
+
 	match (&gr.expiration, &gr.revocation) {
 		(None, None) => {}
 		(Some(exp), None) => {
 			if exp < &Datetime::now() {
 				// Return opaque error to avoid leaking revocation status.
 				debug!("Bearer access grant `{}` for method `{}` is expired", gr.id, gr.ac);
+
 				bail!(Error::InvalidAuth);
 			}
 		}
@@ -840,6 +839,7 @@ pub fn verify_grant_bearer(
 	match &gr.grant {
 		catalog::Grant::Bearer(bearer) => {
 			// Hash provided signin bearer key.
+
 			let mut hasher = Sha256::new();
 			hasher.update(key);
 			let hash = hasher.finalize();
@@ -848,6 +848,7 @@ pub fn verify_grant_bearer(
 			let signin_key_bytes: &[u8] = hash_hex.as_bytes();
 			let bearer_key_bytes: &[u8] = bearer.key.as_bytes();
 			let ok: bool = bearer_key_bytes.ct_eq(signin_key_bytes).into();
+
 			if ok {
 				Ok(bearer)
 			} else {

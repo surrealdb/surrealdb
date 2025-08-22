@@ -1,4 +1,6 @@
+use md5::Digest;
 use revision::revisioned;
+use sha2::Sha256;
 use uuid::Uuid;
 
 use crate::kvs::impl_kv_value_revisioned;
@@ -63,6 +65,20 @@ pub struct GrantBearer {
 	// Immediately after generation, it will contain the plaintext key.
 	// Will be hashed before storage so that the plaintext key is not stored.
 	pub key: String,
+}
+
+impl GrantBearer {
+	pub fn hashed(self) -> Self {
+		let mut hasher = Sha256::new();
+		hasher.update(self.key.as_str());
+		let hash = hasher.finalize();
+		let hash_hex = format!("{hash:x}").into();
+
+		Self {
+			key: hash_hex,
+			..self
+		}
+	}
 }
 
 #[revisioned(revision = 1)]

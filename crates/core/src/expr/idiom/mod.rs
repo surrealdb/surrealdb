@@ -122,12 +122,12 @@ impl Idiom {
 		let mut iter = self.0.iter();
 		match iter.next() {
 			Some(Part::Field(v)) => s.push_str(&v.to_raw_string()),
-			Some(x) => s.push_str(&x.to_string()),
+			Some(x) => s.push_str(&x.to_raw_string()),
 			None => {}
 		};
 
 		for p in iter {
-			s.push_str(&p.to_string());
+			s.push_str(&p.to_raw_string());
 		}
 
 		s
@@ -227,7 +227,8 @@ impl Revisioned for Idiom {
 
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
 		let s: String = Revisioned::deserialize_revisioned(reader)?;
-		let idiom = Idiom::from_str(&s).map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
+		let idiom =
+			Idiom::from_str(&s).map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
 		Ok(idiom)
 	}
 }

@@ -618,6 +618,14 @@ impl Expr {
 
 		res.map_err(ControlFlow::Err)
 	}
+
+	pub(crate) fn to_raw_string(&self) -> String {
+		match self {
+			Expr::Idiom(idiom) => idiom.to_raw_string(),
+			Expr::Table(ident) => ident.to_raw_string(),
+			_ => self.to_string(),
+		}
+	}
 }
 
 impl fmt::Display for Expr {

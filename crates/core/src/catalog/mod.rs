@@ -22,20 +22,23 @@ pub(crate) use view::*;
 #[cfg(test)]
 mod test {
 	use std::str::FromStr;
-use std::time::Duration;
+	use std::time::Duration;
 
 	use rstest::rstest;
-use uuid::Uuid;
+	use uuid::Uuid;
 
 	use super::*;
-	use crate::expr::{Block, ChangeFeed, Expr, Fetch, Fetchs, Field, Fields, Filter, Groups, Idiom, Kind, Literal, Tokenizer};
+	use crate::expr::{
+		Block, ChangeFeed, Expr, Fetch, Fetchs, Field, Fields, Filter, Groups, Idiom, Kind,
+		Literal, Tokenizer,
+	};
 	use crate::iam::Auth;
-use crate::kvs::version::MajorVersion;
-use crate::kvs::KVValue;
-use crate::val::{Datetime, Value};
-use crate::vs::VersionStamp;
+	use crate::kvs::KVValue;
+	use crate::kvs::version::MajorVersion;
+	use crate::val::{Datetime, Value};
+	use crate::vs::VersionStamp;
 
-    /// This test is used to ensure that
+	/// This test is used to ensure that
 	#[rstest]
 	#[case::namespace(NamespaceDefinition {
         namespace_id: NamespaceId(123),
@@ -80,7 +83,7 @@ use crate::vs::VersionStamp;
         cache_tables_ts: Uuid::default(),
         cache_indexes_ts: Uuid::default(),
     }, 147)]
-    #[case::subscription(SubscriptionDefinition {
+	#[case::subscription(SubscriptionDefinition {
         id: Uuid::default(),
         node: Uuid::default(),
         fields: Fields::Select(vec![Field::All, Field::Single {
@@ -93,7 +96,7 @@ use crate::vs::VersionStamp;
         auth: Some(Auth::default()),
         session: Some(Value::default()),
     }, 97)]
-    #[case::access(AccessDefinition {
+	#[case::access(AccessDefinition {
         name: "access".to_string(),
         access_type: AccessType::Bearer(BearerAccess {
             kind: BearerAccessType::Bearer,
@@ -115,7 +118,7 @@ use crate::vs::VersionStamp;
         session_duration: Some(Duration::from_secs(123)),
         comment: Some("comment".to_string()),
     }, 59)]
-    #[case::access(AccessGrant {
+	#[case::access(AccessGrant {
         id: "access".to_string(),
         ac: "access".to_string(),
         creation: Datetime::MAX_UTC,
@@ -127,7 +130,7 @@ use crate::vs::VersionStamp;
             token: Some("token".to_string()),
         }),
     }, 95)]
-    #[case::analyzer(AnalyzerDefinition {
+	#[case::analyzer(AnalyzerDefinition {
         name: "analyzer".to_string(),
         function: Some("function".to_string()),
         tokenizers: Some(vec![Tokenizer::Camel]),
@@ -155,7 +158,7 @@ use crate::vs::VersionStamp;
         },
         comment: None,
     }, 44)]
-    #[case::bucket(BucketDefinition {
+	#[case::bucket(BucketDefinition {
         id: Some(BucketId(123)),
         readonly: false,
         name: "bucket".to_string(),
@@ -163,18 +166,18 @@ use crate::vs::VersionStamp;
         comment: Some("comment".to_string()),
         permissions: Permission::Full,
     }, 32)]
-    #[case::config(ConfigDefinition::GraphQL(GraphQLConfig {
+	#[case::config(ConfigDefinition::GraphQL(GraphQLConfig {
         tables: TablesConfig::default(),
         functions: FunctionsConfig::default(),
     }), 7)]
-    #[case::event(EventDefinition {
+	#[case::event(EventDefinition {
         name: "test".to_string(),
         target_table: "test".to_string(),
         when: Expr::Literal(Literal::Strand("when".to_string().into())),
         then: vec![Expr::Literal(Literal::Strand("then".to_string().into()))],
         comment: Some("comment".to_string()),
     }, 35)]
-    #[case::field(FieldDefinition {
+	#[case::field(FieldDefinition {
         name: Idiom::from_str("field[0]").unwrap(),
         what: "what".to_string(),
         flexible: false,
@@ -189,7 +192,7 @@ use crate::vs::VersionStamp;
         comment: Some("comment".to_string()),
         reference: None,
     }, 38)]
-    #[case::function(FunctionDefinition {
+	#[case::function(FunctionDefinition {
         name: "function".to_string(),
         args: vec![],
         block: Block(vec![
@@ -199,35 +202,35 @@ use crate::vs::VersionStamp;
         permissions: Permission::Full,
         returns: Some(Kind::Any),
     }, 34)]
-    #[case::index(IndexDefinition {
+	#[case::index(IndexDefinition {
         name: "test".to_string(),
         what: "what".to_string(),
         cols: vec![Idiom::from_str("field[0]").unwrap()],
         index: Index::Idx,
         comment: Some("comment".to_string()),
     }, 32)]
-    #[case::model(MlModelDefinition {
+	#[case::model(MlModelDefinition {
         name: "model".to_string(),
         hash: "hash".to_string(),
         version: "1.0.0".to_string(),
         comment: Some("comment".to_string()),
         permissions: Permission::Full,
     }, 29)]
-    #[case::param(ParamDefinition {
+	#[case::param(ParamDefinition {
         name: "param".to_string(),
         value: Value::Bool(true),
         comment: Some("comment".to_string()),
         permissions: Permission::Full,
     }, 21)]
-    #[case::sequence(SequenceDefinition {
+	#[case::sequence(SequenceDefinition {
         name: "sequence".to_string(),
         batch: 123,
         start: 123,
         timeout: Some(Duration::from_secs(123)),
     }, 15)]
-    #[case::version(MajorVersion::from(1), 2)]
-    #[case::versionstamp(VersionStamp::ZERO, 10)]
-    #[case::user(UserDefinition {
+	#[case::version(MajorVersion::from(1), 2)]
+	#[case::versionstamp(VersionStamp::ZERO, 10)]
+	#[case::user(UserDefinition {
         name: "tobie".to_string(),
         hash: "hash".to_string(),
         code: "code".to_string(),
@@ -236,7 +239,7 @@ use crate::vs::VersionStamp;
         session_duration: Some(Duration::from_secs(123)),
         comment: Some("comment".to_string()),
     }, 38)]
-    #[case::value(Value::Bool(true), 3)]
+	#[case::value(Value::Bool(true), 3)]
 	fn test_serialize_deserialize<T>(#[case] original: T, #[case] expected_encoded_size: usize)
 	where
 		T: KVValue + std::fmt::Debug + PartialEq,

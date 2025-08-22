@@ -13,8 +13,8 @@ use super::tr::Check;
 use super::{Key, Val, Version, util};
 use crate::catalog;
 use crate::catalog::{
-	ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId,
-	TableDefinition,
+	ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, NamespaceDefinition,
+	NamespaceId, TableDefinition,
 };
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
