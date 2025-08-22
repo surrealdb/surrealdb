@@ -30,7 +30,8 @@ impl Document {
 				DocKind::CurrentReduced => &mut self.current_reduced,
 			};
 
-			Document::computed_fields_inner(stk, ctx, opt, rid.as_ref(), fields.as_ref(), doc).await?;
+			Document::computed_fields_inner(stk, ctx, opt, rid.as_ref(), fields.as_ref(), doc)
+				.await?;
 		}
 
 		Ok(())
@@ -52,8 +53,7 @@ impl Document {
 		// Compute the fields
 		for fd in fields.iter() {
 			if let Some(computed) = &fd.computed {
-				let mut val =
-					computed.compute(stk, ctx, opt, Some(doc)).await.catch_return()?;
+				let mut val = computed.compute(stk, ctx, opt, Some(doc)).await.catch_return()?;
 				if let Some(kind) = fd.field_kind.as_ref() {
 					val = val.coerce_to_kind(kind).map_err(|e| Error::FieldCoerce {
 						thing: rid.to_string(),

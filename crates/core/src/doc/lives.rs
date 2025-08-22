@@ -117,7 +117,8 @@ impl Document {
 
 			// Get the document to check against and to return based on lq context
 			// We need to clone the document as we will potentially modify it with computed fields
-			// The outcome for every computed field can be different based on the context of the user
+			// The outcome for every computed field can be different based on the context of the
+			// user
 			let mut doc = match (self.check_reduction_required(&lqopt)?, stm.is_delete()) {
 				(true, true) => {
 					self.compute_reduced_target(stk, &lqctx, &lqopt, &self.initial).await?
@@ -131,7 +132,15 @@ impl Document {
 
 			if let Ok(rid) = self.id() {
 				let fields = self.fd(ctx, opt).await?;
-				Document::computed_fields_inner(stk, ctx, opt, rid.as_ref(), fields.as_ref(), &mut doc).await?;
+				Document::computed_fields_inner(
+					stk,
+					ctx,
+					opt,
+					rid.as_ref(),
+					fields.as_ref(),
+					&mut doc,
+				)
+				.await?;
 			};
 
 			// First of all, let's check to see if the WHERE

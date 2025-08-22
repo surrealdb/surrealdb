@@ -9,8 +9,8 @@ use uuid::Uuid;
 use super::DefineKind;
 use crate::catalog::{DatabaseId, NamespaceId, Relation, TableDefinition, TableType};
 use crate::ctx::Context;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
@@ -349,7 +349,12 @@ impl DefineFieldStatement {
 				_ => false,
 			};
 
-			ensure!(is_record_id, Error::ReferenceTypeConflict(self.field_kind.as_ref().unwrap_or(&Kind::Any).to_string()));
+			ensure!(
+				is_record_id,
+				Error::ReferenceTypeConflict(
+					self.field_kind.as_ref().unwrap_or(&Kind::Any).to_string()
+				)
+			);
 		}
 
 		Ok(())
