@@ -198,7 +198,7 @@ impl<'a> Index<'a> {
 	/// when iterating all entries for a given index.
 	pub fn prefix_beg(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix(ns, db, tb, ix)?;
-		beg.extend_from_slice(&[0x00]);
+		beg.extend_from_slice(&[0x00]); // lower sentinel for entire index keyspace
 		Ok(beg)
 	}
 
@@ -206,7 +206,7 @@ impl<'a> Index<'a> {
 	/// when iterating all entries for a given index.
 	pub fn prefix_end(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix(ns, db, tb, ix)?;
-		beg.extend_from_slice(&[0xff]);
+		beg.extend_from_slice(&[0xff]); // upper sentinel for entire index keyspace (exclusive)
 		Ok(beg)
 	}
 
@@ -269,7 +269,7 @@ impl<'a> Index<'a> {
 		fd: &StoreKeyArray,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
-		*beg.last_mut().unwrap() = 0x00;
+		*beg.last_mut().unwrap() = 0x00; // set trailing sentinel to 0x00 -> inclusive lower bound within composite tuple
 		Ok(beg)
 	}
 
@@ -285,7 +285,7 @@ impl<'a> Index<'a> {
 		fd: &StoreKeyArray,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
-		*beg.last_mut().unwrap() = 0xff;
+		*beg.last_mut().unwrap() = 0xff; // set trailing sentinel to 0xFF -> exclusive upper bound within composite tuple
 		Ok(beg)
 	}
 }

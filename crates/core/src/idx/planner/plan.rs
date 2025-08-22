@@ -570,17 +570,21 @@ pub(super) struct RangeValue {
 
 impl RangeValue {
 	fn set_to(&mut self, v: &Arc<Value>) {
+		// Merge an exclusive upper bound (e.g., < v). We choose the maximum 'to' value.
 		if self.value.is_none() {
 			self.value = v.clone();
 			return;
 		}
 		if self.value.lt(v) {
 			self.value = v.clone();
+			// A stricter (exclusive) bound dominates when we move the upper limit up.
 			self.inclusive = false;
 		}
 	}
 
 	fn set_to_inclusive(&mut self, v: &Arc<Value>) {
+		// Merge an inclusive upper bound (e.g., <= v). Prefer the highest value; if
+		// values are equal, inclusive wins over exclusive.
 		if self.value.is_none() {
 			self.value = v.clone();
 			self.inclusive = true;
@@ -597,6 +601,8 @@ impl RangeValue {
 	}
 
 	fn set_from(&mut self, v: &Arc<Value>) {
+		// Merge an exclusive lower bound (e.g., > v). We choose the minimum 'from' value
+		// that is still >= all constraints; moving the bound down uses exclusive.
 		if self.value.is_none() {
 			self.value = v.clone();
 			return;
@@ -608,6 +614,8 @@ impl RangeValue {
 	}
 
 	fn set_from_inclusive(&mut self, v: &Arc<Value>) {
+		// Merge an inclusive lower bound (e.g., >= v). If multiple constraints target
+		// the same value, inclusive should override exclusive.
 		if self.value.as_ref().is_none() {
 			self.value = v.clone();
 			self.inclusive = true;

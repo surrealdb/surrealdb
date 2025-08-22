@@ -407,6 +407,9 @@ struct ReverseRangeScan {
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 impl ReverseRangeScan {
 	fn new(r: RangeScan) -> Self {
+		// Capture whether the original forward range considered the endpoints inclusive.
+		// Reverse KV scans typically exclude the end key, so we keep these flags and
+		// later compensate by explicitly fetching the endpoint once per iterator.
 		Self {
 			beg_incl: r.beg_excl_match_checked,
 			end_incl: r.end_excl_match_checked,
@@ -414,11 +417,12 @@ impl ReverseRangeScan {
 		}
 	}
 	fn matches_check(&self, k: &Key) -> bool {
-		// We check if we should match the key matching the beginning of the range
+		// Skip keys that are exactly equal to the range boundaries if we haven't
+		// performed the explicit endpoint compensation yet. This avoids double
+		// returning the endpoints when they are inclusive.
 		if !self.r.beg_excl_match_checked && self.r.beg.eq(k) {
 			return false;
 		}
-		// We check if we should match the key matching the end of the range
 		if !self.r.end_excl_match_checked && self.r.end.eq(k) {
 			return false;
 		}
@@ -489,12 +493,20 @@ impl IndexRangeThingIterator {
 				}
 			}
 		}
+		// Sort candidates by encoded key. For lower bounds we want the greatest value (max),
+		// for upper bounds we want the smallest (min). The comparator orders by key descending
+		// (b1.cmp(a1)), and for equal keys orders by the boolean flag so that strict operators
+		// take precedence when choosing the tightest bound.
 		let cmp = |(a1, a2, _): &(Vec<u8>, bool, StoreKeyValue),
 		           (b1, b2, _): &(Vec<u8>, bool, StoreKeyValue)| {
 			b1.cmp(a1).then_with(|| b2.cmp(a2))
 		};
 		from.sort_unstable_by(cmp);
 		to.sort_unstable_by(cmp);
+		// Pick the strongest lower bound: first element after sorting (greatest key).
+		// The stored boolean reflects the original operator kind: true for strict (>, <),
+		// false for inclusive (>=, <=). For the final bound, inclusive is the inverse for
+		// lower bounds because a strict '>' becomes an exclusive range start.
 		let from = if let Some((_, inclusivity, val)) = from.into_iter().next() {
 			StoreRangeValue {
 				value: val,
@@ -503,6 +515,8 @@ impl IndexRangeThingIterator {
 		} else {
 			StoreRangeValue::default()
 		};
+		// Pick the strongest upper bound: last element after sorting (smallest key).
+		// Here the inclusive flag matches the operator: '<=' is inclusive, '<' is exclusive.
 		let to = if let Some((_, inclusivity, val)) = to.into_iter().next_back() {
 			StoreRangeValue {
 				value: val,
@@ -531,10 +545,10 @@ impl IndexRangeThingIterator {
 	///
 	/// - If `from.value` is `None`, use the index-prefix begin to start at the first key in the
 	///   index keyspace.
-	/// - Otherwise, serialize the `from` value into an index field array and construct the
-	///   boundary key. For an inclusive lower bound use `prefix_ids_beg` (include all records
-	///   with that value); for an exclusive lower bound use `prefix_ids_end` so the scan starts
-	///   after all records with that exact value.
+	/// - Otherwise, serialize the `from` value into an index field array and construct the boundary
+	///   key. For an inclusive lower bound use `prefix_ids_beg` (include all records with that
+	///   value); for an exclusive lower bound use `prefix_ids_end` so the scan starts after all
+	///   records with that exact value.
 	fn compute_beg(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -554,12 +568,12 @@ impl IndexRangeThingIterator {
 
 	/// Compute the end key for a range scan over an index by value.
 	///
-	/// - If `to.value` is `None`, use the index-prefix end to stop at the last key in the
-	///   index keyspace.
-	/// - Otherwise, serialize the `to` value and construct the boundary key. For an inclusive
-	///   upper bound use `prefix_ids_end` so the scan can include all records with that exact
-	///   value; for an exclusive upper bound use `prefix_ids_beg` so the scan stops just before
-	///   any key matching that exact value.
+	/// - If `to.value` is `None`, use the index-prefix end to stop at the last key in the index
+	///   keyspace.
+	/// - Otherwise, serialize the `to` value and construct the boundary key. For an inclusive upper
+	///   bound use `prefix_ids_end` so the scan can include all records with that exact value; for
+	///   an exclusive upper bound use `prefix_ids_beg` so the scan stops just before any key
+	///   matching that exact value.
 	fn compute_end(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -673,6 +687,9 @@ impl IndexRangeThingIterator {
 		let res = tx.scan(self.r.range(), limit, None).await?;
 		if let Some((key, _)) = res.last() {
 			self.r.beg.clone_from(key);
+			// Advance begin key one byte past the last returned key to avoid
+			// returning it again on the next paged call. Since keys are
+			// lexicographically ordered, appending 0x00 moves strictly after `key`.
 			self.r.beg.push(0x00);
 		}
 		Ok(res)
@@ -686,6 +703,8 @@ impl IndexRangeThingIterator {
 		let res = tx.keys(self.r.range(), limit, None).await?;
 		if let Some(key) = res.last() {
 			self.r.beg.clone_from(key);
+			// Same pagination technique as in next_scan: move begin strictly past
+			// the last seen key so subsequent calls don't re-count it.
 			self.r.beg.push(0x00);
 		}
 		Ok(res)
