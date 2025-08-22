@@ -9,10 +9,13 @@ use super::Transaction;
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
-use crate::expr::paths::{EDGE, IN, OUT};
-use crate::expr::{Base, DefineAccessStatement, DefineAnalyzerStatement, DefineUserStatement};
+use crate::expr::paths::{IN, OUT};
+use crate::expr::statements::define::{DefineAccessStatement, DefineUserStatement};
+use crate::expr::{Base, DefineAnalyzerStatement};
 use crate::key::thing;
+use crate::kvs::KVValue;
 use crate::sql::ToSql;
+use crate::val::record::Record;
 use crate::val::{RecordId, Strand, Value};
 
 #[derive(Clone, Debug)]
@@ -457,9 +460,9 @@ impl Transaction {
 	///
 	/// * `String` - Returns the generated SQL command as a string. If no command is generated,
 	///   returns an empty string.
-	fn process_value(
+	fn process_record(
 		k: thing::ThingKey,
-		mut v: Value,
+		mut record: Record,
 		records_relate: &mut Vec<String>,
 		records_normal: &mut Vec<String>,
 		is_tombstone: Option<bool>,
@@ -470,21 +473,23 @@ impl Transaction {
 			table: k.tb.to_owned(),
 			key: k.id.clone(),
 		};
-		v.def(&rid);
+		record.data.to_mut().def(&rid);
 		// Match on the value to determine if it is a graph edge record or a normal
 		// record.
-		match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
+		match (record.is_edge(), record.data.as_ref().pick(&*IN), record.data.as_ref().pick(&*OUT))
+		{
 			// If the value is a graph edge record (indicated by EDGE, IN, and OUT fields):
-			(Value::Bool(true), Value::RecordId(_), Value::RecordId(_)) => {
+			(true, Value::RecordId(_), Value::RecordId(_)) => {
 				if let Some(version) = version {
 					// If a version exists, format the value as an INSERT RELATION VERSION command.
 					let ts = Utc.timestamp_nanos(version as i64);
-					let sql = format!("INSERT RELATION {} VERSION d'{:?}';", v, ts);
+					let sql =
+						format!("INSERT RELATION {} VERSION d'{:?}';", record.data.as_ref(), ts);
 					records_relate.push(sql);
 					String::new()
 				} else {
 					// If no version exists, push the value to the records_relate vector.
-					records_relate.push(v.to_string());
+					records_relate.push(record.data.as_ref().to_string());
 					String::new()
 				}
 			}
@@ -498,12 +503,12 @@ impl Transaction {
 						// If the record is not a tombstone and a version exists, format it as an
 						// INSERT VERSION command.
 						let ts = Utc.timestamp_nanos(version.unwrap() as i64);
-						format!("INSERT {} VERSION d'{:?}';", v, ts)
+						format!("INSERT {} VERSION d'{:?}';", record.data.as_ref(), ts)
 					}
 				} else {
 					// If no tombstone or version information is provided, push the value to the
 					// records_normal vector.
-					records_normal.push(v.to_string());
+					records_normal.push(record.data.as_ref().to_string());
 					String::new()
 				}
 			}
@@ -547,13 +552,13 @@ impl Transaction {
 			}
 
 			let k = thing::ThingKey::decode_key(&k)?;
-			let v: Value = if v.is_empty() {
-				Value::None
+			let v: Record = if v.is_empty() {
+				Default::default()
 			} else {
-				revision::from_slice(&v)?
+				KVValue::kv_decode_value(v)?
 			};
 			// Process the value and generate the appropriate SQL command.
-			let sql = Self::process_value(
+			let sql = Self::process_record(
 				k,
 				v,
 				&mut records_relate,
@@ -630,9 +635,9 @@ impl Transaction {
 		// Process each regular value.
 		for (k, v) in regular_values {
 			let k = thing::ThingKey::decode_key(&k)?;
-			let v: Value = revision::from_slice(&v)?;
+			let v = Record::kv_decode_value(v)?;
 			// Process the value and categorize it into records_relate or records_normal.
-			Self::process_value(k, v, &mut records_relate, &mut records_normal, None, None);
+			Self::process_record(k, v, &mut records_relate, &mut records_normal, None, None);
 		}
 
 		// If there are normal records, generate and send the INSERT SQL command.

@@ -11,12 +11,13 @@ use crate::catalog::{
 };
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, Part};
+use crate::expr::{Base, Expr, Ident, Idiom, Kind, KindLiteral, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::{Strand, Value};
@@ -41,6 +42,7 @@ pub struct DefineFieldStatement {
 	pub readonly: bool,
 	pub value: Option<Expr>,
 	pub assert: Option<Expr>,
+	pub computed: Option<Expr>,
 	pub default: DefineDefault,
 	pub permissions: Permissions,
 	pub comment: Option<Strand>,
@@ -65,6 +67,7 @@ impl DefineFieldStatement {
 			readonly: self.readonly,
 			value: self.value.clone(),
 			assert: self.assert.clone(),
+			computed: self.computed.clone(),
 			default: match &self.default {
 				DefineDefault::None => catalog::DefineDefault::None,
 				DefineDefault::Set(x) => catalog::DefineDefault::Set(x.clone()),
@@ -90,6 +93,12 @@ impl DefineFieldStatement {
 
 		// Get the NS and DB
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+
+		// Validate computed options
+		self.validate_computed_options(ns, db, ctx.tx()).await?;
+
+		// Validate reference options
+		self.validate_reference_options(ctx)?;
 
 		// Disallow mismatched types
 		self.disallow_mismatched_types(ctx, ns, db).await?;
@@ -278,6 +287,91 @@ impl DefineFieldStatement {
 		Ok(())
 	}
 
+	pub(crate) async fn validate_computed_options(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		txn: Arc<Transaction>,
+	) -> Result<()> {
+		// Find all existing field definitions
+		let fields = txn.all_tb_fields(ns, db, &self.what, None).await?;
+		if self.computed.is_some() {
+			// Ensure the field is not the `id` field
+			ensure!(!self.name.is_id(), Error::IdFieldKeywordConflict("COMPUTED".into()));
+
+			// Ensure the field is top-level
+			ensure!(self.name.len() == 1, Error::ComputedNestedField(self.name.to_string()));
+
+			// Ensure there are no conflicting clauses
+			ensure!(self.value.is_none(), Error::ComputedKeywordConflict("VALUE".into()));
+			ensure!(self.assert.is_none(), Error::ComputedKeywordConflict("ASSERT".into()));
+			ensure!(self.reference.is_none(), Error::ComputedKeywordConflict("REFERENCE".into()));
+			ensure!(
+				matches!(self.default, DefineDefault::None),
+				Error::ComputedKeywordConflict("DEFAULT".into())
+			);
+			ensure!(!self.flex, Error::ComputedKeywordConflict("FLEXIBLE".into()));
+			ensure!(!self.readonly, Error::ComputedKeywordConflict("READONLY".into()));
+
+			// Ensure no nested fields exist
+			for field in fields.iter() {
+				if field.name.starts_with(&self.name) && field.name != self.name {
+					bail!(Error::ComputedNestedFieldConflict(
+						self.name.to_string(),
+						field.name.to_string()
+					));
+				}
+			}
+		} else {
+			// Ensure no parent fields are computed
+			for field in fields.iter() {
+				if field.computed.is_some()
+					&& self.name.starts_with(&field.name)
+					&& field.name != self.name
+				{
+					bail!(Error::ComputedParentFieldConflict(
+						self.name.to_string(),
+						field.name.to_string()
+					));
+				}
+			}
+		}
+
+		Ok(())
+	}
+
+	pub(crate) fn validate_reference_options(&self, ctx: &Context) -> Result<()> {
+		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
+			return Ok(());
+		}
+
+		// If a reference is defined, the field must be a record
+		if self.reference.is_some() {
+			let is_record_id = match &self.field_kind {
+				Some(Kind::Either(kinds)) => kinds.iter().all(|k| matches!(k, Kind::Record(_))),
+				Some(Kind::Array(kind, _)) | Some(Kind::Set(kind, _)) => match kind.as_ref() {
+					Kind::Either(kinds) => kinds.iter().all(|k| matches!(k, Kind::Record(_))),
+					Kind::Record(_) => true,
+					_ => false,
+				},
+				Some(Kind::Literal(KindLiteral::Array(kinds))) => {
+					kinds.iter().all(|k| matches!(k, Kind::Record(_)))
+				}
+				Some(Kind::Record(_)) => true,
+				_ => false,
+			};
+
+			ensure!(
+				is_record_id,
+				Error::ReferenceTypeConflict(
+					self.field_kind.as_ref().unwrap_or(&Kind::Any).to_string()
+				)
+			);
+		}
+
+		Ok(())
+	}
+
 	pub(crate) async fn disallow_mismatched_types(
 		&self,
 		ctx: &Context,
@@ -337,6 +431,9 @@ impl Display for DefineFieldStatement {
 		if let Some(ref v) = self.assert {
 			write!(f, " ASSERT {v}")?
 		}
+		if let Some(ref v) = self.computed {
+			write!(f, " COMPUTED {v}")?
+		}
 		if let Some(ref v) = self.reference {
 			write!(f, " REFERENCE {v}")?
 		}
@@ -367,6 +464,7 @@ impl InfoStructure for DefineFieldStatement {
 			"kind".to_string(), if let Some(v) = self.field_kind => v.structure(),
 			"value".to_string(), if let Some(v) = self.value => v.structure(),
 			"assert".to_string(), if let Some(v) = self.assert => v.structure(),
+			"computed".to_string(), if let Some(v) = self.computed => v.structure(),
 			"default_always".to_string(), if matches!(&self.default, DefineDefault::Always(_) | DefineDefault::Set(_)) => Value::Bool(matches!(self.default,DefineDefault::Always(_))), // Only reported if DEFAULT is also enabled for this field
 			"default".to_string(), if let DefineDefault::Always(v) | DefineDefault::Set(v) = self.default => v.structure(),
 			"reference".to_string(), if let Some(v) = self.reference => v.structure(),

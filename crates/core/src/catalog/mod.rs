@@ -35,6 +35,7 @@ mod test {
 	use crate::iam::Auth;
 	use crate::kvs::KVValue;
 	use crate::kvs::version::MajorVersion;
+	use crate::val::record::{Data, Record};
 	use crate::val::{Datetime, Value};
 	use crate::vs::VersionStamp;
 
@@ -185,13 +186,14 @@ mod test {
         readonly: false,
         value: None,
         assert: None,
+        computed: None,
         default: DefineDefault::None,
         select_permission: Permission::Full,
         create_permission: Permission::Full,
         update_permission: Permission::Full,
         comment: Some("comment".to_string()),
         reference: None,
-    }, 38)]
+    }, 39)]
 	#[case::function(FunctionDefinition {
         name: "function".to_string(),
         args: vec![],
@@ -239,7 +241,7 @@ mod test {
         session_duration: Some(Duration::from_secs(123)),
         comment: Some("comment".to_string()),
     }, 38)]
-	#[case::value(Value::Bool(true), 3)]
+	#[case::record(Record::new(Data::from(Value::Bool(true))), 5)]
 	fn test_serialize_deserialize<T>(#[case] original: T, #[case] expected_encoded_size: usize)
 	where
 		T: KVValue + std::fmt::Debug + PartialEq,

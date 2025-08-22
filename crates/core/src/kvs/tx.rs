@@ -26,7 +26,8 @@ use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::key::KVKey;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::{Transactor, cache};
-use crate::val::{RecordId, RecordIdKey, Value};
+use crate::val::record::Record;
+use crate::val::{RecordId, RecordIdKey};
 
 pub struct Transaction {
 	/// Is this is a local datastore transaction?
@@ -1874,50 +1875,52 @@ impl Transaction {
 		tb: &str,
 		id: &RecordIdKey,
 		version: Option<u64>,
-	) -> Result<Arc<Value>> {
+	) -> Result<Arc<Record>> {
 		// Cache is not versioned
 		if version.is_some() {
 			// Fetch the record from the datastore
 			let key = crate::key::thing::new(ns, db, tb, id);
 			match self.get(&key, version).await? {
 				// The value exists in the datastore
-				Some(mut val) => {
+				Some(mut record) => {
 					// Inject the id field into the document
 					let rid = RecordId {
 						table: tb.to_owned(),
 						key: id.clone(),
 					};
-					val.def(&rid);
-					let val = cache::tx::Entry::Val(Arc::new(val));
-					val.try_into_val()
+					record.data.to_mut().def(&rid);
+					// Convert to read-only format for better sharing and performance
+					Ok(record.into_read_only())
 				}
 				// The value is not in the datastore
-				None => Ok(Arc::new(Value::None)),
+				None => Ok(Arc::new(Default::default())),
 			}
 		} else {
 			let qey = cache::tx::Lookup::Record(ns, db, tb, id);
 			match self.cache.get(&qey) {
 				// The entry is in the cache
-				Some(val) => val.try_into_val(),
+				Some(val) => val.try_into_record(),
 				// The entry is not in the cache
 				None => {
 					// Fetch the record from the datastore
 					let key = crate::key::thing::new(ns, db, tb, id);
 					match self.get(&key, None).await? {
 						// The value exists in the datastore
-						Some(mut val) => {
+						Some(mut record) => {
 							// Inject the id field into the document
 							let rid = RecordId {
 								table: tb.to_owned(),
 								key: id.clone(),
 							};
-							val.def(&rid);
-							let val = cache::tx::Entry::Val(Arc::new(val));
-							self.cache.insert(qey, val.clone());
-							val.try_into_val()
+							record.data.to_mut().def(&rid);
+							// Convert to read-only format for better sharing and performance
+							let record = record.into_read_only();
+							let entry = cache::tx::Entry::Val(record.clone());
+							self.cache.insert(qey, entry);
+							Ok(record)
 						}
 						// The value is not in the datastore
-						None => Ok(Arc::new(Value::None)),
+						None => Ok(Arc::new(Default::default())),
 					}
 				}
 			}
@@ -1931,14 +1934,14 @@ impl Transaction {
 		db: DatabaseId,
 		tb: &str,
 		id: &RecordIdKey,
-		val: Value,
+		record: Record,
 	) -> Result<()> {
 		// Set the value in the datastore
 		let key = crate::key::thing::new(ns, db, tb, id);
-		self.set(&key, &val, None).await?;
+		self.set(&key, &record, None).await?;
 		// Set the value in the cache
 		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
-		self.cache.insert(qey, cache::tx::Entry::Val(Arc::new(val)));
+		self.cache.insert(qey, cache::tx::Entry::Val(record.into_read_only()));
 		// Return nothing
 		Ok(())
 	}
@@ -1950,11 +1953,11 @@ impl Transaction {
 		db: DatabaseId,
 		tb: &str,
 		id: &RecordIdKey,
-		val: Arc<Value>,
+		record: Arc<Record>,
 	) -> Result<()> {
 		// Set the value in the cache
 		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
-		self.cache.insert(qey, cache::tx::Entry::Val(val));
+		self.cache.insert(qey, cache::tx::Entry::Val(record));
 		// Return nothing
 		Ok(())
 	}

@@ -1668,6 +1668,7 @@ fn parse_define_field() {
 				},
 				comment: None,
 				reference: None,
+				computed: None,
 			})))
 		)
 	}
@@ -1702,6 +1703,7 @@ fn parse_define_field() {
 				},
 				comment: None,
 				reference: None,
+				computed: None,
 			})))
 		)
 	}

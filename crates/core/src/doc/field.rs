@@ -62,14 +62,14 @@ impl Document {
 			for fd in self.fd(ctx, opt).await?.iter() {
 				let is_flex = fd.flexible;
 				let is_literal = fd.field_kind.as_ref().is_some_and(Kind::contains_literal);
-				for k in self.current.doc.each(&fd.name).into_iter() {
+				for k in self.current.doc.as_ref().each(&fd.name).into_iter() {
 					defined_field_names.insert(&k, is_flex || is_literal);
 				}
 			}
 
 			// Loop over every field in the document
 			for current_doc_field_idiom in
-				self.current.doc.every(None, true, ArrayBehaviour::Full).iter()
+				self.current.doc.as_ref().every(None, true, ArrayBehaviour::Full).iter()
 			{
 				if current_doc_field_idiom.is_special() {
 					// This field is a built-in field, so we can skip it.
@@ -265,21 +265,26 @@ impl Document {
 				*/
 				// Skip this field?
 				if !skipped {
-					// Process any DEFAULT clause
-					val = field.process_default_clause(val).await?;
-					// Check for the existance of a VALUE clause
-					if field.def.value.is_some() {
+					if field.def.computed.is_some() {
+						// The value will be computed by the `COMPUTED` clause, so we set it to NONE
+						val = Value::None;
+					} else {
+						// Process any DEFAULT clause
+						val = field.process_default_clause(val).await?;
+						// Check for the existance of a VALUE clause
+						if field.def.value.is_some() {
+							// Process any TYPE clause
+							val = field.process_type_clause(val).await?;
+							// Process any VALUE clause
+							val = field.process_value_clause(val).await?;
+						}
 						// Process any TYPE clause
 						val = field.process_type_clause(val).await?;
-						// Process any VALUE clause
-						val = field.process_value_clause(val).await?;
+						// Process any ASSERT clause
+						val = field.process_assert_clause(val).await?;
+						// Process any REFERENCE clause
+						field.process_reference_clause(&val).await?;
 					}
-					// Process any TYPE clause
-					val = field.process_type_clause(val).await?;
-					// Process any ASSERT clause
-					val = field.process_assert_clause(val).await?;
-					// Process any REFERENCE clause
-					field.process_reference_clause(&val).await?;
 				}
 				// Process any PERMISSIONS clause
 				val = field.process_permissions_clause(val).await?;
@@ -671,6 +676,7 @@ impl FieldEditContext<'_> {
 					.doc
 					.current
 					.doc
+					.as_ref()
 					.get(self.stk, self.ctx, self.opt, doc, &self.def.name)
 					.await
 					.catch_return()?;

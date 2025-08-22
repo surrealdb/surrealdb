@@ -19,8 +19,9 @@ use crate::expr::graph::ComputedGraphSubject;
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, thing};
-use crate::kvs::{KVKey, Key, Transaction, Val};
+use crate::kvs::{KVKey, KVValue, Key, Transaction, Val};
 use crate::syn;
+use crate::val::record::Record;
 use crate::val::{RecordId, RecordIdKeyRange, Value};
 
 impl Iterable {
@@ -162,10 +163,10 @@ impl Collected {
 		rid_only: bool,
 	) -> Result<Processed> {
 		// Parse the data from the store
-		let gra: graph::Graph = graph::Graph::decode_key(&key)?;
+		let gra = graph::Graph::decode_key(&key)?;
 		// Fetch the data from the store
-		let val = if rid_only {
-			Arc::new(Value::Null)
+		let record = if rid_only {
+			Arc::new(Default::default())
 		} else {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 			txn.get_record(ns, db, gra.ft, &gra.fk, None).await?
@@ -175,7 +176,7 @@ impl Collected {
 			key: gra.fk,
 		};
 		// Parse the data from the store
-		let val = Operable::Value(val);
+		let val = Operable::Value(record);
 		// Process the record
 		Ok(Processed {
 			rs: RecordStrategy::KeysAndValues,
@@ -188,7 +189,7 @@ impl Collected {
 
 	async fn process_range_key(key: Key) -> Result<Processed> {
 		let key = thing::ThingKey::decode_key(&key)?;
-		let val = Value::Null;
+		let val = Record::new(Value::Null.into());
 		let rid = RecordId {
 			table: key.tb.to_owned(),
 			key: key.id,
@@ -218,7 +219,7 @@ impl Collected {
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
-			val: Operable::Value(Value::Null.into()),
+			val: Operable::Value(Record::new(Value::Null.into()).into_read_only()),
 		};
 		Ok(pro)
 	}
@@ -236,7 +237,7 @@ impl Collected {
 	) -> Result<Processed> {
 		// if it is skippable we only need the record id
 		let val = if rid_only {
-			Operable::Value(Arc::new(Value::Null))
+			Operable::Value(Record::new(Value::Null.into()).into_read_only())
 		} else {
 			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 			let val = txn.get_record(ns, db, &v.table, &v.key, None).await?;
@@ -262,7 +263,7 @@ impl Collected {
 	) -> Result<Processed> {
 		// if it is skippable we only need the record id
 		let val = if rid_only {
-			Arc::new(Value::Null)
+			Record::new(Value::Null.into()).into_read_only()
 		} else {
 			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 			txn.get_record(ns, db, &record_id.table, &record_id.key, opt.version).await?
@@ -288,7 +289,7 @@ impl Collected {
 			generate: Some(v),
 			rid: None,
 			ir: None,
-			val: Operable::Value(Value::None.into()),
+			val: Operable::Value(Default::default()),
 		};
 		Ok(pro)
 	}
@@ -309,7 +310,7 @@ impl Collected {
 			generate: None,
 			rid,
 			ir: None,
-			val: Operable::Value(v.into()),
+			val: Operable::Value(Record::new(v.into()).into_read_only()),
 		}
 	}
 
@@ -320,7 +321,7 @@ impl Collected {
 			generate: None,
 			rid: Some(v.into()),
 			ir: None,
-			val: Operable::Value(Value::None.into()),
+			val: Operable::Value(Default::default()),
 		};
 		Ok(pro)
 	}
@@ -332,7 +333,7 @@ impl Collected {
 			generate: None,
 			rid: Some(v.into()),
 			ir: None,
-			val: Operable::Insert(Value::None.into(), o.into()),
+			val: Operable::Insert(Default::default(), o.into()),
 		};
 		// Everything ok
 		Ok(pro)
@@ -340,13 +341,13 @@ impl Collected {
 
 	fn process_key_val(key: Key, val: Val) -> Result<Processed> {
 		let key = thing::ThingKey::decode_key(&key)?;
-		let mut val: Value = revision::from_slice(&val)?;
+		let mut val = Record::kv_decode_value(val)?;
 		let rid = RecordId {
 			table: key.tb.to_owned(),
 			key: key.id,
 		};
 		// Inject the id field into the document
-		val.def(&rid);
+		val.data.to_mut().def(&rid);
 		// Create a new operable value
 		let val = Operable::Value(val.into());
 		// Process the record
@@ -376,7 +377,9 @@ impl Collected {
 			generate: None,
 			rid: Some(t),
 			ir: Some(Arc::new(ir)),
-			val: Operable::Value(v.unwrap_or_else(|| Value::Null.into())),
+			val: Operable::Value(
+				v.unwrap_or_else(|| Record::new(Value::Null.into()).into_read_only()),
+			),
 		}
 	}
 
@@ -394,7 +397,7 @@ impl Collected {
 			v
 		} else if rid_only {
 			// if it is skippable we only need the record id
-			Value::Null.into()
+			Record::new(Value::Null.into()).into_read_only()
 		} else {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 			txn.get_record(ns, db, &t.table, &t.key, None).await?

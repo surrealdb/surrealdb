@@ -32,6 +32,7 @@ pub(crate) struct FieldDefinition {
 	pub readonly: bool,
 	pub value: Option<Expr>,
 	pub assert: Option<Expr>,
+	pub computed: Option<Expr>,
 	pub default: DefineDefault,
 	pub select_permission: Permission,
 	pub create_permission: Permission,
@@ -52,6 +53,7 @@ impl FieldDefinition {
 			readonly: self.readonly,
 			value: self.value.clone().map(|x| x.into()),
 			assert: self.assert.clone().map(|x| x.into()),
+			computed: self.computed.clone().map(|x| x.into()),
 			default: match &self.default {
 				DefineDefault::None => crate::sql::statements::define::DefineDefault::None,
 				DefineDefault::Set(x) => {
@@ -82,6 +84,7 @@ impl InfoStructure for FieldDefinition {
 			"kind".to_string(), if let Some(v) = self.field_kind => v.structure(),
 			"value".to_string(), if let Some(v) = self.value => v.structure(),
 			"assert".to_string(), if let Some(v) = self.assert => v.structure(),
+			"computed".to_string(), if let Some(v) = self.computed => v.structure(),
 			"default_always".to_string(), if matches!(&self.default, DefineDefault::Always(_) | DefineDefault::Set(_)) => Value::Bool(matches!(self.default,DefineDefault::Always(_))), // Only reported if DEFAULT is also enabled for this field
 			"default".to_string(), if let DefineDefault::Always(v) | DefineDefault::Set(v) = self.default => v.structure(),
 			"reference".to_string(), if let Some(v) = self.reference => v.structure(),

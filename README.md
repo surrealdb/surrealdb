@@ -264,9 +264,8 @@ UPDATE person SET
 Store dynamically computed fields which are calculated when retrieved.
 
 ```sql
-CREATE person SET
-    birthday = <datetime> "2007-06-22",
-    can_drive = <future> { time::now() > birthday + 18y }
+DEFINE FIELD can_drive ON TABLE person COMPUTED time::now() > birthday + 18y;
+CREATE person SET birthday = d"2007-06-22";
 ;
 ```
 
