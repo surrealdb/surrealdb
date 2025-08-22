@@ -1,8 +1,6 @@
 ## https://github.com/surrealdb/surrealdb/issues/4899
 
 /**
-[test]
-wip = true
 
 [[test.results]]
 value = "NONE"
@@ -11,28 +9,13 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{
-	id: A:1,
-	test: NULL
-}"
+value = "{ id: A:1, test: NULL }"
 
 [[test.results]]
-value = "{
-	id: A:2,
-	test: NULL
-}"
+value = "{ id: A:2, test: NULL }"
 
 [[test.results]]
-value = "[
-	{
-		id: A:1,
-		test: NULL
-	},
-	{
-		id: A:2,
-		test: NULL
-	}
-]"
+value = "[{ id: A:1, test: NULL }, { id: A:2, test: NULL }]"
 */
 
 

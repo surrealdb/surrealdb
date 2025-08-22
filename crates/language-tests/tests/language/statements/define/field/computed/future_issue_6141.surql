@@ -1,8 +1,6 @@
 ## https://github.com/surrealdb/surrealdb/issues/6141
 
 /**
-[test]
-wip = true
 
 [[test.results]]
 value = "NONE"
@@ -20,52 +18,27 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
+value = "{ bar: 1, foo: 1, foobar: 'foo', id: bug:1 }"
 
 [[test.results]]
-value = "{
-	bar: 1,
-	foo: 1,
-	foobar: 'foo',
-	id: bug:1
-}"
+value = "{ bar: 2, foo: 2, foobar: 'bar', id: bug:2 }"
 
 [[test.results]]
-value = "{
-	bar: 2,
-	foo: 2,
-	foobar: 'bar',
-	id: bug:2
-}"
-
-[[test.results]]
-value = "[
-	{
-		bar: 1,
-		foo: 1,
-		foobar: 'foo',
-		id: bug:1
-	},
-	{
-		bar: 2,
-		foo: 2,
-		foobar: 'bar',
-		id: bug:2
-	}
-]}"
+value = "[{ bar: 1, foo: 1, foobar: 'foo', id: bug:1 }, { bar: 2, foo: 2, foobar: 'bar', id: bug:2 }]"
 */
 
 REMOVE TABLE IF EXISTS bug;
 DEFINE TABLE IF NOT EXISTS bug SCHEMAFULL;
 DEFINE FIELD foobar ON TABLE bug TYPE "foo"|"bar";
 
-## Futures
+## Computed fields
 DEFINE FIELD OVERWRITE foo ON TABLE bug COMPUTED {
     IF foobar == "foo" THEN
         RETURN 1;
     END;
     RETURN 2;
 } COMMENT "This IF-END syntax always resolves to 2";
+
 DEFINE FIELD OVERWRITE bar ON TABLE bug COMPUTED {
     IF foobar == "foo" {
         RETURN 1;
