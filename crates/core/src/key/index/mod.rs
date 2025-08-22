@@ -198,7 +198,7 @@ impl<'a> Index<'a> {
 	/// when iterating all entries for a given index.
 	pub fn prefix_beg(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix(ns, db, tb, ix)?;
-		beg.extend_from_slice(&[0x00]);
+		beg.extend_from_slice(&[0x00]); // lower sentinel for entire index keyspace
 		Ok(beg)
 	}
 
@@ -206,7 +206,7 @@ impl<'a> Index<'a> {
 	/// when iterating all entries for a given index.
 	pub fn prefix_end(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix(ns, db, tb, ix)?;
-		beg.extend_from_slice(&[0xff]);
+		beg.extend_from_slice(&[0xff]); // upper sentinel for entire index keyspace (exclusive)
 		Ok(beg)
 	}
 
@@ -223,8 +223,11 @@ impl<'a> Index<'a> {
 		PrefixIds::new(ns, db, tb, ix, fd).encode_key()
 	}
 
-	/// Start of the subspace for a specific set of field values: prefix_ids + 0x00.
-	/// This is the lower bound when scanning all record ids matching those values.
+	/// Returns the smallest possible key for the given index field prefix (fd),
+	/// used as the inclusive lower bound of a scan over all record ids matching
+	/// that prefix. This is equivalent to prefix_ids(...) followed by a 0x00
+	/// byte, so that range scans using [beg, end) style boundaries include the
+	/// first key.
 	pub fn prefix_ids_beg(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -237,8 +240,11 @@ impl<'a> Index<'a> {
 		Ok(beg)
 	}
 
-	/// End of the subspace for a specific set of field values: prefix_ids + 0xFF
-	/// (exclusive upper bound).
+	/// Returns the greatest possible key for the given index field prefix (fd),
+	/// typically used as the exclusive upper bound of a scan over all record
+	/// ids matching that prefix. This is equivalent to prefix_ids(...)
+	/// followed by a 0xff byte so that range scans using [beg, end) do not
+	/// include keys beyond the intended prefix.
 	pub fn prefix_ids_end(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -251,9 +257,10 @@ impl<'a> Index<'a> {
 		Ok(beg)
 	}
 
-	/// For composite indexes, adjust the last terminator to 0x00 to form the
-	/// inclusive lower bound of the composite range. The last 0x00 ensures any
-	/// following id component compares greater.
+	/// Returns the smallest key within the composite index tuple identified by
+	/// `fd`. For composite indexes, the last byte acts as a sentinel; setting
+	/// it to 0x00 gives the inclusive lower bound when scanning for an exact
+	/// composite match.
 	pub fn prefix_ids_composite_beg(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -262,12 +269,14 @@ impl<'a> Index<'a> {
 		fd: &StoreKeyArray,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
-		*beg.last_mut().unwrap() = 0x00;
+		*beg.last_mut().unwrap() = 0x00; // set trailing sentinel to 0x00 -> inclusive lower bound within composite tuple
 		Ok(beg)
 	}
 
-	/// For composite indexes, adjust the last terminator to 0xFF to form the
-	/// exclusive upper bound of the composite range.
+	/// Returns the greatest key within the composite index tuple identified by
+	/// `fd`. For composite indexes, the last byte acts as a sentinel; setting
+	/// it to 0xff yields the exclusive upper bound for scans targeting the
+	/// exact composite value.
 	pub fn prefix_ids_composite_end(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -276,7 +285,7 @@ impl<'a> Index<'a> {
 		fd: &StoreKeyArray,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
-		*beg.last_mut().unwrap() = 0xff;
+		*beg.last_mut().unwrap() = 0xff; // set trailing sentinel to 0xFF -> exclusive upper bound within composite tuple
 		Ok(beg)
 	}
 }
