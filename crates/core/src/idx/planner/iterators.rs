@@ -527,15 +527,14 @@ impl IndexRangeThingIterator {
 		Ok(RangeScan::new(beg, from_inclusive, end, to_inclusive))
 	}
 
-	/// Compute the begin key for a range scan over an index by scalar value.
+	/// Compute the begin key for a range scan over an index by value.
 	///
-	/// - If `from.value` is `None`, we need the very beginning of the range for the given
-	///   `value_type` (e.g., smallest int/float/decimal), so we use the type-specific index prefix
-	///   begin.
-	/// - Otherwise, we serialize the `from` value into an index field array and construct the
-	///   boundary key. For an inclusive lower bound we use `prefix_ids_beg` (include all records
-	///   with that value), and for an exclusive lower bound we use `prefix_ids_end` so the scan
-	///   starts after all records with that exact value.
+	/// - If `from.value` is `None`, use the index-prefix begin to start at the first key in the
+	///   index keyspace.
+	/// - Otherwise, serialize the `from` value into an index field array and construct the
+	///   boundary key. For an inclusive lower bound use `prefix_ids_beg` (include all records
+	///   with that value); for an exclusive lower bound use `prefix_ids_end` so the scan starts
+	///   after all records with that exact value.
 	fn compute_beg(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -553,13 +552,13 @@ impl IndexRangeThingIterator {
 		}
 	}
 
-	/// Compute the end key for a range scan over an index by scalar value.
+	/// Compute the end key for a range scan over an index by value.
 	///
-	/// - If `to.value` is `None`, we need the very end of the range for the given `value_type`
-	///   (e.g., greatest int/float/decimal), so we use the type-specific index prefix end.
-	/// - Otherwise, we serialize the `to` value and construct the boundary key. For an inclusive
-	///   upper bound we use `prefix_ids_end` so the scan can include all records with that exact
-	///   value; for an exclusive upper bound we use `prefix_ids_beg` so the scan stops just before
+	/// - If `to.value` is `None`, use the index-prefix end to stop at the last key in the
+	///   index keyspace.
+	/// - Otherwise, serialize the `to` value and construct the boundary key. For an inclusive
+	///   upper bound use `prefix_ids_end` so the scan can include all records with that exact
+	///   value; for an exclusive upper bound use `prefix_ids_beg` so the scan stops just before
 	///   any key matching that exact value.
 	fn compute_end(
 		ns: NamespaceId,
@@ -579,7 +578,7 @@ impl IndexRangeThingIterator {
 	}
 
 	/// Build a range scan over a composite index using a fixed `prefix` and
-	/// optional scalar range on the next column.
+	/// an optional range on the next column value.
 	///
 	/// - When `from` or `to` values are `None`, we scan the full extent of the composite tuple
 	///   starting at `prefix` by using the composite begin/end sentinels.
@@ -617,7 +616,7 @@ impl IndexRangeThingIterator {
 	}
 
 	/// Compute the begin key for a composite index range when a fixed `prefix`
-	/// (values for leading columns) is provided and an optional scalar `from`
+	/// (values for leading columns) is provided and an optional `from`
 	/// value applies to the next column.
 	///
 	/// Inclusive `from` uses `prefix_ids_beg` to include all rows equal to the
@@ -641,7 +640,7 @@ impl IndexRangeThingIterator {
 	}
 
 	/// Compute the end key for a composite index range when a fixed `prefix`
-	/// is provided and an optional scalar `to` value applies to the next
+	/// is provided and an optional `to` value applies to the next
 	/// column.
 	///
 	/// Inclusive `to` uses `prefix_ids_end` so rows equal to the boundary are
