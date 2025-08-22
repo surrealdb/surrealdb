@@ -41,6 +41,7 @@ pub(crate) struct CursorDoc {
 	pub(crate) rid: Option<Arc<RecordId>>,
 	pub(crate) ir: Option<Arc<IteratorRecord>>,
 	pub(crate) doc: CursorValue,
+	pub(crate) fields_computed: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -102,6 +103,7 @@ impl CursorDoc {
 			rid,
 			ir,
 			doc: doc.into(),
+			fields_computed: false,
 		}
 	}
 }
@@ -133,6 +135,7 @@ impl From<Value> for CursorDoc {
 				mutable: val,
 				read_only: None,
 			},
+			fields_computed: false,
 		}
 	}
 }
@@ -146,6 +149,7 @@ impl From<Arc<Value>> for CursorDoc {
 				mutable: Value::None,
 				read_only: Some(doc),
 			},
+			fields_computed: false,
 		}
 	}
 }
