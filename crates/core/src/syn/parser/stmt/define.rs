@@ -864,7 +864,7 @@ impl Parser<'_> {
 				}
 				t!("COMPUTED") => {
 					self.pop_peek();
-					res.computed = Some(ctx.run(|ctx| self.parse_expr_field(ctx)).await?);
+					res.computed = Some(stk.run(|stk| self.parse_expr_field(stk)).await?);
 				}
 				_ => break,
 			}
