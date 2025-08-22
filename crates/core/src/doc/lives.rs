@@ -9,9 +9,9 @@ use crate::dbs::{Action, Notification, Options, Statement};
 use crate::doc::compute::DocKind;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
-use crate::expr::FlowResultExt as _;
 use crate::expr::paths::{AC, META, RD, TK};
 use crate::expr::permission::Permission;
+use crate::expr::{FlowResultExt as _, LiveStatement};
 use crate::val::Value;
 
 impl Document {
@@ -76,14 +76,9 @@ impl Document {
 				})
 				.map_err(anyhow::Error::new)?;
 			// Get the current and initial docs
+			// These are only used for EVENTS, so they should not be reduced
 			let current = self.current.doc.as_arc();
 			let initial = self.initial.doc.as_arc();
-			// Check if this is a delete statement
-			let doc = if stm.is_delete() {
-				&self.initial
-			} else {
-				&self.current
-			};
 			// Ensure that a session exists on the LIVE query
 			let sess = match lv.session.as_ref() {
 				Some(v) => v,
@@ -117,15 +112,29 @@ impl Document {
 			lqctx.add_value("value", current.clone());
 			lqctx.add_value("after", current);
 			lqctx.add_value("before", initial);
+			// Freeze the context
+			let lqctx = lqctx.freeze();
 			// We need to create a new options which we will
 			// use for processing this LIVE query statement.
 			// This ensures that we are using the auth data
 			// of the user who created the LIVE query.
 			let lqopt = opt.new_with_perms(true).with_auth(Arc::from(auth));
+
+			// Get the document to check against and to return based on lq context
+			let doc = match (self.check_reduction_required(&lqopt)?, stm.is_delete()) {
+				(true, true) => {
+					&self.compute_reduced_target(stk, &lqctx, &lqopt, &self.initial).await?
+				}
+				(true, false) => {
+					&self.compute_reduced_target(stk, &lqctx, &lqopt, &self.current).await?
+				}
+				(false, true) => &self.initial,
+				(false, false) => &self.current,
+			};
+
 			// First of all, let's check to see if the WHERE
 			// clause of the LIVE query is matched by this
 			// document. If it is then we can continue.
-			let lqctx = lqctx.freeze();
 			match self.lq_check(stk, &lqctx, &lqopt, &lq, doc).await {
 				Err(IgnoreError::Ignore) => continue,
 				Err(IgnoreError::Error(e)) => return Err(e),
@@ -135,7 +144,7 @@ impl Document {
 			// clause for this table allows this document to
 			// be viewed by the user who created this LIVE
 			// query. If it does, then we can continue.
-			match self.lq_allow(stk, &lqctx, &lqopt, &lq, doc).await {
+			match self.lq_allow(stk, &lqctx, &lqopt, &lq).await {
 				Err(IgnoreError::Ignore) => continue,
 				Err(IgnoreError::Error(e)) => return Err(e),
 				Ok(_) => (),
@@ -162,7 +171,7 @@ impl Document {
 					// An error ignore here is about livequery not the query which invoked the
 					// livequery trigger. So we should catch the ignore and skip this entry in this
 					// case.
-					let result = match self.pluck(stk, &lqctx, &lqopt, &lq).await {
+					let result = match self.lq_pluck(stk, &lqctx, &lqopt, lv, doc).await {
 						Err(IgnoreError::Ignore) => continue,
 						Err(IgnoreError::Error(e)) => return Err(e),
 						Ok(x) => x,
@@ -178,7 +187,7 @@ impl Document {
 					// An error ignore here is about livequery not the query which invoked the
 					// livequery trigger. So we should catch the ignore and skip this entry in this
 					// case.
-					let result = match self.pluck(stk, &lqctx, &lqopt, &lq).await {
+					let result = match self.lq_pluck(stk, &lqctx, &lqopt, lv, doc).await {
 						Err(IgnoreError::Ignore) => continue,
 						Err(IgnoreError::Error(e)) => return Err(e),
 						Ok(x) => x,
@@ -252,7 +261,6 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		// Should we run permissions checks?
 		if opt.check_perms(stm.into())? {
@@ -263,6 +271,13 @@ impl Document {
 				Permission::None => return Err(IgnoreError::Ignore),
 				Permission::Full => return Ok(()),
 				Permission::Specific(e) => {
+					// Retrieve the document to check permissions against
+					let doc = if stm.is_delete() {
+						&self.initial
+					} else {
+						&self.current
+					};
+
 					// Disable permissions
 					let opt = &opt.new_with_perms(false);
 					// Process the PERMISSION clause
@@ -279,5 +294,16 @@ impl Document {
 		}
 		// Carry on
 		Ok(())
+	}
+
+	async fn lq_pluck(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		stm: &LiveStatement,
+		doc: &CursorDoc,
+	) -> Result<Value, IgnoreError> {
+		stm.expr.compute(stk, ctx, opt, Some(doc), false).await.map_err(IgnoreError::from)
 	}
 }

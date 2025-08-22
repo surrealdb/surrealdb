@@ -8,19 +8,16 @@
 //!
 //! There are a bunch of common patterns for which this module has some
 //! confinence functions.
-//! - Whenever only one token can be next you should use the `expected!` macro.
-//!   This macro ensures that the given token type is next and if not returns a
-//!   parser error.
-//! - Whenever a limited set of tokens can be next it is common to match the
-//!   token kind and then have a catch all arm which calles the macro
-//!   `unexpected!`. This macro will raise an parse error with information about
-//!   the type of token it recieves and what it expected.
-//! - If a single token can be optionally next use [`Parser::eat`] this function
-//!   returns a bool depending on if the given tokenkind was eaten.
-//! - If a closing delimiting token is expected use
-//!   `Parser::expect_closing_delimiter`. This function will raise an error if
-//!   the expected delimiter isn't the next token. This error will also point to
-//!   which delimiter the parser expected to be closed.
+//! - Whenever only one token can be next you should use the `expected!` macro. This macro ensures
+//!   that the given token type is next and if not returns a parser error.
+//! - Whenever a limited set of tokens can be next it is common to match the token kind and then
+//!   have a catch all arm which calles the macro `unexpected!`. This macro will raise an parse
+//!   error with information about the type of token it recieves and what it expected.
+//! - If a single token can be optionally next use [`Parser::eat`] this function returns a bool
+//!   depending on if the given tokenkind was eaten.
+//! - If a closing delimiting token is expected use `Parser::expect_closing_delimiter`. This
+//!   function will raise an error if the expected delimiter isn't the next token. This error will
+//!   also point to which delimiter the parser expected to be closed.
 //!
 //! ## Far Token Peek
 //!
@@ -84,8 +81,8 @@ mod kind;
 pub(crate) mod mac;
 mod object;
 mod prime;
+mod record_id;
 mod stmt;
-mod thing;
 mod token;
 mod token_buffer;
 mod value;
@@ -404,16 +401,16 @@ impl<'a> Parser<'a> {
 	/// Parse a full query.
 	///
 	/// This is the primary entry point of the parser.
-	pub async fn parse_query(&mut self, ctx: &mut Stk) -> ParseResult<sql::Ast> {
-		let statements = self.parse_stmt_list(ctx).await?;
+	pub async fn parse_query(&mut self, stk: &mut Stk) -> ParseResult<sql::Ast> {
+		let statements = self.parse_stmt_list(stk).await?;
 		Ok(sql::Ast {
 			expressions: statements,
 		})
 	}
 
 	/// Parse a single statement.
-	pub async fn parse_statement(&mut self, ctx: &mut Stk) -> ParseResult<sql::TopLevelExpr> {
-		self.parse_top_level_expr(ctx).await
+	pub async fn parse_statement(&mut self, stk: &mut Stk) -> ParseResult<sql::TopLevelExpr> {
+		self.parse_top_level_expr(stk).await
 	}
 }
 

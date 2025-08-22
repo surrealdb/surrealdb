@@ -20,6 +20,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::idx::ft::fulltext::DocLengthAndCount;
 use crate::key::category::{Categorise, Category};
@@ -29,9 +30,9 @@ use crate::kvs::KVKey;
 pub(crate) struct Dc<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -72,10 +73,9 @@ impl<'a> Dc<'a> {
 	/// * `doc_id` - The document ID being tracked
 	/// * `nid` - Node ID for distributed transaction tracking
 	/// * `uid` - Transaction ID for concurrency control
-	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
 		doc_id: DocId,
@@ -116,7 +116,12 @@ impl<'a> Dc<'a> {
 	///
 	/// # Returns
 	/// The encoded root key as a byte vector
-	pub(crate) fn new_root(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Result<Vec<u8>> {
+	pub(crate) fn new_root(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a str,
+		ix: &'a str,
+	) -> Result<Vec<u8>> {
 		DcPrefix::new(ns, db, tb, ix).encode_key()
 	}
 
@@ -136,8 +141,8 @@ impl<'a> Dc<'a> {
 	/// # Returns
 	/// A tuple of (start, end) keys that define the range for database queries
 	pub(crate) fn range(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
@@ -154,9 +159,9 @@ impl<'a> Dc<'a> {
 struct DcPrefix<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -171,7 +176,7 @@ impl KVKey for DcPrefix<'_> {
 }
 
 impl<'a> DcPrefix<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -196,8 +201,8 @@ mod tests {
 	#[test]
 	fn key_with_ids() {
 		let val = Dc::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 			129,
@@ -205,23 +210,22 @@ mod tests {
 			Uuid::from_u128(2),
 		);
 		let enc = Dc::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dc\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!dc\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
 	}
 
 	#[test]
 	fn key_root() {
-		let enc = Dc::new_root("testns", "testdb", "testtb", "testix").unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dc");
+		let enc = Dc::new_root(NamespaceId(1), DatabaseId(2), "testtb", "testix").unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!dc");
 	}
 
 	#[test]
 	fn range() {
-		let (beg, end) = Dc::range("testns", "testdb", "testtb", "testix").unwrap();
-		println!("{} {}", beg.len(), end.len());
-		assert_eq!(beg, b"/*testns\0*testdb\0*testtb\0+testix\0!dc\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
+		let (beg, end) = Dc::range(NamespaceId(1), DatabaseId(2), "testtb", "testix").unwrap();
+		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!dc\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
 		assert_eq!(
 			end,
-			b"/*testns\0*testdb\0*testtb\0+testix\0!dc\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!dc\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
 		);
 	}
 }

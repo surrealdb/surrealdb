@@ -53,7 +53,7 @@ pub async fn process_fns(
 					let res = gtx.run_fn(&fnd1.name, args).await?;
 
 					let gql_res = match res {
-						Value::Thing(rid) => {
+						Value::RecordId(rid) => {
 							let mut tmp = field_val_erase_owned((gtx.clone(), rid.clone()));
 							match kind1 {
 								Kind::Record(ts) if ts.len() != 1 => {

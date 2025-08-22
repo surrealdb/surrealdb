@@ -53,7 +53,7 @@ impl Document {
 		// Get the table
 		let tb = self.tb(ctx, opt).await?;
 		// This table is schemafull
-		if tb.full {
+		if tb.schemafull {
 			// Prune unspecified fields from the document that are not defined via
 			// `DefineFieldStatement`s.
 
@@ -107,7 +107,7 @@ impl Document {
 							!opt.strict,
 							// If strict, then throw an error on an undefined field
 							Error::FieldUndefined {
-								table: tb.name.into_raw_string(),
+								table: tb.name.clone(),
 								field: current_doc_field_idiom.to_owned(),
 							}
 						);
@@ -123,7 +123,7 @@ impl Document {
 							!opt.strict,
 							// If strict, then throw an error on an undefined field
 							Error::FieldUndefined {
-								table: tb.name.into_raw_string(),
+								table: tb.name.clone(),
 								field: current_doc_field_idiom.to_owned(),
 							}
 						);
@@ -743,7 +743,7 @@ impl FieldEditContext<'_> {
 				RefAction::Ignore => Ok(()),
 				// Create the reference, if it does not exist yet.
 				RefAction::Set(thing) => {
-					let (ns, db) = self.opt.ns_db()?;
+					let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
 					let name = self.def.name.to_string();
 					let key = crate::key::r#ref::new(
 						ns,
@@ -761,7 +761,7 @@ impl FieldEditContext<'_> {
 				}
 				// Delete the reference, if it exists
 				RefAction::Delete(things, ff) => {
-					let (ns, db) = self.opt.ns_db()?;
+					let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
 					for thing in things {
 						let key = crate::key::r#ref::new(
 							ns,
@@ -783,46 +783,4 @@ impl FieldEditContext<'_> {
 			Ok(())
 		}
 	}
-
-	// Process any `TYPE reference` clause for the field definition
-	/*
-	async fn process_refs_type(&mut self) -> Result<Option<Refs>> {
-		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-			return Ok(None);
-		}
-
-		let refs = match &self.def.field_kind {
-			// We found a reference type for this field
-			// In this case, we force the value to be a reference
-			Some(Kind::References(ft, ff)) => Refs(vec![(ft.clone(), ff.clone())]),
-			Some(Kind::Either(kinds)) => {
-				if !kinds.iter().all(|k| matches!(k, Kind::References(_, _))) {
-					return Ok(None);
-				}
-
-				// Extract all reference types
-				let pairs: Vec<_> = kinds
-					.iter()
-					.filter_map(|k| {
-						if let Kind::References(ft, ff) = k {
-							Some((ft.clone(), ff.clone()))
-						} else {
-							None
-						}
-					})
-					.collect();
-
-				// If the length does not match, there were non-reference types
-				ensure!(pairs.len() == kinds.len(), Error::RefsMismatchingVariants);
-
-				// All ok
-				Refs(pairs)
-			}
-			// This is not a reference type, continue as normal
-			_ => return Ok(None),
-		};
-
-		Ok(Some(refs))
-	}
-	*/
 }

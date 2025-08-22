@@ -34,16 +34,23 @@ pub async fn generate_schema(
 	let ns = session.ns.as_ref().ok_or(GqlError::UnspecifiedNamespace)?;
 	let db = session.db.as_ref().ok_or(GqlError::UnspecifiedDatabase)?;
 
-	let cg = tx.get_db_config(ns, db, "graphql").await.map_err(|e| {
-		if matches!(e.downcast_ref(), Some(crate::err::Error::CgNotFound { .. })) {
-			GqlError::NotConfigured
-		} else {
-			GqlError::DbError(e)
-		}
-	})?;
+	let db_def = match tx.get_db_by_name(ns, db).await? {
+		Some(db) => db,
+		None => return Err(GqlError::DbError(anyhow::anyhow!("Database not found: {ns} {db}"))),
+	};
+
+	let cg = tx.get_db_config(db_def.namespace_id, db_def.database_id, "graphql").await.map_err(
+		|e| {
+			if matches!(e.downcast_ref(), Some(crate::err::Error::CgNotFound { .. })) {
+				GqlError::NotConfigured
+			} else {
+				GqlError::DbError(e)
+			}
+		},
+	)?;
 	let config = cg.inner.clone().try_into_graphql()?;
 
-	let tbs = tx.all_tb(ns, db, None).await?;
+	let tbs = tx.all_tb(db_def.namespace_id, db_def.database_id, None).await?;
 
 	let tbs = match config.tables {
 		TablesConfig::None => None,
@@ -56,7 +63,7 @@ pub async fn generate_schema(
 		}
 	};
 
-	let fns = tx.all_db_functions(ns, db).await?;
+	let fns = tx.all_db_functions(db_def.namespace_id, db_def.database_id).await?;
 
 	let fns = match config.functions {
 		FunctionsConfig::None => None,
@@ -90,7 +97,17 @@ pub async fn generate_schema(
 
 	match tbs {
 		Some(tbs) if !tbs.is_empty() => {
-			query = process_tbs(tbs, query, &mut types, &tx, ns, db, session, datastore).await?;
+			query = process_tbs(
+				tbs,
+				query,
+				&mut types,
+				&tx,
+				db_def.namespace_id,
+				db_def.database_id,
+				session,
+				datastore,
+			)
+			.await?;
 		}
 		_ => {}
 	}
@@ -207,7 +224,7 @@ pub fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> {
 		),
 		SurValue::Geometry(_) => return Err(resolver_error("unimplemented: Geometry types")),
 		SurValue::Bytes(b) => GqlValue::Binary(b.into_inner().into()),
-		SurValue::Thing(t) => GqlValue::String(t.to_string()),
+		SurValue::RecordId(t) => GqlValue::String(t.to_string()),
 		v => return Err(internal_error(format!("found unsupported value variant: {v:?}"))),
 	};
 	Ok(out)
@@ -231,7 +248,6 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 		Kind::Int => TypeRef::named(TypeRef::INT),
 		Kind::Number => TypeRef::named("number"),
 		Kind::Object => TypeRef::named("object"),
-		Kind::Point => return Err(schema_error("Kind::Point is not yet supported")),
 		Kind::Regex => return Err(schema_error("Kind::Regex is not yet supported")),
 		Kind::String => TypeRef::named(TypeRef::STRING),
 		Kind::Uuid => TypeRef::named("uuid"),
@@ -315,14 +331,6 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 		// TODO(raphaeldarley): check if union is of literals and generate enum
 		// generate custom scalar from other literals?
 		Kind::Literal(_) => return Err(schema_error("Kind::Literal is not yet supported")),
-		Kind::References(ft, _) => {
-			let inner = match ft.clone() {
-				Some(ft) => Kind::Record(vec![ft]),
-				None => Kind::Record(vec![]),
-			};
-
-			TypeRef::List(Box::new(kind_to_type(inner, types)?))
-		}
 		Kind::File(_) => return Err(schema_error("Kind::File is not yet supported")),
 	};
 
@@ -546,16 +554,6 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 			},
 			_ => Err(type_error(kind, val)),
 		},
-		Kind::Point => match val {
-			GqlValue::List(l) => match l.as_slice() {
-				[GqlValue::Number(x), GqlValue::Number(y)] => match (x.as_f64(), y.as_f64()) {
-					(Some(x), Some(y)) => Ok(SurValue::Geometry(Geometry::Point((x, y).into()))),
-					_ => Err(type_error(kind, val)),
-				},
-				_ => Err(type_error(kind, val)),
-			},
-			_ => Err(type_error(kind, val)),
-		},
 		Kind::String => match val {
 			GqlValue::String(s) => Ok(SurValue::Strand(s.to_owned().into())),
 			GqlValue::Enum(s) => Ok(SurValue::Strand(s.as_str().into())),
@@ -571,7 +569,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 		Kind::Record(ref ts) => match val {
 			GqlValue::String(s) => match syn::thing(s) {
 				Ok(t) => match ts.contains(&t.tb.as_str().into()) {
-					true => Ok(SurValue::Thing(t.into())),
+					true => Ok(SurValue::RecordId(t.into())),
 					false => Err(type_error(kind, val)),
 				},
 				Err(_) => Err(type_error(kind, val)),
@@ -655,7 +653,6 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 		Kind::Range => Err(resolver_error("Ranges are not yet supported")),
 		Kind::Literal(_) => Err(resolver_error("Literals are not yet supported")),
 		Kind::Regex => Err(resolver_error("Regexes are not yet supported")),
-		Kind::References(_, _) => Err(resolver_error("Cannot convert value into references")),
 		Kind::File(_) => Err(resolver_error("Files are not yet supported")),
 	}
 }

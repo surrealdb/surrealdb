@@ -25,40 +25,49 @@ impl RemoveNamespaceStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;
 		// Get the transaction
 		let txn = ctx.tx();
-		// Remove the index stores
-		#[cfg(not(target_family = "wasm"))]
-		ctx.get_index_stores().namespace_removed(ctx.get_index_builder(), &txn, &self.name).await?;
-		#[cfg(target_family = "wasm")]
-		ctx.get_index_stores().namespace_removed(&txn, &self.name).await?;
-		// Remove the sequences
-		if let Some(seq) = ctx.get_sequences() {
-			seq.namespace_removed(&txn, &self.name).await?;
-		}
-		// Get the definition
-		let ns = match txn.get_ns(&self.name).await {
-			Ok(x) => x,
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::NsNotFound { .. })) {
+
+		let ns = match txn.get_ns_by_name(&self.name).await? {
+			Some(x) => x,
+			None => {
+				if self.if_exists {
 					return Ok(Value::None);
-				} else {
-					return Err(e);
 				}
+
+				return Err(Error::NsNotFound {
+					name: self.name.to_string(),
+				}
+				.into());
 			}
 		};
+
+		// Remove the index stores
+		#[cfg(not(target_family = "wasm"))]
+		ctx.get_index_stores()
+			.namespace_removed(ctx.get_index_builder(), &txn, ns.namespace_id)
+			.await?;
+		#[cfg(target_family = "wasm")]
+		ctx.get_index_stores().namespace_removed(&txn, ns.namespace_id).await?;
+		// Remove the sequences
+		if let Some(seq) = ctx.get_sequences() {
+			seq.namespace_removed(&txn, ns.namespace_id).await?;
+		}
+
 		// Delete the definition
-		let key = crate::key::root::ns::new(&ns.name);
+		let key = crate::key::root::ns::new(ns.namespace_id);
+		let catalog_key = crate::key::catalog::ns::new(&ns.name);
+		let namespace_root = crate::key::namespace::all::new(ns.namespace_id);
 		if self.expunge {
-			txn.clr(&key).await?
+			txn.clr(&key).await?;
+			txn.clr(&catalog_key).await?;
+			txn.clrp(&catalog_key).await?;
+			txn.clrp(&namespace_root).await?;
 		} else {
-			txn.del(&key).await?
+			txn.del(&key).await?;
+			txn.del(&catalog_key).await?;
+			txn.delp(&catalog_key).await?;
+			txn.delp(&namespace_root).await?;
 		};
-		// Delete the resource data
-		let key = crate::key::namespace::all::new(&ns.name);
-		if self.expunge {
-			txn.clrp(&key).await?
-		} else {
-			txn.delp(&key).await?
-		};
+
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
 			cache.clear();
