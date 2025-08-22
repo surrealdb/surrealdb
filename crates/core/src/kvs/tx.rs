@@ -1899,7 +1899,7 @@ impl Transaction {
 			let qey = cache::tx::Lookup::Record(ns, db, tb, id);
 			match self.cache.get(&qey) {
 				// The entry is in the cache
-				Some(val) => val.try_into_val(),
+				Some(val) => val.try_into_record(),
 				// The entry is not in the cache
 				None => {
 					// Fetch the record from the datastore

@@ -298,9 +298,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Lvs"),
 		}
 	}
-	/// Converts this cache entry into a single [`Value`].
+	/// Converts this cache entry into a single [`Record`].
 	/// This panics if called on a cache entry that is not an [`Entry::Val`].
-	pub(crate) fn try_into_val(self) -> Result<Arc<Record>> {
+	pub(crate) fn try_into_record(self) -> Result<Arc<Record>> {
 		match self {
 			Entry::Val(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Val"),
