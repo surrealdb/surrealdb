@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::Arc;
@@ -14,7 +13,7 @@ use crate::expr::{BinaryOperator, Ident};
 use crate::idx::docids::DocId;
 use crate::idx::ft::fulltext::FullTextHitsIterator;
 use crate::idx::ft::search::SearchHitsIterator;
-use crate::idx::planner::plan::RangeValue;
+use crate::idx::planner::plan::StoreRangeValue;
 use crate::idx::planner::tree::IndexReference;
 use crate::key::index::Index;
 use crate::key::value::{StoreKeyArray, StoreKeyValue};
@@ -427,20 +426,6 @@ impl ReverseRangeScan {
 	}
 }
 
-pub(super) struct IteratorRange<'a> {
-	from: Cow<'a, RangeValue>,
-	to: Cow<'a, RangeValue>,
-}
-
-impl<'a> IteratorRange<'a> {
-	pub(super) fn new(from: &'a RangeValue, to: &'a RangeValue) -> Self {
-		IteratorRange {
-			from: Cow::Borrowed(from),
-			to: Cow::Borrowed(to),
-		}
-	}
-}
-
 pub(crate) struct IndexRangeThingIterator {
 	irf: IteratorRef,
 	r: RangeScan,
@@ -452,11 +437,12 @@ impl IndexRangeThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &DefineIndexStatement,
-		range: &IteratorRange<'_>,
+		from: StoreRangeValue,
+		to: StoreRangeValue,
 	) -> Result<Self> {
 		Ok(Self {
 			irf,
-			r: Self::range_scan(ns, db, ix, range)?,
+			r: Self::range_scan(ns, db, ix, from, to)?,
 		})
 	}
 
@@ -466,7 +452,7 @@ impl IndexRangeThingIterator {
 		db: DatabaseId,
 		ix: &DefineIndexStatement,
 	) -> Result<Self> {
-		Self::new(irf, ns, db, ix, &full_iterator_range())
+		Self::new(irf, ns, db, ix, StoreRangeValue::default(), StoreRangeValue::default())
 	}
 
 	pub(super) fn compound_range(
@@ -485,13 +471,16 @@ impl IndexRangeThingIterator {
 	}
 
 	/// Determines the lowest and highest values in the range
-	fn reduce_range(ranges: &[(BinaryOperator, Arc<Value>)]) -> Result<(RangeValue, RangeValue)> {
+	fn reduce_range(
+		ranges: &[(BinaryOperator, Arc<Value>)],
+	) -> Result<(StoreRangeValue, StoreRangeValue)> {
 		let mut from = vec![];
 		let mut to = vec![];
 		for (op, v) in ranges {
-			let key = storekey::serialize(v.as_ref())?;
+			let v: StoreKeyValue = v.as_ref().clone().into();
+			let key = v.encode_key()?;
 			match op {
-				BinaryOperator::LessThan => to.push((key, false, v.clone())),
+				BinaryOperator::LessThan => to.push((key, false, v)),
 				BinaryOperator::LessThanEqual => to.push((key, true, v.clone())),
 				BinaryOperator::MoreThan => from.push((key, true, v.clone())),
 				BinaryOperator::MoreThanEqual => from.push((key, false, v.clone())),
@@ -500,23 +489,27 @@ impl IndexRangeThingIterator {
 				}
 			}
 		}
-		from.sort_unstable();
-		to.sort_unstable();
-		let from = if let Some((_, inclusivity, val)) = from.first() {
-			RangeValue {
-				value: val.as_ref().clone(),
-				inclusive: !*inclusivity,
-			}
-		} else {
-			RangeValue::default()
+		let cmp = |(a1, a2, _): &(Vec<u8>, bool, StoreKeyValue),
+		           (b1, b2, _): &(Vec<u8>, bool, StoreKeyValue)| {
+			b1.cmp(a1).then_with(|| b2.cmp(a2))
 		};
-		let to = if let Some((_, inclusivity, val)) = to.last() {
-			RangeValue {
-				value: val.as_ref().clone(),
-				inclusive: *inclusivity,
+		from.sort_unstable_by(cmp);
+		to.sort_unstable_by(cmp);
+		let from = if let Some((_, inclusivity, val)) = from.into_iter().next() {
+			StoreRangeValue {
+				value: val,
+				inclusive: !inclusivity,
 			}
 		} else {
-			RangeValue::default()
+			StoreRangeValue::default()
+		};
+		let to = if let Some((_, inclusivity, val)) = to.into_iter().next_back() {
+			StoreRangeValue {
+				value: val,
+				inclusive: inclusivity,
+			}
+		} else {
+			StoreRangeValue::default()
 		};
 		Ok((from, to))
 	}
@@ -525,11 +518,13 @@ impl IndexRangeThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &DefineIndexStatement,
-		range: &IteratorRange<'_>,
+		from: StoreRangeValue,
+		to: StoreRangeValue,
 	) -> Result<RangeScan> {
-		let beg = Self::compute_beg(ns, db, &ix.what, &ix.name, &range.from)?;
-		let end = Self::compute_end(ns, db, &ix.what, &ix.name, &range.to)?;
-		Ok(RangeScan::new(beg, range.from.inclusive, end, range.to.inclusive))
+		let (from_inclusive, to_inclusive) = (from.inclusive, to.inclusive);
+		let beg = Self::compute_beg(ns, db, &ix.what, &ix.name, from)?;
+		let end = Self::compute_end(ns, db, &ix.what, &ix.name, to)?;
+		Ok(RangeScan::new(beg, from_inclusive, end, to_inclusive))
 	}
 
 	/// Compute the begin key for a range scan over an index by scalar value.
@@ -546,16 +541,15 @@ impl IndexRangeThingIterator {
 		db: DatabaseId,
 		ix_what: &Ident,
 		ix_name: &Ident,
-		from: &RangeValue,
+		from: StoreRangeValue,
 	) -> Result<Vec<u8>> {
 		if from.value.is_none() {
 			return Index::prefix_beg(ns, db, ix_what, ix_name);
 		}
-		let fd = StoreKeyArray::from(StoreKeyValue::from(from.value.clone()));
 		if from.inclusive {
-			Index::prefix_ids_beg(ns, db, ix_what, ix_name, &fd)
+			Index::prefix_ids_beg(ns, db, ix_what, ix_name, &StoreKeyArray::from(from.value))
 		} else {
-			Index::prefix_ids_end(ns, db, ix_what, ix_name, &fd)
+			Index::prefix_ids_end(ns, db, ix_what, ix_name, &StoreKeyArray::from(from.value))
 		}
 	}
 
@@ -572,16 +566,15 @@ impl IndexRangeThingIterator {
 		db: DatabaseId,
 		ix_what: &Ident,
 		ix_name: &Ident,
-		to: &RangeValue,
+		to: StoreRangeValue,
 	) -> Result<Vec<u8>> {
 		if to.value.is_none() {
 			return Index::prefix_end(ns, db, ix_what, ix_name);
 		}
-		let fd = StoreKeyArray::from(StoreKeyValue::from(to.value.clone()));
 		if to.inclusive {
-			Index::prefix_ids_end(ns, db, ix_what, ix_name, &fd)
+			Index::prefix_ids_end(ns, db, ix_what, ix_name, &StoreKeyArray::from(to.value))
 		} else {
-			Index::prefix_ids_beg(ns, db, ix_what, ix_name, &fd)
+			Index::prefix_ids_beg(ns, db, ix_what, ix_name, &StoreKeyArray::from(to.value))
 		}
 	}
 
@@ -597,8 +590,8 @@ impl IndexRangeThingIterator {
 		db: DatabaseId,
 		ix: &DefineIndexStatement,
 		prefix: &[Value],
-		from: RangeValue,
-		to: RangeValue,
+		from: StoreRangeValue,
+		to: StoreRangeValue,
 	) -> Result<RangeScan> {
 		// Prepare the fixed composite prefix (may be empty for the leading column)
 		let prefix_array: StoreKeyArray = if prefix.is_empty() {
@@ -607,19 +600,20 @@ impl IndexRangeThingIterator {
 			Array::from(prefix.to_vec())
 		}
 		.into();
+		let (from_inclusive, to_inclusive) = (from.inclusive, to.inclusive);
 		// Compute the lower bound for the scan
 		let beg = if from.value.is_none() {
 			Index::prefix_ids_composite_beg(ns, db, &ix.what, &ix.name, &prefix_array)?
 		} else {
-			Self::compute_beg_with_prefix(ns, db, &ix.what, &ix.name, &prefix_array, &from)?
+			Self::compute_beg_with_prefix(ns, db, &ix.what, &ix.name, &prefix_array, from)?
 		};
 		// Compute the upper bound for the scan
 		let end = if to.value.is_none() {
 			Index::prefix_ids_composite_end(ns, db, &ix.what, &ix.name, &prefix_array)?
 		} else {
-			Self::compute_end_with_prefix(ns, db, &ix.what, &ix.name, &prefix_array, &to)?
+			Self::compute_end_with_prefix(ns, db, &ix.what, &ix.name, &prefix_array, to)?
 		};
-		Ok(RangeScan::new(beg, from.inclusive, end, to.inclusive))
+		Ok(RangeScan::new(beg, from_inclusive, end, to_inclusive))
 	}
 
 	/// Compute the begin key for a composite index range when a fixed `prefix`
@@ -635,10 +629,10 @@ impl IndexRangeThingIterator {
 		ix_what: &Ident,
 		ix_name: &Ident,
 		prefix: &StoreKeyArray,
-		from: &RangeValue,
+		from: StoreRangeValue,
 	) -> Result<Vec<u8>> {
 		let mut fd = prefix.clone();
-		fd.0.push(from.value.clone().into());
+		fd.0.push(from.value);
 		if from.inclusive {
 			Index::prefix_ids_beg(ns, db, ix_what, ix_name, &fd)
 		} else {
@@ -659,10 +653,10 @@ impl IndexRangeThingIterator {
 		ix_what: &Ident,
 		ix_name: &Ident,
 		prefix: &StoreKeyArray,
-		to: &RangeValue,
+		to: StoreRangeValue,
 	) -> Result<Vec<u8>> {
 		let mut fd = prefix.clone();
-		fd.0.push(to.value.clone().into());
+		fd.0.push(to.value);
 		if to.inclusive {
 			Index::prefix_ids_end(ns, db, ix_what, ix_name, &fd)
 		} else {
@@ -730,11 +724,12 @@ impl IndexRangeReverseThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &DefineIndexStatement,
-		range: &IteratorRange<'_>,
+		from: StoreRangeValue,
+		to: StoreRangeValue,
 	) -> Result<Self> {
 		Ok(Self {
 			irf,
-			r: ReverseRangeScan::new(IndexRangeThingIterator::range_scan(ns, db, ix, range)?),
+			r: ReverseRangeScan::new(IndexRangeThingIterator::range_scan(ns, db, ix, from, to)?),
 		})
 	}
 
@@ -744,8 +739,7 @@ impl IndexRangeReverseThingIterator {
 		db: DatabaseId,
 		ix: &DefineIndexStatement,
 	) -> Result<Self> {
-		let range = full_iterator_range();
-		Self::new(irf, ns, db, ix, &range)
+		Self::new(irf, ns, db, ix, StoreRangeValue::default(), StoreRangeValue::default())
 	}
 	/// When scanning in reverse, the KV range APIs do not return the inclusive
 	/// end key. We compensate by explicitly checking and returning the end key
@@ -1152,17 +1146,6 @@ impl UniqueEqualThingIterator {
 	}
 }
 
-fn full_iterator_range<'a>() -> IteratorRange<'a> {
-	let value = RangeValue {
-		value: Value::None,
-		inclusive: true,
-	};
-	IteratorRange {
-		from: Cow::Owned(value.clone()),
-		to: Cow::Owned(value),
-	}
-}
-
 pub(crate) struct UniqueRangeThingIterator {
 	irf: IteratorRef,
 	r: RangeScan,
@@ -1174,11 +1157,12 @@ impl UniqueRangeThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &DefineIndexStatement,
-		range: &IteratorRange<'_>,
+		from: StoreRangeValue,
+		to: StoreRangeValue,
 	) -> Result<RangeScan> {
-		let beg = Self::compute_beg(ns, db, &ix.what, &ix.name, &range.from)?;
-		let end = Self::compute_end(ns, db, &ix.what, &ix.name, &range.to)?;
-		Ok(RangeScan::new(beg, range.from.inclusive, end, range.to.inclusive))
+		let beg = Self::compute_beg(ns, db, &ix.what, &ix.name, from.value)?;
+		let end = Self::compute_end(ns, db, &ix.what, &ix.name, to.value)?;
+		Ok(RangeScan::new(beg, from.inclusive, end, to.inclusive))
 	}
 
 	pub(super) fn new(
@@ -1186,9 +1170,10 @@ impl UniqueRangeThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &DefineIndexStatement,
-		r: &IteratorRange<'_>,
+		from: StoreRangeValue,
+		to: StoreRangeValue,
 	) -> Result<Self> {
-		let r = Self::range_scan(ns, db, ix, r)?;
+		let r = Self::range_scan(ns, db, ix, from, to)?;
 		Ok(Self {
 			irf,
 			r,
@@ -1202,7 +1187,7 @@ impl UniqueRangeThingIterator {
 		db: DatabaseId,
 		ix: &DefineIndexStatement,
 	) -> Result<Self> {
-		Self::new(irf, ns, db, ix, &full_iterator_range())
+		Self::new(irf, ns, db, ix, StoreRangeValue::default(), StoreRangeValue::default())
 	}
 
 	pub(super) fn compound_range(
@@ -1227,13 +1212,12 @@ impl UniqueRangeThingIterator {
 		db: DatabaseId,
 		ix_what: &Ident,
 		ix_name: &Ident,
-		from: &RangeValue,
+		from: StoreKeyValue,
 	) -> Result<Vec<u8>> {
-		if from.value.is_none() {
+		if from.is_none() {
 			return Index::prefix_beg(ns, db, ix_what, ix_name);
 		}
-		let fd = StoreKeyArray::from(StoreKeyValue::from(from.value.clone()));
-		Index::new(ns, db, ix_what, ix_name, &fd, None).encode_key()
+		Index::new(ns, db, ix_what, ix_name, &StoreKeyArray::from(from), None).encode_key()
 	}
 
 	fn compute_end(
@@ -1241,13 +1225,12 @@ impl UniqueRangeThingIterator {
 		db: DatabaseId,
 		ix_what: &Ident,
 		ix_name: &Ident,
-		to: &RangeValue,
+		to: StoreKeyValue,
 	) -> Result<Vec<u8>> {
-		if to.value.is_none() {
+		if to.is_none() {
 			return Index::prefix_end(ns, db, ix_what, ix_name);
 		}
-		let fd = StoreKeyArray::from(StoreKeyValue::from(to.value.clone()));
-		Index::new(ns, db, ix_what, ix_name, &fd, None).encode_key()
+		Index::new(ns, db, ix_what, ix_name, &StoreKeyArray::from(to), None).encode_key()
 	}
 
 	async fn next_batch<B: IteratorBatch>(
@@ -1322,9 +1305,10 @@ impl UniqueRangeReverseThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &DefineIndexStatement,
-		range: &IteratorRange<'_>,
+		from: StoreRangeValue,
+		to: StoreRangeValue,
 	) -> Result<Self> {
-		let r = ReverseRangeScan::new(UniqueRangeThingIterator::range_scan(ns, db, ix, range)?);
+		let r = ReverseRangeScan::new(UniqueRangeThingIterator::range_scan(ns, db, ix, from, to)?);
 		Ok(Self {
 			irf,
 			r,
@@ -1338,8 +1322,7 @@ impl UniqueRangeReverseThingIterator {
 		db: DatabaseId,
 		ix: &DefineIndexStatement,
 	) -> Result<Self> {
-		let r = full_iterator_range();
-		Self::new(irf, ns, db, ix, &r)
+		Self::new(irf, ns, db, ix, StoreRangeValue::default(), StoreRangeValue::default())
 	}
 
 	async fn next_batch<B: IteratorBatch>(
