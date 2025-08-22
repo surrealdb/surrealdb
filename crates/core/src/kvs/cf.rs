@@ -22,18 +22,19 @@ impl Datastore {
 		let nss = catch!(txn, txn.all_ns().await);
 		// Loop over all namespaces
 		for ns in nss.iter() {
-			// Get the namespace name
-			let ns = &ns.name;
 			// Fetch all namespaces
-			let dbs = catch!(txn, txn.all_db(ns).await);
+			let dbs = catch!(txn, txn.all_db(ns.namespace_id).await);
 			// Loop over all databases
 			for db in dbs.iter() {
-				// Get the database name
-				let db = &db.name;
 				// TODO(SUR-341): This is incorrect, it's a [ns,db] to vs pair
 				// It's safe for now, as it is unused but either the signature must change
 				// to include {(ns, db): (ts, vs)} mapping, or we don't return it
-				vs = Some(txn.lock().await.set_timestamp_for_versionstamp(ts, ns, db).await?);
+				vs = Some(
+					txn.lock()
+						.await
+						.set_timestamp_for_versionstamp(ts, db.namespace_id, db.database_id)
+						.await?,
+				);
 			}
 			// Possibly renew the lease
 			if let Some(lh) = lh {

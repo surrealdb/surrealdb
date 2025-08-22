@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter, Write};
 use std::hash::{Hash, Hasher};
+use std::str::FromStr;
 
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use revision::revisioned;
@@ -10,11 +11,54 @@ use serde::{Deserialize, Serialize};
 use super::escape::EscapeKey;
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Expr, Ident, Idiom, Literal, Part, Value};
+use crate::expr::{Expr, Literal, Part, Value};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
 	Regex, Strand, Uuid,
 };
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+pub enum GeometryKind {
+	Point,
+	Line,
+	Polygon,
+	MultiPoint,
+	MultiLine,
+	MultiPolygon,
+	Collection,
+}
+
+impl Display for GeometryKind {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		match self {
+			GeometryKind::Point => write!(f, "point"),
+			GeometryKind::Line => write!(f, "line"),
+			GeometryKind::Polygon => write!(f, "polygon"),
+			GeometryKind::MultiPoint => write!(f, "multipoint"),
+			GeometryKind::MultiLine => write!(f, "multiline"),
+			GeometryKind::MultiPolygon => write!(f, "multipolygon"),
+			GeometryKind::Collection => write!(f, "collection"),
+		}
+	}
+}
+
+impl FromStr for GeometryKind {
+	type Err = anyhow::Error;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s {
+			"point" => Ok(GeometryKind::Point),
+			"line" => Ok(GeometryKind::Line),
+			"polygon" => Ok(GeometryKind::Polygon),
+			"multipoint" => Ok(GeometryKind::MultiPoint),
+			"multiline" => Ok(GeometryKind::MultiLine),
+			"multipolygon" => Ok(GeometryKind::MultiPolygon),
+			"collection" => Ok(GeometryKind::Collection),
+			_ => Err(anyhow::anyhow!("invalid geometry kind: {s}")),
+		}
+	}
+}
 
 /// The kind, or data type, of a value or field.
 #[revisioned(revision = 1)]
@@ -43,9 +87,6 @@ pub enum Kind {
 	Number,
 	/// Object type.
 	Object,
-	/// Geometric 2D point type with longitude *then* latitude coordinates.
-	/// This follows the GeoJSON spec.
-	Point,
 	/// String type.
 	String,
 	/// UUID type.
@@ -53,11 +94,11 @@ pub enum Kind {
 	/// Regular expression type.
 	Regex,
 	/// A record type.
-	Record(Vec<Ident>),
+	Record(Vec<String>),
 	/// A geometry type.
 	/// The vec contains the geometry types as strings, for example `"point"` or
-	/// `"polygon"`. TODO(3.0): Change to use an enum
-	Geometry(Vec<String>),
+	/// `"polygon"`.
+	Geometry(Vec<GeometryKind>),
 	/// An optional type.
 	Option(Box<Kind>),
 	/// An either type.
@@ -79,12 +120,10 @@ pub enum Kind {
 	/// `"a"`. This can be used in the `Kind::Either` type to represent an
 	/// enum.
 	Literal(KindLiteral),
-	/// A references type representing a link to another table or field.
-	References(Option<Ident>, Option<Idiom>),
 	/// A file type.
 	/// If the kind was specified without a bucket the vec will be empty.
 	/// So `<file>` is just `Kind::File(Vec::new())`
-	File(Vec<Ident>),
+	File(Vec<String>),
 }
 
 impl Default for Kind {
@@ -150,7 +189,6 @@ impl Kind {
 				| Kind::Int
 				| Kind::Number
 				| Kind::Object
-				| Kind::Point
 				| Kind::String
 				| Kind::Uuid
 				| Kind::Regex
@@ -159,7 +197,6 @@ impl Kind {
 				| Kind::Function(_, _)
 				| Kind::Range
 				| Kind::Literal(_)
-				| Kind::References(_, _)
 				| Kind::File(_) => return None,
 				Kind::Option(x) => {
 					this = x;
@@ -175,15 +212,6 @@ impl Kind {
 					return Some(Kind::Either(kinds));
 				}
 			}
-		}
-	}
-
-	/// Get the inner kind of a [`Kind::Option`] or return the original [`Kind`]
-	/// if it is not the Option variant.
-	pub(crate) fn get_optional_inner_kind(&self) -> &Kind {
-		match self {
-			Kind::Option(k) => k.as_ref().get_optional_inner_kind(),
-			_ => self,
 		}
 	}
 
@@ -331,23 +359,23 @@ impl_basic_has_kind! {
 }
 
 macro_rules! impl_geometry_has_kind{
-	($($name:ty => $kind:literal),*$(,)?) => {
+	($($name:ty => $kind:expr),*$(,)?) => {
 		$(
 			impl HasKind for $name{
 				fn kind() -> Kind{
-					Kind::Geometry(vec![$kind.to_string()])
+					Kind::Geometry(vec![$kind])
 				}
 			}
 		)*
 	}
 }
 impl_geometry_has_kind! {
-	Point<f64> => "point",
-	LineString<f64> => "line",
-	MultiPoint<f64> => "multipoint",
-	Polygon<f64> => "polygon",
-	MultiLineString<f64> => "multiline",
-	MultiPolygon<f64> => "multipolygon",
+	Point<f64> => GeometryKind::Point,
+	LineString<f64> => GeometryKind::Line,
+	MultiPoint<f64> => GeometryKind::MultiPoint,
+	Polygon<f64> => GeometryKind::Polygon,
+	MultiLineString<f64> => GeometryKind::MultiLine,
+	MultiPolygon<f64> => GeometryKind::MultiPolygon,
 }
 
 impl From<&Kind> for Box<Kind> {
@@ -371,7 +399,6 @@ impl Display for Kind {
 			Kind::Int => f.write_str("int"),
 			Kind::Number => f.write_str("number"),
 			Kind::Object => f.write_str("object"),
-			Kind::Point => f.write_str("point"),
 			Kind::String => f.write_str("string"),
 			Kind::Uuid => f.write_str("uuid"),
 			Kind::Regex => f.write_str("regex"),
@@ -379,39 +406,34 @@ impl Display for Kind {
 			Kind::Option(k) => write!(f, "option<{}>", k),
 			Kind::Record(k) => {
 				if k.is_empty() {
-					write!(f, "record")
+					f.write_str("record")
 				} else {
 					write!(f, "record<{}>", Fmt::verbar_separated(k))
 				}
 			}
 			Kind::Geometry(k) => {
 				if k.is_empty() {
-					write!(f, "geometry")
+					f.write_str("geometry")
 				} else {
 					write!(f, "geometry<{}>", Fmt::verbar_separated(k))
 				}
 			}
 			Kind::Set(k, l) => match (k, l) {
-				(k, None) if k.is_any() => write!(f, "set"),
-				(k, None) => write!(f, "set<{k}>"),
-				(k, Some(l)) => write!(f, "set<{k}, {l}>"),
+				(k, None) if k.is_any() => f.write_str("set"),
+				(k, None) => write!(f, "set<{}>", k),
+				(k, Some(l)) => write!(f, "set<{}, {}>", k, l),
 			},
 			Kind::Array(k, l) => match (k, l) {
-				(k, None) if k.is_any() => write!(f, "array"),
-				(k, None) => write!(f, "array<{k}>"),
-				(k, Some(l)) => write!(f, "array<{k}, {l}>"),
+				(k, None) if k.is_any() => f.write_str("array"),
+				(k, None) => write!(f, "array<{}>", k),
+				(k, Some(l)) => write!(f, "array<{}, {}>", k, l),
 			},
 			Kind::Either(k) => write!(f, "{}", Fmt::verbar_separated(k)),
 			Kind::Range => f.write_str("range"),
 			Kind::Literal(l) => write!(f, "{}", l),
-			Kind::References(t, i) => match (t, i) {
-				(Some(t), None) => write!(f, "references<{}>", t),
-				(Some(t), Some(i)) => write!(f, "references<{}, {}>", t, i),
-				(None, _) => f.write_str("references"),
-			},
 			Kind::File(k) => {
 				if k.is_empty() {
-					write!(f, "file")
+					f.write_str("file")
 				} else {
 					write!(f, "file<{}>", Fmt::verbar_separated(k))
 				}
@@ -716,7 +738,7 @@ impl KindLiteral {
 impl Display for KindLiteral {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			KindLiteral::String(s) => write!(f, "{}", s),
+			KindLiteral::String(s) => write!(f, "{s}"),
 			KindLiteral::Integer(n) => write!(f, "{}", n),
 			KindLiteral::Float(n) => write!(f, "{}f", n),
 			KindLiteral::Decimal(n) => write!(f, "{}dec", n),

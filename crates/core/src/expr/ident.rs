@@ -2,6 +2,7 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
+use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -30,10 +31,22 @@ impl Ident {
 
 	/// Create a new identifier
 	///
+	/// This function checks if the string has a null byte, returns an error if it
+	/// has.
+	pub fn try_new(str: String) -> Result<Self> {
+		if str.contains('\0') {
+			return Err(anyhow::anyhow!("String contains null byte"));
+		}
+		Ok(Ident(str))
+	}
+
+	/// Create a new identifier
+	///
 	/// # Safety
 	/// Caller should ensure that the string does not contain a null byte.
-	pub unsafe fn new_unchecked(str: String) -> Self {
-		Ident(str)
+	pub unsafe fn new_unchecked(s: String) -> Self {
+		debug_assert!(!s.as_bytes().contains(&0));
+		Ident(s)
 	}
 
 	pub fn from_strand(str: Strand) -> Self {
@@ -57,8 +70,8 @@ impl Ident {
 	}
 
 	/// Convert the Ident to a raw String
-	pub fn into_raw_string(&self) -> String {
-		self.0.to_string()
+	pub fn as_raw_string(&self) -> String {
+		self.0.clone()
 	}
 
 	/// Checks if this field is the `type` field
@@ -96,6 +109,6 @@ impl From<Table> for Ident {
 
 impl InfoStructure for Ident {
 	fn structure(self) -> Value {
-		self.into_raw_string().into()
+		self.as_raw_string().into()
 	}
 }

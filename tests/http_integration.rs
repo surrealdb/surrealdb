@@ -1172,7 +1172,7 @@ mod http_integration {
 			// Verify there are no records
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {body}");
+			assert_eq!(body["information"], "Table `table` not found", "body: {body}");
 
 			// Try to create the record
 			let res = client
@@ -1205,7 +1205,7 @@ mod http_integration {
 			// Verify the table is empty
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {body}");
+			assert_eq!(body["information"], "Table `table_noauth` not found", "body: {body}");
 		}
 
 		Ok(())

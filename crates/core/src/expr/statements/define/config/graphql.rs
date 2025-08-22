@@ -189,10 +189,10 @@ impl InfoStructure for FunctionsConfig {
 			FunctionsConfig::None => Value::None,
 			FunctionsConfig::Auto => Value::Strand("AUTO".into()),
 			FunctionsConfig::Include(fs) => Value::from(map!(
-				"include" => Value::Array(fs.into_iter().map(|i| Value::from(i.into_raw_string())).collect()),
+				"include" => Value::Array(fs.into_iter().map(|i| Value::from(i.as_raw_string())).collect()),
 			)),
 			FunctionsConfig::Exclude(fs) => Value::from(map!(
-				"exclude" => Value::Array(fs.into_iter().map(|i| Value::from(i.into_raw_string())).collect()),
+				"exclude" => Value::Array(fs.into_iter().map(|i| Value::from(i.as_raw_string())).collect()),
 			)),
 		}
 	}

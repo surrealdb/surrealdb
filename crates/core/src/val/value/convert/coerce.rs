@@ -5,8 +5,8 @@ use std::hash::BuildHasher;
 use geo::Point;
 use rust_decimal::Decimal;
 
-use crate::expr::kind::{HasKind, KindLiteral};
-use crate::expr::{Ident, Kind};
+use crate::expr::Kind;
+use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range,
@@ -438,7 +438,6 @@ impl Value {
 			Kind::Datetime => self.can_coerce_to::<Datetime>(),
 			Kind::Duration => self.can_coerce_to::<Duration>(),
 			Kind::Object => self.can_coerce_to::<Object>(),
-			Kind::Point => self.can_coerce_to::<Point<f64>>(),
 			Kind::Bytes => self.can_coerce_to::<Bytes>(),
 			Kind::Uuid => self.can_coerce_to::<Uuid>(),
 			Kind::Regex => self.can_coerce_to::<Regex>(),
@@ -472,7 +471,6 @@ impl Value {
 			},
 			Kind::Either(k) => k.iter().any(|x| self.can_coerce_to_kind(x)),
 			Kind::Literal(lit) => self.can_coerce_to_literal(lit),
-			Kind::References(_, _) => false,
 			Kind::File(buckets) => {
 				if buckets.is_empty() {
 					self.can_coerce_to::<File>()
@@ -499,17 +497,14 @@ impl Value {
 		}
 	}
 
-	fn can_coerce_to_record(&self, val: &[Ident]) -> bool {
+	fn can_coerce_to_record(&self, val: &[String]) -> bool {
 		match self {
-			Value::RecordId(t) => {
-				val.is_empty() || val.iter().any(|x| t.table == **x)
-				//t.is_record_type(val),
-			}
+			Value::RecordId(t) => val.is_empty() || val.contains(&t.table),
 			_ => false,
 		}
 	}
 
-	fn can_coerce_to_geometry(&self, val: &[String]) -> bool {
+	fn can_coerce_to_geometry(&self, val: &[GeometryKind]) -> bool {
 		self.is_geometry_type(val)
 	}
 
@@ -517,7 +512,7 @@ impl Value {
 		val.validate_value(self)
 	}
 
-	fn can_coerce_to_file_buckets(&self, buckets: &[Ident]) -> bool {
+	fn can_coerce_to_file_buckets(&self, buckets: &[String]) -> bool {
 		matches!(self, Value::File(f) if f.is_bucket_type(buckets))
 	}
 
@@ -547,7 +542,6 @@ impl Value {
 			Kind::Datetime => self.coerce_to::<Datetime>().map(Value::from),
 			Kind::Duration => self.coerce_to::<Duration>().map(Value::from),
 			Kind::Object => self.coerce_to::<Object>().map(Value::from),
-			Kind::Point => self.coerce_to::<Point<f64>>().map(Value::from),
 			Kind::Bytes => self.coerce_to::<Bytes>().map(Value::from),
 			Kind::Uuid => self.coerce_to::<Uuid>().map(Value::from),
 			Kind::Regex => self.coerce_to::<Regex>().map(Value::from),
@@ -593,10 +587,6 @@ impl Value {
 				))
 			}
 			Kind::Literal(lit) => self.coerce_to_literal(lit),
-			Kind::References(_, _) => Err(CoerceError::InvalidKind {
-				from: self,
-				into: kind.to_string(),
-			}),
 			Kind::File(buckets) => {
 				if buckets.is_empty() {
 					self.coerce_to::<File>().map(Value::from)
@@ -621,11 +611,11 @@ impl Value {
 	}
 
 	/// Try to coerce this value to a Record of a certain type
-	pub(crate) fn coerce_to_record_kind(self, val: &[Ident]) -> Result<RecordId, CoerceError> {
+	pub(crate) fn coerce_to_record_kind(self, val: &[String]) -> Result<RecordId, CoerceError> {
 		let this = match self {
 			// Records are allowed if correct type
 			Value::RecordId(v) => {
-				if val.is_empty() || val.iter().any(|x| **x == v.table) {
+				if val.is_empty() || val.contains(&v.table) {
 					return Ok(v);
 				} else {
 					Value::RecordId(v)
@@ -649,7 +639,10 @@ impl Value {
 	}
 
 	/// Try to coerce this value to a `Geometry` of a certain type
-	pub(crate) fn coerce_to_geometry_kind(self, val: &[String]) -> Result<Geometry, CoerceError> {
+	pub(crate) fn coerce_to_geometry_kind(
+		self,
+		val: &[GeometryKind],
+	) -> Result<Geometry, CoerceError> {
 		if self.is_geometry_type(val) {
 			let Value::Geometry(x) = self else {
 				// Checked above in is_geometry_type
@@ -730,7 +723,7 @@ impl Value {
 		Ok(array)
 	}
 
-	pub(crate) fn coerce_to_file_buckets(self, buckets: &[Ident]) -> Result<File, CoerceError> {
+	pub(crate) fn coerce_to_file_buckets(self, buckets: &[String]) -> Result<File, CoerceError> {
 		let v = self.coerce_to::<File>()?;
 
 		if v.is_bucket_type(buckets) {

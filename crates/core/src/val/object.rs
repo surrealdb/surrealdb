@@ -126,33 +126,21 @@ impl Object {
 			})
 			.collect()
 	}
-}
 
-impl std::ops::Add for Object {
-	type Output = Self;
-
-	fn add(self, rhs: Self) -> Self::Output {
-		let mut lhs = self;
-		lhs.0.extend(rhs.0);
-		lhs
-	}
-}
-
-impl Display for Object {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+	pub(crate) fn display<V: Display>(f: &mut Formatter, o: &BTreeMap<String, V>) -> fmt::Result {
 		let mut f = Pretty::from(f);
 		if is_pretty() {
 			f.write_char('{')?;
 		} else {
 			f.write_str("{ ")?;
 		}
-		if !self.is_empty() {
+		if !o.is_empty() {
 			let indent = pretty_indent();
 			write!(
 				f,
 				"{}",
 				Fmt::pretty_comma_separated(
-					self.0.iter().map(|args| Fmt::new(args, |(k, v), f| write!(
+					o.iter().map(|args| Fmt::new(args, |(k, v), f| write!(
 						f,
 						"{}: {}",
 						EscapeKey(k),
@@ -167,6 +155,22 @@ impl Display for Object {
 		} else {
 			f.write_str(" }")
 		}
+	}
+}
+
+impl std::ops::Add for Object {
+	type Output = Self;
+
+	fn add(self, rhs: Self) -> Self::Output {
+		let mut lhs = self;
+		lhs.0.extend(rhs.0);
+		lhs
+	}
+}
+
+impl Display for Object {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		Object::display(f, &self.0)
 	}
 }
 
