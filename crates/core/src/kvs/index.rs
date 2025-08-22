@@ -26,8 +26,9 @@ use crate::idx::index::IndexOperation;
 use crate::key::thing;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::ds::TransactionFactory;
-use crate::kvs::{Key, Transaction, TransactionType, Val, impl_kv_value_revisioned};
+use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val, impl_kv_value_revisioned};
 use crate::mem::ALLOC;
+use crate::val::record::Record;
 use crate::val::{Object, RecordId, RecordIdKey, Value};
 
 #[derive(Debug, Clone)]
@@ -541,7 +542,7 @@ impl Building {
 			self.is_beyond_threshold(Some(*count))?;
 			let key = thing::ThingKey::decode_key(&k)?;
 			// Parse the value
-			let val: Value = revision::from_slice(&v)?;
+			let val = Record::kv_decode_value(v)?;
 			let rid: Arc<RecordId> = RecordId {
 				table: key.tb.to_owned(),
 				key: key.id,
