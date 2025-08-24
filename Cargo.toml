@@ -110,6 +110,8 @@ pharos = "0.5.3"
 phf = "0.11.2"
 pin-project-lite = "0.2.13"
 quick_cache = "0.6.12"
+quote = "1.0.36"
+syn = "2.0.66"
 # TODO: Look at use of this dependency. Last update was 4 years ago and it is unmaintained
 radix_trie = "0.2.1"
 rand = "0.8.5"
