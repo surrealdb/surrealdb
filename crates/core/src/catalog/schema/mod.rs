@@ -32,7 +32,6 @@ pub use user::*;
 
 use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
-use crate::sql::ToSql;
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
@@ -141,7 +140,7 @@ impl Permissions {
 
 impl Display for Permissions {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-		write!(f, "{}", self.to_sql())
+		write!(f, "{}", self.to_sql_definition())
 	}
 }
 
