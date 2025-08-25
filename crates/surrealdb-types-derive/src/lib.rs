@@ -28,7 +28,7 @@ use syn::{Data, DeriveInput, Fields, Ident, Type, parse_macro_input};
 ///     age: 30,
 ///     active: true,
 /// };
-/// 
+///
 /// // Converted to Value::Object as { "name": "Alice", "age": 30, "active": true }
 /// let value: Value = person.into_value();
 ///

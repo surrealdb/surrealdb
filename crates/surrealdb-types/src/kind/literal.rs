@@ -6,15 +6,28 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Duration, Kind};
 
+/// Represents literal values in SurrealDB's type system
+///
+/// Literal types are used to represent specific values that can only be a single value.
+/// For example, a literal type `"a"` can only ever be the string `"a"`.
+/// This is commonly used in `Kind::Either` to represent enum-like types.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum KindLiteral {
+	/// A string literal
 	String(String),
+	/// An integer literal
 	Integer(i64),
+	/// A floating-point literal
 	Float(f64),
+	/// A decimal literal
 	Decimal(Decimal),
+	/// A duration literal
 	Duration(Duration),
+	/// An array of kinds literal
 	Array(Vec<Kind>),
+	/// An object with string keys and kind values literal
 	Object(BTreeMap<String, Kind>),
+	/// A boolean literal
 	Bool(bool),
 }
 

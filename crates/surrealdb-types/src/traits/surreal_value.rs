@@ -7,10 +7,22 @@ use crate::{
 	Object, Range, RecordId, SurrealNone, SurrealNull, Uuid, Value,
 };
 
+/// Trait for converting between SurrealDB values and Rust types
+///
+/// This trait provides a type-safe way to convert between SurrealDB `Value` types
+/// and Rust types. It defines four main operations:
+/// - `kind_of()`: Returns the `Kind` that represents this type
+/// - `is_value()`: Checks if a `Value` can be converted to this type
+/// - `into_value()`: Converts this type into a `Value`
+/// - `from_value()`: Attempts to convert a `Value` into this type
 pub trait SurrealValue {
+	/// Returns the kind that represents this type
 	fn kind_of() -> Kind;
+	/// Checks if the given value can be converted to this type
 	fn is_value(value: &Value) -> bool;
+	/// Converts this type into a SurrealDB value
 	fn into_value(self) -> Value;
+	/// Attempts to convert a SurrealDB value into this type
 	fn from_value(value: Value) -> Option<Self>
 	where
 		Self: Sized;
@@ -44,6 +56,9 @@ macro_rules! impl_surreal_value_concrete {
 
         $(
             impl Value {
+                /// Checks if this value can be converted to the given type
+                ///
+                /// Returns `true` if the value can be converted to the type, `false` otherwise.
                 pub fn $is_fnc(&self) -> bool {
                     <$type>::is_value(self)
                 }
@@ -52,6 +67,7 @@ macro_rules! impl_surreal_value_concrete {
 
         $(
             impl Value {
+                /// Converts the given value into a `Value`
                 pub fn $from_fnc(value: $type) -> Value {
                     <$type>::into_value(value)
                 }
@@ -60,6 +76,9 @@ macro_rules! impl_surreal_value_concrete {
 
         $(
             impl Value {
+                /// Attempts to convert a SurrealDB value into the given type
+                ///
+                /// Returns `Some(T)` if the conversion is successful, `None` otherwise.
                 pub fn $into_fnc(self) -> Option<$type> {
                     <$type>::from_value(self)
                 }
@@ -96,6 +115,9 @@ macro_rules! impl_surreal_value_generic {
 
         $(
             impl Value {
+                /// Checks if this value can be converted to the given type
+                ///
+                /// Returns `true` if the value can be converted to the type, `false` otherwise.
                 pub fn $is_fnc<$($is_generic: SurrealValue),*>(&self) -> bool {
                     <$type>::is_value(self)
                 }
@@ -104,6 +126,7 @@ macro_rules! impl_surreal_value_generic {
 
         $(
             impl Value {
+                /// Converts the given value into a `Value`
                 pub fn $from_fnc<$($from_generic: SurrealValue),*>(value: $type) -> Value {
                     <$type>::into_value(value)
                 }
@@ -112,6 +135,9 @@ macro_rules! impl_surreal_value_generic {
 
         $(
             impl Value {
+                /// Attempts to convert a SurrealDB value into the given type
+                ///
+                /// Returns `Some(T)` if the conversion is successful, `None` otherwise.
                 pub fn $into_fnc<$($into_generic: SurrealValue),*>(self) -> Option<$type> {
                     <$type>::from_value(self)
                 }
@@ -182,10 +208,16 @@ impl_surreal_value_concrete!(
 // Manual impls for true & false
 
 impl Value {
+	/// Checks if this value is specifically `true`
+	///
+	/// Returns `true` if the value is `Value::Bool(true)`, `false` otherwise.
 	pub fn is_true(&self) -> bool {
 		matches!(self, Value::Bool(true))
 	}
 
+	/// Checks if this value is specifically `false`
+	///
+	/// Returns `true` if the value is `Value::Bool(false)`, `false` otherwise.
 	pub fn is_false(&self) -> bool {
 		matches!(self, Value::Bool(false))
 	}

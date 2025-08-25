@@ -5,14 +5,27 @@ use std::iter::once;
 use geo::{Coord, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use serde::{Deserialize, Serialize};
 
+/// Represents geometric shapes in SurrealDB
+///
+/// Geometry types support various geometric shapes including points, lines, polygons,
+/// and their multi-variants. This is useful for spatial data and geographic applications.
+///
+/// The types used internally originate from the `geo` crate.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Geometry {
+	/// A single point in 2D space
 	Point(Point<f64>),
+	/// A line consisting of multiple connected points
 	Line(LineString<f64>),
+	/// A polygon with an exterior boundary and optional interior holes
 	Polygon(Polygon<f64>),
+	/// Multiple points
 	MultiPoint(MultiPoint<f64>),
+	/// Multiple lines
 	MultiLine(MultiLineString<f64>),
+	/// Multiple polygons
 	MultiPolygon(MultiPolygon<f64>),
+	/// A collection of different geometry types
 	Collection(Vec<Geometry>),
 }
 

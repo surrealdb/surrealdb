@@ -5,9 +5,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::Value;
 
+/// Represents a range of values in SurrealDB
+///
+/// A range defines an interval between two values with inclusive or exclusive bounds.
+/// This is commonly used for range queries and comparisons.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Range {
+	/// The lower bound of the range
 	pub start: Bound<Value>,
+	/// The upper bound of the range
 	pub end: Bound<Value>,
 }
 

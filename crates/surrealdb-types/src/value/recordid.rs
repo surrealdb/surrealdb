@@ -5,9 +5,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Array, Number, Object, Range, Uuid, Value};
 
+/// Represents a range of record identifier keys in SurrealDB
+///
+/// This type is used for range queries on record identifiers,
+/// allowing queries like "find all records with IDs between X and Y".
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct RecordIdKeyRange {
+	/// The lower bound of the range
 	pub start: Bound<RecordIdKey>,
+	/// The upper bound of the range
 	pub end: Bound<RecordIdKey>,
 }
 
@@ -81,13 +87,23 @@ impl PartialEq<Range> for RecordIdKeyRange {
 	}
 }
 
+/// Represents a key component of a record identifier in SurrealDB
+///
+/// Record identifiers can have various types of keys including numbers, strings, UUIDs,
+/// arrays, objects, or ranges. This enum provides type-safe representation for all key types.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum RecordIdKey {
+	/// A numeric key
 	Number(i64),
+	/// A string key
 	String(String),
+	/// A UUID key
 	Uuid(Uuid),
+	/// An array key
 	Array(Array),
+	/// An object key
 	Object(Object),
+	/// A range key
 	Range(Box<RecordIdKeyRange>),
 }
 
@@ -135,7 +151,13 @@ impl PartialEq<Value> for RecordIdKey {
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+/// Represents a record identifier in SurrealDB
+///
+/// A record identifier consists of a table name and a key that uniquely identifies
+/// a record within that table. This is the primary way to reference specific records.
 pub struct RecordId {
+	/// The name of the table containing the record
 	pub table: String,
+	/// The key that uniquely identifies the record within the table
 	pub key: RecordIdKey,
 }

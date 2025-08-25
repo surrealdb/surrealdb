@@ -5,6 +5,7 @@ pub use geometry::*;
 pub use literal::*;
 use serde::{Deserialize, Serialize};
 
+/// The kind of a SurrealDB value.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Kind {
 	/// The most generic type, can be anything.

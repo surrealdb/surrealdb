@@ -9,12 +9,17 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub(crate) const REGEX_TOKEN: &str = "$surrealdb::public::Regex";
 
+/// Represents a regular expression in SurrealDB
+///
+/// A regular expression is a pattern used for matching strings.
+/// This type wraps the `regex::Regex` type and provides custom serialization/deserialization.
 #[derive(Clone)]
 pub struct Regex(pub regex::Regex);
 
 impl Regex {
-	// Deref would expose `regex::Regex::as_str` which wouldn't have the '/'
-	// delimiters.
+	/// Returns a reference to the underlying regex
+	///
+	/// Note: This method returns the regex without the '/' delimiters that are used in display.
 	pub fn regex(&self) -> &regex::Regex {
 		&self.0
 	}

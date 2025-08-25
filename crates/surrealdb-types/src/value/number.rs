@@ -5,10 +5,17 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 
+/// Represents a numeric value in SurrealDB
+///
+/// Numbers in SurrealDB can be integers, floating-point numbers, or decimal numbers.
+/// This enum provides type-safe representation for all numeric types.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum Number {
+	/// A 64-bit signed integer
 	Int(i64),
+	/// A 64-bit floating-point number
 	Float(f64),
+	/// A decimal number with arbitrary precision
 	Decimal(Decimal),
 }
 
@@ -217,5 +224,36 @@ impl PartialEq for Number {
 impl PartialOrd for Number {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 		Some(self.cmp(other))
+	}
+}
+
+// From implementations for common numeric types
+impl From<i32> for Number {
+	fn from(value: i32) -> Self {
+		Number::Int(value as i64)
+	}
+}
+
+impl From<i64> for Number {
+	fn from(value: i64) -> Self {
+		Number::Int(value)
+	}
+}
+
+impl From<f32> for Number {
+	fn from(value: f32) -> Self {
+		Number::Float(value as f64)
+	}
+}
+
+impl From<f64> for Number {
+	fn from(value: f64) -> Self {
+		Number::Float(value)
+	}
+}
+
+impl From<Decimal> for Number {
+	fn from(value: Decimal) -> Self {
+		Number::Decimal(value)
 	}
 }

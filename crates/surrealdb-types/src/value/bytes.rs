@@ -3,6 +3,9 @@ use std::fmt;
 use serde::de::{self, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 
+/// Represents binary data in SurrealDB
+///
+/// Bytes stores raw binary data as a vector of unsigned 8-bit integers.
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Bytes(pub Vec<u8>);
 
