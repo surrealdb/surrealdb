@@ -148,8 +148,8 @@ impl Value {
 
 	/// Converts this value to the specified type
 	///
-	/// Returns `Some(T)` if the conversion is successful, `None` otherwise.
-	pub fn into<T: SurrealValue>(self) -> Option<T> {
+	/// Returns `Ok(T)` if the conversion is successful, `Err(anyhow::Error)` otherwise.
+	pub fn into<T: SurrealValue>(self) -> anyhow::Result<T> {
 		T::from_value(self)
 	}
 

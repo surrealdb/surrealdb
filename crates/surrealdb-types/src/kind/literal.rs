@@ -1,9 +1,12 @@
 use std::collections::BTreeMap;
+use std::fmt::Display;
 use std::hash;
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
+use crate::utils::display::JoinDisplayable;
+use crate::utils::escape::QuoteStr;
 use crate::{Duration, Kind};
 
 /// Represents literal values in SurrealDB's type system
@@ -107,6 +110,37 @@ impl hash::Hash for KindLiteral {
 			KindLiteral::Array(kinds) => kinds.hash(state),
 			KindLiteral::Object(btree_map) => btree_map.hash(state),
 			KindLiteral::Bool(x) => x.hash(state),
+		}
+	}
+}
+
+impl Display for KindLiteral {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			KindLiteral::String(string) => QuoteStr(string).fmt(f),
+			KindLiteral::Integer(x) => write!(f, "{}", x),
+			KindLiteral::Float(v) => {
+				if v.is_finite() {
+					// Add suffix to distinguish between int and float
+					write!(f, "{v}f")
+				} else {
+					// Don't add suffix for NaN, inf, -inf
+					Display::fmt(v, f)
+				}
+			}
+			KindLiteral::Decimal(v) => write!(f, "{v}dec"),
+			KindLiteral::Duration(duration) => write!(f, "{}", duration),
+			KindLiteral::Array(kinds) => write!(f, "[{}]", kinds.join_displayable(", ")),
+			KindLiteral::Object(btree_map) => write!(
+				f,
+				"{{{}}}",
+				btree_map
+					.iter()
+					.map(|(k, v)| format!("{}: {}", k, v))
+					.collect::<Vec<String>>()
+					.join(", ")
+			),
+			KindLiteral::Bool(x) => write!(f, "{}", x),
 		}
 	}
 }

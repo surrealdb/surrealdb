@@ -4,6 +4,7 @@
 mod flatbuffers;
 mod kind;
 mod traits;
+pub(crate) mod utils;
 mod value;
 
 pub use flatbuffers::*;

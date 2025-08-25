@@ -1,9 +1,13 @@
 mod geometry;
 mod literal;
 
+use std::fmt::Display;
+
 pub use geometry::*;
 pub use literal::*;
 use serde::{Deserialize, Serialize};
+
+use crate::utils::display::JoinDisplayable;
 
 /// The kind of a SurrealDB value.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -75,5 +79,61 @@ pub enum Kind {
 impl Default for Kind {
 	fn default() -> Self {
 		Self::Any
+	}
+}
+
+impl Display for Kind {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Kind::Any => write!(f, "any"),
+			Kind::None => write!(f, "none"),
+			Kind::Null => write!(f, "null"),
+			Kind::Bool => write!(f, "bool"),
+			Kind::Bytes => write!(f, "bytes"),
+			Kind::Datetime => write!(f, "datetime"),
+			Kind::Decimal => write!(f, "decimal"),
+			Kind::Duration => write!(f, "duration"),
+			Kind::Float => write!(f, "float"),
+			Kind::Int => write!(f, "int"),
+			Kind::Number => write!(f, "number"),
+			Kind::Object => write!(f, "object"),
+			Kind::String => write!(f, "string"),
+			Kind::Uuid => write!(f, "uuid"),
+			Kind::Regex => write!(f, "regex"),
+			Kind::Record(table) => {
+				if table.is_empty() {
+					write!(f, "record")
+				} else {
+					write!(f, "record<{}>", table.join_displayable(" | "))
+				}
+			}
+			Kind::Geometry(kinds) => {
+				if kinds.is_empty() {
+					write!(f, "geometry")
+				} else {
+					write!(f, "geometry<{}>", kinds.join_displayable(" | "))
+				}
+			}
+			Kind::Option(kind) => write!(f, "option<{}>", kind),
+			Kind::Either(kinds) => write!(f, "{}", kinds.join_displayable(" | ")),
+			Kind::Set(kind, max) => match max {
+				Some(max) => write!(f, "set<{}, {}>", kind, max),
+				None => write!(f, "set<{}>", kind),
+			},
+			Kind::Array(kind, max) => match max {
+				Some(max) => write!(f, "array<{}, {}>", kind, max),
+				None => write!(f, "array<{}>", kind),
+			},
+			Kind::Function(_, _) => write!(f, "function"),
+			Kind::Range => write!(f, "range"),
+			Kind::Literal(literal) => write!(f, "{}", literal),
+			Kind::File(bucket) => {
+				if bucket.is_empty() {
+					write!(f, "file")
+				} else {
+					write!(f, "file<{}>", bucket.join_displayable(" | "))
+				}
+			}
+		}
 	}
 }

@@ -23,7 +23,7 @@ pub trait SurrealValue {
 	/// Converts this type into a SurrealDB value
 	fn into_value(self) -> Value;
 	/// Attempts to convert a SurrealDB value into this type
-	fn from_value(value: Value) -> Option<Self>
+	fn from_value(value: Value) -> anyhow::Result<Self>
 	where
 		Self: Sized;
 }
@@ -49,7 +49,7 @@ macro_rules! impl_surreal_value_concrete {
                 $into
             }
 
-            fn from_value($value_into: Value) -> Option<Self> {
+            fn from_value($value_into: Value) -> anyhow::Result<Self> {
                 $from
             }
         }
@@ -78,8 +78,8 @@ macro_rules! impl_surreal_value_concrete {
             impl Value {
                 /// Attempts to convert a SurrealDB value into the given type
                 ///
-                /// Returns `Some(T)` if the conversion is successful, `None` otherwise.
-                pub fn $into_fnc(self) -> Option<$type> {
+                /// Returns `Ok(T)` if the conversion is successful, `Err(anyhow::Error)` otherwise.
+                pub fn $into_fnc(self) -> anyhow::Result<$type> {
                     <$type>::from_value(self)
                 }
             }
@@ -108,7 +108,7 @@ macro_rules! impl_surreal_value_generic {
                 $into
             }
 
-            fn from_value($value_into: Value) -> Option<Self> {
+            fn from_value($value_into: Value) -> anyhow::Result<Self> {
                 $from
             }
         }
@@ -137,8 +137,8 @@ macro_rules! impl_surreal_value_generic {
             impl Value {
                 /// Attempts to convert a SurrealDB value into the given type
                 ///
-                /// Returns `Some(T)` if the conversion is successful, `None` otherwise.
-                pub fn $into_fnc<$($into_generic: SurrealValue),*>(self) -> Option<$type> {
+                /// Returns `Ok(T)` if the conversion is successful, `Err(anyhow::Error)` otherwise.
+                pub fn $into_fnc<$($into_generic: SurrealValue),*>(self) -> anyhow::Result<$type> {
                     <$type>::from_value(self)
                 }
             }
@@ -151,7 +151,7 @@ impl_surreal_value_concrete!(
 	Value as Kind::Any,
 	(_value) => true,
 	(self) => self,
-	(value) => Some(value)
+	(value) => Ok(value)
 );
 
 impl_surreal_value_concrete!(
@@ -160,9 +160,9 @@ impl_surreal_value_concrete!(
 	(self) => Value::None,
 	(value) => {
 		if value == Value::None {
-			Some(())
+			Ok(())
 		} else {
-			None
+			Err(convertion_error(Self::kind_of(), value))
 		}
 	}
 );
@@ -173,9 +173,9 @@ impl_surreal_value_concrete!(
 	(self) => Value::None,
 	(value) => {
 		if value == Value::None {
-			Some(SurrealNone)
+			Ok(SurrealNone)
 		} else {
-			None
+			Err(convertion_error(Self::kind_of(), value))
 		}
 	}
 );
@@ -186,9 +186,9 @@ impl_surreal_value_concrete!(
 	(self) => Value::Null,
 	(value) => {
 		if value == Value::Null {
-			Some(SurrealNull)
+			Ok(SurrealNull)
 		} else {
-			None
+			Err(convertion_error(Self::kind_of(), value))
 		}
 	}
 );
@@ -199,9 +199,9 @@ impl_surreal_value_concrete!(
 	from_bool(self) => Value::Bool(self),
 	into_bool(value) => {
 		let Value::Bool(b) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(b)
+		Ok(b)
 	}
 );
 
@@ -229,9 +229,9 @@ impl_surreal_value_concrete!(
 	from_number(self) => Value::Number(self),
 	into_number(value) => {
 		let Value::Number(n) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(n)
+		Ok(n)
 	}
 );
 
@@ -241,9 +241,9 @@ impl_surreal_value_concrete!(
 	from_int(self) => Value::Number(Number::Int(self)),
 	into_int(value) => {
 		let Value::Number(Number::Int(n)) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(n)
+		Ok(n)
 	}
 );
 
@@ -253,9 +253,9 @@ impl_surreal_value_concrete!(
 	from_float(self) => Value::Number(Number::Float(self)),
 	into_float(value) => {
 		let Value::Number(Number::Float(n)) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(n)
+		Ok(n)
 	}
 );
 
@@ -265,9 +265,9 @@ impl_surreal_value_concrete!(
 	from_decimal(self) => Value::Number(Number::Decimal(self)),
 	into_decimal(value) => {
 		let Value::Number(Number::Decimal(n)) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(n)
+		Ok(n)
 	}
 );
 
@@ -277,9 +277,9 @@ impl_surreal_value_concrete!(
 	from_string(self) => Value::String(self),
 	into_string(value) => {
 		let Value::String(s) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(s)
+		Ok(s)
 	}
 );
 
@@ -289,9 +289,9 @@ impl_surreal_value_concrete!(
 	from_duration(self) => Value::Duration(self),
 	into_duration(value) => {
 		let Value::Duration(d) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(d)
+		Ok(d)
 	}
 );
 
@@ -301,9 +301,9 @@ impl_surreal_value_concrete!(
 	(self) => Value::Duration(Duration(self)),
 	(value) => {
 		let Value::Duration(Duration(d)) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(d)
+		Ok(d)
 	}
 );
 
@@ -313,9 +313,9 @@ impl_surreal_value_concrete!(
 	from_datetime(self) => Value::Datetime(self),
 	into_datetime(value) => {
 		let Value::Datetime(d) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(d)
+		Ok(d)
 	}
 );
 
@@ -325,9 +325,9 @@ impl_surreal_value_concrete!(
 	(self) => Value::Datetime(Datetime(self)),
 	(value) => {
 		let Value::Datetime(Datetime(d)) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(d)
+		Ok(d)
 	}
 );
 
@@ -337,9 +337,9 @@ impl_surreal_value_concrete!(
 	from_uuid(self) => Value::Uuid(self),
 	into_uuid(value) => {
 		let Value::Uuid(u) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(u)
+		Ok(u)
 	}
 );
 
@@ -349,9 +349,9 @@ impl_surreal_value_concrete!(
 	(self) => Value::Uuid(Uuid(self)),
 	(value) => {
 		let Value::Uuid(Uuid(u)) = value else {
-			return None;
+			return Err(convertion_error(<Uuid>::kind_of(), value));
 		};
-		Some(u)
+		Ok(u)
 	}
 );
 
@@ -361,9 +361,9 @@ impl_surreal_value_concrete!(
 	from_array(self) => Value::Array(self),
 	into_array(value) => {
 		let Value::Array(a) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(a)
+		Ok(a)
 	}
 );
 
@@ -373,9 +373,9 @@ impl_surreal_value_concrete!(
 	from_object(self) => Value::Object(self),
 	into_object(value) => {
 		let Value::Object(o) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(o)
+		Ok(o)
 	}
 );
 
@@ -385,9 +385,9 @@ impl_surreal_value_concrete!(
 	from_geometry(self) => Value::Geometry(self),
 	into_geometry(value) => {
 		let Value::Geometry(g) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(g)
+		Ok(g)
 	}
 );
 
@@ -397,9 +397,9 @@ impl_surreal_value_concrete!(
 	from_bytes(self) => Value::Bytes(self),
 	into_bytes(value) => {
 		let Value::Bytes(b) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(b)
+		Ok(b)
 	}
 );
 
@@ -409,9 +409,9 @@ impl_surreal_value_concrete!(
 	(self) => Value::Bytes(Bytes(self)),
 	(value) => {
 		let Value::Bytes(Bytes(b)) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(b)
+		Ok(b)
 	}
 );
 
@@ -421,9 +421,9 @@ impl_surreal_value_concrete!(
 	(self) => Value::Bytes(Bytes(self.to_vec())),
 	(value) => {
 		let Value::Bytes(Bytes(b)) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(bytes::Bytes::from(b))
+		Ok(bytes::Bytes::from(b))
 	}
 );
 
@@ -433,9 +433,9 @@ impl_surreal_value_concrete!(
 	from_record(self) => Value::RecordId(self),
 	into_record(value) => {
 		let Value::RecordId(r) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(r)
+		Ok(r)
 	}
 );
 
@@ -445,9 +445,9 @@ impl_surreal_value_concrete!(
 	from_file(self) => Value::File(self),
 	into_file(value) => {
 		let Value::File(f) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(f)
+		Ok(f)
 	}
 );
 
@@ -457,9 +457,9 @@ impl_surreal_value_concrete!(
 	from_range(self) => Value::Range(Box::new(self)),
 	into_range(value) => {
 		let Value::Range(r) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(*r)
+		Ok(*r)
 	}
 );
 
@@ -476,9 +476,13 @@ impl_surreal_value_generic!(
 	from_vec<T>(self) => Value::Array(Array(self.into_iter().map(SurrealValue::into_value).collect())),
 	into_vec<T>(value) => {
 		let Value::Array(Array(a)) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		a.into_iter().map(|v| T::from_value(v)).collect()
+		a
+			.into_iter()
+			.map(|v| T::from_value(v))
+			.collect::<anyhow::Result<Vec<T>>>()
+			.map_err(|e| anyhow::anyhow!("Failed to convert to {}: {}", Self::kind_of(), e))
 	}
 );
 
@@ -487,8 +491,8 @@ impl_surreal_value_generic!(
 	is_option<T>(value) => matches!(value, Value::None) || T::is_value(value),
 	from_option<T>(self) => self.map(T::into_value).unwrap_or(Value::None),
 	into_option<T>(value) => match value{
-		Value::None => Some(None),
-		x => T::from_value(x).map(Some),
+		Value::None => Ok(None),
+		x => T::from_value(x).map(Some).map_err(|e| anyhow::anyhow!("Failed to convert to {}: {}", Self::kind_of(), e)),
 	}
 );
 
@@ -504,9 +508,13 @@ impl_surreal_value_generic!(
 	from_btreemap<V>(self) => Value::Object(Object(self.into_iter().map(|(k, v)| (k, v.into_value())).collect())),
 	into_btreemap<V>(value) => {
 		let Value::Object(Object(o)) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		o.into_iter().map(|(k, v)| V::from_value(v).map(|v| (k, v))).collect()
+		o
+			.into_iter()
+			.map(|(k, v)| V::from_value(v).map(|v| (k, v)))
+			.collect::<anyhow::Result<BTreeMap<String, V>>>()
+			.map_err(|e| anyhow::anyhow!("Failed to convert to {}: {}", Self::kind_of(), e))
 	}
 );
 
@@ -522,9 +530,13 @@ impl_surreal_value_generic!(
 	from_hashmap<V>(self) => Value::Object(Object(self.into_iter().map(|(k, v)| (k, v.into_value())).collect())),
 	into_hashmap<V>(value) => {
 		let Value::Object(Object(o)) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		o.into_iter().map(|(k, v)| V::from_value(v).map(|v| (k, v))).collect()
+		o
+			.into_iter()
+			.map(|(k, v)| V::from_value(v).map(|v| (k, v)))
+			.collect::<anyhow::Result<HashMap<String, V>>>()
+			.map_err(|e| anyhow::anyhow!("Failed to convert to {}: {}", Self::kind_of(), e))
 	}
 );
 
@@ -535,9 +547,9 @@ impl_surreal_value_concrete!(
 	from_point(self) => Value::Geometry(Geometry::Point(self)),
 	into_point(value) => {
 		let Value::Geometry(Geometry::Point(p)) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(p)
+		Ok(p)
 	}
 );
 
@@ -547,9 +559,9 @@ impl_surreal_value_concrete!(
 	from_line(self) => Value::Geometry(Geometry::Line(self)),
 	into_line(value) => {
 		let Value::Geometry(Geometry::Line(l)) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(l)
+		Ok(l)
 	}
 );
 
@@ -559,9 +571,9 @@ impl_surreal_value_concrete!(
 	from_polygon(self) => Value::Geometry(Geometry::Polygon(self)),
 	into_polygon(value) => {
 		let Value::Geometry(Geometry::Polygon(p)) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(p)
+		Ok(p)
 	}
 );
 
@@ -571,9 +583,9 @@ impl_surreal_value_concrete!(
 	from_multipoint(self) => Value::Geometry(Geometry::MultiPoint(self)),
 	into_multipoint(value) => {
 		let Value::Geometry(Geometry::MultiPoint(m)) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(m)
+		Ok(m)
 	}
 );
 
@@ -583,9 +595,9 @@ impl_surreal_value_concrete!(
 	from_multiline(self) => Value::Geometry(Geometry::MultiLine(self)),
 	into_multiline(value) => {
 		let Value::Geometry(Geometry::MultiLine(m)) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(m)
+		Ok(m)
 	}
 );
 
@@ -595,9 +607,9 @@ impl_surreal_value_concrete!(
 	from_multipolygon(self) => Value::Geometry(Geometry::MultiPolygon(self)),
 	into_multipolygon(value) => {
 		let Value::Geometry(Geometry::MultiPolygon(m)) = value else {
-			return None;
+			return Err(convertion_error(Self::kind_of(), value));
 		};
-		Some(m)
+		Ok(m)
 	}
 );
 
@@ -629,17 +641,17 @@ macro_rules! impl_tuples {
                     Value::Array(Array(vec![$($t.into_value()),+]))
                 }
 
-                fn from_value(value: Value) -> Option<Self> {
+                fn from_value(value: Value) -> anyhow::Result<Self> {
                     let Value::Array(Array(mut a)) = value else {
-                        return None;
+                        return Err(convertion_error(Self::kind_of(), value));
                     };
 
                     if a.len() != $n {
-                        return None;
+                        return Err(anyhow::anyhow!("Failed to convert to {}: Expected Array of length {}, got {}", Self::kind_of(), $n, a.len()));
                     }
 
-                    $(#[allow(non_snake_case)] let $t = $t::from_value(a.remove(0))?;)+
-                    Some(($($t,)+))
+                    $(#[allow(non_snake_case)] let $t = $t::from_value(a.remove(0)).map_err(|e| anyhow::anyhow!("Failed to convert to {}: {}", Self::kind_of(), e))?;)+
+                    Ok(($($t,)+))
                 }
             }
         )+
@@ -657,4 +669,8 @@ impl_tuples! {
 	8 => (A, B, C, D, E, F, G, H),
 	9 => (A, B, C, D, E, F, G, H, I),
 	10 => (A, B, C, D, E, F, G, H, I, J)
+}
+
+fn convertion_error(expected: Kind, got: Value) -> anyhow::Error {
+	anyhow::anyhow!("Expected {}, got {:?}", expected, got.value_kind())
 }

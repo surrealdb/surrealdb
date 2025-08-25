@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use serde::{Deserialize, Serialize};
 
 /// Represents different types of geometric shapes in SurrealDB's type system
@@ -20,4 +22,18 @@ pub enum GeometryKind {
 	MultiPolygon,
 	/// A collection of different geometry types
 	Collection,
+}
+
+impl Display for GeometryKind {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			GeometryKind::Point => write!(f, "point"),
+			GeometryKind::Line => write!(f, "line"),
+			GeometryKind::Polygon => write!(f, "polygon"),
+			GeometryKind::MultiPoint => write!(f, "multipoint"),
+			GeometryKind::MultiLine => write!(f, "multiline"),
+			GeometryKind::MultiPolygon => write!(f, "multipolygon"),
+			GeometryKind::Collection => write!(f, "collection"),
+		}
+	}
 }
