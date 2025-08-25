@@ -5870,6 +5870,7 @@ dependencies = [
  "subtle",
  "surrealdb-protocol",
  "surrealdb-tikv-client",
+ "surrealdb-types",
  "surrealkv",
  "surrealml-core",
  "sysinfo",
@@ -5956,6 +5957,35 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tonic 0.10.2",
+]
+
+[[package]]
+name = "surrealdb-types"
+version = "3.0.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "flatbuffers",
+ "geo",
+ "hex",
+ "regex",
+ "rstest",
+ "rust_decimal",
+ "serde",
+ "surrealdb-protocol",
+ "surrealdb-types-derive",
+ "uuid",
+]
+
+[[package]]
+name = "surrealdb-types-derive"
+version = "3.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "surrealdb-types",
+ "syn 2.0.100",
 ]
 
 [[package]]
