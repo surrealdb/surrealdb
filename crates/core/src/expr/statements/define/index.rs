@@ -177,15 +177,15 @@ pub(in crate::expr::statements) async fn run_indexing(
 	opt: &Options,
 	#[cfg_attr(not(target_family = "wasm"), expect(unused_variables))] doc: Option<&CursorDoc>,
 	index: &IndexDefinition,
-	blocking: bool,
+	_blocking: bool,
 ) -> Result<()> {
 	#[cfg(target_family = "wasm")]
 	{
 		{
 			// Create the remove statement
 			let stm = RemoveIndexStatement {
-				name: index.name.clone(),
-				what: index.what.clone(),
+				name: Ident::new(index.name.clone()).unwrap(),
+				what: Ident::new(index.what.clone()).unwrap(),
 				if_exists: false,
 			};
 			// Execute the delete statement
@@ -193,14 +193,15 @@ pub(in crate::expr::statements) async fn run_indexing(
 		}
 		{
 			// Force queries to run
-			let opt = &opt.new_with_force(Force::Index(Arc::new([self.clone()])));
+			let opt = &opt.new_with_force(Force::Index(Arc::new([index.clone()])));
 			// Update the index data
-			let stm = UpdateStatement {
-				what: vec![Expr::Table(index.what.clone().into())],
+			let stm = crate::expr::UpdateStatement {
+				what: vec![crate::expr::Expr::Table(Ident::new(index.what.clone()).unwrap())],
 				output: Some(Output::None),
 				..UpdateStatement::default()
 			};
 			stm.compute(stk, ctx, opt, doc).await?;
+			Ok(())
 		}
 	}
 
@@ -210,7 +211,7 @@ pub(in crate::expr::statements) async fn run_indexing(
 		let rcv = ctx
 			.get_index_builder()
 			.ok_or_else(|| Error::unreachable("No Index Builder"))?
-			.build(ctx, opt.clone(), ns, db, index.clone().into(), blocking)?;
+			.build(ctx, opt.clone(), ns, db, index.clone().into(), _blocking)?;
 		if let Some(rcv) = rcv {
 			rcv.await.map_err(|_| Error::IndexingBuildingCancelled)?
 		} else {
