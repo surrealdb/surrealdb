@@ -23,8 +23,10 @@ impl Value {
 				_ => Ok(()),
 			},
 			Value::Array(v) => match val {
-				Value::Array(x) => self.set(stk, ctx, opt, path, Value::from(v - x)).await,
-				x => self.set(stk, ctx, opt, path, Value::from(v - x)).await,
+				Value::Array(x) => {
+					self.set(stk, ctx, opt, path, Value::from(v.remove_all(&x.0))).await
+				}
+				x => self.set(stk, ctx, opt, path, Value::from(v.remove_value(&x))).await,
 			},
 			Value::None => match val {
 				Value::Number(x) => {

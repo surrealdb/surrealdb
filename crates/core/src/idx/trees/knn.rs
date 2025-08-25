@@ -634,7 +634,7 @@ pub(super) mod tests {
 	use rust_decimal::prelude::Zero;
 	use test_log::test;
 
-	use crate::expr::index::{Distance, VectorType};
+	use crate::catalog::{Distance, VectorType};
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};

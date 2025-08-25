@@ -32,8 +32,8 @@ pub use self::create::CreateStatement;
 pub use self::define::{
 	DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement,
 	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineModelStatement, DefineNamespaceStatement, DefineParamStatement, DefineParamStore,
-	DefineStatement, DefineTableStatement, DefineUserStatement,
+	DefineModelStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
+	DefineTableStatement, DefineUserStatement,
 };
 pub use self::delete::DeleteStatement;
 pub use self::foreach::ForeachStatement;

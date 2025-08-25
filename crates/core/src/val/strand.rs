@@ -100,6 +100,10 @@ impl Strand {
 	pub fn as_str(&self) -> &str {
 		self.0.as_str()
 	}
+
+	pub fn to_raw_string(&self) -> String {
+		self.0.clone()
+	}
 }
 
 impl Borrow<StrandRef> for Strand {

@@ -6,11 +6,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::expr::index::Index;
+use crate::catalog::{self, DatabaseId, Index, IndexDefinition, NamespaceId};
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
-use crate::expr::statements::{DefineFieldStatement, DefineIndexStatement};
 use crate::expr::{
 	BinaryOperator, Cond, Expr, FlowResultExt as _, Ident, Idiom, Kind, Literal, Order, Part, With,
 };
@@ -185,8 +183,7 @@ impl<'a> TreeBuilder<'a> {
 				self.check_boolean_operator(group, op);
 				let left_node = stk.run(|stk| self.eval_value(stk, group, left)).await?;
 				let right_node = stk.run(|stk| self.eval_value(stk, group, right)).await?;
-				// If both values are computable, then we can delegate the computation to the
-				// parent
+				// If both values are computable, then we can delegate the computation to the parent
 				if left_node == Node::Computable && right_node == Node::Computable {
 					return Ok(Node::Computable);
 				}
@@ -363,7 +360,7 @@ impl<'a> TreeBuilder<'a> {
 	async fn resolve_record_field(
 		&mut self,
 		tx: &Transaction,
-		fields: &[DefineFieldStatement],
+		fields: &[catalog::FieldDefinition],
 		idiom: &Arc<Idiom>,
 	) -> Result<Option<RecordOptions>> {
 		for field in fields.iter() {
@@ -685,12 +682,12 @@ impl IndexesMap {
 
 #[derive(Debug, Clone)]
 pub(super) struct IndexReference {
-	indexes: Arc<[DefineIndexStatement]>,
+	indexes: Arc<[IndexDefinition]>,
 	idx: usize,
 }
 
 impl IndexReference {
-	pub(super) fn new(indexes: Arc<[DefineIndexStatement]>, idx: usize) -> Self {
+	pub(super) fn new(indexes: Arc<[IndexDefinition]>, idx: usize) -> Self {
 		Self {
 			indexes,
 			idx,
@@ -713,7 +710,7 @@ impl PartialEq for IndexReference {
 impl Eq for IndexReference {}
 
 impl Deref for IndexReference {
-	type Target = DefineIndexStatement;
+	type Target = IndexDefinition;
 
 	fn deref(&self) -> &Self::Target {
 		&self.indexes[self.idx]
@@ -722,8 +719,8 @@ impl Deref for IndexReference {
 
 #[derive(Clone)]
 struct SchemaCache {
-	indexes: Arc<[DefineIndexStatement]>,
-	fields: Arc<[DefineFieldStatement]>,
+	indexes: Arc<[IndexDefinition]>,
+	fields: Arc<[catalog::FieldDefinition]>,
 }
 
 impl SchemaCache {

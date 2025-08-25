@@ -3,8 +3,6 @@ use std::fmt::{Display, Formatter};
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -12,12 +10,11 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::ident::Ident;
-use crate::expr::statements::define::DefineKind;
+use crate::expr::statements::define::run_indexing;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RebuildStatement {
 	Index(RebuildIndexStatement),
 }
@@ -45,8 +42,7 @@ impl Display for RebuildStatement {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RebuildIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -77,11 +73,10 @@ impl RebuildIndexStatement {
 				}
 			}
 		};
-		let mut ix = ix.as_ref().clone();
-		ix.kind = DefineKind::Overwrite;
+		let ix = ix.as_ref().clone();
 
 		// Rebuild the index
-		ix.compute(stk, ctx, opt, doc).await?;
+		run_indexing(stk, ctx, opt, doc, &ix, false).await?;
 		// Ok all good
 		Ok(Value::None)
 	}

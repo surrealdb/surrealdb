@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
+use std::str::FromStr;
 
 use md5::{Digest, Md5};
+use reblessive::Stack;
 use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use revision::Revisioned;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -18,8 +19,7 @@ use crate::expr::{FlowResult, Ident, Part, Value};
 
 pub mod recursion;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Idioms(pub Vec<Idiom>);
 
 impl Deref for Idioms {
@@ -49,8 +49,8 @@ impl InfoStructure for Idioms {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+/// An idiom defines a way to reference a field, reference, or other part of the document graph.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Idiom(pub Vec<Part>);
 
 impl Deref for Idiom {
@@ -115,18 +115,18 @@ impl Idiom {
 	}
 
 	/// Returns a raw string representation of this idiom without any escaping.
-	pub(crate) fn as_raw_string(&self) -> String {
+	pub(crate) fn to_raw_string(&self) -> String {
 		let mut s = String::new();
 
 		let mut iter = self.0.iter();
 		match iter.next() {
-			Some(Part::Field(v)) => s.push_str(&v.as_raw_string()),
-			Some(x) => s.push_str(&x.as_raw_string()),
+			Some(Part::Field(v)) => s.push_str(&v.to_raw_string()),
+			Some(x) => s.push_str(&x.to_raw_string()),
 			None => {}
 		};
 
 		for p in iter {
-			s.push_str(&p.as_raw_string());
+			s.push_str(&p.to_raw_string());
 		}
 
 		s
@@ -190,6 +190,45 @@ impl Display for Idiom {
 			p.fmt(f)?;
 		}
 		Ok(())
+	}
+}
+
+impl FromStr for Idiom {
+	type Err = revision::Error;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		let buf = s.as_bytes();
+		let mut stack = Stack::new();
+		let mut parser = crate::syn::parser::Parser::new(buf);
+		let expr = stack
+			.enter(|stk| parser.parse_expr(stk))
+			.finish()
+			.map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
+
+		match expr {
+			crate::sql::Expr::Idiom(idiom) => Ok(idiom.into()),
+			_ => Err(revision::Error::Conversion("Expected an idiom".to_string())),
+		}
+	}
+}
+
+impl Revisioned for Idiom {
+	fn revision() -> u16 {
+		1
+	}
+
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
+		self.to_raw_string().serialize_revisioned(writer)?;
+		Ok(())
+	}
+
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		let s: String = Revisioned::deserialize_revisioned(reader)?;
+		let idiom =
+			Idiom::from_str(&s).map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
+		Ok(idiom)
 	}
 }
 
@@ -297,6 +336,6 @@ mod tests {
 	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("value".to_string())))]), "nested.nested.value")]
 	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("value".to_string())))]), "value")]
 	fn test_idiom_to_raw_string(#[case] idiom: Idiom, #[case] expected: &'static str) {
-		assert_eq!(idiom.as_raw_string(), expected.to_string());
+		assert_eq!(idiom.to_raw_string(), expected.to_string());
 	}
 }

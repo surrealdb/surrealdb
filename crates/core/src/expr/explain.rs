@@ -1,10 +1,6 @@
 use std::fmt;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Explain(pub bool);
 
 impl fmt::Display for Explain {

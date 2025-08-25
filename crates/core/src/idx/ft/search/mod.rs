@@ -1,10 +1,3 @@
-mod doclength;
-mod offsets;
-mod postings;
-pub(crate) mod scorer;
-pub(in crate::idx) mod termdocs;
-pub(crate) mod terms;
-
 use std::collections::HashSet;
 use std::ops::BitAnd;
 use std::sync::Arc;
@@ -16,12 +9,10 @@ use roaring::treemap::IntoIter;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{self, DatabaseId, NamespaceId, Scoring, SearchParams};
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::expr::index::SearchParams;
-use crate::expr::statements::DefineAnalyzerStatement;
-use crate::expr::{Idiom, Scoring};
+use crate::expr::Idiom;
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::docids::btdocids::BTreeDocIds;
@@ -29,18 +20,26 @@ use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::highlighter::{HighlightParams, Highlighter, Offseter};
 use crate::idx::ft::offset::OffsetRecords;
-use crate::idx::ft::search::doclength::DocLengths;
-use crate::idx::ft::search::offsets::Offsets;
-use crate::idx::ft::search::postings::Postings;
-use crate::idx::ft::search::scorer::BM25Scorer;
-use crate::idx::ft::search::termdocs::{SearchTermDocs, SearchTermsDocs};
-use crate::idx::ft::search::terms::{SearchTerms, TermId, TermLen};
 use crate::idx::ft::{DocLength, TermFrequency};
 use crate::idx::planner::iterators::MatchesHitsIterator;
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::IndexStores;
 use crate::kvs::{KVValue, Key, Transaction, TransactionType};
 use crate::val::{Object, RecordId, Value};
+
+mod doclength;
+mod offsets;
+mod postings;
+pub(crate) mod scorer;
+pub(in crate::idx) mod termdocs;
+pub(crate) mod terms;
+
+use doclength::DocLengths;
+use offsets::Offsets;
+use postings::Postings;
+use scorer::BM25Scorer;
+use termdocs::{SearchTermDocs, SearchTermsDocs};
+use terms::{SearchTerms, TermId, TermLen};
 
 pub(in crate::idx) type TermIdList = Vec<Option<(TermId, TermLen)>>;
 
@@ -153,7 +152,7 @@ impl SearchIndex {
 	async fn with_analyzer(
 		ixs: &IndexStores,
 		txn: &Transaction,
-		az: Arc<DefineAnalyzerStatement>,
+		az: Arc<catalog::AnalyzerDefinition>,
 		index_key_base: IndexKeyBase,
 		p: &SearchParams,
 		tt: TransactionType,
@@ -664,10 +663,9 @@ mod tests {
 	use reblessive::tree::Stk;
 	use test_log::test;
 
-	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::catalog::{self, DatabaseId, NamespaceId, SearchParams};
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
-	use crate::expr::index::SearchParams;
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::Score;
@@ -723,7 +721,7 @@ mod tests {
 		ctx: &Context,
 		ds: &Datastore,
 		tt: TransactionType,
-		az: Arc<DefineAnalyzerStatement>,
+		az: Arc<catalog::AnalyzerDefinition>,
 		order: u32,
 		hl: bool,
 	) -> (Context, Options, SearchIndex) {
@@ -774,7 +772,7 @@ mod tests {
 		let DefineStatement::Analyzer(az) = *q else {
 			panic!()
 		};
-		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
+		let az = Arc::new(DefineAnalyzerStatement::from(az).to_definition());
 		let mut stack = reblessive::TreeStack::new();
 
 		let btree_order = 5;
@@ -917,7 +915,7 @@ mod tests {
 			let DefineStatement::Analyzer(az) = *q else {
 				panic!()
 			};
-			let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
+			let az = Arc::new(DefineAnalyzerStatement::from(az).to_definition());
 			let mut stack = reblessive::TreeStack::new();
 
 			let doc1 = RecordId::new("t".to_string(), strand!("doc1").to_owned());
@@ -1058,7 +1056,7 @@ mod tests {
 		let DefineStatement::Analyzer(az) = *q else {
 			panic!()
 		};
-		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
+		let az = Arc::new(DefineAnalyzerStatement::from(az).to_definition());
 		let doc = RecordId::new("t".to_string(), strand!("doc1").to_owned());
 		let content = Value::from(Array::from(vec![
 			"Enter a search term",

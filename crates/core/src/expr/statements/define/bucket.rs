@@ -2,22 +2,18 @@ use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use super::{CursorDoc, DefineKind};
 use crate::buc::{self, BucketConnectionKey};
+use crate::catalog::{BucketDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, FlowResultExt, Ident, Literal, Permission};
+use crate::expr::{Base, Expr, FlowResultExt, Ident};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::impl_kv_value_revisioned;
-use crate::val::{Object, Strand, Value};
+use crate::val::{Strand, Value};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineBucketStatement {
 	pub kind: DefineKind,
 	pub name: Ident,
@@ -85,12 +81,12 @@ impl DefineBucketStatement {
 		// Process the statement
 		let key = crate::key::database::bu::new(ns, db, &name);
 		let ap = BucketDefinition {
-			name: self.name.clone(),
+			id: None,
+			name: self.name.to_raw_string(),
 			backend,
 			permissions: self.permissions.clone(),
 			readonly: self.readonly,
-			comment: self.comment.clone(),
-			..Default::default()
+			comment: self.comment.as_ref().map(|c| c.to_raw_string()),
 		};
 		txn.set(&key, &ap, None).await?;
 		// Clear the cache
@@ -115,70 +111,15 @@ impl Display for DefineBucketStatement {
 		}
 
 		if let Some(ref backend) = self.backend {
-			write!(f, " BACKEND {}", backend)?;
+			write!(f, " BACKEND {backend}")?;
 		}
 
 		write!(f, " PERMISSIONS {}", self.permissions)?;
 
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?;
+			write!(f, " COMMENT {comment}")?;
 		}
 
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineBucketStatement {
-	fn structure(self) -> Value {
-		Value::from(Object(map! {
-			"name".to_string() => self.name.structure(),
-			"permissions".to_string() => self.permissions.structure(),
-			// TODO: Null byte validity
-			"backend".to_string(), if let Some(backend) = self.backend => Value::Strand(Strand::new(backend.to_string()).unwrap()),
-			"readonly".to_string() => self.readonly.into(),
-			"comment".to_string(), if let Some(comment) = self.comment => comment.into(),
-		}))
-	}
-}
-
-// Computed bucket definition struct
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-pub struct BucketDefinition {
-	pub id: Option<u32>,
-	pub name: Ident,
-	pub backend: Option<String>,
-	pub permissions: Permission,
-	pub readonly: bool,
-	pub comment: Option<Strand>,
-}
-impl_kv_value_revisioned!(BucketDefinition);
-
-impl From<BucketDefinition> for DefineBucketStatement {
-	fn from(value: BucketDefinition) -> Self {
-		DefineBucketStatement {
-			kind: DefineKind::Default,
-			name: value.name,
-			// TODO: Null byte validity.
-			backend: value.backend.map(|v| Expr::Literal(Literal::Strand(Strand::new(v).unwrap()))),
-			permissions: value.permissions,
-			readonly: value.readonly,
-			comment: value.comment,
-		}
-	}
-}
-
-impl InfoStructure for BucketDefinition {
-	fn structure(self) -> Value {
-		let db: DefineBucketStatement = self.into();
-		db.structure()
-	}
-}
-
-impl Display for BucketDefinition {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let db: DefineBucketStatement = self.clone().into();
-		db.fmt(f)
 	}
 }

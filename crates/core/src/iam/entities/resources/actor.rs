@@ -1,12 +1,12 @@
 use std::ops::Deref;
-use std::str::FromStr;
+use std::str::FromStr as _;
 
+use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use super::{Level, Resource, ResourceKind};
-use crate::expr::statements::{DefineAccessStatement, DefineUserStatement};
-use crate::iam::{Error, Role};
+use crate::iam::Role;
 
 //
 // User
@@ -53,6 +53,11 @@ impl Actor {
 		}
 	}
 
+	pub fn from_role_names(id: String, roles: &[String], level: Level) -> Result<Self> {
+		let roles = roles.iter().map(|x| Role::from_str(x)).collect::<Result<Vec<_>, _>>()?;
+		Ok(Self::new(id, roles, level))
+	}
+
 	/// Checks if the actor has the given role.
 	pub(crate) fn has_role(&self, role: Role) -> bool {
 		self.roles.contains(&role)
@@ -78,19 +83,5 @@ impl Deref for Actor {
 	type Target = Resource;
 	fn deref(&self) -> &Self::Target {
 		&self.res
-	}
-}
-
-impl std::convert::TryFrom<(&DefineUserStatement, Level)> for Actor {
-	type Error = Error;
-	fn try_from(val: (&DefineUserStatement, Level)) -> Result<Self, Self::Error> {
-		let roles = val.0.roles.iter().map(|e| Role::from_str(e)).collect::<Result<_, _>>()?;
-		Ok(Self::new(val.0.name.to_string(), roles, val.1))
-	}
-}
-
-impl std::convert::From<(&DefineAccessStatement, Level)> for Actor {
-	fn from(val: (&DefineAccessStatement, Level)) -> Self {
-		Self::new(val.0.name.to_string(), Vec::default(), val.1)
 	}
 }

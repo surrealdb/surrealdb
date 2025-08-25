@@ -1,6 +1,7 @@
 use anyhow::Result;
 use reblessive;
 
+use crate::catalog;
 use crate::cnf::INSECURE_FORWARD_ACCESS_ERRORS;
 use crate::ctx::MutableContext;
 use crate::dbs::Session;
@@ -118,17 +119,16 @@ pub async fn create_refresh_token_record(
 	ctx.set_transaction(tx.clone());
 	let ctx = ctx.freeze();
 	// Create a bearer grant to act as the refresh token
-	let grant =
-		access::create_grant(ac, Some(Base::Db), access::SubjectStore::Record(rid), &ctx, &opt)
-			.await
-			.map_err(|e| {
-				warn!("Unexpected error when attempting to create a refresh token: {e}");
-				Error::UnexpectedAuth
-			})?;
+	let grant = access::create_grant(ac, Some(Base::Db), catalog::Subject::Record(rid), &ctx, &opt)
+		.await
+		.map_err(|e| {
+			warn!("Unexpected error when attempting to create a refresh token: {e}");
+			Error::UnexpectedAuth
+		})?;
 	tx.commit().await?;
 	// Return the key string from the bearer grant
 	match grant.grant {
-		access::Grant::Bearer(bearer) => Ok(bearer.key.into_string()),
+		catalog::Grant::Bearer(bearer) => Ok(bearer.key),
 		_ => Err(anyhow::Error::new(Error::AccessMethodMismatch)),
 	}
 }

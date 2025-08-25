@@ -416,7 +416,7 @@ pub trait RpcProtocolV1: RpcContext {
 
 		// Specify the SQL query string
 		let sql = LiveStatement {
-			expr: if diff.unwrap_or(Value::None).is_true() {
+			fields: if diff.unwrap_or(Value::None).is_true() {
 				Fields::none()
 			} else {
 				Fields::all()

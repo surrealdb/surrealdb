@@ -2,8 +2,6 @@ use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use super::FlowResultExt as _;
 use crate::ctx::Context;
@@ -11,8 +9,7 @@ use crate::dbs::Options;
 use crate::expr::fmt::Fmt;
 use crate::expr::{AssignOperator, Expr, Idiom, Literal, Part, Value};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Data {
 	EmptyExpression,
 	SetExpression(Vec<Assignment>),
@@ -26,8 +23,7 @@ pub enum Data {
 	UpdateExpression(Vec<Assignment>),
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Assignment {
 	pub place: Idiom,
 	pub operator: AssignOperator,

@@ -412,6 +412,11 @@ impl<'a> Parser<'a> {
 	pub async fn parse_statement(&mut self, stk: &mut Stk) -> ParseResult<sql::TopLevelExpr> {
 		self.parse_top_level_expr(stk).await
 	}
+
+	/// Parse a single expression.
+	pub(crate) async fn parse_expr(&mut self, stk: &mut Stk) -> ParseResult<sql::Expr> {
+		self.parse_expr_start(stk).await
+	}
 }
 
 /// A struct which can parse queries statements by statement
@@ -497,7 +502,7 @@ impl StatementStream {
 			return Ok(None);
 		}
 
-		let res = self.stack.enter(|ctx| parser.parse_statement(ctx)).finish();
+		let res = self.stack.enter(|stk| parser.parse_statement(stk)).finish();
 		if parser.peek().is_eof() {
 			if buffer.len() > u32::MAX as usize {
 				let error = syntax_error!("Cannot parse query, statement exceeded maximum size of 4GB", @parser.last_span());
@@ -565,7 +570,7 @@ impl StatementStream {
 			return Ok(None);
 		}
 
-		match self.stack.enter(|ctx| parser.parse_statement(ctx)).finish() {
+		match self.stack.enter(|stk| parser.parse_statement(stk)).finish() {
 			Ok(x) => {
 				if !parser.peek().is_eof() && !parser.eat(t!(";")) {
 					let peek = parser.peek();

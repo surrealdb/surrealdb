@@ -2,10 +2,9 @@ use std::fmt;
 use std::fmt::Display;
 
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum Language {
 	Arabic,
 	Danish,

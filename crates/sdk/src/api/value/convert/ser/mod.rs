@@ -7,14 +7,14 @@ use anyhow::Result;
 use castaway::match_type;
 use serde::ser::Serialize;
 use serde_content::{Number, Serializer, Unexpected, Value as Content};
+use surrealdb_core::val;
 
-use crate::core::val;
 use crate::error::Api;
 
 //type Content = serde_content::Value<'static>;
 
-/// Convert a `T` into `surrealdb::expr::Value` which is an enum that can
-/// represent any valid SQL data.
+/// Convert a `T` into `surrealdb::expr::Value` which is an enum that can represent any valid SQL
+/// data.
 pub fn to_value<T>(value: T) -> Result<val::Value>
 where
 	T: Serialize + 'static,
@@ -117,10 +117,10 @@ mod tests {
 	use std::ops::Bound;
 
 	use ::serde::Serialize;
+	use surrealdb_core::val::Regex;
+	use surrealdb_core::{map, syn};
 
 	use super::*;
-	use crate::core::val::Regex;
-	use crate::core::{map, syn};
 
 	#[test]
 	fn value_none() {
@@ -202,7 +202,7 @@ mod tests {
 
 	#[test]
 	fn datetime() {
-		let datetime = val::Datetime::default();
+		let datetime = val::Datetime::now();
 		let value = to_value(datetime.clone()).unwrap();
 		let expected = val::Value::Datetime(datetime);
 		assert_eq!(value, expected);

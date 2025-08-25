@@ -5,8 +5,7 @@ use ahash::HashMap;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::DatabaseDefinition;
-use crate::expr::index::{HnswParams, VectorType};
+use crate::catalog::{DatabaseDefinition, HnswParams, VectorType};
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::planner::iterators::KnnIteratorResult;

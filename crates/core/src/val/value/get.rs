@@ -217,7 +217,7 @@ impl Value {
 						for p in p.iter() {
 							let idiom = p.idiom();
 							obj.insert(
-								p.field().as_raw_string(),
+								p.field().to_raw_string(),
 								stk.run(|stk| idiom.compute(stk, ctx, opt, Some(&cur_doc))).await?,
 							);
 						}

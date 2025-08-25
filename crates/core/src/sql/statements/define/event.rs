@@ -10,7 +10,7 @@ use crate::val::Strand;
 pub struct DefineEventStatement {
 	pub kind: DefineKind,
 	pub name: Ident,
-	pub what: Ident,
+	pub target_table: Ident,
 	pub when: Expr,
 	pub then: Vec<Expr>,
 	pub comment: Option<Strand>,
@@ -28,7 +28,7 @@ impl Display for DefineEventStatement {
 			f,
 			" {} ON {} WHEN {} THEN {}",
 			self.name,
-			self.what,
+			self.target_table,
 			self.when,
 			Fmt::comma_separated(&self.then)
 		)?;
@@ -44,7 +44,7 @@ impl From<DefineEventStatement> for crate::expr::statements::DefineEventStatemen
 		crate::expr::statements::DefineEventStatement {
 			kind: v.kind.into(),
 			name: v.name.into(),
-			target_table: v.what.into(),
+			target_table: v.target_table.into(),
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
 			comment: v.comment,
@@ -57,7 +57,7 @@ impl From<crate::expr::statements::DefineEventStatement> for DefineEventStatemen
 		DefineEventStatement {
 			kind: v.kind.into(),
 			name: v.name.into(),
-			what: v.target_table.into(),
+			target_table: v.target_table.into(),
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
 			comment: v.comment,

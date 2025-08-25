@@ -1,6 +1,7 @@
 use std::fmt;
 
 use crate::sql::fmt::Pretty;
+use crate::sql::literal::ObjectEntry;
 use crate::sql::operator::BindingPower;
 use crate::sql::statements::{
 	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
@@ -10,8 +11,9 @@ use crate::sql::statements::{
 };
 use crate::sql::{
 	BinaryOperator, Block, Closure, Constant, FunctionCall, Ident, Idiom, Literal, Mock, Param,
-	PostfixOperator, PrefixOperator,
+	PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
+use crate::val::{Number, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -78,6 +80,47 @@ impl Expr {
 				x => Idiom::field(Ident::new(x.to_string()).unwrap()),
 			},
 			x => Idiom::field(Ident::new(x.to_string()).unwrap()),
+		}
+	}
+
+	pub(crate) fn from_value(value: Value) -> Self {
+		match value {
+			Value::None => Expr::Literal(Literal::None),
+			Value::Null => Expr::Literal(Literal::Null),
+			Value::Bool(x) => Expr::Literal(Literal::Bool(x)),
+			Value::Number(Number::Float(x)) => Expr::Literal(Literal::Float(x)),
+			Value::Number(Number::Int(x)) => Expr::Literal(Literal::Integer(x)),
+			Value::Number(Number::Decimal(x)) => Expr::Literal(Literal::Decimal(x)),
+			Value::Strand(x) => Expr::Literal(Literal::Strand(x)),
+			Value::Bytes(x) => Expr::Literal(Literal::Bytes(x)),
+			Value::Regex(x) => Expr::Literal(Literal::Regex(x)),
+			Value::RecordId(x) => Expr::Literal(Literal::RecordId(RecordIdLit {
+				table: x.table.clone(),
+				key: RecordIdKeyLit::from_record_id_key(x.key),
+			})),
+			Value::Array(x) => {
+				Expr::Literal(Literal::Array(x.into_iter().map(Expr::from_value).collect()))
+			}
+			Value::Object(x) => Expr::Literal(Literal::Object(
+				x.into_iter()
+					.map(|(k, v)| ObjectEntry {
+						key: k,
+						value: Expr::from_value(v),
+					})
+					.collect(),
+			)),
+			Value::Duration(x) => Expr::Literal(Literal::Duration(x)),
+			Value::Datetime(x) => Expr::Literal(Literal::Datetime(x)),
+			Value::Uuid(x) => Expr::Literal(Literal::Uuid(x)),
+			Value::Geometry(x) => Expr::Literal(Literal::Geometry(x)),
+			Value::File(x) => Expr::Literal(Literal::File(x)),
+			Value::Closure(x) => Expr::Literal(Literal::Closure(Box::new(Closure {
+				args: x.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
+				returns: x.returns.map(|k| k.into()),
+				body: x.body.into(),
+			}))),
+			Value::Table(x) => Expr::Table(unsafe { Ident::new_unchecked(x.into_string()) }),
+			Value::Range(x) => x.into_literal().into(),
 		}
 	}
 }
@@ -161,7 +204,7 @@ impl fmt::Display for Expr {
 			Expr::Closure(closure) => write!(f, "{closure}"),
 			Expr::Break => write!(f, "BREAK"),
 			Expr::Continue => write!(f, "CONTINUE"),
-			Expr::Return(x) => write!(f, "RETURN {x}"),
+			Expr::Return(x) => write!(f, "{x}"),
 			Expr::Throw(expr) => write!(f, "THROW {expr}"),
 			Expr::If(s) => write!(f, "{s}"),
 			Expr::Select(s) => write!(f, "{s}"),

@@ -3,7 +3,7 @@ use std::fmt;
 
 use anyhow::Result;
 
-use crate::catalog::TableDefinition;
+use crate::catalog::{Permission, TableDefinition};
 use crate::ctx::{Context, MutableContext};
 use crate::err::Error;
 use crate::expr::cond::Cond;
@@ -27,7 +27,7 @@ use crate::expr::statements::select::SelectStatement;
 use crate::expr::statements::show::ShowStatement;
 use crate::expr::statements::update::UpdateStatement;
 use crate::expr::statements::upsert::UpsertStatement;
-use crate::expr::{Explain, Permission, Timeout, With};
+use crate::expr::{Explain, Timeout, With};
 use crate::idx::planner::QueryPlanner;
 
 #[derive(Clone, Debug)]
@@ -250,7 +250,7 @@ impl Statement<'_> {
 	pub(crate) fn expr(&self) -> Option<&Fields> {
 		match self {
 			Statement::Select(v) => Some(&v.expr),
-			Statement::Live(v) => Some(&v.expr),
+			Statement::Live(v) => Some(&v.fields),
 			_ => None,
 		}
 	}

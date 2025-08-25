@@ -1,10 +1,6 @@
 use std::fmt::{Display, Formatter, Result};
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum With {
 	NoIndex,
 	Index(Vec<String>),

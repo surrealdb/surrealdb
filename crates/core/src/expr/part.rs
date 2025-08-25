@@ -1,10 +1,8 @@
+use std::fmt;
 use std::fmt::Write;
-use std::{fmt, str};
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::cnf::IDIOM_RECURSION_LIMIT;
 use crate::ctx::Context;
@@ -19,8 +17,7 @@ use crate::expr::idiom::recursion::{
 use crate::expr::{Expr, FlowResultExt as _, Graph, Ident, Idiom, Literal, Value};
 use crate::val::{Array, RecordId};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Part {
 	All,
 	Flatten,
@@ -54,49 +51,6 @@ impl Part {
 
 	pub(crate) fn is_index(&self) -> bool {
 		matches!(self, Part::Value(Expr::Literal(Literal::Integer(_))) | Part::First | Part::Last)
-	}
-
-	/// Returns a raw string representation of this part without any escaping.
-	pub(crate) fn as_raw_string(&self) -> String {
-		match self {
-			Part::All => "[*]".to_string(),
-			Part::Last => "[$]".to_string(),
-			Part::First => "[0]".to_string(),
-			Part::Start(v) => v.to_string(),
-			Part::Field(v) => format!(".{}", v.as_raw_string()),
-			Part::Flatten => "…".to_string(),
-			Part::Where(v) => format!("[WHERE {v}]"),
-			Part::Graph(v) => v.to_string(),
-			Part::Value(v) => format!("[{v}]"),
-			Part::Method(v, a) => format!(".{v}({})", Fmt::comma_separated(a)),
-			Part::Destructure(v) => {
-				let mut s = String::from(".{");
-				for (i, p) in v.iter().enumerate() {
-					s.push_str(&p.as_raw_string());
-					if i != v.len() - 1 {
-						s.push(',');
-					}
-				}
-				s.push('}');
-				s
-			}
-			Part::Optional => "?".to_string(),
-			Part::Recurse(v, nest, instruction) => {
-				let mut s = format!(".{{{v}");
-				if let Some(instruction) = instruction {
-					s.push_str(&format!("+{instruction}"));
-				}
-				s.push('}');
-
-				if let Some(nest) = nest {
-					s.push_str(&format!("({nest})"));
-				}
-
-				s
-			}
-			Part::Doc => "@".to_string(),
-			Part::RepeatRecurse => ".@".to_string(),
-		}
 	}
 
 	/// Returns the idex if this part would have been `Part::Index(x)` before
@@ -181,6 +135,14 @@ impl Part {
 				None
 			}
 			_ => None,
+		}
+	}
+
+	pub(crate) fn to_raw_string(&self) -> String {
+		match self {
+			Part::Start(v) => v.to_raw_string(),
+			Part::Field(v) => format!(".{}", v.to_raw_string()),
+			_ => self.to_string(),
 		}
 	}
 }
@@ -319,7 +281,7 @@ impl<'a> RecursionPlan {
 					.catch_return()?
 				{
 					Value::Object(mut obj) => {
-						obj.insert(field.as_raw_string(), v);
+						obj.insert(field.to_raw_string(), v);
 						Ok(Value::Object(obj))
 					}
 					Value::None => Ok(Value::None),
@@ -445,8 +407,7 @@ impl<'a> NextMethod<'a> for &'a Idiom {
 
 // ------------------------------
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum DestructurePart {
 	All(Ident),
 	Field(Ident),
@@ -475,25 +436,6 @@ impl DestructurePart {
 		}
 	}
 
-	pub(crate) fn as_raw_string(&self) -> String {
-		match self {
-			DestructurePart::All(fd) => format!("{}.*", fd.as_raw_string()),
-			DestructurePart::Field(fd) => fd.as_raw_string(),
-			DestructurePart::Aliased(fd, v) => {
-				format!("{}: {}", fd.as_raw_string(), v.as_raw_string())
-			}
-			DestructurePart::Destructure(fd, d) => {
-				let mut s = fd.as_raw_string();
-				s.push('{');
-				for p in d.iter() {
-					s.push_str(&p.as_raw_string());
-				}
-				s.push('}');
-				s
-			}
-		}
-	}
-
 	pub fn idiom(&self) -> Idiom {
 		Idiom(self.path())
 	}
@@ -514,8 +456,7 @@ impl fmt::Display for DestructurePart {
 
 // ------------------------------
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Recurse {
 	Fixed(u32),
 	Range(Option<u32>, Option<u32>),
@@ -565,8 +506,7 @@ impl fmt::Display for Recurse {
 
 // ------------------------------
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RecurseInstruction {
 	Path {
 		// Do we include the starting point in the paths?

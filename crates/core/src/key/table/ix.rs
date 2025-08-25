@@ -2,8 +2,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::expr::DefineIndexStatement;
+use crate::catalog::{DatabaseId, IndexDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
@@ -23,7 +22,7 @@ pub(crate) struct Ix<'a> {
 }
 
 impl KVKey for Ix<'_> {
-	type ValueType = DefineIndexStatement;
+	type ValueType = IndexDefinition;
 }
 
 pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Ix<'a> {

@@ -2,8 +2,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::expr::DefineParamStore;
+use crate::catalog::{DatabaseId, NamespaceId, ParamDefinition};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
@@ -21,7 +20,7 @@ pub(crate) struct Pa<'a> {
 }
 
 impl KVKey for Pa<'_> {
-	type ValueType = DefineParamStore;
+	type ValueType = ParamDefinition;
 }
 
 pub fn new(ns: NamespaceId, db: DatabaseId, pa: &str) -> Pa<'_> {

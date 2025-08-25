@@ -3,8 +3,6 @@ use std::sync::Arc;
 
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
@@ -19,8 +17,7 @@ use crate::expr::{
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::{Datetime, Value};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SelectStatement {
 	/// The foo,bar part in SELECT foo,bar FROM baz.
 	pub expr: Fields,
@@ -102,6 +99,7 @@ impl SelectStatement {
 			_ => None,
 		};
 		let opt = Arc::new(opt.clone().with_version(version));
+
 		// Extract the limits
 		i.setup_limit(stk, ctx, &opt, &stm).await?;
 		// Fail for multiple targets without a limit

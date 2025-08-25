@@ -27,7 +27,7 @@ use crate::val::Value;
 /// # Examples
 ///
 /// ```rust
-/// use surrealdb::val::{Record, Data, Value};
+/// use surrealdb_core::val::{Record, Data, Value};
 ///
 /// // Create a new record with mutable data
 /// let data = Data::Mutable(Value::Object(Object::default()));

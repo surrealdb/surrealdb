@@ -1,9 +1,9 @@
 use std::fmt;
 use std::ops::Bound;
 
+use reblessive::Stack;
 use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use revision::Revisioned;
 
 use super::SleepStatement;
 use crate::ctx::{Context, MutableContext};
@@ -26,9 +26,7 @@ use crate::expr::{
 use crate::fnc;
 use crate::val::{Array, Closure, Range, Strand, Value};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Value")]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Expr {
 	Literal(Literal),
 	Param(Param),
@@ -620,6 +618,14 @@ impl Expr {
 
 		res.map_err(ControlFlow::Err)
 	}
+
+	pub(crate) fn to_raw_string(&self) -> String {
+		match self {
+			Expr::Idiom(idiom) => idiom.to_raw_string(),
+			Expr::Table(ident) => ident.to_raw_string(),
+			_ => self.to_string(),
+		}
+	}
 }
 
 impl fmt::Display for Expr {
@@ -727,5 +733,31 @@ impl InfoStructure for Expr {
 	fn structure(self) -> Value {
 		// TODO: null byte validity
 		Strand::new(self.to_string()).unwrap().into()
+	}
+}
+
+impl Revisioned for Expr {
+	fn revision() -> u16 {
+		1
+	}
+
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
+		self.to_string().serialize_revisioned(writer)?;
+		Ok(())
+	}
+
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		let query: String = Revisioned::deserialize_revisioned(reader)?;
+
+		let mut stack = Stack::new();
+		let mut parser = crate::syn::parser::Parser::new(query.as_bytes());
+		let expr = stack
+			.enter(|stk| parser.parse_expr(stk))
+			.finish()
+			.map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
+		Ok(expr.into())
 	}
 }

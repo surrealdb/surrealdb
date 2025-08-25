@@ -1,10 +1,11 @@
 use reblessive::tree::Stk;
 
+use crate::catalog::FieldDefinition;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
-use crate::expr::{DefineFieldStatement, FlowResultExt as _};
+use crate::expr::FlowResultExt as _;
 use crate::val::RecordId;
 
 impl Document {
@@ -42,7 +43,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		rid: &RecordId,
-		fields: &[DefineFieldStatement],
+		fields: &[FieldDefinition],
 		doc: &mut CursorDoc,
 	) -> anyhow::Result<()> {
 		// Check if the fields have already been computed

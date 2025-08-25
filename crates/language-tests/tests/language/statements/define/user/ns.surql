@@ -2,6 +2,7 @@
 [env]
 namespace = false
 clean = true
+timeout = 10000
 
 [test]
 

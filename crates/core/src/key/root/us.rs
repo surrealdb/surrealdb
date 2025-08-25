@@ -1,7 +1,7 @@
 //! Stores a DEFINE USER ON ROOT config definition
 use serde::{Deserialize, Serialize};
 
-use crate::expr::statements::define::DefineUserStatement;
+use crate::catalog;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
@@ -15,7 +15,7 @@ pub(crate) struct Us<'a> {
 }
 
 impl KVKey for Us<'_> {
-	type ValueType = DefineUserStatement;
+	type ValueType = catalog::UserDefinition;
 }
 
 pub fn new(user: &str) -> Us<'_> {

@@ -3,13 +3,13 @@ use std::sync::Arc;
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
+use crate::catalog;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::doc::compute::DocKind;
 use crate::expr::output::Output;
-use crate::expr::permission::Permission;
 use crate::expr::{FlowResultExt as _, Operation};
 use crate::iam::Action;
 use crate::val::Value;
@@ -135,10 +135,10 @@ impl Document {
 					// Loop over each field in document
 					for k in out.each(&fd.name).iter() {
 						// Process the field permissions
-						match &fd.permissions.select {
-							Permission::Full => (),
-							Permission::None => out.del(stk, ctx, opt, k).await?,
-							Permission::Specific(e) => {
+						match &fd.select_permission {
+							catalog::Permission::Full => (),
+							catalog::Permission::None => out.del(stk, ctx, opt, k).await?,
+							catalog::Permission::Specific(e) => {
 								// Disable permissions
 								let opt = &opt.new_with_perms(false);
 								// Get the current value

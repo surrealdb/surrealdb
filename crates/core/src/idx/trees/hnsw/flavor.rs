@@ -1,8 +1,7 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::DatabaseDefinition;
-use crate::expr::index::HnswParams;
+use crate::catalog::{DatabaseDefinition, HnswParams};
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::{AHashSet, ArraySet};

@@ -19,8 +19,10 @@ impl Value {
 	) -> Result<()> {
 		match self.get(stk, ctx, opt, None, path).await.catch_return()? {
 			Value::Array(v) => match val {
-				Value::Array(x) => self.set(stk, ctx, opt, path, Value::from((v + x).uniq())).await,
-				x => self.set(stk, ctx, opt, path, Value::from((v + x).uniq())).await,
+				Value::Array(x) => {
+					self.set(stk, ctx, opt, path, Value::from(v.concat(x).uniq())).await
+				}
+				x => self.set(stk, ctx, opt, path, Value::from(v.with_push(x).uniq())).await,
 			},
 			Value::None => match val {
 				Value::Array(x) => self.set(stk, ctx, opt, path, Value::from(x)).await,

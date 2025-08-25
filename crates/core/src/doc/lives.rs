@@ -4,13 +4,13 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
+use crate::catalog::{Permission, SubscriptionDefinition};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Action, Notification, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
+use crate::expr::FlowResultExt as _;
 use crate::expr::paths::{AC, RD, TK};
-use crate::expr::permission::Permission;
-use crate::expr::{FlowResultExt as _, LiveStatement};
 use crate::val::Value;
 
 impl Document {
@@ -43,17 +43,15 @@ impl Document {
 		}
 
 		// Get all live queries for this table
-		let lvs = self.lv(ctx, opt).await?;
+		let live_subscriptions = self.lv(ctx, opt).await?;
 
 		// If there are no live queries, we can skip the rest of the function
-		if lvs.is_empty() {
+		if live_subscriptions.is_empty() {
 			return Ok(());
 		}
 
 		// Loop through all index statements
-		for lv in lvs.iter() {
-			// Create a new statement
-			let lq = Statement::from(lv);
+		for live_subscription in live_subscriptions.iter() {
 			// Get the event action
 			let met = if stm.is_delete() {
 				Value::from("DELETE")
@@ -75,12 +73,12 @@ impl Document {
 			let current = self.current.doc.as_arc();
 			let initial = self.initial.doc.as_arc();
 			// Ensure that a session exists on the LIVE query
-			let sess = match lv.session.as_ref() {
+			let sess = match live_subscription.session.as_ref() {
 				Some(v) => v,
 				None => continue,
 			};
 			// Ensure that auth info exists on the LIVE query
-			let auth = match lv.auth.clone() {
+			let auth = match live_subscription.auth.clone() {
 				Some(v) => v,
 				None => continue,
 			};
@@ -146,7 +144,7 @@ impl Document {
 			// First of all, let's check to see if the WHERE
 			// clause of the LIVE query is matched by this
 			// document. If it is then we can continue.
-			match self.lq_check(stk, &lqctx, &lqopt, &lq, &doc).await {
+			match self.lq_check(stk, &lqctx, &lqopt, live_subscription, &doc).await {
 				Err(IgnoreError::Ignore) => continue,
 				Err(IgnoreError::Error(e)) => return Err(e),
 				Ok(_) => (),
@@ -155,7 +153,7 @@ impl Document {
 			// clause for this table allows this document to
 			// be viewed by the user who created this LIVE
 			// query. If it does, then we can continue.
-			match self.lq_allow(stk, &lqctx, &lqopt, &lq).await {
+			match self.lq_allow(stk, &lqctx, &lqopt).await {
 				Err(IgnoreError::Ignore) => continue,
 				Err(IgnoreError::Error(e)) => return Err(e),
 				Ok(_) => (),
@@ -165,7 +163,7 @@ impl Document {
 			// the relevant result.
 			let (action, mut result) = if stm.is_delete() {
 				// Prepare a DELETE notification
-				if opt.id()? == lv.node.0 {
+				if opt.id()? == live_subscription.node {
 					// Ensure futures are run
 					// Output the full document before any changes were applied
 					let result = doc.doc.as_ref().clone();
@@ -176,15 +174,16 @@ impl Document {
 				}
 			} else if self.is_new() {
 				// Prepare a CREATE notification
-				if opt.id()? == lv.node.0 {
+				if opt.id()? == live_subscription.node {
 					// An error ignore here is about livequery not the query which invoked the
 					// livequery trigger. So we should catch the ignore and skip this entry in this
 					// case.
-					let result = match self.lq_pluck(stk, &lqctx, &lqopt, lv, &doc).await {
-						Err(IgnoreError::Ignore) => continue,
-						Err(IgnoreError::Error(e)) => return Err(e),
-						Ok(x) => x,
-					};
+					let result =
+						match self.lq_pluck(stk, &lqctx, &lqopt, live_subscription, &doc).await {
+							Err(IgnoreError::Ignore) => continue,
+							Err(IgnoreError::Error(e)) => return Err(e),
+							Ok(x) => x,
+						};
 					(Action::Create, result)
 				} else {
 					// TODO: Send to message broker
@@ -192,15 +191,16 @@ impl Document {
 				}
 			} else {
 				// Prepare a UPDATE notification
-				if opt.id()? == lv.node.0 {
+				if opt.id()? == live_subscription.node {
 					// An error ignore here is about livequery not the query which invoked the
 					// livequery trigger. So we should catch the ignore and skip this entry in this
 					// case.
-					let result = match self.lq_pluck(stk, &lqctx, &lqopt, lv, &doc).await {
-						Err(IgnoreError::Ignore) => continue,
-						Err(IgnoreError::Error(e)) => return Err(e),
-						Ok(x) => x,
-					};
+					let result =
+						match self.lq_pluck(stk, &lqctx, &lqopt, live_subscription, &doc).await {
+							Err(IgnoreError::Ignore) => continue,
+							Err(IgnoreError::Error(e)) => return Err(e),
+							Ok(x) => x,
+						};
 					(Action::Update, result)
 				} else {
 					// TODO: Send to message broker
@@ -209,8 +209,8 @@ impl Document {
 			};
 
 			// Process any potential `FETCH` clause on the live statement
-			if let Some(fetchs) = &lv.fetch {
-				let mut idioms = Vec::with_capacity(fetchs.0.len());
+			if let Some(fetchs) = &live_subscription.fetch {
+				let mut idioms = Vec::with_capacity(fetchs.len());
 				for fetch in fetchs.iter() {
 					fetch.compute(stk, &lqctx, &lqopt, &mut idioms).await?;
 				}
@@ -222,7 +222,7 @@ impl Document {
 			// Send the notification
 			let res = chn
 				.send(Notification {
-					id: lv.id,
+					id: live_subscription.id.into(),
 					action,
 					record: Value::RecordId(rid.as_ref().clone()),
 					result,
@@ -244,14 +244,14 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		stm: &Statement<'_>,
+		live_subscription: &SubscriptionDefinition,
 		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		// Check where condition
-		if let Some(cond) = stm.cond() {
+		if let Some(cond) = live_subscription.cond.as_ref() {
 			// Check if the expression is truthy
 			if !stk
-				.run(|stk| cond.0.compute(stk, ctx, opt, Some(doc)))
+				.run(|stk| cond.compute(stk, ctx, opt, Some(doc)))
 				.await
 				.catch_return()?
 				.is_truthy()
@@ -269,10 +269,10 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		stm: &Statement<'_>,
 	) -> Result<(), IgnoreError> {
 		// Should we run permissions checks?
-		if opt.check_perms(stm.into())? {
+		// Live queries are always
+		if opt.check_perms(crate::iam::Action::View)? {
 			// Get the table
 			let tb = self.tb(ctx, opt).await?;
 			// Process the table permissions
@@ -281,11 +281,7 @@ impl Document {
 				Permission::Full => return Ok(()),
 				Permission::Specific(e) => {
 					// Retrieve the document to check permissions against
-					let doc = if stm.is_delete() {
-						&self.initial
-					} else {
-						&self.current
-					};
+					let doc = &self.current;
 
 					// Disable permissions
 					let opt = &opt.new_with_perms(false);
@@ -310,9 +306,13 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		stm: &LiveStatement,
+		live_subscription: &SubscriptionDefinition,
 		doc: &CursorDoc,
 	) -> Result<Value, IgnoreError> {
-		stm.expr.compute(stk, ctx, opt, Some(doc), false).await.map_err(IgnoreError::from)
+		live_subscription
+			.fields
+			.compute(stk, ctx, opt, Some(doc), false)
+			.await
+			.map_err(IgnoreError::from)
 	}
 }

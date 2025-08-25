@@ -1,8 +1,5 @@
 use std::fmt;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-
 use crate::expr::escape::EscapeIdent;
 use crate::val::{RecordId, RecordIdKey};
 
@@ -40,8 +37,7 @@ impl Iterator for IntoIter {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Mock {
 	Count(String, u64),
 	Range(String, u64, u64),

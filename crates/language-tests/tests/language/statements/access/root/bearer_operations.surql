@@ -1,0 +1,155 @@
+/**
+[env]
+clean = true
+namespace = false
+database = false
+
+[env.capabilities]
+allow-experimental = ["bearer_access"]
+
+[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+match = ''' $result.accesses.api == 'DEFINE ACCESS api ON ROOT TYPE BEARER FOR USER DURATION FOR GRANT 4w2d, FOR TOKEN 1h, FOR SESSION NONE' '''
+
+[[test.results]]
+match = '''
+	$result.ac == 'api'
+		&& 'creation' in $result
+		&& 'expiration' in $result
+		&& type::is::object($result.grant)
+		&& $result.revocation == NONE
+		&& $result.subject == { user: 'tobie'}
+		&& $result.type == 'bearer'
+'''
+
+[[test.results]]
+match = '''
+	$result.ac == 'api'
+		&& 'creation' in $result
+		&& 'expiration' in $result
+		&& type::is::object($result.grant)
+		&& $result.revocation == NONE
+		&& $result.subject == { user: 'tobie'}
+		&& $result.type == 'bearer'
+'''
+
+[[test.results]]
+match = '''
+	$result.ac == 'api'
+		&& 'creation' in $result
+		&& 'expiration' in $result
+		&& type::is::object($result.grant)
+		&& $result.revocation == NONE
+		&& $result.subject == { user: 'tobie'}
+		&& $result.type == 'bearer'
+'''
+
+[[test.results]]
+match = '''
+	$result.ac == 'api'
+		&& 'creation' in $result
+		&& 'expiration' in $result
+		&& type::is::object($result.grant)
+		&& $result.revocation == NONE
+		&& $result.subject == { user: 'tobie'}
+		&& $result.type == 'bearer'
+'''
+
+[[test.results]]
+match = '''
+	array::len($result) == 4
+
+		&& $result[0].ac == 'api'
+		&& type::is::object($result[0].grant)
+		&& $result[0].grant.key = '[REDACTED]'
+		&& 'id' in $result[0].grant
+
+		&& $result[1].ac == 'api'
+		&& type::is::object($result[1].grant)
+		&& $result[1].grant.key = '[REDACTED]'
+		&& 'id' in $result[1].grant
+
+		&& $result[2].ac == 'api'
+		&& type::is::object($result[2].grant)
+		&& $result[2].grant.key = '[REDACTED]'
+		&& 'id' in $result[2].grant
+
+		&& $result[3].ac == 'api'
+		&& type::is::object($result[3].grant)
+		&& $result[3].grant.key = '[REDACTED]'
+		&& 'id' in $result[3].grant
+
+'''
+
+
+[[test.results]]
+match = '''
+	array::len($result) == 4
+
+		&& $result[0].ac == 'api'
+		&& type::is::object($result[0].grant)
+		&& $result[0].grant.key = '[REDACTED]'
+		&& 'id' in $result[0].grant
+
+		&& $result[1].ac == 'api'
+		&& type::is::object($result[1].grant)
+		&& $result[1].grant.key = '[REDACTED]'
+		&& 'id' in $result[1].grant
+
+		&& $result[2].ac == 'api'
+		&& type::is::object($result[2].grant)
+		&& $result[2].grant.key = '[REDACTED]'
+		&& 'id' in $result[2].grant
+
+		&& $result[3].ac == 'api'
+		&& type::is::object($result[3].grant)
+		&& $result[3].grant.key = '[REDACTED]'
+		&& 'id' in $result[3].grant
+
+'''
+
+[[test.results]]
+error = "The root access method 'invalid' does not exist"
+
+[[test.results]]
+error = "The root access method 'invalid' does not exist"
+
+[[test.results]]
+error = "The root user 'invalid' does not exist"
+
+[[test.results]]
+error = "The root user 'invalid' does not exist"
+
+[[test.results]]
+error = "The root access method 'invalid' does not exist"
+
+[[test.results]]
+error = "The root access method 'invalid' does not exist"
+*/
+
+
+-- Initial setup
+DEFINE ACCESS api ON ROOT TYPE BEARER FOR USER;
+DEFINE USER tobie ON ROOT PASSWORD 'secret' ROLES EDITOR;
+INFO FOR ROOT;
+-- Should succeed
+ACCESS api ON ROOT GRANT FOR USER tobie;
+ACCESS api ON ROOT GRANT FOR USER tobie;
+ACCESS api GRANT FOR USER tobie;
+ACCESS api GRANT FOR USER tobie;
+ACCESS api ON ROOT SHOW ALL;
+ACCESS api SHOW ALL;
+-- Should fail
+ACCESS invalid ON ROOT GRANT FOR USER tobie;
+ACCESS invalid GRANT FOR USER tobie;
+ACCESS api ON ROOT GRANT FOR USER invalid;
+ACCESS api GRANT FOR USER invalid;
+ACCESS invalid ON ROOT SHOW ALL;
+ACCESS invalid SHOW ALL;

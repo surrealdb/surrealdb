@@ -2,9 +2,8 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use anyhow::Result;
-use revision::Revisioned;
 
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, KVValue};
 
 /// Advances a key to the next value,
 /// can be used to skip over a certain key.
@@ -31,12 +30,12 @@ pub fn to_prefix_range<K: KVKey>(key: K) -> Result<Range<Vec<u8>>> {
 /// expected type, returning an error if any of the values fail to serialize.
 pub fn deserialize_cache<'a, I, T>(iter: I) -> Result<Arc<[T]>>
 where
-	T: Revisioned,
+	T: KVValue,
 	I: Iterator<Item = &'a [u8]>,
 {
 	let mut buf = Vec::new();
-	for mut slice in iter {
-		buf.push(Revisioned::deserialize_revisioned(&mut slice)?)
+	for slice in iter {
+		buf.push(T::kv_decode_value(slice.to_vec())?)
 	}
 	Ok(Arc::from(buf))
 }

@@ -1,8 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::catalog::TableDefinition;
@@ -12,8 +10,7 @@ use crate::err::Error;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveIndexStatement {
 	pub name: Ident,
 	pub what: Ident,

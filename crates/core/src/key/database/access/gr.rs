@@ -2,8 +2,8 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::catalog;
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::expr::statements::access::AccessGrantStore;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
@@ -23,7 +23,7 @@ pub(crate) struct Gr<'a> {
 }
 
 impl KVKey for Gr<'_> {
-	type ValueType = AccessGrantStore;
+	type ValueType = catalog::AccessGrant;
 }
 
 pub fn new<'a>(ns: NamespaceId, db: DatabaseId, ac: &'a str, gr: &'a str) -> Gr<'a> {

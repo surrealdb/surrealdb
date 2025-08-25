@@ -12,8 +12,7 @@ use reblessive::tree::Stk;
 use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::DatabaseDefinition;
-use crate::expr::index::HnswParams;
+use crate::catalog::{DatabaseDefinition, HnswParams};
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
@@ -447,9 +446,10 @@ mod tests {
 	use roaring::RoaringTreemap;
 	use test_log::test;
 
-	use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
+	use crate::catalog::{
+		DatabaseDefinition, DatabaseId, Distance, HnswParams, NamespaceId, VectorType,
+	};
 	use crate::ctx::{Context, MutableContext};
-	use crate::expr::index::{Distance, HnswParams, VectorType};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::DocId;
 	use crate::idx::planner::checker::HnswConditionChecker;
@@ -567,17 +567,17 @@ mod tests {
 	) -> HnswParams {
 		let m = m as u8;
 		let m0 = m * 2;
-		HnswParams::new(
-			dimension as u16,
+		HnswParams {
+			dimension: dimension as u16,
 			distance,
 			vector_type,
 			m,
 			m0,
-			(1.0 / (m as f64).ln()).into(),
-			efc as u16,
+			ml: (1.0 / (m as f64).ln()).into(),
+			ef_construction: efc as u16,
 			extend_candidates,
 			keep_pruned_connections,
-		)
+		}
 	}
 
 	async fn test_hnsw(collection_size: usize, p: HnswParams) {

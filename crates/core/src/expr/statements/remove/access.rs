@@ -1,8 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -10,8 +8,7 @@ use crate::err::Error;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveAccessStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -34,7 +31,7 @@ impl RemoveAccessStatement {
 						return Ok(Value::None);
 					} else {
 						return Err(anyhow::Error::new(Error::AccessRootNotFound {
-							ac: self.name.as_raw_string(),
+							ac: self.name.to_raw_string(),
 						}));
 					}
 				};
@@ -61,7 +58,7 @@ impl RemoveAccessStatement {
 					} else {
 						let ns = opt.ns()?;
 						return Err(anyhow::Error::new(Error::AccessNsNotFound {
-							ac: self.name.as_raw_string(),
+							ac: self.name.to_raw_string(),
 							ns: ns.to_string(),
 						}));
 					}
@@ -89,7 +86,7 @@ impl RemoveAccessStatement {
 					} else {
 						let (ns, db) = opt.ns_db()?;
 						return Err(anyhow::Error::new(Error::AccessDbNotFound {
-							ac: self.name.as_raw_string(),
+							ac: self.name.to_raw_string(),
 							ns: ns.to_string(),
 							db: db.to_string(),
 						}));
@@ -106,7 +103,6 @@ impl RemoveAccessStatement {
 				// Ok all good
 				Ok(Value::None)
 			}
-			_ => Err(anyhow::Error::new(Error::InvalidLevel(self.base.to_string()))),
 		}
 	}
 }
