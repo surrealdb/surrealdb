@@ -11,7 +11,7 @@ pub struct Escape<'a> {
 }
 
 impl<'a> Escape<'a> {
-	fn escape_str(s: &'a str, escape_char: char) -> Self {
+	pub fn escape_str(s: &'a str, escape_char: char) -> Self {
 		Escape {
 			chars: s.chars(),
 			pending: None,

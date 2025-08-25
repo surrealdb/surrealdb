@@ -1,8 +1,10 @@
 use std::cmp::Ordering;
+use std::fmt::Display;
 use std::ops::Bound;
 
 use serde::{Deserialize, Serialize};
 
+use crate::utils::escape::{Escape, QuoteStr};
 use crate::{Array, Number, Object, Range, Uuid, Value};
 
 /// Represents a range of record identifier keys in SurrealDB
@@ -87,6 +89,26 @@ impl PartialEq<Range> for RecordIdKeyRange {
 	}
 }
 
+impl Display for RecordIdKeyRange {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match &self.start {
+			Bound::Unbounded => (),
+			Bound::Included(start) => write!(f, "{}", start)?,
+			Bound::Excluded(start) => write!(f, "{}>", start)?,
+		}
+
+		write!(f, "..")?;
+
+		match &self.end {
+			Bound::Unbounded => (),
+			Bound::Included(end) => write!(f, "={}", end)?,
+			Bound::Excluded(end) => write!(f, "{}", end)?,
+		}
+
+		Ok(())
+	}
+}
+
 /// Represents a key component of a record identifier in SurrealDB
 ///
 /// Record identifiers can have various types of keys including numbers, strings, UUIDs,
@@ -150,6 +172,19 @@ impl PartialEq<Value> for RecordIdKey {
 	}
 }
 
+impl Display for RecordIdKey {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			RecordIdKey::Number(x) => write!(f, "{}", x),
+			RecordIdKey::String(x) => write!(f, "{}", escape_ident(x)),
+			RecordIdKey::Uuid(x) => write!(f, "u{}", QuoteStr(&x.0.to_string())),
+			RecordIdKey::Array(x) => write!(f, "{}", x),
+			RecordIdKey::Object(x) => write!(f, "{}", x),
+			RecordIdKey::Range(x) => write!(f, "{}", x),
+		}
+	}
+}
+
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 /// Represents a record identifier in SurrealDB
 ///
@@ -160,4 +195,19 @@ pub struct RecordId {
 	pub table: String,
 	/// The key that uniquely identifies the record within the table
 	pub key: RecordIdKey,
+}
+
+impl Display for RecordId {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let inner = format!("{}:{}", escape_ident(&self.table), self.key);
+		write!(f, "r{}", QuoteStr(&inner))
+	}
+}
+
+fn escape_ident(v: &str) -> String {
+	if v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_')) {
+		return v.to_string();
+	} else {
+		format!("`{}`", Escape::escape_str(v, '`'))
+	}
 }
