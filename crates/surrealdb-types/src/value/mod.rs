@@ -17,7 +17,7 @@ pub mod object;
 /// Range value types for SurrealDB
 pub mod range;
 /// Record identifier value types for SurrealDB
-pub mod recordid;
+pub mod record_id;
 /// Regular expression value types for SurrealDB
 pub mod regex;
 /// UUID value types for SurrealDB
@@ -36,7 +36,7 @@ pub use self::geometry::Geometry;
 pub use self::number::Number;
 pub use self::object::Object;
 pub use self::range::Range;
-pub use self::recordid::{RecordId, RecordIdKey, RecordIdKeyRange};
+pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::regex::Regex;
 pub use self::uuid::Uuid;
 use crate::{Kind, SurrealValue};

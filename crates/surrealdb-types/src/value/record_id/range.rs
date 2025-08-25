@@ -3,7 +3,7 @@ use std::ops::Bound;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Array, Number, Object, Range, Uuid, Value};
+use crate::{Range, RecordIdKey};
 
 /// Represents a range of record identifier keys in SurrealDB
 ///
@@ -15,6 +15,36 @@ pub struct RecordIdKeyRange {
 	pub start: Bound<RecordIdKey>,
 	/// The upper bound of the range
 	pub end: Bound<RecordIdKey>,
+}
+
+impl RecordIdKeyRange {
+	/// Converts this range into a `Range` value.
+	pub fn into_value_range(self) -> Range {
+		Range {
+			start: self.start.map(RecordIdKey::into_value),
+			end: self.end.map(RecordIdKey::into_value),
+		}
+	}
+
+	/// Converts a `Range` value into a `RecordIdKeyRange`.
+	pub fn from_value_range(range: Range) -> Option<Self> {
+		let start = match range.start {
+			Bound::Included(x) => Bound::Included(RecordIdKey::from_value(x)?),
+			Bound::Excluded(x) => Bound::Excluded(RecordIdKey::from_value(x)?),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+
+		let end = match range.end {
+			Bound::Included(x) => Bound::Included(RecordIdKey::from_value(x)?),
+			Bound::Excluded(x) => Bound::Excluded(RecordIdKey::from_value(x)?),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+
+		Some(RecordIdKeyRange {
+			start,
+			end,
+		})
+	}
 }
 
 impl PartialOrd for RecordIdKeyRange {
@@ -85,79 +115,4 @@ impl PartialEq<Range> for RecordIdKeyRange {
 			Bound::Unbounded => matches!(other.end, Bound::Unbounded),
 		})
 	}
-}
-
-/// Represents a key component of a record identifier in SurrealDB
-///
-/// Record identifiers can have various types of keys including numbers, strings, UUIDs,
-/// arrays, objects, or ranges. This enum provides type-safe representation for all key types.
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub enum RecordIdKey {
-	/// A numeric key
-	Number(i64),
-	/// A string key
-	String(String),
-	/// A UUID key
-	Uuid(Uuid),
-	/// An array key
-	Array(Array),
-	/// An object key
-	Object(Object),
-	/// A range key
-	Range(Box<RecordIdKeyRange>),
-}
-
-impl PartialEq<Value> for RecordIdKey {
-	fn eq(&self, other: &Value) -> bool {
-		match self {
-			RecordIdKey::Number(a) => Value::Number(Number::Int(*a)) == *other,
-			RecordIdKey::String(a) => {
-				if let Value::String(b) = other {
-					a.as_str() == b.as_str()
-				} else {
-					false
-				}
-			}
-			RecordIdKey::Uuid(a) => {
-				if let Value::Uuid(b) = other {
-					a == b
-				} else {
-					false
-				}
-			}
-			RecordIdKey::Object(a) => {
-				if let Value::Object(b) = other {
-					a == b
-				} else {
-					false
-				}
-			}
-			RecordIdKey::Array(a) => {
-				if let Value::Array(b) = other {
-					a == b
-				} else {
-					false
-				}
-			}
-			RecordIdKey::Range(a) => {
-				if let Value::Range(b) = other {
-					**a == **b
-				} else {
-					false
-				}
-			}
-		}
-	}
-}
-
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-/// Represents a record identifier in SurrealDB
-///
-/// A record identifier consists of a table name and a key that uniquely identifies
-/// a record within that table. This is the primary way to reference specific records.
-pub struct RecordId {
-	/// The name of the table containing the record
-	pub table: String,
-	/// The key that uniquely identifies the record within the table
-	pub key: RecordIdKey,
 }

@@ -212,7 +212,7 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 					}
 
 					fn is_value(value: &surrealdb_types::Value) -> bool {
-						if let surrealdb_types::Value::Object(surrealdb_types::Object(obj)) = value {
+						if let surrealdb_types::Value::Object(obj) = value {
 							#(#is_value_checks)&&*
 						} else {
 							false
@@ -220,13 +220,13 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 					}
 
 					fn into_value(self) -> surrealdb_types::Value {
-						surrealdb_types::Value::Object(surrealdb_types::Object(std::collections::BTreeMap::from([
+						surrealdb_types::Value::Object(surrealdb_types::Object::from(std::collections::BTreeMap::from([
 							#(#into_value_fields),*
 						])))
 					}
 
 					fn from_value(value: surrealdb_types::Value) -> anyhow::Result<Self> {
-						let surrealdb_types::Value::Object(surrealdb_types::Object(obj)) = value else {
+						let surrealdb_types::Value::Object(obj) = value else {
 							return Err(anyhow::anyhow!("Failed to convert to {}: Expected Object, got {:?}", Self::kind_of(), value.value_kind()));
 						};
 
@@ -305,7 +305,7 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 					}
 
 					fn is_value(value: &surrealdb_types::Value) -> bool {
-						if let surrealdb_types::Value::Array(surrealdb_types::Array(values)) = value {
+						if let surrealdb_types::Value::Array(values) = value {
 							values.len() == #field_count && #(#is_value_checks)&&*
 						} else {
 							false
@@ -313,13 +313,13 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 					}
 
 					fn into_value(self) -> surrealdb_types::Value {
-						surrealdb_types::Value::Array(surrealdb_types::Array(vec![
+						surrealdb_types::Value::Array(surrealdb_types::Array::from(vec![
 							#(#into_value_fields),*
 						]))
 					}
 
 					fn from_value(value: surrealdb_types::Value) -> anyhow::Result<Self> {
-						let surrealdb_types::Value::Array(surrealdb_types::Array(values)) = value else {
+						let surrealdb_types::Value::Array(values) = value else {
 							return Err(anyhow::anyhow!("Failed to convert to {}: Expected Array, got {:?}", Self::kind_of(), value.value_kind()));
 						};
 
@@ -346,16 +346,16 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 					}
 
 					fn is_value(value: &surrealdb_types::Value) -> bool {
-						matches!(value, surrealdb_types::Value::Object(surrealdb_types::Object(obj)) if obj.is_empty())
+						matches!(value, surrealdb_types::Value::Object(obj) if obj.is_empty())
 					}
 
 					fn into_value(self) -> surrealdb_types::Value {
-						surrealdb_types::Value::Object(surrealdb_types::Object(std::collections::BTreeMap::new()))
+						surrealdb_types::Value::Object(surrealdb_types::Object::new())
 					}
 
 					fn from_value(value: surrealdb_types::Value) -> anyhow::Result<Self> {
 						match value {
-							surrealdb_types::Value::Object(surrealdb_types::Object(obj)) if obj.is_empty() => Ok(Self),
+							surrealdb_types::Value::Object(obj) if obj.is_empty() => Ok(Self),
 							_ => Err(anyhow::anyhow!("Failed to convert to {}: Expected empty Object, got {:?}", Self::kind_of(), value.value_kind())),
 						}
 					}

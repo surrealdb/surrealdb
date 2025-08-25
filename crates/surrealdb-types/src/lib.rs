@@ -181,34 +181,34 @@ mod tests {
 	fn test_array_macro() {
 		// Test empty array
 		let empty = array![];
-		assert_eq!(empty.0.len(), 0);
+		assert_eq!(empty.len(), 0);
 
 		// Test with simple values
 		let arr1 = array![1, 2, 3];
-		assert_eq!(arr1.0.len(), 3);
-		assert_eq!(arr1.0[0], Value::Number(1.into()));
-		assert_eq!(arr1.0[1], Value::Number(2.into()));
-		assert_eq!(arr1.0[2], Value::Number(3.into()));
+		assert_eq!(arr1.len(), 3);
+		assert_eq!(arr1[0], Value::Number(1.into()));
+		assert_eq!(arr1[1], Value::Number(2.into()));
+		assert_eq!(arr1[2], Value::Number(3.into()));
 
 		// Test with mixed types
 		let arr2 = array!["hello".to_string(), 42, true];
-		assert_eq!(arr2.0.len(), 3);
-		assert_eq!(arr2.0[0], Value::String("hello".to_string()));
-		assert_eq!(arr2.0[1], Value::Number(42.into()));
-		assert_eq!(arr2.0[2], Value::Bool(true));
+		assert_eq!(arr2.len(), 3);
+		assert_eq!(arr2[0], Value::String("hello".to_string()));
+		assert_eq!(arr2[1], Value::Number(42.into()));
+		assert_eq!(arr2[2], Value::Bool(true));
 
 		// Test with trailing comma
 		let arr3 = array!["a".to_string(), "b".to_string()];
-		assert_eq!(arr3.0.len(), 2);
-		assert_eq!(arr3.0[0], Value::String("a".to_string()));
-		assert_eq!(arr3.0[1], Value::String("b".to_string()));
+		assert_eq!(arr3.len(), 2);
+		assert_eq!(arr3[0], Value::String("a".to_string()));
+		assert_eq!(arr3[1], Value::String("b".to_string()));
 
 		// Test with nested objects and arrays
 		let nested_obj = object! { name: "John".to_string(), age: 30 };
 		let arr4 = array![1, nested_obj.clone(), "end".to_string()];
-		assert_eq!(arr4.0.len(), 3);
-		assert_eq!(arr4.0[0], Value::Number(1.into()));
-		assert_eq!(arr4.0[1], Value::Object(nested_obj));
-		assert_eq!(arr4.0[2], Value::String("end".to_string()));
+		assert_eq!(arr4.len(), 3);
+		assert_eq!(arr4[0], Value::Number(1.into()));
+		assert_eq!(arr4[1], Value::Object(nested_obj));
+		assert_eq!(arr4[2], Value::String("end".to_string()));
 	}
 }

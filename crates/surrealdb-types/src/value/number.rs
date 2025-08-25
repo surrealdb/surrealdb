@@ -5,6 +5,8 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 
+use crate::Kind;
+
 /// Represents a numeric value in SurrealDB
 ///
 /// Numbers in SurrealDB can be integers, floating-point numbers, or decimal numbers.
@@ -18,6 +20,48 @@ pub enum Number {
 	/// A decimal number with arbitrary precision
 	Decimal(Decimal),
 }
+
+macro_rules! impl_number {
+	($($variant:ident($type:ty) => ($is:ident, $into:ident, $from:ident),)+) => {
+		impl Number {
+			/// Get the kind of number
+			pub fn kind(&self) -> Kind {
+				match self {
+					$(
+						Self::$variant(_) => Kind::$variant,
+					)+
+				}
+			}
+
+			$(
+				/// Check if this is a of the given type
+				pub fn $is(&self) -> bool {
+					matches!(self, Self::$variant(_))
+				}
+
+				/// Convert this number into the given type
+				pub fn $into(self) -> anyhow::Result<$type> {
+					if let Self::$variant(v) = self {
+						Ok(v)
+					} else {
+						Err(anyhow::anyhow!("Expected a {} but got a {}", Kind::$variant, self.kind()))
+					}
+				}
+
+				/// Create a new number from the given type
+				pub fn $from(v: $type) -> Self {
+					Self::$variant(v)
+				}
+			)+
+		}
+	}
+}
+
+impl_number! (
+	Int(i64) => (is_int, into_int, from_int),
+	Float(f64) => (is_float, into_float, from_float),
+	Decimal(Decimal) => (is_decimal, into_decimal, from_decimal),
+);
 
 impl Default for Number {
 	fn default() -> Self {

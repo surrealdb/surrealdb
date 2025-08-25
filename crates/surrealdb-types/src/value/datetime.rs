@@ -1,28 +1,55 @@
-use chrono::{DateTime, SecondsFormat, Utc};
+use std::ops::Deref;
+
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+use crate::Duration;
 
 /// Represents a datetime value in SurrealDB
 ///
 /// A datetime represents a specific point in time, stored as UTC.
 /// This type wraps the `chrono::DateTime<Utc>` type.
-#[derive(
-	Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
-)]
-pub struct Datetime(pub DateTime<Utc>);
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct Datetime(pub(crate) DateTime<Utc>);
+
+impl Default for Datetime {
+	fn default() -> Self {
+		Self(Utc::now())
+	}
+}
 
 impl Datetime {
 	/// The minimum UTC datetime
 	pub const MIN_UTC: Self = Datetime(DateTime::<Utc>::MIN_UTC);
 	/// The maximum UTC datetime
 	pub const MAX_UTC: Self = Datetime(DateTime::<Utc>::MAX_UTC);
+}
 
-	/// Convert the Datetime to a raw String
-	pub fn into_raw_string(&self) -> String {
-		self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true)
+impl From<DateTime<Utc>> for Datetime {
+	fn from(v: DateTime<Utc>) -> Self {
+		Self(v)
 	}
+}
 
-	/// Convert to nanosecond timestamp.
-	pub fn to_u64(&self) -> Option<u64> {
-		self.0.timestamp_nanos_opt().map(|v| v as u64)
+impl From<Datetime> for DateTime<Utc> {
+	fn from(x: Datetime) -> Self {
+		x.0
+	}
+}
+
+impl Deref for Datetime {
+	type Target = DateTime<Utc>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl std::ops::Sub for Datetime {
+	type Output = Duration;
+	fn sub(self, other: Self) -> Duration {
+		match (self.0 - other.0).to_std() {
+			Ok(d) => Duration::from(d),
+			Err(_) => Duration::default(),
+		}
 	}
 }

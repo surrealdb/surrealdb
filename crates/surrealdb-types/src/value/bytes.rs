@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use serde::de::{self, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 
@@ -5,7 +7,39 @@ use serde::{Deserialize, Serialize};
 ///
 /// Bytes stores raw binary data as a vector of unsigned 8-bit integers.
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct Bytes(pub Vec<u8>);
+pub struct Bytes(pub(crate) Vec<u8>);
+
+impl From<Vec<u8>> for Bytes {
+	fn from(v: Vec<u8>) -> Self {
+		Self(v)
+	}
+}
+
+impl From<Bytes> for Vec<u8> {
+	fn from(val: Bytes) -> Self {
+		val.0
+	}
+}
+
+impl From<Bytes> for bytes::Bytes {
+	fn from(bytes: Bytes) -> Self {
+		bytes.0.into()
+	}
+}
+
+impl From<bytes::Bytes> for Bytes {
+	fn from(bytes: bytes::Bytes) -> Self {
+		Bytes(bytes.into())
+	}
+}
+
+impl Deref for Bytes {
+	type Target = Vec<u8>;
+
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
 
 impl Serialize for Bytes {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

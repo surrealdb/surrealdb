@@ -120,8 +120,8 @@ impl ToFlatbuffers for Array {
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> anyhow::Result<Self::Output<'bldr>> {
-		let mut values = Vec::with_capacity(self.0.len());
-		for value in &self.0 {
+		let mut values = Vec::with_capacity(self.len());
+		for value in self.iter() {
 			values.push(value.to_fb(builder)?);
 		}
 		let values_vector = builder.create_vector(&values);
@@ -144,6 +144,6 @@ impl FromFlatbuffers for Array {
 		for value in values {
 			vec.push(Value::from_fb(value)?);
 		}
-		Ok(Array(vec))
+		Ok(Array::from(vec))
 	}
 }
