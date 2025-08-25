@@ -178,8 +178,6 @@ impl DefineFieldStatement {
 						if let Some(cache) = ctx.get_cache() {
 							cache.clear_tb(ns, db, &self.what);
 						}
-						// Clear the cache
-						txn.clear_cache();
 					}
 				}
 			}
@@ -211,8 +209,6 @@ impl DefineFieldStatement {
 						if let Some(cache) = ctx.get_cache() {
 							cache.clear_tb(ns, db, &self.what);
 						}
-						// Clear the cache
-						txn.clear_cache();
 					}
 				}
 			}

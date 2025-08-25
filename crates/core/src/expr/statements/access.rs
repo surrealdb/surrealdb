@@ -301,15 +301,17 @@ pub async fn create_grant(
 			let ns = ctx.expect_ns_id(opt).await?;
 			txn.get_ns_access(ns, &access).await?.ok_or_else(|| Error::AccessNsNotFound {
 				ac: access.to_string(),
-				ns: ns.to_string(),
+				// The namespace is expected above so this unwrap should not be able to trigger
+				ns: opt.ns.as_deref().unwrap().to_owned(),
 			})?
 		}
 		Base::Db => {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 			txn.get_db_access(ns, db, &access).await?.ok_or_else(|| Error::AccessDbNotFound {
 				ac: access.to_string(),
-				ns: ns.to_string(),
-				db: db.to_string(),
+				// The namespace and database is expected above so these unwraps should not be able to trigger
+				ns: opt.ns.as_deref().unwrap().to_owned(),
+				db: opt.db.as_deref().unwrap().to_owned(),
 			})?
 		}
 	};
@@ -416,7 +418,9 @@ pub async fn create_grant(
 							txn.get_ns_user(ns_id, user).await?.ok_or_else(|| {
 								Error::UserNsNotFound {
 									name: user.to_string(),
-									ns: ns_id.to_string(),
+									// We just retrieved the ns_id above so we should have a
+									// namespace.
+									ns: opt.ns().unwrap().to_owned(),
 								}
 							})?
 						}
@@ -425,8 +429,10 @@ pub async fn create_grant(
 							txn.get_db_user(ns_id, db_id, user).await?.ok_or_else(|| {
 								Error::UserDbNotFound {
 									name: user.to_string(),
-									ns: ns_id.to_string(),
-									db: db_id.to_string(),
+									// We just retrieved the ns_id and db_id above so we should have a
+									// namespace and database.
+									ns: opt.ns().unwrap().to_owned(),
+									db: opt.db().unwrap().to_owned(),
 								}
 							})?
 						}
@@ -556,14 +562,30 @@ async fn compute_show(
 	txn.clear_cache();
 	// Check if the access method exists.
 	match base {
-		Base::Root => txn.get_root_access(&stmt.ac).await?,
+		Base::Root => {
+			txn.expect_root_access(&stmt.ac).await?;
+		}
 		Base::Ns => {
 			let ns = ctx.expect_ns_id(opt).await?;
-			txn.get_ns_access(ns, &stmt.ac).await?
+			if let None = txn.get_ns_access(ns, &stmt.ac).await? {
+				bail!(Error::AccessNsNotFound {
+					ac: stmt.ac.to_string(),
+					// We expected a namespace above so this unwrap shouldn't be able to trigger.
+					ns: opt.ns.as_deref().unwrap().to_owned(),
+				});
+			}
 		}
 		Base::Db => {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-			txn.get_db_access(ns, db, &stmt.ac).await?
+			// We expected a namespace above so this unwrap shouldn't be able to trigger.
+			if let None = txn.get_db_access(ns, db, &stmt.ac).await? {
+				bail!(Error::AccessDbNotFound {
+					ac: stmt.ac.to_string(),
+					// We expected a namespace and database above so these unwrap shouldn't be able to trigger.
+					ns: opt.ns.as_deref().unwrap().to_owned(),
+					db: opt.db.as_deref().unwrap().to_owned(),
+				});
+			}
 		}
 	};
 
@@ -803,7 +825,7 @@ pub async fn revoke_grant(
 									Some(&CursorDoc {
 										rid: None,
 										ir: None,
-										doc: redacted_gr.clone().into(),
+										doc: redacted_gr.into(),
 										fields_computed: false,
 									}),
 								)
@@ -820,6 +842,8 @@ pub async fn revoke_grant(
 
 				let mut gr = gr.clone();
 				gr.revocation = Some(Datetime::now());
+				// recreate now that the revocation is set.
+				let redacted_gr = Value::Object(access_object_from_grant(&gr.clone().redacted()));
 
 				// Revoke the grant.
 				match base {
