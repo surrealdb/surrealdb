@@ -150,6 +150,7 @@ impl InfoStructure for Permissions {
 			"select".to_string() => self.select.structure(),
 			"create".to_string() => self.create.structure(),
 			"update".to_string() => self.update.structure(),
+			"delete".to_string() => self.delete.structure(),
 		})
 	}
 }

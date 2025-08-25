@@ -34,9 +34,11 @@ pub(crate) struct FieldDefinition {
 	pub assert: Option<Expr>,
 	pub computed: Option<Expr>,
 	pub default: DefineDefault,
+
 	pub select_permission: Permission,
 	pub create_permission: Permission,
 	pub update_permission: Permission,
+
 	pub comment: Option<String>,
 	pub reference: Option<Reference>,
 }
