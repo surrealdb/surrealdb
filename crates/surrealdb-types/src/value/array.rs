@@ -1,9 +1,6 @@
-use std::fmt::Display;
-
 use serde::{Deserialize, Serialize};
 
 use crate::Value;
-use crate::utils::display::JoinDisplayable;
 
 /// Represents an array of values in SurrealDB
 ///
@@ -24,11 +21,5 @@ impl Array {
 		V: Into<Value>,
 	{
 		self.0.push(value.into());
-	}
-}
-
-impl Display for Array {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "[{}]", self.0.join_displayable(", "))
 	}
 }

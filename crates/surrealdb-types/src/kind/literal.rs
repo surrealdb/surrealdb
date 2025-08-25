@@ -129,7 +129,7 @@ impl Display for KindLiteral {
 				}
 			}
 			KindLiteral::Decimal(v) => write!(f, "{v}dec"),
-			KindLiteral::Duration(duration) => write!(f, "{}", duration),
+			KindLiteral::Duration(duration) => duration.fmt_internal(f),
 			KindLiteral::Array(kinds) => write!(f, "[{}]", kinds.join_displayable(", ")),
 			KindLiteral::Object(btree_map) => write!(
 				f,

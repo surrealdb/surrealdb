@@ -1,5 +1,3 @@
-use std::fmt::Display;
-
 use serde::{Deserialize, Serialize};
 
 pub(crate) static SECONDS_PER_YEAR: u64 = 365 * SECONDS_PER_DAY;
@@ -19,8 +17,8 @@ pub(crate) static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
 )]
 pub struct Duration(pub std::time::Duration);
 
-impl Display for Duration {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl Duration {
+	pub(crate) fn fmt_internal(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		// Split up the duration
 		let secs = self.0.as_secs();
 		let nano = self.0.subsec_nanos();

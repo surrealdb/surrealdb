@@ -24,7 +24,6 @@ pub mod regex;
 pub mod uuid;
 
 use std::cmp::Ordering;
-use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
@@ -40,7 +39,6 @@ pub use self::range::Range;
 pub use self::recordid::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::regex::Regex;
 pub use self::uuid::Uuid;
-use crate::utils::escape::QuoteStr;
 use crate::{Kind, SurrealValue};
 
 /// Marker type for value conversions from Value::None
@@ -160,28 +158,5 @@ impl Value {
 	/// Converts the given value of type `T` into a `Value`.
 	pub fn from<T: SurrealValue>(value: T) -> Value {
 		value.into_value()
-	}
-}
-
-impl Display for Value {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		match self {
-			Value::None => write!(f, "NONE"),
-			Value::Null => write!(f, "NULL"),
-			Value::Bool(b) => write!(f, "{}", b),
-			Value::Number(n) => write!(f, "{}", n),
-			Value::String(s) => QuoteStr(s).fmt(f),
-			Value::Duration(d) => write!(f, "{}", d),
-			Value::Datetime(d) => write!(f, "{}", d),
-			Value::Uuid(u) => write!(f, "{}", u),
-			Value::Array(a) => write!(f, "{}", a),
-			Value::Object(o) => write!(f, "{}", o),
-			Value::Geometry(g) => write!(f, "{}", g),
-			Value::Bytes(b) => write!(f, "{}", b),
-			Value::RecordId(r) => write!(f, "{}", r),
-			Value::File(x) => write!(f, "{}", x),
-			Value::Range(r) => write!(f, "{}", r),
-			Value::Regex(r) => write!(f, "{}", r),
-		}
 	}
 }

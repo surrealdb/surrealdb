@@ -1,5 +1,4 @@
 use std::cmp::Ordering;
-use std::fmt::Display;
 use std::hash;
 
 use rust_decimal::Decimal;
@@ -256,23 +255,5 @@ impl From<f64> for Number {
 impl From<Decimal> for Number {
 	fn from(value: Decimal) -> Self {
 		Number::Decimal(value)
-	}
-}
-
-impl Display for Number {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		match self {
-			Number::Int(v) => write!(f, "{}", v),
-			Number::Float(v) => {
-				if v.is_finite() {
-					// Add suffix to distinguish between int and float
-					write!(f, "{v}f")
-				} else {
-					// Don't add suffix for NaN, inf, -inf
-					Display::fmt(v, f)
-				}
-			}
-			Number::Decimal(v) => write!(f, "{v}dec"),
-		}
 	}
 }

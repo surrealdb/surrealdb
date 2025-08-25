@@ -1,9 +1,5 @@
-use std::fmt::Display;
-
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
-
-use crate::utils::escape::QuoteStr;
 
 /// Represents a datetime value in SurrealDB
 ///
@@ -28,11 +24,5 @@ impl Datetime {
 	/// Convert to nanosecond timestamp.
 	pub fn to_u64(&self) -> Option<u64> {
 		self.0.timestamp_nanos_opt().map(|v| v as u64)
-	}
-}
-
-impl Display for Datetime {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "d{}", &QuoteStr(&self.into_raw_string()))
 	}
 }

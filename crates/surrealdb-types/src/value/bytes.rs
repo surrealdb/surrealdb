@@ -1,9 +1,5 @@
-use std::fmt::{self, Display};
-
 use serde::de::{self, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
-
-use crate::utils::escape::QuoteStr;
 
 /// Represents binary data in SurrealDB
 ///
@@ -30,7 +26,7 @@ impl<'de> Deserialize<'de> for Bytes {
 		impl<'de> Visitor<'de> for RawBytesVisitor {
 			type Value = Bytes;
 
-			fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+			fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
 				formatter.write_str("bytes or sequence of bytes")
 			}
 
@@ -62,11 +58,5 @@ impl<'de> Deserialize<'de> for Bytes {
 		}
 
 		deserializer.deserialize_byte_buf(RawBytesVisitor)
-	}
-}
-
-impl Display for Bytes {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "b{}", QuoteStr(&hex::encode(&self.0)))
 	}
 }

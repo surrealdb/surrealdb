@@ -1,10 +1,8 @@
 use std::collections::BTreeMap;
-use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
 use crate::Value;
-use crate::utils::escape::EscapeKey;
 
 /// Represents an object with key-value pairs in SurrealDB
 ///
@@ -25,19 +23,5 @@ impl Object {
 		V: Into<Value>,
 	{
 		self.0.insert(key, value.into())
-	}
-}
-
-impl Display for Object {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(
-			f,
-			"{{{}}}",
-			self.0
-				.iter()
-				.map(|(k, v)| format!("{}: {}", EscapeKey(k), v))
-				.collect::<Vec<String>>()
-				.join(", ")
-		)
 	}
 }

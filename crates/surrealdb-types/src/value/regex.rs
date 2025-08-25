@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::fmt::{self, Debug, Display, Formatter};
+use std::fmt::{self, Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
@@ -66,12 +66,6 @@ impl Hash for Regex {
 }
 
 impl Debug for Regex {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(self, f)
-	}
-}
-
-impl Display for Regex {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		let t = self.0.to_string().replace('/', "\\/");
 		write!(f, "/{}/", &t)
