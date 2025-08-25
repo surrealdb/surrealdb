@@ -28,7 +28,6 @@ pub mod file;
 pub mod geometry;
 pub mod number;
 pub mod object;
-pub mod public;
 pub mod range;
 pub mod record_id;
 pub mod regex;
