@@ -183,8 +183,11 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 				.map(|(field_name, field_type)| {
 					let field_name_str = field_name.to_string();
 					quote! {
-						let #field_name = obj.get(#field_name_str)
-							.and_then(|v| <#field_type as surrealdb_types::SurrealValue>::from_value(v.clone()))?;
+						let #field_name = <#field_type as surrealdb_types::SurrealValue>::from_value(
+							obj.get(#field_name_str)
+								.ok_or_else(|| anyhow::anyhow!("Failed to convert to {}: Missing field '{}'", Self::kind_of(), #field_name_str))?
+								.clone()
+						).map_err(|e| anyhow::anyhow!("Failed to convert to {}: {}", Self::kind_of(), e))?;
 					}
 				})
 				.collect();
@@ -222,14 +225,14 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 						])))
 					}
 
-					fn from_value(value: surrealdb_types::Value) -> Option<Self> {
+					fn from_value(value: surrealdb_types::Value) -> anyhow::Result<Self> {
 						let surrealdb_types::Value::Object(surrealdb_types::Object(obj)) = value else {
-							return None;
+							return Err(anyhow::anyhow!("Failed to convert to {}: Expected Object, got {:?}", Self::kind_of(), value.value_kind()));
 						};
 
 						#(#from_value_fields)*
 
-						Some(Self {
+						Ok(Self {
 							#(#field_names),*
 						})
 					}
@@ -267,8 +270,11 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 					let field_ident =
 						syn::Ident::new(&format!("field_{}", i), proc_macro2::Span::call_site());
 					quote! {
-						let #field_ident = values.get(#i)
-							.and_then(|v| <#field_type as surrealdb_types::SurrealValue>::from_value(v.clone()))?;
+						let #field_ident = <#field_type as surrealdb_types::SurrealValue>::from_value(
+							values.get(#i)
+								.ok_or_else(|| anyhow::anyhow!("Failed to convert to {}: Missing field at index {}", Self::kind_of(), #i))?
+								.clone()
+						).map_err(|e| anyhow::anyhow!("Failed to convert to {}: {}", Self::kind_of(), e))?;
 					}
 				})
 				.collect();
@@ -312,18 +318,18 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 						]))
 					}
 
-					fn from_value(value: surrealdb_types::Value) -> Option<Self> {
+					fn from_value(value: surrealdb_types::Value) -> anyhow::Result<Self> {
 						let surrealdb_types::Value::Array(surrealdb_types::Array(values)) = value else {
-							return None;
+							return Err(anyhow::anyhow!("Failed to convert to {}: Expected Array, got {:?}", Self::kind_of(), value.value_kind()));
 						};
 
 						if values.len() != #field_count {
-							return None;
+							return Err(anyhow::anyhow!("Failed to convert to {}: Expected Array of length {}, got {}", Self::kind_of(), #field_count, values.len()));
 						}
 
 						#(#from_value_fields)*
 
-						Some(Self(
+						Ok(Self(
 							#(#field_assignments),*
 						))
 					}
@@ -347,10 +353,10 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 						surrealdb_types::Value::Object(surrealdb_types::Object(std::collections::BTreeMap::new()))
 					}
 
-					fn from_value(value: surrealdb_types::Value) -> Option<Self> {
+					fn from_value(value: surrealdb_types::Value) -> anyhow::Result<Self> {
 						match value {
-							surrealdb_types::Value::Object(surrealdb_types::Object(obj)) if obj.is_empty() => Some(Self),
-							_ => None,
+							surrealdb_types::Value::Object(surrealdb_types::Object(obj)) if obj.is_empty() => Ok(Self),
+							_ => Err(anyhow::anyhow!("Failed to convert to {}: Expected empty Object, got {:?}", Self::kind_of(), value.value_kind())),
 						}
 					}
 				}

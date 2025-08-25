@@ -92,15 +92,6 @@ let record_id = RecordId {
 let record_val = Value::RecordId(record_id);
 ```
 
-## Architecture
-
-This crate is designed with the following principles:
-
-- **Comprehensive type coverage**: Supports all SurrealDB data types
-- **Serialization support**: Works with serde for data exchange
-- **Extensible**: Easy to add new types or modify existing ones
-- **Type safe**: Compile-time guarantees for type conversions
-
 ## Usage
 
 ### Basic Usage
@@ -123,7 +114,9 @@ map.insert("key".to_string(), Value::String("value".to_string()));
 let object = Value::Object(Object(map));
 ```
 
-### object & array macros
+### Macros for object & array values
+
+This library provides two macros to easily create object and array values. All values you pass to the macro must implement the `SurrealValue` trait.
 
 ```rust
 use surrealdb_types::{object, array};
@@ -138,6 +131,32 @@ let values = array![
 let map = object! {
     key: "value".to_string(),
 };
+```
+
+### Deriving the `SurrealValue` trait
+
+#### Requirements
+
+- All fields must implement the `SurrealValue` trait
+- You need to have `anyhow` in your dependencies, as the `SurrealValue` trait uses it for error handling.
+
+```rust
+#[derive(SurrealValue)]
+struct Person {
+    name: String,
+    age: u32,
+}
+
+let person = Person {
+    name: "John".to_string(),
+    age: 30,
+};
+
+let value = person.into_value();
+let person2 = Person::from_value(value).unwrap();
+
+assert_eq!(person2.name, "John");
+assert_eq!(person2.age, 30);
 ```
 
 ### Type Checking
@@ -165,6 +184,17 @@ This crate has minimal external dependencies:
 - `rust_decimal`: For decimal number support
 - `regex`: For regular expression support
 - `geo`: For geometric types
+- `surrealdb-types-derive`: For deriving the `SurrealValue` trait
+- `surrealdb-protocol`: For the SurrealDB protocol
+- `flatbuffers`: For the FlatBuffers protocol
+- `bytes`: For the Bytes type
+- `anyhow`: For error handling
+- `geo`: For geometric types
+- `regex`: For regular expression support
+- `rust_decimal`: For decimal number support
+- `uuid`: For UUID support
+- `rstest`: For testing
+- `hex`: For hex encoding
 
 ## License
 
