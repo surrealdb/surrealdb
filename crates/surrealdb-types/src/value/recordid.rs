@@ -206,7 +206,7 @@ impl Display for RecordId {
 
 fn escape_ident(v: &str) -> String {
 	if v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_')) {
-		return v.to_string();
+		v.to_string()
 	} else {
 		format!("`{}`", Escape::escape_str(v, '`'))
 	}

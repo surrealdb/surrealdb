@@ -215,7 +215,7 @@ impl Display for Geometry {
 			}
 			Self::MultiPoint(v) => {
 				write!(f, "{{ type: 'MultiPoint', coordinates: [")?;
-				fmt_points(f, v.iter().cloned())?;
+				fmt_points(f, v.iter().copied())?;
 				write!(f, "] }}")
 			}
 			Self::MultiLine(v) => {
