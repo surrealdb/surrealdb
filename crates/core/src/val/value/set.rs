@@ -45,7 +45,7 @@ impl Value {
 			}
 
 			match p {
-				Part::Graph(g) => {
+				Part::Lookup(g) => {
 					match place {
 						Value::Object(obj) => match obj.entry(g.to_raw()) {
 							Entry::Vacant(x) => {
@@ -253,7 +253,7 @@ impl Value {
 	) -> Result<()> {
 		for p in path.iter().rev() {
 			let name = match p {
-				Part::Graph(x) => x.to_raw(),
+				Part::Lookup(x) => x.to_raw(),
 				Part::Field(f) => f.as_str().to_owned(),
 				Part::Value(x) => {
 					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()?;

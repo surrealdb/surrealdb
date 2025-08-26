@@ -16,7 +16,7 @@ use crate::expr::fmt::{Fmt, is_pretty, pretty_indent};
 use crate::expr::idiom::recursion::{
 	self, Recursion, clean_iteration, compute_idiom_recursion, is_final,
 };
-use crate::expr::{Expr, FlowResultExt as _, Graph, Ident, Idiom, Literal, Value};
+use crate::expr::{Expr, FlowResultExt as _, Lookup, Ident, Idiom, Literal, Value};
 use crate::val::{Array, RecordId};
 
 #[revisioned(revision = 1)]
@@ -28,7 +28,7 @@ pub enum Part {
 	First,
 	Field(Ident),
 	Where(Expr),
-	Graph(Graph),
+	Lookup(Lookup),
 	Value(Expr),
 	/// TODO: Remove, start and move it out of part to elimite invalid state.
 	Start(Expr),
@@ -66,7 +66,7 @@ impl Part {
 			Part::Field(v) => format!(".{}", v.as_raw_string()),
 			Part::Flatten => "…".to_string(),
 			Part::Where(v) => format!("[WHERE {v}]"),
-			Part::Graph(v) => v.to_string(),
+			Part::Lookup(v) => v.to_string(),
 			Part::Value(v) => format!("[{v}]"),
 			Part::Method(v, a) => format!(".{v}({})", Fmt::comma_separated(a)),
 			Part::Destructure(v) => {
@@ -133,7 +133,7 @@ impl Part {
 	/// Returns a yield if an alias is specified
 	pub(crate) fn alias(&self) -> Option<&Idiom> {
 		match self {
-			Part::Graph(v) => v.alias.as_ref(),
+			Part::Lookup(v) => v.alias.as_ref(),
 			_ => None,
 		}
 	}
@@ -195,7 +195,7 @@ impl fmt::Display for Part {
 			Part::Field(v) => write!(f, ".{v}"),
 			Part::Flatten => f.write_str("…"),
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
-			Part::Graph(v) => write!(f, "{v}"),
+			Part::Lookup(v) => write!(f, "{v}"),
 			Part::Value(v) => write!(f, "[{v}]"),
 			Part::Method(v, a) => write!(f, ".{v}({})", Fmt::comma_separated(a)),
 			Part::Destructure(v) => {

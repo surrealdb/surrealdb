@@ -69,7 +69,7 @@ impl Display for Graph {
 	}
 }
 
-impl From<Graph> for crate::expr::Graph {
+impl From<Graph> for crate::expr::Lookup {
 	fn from(v: Graph) -> Self {
 		Self {
 			dir: v.dir.into(),
@@ -86,8 +86,8 @@ impl From<Graph> for crate::expr::Graph {
 	}
 }
 
-impl From<crate::expr::Graph> for Graph {
-	fn from(v: crate::expr::Graph) -> Self {
+impl From<crate::expr::Lookup> for Graph {
+	fn from(v: crate::expr::Lookup) -> Self {
 		Graph {
 			dir: v.dir.into(),
 			expr: v.expr.map(Into::into),

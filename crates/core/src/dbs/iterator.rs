@@ -11,9 +11,9 @@ use crate::dbs::result::Results;
 use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, Document, IgnoreError};
 use crate::err::Error;
-use crate::expr::graph::ComputedGraphSubject;
+use crate::expr::lookup::ComputedLookupSubject;
 use crate::expr::{
-	self, ControlFlow, Dir, Expr, Fields, FlowResultExt, Graph, Ident, Literal, Mock, Part,
+	self, ControlFlow, Dir, Expr, Fields, FlowResultExt, Lookup, Ident, Literal, Mock, Part,
 };
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
@@ -186,7 +186,7 @@ impl Iterator {
 					return self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, val).await;
 				};
 
-				let Part::Graph(ref graph) = x[1] else {
+				let Part::Lookup(ref graph) = x[1] else {
 					return self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, val).await;
 				};
 
@@ -315,7 +315,7 @@ impl Iterator {
 			// recreate the expression for the error.
 			let value = expr::Idiom(vec![
 				expr::Part::Start(Expr::Literal(Literal::RecordId(from.into_literal()))),
-				expr::Part::Graph(Graph {
+				expr::Part::Lookup(Lookup {
 					dir,
 					what: what.into_iter().map(|x| x.into_literal()).collect(),
 					..Default::default()
@@ -454,7 +454,7 @@ impl Iterator {
 							.await;
 					};
 
-					let Part::Graph(ref graph) = x[0] else {
+					let Part::Lookup(ref graph) = x[0] else {
 						return self
 							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
 							.await;

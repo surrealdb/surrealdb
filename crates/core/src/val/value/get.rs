@@ -14,7 +14,7 @@ use crate::expr::field::{Field, Fields};
 use crate::expr::idiom::recursion::{Recursion, compute_idiom_recursion};
 use crate::expr::part::{FindRecursionPlan, Next, NextMethod, Part, Skip, SplitByRepeatRecurse};
 use crate::expr::statements::select::SelectStatement;
-use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Graph, Idiom, Literal};
+use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Lookup, Idiom, Literal};
 use crate::fnc::idiom;
 use crate::val::{RecordIdKey, Value};
 
@@ -169,7 +169,7 @@ impl Value {
 				},
 				// Current value at path is an object
 				Value::Object(v) => match p {
-					Part::Graph(_) => match v.rid() {
+					Part::Lookup(_) => match v.rid() {
 						Some(v) => {
 							let v = Value::RecordId(v);
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path)).await
@@ -355,8 +355,8 @@ impl Value {
 						// If we are chaining graph parts, we need to make sure to flatten the
 						// result
 						let mapped = match (path.first(), path.get(1)) {
-							(Some(Part::Graph(_)), Some(Part::Graph(_))) => mapped.flatten(),
-							(Some(Part::Graph(_)), Some(Part::Where(_))) => mapped.flatten(),
+							(Some(Part::Lookup(_)), Some(Part::Lookup(_))) => mapped.flatten(),
+							(Some(Part::Lookup(_)), Some(Part::Where(_))) => mapped.flatten(),
 							_ => mapped,
 						};
 
@@ -374,7 +374,7 @@ impl Value {
 
 					match p {
 						// This is a graph traversal expression
-						Part::Graph(g) => {
+						Part::Lookup(g) => {
 							let last_part = path.len() == 1;
 							let expr = g.expr.clone().unwrap_or(if last_part {
 								Fields::value_id()
@@ -384,7 +384,7 @@ impl Value {
 
 							let what = Expr::Idiom(Idiom(vec![
 								Part::Start(Expr::Literal(Literal::RecordId(val.into_literal()))),
-								Part::Graph(Graph {
+								Part::Lookup(Lookup {
 									what: g.what.clone(),
 									dir: g.dir.clone(),
 									..Default::default()
@@ -417,7 +417,7 @@ impl Value {
 								// become [1, 2, 3, 4, 5, 6]. This slice access won't panic
 								// as we have already checked the length of the path.
 								Ok(match path[1] {
-									Part::Graph(_) | Part::Where(_) => res.flatten(),
+									Part::Lookup(_) | Part::Where(_) => res.flatten(),
 									_ => res,
 								})
 							}

@@ -12,7 +12,7 @@ use crate::expr::dir::Dir;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::reference::ReferenceDeleteStrategy;
 use crate::expr::statements::{DeleteStatement, UpdateStatement};
-use crate::expr::{AssignOperator, Data, Expr, FlowResultExt as _, Graph, Idiom, Literal, Part};
+use crate::expr::{AssignOperator, Data, Expr, FlowResultExt as _, Lookup, Idiom, Literal, Part};
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
 use crate::val::{RecordId, Value};
@@ -68,7 +68,7 @@ impl Document {
 						Part::Start(Expr::Literal(Literal::RecordId(
 							(**rid).clone().into_literal(),
 						))),
-						Part::Graph(Graph {
+						Part::Lookup(Lookup {
 							dir: Dir::Both,
 							..Default::default()
 						}),
