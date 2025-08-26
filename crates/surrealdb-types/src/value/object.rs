@@ -57,25 +57,44 @@ impl IntoIterator for Object {
 	}
 }
 
-impl Deref for Object {
-	type Target = BTreeMap<String, Value>;
-	fn deref(&self) -> &Self::Target {
-		&self.0
+impl Object {
+	/// Get the value of a key
+	pub fn get(&self, key: &str) -> Option<&Value> {
+		self.0.get(key)
 	}
-}
 
-impl DerefMut for Object {
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut self.0
+	/// Get a mutable reference to the value of a key
+	pub fn get_mut(&mut self, key: &str) -> Option<&mut Value> {
+		self.0.get_mut(key)
 	}
-}
 
-impl std::ops::Add for Object {
-	type Output = Self;
+	/// Insert a key-value pair into the object
+	pub fn insert(&mut self, key: String, value: Value) -> Option<Value> {
+		self.0.insert(key, value)
+	}
 
-	fn add(self, rhs: Self) -> Self::Output {
-		let mut lhs = self;
-		lhs.0.extend(rhs.0);
-		lhs
+	/// Remove a key-value pair from the object
+	pub fn remove(&mut self, key: &str) -> Option<Value> {
+		self.0.remove(key)
+	}
+
+	/// Extend the object with the contents of another object
+	pub fn extend(&mut self, other: Object) {
+		self.0.extend(other.0);
+	}
+
+	/// Clear the object
+	pub fn clear(&mut self) {
+		self.0.clear();
+	}
+
+	/// Get the number of key-value pairs in the object
+	pub fn len(&self) -> usize {
+		self.0.len()
+	}
+
+	/// Check if the object is empty
+	pub fn is_empty(&self) -> bool {
+		self.0.is_empty()
 	}
 }

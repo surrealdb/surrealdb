@@ -48,13 +48,3 @@ impl Deref for Datetime {
 		&self.0
 	}
 }
-
-impl std::ops::Sub for Datetime {
-	type Output = Duration;
-	fn sub(self, other: Self) -> Duration {
-		match (self.0 - other.0).to_std() {
-			Ok(d) => Duration::from(d),
-			Err(_) => Duration::default(),
-		}
-	}
-}
