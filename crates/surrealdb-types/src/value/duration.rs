@@ -2,8 +2,6 @@ use std::ops::Deref;
 
 use serde::{Deserialize, Serialize};
 
-use crate::Datetime;
-
 pub(crate) static SECONDS_PER_YEAR: u64 = 365 * SECONDS_PER_DAY;
 pub(crate) static SECONDS_PER_WEEK: u64 = 7 * SECONDS_PER_DAY;
 pub(crate) static SECONDS_PER_DAY: u64 = 24 * SECONDS_PER_HOUR;

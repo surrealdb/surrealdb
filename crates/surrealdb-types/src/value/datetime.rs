@@ -3,8 +3,6 @@ use std::ops::Deref;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::Duration;
-
 /// Represents a datetime value in SurrealDB
 ///
 /// A datetime represents a specific point in time, stored as UTC.
