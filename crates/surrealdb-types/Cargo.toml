@@ -1,5 +1,7 @@
 [package]
 name = "surrealdb-types"
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-types/"
 authors.workspace = true
 edition.workspace = true
 license-file.workspace = true
