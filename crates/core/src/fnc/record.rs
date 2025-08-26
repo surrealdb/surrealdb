@@ -119,7 +119,7 @@ pub mod is {
 	///
 	/// Returns `true` if the record is an edge, `false` otherwise
 	pub async fn edge(
-		(_stk, ctx, opt, _doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+		(_stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 		(arg,): (Value,),
 	) -> Result<Value> {
 		match opt {
@@ -129,6 +129,16 @@ pub mod is {
 					name: "record::is::edge".to_owned(),
 					message: "Expected a record ID".to_owned(),
 				})?;
+
+				// We may already know if the record is an edge based on the current document
+				// As an example, we may use this function inside a select predicate or filter
+				// get_record() can potentially do a new fetch on the KV store, which at scale can be expensive
+				// Let's short circuit if the rid matches the current document
+				if let Some(doc) = doc {
+					if doc.rid.as_ref().is_some_and(|x| x.as_ref() == &rid) {
+						return Ok(Value::Bool(doc.doc.is_edge()))
+					}
+				}
 
 				// Ensure we have a valid database context (namespace and database must be set)
 				opt.valid_for_db()?;
