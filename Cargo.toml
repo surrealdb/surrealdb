@@ -6,7 +6,7 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 edition = "2024"
 license-file = "LICENSE"
 publish = false
-version = "3.0.0"
+version = "3.0.0-nightly"
 rust-version = "1.87.0"
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
 repository = "https://github.com/surrealdb/surrealdb"
@@ -22,8 +22,8 @@ categories = ["database-implementations", "data-structures", "embedded"]
 
 [workspace.dependencies]
 # workspace internal dependencies
-surrealdb = { version = "=3.0.0", package = "surrealdb", path = "./crates/sdk" }
-surrealdb-core = { version = "=3.0.0", package = "surrealdb-core", path = "./crates/core", default-features = false }
+surrealdb = { version = "=3.0.0-nightly", package = "surrealdb", path = "./crates/sdk" }
+surrealdb-core = { version = "=3.0.0-nightly", package = "surrealdb-core", path = "./crates/core", default-features = false }
 
 # External surreal crates
 affinitypool = { version = "0.3.1" }
