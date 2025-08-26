@@ -23,6 +23,7 @@ impl RemoveEventStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
 		// Get the NS and DB
+		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 
 		// Get the transaction
@@ -50,16 +51,16 @@ impl RemoveEventStatement {
 		};
 
 		// Refresh the table cache for events
-		let key = crate::key::database::tb::new(ns, db, &self.table_name);
-		txn.set(
-			&key,
-			&TableDefinition {
+		txn.put_tb(
+			ns_name,
+			db_name,
+			TableDefinition {
 				cache_events_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
 			},
-			None,
 		)
 		.await?;
+
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
 			cache.clear_tb(ns, db, &self.table_name);

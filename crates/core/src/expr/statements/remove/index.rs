@@ -23,6 +23,7 @@ impl RemoveIndexStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Get the NS and DB
+		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the transaction
 		let txn = ctx.tx();
@@ -49,7 +50,6 @@ impl RemoveIndexStatement {
 		let key = crate::key::index::all::new(ns, db, &self.what, &self.name);
 		txn.delp(&key).await?;
 		// Refresh the table cache for indexes
-		let key = crate::key::database::tb::new(ns, db, &self.what);
 		let Some(tb) = txn.get_tb(ns, db, &self.what).await? else {
 			return Err(Error::TbNotFound {
 				name: self.what.to_string(),
@@ -57,13 +57,13 @@ impl RemoveIndexStatement {
 			.into());
 		};
 
-		txn.set(
-			&key,
-			&TableDefinition {
+		txn.put_tb(
+			ns_name,
+			db_name,
+			TableDefinition {
 				cache_indexes_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
 			},
-			None,
 		)
 		.await?;
 		// Clear the cache

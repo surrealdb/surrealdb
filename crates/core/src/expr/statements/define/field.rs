@@ -92,6 +92,7 @@ impl DefineFieldStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 
 		// Get the NS and DB
+		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 
 		// Validate computed options
@@ -136,21 +137,11 @@ impl DefineFieldStatement {
 		txn.set(&key, &definition, None).await?;
 
 		// Refresh the table cache
-		let tb_def = TableDefinition {
+		let mut tb = TableDefinition {
 			cache_fields_ts: Uuid::now_v7(),
 			..tb.as_ref().clone()
 		};
 
-		let key = crate::key::database::tb::new(ns, db, &self.what);
-		txn.set(&key, &tb_def, None).await?;
-		// Clear the cache
-		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &self.what);
-		}
-		// Clear the cache
-		txn.clear_cache();
-		// Process possible recursive defitions
-		self.process_recursive_definitions(ns, db, txn.clone()).await?;
 		// If this is an `in` field then check relation definitions
 		if fd.as_str() == "in" {
 			// The table is marked as TYPE RELATION
@@ -164,24 +155,24 @@ impl DefineFieldStatement {
 					);
 					// Add the TYPE to the DEFINE TABLE statement
 					if relation.from.as_ref() != self.field_kind.as_ref() {
-						let key = crate::key::database::tb::new(ns, db, &self.what);
-						let val = TableDefinition {
-							cache_fields_ts: Uuid::now_v7(),
-							table_type: TableType::Relation(Relation {
-								from: self.field_kind.clone(),
-								..relation.to_owned()
-							}),
-							..tb.as_ref().to_owned()
-						};
-						txn.set(&key, &val, None).await?;
+						tb.table_type = TableType::Relation(Relation {
+							from: self.field_kind.clone(),
+							..relation.to_owned()
+						});
+
+						txn.put_tb(ns_name, db_name, tb).await?;
 						// Clear the cache
 						if let Some(cache) = ctx.get_cache() {
 							cache.clear_tb(ns, db, &self.what);
 						}
+
+						txn.clear_cache();
+						return Ok(Value::None);
 					}
 				}
 			}
 		}
+
 		// If this is an `out` field then check relation definitions
 		if fd.as_str() == "out" {
 			// The table is marked as TYPE RELATION
@@ -195,24 +186,33 @@ impl DefineFieldStatement {
 					);
 					// Add the TYPE to the DEFINE TABLE statement
 					if relation.from.as_ref() != self.field_kind.as_ref() {
-						let key = crate::key::database::tb::new(ns, db, &self.what);
-						let val = TableDefinition {
-							cache_fields_ts: Uuid::now_v7(),
-							table_type: TableType::Relation(Relation {
-								to: self.field_kind.clone(),
-								..relation.to_owned()
-							}),
-							..tb.as_ref().to_owned()
-						};
-						txn.set(&key, &val, None).await?;
+						tb.table_type = TableType::Relation(Relation {
+							to: self.field_kind.clone(),
+							..relation.clone()
+						});
+						txn.put_tb(ns_name, db_name, tb).await?;
 						// Clear the cache
 						if let Some(cache) = ctx.get_cache() {
 							cache.clear_tb(ns, db, &self.what);
 						}
+
+						txn.clear_cache();
+						return Ok(Value::None);
 					}
 				}
 			}
 		}
+
+		txn.put_tb(ns_name, db_name, tb).await?;
+
+		// Process possible recursive defitions
+		self.process_recursive_definitions(ns, db, txn.clone()).await?;
+
+		// Clear the cache
+		if let Some(cache) = ctx.get_cache() {
+			cache.clear_tb(ns, db, &self.what);
+		}
+
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

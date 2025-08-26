@@ -567,7 +567,7 @@ async fn compute_show(
 		}
 		Base::Ns => {
 			let ns = ctx.expect_ns_id(opt).await?;
-			if let None = txn.get_ns_access(ns, &stmt.ac).await? {
+			if txn.get_ns_access(ns, &stmt.ac).await?.is_none() {
 				bail!(Error::AccessNsNotFound {
 					ac: stmt.ac.to_string(),
 					// We expected a namespace above so this unwrap shouldn't be able to trigger.
@@ -578,7 +578,7 @@ async fn compute_show(
 		Base::Db => {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 			// We expected a namespace above so this unwrap shouldn't be able to trigger.
-			if let None = txn.get_db_access(ns, db, &stmt.ac).await? {
+			if txn.get_db_access(ns, db, &stmt.ac).await?.is_none() {
 				bail!(Error::AccessDbNotFound {
 					ac: stmt.ac.to_string(),
 					// We expected a namespace and database above so these unwrap shouldn't be able to trigger.

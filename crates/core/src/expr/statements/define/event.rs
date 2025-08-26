@@ -35,6 +35,7 @@ impl DefineEventStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
 		// Get the NS and DB
+		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
@@ -75,13 +76,12 @@ impl DefineEventStatement {
 		.await?;
 
 		// Refresh the table cache
-		let tb_def = TableDefinition {
+		let tb = TableDefinition {
 			cache_events_ts: Uuid::now_v7(),
 			..tb.as_ref().clone()
 		};
 
-		let key = crate::key::database::tb::new(ns, db, &self.target_table);
-		txn.set(&key, &tb_def, None).await?;
+		txn.put_tb(ns_name, db_name, tb).await?;
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {

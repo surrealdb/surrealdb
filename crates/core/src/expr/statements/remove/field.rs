@@ -23,6 +23,7 @@ impl RemoveFieldStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Get the NS and DB
+		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the transaction
 		let txn = ctx.tx();
@@ -46,7 +47,6 @@ impl RemoveFieldStatement {
 		let key = crate::key::table::fd::new(ns, db, &self.table_name, &name);
 		txn.del(&key).await?;
 		// Refresh the table cache for fields
-		let key = crate::key::database::tb::new(ns, db, &self.table_name);
 		let Some(tb) = txn.get_tb(ns, db, &self.table_name).await? else {
 			return Err(Error::TbNotFound {
 				name: self.table_name.to_string(),
@@ -54,13 +54,13 @@ impl RemoveFieldStatement {
 			.into());
 		};
 
-		txn.set(
-			&key,
-			&TableDefinition {
+		txn.put_tb(
+			ns_name,
+			db_name,
+			TableDefinition {
 				cache_fields_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
 			},
-			None,
 		)
 		.await?;
 		// Clear the cache

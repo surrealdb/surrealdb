@@ -118,14 +118,13 @@ impl DefineIndexStatement {
 
 		// Refresh the table cache
 
-		let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
-		txn.set(
-			&key,
-			&TableDefinition {
+		txn.put_tb(
+			ns,
+			db,
+			TableDefinition {
 				cache_indexes_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
 			},
-			None,
 		)
 		.await?;
 

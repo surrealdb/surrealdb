@@ -164,13 +164,17 @@ impl Display for JwtAccess {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match &self.verify {
 			JwtAccessVerify::Key(v) => {
-				write!(f, "ALGORITHM {} KEY {}", v.alg, QuoteStr("[REDACTED]"))?;
+				if v.alg.is_symmetric() {
+					write!(f, "ALGORITHM {} KEY {}", v.alg, QuoteStr("[REDACTED]"))?;
+				} else {
+					write!(f, "ALGORITHM {} KEY {}", v.alg, QuoteStr(&v.key))?;
+				}
 			}
 			JwtAccessVerify::Jwks(v) => {
 				write!(f, "URL {}", QuoteStr(&v.url),)?;
 			}
 		}
-		if let Some(iss) = &self.issue {
+		if self.issue.is_some() {
 			write!(f, " WITH ISSUER KEY {}", QuoteStr("[REDACTED]"))?;
 		}
 		Ok(())

@@ -48,6 +48,7 @@ impl DefineTableStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Get the NS and DB
+		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
@@ -94,17 +95,13 @@ impl DefineTableStatement {
 		// Add table relational fields
 		Self::add_in_out_fields(&txn, ns, db, &mut tb_def).await?;
 
+		// Record definition change
+		if self.changefeed.is_some() {
+			txn.lock().await.record_table_change(ns, db, &self.name, &tb_def);
+		}
+
 		// Update the catalog
-		{
-			let (ns, db) = opt.ns_db()?;
-			let catalog_key = crate::key::catalog::tb::new(ns, db, &self.name);
-			txn.set(&catalog_key, &tb_def, None).await?;
-		}
-		{
-			let key = crate::key::database::tb::new(ns, db, &self.name);
-			// Set the table definition
-			txn.set(&key, &tb_def, None).await?;
-		}
+		txn.put_tb(ns_name, db_name, tb_def.clone()).await?;
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
@@ -112,10 +109,6 @@ impl DefineTableStatement {
 		}
 		// Clear the cache
 		txn.clear_cache();
-		// Record definition change
-		if tb_def.changefeed.is_some() {
-			txn.lock().await.record_table_change(ns, db, &self.name, &tb_def);
-		}
 		// Check if table is a view
 		if let Some(view) = &self.view {
 			// Force queries to run
@@ -135,16 +128,16 @@ impl DefineTableStatement {
 					});
 				};
 
-				let key = crate::key::database::tb::new(ns, db, ft);
-				txn.set(
-					&key,
-					&TableDefinition {
+				txn.put_tb(
+					ns_name,
+					db_name,
+					TableDefinition {
 						cache_tables_ts: Uuid::now_v7(),
 						..foreign_tb.as_ref().clone()
 					},
-					None,
 				)
 				.await?;
+
 				// Clear the cache
 				if let Some(cache) = ctx.get_cache() {
 					cache.clear_tb(ns, db, ft);
