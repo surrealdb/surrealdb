@@ -121,7 +121,6 @@ impl DefineFieldStatement {
 				cache_fields_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
 			};
-			let (ns, db) = opt.ns_db()?;
 			txn.put_tb(ns, db, tb_def).await?;
 		}
 

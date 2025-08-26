@@ -73,7 +73,6 @@ impl RemoveTableStatement {
 		for ft in fts.iter() {
 			// Refresh the table cache
 			let foreign_tb = txn.expect_tb(ns, db, &ft.name).await?;
-			let (ns, db) = opt.ns_db()?;
 			txn.put_tb(
 				ns,
 				db,
@@ -93,7 +92,6 @@ impl RemoveTableStatement {
 				txn.del(&key).await?;
 				// Refresh the table cache for foreign tables
 				let foreign_tb = txn.expect_tb(ns, db, ft).await?;
-				let (ns, db) = opt.ns_db()?;
 				txn.put_tb(
 					ns,
 					db,

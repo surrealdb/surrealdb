@@ -521,14 +521,8 @@ mod tests {
 		// let db = tx.ensure_ns_db(NS, DB, false).await.unwrap();
 		tx.put_ns(dns).await.unwrap();
 		tx.put_db(NS, ddb).await.unwrap();
-		tx.put_tb(NS, DB, dtb).await.unwrap();
+		tx.put_tb(namespace_id, database_id, dtb).await.unwrap();
 
-		// let ns_root = crate::key::root::ns::new(namespace_id);
-		// tx.put(&ns_root, &dns, None).await.unwrap();
-		// let db_root = crate::key::namespace::db::new(namespace_id, database_id);
-		// tx.put(&db_root, &ddb, None).await.unwrap();
-		// let tb_root = crate::key::database::tb::new(namespace_id, database_id,
-		// &dtb.name); tx.put(&tb_root, &dtb, None).await.unwrap();
 		tx.commit().await.unwrap();
 		ds
 	}

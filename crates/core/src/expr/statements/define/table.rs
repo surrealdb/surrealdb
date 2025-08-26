@@ -106,16 +106,9 @@ impl DefineTableStatement {
 		Self::add_in_out_fields(&txn, ns, db, &mut tb_def).await?;
 
 		// Update the catalog
-		{
-			let (ns, db) = opt.ns_db()?;
-			let catalog_key = crate::key::catalog::tb::new(ns, db, &self.name);
-			txn.set(&catalog_key, &tb_def, None).await?;
-		}
-		{
-			let key = crate::key::database::tb::new(ns, db, &self.name);
-			// Set the table definition
-			txn.set(&key, &tb_def, None).await?;
-		}
+		let key = crate::key::database::tb::new(ns, db, &self.name);
+		// Set the table definition
+		txn.set(&key, &tb_def, None).await?;
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
@@ -146,7 +139,6 @@ impl DefineTableStatement {
 					});
 				};
 
-				let (ns, db) = opt.ns_db()?;
 				txn.put_tb(
 					ns,
 					db,
@@ -159,7 +151,6 @@ impl DefineTableStatement {
 
 				// Clear the cache
 				if let Some(cache) = ctx.get_cache() {
-					let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 					cache.clear_tb(ns, db, ft);
 				}
 				// Clear the cache
