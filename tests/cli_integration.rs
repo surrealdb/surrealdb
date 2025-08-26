@@ -616,9 +616,9 @@ mod cli_integration {
 			let args =
 				format!("sql --conn http://{addr} --db {db} --ns {ns} --user {USER} --pass {PASS}");
 			let _ = common::run(&args)
-				.input(dbg!(format!("DEFINE ACCESS {ac} ON ROOT TYPE JWT ALGORITHM HS512 KEY '{key}';
+				.input(format!("DEFINE ACCESS {ac} ON ROOT TYPE JWT ALGORITHM HS512 KEY '{key}';
                                                 DEFINE ACCESS {ac} ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '{key}';
-                                                DEFINE ACCESS {ac} ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{key}';\n").as_str()))
+                                                DEFINE ACCESS {ac} ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{key}';\n").as_str())
 				.output()
 				.expect("success");
 		}

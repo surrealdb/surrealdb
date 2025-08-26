@@ -171,7 +171,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 		}
 	}
 	// Check the token authentication claims
-	match dbg!(&token_data.claims) {
+	match &token_data.claims {
 		// Check if this is record access
 		Claims {
 			ns: Some(ns),
@@ -616,7 +616,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace access method
-			let de = dbg!(tx.get_root_access(ac).await)?;
+			let de = tx.get_root_access(ac).await?;
 
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
@@ -634,9 +634,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				| catalog::AccessType::Bearer(catalog::BearerAccess {
 					jwt,
 					..
-				}) => match dbg!(&jwt.verify) {
+				}) => match &jwt.verify {
 					catalog::JwtAccessVerify::Key(key) => {
-						decode_key(key.alg, dbg!(&key.key).as_bytes())
+						decode_key(key.alg, (&key.key).as_bytes())
 					}
 					#[cfg(feature = "jwks")]
 					catalog::JwtAccessVerify::Jwks(jwks) => {
@@ -652,7 +652,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				_ => bail!(Error::AccessMethodMismatch),
 			}?;
 			// Verify the token
-			dbg!(verify_token(token, &cf.0, &cf.1))?;
+			verify_token(token, &cf.0, &cf.1)?;
 			// AUTHENTICATE clause
 			if let Some(au) = &de.authenticate {
 				// Setup the system session for executing the clause
@@ -833,7 +833,7 @@ fn verify_pass(pass: &str, hash: &str) -> Result<()> {
 }
 
 fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Result<()> {
-	match dbg!(decode::<Claims>(token, key, validation)) {
+	match decode::<Claims>(token, key, validation) {
 		Ok(_) => Ok(()),
 		Err(err) => {
 			// Only transparently return certain token verification errors

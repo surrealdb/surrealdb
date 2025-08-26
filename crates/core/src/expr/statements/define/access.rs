@@ -252,7 +252,7 @@ impl DefineAccessStatement {
 				}
 				// Process the statement
 				let key = crate::key::root::ac::new(&self.name);
-				txn.set(&key, dbg!(&dbg!(self).to_definition()), None).await?;
+				txn.set(&key, &self.to_definition(), None).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
