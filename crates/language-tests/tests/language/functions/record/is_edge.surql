@@ -47,6 +47,17 @@ value = "false"
 [[test.results]]
 value = "true"
 
+[[test.results]]
+value = "[{ id: person:jane, is_edge: false, name: 'Jane' }, { id: person:john, is_edge: false, name: 'John' }]"
+
+[[test.results]]
+value = "[{ id: knows:person, in: person:john, is_edge: true, out: person:jane, since: '2023-01-01' }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ id: knows:person, in: person:john, out: person:jane, since: '2023-01-01' }]"
 */
 
 -- Test 1: Non-existent record, using a record ID
@@ -93,3 +104,15 @@ function() { return surrealdb.functions.record.is.edge("person:john"); };
 
 -- Test 15: JavaScript function call for an edge record (should be true)
 function() { return surrealdb.functions.record.is.edge("knows:person"); };
+
+-- Test 16: Check if the function works as expected inside a select predicate (should be false)
+SELECT *, record::is::edge(id) as is_edge FROM person;
+
+-- Test 17: Check if the function works as expected inside a select predicate (should be true)
+SELECT *, record::is::edge(id) as is_edge FROM knows;
+
+-- Test 18: Check if the function works as expected inside a select filter (should be empty)
+SELECT * FROM person WHERE record::is::edge(id) = true;
+
+-- Test 19: Check if the function works as expected inside a select filter (should not be empty)
+SELECT * FROM knows WHERE record::is::edge(id) = true;
