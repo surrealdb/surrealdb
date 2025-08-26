@@ -92,18 +92,22 @@ impl Array {
 	pub(crate) fn is_all_none_or_null(&self) -> bool {
 		self.0.iter().all(|v| v.is_nullish())
 	}
+
+	pub(crate) fn display<V: Display>(v: &[V], f: &mut Formatter) -> fmt::Result {
+		let mut f = Pretty::from(f);
+		f.write_char('[')?;
+		if !v.is_empty() {
+			let indent = pretty_indent();
+			write!(f, "{}", Fmt::pretty_comma_separated(v))?;
+			drop(indent);
+		}
+		f.write_char(']')
+	}
 }
 
 impl Display for Array {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		let mut f = Pretty::from(f);
-		f.write_char('[')?;
-		if !self.is_empty() {
-			let indent = pretty_indent();
-			write!(f, "{}", Fmt::pretty_comma_separated(self.as_slice()))?;
-			drop(indent);
-		}
-		f.write_char(']')
+		Array::display(&self.0, f)
 	}
 }
 

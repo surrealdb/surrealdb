@@ -601,9 +601,10 @@ impl<'a> TreeBuilder<'a> {
 		if let Some(v) = n.is_computed() {
 			match (op, v, p) {
 				(BinaryOperator::Equal | BinaryOperator::ExactEqual, v, _) => {
-					self.index_map.check_compound(ixr, col, &v);
+					let iop = IndexOperator::Equality(v);
+					self.index_map.check_compound(ixr, col, &iop);
 					if col == 0 {
-						return Some(IndexOperator::Equality(v));
+						return Some(iop);
 					}
 				}
 				(BinaryOperator::Contain, v, IdiomPosition::Left) => {
@@ -641,8 +642,10 @@ impl<'a> TreeBuilder<'a> {
 					v,
 					p,
 				) => {
+					let iop = IndexOperator::RangePart(p.transform(op), v);
+					self.index_map.check_compound(ixr, col, &iop);
 					if col == 0 {
-						return Some(IndexOperator::RangePart(p.transform(op), v));
+						return Some(iop);
 					}
 				}
 				_ => {}
@@ -652,7 +655,7 @@ impl<'a> TreeBuilder<'a> {
 	}
 }
 
-pub(super) type CompoundIndexes = HashMap<IndexReference, Vec<Vec<Arc<Value>>>>;
+pub(super) type CompoundIndexes = HashMap<IndexReference, Vec<Vec<IndexOperator>>>;
 
 /// For each expression a possible index option
 #[derive(Default)]
@@ -664,17 +667,18 @@ pub(super) struct IndexesMap {
 }
 
 impl IndexesMap {
-	pub(crate) fn check_compound(&mut self, ixr: &IndexReference, col: usize, val: &Arc<Value>) {
+	pub(crate) fn check_compound(&mut self, ixr: &IndexReference, col: usize, iop: &IndexOperator) {
 		let cols = ixr.cols.len();
 		let values = self.compound_indexes.entry(ixr.clone()).or_insert(vec![vec![]; cols]);
 		if let Some(a) = values.get_mut(col) {
-			a.push(val.clone());
+			a.push(iop.clone());
 		}
 	}
 
 	pub(crate) fn check_compound_array(&mut self, ixr: &IndexReference, col: usize, a: &Array) {
 		for v in a.iter() {
-			self.check_compound(ixr, col, &Arc::new(v.clone()))
+			let iop = IndexOperator::Equality(Arc::new(v.clone()));
+			self.check_compound(ixr, col, &iop)
 		}
 	}
 }
@@ -739,7 +743,7 @@ impl SchemaCache {
 
 pub(super) type GroupRef = u16;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) enum Node {
 	Expression {
 		group: GroupRef,
