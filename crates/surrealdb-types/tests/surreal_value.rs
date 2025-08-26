@@ -299,7 +299,7 @@ test_surreal_value!(
 
 test_surreal_value!(
 	bytes_vec<Vec<u8>>(
-		vec![1 as u8, 2, 3] => (
+		vec![1_u8, 2, 3] => (
 			Value::Bytes(_),
 			Kind::Bytes
 		),

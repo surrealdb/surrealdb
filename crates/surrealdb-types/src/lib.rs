@@ -125,7 +125,6 @@ macro_rules! array {
 /// let mixed = array! ["hello", 42, true];
 /// let nested = array! [1, person, "end"];  // can include objects and other values
 /// ```
-
 #[cfg(test)]
 mod tests {
 	use super::*;
