@@ -23,6 +23,11 @@ impl Datetime {
 	pub const MIN_UTC: Self = Datetime(DateTime::<Utc>::MIN_UTC);
 	/// The maximum UTC datetime
 	pub const MAX_UTC: Self = Datetime(DateTime::<Utc>::MAX_UTC);
+
+	/// Returns the current UTC datetime
+	pub fn now() -> Self {
+		Self(Utc::now())
+	}
 }
 
 impl From<DateTime<Utc>> for Datetime {

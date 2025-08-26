@@ -21,12 +21,12 @@ pub struct RecordId {
 
 impl RecordId {
 	/// Creates a new record id from the given table and key
-	pub fn new<K>(table: String, key: K) -> Self
+	pub fn new<T: Into<String>, K>(table: T, key: K) -> Self
 	where
 		RecordIdKey: From<K>,
 	{
 		RecordId {
-			table,
+			table: table.into(),
 			key: key.into(),
 		}
 	}

@@ -75,6 +75,12 @@ impl From<String> for RecordIdKey {
 	}
 }
 
+impl From<&str> for RecordIdKey {
+	fn from(value: &str) -> Self {
+		RecordIdKey::String(value.to_string())
+	}
+}
+
 impl From<Uuid> for RecordIdKey {
 	fn from(value: Uuid) -> Self {
 		RecordIdKey::Uuid(value)

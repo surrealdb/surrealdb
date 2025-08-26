@@ -14,7 +14,10 @@ pub struct File {
 
 impl File {
 	/// Create a new file pointer
-	pub fn new(bucket: String, key: String) -> Self {
+	pub fn new<B: Into<String>, K: Into<String>>(bucket: B, key: K) -> Self {
+		let bucket: String = bucket.into();
+		let key: String = key.into();
+
 		let key = if key.starts_with("/") {
 			key
 		} else {

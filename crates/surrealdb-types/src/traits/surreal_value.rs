@@ -28,8 +28,65 @@ pub trait SurrealValue {
 		Self: Sized;
 }
 
-// Simple macro for concrete types
-macro_rules! impl_surreal_value_concrete {
+macro_rules! impl_surreal_value {
+	// Generic types
+    (
+        <$($generic:ident),*> $type:ty as $kind:expr,
+        $($is_fnc:ident<$($is_generic:ident),*>)? ($value_is:ident) => $is:expr,
+        $($from_fnc:ident<$($from_generic:ident),*>)? ($self:ident) => $into:expr,
+        $($into_fnc:ident<$($into_generic:ident),*>)? ($value_into:ident) => $from:expr
+    ) => {
+        impl<$($generic: SurrealValue),*> SurrealValue for $type {
+            fn kind_of() -> Kind {
+                $kind
+            }
+
+            fn is_value($value_is: &Value) -> bool {
+                $is
+            }
+
+            fn into_value($self) -> Value {
+                $into
+            }
+
+            fn from_value($value_into: Value) -> anyhow::Result<Self> {
+                $from
+            }
+        }
+
+        $(
+            impl Value {
+                /// Checks if this value can be converted to the given type
+                ///
+                /// Returns `true` if the value can be converted to the type, `false` otherwise.
+                pub fn $is_fnc<$($is_generic: SurrealValue),*>(&self) -> bool {
+                    <$type>::is_value(self)
+                }
+            }
+        )?
+
+        $(
+            impl Value {
+                /// Converts the given value into a `Value`
+                pub fn $from_fnc<$($from_generic: SurrealValue),*>(value: $type) -> Value {
+                    <$type>::into_value(value)
+                }
+            }
+        )?
+
+        $(
+            impl Value {
+                /// Attempts to convert a SurrealDB value into the given type
+                ///
+                /// Returns `Ok(T)` if the conversion is successful, `Err(anyhow::Error)` otherwise.
+                pub fn $into_fnc<$($into_generic: SurrealValue),*>(self) -> anyhow::Result<$type> {
+                    <$type>::from_value(self)
+                }
+            }
+        )?
+    };
+
+	// Concrete types
     (
         $type:ty as $kind:expr,
         $($is_fnc:ident)? ($value_is:ident) => $is:expr,
@@ -87,74 +144,15 @@ macro_rules! impl_surreal_value_concrete {
     };
 }
 
-// Macro for generic types
-macro_rules! impl_surreal_value_generic {
-    (
-        <$($generic:ident),*> $type:ty as $kind:expr,
-        $($is_fnc:ident<$($is_generic:ident),*>)? ($value_is:ident) => $is:expr,
-        $($from_fnc:ident<$($from_generic:ident),*>)? ($self:ident) => $into:expr,
-        $($into_fnc:ident<$($into_generic:ident),*>)? ($value_into:ident) => $from:expr
-    ) => {
-        impl<$($generic: SurrealValue),*> SurrealValue for $type {
-            fn kind_of() -> Kind {
-                $kind
-            }
-
-            fn is_value($value_is: &Value) -> bool {
-                $is
-            }
-
-            fn into_value($self) -> Value {
-                $into
-            }
-
-            fn from_value($value_into: Value) -> anyhow::Result<Self> {
-                $from
-            }
-        }
-
-        $(
-            impl Value {
-                /// Checks if this value can be converted to the given type
-                ///
-                /// Returns `true` if the value can be converted to the type, `false` otherwise.
-                pub fn $is_fnc<$($is_generic: SurrealValue),*>(&self) -> bool {
-                    <$type>::is_value(self)
-                }
-            }
-        )?
-
-        $(
-            impl Value {
-                /// Converts the given value into a `Value`
-                pub fn $from_fnc<$($from_generic: SurrealValue),*>(value: $type) -> Value {
-                    <$type>::into_value(value)
-                }
-            }
-        )?
-
-        $(
-            impl Value {
-                /// Attempts to convert a SurrealDB value into the given type
-                ///
-                /// Returns `Ok(T)` if the conversion is successful, `Err(anyhow::Error)` otherwise.
-                pub fn $into_fnc<$($into_generic: SurrealValue),*>(self) -> anyhow::Result<$type> {
-                    <$type>::from_value(self)
-                }
-            }
-        )?
-    };
-}
-
 // Concrete type implementations using the macro
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	Value as Kind::Any,
 	(_value) => true,
 	(self) => self,
 	(value) => Ok(value)
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	() as Kind::None,
 	(value) => matches!(value, Value::None),
 	(self) => Value::None,
@@ -167,7 +165,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	SurrealNone as Kind::None,
 	is_none(value) => matches!(value, Value::None),
 	(self) => Value::None,
@@ -180,7 +178,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	SurrealNull as Kind::Null,
 	is_null(value) => matches!(value, Value::Null),
 	(self) => Value::Null,
@@ -193,7 +191,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	bool as Kind::Bool,
 	is_bool(value) => matches!(value, Value::Bool(_)),
 	from_bool(self) => Value::Bool(self),
@@ -223,7 +221,7 @@ impl Value {
 	}
 }
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	Number as Kind::Number,
 	is_number(value) => matches!(value, Value::Number(_)),
 	from_number(self) => Value::Number(self),
@@ -235,7 +233,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	i64 as Kind::Int,
 	is_int(value) => matches!(value, Value::Number(Number::Int(_))),
 	from_int(self) => Value::Number(Number::Int(self)),
@@ -247,7 +245,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	f64 as Kind::Float,
 	is_float(value) => matches!(value, Value::Number(Number::Float(_))),
 	from_float(self) => Value::Number(Number::Float(self)),
@@ -259,7 +257,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	Decimal as Kind::Decimal,
 	is_decimal(value) => matches!(value, Value::Number(Number::Decimal(_))),
 	from_decimal(self) => Value::Number(Number::Decimal(self)),
@@ -271,7 +269,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	String as Kind::String,
 	is_string(value) => matches!(value, Value::String(_)),
 	from_string(self) => Value::String(self),
@@ -283,7 +281,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	Duration as Kind::Duration,
 	is_duration(value) => matches!(value, Value::Duration(_)),
 	from_duration(self) => Value::Duration(self),
@@ -295,7 +293,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	std::time::Duration as Kind::Duration,
 	(value) => matches!(value, Value::Duration(_)),
 	(self) => Value::Duration(Duration(self)),
@@ -307,7 +305,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	Datetime as Kind::Datetime,
 	is_datetime(value) => matches!(value, Value::Datetime(_)),
 	from_datetime(self) => Value::Datetime(self),
@@ -319,7 +317,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	chrono::DateTime<chrono::Utc> as Kind::Datetime,
 	(value) => matches!(value, Value::Datetime(_)),
 	(self) => Value::Datetime(Datetime(self)),
@@ -331,7 +329,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	Uuid as Kind::Uuid,
 	is_uuid(value) => matches!(value, Value::Uuid(_)),
 	from_uuid(self) => Value::Uuid(self),
@@ -343,7 +341,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	uuid::Uuid as Kind::Uuid,
 	(value) => matches!(value, Value::Uuid(_)),
 	(self) => Value::Uuid(Uuid(self)),
@@ -355,7 +353,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	Array as Kind::Array(Box::new(Kind::Any), None),
 	is_array(value) => matches!(value, Value::Array(_)),
 	from_array(self) => Value::Array(self),
@@ -367,7 +365,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	Object as Kind::Object,
 	is_object(value) => matches!(value, Value::Object(_)),
 	from_object(self) => Value::Object(self),
@@ -379,7 +377,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	Geometry as Kind::Geometry(vec![]),
 	is_geometry(value) => matches!(value, Value::Geometry(_)),
 	from_geometry(self) => Value::Geometry(self),
@@ -391,7 +389,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	Bytes as Kind::Bytes,
 	is_bytes(value) => matches!(value, Value::Bytes(_)),
 	from_bytes(self) => Value::Bytes(self),
@@ -403,7 +401,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	Vec<u8> as Kind::Bytes,
 	(value) => matches!(value, Value::Bytes(_)),
 	(self) => Value::Bytes(Bytes(self)),
@@ -415,7 +413,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	bytes::Bytes as Kind::Bytes,
 	(value) => matches!(value, Value::Bytes(_)),
 	(self) => Value::Bytes(Bytes(self.to_vec())),
@@ -427,7 +425,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	RecordId as Kind::Record(vec![]),
 	is_record(value) => matches!(value, Value::RecordId(_)),
 	from_record(self) => Value::RecordId(self),
@@ -439,7 +437,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	File as Kind::File(vec![]),
 	is_file(value) => matches!(value, Value::File(_)),
 	from_file(self) => Value::File(self),
@@ -451,7 +449,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	Range as Kind::Range,
 	is_range(value) => matches!(value, Value::Range(_)),
 	from_range(self) => Value::Range(Box::new(self)),
@@ -464,7 +462,7 @@ impl_surreal_value_concrete!(
 );
 
 // Generic implementations using the macro
-impl_surreal_value_generic!(
+impl_surreal_value!(
 	<T> Vec<T> as Kind::Array(Box::new(T::kind_of()), None),
 	is_vec<T>(value) => {
 		if let Value::Array(Array(a)) = value {
@@ -486,7 +484,7 @@ impl_surreal_value_generic!(
 	}
 );
 
-impl_surreal_value_generic!(
+impl_surreal_value!(
 	<T> Option<T> as Kind::Option(Box::new(T::kind_of())),
 	is_option<T>(value) => matches!(value, Value::None) || T::is_value(value),
 	from_option<T>(self) => self.map(T::into_value).unwrap_or(Value::None),
@@ -496,7 +494,7 @@ impl_surreal_value_generic!(
 	}
 );
 
-impl_surreal_value_generic!(
+impl_surreal_value!(
 	<V> BTreeMap<String, V> as Kind::Object,
 	(value) => {
 		if let Value::Object(Object(o)) = value {
@@ -518,7 +516,7 @@ impl_surreal_value_generic!(
 	}
 );
 
-impl_surreal_value_generic!(
+impl_surreal_value!(
 	<V> HashMap<String, V> as Kind::Object,
 	(value) => {
 		if let Value::Object(Object(o)) = value {
@@ -541,7 +539,7 @@ impl_surreal_value_generic!(
 );
 
 // Geometry implementations
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	geo::Point as Kind::Geometry(vec![GeometryKind::Point]),
 	is_point(value) => matches!(value, Value::Geometry(Geometry::Point(_))),
 	from_point(self) => Value::Geometry(Geometry::Point(self)),
@@ -553,7 +551,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	geo::LineString as Kind::Geometry(vec![GeometryKind::Line]),
 	is_line(value) => matches!(value, Value::Geometry(Geometry::Line(_))),
 	from_line(self) => Value::Geometry(Geometry::Line(self)),
@@ -565,7 +563,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	geo::Polygon as Kind::Geometry(vec![GeometryKind::Polygon]),
 	is_polygon(value) => matches!(value, Value::Geometry(Geometry::Polygon(_))),
 	from_polygon(self) => Value::Geometry(Geometry::Polygon(self)),
@@ -577,7 +575,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	geo::MultiPoint as Kind::Geometry(vec![GeometryKind::MultiPoint]),
 	is_multipoint(value) => matches!(value, Value::Geometry(Geometry::MultiPoint(_))),
 	from_multipoint(self) => Value::Geometry(Geometry::MultiPoint(self)),
@@ -589,7 +587,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	geo::MultiLineString as Kind::Geometry(vec![GeometryKind::MultiLine]),
 	is_multiline(value) => matches!(value, Value::Geometry(Geometry::MultiLine(_))),
 	from_multiline(self) => Value::Geometry(Geometry::MultiLine(self)),
@@ -601,7 +599,7 @@ impl_surreal_value_concrete!(
 	}
 );
 
-impl_surreal_value_concrete!(
+impl_surreal_value!(
 	geo::MultiPolygon as Kind::Geometry(vec![GeometryKind::MultiPolygon]),
 	is_multipolygon(value) => matches!(value, Value::Geometry(Geometry::MultiPolygon(_))),
 	from_multipolygon(self) => Value::Geometry(Geometry::MultiPolygon(self)),

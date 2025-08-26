@@ -25,8 +25,8 @@ pub use value::*;
 /// use surrealdb_types::object;
 ///
 /// let obj = object! {
-///     name => "John".to_string(),
-///     "user-id" => 12345,
+///     name: "John".to_string(),
+///     "user-id": 12345,
 /// };
 /// ```
 #[macro_export]

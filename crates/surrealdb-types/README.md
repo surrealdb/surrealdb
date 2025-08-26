@@ -17,7 +17,8 @@ The `surrealdb-types` crate acts as a shared public value type system that:
 The main `Value` enum represents all possible data types in SurrealDB:
 
 ```rust
-use surrealdb_types::Value;
+use surrealdb_types::{Array, Datetime, Number, Object, Value};
+use std::collections::BTreeMap;
 
 // Basic types
 let bool_val = Value::Bool(true);
@@ -25,9 +26,9 @@ let string_val = Value::String("hello".to_string());
 let number_val = Value::Number(Number::Int(42));
 
 // Complex types
-let array_val = Value::Array(Array(vec![Value::String("item".to_string())]));
-let object_val = Value::Object(Object(BTreeMap::new()));
-let datetime_val = Value::Datetime(Datetime(chrono::Utc::now()));
+let array_val = Value::Array(Array::from(vec![Value::String("item".to_string())]));
+let object_val = Value::Object(Object::new());
+let datetime_val = Value::Datetime(Datetime::now());
 ```
 
 ### Type System
@@ -53,7 +54,7 @@ The `SurrealValue` trait provides type-safe conversion between Rust types and Su
 use surrealdb_types::{SurrealValue, Value};
 
 // Convert from Rust type to SurrealDB value
-let value: Value = "hello".into_value();
+let value: Value = "hello".to_string().into_value();
 
 // Check if a value is of a specific type
 if value.is::<String>() {
@@ -61,9 +62,8 @@ if value.is::<String>() {
 }
 
 // Convert from SurrealDB value to Rust type
-if let Some(string) = value.into::<String>() {
-    println!("Extracted string: {}", string);
-}
+let string = value.into::<String>().unwrap();
+println!("Extracted string: {}", string);
 ```
 
 ### Geometric Types
@@ -105,13 +105,13 @@ let values = vec![
     Value::Bool(true),
     Value::Number(Number::Int(42)),
     Value::String("hello".to_string()),
-    Value::Array(Array(vec![Value::String("item".to_string())])),
+    Value::Array(Array::from(vec![Value::String("item".to_string())])),
 ];
 
 // Work with objects
 let mut map = BTreeMap::new();
 map.insert("key".to_string(), Value::String("value".to_string()));
-let object = Value::Object(Object(map));
+let object = Value::Object(Object::from(map));
 ```
 
 ### Macros for object & array values
@@ -141,10 +141,12 @@ let map = object! {
 - You need to have `anyhow` in your dependencies, as the `SurrealValue` trait uses it for error handling.
 
 ```rust
+use surrealdb_types::SurrealValue;
+
 #[derive(SurrealValue)]
 struct Person {
     name: String,
-    age: u32,
+    age: i64,
 }
 
 let person = Person {
@@ -168,7 +170,7 @@ fn process_value(value: &Value) {
     match value {
         Value::String(s) => println!("String: {}", s),
         Value::Number(n) => println!("Number: {:?}", n),
-        Value::Array(arr) => println!("Array with {} items", arr.0.len()),
+        Value::Array(arr) => println!("Array with {} items", arr.len()),
         _ => println!("Other type"),
     }
 }
