@@ -616,9 +616,9 @@ mod cli_integration {
 			let args =
 				format!("sql --conn http://{addr} --db {db} --ns {ns} --user {USER} --pass {PASS}");
 			let _ = common::run(&args)
-				.input(format!("DEFINE ACCESS {ac} ON ROOT TYPE JWT ALGORITHM HS512 KEY '{key}';
+				.input(dbg!(format!("DEFINE ACCESS {ac} ON ROOT TYPE JWT ALGORITHM HS512 KEY '{key}';
                                                 DEFINE ACCESS {ac} ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '{key}';
-                                                DEFINE ACCESS {ac} ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{key}';\n").as_str())
+                                                DEFINE ACCESS {ac} ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{key}';\n").as_str()))
 				.output()
 				.expect("success");
 		}
@@ -1065,15 +1065,15 @@ mod cli_integration {
 			let output = remove_debug_info(output).replace('\n', "");
 			let allowed = [
 				// Delete these
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, select: false, update: false }, schemafull: false } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 2 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, select: false, update: false }, schemafull: false } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, select: false, update: false }, schemafull: false } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, select: false, update: false }, schemafull: false } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 4 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 2 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 4 }]]",
 				// Keep these
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, select: false, update: false }, schemafull: false } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, select: false, update: false }, schemafull: false } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, select: false, update: false }, schemafull: false } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, select: false, update: false }, schemafull: false } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 262144 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 262144 }]]",
 			];
 			allowed
 				.into_iter()

@@ -252,7 +252,7 @@ impl DefineAccessStatement {
 				}
 				// Process the statement
 				let key = crate::key::root::ac::new(&self.name);
-				txn.set(&key, &self.to_definition(), None).await?;
+				txn.set(&key, dbg!(&dbg!(self).to_definition()), None).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -315,6 +315,36 @@ impl DefineAccessStatement {
 				Ok(Value::None)
 			}
 		}
+	}
+
+	/// Remove information from the access definition which should not be displayed.
+	pub fn redact(mut self) -> Self {
+		fn redact_jwt_access(acc: &mut JwtAccess) {
+			if let JwtAccessVerify::Key(ref mut v) = acc.verify {
+				if v.alg.is_symmetric() {
+					v.key = "[REDACTED]".to_string();
+				}
+			}
+			if let Some(ref mut s) = acc.issue {
+				s.key = "[REDACTED]".to_string();
+			}
+		}
+
+		match self.access_type {
+			AccessType::Jwt(ref mut key) => {
+				redact_jwt_access(key);
+			}
+			AccessType::Bearer(ref mut b) => {
+				redact_jwt_access(&mut b.jwt);
+			}
+			AccessType::Record(ref mut r) => {
+				redact_jwt_access(&mut r.jwt);
+				if let Some(ref mut b) = r.bearer {
+					redact_jwt_access(&mut b.jwt);
+				}
+			}
+		}
+		self
 	}
 }
 

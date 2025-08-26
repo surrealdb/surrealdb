@@ -270,7 +270,9 @@ impl Transaction {
 			let accesses = self.all_db_accesses(ns, db).await?;
 			self.export_section(
 				"ACCESSES",
-				accesses.iter().map(|x| DefineAccessStatement::from_definition(Base::Db, x)),
+				accesses
+					.iter()
+					.map(|x| DefineAccessStatement::from_definition(Base::Db, x).redact()),
 				chn,
 			)
 			.await?;

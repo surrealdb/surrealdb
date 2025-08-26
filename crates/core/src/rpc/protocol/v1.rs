@@ -227,8 +227,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut session = self.session().as_ref().clone();
 		// Attempt authentication, mutating the session
 		let out: Result<Value> =
-			crate::iam::verify::token(self.kvs(), &mut session, token.as_str())
-				.await
+			dbg!(crate::iam::verify::token(self.kvs(), &mut session, token.as_str()).await)
 				.map(|_| Value::None);
 		// Store the updated session
 		self.set_session(Arc::new(session));
