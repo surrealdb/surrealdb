@@ -1,13 +1,16 @@
-use crate::err::Error;
-use crate::expr::{Array, Idiom, Object, Value};
-use crate::idx::ft::offsets::{Offset, Position};
-use anyhow::{Result, ensure};
-use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::collections::btree_map::Entry as BEntry;
 use std::collections::hash_map::Entry as HEntry;
+use std::collections::{BTreeMap, HashMap};
 use std::convert::Infallible;
 use std::result;
+
+use anyhow::{Result, ensure};
+
+use crate::err::Error;
+use crate::expr::Idiom;
+use crate::idx::ft::Position;
+use crate::idx::ft::offset::Offset;
+use crate::val::{Array, Object, Value};
 
 pub(crate) struct HighlightParams {
 	pub(crate) prefix: Value,
@@ -49,7 +52,7 @@ impl Highlighter {
 
 	fn extract(val: Value, vals: &mut Vec<String>) {
 		match val {
-			Value::Strand(s) => vals.push(s.0),
+			Value::Strand(s) => vals.push(s.into_string()),
 			Value::Number(n) => vals.push(n.to_string()),
 			Value::Bool(b) => vals.push(b.to_string()),
 			Value::Array(a) => {

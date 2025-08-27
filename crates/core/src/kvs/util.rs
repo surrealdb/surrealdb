@@ -1,10 +1,10 @@
-use std::{ops::Range, sync::Arc};
-
-use revision::Revisioned;
+use std::ops::Range;
+use std::sync::Arc;
 
 use anyhow::Result;
+use revision::Revisioned;
 
-use super::KeyEncode;
+use crate::kvs::KVKey;
 
 /// Advances a key to the next value,
 /// can be used to skip over a certain key.
@@ -17,8 +17,8 @@ pub fn advance_key(key: &mut [u8]) {
 	}
 }
 
-pub fn to_prefix_range<K: KeyEncode>(key: K) -> Result<Range<Vec<u8>>> {
-	let start = key.encode_owned()?;
+pub fn to_prefix_range<K: KVKey>(key: K) -> Result<Range<Vec<u8>>> {
+	let start = key.encode_key()?;
 	let mut end = start.clone();
 	end.push(0xff);
 	Ok(Range {
@@ -27,8 +27,8 @@ pub fn to_prefix_range<K: KeyEncode>(key: K) -> Result<Range<Vec<u8>>> {
 	})
 }
 
-/// Takes an iterator of byte slices and deserializes the byte slices to the expected type,
-/// returning an error if any of the values fail to serialize.
+/// Takes an iterator of byte slices and deserializes the byte slices to the
+/// expected type, returning an error if any of the values fail to serialize.
 pub fn deserialize_cache<'a, I, T>(iter: I) -> Result<Arc<[T]>>
 where
 	T: Revisioned,

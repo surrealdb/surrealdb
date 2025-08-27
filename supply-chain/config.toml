@@ -234,6 +234,10 @@ criteria = "safe-to-deploy"
 version = "0.9.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.bnum]]
+version = "0.12.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.borsh]]
 version = "1.5.6"
 criteria = "safe-to-deploy"
@@ -376,6 +380,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.dashmap]]
 version = "5.5.3"
+criteria = "safe-to-run"
+
+[[exemptions.dashmap]]
+version = "6.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.data-encoding]]
@@ -440,6 +448,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.fail]]
 version = "0.4.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.fastnum]]
+version = "0.3.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.findshlibs]]

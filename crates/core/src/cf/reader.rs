@@ -1,12 +1,14 @@
+use anyhow::{Result, bail};
+
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::cf::{ChangeSet, DatabaseMutation, TableMutations};
 use crate::err::Error;
 use crate::expr::statements::show::ShowSince;
 use crate::key::change;
 #[cfg(debug_assertions)]
 use crate::key::debug::Sprintable;
-use crate::kvs::{KeyDecode, Transaction};
+use crate::kvs::{KVKey, Transaction};
 use crate::vs::VersionStamp;
-use anyhow::{Result, bail};
 
 // Reads the change feed for a specific database or a table,
 // starting from a specific versionstamp.
@@ -18,20 +20,20 @@ use anyhow::{Result, bail};
 // The second call would start from the last versionstamp + 1 of the first call.
 pub async fn read(
 	tx: &Transaction,
-	ns: &str,
-	db: &str,
+	ns: NamespaceId,
+	db: DatabaseId,
 	tb: Option<&str>,
 	start: ShowSince,
 	limit: Option<u32>,
 ) -> Result<Vec<ChangeSet>> {
 	// Calculate the start of the changefeed range
 	let beg = match start {
-		ShowSince::Versionstamp(x) => change::prefix_ts(ns, db, VersionStamp::from_u64(x))?,
+		ShowSince::Versionstamp(x) => change::prefix_ts(ns, db, VersionStamp::from_u64(x)),
 		ShowSince::Timestamp(x) => {
 			let ts = x.0.timestamp() as u64;
 			let vs = tx.lock().await.get_versionstamp_from_timestamp(ts, ns, db).await?;
 			match vs {
-				Some(vs) => change::prefix_ts(ns, db, vs)?,
+				Some(vs) => change::prefix_ts(ns, db, vs),
 				None => {
 					bail!(Error::Internal(
 						"no versionstamp associated to this timestamp exists yet".to_string(),
@@ -39,9 +41,10 @@ pub async fn read(
 				}
 			}
 		}
-	};
+	}
+	.encode_key()?;
 	// Calculate the end of the changefeed range
-	let end = change::suffix(ns, db)?;
+	let end = change::suffix(ns, db).encode_key()?;
 	// Limit the changefeed results with a default
 	let limit = limit.unwrap_or(100).min(1000);
 	// Create an empty buffer for the versionstamp
@@ -50,12 +53,15 @@ pub async fn read(
 	let mut buf: Vec<TableMutations> = Vec::new();
 	// Create an empty buffer for the final changesets
 	let mut res = Vec::<ChangeSet>::new();
+
 	// iterate over _x and put decoded elements to r
 	for (k, v) in tx.scan(beg..end, limit, None).await? {
 		#[cfg(debug_assertions)]
 		trace!("Reading change feed entry: {}", k.sprint());
+
 		// Decode the changefeed entry key
-		let dec = crate::key::change::Cf::decode(&k).unwrap();
+		let dec = crate::key::change::Cf::decode_key(&k)?;
+
 		// Check the change is for the desired table
 		if tb.is_some_and(|tb| tb != dec.tb) {
 			continue;

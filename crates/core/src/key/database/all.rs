@@ -1,37 +1,41 @@
 //! Stores the key prefix for all keys under a database
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct All<'a> {
+pub(crate) struct DatabaseRoot {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
-}
-impl_key!(All<'a>);
-
-pub fn new<'a>(ns: &'a str, db: &'a str) -> All<'a> {
-	All::new(ns, db)
+	pub db: DatabaseId,
 }
 
-impl Categorise for All<'_> {
+impl KVKey for DatabaseRoot {
+	type ValueType = Vec<u8>;
+}
+
+pub fn new(ns: NamespaceId, db: DatabaseId) -> DatabaseRoot {
+	DatabaseRoot::new(ns, db)
+}
+
+impl Categorise for DatabaseRoot {
 	fn categorise(&self) -> Category {
 		Category::DatabaseRoot
 	}
 }
 
-impl<'a> All<'a> {
-	pub fn new(ns: &'a str, db: &'a str) -> Self {
+impl DatabaseRoot {
+	#[inline]
+	pub fn new(ns: NamespaceId, db: DatabaseId) -> Self {
 		Self {
-			__: b'/', // /
-			_a: b'*', // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: b'*', // *
+			_b: b'*',
 			db,
 		}
 	}
@@ -39,19 +43,16 @@ impl<'a> All<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
-		let val = All::new(
-			"testns",
-			"testdb",
+		let val = DatabaseRoot::new(
+			NamespaceId(1),
+			DatabaseId(2),
 		);
-		let enc = All::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0");
-
-		let dec = All::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = val.encode_key().unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02");
 	}
 }

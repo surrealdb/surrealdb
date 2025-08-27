@@ -1,32 +1,21 @@
+use std::cmp::Ordering;
+use std::mem::size_of_val;
+
+use anyhow::{Result, bail, ensure};
+use rand::prelude::SliceRandom;
+use reblessive::tree::Stk;
+
+use super::args::{Optional, Rest};
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::Closure;
-use crate::expr::FlowResultExt as _;
-use crate::expr::Function;
-use crate::expr::array::Array;
-use crate::expr::array::Clump;
-use crate::expr::array::Combine;
-use crate::expr::array::Complement;
-use crate::expr::array::Difference;
-use crate::expr::array::Flatten;
-use crate::expr::array::Intersect;
-use crate::expr::array::Matches;
-use crate::expr::array::Transpose;
-use crate::expr::array::Union;
-use crate::expr::array::Uniq;
-use crate::expr::array::Windows;
-use crate::expr::value::Value;
-use anyhow::{Result, bail, ensure};
-use rand::prelude::SliceRandom;
-use reblessive::tree::Stk;
-use std::cmp::Ordering;
-use std::mem::size_of_val;
-
-use super::args::Optional;
-use super::args::Rest;
+use crate::val::array::{
+	Clump, Combine, Complement, Difference, Flatten, Intersect, Matches, Transpose, Union, Uniq,
+	Windows,
+};
+use crate::val::{Array, Closure, Value};
 
 /// Returns an error if an array of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
@@ -64,12 +53,11 @@ pub async fn all(
 	(array, Optional(check)): (Array, Optional<Value>),
 ) -> Result<Value> {
 	Ok(match check {
-		Some(closure) if closure.is_closure() => {
+		Some(Value::Closure(closure)) => {
 			if let Some(opt) = opt {
 				for arg in array.into_iter() {
 					// TODO: Don't clone the closure every time the function is called.
-					let fnc = Function::Anonymous(closure.clone(), vec![arg], true);
-					if fnc.compute(stk, ctx, opt, doc).await.catch_return()?.is_truthy() {
+					if closure.compute(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
 						continue;
 					} else {
 						return Ok(Value::Bool(false));
@@ -90,12 +78,11 @@ pub async fn any(
 	(array, Optional(check)): (Array, Optional<Value>),
 ) -> Result<Value> {
 	Ok(match check {
-		Some(closure) if closure.is_closure() => {
+		Some(Value::Closure(closure)) => {
 			if let Some(opt) = opt {
 				for arg in array.into_iter() {
 					// TODO: Don't clone the closure every time the function is called.
-					let fnc = Function::Anonymous(closure.clone(), vec![arg], true);
-					if fnc.compute(stk, ctx, opt, doc).await.catch_return()?.is_truthy() {
+					if closure.compute(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
 						return Ok(Value::Bool(true));
 					} else {
 						continue;
@@ -238,13 +225,11 @@ pub async fn filter(
 	(array, check): (Array, Value),
 ) -> Result<Value> {
 	Ok(match check {
-		closure if closure.is_closure() => {
+		Value::Closure(closure) => {
 			if let Some(opt) = opt {
 				let mut res = Vec::with_capacity(array.len());
 				for arg in array.into_iter() {
-					// TODO: Don't clone the closure every time the function is called.
-					let fnc = Function::Anonymous(closure.clone(), vec![arg.clone()], true);
-					if fnc.compute(stk, ctx, opt, doc).await.catch_return()?.is_truthy() {
+					if closure.compute(stk, ctx, opt, doc, vec![arg.clone()]).await?.is_truthy() {
 						res.push(arg)
 					}
 				}
@@ -262,14 +247,12 @@ pub async fn filter_index(
 	(array, value): (Array, Value),
 ) -> Result<Value> {
 	Ok(match value {
-		closure if closure.is_closure() => {
+		Value::Closure(closure) => {
 			if let Some(opt) = opt {
 				let mut res = Vec::with_capacity(array.len());
 				for (i, arg) in array.into_iter().enumerate() {
-					// TODO: Don't clone the closure every time the function is called.
-					let fnc = Function::Anonymous(closure.clone(), vec![arg, i.into()], true);
-					if fnc.compute(stk, ctx, opt, doc).await.catch_return()?.is_truthy() {
-						res.push(i);
+					if closure.compute(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
+						res.push(Value::from(i as i64));
 					}
 				}
 				Value::from(res)
@@ -297,12 +280,10 @@ pub async fn find(
 	(array, value): (Array, Value),
 ) -> Result<Value> {
 	Ok(match value {
-		closure if closure.is_closure() => {
+		Value::Closure(closure) => {
 			if let Some(opt) = opt {
 				for arg in array.into_iter() {
-					// TODO: Don't clone the closure every time the function is called.
-					let fnc = Function::Anonymous(closure.clone(), vec![arg.clone()], true);
-					if fnc.compute(stk, ctx, opt, doc).await.catch_return()?.is_truthy() {
+					if closure.compute(stk, ctx, opt, doc, vec![arg.clone()]).await?.is_truthy() {
 						return Ok(arg);
 					}
 				}
@@ -311,7 +292,7 @@ pub async fn find(
 				Value::None
 			}
 		}
-		value => array.into_iter().find(|v: &Value| *v == value).into(),
+		value => array.into_iter().find(|v: &Value| *v == value).unwrap_or(Value::None),
 	})
 }
 
@@ -320,12 +301,11 @@ pub async fn find_index(
 	(array, value): (Array, Value),
 ) -> Result<Value> {
 	Ok(match value {
-		closure if closure.is_closure() => {
+		Value::Closure(closure) => {
 			if let Some(opt) = opt {
 				for (i, arg) in array.into_iter().enumerate() {
 					// TODO: Don't clone the closure every time the function is called.
-					let fnc = Function::Anonymous(closure.clone(), vec![arg, i.into()], true);
-					if fnc.compute(stk, ctx, opt, doc).await.catch_return()?.is_truthy() {
+					if closure.compute(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
 						return Ok(i.into());
 					}
 				}
@@ -344,7 +324,7 @@ pub async fn find_index(
 					None
 				}
 			})
-			.into(),
+			.unwrap_or(Value::None),
 	})
 }
 
@@ -368,8 +348,7 @@ pub async fn fold(
 		let mut accum = init;
 		for (i, val) in array.into_iter().enumerate() {
 			// TODO: Don't clone the closure every time the function is called.
-			let fnc = Function::Anonymous(mapper.clone().into(), vec![accum, val, i.into()], true);
-			accum = fnc.compute(stk, ctx, opt, doc).await.catch_return()?;
+			accum = mapper.compute(stk, ctx, opt, doc, vec![accum, val, i.into()]).await?
 		}
 		Ok(accum)
 	} else {
@@ -508,8 +487,7 @@ pub async fn map(
 		let mut res = Vec::with_capacity(array.len());
 		for (i, arg) in array.into_iter().enumerate() {
 			// TODO: Don't clone the closure every time the function is called.
-			let fnc = Function::Anonymous(mapper.clone().into(), vec![arg, i.into()], true);
-			res.push(fnc.compute(stk, ctx, opt, doc).await.catch_return()?);
+			res.push(mapper.compute(stk, ctx, opt, doc, vec![arg, i.into()]).await?);
 		}
 		Ok(res.into())
 	} else {
@@ -530,7 +508,7 @@ pub fn min((array,): (Array,)) -> Result<Value> {
 }
 
 pub fn pop((mut array,): (Array,)) -> Result<Value> {
-	Ok(array.pop().into())
+	Ok(array.pop().unwrap_or(Value::None))
 }
 
 pub fn prepend((mut array, value): (Array, Value)) -> Result<Value> {
@@ -584,12 +562,8 @@ pub async fn reduce(
 					return Ok(Value::None);
 				};
 				for (idx, val) in iter.enumerate() {
-					let fnc = Function::Anonymous(
-						mapper.clone().into(),
-						vec![accum, val, idx.into()],
-						true,
-					);
-					accum = fnc.compute(stk, ctx, opt, doc).await.catch_return()?;
+					accum =
+						mapper.compute(stk, ctx, opt, doc, vec![accum, val, idx.into()]).await?;
 				}
 				Ok(accum)
 			}
@@ -757,9 +731,9 @@ pub fn windows((array, window_size): (Array, i64)) -> Result<Value> {
 
 pub mod sort {
 
-	use crate::expr::array::Array;
-	use crate::expr::value::Value;
 	use anyhow::Result;
+
+	use crate::val::{Array, Value};
 
 	pub fn asc((mut array,): (Array,)) -> Result<Value> {
 		array.sort_unstable();
@@ -775,10 +749,8 @@ pub mod sort {
 #[cfg(test)]
 mod tests {
 	use super::{at, first, join, last, slice};
-	use crate::{
-		expr::{Array, Value},
-		fnc::args::Optional,
-	};
+	use crate::fnc::args::Optional;
+	use crate::val::{Array, Value};
 
 	#[test]
 	fn array_slice() {

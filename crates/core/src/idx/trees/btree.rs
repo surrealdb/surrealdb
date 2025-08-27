@@ -1,25 +1,25 @@
-use crate::err::Error;
-use crate::expr::{Object, Value};
-use crate::idx::VersionedStore;
-use crate::idx::trees::bkeys::BKeys;
-use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeStore};
-use crate::kvs::{Key, Transaction, Val};
+use std::collections::VecDeque;
+use std::fmt::{Debug, Display, Formatter};
+use std::io::Cursor;
+use std::marker::PhantomData;
+
 #[cfg(debug_assertions)]
 use ahash::HashSet;
 use anyhow::{Result, bail};
 use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
-use std::fmt::{Debug, Display, Formatter};
-use std::io::Cursor;
-use std::marker::PhantomData;
+
+use crate::err::Error;
+use crate::idx::trees::bkeys::BKeys;
+use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeStore};
+use crate::kvs::{KVValue, Key, Transaction, Val};
+use crate::val::{Object, Value};
 
 pub type Payload = u64;
 
 type BStoredNode<BK> = StoredNode<BTreeNode<BK>>;
 pub(in crate::idx) type BTreeStore<BK> = TreeStore<BTreeNode<BK>>;
 
-#[non_exhaustive]
 pub struct BTree<BK>
 where
 	BK: BKeys,
@@ -31,7 +31,6 @@ where
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Serialize, Deserialize)]
-#[non_exhaustive]
 pub struct BState {
 	minimum_degree: u32,
 	root: Option<NodeId>,
@@ -40,8 +39,16 @@ pub struct BState {
 	generation: StoreGeneration,
 }
 
-impl VersionedStore for BState {
-	fn try_from(val: Val) -> Result<Self> {
+impl KVValue for BState {
+	#[inline]
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let mut val = Vec::new();
+		self.serialize_revisioned(&mut val)?;
+		Ok(val)
+	}
+
+	#[inline]
+	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
 		match Self::deserialize_revisioned(&mut val.as_slice()) {
 			Ok(r) => Ok(r),
 			// If it fails here, there is the chance it was an old version of BState
@@ -146,7 +153,6 @@ impl From<BStatistics> for Value {
 }
 
 #[derive(Debug, Clone)]
-#[non_exhaustive]
 pub enum BTreeNode<BK>
 where
 	BK: BKeys + Clone,
@@ -652,7 +658,8 @@ where
 
 		// CLRS: 2c
 		// Merge children
-		// The payload is set to 0. The payload does not matter, as the key will be deleted after anyway.
+		// The payload is set to 0. The payload does not matter, as the key will be
+		// deleted after anyway.
 		#[cfg(debug_assertions)]
 		{
 			left_node.n.check();
@@ -1003,27 +1010,24 @@ where
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::VersionedStore;
-	use crate::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
-	use crate::idx::trees::btree::{
-		BState, BStatistics, BStoredNode, BTree, BTreeNode, BTreeStore, Payload,
-	};
-	use crate::idx::trees::store::{NodeId, TreeNode, TreeNodeProvider};
-	use crate::kvs::{Datastore, Key, LockType::*, Transaction, TransactionType};
-	use anyhow::Result;
-	use rand::prelude::SliceRandom;
-	use rand::thread_rng;
 	use std::cmp::Ordering;
-	use std::collections::{BTreeMap, VecDeque};
-	use std::fmt::Debug;
+	use std::collections::BTreeMap;
 	use std::sync::Arc;
+
+	use rand::seq::SliceRandom;
+	use rand::thread_rng;
 	use test_log::test;
+
+	use super::*;
+	use crate::idx::trees::bkeys::{FstKeys, TrieKeys};
+	use crate::idx::trees::store::TreeNodeProvider;
+	use crate::kvs::{Datastore, LockType, TransactionType};
 
 	#[test]
 	fn test_btree_state_serde() {
 		let s = BState::new(3);
-		let val = VersionedStore::try_into(&s).unwrap();
-		let s: BState = VersionedStore::try_from(val).unwrap();
+		let val = s.kv_encode_value().unwrap();
+		let s: BState = BState::kv_decode_value(val).unwrap();
 		assert_eq!(s.minimum_degree, 3);
 		assert_eq!(s.root, None);
 		assert_eq!(s.next_node_id, 0);
@@ -1094,7 +1098,7 @@ mod tests {
 	where
 		BK: BKeys + Debug + Clone,
 	{
-		let tx = ds.transaction(tt, Optimistic).await.unwrap();
+		let tx = ds.transaction(tt, LockType::Optimistic).await.unwrap();
 		let st = tx
 			.index_caches()
 			.get_store_btree_fst(TreeNodeProvider::Debug, t.state.generation, tt, cache_size)
@@ -1112,7 +1116,7 @@ mod tests {
 	where
 		BK: BKeys + Debug + Clone,
 	{
-		let tx = ds.transaction(tt, Optimistic).await.unwrap();
+		let tx = ds.transaction(tt, LockType::Optimistic).await.unwrap();
 		let st = tx
 			.index_caches()
 			.get_store_btree_trie(TreeNodeProvider::Debug, t.state.generation, tt, cache_size)

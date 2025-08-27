@@ -1,21 +1,24 @@
 //! Stores a DEFINE NAMESPACE config definition
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::{NamespaceDefinition, NamespaceId};
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Ns<'a> {
+pub(crate) struct Ns {
 	__: u8,
 	_a: u8,
 	_b: u8,
 	_c: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 }
-impl_key!(Ns<'a>);
 
-pub fn new(ns: &str) -> Ns<'_> {
+impl KVKey for Ns {
+	type ValueType = NamespaceDefinition;
+}
+
+pub fn new(ns: NamespaceId) -> Ns {
 	Ns::new(ns)
 }
 
@@ -31,14 +34,14 @@ pub fn suffix() -> Vec<u8> {
 	k
 }
 
-impl Categorise for Ns<'_> {
+impl Categorise for Ns {
 	fn categorise(&self) -> Category {
 		Category::Namespace
 	}
 }
 
-impl<'a> Ns<'a> {
-	pub fn new(ns: &'a str) -> Self {
+impl Ns {
+	pub fn new(ns: NamespaceId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'!',
@@ -51,18 +54,12 @@ impl<'a> Ns<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
-		#[rustfmt::skip]
-            let val = Ns::new(
-            "testns",
-        );
-		let enc = Ns::encode(&val).unwrap();
-		assert_eq!(enc, b"/!nstestns\0");
-
-		let dec = Ns::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let val = Ns::new(NamespaceId(1));
+		let enc = Ns::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/!ns\x00\x00\x00\x01");
 	}
 }

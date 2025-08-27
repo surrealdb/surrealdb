@@ -1,11 +1,13 @@
 #![cfg(feature = "kv-indxdb")]
 
+use std::ops::Range;
+
+use anyhow::{Result, ensure};
+
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::SavePoints;
 use crate::kvs::{Check, Key, Val};
-use anyhow::{Result, ensure};
-use std::ops::Range;
 
 pub struct Datastore {
 	db: indxdb::Db,

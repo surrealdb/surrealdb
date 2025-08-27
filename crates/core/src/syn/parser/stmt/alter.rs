@@ -1,27 +1,20 @@
 use reblessive::Stk;
 
-use crate::sql::statements::alter::{AlterFieldStatement, AlterSequenceStatement};
+use crate::sql::TableType;
+use crate::sql::statements::alter::field::AlterDefault;
+use crate::sql::statements::alter::{AlterFieldStatement, AlterKind, AlterSequenceStatement};
+use crate::sql::statements::{AlterStatement, AlterTableStatement};
 use crate::syn::error::bail;
-use crate::{
-	sql::{
-		TableType,
-		statements::{AlterStatement, AlterTableStatement},
-	},
-	syn::{
-		parser::{
-			ParseResult, Parser,
-			mac::{expected, unexpected},
-		},
-		token::t,
-	},
-};
+use crate::syn::parser::mac::{expected, unexpected};
+use crate::syn::parser::{ParseResult, Parser};
+use crate::syn::token::t;
 
 impl Parser<'_> {
-	pub(crate) async fn parse_alter_stmt(&mut self, ctx: &mut Stk) -> ParseResult<AlterStatement> {
+	pub(crate) async fn parse_alter_stmt(&mut self, stk: &mut Stk) -> ParseResult<AlterStatement> {
 		let next = self.next();
 		match next.kind {
-			t!("TABLE") => self.parse_alter_table(ctx).await.map(AlterStatement::Table),
-			t!("FIELD") => self.parse_alter_field(ctx).await.map(AlterStatement::Field),
+			t!("TABLE") => self.parse_alter_table(stk).await.map(AlterStatement::Table),
+			t!("FIELD") => self.parse_alter_field(stk).await.map(AlterStatement::Field),
 			t!("SEQUENCE") => self.parse_alter_sequence().await.map(AlterStatement::Sequence),
 			_ => unexpected!(self, next, "a alter statement keyword"),
 		}
@@ -29,7 +22,7 @@ impl Parser<'_> {
 
 	pub(crate) async fn parse_alter_table(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 	) -> ParseResult<AlterTableStatement> {
 		let if_exists = if self.eat(t!("IF")) {
 			expected!(self, t!("EXISTS"));
@@ -52,11 +45,11 @@ impl Parser<'_> {
 					match peek.kind {
 						t!("COMMENT") => {
 							self.pop_peek();
-							res.comment = Some(None);
+							res.comment = AlterKind::Drop;
 						}
 						t!("CHANGEFEED") => {
 							self.pop_peek();
-							res.changefeed = Some(None);
+							res.changefeed = AlterKind::Drop;
 						}
 						_ => {
 							unexpected!(self, peek, "`COMMENT` or `CHANGEFEED`")
@@ -65,7 +58,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(Some(self.next_token_value()?))
+					res.comment = AlterKind::Set(self.next_token_value()?);
 				}
 				t!("TYPE") => {
 					self.pop_peek();
@@ -88,19 +81,19 @@ impl Parser<'_> {
 				}
 				t!("SCHEMALESS") => {
 					self.pop_peek();
-					res.full = Some(false);
+					res.schemafull = AlterKind::Drop;
 				}
 				t!("SCHEMAFULL") => {
 					self.pop_peek();
-					res.full = Some(true);
+					res.schemafull = AlterKind::Set(());
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
-					res.permissions = Some(ctx.run(|ctx| self.parse_permission(ctx, false)).await?);
+					res.permissions = Some(stk.run(|stk| self.parse_permission(stk, false)).await?);
 				}
 				t!("CHANGEFEED") => {
 					self.pop_peek();
-					res.changefeed = Some(Some(self.parse_changefeed()?))
+					res.changefeed = AlterKind::Set(self.parse_changefeed()?)
 				}
 				_ => break,
 			}
@@ -111,7 +104,7 @@ impl Parser<'_> {
 
 	pub(crate) async fn parse_alter_field(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 	) -> ParseResult<AlterFieldStatement> {
 		let if_exists = if self.eat(t!("IF")) {
 			expected!(self, t!("EXISTS"));
@@ -119,7 +112,7 @@ impl Parser<'_> {
 		} else {
 			false
 		};
-		let name = self.parse_local_idiom(ctx).await?;
+		let name = self.parse_local_idiom(stk).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
 		let what = self.next_token_value()?;
@@ -138,32 +131,31 @@ impl Parser<'_> {
 					match peek.kind {
 						t!("FLEXIBLE") => {
 							self.pop_peek();
-							res.flex = Some(false);
+							res.flex = AlterKind::Drop;
 						}
 						t!("TYPE") => {
 							self.pop_peek();
-							res.kind = Some(None);
+							res.kind = AlterKind::Drop;
 						}
 						t!("READONLY") => {
 							self.pop_peek();
-							res.readonly = Some(false);
+							res.readonly = AlterKind::Drop;
 						}
 						t!("VALUE") => {
 							self.pop_peek();
-							res.value = Some(None);
+							res.value = AlterKind::Drop;
 						}
 						t!("ASSERT") => {
 							self.pop_peek();
-							res.assert = Some(None);
+							res.assert = AlterKind::Drop;
 						}
 						t!("DEFAULT") => {
 							self.pop_peek();
-							res.default = Some(None);
-							res.default_always = Some(false);
+							res.default = AlterDefault::Drop;
 						}
 						t!("COMMENT") => {
 							self.pop_peek();
-							res.comment = Some(None);
+							res.comment = AlterKind::Drop;
 						}
 						t!("REFERENCE") => {
 							if !self.settings.references_enabled {
@@ -174,7 +166,7 @@ impl Parser<'_> {
 							}
 
 							self.pop_peek();
-							res.reference = Some(None);
+							res.reference = AlterKind::Drop;
 						}
 						_ => {
 							unexpected!(
@@ -187,36 +179,41 @@ impl Parser<'_> {
 				}
 				t!("FLEXIBLE") => {
 					self.pop_peek();
-					res.flex = Some(true)
+					res.flex = AlterKind::Set(());
 				}
 				t!("TYPE") => {
 					self.pop_peek();
-					res.kind = Some(Some(ctx.run(|ctx| self.parse_inner_kind(ctx)).await?));
+					res.kind = AlterKind::Set(stk.run(|stk| self.parse_inner_kind(stk)).await?);
 				}
 				t!("READONLY") => {
 					self.pop_peek();
-					res.flex = Some(true)
+					res.flex = AlterKind::Set(());
 				}
 				t!("VALUE") => {
 					self.pop_peek();
-					res.value = Some(Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?));
+					res.value = AlterKind::Set(stk.run(|stk| self.parse_expr_field(stk)).await?);
 				}
 				t!("ASSERT") => {
 					self.pop_peek();
-					res.assert = Some(Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?));
+					res.assert = AlterKind::Set(stk.run(|stk| self.parse_expr_field(stk)).await?);
 				}
 				t!("DEFAULT") => {
 					self.pop_peek();
-					res.default_always = Some(self.eat(t!("ALWAYS")));
-					res.default = Some(Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?));
+					if self.eat(t!("ALWAYS")) {
+						res.default =
+							AlterDefault::Always(stk.run(|stk| self.parse_expr_field(stk)).await?);
+					} else {
+						res.default =
+							AlterDefault::Set(stk.run(|stk| self.parse_expr_field(stk)).await?);
+					}
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
-					res.permissions = Some(ctx.run(|ctx| self.parse_permission(ctx, false)).await?);
+					res.permissions = Some(stk.run(|stk| self.parse_permission(stk, false)).await?);
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(Some(self.next_token_value()?))
+					res.comment = AlterKind::Set(self.next_token_value()?);
 				}
 				t!("REFERENCE") => {
 					if !self.settings.references_enabled {
@@ -227,7 +224,7 @@ impl Parser<'_> {
 					}
 
 					self.pop_peek();
-					res.reference = Some(Some(self.parse_reference(ctx).await?));
+					res.reference = AlterKind::Set(self.parse_reference(stk).await?);
 				}
 				_ => break,
 			}

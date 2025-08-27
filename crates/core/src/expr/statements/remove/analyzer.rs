@@ -1,27 +1,25 @@
+use std::fmt::{self, Display, Formatter};
+
+use anyhow::Result;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
-use anyhow::Result;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
-
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct RemoveAnalyzerStatement {
 	pub name: Ident,
-	#[revision(start = 2)]
 	pub if_exists: bool,
 }
 
 impl RemoveAnalyzerStatement {
 	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
 		// Get the transaction
@@ -40,9 +38,9 @@ impl RemoveAnalyzerStatement {
 		};
 		// Delete the definition
 		let key = crate::key::database::az::new(ns, db, &az.name);
-		txn.del(key).await?;
+		txn.del(&key).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Cleanup in-memory mappers if not used anymore
 		let azs = txn.all_db_analyzers(ns, db).await?;
 		ctx.get_index_stores().mappers().cleanup(&azs);

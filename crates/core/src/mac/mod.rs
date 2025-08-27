@@ -5,13 +5,13 @@
 ///
 /// - `$key`: An expression representing the name of the environment variable.
 /// - `$t`: The type of the value to be parsed.
-/// - `$default`: The default value to fall back to if the environment variable
-///   is not set or parsing fails.
+/// - `$default`: The default value to fall back to if the environment variable is not set or
+///   parsing fails.
 ///
 /// # Return Value
 ///
-/// A lazy static variable of type `std::sync::LazyLock`, which holds the parsed value
-/// from the environment variable or the default value.
+/// A lazy static variable of type `std::sync::LazyLock`, which holds the parsed
+/// value from the environment variable or the default value.
 #[macro_export]
 macro_rules! lazy_env_parse {
 	// With no default specified
@@ -160,6 +160,26 @@ macro_rules! run {
 	};
 }
 
+/// Macro which creates a StrandRef a str like type which is guarenteed to not
+/// contain null bytes.
+#[macro_export]
+macro_rules! strand {
+	($e:expr) => {
+		const {
+			let s: &str = $e;
+			let mut len = s.len();
+			while len > 0 {
+				len -= 1;
+				if s.as_bytes()[len] == 0 {
+					panic!("used strand! macro on strand with null bytes")
+				}
+			}
+			// Safe as the condition is checked above
+			unsafe { $crate::val::StrandRef::new_unchecked(s) }
+		}
+	};
+}
+
 #[cfg(test)]
 mod test {
 	use crate::err::Error;
@@ -177,7 +197,7 @@ mod test {
 		let Ok(Error::Unreachable(msg)) = fail_func().unwrap_err().downcast() else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:168: Reached unreachable code", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:188: Reached unreachable code", msg);
 	}
 
 	#[test]
@@ -185,7 +205,7 @@ mod test {
 		let Error::Unreachable(msg) = Error::unreachable("Reached unreachable code") else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:185: Reached unreachable code", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:205: Reached unreachable code", msg);
 	}
 
 	#[test]
@@ -193,6 +213,6 @@ mod test {
 		let Ok(Error::Unreachable(msg)) = fail_func_args().unwrap_err().downcast() else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:172: Found test but expected other", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:192: Found test but expected other", msg);
 	}
 }

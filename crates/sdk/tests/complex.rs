@@ -1,15 +1,15 @@
 #![cfg(not(target_family = "wasm"))]
 
-mod parse;
-use parse::Parse;
 mod helpers;
-use helpers::new_ds;
-use helpers::with_enough_stack;
+use helpers::{new_ds, with_enough_stack};
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::sql::SqlValue;
-use surrealdb_core::expr::Value;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::err::Error;
+use surrealdb_core::syn;
+use surrealdb_core::val::Value;
+
+/* Removed because of <future> removal, not yet relevant for the initial COMPUTED implementation.
+ * Once we start to analyze query dependencies up front we can error on cyclic dependencies again.
 
 #[test]
 fn self_referential_field() -> Result<()> {
@@ -119,12 +119,13 @@ fn ok_future_graph_subquery_recursion_depth() -> Result<()> {
 		}
 		//
 		let tmp = res.next().unwrap()?;
-		let val = Value::parse("[ { fut: [42] } ]");
+		let val = syn::value("[ { fut: [42] } ]").unwrap();
 		assert_eq!(tmp, val);
 		//
 		Ok(())
 	})
 }
+*/
 
 #[test]
 fn ok_graph_traversal_depth() -> Result<()> {
@@ -159,13 +160,14 @@ fn ok_graph_traversal_depth() -> Result<()> {
 			//
 			match tmp {
 				Ok(res) => {
-					let val = Value::parse(&format!(
+					let val = syn::value(&format!(
 						"[
 							{{
 								res: [node:{n}],
 							}}
 						]"
-					));
+					))
+					.unwrap();
 					assert_eq!(res, val);
 				}
 				Err(res) => {
@@ -196,7 +198,7 @@ fn ok_cast_chain_depth() -> Result<()> {
 		assert_eq!(res.len(), 1);
 		//
 		let tmp = res.next().unwrap()?;
-		let val = Value::from(vec![SqlValue::from(5)]);
+		let val = Value::from(vec![Value::from(5)]);
 		assert_eq!(tmp, val);
 		//
 		Ok(())

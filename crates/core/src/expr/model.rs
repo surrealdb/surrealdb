@@ -1,24 +1,10 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::ControlFlow;
-use crate::expr::FlowResult;
-use crate::expr::value::Value;
+#[cfg(feature = "ml")]
+use std::collections::HashMap;
+use std::fmt;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-
-#[cfg(feature = "ml")]
-use crate::expr::Permission;
-#[cfg(feature = "ml")]
-use crate::iam::Action;
-#[cfg(feature = "ml")]
-use futures::future::try_join_all;
-#[cfg(feature = "ml")]
-use std::collections::HashMap;
 #[cfg(feature = "ml")]
 use surrealml::errors::error::SurrealError;
 #[cfg(feature = "ml")]
@@ -28,32 +14,34 @@ use surrealml::ndarray as mlNdarray;
 #[cfg(feature = "ml")]
 use surrealml::storage::surml_file::SurMlFile;
 
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+#[cfg(feature = "ml")]
+use crate::expr::Permission;
+use crate::expr::{ControlFlow, FlowResult};
+#[cfg(feature = "ml")]
+use crate::iam::Action;
+use crate::val::Value;
+
 #[cfg(feature = "ml")]
 const ARGUMENTS: &str = "The model expects 1 argument. The argument can be either a number, an object, or an array of numbers.";
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Model";
+pub fn get_model_path(ns: &str, db: &str, name: &str, version: &str, hash: &str) -> String {
+	format!("ml/{ns}/{db}/{name}-{version}-{hash}.surml")
+}
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Model")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct Model {
 	pub name: String,
 	pub version: String,
-	pub args: Vec<Value>,
 }
 
 impl fmt::Display for Model {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ml::{}<{}>(", self.name, self.version)?;
-		for (idx, p) in self.args.iter().enumerate() {
-			if idx != 0 {
-				write!(f, ",")?;
-			}
-			write!(f, "{}", p)?;
-		}
-		write!(f, ")")
+		write!(f, "ml::{}<{}>", self.name, self.version)
 	}
 }
 
@@ -65,21 +53,27 @@ impl Model {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
+		mut args: Vec<Value>,
 	) -> FlowResult<Value> {
-		use crate::expr::{FlowResultExt, value::CoerceError};
+		use crate::val::{CoerceError, Number};
 
-		// Ensure futures are run
-		let opt = &opt.new_with_futures(true);
 		// Get the full name of this model
 		let name = format!("ml::{}", self.name);
 		// Check this function is allowed
 		ctx.check_allowed_function(name.as_str())?;
 		// Get the model definition
-		let (ns, db) = opt.ns_db()?;
-		let val = ctx.tx().get_db_model(ns, db, &self.name, &self.version).await?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+		let Some(val) = ctx.tx().get_db_model(ns, db, &self.name, &self.version).await? else {
+			return Err(ControlFlow::from(anyhow::Error::new(Error::MlNotFound {
+				name: format!("{}<{}>", self.name, self.version),
+			})));
+		};
+
 		// Calculate the model path
-		let (ns, db) = opt.ns_db()?;
-		let path = format!("ml/{}/{}/{}-{}-{}.surml", ns, db, self.name, self.version, val.hash);
+		let path = {
+			let (ns, db) = opt.ns_db()?;
+			get_model_path(ns, db, &self.name, &self.version, &val.hash)
+		};
 		// Check permissions
 		if opt.check_perms(Action::View)? {
 			match &val.permissions {
@@ -105,14 +99,7 @@ impl Model {
 				}
 			}
 		}
-		// Compute the function arguments
-		let mut args = stk
-			.scope(|stk| {
-				try_join_all(self.args.iter().map(|v| {
-					stk.run(|stk| async { v.compute(stk, ctx, opt, doc).await.catch_return() })
-				}))
-			})
-			.await?;
+
 		// Check the minimum argument length
 		if args.len() != 1 {
 			return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidArguments {
@@ -120,8 +107,10 @@ impl Model {
 				message: ARGUMENTS.into(),
 			})));
 		}
+
 		// Take the first and only specified argument
-		match args.swap_remove(0) {
+		let argument = args.pop().unwrap();
+		match argument {
 			// Perform bufferered compute
 			Value::Object(v) => {
 				// Compute the model function arguments
@@ -152,7 +141,7 @@ impl Model {
 				.unwrap()
 				.map_err(ControlFlow::from)?;
 				// Convert the output to a value
-				Ok(outcome.into())
+				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())
 			}
 			// Perform raw compute
 			Value::Number(v) => {
@@ -184,7 +173,7 @@ impl Model {
 				.unwrap()
 				.map_err(ControlFlow::from)?;
 				// Convert the output to a value
-				Ok(outcome.into())
+				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())
 			}
 			// Perform raw compute
 			Value::Array(v) => {
@@ -218,7 +207,7 @@ impl Model {
 				.unwrap()
 				.map_err(ControlFlow::from)?;
 				// Convert the output to a value
-				Ok(outcome.into())
+				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())
 			}
 			//
 			_ => Err(ControlFlow::from(anyhow::Error::new(Error::InvalidArguments {
@@ -235,6 +224,7 @@ impl Model {
 		_ctx: &Context,
 		_opt: &Options,
 		_doc: Option<&CursorDoc>,
+		_args: Vec<Value>,
 	) -> FlowResult<Value> {
 		Err(ControlFlow::from(anyhow::Error::new(Error::InvalidModel {
 			message: String::from("Machine learning computation is not enabled."),

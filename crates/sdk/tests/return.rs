@@ -1,14 +1,14 @@
-mod parse;
-use parse::Parse;
 mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb_core::expr::Value;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::val::Value;
+use surrealdb_core::{strand, syn};
 
 #[tokio::test]
 async fn return_subquery_only() -> Result<()> {
 	let sql = "
+		USE NS test DB test;
 		CREATE person:tobie SET name = 'Tobie';
 		CREATE person:jaime SET name = 'Jaime';
 		LET $single = person:tobie;
@@ -42,119 +42,123 @@ async fn return_subquery_only() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 27);
-	//
+	assert_eq!(res.len(), 28);
+
+	// USE NS test DB test;
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
-	//
+	// CREATE person:tobie SET name = 'Tobie';
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
-	//
+	// CREATE person:jaime SET name = 'Jaime';
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
-	//
+	// LET $single = person:tobie;
+	let tmp = res.remove(0).result;
+	tmp.unwrap();
+	// SELECT name FROM person;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ name: 'Jaime' }, { name: 'Tobie' }]");
+	let val = syn::value("[{ name: 'Jaime' }, { name: 'Tobie' }]").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// SELECT VALUE name FROM person;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['Jaime', 'Tobie']");
+	let val = syn::value("['Jaime', 'Tobie']").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// SELECT name FROM ONLY person;
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"Expected a single result output when using the ONLY keyword"#
 	));
-	//
+	// SELECT VALUE name FROM ONLY person;
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"Expected a single result output when using the ONLY keyword"#
 	));
-	//
+	// SELECT name FROM person:tobie;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ name: 'Tobie' }]");
+	let val = syn::value("[{ name: 'Tobie' }]").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// SELECT VALUE name FROM person:tobie;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['Tobie']");
+	let val = syn::value("['Tobie']").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// SELECT name FROM ONLY person:tobie;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("{ name: 'Tobie' }");
+	let val = syn::value("{ name: 'Tobie' }").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// SELECT VALUE name FROM person:tobie;
 	let tmp = res.remove(0).result?;
-	let val = Value::from("Tobie");
+	let val = Value::from(strand!("Tobie").to_owned());
 	assert_eq!(tmp, val);
-	//
+	// SELECT name FROM $single;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ name: 'Tobie' }]");
+	let val = syn::value("[{ name: 'Tobie' }]").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// SELECT VALUE name FROM ONLY $single;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['Tobie']");
+	let val = syn::value("['Tobie']").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// SELECT VALUE name FROM $single;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("{ name: 'Tobie' }");
+	let val = syn::value("{ name: 'Tobie' }").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// SELECT name FROM ONLY $single;
 	let tmp = res.remove(0).result?;
-	let val = Value::from("Tobie");
+	let val = Value::from(strand!("Tobie").to_owned());
 	assert_eq!(tmp, val);
-	//
+	// SELECT VALUE name FROM ONLY $single;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ name: 'Jaime' }, { name: 'Tobie' }]");
+	let val = syn::value("[{ name: 'Jaime' }, { name: 'Tobie' }]").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// RETURN SELECT name FROM ONLY person;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['Jaime', 'Tobie']");
+	let val = syn::value("['Jaime', 'Tobie']").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// RETURN SELECT name FROM person;
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"Expected a single result output when using the ONLY keyword"#
 	));
-	//
+	// RETURN SELECT VALUE name FROM person;
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"Expected a single result output when using the ONLY keyword"#
 	));
-	//
+	// RETURN SELECT name FROM person:tobie;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ name: 'Tobie' }]");
+	let val = syn::value("[{ name: 'Tobie' }]").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// RETURN SELECT VALUE name FROM person:tobie;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['Tobie']");
+	let val = syn::value("['Tobie']").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// RETURN SELECT name FROM $single;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("{ name: 'Tobie' }");
+	let val = syn::value("{ name: 'Tobie' }").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// RETURN SELECT name FROM ONLY person:tobie;
 	let tmp = res.remove(0).result?;
-	let val = Value::from("Tobie");
+	let val = Value::from(strand!("Tobie").to_owned());
 	assert_eq!(tmp, val);
-	//
+	// RETURN SELECT VALUE name FROM ONLY person:tobie;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ name: 'Tobie' }]");
+	let val = syn::value("[{ name: 'Tobie' }]").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// RETURN SELECT VALUE name FROM $single;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['Tobie']");
+	let val = syn::value("['Tobie']").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// RETURN SELECT name FROM ONLY $single;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("{ name: 'Tobie' }");
+	let val = syn::value("{ name: 'Tobie' }").unwrap();
 	assert_eq!(tmp, val);
-	//
+	// RETURN SELECT VALUE name FROM ONLY $single;
 	let tmp = res.remove(0).result?;
-	let val = Value::from("Tobie");
+	let val = Value::from(strand!("Tobie").to_owned());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -199,19 +203,19 @@ async fn return_breaks_nested_execution() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("1");
+	let val = syn::value("1").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("1");
+	let val = syn::value("1").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("1");
+	let val = syn::value("1").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[2, 2, 4, 4]");
+	let val = syn::value("[2, 2, 4, 4]").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

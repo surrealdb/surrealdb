@@ -4,8 +4,13 @@ mod lru;
 mod mapper;
 pub(crate) mod tree;
 
+use std::fmt::{Debug, Display, Formatter};
+use std::sync::Arc;
+
+use anyhow::Result;
+
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
-use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::Index;
 use crate::expr::index::HnswParams;
@@ -17,15 +22,11 @@ use crate::idx::trees::store::mapper::Mappers;
 use crate::idx::trees::store::tree::{TreeRead, TreeWrite};
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::IndexBuilder;
-use crate::kvs::{Key, Transaction, TransactionType, Val};
-use anyhow::Result;
-use std::fmt::{Debug, Display, Formatter};
-use std::sync::Arc;
+use crate::kvs::{KVKey, Key, Transaction, TransactionType, Val};
 
 pub type NodeId = u64;
 pub type StoreGeneration = u64;
 
-#[non_exhaustive]
 #[expect(clippy::large_enum_variant)]
 pub enum TreeStore<N>
 where
@@ -122,7 +123,6 @@ where
 }
 
 #[derive(Clone)]
-#[non_exhaustive]
 pub enum TreeNodeProvider {
 	DocIds(IndexKeyBase),
 	DocLengths(IndexKeyBase),
@@ -135,11 +135,11 @@ pub enum TreeNodeProvider {
 impl TreeNodeProvider {
 	pub fn get_key(&self, node_id: NodeId) -> Result<Key> {
 		match self {
-			TreeNodeProvider::DocIds(ikb) => ikb.new_bd_key(Some(node_id)),
-			TreeNodeProvider::DocLengths(ikb) => ikb.new_bl_key(Some(node_id)),
-			TreeNodeProvider::Postings(ikb) => ikb.new_bp_key(Some(node_id)),
-			TreeNodeProvider::Terms(ikb) => ikb.new_bt_key(Some(node_id)),
-			TreeNodeProvider::Vector(ikb) => ikb.new_vm_key(Some(node_id)),
+			TreeNodeProvider::DocIds(ikb) => ikb.new_bd_key(node_id).encode_key(),
+			TreeNodeProvider::DocLengths(ikb) => ikb.new_bl_key(node_id).encode_key(),
+			TreeNodeProvider::Postings(ikb) => ikb.new_bp_key(node_id).encode_key(),
+			TreeNodeProvider::Terms(ikb) => ikb.new_bt_key(node_id).encode_key(),
+			TreeNodeProvider::Vector(ikb) => ikb.new_vm_key(node_id).encode_key(),
 			TreeNodeProvider::Debug => Ok(node_id.to_be_bytes().to_vec()),
 		}
 	}
@@ -149,7 +149,7 @@ impl TreeNodeProvider {
 		N: TreeNode + Clone,
 	{
 		let key = self.get_key(id)?;
-		if let Some(val) = tx.get(key.clone(), None).await? {
+		if let Some(val) = tx.get(&key, None).await? {
 			let size = val.len() as u32;
 			let node = N::try_from_val(val)?;
 			Ok(StoredNode::new(node, id, key, size))
@@ -164,12 +164,11 @@ impl TreeNodeProvider {
 	{
 		let val = node.n.try_into_val()?;
 		node.size = val.len() as u32;
-		tx.set(node.key.clone(), val, None).await?;
+		tx.set(&node.key, &val, None).await?;
 		Ok(())
 	}
 }
 
-#[non_exhaustive]
 #[derive(Debug)]
 pub struct StoredNode<N>
 where
@@ -213,7 +212,6 @@ pub trait TreeNode: Debug + Clone + Display {
 }
 
 #[derive(Clone)]
-#[non_exhaustive]
 pub struct IndexStores(Arc<Inner>);
 
 struct Inner {
@@ -233,13 +231,13 @@ impl Default for IndexStores {
 impl IndexStores {
 	pub(crate) async fn get_index_hnsw(
 		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ctx: &Context,
-		opt: &Options,
 		ix: &DefineIndexStatement,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex> {
-		let (ns, db) = opt.ns_db()?;
-		let ikb = IndexKeyBase::new(ns, db, ix)?;
+		let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 		self.0.hnsw_indexes.get(ctx, &ix.what, &ikb, p).await
 	}
 
@@ -247,8 +245,8 @@ impl IndexStores {
 		&self,
 		#[cfg(not(target_family = "wasm"))] ib: Option<&IndexBuilder>,
 		tx: &Transaction,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
 		ix: &str,
 	) -> Result<()> {
@@ -263,13 +261,13 @@ impl IndexStores {
 		&self,
 		#[cfg(not(target_family = "wasm"))] ib: Option<&IndexBuilder>,
 		tx: &Transaction,
-		ns: &str,
+		ns: NamespaceId,
 	) -> Result<()> {
 		for db in tx.all_db(ns).await?.iter() {
 			#[cfg(not(target_family = "wasm"))]
-			self.database_removed(ib, tx, ns, &db.name).await?;
+			self.database_removed(ib, tx, ns, db.database_id).await?;
 			#[cfg(target_family = "wasm")]
-			self.database_removed(tx, ns, &db.name).await?;
+			self.database_removed(tx, ns, db.database_id).await?;
 		}
 		Ok(())
 	}
@@ -278,8 +276,8 @@ impl IndexStores {
 		&self,
 		#[cfg(not(target_family = "wasm"))] ib: Option<&IndexBuilder>,
 		tx: &Transaction,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 	) -> Result<()> {
 		for tb in tx.all_tb(ns, db, None).await?.iter() {
 			#[cfg(not(target_family = "wasm"))]
@@ -294,8 +292,8 @@ impl IndexStores {
 		&self,
 		#[cfg(not(target_family = "wasm"))] ib: Option<&IndexBuilder>,
 		tx: &Transaction,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
 	) -> Result<()> {
 		for ix in tx.all_tb_indexes(ns, db, tb).await?.iter() {
@@ -308,9 +306,14 @@ impl IndexStores {
 		Ok(())
 	}
 
-	async fn remove_index(&self, ns: &str, db: &str, ix: &DefineIndexStatement) -> Result<()> {
+	async fn remove_index(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix: &DefineIndexStatement,
+	) -> Result<()> {
 		if matches!(ix.index, Index::Hnsw(_)) {
-			let ikb = IndexKeyBase::new(ns, db, ix)?;
+			let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 			self.remove_hnsw_index(ikb).await?;
 		}
 		Ok(())

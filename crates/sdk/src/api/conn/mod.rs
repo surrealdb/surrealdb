@@ -1,19 +1,16 @@
-use crate::Value;
-use crate::api;
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::api::Surreal;
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicI64, Ordering};
+
+use async_channel::{Receiver, Sender};
+use serde::de::DeserializeOwned;
+
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::method::query::Response;
 use crate::api::opt::Endpoint;
-use async_channel::Receiver;
-use async_channel::Sender;
-use serde::de::DeserializeOwned;
-use std::collections::HashSet;
-use std::sync::atomic::AtomicI64;
-use std::sync::atomic::Ordering;
-use surrealdb_core::expr::{Value as CoreValue, from_value as from_core_value};
+use crate::api::{ExtraFeatures, Result, Surreal};
+use crate::core::val::Value as CoreValue;
+use crate::{Value, api, value};
 
 mod cmd;
 pub(crate) use cmd::Command;
@@ -42,6 +39,7 @@ pub(crate) struct Route {
 #[derive(Debug)]
 pub struct Router {
 	pub(crate) sender: Sender<Route>,
+	#[allow(dead_code)]
 	pub(crate) config: Config,
 	pub(crate) last_id: AtomicI64,
 	pub(crate) features: HashSet<ExtraFeatures>,
@@ -107,7 +105,7 @@ impl Router {
 		Box::pin(async move {
 			let rx = self.send(command).await?;
 			let value = self.recv(rx).await?;
-			from_core_value(value)
+			value::from_core_value(value)
 		})
 	}
 
@@ -120,7 +118,7 @@ impl Router {
 			let rx = self.send(command).await?;
 			match self.recv(rx).await? {
 				CoreValue::None | CoreValue::Null => Ok(None),
-				value => from_core_value(value),
+				value => value::from_core_value(value),
 			}
 		})
 	}
@@ -137,7 +135,7 @@ impl Router {
 				CoreValue::Array(array) => CoreValue::Array(array),
 				value => vec![value].into(),
 			};
-			from_core_value(value)
+			value::from_core_value(value)
 		})
 	}
 

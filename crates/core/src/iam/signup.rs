@@ -1,28 +1,29 @@
+use std::sync::Arc;
+
+use anyhow::{Result, bail};
+use chrono::Utc;
+use jsonwebtoken::{Header, encode};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
 use super::access::{authenticate_record, create_refresh_token_record};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Session, Variables};
 use crate::err::Error;
 use crate::expr::AccessType;
-use crate::expr::Object;
-use crate::expr::Value;
-use crate::iam::Auth;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::Claims;
-use crate::iam::{Actor, Level};
-use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use anyhow::{Result, bail};
-use chrono::Utc;
-use jsonwebtoken::{Header, encode};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use uuid::Uuid;
+use crate::iam::{Actor, Auth, Level};
+use crate::kvs::Datastore;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
+use crate::val::{Object, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct SignupData {
 	pub token: Option<String>,
 	pub refresh: Option<String>,
@@ -42,8 +43,6 @@ impl From<SignupData> for Value {
 }
 
 pub async fn signup(kvs: &Datastore, session: &mut Session, vars: Object) -> Result<SignupData> {
-	// Check vars contains only computed values
-	vars.validate_computed()?;
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
@@ -73,19 +72,28 @@ pub async fn db_access(
 ) -> Result<SignupData> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
+	let db_def = match tx.get_db_by_name(&ns, &db).await? {
+		Some(db) => db,
+		None => {
+			return Err(Error::DbNotFound {
+				name: db.to_string(),
+			}
+			.into());
+		}
+	};
 	// Fetch the specified access method from storage
-	let access = tx.get_db_access(&ns, &db, &ac).await;
+	let access = tx.get_db_access(db_def.namespace_id, db_def.database_id, &ac).await;
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
 
 	// Check the provided access method exists
-	let Ok(av) = access else {
+	let Ok(Some(av)) = access else {
 		bail!(Error::AccessNotFound)
 	};
 
 	// Check the access method type
 	// Currently, only the record access method supports signup
-	let AccessType::Record(ref at) = av.kind else {
+	let AccessType::Record(ref at) = av.access_type else {
 		bail!(Error::AccessMethodMismatch)
 	};
 
@@ -123,7 +131,7 @@ pub async fn db_access(
 				ns: Some(ns.clone()),
 				db: Some(db.clone()),
 				ac: Some(ac.clone()),
-				id: Some(rid.to_raw()),
+				id: Some(rid.to_string()),
 				..Claims::default()
 			};
 			// AUTHENTICATE clause
@@ -131,7 +139,7 @@ pub async fn db_access(
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 				sess.rd = Some(rid.clone().into());
-				sess.tk = Some((&claims).into());
+				sess.tk = Some(claims.clone().into_claims_object().into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
 				rid = authenticate_record(kvs, &sess, au).await?;
@@ -166,7 +174,7 @@ pub async fn db_access(
 			// Create the authentication token
 			let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
 			// Set the authentication on the session
-			session.tk = Some((&claims).into());
+			session.tk = Some(claims.into_claims_object().into());
 			session.ns = Some(ns.clone());
 			session.db = Some(db.clone());
 			session.ac = Some(ac.clone());
@@ -211,10 +219,13 @@ pub async fn db_access(
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use crate::{dbs::Capabilities, iam::Role};
-	use chrono::Duration;
 	use std::collections::HashMap;
+
+	use chrono::Duration;
+
+	use super::*;
+	use crate::dbs::Capabilities;
+	use crate::iam::Role;
 
 	#[tokio::test]
 	async fn test_record_signup() {
@@ -275,7 +286,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Session expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -458,7 +470,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -500,7 +513,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -633,7 +647,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Session expiration should always be set for tokens issued by SurrealDB
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_sess_exp =
 				(Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_sess_exp =
@@ -745,7 +760,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -840,7 +856,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(

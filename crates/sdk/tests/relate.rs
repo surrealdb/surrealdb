@@ -1,15 +1,12 @@
-mod parse;
-
-use parse::Parse;
-
 mod helpers;
-use crate::helpers::Test;
-
 use helpers::new_ds;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::expr::Value;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::err::Error;
+use surrealdb_core::syn;
+use surrealdb_core::val::Value;
+
+use crate::helpers::Test;
 
 #[tokio::test]
 async fn relate_with_parameters() -> Result<()> {
@@ -32,7 +29,7 @@ async fn relate_with_parameters() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: knows:test,
@@ -41,7 +38,8 @@ async fn relate_with_parameters() -> Result<()> {
 				brother: true,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -70,7 +68,7 @@ async fn relate_and_overwrite() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: knows:test,
@@ -79,11 +77,12 @@ async fn relate_and_overwrite() -> Result<()> {
 				brother: true,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: knows:test,
@@ -92,11 +91,12 @@ async fn relate_and_overwrite() -> Result<()> {
 				test: true,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: knows:test,
@@ -105,7 +105,8 @@ async fn relate_and_overwrite() -> Result<()> {
 				test: true,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -114,6 +115,7 @@ async fn relate_and_overwrite() -> Result<()> {
 #[tokio::test]
 async fn relate_with_param_or_subquery() -> Result<()> {
 	let sql = r#"
+		USE NS test DB test;
 		LET $tobie = person:tobie;
 		LET $jaime = person:jaime;
         LET $relation = type::table("knows");
@@ -126,14 +128,22 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 8);
-	//
-	for _ in 0..3 {
-		let tmp = res.remove(0).result?;
-		let val = Value::None;
-		assert_eq!(tmp, val);
-	}
-	//
+	assert_eq!(res.len(), 9);
+
+	// USE NS test DB test;
+	let tmp = res.remove(0).result;
+	tmp.unwrap();
+	// LET $tobie = person:tobie;
+	let tmp = res.remove(0).result;
+	assert_eq!(tmp.unwrap(), Value::None);
+	// LET $jaime = person:jaime;
+	let tmp = res.remove(0).result;
+	assert_eq!(tmp.unwrap(), Value::None);
+	// LET $relation = type::table("knows");
+	let tmp = res.remove(0).result;
+	assert_eq!(tmp.unwrap(), Value::None);
+	// RELATE $tobie->$relation->$jaime;
+	// RELATE $tobie->(type::table("knows"))->$jaime;
 	for _ in 0..2 {
 		let tmp = res.remove(0).result?;
 		let Value::Array(v) = tmp else {
@@ -144,22 +154,22 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 		let Value::Object(o) = tmp else {
 			panic!("should be object {tmp:?}")
 		};
-		assert_eq!(o.get("in").unwrap(), &Value::parse("person:tobie"));
-		assert_eq!(o.get("out").unwrap(), &Value::parse("person:jaime"));
+		assert_eq!(o.get("in").unwrap(), &syn::value("person:tobie").unwrap());
+		assert_eq!(o.get("out").unwrap(), &syn::value("person:jaime").unwrap());
 		let id = o.get("id").unwrap();
 
-		let Value::Thing(t) = id else {
+		let Value::RecordId(t) = id else {
 			panic!("should be thing {id:?}")
 		};
-		assert_eq!(t.tb, "knows");
+		assert_eq!(t.table, "knows");
 	}
-	//
+	// LET $relation = type::thing("knows:foo");
 	let tmp = res.remove(0).result?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
-	//
+	// RELATE $tobie->$relation->$jaime;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: knows:foo,
@@ -167,11 +177,12 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 				out: person:jaime,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
-	//
+	// LET $relation = type::thing("knows:bar");
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: knows:bar,
@@ -179,7 +190,8 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 				out: person:jaime,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -198,15 +210,15 @@ async fn relate_with_complex_table() -> Result<()> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: a:1 }, { id: a:2 }]");
+	let val = syn::value("[{ id: a:1 }, { id: a:2 }]").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: `-`:`-`, in: a:1, out: a:2 }]");
+	let val = syn::value("[{ id: `-`:`-`, in: a:1, out: a:2 }]").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ rel: [`-`:`-`] }]");
+	let val = syn::value("[{ rel: [`-`:`-`] }]").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -215,6 +227,7 @@ async fn relate_with_complex_table() -> Result<()> {
 #[tokio::test]
 async fn schemafull_relate() -> Result<()> {
 	let sql = r#"
+	USE NS test DB test;
 	INSERT INTO person [
 		{ id: 1 },
 		{ id: 2 }
@@ -229,7 +242,10 @@ async fn schemafull_relate() -> Result<()> {
 	"#;
 
 	let mut t = Test::new(sql).await?;
-
+	// USE NS test DB test;
+	let tmp = t.next()?.result;
+	tmp.unwrap();
+	//
 	t.expect_val(
 		"[
 			{id: person:1},
@@ -279,7 +295,7 @@ async fn relate_enforced() -> Result<()> {
 	//
 	t.expect_val("[{ id: edge:1, in: a:1, out: a:2 }]")?;
 	//
-	let info = Value::parse(
+	let info = syn::value(
 		"{
 	accesses: {},
 	analyzers: {},
@@ -296,7 +312,8 @@ async fn relate_enforced() -> Result<()> {
 	},
 	users: {}
 	}",
-	);
+	)
+	.unwrap();
 	t.expect_value(info)?;
 	Ok(())
 }

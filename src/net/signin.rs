@@ -1,23 +1,24 @@
+use anyhow::Context as _;
+use axum::extract::DefaultBodyLimit;
+use axum::routing::options;
+use axum::{Extension, Router};
+use axum_extra::TypedHeader;
+use bytes::Bytes;
+use serde::Serialize;
+use tower_http::limit::RequestBodyLimitLayer;
+
 use super::AppState;
 use super::error::ResponseError;
 use super::headers::Accept;
 use super::output::Output;
 use crate::cnf::HTTP_MAX_SIGNUP_BODY_SIZE;
+use crate::core::dbs::Session;
+use crate::core::dbs::capabilities::RouteTarget;
+use crate::core::iam::signin::signin;
+use crate::core::syn;
+use crate::core::val::Value;
 use crate::net::error::Error as NetError;
 use crate::net::input::bytes_to_utf8;
-use anyhow::Context as _;
-use axum::Extension;
-use axum::Router;
-use axum::extract::DefaultBodyLimit;
-use axum::routing::options;
-use axum_extra::TypedHeader;
-use bytes::Bytes;
-use serde::Serialize;
-use surrealdb::dbs::Session;
-use surrealdb::dbs::capabilities::RouteTarget;
-use surrealdb::iam::signin::signin;
-use surrealdb::sql::SqlValue;
-use tower_http::limit::RequestBodyLimitLayer;
 
 #[derive(Serialize)]
 struct Success {
@@ -64,15 +65,15 @@ async fn handler(
 	// Convert the HTTP body into text
 	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
 	// Parse the provided data as JSON
-	match surrealdb::sql::json(data) {
+	match syn::json(data) {
 		// The provided value was an object
-		Ok(SqlValue::Object(vars)) => {
-			match signin(kvs, &mut session, vars.into()).await {
+		Ok(Value::Object(vars)) => {
+			match signin(kvs, &mut session, vars).await {
 				// Authentication was successful
 				Ok(v) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => {
-						Ok(Output::json(&Success::new(v.token, v.refresh)))
+						Ok(Output::json_other(&Success::new(v.token, v.refresh)))
 					}
 					Some(Accept::ApplicationCbor) => {
 						Ok(Output::cbor(&Success::new(v.token, v.refresh)))
@@ -81,7 +82,9 @@ async fn handler(
 					// NOTE: Only the token is returned in a plain text response.
 					Some(Accept::TextPlain) => Ok(Output::Text(v.token)),
 					// Internal serialization
-					Some(Accept::Surrealdb) => Ok(Output::full(&Success::new(v.token, v.refresh))),
+					Some(Accept::Surrealdb) => {
+						Ok(Output::bincode(&Success::new(v.token, v.refresh)))
+					}
 					// Return nothing
 					None => Ok(Output::None),
 					// An incorrect content-type was requested

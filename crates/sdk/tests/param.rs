@@ -1,10 +1,8 @@
-mod parse;
-use parse::Parse;
 mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::expr::Value;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::syn;
 
 #[tokio::test]
 async fn define_global_param() -> Result<()> {
@@ -24,7 +22,7 @@ async fn define_global_param() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"{
 			accesses: {},
 			analyzers: {},
@@ -38,18 +36,19 @@ async fn define_global_param() -> Result<()> {
 			tables: {},
 			users: {},
 		}",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[12345]");
+	let val = syn::value("[12345]").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[56789]");
+	let val = syn::value("[56789]").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -58,6 +57,7 @@ async fn define_global_param() -> Result<()> {
 #[tokio::test]
 async fn define_protected_param() -> Result<()> {
 	let sql = "
+		USE NS test DB test;
 		LET $test = { some: 'thing', other: true };
 		SELECT * FROM $test WHERE some = 'thing';
 		LET $auth = { ID: admin:tester };
@@ -65,22 +65,26 @@ async fn define_protected_param() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
-	//
+	assert_eq!(res.len(), 4);
+	// USE NS test DB test;
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
-	//
+	// LET $test = { some: 'thing', other: true };
+	let tmp = res.remove(0).result;
+	tmp.unwrap();
+	// SELECT * FROM $test WHERE some = 'thing';
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				other: true,
 				some: 'thing'
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
-	//
+	// LET $auth = { ID: admin:tester };
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),

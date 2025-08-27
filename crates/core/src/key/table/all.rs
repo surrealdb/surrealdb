@@ -1,34 +1,38 @@
 //! Stores the key prefix for all keys under a table
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Table<'a> {
+pub(crate) struct TableRoot<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 }
-impl_key!(Table<'a>);
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> Table<'a> {
-	Table::new(ns, db, tb)
+impl KVKey for TableRoot<'_> {
+	type ValueType = Vec<u8>;
 }
 
-impl Categorise for Table<'_> {
+pub fn new(ns: NamespaceId, db: DatabaseId, tb: &str) -> TableRoot<'_> {
+	TableRoot::new(ns, db, tb)
+}
+
+impl Categorise for TableRoot<'_> {
 	fn categorise(&self) -> Category {
 		Category::TableRoot
 	}
 }
 
-impl<'a> Table<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str) -> Self {
+impl<'a> TableRoot<'a> {
+	#[inline]
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -43,20 +47,17 @@ impl<'a> Table<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
-		let val = Table::new(
-			"testns",
-			"testdb",
+		let val = TableRoot::new(
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 		);
-		let enc = Table::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0");
-
-		let dec = Table::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = TableRoot::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0");
 	}
 }

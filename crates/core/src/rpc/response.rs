@@ -1,16 +1,15 @@
-use crate::dbs;
-use crate::dbs::Notification;
-use crate::expr;
-use crate::expr::Value;
 use revision::revisioned;
 use serde::Serialize;
+
+use crate::dbs;
+use crate::dbs::Notification;
+use crate::val::{Object, Strand, Value};
 
 /// The data returned by the database
 // The variants here should be in exactly the same order as `crate::engine::remote::ws::Data`
 // In future, they will possibly be merged to avoid having to keep them in sync.
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize)]
-#[non_exhaustive]
 pub enum Data {
 	/// Generally methods return a `expr::Value`
 	Other(Value),
@@ -21,38 +20,18 @@ pub enum Data {
 	// Add new variants here
 }
 
-impl From<Value> for Data {
-	fn from(v: Value) -> Self {
-		Data::Other(v)
-	}
-}
+impl Data {
+	pub fn into_value(self) -> Value {
+		match self {
+			Data::Query(v) => v.into_iter().map(|x| x.into_value()).collect(),
+			Data::Live(v) => Value::from(Object(map! {
+				"id".to_owned() => v.id.into(),
+				"action".to_owned() => Strand::new(v.action.to_string()).unwrap().into(),
+				"record".to_owned() => v.record,
+				"result".to_owned() => v.result,
 
-impl From<String> for Data {
-	fn from(v: String) -> Self {
-		Data::Other(Value::from(v))
-	}
-}
-
-impl From<Notification> for Data {
-	fn from(n: Notification) -> Self {
-		Data::Live(n)
-	}
-}
-
-impl From<Vec<dbs::Response>> for Data {
-	fn from(v: Vec<dbs::Response>) -> Self {
-		Data::Query(v)
-	}
-}
-
-impl TryFrom<Data> for Value {
-	type Error = anyhow::Error;
-
-	fn try_from(val: Data) -> Result<Self, Self::Error> {
-		match val {
-			Data::Query(v) => expr::to_value(v),
-			Data::Live(v) => expr::to_value(v),
-			Data::Other(v) => Ok(v),
+			})),
+			Data::Other(v) => v,
 		}
 	}
 }

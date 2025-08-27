@@ -1,32 +1,35 @@
 //! Stores the key prefix for all keys under a namespace access method
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::NamespaceId;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Access<'a> {
+pub(crate) struct AccessRoot<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
 	pub ac: &'a str,
 }
-impl_key!(Access<'a>);
 
-pub fn new<'a>(ns: &'a str, ac: &'a str) -> Access<'a> {
-	Access::new(ns, ac)
+impl KVKey for AccessRoot<'_> {
+	type ValueType = Vec<u8>;
 }
 
-impl Categorise for Access<'_> {
+pub fn new(ns: NamespaceId, ac: &str) -> AccessRoot<'_> {
+	AccessRoot::new(ns, ac)
+}
+
+impl Categorise for AccessRoot<'_> {
 	fn categorise(&self) -> Category {
 		Category::NamespaceAccessRoot
 	}
 }
 
-impl<'a> Access<'a> {
-	pub fn new(ns: &'a str, ac: &'a str) -> Self {
+impl<'a> AccessRoot<'a> {
+	pub fn new(ns: NamespaceId, ac: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -39,19 +42,16 @@ impl<'a> Access<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
-		let val = Access::new(
-			"testns",
+		let val = AccessRoot::new(
+			NamespaceId(1),
 			"testac",
 		);
-		let enc = Access::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0&testac\0");
-
-		let dec = Access::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = AccessRoot::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01&testac\0");
 	}
 }

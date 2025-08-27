@@ -1,37 +1,54 @@
 #![cfg(test)]
 
-use anyhow::ensure;
-use regex::Regex;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
 use std::sync::Arc;
 use std::thread::Builder;
+
+use anyhow::ensure;
+use regex::Regex;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::dbs::capabilities::Capabilities;
-use surrealdb::iam::{Auth, Level, Role};
-use surrealdb::kvs::Datastore;
-use surrealdb_core::dbs::Response;
-use surrealdb_core::expr::{Number, Value, value};
+use surrealdb_core::dbs::capabilities::Capabilities;
+use surrealdb_core::dbs::{Response, Session};
+use surrealdb_core::iam::{Auth, Level, Role};
+use surrealdb_core::kvs::Datastore;
+use surrealdb_core::syn;
+use surrealdb_core::val::{Number, Value};
 
 pub async fn new_ds() -> Result<Datastore> {
 	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())
 }
 
 #[allow(dead_code)]
+#[expect(clippy::too_many_arguments)]
 pub async fn iam_run_case(
+	test_index: i32,
 	prepare: &str,
 	test: &str,
 	check: &str,
-	check_expected_result: &[&str],
+	check_expected_result: &str,
 	ds: &Datastore,
 	sess: &Session,
+	use_ns: bool,
+	use_db: bool,
 	should_succeed: bool,
 ) -> Result<()> {
-	// Use the session as the test statement, but change the Auth to run the check with full permissions
+	// Use the session as the test statement, but change the Auth to run the check
+	// with full permissions
 	let mut owner_sess = sess.clone();
 	owner_sess.au = Arc::new(Auth::for_root(Role::Owner));
+
+	if use_ns {
+		if let Some(ns) = &sess.ns {
+			ds.execute(&format!("USE NS {ns}"), &owner_sess, None).await.unwrap();
+		}
+	}
+	if use_db {
+		if let Some(db) = &sess.db {
+			ds.execute(&format!("USE DB {db}"), &owner_sess, None).await.unwrap();
+		}
+	}
 
 	// Prepare statement
 	{
@@ -49,35 +66,44 @@ pub async fn iam_run_case(
 
 	// Check datastore state first
 	{
-		let resp = ds.execute(check, &owner_sess, None).await.unwrap();
-		ensure!(
-			resp.len() == check_expected_result.len(),
-			"Check statement failed for test: expected {} results, got {}",
-			check_expected_result.len(),
+		let mut resp = ds.execute(check, &owner_sess, None).await.unwrap();
+		assert_eq!(
+			resp.len(),
+			1,
+			"Check statement failed for test {test_index} ({test}): expected 1 result, got {}",
 			resp.len()
 		);
 
-		for (i, r) in resp.into_iter().enumerate() {
-			let tmp = r.output();
-			ensure!(tmp.is_ok(), "Check statement errored for test: {}", tmp.unwrap_err());
+		let tmp = resp.pop().unwrap().output();
+		ensure!(
+			tmp.is_ok(),
+			"Check statement errored for test {test_index} ({test}): {}",
+			tmp.unwrap_err()
+		);
 
-			let tmp = tmp.unwrap();
-			let expected = value(check_expected_result[i])?;
-			ensure!(
-				tmp == expected,
-				"Check statement failed for test: expected value '{:#}' doesn't match '{:#}'",
-				expected,
-				tmp
-			)
-		}
+		let tmp = tmp.unwrap();
+		let expected = syn::value(check_expected_result)?;
+		ensure!(
+			tmp == expected,
+			"Check statement failed for test {test_index} ({test}): expected value \n'{expected:#}' \ndoesn't match \n'{tmp:#}'",
+		)
 	}
 
-	// Check statement result. If the statement should succeed, check that the result is Ok, otherwise check that the result is a 'Not Allowed' error
+	// Check statement result. If the statement should succeed, check that the
+	// result is Ok, otherwise check that the result is a 'Not Allowed' error
 	let res = resp.pop().unwrap().output();
 	if should_succeed {
-		ensure!(res.is_ok(), "Test statement failed: {}", res.unwrap_err());
+		ensure!(
+			res.is_ok(),
+			"Test statement failed for test {test_index} ({test}): {}",
+			res.unwrap_err()
+		);
 	} else {
-		ensure!(res.is_err(), "Test statement succeeded when it should have failed: {:?}", res);
+		ensure!(
+			res.is_err(),
+			"Test statement succeeded for test {test_index} ({test}) when it should have failed: {:?}",
+			res
+		);
 
 		let err = res.unwrap_err().to_string();
 		ensure!(
@@ -89,38 +115,79 @@ pub async fn iam_run_case(
 	Ok(())
 }
 
-type CaseIter<'a> = std::slice::Iter<'a, ((Level, Role), (&'a str, &'a str), bool)>;
+type CaseIter<'a> = std::slice::Iter<'a, ((Level, Role), (&'a str, &'a str), bool, String)>;
 
 #[allow(dead_code)]
 pub async fn iam_check_cases(
 	cases: CaseIter<'_>,
 	scenario: &HashMap<&str, &str>,
-	check_results: [Vec<&str>; 2],
+	expected_anonymous_success_result: &str,
+	expected_anonymous_failure_result: &str,
+) -> Result<()> {
+	iam_check_cases_impl(
+		cases,
+		scenario,
+		expected_anonymous_success_result,
+		expected_anonymous_failure_result,
+		true,
+		true,
+	)
+	.await
+}
+
+#[allow(dead_code)]
+pub async fn iam_check_cases_impl(
+	cases: CaseIter<'_>,
+	scenario: &HashMap<&str, &str>,
+	expected_anonymous_success_result: &str,
+	expected_anonymous_failure_result: &str,
+	use_ns: bool,
+	use_db: bool,
 ) -> Result<()> {
 	let prepare = scenario.get("prepare").unwrap();
 	let test = scenario.get("test").unwrap();
 	let check = scenario.get("check").unwrap();
 
-	for ((level, role), (ns, db), should_succeed) in cases {
-		println!("* Testing '{test}' for '{level}Actor({role})' on '({ns}, {db})'");
+	for (test_index, ((level, role), (ns, db), should_succeed, expected_result)) in
+		cases.enumerate()
+	{
+		println!("* Testing '{test}' for '{level}Actor({role})' on '({ns}, {db})' - {test_index}");
 		let sess = Session::for_level(level.to_owned(), role.to_owned()).with_ns(ns).with_db(db);
-		let expected_result = if *should_succeed {
-			check_results.first().unwrap()
-		} else {
-			&check_results[1]
-		};
+
 		// Auth enabled
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(true);
-			iam_run_case(prepare, test, check, expected_result, &ds, &sess, *should_succeed)
-				.await?;
+			iam_run_case(
+				test_index as i32,
+				prepare,
+				test,
+				check,
+				expected_result,
+				&ds,
+				&sess,
+				use_ns,
+				use_db,
+				*should_succeed,
+			)
+			.await?;
 		}
 
 		// Auth disabled
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(false);
-			iam_run_case(prepare, test, check, expected_result, &ds, &sess, *should_succeed)
-				.await?;
+			iam_run_case(
+				test_index as i32,
+				prepare,
+				test,
+				check,
+				expected_result,
+				&ds,
+				&sess,
+				use_ns,
+				use_db,
+				*should_succeed,
+			)
+			.await?;
 		}
 	}
 
@@ -139,17 +206,20 @@ pub async fn iam_check_cases(
 			);
 			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 			let expected_result = if auth_enabled {
-				&check_results[1]
+				expected_anonymous_failure_result
 			} else {
-				check_results.first().unwrap()
+				expected_anonymous_success_result
 			};
 			iam_run_case(
+				-1,
 				prepare,
 				test,
 				check,
 				expected_result,
 				&ds,
 				&Session::default().with_ns(ns).with_db(db),
+				use_ns,
+				use_db,
 				!auth_enabled,
 			)
 			.await?;
@@ -163,7 +233,8 @@ pub async fn iam_check_cases(
 pub fn with_enough_stack(fut: impl Future<Output = Result<()>> + Send + 'static) -> Result<()> {
 	let mut builder = Builder::new();
 
-	// Roughly how much stack is allocated for surreal server workers in release mode
+	// Roughly how much stack is allocated for surreal server workers in release
+	// mode
 	#[cfg(not(debug_assertions))]
 	{
 		builder = builder.stack_size(10_000_000);
@@ -197,7 +268,8 @@ fn skip_ok_pos(res: &mut Vec<Response>, pos: usize) -> Result<()> {
 }
 
 /// Skip the specified number of successful results from a vector of responses.
-/// This function will panic if there are not enough results in the vector or if an error occurs.
+/// This function will panic if there are not enough results in the vector or if
+/// an error occurs.
 #[track_caller]
 #[allow(dead_code)]
 pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<()> {
@@ -276,8 +348,9 @@ impl Test {
 	}
 
 	/// Retrieves the next response from the responses list.
-	/// This method will panic if the responses list is empty, indicating that there are no more responses to retrieve.
-	/// The panic message will include the last position in the responses list before it was emptied.
+	/// This method will panic if the responses list is empty, indicating that
+	/// there are no more responses to retrieve. The panic message will include
+	/// the last position in the responses list before it was emptied.
 	#[track_caller]
 	#[allow(dead_code)]
 	#[allow(clippy::should_implement_trait)]
@@ -288,15 +361,16 @@ impl Test {
 	}
 
 	/// Retrieves the next value from the responses list.
-	/// This method will panic if the responses list is empty, indicating that there are no more responses to retrieve.
-	/// The panic message will include the last position in the responses list before it was emptied.
+	/// This method will panic if the responses list is empty, indicating that
+	/// there are no more responses to retrieve. The panic message will include
+	/// the last position in the responses list before it was emptied.
 	#[track_caller]
 	pub fn next_value(&mut self) -> Result<Value> {
 		self.next()?.result
 	}
 
-	/// Skips a specified number of elements from the beginning of the `responses` vector
-	/// and updates the position.
+	/// Skips a specified number of elements from the beginning of the
+	/// `responses` vector and updates the position.
 	#[track_caller]
 	#[allow(dead_code)]
 	pub fn skip_ok(&mut self, skip: usize) -> Result<&mut Self> {
@@ -317,11 +391,6 @@ impl Test {
 		// Then check they are indeed the same values
 		//
 		// If it is a constant we need to transform it as a number
-		let val = if let Value::Constant(c) = val {
-			c.compute().unwrap_or_else(|e| panic!("Can't convert constant {c} - {e}"))
-		} else {
-			val
-		};
 		if val.as_number().map(|x| x.is_nan()).unwrap_or(false) {
 			assert!(
 				tmp.as_number().map(|x| x.is_nan()).unwrap_or(false),
@@ -349,7 +418,8 @@ impl Test {
 		self.expect_value_info(val, "")
 	}
 
-	/// Expect values in the given slice to be present in the responses, following the same order.
+	/// Expect values in the given slice to be present in the responses,
+	/// following the same order.
 	#[track_caller]
 	#[allow(dead_code)]
 	pub fn expect_values(&mut self, values: &[Value]) -> Result<&mut Self> {
@@ -370,14 +440,15 @@ impl Test {
 	#[allow(dead_code)]
 	pub fn expect_val_info<I: Display>(&mut self, val: &str, info: I) -> Result<&mut Self> {
 		self.expect_value_info(
-			value(val).unwrap_or_else(|_| panic!("INVALID VALUE {info}:\n{val}")),
+			syn::value(val).unwrap_or_else(|_| panic!("INVALID VALUE {info}:\n{val}")),
 			info,
 		)
 	}
 
 	#[track_caller]
 	#[allow(dead_code)]
-	/// Expect values in the given slice to be present in the responses, following the same order.
+	/// Expect values in the given slice to be present in the responses,
+	/// following the same order.
 	pub fn expect_vals(&mut self, vals: &[&str]) -> Result<&mut Self> {
 		for (i, val) in vals.iter().enumerate() {
 			self.expect_val_info(val, i)?;
@@ -385,9 +456,9 @@ impl Test {
 		Ok(self)
 	}
 
-	/// Expects the next result to be an error with the given check function returning true.
-	/// This function will panic if the next result is not an error or if the error
-	/// message does not pass the check.
+	/// Expects the next result to be an error with the given check function
+	/// returning true. This function will panic if the next result is not an
+	/// error or if the error message does not pass the check.
 	#[track_caller]
 	#[allow(dead_code)]
 	pub fn expect_error_func<F: Fn(&anyhow::Error) -> bool>(
@@ -422,7 +493,8 @@ impl Test {
 		Ok(self)
 	}
 
-	/// Expects the next value to be a floating-point number and compares it with the given value.
+	/// Expects the next value to be a floating-point number and compares it
+	/// with the given value.
 	///
 	/// # Arguments
 	///

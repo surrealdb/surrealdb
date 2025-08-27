@@ -1,49 +1,53 @@
 //! Stores a DEFINE BUCKET definition
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::expr::statements::define::BucketDefinition;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Bu<'a> {
+pub(crate) struct BucketKey<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	_d: u8,
 	_e: u8,
 	pub bu: &'a str,
 }
-impl_key!(Bu<'a>);
 
-pub fn new<'a>(ns: &'a str, db: &'a str, bu: &'a str) -> Bu<'a> {
-	Bu::new(ns, db, bu)
+impl KVKey for BucketKey<'_> {
+	type ValueType = BucketDefinition;
 }
 
-pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode()?;
+pub fn new(ns: NamespaceId, db: DatabaseId, bu: &str) -> BucketKey<'_> {
+	BucketKey::new(ns, db, bu)
+}
+
+pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
+	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"!bu\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode()?;
+pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
+	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"!bu\xff");
 	Ok(k)
 }
 
-impl Categorise for Bu<'_> {
+impl Categorise for BucketKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseBucket
 	}
 }
 
-impl<'a> Bu<'a> {
-	pub fn new(ns: &'a str, db: &'a str, bu: &'a str) -> Self {
+impl<'a> BucketKey<'a> {
+	pub fn new(ns: NamespaceId, db: DatabaseId, bu: &'a str) -> Self {
 		Self {
 			__: b'/', // /
 			_a: b'*', // *
@@ -60,32 +64,29 @@ impl<'a> Bu<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
-            let val = Bu::new(
-            "ns",
-            "db",
+            let val = BucketKey::new(
+            NamespaceId(1),
+            DatabaseId(2),
             "test",
         );
-		let enc = Bu::encode(&val).unwrap();
-		assert_eq!(enc, b"/*ns\0*db\0!butest\0");
-		let dec = Bu::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = BucketKey::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!butest\0");
 	}
 
 	#[test]
 	fn prefix() {
-		let val = super::prefix("namespace", "database").unwrap();
-		assert_eq!(val, b"/*namespace\0*database\0!bu\0");
+		let val = super::prefix(NamespaceId(1), DatabaseId(2)).unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!bu\0");
 	}
 
 	#[test]
 	fn suffix() {
-		let val = super::suffix("namespace", "database").unwrap();
-		assert_eq!(val, b"/*namespace\0*database\0!bu\xff");
+		let val = super::suffix(NamespaceId(1), DatabaseId(2)).unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!bu\xff");
 	}
 }

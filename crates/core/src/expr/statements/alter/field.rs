@@ -1,39 +1,49 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::reference::Reference;
-use crate::expr::statements::DefineTableStatement;
-use crate::expr::{Base, Ident, Permissions, Strand, Value};
-use crate::expr::{Idiom, Kind};
-use crate::iam::{Action, ResourceKind};
+use std::fmt::{self, Display};
+use std::ops::Deref;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
-use std::ops::Deref;
 use uuid::Uuid;
 
+use super::AlterKind;
+use crate::catalog::TableDefinition;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::expr::reference::Reference;
+use crate::expr::statements::define::DefineDefault;
+use crate::expr::{Base, Expr, Ident, Idiom, Kind, Permissions};
+use crate::iam::{Action, ResourceKind};
+use crate::val::{Strand, Value};
+
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+pub enum AlterDefault {
+	#[default]
+	None,
+	Drop,
+	Always(Expr),
+	Set(Expr),
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct AlterFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
 	pub if_exists: bool,
-	pub flex: Option<bool>,
-	pub kind: Option<Option<Kind>>,
-	pub readonly: Option<bool>,
-	pub value: Option<Option<Value>>,
-	pub assert: Option<Option<Value>>,
-	pub default: Option<Option<Value>>,
+	pub flex: AlterKind<()>,
+	pub kind: AlterKind<Kind>,
+	pub readonly: AlterKind<()>,
+	pub value: AlterKind<Expr>,
+	pub assert: AlterKind<Expr>,
+	pub default: AlterDefault,
 	pub permissions: Option<Permissions>,
-	pub comment: Option<Option<Strand>>,
-	pub reference: Option<Option<Reference>>,
-	pub default_always: Option<bool>,
+	pub comment: AlterKind<Strand>,
+	pub reference: AlterKind<Reference>,
 }
 
 impl AlterFieldStatement {
@@ -47,64 +57,78 @@ impl AlterFieldStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the table definition
 		let name = self.name.to_string();
-		let mut df = match txn.get_tb_field(ns, db, &self.what, &name).await {
-			Ok(tb) => tb.deref().clone(),
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::FdNotFound { .. })) {
+		let mut df = match txn.get_tb_field(ns, db, &self.what, &name).await? {
+			Some(tb) => tb.deref().clone(),
+			None => {
+				if self.if_exists {
 					return Ok(Value::None);
-				} else {
-					return Err(e);
 				}
+
+				return Err(Error::FdNotFound {
+					name,
+				}
+				.into());
 			}
 		};
-		// Process the statement
-		if let Some(flex) = &self.flex {
-			df.flex = *flex;
+
+		match self.flex {
+			AlterKind::Set(_) => df.flex = true,
+			AlterKind::Drop => df.flex = false,
+			AlterKind::None => {}
 		}
-		if let Some(kind) = &self.kind {
-			df.kind.clone_from(kind);
+
+		match self.kind {
+			AlterKind::Set(ref k) => df.field_kind = Some(k.clone()),
+			AlterKind::Drop => df.field_kind = None,
+			AlterKind::None => {}
 		}
-		if let Some(readonly) = &self.readonly {
-			df.readonly = *readonly;
+
+		match self.readonly {
+			AlterKind::Set(_) => df.readonly = true,
+			AlterKind::Drop => df.readonly = false,
+			AlterKind::None => {}
 		}
-		if let Some(value) = &self.value {
-			df.value.clone_from(value);
+
+		match self.value {
+			AlterKind::Set(ref k) => df.value = Some(k.clone()),
+			AlterKind::Drop => df.value = None,
+			AlterKind::None => {}
 		}
-		if let Some(assert) = &self.assert {
-			df.assert.clone_from(assert);
+
+		match self.assert {
+			AlterKind::Set(ref k) => df.assert = Some(k.clone()),
+			AlterKind::Drop => df.assert = None,
+			AlterKind::None => {}
 		}
-		if let Some(default) = &self.default {
-			df.default.clone_from(default);
+
+		match self.default {
+			AlterDefault::None => {}
+			AlterDefault::Drop => df.default = DefineDefault::None,
+			AlterDefault::Always(ref expr) => df.default = DefineDefault::Always(expr.clone()),
+			AlterDefault::Set(ref expr) => df.default = DefineDefault::Set(expr.clone()),
 		}
+
 		if let Some(permissions) = &self.permissions {
 			df.permissions = permissions.clone();
 		}
-		if let Some(comment) = &self.comment {
-			df.comment.clone_from(comment);
-		}
-		if let Some(reference) = &self.reference {
-			df.reference.clone_from(reference);
 
-			// Validate reference options
-			if df.reference.is_some() {
-				df.validate_reference_options(ctx)?;
+		match self.comment {
+			AlterKind::Set(ref k) => df.comment = Some(k.clone()),
+			AlterKind::Drop => df.comment = None,
+			AlterKind::None => {}
+		}
+
+		match self.reference {
+			AlterKind::Set(ref k) => {
+				df.reference = Some(k.clone());
 			}
-		}
-		if let Some(default_always) = &self.default_always {
-			df.default_always = *default_always;
-		}
-
-		// Validate reference options
-		df.validate_reference_options(ctx)?;
-
-		// Correct reference type
-		if let Some(kind) = df.get_reference_kind(ctx, opt).await? {
-			df.kind = Some(kind);
+			AlterKind::Drop => df.reference = None,
+			AlterKind::None => {}
 		}
 
 		// Disallow mismatched types
@@ -112,25 +136,30 @@ impl AlterFieldStatement {
 
 		// Set the table definition
 		let key = crate::key::table::fd::new(ns, db, &self.what, &name);
-		txn.set(key, revision::to_vec(&df)?, None).await?;
+		txn.set(&key, &df, None).await?;
 		// Refresh the table cache
 		let key = crate::key::database::tb::new(ns, db, &self.what);
-		let tb = txn.get_tb(ns, db, &self.what).await?;
+		let Some(tb) = txn.get_tb(ns, db, &self.what).await? else {
+			return Err(Error::TbNotFound {
+				name: self.what.to_string(),
+			}
+			.into());
+		};
 		txn.set(
-			key,
-			revision::to_vec(&DefineTableStatement {
+			&key,
+			&TableDefinition {
 				cache_fields_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
-			})?,
+			},
 			None,
 		)
 		.await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Process possible recursive defitions
 		df.process_recursive_definitions(ns, db, txn.clone()).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -143,70 +172,59 @@ impl Display for AlterFieldStatement {
 			write!(f, " IF EXISTS")?
 		}
 		write!(f, " {} ON {}", self.name, self.what)?;
-		if let Some(flex) = self.flex {
-			if flex {
-				write!(f, " FLEXIBLE")?;
-			} else {
-				write!(f, " DROP FLEXIBLE")?;
-			}
-		}
-		if let Some(kind) = &self.kind {
-			if let Some(kind) = kind {
-				write!(f, " TYPE {kind}")?;
-			} else {
-				write!(f, " DROP TYPE")?;
-			}
-		}
-		if let Some(readonly) = self.readonly {
-			if readonly {
-				write!(f, " READONLY")?;
-			} else {
-				write!(f, " DROP READONLY")?;
-			}
-		}
-		if let Some(value) = &self.value {
-			if let Some(value) = value {
-				write!(f, " VALUE {value}")?;
-			} else {
-				write!(f, " DROP VALUE")?;
-			}
-		}
-		if let Some(assert) = &self.assert {
-			if let Some(assert) = assert {
-				write!(f, " ASSERT {assert}")?;
-			} else {
-				write!(f, " DROP ASSERT")?;
-			}
-		}
-		if let Some(default) = &self.default {
-			if let Some(default) = default {
-				write!(f, " DEFAULT")?;
-				if self.default_always.is_some_and(|x| x) {
-					write!(f, " ALWAYS")?;
-				}
 
-				write!(f, " {default}")?;
-			} else {
-				write!(f, " DROP DEFAULT")?;
-			}
+		match self.flex {
+			AlterKind::Set(_) => write!(f, " FLEXIBLE")?,
+			AlterKind::Drop => write!(f, " DROP FLEXIBLE")?,
+			AlterKind::None => {}
+		}
+
+		match self.kind {
+			AlterKind::Set(ref x) => write!(f, " TYPE {x}")?,
+			AlterKind::Drop => write!(f, " DROP TYPE")?,
+			AlterKind::None => {}
+		}
+
+		match self.readonly {
+			AlterKind::Set(_) => write!(f, " READONLY")?,
+			AlterKind::Drop => write!(f, " DROP READONLY")?,
+			AlterKind::None => {}
+		}
+
+		match self.value {
+			AlterKind::Set(ref v) => write!(f, " VALUE {v}")?,
+			AlterKind::Drop => write!(f, " DROP VALUE")?,
+			AlterKind::None => {}
+		}
+
+		match self.assert {
+			AlterKind::Set(ref v) => write!(f, " ASSERT {v}")?,
+			AlterKind::Drop => write!(f, " DROP ASSERT")?,
+			AlterKind::None => {}
+		}
+
+		match self.default {
+			AlterDefault::None => {}
+			AlterDefault::Drop => write!(f, " DROP DEFAULT")?,
+			AlterDefault::Always(ref expr) => write!(f, "DEFAULT ALWAYS {expr}")?,
+			AlterDefault::Set(ref expr) => write!(f, "DEFAULT {expr}")?,
 		}
 		if let Some(permissions) = &self.permissions {
 			write!(f, "{permissions}")?;
 		}
-		if let Some(comment) = &self.comment {
-			if let Some(comment) = comment {
-				write!(f, " COMMENT {comment}")?;
-			} else {
-				write!(f, " DROP COMMENT")?;
-			}
+
+		match self.comment {
+			AlterKind::Set(ref v) => write!(f, " COMMENT {v}")?,
+			AlterKind::Drop => write!(f, " DROP COMMENT")?,
+			AlterKind::None => {}
 		}
-		if let Some(reference) = &self.reference {
-			if let Some(reference) = reference {
-				write!(f, " REFERENCE {reference}")?;
-			} else {
-				write!(f, " DROP REFERENCE")?;
-			}
+
+		match self.reference {
+			AlterKind::Set(ref v) => write!(f, " REFERENCE {v}")?,
+			AlterKind::Drop => write!(f, " DROP REFERENCE")?,
+			AlterKind::None => {}
 		}
+
 		Ok(())
 	}
 }

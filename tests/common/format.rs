@@ -1,4 +1,5 @@
-use std::{fmt, string::ToString};
+use std::fmt;
+use std::string::ToString;
 
 #[derive(Debug, Copy, Clone)]
 pub enum Format {

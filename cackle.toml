@@ -169,6 +169,9 @@ allow_proc_macro = true
 [pkg.serial_test_derive]
 allow_proc_macro = true
 
+[pkg.surrealdb-types-derive]
+allow_proc_macro = true
+
 [pkg.time-macros]
 allow_proc_macro = true
 allow_unsafe = true
@@ -649,6 +652,7 @@ allow_unsafe = true
 
 [pkg.dashmap]
 allow_unsafe = true
+allow_apis = ["net"]
 
 [pkg.tokio-stream]
 allow_unsafe = true
@@ -750,6 +754,13 @@ from.build.allow_apis = ["fs"]
 from.build.allow_apis = ["fs"]
 
 [pkg.smol_str]
+allow_unsafe = true
+
+[pkg.fastnum]
+build.allow_apis = ["fs"]
+allow_unsafe = true
+
+[pkg.bnum]
 allow_unsafe = true
 
 [pkg.rust_decimal]

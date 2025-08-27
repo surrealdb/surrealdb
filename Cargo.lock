@@ -905,6 +905,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bnum"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f781dba93de3a5ef6dc5b17c9958b208f6f3f021623b360fb605ea51ce443f10"
+
+[[package]]
 name = "borsh"
 version = "1.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1484,6 +1490,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashmap"
+version = "6.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
+]
+
+[[package]]
 name = "data-encoding"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1762,6 +1782,16 @@ dependencies = [
  "lazy_static",
  "log",
  "rand 0.7.3",
+]
+
+[[package]]
+name = "fastnum"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aaa0b51af582b2c8bb5db89abf8a8d73a98b7e9561a7f25ec93f3b0ea25ef2db"
+dependencies = [
+ "autocfg",
+ "bnum",
 ]
 
 [[package]]
@@ -4950,9 +4980,9 @@ dependencies = [
 
 [[package]]
 name = "rust_decimal"
-version = "1.37.1"
+version = "1.37.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "faa7de2ba56ac291bd90c6b9bece784a52ae1411f9506544b3eae36dd2356d50"
+checksum = "b203a6425500a03e0919c42d3c47caca51e79f1132046626d2c8871c5092035d"
 dependencies = [
  "arbitrary",
  "arrayvec",
@@ -5347,7 +5377,7 @@ version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e56dd856803e253c8f298af3f4d7eb0ae5e23a737252cd90bb4f3b435033b2d"
 dependencies = [
- "dashmap",
+ "dashmap 5.5.3",
  "futures",
  "lazy_static",
  "log",
@@ -5628,6 +5658,7 @@ dependencies = [
  "axum-extra",
  "axum-server",
  "base64 0.21.7",
+ "bincode",
  "bytes",
  "chrono",
  "ciborium",
@@ -5695,6 +5726,7 @@ dependencies = [
  "arrayvec",
  "async-channel",
  "bincode",
+ "castaway",
  "chrono",
  "ciborium",
  "criterion",
@@ -5719,6 +5751,7 @@ dependencies = [
  "reqwest",
  "revision 0.11.0",
  "ring",
+ "rstest",
  "rust_decimal",
  "rustls 0.23.25",
  "rustls-pki-types",
@@ -5767,15 +5800,15 @@ dependencies = [
  "bincode",
  "blake3",
  "bytes",
- "castaway",
  "chrono",
  "ciborium",
  "criterion",
- "dashmap",
+ "dashmap 6.1.0",
  "deunicode",
  "dmp",
  "env_logger",
  "ext-sort",
+ "fastnum",
  "flatbuffers",
  "flate2",
  "foundationdb",
@@ -5827,7 +5860,6 @@ dependencies = [
  "scrypt",
  "semver",
  "serde",
- "serde-content",
  "serde_json",
  "serial_test",
  "sha1",
@@ -5838,6 +5870,7 @@ dependencies = [
  "subtle",
  "surrealdb-protocol",
  "surrealdb-tikv-client",
+ "surrealdb-types",
  "surrealkv",
  "surrealml-core",
  "sysinfo",
@@ -5876,9 +5909,9 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-protocol"
-version = "0.2.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37827e7976caa8071614d59cdecc758c6a5820974bc31a75185001a8161a08ce"
+checksum = "8219a53e8a4948025993f9ecd29397dc643f87057b334d0dd134eb2623e4d8bf"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5924,6 +5957,35 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tonic 0.10.2",
+]
+
+[[package]]
+name = "surrealdb-types"
+version = "3.0.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "flatbuffers",
+ "geo",
+ "hex",
+ "regex",
+ "rstest",
+ "rust_decimal",
+ "serde",
+ "surrealdb-protocol",
+ "surrealdb-types-derive",
+ "uuid",
+]
+
+[[package]]
+name = "surrealdb-types-derive"
+version = "3.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "surrealdb-types",
+ "syn 2.0.100",
 ]
 
 [[package]]

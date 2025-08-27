@@ -1,18 +1,19 @@
 //! Stores BTree nodes for terms
-use crate::idx::trees::store::NodeId;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::idx::ft::search::terms::SearchTermsState;
+use crate::idx::trees::store::NodeId;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Bt<'a> {
+pub(crate) struct BtRoot<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -20,9 +21,57 @@ pub struct Bt<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub node_id: Option<NodeId>,
 }
-impl_key!(Bt<'a>);
+
+impl KVKey for BtRoot<'_> {
+	type ValueType = SearchTermsState;
+}
+
+impl Categorise for BtRoot<'_> {
+	fn categorise(&self) -> Category {
+		Category::IndexBTreeNodeTerms
+	}
+}
+
+impl<'a> BtRoot<'a> {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
+		Self {
+			__: b'/',
+			_a: b'*',
+			ns,
+			_b: b'*',
+			db,
+			_c: b'*',
+			tb,
+			_d: b'+',
+			ix,
+			_e: b'!',
+			_f: b'b',
+			_g: b't',
+		}
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub(crate) struct Bt<'a> {
+	__: u8,
+	_a: u8,
+	pub ns: NamespaceId,
+	_b: u8,
+	pub db: DatabaseId,
+	_c: u8,
+	pub tb: &'a str,
+	_d: u8,
+	pub ix: &'a str,
+	_e: u8,
+	_f: u8,
+	_g: u8,
+	pub node_id: NodeId,
+}
+
+impl KVKey for Bt<'_> {
+	type ValueType = Vec<u8>;
+}
 
 impl Categorise for Bt<'_> {
 	fn categorise(&self) -> Category {
@@ -31,13 +80,7 @@ impl Categorise for Bt<'_> {
 }
 
 impl<'a> Bt<'a> {
-	pub fn new(
-		ns: &'a str,
-		db: &'a str,
-		tb: &'a str,
-		ix: &'a str,
-		node_id: Option<NodeId>,
-	) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, node_id: NodeId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -58,21 +101,35 @@ impl<'a> Bt<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+
 	#[test]
-	fn key() {
-		use super::*;
+	fn root() {
 		#[rustfmt::skip]
-		let val = Bt::new(
-			"testns",
-			"testdb",
+		let val = BtRoot::new(
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
-			Some(7)
 		);
-		let enc = Bt::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bt\x01\0\0\0\0\0\0\0\x07");
-		let dec = Bt::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = BtRoot::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!bt");
+	}
+
+	#[test]
+	fn key() {
+		#[rustfmt::skip]
+		let val = Bt::new(
+			NamespaceId(1),
+			DatabaseId(2),
+			"testtb",
+			"testix",
+			7
+		);
+		let enc = Bt::encode_key(&val).unwrap();
+		assert_eq!(
+			enc,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!bt\0\0\0\0\0\0\0\x07"
+		);
 	}
 }

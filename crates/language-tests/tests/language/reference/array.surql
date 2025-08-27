@@ -1,5 +1,8 @@
 /**
 [test]
+# TODO: References are being replaced with a new syntax, these tests should be updated when that
+# new syntax is added.
+wip = true
 
 [[test.results]]
 value = "NONE"

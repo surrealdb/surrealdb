@@ -1,18 +1,18 @@
-use crate::expr::{Array, IdRange, Object, id::Gen, id::Id as NewId};
+use crate::expr::{RecordIdKeyRangeLit, id::Gen, id::RecordIdKeyLit as NewId};
+use crate::val::{Array, Object};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Id {
 	Number(i64),
 	String(String),
 	Array(Array),
 	Object(Object),
 	Generate(Gen),
-	Range(Box<IdRange>),
+	Range(Box<RecordIdKeyRangeLit>),
 }
 
 impl Id {
@@ -56,14 +56,13 @@ pub mod key {
 	use serde::{Deserialize, Serialize};
 
 	use crate::{
-		expr::{Dir, id::Id as NewId},
-		kvs::impl_key,
+		expr::{Dir, id::RecordIdKeyLit as NewId},
+		kvs::KVKey,
 	};
 
 	use super::Id;
 
 	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-	#[non_exhaustive]
 	pub struct Graph<'a> {
 		__: u8,
 		_a: u8,
@@ -78,35 +77,15 @@ pub mod key {
 		pub ft: &'a str,
 		pub fk: Id,
 	}
-	impl_key!(Graph<'a>);
+
+	impl KVKey for Graph<'_> {
+		type ValueType = ();
+	}
 
 	impl Graph<'_> {
-		/*
-		pub fn new(
-			ns: &'a str,
-			db: &'a str,
-			tb: &'a str,
-			id: Id,
-			eg: Dir,
-			ft: &'a str,
-			fk: &'a Id,
-		) -> Self {
-			Self {
-				__: b'/',
-				_a: b'*',
-				ns,
-				_b: b'*',
-				db,
-				_c: b'*',
-				tb,
-				_d: b'~',
-				id,
-				eg,
-				ft,
-				fk: fk.to_owned(),
-			}
+		pub fn decode_key(k: &[u8]) -> anyhow::Result<Graph<'_>> {
+			Ok(storekey::deserialize(k)?)
 		}
-		*/
 
 		pub fn fix(&self) -> Option<crate::key::graph::Graph> {
 			let fixed = match (self.id.fix(), self.fk.fix()) {
@@ -145,7 +124,6 @@ pub mod key {
 	}
 
 	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-	#[non_exhaustive]
 	pub struct Thing<'a> {
 		__: u8,
 		_a: u8,
@@ -157,24 +135,15 @@ pub mod key {
 		_d: u8,
 		pub id: Id,
 	}
-	impl_key!(Thing<'a>);
+
+	impl KVKey for Thing<'_> {
+		type ValueType = Value;
+	}
 
 	impl Thing<'_> {
-		/*
-		pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: Id) -> Self {
-			Self {
-				__: b'/',
-				_a: b'*',
-				ns,
-				_b: b'*',
-				db,
-				_c: b'*',
-				tb,
-				_d: b'*',
-				id,
-			}
+		pub fn decode_key(k: &[u8]) -> anyhow::Result<Thing<'_>> {
+			Ok(storekey::deserialize(k)?)
 		}
-		*/
 
 		pub fn fix(&self) -> Option<crate::key::thing::Thing> {
 			self.id.fix().map(|id| crate::key::thing::new(self.ns, self.db, self.tb, &id))

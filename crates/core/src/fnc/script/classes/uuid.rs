@@ -1,12 +1,13 @@
-use crate::expr::uuid;
-use js::{JsLifetime, class::Trace};
+use js::JsLifetime;
+use js::class::Trace;
+
+use crate::val::Uuid as SqlUuid;
 
 #[derive(Clone, Trace, JsLifetime)]
 #[js::class]
-#[non_exhaustive]
 pub struct Uuid {
 	#[qjs(skip_trace)]
-	pub(crate) value: Option<uuid::Uuid>,
+	pub(crate) value: Option<SqlUuid>,
 }
 
 #[js::methods]
@@ -14,7 +15,7 @@ impl Uuid {
 	#[qjs(constructor)]
 	pub fn new(value: String) -> Self {
 		Self {
-			value: uuid::Uuid::try_from(value).ok(),
+			value: SqlUuid::try_from(value).ok(),
 		}
 	}
 	#[qjs(get)]

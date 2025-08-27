@@ -1,52 +1,42 @@
-use super::Key;
-use super::KeyEncode;
-use super::Val;
-use super::Version;
-use super::batch::Batch;
-use super::tr::Check;
-use super::util;
-use crate::cnf::NORMAL_FETCH_SIZE;
-use crate::dbs::node::Node;
-use crate::err::Error;
-use crate::expr::Id;
-use crate::expr::Permissions;
-use crate::expr::Value;
-use crate::expr::statements::AccessGrant;
-use crate::expr::statements::DefineAccessStatement;
-use crate::expr::statements::DefineAnalyzerStatement;
-use crate::expr::statements::DefineDatabaseStatement;
-use crate::expr::statements::DefineEventStatement;
-use crate::expr::statements::DefineFieldStatement;
-use crate::expr::statements::DefineFunctionStatement;
-use crate::expr::statements::DefineIndexStatement;
-use crate::expr::statements::DefineModelStatement;
-use crate::expr::statements::DefineNamespaceStatement;
-use crate::expr::statements::DefineParamStatement;
-use crate::expr::statements::DefineTableStatement;
-use crate::expr::statements::DefineUserStatement;
-use crate::expr::statements::LiveStatement;
-use crate::expr::statements::define::BucketDefinition;
-use crate::expr::statements::define::DefineConfigStatement;
-use crate::expr::statements::define::{ApiDefinition, DefineSequenceStatement};
-use crate::idx::planner::ScanDirection;
-use crate::idx::trees::store::cache::IndexTreeCaches;
-use crate::key::database::sq::Sq;
-use crate::kvs::Transactor;
-use crate::kvs::cache;
-use crate::kvs::cache::tx::TransactionCache;
-use crate::kvs::scanner::Scanner;
-use anyhow::Result;
-use futures::lock::Mutex;
-use futures::lock::MutexGuard;
-use futures::stream::Stream;
+use std::any::Any;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
+
+use anyhow::Result;
+use futures::lock::{Mutex, MutexGuard};
+use futures::stream::Stream;
 use uuid::Uuid;
 
-#[non_exhaustive]
+use super::batch::Batch;
+use super::tr::Check;
+use super::{Key, Val, Version, util};
+use crate::catalog::{
+	DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId, TableDefinition,
+};
+use crate::cnf::NORMAL_FETCH_SIZE;
+use crate::dbs::node::Node;
+use crate::err::Error;
+use crate::expr::statements::access::AccessGrantStore;
+use crate::expr::statements::define::config::ConfigStore;
+use crate::expr::statements::define::{ApiDefinition, BucketDefinition, DefineSequenceStatement};
+use crate::expr::statements::{
+	DefineAccessStatement, DefineAnalyzerStatement, DefineEventStatement, DefineFieldStatement,
+	DefineFunctionStatement, DefineIndexStatement, DefineModelStatement, DefineParamStore,
+	DefineUserStatement, LiveStatement,
+};
+use crate::idx::planner::ScanDirection;
+use crate::idx::trees::store::cache::IndexTreeCaches;
+use crate::key::database::sq::Sq;
+use crate::kvs::cache::tx::TransactionCache;
+use crate::kvs::key::KVKey;
+use crate::kvs::scanner::Scanner;
+use crate::kvs::{Transactor, cache};
+use crate::val::record::Record;
+use crate::val::{RecordId, RecordIdKey};
+
 pub struct Transaction {
-	/// Is this is a local datastore transaction
+	/// Is this is a local datastore transaction?
 	local: bool,
 	/// The underlying transactor
 	tx: Mutex<Transactor>,
@@ -54,7 +44,7 @@ pub struct Transaction {
 	cache: TransactionCache,
 	/// Cache the index updates
 	index_caches: IndexTreeCaches,
-	/// Does this supports reverse scan
+	/// Does this support reverse scan?
 	reverse_scan: bool,
 }
 
@@ -123,189 +113,198 @@ impl Transaction {
 
 	/// Check if a key exists in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn exists<K>(&self, key: K, version: Option<u64>) -> Result<bool>
+	pub async fn exists<K>(&self, key: &K, version: Option<u64>) -> Result<bool>
 	where
-		K: KeyEncode + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.exists(key, version).await
 	}
 
 	/// Fetch a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn get<K>(&self, key: K, version: Option<u64>) -> Result<Option<Val>>
+	pub async fn get<K>(&self, key: &K, version: Option<u64>) -> Result<Option<K::ValueType>>
 	where
-		K: KeyEncode + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.get(key, version).await
 	}
 
 	/// Retrieve a batch set of keys from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn getm<K>(&self, keys: Vec<K>) -> Result<Vec<Option<Val>>>
+	pub async fn getm<K>(&self, keys: Vec<K>) -> Result<Vec<Option<K::ValueType>>>
 	where
-		K: KeyEncode + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.getm(keys).await
 	}
 
 	/// Retrieve a specific prefix of keys from the datastore.
 	///
-	/// This function fetches key-value pairs from the underlying datastore in grouped batches.
+	/// This function fetches key-value pairs from the underlying datastore in
+	/// grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn getp<K>(&self, key: K) -> Result<Vec<(Key, Val)>>
+	pub async fn getp<K>(&self, key: &K) -> Result<Vec<(Key, Val)>>
 	where
-		K: KeyEncode + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.getp(key).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
-	/// This function fetches key-value pairs from the underlying datastore in grouped batches.
+	/// This function fetches key-value pairs from the underlying datastore in
+	/// grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn getr<K>(&self, rng: Range<K>, version: Option<u64>) -> Result<Vec<(Key, Val)>>
 	where
-		K: KeyEncode + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.getr(rng, version).await
 	}
 
 	/// Delete a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn del<K>(&self, key: K) -> Result<()>
+	pub async fn del<K>(&self, key: &K) -> Result<()>
 	where
-		K: KeyEncode + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.del(key).await
 	}
 
-	/// Delete a key from the datastore if the current value matches a condition.
+	/// Delete a key from the datastore if the current value matches a
+	/// condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn delc<K, V>(&self, key: K, chk: Option<V>) -> Result<()>
+	pub async fn delc<K>(&self, key: &K, chk: Option<&K::ValueType>) -> Result<()>
 	where
-		K: KeyEncode + Debug,
-		V: Into<Val> + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.delc(key, chk).await
 	}
 
 	/// Delete a range of keys from the datastore.
 	///
-	/// This function deletes entries from the underlying datastore in grouped batches.
+	/// This function deletes entries from the underlying datastore in grouped
+	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn delr<K>(&self, rng: Range<K>) -> Result<()>
 	where
-		K: KeyEncode + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.delr(rng).await
 	}
 
 	/// Delete a prefix of keys from the datastore.
 	///
-	/// This function deletes entries from the underlying datastore in grouped batches.
+	/// This function deletes entries from the underlying datastore in grouped
+	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn delp<K>(&self, key: K) -> Result<()>
+	pub async fn delp<K>(&self, key: &K) -> Result<()>
 	where
-		K: KeyEncode + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.delp(key).await
 	}
 
 	/// Delete all versions of a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn clr<K>(&self, key: K) -> Result<()>
+	pub async fn clr<K>(&self, key: &K) -> Result<()>
 	where
-		K: KeyEncode + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.clr(key).await
 	}
 
-	/// Delete all versions of a key from the datastore if the current value matches a condition.
+	/// Delete all versions of a key from the datastore if the current value
+	/// matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn clrc<K, V>(&self, key: K, chk: Option<V>) -> Result<()>
+	pub async fn clrc<K>(&self, key: &K, chk: Option<&K::ValueType>) -> Result<()>
 	where
-		K: KeyEncode + Debug,
-		V: Into<Val> + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.clrc(key, chk).await
 	}
 
 	/// Delete all versions of a range of keys from the datastore.
 	///
-	/// This function deletes entries from the underlying datastore in grouped batches.
+	/// This function deletes entries from the underlying datastore in grouped
+	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn clrr<K>(&self, rng: Range<K>) -> Result<()>
 	where
-		K: KeyEncode + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.clrr(rng).await
 	}
 
 	/// Delete all versions of a prefix of keys from the datastore.
 	///
-	/// This function deletes entries from the underlying datastore in grouped batches.
+	/// This function deletes entries from the underlying datastore in grouped
+	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn clrp<K>(&self, key: K) -> Result<()>
+	pub async fn clrp<K>(&self, key: &K) -> Result<()>
 	where
-		K: KeyEncode + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.clrp(key).await
 	}
 
 	/// Insert or update a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn set<K, V>(&self, key: K, val: V, version: Option<u64>) -> Result<()>
+	pub async fn set<K>(&self, key: &K, val: &K::ValueType, version: Option<u64>) -> Result<()>
 	where
-		K: KeyEncode + Debug,
-		V: Into<Val> + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.set(key, val, version).await
 	}
 
 	/// Insert or replace a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn replace<K, V>(&self, key: K, val: V) -> Result<()>
+	pub async fn replace<K>(&self, key: &K, val: &K::ValueType) -> Result<()>
 	where
-		K: KeyEncode + Debug,
-		V: Into<Val> + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.replace(key, val).await
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn put<K, V>(&self, key: K, val: V, version: Option<u64>) -> Result<()>
+	pub async fn put<K>(&self, key: &K, val: &K::ValueType, version: Option<u64>) -> Result<()>
 	where
-		K: KeyEncode + Debug,
-		V: Into<Val> + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.put(key, val, version).await
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn putc<K, V>(&self, key: K, val: V, chk: Option<V>) -> Result<()>
+	pub async fn putc<K>(
+		&self,
+		key: &K,
+		val: &K::ValueType,
+		chk: Option<&K::ValueType>,
+	) -> Result<()>
 	where
-		K: KeyEncode + Debug,
-		V: Into<Val> + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.putc(key, val, chk).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
-	/// This function fetches the full range of keys, in a single request to the underlying datastore.
+	/// This function fetches the full range of keys, in a single request to the
+	/// underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn keys<K>(&self, rng: Range<K>, limit: u32, version: Option<u64>) -> Result<Vec<Key>>
 	where
-		K: KeyEncode + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.keys(rng, limit, version).await
 	}
 
-	/// Retrieve a specific range of keys from the datastore.
+	/// Retrieve a specific range of keys from the datastore in reverse order.
 	///
-	/// This function fetches the full range of keys, in a single request to the underlying datastore.
+	/// This function fetches the full range of keys, in a single request to the
+	/// underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn keysr<K>(
 		&self,
@@ -314,14 +313,15 @@ impl Transaction {
 		version: Option<u64>,
 	) -> Result<Vec<Key>>
 	where
-		K: KeyEncode + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.keysr(rng, limit, version).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
-	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
+	/// This function fetches the full range of key-value pairs, in a single
+	/// request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn scan<K>(
 		&self,
@@ -330,7 +330,7 @@ impl Transaction {
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>
 	where
-		K: KeyEncode + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.scan(rng, limit, version).await
 	}
@@ -343,25 +343,27 @@ impl Transaction {
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>
 	where
-		K: Into<Key> + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.scanr(rng, limit, version).await
 	}
 
 	/// Count the total number of keys within a range in the datastore.
 	///
-	/// This function fetches the total count, in batches, with multiple requests to the underlying datastore.
+	/// This function fetches the total count, in batches, with multiple
+	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn count<K>(&self, rng: Range<K>) -> Result<usize>
 	where
-		K: KeyEncode + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.count(rng).await
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
-	/// This function fetches the keys in batches, with multiple requests to the underlying datastore.
+	/// This function fetches the keys in batches, with multiple requests to the
+	/// underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn batch_keys<K>(
 		&self,
@@ -370,14 +372,15 @@ impl Transaction {
 		version: Option<u64>,
 	) -> Result<Batch<Key>>
 	where
-		K: KeyEncode + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.batch_keys(rng, batch, version).await
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
-	/// This function fetches the key-value pairs in batches, with multiple requests to the underlying datastore.
+	/// This function fetches the key-value pairs in batches, with multiple
+	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn batch_keys_vals<K>(
 		&self,
@@ -386,14 +389,15 @@ impl Transaction {
 		version: Option<u64>,
 	) -> Result<Batch<(Key, Val)>>
 	where
-		K: KeyEncode + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.batch_keys_vals(rng, batch, version).await
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
-	/// This function fetches the key-value-version pairs in batches, with multiple requests to the underlying datastore.
+	/// This function fetches the key-value-version pairs in batches, with
+	/// multiple requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn batch_keys_vals_versions<K>(
 		&self,
@@ -401,14 +405,15 @@ impl Transaction {
 		batch: u32,
 	) -> Result<Batch<(Key, Val, Version, bool)>>
 	where
-		K: KeyEncode + Debug,
+		K: KVKey + Debug,
 	{
 		self.lock().await.batch_keys_vals_versions(rng, batch).await
 	}
 
 	/// Retrieve a stream over a specific range of keys in the datastore.
 	///
-	/// This function fetches the key-value pairs in batches, with multiple requests to the underlying datastore.
+	/// This function fetches the key-value pairs in batches, with multiple
+	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub fn stream(
 		&self,
@@ -512,7 +517,7 @@ impl Transaction {
 
 	/// Retrieve all root access grants in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_root_access_grants(&self, ra: &str) -> Result<Arc<[AccessGrant]>> {
+	pub async fn all_root_access_grants(&self, ra: &str) -> Result<Arc<[AccessGrantStore]>> {
 		let qey = cache::tx::Lookup::Rgs(ra);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_rag(),
@@ -530,7 +535,7 @@ impl Transaction {
 
 	/// Retrieve all namespace definitions in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_ns(&self) -> Result<Arc<[DefineNamespaceStatement]>> {
+	pub async fn all_ns(&self) -> Result<Arc<[NamespaceDefinition]>> {
 		let qey = cache::tx::Lookup::Nss;
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_nss(),
@@ -548,7 +553,7 @@ impl Transaction {
 
 	/// Retrieve all namespace user definitions for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_ns_users(&self, ns: &str) -> Result<Arc<[DefineUserStatement]>> {
+	pub async fn all_ns_users(&self, ns: NamespaceId) -> Result<Arc<[DefineUserStatement]>> {
 		let qey = cache::tx::Lookup::Nus(ns);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_nus(),
@@ -566,7 +571,7 @@ impl Transaction {
 
 	/// Retrieve all namespace access definitions for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_ns_accesses(&self, ns: &str) -> Result<Arc<[DefineAccessStatement]>> {
+	pub async fn all_ns_accesses(&self, ns: NamespaceId) -> Result<Arc<[DefineAccessStatement]>> {
 		let qey = cache::tx::Lookup::Nas(ns);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_nas(),
@@ -584,7 +589,11 @@ impl Transaction {
 
 	/// Retrieve all namespace access grants for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_ns_access_grants(&self, ns: &str, na: &str) -> Result<Arc<[AccessGrant]>> {
+	pub async fn all_ns_access_grants(
+		&self,
+		ns: NamespaceId,
+		na: &str,
+	) -> Result<Arc<[AccessGrantStore]>> {
 		let qey = cache::tx::Lookup::Ngs(ns, na);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_nag(),
@@ -602,7 +611,7 @@ impl Transaction {
 
 	/// Retrieve all database definitions for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_db(&self, ns: &str) -> Result<Arc<[DefineDatabaseStatement]>> {
+	pub async fn all_db(&self, ns: NamespaceId) -> Result<Arc<[DatabaseDefinition]>> {
 		let qey = cache::tx::Lookup::Dbs(ns);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_dbs(),
@@ -620,7 +629,11 @@ impl Transaction {
 
 	/// Retrieve all database user definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_db_users(&self, ns: &str, db: &str) -> Result<Arc<[DefineUserStatement]>> {
+	pub async fn all_db_users(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<Arc<[DefineUserStatement]>> {
 		let qey = cache::tx::Lookup::Dus(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_dus(),
@@ -640,8 +653,8 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_accesses(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 	) -> Result<Arc<[DefineAccessStatement]>> {
 		let qey = cache::tx::Lookup::Das(ns, db);
 		match self.cache.get(&qey) {
@@ -662,10 +675,10 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_access_grants(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		da: &str,
-	) -> Result<Arc<[AccessGrant]>> {
+	) -> Result<Arc<[AccessGrantStore]>> {
 		let qey = cache::tx::Lookup::Dgs(ns, db, da);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_dag(),
@@ -683,7 +696,11 @@ impl Transaction {
 
 	/// Retrieve all api definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_db_apis(&self, ns: &str, db: &str) -> Result<Arc<[ApiDefinition]>> {
+	pub async fn all_db_apis(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<Arc<[ApiDefinition]>> {
 		let qey = cache::tx::Lookup::Aps(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val,
@@ -704,8 +721,8 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_analyzers(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 	) -> Result<Arc<[DefineAnalyzerStatement]>> {
 		let qey = cache::tx::Lookup::Azs(ns, db);
 		match self.cache.get(&qey) {
@@ -724,7 +741,11 @@ impl Transaction {
 
 	/// Retrieve all analyzer definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_db_buckets(&self, ns: &str, db: &str) -> Result<Arc<[BucketDefinition]>> {
+	pub async fn all_db_buckets(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<Arc<[BucketDefinition]>> {
 		let qey = cache::tx::Lookup::Bus(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_bus(),
@@ -744,8 +765,8 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_sequences(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 	) -> Result<Arc<[DefineSequenceStatement]>> {
 		let qey = cache::tx::Lookup::Sqs(ns, db);
 		match self.cache.get(&qey) {
@@ -766,8 +787,8 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_functions(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 	) -> Result<Arc<[DefineFunctionStatement]>> {
 		let qey = cache::tx::Lookup::Fcs(ns, db);
 		match self.cache.get(&qey) {
@@ -786,7 +807,11 @@ impl Transaction {
 
 	/// Retrieve all param definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_db_params(&self, ns: &str, db: &str) -> Result<Arc<[DefineParamStatement]>> {
+	pub async fn all_db_params(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<Arc<[DefineParamStore]>> {
 		let qey = cache::tx::Lookup::Pas(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_pas(),
@@ -804,7 +829,11 @@ impl Transaction {
 
 	/// Retrieve all model definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_db_models(&self, ns: &str, db: &str) -> Result<Arc<[DefineModelStatement]>> {
+	pub async fn all_db_models(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<Arc<[DefineModelStatement]>> {
 		let qey = cache::tx::Lookup::Mls(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_mls(),
@@ -822,7 +851,11 @@ impl Transaction {
 
 	/// Retrieve all model definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_db_configs(&self, ns: &str, db: &str) -> Result<Arc<[DefineConfigStatement]>> {
+	pub async fn all_db_configs(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<Arc<[ConfigStore]>> {
 		let qey = cache::tx::Lookup::Cgs(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_cgs(),
@@ -842,10 +875,10 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_tb(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		version: Option<u64>,
-	) -> Result<Arc<[DefineTableStatement]>> {
+	) -> Result<Arc<[TableDefinition]>> {
 		let qey = cache::tx::Lookup::Tbs(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_tbs(),
@@ -865,8 +898,8 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_tb_events(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
 	) -> Result<Arc<[DefineEventStatement]>> {
 		let qey = cache::tx::Lookup::Evs(ns, db, tb);
@@ -888,8 +921,8 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_tb_fields(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
 		version: Option<u64>,
 	) -> Result<Arc<[DefineFieldStatement]>> {
@@ -912,8 +945,8 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_tb_indexes(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
 	) -> Result<Arc<[DefineIndexStatement]>> {
 		let qey = cache::tx::Lookup::Ixs(ns, db, tb);
@@ -935,10 +968,10 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_tb_views(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
-	) -> Result<Arc<[DefineTableStatement]>> {
+	) -> Result<Arc<[TableDefinition]>> {
 		let qey = cache::tx::Lookup::Fts(ns, db, tb);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_fts(),
@@ -956,7 +989,12 @@ impl Transaction {
 
 	/// Retrieve all live definitions for a specific table.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_tb_lives(&self, ns: &str, db: &str, tb: &str) -> Result<Arc<[LiveStatement]>> {
+	pub async fn all_tb_lives(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+	) -> Result<Arc<[LiveStatement]>> {
 		let qey = cache::tx::Lookup::Lvs(ns, db, tb);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_lvs(),
@@ -979,11 +1017,10 @@ impl Transaction {
 		match self.cache.get(&qey) {
 			Some(val) => val,
 			None => {
-				let key = crate::key::root::nd::new(id).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::NdNotFound {
+				let key = crate::key::root::nd::new(id);
+				let val = self.get(&key, None).await?.ok_or_else(|| Error::NdNotFound {
 					uuid: id.to_string(),
 				})?;
-				let val: Node = revision::from_slice(&val)?;
 				let val = cache::tx::Entry::Any(Arc::new(val));
 				self.cache.insert(qey, val.clone());
 				val
@@ -994,124 +1031,318 @@ impl Transaction {
 
 	/// Retrieve a specific root user definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_root_user(&self, us: &str) -> Result<Arc<DefineUserStatement>> {
+	pub async fn get_root_user(&self, us: &str) -> Result<Option<Arc<DefineUserStatement>>> {
 		let qey = cache::tx::Lookup::Ru(us);
 		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+			Some(val) => val.try_into_type().map(Some),
 			None => {
-				let key = crate::key::root::us::new(us).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::UserRootNotFound {
-					name: us.to_owned(),
-				})?;
-				let val: DefineUserStatement = revision::from_slice(&val)?;
+				let key = crate::key::root::us::new(us);
+				let Some(val) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
-				Ok(val)
+				Ok(Some(val))
 			}
+		}
+	}
+
+	pub async fn expect_root_user(&self, us: &str) -> Result<Arc<DefineUserStatement>> {
+		match self.get_root_user(us).await? {
+			Some(val) => Ok(val),
+			None => anyhow::bail!(Error::UserRootNotFound {
+				name: us.to_owned(),
+			}),
 		}
 	}
 
 	/// Retrieve a specific root access definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_root_access(&self, ra: &str) -> Result<Arc<DefineAccessStatement>> {
+	pub async fn get_root_access(&self, ra: &str) -> Result<Option<Arc<DefineAccessStatement>>> {
 		let qey = cache::tx::Lookup::Ra(ra);
 		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+			Some(val) => val.try_into_type().map(Some),
 			None => {
-				let key = crate::key::root::ac::new(ra).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::AccessRootNotFound {
-					ac: ra.to_owned(),
-				})?;
-				let val: DefineAccessStatement = revision::from_slice(&val)?;
+				let key = crate::key::root::ac::new(ra);
+				let Some(val) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
-				Ok(val)
+				Ok(Some(val))
 			}
+		}
+	}
+
+	pub async fn expect_root_access(&self, ra: &str) -> Result<Arc<DefineAccessStatement>> {
+		match self.get_root_access(ra).await? {
+			Some(val) => Ok(val),
+			None => anyhow::bail!(Error::AccessRootNotFound {
+				ac: ra.to_owned(),
+			}),
 		}
 	}
 
 	/// Retrieve a specific root access grant.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_root_access_grant(&self, ac: &str, gr: &str) -> Result<Arc<AccessGrant>> {
+	pub async fn get_root_access_grant(
+		&self,
+		ac: &str,
+		gr: &str,
+	) -> Result<Option<Arc<AccessGrantStore>>> {
 		let qey = cache::tx::Lookup::Rg(ac, gr);
 		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+			Some(val) => val.try_into_type().map(Some),
 			None => {
-				let key = crate::key::root::access::gr::new(ac, gr).encode()?;
-				let val =
-					self.get(key, None).await?.ok_or_else(|| Error::AccessGrantRootNotFound {
-						ac: ac.to_owned(),
-						gr: gr.to_owned(),
-					})?;
-				let val: AccessGrant = revision::from_slice(&val)?;
+				let key = crate::key::root::access::gr::new(ac, gr);
+				let Some(val) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
-				Ok(val)
+				Ok(Some(val))
 			}
 		}
 	}
 
 	/// Retrieve a specific namespace definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_ns(&self, ns: &str) -> Result<Arc<DefineNamespaceStatement>> {
-		let qey = cache::tx::Lookup::Ns(ns);
+	pub async fn get_ns(&self, ns: NamespaceId) -> Result<Option<Arc<NamespaceDefinition>>> {
+		let qey = cache::tx::Lookup::NsById(ns);
 		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+			Some(val) => val.try_into_type().map(Some),
 			None => {
-				let key = crate::key::root::ns::new(ns).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::NsNotFound {
-					name: ns.to_owned(),
-				})?;
-				let val: DefineNamespaceStatement = revision::from_slice(&val)?;
-				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
+				let key = crate::key::root::ns::new(ns);
+				let Some(ns_def) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
+
+				let ns_def = Arc::new(ns_def);
+				let entr = cache::tx::Entry::Any(ns_def.clone());
 				self.cache.insert(qey, entr);
-				Ok(val)
+				Ok(Some(ns_def))
 			}
 		}
 	}
 
+	pub async fn get_ns_by_name(&self, ns: &str) -> Result<Option<Arc<NamespaceDefinition>>> {
+		let qey = cache::tx::Lookup::NsByName(ns);
+		match self.cache.get(&qey) {
+			Some(val) => val.try_into_type().map(Some),
+			None => {
+				let key = crate::key::catalog::ns::new(ns);
+				let Some(ns) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
+
+				let ns = Arc::new(ns);
+				let entr = cache::tx::Entry::Any(ns.clone());
+				self.cache.insert(qey, entr);
+				Ok(Some(ns))
+			}
+		}
+	}
+
+	pub async fn expect_ns_by_name(&self, ns: &str) -> Result<Arc<NamespaceDefinition>> {
+		match self.get_ns_by_name(ns).await? {
+			Some(val) => Ok(val),
+			None => anyhow::bail!(Error::NsNotFound {
+				name: ns.to_owned(),
+			}),
+		}
+	}
+
+	pub(crate) async fn put_ns(&self, ns: NamespaceDefinition) -> Result<Arc<NamespaceDefinition>> {
+		let key = crate::key::catalog::ns::new(&ns.name);
+		self.put(&key, &ns, None).await?;
+
+		let key = crate::key::root::ns::new(ns.namespace_id);
+		self.put(&key, &ns, None).await?;
+
+		// Populate cache
+		let cached_ns = Arc::new(ns.clone());
+
+		let qey = cache::tx::Lookup::NsById(ns.namespace_id);
+		let entry = cache::tx::Entry::Any(Arc::clone(&cached_ns) as Arc<dyn Any + Send + Sync>);
+		self.cache.insert(qey, entry.clone());
+
+		let qey = cache::tx::Lookup::NsByName(&ns.name);
+		self.cache.insert(qey, entry);
+
+		Ok(cached_ns)
+	}
+
+	pub(crate) async fn put_db(
+		&self,
+		ns: &str,
+		db: DatabaseDefinition,
+	) -> Result<Arc<DatabaseDefinition>> {
+		let key = crate::key::catalog::db::new(ns, &db.name);
+		self.put(&key, &db, None).await?;
+
+		let key = crate::key::namespace::db::new(db.namespace_id, db.database_id);
+		self.put(&key, &db, None).await?;
+
+		// Populate cache
+		let cached_db = Arc::new(db.clone());
+
+		let qey = cache::tx::Lookup::DbById(db.namespace_id, db.database_id);
+		let entry = cache::tx::Entry::Any(Arc::clone(&cached_db) as Arc<dyn Any + Send + Sync>);
+		self.cache.insert(qey, entry.clone());
+
+		let qey = cache::tx::Lookup::DbByName(ns, &db.name);
+		self.cache.insert(qey, entry);
+
+		Ok(cached_db)
+	}
+
+	pub async fn get_tb_by_name(
+		&self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+	) -> Result<Option<Arc<TableDefinition>>> {
+		let qey = cache::tx::Lookup::TbByName(ns, db, tb);
+		match self.cache.get(&qey) {
+			Some(val) => val.try_into_type().map(Some),
+			None => {
+				let key = crate::key::catalog::tb::new(ns, db, tb);
+				let Some(tb) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
+
+				let tb = Arc::new(tb);
+				let entr = cache::tx::Entry::Any(tb.clone());
+				self.cache.insert(qey, entr);
+				Ok(Some(tb))
+			}
+		}
+	}
+
+	pub(crate) async fn put_tb(
+		&self,
+		ns: &str,
+		db: &str,
+		tb: TableDefinition,
+	) -> Result<Arc<TableDefinition>> {
+		let key = crate::key::catalog::tb::new(ns, db, &tb.name);
+		self.set(&key, &tb, None).await?;
+
+		let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
+		self.set(&key, &tb, None).await?;
+
+		// Populate cache
+		let cached_tb = Arc::new(tb.clone());
+		let cached_entry =
+			cache::tx::Entry::Any(Arc::clone(&cached_tb) as Arc<dyn Any + Send + Sync>);
+
+		let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, &tb.name);
+		self.cache.insert(qey, cached_entry.clone());
+
+		let qey = cache::tx::Lookup::TbByName(ns, db, &tb.name);
+		self.cache.insert(qey, cached_entry);
+
+		Ok(cached_tb)
+	}
+
+	pub(crate) async fn del_tb(&self, ns: &str, db: &str, tb: &str) -> Result<()> {
+		let Some(tb) = self.get_tb_by_name(ns, db, tb).await? else {
+			return Err(Error::TbNotFound {
+				name: tb.to_string(),
+			}
+			.into());
+		};
+
+		{
+			let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
+			self.del(&key).await?;
+		}
+		{
+			let key = crate::key::catalog::tb::new(ns, db, &tb.name);
+			self.del(&key).await?;
+		}
+
+		// Clear the cache
+		let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, &tb.name);
+		self.cache.remove(qey);
+		let qey = cache::tx::Lookup::TbByName(ns, db, &tb.name);
+		self.cache.remove(qey);
+
+		Ok(())
+	}
+
+	pub(crate) async fn clr_tb(&self, ns: &str, db: &str, tb: &str) -> Result<()> {
+		let Some(tb) = self.get_tb_by_name(ns, db, tb).await? else {
+			return Err(Error::TbNotFound {
+				name: tb.to_string(),
+			}
+			.into());
+		};
+
+		{
+			let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
+			self.clr(&key).await?;
+		}
+		{
+			let key = crate::key::catalog::tb::new(ns, db, &tb.name);
+			self.clr(&key).await?;
+		}
+
+		// Clear the cache
+		let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, &tb.name);
+		self.cache.remove(qey);
+		let qey = cache::tx::Lookup::TbByName(ns, db, &tb.name);
+		self.cache.remove(qey);
+
+		Ok(())
+	}
+
 	/// Retrieve a specific namespace user definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_ns_user(&self, ns: &str, us: &str) -> Result<Arc<DefineUserStatement>> {
+	pub async fn get_ns_user(
+		&self,
+		ns: NamespaceId,
+		us: &str,
+	) -> Result<Option<Arc<DefineUserStatement>>> {
 		let qey = cache::tx::Lookup::Nu(ns, us);
 		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+			Some(val) => val.try_into_type().map(Some),
 			None => {
-				let key = crate::key::namespace::us::new(ns, us).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::UserNsNotFound {
-					name: us.to_owned(),
-					ns: ns.to_owned(),
-				})?;
-				let val: DefineUserStatement = revision::from_slice(&val)?;
+				let key = crate::key::namespace::us::new(ns, us);
+				let Some(val) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
+
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
-				Ok(val)
+				Ok(Some(val))
 			}
 		}
 	}
 
 	/// Retrieve a specific namespace access definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_ns_access(&self, ns: &str, na: &str) -> Result<Arc<DefineAccessStatement>> {
+	pub async fn get_ns_access(
+		&self,
+		ns: NamespaceId,
+		na: &str,
+	) -> Result<Option<Arc<DefineAccessStatement>>> {
 		let qey = cache::tx::Lookup::Na(ns, na);
 		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+			Some(val) => val.try_into_type().map(Some),
 			None => {
-				let key = crate::key::namespace::ac::new(ns, na).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::AccessNsNotFound {
-					ac: na.to_owned(),
-					ns: ns.to_owned(),
-				})?;
-				let val: DefineAccessStatement = revision::from_slice(&val)?;
+				let key = crate::key::namespace::ac::new(ns, na);
+				let Some(val) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
-				Ok(val)
+				Ok(Some(val))
 			}
 		}
 	}
@@ -1120,46 +1351,91 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_ns_access_grant(
 		&self,
-		ns: &str,
+		ns: NamespaceId,
 		ac: &str,
 		gr: &str,
-	) -> Result<Arc<AccessGrant>> {
+	) -> Result<Option<Arc<AccessGrantStore>>> {
 		let qey = cache::tx::Lookup::Ng(ns, ac, gr);
 		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+			Some(val) => val.try_into_type().map(Some),
 			None => {
-				let key = crate::key::namespace::access::gr::new(ns, ac, gr).encode()?;
-				let val =
-					self.get(key, None).await?.ok_or_else(|| Error::AccessGrantNsNotFound {
-						ac: ac.to_owned(),
-						gr: gr.to_owned(),
-						ns: ns.to_owned(),
-					})?;
-				let val: AccessGrant = revision::from_slice(&val)?;
+				let key = crate::key::namespace::access::gr::new(ns, ac, gr);
+				let Some(val) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
-				Ok(val)
+				Ok(Some(val))
 			}
 		}
 	}
 
 	/// Retrieve a specific database definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_db(&self, ns: &str, db: &str) -> Result<Arc<DefineDatabaseStatement>> {
-		let qey = cache::tx::Lookup::Db(ns, db);
+	pub async fn get_db(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<Option<Arc<DatabaseDefinition>>> {
+		let qey = cache::tx::Lookup::DbById(ns, db);
 		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+			Some(val) => val.try_into_type().map(Some),
 			None => {
-				let key = crate::key::namespace::db::new(ns, db).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::DbNotFound {
-					name: db.to_owned(),
-				})?;
-				let val: DefineDatabaseStatement = revision::from_slice(&val)?;
-				let val = Arc::new(val);
+				let key = crate::key::namespace::db::new(ns, db);
+				let Some(db_def) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
+
+				let val = Arc::new(db_def);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
-				Ok(val)
+				Ok(Some(val))
+			}
+		}
+	}
+
+	/// Retrieve a specific database definition.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn get_db_by_name(
+		&self,
+		ns: &str,
+		db: &str,
+	) -> Result<Option<Arc<DatabaseDefinition>>> {
+		let qey = cache::tx::Lookup::DbByName(ns, db);
+		match self.cache.get(&qey) {
+			Some(val) => val.try_into_type().map(Some),
+			None => {
+				let catalog_key = crate::key::catalog::db::new(ns, db);
+				let Some(db) = self.get(&catalog_key, None).await? else {
+					return Ok(None);
+				};
+
+				let key = crate::key::namespace::db::new(db.namespace_id, db.database_id);
+				let Some(db_def) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
+
+				let val = Arc::new(db_def);
+				let entr = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entr);
+				Ok(Some(val))
+			}
+		}
+	}
+
+	pub async fn expect_db_by_name(&self, ns: &str, db: &str) -> Result<Arc<DatabaseDefinition>> {
+		match self.get_db_by_name(ns, db).await? {
+			Some(val) => Ok(val),
+			None => {
+				// Check if the namespace exists.
+				// If it doesn't, return a namespace not found error.
+				self.expect_ns_by_name(ns).await?;
+
+				// Return a database not found error.
+				Err(anyhow::anyhow!(Error::DbNotFound {
+					name: db.to_owned()
+				}))
 			}
 		}
 	}
@@ -1168,25 +1444,23 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_user(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		us: &str,
-	) -> Result<Arc<DefineUserStatement>> {
+	) -> Result<Option<Arc<DefineUserStatement>>> {
 		let qey = cache::tx::Lookup::Du(ns, db, us);
 		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+			Some(val) => val.try_into_type().map(Some),
 			None => {
-				let key = crate::key::database::us::new(ns, db, us).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::UserDbNotFound {
-					name: us.to_owned(),
-					ns: ns.to_owned(),
-					db: db.to_owned(),
-				})?;
-				let val: DefineUserStatement = revision::from_slice(&val)?;
+				let key = crate::key::database::us::new(ns, db, us);
+				let Some(val) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
+
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
-				Ok(val)
+				Ok(Some(val))
 			}
 		}
 	}
@@ -1195,25 +1469,22 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_access(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		da: &str,
-	) -> Result<Arc<DefineAccessStatement>> {
+	) -> Result<Option<Arc<DefineAccessStatement>>> {
 		let qey = cache::tx::Lookup::Da(ns, db, da);
 		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+			Some(val) => val.try_into_type().map(Some),
 			None => {
-				let key = crate::key::database::ac::new(ns, db, da).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::AccessDbNotFound {
-					ac: da.to_owned(),
-					ns: ns.to_owned(),
-					db: db.to_owned(),
-				})?;
-				let val: DefineAccessStatement = revision::from_slice(&val)?;
+				let key = crate::key::database::ac::new(ns, db, da);
+				let Some(val) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
-				Ok(val)
+				Ok(Some(val))
 			}
 		}
 	}
@@ -1222,28 +1493,23 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_access_grant(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ac: &str,
 		gr: &str,
-	) -> Result<Arc<AccessGrant>> {
+	) -> Result<Option<Arc<AccessGrantStore>>> {
 		let qey = cache::tx::Lookup::Dg(ns, db, ac, gr);
 		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+			Some(val) => val.try_into_type().map(Some),
 			None => {
-				let key = crate::key::database::access::gr::new(ns, db, ac, gr).encode()?;
-				let val =
-					self.get(key, None).await?.ok_or_else(|| Error::AccessGrantDbNotFound {
-						ac: ac.to_owned(),
-						gr: gr.to_owned(),
-						ns: ns.to_owned(),
-						db: db.to_owned(),
-					})?;
-				let val: AccessGrant = revision::from_slice(&val)?;
+				let key = crate::key::database::access::gr::new(ns, db, ac, gr);
+				let Some(val) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
-				Ok(val)
+				Ok(Some(val))
 			}
 		}
 	}
@@ -1252,40 +1518,44 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_model(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ml: &str,
 		vn: &str,
-	) -> Result<Arc<DefineModelStatement>> {
+	) -> Result<Option<Arc<DefineModelStatement>>> {
 		let qey = cache::tx::Lookup::Ml(ns, db, ml, vn);
 		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+			Some(val) => val.try_into_type().map(Some),
 			None => {
-				let key = crate::key::database::ml::new(ns, db, ml, vn).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::MlNotFound {
-					name: format!("{ml}<{vn}>"),
-				})?;
-				let val: DefineModelStatement = revision::from_slice(&val)?;
+				let key = crate::key::database::ml::new(ns, db, ml, vn);
+				let Some(val) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
+
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
-				Ok(val)
+				Ok(Some(val))
 			}
 		}
 	}
 
 	/// Retrieve a specific api definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_db_api(&self, ns: &str, db: &str, ap: &str) -> Result<Arc<ApiDefinition>> {
+	pub async fn get_db_api(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ap: &str,
+	) -> Result<Arc<ApiDefinition>> {
 		let qey = cache::tx::Lookup::Ap(ns, db, ap);
 		match self.cache.get(&qey) {
 			Some(val) => val,
 			None => {
-				let key = crate::key::database::ap::new(ns, db, ap).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::ApNotFound {
+				let key = crate::key::database::ap::new(ns, db, ap);
+				let val = self.get(&key, None).await?.ok_or_else(|| Error::ApNotFound {
 					value: ap.to_owned(),
 				})?;
-				let val: ApiDefinition = revision::from_slice(&val)?;
 				let val = cache::tx::Entry::Any(Arc::new(val));
 				self.cache.insert(qey, val.clone());
 				val
@@ -1298,44 +1568,56 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_bucket(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		bu: &str,
-	) -> Result<Arc<BucketDefinition>> {
+	) -> Result<Option<Arc<BucketDefinition>>> {
 		let qey = cache::tx::Lookup::Bu(ns, db, bu);
 		match self.cache.get(&qey) {
-			Some(val) => val,
+			Some(val) => val.try_into_type().map(Some),
 			None => {
-				let key = crate::key::database::bu::new(ns, db, bu).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::BuNotFound {
-					value: bu.to_owned(),
-				})?;
-				let val: BucketDefinition = revision::from_slice(&val)?;
-				let val = cache::tx::Entry::Any(Arc::new(val));
-				self.cache.insert(qey, val.clone());
-				val
+				let key = crate::key::database::bu::new(ns, db, bu);
+				let Some(val) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
+				let bucket_def = Arc::new(val);
+				let entr = cache::tx::Entry::Any(bucket_def.clone());
+				self.cache.insert(qey, entr);
+				Ok(Some(bucket_def))
 			}
 		}
-		.try_into_type()
+	}
+
+	pub async fn expect_db_bucket(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		bu: &str,
+	) -> Result<Arc<BucketDefinition>> {
+		match self.get_db_bucket(ns, db, bu).await? {
+			Some(val) => Ok(val),
+			None => anyhow::bail!(Error::BuNotFound {
+				name: bu.to_owned(),
+			}),
+		}
 	}
 
 	/// Retrieve a specific analyzer definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_analyzer(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		az: &str,
 	) -> Result<Arc<DefineAnalyzerStatement>> {
 		let qey = cache::tx::Lookup::Az(ns, db, az);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
 			None => {
-				let key = crate::key::database::az::new(ns, db, az).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::AzNotFound {
+				let key = crate::key::database::az::new(ns, db, az);
+				let val = self.get(&key, None).await?.ok_or_else(|| Error::AzNotFound {
 					name: az.to_owned(),
 				})?;
-				let val: DefineAnalyzerStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1347,19 +1629,18 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_sequence(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		sq: &str,
 	) -> Result<Arc<DefineSequenceStatement>> {
 		let qey = cache::tx::Lookup::Sq(ns, db, sq);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
 			None => {
-				let key = Sq::new(ns, db, sq).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::SeqNotFound {
+				let key = Sq::new(ns, db, sq);
+				let val = self.get(&key, None).await?.ok_or_else(|| Error::SeqNotFound {
 					name: sq.to_owned(),
 				})?;
-				let val: DefineSequenceStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1372,19 +1653,18 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_function(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		fc: &str,
 	) -> Result<Arc<DefineFunctionStatement>> {
 		let qey = cache::tx::Lookup::Fc(ns, db, fc);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
 			None => {
-				let key = crate::key::database::fc::new(ns, db, fc).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::FcNotFound {
+				let key = crate::key::database::fc::new(ns, db, fc);
+				let val = self.get(&key, None).await?.ok_or_else(|| Error::FcNotFound {
 					name: fc.to_owned(),
 				})?;
-				let val: DefineFunctionStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1397,19 +1677,18 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_param(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		pa: &str,
-	) -> Result<Arc<DefineParamStatement>> {
+	) -> Result<Arc<DefineParamStore>> {
 		let qey = cache::tx::Lookup::Pa(ns, db, pa);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
 			None => {
-				let key = crate::key::database::pa::new(ns, db, pa).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::PaNotFound {
+				let key = crate::key::database::pa::new(ns, db, pa);
+				let val = self.get(&key, None).await?.ok_or_else(|| Error::PaNotFound {
 					name: pa.to_owned(),
 				})?;
-				let val: DefineParamStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1422,10 +1701,10 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_config(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		cg: &str,
-	) -> Result<Arc<DefineConfigStatement>> {
+	) -> Result<Arc<ConfigStore>> {
 		if let Some(val) = self.get_db_optional_config(ns, db, cg).await? {
 			Ok(val)
 		} else {
@@ -1439,17 +1718,16 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_optional_config(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		cg: &str,
-	) -> Result<Option<Arc<DefineConfigStatement>>> {
+	) -> Result<Option<Arc<ConfigStore>>> {
 		let qey = cache::tx::Lookup::Cg(ns, db, cg);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Option::Some),
 			None => {
-				let key = crate::key::database::cg::new(ns, db, cg).encode()?;
-				if let Some(val) = self.get(key, None).await? {
-					let val: DefineConfigStatement = revision::from_slice(&val)?;
+				let key = crate::key::database::cg::new(ns, db, cg);
+				if let Some(val) = self.get(&key, None).await? {
 					let val = Arc::new(val);
 					let entr = cache::tx::Entry::Any(val.clone());
 					self.cache.insert(qey, entr);
@@ -1463,21 +1741,53 @@ impl Transaction {
 
 	/// Retrieve a specific table definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_tb(&self, ns: &str, db: &str, tb: &str) -> Result<Arc<DefineTableStatement>> {
+	pub async fn get_tb(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+	) -> Result<Option<Arc<TableDefinition>>> {
 		let qey = cache::tx::Lookup::Tb(ns, db, tb);
 		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+			Some(val) => val.try_into_type().map(Some),
 			None => {
-				let key = crate::key::database::tb::new(ns, db, tb).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::TbNotFound {
-					name: tb.to_owned(),
-				})?;
-				let val: DefineTableStatement = revision::from_slice(&val)?;
+				let key = crate::key::database::tb::new(ns, db, tb);
+				let Some(val) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
-				Ok(val)
+				Ok(Some(val))
 			}
+		}
+	}
+
+	pub async fn check_tb(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		strict: bool,
+	) -> Result<()> {
+		if !strict {
+			return Ok(());
+		}
+		self.expect_tb(ns, db, tb).await?;
+		Ok(())
+	}
+
+	pub async fn expect_tb(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+	) -> Result<Arc<TableDefinition>> {
+		match self.get_tb(ns, db, tb).await? {
+			Some(val) => Ok(val),
+			None => anyhow::bail!(Error::TbNotFound {
+				name: tb.to_owned(),
+			}),
 		}
 	}
 
@@ -1485,8 +1795,8 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_tb_event(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
 		ev: &str,
 	) -> Result<Arc<DefineEventStatement>> {
@@ -1494,11 +1804,10 @@ impl Transaction {
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
 			None => {
-				let key = crate::key::table::ev::new(ns, db, tb, ev).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::EvNotFound {
+				let key = crate::key::table::ev::new(ns, db, tb, ev);
+				let val = self.get(&key, None).await?.ok_or_else(|| Error::EvNotFound {
 					name: ev.to_owned(),
 				})?;
-				let val: DefineEventStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1511,24 +1820,23 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_tb_field(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
 		fd: &str,
-	) -> Result<Arc<DefineFieldStatement>> {
+	) -> Result<Option<Arc<DefineFieldStatement>>> {
 		let qey = cache::tx::Lookup::Fd(ns, db, tb, fd);
 		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+			Some(val) => val.try_into_type().map(Some),
 			None => {
-				let key = crate::key::table::fd::new(ns, db, tb, fd).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::FdNotFound {
-					name: fd.to_owned(),
-				})?;
-				let val: DefineFieldStatement = revision::from_slice(&val)?;
+				let key = crate::key::table::fd::new(ns, db, tb, fd);
+				let Some(val) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
-				Ok(val)
+				Ok(Some(val))
 			}
 		}
 	}
@@ -1537,8 +1845,8 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_tb_index(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
 		ix: &str,
 	) -> Result<Arc<DefineIndexStatement>> {
@@ -1546,11 +1854,10 @@ impl Transaction {
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
 			None => {
-				let key = crate::key::table::ix::new(ns, db, tb, ix).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::IxNotFound {
+				let key = crate::key::table::ix::new(ns, db, tb, ix);
+				let val = self.get(&key, None).await?.ok_or_else(|| Error::IxNotFound {
 					name: ix.to_owned(),
 				})?;
-				let val: DefineIndexStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1563,51 +1870,57 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_record(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
-		id: &Id,
+		id: &RecordIdKey,
 		version: Option<u64>,
-	) -> Result<Arc<Value>> {
+	) -> Result<Arc<Record>> {
 		// Cache is not versioned
 		if version.is_some() {
 			// Fetch the record from the datastore
-			let key = crate::key::thing::new(ns, db, tb, id).encode()?;
-			match self.get(key, version).await? {
+			let key = crate::key::thing::new(ns, db, tb, id);
+			match self.get(&key, version).await? {
 				// The value exists in the datastore
-				Some(val) => {
-					let mut val: Value = revision::from_slice(&val)?;
+				Some(mut record) => {
 					// Inject the id field into the document
-					let rid = crate::expr::Thing::from((tb, id.clone()));
-					val.def(&rid);
-					let val = cache::tx::Entry::Val(Arc::new(val));
-					val.try_into_val()
+					let rid = RecordId {
+						table: tb.to_owned(),
+						key: id.clone(),
+					};
+					record.data.to_mut().def(&rid);
+					// Convert to read-only format for better sharing and performance
+					Ok(record.into_read_only())
 				}
 				// The value is not in the datastore
-				None => Ok(Arc::new(Value::None)),
+				None => Ok(Arc::new(Default::default())),
 			}
 		} else {
 			let qey = cache::tx::Lookup::Record(ns, db, tb, id);
 			match self.cache.get(&qey) {
 				// The entry is in the cache
-				Some(val) => val.try_into_val(),
+				Some(val) => val.try_into_record(),
 				// The entry is not in the cache
 				None => {
 					// Fetch the record from the datastore
-					let key = crate::key::thing::new(ns, db, tb, id).encode()?;
-					match self.get(key, None).await? {
+					let key = crate::key::thing::new(ns, db, tb, id);
+					match self.get(&key, None).await? {
 						// The value exists in the datastore
-						Some(val) => {
-							let mut val: Value = revision::from_slice(&val)?;
+						Some(mut record) => {
 							// Inject the id field into the document
-							let rid = crate::expr::Thing::from((tb, id.clone()));
-							val.def(&rid);
-							let val = cache::tx::Entry::Val(Arc::new(val));
-							self.cache.insert(qey, val.clone());
-							val.try_into_val()
+							let rid = RecordId {
+								table: tb.to_owned(),
+								key: id.clone(),
+							};
+							record.data.to_mut().def(&rid);
+							// Convert to read-only format for better sharing and performance
+							let record = record.into_read_only();
+							let entry = cache::tx::Entry::Val(record.clone());
+							self.cache.insert(qey, entry);
+							Ok(record)
 						}
 						// The value is not in the datastore
-						None => Ok(Arc::new(Value::None)),
+						None => Ok(Arc::new(Default::default())),
 					}
 				}
 			}
@@ -1617,18 +1930,18 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn set_record(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
-		id: &Id,
-		val: Value,
+		id: &RecordIdKey,
+		record: Record,
 	) -> Result<()> {
 		// Set the value in the datastore
 		let key = crate::key::thing::new(ns, db, tb, id);
-		self.set(&key, revision::to_vec(&val)?, None).await?;
+		self.set(&key, &record, None).await?;
 		// Set the value in the cache
 		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
-		self.cache.insert(qey, cache::tx::Entry::Val(Arc::new(val)));
+		self.cache.insert(qey, cache::tx::Entry::Val(record.into_read_only()));
 		// Return nothing
 		Ok(())
 	}
@@ -1636,53 +1949,67 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub fn set_record_cache(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
-		id: &Id,
-		val: Arc<Value>,
+		id: &RecordIdKey,
+		record: Arc<Record>,
 	) -> Result<()> {
 		// Set the value in the cache
 		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
-		self.cache.insert(qey, cache::tx::Entry::Val(val));
+		self.cache.insert(qey, cache::tx::Entry::Val(record));
 		// Return nothing
 		Ok(())
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn del_record(&self, ns: &str, db: &str, tb: &str, id: &Id) -> Result<()> {
-		// Set the value in the datastore
+	pub async fn del_record(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		id: &RecordIdKey,
+	) -> Result<()> {
+		// Delete the value in the datastore
 		let key = crate::key::thing::new(ns, db, tb, id);
 		self.del(&key).await?;
-		// Set the value in the cache
+		// Clear the value from the cache
 		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
 		self.cache.remove(qey);
 		// Return nothing
 		Ok(())
 	}
 
-	/// Get or add a namespace with a default configuration, only if we are in dynamic mode.
+	/// Get or add a namespace with a default configuration, only if we are in
+	/// dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_or_add_ns(
-		&self,
-		ns: &str,
-		strict: bool,
-	) -> Result<Arc<DefineNamespaceStatement>> {
-		self.get_or_add_ns_upwards(ns, strict, false).await
+	pub async fn get_or_add_ns(&self, ns: &str, strict: bool) -> Result<Arc<NamespaceDefinition>> {
+		self.get_or_add_ns_upwards(ns, strict).await
 	}
 
-	/// Get or add a database with a default configuration, only if we are in dynamic mode.
+	/// Get or add a database with a default configuration, only if we are in
+	/// dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_or_add_db(
 		&self,
 		ns: &str,
 		db: &str,
 		strict: bool,
-	) -> Result<Arc<DefineDatabaseStatement>> {
+	) -> Result<Arc<DatabaseDefinition>> {
 		self.get_or_add_db_upwards(ns, db, strict, false).await
 	}
 
-	/// Get or add a table with a default configuration, only if we are in dynamic mode.
+	pub async fn ensure_ns_db(
+		&self,
+		ns: &str,
+		db: &str,
+		strict: bool,
+	) -> Result<Arc<DatabaseDefinition>> {
+		self.get_or_add_db_upwards(ns, db, strict, true).await
+	}
+
+	/// Get or add a table with a default configuration, only if we are in
+	/// dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_or_add_tb(
 		&self,
@@ -1690,26 +2017,24 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 		strict: bool,
-	) -> Result<Arc<DefineTableStatement>> {
+	) -> Result<Arc<TableDefinition>> {
 		self.get_or_add_tb_upwards(ns, db, tb, strict, false).await
 	}
 
 	/// Ensures that a table, database, and namespace are all fully defined.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	#[inline(always)]
 	pub async fn ensure_ns_db_tb(
 		&self,
 		ns: &str,
 		db: &str,
 		tb: &str,
 		strict: bool,
-	) -> Result<Arc<DefineTableStatement>> {
+	) -> Result<Arc<TableDefinition>> {
 		self.get_or_add_tb_upwards(ns, db, tb, strict, true).await
 	}
 
 	/// Ensure a specific table (and database, and namespace) exist.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	#[inline(always)]
 	pub(crate) async fn check_ns_db_tb(
 		&self,
 		ns: &str,
@@ -1718,47 +2043,34 @@ impl Transaction {
 		strict: bool,
 	) -> Result<()> {
 		if !strict {
-			// Strict mode is disabled
 			return Ok(());
 		}
-		// Strict mode is enabled
-		// Check that the table exists
-		let Err(tb_e) = self.get_tb(ns, db, tb).await else {
-			return Ok(());
+
+		let db = match self.get_db_by_name(ns, db).await? {
+			Some(db) => db,
+			None => {
+				return Err(Error::DbNotFound {
+					name: db.to_owned(),
+				}
+				.into());
+			}
 		};
 
-		let Some(Error::TbNotFound {
-			..
-		}) = tb_e.downcast_ref()
-		else {
-			return Err(tb_e);
+		match self.get_tb(db.namespace_id, db.database_id, tb).await? {
+			Some(tb) => tb,
+			None => {
+				return Err(Error::TbNotFound {
+					name: tb.to_owned(),
+				}
+				.into());
+			}
 		};
-
-		// Table doesn't exists but next check the database.
-		let Err(db_e) = self.get_db(ns, db).await else {
-			return Err(tb_e);
-		};
-
-		let Some(Error::DbNotFound {
-			..
-		}) = db_e.downcast_ref()
-		else {
-			return Err(db_e);
-		};
-
-		// Database doesn't exists but next check the namespace.
-		let Err(ns_e) = self.get_ns(ns).await else {
-			return Err(db_e);
-		};
-
-		// Namespace check failed or namespace didn't exist.
-		return Err(ns_e);
+		Ok(())
 	}
 
 	/// Clears all keys from the transaction cache.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	#[inline(always)]
-	pub fn clear(&self) {
+	pub fn clear_cache(&self) {
 		self.cache.clear()
 	}
 
@@ -1766,58 +2078,38 @@ impl Transaction {
 	// Private methods
 	// --------------------------------------------------
 
-	/// Get or add a namespace with a default configuration, only if we are in dynamic mode.
+	/// Get or add a namespace with a default configuration, only if we are in
+	/// dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_or_add_ns_upwards(
 		&self,
 		ns: &str,
 		strict: bool,
-		_upwards: bool,
-	) -> Result<Arc<DefineNamespaceStatement>> {
-		let qey = cache::tx::Lookup::Ns(ns);
-		match self.cache.get(&qey) {
-			// The entry is in the cache
-			Some(val) => val,
-			// The entry is not in the cache
+	) -> Result<Arc<NamespaceDefinition>> {
+		match self.get_ns_by_name(ns).await? {
+			Some(val) => Ok(val),
+			// The entry is not in the database
 			None => {
-				// Try to fetch the value from the datastore
-				let key = crate::key::root::ns::new(ns);
-				let res = self.get(&key, None).await?.ok_or_else(|| Error::NsNotFound {
-					name: ns.to_owned(),
-				});
-				// Check whether the value exists in the datastore
-				match res {
-					// Store a new default value in the datastore
-					Err(Error::NsNotFound {
-						..
-					}) if !strict => {
-						let val = DefineNamespaceStatement {
-							name: ns.to_owned().into(),
-							..Default::default()
-						};
-						let val = {
-							self.put(&key, revision::to_vec(&val)?, None).await?;
-							cache::tx::Entry::Any(Arc::new(val))
-						};
-						self.cache.insert(qey, val.clone());
-						val
+				if strict {
+					return Err(Error::NsNotFound {
+						name: ns.to_owned(),
 					}
-					// Store the fetched value in the cache
-					Ok(val) => {
-						let val: DefineNamespaceStatement = revision::from_slice(&val)?;
-						let val = cache::tx::Entry::Any(Arc::new(val));
-						self.cache.insert(qey, val.clone());
-						val
-					}
-					// Throw any received errors
-					Err(err) => Err(err)?,
+					.into());
 				}
+
+				let ns = NamespaceDefinition {
+					namespace_id: self.lock().await.get_next_ns_id().await?,
+					name: ns.to_owned(),
+					comment: None,
+				};
+
+				return self.put_ns(ns).await;
 			}
 		}
-		.try_into_type()
 	}
 
-	/// Get or add a database with a default configuration, only if we are in dynamic mode.
+	/// Get or add a database with a default configuration, only if we are in
+	/// dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_or_add_db_upwards(
 		&self,
@@ -1825,65 +2117,64 @@ impl Transaction {
 		db: &str,
 		strict: bool,
 		upwards: bool,
-	) -> Result<Arc<DefineDatabaseStatement>> {
-		let qey = cache::tx::Lookup::Db(ns, db);
+	) -> Result<Arc<DatabaseDefinition>> {
+		let qey = cache::tx::Lookup::DbByName(ns, db);
 		match self.cache.get(&qey) {
 			// The entry is in the cache
 			Some(val) => val,
 			// The entry is not in the cache
 			None => {
-				// Try to fetch the value from the datastore
-				let key = crate::key::namespace::db::new(ns, db);
-				let res = self.get(&key, None).await?.ok_or_else(|| Error::DbNotFound {
-					name: db.to_owned(),
-				});
-				// Check whether the value exists in the datastore
-				match res {
-					// Store a new default value in the datastore
-					Err(Error::DbNotFound {
-						..
-					}) if !strict => {
-						// First ensure that a namespace exists
-						if upwards {
-							self.get_or_add_ns_upwards(ns, strict, upwards).await?;
-						}
-						// Next, dynamically define the database
-						let val = DefineDatabaseStatement {
-							name: db.to_owned().into(),
-							..Default::default()
-						};
-						let val = {
-							self.put(&key, revision::to_vec(&val)?, None).await?;
-							cache::tx::Entry::Any(Arc::new(val))
-						};
-						self.cache.insert(qey, val.clone());
-						val
-					}
-					// Check to see that the hierarchy exists
-					Err(Error::DbNotFound {
-						name,
-					}) if strict => {
-						self.get_ns(ns).await?;
-						Err(Error::DbNotFound {
-							name,
-						})?
-					}
-					// Store the fetched value in the cache
-					Ok(val) => {
-						let val: DefineDatabaseStatement = revision::from_slice(&val)?;
-						let val = cache::tx::Entry::Any(Arc::new(val));
-						self.cache.insert(qey, val.clone());
-						val
-					}
-					// Throw any received errors
-					Err(err) => Err(err)?,
+				let db_def = self.get_db_by_name(ns, db).await?;
+				if let Some(db_def) = db_def {
+					return Ok(db_def);
 				}
+
+				// Database does not exist
+				if !strict {
+					let ns_def = if upwards {
+						self.get_or_add_ns_upwards(ns, strict).await?
+					} else {
+						match self.get_ns_by_name(ns).await? {
+							Some(ns_def) => ns_def,
+							None => {
+								return Err(Error::NsNotFound {
+									name: ns.to_owned(),
+								}
+								.into());
+							}
+						}
+					};
+
+					let db_def = DatabaseDefinition {
+						namespace_id: ns_def.namespace_id,
+						database_id: self.lock().await.get_next_db_id(ns_def.namespace_id).await?,
+						name: db.to_string(),
+						comment: None,
+						changefeed: None,
+					};
+
+					return self.put_db(&ns_def.name, db_def).await;
+				}
+
+				// Ensure the namespace exists
+				if self.get_ns_by_name(ns).await?.is_none() {
+					return Err(Error::NsNotFound {
+						name: ns.to_owned(),
+					}
+					.into());
+				}
+
+				return Err(Error::DbNotFound {
+					name: db.to_owned(),
+				}
+				.into());
 			}
 		}
 		.try_into_type()
 	}
 
-	/// Get or add a table with a default configuration, only if we are in dynamic mode.
+	/// Get or add a table with a default configuration, only if we are in
+	/// dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_or_add_tb_upwards(
 		&self,
@@ -1892,64 +2183,61 @@ impl Transaction {
 		tb: &str,
 		strict: bool,
 		upwards: bool,
-	) -> Result<Arc<DefineTableStatement>> {
-		let qey = cache::tx::Lookup::Tb(ns, db, tb);
+	) -> Result<Arc<TableDefinition>> {
+		let qey = cache::tx::Lookup::TbByName(ns, db, tb);
 		match self.cache.get(&qey) {
 			// The entry is in the cache
-			Some(val) => val,
+			Some(val) => val.try_into_type(),
 			// The entry is not in the cache
 			None => {
-				// Try to fetch the value from the datastore
-				let key = crate::key::database::tb::new(ns, db, tb);
-				let res = self.get(&key, None).await?.ok_or_else(|| Error::TbNotFound {
-					name: tb.to_owned(),
-				});
-				// Check whether the value exists in the datastore
-				match res {
-					// Store a new default value in the datastore
-					Err(Error::TbNotFound {
-						..
-					}) if !strict => {
-						// First ensure that a database exists
-						if upwards {
-							self.get_or_add_db_upwards(ns, db, strict, upwards).await?;
-						}
-						// Next, dynamically define the table
-						let val = DefineTableStatement {
-							name: tb.to_owned().into(),
-							permissions: Permissions::none(),
-							..Default::default()
-						};
-						let val = {
-							self.put(&key, revision::to_vec(&val)?, None).await?;
-							cache::tx::Entry::Any(Arc::new(val))
-						};
-						self.cache.insert(qey, val.clone());
-						val
-					}
-					// Check to see that the hierarchy exists
-					Err(Error::TbNotFound {
-						name,
-					}) if strict => {
-						self.get_ns(ns).await?;
-						self.get_db(ns, db).await?;
-						Err(Error::TbNotFound {
-							name,
-						})?
-					}
-					// Store the fetched value in the cache
-					Ok(val) => {
-						let val: DefineTableStatement = revision::from_slice(&val)?;
-						let val = cache::tx::Entry::Any(Arc::new(val));
-						self.cache.insert(qey, val.clone());
-						val
-					}
-					// Throw any received errors
-					Err(err) => Err(err)?,
+				let key = crate::key::catalog::tb::new(ns, db, tb);
+				if let Some(tb_def) = self.get(&key, None).await? {
+					let cached_tb = Arc::new(tb_def);
+					let cached_entry =
+						cache::tx::Entry::Any(Arc::clone(&cached_tb) as Arc<dyn Any + Send + Sync>);
+					self.cache.insert(qey, cached_entry);
+					return Ok(cached_tb);
 				}
+
+				if strict {
+					return Err(Error::TbNotFound {
+						name: tb.to_owned(),
+					}
+					.into());
+				}
+
+				let db_def = if upwards {
+					self.get_or_add_db_upwards(ns, db, strict, upwards).await?
+				} else {
+					if self.get_ns_by_name(ns).await?.is_none() {
+						return Err(Error::NsNotFound {
+							name: ns.to_owned(),
+						}
+						.into());
+					}
+					match self.get_db_by_name(ns, db).await? {
+						Some(db_def) => db_def,
+						None => {
+							return Err(Error::DbNotFound {
+								name: db.to_owned(),
+							}
+							.into());
+						}
+					}
+				};
+
+				let tb_def = TableDefinition::new(
+					db_def.namespace_id,
+					db_def.database_id,
+					self.lock()
+						.await
+						.get_next_tb_id(db_def.namespace_id, db_def.database_id)
+						.await?,
+					tb.to_owned(),
+				);
+				self.put_tb(ns, db, tb_def).await
 			}
 		}
-		.try_into_type()
 	}
 
 	pub(crate) fn index_caches(&self) -> &IndexTreeCaches {

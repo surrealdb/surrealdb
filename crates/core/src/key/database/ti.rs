@@ -1,25 +1,25 @@
 //! Stores the next and available freed IDs for documents
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
+
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::key::category::{Categorise, Category};
+use crate::key::database::all::DatabaseRoot;
+use crate::kvs::KVKey;
 
 // Table ID generator
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Ti {
-	__: u8,
-	_a: u8,
-	pub ns: u32,
-	_b: u8,
-	pub db: u32,
+pub(crate) struct Ti {
+	table_root: DatabaseRoot,
 	_c: u8,
 	_d: u8,
 	_e: u8,
 }
-impl_key!(Ti);
 
-pub fn new(ns: u32, db: u32) -> Ti {
+impl KVKey for Ti {
+	type ValueType = Vec<u8>;
+}
+
+pub fn new(ns: NamespaceId, db: DatabaseId) -> Ti {
 	Ti::new(ns, db)
 }
 
@@ -30,13 +30,9 @@ impl Categorise for Ti {
 }
 
 impl Ti {
-	pub fn new(ns: u32, db: u32) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId) -> Self {
 		Ti {
-			__: b'/',
-			_a: b'+',
-			ns,
-			_b: b'*',
-			db,
+			table_root: DatabaseRoot::new(ns, db),
 			_c: b'!',
 			_d: b't',
 			_e: b'i',
@@ -46,17 +42,16 @@ impl Ti {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Ti::new(
-			123u32,
-			234u32,
+			NamespaceId(123),
+			DatabaseId(234),
 		);
-		let enc = Ti::encode(&val).unwrap();
-		let dec = Ti::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = Ti::encode_key(&val).unwrap();
+		assert_eq!(&enc, b"/*\x00\x00\x00\x7b*\x00\x00\x00\xea!\x74\x69");
 	}
 }

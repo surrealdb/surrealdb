@@ -1,16 +1,19 @@
 //! Store state of an HNSW index
-use crate::kvs::impl_key;
-use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
+use serde::{Deserialize, Serialize};
+
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::idx::trees::hnsw::HnswState;
+use crate::kvs::KVKey;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Hs<'a> {
+pub(crate) struct Hs<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -19,10 +22,13 @@ pub struct Hs<'a> {
 	_f: u8,
 	_g: u8,
 }
-impl_key!(Hs<'a>);
+
+impl KVKey for Hs<'_> {
+	type ValueType = HnswState;
+}
 
 impl<'a> Hs<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -42,21 +48,17 @@ impl<'a> Hs<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
-		let val = Hs::new("testns", "testdb", "testtb", "testix");
-		let enc = Hs::encode(&val).unwrap();
+		let val = Hs::new(NamespaceId(1), DatabaseId(2), "testtb", "testix");
+		let enc = Hs::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\0*testdb\0*testtb\0+testix\0!hs",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!hs",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);
-
-		let dec = Hs::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

@@ -1,16 +1,17 @@
 //! Stores Things of an HNSW index
-use crate::expr::Id;
-use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::kvs::KVKey;
+use crate::val::RecordIdKey;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Hi<'a> {
+pub(crate) struct Hi<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -18,12 +19,15 @@ pub struct Hi<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub id: Id,
+	pub id: RecordIdKey,
 }
-impl_key!(Hi<'a>);
+
+impl KVKey for Hi<'_> {
+	type ValueType = u64;
+}
 
 impl<'a> Hi<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: Id) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, id: RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -44,21 +48,23 @@ impl<'a> Hi<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
-		let val = Hi::new("testns", "testdb", "testtb", "testix", Id::String("testid".to_string()));
-		let enc = Hi::encode(&val).unwrap();
+		let val = Hi::new(
+			NamespaceId(1),
+			DatabaseId(2),
+			"testtb",
+			"testix",
+			RecordIdKey::String("testid".to_string()),
+		);
+		let enc = Hi::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\0*testdb\0*testtb\0+testix\0!hi\0\0\0\x01testid\0",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!hi\0\0\0\x01testid\0",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);
-
-		let dec = Hi::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

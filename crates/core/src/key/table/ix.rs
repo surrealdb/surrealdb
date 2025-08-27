@@ -1,18 +1,19 @@
 //! Stores a DEFINE INDEX config definition
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::expr::DefineIndexStatement;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Ix<'a> {
+pub(crate) struct Ix<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -20,20 +21,23 @@ pub struct Ix<'a> {
 	_f: u8,
 	pub ix: &'a str,
 }
-impl_key!(Ix<'a>);
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Ix<'a> {
+impl KVKey for Ix<'_> {
+	type ValueType = DefineIndexStatement;
+}
+
+pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Ix<'a> {
 	Ix::new(ns, db, tb, ix)
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db, tb).encode()?;
+pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
+	let mut k = super::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"!ix\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db, tb).encode()?;
+pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
+	let mut k = super::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"!ix\xff");
 	Ok(k)
 }
@@ -45,7 +49,7 @@ impl Categorise for Ix<'_> {
 }
 
 impl<'a> Ix<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -64,21 +68,18 @@ impl<'a> Ix<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Ix::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 		);
-		let enc = Ix::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0!ixtestix\0");
-
-		let dec = Ix::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = Ix::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!ixtestix\0");
 	}
 }

@@ -1,19 +1,22 @@
 //! Stores a DEFINE USER ON ROOT config definition
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
+use crate::expr::statements::define::DefineUserStatement;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Us<'a> {
+pub(crate) struct Us<'a> {
 	__: u8,
 	_a: u8,
 	_b: u8,
 	_c: u8,
 	pub user: &'a str,
 }
-impl_key!(Us<'a>);
+
+impl KVKey for Us<'_> {
+	type ValueType = DefineUserStatement;
+}
 
 pub fn new(user: &str) -> Us<'_> {
 	Us::new(user)
@@ -51,16 +54,14 @@ impl<'a> Us<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Us::new("testuser");
-		let enc = Us::encode(&val).unwrap();
+		let enc = Us::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/!ustestuser\x00");
-		let dec = Us::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 
 	#[test]

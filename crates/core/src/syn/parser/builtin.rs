@@ -1,18 +1,15 @@
-use super::{ParseResult, Parser};
-use crate::{
-	sql::{Constant, Function, SqlValue},
-	syn::{
-		error::{MessageKind, bail},
-		parser::{SyntaxError, mac::expected, unexpected},
-		token::{Span, t},
-	},
-};
 use phf::phf_map;
 use reblessive::Stk;
 use unicase::UniCase;
 
+use super::{ParseResult, Parser};
+use crate::sql::{Constant, Expr, Function, FunctionCall};
+use crate::syn::error::{MessageKind, bail};
+use crate::syn::parser::mac::expected;
+use crate::syn::parser::{SyntaxError, unexpected};
+use crate::syn::token::{Span, t};
+
 /// The kind of a parsed path.
-#[non_exhaustive]
 pub enum PathKind {
 	Constant(Constant),
 	Function,
@@ -239,11 +236,14 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		//
 		UniCase::ascii("record::exists") => PathKind::Function,
 		UniCase::ascii("record::id") => PathKind::Function,
+		UniCase::ascii("record::is::edge") => PathKind::Function,
 		UniCase::ascii("record::table") => PathKind::Function,
 		UniCase::ascii("record::tb") => PathKind::Function,
 		UniCase::ascii("record::refs") => PathKind::Function,
 		//
 		UniCase::ascii("search::analyze") => PathKind::Function,
+		UniCase::ascii("search::linear") => PathKind::Function,
+		UniCase::ascii("search::rrf") => PathKind::Function,
 		UniCase::ascii("search::score") => PathKind::Function,
 		UniCase::ascii("search::highlight") => PathKind::Function,
 		UniCase::ascii("search::offsets") => PathKind::Function,
@@ -450,7 +450,9 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("time::EPOCH") => PathKind::Constant(Constant::TimeEpoch),
 		UniCase::ascii("time::MINIMUM") => PathKind::Constant(Constant::TimeMin),
 		UniCase::ascii("time::MAXIMUM") => PathKind::Constant(Constant::TimeMax),
-		UniCase::ascii("duration::MAX") => PathKind::Constant(Constant::DurationMax)
+		UniCase::ascii("duration::MAX") => PathKind::Constant(Constant::DurationMax),
+		//
+		UniCase::ascii("schema::table::exists") => PathKind::Function,
 };
 
 const MAX_LEVENSTHEIN_CUT_OFF: u8 = 4;
@@ -459,19 +461,21 @@ const LEVENSTHEIN_ARRAY_SIZE: usize = 1 + MAX_FUNCTION_NAME_LEN + MAX_LEVENSTHEI
 
 /// simple function calculating levenshtein distance with a cut-off.
 ///
-/// levenshtein distance seems fast enough for searching possible functions to suggest as the list
-/// isn't that long and the function names aren't that long. Additionally this function also uses a
-/// cut off for quick rejection of strings which won't lower the minimum searched distance.
+/// levenshtein distance seems fast enough for searching possible functions to
+/// suggest as the list isn't that long and the function names aren't that long.
+/// Additionally this function also uses a cut off for quick rejection of
+/// strings which won't lower the minimum searched distance.
 ///
-/// Function uses stack allocated array's of size LEVENSTHEIN_ARRAY_SIZE. LEVENSTHEIN_ARRAY_SIZE should the largest size in the haystack +
+/// Function uses stack allocated array's of size LEVENSTHEIN_ARRAY_SIZE.
+/// LEVENSTHEIN_ARRAY_SIZE should the largest size in the haystack +
 /// maximum cut_off + 1 for the additional value required during calculation
 fn levenshtein(a: &[u8], b: &[u8], cut_off: u8) -> u8 {
 	debug_assert!(LEVENSTHEIN_ARRAY_SIZE < u8::MAX as usize);
 	let mut distance_array = [[0u8; LEVENSTHEIN_ARRAY_SIZE]; 2];
 
 	if a.len().abs_diff(b.len()) > cut_off as usize {
-		// moving from a to b requires atleast more then cut off insertions or deletions so don't
-		// even bother.
+		// moving from a to b requires atleast more then cut off insertions or deletions
+		// so don't even bother.
 		return cut_off + 1;
 	}
 
@@ -503,9 +507,9 @@ fn levenshtein(a: &[u8], b: &[u8], cut_off: u8) -> u8 {
 			lowest = res.min(lowest)
 		}
 
-		// The lowest value in the next calculated row will always be equal or larger then the
-		// lowest value of the current row. So we can cut off search early if the score can't equal
-		// the cut_off.
+		// The lowest value in the next calculated row will always be equal or larger
+		// then the lowest value of the current row. So we can cut off search early if
+		// the score can't equal the cut_off.
 		if lowest > cut_off {
 			return cut_off + 1;
 		}
@@ -537,11 +541,7 @@ fn find_suggestion(got: &str) -> Option<&'static str> {
 
 impl Parser<'_> {
 	/// Parse a builtin path.
-	pub(super) async fn parse_builtin(
-		&mut self,
-		stk: &mut Stk,
-		start: Span,
-	) -> ParseResult<SqlValue> {
+	pub(super) async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Expr> {
 		let mut last_span = start;
 		while self.eat(t!("::")) {
 			let peek = self.peek();
@@ -556,15 +556,16 @@ impl Parser<'_> {
 		let str = self.lexer.span_str(span);
 
 		match PATHS.get_entry(&UniCase::ascii(str)) {
-			Some((_, PathKind::Constant(x))) => Ok(SqlValue::Constant(x.clone())),
+			Some((_, PathKind::Constant(x))) => Ok(Expr::Constant(x.clone())),
 			Some((k, PathKind::Function)) => {
+				// TODO: Move this out of the parser.
 				if k == &UniCase::ascii("api::invoke") && !self.settings.define_api_enabled {
 					bail!("Cannot use the `api::invoke` method, as the experimental define api capability is not enabled", @span);
 				}
 
 				stk.run(|ctx| self.parse_builtin_function(ctx, k.into_inner().to_owned()))
 					.await
-					.map(|x| SqlValue::Function(Box::new(x)))
+					.map(|x| Expr::FunctionCall(Box::new(x)))
 			}
 			None => {
 				if let Some(suggest) = find_suggestion(str) {
@@ -585,7 +586,7 @@ impl Parser<'_> {
 		&mut self,
 		stk: &mut Stk,
 		name: String,
-	) -> ParseResult<Function> {
+	) -> ParseResult<FunctionCall> {
 		let start = expected!(self, t!("(")).span;
 		let mut args = Vec::new();
 		loop {
@@ -593,7 +594,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let arg = stk.run(|ctx| self.parse_value_inherit(ctx)).await?;
+			let arg = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
 			args.push(arg);
 
 			if !self.eat(t!(",")) {
@@ -601,7 +602,11 @@ impl Parser<'_> {
 				break;
 			}
 		}
-		Ok(Function::Normal(name, args))
+		let receiver = Function::Normal(name);
+		Ok(FunctionCall {
+			receiver,
+			arguments: args,
+		})
 	}
 }
 
@@ -612,8 +617,8 @@ mod test {
 	#[test]
 	fn function_name_constant_up_to_date() {
 		let max = PATHS.keys().map(|x| x.len()).max().unwrap();
-		// These two need to be the same but the constant needs to manually be updated if PATHS
-		// ever changes so that these two values are not the same.
+		// These two need to be the same but the constant needs to manually be updated
+		// if PATHS ever changes so that these two values are not the same.
 		assert_eq!(
 			MAX_FUNCTION_NAME_LEN, max,
 			"the constant MAX_FUNCTION_NAME_LEN should be {} but is {}, please update the constant",

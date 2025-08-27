@@ -1,18 +1,21 @@
 //! Stores Things of an HNSW index
-use crate::idx::trees::vector::SerializedVector;
-use crate::kvs::impl_key;
-use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
+
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::idx::trees::hnsw::docs::ElementDocs;
+use crate::idx::trees::vector::SerializedVector;
+use crate::kvs::KVKey;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Hv<'a> {
+pub(crate) struct Hv<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -22,12 +25,15 @@ pub struct Hv<'a> {
 	_g: u8,
 	pub vec: Arc<SerializedVector>,
 }
-impl_key!(Hv<'a>);
+
+impl KVKey for Hv<'_> {
+	type ValueType = ElementDocs;
+}
 
 impl<'a> Hv<'a> {
 	pub fn new(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
 		vec: Arc<SerializedVector>,
@@ -52,27 +58,23 @@ impl<'a> Hv<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		let val = Hv::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 			Arc::new(SerializedVector::I16(vec![2])),
 		);
-		let enc = Hv::encode(&val).unwrap();
+		let enc = Hv::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\0*testdb\0*testtb\0+testix\0!hv\0\0\0\x04\x80\x02\x01",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!hv\0\0\0\x04\x80\x02\x01",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);
-
-		let dec = Hv::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

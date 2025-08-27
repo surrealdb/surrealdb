@@ -1,37 +1,35 @@
 use std::collections::HashMap;
 
-use crate::cf::{TableMutation, TableMutations};
-use crate::doc::CursorValue;
-use crate::expr::Idiom;
-use crate::expr::statements::DefineTableStatement;
-use crate::expr::thing::Thing;
-use crate::kvs::{Key, KeyEncode};
 use anyhow::Result;
 
-// PreparedWrite is a tuple of (versionstamp key, key prefix, key suffix, serialized table mutations).
-// The versionstamp key is the key that contains the current versionstamp and might be used by the
-// specific transaction implementation to make the versionstamp unique and monotonic.
-// The key prefix and key suffix are used to construct the key for the table mutations.
+use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
+use crate::cf::{TableMutation, TableMutations};
+use crate::doc::CursorRecord;
+use crate::kvs::{KVKey, Key};
+use crate::val::RecordId;
+
+// PreparedWrite is a tuple of (versionstamp key, key prefix, key suffix,
+// serialized table mutations). The versionstamp key is the key that contains
+// the current versionstamp and might be used by the specific transaction
+// implementation to make the versionstamp unique and monotonic. The key prefix
+// and key suffix are used to construct the key for the table mutations.
 // The consumer of this library should write KV pairs with the following format:
 // key = key_prefix + versionstamp + key_suffix
 // value = serialized table mutations
 type PreparedWrite = (Vec<u8>, Vec<u8>, Vec<u8>, crate::kvs::Val);
 
-#[non_exhaustive]
 pub struct Writer {
 	buf: Buffer,
 }
 
-#[non_exhaustive]
 pub struct Buffer {
 	pub b: HashMap<ChangeKey, TableMutations>,
 }
 
 #[derive(Hash, Eq, PartialEq, Debug)]
-#[non_exhaustive]
 pub struct ChangeKey {
-	pub ns: String,
-	pub db: String,
+	pub ns: NamespaceId,
+	pub db: DatabaseId,
 	pub tb: String,
 }
 
@@ -42,7 +40,7 @@ impl Buffer {
 		}
 	}
 
-	pub fn push(&mut self, ns: String, db: String, tb: String, m: TableMutation) {
+	pub fn push(&mut self, ns: NamespaceId, db: DatabaseId, tb: String, m: TableMutation) {
 		let tb2 = tb.clone();
 		let ms = self
 			.b
@@ -67,18 +65,28 @@ impl Writer {
 	#[expect(clippy::too_many_arguments)]
 	pub(crate) fn record_cf_change(
 		&mut self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
-		id: Thing,
-		previous: CursorValue,
-		current: CursorValue,
+		id: RecordId,
+		previous: CursorRecord,
+		current: CursorRecord,
 		store_difference: bool,
 	) {
-		if current.as_ref().is_some() {
+		if current.as_ref().is_nullish() {
 			self.buf.push(
-				ns.to_string(),
-				db.to_string(),
+				ns,
+				db,
+				tb.to_string(),
+				match store_difference {
+					true => TableMutation::DelWithOriginal(id, previous.into_owned()),
+					false => TableMutation::Del(id),
+				},
+			);
+		} else {
+			self.buf.push(
+				ns,
+				db,
 				tb.to_string(),
 				match store_difference {
 					true => {
@@ -86,9 +94,10 @@ impl Writer {
 							TableMutation::Set(id, current.into_owned())
 						} else {
 							// We intentionally record the patches in reverse (current -> previous)
-							// because we cannot otherwise resolve operations such as "replace" and "remove".
+							// because we cannot otherwise resolve operations such as "replace" and
+							// "remove".
 							let patches_to_create_previous =
-								current.diff(&previous, Idiom::default());
+								current.as_ref().diff(previous.as_ref());
 							TableMutation::SetWithDiff(
 								id,
 								current.into_owned(),
@@ -99,30 +108,22 @@ impl Writer {
 					false => TableMutation::Set(id, current.into_owned()),
 				},
 			);
-		} else {
-			self.buf.push(
-				ns.to_string(),
-				db.to_string(),
-				tb.to_string(),
-				match store_difference {
-					true => TableMutation::DelWithOriginal(id, previous.into_owned()),
-					false => TableMutation::Del(id),
-				},
-			);
 		}
 	}
 
-	pub(crate) fn define_table(&mut self, ns: &str, db: &str, tb: &str, dt: &DefineTableStatement) {
-		self.buf.push(
-			ns.to_string(),
-			db.to_string(),
-			tb.to_string(),
-			TableMutation::Def(dt.to_owned()),
-		)
+	pub(crate) fn define_table(
+		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		dt: &TableDefinition,
+	) {
+		self.buf.push(ns, db, tb.to_string(), TableMutation::Def(dt.to_owned()))
 	}
 
 	// get returns all the mutations buffered for this transaction,
-	// that are to be written onto the key composed of the specified prefix + the current timestamp + the specified suffix.
+	// that are to be written onto the key composed of the specified prefix + the
+	// current timestamp + the specified suffix.
 	pub(crate) fn get(&self) -> Result<Vec<PreparedWrite>> {
 		let mut r = Vec::<(Vec<u8>, Vec<u8>, Vec<u8>, crate::kvs::Val)>::new();
 		// Get the current timestamp
@@ -135,8 +136,8 @@ impl Writer {
 			mutations,
 		) in self.buf.b.iter()
 		{
-			let ts_key: Key = crate::key::database::vs::new(ns, db).encode()?;
-			let tc_key_prefix: Key = crate::key::change::versionstamped_key_prefix(ns, db)?;
+			let ts_key: Key = crate::key::database::vs::new(*ns, *db).encode_key()?;
+			let tc_key_prefix: Key = crate::key::change::versionstamped_key_prefix(*ns, *db)?;
 			let tc_key_suffix: Key = crate::key::change::versionstamped_key_suffix(tb.as_str());
 			let value = revision::to_vec(mutations)?;
 
@@ -150,17 +151,16 @@ impl Writer {
 mod tests {
 	use std::time::Duration;
 
-	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
-	use crate::expr::Datetime;
-	use crate::expr::changefeed::ChangeFeed;
-	use crate::expr::id::Id;
-	use crate::expr::statements::show::ShowSince;
-	use crate::expr::statements::{
-		DefineDatabaseStatement, DefineNamespaceStatement, DefineTableStatement,
+	use crate::catalog::{
+		DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId, TableDefinition, TableId,
 	};
-	use crate::expr::thing::Thing;
-	use crate::expr::value::Value;
-	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
+	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
+	use crate::expr::changefeed::ChangeFeed;
+	use crate::expr::statements::show::ShowSince;
+	use crate::kvs::LockType::*;
+	use crate::kvs::TransactionType::*;
+	use crate::kvs::{Datastore, Transaction};
+	use crate::val::{Datetime, RecordId, RecordIdKey, Value};
 	use crate::vs::VersionStamp;
 
 	const DONT_STORE_PREVIOUS: bool = false;
@@ -182,17 +182,21 @@ mod tests {
 		// Write things to the table.
 		//
 
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tb = tx.ensure_ns_db_tb(NS, DB, TB, false).await.unwrap();
+		tx.commit().await.unwrap();
+
 		let mut tx1 = ds.transaction(Write, Optimistic).await.unwrap().inner();
-		let thing_a = Thing {
-			tb: TB.to_owned(),
-			id: Id::from("A"),
+		let thing_a = RecordId {
+			table: TB.to_owned(),
+			key: RecordIdKey::String("A".to_owned()),
 		};
 		let value_a: Value = "a".into();
 		let previous = Value::None;
 		tx1.record_change(
-			NS,
-			DB,
-			TB,
+			tb.namespace_id,
+			tb.database_id,
+			&tb.name,
 			&thing_a,
 			previous.clone().into(),
 			value_a.into(),
@@ -202,15 +206,15 @@ mod tests {
 		tx1.commit().await.unwrap();
 
 		let mut tx2 = ds.transaction(Write, Optimistic).await.unwrap().inner();
-		let thing_c = Thing {
-			tb: TB.to_owned(),
-			id: Id::from("C"),
+		let thing_c = RecordId {
+			table: TB.to_owned(),
+			key: RecordIdKey::String("C".to_owned()),
 		};
 		let value_c: Value = "c".into();
 		tx2.record_change(
-			NS,
-			DB,
-			TB,
+			tb.namespace_id,
+			tb.database_id,
+			&tb.name,
 			&thing_c,
 			previous.clone().into(),
 			value_c.into(),
@@ -220,29 +224,29 @@ mod tests {
 		tx2.commit().await.unwrap();
 
 		let mut tx3 = ds.transaction(Write, Optimistic).await.unwrap().inner();
-		let thing_b = Thing {
-			tb: TB.to_owned(),
-			id: Id::from("B"),
+		let thing_b = RecordId {
+			table: TB.to_owned(),
+			key: RecordIdKey::String("B".to_owned()),
 		};
 		let value_b: Value = "b".into();
 		tx3.record_change(
-			NS,
-			DB,
-			TB,
+			tb.namespace_id,
+			tb.database_id,
+			&tb.name,
 			&thing_b,
 			previous.clone().into(),
 			value_b.into(),
 			DONT_STORE_PREVIOUS,
 		);
-		let thing_c2 = Thing {
-			tb: TB.to_owned(),
-			id: Id::from("C"),
+		let thing_c2 = RecordId {
+			table: TB.to_owned(),
+			key: RecordIdKey::String("C".to_owned()),
 		};
 		let value_c2: Value = "c2".into();
 		tx3.record_change(
-			NS,
-			DB,
-			TB,
+			tb.namespace_id,
+			tb.database_id,
+			&tb.name,
 			&thing_c2,
 			previous.clone().into(),
 			value_c2.into(),
@@ -258,9 +262,16 @@ mod tests {
 		let start: u64 = 0;
 
 		let tx4 = ds.transaction(Write, Optimistic).await.unwrap();
-		let r = crate::cf::read(&tx4, NS, DB, Some(TB), ShowSince::Versionstamp(start), Some(10))
-			.await
-			.unwrap();
+		let r = crate::cf::read(
+			&tx4,
+			tb.namespace_id,
+			tb.database_id,
+			Some(&tb.name),
+			ShowSince::Versionstamp(start),
+			Some(10),
+		)
+		.await
+		.unwrap();
 		tx4.commit().await.unwrap();
 
 		let want: Vec<ChangeSet> = vec![
@@ -269,7 +280,10 @@ mod tests {
 				DatabaseMutation(vec![TableMutations(
 					TB.to_string(),
 					vec![TableMutation::Set(
-						Thing::from((TB.to_string(), "A".to_string())),
+						RecordId {
+							table: TB.to_string(),
+							key: RecordIdKey::String("A".to_owned()),
+						},
 						Value::from("a"),
 					)],
 				)]),
@@ -279,7 +293,10 @@ mod tests {
 				DatabaseMutation(vec![TableMutations(
 					TB.to_string(),
 					vec![TableMutation::Set(
-						Thing::from((TB.to_string(), "C".to_string())),
+						RecordId {
+							table: TB.to_string(),
+							key: RecordIdKey::String("C".to_owned()),
+						},
 						Value::from("c"),
 					)],
 				)]),
@@ -290,11 +307,17 @@ mod tests {
 					TB.to_string(),
 					vec![
 						TableMutation::Set(
-							Thing::from((TB.to_string(), "B".to_string())),
+							RecordId {
+								table: TB.to_string(),
+								key: RecordIdKey::String("B".to_owned()),
+							},
 							Value::from("b"),
 						),
 						TableMutation::Set(
-							Thing::from((TB.to_string(), "C".to_string())),
+							RecordId {
+								table: TB.to_string(),
+								key: RecordIdKey::String("C".to_owned()),
+							},
 							Value::from("c2"),
 						),
 					],
@@ -306,15 +329,24 @@ mod tests {
 
 		let tx5 = ds.transaction(Write, Optimistic).await.unwrap();
 		// gc_all needs to be committed before we can read the changes
-		crate::cf::gc_range(&tx5, NS, DB, VersionStamp::from_u64(4)).await.unwrap();
+		crate::cf::gc_range(&tx5, tb.namespace_id, tb.database_id, VersionStamp::from_u64(4))
+			.await
+			.unwrap();
 		// We now commit tx5, which should persist the gc_all resullts
 		tx5.commit().await.unwrap();
 
 		// Now we should see the gc_all results
 		let tx6 = ds.transaction(Write, Optimistic).await.unwrap();
-		let r = crate::cf::read(&tx6, NS, DB, Some(TB), ShowSince::Versionstamp(start), Some(10))
-			.await
-			.unwrap();
+		let r = crate::cf::read(
+			&tx6,
+			tb.namespace_id,
+			tb.database_id,
+			Some(&tb.name),
+			ShowSince::Versionstamp(start),
+			Some(10),
+		)
+		.await
+		.unwrap();
 		tx6.commit().await.unwrap();
 
 		let want: Vec<ChangeSet> = vec![ChangeSet(
@@ -323,11 +355,17 @@ mod tests {
 				TB.to_string(),
 				vec![
 					TableMutation::Set(
-						Thing::from((TB.to_string(), "B".to_string())),
+						RecordId {
+							table: TB.to_string(),
+							key: RecordIdKey::String("B".to_owned()),
+						},
 						Value::from("b"),
 					),
 					TableMutation::Set(
-						Thing::from((TB.to_string(), "C".to_string())),
+						RecordId {
+							table: TB.to_string(),
+							key: RecordIdKey::String("C".to_owned()),
+						},
 						Value::from("c2"),
 					),
 				],
@@ -339,9 +377,16 @@ mod tests {
 		ds.changefeed_process_at(None, (ts.0.timestamp() + 5).try_into().unwrap()).await.unwrap();
 
 		let tx7 = ds.transaction(Write, Optimistic).await.unwrap();
-		let r = crate::cf::read(&tx7, NS, DB, Some(TB), ShowSince::Timestamp(ts), Some(10))
-			.await
-			.unwrap();
+		let r = crate::cf::read(
+			&tx7,
+			tb.namespace_id,
+			tb.database_id,
+			Some(&tb.name),
+			ShowSince::Timestamp(ts),
+			Some(10),
+		)
+		.await
+		.unwrap();
 		tx7.commit().await.unwrap();
 		assert_eq!(r, want);
 	}
@@ -350,41 +395,61 @@ mod tests {
 	async fn scan_picks_up_from_offset() {
 		// Given we have 2 entries in change feeds
 		let ds = init(false).await;
+
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tb = tx.ensure_ns_db_tb(NS, DB, TB, false).await.unwrap();
+		tx.commit().await.unwrap();
+
 		ds.changefeed_process_at(None, 5).await.unwrap();
 		let _id1 = record_change_feed_entry(
 			ds.transaction(Write, Optimistic).await.unwrap(),
+			&tb,
 			"First".to_string(),
 		)
 		.await;
 		ds.changefeed_process_at(None, 10).await.unwrap();
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-		let vs1 = tx.get_versionstamp_from_timestamp(5, NS, DB).await.unwrap().unwrap();
-		let vs2 = tx.get_versionstamp_from_timestamp(10, NS, DB).await.unwrap().unwrap();
+		let vs1 = tx
+			.get_versionstamp_from_timestamp(5, tb.namespace_id, tb.database_id)
+			.await
+			.unwrap()
+			.unwrap();
+		let vs2 = tx
+			.get_versionstamp_from_timestamp(10, tb.namespace_id, tb.database_id)
+			.await
+			.unwrap()
+			.unwrap();
 		tx.cancel().await.unwrap();
 		let _id2 = record_change_feed_entry(
 			ds.transaction(Write, Optimistic).await.unwrap(),
+			&tb,
 			"Second".to_string(),
 		)
 		.await;
 
 		// When we scan from the versionstamp between the changes
-		let r = change_feed_vs(ds.transaction(Write, Optimistic).await.unwrap(), &vs2).await;
+		let r = change_feed_vs(ds.transaction(Write, Optimistic).await.unwrap(), &tb, &vs2).await;
 
 		// Then there is only 1 change
 		assert_eq!(r.len(), 1);
 		assert!(r[0].0 >= vs2, "{:?}", r);
 
-		// And scanning with previous offset includes both values (without table definitions)
-		let r = change_feed_vs(ds.transaction(Write, Optimistic).await.unwrap(), &vs1).await;
+		// And scanning with previous offset includes both values (without table
+		// definitions)
+		let r = change_feed_vs(ds.transaction(Write, Optimistic).await.unwrap(), &tb, &vs1).await;
 		assert_eq!(r.len(), 2);
 	}
 
-	async fn change_feed_vs(tx: Transaction, vs: &VersionStamp) -> Vec<ChangeSet> {
+	async fn change_feed_vs(
+		tx: Transaction,
+		tb: &TableDefinition,
+		vs: &VersionStamp,
+	) -> Vec<ChangeSet> {
 		let r = crate::cf::read(
 			&tx,
-			NS,
-			DB,
-			Some(TB),
+			tb.namespace_id,
+			tb.database_id,
+			Some(&tb.name),
 			ShowSince::Versionstamp(vs.into_u64_lossy()),
 			Some(10),
 		)
@@ -394,63 +459,76 @@ mod tests {
 		r
 	}
 
-	async fn record_change_feed_entry(tx: Transaction, id: String) -> Thing {
-		let thing = Thing {
-			tb: TB.to_owned(),
-			id: Id::from(id),
+	async fn record_change_feed_entry(
+		tx: Transaction,
+		tb: &TableDefinition,
+		id: String,
+	) -> RecordId {
+		let record_id = RecordId {
+			table: tb.name.clone(),
+			key: RecordIdKey::String(id),
 		};
 		let value_a: Value = "a".into();
 		let previous = Value::None.into();
 		tx.lock().await.record_change(
-			NS,
-			DB,
-			TB,
-			&thing,
+			tb.namespace_id,
+			tb.database_id,
+			&tb.name,
+			&record_id,
 			previous,
 			value_a.into(),
 			DONT_STORE_PREVIOUS,
 		);
 		tx.lock().await.complete_changes(true).await.unwrap();
 		tx.commit().await.unwrap();
-		thing
+		record_id
 	}
 
 	async fn init(store_diff: bool) -> Datastore {
-		let dns = DefineNamespaceStatement {
-			name: crate::expr::Ident(NS.to_string()),
-			..Default::default()
+		let namespace_id = NamespaceId(1);
+		let database_id = DatabaseId(2);
+		let table_id = TableId(3);
+		let dns = NamespaceDefinition {
+			namespace_id,
+			name: NS.to_string(),
+			comment: None,
 		};
-		let ddb = DefineDatabaseStatement {
-			name: crate::expr::Ident(DB.to_string()),
+		let ddb = DatabaseDefinition {
+			namespace_id,
+			database_id,
+			name: NS.to_string(),
 			changefeed: Some(ChangeFeed {
 				expiry: Duration::from_secs(10),
 				store_diff,
 			}),
-			..Default::default()
+			comment: None,
 		};
-		let dtb = DefineTableStatement {
-			name: TB.into(),
-			changefeed: Some(ChangeFeed {
+		let dtb = TableDefinition::new(namespace_id, database_id, table_id, TB.to_string())
+			.with_changefeed(ChangeFeed {
 				expiry: Duration::from_secs(10 * 60),
 				store_diff,
-			}),
-			..Default::default()
-		};
+			});
 
 		let ds = Datastore::new("memory").await.unwrap();
 
 		//
-		// Create the ns, db, and tb to let the GC and the timestamp-to-versionstamp conversion
-		// work.
+		// Create the ns, db, and tb to let the GC and the timestamp-to-versionstamp
+		// conversion work.
 		//
 
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-		let ns_root = crate::key::root::ns::new(NS);
-		tx.put(&ns_root, revision::to_vec(&dns).unwrap(), None).await.unwrap();
-		let db_root = crate::key::namespace::db::new(NS, DB);
-		tx.put(&db_root, revision::to_vec(&ddb).unwrap(), None).await.unwrap();
-		let tb_root = crate::key::database::tb::new(NS, DB, TB);
-		tx.put(&tb_root, revision::to_vec(&dtb).unwrap(), None).await.unwrap();
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+
+		// let db = tx.ensure_ns_db(NS, DB, false).await.unwrap();
+		tx.put_ns(dns).await.unwrap();
+		tx.put_db(NS, ddb).await.unwrap();
+		tx.put_tb(NS, DB, dtb).await.unwrap();
+
+		// let ns_root = crate::key::root::ns::new(namespace_id);
+		// tx.put(&ns_root, &dns, None).await.unwrap();
+		// let db_root = crate::key::namespace::db::new(namespace_id, database_id);
+		// tx.put(&db_root, &ddb, None).await.unwrap();
+		// let tb_root = crate::key::database::tb::new(namespace_id, database_id,
+		// &dtb.name); tx.put(&tb_root, &dtb, None).await.unwrap();
 		tx.commit().await.unwrap();
 		ds
 	}

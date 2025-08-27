@@ -1,11 +1,9 @@
 use revision::revisioned;
-
 use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Deserialize, Serialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Level {
 	#[default]
 	No,
@@ -29,7 +27,8 @@ impl std::fmt::Display for Level {
 
 impl Level {
 	/// Returns if the level is a sub level of the given level.
-	/// For example Level::Namespace is a sublevel of Level::Root, and Level::Database("foo", "bar") is a sublevel of Level::Namespace("foo").
+	/// For example Level::Namespace is a sublevel of Level::Root, and
+	/// Level::Database("foo", "bar") is a sublevel of Level::Namespace("foo").
 	/// Every level is also a sublevel of itself.
 	pub(crate) fn sublevel_of(&self, other: &Self) -> bool {
 		match self {

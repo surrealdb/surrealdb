@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/core", "crates/macros", "crates/sdk"]
+members = [".", "crates/core", "crates/macros", "crates/sdk", "crates/surrealdb-types", "crates/surrealdb-types-derive"]
 
 [workspace.package]
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -7,7 +7,7 @@ edition = "2024"
 license-file = "LICENSE"
 publish = false
 version = "3.0.0"
-rust-version = "1.85.0"
+rust-version = "1.87.0"
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
 repository = "https://github.com/surrealdb/surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb"
@@ -24,6 +24,8 @@ categories = ["database-implementations", "data-structures", "embedded"]
 # workspace internal dependencies
 surrealdb = { version = "=3.0.0", package = "surrealdb", path = "./crates/sdk" }
 surrealdb-core = { version = "=3.0.0", package = "surrealdb-core", path = "./crates/core", default-features = false }
+surrealdb-types = { version = "=3.0.0", package = "surrealdb-types", path = "./crates/surrealdb-types" }
+surrealdb-types-derive = { version = "=3.0.0", package = "surrealdb-types-derive", path = "./crates/surrealdb-types-derive" }
 
 # External surreal crates
 affinitypool = { version = "0.3.1" }
@@ -75,9 +77,10 @@ bytes = "1.5.0"
 castaway = "0.2.3"
 chrono = "0.4.38"
 ciborium = "0.2.1"
-dashmap = "5.5.3"
+dashmap = "6.1.0"
 deunicode = "1.6.1"
 ext-sort = "^0.1.4"
+fastnum = "0.3.2"
 flatbuffers = { version = "25.2.10", features = ["serde"] }
 fst = "0.4.7"
 futures = "0.3.30"
@@ -119,10 +122,7 @@ reqwest = { version = "0.12.7", default-features = false }
 ring = "0.17.13"
 roaring = "0.10.6"
 rustls = { version = "0.23.12", default-features = false }
-rust_decimal = { version = "1.37.1" }
-# Sub dependency of the rustls dependency, should be updated whenever rustls is.
-# Defined so we can enable features on this dependency.
-rustls-pki-types = "1.7.0"
+rust_decimal = { version = "1.37.2" }
 rust-s3 = "0.35.1"
 # TODO: Look at dependency, 5 years old seems unmaintained.
 rust-stemmers = "1.2.0"
@@ -135,7 +135,7 @@ sha2 = "0.10.8"
 snap = "1.1.0"
 strsim = "0.11.1"
 subtle = "2.6"
-surrealdb-protocol = { version = "0.2.1", default-features = false }
+surrealdb-protocol = { version = "0.4.0", default-features = false }
 sysinfo = "0.33.0"
 tempfile = "3.10.1"
 thiserror = "1.0.63"
@@ -241,6 +241,7 @@ axum-extra = { version = "0.9.3", features = [
     "typed-header",
 ] }
 axum-server = { version = "0.7.1", features = ["tls-rustls-no-provider"] }
+bincode.workspace = true
 console-subscriber = "0.4.1"
 clap = { version = "4.4.11", features = [
     "env",

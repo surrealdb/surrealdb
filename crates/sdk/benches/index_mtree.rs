@@ -1,21 +1,21 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use criterion::measurement::WallTime;
 use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use futures::future::join_all;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use reblessive::TreeStack;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use surrealdb::kvs::Datastore;
-use surrealdb::kvs::LockType::Optimistic;
-use surrealdb::kvs::TransactionType::{Read, Write};
 use surrealdb_core::ctx::MutableContext;
 use surrealdb_core::expr::index::{Distance, MTreeParams, VectorType};
-use surrealdb_core::expr::{Id, Number, Thing, Value};
 use surrealdb_core::idx::IndexKeyBase;
 use surrealdb_core::idx::planner::checker::MTreeConditionChecker;
 use surrealdb_core::idx::trees::mtree::MTreeIndex;
-use surrealdb_core::kvs::{Transaction, TransactionType};
+use surrealdb_core::kvs::LockType::Optimistic;
+use surrealdb_core::kvs::TransactionType::{Read, Write};
+use surrealdb_core::kvs::{Datastore, Transaction, TransactionType};
+use surrealdb_core::val::{Number, RecordId, RecordIdKey, Value};
 use tokio::runtime::{Builder, Runtime};
 use tokio::task;
 
@@ -47,16 +47,16 @@ async fn mtree_index(
 	cache_size: usize,
 	tt: TransactionType,
 ) -> MTreeIndex {
-	let p = MTreeParams::new(
-		dimension as u16,
-		Distance::Euclidean,
-		VectorType::F64,
-		40,
-		100,
-		cache_size as u32,
-		cache_size as u32,
-	);
-	MTreeIndex::new(tx, IndexKeyBase::default(), &p, tt).await.unwrap()
+	let p = MTreeParams {
+		dimension: dimension as u16,
+		distance: Distance::Euclidean,
+		vector_type: VectorType::F64,
+		capacity: 40,
+		doc_ids_order: 100,
+		doc_ids_cache: cache_size as u32,
+		mtree_cache: cache_size as u32,
+	};
+	MTreeIndex::new(tx, IndexKeyBase::new(0, 0, "test", "test"), &p, tt).await.unwrap()
 }
 
 fn runtime() -> Runtime {
@@ -141,8 +141,15 @@ async fn insert_objects(
 			for i in 0..samples_size {
 				let vector: Vec<Number> = random_object(&mut rng, vector_size);
 				// Insert the sample
-				let rid = Thing::from(("test", Id::from(i as i64)));
-				mt.index_document(stk, &tx, &rid, &[Value::from(vector)]).await.unwrap();
+				let rid = RecordId::new("test".to_string(), RecordIdKey::from(i as i64));
+				mt.index_document(
+					stk,
+					&tx,
+					&rid,
+					&[vector.into_iter().map(Value::from).collect::<Value>()],
+				)
+				.await
+				.unwrap();
 			}
 		})
 		.finish()
@@ -159,6 +166,7 @@ async fn knn_lookup_objects(
 	knn: usize,
 ) {
 	let txn = ds.transaction(Read, Optimistic).await.unwrap();
+	let db = txn.ensure_ns_db("myns", "mydb", false).await.unwrap();
 	let mt = Arc::new(mtree_index(&txn, vector_size, cache_size, Read).await);
 	let ctx = Arc::new(MutableContext::from(txn));
 
@@ -166,7 +174,7 @@ async fn knn_lookup_objects(
 
 	let mut consumers = Vec::with_capacity(4);
 	for _ in 0..4 {
-		let (ctx, mt, counter) = (ctx.clone(), mt.clone(), counter.clone());
+		let (ctx, mt, counter, db) = (ctx.clone(), mt.clone(), counter.clone(), db.clone());
 		let c = task::spawn(async move {
 			let mut rng = StdRng::from_entropy();
 			let mut stack = TreeStack::new();
@@ -175,7 +183,7 @@ async fn knn_lookup_objects(
 					while counter.fetch_add(1, Ordering::Relaxed) < samples_size {
 						let object = random_object(&mut rng, vector_size);
 						let chk = MTreeConditionChecker::new(&ctx);
-						let r = mt.knn_search(stk, &ctx, &object, knn, chk).await.unwrap();
+						let r = mt.knn_search(&db, stk, &ctx, &object, knn, chk).await.unwrap();
 						assert_eq!(r.len(), knn);
 					}
 				})

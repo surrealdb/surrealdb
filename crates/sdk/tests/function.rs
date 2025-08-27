@@ -1,13 +1,13 @@
-mod parse;
-use parse::Parse;
-use surrealdb::expr::{Number, Value};
 mod helpers;
-use crate::helpers::Test;
 use helpers::new_ds;
 use surrealdb::Result;
-use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::sql::{self, SqlValue};
+use surrealdb_core::dbs::Session;
+use surrealdb_core::err::Error;
+use surrealdb_core::sql::{Expr, FunctionCall};
+use surrealdb_core::val::{Array, Number, Table, Value};
+use surrealdb_core::{sql, strand, syn};
+
+use crate::helpers::Test;
 
 async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<()> {
 	Test::new(sql).await?.expect_vals(desired_responses)?;
@@ -39,11 +39,12 @@ macro_rules! assert_delta {
 #[tokio::test]
 async fn error_on_invalid_function() -> Result<()> {
 	let dbs = new_ds().await?;
-	let mut query = sql::Query::default();
-	query.0.0 = vec![sql::Statement::Value(SqlValue::Function(Box::new(sql::Function::Normal(
-		"this is an invalid function name".to_string(),
-		Vec::new(),
-	))))];
+	let query = sql::Ast {
+		expressions: vec![sql::TopLevelExpr::Expr(Expr::FunctionCall(Box::new(FunctionCall {
+			receiver: sql::Function::Normal("this is an invalid function name".to_string()),
+			arguments: Vec::new(),
+		})))],
+	};
 	let session = Session::owner().with_ns("test").with_db("test");
 	let mut resp = dbs.process(query, &session, None).await.unwrap();
 	assert_eq!(resp.len(), 1);
@@ -91,6 +92,7 @@ async fn function_rand_ulid() -> Result<()> {
 #[tokio::test]
 async fn function_rand_ulid_from_datetime() -> Result<()> {
 	let sql = r#"
+		USE NS test DB test;
         CREATE ONLY test:[rand::ulid()] SET created = time::now(), num = 1;
         SLEEP 100ms;
         LET $rec = CREATE ONLY test:[rand::ulid()] SET created = time::now(), num = 2;
@@ -99,6 +101,9 @@ async fn function_rand_ulid_from_datetime() -> Result<()> {
 		SELECT VALUE num FROM test:[rand::ulid($rec.created - 50ms)]..;
 	"#;
 	let mut test = Test::new(sql).await?;
+	// USE NS test DB test;
+	let tmp = test.next()?.result;
+	tmp.unwrap();
 	//
 	let tmp = test.next()?.result?;
 	assert!(tmp.is_object());
@@ -116,7 +121,7 @@ async fn function_rand_ulid_from_datetime() -> Result<()> {
 	assert!(tmp.is_object());
 	//
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::parse("[2, 3]"));
+	assert_eq!(tmp, syn::value("[2, 3]").unwrap());
 	//
 	Ok(())
 }
@@ -137,6 +142,7 @@ async fn function_rand_uuid() -> Result<()> {
 #[tokio::test]
 async fn function_rand_uuid_from_datetime() -> Result<()> {
 	let sql = r#"
+		USE NS test DB test;
         CREATE ONLY test:[rand::uuid()] SET created = time::now(), num = 1;
         SLEEP 100ms;
         LET $rec = CREATE ONLY test:[rand::uuid()] SET created = time::now(), num = 2;
@@ -145,6 +151,9 @@ async fn function_rand_uuid_from_datetime() -> Result<()> {
 		SELECT VALUE num FROM test:[rand::uuid($rec.created - 50ms)]..;
 	"#;
 	let mut test = Test::new(sql).await?;
+	// USE NS test DB test;
+	let tmp = test.next()?.result;
+	tmp.unwrap();
 	//
 	let tmp = test.next()?.result?;
 	assert!(tmp.is_object());
@@ -162,7 +171,7 @@ async fn function_rand_uuid_from_datetime() -> Result<()> {
 	assert!(tmp.is_object());
 	//
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::parse("[2, 3]"));
+	assert_eq!(tmp, syn::value("[2, 3]").unwrap());
 	//
 	Ok(())
 }
@@ -196,6 +205,7 @@ async fn function_rand_uuid_v7() -> Result<()> {
 #[tokio::test]
 async fn function_rand_uuid_v7_from_datetime() -> Result<()> {
 	let sql = r#"
+		USE NS test DB test;
         CREATE ONLY test:[rand::uuid::v7()] SET created = time::now(), num = 1;
         SLEEP 100ms;
         LET $rec = CREATE ONLY test:[rand::uuid::v7()] SET created = time::now(), num = 2;
@@ -204,6 +214,9 @@ async fn function_rand_uuid_v7_from_datetime() -> Result<()> {
 		SELECT VALUE num FROM test:[rand::uuid::v7($rec.created - 50ms)]..;
 	"#;
 	let mut test = Test::new(sql).await?;
+	// USE NS test DB test;
+	let tmp = test.next()?.result;
+	tmp.unwrap();
 	//
 	let tmp = test.next()?.result?;
 	assert!(tmp.is_object());
@@ -221,7 +234,7 @@ async fn function_rand_uuid_v7_from_datetime() -> Result<()> {
 	assert!(tmp.is_object());
 	//
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::parse("[2, 3]"));
+	assert_eq!(tmp, syn::value("[2, 3]").unwrap());
 	//
 	Ok(())
 }
@@ -233,19 +246,23 @@ async fn function_rand_uuid_v7_from_datetime() -> Result<()> {
 #[tokio::test]
 async fn function_record_exists() -> Result<()> {
 	let sql = r#"
+		USE NS test DB test;
 		RETURN record::exists(r"person:tobie");
 		CREATE ONLY person:tobie;
 		RETURN record::exists(r"person:tobie");
 	"#;
 	let mut test = Test::new(sql).await?;
-	//
+	// USE NS test DB test;
+	let tmp = test.next()?.result;
+	tmp.unwrap();
+	// RETURN record::exists(r"person:tobie");
 	let tmp = test.next()?.result?;
 	let val = Value::from(false);
 	assert_eq!(tmp, val);
-	//
+	// CREATE ONLY person:tobie;
 	let tmp = test.next()?.result?;
 	assert!(tmp.is_object());
-	//
+	// RETURN record::exists(r"person:tobie");
 	let tmp = test.next()?.result?;
 	let val = Value::from(true);
 	assert_eq!(tmp, val);
@@ -434,7 +451,7 @@ async fn function_search_analyzer() -> Result<()> {
 	}
 	//
 	let tmp = test.next()?.result?;
-	let val: Value = Value::parse("['This', 'is', 'a', 'sample', 'of', 'HTML']");
+	let val: Value = syn::value("['This', 'is', 'a', 'sample', 'of', 'HTML']").unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
@@ -1607,31 +1624,31 @@ async fn function_string_slice() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("'the quick brown fox jumps over the lazy dog.'");
+	let val = syn::value("'the quick brown fox jumps over the lazy dog.'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("'fox jumps over the lazy dog.'");
+	let val = syn::value("'fox jumps over the lazy dog.'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("'the quick brown fox jumps over the lazy dog.'");
+	let val = syn::value("'the quick brown fox jumps over the lazy dog.'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("'the quick brown fox jumps over the lazy dog'");
+	let val = syn::value("'the quick brown fox jumps over the lazy dog'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("'fox jumps over the lazy dog'");
+	let val = syn::value("'fox jumps over the lazy dog'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("'lazy dog'");
+	let val = syn::value("'lazy dog'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("''");
+	let val = syn::value("''").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1671,15 +1688,15 @@ async fn function_string_split() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("['', '']");
+	let val = syn::value("['', '']").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("['this', 'is', 'a', 'list']");
+	let val = syn::value("['this', 'is', 'a', 'list']").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("['this', 'is', 'another', 'test']");
+	let val = syn::value("['this', 'is', 'another', 'test']").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1767,15 +1784,15 @@ async fn function_string_words() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("[]");
+	let val = Array::new().into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("['test']");
+	let val = syn::value("['test']").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("['this', 'is', 'a', 'test']");
+	let val = syn::value("['this', 'is', 'a', 'test']").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1795,15 +1812,15 @@ async fn function_time_ceil() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1987-06-25T00:00:00Z'");
+	let val = syn::value("d'1987-06-25T00:00:00Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1987-12-28T00:00:00Z'");
+	let val = syn::value("d'1987-12-28T00:00:00Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'2023-05-11T03:09:00Z'");
+	let val = syn::value("d'2023-05-11T03:09:00Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1837,15 +1854,15 @@ async fn function_time_floor() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1987-06-18T00:00:00Z'");
+	let val = syn::value("d'1987-06-18T00:00:00Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1986-12-28T00:00:00Z'");
+	let val = syn::value("d'1986-12-28T00:00:00Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'2023-05-11T03:09:00Z'");
+	let val = syn::value("d'2023-05-11T03:09:00Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1860,11 +1877,11 @@ async fn function_time_format() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("'1987-06-22'");
+	let val = syn::value("'1987-06-22'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("'08:30:45'");
+	let val = syn::value("'08:30:45'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1879,11 +1896,11 @@ async fn function_time_group() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1987-06-22T08:00:00Z'");
+	let val = syn::value("d'1987-06-22T08:00:00Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1987-06-01T00:00:00Z'");
+	let val = syn::value("d'1987-06-01T00:00:00Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1943,7 +1960,7 @@ async fn function_time_min() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1987-06-22T08:30:45Z'");
+	let val = syn::value("d'1987-06-22T08:30:45Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1957,7 +1974,7 @@ async fn function_time_max() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1988-06-22T08:30:45Z'");
+	let val = syn::value("d'1988-06-22T08:30:45Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2075,11 +2092,11 @@ async fn function_time_round() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1987-06-25T00:00:00Z'");
+	let val = syn::value("d'1987-06-25T00:00:00Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1986-12-28T00:00:00Z'");
+	let val = syn::value("d'1986-12-28T00:00:00Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2202,11 +2219,11 @@ async fn function_time_from_nanos() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1982-03-03T17:49:30.384840Z'");
+	let val = syn::value("d'1982-03-03T17:49:30.384840Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'2060-01-02T08:28:24.384440Z'");
+	let val = syn::value("d'2060-01-02T08:28:24.384440Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2221,11 +2238,11 @@ async fn function_time_from_micros() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1982-03-03T17:49:30.384840Z'");
+	let val = syn::value("d'1982-03-03T17:49:30.384840Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'2060-01-02T08:28:24.384440Z'");
+	let val = syn::value("d'2060-01-02T08:28:24.384440Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2240,11 +2257,11 @@ async fn function_time_from_millis() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1982-03-03T17:49:33.840Z'");
+	let val = syn::value("d'1982-03-03T17:49:33.840Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'2060-01-02T08:28:24.440Z'");
+	let val = syn::value("d'2060-01-02T08:28:24.440Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2259,11 +2276,11 @@ async fn function_time_from_secs() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1982-03-04T01:37:20Z'");
+	let val = syn::value("d'1982-03-04T01:37:20Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'2060-03-05T09:27:20Z'");
+	let val = syn::value("d'2060-03-05T09:27:20Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2277,7 +2294,7 @@ async fn function_time_from_ulid() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'2024-09-23T19:55:34.933Z'");
+	let val = syn::value("d'2024-09-23T19:55:34.933Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2292,11 +2309,11 @@ async fn function_time_from_unix() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1982-03-04T01:37:20Z'");
+	let val = syn::value("d'1982-03-04T01:37:20Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'2060-03-05T09:27:20Z'");
+	let val = syn::value("d'2060-03-05T09:27:20Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2335,7 +2352,7 @@ async fn function_time_from_uuid() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'2024-09-23T19:55:34.933Z'");
+	let val = syn::value("d'2024-09-23T19:55:34.933Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2373,11 +2390,11 @@ async fn function_type_datetime() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1987-06-22T00:00:00Z'");
+	let val = syn::value("d'1987-06-22T00:00:00Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'2022-08-01T00:00:00Z'");
+	let val = syn::value("d'2022-08-01T00:00:00Z'").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2418,11 +2435,11 @@ async fn function_type_duration() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("1h30m");
+	let val = syn::value("1h30m").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("1h30m30s50ms");
+	let val = syn::value("1h30m30s50ms").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -3006,11 +3023,11 @@ async fn function_type_number() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("194719.1947104740");
+	let val = syn::value("194719.1947104740").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("1457105732053058.3957394823281756381849375");
+	let val = syn::value("1457105732053058.3957394823281756381849375").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -3025,7 +3042,7 @@ async fn function_type_point() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"{
 			type: 'Point',
 			coordinates: [
@@ -3033,11 +3050,12 @@ async fn function_type_point() -> Result<()> {
 				6.789
 			]
 		}",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"{
 			type: 'Point',
 			coordinates: [
@@ -3045,7 +3063,8 @@ async fn function_type_point() -> Result<()> {
 				51.509865
 			]
 		}",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -3099,11 +3118,11 @@ async fn function_type_table() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::Table("person".into());
+	let val = Value::Table(Table::from_strand(strand!("person").to_owned()));
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::Table("animal".into());
+	let val = Value::Table(Table::from_strand(strand!("animal").to_owned()));
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -3112,6 +3131,7 @@ async fn function_type_table() -> Result<()> {
 #[tokio::test]
 async fn function_type_thing() -> Result<()> {
 	let sql = r#"
+		USE NS test DB test;
 		CREATE type::thing('person', 'test');
 		CREATE type::thing('person', 1434619);
 		CREATE type::thing(<string> person:john);
@@ -3119,79 +3139,63 @@ async fn function_type_thing() -> Result<()> {
 		CREATE type::thing('temperature', ['London', '2022-09-30T20:25:01.406828Z']);
 	"#;
 	let mut test = Test::new(sql).await?;
+	// USE NS test DB test;
+	let tmp = test.next()?.result;
+	tmp.unwrap();
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: person:test,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: person:1434619,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: person:john,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: city:⟨8e60244d-95f6-4f95-9e30-09a98977efb0⟩,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: temperature:['London', '2022-09-30T20:25:01.406828Z'],
 			}
 		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn function_type_range() -> Result<()> {
-	let sql = r#"
-	    RETURN type::range(..);
-		RETURN type::range(1..2);
-		RETURN type::range([1, 2]);
-	"#;
-	let mut test = Test::new(sql).await?;
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::parse("..");
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::parse("1..2");
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::parse("1..2");
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -3209,7 +3213,7 @@ async fn function_value_diff() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse(
+	let val = syn::value(
 		r#"
 		[
 			{
@@ -3223,7 +3227,8 @@ async fn function_value_diff() -> Result<()> {
 			}
 		]
 	"#,
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -3247,7 +3252,7 @@ async fn function_value_patch() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("{ b: 2, c: 3 }");
+	let val = syn::value("{ b: 2, c: 3 }").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -3679,10 +3684,8 @@ async fn function_vector_distance_chebyshev() -> Result<()> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_head() -> Result<()> {
-	use wiremock::{
-		Mock, ResponseTemplate,
-		matchers::{header, method, path},
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("HEAD"))
@@ -3703,10 +3706,8 @@ pub async fn function_http_head() -> Result<()> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_get() -> Result<()> {
-	use wiremock::{
-		Mock, ResponseTemplate,
-		matchers::{header, method, path},
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("GET"))
@@ -3732,10 +3733,8 @@ pub async fn function_http_get() -> Result<()> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_put() -> Result<()> {
-	use wiremock::{
-		Mock, ResponseTemplate,
-		matchers::{header, method, path},
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("PUT"))
@@ -3760,10 +3759,8 @@ pub async fn function_http_put() -> Result<()> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_post() -> Result<()> {
-	use wiremock::{
-		Mock, ResponseTemplate,
-		matchers::{header, method, path},
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("POST"))
@@ -3790,10 +3787,8 @@ pub async fn function_http_post() -> Result<()> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_patch() -> Result<()> {
-	use wiremock::{
-		Mock, ResponseTemplate,
-		matchers::{header, method, path},
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("PATCH"))
@@ -3820,10 +3815,8 @@ pub async fn function_http_patch() -> Result<()> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_delete() -> Result<()> {
-	use wiremock::{
-		Mock, ResponseTemplate,
-		matchers::{header, method, path},
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("DELETE"))
@@ -3849,10 +3842,8 @@ pub async fn function_http_delete() -> Result<()> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_error() -> Result<()> {
-	use wiremock::{
-		Mock, ResponseTemplate,
-		matchers::{header, method, path},
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("GET"))
@@ -3881,10 +3872,8 @@ pub async fn function_http_error() -> Result<()> {
 #[cfg(all(feature = "http", feature = "scripting"))]
 #[tokio::test]
 pub async fn function_http_get_from_script() -> Result<()> {
-	use wiremock::{
-		Mock, ResponseTemplate,
-		matchers::{header, method, path},
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("GET"))

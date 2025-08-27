@@ -8,7 +8,7 @@ value = "NONE"
 value = "4"
 
 [[test.results]]
-value = "NONE"
+error = "There was a problem running the non_func() function. no such method found for the object type"
 
 */
 

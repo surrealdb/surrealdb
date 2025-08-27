@@ -1,24 +1,22 @@
+use std::fmt::{self, Display, Formatter};
+
+use anyhow::Result;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::catalog::TableDefinition;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::statements::define::DefineTableStatement;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
-use anyhow::Result;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
-use uuid::Uuid;
-
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct RemoveIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
-	#[revision(start = 2)]
 	pub if_exists: bool,
 }
 
@@ -28,7 +26,7 @@ impl RemoveIndexStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the transaction
 		let txn = ctx.tx();
 		// Clear the index store cache
@@ -49,19 +47,25 @@ impl RemoveIndexStatement {
 
 		// Delete the definition
 		let key = crate::key::table::ix::new(ns, db, &self.what, &self.name);
-		txn.del(key).await?;
+		txn.del(&key).await?;
 		// Remove the index data
 		let key = crate::key::index::all::new(ns, db, &self.what, &self.name);
-		txn.delp(key).await?;
+		txn.delp(&key).await?;
 		// Refresh the table cache for indexes
 		let key = crate::key::database::tb::new(ns, db, &self.what);
-		let tb = txn.get_tb(ns, db, &self.what).await?;
+		let Some(tb) = txn.get_tb(ns, db, &self.what).await? else {
+			return Err(Error::TbNotFound {
+				name: self.what.to_string(),
+			}
+			.into());
+		};
+
 		txn.set(
-			key,
-			revision::to_vec(&DefineTableStatement {
+			&key,
+			&TableDefinition {
 				cache_indexes_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
-			})?,
+			},
 			None,
 		)
 		.await?;
@@ -70,7 +74,7 @@ impl RemoveIndexStatement {
 			cache.clear_tb(ns, db, &self.what);
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

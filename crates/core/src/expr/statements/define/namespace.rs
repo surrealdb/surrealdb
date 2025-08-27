@@ -1,29 +1,30 @@
+use std::fmt::{self, Display};
+
+use anyhow::{Result, bail};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::DefineKind;
+use crate::catalog::NamespaceDefinition;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Strand, Value};
+use crate::expr::{Base, Ident};
 use crate::iam::{Action, ResourceKind};
-use anyhow::{Result, bail};
+use crate::kvs::impl_kv_value_revisioned;
+use crate::val::{Strand, Value};
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
-
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct DefineNamespaceStatement {
+	pub kind: DefineKind,
 	pub id: Option<u32>,
 	pub name: Ident,
 	pub comment: Option<Strand>,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub overwrite: bool,
 }
+
+impl_kv_value_revisioned!(DefineNamespaceStatement);
 
 impl DefineNamespaceStatement {
 	/// Process this type returning a computed simple Value
@@ -38,34 +39,36 @@ impl DefineNamespaceStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
-		if txn.get_ns(&self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::NsAlreadyExists {
-					name: self.name.to_string(),
-				});
+		let namespace_id = if let Some(ns) = txn.get_ns_by_name(&self.name).await? {
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::NsAlreadyExists {
+							name: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => return Ok(Value::None),
 			}
-		}
+			ns.namespace_id
+		} else {
+			txn.lock().await.get_next_ns_id().await?
+		};
+
 		// Process the statement
-		let key = crate::key::root::ns::new(&self.name);
-		txn.set(
-			key,
-			revision::to_vec(&DefineNamespaceStatement {
-				id: match self.id {
-					Some(id) => Some(id),
-					None => Some(txn.lock().await.get_next_ns_id().await?),
-				},
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
-				..self.clone()
-			})?,
-			None,
-		)
-		.await?;
+		let catalog_key = crate::key::catalog::ns::new(&self.name);
+		let ns_def = NamespaceDefinition {
+			namespace_id,
+			name: self.name.to_string(),
+			comment: self.comment.clone().map(|c| c.into_string()),
+		};
+		txn.set(&catalog_key, &ns_def, None).await?;
+
+		let key = crate::key::root::ns::new(namespace_id);
+		txn.set(&key, &ns_def, None).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -74,25 +77,15 @@ impl DefineNamespaceStatement {
 impl Display for DefineNamespaceStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE NAMESPACE")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineNamespaceStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
 	}
 }

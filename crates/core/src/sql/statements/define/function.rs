@@ -1,39 +1,31 @@
-use crate::sql::fmt::{is_pretty, pretty_indent};
-
-use crate::sql::{Block, Ident, Kind, Permission, Strand};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
-#[revisioned(revision = 4)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use super::DefineKind;
+use crate::sql::fmt::{is_pretty, pretty_indent};
+use crate::sql::{Block, Ident, Kind, Permission};
+use crate::val::Strand;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct DefineFunctionStatement {
+	pub kind: DefineKind,
 	pub name: Ident,
 	pub args: Vec<(Ident, Kind)>,
 	pub block: Block,
 	pub comment: Option<Strand>,
 	pub permissions: Permission,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub overwrite: bool,
-	#[revision(start = 4)]
 	pub returns: Option<Kind>,
 }
 
 impl fmt::Display for DefineFunctionStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE FUNCTION")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
-		}
-		write!(f, " fn::{}(", self.name.0)?;
+		write!(f, " fn::{}(", &*self.name)?;
 		for (i, (name, kind)) in self.args.iter().enumerate() {
 			if i > 0 {
 				f.write_str(", ")?;
@@ -62,13 +54,12 @@ impl fmt::Display for DefineFunctionStatement {
 impl From<DefineFunctionStatement> for crate::expr::statements::DefineFunctionStatement {
 	fn from(v: DefineFunctionStatement) -> Self {
 		Self {
+			kind: v.kind.into(),
 			name: v.name.into(),
 			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
 			block: v.block.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 			permissions: v.permissions.into(),
-			if_not_exists: v.if_not_exists,
-			overwrite: v.overwrite,
 			returns: v.returns.map(Into::into),
 		}
 	}
@@ -77,13 +68,12 @@ impl From<DefineFunctionStatement> for crate::expr::statements::DefineFunctionSt
 impl From<crate::expr::statements::DefineFunctionStatement> for DefineFunctionStatement {
 	fn from(v: crate::expr::statements::DefineFunctionStatement) -> Self {
 		Self {
+			kind: v.kind.into(),
 			name: v.name.into(),
 			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
 			block: v.block.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 			permissions: v.permissions.into(),
-			if_not_exists: v.if_not_exists,
-			overwrite: v.overwrite,
 			returns: v.returns.map(Into::into),
 		}
 	}

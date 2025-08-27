@@ -1,37 +1,41 @@
 //! Stores a DEFINE API definition
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::expr::statements::define::ApiDefinition;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Ap<'a> {
+pub(crate) struct Ap<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	_d: u8,
 	_e: u8,
 	pub ap: &'a str,
 }
-impl_key!(Ap<'a>);
 
-pub fn new<'a>(ns: &'a str, db: &'a str, ap: &'a str) -> Ap<'a> {
+impl KVKey for Ap<'_> {
+	type ValueType = ApiDefinition;
+}
+
+pub fn new(ns: NamespaceId, db: DatabaseId, ap: &str) -> Ap<'_> {
 	Ap::new(ns, db, ap)
 }
 
-pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode()?;
+pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
+	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"!ap\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode()?;
+pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
+	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"!ap\xff");
 	Ok(k)
 }
@@ -43,7 +47,7 @@ impl Categorise for Ap<'_> {
 }
 
 impl<'a> Ap<'a> {
-	pub fn new(ns: &'a str, db: &'a str, ap: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, ap: &'a str) -> Self {
 		Self {
 			__: b'/', // /
 			_a: b'*', // *
@@ -60,32 +64,29 @@ impl<'a> Ap<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
             let val = Ap::new(
-            "ns",
-            "db",
+            NamespaceId(1),
+            DatabaseId(2),
             "test",
         );
-		let enc = Ap::encode(&val).unwrap();
-		assert_eq!(enc, b"/*ns\0*db\0!aptest\0");
-		let dec = Ap::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = Ap::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!aptest\0");
 	}
 
 	#[test]
 	fn prefix() {
-		let val = super::prefix("namespace", "database").unwrap();
-		assert_eq!(val, b"/*namespace\0*database\0!ap\0");
+		let val = super::prefix(NamespaceId(1), DatabaseId(2)).unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!ap\0");
 	}
 
 	#[test]
 	fn suffix() {
-		let val = super::suffix("namespace", "database").unwrap();
-		assert_eq!(val, b"/*namespace\0*database\0!ap\xff");
+		let val = super::suffix(NamespaceId(1), DatabaseId(2)).unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!ap\xff");
 	}
 }

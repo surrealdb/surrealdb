@@ -1,11 +1,7 @@
-use crate::syn::{
-	error::{SyntaxError, bail, syntax_error},
-	lexer::{
-		Lexer,
-		unicode::{byte, chars},
-	},
-	token::{Token, TokenKind, t},
-};
+use crate::syn::error::{SyntaxError, bail, syntax_error};
+use crate::syn::lexer::Lexer;
+use crate::syn::lexer::unicode::{byte, chars};
+use crate::syn::token::{Token, TokenKind, t};
 
 impl Lexer<'_> {
 	/// Eats a single line comment.

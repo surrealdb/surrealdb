@@ -1,43 +1,45 @@
+use std::fmt::{self, Display};
+#[cfg(target_family = "wasm")]
+use std::sync::Arc;
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use super::DefineKind;
+use crate::catalog::TableDefinition;
 use crate::ctx::Context;
 #[cfg(target_family = "wasm")]
 use crate::dbs::Force;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::statements::DefineTableStatement;
+#[cfg(target_family = "wasm")]
+use crate::expr::Output;
 use crate::expr::statements::info::InfoStructure;
 #[cfg(target_family = "wasm")]
 use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
-use crate::expr::{Base, Ident, Idioms, Index, Part, Strand, Value};
-#[cfg(target_family = "wasm")]
-use crate::expr::{Output, Values};
+use crate::expr::{Base, Ident, Idiom, Index, Part};
 use crate::iam::{Action, ResourceKind};
-use anyhow::{Result, bail};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
-#[cfg(target_family = "wasm")]
-use std::sync::Arc;
-use uuid::Uuid;
+use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::fmt::Fmt;
+use crate::val::{Array, Strand, Value};
 
-#[revisioned(revision = 4)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct DefineIndexStatement {
+	pub kind: DefineKind,
 	pub name: Ident,
 	pub what: Ident,
-	pub cols: Idioms,
+	pub cols: Vec<Idiom>,
 	pub index: Index,
 	pub comment: Option<Strand>,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub overwrite: bool,
-	#[revision(start = 4)]
 	pub concurrently: bool,
 }
+
+impl_kv_value_revisioned!(DefineIndexStatement);
 
 impl DefineIndexStatement {
 	/// Process this type returning a computed simple Value
@@ -50,82 +52,96 @@ impl DefineIndexStatement {
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
-		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
 		// Fetch the transaction
 		let txn = ctx.tx();
+
+		let (ns, db) = opt.ns_db()?;
+		let tb = txn.ensure_ns_db_tb(ns, db, &self.what, opt.strict).await?;
+
 		// Check if the definition exists
-		if txn.get_tb_index(ns, db, &self.what, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::IxAlreadyExists {
-					name: self.name.to_string(),
-				});
+		if txn.get_tb_index(tb.namespace_id, tb.database_id, &tb.name, &self.name).await.is_ok() {
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::IxAlreadyExists {
+							name: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 			// Clear the index store cache
 			#[cfg(not(target_family = "wasm"))]
 			ctx.get_index_stores()
-				.index_removed(ctx.get_index_builder(), &txn, ns, db, &self.what, &self.name)
+				.index_removed(
+					ctx.get_index_builder(),
+					&txn,
+					tb.namespace_id,
+					tb.database_id,
+					&tb.name,
+					&self.name,
+				)
 				.await?;
 			#[cfg(target_family = "wasm")]
-			ctx.get_index_stores().index_removed(&txn, ns, db, &self.what, &self.name).await?;
+			ctx.get_index_stores()
+				.index_removed(&txn, tb.namespace_id, tb.database_id, &tb.name, &self.name)
+				.await?;
 		}
-		// Does the table exist?
-		match txn.get_tb(ns, db, &self.what).await {
-			Ok(tb) => {
-				// Are we SchemaFull?
-				if tb.full {
-					// Check that the fields exist
-					for idiom in self.cols.iter() {
-						let Some(Part::Field(first)) = idiom.0.first() else {
-							continue;
-						};
-						txn.get_tb_field(ns, db, &self.what, &first.to_string()).await?;
-					}
+
+		// If the table is schemafull, ensure that the fields exist.
+		if tb.schemafull {
+			// Check that the fields exist
+			for idiom in self.cols.iter() {
+				let Some(Part::Field(first)) = idiom.0.first() else {
+					continue;
+				};
+				if txn
+					.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, &first.as_raw_string())
+					.await?
+					.is_none()
+				{
+					bail!(Error::FdNotFound {
+						name: first.to_string(),
+					});
 				}
 			}
-			Err(e) => {
-				if !matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
-					return Err(e);
-				}
-			}
 		}
+
 		// Process the statement
-		let key = crate::key::table::ix::new(ns, db, &self.what, &self.name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-		txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?;
+		let key = crate::key::table::ix::new(tb.namespace_id, tb.database_id, &tb.name, &self.name);
 		txn.set(
-			key,
-			revision::to_vec(&DefineIndexStatement {
-				// Don't persist the `IF NOT EXISTS`, `OVERWRITE` and `CONCURRENTLY` clause to schema
-				if_not_exists: false,
-				overwrite: false,
+			&key,
+			&DefineIndexStatement {
+				// Don't persist the `IF NOT EXISTS`, `OVERWRITE` and `CONCURRENTLY` clause to
+				// schema
+				kind: DefineKind::Default,
 				concurrently: false,
 				..self.clone()
-			})?,
+			},
 			None,
 		)
 		.await?;
+
 		// Refresh the table cache
-		let key = crate::key::database::tb::new(ns, db, &self.what);
-		let tb = txn.get_tb(ns, db, &self.what).await?;
+
+		let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
 		txn.set(
-			key,
-			revision::to_vec(&DefineTableStatement {
+			&key,
+			&TableDefinition {
 				cache_indexes_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
-			})?,
+			},
 			None,
 		)
 		.await?;
+
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &self.what);
+			cache.clear_tb(tb.namespace_id, tb.database_id, &tb.name);
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Process the index
 		#[cfg(not(target_family = "wasm"))]
 		self.async_index(stk, ctx, opt, doc, !self.concurrently).await?;
@@ -143,6 +159,8 @@ impl DefineIndexStatement {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<()> {
+		use crate::expr::Expr;
+
 		{
 			// Create the remove statement
 			let stm = RemoveIndexStatement {
@@ -158,7 +176,7 @@ impl DefineIndexStatement {
 			let opt = &opt.new_with_force(Force::Index(Arc::new([self.clone()])));
 			// Update the index data
 			let stm = UpdateStatement {
-				what: Values(vec![Value::Table(self.what.clone().into())]),
+				what: vec![Expr::Table(self.what.clone().into())],
 				output: Some(Output::None),
 				..UpdateStatement::default()
 			};
@@ -176,10 +194,11 @@ impl DefineIndexStatement {
 		_doc: Option<&CursorDoc>,
 		blocking: bool,
 	) -> Result<()> {
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let rcv = ctx
 			.get_index_builder()
 			.ok_or_else(|| Error::unreachable("No Index Builder"))?
-			.build(ctx, opt.clone(), self.clone().into(), blocking)?;
+			.build(ctx, opt.clone(), ns, db, self.clone().into(), blocking)?;
 		if let Some(rcv) = rcv {
 			rcv.await.map_err(|_| Error::IndexingBuildingCancelled)?
 		} else {
@@ -191,13 +210,18 @@ impl DefineIndexStatement {
 impl Display for DefineIndexStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE INDEX")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
-		}
-		write!(f, " {} ON {} FIELDS {}", self.name, self.what, self.cols)?;
+		write!(
+			f,
+			" {} ON {} FIELDS {}",
+			self.name,
+			self.what,
+			Fmt::comma_separated(self.cols.iter())
+		)?;
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index)?;
 		}
@@ -216,7 +240,7 @@ impl InfoStructure for DefineIndexStatement {
 		Value::from(map! {
 			"name".to_string() => self.name.structure(),
 			"what".to_string() => self.what.structure(),
-			"cols".to_string() => self.cols.structure(),
+			"cols".to_string() => Value::Array(Array(self.cols.into_iter().map(|x| x.structure()).collect())),
 			"index".to_string() => self.index.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})

@@ -7,19 +7,19 @@ mod common;
 
 #[cfg(all(docker, feature = "storage-rocksdb"))]
 mod database_upgrade {
-	use super::common::docker::DockerContainer;
 	use std::net::Ipv4Addr;
 	use std::time::Duration;
+
 	use surrealdb::engine::any::{Any, connect};
 	use surrealdb::opt::auth::Root;
 	use surrealdb::{Connection, Surreal, Value};
 	use test_log::test;
 	use tokio::net::TcpListener;
-	use tokio::time::sleep;
-	use tokio::time::timeout;
-	use tracing::error;
-	use tracing::info;
+	use tokio::time::{sleep, timeout};
+	use tracing::{error, info};
 	use ulid::Ulid;
+
+	use super::common::docker::DockerContainer;
 
 	const NS: &str = "test";
 	const DB: &str = "test";
@@ -239,7 +239,8 @@ mod database_upgrade {
 		let client = Surreal::<Any>::init();
 		let db = client.clone();
 		let localhost = Ipv4Addr::LOCALHOST;
-		// We need HTTP because we are using the import method which is not available with WS
+		// We need HTTP because we are using the import method which is not available
+		// with WS
 		let endpoint = format!("http://{localhost}:{port}");
 		info!("Wait for the database to be ready; endpoint => {endpoint}");
 		tokio::spawn(async move {

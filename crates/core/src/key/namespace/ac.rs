@@ -1,35 +1,39 @@
 //! Stores a DEFINE ACCESS ON NAMESPACE configuration
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::NamespaceId;
+use crate::expr::statements::define::DefineAccessStatement;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::KVKey;
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Ac<'a> {
+pub(crate) struct Ac<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
 	_c: u8,
 	_d: u8,
 	pub ac: &'a str,
 }
-impl_key!(Ac<'a>);
 
-pub fn new<'a>(ns: &'a str, ac: &'a str) -> Ac<'a> {
+impl KVKey for Ac<'_> {
+	type ValueType = DefineAccessStatement;
+}
+
+pub fn new(ns: NamespaceId, ac: &str) -> Ac<'_> {
 	Ac::new(ns, ac)
 }
 
-pub fn prefix(ns: &str) -> Result<Vec<u8>> {
-	let mut k = crate::key::namespace::all::new(ns).encode()?;
+pub fn prefix(ns: NamespaceId) -> Result<Vec<u8>> {
+	let mut k = crate::key::namespace::all::new(ns).encode_key()?;
 	k.extend_from_slice(b"!ac\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: &str) -> Result<Vec<u8>> {
-	let mut k = crate::key::namespace::all::new(ns).encode()?;
+pub fn suffix(ns: NamespaceId) -> Result<Vec<u8>> {
+	let mut k = crate::key::namespace::all::new(ns).encode_key()?;
 	k.extend_from_slice(b"!ac\xff");
 	Ok(k)
 }
@@ -41,7 +45,7 @@ impl Categorise for Ac<'_> {
 }
 
 impl<'a> Ac<'a> {
-	pub fn new(ns: &'a str, ac: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, ac: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -56,31 +60,28 @@ impl<'a> Ac<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Ac::new(
-			"testns",
+			NamespaceId(1),
 			"testac",
 		);
-		let enc = Ac::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0!actestac\0");
-
-		let dec = Ac::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = Ac::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01!actestac\0");
 	}
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix("testns").unwrap();
-		assert_eq!(val, b"/*testns\0!ac\0");
+		let val = super::prefix(NamespaceId(1)).unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01!ac\0");
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::suffix("testns").unwrap();
-		assert_eq!(val, b"/*testns\0!ac\xff");
+		let val = super::suffix(NamespaceId(1)).unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01!ac\xff");
 	}
 }

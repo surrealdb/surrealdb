@@ -1,5 +1,6 @@
-use crate::expr::number::Number;
 use std::collections::BTreeMap;
+
+use crate::val::Number;
 
 pub trait Mode {
 	/// Find the most frequent number in collection
