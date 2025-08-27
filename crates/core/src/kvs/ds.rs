@@ -72,14 +72,6 @@ const LQ_CHANNEL_SIZE: usize = 15_000;
 // credentials for the first time
 const INITIAL_USER_ROLE: &str = "owner";
 
-const FDB: &str = "fdb:";
-const FILE: &str = "file:";
-const INDXDB: &str = "indxdb:";
-const ROCKSDB: &str = "rocksdb:";
-const SURREALKV: &str = "surrealkv:";
-const SURREALKV_VERSIONED: &str = "surrealkv+versioned:";
-const TIKV: &str = "tikv:";
-
 /// The underlying datastore instance which stores the dataset.
 pub struct Datastore {
 	transaction_factory: TransactionFactory,
@@ -295,42 +287,42 @@ impl Datastore {
 				bail!(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a File datastore
-			s if s.starts_with(FILE) => {
+			s if s.starts_with("file:") => {
 				#[cfg(feature = "kv-rocksdb")]
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
 
-					let s = s.trim_start_matches(FILE);
+					let s = s.trim_start_matches("file:");
 					let s = s.trim_start_matches("/");
 					// Initialise the storage engine
-					info!(target: TARGET, "Starting kvs store at {ROCKSDB}//{s}");
+					info!(target: TARGET, "Starting kvs store at rocksdb://{s}");
 					warn!(
 						"file:// is deprecated, please use surrealkv:// or surrealkv+versioned:// or rocksdb://"
 					);
 
 					let v = super::rocksdb::Datastore::new(s).await.map(DatastoreFlavor::RocksDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store at {ROCKSDB}//{s}");
+					info!(target: TARGET, "Started kvs store at rocksdb://{s}");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
 				bail!(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a RocksDB datastore
-			s if s.starts_with(ROCKSDB) => {
+			s if s.starts_with("rocksdb:") => {
 				#[cfg(feature = "kv-rocksdb")]
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
 					// Initialise the storage engine
-					let s = s.trim_start_matches(ROCKSDB);
+					let s = s.trim_start_matches("rocksdb:");
 					let s = s.trim_start_matches("/");
-					info!(target: TARGET, "Starting kvs store at {ROCKSDB}//{s}");
+					info!(target: TARGET, "Starting kvs store at rocksdb://{s}");
 
 					let v = super::rocksdb::Datastore::new(s).await.map(DatastoreFlavor::RocksDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store at {ROCKSDB}//{s}");
+					info!(target: TARGET, "Started kvs store at rocksdb://{s}");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
@@ -352,9 +344,9 @@ impl Datastore {
 					let path = format!(
 						"{}//{s}",
 						if enable_versions {
-							SURREALKV_VERSIONED
+							"surrealkv+versioned:"
 						} else {
-							SURREALKV
+							"surrealkv:"
 						}
 					);
 
@@ -371,48 +363,48 @@ impl Datastore {
 				bail!(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate an IndxDB database
-			s if s.starts_with(INDXDB) => {
+			s if s.starts_with("indxdb:") => {
 				#[cfg(feature = "kv-indxdb")]
 				{
-					let s = s.trim_start_matches("INDXDB");
+					let s = s.trim_start_matches("indxdb:");
 					let s = s.trim_start_matches("/");
-					info!(target: TARGET, "Starting kvs store at {INDXDB}//{s}");
+					info!(target: TARGET, "Starting kvs store at indxdb://{s}");
 
 					let v = super::indxdb::Datastore::new(s).await.map(DatastoreFlavor::IndxDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store at {INDXDB}//{s}");
+					info!(target: TARGET, "Started kvs store at indxdb://{s}");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
 				bail!(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a TiKV datastore
-			s if s.starts_with(TIKV) => {
+			s if s.starts_with("tikv:") => {
 				#[cfg(feature = "kv-tikv")]
 				{
-					let s = s.trim_start_matches(TIKV);
+					let s = s.trim_start_matches("tikv:");
 					let s = s.trim_start_matches("/");
-					info!(target: TARGET, "Connecting to kvs store at {TIKV}//{s}");
+					info!(target: TARGET, "Connecting to kvs store at tikv://{s}");
 
 					let v = super::tikv::Datastore::new(s).await.map(DatastoreFlavor::TiKV);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Connected to kvs store at {TIKV}//{s}");
+					info!(target: TARGET, "Connected to kvs store at tikv://{s}");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-tikv"))]
 				bail!(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a FoundationDB datastore
-			s if s.starts_with(FDB) => {
+			s if s.starts_with("fdb:") => {
 				#[cfg(feature = "kv-fdb")]
 				{
-					let s = s.trim_start_matches(FDB);
+					let s = s.trim_start_matches("fdb:");
 					let s = s.trim_start_matches("/");
-					info!(target: TARGET, "Connecting to kvs store at {FDB}//{s}");
+					info!(target: TARGET, "Connecting to kvs store at fdb://{s}");
 
 					let v = super::fdb::Datastore::new(s).await.map(DatastoreFlavor::FoundationDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Connected to kvs store at {FDB}//{s}");
+					info!(target: TARGET, "Connected to kvs store at fdb://{s}");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-fdb"))]
