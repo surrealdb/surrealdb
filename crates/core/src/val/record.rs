@@ -5,6 +5,7 @@
 //! The data can be stored in either mutable or read-only form for performance optimization.
 
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::mem;
 use std::sync::Arc;
@@ -112,13 +113,27 @@ impl Record {
 	/// * `rtype` - The record type to set
 	pub(crate) fn set_record_type(&mut self, rtype: RecordType) {
 		match &mut self.metadata {
-			Some(metadata) => {
-				metadata.record_type = Some(rtype);
-			}
+			Some(metadata) => metadata.set_record_type(rtype),
 			metadata => {
-				*metadata = Some(Metadata {
-					record_type: Some(rtype),
-				});
+				*metadata = Some(Metadata::new().with_record_type(rtype));
+			}
+		}
+	}
+
+	pub(crate) fn increment_count(&mut self, key: String) {
+		match &mut self.metadata {
+			Some(metadata) => metadata.increment_count(key),
+			metadata => {
+				*metadata = Some(Metadata::new().with_stat(key, Stat::Count(1)));
+			}
+		}
+	}
+
+	pub(crate) fn decrement_count(&mut self, key: String) {
+		match &mut self.metadata {
+			Some(metadata) => metadata.decrement_count(key),
+			metadata => {
+				*metadata = Some(Metadata::new().with_stat(key, Stat::Count(0)));
 			}
 		}
 	}
@@ -298,10 +313,53 @@ impl From<Arc<Value>> for Data {
 /// The metadata is revisioned to ensure compatibility across different versions
 /// of the database.
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub(crate) struct Metadata {
 	/// The type of the record (e.g., Edge for graph edges)
 	record_type: Option<RecordType>,
+	stats: BTreeMap<String, Stat>,
+}
+
+impl Metadata {
+	fn new() -> Self {
+		Default::default()
+	}
+
+	fn set_record_type(&mut self, record_type: RecordType) {
+		self.record_type = Some(record_type);
+	}
+
+	fn with_record_type(mut self, record_type: RecordType) -> Self {
+		self.set_record_type(record_type);
+		self
+	}
+
+	fn get_stat(&self, key: &str) -> Option<&Stat> {
+		self.stats.get(key)
+	}
+
+	fn set_stat(&mut self, key: String, stat: Stat) {
+		self.stats.insert(key, stat);
+	}
+
+	fn with_stat(mut self, key: String, stat: Stat) -> Self {
+		self.set_stat(key, stat);
+		self
+	}
+
+	fn increment_count(&mut self, key: String) {
+		match self.get_stat(&key) {
+			Some(Stat::Count(count)) => self.set_stat(key, Stat::Count(count + 1)),
+			_ => self.set_stat(key, Stat::Count(1)),
+		}
+	}
+
+	fn decrement_count(&mut self, key: String) {
+		match self.get_stat(&key) {
+			Some(Stat::Count(count)) => self.set_stat(key, Stat::Count(count - 1)),
+			_ => self.set_stat(key, Stat::Count(0)),
+		}
+	}
 }
 
 /// Types of records that can be stored in the database
@@ -314,4 +372,10 @@ pub(crate) struct Metadata {
 pub(crate) enum RecordType {
 	/// Represents an edge in a graph
 	Edge,
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+pub(crate) enum Stat {
+	Count(u64),
 }
