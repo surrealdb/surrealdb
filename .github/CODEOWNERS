@@ -2,7 +2,6 @@
 * @surrealdb/surrealdb
 
 # Configuration for CI
-/.github/CODEOWNERS @surrealdb/security
 /.github/ @surrealdb/ci
 
 # Configuration for deployment
@@ -25,6 +24,7 @@ crates/sdk/Cargo.toml @surrealdb/security
 cackle.toml @surrealdb/security
 supply-chain/* @surrealdb/security
 deny.toml @surrealdb/security
+.github/CODEOWNERS @surrealdb/security
 
 # Code for fuzzing configuration
 /crates/fuzz/ @surrealdb/security
