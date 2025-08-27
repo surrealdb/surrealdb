@@ -276,7 +276,7 @@ mod tests {
 
 		let want: Vec<ChangeSet> = vec![
 			ChangeSet(
-				VersionStamp::from_u64(1),
+				VersionStamp::from_u64(2),
 				DatabaseMutation(vec![TableMutations(
 					TB.to_string(),
 					vec![TableMutation::Set(
@@ -289,7 +289,7 @@ mod tests {
 				)]),
 			),
 			ChangeSet(
-				VersionStamp::from_u64(2),
+				VersionStamp::from_u64(3),
 				DatabaseMutation(vec![TableMutations(
 					TB.to_string(),
 					vec![TableMutation::Set(
@@ -302,7 +302,7 @@ mod tests {
 				)]),
 			),
 			ChangeSet(
-				VersionStamp::from_u64(3),
+				VersionStamp::from_u64(4),
 				DatabaseMutation(vec![TableMutations(
 					TB.to_string(),
 					vec![
@@ -329,7 +329,7 @@ mod tests {
 
 		let tx5 = ds.transaction(Write, Optimistic).await.unwrap();
 		// gc_all needs to be committed before we can read the changes
-		crate::cf::gc_range(&tx5, tb.namespace_id, tb.database_id, VersionStamp::from_u64(3))
+		crate::cf::gc_range(&tx5, tb.namespace_id, tb.database_id, VersionStamp::from_u64(4))
 			.await
 			.unwrap();
 		// We now commit tx5, which should persist the gc_all resullts
@@ -350,7 +350,7 @@ mod tests {
 		tx6.commit().await.unwrap();
 
 		let want: Vec<ChangeSet> = vec![ChangeSet(
-			VersionStamp::from_u64(3),
+			VersionStamp::from_u64(4),
 			DatabaseMutation(vec![TableMutations(
 				TB.to_string(),
 				vec![
