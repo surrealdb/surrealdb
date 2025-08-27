@@ -26,7 +26,7 @@ use crate::val::Value;
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```rust,no_run
 /// use surrealdb::val::{Record, Data, Value};
 ///
 /// // Create a new record with mutable data

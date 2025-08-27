@@ -74,8 +74,6 @@ impl RemoveTableStatement {
 			// Refresh the table cache
 			let foreign_tb = txn.expect_tb(ns, db, &ft.name).await?;
 			txn.put_tb(
-				ns,
-				db,
 				TableDefinition {
 					cache_tables_ts: Uuid::now_v7(),
 					..foreign_tb.as_ref().clone()
@@ -93,8 +91,6 @@ impl RemoveTableStatement {
 				// Refresh the table cache for foreign tables
 				let foreign_tb = txn.expect_tb(ns, db, ft).await?;
 				txn.put_tb(
-					ns,
-					db,
 					TableDefinition {
 						cache_tables_ts: Uuid::now_v7(),
 						..foreign_tb.as_ref().clone()

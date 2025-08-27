@@ -1196,13 +1196,8 @@ impl Transaction {
 
 	pub(crate) async fn put_tb(
 		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
 		tb: TableDefinition,
 	) -> Result<Arc<TableDefinition>> {
-		let key = crate::key::database::tb::new(ns, db, &tb.name);
-		self.set(&key, &tb, None).await?;
-
 		let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
 		self.set(&key, &tb, None).await?;
 
@@ -2168,7 +2163,7 @@ impl Transaction {
 						.await?,
 					tb.to_owned(),
 				);
-				self.put_tb(db_def.namespace_id, db_def.database_id, tb_def).await
+				self.put_tb(tb_def).await
 			}
 		}
 	}

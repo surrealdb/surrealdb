@@ -116,13 +116,11 @@ impl DefineFieldStatement {
 		.await?;
 
 		// Refresh the table cache
-		{
-			let tb_def = TableDefinition {
-				cache_fields_ts: Uuid::now_v7(),
-				..tb.as_ref().clone()
-			};
-			txn.put_tb(ns, db, tb_def).await?;
-		}
+		let tb_def = TableDefinition {
+			cache_fields_ts: Uuid::now_v7(),
+			..tb.as_ref().clone()
+		};
+		txn.put_tb(tb_def).await?;
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
