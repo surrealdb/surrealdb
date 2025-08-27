@@ -209,7 +209,7 @@ impl Iterator {
 					};
 					let mut what = Vec::new();
 					for s in lookup.what.iter() {
-						what.push(s.compute(stk, ctx, opt, doc).await?);
+						what.push(s.compute(stk, ctx, opt, doc, &lookup.kind).await?);
 					}
 					// idiom matches the Edges pattern.
 					self.prepare_lookup(stm_ctx.stm, from, lookup.kind.clone(), what)?;
@@ -481,7 +481,7 @@ impl Iterator {
 						};
 						let mut what = Vec::new();
 						for s in lookup.what.iter() {
-							what.push(s.compute(stk, ctx, opt, doc).await?);
+							what.push(s.compute(stk, ctx, opt, doc, &lookup.kind).await?);
 						}
 						// idiom matches the Edges pattern.
 						return self.prepare_lookup(stm_ctx.stm, from, lookup.kind.clone(), what);

@@ -1,11 +1,12 @@
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Bound;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -126,7 +127,12 @@ impl LookupSubject {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
+		kind: &LookupKind,
 	) -> Result<ComputedLookupSubject> {
+		if matches!(kind, LookupKind::Reference) && !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
+			bail!("Failed to process lookup: Experimental capability `record_references` is not enabled");
+		}
+
 		match self {
 			LookupSubject::Table(ident) => Ok(ComputedLookupSubject::Table(ident.clone())),
 			LookupSubject::Range {

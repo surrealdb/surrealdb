@@ -274,13 +274,13 @@ mod tests {
 			"testtb",
 			RecordIdKey::String("testid".to_owned()),
 			"othertb",
-			"test.*",
 			RecordIdKey::String("otherid".to_owned()),
+			"test.*",
 		);
 		let enc = Ref::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\x00&\0\0\0\x01testid\0othertb\0test.*\0\0\0\0\x01otherid\0"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\x00&\0\0\0\x01testid\0othertb\0\0\0\0\x01otherid\0test.*\0"
 		);
 	}
 }
