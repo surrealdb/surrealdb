@@ -1,8 +1,6 @@
 use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use super::DefineKind;
 use crate::catalog::DatabaseDefinition;
@@ -14,11 +12,9 @@ use crate::expr::changefeed::ChangeFeed;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Strand, Value};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineDatabaseStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
@@ -26,8 +22,6 @@ pub struct DefineDatabaseStatement {
 	pub comment: Option<Strand>,
 	pub changefeed: Option<ChangeFeed>,
 }
-
-impl_kv_value_revisioned!(DefineDatabaseStatement);
 
 impl DefineDatabaseStatement {
 	/// Process this type returning a computed simple Value
@@ -68,7 +62,7 @@ impl DefineDatabaseStatement {
 			txn.lock().await.get_next_db_id(nsv.namespace_id).await?
 		};
 
-		let name: String = self.name.as_raw_string();
+		let name: String = self.name.to_raw_string();
 
 		// Set the database definition, keyed by namespace name and database name.
 		let db_def = DatabaseDefinition {

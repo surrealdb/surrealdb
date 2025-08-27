@@ -172,7 +172,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn changefeed_read_write() {
-		let ts = Datetime::default();
+		let ts = Datetime::now();
 		let ds = init(false).await;
 
 		// Let the db remember the timestamp for the current versionstamp

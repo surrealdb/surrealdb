@@ -3,8 +3,6 @@ use std::ops::Bound;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use super::RecordIdKeyLit;
 use crate::ctx::Context;
@@ -12,8 +10,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::val::RecordIdKeyRange;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RecordIdKeyRangeLit {
 	pub start: Bound<RecordIdKeyLit>,
 	pub end: Bound<RecordIdKeyLit>,

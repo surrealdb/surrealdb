@@ -241,6 +241,8 @@ category = "CI - INTEGRATION TESTS"
 command = "cargo"
 args = [
     "llvm-cov",
+    "-j",
+    "10",
     "--html",
     "--locked",
     "--no-default-features",

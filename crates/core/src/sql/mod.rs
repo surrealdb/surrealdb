@@ -56,6 +56,8 @@ pub mod statements;
 #[cfg(feature = "arbitrary")]
 pub(crate) mod arbitrary;
 
+use std::fmt::Display;
+
 pub use self::access::{Access, Accesses};
 pub use self::access_type::{AccessType, JwtAccess, RecordAccess};
 pub use self::algorithm::Algorithm;
@@ -119,4 +121,13 @@ pub use self::with::With;
 /// Trait for types that can be converted to SQL representation
 pub trait ToSql {
 	fn to_sql(&self) -> String;
+}
+
+impl<T> ToSql for T
+where
+	T: Display,
+{
+	fn to_sql(&self) -> String {
+		self.to_string()
+	}
 }

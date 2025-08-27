@@ -3,12 +3,12 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{DefineFieldStatement, DefineKind};
-use crate::catalog::{DatabaseId, NamespaceId, TableDefinition, TableType};
+use super::DefineKind;
+use crate::catalog::{
+	DatabaseId, FieldDefinition, NamespaceId, Permissions, TableDefinition, TableType,
+};
 use crate::ctx::Context;
 use crate::dbs::{Force, Options};
 use crate::doc::CursorDoc;
@@ -18,13 +18,12 @@ use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::UpdateStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, Output, Permissions, View};
+use crate::expr::{Base, Expr, Ident, Idiom, Kind, Output, View};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::{Transaction, impl_kv_value_revisioned};
+use crate::kvs::Transaction;
 use crate::val::{Strand, Value};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineTableStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
@@ -36,17 +35,7 @@ pub struct DefineTableStatement {
 	pub changefeed: Option<ChangeFeed>,
 	pub comment: Option<Strand>,
 	pub table_type: TableType,
-	/// The last time that a DEFINE FIELD was added to this table
-	pub cache_fields_ts: Uuid,
-	/// The last time that a DEFINE EVENT was added to this table
-	pub cache_events_ts: Uuid,
-	/// The last time that a DEFINE TABLE was added to this table
-	pub cache_tables_ts: Uuid,
-	/// The last time that a DEFINE INDEX was added to this table
-	pub cache_indexes_ts: Uuid,
 }
-
-impl_kv_value_revisioned!(DefineTableStatement);
 
 impl DefineTableStatement {
 	pub(crate) async fn compute(
@@ -88,13 +77,13 @@ impl DefineTableStatement {
 			namespace_id: ns,
 			database_id: db,
 			table_id,
-			name: self.name.as_raw_string(),
+			name: self.name.to_raw_string(),
 			drop: self.drop,
 			schemafull: self.full,
 			table_type: self.table_type.clone(),
 			view: self.view.clone().map(|v| v.to_definition()),
 			permissions: self.permissions.clone(),
-			comment: self.comment.clone().map(|c| c.into_string()),
+			comment: self.comment.clone().map(|c| c.to_raw_string()),
 			changefeed: self.changefeed,
 
 			cache_fields_ts: cache_ts,
@@ -106,10 +95,13 @@ impl DefineTableStatement {
 		// Add table relational fields
 		Self::add_in_out_fields(&txn, ns, db, &mut tb_def).await?;
 
-		// Set the table definition
-		{
-			txn.put_tb(ns_name, db_name, &tb_def).await?;
+		// Record definition change
+		if self.changefeed.is_some() {
+			txn.lock().await.record_table_change(ns, db, &self.name, &tb_def);
 		}
+
+		// Update the catalog
+		txn.put_tb(ns_name, db_name, &tb_def).await?;
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
@@ -117,10 +109,6 @@ impl DefineTableStatement {
 		}
 		// Clear the cache
 		txn.clear_cache();
-		// Record definition change
-		if tb_def.changefeed.is_some() {
-			txn.lock().await.record_table_change(ns, db, &self.name, &tb_def);
-		}
 		// Check if table is a view
 		if let Some(view) = &self.view {
 			// Force queries to run
@@ -192,7 +180,7 @@ impl DefineTableStatement {
 	/// Used to add relational fields to existing table records
 	///
 	/// Returns the cache key ts.
-	pub(crate) async fn add_in_out_fields(
+	pub async fn add_in_out_fields(
 		txn: &Transaction,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -206,9 +194,9 @@ impl DefineTableStatement {
 				let val = rel.from.clone().unwrap_or(Kind::Record(vec![]));
 				txn.set(
 					&key,
-					&DefineFieldStatement {
+					&FieldDefinition {
 						name: Idiom::from(IN.to_vec()),
-						what: unsafe { Ident::new_unchecked(tb.name.clone()) },
+						what: tb.name.clone(),
 						field_kind: Some(val),
 						..Default::default()
 					},
@@ -222,9 +210,9 @@ impl DefineTableStatement {
 				let val = rel.to.clone().unwrap_or(Kind::Record(vec![]));
 				txn.set(
 					&key,
-					&DefineFieldStatement {
+					&FieldDefinition {
 						name: Idiom::from(OUT.to_vec()),
-						what: unsafe { Ident::new_unchecked(tb.name.clone()) },
+						what: tb.name.clone(),
 						field_kind: Some(val),
 						..Default::default()
 					},
@@ -289,8 +277,8 @@ impl Display for DefineTableStatement {
 		} else {
 			" SCHEMALESS"
 		})?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+		if let Some(ref comment) = self.comment {
+			write!(f, " COMMENT {comment}")?
 		}
 		if let Some(ref v) = self.view {
 			write!(f, " {v}")?

@@ -318,9 +318,9 @@ impl ops::Add<Datetime> for Duration {
 		match chrono::Duration::from_std(self.0) {
 			Ok(d) => match other.0.checked_add_signed(d) {
 				Some(v) => Datetime::from(v),
-				None => Datetime::default(),
+				None => Datetime::MAX_UTC,
 			},
-			Err(_) => Datetime::default(),
+			Err(_) => Datetime::MAX_UTC,
 		}
 	}
 }
@@ -348,9 +348,9 @@ impl ops::Sub<Datetime> for Duration {
 		match chrono::Duration::from_std(self.0) {
 			Ok(d) => match other.0.checked_sub_signed(d) {
 				Some(v) => Datetime::from(v),
-				None => Datetime::default(),
+				None => Datetime::MIN_UTC,
 			},
-			Err(_) => Datetime::default(),
+			Err(_) => Datetime::MIN_UTC,
 		}
 	}
 }

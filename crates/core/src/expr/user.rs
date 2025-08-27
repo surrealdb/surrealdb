@@ -1,12 +1,6 @@
-use std::str;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-
 use crate::val::Duration;
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 // Durations representing the expiration of different elements of user
 // authentication In this context, the None variant represents that the element
 // does not expire

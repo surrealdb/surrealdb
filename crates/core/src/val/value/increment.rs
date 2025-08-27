@@ -23,8 +23,8 @@ impl Value {
 				_ => Ok(()),
 			},
 			Value::Array(v) => match val {
-				Value::Array(x) => self.set(stk, ctx, opt, path, Value::Array(v + x)).await,
-				x => self.set(stk, ctx, opt, path, Value::Array(v + x)).await,
+				Value::Array(x) => self.set(stk, ctx, opt, path, Value::Array(v.concat(x))).await,
+				x => self.set(stk, ctx, opt, path, Value::Array(v.with_push(x))).await,
 			},
 			Value::None => match val {
 				Value::Number(x) => {

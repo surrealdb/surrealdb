@@ -2,8 +2,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::expr::statements::define::DefineModelStatement;
+use crate::catalog::{DatabaseId, MlModelDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
@@ -22,7 +21,7 @@ pub(crate) struct Ml<'a> {
 }
 
 impl KVKey for Ml<'_> {
-	type ValueType = DefineModelStatement;
+	type ValueType = MlModelDefinition;
 }
 
 pub fn new<'a>(ns: NamespaceId, db: DatabaseId, ml: &'a str, vn: &'a str) -> Ml<'a> {

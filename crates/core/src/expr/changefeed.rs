@@ -1,14 +1,13 @@
 use std::fmt::{self, Display, Formatter};
-use std::{str, time};
+use std::time;
 
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::val::{Duration, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ChangeFeed {
 	pub expiry: time::Duration,

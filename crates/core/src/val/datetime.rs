@@ -20,14 +20,14 @@ use crate::val::{Duration, Strand, TrySub};
 pub struct Datetime(pub DateTime<Utc>);
 
 impl Datetime {
-	pub const MIN_UTC: Self = Datetime(DateTime::<Utc>::MIN_UTC);
-	pub const MAX_UTC: Self = Datetime(DateTime::<Utc>::MAX_UTC);
+	pub fn now() -> Datetime {
+		Datetime(Utc::now())
+	}
 }
 
-impl Default for Datetime {
-	fn default() -> Self {
-		Self(Utc::now())
-	}
+impl Datetime {
+	pub const MIN_UTC: Self = Datetime(DateTime::<Utc>::MIN_UTC);
+	pub const MAX_UTC: Self = Datetime(DateTime::<Utc>::MAX_UTC);
 }
 
 impl From<DateTime<Utc>> for Datetime {
