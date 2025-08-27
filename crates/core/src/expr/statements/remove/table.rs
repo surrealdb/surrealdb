@@ -26,6 +26,7 @@ impl RemoveTableStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Get the NS and DB
+		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the transaction
 		let txn = ctx.tx();
@@ -55,11 +56,9 @@ impl RemoveTableStatement {
 
 		// Delete the definition
 		if self.expunge {
-			let (ns, db) = opt.ns_db()?;
-			txn.clr_tb(ns, db, &self.name).await?
+			txn.clr_tb(ns_name, db_name, &self.name).await?
 		} else {
-			let (ns, db) = opt.ns_db()?;
-			txn.del_tb(ns, db, &self.name).await?
+			txn.del_tb(ns_name, db_name, &self.name).await?
 		};
 
 		// Remove the resource data
@@ -74,6 +73,8 @@ impl RemoveTableStatement {
 			// Refresh the table cache
 			let foreign_tb = txn.expect_tb(ns, db, &ft.name).await?;
 			txn.put_tb(
+				ns_name,
+				db_name,
 				&TableDefinition {
 					cache_tables_ts: Uuid::now_v7(),
 					..foreign_tb.as_ref().clone()
@@ -91,6 +92,8 @@ impl RemoveTableStatement {
 				// Refresh the table cache for foreign tables
 				let foreign_tb = txn.expect_tb(ns, db, ft).await?;
 				txn.put_tb(
+					ns_name,
+					db_name,
 					&TableDefinition {
 						cache_tables_ts: Uuid::now_v7(),
 						..foreign_tb.as_ref().clone()

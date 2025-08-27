@@ -59,6 +59,7 @@ impl DefineTableStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Get the NS and DB
+		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
@@ -106,7 +107,9 @@ impl DefineTableStatement {
 		Self::add_in_out_fields(&txn, ns, db, &mut tb_def).await?;
 
 		// Set the table definition
-		txn.put_tb(&tb_def).await?;
+		{
+			txn.put_tb(ns_name, db_name, &tb_def).await?;
+		}
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
@@ -137,8 +140,9 @@ impl DefineTableStatement {
 					});
 				};
 
-				
 				txn.put_tb(
+					ns_name,
+					db_name,
 					&TableDefinition {
 						cache_tables_ts: Uuid::now_v7(),
 						..foreign_tb.as_ref().clone()

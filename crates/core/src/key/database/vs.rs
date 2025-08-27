@@ -8,7 +8,7 @@ use crate::vs::VersionStamp;
 
 // Vs stands for Database Versionstamp
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub(crate) struct Vs {
+pub(crate) struct VsKey {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -19,23 +19,23 @@ pub(crate) struct Vs {
 	_e: u8,
 }
 
-impl KVKey for Vs {
+impl KVKey for VsKey {
 	type ValueType = VersionStamp;
 }
 
-pub fn new(ns: NamespaceId, db: DatabaseId) -> Vs {
-	Vs::new(ns, db)
+pub fn new(ns: NamespaceId, db: DatabaseId) -> VsKey {
+	VsKey::new(ns, db)
 }
 
-impl Categorise for Vs {
+impl Categorise for VsKey {
 	fn categorise(&self) -> Category {
 		Category::DatabaseVersionstamp
 	}
 }
 
-impl Vs {
+impl VsKey {
 	pub fn new(ns: NamespaceId, db: DatabaseId) -> Self {
-		Vs {
+		VsKey {
 			__: b'/',
 			_a: b'*',
 			ns,
@@ -55,11 +55,11 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Vs::new(
+		let val = VsKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 		);
-		let enc = Vs::encode_key(&val).unwrap();
+		let enc = VsKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!vs");
 	}
 }

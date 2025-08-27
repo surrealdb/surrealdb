@@ -34,6 +34,7 @@ impl Categorise for Cf<'_> {
 }
 
 impl<'a> Cf<'a> {
+	#[cfg(test)]
 	pub fn new(ns: NamespaceId, db: DatabaseId, vs: VersionStamp, tb: &'a str) -> Self {
 		Cf {
 			__: b'/',

@@ -1196,10 +1196,12 @@ impl Transaction {
 
 	pub(crate) async fn put_tb(
 		&self,
+		ns: &str,
+		db: &str,
 		tb: &TableDefinition,
 	) -> Result<Arc<TableDefinition>> {
 		let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
-		self.set(&key, &tb, None).await?;
+		self.set(&key, tb, None).await?;
 
 		// Populate cache
 		let cached_tb = Arc::new(tb.clone());
@@ -1207,6 +1209,9 @@ impl Transaction {
 			cache::tx::Entry::Any(Arc::clone(&cached_tb) as Arc<dyn Any + Send + Sync>);
 
 		let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, &tb.name);
+		self.cache.insert(qey, cached_entry.clone());
+
+		let qey = cache::tx::Lookup::TbByName(ns, db, &tb.name);
 		self.cache.insert(qey, cached_entry.clone());
 
 		Ok(cached_tb)
@@ -2048,7 +2053,10 @@ impl Transaction {
 		let qey = cache::tx::Lookup::DbByName(ns, db);
 		match self.cache.get(&qey) {
 			// The entry is in the cache
-			Some(val) => val,
+			Some(val) => {
+				let t = val.try_into_type()?;
+				Ok(t)
+			}
 			// The entry is not in the cache
 			None => {
 				let db_def = self.get_db_by_name(ns, db).await?;
@@ -2097,7 +2105,6 @@ impl Transaction {
 				.into());
 			}
 		}
-		.try_into_type()
 	}
 
 	/// Get or add a table with a default configuration, only if we are in
@@ -2163,7 +2170,7 @@ impl Transaction {
 						.await?,
 					tb.to_owned(),
 				);
-				self.put_tb(&tb_def).await
+				self.put_tb(ns, db, &tb_def).await
 			}
 		}
 	}
