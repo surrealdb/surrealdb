@@ -106,6 +106,14 @@ allow = ["BUSL-1.1"]
 name = "surrealml-core"
 allow = ["Apache-2.0"]
 
+[[licenses.exceptions]]
+name = "surrealdb-types"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-types-derive"
+allow = ["BUSL-1.1"]
+
 # Specify overrides for crates where licenses are hard to guess.
 
 [[licenses.clarify]]
@@ -126,6 +134,16 @@ license-files = []
 [[licenses.clarify]]
 name = "surrealml-core"
 expression = "Apache-2.0"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-types"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-types-derive"
+expression = "BUSL-1.1"
 license-files = []
 
 [[licenses.clarify]]
