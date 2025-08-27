@@ -169,6 +169,9 @@ allow_proc_macro = true
 [pkg.serial_test_derive]
 allow_proc_macro = true
 
+[pkg.surrealdb-types-derive]
+allow_proc_macro = true
+
 [pkg.time-macros]
 allow_proc_macro = true
 allow_unsafe = true
