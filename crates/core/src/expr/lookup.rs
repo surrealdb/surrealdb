@@ -41,9 +41,11 @@ impl Lookup {
 
 impl Display for Lookup {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		let what_contained = self.what.len() > 1
-			|| self.what.iter().any(|w| matches!(w, LookupSubject::Field(_, _)));
-		if !what_contained && self.cond.is_none() && self.alias.is_none() && self.expr.is_none() {
+		if self.what.len() <= 1 
+			&& self.cond.is_none() 
+			&& self.alias.is_none() 
+			&& self.expr.is_none() 
+		{
 			Display::fmt(&self.kind, f)?;
 			if self.what.is_empty() {
 				f.write_char('?')
@@ -110,8 +112,7 @@ impl Display for LookupKind {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum LookupSubject {
-	Table(Ident),
-	Field(Ident, Ident),
+	Table(Ident),	
 	Range {
 		table: Ident,
 		range: RecordIdKeyRangeLit,
@@ -128,9 +129,6 @@ impl LookupSubject {
 	) -> Result<ComputedLookupSubject> {
 		match self {
 			LookupSubject::Table(ident) => Ok(ComputedLookupSubject::Table(ident.clone())),
-			LookupSubject::Field(ident, field) => {
-				Ok(ComputedLookupSubject::Field(ident.clone(), field.clone()))
-			}
 			LookupSubject::Range {
 				table,
 				range,
@@ -145,7 +143,6 @@ impl LookupSubject {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum ComputedLookupSubject {
 	Table(Ident),
-	Field(Ident, Ident),
 	Range {
 		table: Ident,
 		range: RecordIdKeyRange,
@@ -156,7 +153,6 @@ impl ComputedLookupSubject {
 	pub fn into_literal(self) -> LookupSubject {
 		match self {
 			ComputedLookupSubject::Table(ident) => LookupSubject::Table(ident),
-			ComputedLookupSubject::Field(ident, field) => LookupSubject::Field(ident, field),
 			ComputedLookupSubject::Range {
 				table,
 				range,
@@ -181,15 +177,55 @@ impl ComputedLookupSubject {
 					crate::key::r#ref::ftprefix(ns, db, tb, id, t)?,
 					crate::key::r#ref::ftsuffix(ns, db, tb, id, t)?,
 				)),
-				Self::Field(ft, ff) => Ok((
-					crate::key::r#ref::ffprefix(ns, db, tb, id, ft, ff)?,
-					crate::key::r#ref::ffsuffix(ns, db, tb, id, ft, ff)?,
-				)),
 				Self::Range {
-					..
+					table,
+					range,
 				} => {
-					// Based on the parser it is not possible for a user to get here
-					fail!("Range lookup not supported for reference")
+					let beg = match &range.start {
+						Bound::Unbounded => {
+							crate::key::r#ref::ftprefix(ns, db, tb, id, table)?
+						}
+						Bound::Included(v) => crate::key::r#ref::fkprefix(
+							ns,
+							db,
+							tb,
+							id,
+							table,
+							v,
+						)?,
+						Bound::Excluded(v) => crate::key::r#ref::fksuffix(
+							ns,
+							db,
+							tb,
+							id,
+							table,
+							v,
+						)?
+					};
+					// Prepare the range end key
+					let end = match &range.end {
+						Bound::Unbounded => {
+							crate::key::r#ref::ftsuffix(ns, db, tb, id, table)?
+						}
+						Bound::Excluded(v) => crate::key::r#ref::fkprefix(
+							ns,
+							db,
+							tb,
+							id,
+							table,
+							v,
+						)?,
+						Bound::Included(v) => crate::key::r#ref::fksuffix(
+							ns,
+							db,
+							tb,
+							id,
+							table,
+							v,
+						)?,
+					};
+
+					Ok((beg, end))
 				}
 			},
 			LookupKind::Graph(dir) => match self {
@@ -197,10 +233,6 @@ impl ComputedLookupSubject {
 					crate::key::graph::ftprefix(ns, db, tb, id, dir, t)?,
 					crate::key::graph::ftsuffix(ns, db, tb, id, dir, t)?,
 				)),
-				Self::Field(_, _) => {
-					// Based on the parser it is not possible for a user to get here
-					fail!("Field lookup not supported for graph")
-				}
 				Self::Range {
 					table,
 					range,
@@ -284,7 +316,6 @@ impl Display for LookupSubject {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Table(tb) => Display::fmt(&tb, f),
-			Self::Field(tb, field) => write!(f, "{tb}.{field}"),
 			Self::Range {
 				table,
 				range,

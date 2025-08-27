@@ -22,9 +22,11 @@ pub struct Lookup {
 
 impl Display for Lookup {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		let what_contained = self.what.len() > 1
-			|| self.what.iter().any(|w| matches!(w, LookupSubject::Field(_, _)));
-		if !what_contained && self.cond.is_none() && self.alias.is_none() && self.expr.is_none() {
+		if self.what.len() <= 1 
+			&& self.cond.is_none() 
+			&& self.alias.is_none() 
+			&& self.expr.is_none() 
+		{
 			Display::fmt(&self.kind, f)?;
 			if self.what.is_empty() {
 				f.write_char('?')
@@ -155,7 +157,6 @@ impl From<crate::expr::lookup::LookupKind> for LookupKind {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum LookupSubject {
 	Table(Ident),
-	Field(Ident, Ident),
 	Range(Ident, RecordIdKeyRangeLit),
 }
 
@@ -163,7 +164,6 @@ impl Display for LookupSubject {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Table(tb) => Display::fmt(&tb, f),
-			Self::Field(tb, field) => write!(f, "{tb}.{field}"),
 			Self::Range(tb, rng) => write!(f, "{tb}:{rng}"),
 		}
 	}
@@ -173,7 +173,6 @@ impl From<LookupSubject> for crate::expr::lookup::LookupSubject {
 	fn from(v: LookupSubject) -> Self {
 		match v {
 			LookupSubject::Table(tb) => Self::Table(tb.into()),
-			LookupSubject::Field(tb, field) => Self::Field(tb.into(), field.into()),
 			LookupSubject::Range(table, range) => Self::Range {
 				table: table.into(),
 				range: range.into(),
@@ -186,9 +185,6 @@ impl From<crate::expr::lookup::LookupSubject> for LookupSubject {
 	fn from(v: crate::expr::lookup::LookupSubject) -> Self {
 		match v {
 			crate::expr::lookup::LookupSubject::Table(tb) => Self::Table(tb.into()),
-			crate::expr::lookup::LookupSubject::Field(tb, field) => {
-				Self::Field(tb.into(), field.into())
-			}
 			crate::expr::lookup::LookupSubject::Range {
 				table,
 				range,

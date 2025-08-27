@@ -78,7 +78,7 @@ impl<'a> PrefixFt<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-struct PrefixFf<'a> {
+struct PrefixFk<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -89,23 +89,23 @@ struct PrefixFf<'a> {
 	_d: u8,
 	pub id: RecordIdKey,
 	pub ft: &'a str,
-	pub ff: &'a str,
+	pub fk: RecordIdKey,
 }
 
-impl KVKey for PrefixFf<'_> {
+impl KVKey for PrefixFk<'_> {
 	type ValueType = Vec<u8>;
 }
 
 // Code here is used in references which is temporarly removed
 #[allow(dead_code)]
-impl<'a> PrefixFf<'a> {
+impl<'a> PrefixFk<'a> {
 	fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &'a str,
 		id: &RecordIdKey,
 		ft: &'a str,
-		ff: &'a str,
+		fk: &RecordIdKey,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -118,7 +118,7 @@ impl<'a> PrefixFf<'a> {
 			_d: b'&',
 			id: id.clone(),
 			ft,
-			ff,
+			fk: fk.clone(),
 		}
 	}
 }
@@ -140,8 +140,8 @@ pub(crate) struct Ref<'a> {
 	_d: u8,
 	pub id: RecordIdKey,
 	pub ft: &'a str,
-	pub ff: &'a str,
 	pub fk: RecordIdKey,
+	pub ff: &'a str,
 }
 
 impl KVKey for Ref<'_> {
@@ -160,10 +160,10 @@ pub fn new<'a>(
 	tb: &'a str,
 	id: &RecordIdKey,
 	ft: &'a str,
-	ff: &'a str,
 	fk: &RecordIdKey,
+	ff: &'a str,
 ) -> Ref<'a> {
-	Ref::new(ns, db, tb, id.to_owned(), ft, ff, fk.to_owned())
+	Ref::new(ns, db, tb, id.to_owned(), ft, fk.to_owned(), ff)
 }
 
 pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey) -> Result<Vec<u8>> {
@@ -202,28 +202,28 @@ pub fn ftsuffix(
 	Ok(k)
 }
 
-pub fn ffprefix(
+pub fn fkprefix(
 	ns: NamespaceId,
 	db: DatabaseId,
 	tb: &str,
 	id: &RecordIdKey,
 	ft: &str,
-	ff: &str,
+	fk: &RecordIdKey,
 ) -> Result<Vec<u8>> {
-	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode_key()?;
+	let mut k = PrefixFk::new(ns, db, tb, id, ft, fk).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn ffsuffix(
+pub fn fksuffix(
 	ns: NamespaceId,
 	db: DatabaseId,
 	tb: &str,
 	id: &RecordIdKey,
 	ft: &str,
-	ff: &str,
+	fk: &RecordIdKey,
 ) -> Result<Vec<u8>> {
-	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode_key()?;
+	let mut k = PrefixFk::new(ns, db, tb, id, ft, fk).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
@@ -241,8 +241,8 @@ impl<'a> Ref<'a> {
 		tb: &'a str,
 		id: RecordIdKey,
 		ft: &'a str,
-		ff: &'a str,
 		fk: RecordIdKey,
+		ff: &'a str,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -255,8 +255,8 @@ impl<'a> Ref<'a> {
 			_d: b'&',
 			id,
 			ft,
-			ff,
 			fk,
+			ff,
 		}
 	}
 }

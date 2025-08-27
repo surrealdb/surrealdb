@@ -4,7 +4,7 @@ use std::ops::Bound;
 use reblessive::Stk;
 
 use super::{ParseResult, Parser};
-use crate::sql::lookup::{LookupKind, LookupSubject};
+use crate::sql::lookup::LookupSubject;
 use crate::sql::{Ident, Param, RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit};
 use crate::syn::error::bail;
 use crate::syn::lexer::compound;
@@ -154,24 +154,13 @@ impl Parser<'_> {
 	pub(crate) async fn parse_lookup_subject(
 		&mut self,
 		stk: &mut Stk,
-		kind: &LookupKind,
-		contained: bool,
 	) -> ParseResult<LookupSubject> {
 		let tb = self.next_token_value()?;
-		let peek = self.peek_whitespace();
-
-		match (peek.kind, kind, contained) {
-			(t!(":"), LookupKind::Graph(_), _) => {
-				self.pop_peek();
-				let rng = self.parse_id_range(stk).await?;
-				Ok(LookupSubject::Range(tb, rng))
-			}
-			(t!("."), LookupKind::Reference, true) => {
-				self.pop_peek();
-				let field = self.next_token_value()?;
-				Ok(LookupSubject::Field(tb, field))
-			}
-			_ => Ok(LookupSubject::Table(tb)),
+		if self.eat_whitespace(t!(":")) {
+			let rng = self.parse_id_range(stk).await?;
+			Ok(LookupSubject::Range(tb, rng))
+		} else {
+			Ok(LookupSubject::Table(tb))
 		}
 	}
 

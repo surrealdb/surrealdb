@@ -752,8 +752,8 @@ impl FieldEditContext<'_> {
 						&thing.table,
 						&thing.key,
 						&self.rid.table,
-						&name,
 						&self.rid.key,
+						&name,
 					);
 
 					self.ctx.tx().set(&key, &(), None).await?;
@@ -770,8 +770,8 @@ impl FieldEditContext<'_> {
 							&thing.table,
 							&thing.key,
 							&self.rid.table,
-							&ff,
 							&self.rid.key,
+							&ff,
 						);
 
 						self.ctx.tx().del(&key).await?;

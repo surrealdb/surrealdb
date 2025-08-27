@@ -669,10 +669,10 @@ impl Parser<'_> {
 						Vec::new()
 					}
 					x if Self::kind_is_identifier(x) => {
-						let subject = self.parse_lookup_subject(stk, &kind, true).await?;
+						let subject = self.parse_lookup_subject(stk).await?;
 						let mut subjects = vec![subject];
 						while self.eat(t!(",")) {
-							subjects.push(self.parse_lookup_subject(stk, &kind, true).await?);
+							subjects.push(self.parse_lookup_subject(stk).await?);
 						}
 						subjects
 					}
@@ -723,7 +723,7 @@ impl Parser<'_> {
 			x if Self::kind_is_identifier(x) => {
 				// The following function should always succeed here,
 				// returning an error here would be a bug, so unwrap.
-				let subject = self.parse_lookup_subject(stk, &kind, false).await?;
+				let subject = self.parse_lookup_subject(stk).await?;
 				Ok(Lookup {
 					kind,
 					what: vec![subject],
