@@ -41,10 +41,10 @@ impl Lookup {
 
 impl Display for Lookup {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		if self.what.len() <= 1 
-			&& self.cond.is_none() 
-			&& self.alias.is_none() 
-			&& self.expr.is_none() 
+		if self.what.len() <= 1
+			&& self.cond.is_none()
+			&& self.alias.is_none()
+			&& self.expr.is_none()
 		{
 			Display::fmt(&self.kind, f)?;
 			if self.what.is_empty() {
@@ -112,7 +112,7 @@ impl Display for LookupKind {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum LookupSubject {
-	Table(Ident),	
+	Table(Ident),
 	Range {
 		table: Ident,
 		range: RecordIdKeyRangeLit,
@@ -182,47 +182,23 @@ impl ComputedLookupSubject {
 					range,
 				} => {
 					let beg = match &range.start {
-						Bound::Unbounded => {
-							crate::key::r#ref::ftprefix(ns, db, tb, id, table)?
+						Bound::Unbounded => crate::key::r#ref::ftprefix(ns, db, tb, id, table)?,
+						Bound::Included(v) => {
+							crate::key::r#ref::fkprefix(ns, db, tb, id, table, v)?
 						}
-						Bound::Included(v) => crate::key::r#ref::fkprefix(
-							ns,
-							db,
-							tb,
-							id,
-							table,
-							v,
-						)?,
-						Bound::Excluded(v) => crate::key::r#ref::fksuffix(
-							ns,
-							db,
-							tb,
-							id,
-							table,
-							v,
-						)?
+						Bound::Excluded(v) => {
+							crate::key::r#ref::fksuffix(ns, db, tb, id, table, v)?
+						}
 					};
 					// Prepare the range end key
 					let end = match &range.end {
-						Bound::Unbounded => {
-							crate::key::r#ref::ftsuffix(ns, db, tb, id, table)?
+						Bound::Unbounded => crate::key::r#ref::ftsuffix(ns, db, tb, id, table)?,
+						Bound::Excluded(v) => {
+							crate::key::r#ref::fkprefix(ns, db, tb, id, table, v)?
 						}
-						Bound::Excluded(v) => crate::key::r#ref::fkprefix(
-							ns,
-							db,
-							tb,
-							id,
-							table,
-							v,
-						)?,
-						Bound::Included(v) => crate::key::r#ref::fksuffix(
-							ns,
-							db,
-							tb,
-							id,
-							table,
-							v,
-						)?,
+						Bound::Included(v) => {
+							crate::key::r#ref::fksuffix(ns, db, tb, id, table, v)?
+						}
 					};
 
 					Ok((beg, end))

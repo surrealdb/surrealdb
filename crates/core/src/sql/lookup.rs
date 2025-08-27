@@ -22,10 +22,10 @@ pub struct Lookup {
 
 impl Display for Lookup {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		if self.what.len() <= 1 
-			&& self.cond.is_none() 
-			&& self.alias.is_none() 
-			&& self.expr.is_none() 
+		if self.what.len() <= 1
+			&& self.cond.is_none()
+			&& self.alias.is_none()
+			&& self.expr.is_none()
 		{
 			Display::fmt(&self.kind, f)?;
 			if self.what.is_empty() {
