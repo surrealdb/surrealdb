@@ -9,6 +9,8 @@ use roaring::RoaringTreemap;
 use roaring::treemap::IntoIter;
 use uuid::Uuid;
 
+use crate::catalog;
+use crate::catalog::{FullTextParams, Scoring};
 /// This module implements a concurrent full-text search index.
 ///
 /// The full-text index allows for efficient text search operations with support
@@ -21,10 +23,8 @@ use uuid::Uuid;
 /// - Compaction of index data
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::expr::index::FullTextParams;
+use crate::expr::Idiom;
 use crate::expr::operator::BooleanOperator;
-use crate::expr::statements::DefineAnalyzerStatement;
-use crate::expr::{Idiom, Scoring};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::docids::seqdocids::SeqDocIds;
@@ -131,7 +131,7 @@ impl FullTextIndex {
 	fn with_analyzer(
 		nid: Uuid,
 		ixs: &IndexStores,
-		az: Arc<DefineAnalyzerStatement>,
+		az: Arc<catalog::AnalyzerDefinition>,
 		ikb: IndexKeyBase,
 		p: &FullTextParams,
 	) -> Result<Self> {
@@ -900,10 +900,9 @@ mod tests {
 	use uuid::Uuid;
 
 	use super::{FullTextIndex, TermDocument};
-	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::catalog::{DatabaseId, FullTextParams, NamespaceId};
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
-	use crate::expr::index::FullTextParams;
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::offset::Offset;
@@ -937,7 +936,7 @@ mod tests {
 			let DefineStatement::Analyzer(az) = *q else {
 				panic!()
 			};
-			let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
+			let az = Arc::new(DefineAnalyzerStatement::from(az).to_definition());
 			let content = Arc::new(Value::from(Array::from(vec![
 				"Enter a search term",
 				"Welcome",

@@ -1,7 +1,5 @@
 use std::fmt::{self, Display, Write};
 
-use uuid::Uuid;
-
 use super::DefineKind;
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::fmt::{is_pretty, pretty_indent};
@@ -74,8 +72,8 @@ impl Display for DefineTableStatement {
 		} else {
 			" SCHEMALESS"
 		})?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+		if let Some(ref comment) = self.comment {
+			write!(f, " COMMENT {comment}")?
 		}
 		if let Some(ref v) = self.view {
 			write!(f, " {v}")?
@@ -107,10 +105,6 @@ impl From<DefineTableStatement> for crate::expr::statements::DefineTableStatemen
 			changefeed: v.changefeed.map(Into::into),
 			comment: v.comment,
 			table_type: v.table_type.into(),
-			cache_fields_ts: Uuid::nil(),
-			cache_events_ts: Uuid::nil(),
-			cache_tables_ts: Uuid::nil(),
-			cache_indexes_ts: Uuid::nil(),
 		}
 	}
 }

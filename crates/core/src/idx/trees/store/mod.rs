@@ -9,12 +9,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, HnswParams, Index, IndexDefinition, NamespaceId};
 use crate::ctx::Context;
 use crate::err::Error;
-use crate::expr::Index;
-use crate::expr::index::HnswParams;
-use crate::expr::statements::DefineIndexStatement;
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::store::cache::TreeCache;
 use crate::idx::trees::store::hnsw::{HnswIndexes, SharedHnswIndex};
@@ -234,7 +231,7 @@ impl IndexStores {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ctx: &Context,
-		ix: &DefineIndexStatement,
+		ix: &IndexDefinition,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex> {
 		let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
@@ -310,7 +307,7 @@ impl IndexStores {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix: &DefineIndexStatement,
+		ix: &IndexDefinition,
 	) -> Result<()> {
 		if matches!(ix.index, Index::Hnsw(_)) {
 			let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);

@@ -5,6 +5,9 @@ auth = { namespace = "test", database = "test", access = "user", rid = "user:tes
 
 [test]
 wip = true
+
+[[test.results]]
+value = "'temporary value'"
 */
 
 $auth;

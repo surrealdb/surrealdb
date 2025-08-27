@@ -13,13 +13,12 @@ use tokio::sync::RwLock;
 use tokio::task;
 use tokio::task::JoinHandle;
 
-use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseDefinition, DatabaseId, IndexDefinition, NamespaceId};
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
-use crate::expr::statements::DefineIndexStatement;
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
@@ -165,7 +164,7 @@ impl IndexBuilder {
 		opt: Options,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix: Arc<DefineIndexStatement>,
+		ix: Arc<IndexDefinition>,
 		sdr: Option<Sender<Result<()>>>,
 	) -> Result<IndexBuilding> {
 		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ns, db, ix)?);
@@ -190,7 +189,7 @@ impl IndexBuilder {
 		opt: Options,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix: Arc<DefineIndexStatement>,
+		ix: Arc<IndexDefinition>,
 		blocking: bool,
 	) -> Result<Option<Receiver<Result<()>>>> {
 		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
@@ -225,7 +224,7 @@ impl IndexBuilder {
 		&self,
 		db: &DatabaseDefinition,
 		ctx: &Context,
-		ix: &DefineIndexStatement,
+		ix: &IndexDefinition,
 		old_values: Option<Vec<Value>>,
 		new_values: Option<Vec<Value>>,
 		rid: &RecordId,
@@ -242,7 +241,7 @@ impl IndexBuilder {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix: &DefineIndexStatement,
+		ix: &IndexDefinition,
 	) -> BuildingStatus {
 		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
 		if let Some(a) = self.indexes.get(&key) {
@@ -329,7 +328,7 @@ struct Building {
 	db: DatabaseId,
 	ikb: IndexKeyBase,
 	tf: TransactionFactory,
-	ix: Arc<DefineIndexStatement>,
+	ix: Arc<IndexDefinition>,
 	status: Arc<RwLock<BuildingStatus>>,
 	queue: Arc<RwLock<QueueSequences>>,
 	aborted: AtomicBool,
@@ -342,7 +341,7 @@ impl Building {
 		opt: Options,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix: Arc<DefineIndexStatement>,
+		ix: Arc<IndexDefinition>,
 	) -> Result<Self> {
 		let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 		Ok(Self {

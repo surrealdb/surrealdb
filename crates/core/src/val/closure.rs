@@ -4,7 +4,6 @@ use std::fmt;
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
@@ -14,8 +13,7 @@ use crate::expr::{Expr, FlowResultExt, Ident, Kind};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::Closure")]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Closure {
 	pub args: Vec<(Ident, Kind)>,
 	pub returns: Option<Kind>,

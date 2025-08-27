@@ -2,7 +2,7 @@ use std::fmt::{self, Display};
 
 use super::DefineKind;
 use super::config::api::ApiConfig;
-use crate::api::method::Method;
+use crate::catalog::ApiMethod;
 use crate::sql::Expr;
 use crate::sql::fmt::{Fmt, pretty_indent};
 use crate::val::Strand;
@@ -84,7 +84,7 @@ impl From<crate::expr::statements::DefineApiStatement> for DefineApiStatement {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ApiAction {
-	pub methods: Vec<Method>,
+	pub methods: Vec<ApiMethod>,
 	pub action: Expr,
 	pub config: ApiConfig,
 }

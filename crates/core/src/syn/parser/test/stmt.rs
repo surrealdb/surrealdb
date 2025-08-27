@@ -1626,7 +1626,7 @@ fn parse_define_event() {
 		Expr::Define(Box::new(DefineStatement::Event(DefineEventStatement {
 			kind: DefineKind::Default,
 			name: Ident::from_strand(strand!("event").to_owned()),
-			what: Ident::from_strand(strand!("table").to_owned()),
+			target_table: Ident::from_strand(strand!("table").to_owned()),
 			when: Expr::Literal(Literal::Null),
 			then: vec![Expr::Literal(Literal::Null), Expr::Literal(Literal::None)],
 			comment: None,
@@ -2472,7 +2472,7 @@ fn parse_live() {
 	let TopLevelExpr::Live(stmt) = res else {
 		panic!()
 	};
-	assert_eq!(stmt.expr, Fields::Select(vec![Field::All]));
+	assert_eq!(stmt.fields, Fields::Select(vec![Field::All]));
 	assert_eq!(stmt.what, Expr::Param(Param::from_strand(strand!("foo").to_owned())));
 
 	let res = syn::parse_with(
@@ -2484,7 +2484,7 @@ fn parse_live() {
 		panic!()
 	};
 	assert_eq!(
-		stmt.expr,
+		stmt.fields,
 		Fields::Select(vec![Field::Single {
 			expr: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(
 				strand!("foo").to_owned()
