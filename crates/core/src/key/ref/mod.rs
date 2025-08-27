@@ -178,31 +178,55 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey) -> Re
 	Ok(k)
 }
 
-pub fn ftprefix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey, ft: &str) -> Result<Vec<u8>> {
+pub fn ftprefix(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &str,
+	id: &RecordIdKey,
+	ft: &str,
+) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn ftsuffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey, ft: &str) -> Result<Vec<u8>> {
+pub fn ftsuffix(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &str,
+	id: &RecordIdKey,
+	ft: &str,
+) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
 
-pub fn ffprefix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey, ft: &str, ff: &str) -> Result<Vec<u8>> {
+pub fn ffprefix(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &str,
+	id: &RecordIdKey,
+	ft: &str,
+	ff: &str,
+) -> Result<Vec<u8>> {
 	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-
-pub fn ffsuffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey, ft: &str, ff: &str) -> Result<Vec<u8>> {
+pub fn ffsuffix(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &str,
+	id: &RecordIdKey,
+	ft: &str,
+	ff: &str,
+) -> Result<Vec<u8>> {
 	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
-
 
 impl Categorise for Ref<'_> {
 	fn categorise(&self) -> Category {

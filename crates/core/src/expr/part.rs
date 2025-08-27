@@ -16,7 +16,7 @@ use crate::expr::fmt::{Fmt, is_pretty, pretty_indent};
 use crate::expr::idiom::recursion::{
 	self, Recursion, clean_iteration, compute_idiom_recursion, is_final,
 };
-use crate::expr::{Expr, FlowResultExt as _, Lookup, Ident, Idiom, Literal, Value};
+use crate::expr::{Expr, FlowResultExt as _, Ident, Idiom, Literal, Lookup, Value};
 use crate::val::{Array, RecordId};
 
 #[revisioned(revision = 1)]

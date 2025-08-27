@@ -14,7 +14,7 @@ use crate::expr::field::{Field, Fields};
 use crate::expr::idiom::recursion::{Recursion, compute_idiom_recursion};
 use crate::expr::part::{FindRecursionPlan, Next, NextMethod, Part, Skip, SplitByRepeatRecurse};
 use crate::expr::statements::select::SelectStatement;
-use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Lookup, Idiom, Literal};
+use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Idiom, Literal, Lookup};
 use crate::fnc::idiom;
 use crate::val::{RecordIdKey, Value};
 
@@ -386,7 +386,7 @@ impl Value {
 								Part::Start(Expr::Literal(Literal::RecordId(val.into_literal()))),
 								Part::Lookup(Lookup {
 									what: g.what.clone(),
-									dir: g.dir.clone(),
+									kind: g.kind.clone(),
 									..Default::default()
 								}),
 							]));

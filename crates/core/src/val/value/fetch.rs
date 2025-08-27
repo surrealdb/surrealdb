@@ -8,7 +8,7 @@ use crate::dbs::Options;
 use crate::expr::field::{Field, Fields};
 use crate::expr::part::Next;
 use crate::expr::statements::select::SelectStatement;
-use crate::expr::{Expr, FlowResultExt as _, Lookup, Idiom, Literal, Part};
+use crate::expr::{Expr, FlowResultExt as _, Idiom, Literal, Lookup, Part};
 use crate::val::Value;
 
 impl Value {
@@ -45,7 +45,7 @@ impl Value {
 							Part::Start(Expr::Literal(Literal::RecordId(x.clone().into_literal()))),
 							Part::Lookup(Lookup {
 								what: g.what.clone(),
-								dir: g.dir.clone(),
+								kind: g.kind.clone(),
 								..Default::default()
 							}),
 						]));

@@ -3,6 +3,7 @@ use reblessive::Stk;
 use super::basic::NumberToken;
 use super::mac::pop_glued;
 use super::{ParseResult, Parser};
+use crate::sql::lookup::LookupKind;
 use crate::sql::{
 	Closure, Dir, Expr, Function, FunctionCall, Ident, Idiom, Kind, Literal, Mock, Param, Part,
 	Script,
@@ -76,14 +77,21 @@ impl Parser<'_> {
 			t!("<") => {
 				self.pop_peek();
 				let peek = self.peek_whitespace();
-				if peek.kind == t!("-") {
+				if peek.kind == t!("~") {
 					self.pop_peek();
-					let graph = stk.run(|ctx| self.parse_graph(ctx, Dir::In)).await?;
-					Expr::Idiom(Idiom(vec![Part::Graph(graph)]))
+					let lookup =
+						stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Reference)).await?;
+					Expr::Idiom(Idiom(vec![Part::Graph(lookup)]))
+				} else if peek.kind == t!("-") {
+					self.pop_peek();
+					let lookup =
+						stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::In))).await?;
+					Expr::Idiom(Idiom(vec![Part::Graph(lookup)]))
 				} else if peek.kind == t!("->") {
 					self.pop_peek();
-					let graph = stk.run(|ctx| self.parse_graph(ctx, Dir::Both)).await?;
-					Expr::Idiom(Idiom(vec![Part::Graph(graph)]))
+					let lookup =
+						stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::Both))).await?;
+					Expr::Idiom(Idiom(vec![Part::Graph(lookup)]))
 				} else {
 					unexpected!(self, token, "expected either a `<-` or a future")
 				}
@@ -142,8 +150,9 @@ impl Parser<'_> {
 			}
 			t!("->") => {
 				self.pop_peek();
-				let graph = stk.run(|ctx| self.parse_graph(ctx, Dir::Out)).await?;
-				Expr::Idiom(Idiom(vec![Part::Graph(graph)]))
+				let lookup =
+					stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::Out))).await?;
+				Expr::Idiom(Idiom(vec![Part::Graph(lookup)]))
 			}
 			t!("[") => {
 				self.pop_peek();
