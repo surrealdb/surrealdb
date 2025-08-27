@@ -520,7 +520,7 @@ mod tests {
 
 		tx.put_ns(dns).await.unwrap();
 		tx.put_db(NS, ddb).await.unwrap();
-		tx.put_tb(dtb).await.unwrap();
+		tx.put_tb(&dtb).await.unwrap();
 
 		tx.commit().await.unwrap();
 		ds

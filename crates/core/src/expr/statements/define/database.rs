@@ -71,7 +71,6 @@ impl DefineDatabaseStatement {
 		let name: String = self.name.as_raw_string();
 
 		// Set the database definition, keyed by namespace name and database name.
-		let key = crate::key::namespace::db::new(nsv.namespace_id, &name);
 		let db_def = DatabaseDefinition {
 			namespace_id: nsv.namespace_id,
 			database_id,
@@ -79,8 +78,7 @@ impl DefineDatabaseStatement {
 			comment: self.comment.clone().map(|s| s.into_string()),
 			changefeed: self.changefeed,
 		};
-		// Set the database definition, keyed by namespace ID and database ID.
-		txn.set(&key, &db_def, None).await?;
+		txn.put_db(&nsv.name, db_def).await?;
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {

@@ -1155,7 +1155,7 @@ impl Transaction {
 		db: DatabaseDefinition,
 	) -> Result<Arc<DatabaseDefinition>> {
 		let key = crate::key::namespace::db::new(db.namespace_id, &db.name);
-		self.put(&key, &db, None).await?;
+		self.set(&key, &db, None).await?;
 
 		// Populate cache
 		let cached_db = Arc::new(db.clone());
@@ -1196,7 +1196,7 @@ impl Transaction {
 
 	pub(crate) async fn put_tb(
 		&self,
-		tb: TableDefinition,
+		tb: &TableDefinition,
 	) -> Result<Arc<TableDefinition>> {
 		let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
 		self.set(&key, &tb, None).await?;
@@ -2163,7 +2163,7 @@ impl Transaction {
 						.await?,
 					tb.to_owned(),
 				);
-				self.put_tb(tb_def).await
+				self.put_tb(&tb_def).await
 			}
 		}
 	}

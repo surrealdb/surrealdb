@@ -120,7 +120,7 @@ impl DefineFieldStatement {
 			cache_fields_ts: Uuid::now_v7(),
 			..tb.as_ref().clone()
 		};
-		txn.put_tb(tb_def).await?;
+		txn.put_tb(&tb_def).await?;
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {

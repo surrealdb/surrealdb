@@ -105,10 +105,8 @@ impl DefineTableStatement {
 		// Add table relational fields
 		Self::add_in_out_fields(&txn, ns, db, &mut tb_def).await?;
 
-		// Update the catalog
-		let key = crate::key::database::tb::new(ns, db, &self.name);
 		// Set the table definition
-		txn.set(&key, &tb_def, None).await?;
+		txn.put_tb(&tb_def).await?;
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
@@ -141,7 +139,7 @@ impl DefineTableStatement {
 
 				
 				txn.put_tb(
-					TableDefinition {
+					&TableDefinition {
 						cache_tables_ts: Uuid::now_v7(),
 						..foreign_tb.as_ref().clone()
 					},
