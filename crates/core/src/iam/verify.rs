@@ -635,9 +635,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					jwt,
 					..
 				}) => match &jwt.verify {
-					catalog::JwtAccessVerify::Key(key) => {
-						decode_key(key.alg, (&key.key).as_bytes())
-					}
+					catalog::JwtAccessVerify::Key(key) => decode_key(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
 					catalog::JwtAccessVerify::Jwks(jwks) => {
 						if let Some(kid) = token_data.header.kid {

@@ -309,7 +309,8 @@ pub async fn create_grant(
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 			txn.get_db_access(ns, db, &access).await?.ok_or_else(|| Error::AccessDbNotFound {
 				ac: access.to_string(),
-				// The namespace and database is expected above so these unwraps should not be able to trigger
+				// The namespace and database is expected above so these unwraps should not be able
+				// to trigger
 				ns: opt.ns.as_deref().unwrap().to_owned(),
 				db: opt.db.as_deref().unwrap().to_owned(),
 			})?
@@ -429,8 +430,8 @@ pub async fn create_grant(
 							txn.get_db_user(ns_id, db_id, user).await?.ok_or_else(|| {
 								Error::UserDbNotFound {
 									name: user.to_string(),
-									// We just retrieved the ns_id and db_id above so we should have a
-									// namespace and database.
+									// We just retrieved the ns_id and db_id above so we should have
+									// a namespace and database.
 									ns: opt.ns().unwrap().to_owned(),
 									db: opt.db().unwrap().to_owned(),
 								}
@@ -581,7 +582,8 @@ async fn compute_show(
 			if txn.get_db_access(ns, db, &stmt.ac).await?.is_none() {
 				bail!(Error::AccessDbNotFound {
 					ac: stmt.ac.to_string(),
-					// We expected a namespace and database above so these unwrap shouldn't be able to trigger.
+					// We expected a namespace and database above so these unwrap shouldn't be able
+					// to trigger.
 					ns: opt.ns.as_deref().unwrap().to_owned(),
 					db: opt.db.as_deref().unwrap().to_owned(),
 				});
