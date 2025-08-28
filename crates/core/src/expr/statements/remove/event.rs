@@ -54,7 +54,7 @@ impl RemoveEventStatement {
 		txn.put_tb(
 			ns_name,
 			db_name,
-			TableDefinition {
+			&TableDefinition {
 				cache_events_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
 			},

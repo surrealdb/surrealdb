@@ -51,16 +51,12 @@ impl DefineNamespaceStatement {
 		};
 
 		// Process the statement
-		let catalog_key = crate::key::catalog::ns::new(&self.name);
 		let ns_def = NamespaceDefinition {
 			namespace_id,
-			name: self.name.to_string(),
+			name: self.name.to_raw_string(),
 			comment: self.comment.clone().map(|c| c.into_string()),
 		};
-		txn.set(&catalog_key, &ns_def, None).await?;
-
-		let key = crate::key::root::ns::new(namespace_id);
-		txn.set(&key, &ns_def, None).await?;
+		txn.put_ns(ns_def).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

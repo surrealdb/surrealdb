@@ -12,6 +12,7 @@ use crate::cf;
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::doc::CursorRecord;
 use crate::idg::u32::U32;
+use crate::key::database::vs::VsKey;
 use crate::key::debug::Sprintable;
 use crate::kvs::KVValue;
 use crate::kvs::batch::Batch;
@@ -518,14 +519,14 @@ impl Transactor {
 	/// entries for this transaction, which should be done immediately before
 	/// the transaction commit. That is to keep other transactions commit
 	/// delay(pessimistic) or conflict(optimistic) as less as possible.
-	pub async fn get_timestamp(&mut self, key: Key) -> Result<VersionStamp> {
+	pub(crate) async fn get_timestamp(&mut self, key: VsKey) -> Result<VersionStamp> {
 		self.inner.get_timestamp(key).await
 	}
 
 	/// Insert or update a key in the datastore.
 	pub(crate) async fn set_versionstamp<K>(
 		&mut self,
-		ts_key: K,
+		ts_key: VsKey,
 		prefix: K,
 		suffix: K,
 		val: K::ValueType,
@@ -533,7 +534,6 @@ impl Transactor {
 	where
 		K: KVKey + Debug,
 	{
-		let ts_key = ts_key.encode_key()?;
 		let prefix = prefix.encode_key()?;
 		let suffix = suffix.encode_key()?;
 		let value = val.kv_encode_value()?;
@@ -677,7 +677,7 @@ impl Transactor {
 		// This also works as an advisory lock on the ts keys so that there is
 		// on other concurrent transactions that can write to the ts_key or the keys
 		// after it.
-		let key = crate::key::database::vs::new(ns, db).encode_key()?;
+		let key = crate::key::database::vs::new(ns, db);
 		let vst = self.get_timestamp(key).await?;
 		trace!(
 			target: TARGET,

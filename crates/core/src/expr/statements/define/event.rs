@@ -81,7 +81,7 @@ impl DefineEventStatement {
 			..tb.as_ref().clone()
 		};
 
-		txn.put_tb(ns_name, db_name, tb).await?;
+		txn.put_tb(ns_name, db_name, &tb).await?;
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {

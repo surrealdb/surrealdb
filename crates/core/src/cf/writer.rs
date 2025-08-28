@@ -5,7 +5,8 @@ use anyhow::Result;
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cf::{TableMutation, TableMutations};
 use crate::doc::CursorRecord;
-use crate::kvs::{KVKey, Key};
+use crate::key::database::vs::VsKey;
+use crate::kvs::{KVValue, Key};
 use crate::val::RecordId;
 
 // PreparedWrite is a tuple of (versionstamp key, key prefix, key suffix,
@@ -16,7 +17,7 @@ use crate::val::RecordId;
 // The consumer of this library should write KV pairs with the following format:
 // key = key_prefix + versionstamp + key_suffix
 // value = serialized table mutations
-type PreparedWrite = (Vec<u8>, Vec<u8>, Vec<u8>, crate::kvs::Val);
+type PreparedWrite = (VsKey, Vec<u8>, Vec<u8>, crate::kvs::Val);
 
 pub struct Writer {
 	buf: Buffer,
@@ -125,7 +126,7 @@ impl Writer {
 	// that are to be written onto the key composed of the specified prefix + the
 	// current timestamp + the specified suffix.
 	pub(crate) fn get(&self) -> Result<Vec<PreparedWrite>> {
-		let mut r = Vec::<(Vec<u8>, Vec<u8>, Vec<u8>, crate::kvs::Val)>::new();
+		let mut r = Vec::<PreparedWrite>::new();
 		// Get the current timestamp
 		for (
 			ChangeKey {
@@ -136,10 +137,10 @@ impl Writer {
 			mutations,
 		) in self.buf.b.iter()
 		{
-			let ts_key: Key = crate::key::database::vs::new(*ns, *db).encode_key()?;
+			let ts_key: VsKey = crate::key::database::vs::new(*ns, *db);
 			let tc_key_prefix: Key = crate::key::change::versionstamped_key_prefix(*ns, *db)?;
 			let tc_key_suffix: Key = crate::key::change::versionstamped_key_suffix(tb.as_str());
-			let value = revision::to_vec(mutations)?;
+			let value = mutations.kv_encode_value()?;
 
 			r.push((ts_key, tc_key_prefix, tc_key_suffix, value))
 		}
@@ -488,22 +489,22 @@ mod tests {
 		let namespace_id = NamespaceId(1);
 		let database_id = DatabaseId(2);
 		let table_id = TableId(3);
-		let dns = NamespaceDefinition {
+		let ns_def = NamespaceDefinition {
 			namespace_id,
 			name: NS.to_string(),
 			comment: None,
 		};
-		let ddb = DatabaseDefinition {
+		let db_def = DatabaseDefinition {
 			namespace_id,
 			database_id,
-			name: NS.to_string(),
+			name: DB.to_string(),
 			changefeed: Some(ChangeFeed {
 				expiry: Duration::from_secs(10),
 				store_diff,
 			}),
 			comment: None,
 		};
-		let dtb = TableDefinition::new(namespace_id, database_id, table_id, TB.to_string())
+		let tb_def = TableDefinition::new(namespace_id, database_id, table_id, TB.to_string())
 			.with_changefeed(ChangeFeed {
 				expiry: Duration::from_secs(10 * 60),
 				store_diff,
@@ -518,17 +519,10 @@ mod tests {
 
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
 
-		// let db = tx.ensure_ns_db(NS, DB, false).await.unwrap();
-		tx.put_ns(dns).await.unwrap();
-		tx.put_db(NS, ddb).await.unwrap();
-		tx.put_tb(NS, DB, dtb).await.unwrap();
+		tx.put_ns(ns_def).await.unwrap();
+		tx.put_db(NS, db_def).await.unwrap();
+		tx.put_tb(NS, DB, &tb_def).await.unwrap();
 
-		// let ns_root = crate::key::root::ns::new(namespace_id);
-		// tx.put(&ns_root, &dns, None).await.unwrap();
-		// let db_root = crate::key::namespace::db::new(namespace_id, database_id);
-		// tx.put(&db_root, &ddb, None).await.unwrap();
-		// let tb_root = crate::key::database::tb::new(namespace_id, database_id,
-		// &dtb.name); tx.put(&tb_root, &dtb, None).await.unwrap();
 		tx.commit().await.unwrap();
 		ds
 	}

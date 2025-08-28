@@ -68,8 +68,6 @@ pub(crate) enum Key {
 	Rg(String, String),
 	/// A cache key for a namespace
 	NsByName(String),
-	/// A cache key for a namespace by id.
-	NsById(NamespaceId),
 	/// A cache key for a namespace user
 	Nu(NamespaceId, String),
 	/// A cache key for a namespace access
@@ -78,8 +76,6 @@ pub(crate) enum Key {
 	Ng(NamespaceId, String, String),
 	/// A cache key for a database
 	DbByName(String, String),
-	/// A cache key for a database by id.
-	DbById(NamespaceId, DatabaseId),
 	/// A cache key for a database user
 	Du(NamespaceId, DatabaseId, String),
 	/// A cache key for a database access
@@ -152,12 +148,10 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Ru(a) => Key::Ru(a.to_string()),
 			Lookup::Ra(a) => Key::Ra(a.to_string()),
 			Lookup::Rg(a, b) => Key::Rg(a.to_string(), b.to_string()),
-			Lookup::NsById(a) => Key::NsById(a),
 			Lookup::NsByName(a) => Key::NsByName(a.to_string()),
 			Lookup::Nu(a, b) => Key::Nu(a, b.to_string()),
 			Lookup::Na(a, b) => Key::Na(a, b.to_string()),
 			Lookup::Ng(a, b, c) => Key::Ng(a, b.to_string(), c.to_string()),
-			Lookup::DbById(a, b) => Key::DbById(a, b),
 			Lookup::DbByName(a, b) => Key::DbByName(a.to_string(), b.to_string()),
 			Lookup::Du(a, b, c) => Key::Du(a, b, c.to_string()),
 			Lookup::Da(a, b, c) => Key::Da(a, b, c.to_string()),

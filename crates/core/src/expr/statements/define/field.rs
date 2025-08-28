@@ -160,7 +160,7 @@ impl DefineFieldStatement {
 							..relation.to_owned()
 						});
 
-						txn.put_tb(ns_name, db_name, tb).await?;
+						txn.put_tb(ns_name, db_name, &tb).await?;
 						// Clear the cache
 						if let Some(cache) = ctx.get_cache() {
 							cache.clear_tb(ns, db, &self.what);
@@ -182,7 +182,7 @@ impl DefineFieldStatement {
 					// The `out` field must be a record type
 					ensure!(
 						kind.is_record(),
-						Error::Thrown("out field on a relation must be a record".into(),)
+						Error::Thrown("out field on a relation must be a record".into())
 					);
 					// Add the TYPE to the DEFINE TABLE statement
 					if relation.from.as_ref() != self.field_kind.as_ref() {
@@ -190,7 +190,7 @@ impl DefineFieldStatement {
 							to: self.field_kind.clone(),
 							..relation.clone()
 						});
-						txn.put_tb(ns_name, db_name, tb).await?;
+						txn.put_tb(ns_name, db_name, &tb).await?;
 						// Clear the cache
 						if let Some(cache) = ctx.get_cache() {
 							cache.clear_tb(ns, db, &self.what);
@@ -203,7 +203,7 @@ impl DefineFieldStatement {
 			}
 		}
 
-		txn.put_tb(ns_name, db_name, tb).await?;
+		txn.put_tb(ns_name, db_name, &tb).await?;
 
 		// Process possible recursive defitions
 		self.process_recursive_definitions(ns, db, txn.clone()).await?;

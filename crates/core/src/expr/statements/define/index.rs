@@ -121,7 +121,7 @@ impl DefineIndexStatement {
 		txn.put_tb(
 			ns,
 			db,
-			TableDefinition {
+			&TableDefinition {
 				cache_indexes_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
 			},

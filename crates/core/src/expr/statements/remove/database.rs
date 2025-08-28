@@ -51,18 +51,13 @@ impl RemoveDatabaseStatement {
 		}
 
 		// Delete the definition
-		let key = crate::key::namespace::db::new(db.namespace_id, db.database_id);
-		let catalog_key = crate::key::catalog::db::new(ns, &self.name);
+		let key = crate::key::namespace::db::new(db.namespace_id, &db.name);
 		let database_root = crate::key::database::all::new(db.namespace_id, db.database_id);
 		if self.expunge {
 			txn.clr(&key).await?;
-			txn.clr(&catalog_key).await?;
-			txn.clrp(&catalog_key).await?;
 			txn.clrp(&database_root).await?;
 		} else {
 			txn.del(&key).await?;
-			txn.del(&catalog_key).await?;
-			txn.delp(&catalog_key).await?;
 			txn.delp(&database_root).await?
 		};
 
