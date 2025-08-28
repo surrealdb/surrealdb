@@ -293,7 +293,12 @@ impl MutableContext {
 	/// If the namespace does not exist, it will return an error.
 	pub(crate) async fn expect_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
 		let ns = opt.ns()?;
-		let ns_def = self.get_cached_ns_or_possibly_add(ns, false).await?;
+		let Some(ns_def) = self.get_cached_ns(ns).await? else {
+			return Err(Error::NsNotFound {
+				name: ns.to_string(),
+			}
+			.into());
+		};
 		Ok(ns_def.namespace_id)
 	}
 
@@ -311,14 +316,38 @@ impl MutableContext {
 		strict: bool,
 	) -> Result<Arc<catalog::NamespaceDefinition>> {
 		{
-			let ns_def_opt = self.namespace.read().await;
-			if let Some(ns_def) = ns_def_opt.as_ref() {
+			let ns_cache_guard = self.namespace.read().await;
+			if let Some(ns_def) = ns_cache_guard.as_ref() {
 				return Ok(Arc::clone(ns_def));
 			}
 		}
 		let ns_def = self.tx().get_or_add_ns(ns, strict).await?;
 		*self.namespace.write().await = Some(Arc::clone(&ns_def));
 		Ok(ns_def)
+	}
+
+	/// Get the namespace definition for the current context.
+	///
+	/// If the namespace does not exist in the context cache, it will be fetched
+	/// from the datastore.
+	///
+	/// If the namespace does not exist in the datastore, the function will return
+	/// `None`.
+	///
+	/// If the namespace exists in the datastore, it will be added to the context
+	/// cache.
+	async fn get_cached_ns(&self, ns: &str) -> Result<Option<Arc<catalog::NamespaceDefinition>>> {
+		{
+			let ns_cache_guard = self.namespace.read().await;
+			if let Some(ns_def) = ns_cache_guard.as_ref() {
+				return Ok(Some(Arc::clone(ns_def)));
+			}
+		}
+		let Some(ns_def) = self.tx().get_ns_by_name(ns).await? else {
+			return Ok(None);
+		};
+		*self.namespace.write().await = Some(Arc::clone(&ns_def));
+		Ok(Some(Arc::clone(&ns_def)))
 	}
 
 	/// Get the namespace and database ids for the current context.
@@ -337,7 +366,12 @@ impl MutableContext {
 		opt: &Options,
 	) -> Result<(NamespaceId, DatabaseId)> {
 		let (ns, db) = opt.ns_db()?;
-		let db_def = self.get_cached_db_or_possibly_add(ns, db, false).await?;
+		let Some(db_def) = self.get_cached_db(ns, db).await? else {
+			return Err(Error::DbNotFound {
+				name: db.to_string(),
+			}
+			.into());
+		};
 		Ok((db_def.namespace_id, db_def.database_id))
 	}
 
@@ -365,14 +399,38 @@ impl MutableContext {
 		strict: bool,
 	) -> Result<Arc<DatabaseDefinition>> {
 		{
-			let db_def_opt = self.database.read().await;
-			if let Some(db_def) = db_def_opt.as_ref() {
+			let db_cache_guard = self.database.read().await;
+			if let Some(db_def) = db_cache_guard.as_ref() {
 				return Ok(Arc::clone(db_def));
 			}
 		}
 		let db_def = self.tx().ensure_ns_db(ns, db, strict).await?;
 		*self.database.write().await = Some(Arc::clone(&db_def));
 		Ok(db_def)
+	}
+
+	/// Get the database definition for the current context.
+	///
+	/// If the database does not exist in the context cache, it will be fetched
+	/// from the datastore.
+	///
+	/// If the database does not exist in the datastore, the function will return
+	/// `None`.
+	///
+	/// If the database exists in the datastore, it will be added to the context
+	/// cache.
+	async fn get_cached_db(&self, ns: &str, db: &str) -> Result<Option<Arc<DatabaseDefinition>>> {
+		{
+			let db_cache_guard = self.database.read().await;
+			if let Some(db_def) = db_cache_guard.as_ref() {
+				return Ok(Some(Arc::clone(db_def)));
+			}
+		}
+		let Some(db_def) = self.tx().get_db_by_name(ns, db).await? else {
+			return Ok(None);
+		};
+		*self.database.write().await = Some(Arc::clone(&db_def));
+		Ok(Some(Arc::clone(&db_def)))
 	}
 
 	/// Add a value to the context. It overwrites any previously set values
