@@ -14,7 +14,7 @@ value = "1f"
 value = "1dec"
 
 [[test.results]]
-value = "1dec"
+value = "1"
 
 [[test.results]]
 value = "'1dec'"
