@@ -331,7 +331,6 @@ impl Iterator {
 			kind,
 			what,
 		};
-		println!("ingesting: {:?}", x);
 		// Add the record to the iterator
 		self.ingest(x);
 		// All ingested ok

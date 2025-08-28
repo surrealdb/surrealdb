@@ -378,9 +378,8 @@ struct FieldEditContext<'a> {
 }
 
 enum RefAction<'a> {
-	Set(&'a RecordId),
-	Delete(Vec<&'a RecordId>, String),
-	Ignore,
+	Set(&'a RecordId, String),
+	Delete(&'a RecordId, String),
 }
 
 impl FieldEditContext<'_> {
@@ -668,12 +667,9 @@ impl FieldEditContext<'_> {
 			let doc = Some(&self.doc.current);
 			let old = self.old.as_ref();
 
-			// If the value has not changed, there is no need to update any references
-			let action = if val == old {
-				RefAction::Ignore
-			// Check if the old value was a record id
-			} else if let Value::RecordId(thing) = old {
-				// We need to check if this reference is contained in an array
+			// The current value might be contained inside an array of references
+			// Try to find other references with a similar path to the current one
+			let mut check_others = async || -> Result<Vec<Value>> {
 				let others = self
 					.doc
 					.current
@@ -682,93 +678,91 @@ impl FieldEditContext<'_> {
 					.get(self.stk, self.ctx, self.opt, doc, &self.def.name)
 					.await
 					.catch_return()?;
-				// If the reference is contained in an array, we only delete it from the array
-				// if there is no other reference to the same record id in the array
+
 				if let Value::Array(arr) = others {
-					if arr.iter().any(|v| v == old) {
-						RefAction::Ignore
-					} else {
-						RefAction::Delete(vec![thing], self.def.name.to_string())
-					}
+					Ok(arr.0)
 				} else {
-					// Otherwise we delete the reference
-					RefAction::Delete(vec![thing], self.def.name.to_string())
+					Ok(vec![])
 				}
-			} else if let Value::Array(oldarr) = old {
+			};
+
+			// Check if the value has actually changed
+			if old == val {
+				// Nothing changed
+				return Ok(());
+			}
+
+			let mut actions = vec![];
+
+			// A value might be contained inside an array of references
+			// If so, we skip it. Otherwise, we delete the reference.
+			if let Value::RecordId(rid) = old {
+				let others = check_others().await?;
+				if !others.iter().any(|v| v == old) {
+					actions.push(RefAction::Delete(rid, self.def.name.to_string()));
+				}
+			}
+
+			// New references, wether on their own or inside an array
+			// are always processed through here. Always add the new reference
+			// if the key already exists it will just overwrite which is fine.
+			if let Value::RecordId(rid) = val {
+				actions.push(RefAction::Set(rid, self.def.name.to_string()));
+			}
+
+			// Values removed from an array are not always processed via the above
+			// Try to delete the references here where needed
+			if let Value::Array(oldarr) = old {
+				// For array based references, we always store the foreign field as the nested field
+				let ff = self.def.name.clone().push(Part::All).to_string();
 				// If the new value is still an array, we only filter out the record ids that
 				// are not present in the new array
-				let removed = if let Value::Array(newarr) = val {
-					oldarr
-						.iter()
-						.filter_map(|v| {
-							// If the record id is still present in the new array, we do not remove
-							// the reference
-							if newarr.contains(v) {
-								None
-							} else if let Value::RecordId(thing) = v {
-								Some(thing)
-							} else {
-								None
-							}
-						})
-						.collect()
+				if let Value::Array(newarr) = val {
+					for old_rid in oldarr.iter() {
+						if newarr.contains(old_rid) {
+							continue;
+						}
+
+						if let Value::RecordId(rid) = old_rid {
+							actions.push(RefAction::Delete(rid, ff.clone()));
+						}
+					}
 
 				// If the new value is not an array, then all record ids in the
 				// old array are removed
 				} else {
-					oldarr
-						.iter()
-						.filter_map(|v| {
-							if let Value::RecordId(thing) = v {
-								Some(thing)
-							} else {
-								None
-							}
-						})
-						.collect()
-				};
-
-				RefAction::Delete(removed, self.def.name.clone().push(Part::All).to_string())
-			// We found a new reference, let's create the link
-			} else if let Value::RecordId(thing) = val {
-				RefAction::Set(thing)
-			} else {
-				// This value is not a record id, nothing to process
-				// This can be a containing array for record ids, for example
-				RefAction::Ignore
-			};
-
-			// Process the action
-			match action {
-				// Nothing to process
-				RefAction::Ignore => Ok(()),
-				// Create the reference, if it does not exist yet.
-				RefAction::Set(thing) => {
-					let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
-					let name = self.def.name.to_string();
-					let key = crate::key::r#ref::new(
-						ns,
-						db,
-						&thing.table,
-						&thing.key,
-						&self.rid.table,
-						&self.rid.key,
-						&name,
-					);
-
-					self.ctx.tx().set(&key, &(), None).await?;
-
-					Ok(())
+					for old_rid in oldarr.iter() {
+						if let Value::RecordId(rid) = old_rid {
+							actions.push(RefAction::Delete(rid, ff.clone()));
+						}
+					}
 				}
-				// Delete the reference, if it exists
-				RefAction::Delete(things, ff) => {
-					let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
-					for thing in things {
+			}
+
+			// Process the actions
+			for action in actions.into_iter() {
+				match action {
+					RefAction::Set(rid, ff) => {
+						let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
 						let key = crate::key::r#ref::new(
 							ns,
 							db,
-							&thing.table,
-							&thing.key,
+							&rid.table,
+							&rid.key,
+							&self.rid.table,
+							&self.rid.key,
+							&ff,
+						);
+
+						self.ctx.tx().set(&key, &(), None).await?;
+					}
+					RefAction::Delete(rid, ff) => {
+						let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
+						let key = crate::key::r#ref::new(
+							ns,
+							db,
+							&rid.table,
+							&rid.key,
 							&self.rid.table,
 							&self.rid.key,
 							&ff,
@@ -776,12 +770,10 @@ impl FieldEditContext<'_> {
 
 						self.ctx.tx().del(&key).await?;
 					}
-
-					Ok(())
 				}
 			}
-		} else {
-			Ok(())
 		}
+
+		Ok(())
 	}
 }
