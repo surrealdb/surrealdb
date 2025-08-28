@@ -9,6 +9,7 @@ use crate::helpers::Test;
 #[tokio::test]
 async fn strict_typing_inline() -> Result<()> {
 	let sql = "
+		USE NS test DB test;
 		UPSERT person:test SET age = <int> NONE;
 		UPSERT person:test SET age = <int> '18';
 		UPSERT person:test SET enabled = <bool | int> NONE;
@@ -22,7 +23,10 @@ async fn strict_typing_inline() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 9);
+	assert_eq!(res.len(), 10);
+	// USE NS test DB test;
+	let tmp = res.remove(0).result;
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
 	assert_eq!(tmp.unwrap_err().to_string(), "Expected `int` but found a `NONE`");
