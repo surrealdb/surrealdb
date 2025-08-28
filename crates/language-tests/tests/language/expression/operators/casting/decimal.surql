@@ -14,10 +14,16 @@ value = "1f"
 value = "1dec"
 
 [[test.results]]
-value = "1"
+value = "1dec"
 
 [[test.results]]
-value = "'1dec'"
+value = "'1'"
+
+[[test.results]]
+value = "'NONE'"
+
+[[test.results]]
+value = "'NULL'"
 
 [[test.results]]
 error = "Expected `object` but found a `1dec`"
@@ -57,9 +63,11 @@ error = "Expected `range` but found a `1dec`"
 <int> 1dec;
 <float> 1dec;
 <option<decimal>> 1dec;
-
 <decimal> 1dec;
 <string> 1dec;
+<string> none;
+<string> null;
+
 <object> 1dec;
 <array> 1dec;
 <datetime> 1dec;

@@ -345,14 +345,14 @@ impl Cast for Strand {
 				}),
 			},
 
-			Value::Null | Value::None => Err(CastError::InvalidKind {
-				from: v,
-				into: "string".into(),
-			}),
-
+			Value::Null => Ok("NULL".into()),
+			Value::None => Ok("NONE".into()),
 			Value::Strand(x) => Ok(x),
 			Value::Uuid(x) => Ok(x.to_raw().into()),
 			Value::Datetime(x) => Ok(x.into_raw_string().into()),
+			Value::Number(Number::Decimal(x)) => {
+				Ok(unsafe { Strand::new_unchecked(x.to_string()) })
+			}
 			// TODO: Handle null bytes
 			x => Ok(unsafe { Strand::new_unchecked(x.to_string()) }),
 		}
