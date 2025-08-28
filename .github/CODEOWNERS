@@ -29,3 +29,6 @@ deny.toml @surrealdb/security
 # Code for fuzzing configuration
 /crates/fuzz/ @surrealdb/security
 SECURITY.md @surrealdb/security
+
+# KV Storage Interface
+/crates/core/src/kvs/ @surrealdb/kv
