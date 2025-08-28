@@ -88,7 +88,7 @@ impl Idiom {
 	pub(crate) fn simplify(&self) -> Idiom {
 		self.0
 			.iter()
-			.filter(|&p| matches!(p, Part::Field(_) | Part::Start(_) | Part::Graph(_)))
+			.filter(|&p| matches!(p, Part::Field(_) | Part::Start(_) | Part::Lookup(_)))
 			.cloned()
 			.collect::<Vec<_>>()
 			.into()
@@ -138,7 +138,7 @@ impl Idiom {
 	}
 	/// Check if the path part is a yield in a multi-yield expression
 	pub(crate) fn part_is_multi_yield(v: &Part) -> bool {
-		matches!(v, Part::Graph(g) if g.alias.is_some())
+		matches!(v, Part::Lookup(g) if g.alias.is_some())
 	}
 
 	/// Check if this Idiom starts with a specific path part

@@ -9,10 +9,10 @@ use crate::sql::access_type::{
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::data::Assignment;
 use crate::sql::filter::Filter;
-use crate::sql::graph::GraphSubject;
 use crate::sql::index::{Distance, HnswParams, MTreeParams, SearchParams, VectorType};
 use crate::sql::language::Language;
 use crate::sql::literal::ObjectEntry;
+use crate::sql::lookup::{LookupKind, LookupSubject};
 use crate::sql::order::{OrderList, Ordering};
 use crate::sql::statements::access::{
 	self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke, AccessStatementShow,
@@ -36,8 +36,8 @@ use crate::sql::statements::{
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
 	Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, Explain, Expr, Fetch,
-	Fetchs, Field, Fields, Graph, Group, Groups, Ident, Idiom, Idioms, Index, Kind, Limit, Literal,
-	Mock, Order, Output, Param, Part, Permission, Permissions, RecordIdKeyLit, RecordIdLit,
+	Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Idioms, Index, Kind, Limit, Literal,
+	Lookup, Mock, Order, Output, Param, Part, Permission, Permissions, RecordIdKeyLit, RecordIdLit,
 	Scoring, Split, Splits, Start, TableType, Timeout, TopLevelExpr, With,
 };
 use crate::syn;
@@ -1885,8 +1885,8 @@ fn parse_delete_2() {
 					table: "a".to_owned(),
 					key: RecordIdKeyLit::String(strand!("b").to_owned()),
 				}))),
-				Part::Graph(Graph {
-					dir: Dir::Out,
+				Part::Graph(Lookup {
+					kind: LookupKind::Graph(Dir::Out),
 					..Default::default()
 				}),
 				Part::Last,
@@ -2752,9 +2752,9 @@ fn parse_update() {
 			only: true,
 			what: vec![Expr::Idiom(Idiom(vec![
 				Part::Field(Ident::from_strand(strand!("a").to_owned())),
-				Part::Graph(Graph {
-					dir: Dir::Out,
-					what: vec![GraphSubject::Table(Ident::from_strand(strand!("b").to_owned()))],
+				Part::Graph(Lookup {
+					kind: LookupKind::Graph(Dir::Out),
+					what: vec![LookupSubject::Table(Ident::from_strand(strand!("b").to_owned()))],
 					..Default::default()
 				})
 			]))],
@@ -2767,9 +2767,9 @@ fn parse_update() {
 				]),
 				Idiom(vec![
 					Part::Field(Ident::from_strand(strand!("a").to_owned())),
-					Part::Graph(Graph {
-						dir: Dir::Out,
-						what: vec![GraphSubject::Table(Ident::from_strand(
+					Part::Graph(Lookup {
+						kind: LookupKind::Graph(Dir::Out),
+						what: vec![LookupSubject::Table(Ident::from_strand(
 							strand!("b").to_owned()
 						))],
 						..Default::default()
@@ -2794,9 +2794,9 @@ fn parse_upsert() {
 			only: true,
 			what: vec![Expr::Idiom(Idiom(vec![
 				Part::Field(Ident::from_strand(strand!("a").to_owned())),
-				Part::Graph(Graph {
-					dir: Dir::Out,
-					what: vec![GraphSubject::Table(Ident::from_strand(strand!("b").to_owned()))],
+				Part::Graph(Lookup {
+					kind: LookupKind::Graph(Dir::Out),
+					what: vec![LookupSubject::Table(Ident::from_strand(strand!("b").to_owned()))],
 					..Default::default()
 				})
 			]))],
@@ -2809,9 +2809,9 @@ fn parse_upsert() {
 				]),
 				Idiom(vec![
 					Part::Field(Ident::from_strand(strand!("a").to_owned())),
-					Part::Graph(Graph {
-						dir: Dir::Out,
-						what: vec![GraphSubject::Table(Ident::from_strand(
+					Part::Graph(Lookup {
+						kind: LookupKind::Graph(Dir::Out),
+						what: vec![LookupSubject::Table(Ident::from_strand(
 							strand!("b").to_owned()
 						))],
 						..Default::default()

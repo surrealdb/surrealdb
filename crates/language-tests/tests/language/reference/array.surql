@@ -1,8 +1,5 @@
 /**
 [test]
-# TODO: References are being replaced with a new syntax, these tests should be updated when that
-# new syntax is added.
-wip = true
 
 [[test.results]]
 value = "NONE"
@@ -54,7 +51,7 @@ allow-experimental = ["record_references"]
 
 */
 DEFINE FIELD connected_to ON utility TYPE option<array<record<house>>> REFERENCE ON DELETE REJECT;
-DEFINE FIELD using ON house TYPE references<utility>;
+DEFINE FIELD using ON house COMPUTED <~utility;
 
 CREATE house:one;
 CREATE utility:gas, utility:water;

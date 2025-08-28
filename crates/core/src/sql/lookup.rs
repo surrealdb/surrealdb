@@ -7,10 +7,10 @@ use crate::sql::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, S
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Graph {
-	pub dir: Dir,
+pub struct Lookup {
+	pub kind: LookupKind,
 	pub expr: Option<Fields>,
-	pub what: Vec<GraphSubject>,
+	pub what: Vec<LookupSubject>,
 	pub cond: Option<Cond>,
 	pub split: Option<Splits>,
 	pub group: Option<Groups>,
@@ -20,21 +20,21 @@ pub struct Graph {
 	pub alias: Option<Idiom>,
 }
 
-impl Display for Graph {
+impl Display for Lookup {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		if self.what.len() <= 1
 			&& self.cond.is_none()
 			&& self.alias.is_none()
 			&& self.expr.is_none()
 		{
-			Display::fmt(&self.dir, f)?;
+			Display::fmt(&self.kind, f)?;
 			if self.what.is_empty() {
 				f.write_char('?')
 			} else {
 				Fmt::comma_separated(self.what.iter()).fmt(f)
 			}
 		} else {
-			write!(f, "{}(", self.dir)?;
+			write!(f, "{}(", self.kind)?;
 			if let Some(ref expr) = self.expr {
 				write!(f, "SELECT {} FROM ", expr)?;
 			}
@@ -69,10 +69,10 @@ impl Display for Graph {
 	}
 }
 
-impl From<Graph> for crate::expr::Graph {
-	fn from(v: Graph) -> Self {
+impl From<Lookup> for crate::expr::Lookup {
+	fn from(v: Lookup) -> Self {
 		Self {
-			dir: v.dir.into(),
+			kind: v.kind.into(),
 			expr: v.expr.map(From::from),
 			what: v.what.into_iter().map(From::from).collect(),
 			cond: v.cond.map(Into::into),
@@ -86,10 +86,10 @@ impl From<Graph> for crate::expr::Graph {
 	}
 }
 
-impl From<crate::expr::Graph> for Graph {
-	fn from(v: crate::expr::Graph) -> Self {
-		Graph {
-			dir: v.dir.into(),
+impl From<crate::expr::Lookup> for Lookup {
+	fn from(v: crate::expr::Lookup) -> Self {
+		Lookup {
+			kind: v.kind.into(),
 			expr: v.expr.map(Into::into),
 			what: v.what.into_iter().map(From::from).collect(),
 			cond: v.cond.map(Into::into),
@@ -105,12 +105,62 @@ impl From<crate::expr::Graph> for Graph {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum GraphSubject {
+pub enum LookupKind {
+	Graph(Dir),
+	Reference,
+}
+
+impl LookupKind {
+	pub fn is_graph(&self) -> bool {
+		matches!(self, LookupKind::Graph(_))
+	}
+
+	pub fn is_reference(&self) -> bool {
+		matches!(self, LookupKind::Reference)
+	}
+}
+
+impl Default for LookupKind {
+	fn default() -> Self {
+		Self::Graph(Dir::Both)
+	}
+}
+
+impl Display for LookupKind {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		match self {
+			Self::Graph(dir) => Display::fmt(dir, f),
+			Self::Reference => write!(f, "<~"),
+		}
+	}
+}
+
+impl From<LookupKind> for crate::expr::lookup::LookupKind {
+	fn from(v: LookupKind) -> Self {
+		match v {
+			LookupKind::Graph(dir) => Self::Graph(dir.into()),
+			LookupKind::Reference => Self::Reference,
+		}
+	}
+}
+
+impl From<crate::expr::lookup::LookupKind> for LookupKind {
+	fn from(v: crate::expr::lookup::LookupKind) -> Self {
+		match v {
+			crate::expr::lookup::LookupKind::Graph(dir) => Self::Graph(dir.into()),
+			crate::expr::lookup::LookupKind::Reference => Self::Reference,
+		}
+	}
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub enum LookupSubject {
 	Table(Ident),
 	Range(Ident, RecordIdKeyRangeLit),
 }
 
-impl Display for GraphSubject {
+impl Display for LookupSubject {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Table(tb) => Display::fmt(&tb, f),
@@ -119,11 +169,11 @@ impl Display for GraphSubject {
 	}
 }
 
-impl From<GraphSubject> for crate::expr::graph::GraphSubject {
-	fn from(v: GraphSubject) -> Self {
+impl From<LookupSubject> for crate::expr::lookup::LookupSubject {
+	fn from(v: LookupSubject) -> Self {
 		match v {
-			GraphSubject::Table(tb) => Self::Table(tb.into()),
-			GraphSubject::Range(table, range) => Self::Range {
+			LookupSubject::Table(tb) => Self::Table(tb.into()),
+			LookupSubject::Range(table, range) => Self::Range {
 				table: table.into(),
 				range: range.into(),
 			},
@@ -131,11 +181,11 @@ impl From<GraphSubject> for crate::expr::graph::GraphSubject {
 	}
 }
 
-impl From<crate::expr::graph::GraphSubject> for GraphSubject {
-	fn from(v: crate::expr::graph::GraphSubject) -> Self {
+impl From<crate::expr::lookup::LookupSubject> for LookupSubject {
+	fn from(v: crate::expr::lookup::LookupSubject) -> Self {
 		match v {
-			crate::expr::graph::GraphSubject::Table(tb) => Self::Table(tb.into()),
-			crate::expr::graph::GraphSubject::Range {
+			crate::expr::lookup::LookupSubject::Table(tb) => Self::Table(tb.into()),
+			crate::expr::lookup::LookupSubject::Range {
 				table,
 				range,
 			} => Self::Range(table.into(), range.into()),

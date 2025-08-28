@@ -8,7 +8,7 @@ use crate::dbs::Options;
 use crate::expr::field::{Field, Fields};
 use crate::expr::part::Next;
 use crate::expr::statements::select::SelectStatement;
-use crate::expr::{Expr, FlowResultExt as _, Graph, Idiom, Literal, Part};
+use crate::expr::{Expr, FlowResultExt as _, Idiom, Literal, Lookup, Part};
 use crate::val::Value;
 
 impl Value {
@@ -31,7 +31,7 @@ impl Value {
 		// just return Ok(())
 		while let Some(p) = iter.next() {
 			match p {
-				Part::Graph(g) => match this {
+				Part::Lookup(g) => match this {
 					Value::Object(o) => {
 						let Some(v) = o.rid() else {
 							return Ok(());
@@ -43,9 +43,9 @@ impl Value {
 					Value::RecordId(x) => {
 						let what = Expr::Idiom(Idiom(vec![
 							Part::Start(Expr::Literal(Literal::RecordId(x.clone().into_literal()))),
-							Part::Graph(Graph {
+							Part::Lookup(Lookup {
 								what: g.what.clone(),
-								dir: g.dir.clone(),
+								kind: g.kind.clone(),
 								..Default::default()
 							}),
 						]));

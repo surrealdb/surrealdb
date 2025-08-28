@@ -4,7 +4,7 @@ use std::ops::Bound;
 use reblessive::Stk;
 
 use super::{ParseResult, Parser};
-use crate::sql::graph::GraphSubject;
+use crate::sql::lookup::LookupSubject;
 use crate::sql::{Ident, Param, RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit};
 use crate::syn::error::bail;
 use crate::syn::lexer::compound;
@@ -151,13 +151,16 @@ impl Parser<'_> {
 		})
 	}
 
-	pub(crate) async fn parse_graph_subject(&mut self, stk: &mut Stk) -> ParseResult<GraphSubject> {
+	pub(crate) async fn parse_lookup_subject(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<LookupSubject> {
 		let tb = self.next_token_value()?;
 		if self.eat_whitespace(t!(":")) {
 			let rng = self.parse_id_range(stk).await?;
-			Ok(GraphSubject::Range(tb, rng))
+			Ok(LookupSubject::Range(tb, rng))
 		} else {
-			Ok(GraphSubject::Table(tb))
+			Ok(LookupSubject::Table(tb))
 		}
 	}
 
