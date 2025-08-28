@@ -9,13 +9,14 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 use async_channel::Sender;
+use tokio::sync::RwLock;
 use trice::Instant;
 #[cfg(feature = "http")]
 use url::Url;
 
 use crate::buc::store::ObjectStore;
 use crate::buc::{self, BucketConnectionKey, BucketConnections};
-use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
+use crate::catalog::{self, DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
@@ -75,6 +76,10 @@ pub struct MutableContext {
 	isolated: bool,
 	// A map of bucket connections
 	buckets: Option<Arc<BucketConnections>>,
+	// The current namespace definition specified by the user.
+	namespace: Arc<RwLock<Option<Arc<catalog::NamespaceDefinition>>>>,
+	// The current database definition specified by the user.
+	database: Arc<RwLock<Option<Arc<catalog::DatabaseDefinition>>>>,
 }
 
 impl Default for MutableContext {
@@ -126,6 +131,8 @@ impl MutableContext {
 			transaction: None,
 			isolated: false,
 			buckets: None,
+			namespace: Arc::new(RwLock::new(None)),
+			database: Arc::new(RwLock::new(None)),
 		}
 	}
 
@@ -152,6 +159,8 @@ impl MutableContext {
 			isolated: false,
 			parent: Some(parent.clone()),
 			buckets: parent.buckets.clone(),
+			namespace: Arc::clone(&parent.namespace),
+			database: Arc::clone(&parent.database),
 		}
 	}
 
@@ -180,6 +189,8 @@ impl MutableContext {
 			isolated: true,
 			parent: Some(parent.clone()),
 			buckets: parent.buckets.clone(),
+			namespace: Arc::clone(&parent.namespace),
+			database: Arc::clone(&parent.database),
 		}
 	}
 
@@ -208,6 +219,8 @@ impl MutableContext {
 			isolated: false,
 			parent: None,
 			buckets: from.buckets.clone(),
+			namespace: Arc::clone(&from.namespace),
+			database: Arc::clone(&from.database),
 		}
 	}
 
@@ -245,6 +258,8 @@ impl MutableContext {
 			transaction: None,
 			isolated: false,
 			buckets: Some(buckets),
+			namespace: Arc::new(RwLock::new(None)),
+			database: Arc::new(RwLock::new(None)),
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -270,7 +285,7 @@ impl MutableContext {
 	/// the `strict` option.
 	pub(crate) async fn get_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
 		let ns = opt.ns()?;
-		let ns_def = self.tx().get_or_add_ns(ns, opt.strict).await?;
+		let ns_def = self.get_cached_ns_or_possibly_add(ns, opt.strict).await?;
 		Ok(ns_def.namespace_id)
 	}
 
@@ -278,13 +293,32 @@ impl MutableContext {
 	/// If the namespace does not exist, it will return an error.
 	pub(crate) async fn expect_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
 		let ns = opt.ns()?;
-		let Some(ns_def) = self.tx().get_ns_by_name(ns).await? else {
-			return Err(Error::NsNotFound {
-				name: ns.to_string(),
-			}
-			.into());
-		};
+		let ns_def = self.get_cached_ns_or_possibly_add(ns, false).await?;
 		Ok(ns_def.namespace_id)
+	}
+
+	/// Get the namespace definition for the current context.
+	///
+	/// If the namespace does not exist in the context cache, it will be
+	/// fetched from the datastore, and possibly added depending on the
+	/// `strict` option.
+	///
+	/// If the namespace does not exist in the datastore, and the `strict` option is
+	/// true, the function will return an error.
+	async fn get_cached_ns_or_possibly_add(
+		&self,
+		ns: &str,
+		strict: bool,
+	) -> Result<Arc<catalog::NamespaceDefinition>> {
+		{
+			let ns_def_opt = self.namespace.read().await;
+			if let Some(ns_def) = ns_def_opt.as_ref() {
+				return Ok(Arc::clone(ns_def));
+			}
+		}
+		let ns_def = self.tx().get_or_add_ns(ns, strict).await?;
+		*self.namespace.write().await = Some(Arc::clone(&ns_def));
+		Ok(ns_def)
 	}
 
 	/// Get the namespace and database ids for the current context.
@@ -292,7 +326,7 @@ impl MutableContext {
 	/// created based on the `strict` option.
 	pub(crate) async fn get_ns_db_ids(&self, opt: &Options) -> Result<(NamespaceId, DatabaseId)> {
 		let (ns, db) = opt.ns_db()?;
-		let db_def = self.tx().ensure_ns_db(ns, db, opt.strict).await?;
+		let db_def = self.get_cached_db_or_possibly_add(ns, db, opt.strict).await?;
 		Ok((db_def.namespace_id, db_def.database_id))
 	}
 
@@ -303,18 +337,41 @@ impl MutableContext {
 		opt: &Options,
 	) -> Result<(NamespaceId, DatabaseId)> {
 		let (ns, db) = opt.ns_db()?;
-		let Some(db_def) = self.tx().get_db_by_name(ns, db).await? else {
-			return Err(Error::DbNotFound {
-				name: db.to_string(),
-			}
-			.into());
-		};
+		let db_def = self.get_cached_db_or_possibly_add(ns, db, false).await?;
 		Ok((db_def.namespace_id, db_def.database_id))
 	}
 
+	/// Get the database definition for the current context.
 	pub(crate) async fn get_db(&self, opt: &Options) -> Result<Arc<DatabaseDefinition>> {
 		let (ns, db) = opt.ns_db()?;
-		let db_def = self.tx().ensure_ns_db(ns, db, opt.strict).await?;
+		let db_def = self.get_cached_db_or_possibly_add(ns, db, opt.strict).await?;
+		Ok(db_def)
+	}
+
+	/// Get the database definition for the current context.
+	///
+	/// If the database does not exist in the context cache, it will be fetched
+	/// from the datastore.
+	///
+	/// If the database does not exist in the datastore, and the `strict` option is
+	/// false, the database will be created and added to the context cache.
+	///
+	/// If the database does not exist in the datastore, and the `strict` option is
+	/// true, the function will return an error.
+	async fn get_cached_db_or_possibly_add(
+		&self,
+		ns: &str,
+		db: &str,
+		strict: bool,
+	) -> Result<Arc<DatabaseDefinition>> {
+		{
+			let db_def_opt = self.database.read().await;
+			if let Some(db_def) = db_def_opt.as_ref() {
+				return Ok(Arc::clone(db_def));
+			}
+		}
+		let db_def = self.tx().ensure_ns_db(ns, db, strict).await?;
+		*self.database.write().await = Some(Arc::clone(&db_def));
 		Ok(db_def)
 	}
 

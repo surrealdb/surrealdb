@@ -342,7 +342,7 @@ async fn run_test_with_dbs(
 		.env
 		.as_ref()
 		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
-		.unwrap_or(Duration::from_secs(2));
+		.unwrap_or(Duration::from_secs(1));
 
 	let mut import_session = Session::owner();
 	if let Some(ns) = session.ns.as_ref() {
