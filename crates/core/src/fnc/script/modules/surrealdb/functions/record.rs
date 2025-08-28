@@ -14,5 +14,5 @@ impl_module_def!(
 	"id" => run,
 	"is" => (is::Package),
 	"table" => run,
-	"tb" => run,
+	"tb" => run
 );

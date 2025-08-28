@@ -1,15 +1,10 @@
 use std::fmt;
 
-use anyhow::{Result, bail};
 use revision::revisioned;
 
+use super::Value;
 use super::statements::info::InfoStructure;
-use super::{Idiom, Value};
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::{Expr, Ident};
+use crate::expr::Expr;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
