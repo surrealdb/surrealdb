@@ -1,6 +1,6 @@
 use reblessive::Stk;
 
-use crate::api::method::Method;
+use crate::catalog::ApiMethod;
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::base::Base;
@@ -202,7 +202,7 @@ impl Parser<'_> {
 		};
 		let name = self.next_token_value()?;
 		expected!(self, t!("ON"));
-		let base = self.parse_base(false)?;
+		let base = self.parse_base()?;
 
 		let mut res = DefineUserStatement {
 			kind,
@@ -323,7 +323,7 @@ impl Parser<'_> {
 		let name = self.next_token_value()?;
 		expected!(self, t!("ON"));
 		// TODO: Parse base should no longer take an argument.
-		let base = self.parse_base(false)?;
+		let base = self.parse_base()?;
 
 		let mut res = DefineAccessStatement {
 			name,
@@ -691,15 +691,15 @@ impl Parser<'_> {
 					}
 				}
 				t!("DELETE") | t!("GET") | t!("PATCH") | t!("POST") | t!("PUT") | t!("TRACE") => {
-					let mut methods: Vec<Method> = vec![];
+					let mut methods: Vec<ApiMethod> = vec![];
 					loop {
 						let method = match self.peek().kind {
-							t!("DELETE") => Method::Delete,
-							t!("GET") => Method::Get,
-							t!("PATCH") => Method::Patch,
-							t!("POST") => Method::Post,
-							t!("PUT") => Method::Put,
-							t!("TRACE") => Method::Trace,
+							t!("DELETE") => ApiMethod::Delete,
+							t!("GET") => ApiMethod::Get,
+							t!("PATCH") => ApiMethod::Patch,
+							t!("POST") => ApiMethod::Post,
+							t!("PUT") => ApiMethod::Put,
+							t!("TRACE") => ApiMethod::Trace,
 							found => {
 								bail!(
 									"Expected one of `delete`, `get`, `patch`, `post`, `put` or `trace`, found {found}"
@@ -759,7 +759,7 @@ impl Parser<'_> {
 		let mut res = DefineEventStatement {
 			kind,
 			name,
-			what,
+			target_table: what,
 			when: Expr::Literal(Literal::Bool(true)),
 			then: Vec::new(),
 			comment: None,

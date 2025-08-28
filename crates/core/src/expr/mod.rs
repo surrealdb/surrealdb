@@ -42,11 +42,9 @@ pub(crate) mod output;
 pub(crate) mod param;
 pub(crate) mod part;
 pub(crate) mod paths;
-pub(crate) mod permission;
 pub(crate) mod plan;
 pub(crate) mod record_id;
 pub(crate) mod reference;
-pub(crate) mod scoring;
 pub(crate) mod script;
 pub(crate) mod split;
 pub(crate) mod start;
@@ -58,10 +56,8 @@ pub(crate) mod with;
 
 pub(crate) mod decimal;
 
-pub mod index;
 pub mod statements;
 
-pub use self::access::{Access, Accesses};
 pub use self::access_type::{AccessType, JwtAccess, RecordAccess};
 pub use self::algorithm::Algorithm;
 pub use self::base::Base;
@@ -82,7 +78,6 @@ pub use self::function::{Function, FunctionCall};
 pub use self::group::{Group, Groups};
 pub use self::ident::Ident;
 pub use self::idiom::{Idiom, Idioms};
-pub use self::index::Index;
 pub use self::kind::{GeometryKind, Kind, KindLiteral};
 pub use self::limit::Limit;
 pub use self::literal::Literal;
@@ -95,10 +90,8 @@ pub use self::order::Order;
 pub use self::output::Output;
 pub use self::param::Param;
 pub use self::part::Part;
-pub use self::permission::{Permission, Permissions};
 pub use self::plan::{LogicalPlan, TopLevelExpr};
 pub use self::record_id::{RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit};
-pub use self::scoring::Scoring;
 pub use self::script::Script;
 pub use self::split::{Split, Splits};
 pub use self::start::Start;
@@ -107,14 +100,14 @@ pub use self::statements::{
 	CreateStatement, DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement,
 	DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
 	DefineIndexStatement, DefineModelStatement, DefineNamespaceStatement, DefineParamStatement,
-	DefineParamStore, DefineStatement, DefineTableStatement, DefineUserStatement, DeleteStatement,
-	ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
-	LiveStatement, OptionStatement, OutputStatement, RebuildStatement, RelateStatement,
-	RemoveAccessStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
-	RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement, RemoveModelStatement,
-	RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
-	RemoveUserStatement, SelectStatement, SetStatement, ShowStatement, SleepStatement,
-	UpdateStatement, UpsertStatement, UseStatement,
+	DefineStatement, DefineTableStatement, DefineUserStatement, DeleteStatement, ForeachStatement,
+	IfelseStatement, InfoStatement, InsertStatement, KillStatement, LiveStatement, OptionStatement,
+	OutputStatement, RebuildStatement, RelateStatement, RemoveAccessStatement,
+	RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
+	RemoveFunctionStatement, RemoveIndexStatement, RemoveModelStatement, RemoveNamespaceStatement,
+	RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
+	SelectStatement, SetStatement, ShowStatement, SleepStatement, UpdateStatement, UpsertStatement,
+	UseStatement,
 };
 pub use self::timeout::Timeout;
 pub use self::tokenizer::Tokenizer;

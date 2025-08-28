@@ -1,6 +1,5 @@
 use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::fmt::{self, Display, Formatter, Write};
-use std::ops;
 use std::ops::{Deref, DerefMut};
 
 use anyhow::{Result, ensure};
@@ -86,11 +85,33 @@ impl Array {
 	pub fn into_literal(self) -> Vec<Expr> {
 		self.into_iter().map(|x| x.into_literal()).collect()
 	}
-}
 
-impl Array {
 	pub(crate) fn is_all_none_or_null(&self) -> bool {
 		self.0.iter().all(|v| v.is_nullish())
+	}
+
+	/// Removes all values in the array which are equal to the given value.
+	pub fn remove_value(mut self, other: &Value) -> Self {
+		self.retain(|x| x != other);
+		self
+	}
+
+	/// Removes all values in the array which are equal to a value in the given slice.
+	pub fn remove_all(mut self, other: &[Value]) -> Self {
+		self.retain(|x| !other.contains(x));
+		self
+	}
+
+	/// Concatenates the two arrays returning an array with the values of both arrays.
+	pub fn concat(mut self, mut other: Array) -> Self {
+		self.0.append(&mut other.0);
+		self
+	}
+
+	/// Pushes a value but takes self as a value.
+	pub fn with_push(mut self, other: Value) -> Self {
+		self.0.push(other);
+		self
 	}
 
 	pub(crate) fn display<V: Display>(v: &[V], f: &mut Formatter) -> fmt::Result {
@@ -108,48 +129,6 @@ impl Array {
 impl Display for Array {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Array::display(&self.0, f)
-	}
-}
-
-// ------------------------------
-
-impl ops::Add<Value> for Array {
-	type Output = Self;
-	fn add(mut self, other: Value) -> Self {
-		self.0.push(other);
-		self
-	}
-}
-
-impl ops::Add for Array {
-	type Output = Self;
-	fn add(mut self, mut other: Self) -> Self {
-		self.0.append(&mut other.0);
-		self
-	}
-}
-
-// ------------------------------
-
-impl ops::Sub<Value> for Array {
-	type Output = Self;
-	fn sub(mut self, other: Value) -> Self {
-		if let Some(p) = self.0.iter().position(|x| *x == other) {
-			self.0.remove(p);
-		}
-		self
-	}
-}
-
-impl ops::Sub for Array {
-	type Output = Self;
-	fn sub(mut self, other: Self) -> Self {
-		for v in other.0 {
-			if let Some(p) = self.0.iter().position(|x| *x == v) {
-				self.0.remove(p);
-			}
-		}
-		self
 	}
 }
 

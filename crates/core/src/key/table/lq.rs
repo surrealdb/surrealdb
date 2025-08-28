@@ -3,8 +3,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::expr::LiveStatement;
+use crate::catalog::{DatabaseId, NamespaceId, SubscriptionDefinition};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
@@ -30,7 +29,7 @@ pub(crate) struct Lq<'a> {
 }
 
 impl KVKey for Lq<'_> {
-	type ValueType = LiveStatement;
+	type ValueType = SubscriptionDefinition;
 }
 
 pub fn new(ns: NamespaceId, db: DatabaseId, tb: &str, lq: Uuid) -> Lq<'_> {

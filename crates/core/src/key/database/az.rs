@@ -2,8 +2,8 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::catalog;
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::expr::statements::define::DefineAnalyzerStatement;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
@@ -21,7 +21,7 @@ pub(crate) struct Az<'a> {
 }
 
 impl KVKey for Az<'_> {
-	type ValueType = DefineAnalyzerStatement;
+	type ValueType = catalog::AnalyzerDefinition;
 }
 
 pub fn new(ns: NamespaceId, db: DatabaseId, az: &str) -> Az<'_> {

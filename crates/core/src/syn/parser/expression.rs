@@ -18,7 +18,7 @@ impl Parser<'_> {
 	/// setting table_as_field.
 	///
 	/// Meant to be used when parsing an expression the first time to avoid
-	/// having the depth limit be lowered unnessacrily
+	/// having the depth limit be lowered unnecessarily.
 	pub async fn parse_expr_start(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		self.table_as_field = true;
 		self.pratt_parse_expr(stk, BindingPower::Base).await

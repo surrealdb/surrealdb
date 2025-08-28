@@ -6,7 +6,6 @@ use std::str::FromStr;
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use revision::revisioned;
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
 
 use super::escape::EscapeKey;
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
@@ -18,7 +17,7 @@ use crate::val::{
 };
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum GeometryKind {
 	Point,
 	Line,
@@ -62,7 +61,7 @@ impl FromStr for GeometryKind {
 
 /// The kind, or data type, of a value or field.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Kind {
 	/// The most generic type, can be anything.
 	Any,
@@ -449,7 +448,7 @@ impl InfoStructure for Kind {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum KindLiteral {
 	String(Strand),
 	Integer(i64),

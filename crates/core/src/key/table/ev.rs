@@ -2,8 +2,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::expr::statements::define::DefineEventStatement;
+use crate::catalog::{DatabaseId, EventDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
@@ -23,7 +22,7 @@ pub(crate) struct Ev<'a> {
 }
 
 impl KVKey for Ev<'_> {
-	type ValueType = DefineEventStatement;
+	type ValueType = EventDefinition;
 }
 
 pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, ev: &'a str) -> Ev<'a> {

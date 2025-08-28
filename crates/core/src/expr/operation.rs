@@ -1,7 +1,6 @@
 use std::fmt;
 
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::val::{Array, Object, Strand, Value};
 
@@ -17,10 +16,9 @@ impl fmt::Display for PatchError {
 }
 
 /// A type representing an delta change to a value.
+
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[serde(tag = "op")]
-#[serde(rename_all = "lowercase")]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Operation {
 	Add {
 		path: Vec<String>,

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 
+use crate::catalog::{self, FieldDefinition};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Options, Statement};
@@ -11,17 +12,14 @@ use crate::err::Error;
 use crate::expr::data::Data;
 use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
 use crate::expr::kind::Kind;
-use crate::expr::permission::Permission;
-use crate::expr::statements::DefineFieldStatement;
-use crate::expr::statements::define::DefineDefault;
 use crate::expr::{FlowResultExt as _, Part};
 use crate::iam::Action;
 use crate::val::value::CoerceError;
 use crate::val::value::every::ArrayBehaviour;
 use crate::val::{RecordId, Value};
 
-/// Removes `NONE` values recursively from objects, but not when `NONE` is a
-/// direct child of an array
+/// Removes `NONE` values recursively from objects, but not when `NONE` is a direct child of an
+/// array
 fn clean_none(v: &mut Value) -> bool {
 	match v {
 		Value::None => false,
@@ -62,7 +60,7 @@ impl Document {
 
 			// Loop through all field definitions
 			for fd in self.fd(ctx, opt).await?.iter() {
-				let is_flex = fd.flex;
+				let is_flex = fd.flexible;
 				let is_literal = fd.field_kind.as_ref().is_some_and(Kind::contains_literal);
 				for k in self.current.doc.as_ref().each(&fd.name).into_iter() {
 					defined_field_names.insert(&k, is_flex || is_literal);
@@ -360,7 +358,7 @@ struct FieldEditContext<'a> {
 	/// The mutable request context
 	context: Option<MutableContext>,
 	/// The defined field statement
-	def: &'a DefineFieldStatement,
+	def: &'a FieldDefinition,
 	/// The current request stack
 	stk: &'a mut Stk,
 	/// The current request context
@@ -439,12 +437,12 @@ impl FieldEditContext<'_> {
 			return Ok(val);
 		}
 		// The document is not being created
-		if !self.doc.is_new() && !matches!(self.def.default, DefineDefault::Always(_)) {
+		if !self.doc.is_new() && !matches!(self.def.default, catalog::DefineDefault::Always(_)) {
 			return Ok(val);
 		}
 		// Get the default value
 		let def = match &self.def.default {
-			DefineDefault::Set(v) | DefineDefault::Always(v) => Some(v),
+			catalog::DefineDefault::Set(v) | catalog::DefineDefault::Always(v) => Some(v),
 			_ => match &self.def.value {
 				// The VALUE clause doesn't
 				Some(v) if v.is_static() => Some(v),
@@ -580,20 +578,20 @@ impl FieldEditContext<'_> {
 		if self.opt.check_perms(Action::Edit)? {
 			// Get the permission clause
 			let perms = if self.doc.is_new() {
-				&self.def.permissions.create
+				&self.def.create_permission
 			} else {
-				&self.def.permissions.update
+				&self.def.update_permission
 			};
 			// Match the permission clause
 			let val = match perms {
 				// The field PERMISSIONS clause
 				// is FULL, enabling this field
 				// to be updated without checks.
-				Permission::Full => val,
+				catalog::Permission::Full => val,
 				// The field PERMISSIONS clause
 				// is NONE, meaning that this
 				// change will be reverted.
-				Permission::None => {
+				catalog::Permission::None => {
 					if val != *self.old {
 						self.old.as_ref().clone()
 					} else {
@@ -604,7 +602,7 @@ impl FieldEditContext<'_> {
 				// is a custom expression, so
 				// we check the expression and
 				// revert the field if denied.
-				Permission::Specific(expr) => {
+				catalog::Permission::Specific(expr) => {
 					// Arc the current value
 					let now = Arc::new(val.clone());
 					// Get the current document
@@ -728,8 +726,8 @@ impl FieldEditContext<'_> {
 						}
 					}
 
-				// If the new value is not an array, then all record ids in the
-				// old array are removed
+					// If the new value is not an array, then all record ids in the old array are
+					// removed
 				} else {
 					for old_rid in oldarr.iter() {
 						if let Value::RecordId(rid) = old_rid {

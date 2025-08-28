@@ -17,179 +17,6 @@ struct TestLevel {
 }
 
 #[tokio::test]
-async fn access_bearer_operations() {
-	let test_levels = vec![
-		TestLevel {
-			base: Base::Root,
-			ns: None,
-			db: None,
-		},
-		TestLevel {
-			base: Base::Ns,
-			ns: Some("test"),
-			db: None,
-		},
-		TestLevel {
-			base: Base::Db,
-			ns: Some("test"),
-			db: Some("test"),
-		},
-	];
-
-	for level in &test_levels {
-		let base = level.base.to_string();
-		println!("Test level: {}", base);
-		let sql = format!(
-			"
-			-- Initial setup
-			DEFINE ACCESS api ON {base} TYPE BEARER FOR USER;
-			DEFINE USER tobie ON {base} PASSWORD 'secret' ROLES EDITOR;
-			INFO FOR {base};
-			-- Should succeed
-			ACCESS api ON {base} GRANT FOR USER tobie;
-			ACCESS api ON {base} GRANT FOR USER tobie;
-			ACCESS api GRANT FOR USER tobie;
-			ACCESS api GRANT FOR USER tobie;
-			ACCESS api ON {base} SHOW ALL;
-			ACCESS api SHOW ALL;
-			-- Should fail
-			ACCESS invalid ON {base} GRANT FOR USER tobie;
-			ACCESS invalid GRANT FOR USER tobie;
-			ACCESS api ON {base} GRANT FOR USER invalid;
-			ACCESS api GRANT FOR USER invalid;
-			ACCESS invalid ON {base} SHOW ALL;
-			ACCESS invalid SHOW ALL;
-		"
-		);
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
-		let ses = match level.base {
-			Base::Root => Session::owner(),
-			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
-			Base::Db => Session::owner().with_ns(level.ns.unwrap()).with_db(level.db.unwrap()),
-			_ => panic!("Invalid base"),
-		};
-		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
-		assert_eq!(res.len(), 15);
-		// Consume the results of the setup statements
-		res.remove(0).result.unwrap();
-		res.remove(0).result.unwrap();
-		// Ensure the access method was created as expected
-		let tmp = res.remove(0).result.unwrap().to_string();
-		let ok =
-			Regex::new(&format!(
-				r"\{{ accesses: \{{ api: 'DEFINE ACCESS api ON {base} TYPE BEARER FOR USER DURATION FOR GRANT 4w2d, FOR TOKEN 1h, FOR SESSION NONE' \}}, .* \}}"
-			)).unwrap();
-		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
-		//
-		let tmp = res.remove(0).result.unwrap().to_string();
-		let ok =
-			Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
-					.unwrap();
-		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
-		//
-		let tmp = res.remove(0).result.unwrap().to_string();
-		let ok =
-			Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
-					.unwrap();
-		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
-		//
-		let tmp = res.remove(0).result.unwrap().to_string();
-		let ok =
-			Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
-					.unwrap();
-		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
-		//
-		let tmp = res.remove(0).result.unwrap().to_string();
-		let ok =
-			Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
-					.unwrap();
-		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
-		//
-		let tmp = res.remove(0).result.unwrap().to_string();
-		let ok = Regex::new(
-			r"\[\{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}\]",
-		)
-		.unwrap();
-		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
-		//
-		let tmp = res.remove(0).result.unwrap().to_string();
-		let ok = Regex::new(
-			r"\[\{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}, \{ ac: 'api', .*, grant: \{ id: .*, key: '\[REDACTED\]' \}, .* \}\]",
-		)
-		.unwrap();
-		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
-		//
-		let tmp = res.remove(0).result.unwrap_err();
-		let expected = if matches!(level.base, Base::Root) {
-			"The root access method 'invalid' does not exist".to_string()
-		} else {
-			format!(
-				"The access method 'invalid' does not exist in the {} 'test'",
-				level.base.to_string().to_lowercase()
-			)
-		};
-		assert_eq!(tmp.to_string(), expected);
-		//
-		let tmp = res.remove(0).result.unwrap_err();
-		let expected = if matches!(level.base, Base::Root) {
-			"The root access method 'invalid' does not exist".to_string()
-		} else {
-			format!(
-				"The access method 'invalid' does not exist in the {} 'test'",
-				level.base.to_string().to_lowercase()
-			)
-		};
-		assert_eq!(tmp.to_string(), expected);
-		//
-		let tmp = res.remove(0).result.unwrap_err();
-		let expected = if matches!(level.base, Base::Root) {
-			"The root user 'invalid' does not exist".to_string()
-		} else {
-			format!(
-				"The user 'invalid' does not exist in the {} 'test'",
-				level.base.to_string().to_lowercase()
-			)
-		};
-		assert_eq!(tmp.to_string(), expected);
-		//
-		let tmp = res.remove(0).result.unwrap_err();
-		let expected = if matches!(level.base, Base::Root) {
-			"The root user 'invalid' does not exist".to_string()
-		} else {
-			format!(
-				"The user 'invalid' does not exist in the {} 'test'",
-				level.base.to_string().to_lowercase()
-			)
-		};
-		assert_eq!(tmp.to_string(), expected);
-		//
-		let tmp = res.remove(0).result.unwrap_err();
-		let expected = if matches!(level.base, Base::Root) {
-			"The root access method 'invalid' does not exist".to_string()
-		} else {
-			format!(
-				"The access method 'invalid' does not exist in the {} 'test'",
-				level.base.to_string().to_lowercase()
-			)
-		};
-		assert_eq!(tmp.to_string(), expected);
-		//
-		let tmp = res.remove(0).result.unwrap_err();
-		let expected = if matches!(level.base, Base::Root) {
-			"The root access method 'invalid' does not exist".to_string()
-		} else {
-			format!(
-				"The access method 'invalid' does not exist in the {} 'test'",
-				level.base.to_string().to_lowercase()
-			)
-		};
-		assert_eq!(tmp.to_string(), expected);
-	}
-}
-
-#[tokio::test]
 async fn access_bearer_grant() {
 	let test_levels = vec![
 		TestLevel {
@@ -234,7 +61,6 @@ async fn access_bearer_grant() {
 			Base::Root => Session::owner(),
 			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
 			Base::Db => Session::owner().with_ns(level.ns.unwrap()).with_db(level.db.unwrap()),
-			_ => panic!("Invalid base"),
 		};
 		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 		assert_eq!(res.len(), 8);
@@ -387,7 +213,6 @@ async fn access_bearer_revoke() {
 			Base::Root => Session::owner(),
 			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
 			Base::Db => Session::owner().with_ns(level.ns.unwrap()).with_db(level.db.unwrap()),
-			_ => panic!("Invalid base"),
 		};
 		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 		// Consume the results of the setup statements
@@ -529,7 +354,6 @@ async fn access_bearer_show() {
 			Base::Root => Session::owner(),
 			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
 			Base::Db => Session::owner().with_ns(level.ns.unwrap()).with_db(level.db.unwrap()),
-			_ => panic!("Invalid base"),
 		};
 		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 		// Consume the results of the setup statements
@@ -694,7 +518,6 @@ async fn access_bearer_purge() {
 			Base::Root => Session::owner(),
 			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
 			Base::Db => Session::owner().with_ns(level.ns.unwrap()).with_db(level.db.unwrap()),
-			_ => panic!("Invalid base"),
 		};
 		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 		// Consume the results of the setup statements
@@ -833,7 +656,6 @@ async fn permissions_access_grant() {
 					false,
 					"owner at namespace level should not be able to issue a grant on its namespace",
 				),
-				_ => panic!("Invalid base"),
 			},
 			(
 				(level_ns.clone(), Role::Owner),
@@ -885,7 +707,6 @@ async fn permissions_access_grant() {
 					false,
 					"owner at database level should not be able to issue a grant on its database",
 				),
-				_ => panic!("Invalid base"),
 			},
 			(
 				(level_db.clone(), Role::Owner),
@@ -954,7 +775,6 @@ async fn permissions_access_grant() {
 				)
 				.with_ns("NS")
 				.with_db("DB"),
-				_ => panic!("Invalid base"),
 			};
 			let statement_setup = format!(
 				"DEFINE ACCESS api ON {base} TYPE BEARER FOR USER; DEFINE USER tobie ON {base} ROLES OWNER"

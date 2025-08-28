@@ -492,7 +492,7 @@ impl IndexOption {
 
 	pub(crate) fn explain(&self) -> Value {
 		let mut e = HashMap::new();
-		e.insert("index", Value::from(self.ix_ref().name.clone().into_strand()));
+		e.insert("index", Value::from(self.ix_ref().name.clone()));
 		match self.op() {
 			IndexOperator::Equality(v) => {
 				e.insert("operator", Value::from(BinaryOperator::Equal.to_string()));

@@ -2,12 +2,13 @@ use std::fmt::{self, Display, Write};
 use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::DefineKind;
-use crate::catalog::{DatabaseId, NamespaceId, Relation, TableDefinition, TableType};
+use crate::catalog::{
+	self, DatabaseId, FieldDefinition, NamespaceId, Permission, Permissions, Relation,
+	TableDefinition, TableType,
+};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
@@ -16,13 +17,12 @@ use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, KindLiteral, Part, Permissions};
+use crate::expr::{Base, Expr, Ident, Idiom, Kind, KindLiteral, Part};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::{Transaction, impl_kv_value_revisioned};
+use crate::kvs::Transaction;
 use crate::val::{Strand, Value};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum DefineDefault {
 	#[default]
 	None,
@@ -30,15 +30,13 @@ pub enum DefineDefault {
 	Set(Expr),
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineFieldStatement {
 	pub kind: DefineKind,
 	pub name: Idiom,
 	pub what: Ident,
 	/// Whether the field is marked as flexible.
-	/// Flexible allows the field to be schemaless even if the table is marked
-	/// as schemafull.
+	/// Flexible allows the field to be schemaless even if the table is marked as schemafull.
 	pub flex: bool,
 	pub field_kind: Option<Kind>,
 	pub readonly: bool,
@@ -51,9 +49,38 @@ pub struct DefineFieldStatement {
 	pub reference: Option<Reference>,
 }
 
-impl_kv_value_revisioned!(DefineFieldStatement);
-
 impl DefineFieldStatement {
+	pub(crate) fn to_definition(&self) -> catalog::FieldDefinition {
+		fn convert_permission(permission: &Permission) -> catalog::Permission {
+			match permission {
+				Permission::None => catalog::Permission::None,
+				Permission::Full => catalog::Permission::Full,
+				Permission::Specific(expr) => catalog::Permission::Specific(expr.clone()),
+			}
+		}
+
+		catalog::FieldDefinition {
+			name: self.name.clone(),
+			what: self.what.clone().to_raw_string(),
+			flexible: self.flex,
+			field_kind: self.field_kind.clone(),
+			readonly: self.readonly,
+			value: self.value.clone(),
+			assert: self.assert.clone(),
+			computed: self.computed.clone(),
+			default: match &self.default {
+				DefineDefault::None => catalog::DefineDefault::None,
+				DefineDefault::Set(x) => catalog::DefineDefault::Set(x.clone()),
+				DefineDefault::Always(x) => catalog::DefineDefault::Always(x.clone()),
+			},
+			select_permission: convert_permission(&self.permissions.select),
+			create_permission: convert_permission(&self.permissions.create),
+			update_permission: convert_permission(&self.permissions.update),
+			comment: self.comment.clone().map(|x| x.into_string()),
+			reference: self.reference.clone(),
+		}
+	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -65,6 +92,7 @@ impl DefineFieldStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 
 		// Get the NS and DB
+		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 
 		// Validate computed options
@@ -79,7 +107,7 @@ impl DefineFieldStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the name of the field
-		let fd = self.name.as_raw_string();
+		let fd = self.name.to_raw_string();
 		// Check if the definition exists
 		if let Some(fd) = txn.get_tb_field(ns, db, &self.what, &fd).await? {
 			match self.kind {
@@ -102,43 +130,22 @@ impl DefineFieldStatement {
 			txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?
 		};
 
+		let definition = self.to_definition();
+
 		// Process the statement
 		let key = crate::key::table::fd::new(ns, db, &tb.name, &fd);
-		txn.set(
-			&key,
-			&DefineFieldStatement {
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				kind: DefineKind::Default,
-				..self.clone()
-			},
-			None,
-		)
-		.await?;
+		txn.set(&key, &definition, None).await?;
 
 		// Refresh the table cache
-		{
-			let tb_def = TableDefinition {
-				cache_fields_ts: Uuid::now_v7(),
-				..tb.as_ref().clone()
-			};
-			let (ns, db) = opt.ns_db()?;
-			txn.put_tb(ns, db, tb_def).await?;
-		}
+		let mut tb = TableDefinition {
+			cache_fields_ts: Uuid::now_v7(),
+			..tb.as_ref().clone()
+		};
 
-		// Clear the cache
-		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &self.what);
-		}
-		// Clear the cache
-		txn.clear_cache();
-		// Process possible recursive defitions
-		self.process_recursive_definitions(ns, db, txn.clone()).await?;
 		// If this is an `in` field then check relation definitions
 		if fd.as_str() == "in" {
-			// Get the table definition that this field belongs to
-			let relation_tb = txn.expect_tb(ns, db, &self.what).await?;
 			// The table is marked as TYPE RELATION
-			if let TableType::Relation(ref relation) = relation_tb.table_type {
+			if let TableType::Relation(ref relation) = tb.table_type {
 				// Check if a field TYPE has been specified
 				if let Some(kind) = self.field_kind.as_ref() {
 					// The `in` field must be a record type
@@ -148,32 +155,28 @@ impl DefineFieldStatement {
 					);
 					// Add the TYPE to the DEFINE TABLE statement
 					if relation.from.as_ref() != self.field_kind.as_ref() {
-						let key = crate::key::database::tb::new(ns, db, &self.what);
-						let val = TableDefinition {
-							cache_fields_ts: Uuid::now_v7(),
-							table_type: TableType::Relation(Relation {
-								from: self.field_kind.clone(),
-								..relation.to_owned()
-							}),
-							..relation_tb.as_ref().to_owned()
-						};
-						txn.set(&key, &val, None).await?;
+						tb.table_type = TableType::Relation(Relation {
+							from: self.field_kind.clone(),
+							..relation.to_owned()
+						});
+
+						txn.put_tb(ns_name, db_name, tb).await?;
 						// Clear the cache
 						if let Some(cache) = ctx.get_cache() {
 							cache.clear_tb(ns, db, &self.what);
 						}
-						// Clear the cache
+
 						txn.clear_cache();
+						return Ok(Value::None);
 					}
 				}
 			}
 		}
+
 		// If this is an `out` field then check relation definitions
 		if fd.as_str() == "out" {
-			// Get the table definition that this field belongs to
-			let relation_tb = txn.expect_tb(ns, db, &self.what).await?;
 			// The table is marked as TYPE RELATION
-			if let TableType::Relation(ref relation) = relation_tb.table_type {
+			if let TableType::Relation(ref relation) = tb.table_type {
 				// Check if a field TYPE has been specified
 				if let Some(kind) = self.field_kind.as_ref() {
 					// The `out` field must be a record type
@@ -183,26 +186,33 @@ impl DefineFieldStatement {
 					);
 					// Add the TYPE to the DEFINE TABLE statement
 					if relation.from.as_ref() != self.field_kind.as_ref() {
-						let key = crate::key::database::tb::new(ns, db, &self.what);
-						let val = TableDefinition {
-							cache_fields_ts: Uuid::now_v7(),
-							table_type: TableType::Relation(Relation {
-								to: self.field_kind.clone(),
-								..relation.to_owned()
-							}),
-							..relation_tb.as_ref().to_owned()
-						};
-						txn.set(&key, &val, None).await?;
+						tb.table_type = TableType::Relation(Relation {
+							to: self.field_kind.clone(),
+							..relation.clone()
+						});
+						txn.put_tb(ns_name, db_name, tb).await?;
 						// Clear the cache
 						if let Some(cache) = ctx.get_cache() {
 							cache.clear_tb(ns, db, &self.what);
 						}
-						// Clear the cache
+
 						txn.clear_cache();
+						return Ok(Value::None);
 					}
 				}
 			}
 		}
+
+		txn.put_tb(ns_name, db_name, tb).await?;
+
+		// Process possible recursive defitions
+		self.process_recursive_definitions(ns, db, txn.clone()).await?;
+
+		// Clear the cache
+		if let Some(cache) = ctx.get_cache() {
+			cache.clear_tb(ns, db, &self.what);
+		}
+
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good
@@ -245,19 +255,17 @@ impl DefineFieldStatement {
 				let val = if let Some(existing) =
 					fields.as_ref().and_then(|x| x.iter().find(|x| x.name == name))
 				{
-					DefineFieldStatement {
+					FieldDefinition {
 						field_kind: Some(cur_kind),
-						reference: self.reference.clone(),
-						kind: DefineKind::Default,
+						//reference: self.reference.clone(),
 						..existing.clone()
 					}
 				} else {
-					DefineFieldStatement {
+					FieldDefinition {
 						name: name.clone(),
-						what: self.what.clone(),
-						flex: self.flex,
+						what: self.what.clone().into_string(),
+						flexible: self.flex,
 						field_kind: Some(cur_kind),
-						kind: DefineKind::Default,
 						reference: self.reference.clone(),
 						..Default::default()
 					}
@@ -430,8 +438,8 @@ impl Display for DefineFieldStatement {
 		if let Some(ref v) = self.reference {
 			write!(f, " REFERENCE {v}")?
 		}
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+		if let Some(ref comment) = self.comment {
+			write!(f, " COMMENT {comment}")?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

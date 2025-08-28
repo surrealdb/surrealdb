@@ -1398,7 +1398,7 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	let initial = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
 	let initial_live_query_version =
 		cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
-	drop(txn);
+	txn.cancel().await?;
 
 	// Define some resources to refresh the UUIDs
 	let sql = r"
@@ -1422,12 +1422,12 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	let after_define = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
 	let after_define_live_query_version =
 		cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
-	drop(txn);
+	txn.cancel().await?;
 	// Compare uuids after definitions
-	assert_ne!(initial.cache_fields_ts, after_define.cache_fields_ts);
-	assert_ne!(initial.cache_events_ts, after_define.cache_events_ts);
-	assert_ne!(initial.cache_tables_ts, after_define.cache_tables_ts);
 	assert_ne!(initial.cache_indexes_ts, after_define.cache_indexes_ts);
+	assert_ne!(initial.cache_tables_ts, after_define.cache_tables_ts);
+	assert_ne!(initial.cache_events_ts, after_define.cache_events_ts);
+	assert_ne!(initial.cache_fields_ts, after_define.cache_fields_ts);
 	assert_ne!(initial_live_query_version, after_define_live_query_version);
 
 	// Remove the defined resources to refresh the UUIDs

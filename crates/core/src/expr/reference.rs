@@ -2,7 +2,6 @@ use std::fmt;
 
 use anyhow::{Result, bail};
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use super::statements::info::InfoStructure;
 use super::{Idiom, Value};
@@ -13,8 +12,7 @@ use crate::err::Error;
 use crate::expr::{Expr, Ident};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Reference")]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Reference {
 	pub on_delete: ReferenceDeleteStrategy,
 }
@@ -35,8 +33,7 @@ impl InfoStructure for Reference {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::ReferenceDeleteStrategy")]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ReferenceDeleteStrategy {
 	Reject,
 	Ignore,
@@ -63,9 +60,7 @@ impl InfoStructure for ReferenceDeleteStrategy {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Refs")]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Refs(pub Vec<(Option<Ident>, Option<Idiom>)>);
 
 impl Refs {

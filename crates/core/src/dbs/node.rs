@@ -2,7 +2,7 @@ use std::fmt::{self, Display};
 use std::ops::{Add, Sub};
 use std::time::Duration;
 
-use revision::{Error, revisioned};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -10,19 +10,16 @@ use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Object, Value};
 
-#[revisioned(revision = 2)]
+/// A node in the cluster
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Node {
-	#[revision(start = 2, default_fn = "default_id")]
+	/// The id of the node
 	pub id: Uuid,
-	#[revision(start = 2, default_fn = "default_hb")]
-	pub hb: Timestamp,
-	#[revision(start = 2, default_fn = "default_gc")]
-	pub gc: bool,
-	#[revision(end = 2, convert_fn = "convert_name")]
-	pub name: String,
-	#[revision(end = 2, convert_fn = "convert_heartbeat")]
+	/// The heartbeat of the node
 	pub heartbeat: Timestamp,
+	/// Whether the node is garbage collected
+	pub gc: bool,
 }
 
 impl_kv_value_revisioned!(Node);
@@ -32,7 +29,7 @@ impl Node {
 	pub fn new(id: Uuid, hb: Timestamp, gc: bool) -> Self {
 		Self {
 			id,
-			hb,
+			heartbeat: hb,
 			gc,
 		}
 	}
@@ -59,33 +56,11 @@ impl Node {
 	pub fn archived(&self) -> Option<Uuid> {
 		self.is_archived().then_some(self.id)
 	}
-	// Sets the default gc value for old nodes
-	fn default_id(_revision: u16) -> Result<Uuid, Error> {
-		Ok(Uuid::default())
-	}
-	// Sets the default gc value for old nodes
-	fn default_hb(_revision: u16) -> Result<Timestamp, Error> {
-		Ok(Timestamp::default())
-	}
-	// Sets the default gc value for old nodes
-	fn default_gc(_revision: u16) -> Result<bool, Error> {
-		Ok(true)
-	}
-	// Sets the default gc value for old nodes
-	fn convert_name(&mut self, _revision: u16, value: String) -> Result<(), Error> {
-		self.id = Uuid::parse_str(&value).unwrap();
-		Ok(())
-	}
-	// Sets the default gc value for old nodes
-	fn convert_heartbeat(&mut self, _revision: u16, value: Timestamp) -> Result<(), Error> {
-		self.hb = value;
-		Ok(())
-	}
 }
 
 impl Display for Node {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "NODE {} SEEN {}", self.id, self.hb)?;
+		write!(f, "NODE {} SEEN {}", self.id, self.heartbeat)?;
 		match self.gc {
 			true => write!(f, " ARCHIVED")?,
 			false => write!(f, " ACTIVE")?,
@@ -98,7 +73,7 @@ impl InfoStructure for Node {
 	fn structure(self) -> Value {
 		Value::Object(Object(map! {
 			"id".to_string() => Value::Uuid(self.id.into()),
-			"seen".to_string() => self.hb.structure(),
+			"seen".to_string() => self.heartbeat.structure(),
 			"active".to_string() => Value::Bool(!self.gc),
 		}))
 	}

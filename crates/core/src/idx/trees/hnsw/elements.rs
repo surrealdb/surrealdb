@@ -1,7 +1,7 @@
 use anyhow::Result;
 use dashmap::DashMap;
 
-use crate::expr::index::Distance;
+use crate::catalog::Distance;
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};

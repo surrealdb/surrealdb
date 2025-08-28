@@ -2,25 +2,22 @@ use std::fmt;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
+use crate::catalog::{NodeLiveQuery, SubscriptionDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _, Literal};
 use crate::iam::Auth;
-use crate::kvs::{Live, impl_kv_value_revisioned};
-use crate::val::{Uuid, Value};
+use crate::val::Value;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct LiveStatement {
 	pub id: Uuid,
 	pub node: Uuid,
-	pub expr: Fields,
+	pub fields: Fields,
 	pub what: Expr,
 	pub cond: Option<Cond>,
 	pub fetch: Option<Fetchs>,
@@ -38,14 +35,12 @@ pub struct LiveStatement {
 	pub(crate) session: Option<Value>,
 }
 
-impl_kv_value_revisioned!(LiveStatement);
-
 impl LiveStatement {
 	pub fn new(expr: Fields) -> Self {
 		LiveStatement {
 			id: Uuid::new_v4(),
 			node: Uuid::new_v4(),
-			expr,
+			fields: expr,
 			what: Expr::Literal(Literal::Null),
 			cond: None,
 			fetch: None,
@@ -59,7 +54,7 @@ impl LiveStatement {
 			id: Uuid::new_v4(),
 			node: Uuid::new_v4(),
 			what,
-			expr,
+			fields: expr,
 			cond: None,
 			auth: None,
 			session: None,
@@ -82,32 +77,34 @@ impl LiveStatement {
 		// Get the Node ID
 		let nid = opt.id()?;
 		// Check that auth has been set
-		let mut stm = LiveStatement {
+		let mut subscription_definition = SubscriptionDefinition {
+			id: self.id,
+			node: self.node,
+			fields: self.fields.clone(),
+			what: self.what.clone(),
+			cond: self.cond.clone().map(|c| c.0),
+			fetch: self.fetch.clone(),
+
 			// Use the current session authentication
 			// for when we store the LIVE Statement
 			auth: Some(opt.auth.as_ref().clone()),
 			// Use the current session authentication
 			// for when we store the LIVE Statement
 			session: ctx.value("session").cloned(),
-			// Clone the rest of the original fields
-			// from the LIVE statement to the new one
-			..self.clone()
 		};
 		// Get the id
-		let id = stm.id.0;
+		let live_query_id = subscription_definition.id;
 		// Process the live query table
-		match stk.run(|stk| stm.what.compute(stk, ctx, opt, doc)).await.catch_return()? {
+		match stk
+			.run(|stk| subscription_definition.what.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+		{
 			Value::Table(tb) => {
 				// Store the current Node ID
-				stm.node = nid.into();
+				subscription_definition.node = nid;
 				// Get the NS and DB
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-				// Store the live info
-				let lq = Live {
-					ns,
-					db,
-					tb: tb.to_string(),
-				};
 				// Get the transaction
 				let txn = ctx.tx();
 				// Ensure that the table definition exists
@@ -116,11 +113,19 @@ impl LiveStatement {
 					txn.ensure_ns_db_tb(ns, db, &tb, opt.strict).await?;
 				}
 				// Insert the node live query
-				let key = crate::key::node::lq::new(nid, id);
-				txn.replace(&key, &lq).await?;
+				let key = crate::key::node::lq::new(nid, live_query_id);
+				txn.replace(
+					&key,
+					&NodeLiveQuery {
+						ns,
+						db,
+						tb: tb.to_string(),
+					},
+				)
+				.await?;
 				// Insert the table live query
-				let key = crate::key::table::lq::new(ns, db, &tb, id);
-				txn.replace(&key, &stm).await?;
+				let key = crate::key::table::lq::new(ns, db, &tb, live_query_id);
+				txn.replace(&key, &subscription_definition).await?;
 				// Refresh the table cache for lives
 				if let Some(cache) = ctx.get_cache() {
 					cache.new_live_queries_version(ns, db, &tb);
@@ -135,13 +140,13 @@ impl LiveStatement {
 			}
 		};
 		// Return the query id
-		Ok(Uuid(id).into())
+		Ok(crate::val::Uuid(live_query_id).into())
 	}
 }
 
 impl fmt::Display for LiveStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "LIVE SELECT {} FROM {}", self.expr, self.what)?;
+		write!(f, "LIVE SELECT {} FROM {}", self.fields, self.what)?;
 		if let Some(ref v) = self.cond {
 			write!(f, " {v}")?
 		}
@@ -149,17 +154,6 @@ impl fmt::Display for LiveStatement {
 			write!(f, " {v}")?
 		}
 		Ok(())
-	}
-}
-
-impl InfoStructure for LiveStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"expr".to_string() => self.expr.structure(),
-			"what".to_string() => self.what.structure(),
-			"cond".to_string(), if let Some(v) = self.cond => v.0.structure(),
-			"fetch".to_string(), if let Some(v) = self.fetch => v.structure(),
-		})
 	}
 }
 

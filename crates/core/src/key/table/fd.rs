@@ -2,8 +2,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::expr::statements::DefineFieldStatement;
+use crate::catalog::{self, DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
@@ -23,7 +22,7 @@ pub(crate) struct Fd<'a> {
 }
 
 impl KVKey for Fd<'_> {
-	type ValueType = DefineFieldStatement;
+	type ValueType = catalog::FieldDefinition;
 }
 
 pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, fd: &'a str) -> Fd<'a> {

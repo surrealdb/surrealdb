@@ -2,8 +2,6 @@ use std::fmt;
 
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
@@ -14,8 +12,7 @@ use crate::expr::{Cond, Data, Explain, Expr, Output, Timeout, With};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Default, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Default, Hash)]
 pub struct UpsertStatement {
 	pub only: bool,
 	pub what: Vec<Expr>,

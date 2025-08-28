@@ -28,6 +28,7 @@ use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::MajorVersion;
 use crate::buc::BucketConnections;
+use crate::catalog::Index;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
@@ -38,7 +39,7 @@ use crate::dbs::node::Timestamp;
 use crate::dbs::{Capabilities, Executor, Notification, Options, Response, Session, Variables};
 use crate::err::Error;
 use crate::expr::statements::DefineUserStatement;
-use crate::expr::{Base, Expr, FlowResultExt as _, Ident, Index, LogicalPlan};
+use crate::expr::{Base, Expr, FlowResultExt as _, Ident, LogicalPlan};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
@@ -932,6 +933,28 @@ impl Datastore {
 	/// ```
 	pub async fn transaction(&self, write: TransactionType, lock: LockType) -> Result<Transaction> {
 		self.transaction_factory.transaction(write, lock).await
+	}
+
+	pub async fn health_check(&self) -> Result<()> {
+		let tx = self.transaction(Read, Optimistic).await?;
+
+		// Cancel the transaction
+		trace!("Cancelling health check transaction");
+		// Attempt to fetch data
+		match tx.get(&vec![0x00], None).await {
+			Err(err) => {
+				// Ensure the transaction is cancelled
+				let _ = tx.cancel().await;
+				// Return an error for this endpoint
+				Err(err)
+			}
+			Ok(_) => {
+				// Ensure the transaction is cancelled
+				let _ = tx.cancel().await;
+				// Return success for this endpoint
+				Ok(())
+			}
+		}
 	}
 
 	/// Parse and execute an SQL query

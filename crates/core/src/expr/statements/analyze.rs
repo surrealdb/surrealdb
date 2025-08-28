@@ -2,15 +2,13 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 
 use anyhow::{Result, bail};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
+use crate::catalog::Index;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::ident::Ident;
-use crate::expr::index::Index;
 use crate::iam::{Action, ResourceKind};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::search::SearchIndex;
@@ -18,8 +16,7 @@ use crate::idx::trees::mtree::MTreeIndex;
 use crate::kvs::TransactionType;
 use crate::val::Value;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum AnalyzeStatement {
 	Idx(Ident, Ident),
 }
