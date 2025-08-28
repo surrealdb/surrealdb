@@ -171,6 +171,18 @@ impl Default for ParserSettings {
 	}
 }
 
+impl ParserSettings {
+	pub fn default_with_experimental(enabled: bool) -> Self {
+		ParserSettings {
+			references_enabled: enabled,
+			bearer_access_enabled: enabled,
+			define_api_enabled: enabled,
+			files_enabled: enabled,
+			..Self::default()
+		}
+	}
+}
+
 /// The SurrealQL parser.
 pub struct Parser<'a> {
 	lexer: Lexer<'a>,
@@ -185,6 +197,11 @@ impl<'a> Parser<'a> {
 	/// Create a new parser from a give source.
 	pub fn new(source: &'a [u8]) -> Self {
 		Parser::new_with_settings(source, ParserSettings::default())
+	}
+
+	/// Create a new parser from a give source.
+	pub fn new_with_experimental(source: &'a [u8], enabled: bool) -> Self {
+		Parser::new_with_settings(source, ParserSettings::default_with_experimental(enabled))
 	}
 
 	/// Create a new parser from a give source.

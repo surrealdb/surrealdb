@@ -753,7 +753,7 @@ impl Revisioned for Expr {
 		let query: String = Revisioned::deserialize_revisioned(reader)?;
 
 		let mut stack = Stack::new();
-		let mut parser = crate::syn::parser::Parser::new(query.as_bytes());
+		let mut parser = crate::syn::parser::Parser::new_with_experimental(query.as_bytes(), true);
 		let expr = stack
 			.enter(|stk| parser.parse_expr(stk))
 			.finish()
