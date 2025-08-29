@@ -73,64 +73,16 @@ jobs:
           folder=$(mktemp -d)
           echo "folder=${folder}" >> $GITHUB_OUTPUT
 
-  docker-builder:
-    name: Prepare docker builder
-    needs: image
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        platform: [ amd64, arm64 ]
-
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # Actions must be pinned by hash
-        with:
-          ref: ${{ inputs.release-branch }}
-
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # (Actions must be pinned by commit hash) v3.10.0
-
-      - name: Setup artifact directory
-        run: mkdir -p ${{ needs.image.outputs.folder }}
-
-      - name: Restore cache artifact (if exists)
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
-        continue-on-error: true
-        with:
-          name: surrealdb-builder-${{ needs.image.outputs.tag }}-${{ matrix.platform }}
-          path: ${{ needs.image.outputs.folder }}
-
-      - name: Build & Push builder image
-        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # (Actions must be pinned by commit hash) v5.4.0
-        id: build
-        with:
-          context: .
-          platforms: linux/${{ matrix.platform }}
-          file: ./docker/Dockerfile
-          target: builder
-          cache-from: type=local,src=${{ needs.image.outputs.folder }}
-          cache-to: type=local,dest=${{ needs.image.outputs.folder }}
-          push: false
-          outputs: type=docker,dest=${{ needs.image.outputs.folder }}/surrealdb-builder-${{ needs.image.outputs.tag }}-${{ matrix.platform }}
-          tags: ${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }}-${{ matrix.platform }}
-          build-args: |
-            RUST_VERSION=${{ inputs.rust-version }}
-
-      - name: Upload builder image
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # (Actions must be pinned by commit hash) v4.6.2
-        with:
-          name: surrealdb-builder-${{ needs.image.outputs.tag }}-${{ matrix.platform }}
-          path: ${{ needs.image.outputs.folder }}
-
   build-linux:
     name: Build ${{ matrix.arch }} binary
-    needs: [ image, docker-builder ]
+    needs: image
     strategy:
       fail-fast: false
       matrix:
         include:
           # Linux amd64
           - arch: x86_64-unknown-linux-gnu
+            platform: amd64
             runner: [ runner-amd64-2xlarge ]
             file: surreal-${{ inputs.name }}.linux-amd64
             build-step: |
@@ -181,6 +133,7 @@ jobs:
 
           # Linux arm64
           - arch: aarch64-unknown-linux-gnu
+            platform: arm64
             runner: [ runner-arm64-2xlarge ]
             file: surreal-${{ inputs.name }}.linux-arm64
             build-step: |
@@ -238,25 +191,40 @@ jobs:
         with:
           ref: ${{ inputs.release-branch }}
 
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # (Actions must be pinned by commit hash) v3.10.0
+
+      - name: Setup artifact directory
+        run: mkdir -p ${{ needs.image.outputs.folder }}
+
+      - name: Restore cache artifact (if exists)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        continue-on-error: true
+        with:
+          name: surrealdb-builder-${{ needs.image.outputs.tag }}-${{ matrix.platform }}
+          path: ${{ needs.image.outputs.folder }}
+
+      - name: Build & Push builder image
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # (Actions must be pinned by commit hash) v5.4.0
+        id: build
+        with:
+          context: .
+          platforms: linux/${{ matrix.platform }}
+          file: ./docker/Dockerfile
+          target: builder
+          cache-from: type=local,src=${{ needs.image.outputs.folder }}
+          cache-to: type=local,dest=${{ needs.image.outputs.folder }}
+          push: false
+          outputs: type=docker,dest=${{ needs.image.outputs.folder }}/surrealdb-builder-${{ needs.image.outputs.tag }}-${{ matrix.platform }}
+          tags: ${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }}-${{ matrix.platform }}
+          build-args: |
+            RUST_VERSION=${{ inputs.rust-version }}
+
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
         with:
           toolchain: ${{ inputs.rust-version }}
           targets: ${{ matrix.arch }}
-
-      - name: Download amd64 builder image
-        if: ${{ matrix.arch == 'x86_64-unknown-linux-gnu' }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
-        with:
-          name: surrealdb-builder-${{ needs.image.outputs.tag }}-amd64
-          path: ${{ needs.image.outputs.folder }}
-
-      - name: Download arm64 builder image
-        if: ${{ matrix.arch == 'aarch64-unknown-linux-gnu' }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
-        with:
-          name: surrealdb-builder-${{ needs.image.outputs.tag }}-arm64
-          path: ${{ needs.image.outputs.folder }}
 
       - name: Output package versions
         run: |
