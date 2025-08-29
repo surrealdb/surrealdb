@@ -52,30 +52,8 @@ permissions:
   contents: read
 
 jobs:
-  image:
-    name: Prepare image variables
-    runs-on: ubuntu-latest
-    outputs:
-      name: ${{ steps.image.outputs.name }}
-      tag: ${{ steps.image.outputs.tag }}
-      folder: ${{ steps.image.outputs.folder }}
-    steps:
-      - name: Prepare docker image name
-        id: image
-        run: |
-          set -x
-
-          echo "name=surrealdb-builder" >> $GITHUB_OUTPUT
-
-          tag=$(echo ${{ github.ref_name }} | sed -e 's/[^a-zA-Z0-9]/-/g')
-          echo "tag=${tag}" >> $GITHUB_OUTPUT
-
-          folder=$(mktemp -d)
-          echo "folder=${folder}" >> $GITHUB_OUTPUT
-
   build-linux:
     name: Build ${{ matrix.arch }} binary
-    needs: image
     strategy:
       fail-fast: false
       matrix:
@@ -86,6 +64,11 @@ jobs:
             runner: [ runner-amd64-2xlarge ]
             file: surreal-${{ inputs.name }}.linux-amd64
             build-step: |
+              set -x
+
+              tag=$(echo ${{ github.ref_name }} | sed -e 's/[^a-zA-Z0-9]/-/g')
+              folder="/tmp/surrealdb-builder/${tag}"
+
               # Build
               extra_args=""
               compile_profile="debug"
@@ -108,7 +91,7 @@ jobs:
                 tar -xz -C $tmpdir
               export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
 
-              docker load -i ${{ needs.image.outputs.folder }}/surrealdb-builder-${{ needs.image.outputs.tag }}-amd64
+              docker load -i ${folder}/surrealdb-builder-${tag}-amd64
 
               docker run \
                 --rm -t \
@@ -118,7 +101,7 @@ jobs:
                 -e ORT_STRATEGY=$ORT_STRATEGY \
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
-                ${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }}-amd64 \
+                surrealdb-builder:${tag}-amd64 \
                   --target x86_64-unknown-linux-gnu --no-default-features ${extra_args} --locked
 
               # Package
@@ -138,6 +121,9 @@ jobs:
             file: surreal-${{ inputs.name }}.linux-arm64
             build-step: |
               set -x
+
+              tag=$(echo ${{ github.ref_name }} | sed -e 's/[^a-zA-Z0-9]/-/g')
+              folder="/tmp/surrealdb-builder/${tag}"
 
               # Build
               extra_args=""
@@ -161,7 +147,7 @@ jobs:
                 tar -xz -C $tmpdir
               export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
 
-              docker load -i ${{ needs.image.outputs.folder }}/surrealdb-builder-${{ needs.image.outputs.tag }}-arm64
+              docker load -i ${folder}/surrealdb-builder-${tag}-arm64
 
               docker run \
                 --rm -t \
@@ -171,7 +157,7 @@ jobs:
                 -e ORT_STRATEGY=$ORT_STRATEGY \
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
-                ${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }}-arm64 \
+                surrealdb-builder:${tag}-arm64 \
                   --target aarch64-unknown-linux-gnu --no-default-features ${extra_args} --locked
 
               # Package
@@ -186,6 +172,16 @@ jobs:
 
     runs-on: ${{ matrix.runner }}
     steps:
+      - name: Prepare docker image name
+        id: image
+        run: |
+          set -x
+
+          tag=$(echo ${{ github.ref_name }} | sed -e 's/[^a-zA-Z0-9]/-/g')
+          echo "tag=${tag}" >> $GITHUB_OUTPUT
+
+          echo "folder=/tmp/surrealdb-builder/${tag}" >> $GITHUB_OUTPUT
+
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -195,14 +191,14 @@ jobs:
         uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # (Actions must be pinned by commit hash) v3.10.0
 
       - name: Setup artifact directory
-        run: mkdir -p ${{ needs.image.outputs.folder }}
+        run: mkdir -p ${{ steps.image.outputs.folder }}
 
       - name: Restore cache artifact (if exists)
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
         continue-on-error: true
         with:
-          name: surrealdb-builder-${{ needs.image.outputs.tag }}-${{ matrix.platform }}
-          path: ${{ needs.image.outputs.folder }}
+          name: surrealdb-builder-${{ steps.image.outputs.tag }}-${{ matrix.platform }}
+          path: ${{ steps.image.outputs.folder }}
 
       - name: Build & Push builder image
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # (Actions must be pinned by commit hash) v5.4.0
@@ -212,11 +208,11 @@ jobs:
           platforms: linux/${{ matrix.platform }}
           file: ./docker/Dockerfile
           target: builder
-          cache-from: type=local,src=${{ needs.image.outputs.folder }}
-          cache-to: type=local,dest=${{ needs.image.outputs.folder }}
+          cache-from: type=local,src=${{ steps.image.outputs.folder }}
+          cache-to: type=local,dest=${{ steps.image.outputs.folder }}
           push: false
-          outputs: type=docker,dest=${{ needs.image.outputs.folder }}/surrealdb-builder-${{ needs.image.outputs.tag }}-${{ matrix.platform }}
-          tags: ${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }}-${{ matrix.platform }}
+          outputs: type=docker,dest=${{ steps.image.outputs.folder }}/surrealdb-builder-${{ steps.image.outputs.tag }}-${{ matrix.platform }}
+          tags: surrealdb-builder:${{ steps.image.outputs.tag }}-${{ matrix.platform }}
           build-args: |
             RUST_VERSION=${{ inputs.rust-version }}
 
