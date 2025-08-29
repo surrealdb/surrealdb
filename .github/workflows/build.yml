@@ -142,8 +142,13 @@ jobs:
               # Build
               extra_args=""
               compile_profile="debug"
-              if [[ ! -z "${{ inputs.extra-features }}" ]]; then
-                extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+              if [[ "${{ inputs.name }}" == "ci" ]]; then
+                extra_args="${extra_args} --features storage-mem,scripting,http,jwks,ml"
+              else
+                extra_args="${extra_args} --features default"
+                if [[ ! -z "${{ inputs.extra-features }}" ]]; then
+                  extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+                fi
               fi
               if [[ "${{ inputs.release }}" == "true" ]]; then
                 extra_args="${extra_args} --release"
@@ -156,7 +161,7 @@ jobs:
                 tar -xz -C /tmp/onnxruntime/
               export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
 
-              cargo build ${extra_args} --locked --target x86_64-apple-darwin
+              cargo build --no-default-features ${extra_args} --locked --target x86_64-apple-darwin
 
               # Package
               cp target/x86_64-apple-darwin/${compile_profile}/surreal surreal
@@ -177,8 +182,13 @@ jobs:
               # Build
               extra_args=""
               compile_profile="debug"
-              if [[ ! -z "${{ inputs.extra-features }}" ]]; then
-                extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+              if [[ "${{ inputs.name }}" == "ci" ]]; then
+                extra_args="${extra_args} --features storage-mem,scripting,http,jwks,ml"
+              else
+                extra_args="${extra_args} --features default"
+                if [[ ! -z "${{ inputs.extra-features }}" ]]; then
+                  extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+                fi
               fi
               if [[ "${{ inputs.release }}" == "true" ]]; then
                 extra_args="${extra_args} --release"
@@ -191,7 +201,7 @@ jobs:
                 tar -xz -C /tmp/onnxruntime/
               export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
 
-              cargo build ${extra_args} --locked --target aarch64-apple-darwin
+              cargo build --no-default-features ${extra_args} --locked --target aarch64-apple-darwin
 
               # Package
               cp target/aarch64-apple-darwin/${compile_profile}/surreal surreal
@@ -207,8 +217,13 @@ jobs:
               # Build
               extra_args=""
               compile_profile="debug"
-              if [[ ! -z "${{ inputs.extra-features }}" ]]; then
-                extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+              if [[ "${{ inputs.name }}" == "ci" ]]; then
+                extra_args="${extra_args} --features storage-mem,scripting,http,jwks,ml"
+              else
+                extra_args="${extra_args} --features default"
+                if [[ ! -z "${{ inputs.extra-features }}" ]]; then
+                  extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+                fi
               fi
               if [[ "${{ inputs.release }}" == "true" ]]; then
                 extra_args="${extra_args} --release"
@@ -232,7 +247,7 @@ jobs:
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
                 ${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }}-amd64 \
-                  --target x86_64-unknown-linux-gnu ${extra_args} --locked
+                  --target x86_64-unknown-linux-gnu --no-default-features ${extra_args} --locked
 
               # Package
               cp target/x86_64-unknown-linux-gnu/${compile_profile}/surreal surreal
@@ -254,8 +269,13 @@ jobs:
               # Build
               extra_args=""
               compile_profile="debug"
-              if [[ ! -z "${{ inputs.extra-features }}" ]]; then
-                extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+              if [[ "${{ inputs.name }}" == "ci" ]]; then
+                extra_args="${extra_args} --features storage-mem,scripting,http,jwks,ml"
+              else
+                extra_args="${extra_args} --features default"
+                if [[ ! -z "${{ inputs.extra-features }}" ]]; then
+                  extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+                fi
               fi
               if [[ "${{ inputs.release }}" == "true" ]]; then
                 extra_args="${extra_args} --release"
@@ -279,7 +299,7 @@ jobs:
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
                 ${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }}-arm64 \
-                  --target aarch64-unknown-linux-gnu ${extra_args} --locked
+                  --target aarch64-unknown-linux-gnu --no-default-features ${extra_args} --locked
 
               # Package
               cp target/aarch64-unknown-linux-gnu/${compile_profile}/surreal surreal
@@ -304,8 +324,13 @@ jobs:
               # Build
               extra_args=""
               compile_profile="debug"
-              if [[ ! -z "${{ inputs.extra-features }}" ]]; then
-                extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+              if [[ "${{ inputs.name }}" == "ci" ]]; then
+                extra_args="${extra_args} --features storage-mem,scripting,http,jwks,ml"
+              else
+                extra_args="${extra_args} --features default"
+                if [[ ! -z "${{ inputs.extra-features }}" ]]; then
+                  extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+                fi
               fi
               if [[ "${{ inputs.release }}" == "true" ]]; then
                 extra_args="${extra_args} --release"
@@ -318,7 +343,7 @@ jobs:
               unzip -d $tmp_dir $tmp_dir/onnxruntime.zip
               export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmp_dir/lib
 
-              cargo build ${extra_args} --locked --target x86_64-pc-windows-msvc
+              cargo build --no-default-features ${extra_args} --locked --target x86_64-pc-windows-msvc
 
               # Package
               ./target/x86_64-pc-windows-msvc/${compile_profile}/surreal.exe version
