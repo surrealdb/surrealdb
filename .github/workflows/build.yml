@@ -161,6 +161,9 @@ jobs:
                 tar -xz -C /tmp/onnxruntime/
               export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
 
+              # Install the target (mac-os seems to need this for some reason)
+              rustup target add x86_64-apple-darwin
+
               cargo build --no-default-features ${extra_args} --locked --target x86_64-apple-darwin
 
               # Package
