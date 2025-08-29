@@ -6,7 +6,7 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err::Error;
-use crate::val::Value;
+use crate::val::record::Record;
 
 impl Document {
 	pub(super) async fn upsert(
@@ -15,7 +15,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<Value, IgnoreError> {
+	) -> Result<Record, IgnoreError> {
 		// Even though we haven't tried to create first this can still not be the
 		// 'initial iteration' if the initial doc is not set.
 		//
@@ -107,7 +107,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<Value, IgnoreError> {
+	) -> Result<Record, IgnoreError> {
 		self.check_permissions_quick(stk, ctx, opt, stm).await?;
 		self.check_table_type(ctx, opt, stm).await?;
 		self.check_data_fields(stk, ctx, opt, stm).await?;
@@ -132,7 +132,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<Value, IgnoreError> {
+	) -> Result<Record, IgnoreError> {
 		self.check_permissions_quick(stk, ctx, opt, stm).await?;
 		self.check_table_type(ctx, opt, stm).await?;
 		self.check_data_fields(stk, ctx, opt, stm).await?;

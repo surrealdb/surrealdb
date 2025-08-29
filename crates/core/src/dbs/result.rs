@@ -11,7 +11,7 @@ use crate::dbs::store::{MemoryCollector, MemoryOrdered, MemoryOrderedLimit, Memo
 use crate::dbs::{Options, Statement};
 use crate::expr::order::Ordering;
 use crate::idx::planner::RecordStrategy;
-use crate::val::Value;
+use crate::val::record::Record;
 
 pub(super) enum Results {
 	None,
@@ -68,28 +68,28 @@ impl Results {
 		opt: &Options,
 		stm: &Statement<'_>,
 		rs: RecordStrategy,
-		val: Value,
+		record: Record,
 	) -> Result<()> {
 		match self {
 			Self::None => {}
 			Self::Memory(s) => {
-				s.push(val);
+				s.push(record);
 			}
 			Self::MemoryOrdered(c) => {
-				c.push(val);
+				c.push(record);
 			}
 			Self::MemoryOrderedLimit(c) => {
-				c.push(val);
+				c.push(record);
 			}
 			Self::MemoryRandom(c) => {
-				c.push(val);
+				c.push(record);
 			}
 			#[cfg(storage)]
 			Self::File(e) => {
-				e.push(val).await?;
+				e.push(record).await?;
 			}
 			Self::Groups(g) => {
-				g.push(stk, ctx, opt, stm, rs, val).await?;
+				g.push(stk, ctx, opt, stm, rs, record).await?;
 			}
 		}
 		Ok(())
@@ -162,7 +162,7 @@ impl Results {
 		}
 	}
 
-	pub(super) async fn take(&mut self) -> Result<Vec<Value>> {
+	pub(super) async fn take(&mut self) -> Result<Vec<Record>> {
 		Ok(match self {
 			Self::Memory(m) => m.take_vec(),
 			Self::MemoryOrdered(c) => c.take_vec(),
@@ -200,8 +200,8 @@ impl Default for Results {
 	}
 }
 
-impl From<Vec<Value>> for Results {
-	fn from(value: Vec<Value>) -> Self {
+impl From<Vec<Record>> for Results {
+	fn from(value: Vec<Record>) -> Self {
 		Results::Memory(value.into())
 	}
 }

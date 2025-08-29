@@ -13,10 +13,11 @@ use crate::expr::output::Output;
 use crate::expr::{FlowResultExt as _, Operation};
 use crate::iam::Action;
 use crate::val::Value;
+use crate::val::record::Record;
 
 impl Document {
 	/// Evaluates a doc that has been modified so that it can be further
-	/// computed into a result Value This includes some permissions handling,
+	/// computed into a result `Record`. This includes some permissions handling,
 	/// output format handling (as specified in statement), field handling
 	/// (like params, links etc).
 	pub(super) async fn pluck(
@@ -25,14 +26,14 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<Value, IgnoreError> {
+	) -> Result<Record, IgnoreError> {
 		// Check if we can view the output
 		self.check_permissions_view(stk, ctx, opt, stm).await?;
 		// Process the desired output
 		let mut out = match stm.output() {
 			Some(v) => match v {
 				Output::None => Err(IgnoreError::Ignore),
-				Output::Null => Ok(Value::Null),
+				Output::Null => Ok(Record::new(Value::Null.into())),
 				Output::Diff => {
 					// Process the permitted documents
 					let (initial, current) = if self.reduced(stk, ctx, opt, Both).await? {
@@ -48,26 +49,28 @@ impl Document {
 					};
 					// Output a DIFF of any changes applied to the document
 					let ops = initial.doc.as_ref().diff(current.doc.as_ref());
-					Ok(Operation::operations_to_value(ops))
+					let value = Operation::operations_to_value(ops);
+					let record = Record::new(value.into());
+					Ok(record)
 				}
 				Output::After => {
 					// Process the permitted documents
 					if self.reduced(stk, ctx, opt, Current).await? {
 						self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced).await?;
-						Ok(self.current_reduced.doc.as_ref().to_owned())
+						Ok((*self.current_reduced.doc).clone())
 					} else {
 						self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
-						Ok(self.current.doc.as_ref().to_owned())
+						Ok((*self.current.doc).clone())
 					}
 				}
 				Output::Before => {
 					// Process the permitted documents
 					if self.reduced(stk, ctx, opt, Initial).await? {
 						self.computed_fields(stk, ctx, opt, DocKind::InitialReduced).await?;
-						Ok(self.initial_reduced.doc.as_ref().to_owned())
+						Ok((*self.initial_reduced.doc).clone())
 					} else {
 						self.computed_fields(stk, ctx, opt, DocKind::Initial).await?;
-						Ok(self.initial.doc.as_ref().to_owned())
+						Ok((*self.initial.doc).clone())
 					}
 				}
 				Output::Fields(v) => {
@@ -87,7 +90,12 @@ impl Document {
 					ctx.add_value("before", initial.doc.as_arc());
 					let ctx = ctx.freeze();
 					// Output the specified fields
-					v.compute(stk, &ctx, opt, Some(current), false).await.map_err(IgnoreError::from)
+					let metadata = current.doc.metadata.clone();
+					let value = v
+						.compute(stk, &ctx, opt, Some(current), false)
+						.await
+						.map_err(IgnoreError::from)?;
+					Ok(Record::new(value.into()).with_metadata(metadata))
 				}
 			},
 			None => match stm {
@@ -104,10 +112,13 @@ impl Document {
 						&self.current
 					};
 					// Process the SELECT statement fields
-					s.expr
+					let metadata = current.doc.metadata.clone();
+					let value = s
+						.expr
 						.compute(stk, ctx, opt, Some(current), s.group.is_some())
 						.await
-						.map_err(IgnoreError::from)
+						.map_err(IgnoreError::from)?;
+					Ok(Record::new(value.into()).with_metadata(metadata))
 				}
 				Statement::Create(_)
 				| Statement::Upsert(_)
@@ -117,10 +128,10 @@ impl Document {
 					// Process the permitted documents
 					if self.reduced(stk, ctx, opt, Current).await? {
 						self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced).await?;
-						Ok(self.current_reduced.doc.as_ref().to_owned())
+						Ok((*self.current_reduced.doc).clone())
 					} else {
 						self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
-						Ok(self.current.doc.as_ref().to_owned())
+						Ok((*self.current.doc).clone())
 					}
 				}
 				_ => Err(IgnoreError::Ignore),
@@ -133,11 +144,13 @@ impl Document {
 				// Loop through all field statements
 				for fd in self.fd(ctx, opt).await?.iter() {
 					// Loop over each field in document
-					for k in out.each(&fd.name).iter() {
+					for k in out.data.as_ref().each(&fd.name).iter() {
 						// Process the field permissions
 						match &fd.select_permission {
 							catalog::Permission::Full => (),
-							catalog::Permission::None => out.del(stk, ctx, opt, k).await?,
+							catalog::Permission::None => {
+								out.data.to_mut().del(stk, ctx, opt, k).await?
+							}
 							catalog::Permission::Specific(e) => {
 								// Disable permissions
 								let opt = &opt.new_with_perms(false);
@@ -154,7 +167,7 @@ impl Document {
 									.catch_return()?
 									.is_truthy()
 								{
-									out.cut(k);
+									out.data.to_mut().cut(k);
 								}
 							}
 						}
@@ -165,7 +178,7 @@ impl Document {
 		// Remove any omitted fields from output
 		if let Some(v) = stm.omit() {
 			for v in v.iter() {
-				out.del(stk, ctx, opt, v).await?;
+				out.data.to_mut().del(stk, ctx, opt, v).await?;
 			}
 		}
 		// Output result

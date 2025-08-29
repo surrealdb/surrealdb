@@ -4,6 +4,7 @@ use crate::ctx::Context;
 use crate::dbs::result::Results;
 use crate::dbs::{Iterable, Statement};
 use crate::idx::planner::RecordStrategy;
+use crate::val::record::Record;
 use crate::val::{Object, Strand, Value};
 
 pub(super) struct Plan {

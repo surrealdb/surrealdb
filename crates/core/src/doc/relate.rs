@@ -4,7 +4,7 @@ use super::IgnoreError;
 use crate::ctx::Context;
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
-use crate::val::Value;
+use crate::val::record::Record;
 
 impl Document {
 	pub(super) async fn relate(
@@ -13,7 +13,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<Value, IgnoreError> {
+	) -> Result<Record, IgnoreError> {
 		// Check if table has correct relation status
 		self.check_table_type(ctx, opt, stm).await?;
 		// Check whether current record exists
@@ -33,7 +33,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<Value, IgnoreError> {
+	) -> Result<Record, IgnoreError> {
 		self.check_permissions_quick(stk, ctx, opt, stm).await?;
 		self.check_table_type(ctx, opt, stm).await?;
 		self.check_data_fields(stk, ctx, opt, stm).await?;
@@ -58,7 +58,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<Value, IgnoreError> {
+	) -> Result<Record, IgnoreError> {
 		self.check_permissions_quick(stk, ctx, opt, stm).await?;
 		self.check_table_type(ctx, opt, stm).await?;
 		self.check_data_fields(stk, ctx, opt, stm).await?;

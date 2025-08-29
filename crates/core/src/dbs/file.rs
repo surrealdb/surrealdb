@@ -17,6 +17,7 @@ use crate::dbs::plan::Explanation;
 use crate::err::Error;
 use crate::expr::order::Ordering;
 use crate::val::Value;
+use crate::val::record::Record;
 
 pub(super) struct FileCollector {
 	dir: TempDir,
@@ -46,17 +47,17 @@ impl FileCollector {
 			dir,
 		})
 	}
-	pub(super) async fn push(&mut self, value: Value) -> Result<(), Error> {
+	pub(super) async fn push(&mut self, record: Record) -> Result<(), Error> {
 		if let Some(mut writer) = self.writer.take() {
 			#[cfg(not(target_family = "wasm"))]
 			let writer = spawn_blocking(move || {
-				writer.push(value)?;
+				writer.push(record)?;
 				Ok::<FileWriter, Error>(writer)
 			})
 			.await
 			.map_err(|e| Error::Internal(format!("{e}")))??;
 			#[cfg(target_family = "wasm")]
-			writer.push(value)?;
+			writer.push(record)?;
 			self.len += 1;
 			self.writer = Some(writer);
 			Ok(())
@@ -87,7 +88,7 @@ impl FileCollector {
 		self.paging.limit = limit;
 	}
 
-	pub(super) async fn take_vec(&mut self) -> Result<Vec<Value>, Error> {
+	pub(super) async fn take_vec(&mut self) -> Result<Vec<Record>, Error> {
 		self.check_reader()?;
 		if let Some(mut reader) = self.reader.take() {
 			if let Some((start, num)) = self.paging.get_start_num(reader.len as u32) {
@@ -106,14 +107,14 @@ impl FileCollector {
 		orders: Ordering,
 		start: u32,
 		num: u32,
-	) -> Result<Vec<Value>, Error> {
+	) -> Result<Vec<Record>, Error> {
 		match orders {
 			Ordering::Random => {
 				let f = move || {
 					let mut rng = rand::thread_rng();
 					let mut iter = reader.into_iter();
 					// fill initial array
-					let mut res: Vec<Value> = Vec::with_capacity(num as usize);
+					let mut res: Vec<Record> = Vec::with_capacity(num as usize);
 					for r in iter.by_ref().take(num as usize) {
 						res.push(r?);
 					}
@@ -154,10 +155,10 @@ impl FileCollector {
 					fs::create_dir(&sort_dir)?;
 
 					let sorter: ExternalSorter<
-						Value,
+						Record,
 						Error,
 						LimitedBufferBuilder,
-						ValueExternalChunk,
+						RecordExternalChunk,
 					> = ExternalSorterBuilder::new()
 						.with_tmp_dir(&sort_dir)
 						.with_buffer(LimitedBufferBuilder::new(
@@ -168,7 +169,7 @@ impl FileCollector {
 
 					let sorted = sorter.sort_by(reader, |a, b| orders.compare(a, b))?;
 					let iter = sorted.map(Result::unwrap);
-					let r: Vec<Value> = iter.skip(start as usize).take(num as usize).collect();
+					let r: Vec<Record> = iter.skip(start as usize).take(num as usize).collect();
 					Ok(r)
 				};
 				#[cfg(target_family = "wasm")]
@@ -215,9 +216,9 @@ impl FileWriter {
 		Ok(())
 	}
 
-	fn write_value<W: Write>(writer: &mut W, value: Value) -> Result<usize, Error> {
+	fn write_record<W: Write>(writer: &mut W, record: Record) -> Result<usize, Error> {
 		let mut val = Vec::new();
-		value.serialize_revisioned(&mut val)?;
+		record.serialize_revisioned(&mut val)?;
 		// Write the size of the buffer in the index
 		Self::write_usize(writer, val.len())?;
 		// Write the buffer in the records
@@ -225,9 +226,9 @@ impl FileWriter {
 		Ok(val.len())
 	}
 
-	fn push(&mut self, value: Value) -> Result<(), Error> {
+	fn push(&mut self, record: Record) -> Result<(), Error> {
 		// Serialize the value in a buffer
-		let len = Self::write_value(&mut self.records, value)?;
+		let len = Self::write_record(&mut self.records, record)?;
 		// Increment the offset of the next record
 		self.offset += len + FileCollector::USIZE_SIZE;
 		Self::write_usize(&mut self.index, self.offset)?;
@@ -259,13 +260,13 @@ impl FileReader {
 		})
 	}
 
-	fn read_value<R: Read>(reader: &mut R) -> Result<Value, Error> {
+	fn read_record<R: Read>(reader: &mut R) -> Result<Record, Error> {
 		let len = FileReader::read_usize(reader)?;
 		let mut buf = vec![0u8; len];
 		if let Err(e) = reader.read_exact(&mut buf) {
 			return Err(Error::Io(e));
 		}
-		let val = Value::deserialize_revisioned(&mut buf.as_slice())?;
+		let val = Record::deserialize_revisioned(&mut buf.as_slice())?;
 		Ok(val)
 	}
 
@@ -278,7 +279,7 @@ impl FileReader {
 		Ok(u)
 	}
 
-	fn take_vec(&mut self, start: u32, num: u32) -> Result<Vec<Value>, Error> {
+	fn take_vec(&mut self, start: u32, num: u32) -> Result<Vec<Record>, Error> {
 		let mut iter = FileRecordsIterator::new(self.records.clone(), self.len);
 		if start > 0 {
 			// Get the start offset of the first record
@@ -305,7 +306,7 @@ impl FileReader {
 }
 
 impl IntoIterator for FileReader {
-	type Item = Result<Value, Error>;
+	type Item = Result<Record, Error>;
 	type IntoIter = FileRecordsIterator;
 
 	fn into_iter(self) -> Self::IntoIter {
@@ -349,7 +350,7 @@ impl FileRecordsIterator {
 }
 
 impl Iterator for FileRecordsIterator {
-	type Item = Result<Value, Error>;
+	type Item = Result<Record, Error>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		if self.pos == self.len {
@@ -359,10 +360,10 @@ impl Iterator for FileRecordsIterator {
 			return Some(Err(e));
 		}
 		if let Some(reader) = &mut self.reader {
-			match FileReader::read_value(reader) {
-				Ok(val) => {
+			match FileReader::read_record(reader) {
+				Ok(record) => {
 					self.pos += 1;
-					Some(Ok(val))
+					Some(Ok(record))
 				}
 				Err(e) => Some(Err(e)),
 			}
@@ -404,11 +405,11 @@ impl FilePaging {
 	}
 }
 
-struct ValueExternalChunk {
+struct RecordExternalChunk {
 	reader: Take<BufReader<File>>,
 }
 
-impl ExternalChunk<Value> for ValueExternalChunk {
+impl ExternalChunk<Record> for RecordExternalChunk {
 	type SerializationError = Error;
 	type DeserializationError = Error;
 
@@ -420,24 +421,24 @@ impl ExternalChunk<Value> for ValueExternalChunk {
 
 	fn dump(
 		chunk_writer: &mut BufWriter<File>,
-		items: impl IntoIterator<Item = Value>,
+		records: impl IntoIterator<Item = Record>,
 	) -> Result<(), Self::SerializationError> {
-		for item in items {
-			FileWriter::write_value(chunk_writer, item)?;
+		for record in records {
+			FileWriter::write_record(chunk_writer, record)?;
 		}
 		Ok(())
 	}
 }
 
-impl Iterator for ValueExternalChunk {
-	type Item = Result<Value, Error>;
+impl Iterator for RecordExternalChunk {
+	type Item = Result<Record, Error>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		if self.reader.limit() == 0 {
 			None
 		} else {
-			match FileReader::read_value(&mut self.reader) {
-				Ok(val) => Some(Ok(val)),
+			match FileReader::read_record(&mut self.reader) {
+				Ok(record) => Some(Ok(record)),
 				Err(err) => Some(Err(err)),
 			}
 		}

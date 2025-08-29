@@ -7,6 +7,7 @@ use anyhow::{Result, ensure};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::capabilities::MethodTarget;
 use crate::dbs::{QueryType, Response, Variables};
+use crate::dbs;
 use crate::err::Error;
 use crate::kvs::{LockType, TransactionType};
 use crate::rpc::args::extract_args;
@@ -308,7 +309,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut res = self.kvs().process(ast, &self.session(), None).await?;
 		// Extract the first value from the result
 		// TODO: Move first here into the actual expression.
-		Ok(Data::Other(res.remove(0).result?.first()))
+		Ok(Data::Other(res.remove(0).result?.into_value().first()))
 	}
 
 	// ------------------------------
@@ -396,7 +397,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = run_query(self, QueryForm::Parsed(ast), var).await?;
 		// Extract the first query result
-		Ok(Data::Other(res.remove(0).result?))
+		Ok(Data::Other(res.remove(0).result?.into_value()))
 	}
 
 	async fn live(&self, params: Array) -> Result<Data, RpcError> {
@@ -434,7 +435,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let res = run_query(self, QueryForm::Parsed(ast), vars).await?;
 
 		// Extract the first query result
-		Ok(Data::Other(res.into_iter().next().unwrap().result?))
+		Ok(Data::Other(res.into_iter().next().unwrap().result?.into_value()))
 	}
 
 	// ------------------------------
@@ -490,7 +491,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
+		let res = res.remove(0).result.map(dbs::Output::into_value).or_else(|e| match e.downcast_ref() {
 			Some(Error::SingleOnlyOutput) => Ok(Value::None),
 			_ => Err(e),
 		})?;
@@ -534,7 +535,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
+		let res = res.remove(0).result.map(dbs::Output::into_value).or_else(|e| match e.downcast_ref() {
 			Some(Error::SingleOnlyOutput) => Ok(Value::None),
 			_ => Err(e),
 		})?;
@@ -576,7 +577,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
+		let res = res.remove(0).result.map(dbs::Output::into_value).or_else(|e| match e.downcast_ref() {
 			Some(Error::SingleOnlyOutput) => Ok(Value::None),
 			_ => Err(e),
 		})?;
@@ -626,7 +627,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = self.kvs().process(ast, &self.session(), None).await?;
 		// Extract the first query result
-		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
+		let res = res.remove(0).result.map(dbs::Output::into_value).or_else(|e| match e.downcast_ref() {
 			Some(Error::SingleOnlyOutput) => Ok(Value::None),
 			_ => Err(e),
 		})?;
@@ -679,7 +680,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
+		let res = res.remove(0).result.map(dbs::Output::into_value).or_else(|e| match e.downcast_ref() {
 			Some(Error::SingleOnlyOutput) => Ok(Value::None),
 			_ => Err(e),
 		})?;
@@ -731,7 +732,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
+		let res = res.remove(0).result.map(dbs::Output::into_value).or_else(|e| match e.downcast_ref() {
 			Some(Error::SingleOnlyOutput) => Ok(Value::None),
 			_ => Err(e),
 		})?;
@@ -779,7 +780,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
+		let res = res.remove(0).result.map(dbs::Output::into_value).or_else(|e| match e.downcast_ref() {
 			Some(Error::SingleOnlyOutput) => Ok(Value::None),
 			_ => Err(e),
 		})?;
@@ -840,7 +841,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = self.kvs().process(Ast::single_expr(expr), &self.session(), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
+		let res = res.remove(0).result.map(dbs::Output::into_value).or_else(|e| match e.downcast_ref() {
 			Some(Error::SingleOnlyOutput) => Ok(Value::None),
 			_ => Err(e),
 		})?;
@@ -894,7 +895,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = self.kvs().process(Ast::single_expr(expr), &self.session(), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
+		let res = res.remove(0).result.map(dbs::Output::into_value).or_else(|e| match e.downcast_ref() {
 			Some(Error::SingleOnlyOutput) => Ok(Value::None),
 			_ => Err(e),
 		})?;
@@ -930,7 +931,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
+		let res = res.remove(0).result.map(dbs::Output::into_value).or_else(|e| match e.downcast_ref() {
 			Some(Error::SingleOnlyOutput) => Ok(Value::None),
 			_ => Err(e),
 		})?;
@@ -1055,7 +1056,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
-		Ok(Data::Other(res))
+		Ok(Data::Other(res.into_value()))
 	}
 
 	// ------------------------------
@@ -1209,12 +1210,12 @@ where
 		// handler
 		match &response.query_type {
 			QueryType::Live => {
-				if let Ok(Value::Uuid(lqid)) = &response.result {
+				if let Ok(dbs::Output::Value(Value::Uuid(lqid))) = &response.result {
 					this.handle_live(&lqid.0).await;
 				}
 			}
 			QueryType::Kill => {
-				if let Ok(Value::Uuid(lqid)) = &response.result {
+				if let Ok(dbs::Output::Value(Value::Uuid(lqid))) = &response.result {
 					this.handle_kill(&lqid.0).await;
 				}
 			}

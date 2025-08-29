@@ -14,21 +14,21 @@ use crate::dbs::plan::Explanation;
 #[cfg(not(target_family = "wasm"))]
 use crate::err::Error;
 use crate::expr::order::OrderList;
-use crate::val::Value;
+use crate::val::record::Record;
 
 #[derive(Default)]
-pub(super) struct MemoryCollector(Vec<Value>);
+pub(super) struct MemoryCollector(Vec<Record>);
 
 impl MemoryCollector {
-	pub(super) fn push(&mut self, val: Value) {
-		self.0.push(val);
+	pub(super) fn push(&mut self, record: Record) {
+		self.0.push(record);
 	}
 
 	pub(super) fn len(&self) -> usize {
 		self.0.len()
 	}
 
-	fn vec_start_limit(start: Option<u32>, limit: Option<u32>, vec: &mut Vec<Value>) {
+	fn vec_start_limit(start: Option<u32>, limit: Option<u32>, vec: &mut Vec<Record>) {
 		match (start, limit) {
 			(Some(start), Some(limit)) => {
 				*vec =
@@ -44,7 +44,7 @@ impl MemoryCollector {
 		Self::vec_start_limit(start, limit, &mut self.0);
 	}
 
-	pub(super) fn take_vec(&mut self) -> Vec<Value> {
+	pub(super) fn take_vec(&mut self) -> Vec<Record> {
 		mem::take(&mut self.0)
 	}
 
@@ -53,9 +53,9 @@ impl MemoryCollector {
 	}
 }
 
-impl From<Vec<Value>> for MemoryCollector {
-	fn from(values: Vec<Value>) -> Self {
-		Self(values)
+impl From<Vec<Record>> for MemoryCollector {
+	fn from(records: Vec<Record>) -> Self {
+		Self(records)
 	}
 }
 
@@ -64,16 +64,16 @@ pub(super) const DEFAULT_BATCH_SIZE: usize = 1024;
 /// The struct MemoryRandom represents an in-memory store that aggregates data
 /// randomly.
 pub(in crate::dbs) struct MemoryRandom {
-	/// Collected values
-	values: Vec<Value>,
+	/// Collected records
+	records: Vec<Record>,
 	/// Ordered index
 	ordered: Vec<usize>,
 	/// The maximum size of a batch
 	batch_size: usize,
-	/// Current batch of values to be merged once full
-	batch: Vec<Value>,
+	/// Current batch of records to be merged once full
+	batch: Vec<Record>,
 	/// The finalized result
-	result: Option<Vec<Value>>,
+	result: Option<Vec<Record>>,
 }
 
 impl MemoryRandom {
@@ -81,7 +81,7 @@ impl MemoryRandom {
 		let batch_size = batch_size.unwrap_or(DEFAULT_BATCH_SIZE);
 		Self {
 			batch_size,
-			values: Vec::new(),
+			records: Vec::new(),
 			ordered: Vec::new(),
 			batch: Vec::with_capacity(batch_size),
 			result: None,
@@ -94,11 +94,11 @@ impl MemoryRandom {
 			result.len()
 		} else {
 			// If we don't have a finalized result, we return the current size
-			self.values.len() + self.batch.len()
+			self.records.len() + self.batch.len()
 		}
 	}
 
-	fn shuffle_batch(values: &mut Vec<Value>, ordered: &mut Vec<usize>, batch: Vec<Value>) {
+	fn shuffle_batch(records: &mut Vec<Record>, ordered: &mut Vec<usize>, batch: Vec<Record>) {
 		let mut rng = thread_rng();
 
 		// Compute the index range of this new batch
@@ -109,7 +109,7 @@ impl MemoryRandom {
 		ordered.extend(start..end);
 
 		// We add the batch to the value vector
-		values.extend(batch);
+		records.extend(batch);
 
 		// Is this the first batch?
 		if start == 0 {
@@ -128,22 +128,22 @@ impl MemoryRandom {
 
 	fn send_batch(&mut self) {
 		let batch = mem::replace(&mut self.batch, Vec::with_capacity(self.batch_size));
-		Self::shuffle_batch(&mut self.values, &mut self.ordered, batch);
+		Self::shuffle_batch(&mut self.records, &mut self.ordered, batch);
 	}
 
-	pub(in crate::dbs) fn push(&mut self, value: Value) {
+	pub(in crate::dbs) fn push(&mut self, record: Record) {
 		// Add the value to the current batch
-		self.batch.push(value);
+		self.batch.push(record);
 		if self.batch_size == self.batch.len() {
 			// The batch is full, we can add it to the main vectors
 			self.send_batch();
 		}
 	}
 
-	fn ordered_values_to_vec(values: &mut [Value], ordered: &[usize]) -> Vec<Value> {
-		let mut vec = Vec::with_capacity(values.len());
+	fn ordered_records_to_vec(records: &mut [Record], ordered: &[usize]) -> Vec<Record> {
+		let mut vec = Vec::with_capacity(records.len());
 		for idx in ordered {
-			vec.push(mem::take(&mut values[*idx]));
+			vec.push(mem::take(&mut records[*idx]));
 		}
 		vec
 	}
@@ -154,7 +154,7 @@ impl MemoryRandom {
 			self.send_batch();
 		}
 		// We build final sorted vector
-		let res = Self::ordered_values_to_vec(&mut self.values, &self.ordered);
+		let res = Self::ordered_records_to_vec(&mut self.records, &self.ordered);
 		self.result = Some(res);
 	}
 
@@ -164,7 +164,7 @@ impl MemoryRandom {
 		}
 	}
 
-	pub(in crate::dbs) fn take_vec(&mut self) -> Vec<Value> {
+	pub(in crate::dbs) fn take_vec(&mut self) -> Vec<Record> {
 		self.result.take().unwrap_or_default()
 	}
 
@@ -176,16 +176,16 @@ impl MemoryRandom {
 /// The struct MemoryOrdered represents an in-memory store that aggregates
 /// ordered data.
 pub(in crate::dbs) struct MemoryOrdered {
-	/// Collected values
-	values: Vec<Value>,
+	/// Collected records
+	records: Vec<Record>,
 	/// Ordered index
 	ordered: Vec<usize>,
 	/// The maximum size of a batch
 	batch_size: usize,
-	/// Current batch of values to be merged once full
-	batch: Vec<Value>,
+	/// Current batch of records to be merged once full
+	batch: Vec<Record>,
 	/// The finalized result
-	result: Option<Vec<Value>>,
+	result: Option<Vec<Record>>,
 	/// The order specification
 	orders: OrderList,
 }
@@ -195,7 +195,7 @@ impl MemoryOrdered {
 		let batch_size = batch_size.unwrap_or(DEFAULT_BATCH_SIZE);
 		Self {
 			batch_size,
-			values: Vec::new(),
+			records: Vec::new(),
 			ordered: Vec::new(),
 			batch: Vec::with_capacity(batch_size),
 			result: None,
@@ -208,20 +208,20 @@ impl MemoryOrdered {
 			// If we have a finalized result, we return its size
 			result.len()
 		} else {
-			// If we don't have a finalized result, we return the amount of value summed
+			// If we don't have a finalized result, we return the amount of records summed
 			// with the current batch
-			self.values.len() + self.batch.len()
+			self.records.len() + self.batch.len()
 		}
 	}
 
 	fn send_batch(&mut self) {
-		self.values.append(&mut self.batch);
-		self.ordered.extend(self.ordered.len()..self.values.len());
+		self.records.append(&mut self.batch);
+		self.ordered.extend(self.ordered.len()..self.records.len());
 	}
 
-	pub(in crate::dbs) fn push(&mut self, value: Value) {
-		// Add the value to the current batch
-		self.batch.push(value);
+	pub(in crate::dbs) fn push(&mut self, record: Record) {
+		// Add the record to the current batch
+		self.batch.push(record);
 		if self.batch_size == self.batch.len() {
 			// The batch is full, we can add it to the main vectors
 			self.send_batch();
@@ -235,9 +235,9 @@ impl MemoryOrdered {
 				self.send_batch();
 			}
 			let mut ordered = mem::take(&mut self.ordered);
-			let mut values = mem::take(&mut self.values);
-			ordered.sort_unstable_by(|a, b| self.orders.compare(&values[*a], &values[*b]));
-			let res = MemoryRandom::ordered_values_to_vec(&mut values, &ordered);
+			let mut records = mem::take(&mut self.records);
+			ordered.sort_unstable_by(|a, b| self.orders.compare(&records[*a], &records[*b]));
+			let res = MemoryRandom::ordered_records_to_vec(&mut records, &ordered);
 			self.result = Some(res);
 		}
 	}
@@ -249,11 +249,11 @@ impl MemoryOrdered {
 				self.send_batch();
 			}
 			let mut ordered = mem::take(&mut self.ordered);
-			let mut values = mem::take(&mut self.values);
+			let mut records = mem::take(&mut self.records);
 			let orders = self.orders.clone();
 			let result = spawn_blocking(move || {
-				ordered.par_sort_unstable_by(|a, b| orders.compare(&values[*a], &values[*b]));
-				MemoryRandom::ordered_values_to_vec(&mut values, &ordered)
+				ordered.par_sort_unstable_by(|a, b| orders.compare(&records[*a], &records[*b]));
+				MemoryRandom::ordered_records_to_vec(&mut records, &ordered)
 			})
 			.await
 			.map_err(|e| Error::OrderingError(format!("{e}")))?;
@@ -268,7 +268,7 @@ impl MemoryOrdered {
 		}
 	}
 
-	pub(super) fn take_vec(&mut self) -> Vec<Value> {
+	pub(super) fn take_vec(&mut self) -> Vec<Record> {
 		self.result.take().unwrap_or_default()
 	}
 
@@ -277,39 +277,39 @@ impl MemoryOrdered {
 	}
 }
 
-pub(super) struct OrderedValue {
-	value: Value,
+pub(super) struct OrderedRecord {
+	record: Record,
 	orders: Arc<OrderList>,
 }
-impl PartialOrd<Self> for OrderedValue {
+impl PartialOrd<Self> for OrderedRecord {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 		Some(self.cmp(other))
 	}
 }
 
-impl Eq for OrderedValue {}
+impl Eq for OrderedRecord {}
 
-impl Ord for OrderedValue {
+impl Ord for OrderedRecord {
 	fn cmp(&self, other: &Self) -> Ordering {
-		self.orders.compare(&other.value, &self.value)
+		self.orders.compare(&self.record, &other.record)
 	}
 }
 
-impl PartialEq<Self> for OrderedValue {
+impl PartialEq<Self> for OrderedRecord {
 	fn eq(&self, other: &Self) -> bool {
-		self.value.eq(&other.value)
+		self.record.eq(&other.record)
 	}
 }
 
 pub(super) struct MemoryOrderedLimit {
 	/// The priority list
-	heap: BinaryHeap<Reverse<OrderedValue>>,
+	heap: BinaryHeap<Reverse<OrderedRecord>>,
 	/// The maximum size of the priority list
 	limit: usize,
 	/// The order specification
 	orders: Arc<OrderList>,
 	/// The finalized result
-	result: Option<Vec<Value>>,
+	result: Option<Vec<Record>>,
 }
 
 impl MemoryOrderedLimit {
@@ -322,16 +322,16 @@ impl MemoryOrderedLimit {
 		}
 	}
 
-	pub(in crate::dbs) fn push(&mut self, value: Value) {
+	pub(in crate::dbs) fn push(&mut self, record: Record) {
 		if self.heap.len() >= self.limit {
-			// When the heap is full, first check if the new value
+			// When the heap is full, first check if the new record
 			// if smaller that the top of this min-heap in order to
 			// prevent unnecessary push/pop and Arc::clone.
 			if let Some(top) = self.heap.peek() {
-				let cmp = self.orders.compare(&value, &top.0.value);
+				let cmp = self.orders.compare(&record, &top.0.record);
 				if cmp == Ordering::Less {
-					self.heap.push(Reverse(OrderedValue {
-						value,
+					self.heap.push(Reverse(OrderedRecord {
+						record,
 						orders: self.orders.clone(),
 					}));
 					self.heap.pop();
@@ -339,8 +339,8 @@ impl MemoryOrderedLimit {
 			}
 		} else {
 			// Push the value onto the heap because it's not full.
-			self.heap.push(Reverse(OrderedValue {
-				value,
+			self.heap.push(Reverse(OrderedRecord {
+				record,
 				orders: self.orders.clone(),
 			}));
 		}
@@ -360,14 +360,14 @@ impl MemoryOrderedLimit {
 		if self.result.is_none() {
 			let mut sorted_vec: Vec<_> = Vec::with_capacity(self.heap.len());
 			while let Some(i) = self.heap.pop() {
-				sorted_vec.push(i.0.value);
+				sorted_vec.push(i.0.record);
 			}
 			sorted_vec.reverse();
 			self.result = Some(sorted_vec);
 		}
 	}
 
-	pub(in crate::dbs) fn take_vec(&mut self) -> Vec<Value> {
+	pub(in crate::dbs) fn take_vec(&mut self) -> Vec<Record> {
 		self.result.take().unwrap_or_default()
 	}
 

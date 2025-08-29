@@ -1,9 +1,9 @@
 use std::ops::Deref;
 use std::{cmp, fmt};
 
-use crate::expr::Value;
 use crate::expr::fmt::Fmt;
 use crate::expr::idiom::Idiom;
+use crate::val::record::Record;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Ordering {
@@ -37,13 +37,23 @@ impl fmt::Display for OrderList {
 }
 
 impl OrderList {
-	pub(crate) fn compare(&self, a: &Value, b: &Value) -> cmp::Ordering {
+	pub(crate) fn compare(&self, a: &Record, b: &Record) -> cmp::Ordering {
 		for order in &self.0 {
 			// Reverse the ordering if DESC
 			let o = if order.direction {
-				a.compare(b, &order.value.0, order.collate, order.numeric)
+				a.data.as_ref().compare(
+					b.data.as_ref(),
+					&order.value.0,
+					order.collate,
+					order.numeric,
+				)
 			} else {
-				b.compare(a, &order.value.0, order.collate, order.numeric)
+				b.data.as_ref().compare(
+					a.data.as_ref(),
+					&order.value.0,
+					order.collate,
+					order.numeric,
+				)
 			};
 			//
 			match o {

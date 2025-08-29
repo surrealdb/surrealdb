@@ -7,6 +7,7 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 
 use crate::expr::TopLevelExpr;
+use crate::val::record::Record;
 use crate::val::{Object, Strand, Value};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Response";
@@ -49,7 +50,7 @@ impl QueryType {
 #[derive(Debug)]
 pub struct Response {
 	pub time: Duration,
-	pub result: Result<Value>,
+	pub result: Result<Output>,
 	// Record the query type in case processing the response is necessary (such as tracking live
 	// queries).
 	pub query_type: QueryType,
@@ -57,7 +58,7 @@ pub struct Response {
 
 impl Response {
 	/// Retrieve the response as a normal result
-	pub fn output(self) -> Result<Value> {
+	pub fn output(self) -> Result<Output> {
 		self.result
 	}
 
@@ -71,9 +72,9 @@ impl Response {
 		}
 
 		match self.result {
-			Ok(v) => {
+			Ok(output) => {
 				res.insert("status".to_owned(), strand!("OK").to_owned().into());
-				res.insert("result".to_owned(), v);
+				res.insert("result".to_owned(), output.into_value());
 			}
 			Err(e) => {
 				res.insert("status".to_owned(), strand!("ERR").to_owned().into());
@@ -139,7 +140,7 @@ impl From<&Response> for QueryMethodResponse {
 	fn from(res: &Response) -> Self {
 		let time = format!("{:?}", res.time);
 		let (status, result) = match &res.result {
-			Ok(value) => (Status::Ok, value.clone()),
+			Ok(output) => (Status::Ok, output.clone().into_value()),
 			Err(error) => (Status::Err, Value::from(error.to_string())),
 		};
 		Self {
@@ -166,5 +167,29 @@ impl Revisioned for Response {
 
 	fn revision() -> u16 {
 		1
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Output {
+	Record(Record),
+	Records(Vec<Record>),
+	Value(Value),
+	Values(Vec<Value>),
+}
+
+impl Output {
+	pub(crate) fn into_value(self) -> Value {
+		match self {
+			Output::Record(record) => record.data.into_value(),
+			Output::Records(records) => records
+				.into_iter()
+				.map(|record| record.data.into_value())
+				.collect::<Vec<_>>()
+				.into(),
+			Output::Value(value) => value,
+			Output::Values(values) => values.into(),
+		}
 	}
 }

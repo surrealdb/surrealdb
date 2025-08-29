@@ -81,7 +81,7 @@ pub(crate) enum Iterable {
 
 #[derive(Debug)]
 pub(crate) enum Operable {
-	Value(Arc<Record>),
+	Record(Arc<Record>),
 	Insert(Arc<Record>, Arc<Value>),
 	Relate(RecordId, Arc<Record>, RecordId, Option<Arc<Value>>),
 	Count(usize),
@@ -502,7 +502,7 @@ impl Iterator {
 		opt: &Options,
 		stm: &Statement<'_>,
 		rs: RecordStrategy,
-	) -> Result<Value> {
+	) -> Result<Vec<Record>> {
 		// Log the statement
 		trace!(target: TARGET, statement = %stm, "Iterating statement");
 		// Enable context override
@@ -600,12 +600,12 @@ impl Iterator {
 		if let Some(e) = plan.explanation {
 			results.clear();
 			for v in e.output() {
-				results.push(v)
+				results.push(Record::new(v.into()));
 			}
 		}
 
 		// Output the results
-		Ok(results.into())
+		Ok(results)
 	}
 
 	#[inline]
@@ -811,7 +811,7 @@ impl Iterator {
 				// Loop over each value
 				for obj in &res {
 					// Get the value at the path
-					let val = obj.pick(split);
+					let val = obj.data.as_ref().pick(split);
 					// Set the value at the path
 					match val {
 						Value::Array(v) => {
@@ -819,7 +819,7 @@ impl Iterator {
 								// Make a copy of object
 								let mut obj = obj.clone();
 								// Set the value at the path
-								obj.set(stk, ctx, opt, split, val).await?;
+								obj.data.to_mut().set(stk, ctx, opt, split, val).await?;
 								// Add the object to the results
 								self.results.push(stk, ctx, opt, stm, rs, obj).await?;
 							}
@@ -828,7 +828,7 @@ impl Iterator {
 							// Make a copy of object
 							let mut obj = obj.clone();
 							// Set the value at the path
-							obj.set(stk, ctx, opt, split, val).await?;
+							obj.data.to_mut().set(stk, ctx, opt, split, val).await?;
 							// Add the object to the results
 							self.results.push(stk, ctx, opt, stm, rs, obj).await?;
 						}
@@ -867,13 +867,13 @@ impl Iterator {
 				fetch.compute(stk, ctx, opt, &mut idioms).await?;
 			}
 			for i in &idioms {
-				let mut values = self.results.take().await?;
+				let mut records = self.results.take().await?;
 				// Loop over each result value
-				for obj in &mut values {
+				for obj in &mut records {
 					// Fetch the value at the path
-					stk.run(|stk| obj.fetch(stk, ctx, opt, i)).await?;
+					stk.run(|stk| obj.data.to_mut().fetch(stk, ctx, opt, i)).await?;
 				}
-				self.results = values.into();
+				self.results = records.into();
 			}
 		}
 		Ok(())
@@ -924,28 +924,30 @@ impl Iterator {
 	) -> Result<()> {
 		let rs = pro.rs;
 		// Extract the value
-		let res = Self::extract_value(stk, ctx, opt, stm, pro).await;
+		let res = Self::extract_record(stk, ctx, opt, stm, pro).await;
 		// Process the result
 		self.result(stk, ctx, opt, stm, rs, res).await;
 		// Everything ok
 		Ok(())
 	}
 
-	async fn extract_value(
+	async fn extract_record(
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		pro: Processed,
-	) -> Result<Value, IgnoreError> {
+	) -> Result<Record, IgnoreError> {
 		// Check if this is a count all
 		let count_all = stm.expr().is_some_and(Fields::is_count_all_only);
 		if count_all {
 			if let Operable::Count(count) = pro.val {
-				return Ok(count.into());
+				return Ok(Record::new(Value::from(count).into()));
 			}
 			if matches!(pro.rs, RecordStrategy::KeysOnly) {
-				return Ok(map! { "count".to_string() => Value::from(1) }.into());
+				let value = Value::from(map! { "count".to_string() => Value::from(1) });
+				let record = Record::new(value.into());
+				return Ok(record);
 			}
 		}
 		// Otherwise, we process the document
@@ -960,7 +962,7 @@ impl Iterator {
 		opt: &Options,
 		stm: &Statement<'_>,
 		rs: RecordStrategy,
-		res: Result<Value, IgnoreError>,
+		res: Result<Record, IgnoreError>,
 	) {
 		// yield
 		yield_now!();

@@ -211,7 +211,7 @@ impl Document {
 
 	/// Check if document has changed
 	pub fn changed(&self) -> bool {
-		self.initial.doc.as_ref() != self.current.doc.as_ref()
+		self.initial.doc.record != self.current.doc.record
 	}
 
 	/// Check if document is being created

@@ -15,7 +15,7 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 		pro: Processed,
-	) -> Result<Value, IgnoreError> {
+	) -> Result<Record, IgnoreError> {
 		// Check current context
 		if ctx.is_done(true).await? {
 			// Don't process the document
@@ -23,7 +23,7 @@ impl Document {
 		}
 		// Setup a new workable
 		let ins = match pro.val {
-			Operable::Value(v) => (v, Workable::Normal),
+			Operable::Record(v) => (v, Workable::Normal),
 			Operable::Insert(v, o) => (v, Workable::Insert(o)),
 			Operable::Relate(f, v, w, o) => (v, Workable::Relate(f, w, o)),
 			Operable::Count(count) => {

@@ -10,6 +10,7 @@ use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};
 use crate::expr::{Expr, Field, FlowResultExt as _, Function, FunctionCall, Idiom};
 use crate::idx::planner::RecordStrategy;
+use crate::val::record::Record;
 use crate::val::{Array, TryAdd, TryFloatDiv, Value};
 
 pub(super) struct GroupsCollector {
@@ -68,7 +69,7 @@ impl GroupsCollector {
 		opt: &Options,
 		stm: &Statement<'_>,
 		rs: RecordStrategy,
-		obj: Value,
+		obj: Record,
 	) -> Result<()> {
 		if let Some(groups) = stm.group() {
 			// Create a new column set
@@ -76,7 +77,7 @@ impl GroupsCollector {
 			// Loop over each group clause
 			for group in groups.iter() {
 				// Get the value at the path
-				let val = obj.pick(group);
+				let val = obj.data.as_ref().pick(group);
 				// Set the value at the path
 				arr.push(val);
 			}
@@ -97,19 +98,21 @@ impl GroupsCollector {
 		agrs: &mut [Aggregator],
 		idioms: &[Idiom],
 		rs: RecordStrategy,
-		obj: Value,
+		obj: Record,
 	) -> Result<()> {
 		let mut count_value = None;
 		if matches!(rs, RecordStrategy::Count) {
-			if let Value::Number(n) = obj {
-				count_value = Some(Value::Number(n));
+			if let Value::Number(n) = obj.data.as_ref() {
+				count_value = Some(Value::Number(n.clone()));
 			}
 		}
 		for (agr, idiom) in agrs.iter_mut().zip(idioms) {
 			let val = if let Some(ref v) = count_value {
 				v.clone()
 			} else {
-				stk.run(|stk| obj.get(stk, ctx, opt, None, idiom)).await.catch_return()?
+				stk.run(|stk| obj.data.as_ref().get(stk, ctx, opt, None, idiom))
+					.await
+					.catch_return()?
 			};
 			agr.push(rs, val).await?;
 		}
@@ -131,8 +134,8 @@ impl GroupsCollector {
 		if let Some(fields) = stm.expr() {
 			// Loop over each grouped collection
 			for aggregator in self.grp.values_mut() {
-				// Create a new value
-				let mut obj = Value::empty_object();
+				// Create a new record
+				let mut obj = Record::default();
 				// Loop over each group clause
 				for field in fields.iter_non_all_fields() {
 					// Process the field
@@ -174,11 +177,11 @@ impl GroupsCollector {
 										// The aggregation is optimised, just get the value
 										agr.compute(a)?
 									};
-									obj.set(stk, ctx, opt, idiom.as_ref(), x).await?;
+									obj.data.to_mut().set(stk, ctx, opt, idiom.as_ref(), x).await?;
 								}
 								_ => {
 									let x = agr.take().first();
-									obj.set(stk, ctx, opt, idiom.as_ref(), x).await?;
+									obj.data.to_mut().set(stk, ctx, opt, idiom.as_ref(), x).await?;
 								}
 							}
 						}

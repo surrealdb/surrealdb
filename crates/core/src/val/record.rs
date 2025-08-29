@@ -37,7 +37,7 @@ use crate::val::Value;
 /// assert!(!record.is_edge());
 /// ```
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Hash)]
 pub struct Record {
 	/// Optional metadata about the record (e.g., record type)
 	pub(crate) metadata: Option<Metadata>,
@@ -122,6 +122,43 @@ impl Record {
 			}
 		}
 	}
+
+	/// Set the metadata for the record
+	///
+	/// This method updates the metadata for the record, replacing any existing metadata.
+	/// If no metadata is provided, it will be removed.
+	///
+	/// # Arguments
+	///
+	/// * `metadata` - The metadata to set for the record
+	///
+	/// # Returns
+	///
+	/// A new `Record` instance with the specified metadata
+	pub(crate) fn with_metadata(mut self, metadata: Option<Metadata>) -> Self {
+		self.metadata = metadata;
+		self
+	}
+}
+
+impl PartialEq<Self> for Record {
+	fn eq(&self, other: &Self) -> bool {
+		self.data == other.data
+	}
+}
+
+impl Eq for Record {}
+
+impl PartialOrd<Self> for Record {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		self.data.partial_cmp(&other.data)
+	}
+}
+
+impl Ord for Record {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.data.cmp(&other.data)
+	}
 }
 
 /// Represents the data stored in a record
@@ -172,6 +209,13 @@ impl Data {
 		match self {
 			Data::Mutable(value) => value,
 			Data::ReadOnly(arc) => Arc::make_mut(arc),
+		}
+	}
+
+	pub(crate) fn into_value(self) -> Value {
+		match self {
+			Data::Mutable(value) => value,
+			Data::ReadOnly(mut arc) => mem::take(Arc::make_mut(&mut arc)),
 		}
 	}
 
@@ -236,6 +280,8 @@ impl PartialEq for Data {
 	}
 }
 
+impl Eq for Data {}
+
 impl PartialOrd for Data {
 	/// Compares two Data instances for ordering
 	///
@@ -243,6 +289,12 @@ impl PartialOrd for Data {
 	/// stored as mutable or read-only.
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 		self.as_ref().partial_cmp(other.as_ref())
+	}
+}
+
+impl Ord for Data {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.as_ref().cmp(other.as_ref())
 	}
 }
 
