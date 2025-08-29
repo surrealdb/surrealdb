@@ -201,7 +201,7 @@ jobs:
 
           # Linux amd64
           - arch: x86_64-unknown-linux-gnu
-            runner: [ runner-amd64-2xlarge ]
+            runner: ubuntu-24.04
             file: surreal-${{ inputs.name }}.linux-amd64
             build-step: |
               # Build
@@ -246,7 +246,7 @@ jobs:
 
           # Linux arm64
           - arch: aarch64-unknown-linux-gnu
-            runner: [ runner-arm64-2xlarge ]
+            runner: ubuntu-24.04
             file: surreal-${{ inputs.name }}.linux-arm64
             build-step: |
               set -x
