@@ -124,7 +124,7 @@ jobs:
 
   build:
     name: Build ${{ matrix.arch }} binary
-    needs: [ image, docker-builder ]
+    needs: image
     strategy:
       fail-fast: false
       matrix:
