@@ -143,7 +143,7 @@ jobs:
               extra_args=""
               compile_profile="debug"
               if [[ "${{ inputs.name }}" == "ci" && "${{ inputs.upload }}" == "false" ]]; then
-                extra_args="${extra_args} --features storage-mem,scripting,http,jwks,ml"
+                extra_args="${extra_args} --features ${{ inputs.extra-features }}"
               else
                 extra_args="${extra_args} --features default"
                 if [[ ! -z "${{ inputs.extra-features }}" ]]; then
@@ -186,7 +186,7 @@ jobs:
               extra_args=""
               compile_profile="debug"
               if [[ "${{ inputs.name }}" == "ci" && "${{ inputs.upload }}" == "false" ]]; then
-                extra_args="${extra_args} --features storage-mem,scripting,http,jwks,ml"
+                extra_args="${extra_args} --features ${{ inputs.extra-features }}"
               else
                 extra_args="${extra_args} --features default"
                 if [[ ! -z "${{ inputs.extra-features }}" ]]; then
@@ -221,7 +221,7 @@ jobs:
               extra_args=""
               compile_profile="debug"
               if [[ "${{ inputs.name }}" == "ci" && "${{ inputs.upload }}" == "false" ]]; then
-                extra_args="${extra_args} --features storage-mem,scripting,http,jwks,ml"
+                extra_args="${extra_args} --features ${{ inputs.extra-features }}"
               else
                 extra_args="${extra_args} --features default"
                 if [[ ! -z "${{ inputs.extra-features }}" ]]; then
@@ -273,7 +273,7 @@ jobs:
               extra_args=""
               compile_profile="debug"
               if [[ "${{ inputs.name }}" == "ci" && "${{ inputs.upload }}" == "false" ]]; then
-                extra_args="${extra_args} --features storage-mem,scripting,http,jwks,ml"
+                extra_args="${extra_args} --features ${{ inputs.extra-features }}"
               else
                 extra_args="${extra_args} --features default"
                 if [[ ! -z "${{ inputs.extra-features }}" ]]; then
@@ -328,7 +328,7 @@ jobs:
               extra_args=""
               compile_profile="debug"
               if [[ "${{ inputs.name }}" == "ci" && "${{ inputs.upload }}" == "false" ]]; then
-                extra_args="${extra_args} --features storage-mem,scripting,http,jwks,ml"
+                extra_args="${extra_args} --features ${{ inputs.extra-features }}"
               else
                 extra_args="${extra_args} --features default"
                 if [[ ! -z "${{ inputs.extra-features }}" ]]; then
