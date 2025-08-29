@@ -293,7 +293,7 @@ jobs:
 
           # Windows amd64
           - arch: x86_64-pc-windows-msvc
-            runner: windows-latest-16-cores
+            runner: windows-2025
             file: surreal-${{ inputs.name }}.windows-amd64
             build-step: |
               set -x
