@@ -47,7 +47,7 @@ pub mod vm;
 use std::borrow::Cow;
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{Encode, BorrowDecode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
@@ -55,7 +55,7 @@ use crate::key::value::StoreKeyArray;
 use crate::kvs::KVKey;
 use crate::val::{RecordId, RecordIdKey};
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Encode, BorrowDecode)]
 struct Prefix<'a> {
 	__: u8,
 	_a: u8,
@@ -90,7 +90,7 @@ impl<'a> Prefix<'a> {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Encode, BorrowDecode)]
 struct PrefixIds<'a> {
 	__: u8,
 	_a: u8,
@@ -136,7 +136,7 @@ impl<'a> PrefixIds<'a> {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Index<'a> {
 	__: u8,
 	_a: u8,

@@ -1,11 +1,11 @@
 //! Stores Things of an HNSW index
-use serde::{Deserialize, Serialize};
+use storekey::{Encode, BorrowDecode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::kvs::KVKey;
 use crate::val::RecordIdKey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Hi<'a> {
 	__: u8,
 	_a: u8,

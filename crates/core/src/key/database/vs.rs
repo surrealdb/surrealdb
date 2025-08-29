@@ -1,5 +1,5 @@
 //! Stores database versionstamps
-use serde::{Deserialize, Serialize};
+use storekey::{Encode, BorrowDecode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
@@ -7,7 +7,7 @@ use crate::kvs::KVKey;
 use crate::vs::VersionStamp;
 
 // Vs stands for Database Versionstamp
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct VsKey {
 	__: u8,
 	_a: u8,

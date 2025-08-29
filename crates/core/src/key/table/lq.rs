@@ -1,6 +1,6 @@
 //! Stores a LIVE SELECT query definition on the table
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId, SubscriptionDefinition};
@@ -12,7 +12,7 @@ use crate::kvs::KVKey;
 /// id, so lq can be derived purely from an lv.
 ///
 /// The value of the lv is the statement.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Lq<'a> {
 	__: u8,
 	_a: u8,
@@ -24,7 +24,6 @@ pub(crate) struct Lq<'a> {
 	_d: u8,
 	_e: u8,
 	_f: u8,
-	#[serde(with = "uuid::serde::compact")]
 	pub lq: Uuid,
 }
 
@@ -72,7 +71,7 @@ impl<'a> Lq<'a> {
 	}
 
 	pub fn decode_key(k: &[u8]) -> anyhow::Result<Lq<'_>> {
-		Ok(storekey::deserialize(k)?)
+		Ok(storekey::decode_borrow(k)?)
 	}
 }
 

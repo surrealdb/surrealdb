@@ -1,12 +1,12 @@
 //! Stores a DEFINE FIELD config definition
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{Encode, BorrowDecode};
 
 use crate::catalog::{self, DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Fd<'a> {
 	__: u8,
 	_a: u8,

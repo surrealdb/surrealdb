@@ -1,12 +1,12 @@
 //! Stores Vector of an HNSW index
-use serde::{Deserialize, Serialize};
+use storekey::{Encode, BorrowDecode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::vector::SerializedVector;
 use crate::kvs::KVKey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct He<'a> {
 	__: u8,
 	_a: u8,

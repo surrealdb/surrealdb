@@ -22,7 +22,7 @@
 //! - `tb`: Table identifier
 //! - `ix`: Index identifier
 //! - `nid`: Node UUID (16 bytes, compact serialized)
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
@@ -30,7 +30,7 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::kvs::sequences::SequenceState;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Is<'a> {
 	__: u8,
 	_a: u8,
@@ -44,7 +44,6 @@ pub(crate) struct Is<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	#[serde(with = "uuid::serde::compact")]
 	pub nid: Uuid,
 }
 

@@ -1,12 +1,12 @@
 //! Stores MTree state and nodes
-use serde::{Deserialize, Serialize};
+use storekey::{Encode, BorrowDecode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::trees::mtree::MState;
 use crate::idx::trees::store::NodeId;
 use crate::kvs::KVKey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode, Hash)]
 pub(crate) struct VmRoot<'a> {
 	__: u8,
 	_a: u8,
@@ -46,7 +46,7 @@ impl<'a> VmRoot<'a> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Vm<'a> {
 	__: u8,
 	_a: u8,

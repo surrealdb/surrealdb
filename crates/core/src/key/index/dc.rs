@@ -17,7 +17,7 @@
 //! - Providing accurate document count information for the index
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
@@ -26,7 +26,7 @@ use crate::idx::ft::fulltext::DocLengthAndCount;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Dc<'a> {
 	__: u8,
 	_a: u8,
@@ -41,9 +41,7 @@ pub(crate) struct Dc<'a> {
 	_f: u8,
 	_g: u8,
 	pub doc_id: DocId,
-	#[serde(with = "uuid::serde::compact")]
 	pub nid: Uuid,
-	#[serde(with = "uuid::serde::compact")]
 	pub uid: Uuid,
 }
 
@@ -116,12 +114,7 @@ impl<'a> Dc<'a> {
 	///
 	/// # Returns
 	/// The encoded root key as a byte vector
-	pub(crate) fn new_root(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a str,
-		ix: &'a str,
-	) -> Result<Vec<u8>> {
+	pub(crate) fn new_root(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Vec<u8> {
 		DcPrefix::new(ns, db, tb, ix).encode_key()
 	}
 
@@ -155,7 +148,7 @@ impl<'a> Dc<'a> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 struct DcPrefix<'a> {
 	__: u8,
 	_a: u8,

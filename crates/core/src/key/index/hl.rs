@@ -1,12 +1,12 @@
 //! Store and chunked layers of an HNSW index
 use std::fmt::Debug;
 
-use serde::{Deserialize, Serialize};
+use storekey::{Encode, BorrowDecode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::kvs::KVKey;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
 pub(crate) struct Hl<'a> {
 	__: u8,
 	_a: u8,

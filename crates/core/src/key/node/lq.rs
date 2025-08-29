@@ -1,6 +1,6 @@
 //! Stores a LIVE SELECT query definition on the cluster
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::NodeLiveQuery;
@@ -14,16 +14,14 @@ use crate::kvs::KVKey;
 ///
 /// The value is just the table of the live query as a Strand, which is the
 /// missing information from the key path
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Lq {
 	__: u8,
 	_a: u8,
-	#[serde(with = "uuid::serde::compact")]
 	pub nd: Uuid,
 	_b: u8,
 	_c: u8,
 	_d: u8,
-	#[serde(with = "uuid::serde::compact")]
 	pub lq: Uuid,
 }
 
@@ -67,7 +65,7 @@ impl Lq {
 	}
 
 	pub fn decode_key(k: Vec<u8>) -> anyhow::Result<Self> {
-		Ok(storekey::deserialize(k.as_slice())?)
+		Ok(storekey::decode_borrow(k.as_slice())?)
 	}
 }
 

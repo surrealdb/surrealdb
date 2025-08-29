@@ -1,6 +1,6 @@
 //! Stores a record document
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
@@ -8,7 +8,7 @@ use crate::kvs::KVKey;
 use crate::val::RecordIdKey;
 use crate::val::record::Record;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct ThingKey<'a> {
 	__: u8,
 	_a: u8,
@@ -63,7 +63,7 @@ impl<'a> ThingKey<'a> {
 	}
 
 	pub fn decode_key(k: &[u8]) -> Result<ThingKey<'_>> {
-		Ok(storekey::deserialize(k)?)
+		Ok(storekey::decode_borrow(k)?)
 	}
 }
 

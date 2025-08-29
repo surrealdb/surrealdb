@@ -18,7 +18,7 @@
 //! - Enabling efficient term frequency tracking for relevance scoring
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
@@ -26,7 +26,7 @@ use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Tt<'a> {
 	__: u8,
 	_a: u8,
@@ -42,9 +42,7 @@ pub(crate) struct Tt<'a> {
 	_g: u8,
 	pub term: &'a str,
 	pub doc_id: DocId,
-	#[serde(with = "uuid::serde::compact")]
 	pub nid: Uuid,
-	#[serde(with = "uuid::serde::compact")]
 	pub uid: Uuid,
 	pub add: bool,
 }
@@ -169,11 +167,11 @@ impl<'a> Tt<'a> {
 	}
 
 	pub fn decode_key(k: &[u8]) -> Result<Tt<'_>> {
-		Ok(storekey::deserialize(k)?)
+		Ok(storekey::decode_borrow(k)?)
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 struct TtTermPrefix<'a> {
 	__: u8,
 	_a: u8,
@@ -214,7 +212,7 @@ impl<'a> TtTermPrefix<'a> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 struct TtTermsPrefix<'a> {
 	__: u8,
 	_a: u8,

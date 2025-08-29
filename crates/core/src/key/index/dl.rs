@@ -14,7 +14,7 @@
 //! - Supporting document length normalization
 //! - Enabling proper ranking of search results based on term frequency and document length
 //! - Providing document-specific statistics for the full-text search engine
-use serde::{Deserialize, Serialize};
+use storekey::{Encode, BorrowDecode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
@@ -22,7 +22,7 @@ use crate::idx::ft::DocLength;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Dl<'a> {
 	__: u8,
 	_a: u8,

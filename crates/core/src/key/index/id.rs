@@ -38,7 +38,7 @@
 //! - **Scalable**: Efficient lookups scale with the number of indexed documents
 use std::fmt::Debug;
 
-use serde::{Deserialize, Serialize};
+use storekey::{Encode, BorrowDecode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
@@ -46,7 +46,7 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::val::RecordIdKey;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
 pub(crate) struct Id<'a> {
 	__: u8,
 	_a: u8,

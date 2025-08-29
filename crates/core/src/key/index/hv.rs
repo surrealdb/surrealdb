@@ -2,14 +2,14 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
+use storekey::{Encode, BorrowDecode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::trees::hnsw::docs::ElementDocs;
 use crate::idx::trees::vector::SerializedVector;
 use crate::kvs::KVKey;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
 pub(crate) struct Hv<'a> {
 	__: u8,
 	_a: u8,

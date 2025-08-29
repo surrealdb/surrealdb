@@ -9,14 +9,13 @@
 //!
 //! Some Value variants (eg Regex, Closure) are skipped for serde because they
 //! are not used in key material.
+use serde::de::{SeqAccess, Visitor};
+use serde::ser::SerializeSeq;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, Bound};
 use std::fmt;
 use std::fmt::{Debug, Formatter};
-
-use serde::de::{SeqAccess, Visitor};
-use serde::ser::SerializeSeq;
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+use storekey::{BorrowDecode, Encode};
 
 use crate::kvs::KVKey;
 use crate::val::{
@@ -24,7 +23,7 @@ use crate::val::{
 	RecordIdKey, RecordIdKeyRange, Regex, Strand, Table, Uuid, Value,
 };
 
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Encode, BorrowDecode, Hash)]
 #[serde(rename = "$surrealdb::private::Value")]
 pub(crate) enum StoreKeyValue {
 	#[default]
@@ -43,35 +42,42 @@ pub(crate) enum StoreKeyValue {
 	RecordId(StoreKeyRecordId),
 	Table(Table),
 	File(File),
-	#[serde(skip)]
-	Regex(Regex),
 	Range(Box<Range>),
-	#[serde(skip)]
-	Closure(Box<Closure>),
 	// Add new variants here
 }
 
-impl From<Value> for StoreKeyValue {
-	fn from(value: Value) -> Self {
+#[derive(Debug)]
+pub struct UnstorableType(());
+
+impl fmt::Display for StoreKeyValue {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		writeln!(f, "Tried to convert value with unstorable type to a stored value")
+	}
+}
+impl std::error::Error for UnstorableType {}
+
+impl TryFrom<Value> for StoreKeyValue {
+	type Error = UnstorableType;
+
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
 		match value {
-			Value::None => Self::None,
-			Value::Null => Self::Null,
-			Value::Bool(b) => Self::Bool(b),
-			Value::Number(n) => Self::Number(n.into()),
-			Value::Strand(s) => Self::Strand(s),
-			Value::Duration(d) => Self::Duration(d),
-			Value::Datetime(d) => Self::Datetime(d),
-			Value::Uuid(u) => Self::Uuid(u),
-			Value::Array(a) => Self::Array(a.into()),
-			Value::Object(o) => Self::Object(o.into()),
-			Value::Geometry(g) => Self::Geometry(g),
-			Value::Bytes(b) => Self::Bytes(b),
-			Value::RecordId(r) => Self::RecordId(r.into()),
-			Value::Table(t) => Self::Table(t),
-			Value::File(f) => Self::File(f),
-			Value::Regex(r) => Self::Regex(r),
-			Value::Range(r) => Self::Range(r),
-			Value::Closure(c) => Self::Closure(c),
+			Value::None => Ok(Self::None),
+			Value::Null => Ok(Self::Null),
+			Value::Bool(b) => Ok(Self::Bool(b)),
+			Value::Number(n) => Ok(Self::Number(n.into())),
+			Value::Strand(s) => Ok(Self::Strand(s)),
+			Value::Duration(d) => Ok(Self::Duration(d)),
+			Value::Datetime(d) => Ok(Self::Datetime(d)),
+			Value::Uuid(u) => Ok(Self::Uuid(u)),
+			Value::Array(a) => Ok(Self::Array(a.into())),
+			Value::Object(o) => Ok(Self::Object(o.into())),
+			Value::Geometry(g) => Ok(Self::Geometry(g)),
+			Value::Bytes(b) => Ok(Self::Bytes(b)),
+			Value::RecordId(r) => Ok(Self::RecordId(r.into())),
+			Value::Table(t) => Ok(Self::Table(t)),
+			Value::File(f) => Ok(Self::File(f)),
+			Value::Range(r) => Ok(Self::Range(r)),
+			_ => Err(UnstorableType),
 		}
 	}
 }
@@ -94,9 +100,7 @@ impl From<StoreKeyValue> for Value {
 			StoreKeyValue::RecordId(r) => Self::RecordId(r.into()),
 			StoreKeyValue::Table(t) => Self::Table(t),
 			StoreKeyValue::File(f) => Self::File(f),
-			StoreKeyValue::Regex(r) => Self::Regex(r),
 			StoreKeyValue::Range(r) => Self::Range(r),
-			StoreKeyValue::Closure(c) => Self::Closure(c),
 		}
 	}
 }
@@ -115,7 +119,7 @@ impl StoreKeyValue {
 /// Numeric values are normalized via StoreKeyNumber’s lexicographic encoding
 /// when present, and components are zero-terminated to allow safe concatenation
 /// in composite keys.
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Encode, BorrowDecode, Hash)]
 pub(crate) struct StoreKeyArray(pub(crate) Vec<StoreKeyValue>);
 
 impl From<StoreKeyValue> for StoreKeyArray {
@@ -139,7 +143,7 @@ impl From<StoreKeyArray> for Array {
 /// Map-like structure for object values used in keys.
 /// Field values use StoreKeyValue encoding; numeric fields are normalized so
 /// that lexicographic byte order matches numeric order in indexes.
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Encode, BorrowDecode, Hash)]
 pub(crate) struct StoreKeyObject(BTreeMap<String, StoreKeyValue>);
 
 impl From<Object> for StoreKeyObject {
@@ -157,7 +161,7 @@ impl From<StoreKeyObject> for Object {
 /// Record identifier encoding for use inside keys.
 /// Table and key are encoded as zero-terminated components so that the
 /// concatenated key stream can be parsed unambiguously.
-#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Encode, BorrowDecode, Hash)]
 pub(crate) struct StoreKeyRecordId {
 	pub(super) table: String,
 	pub(crate) key: StoreKeyRecordIdKey,
@@ -183,7 +187,7 @@ impl From<StoreKeyRecordId> for RecordId {
 
 /// Key component for RecordId when serialized inside keys.
 /// Variants preserve ordering semantics; composite types reuse StoreKey encodings.
-#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Encode, BorrowDecode, Hash)]
 pub(crate) enum StoreKeyRecordIdKey {
 	Number(i64),
 	//TODO: This should definitely be strand, not string as null bytes here can cause a lot of
@@ -195,8 +199,10 @@ pub(crate) enum StoreKeyRecordIdKey {
 	Range(Box<StoreKeyRecordIdKeyRange>),
 }
 
-impl From<RecordIdKey> for StoreKeyRecordIdKey {
-	fn from(r: RecordIdKey) -> Self {
+impl TryFrom<RecordIdKey> for StoreKeyRecordIdKey {
+	type Error = UnstorableType;
+
+	fn try_from(r: RecordIdKey) -> Result<Self, Self::Error> {
 		match r {
 			RecordIdKey::Number(n) => Self::Number(n),
 			RecordIdKey::String(s) => Self::String(s),
@@ -223,7 +229,7 @@ impl From<StoreKeyRecordIdKey> for RecordIdKey {
 
 /// Range of RecordIdKey values used in key encoding. Bounds are expressed
 /// with Included/Excluded/Unbounded and follow the same StoreKey encoding.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, PartialEq, Encode, BorrowDecode, Hash)]
 pub(crate) struct StoreKeyRecordIdKeyRange {
 	pub start: Bound<StoreKeyRecordIdKey>,
 	pub end: Bound<StoreKeyRecordIdKey>,
@@ -309,7 +315,11 @@ impl From<StoreKeyNumber> for Number {
 
 /// Serializes as a zero-terminated sequence of u8 bytes produced by
 /// Number::as_decimal_buf(), which preserves lexicographic order for numbers.
-impl Serialize for StoreKeyNumber {
+impl Encode for StoreKeyNumber {
+	fn encode<W: std::io::Write>(&self, w: &mut storekey::Writer<W>) -> storekey::Result<()> {
+		let buf = self.0.as_decimal_buf().map_err(serde::ser::Error::custom)?;
+	}
+	/*
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: Serializer,
@@ -321,6 +331,7 @@ impl Serialize for StoreKeyNumber {
 		}
 		seq.end()
 	}
+	*/
 }
 
 /// Deserializes a zero-terminated sequence of u8 bytes into a StoreKeyNumber.

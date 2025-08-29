@@ -9,7 +9,7 @@
 //! index that needs to be compacted. The compaction thread processes these
 //! entries at regular intervals defined by the `index_compaction_interval`
 //! configuration option.
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
@@ -24,7 +24,7 @@ use crate::kvs::KVKey;
 ///
 /// Compaction helps optimize index performance by consolidating changes and
 /// removing unnecessary data.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Ic<'a> {
 	__: u8,
 	_a: u8,
@@ -34,9 +34,7 @@ pub(crate) struct Ic<'a> {
 	pub db: DatabaseId,
 	pub tb: &'a str,
 	pub ix: &'a str,
-	#[serde(with = "uuid::serde::compact")]
 	pub nid: Uuid,
-	#[serde(with = "uuid::serde::compact")]
 	pub uid: Uuid,
 }
 
@@ -78,7 +76,7 @@ impl<'a> Ic<'a> {
 	}
 
 	pub fn decode_key(k: &[u8]) -> anyhow::Result<Ic<'_>> {
-		Ok(storekey::deserialize(k)?)
+		Ok(storekey::decode_borrow(k)?)
 	}
 }
 

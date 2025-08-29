@@ -1,5 +1,5 @@
 //! Stores doc keys for doc_ids
-use serde::{Deserialize, Serialize};
+use storekey::{Encode, BorrowDecode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
@@ -8,7 +8,7 @@ use crate::kvs::KVKey;
 use crate::val::RecordId;
 
 /// Id inverted. DocId -> Thing
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Bi<'a> {
 	__: u8,
 	_a: u8,

@@ -1,5 +1,5 @@
 //! Stores cluster membership information
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::dbs::node::Node;
@@ -9,13 +9,12 @@ use crate::kvs::KVKey;
 // Represents cluster information.
 // In the future, this could also include broadcast addresses and other
 // information.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Nd {
 	__: u8,
 	_a: u8,
 	_b: u8,
 	_c: u8,
-	#[serde(with = "uuid::serde::compact")]
 	pub nd: Uuid,
 }
 

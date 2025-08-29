@@ -1,5 +1,5 @@
 //! Stores the DocIds -> Thing of an HNSW index
-use serde::{Deserialize, Serialize};
+use storekey::{Encode, BorrowDecode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
@@ -7,7 +7,7 @@ use crate::idx::trees::hnsw::docs::HnswDocsState;
 use crate::kvs::KVKey;
 use crate::val::RecordIdKey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct HdRoot<'a> {
 	__: u8,
 	_a: u8,
@@ -46,7 +46,7 @@ impl<'a> HdRoot<'a> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Hd<'a> {
 	__: u8,
 	_a: u8,

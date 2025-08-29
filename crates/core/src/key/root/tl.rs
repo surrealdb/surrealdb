@@ -1,12 +1,12 @@
 //! Stores a task lease to ensure only one node is running the task at a time
 
-use serde::{Deserialize, Serialize};
+use storekey::{Encode, BorrowDecode};
 
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::kvs::tasklease::{TaskLease, TaskLeaseType};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Tl {
 	__: u8,
 	_a: u8,

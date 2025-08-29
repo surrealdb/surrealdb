@@ -42,9 +42,9 @@ pub async fn read(
 			}
 		}
 	}
-	.encode_key()?;
+	.encode_key();
 	// Calculate the end of the changefeed range
-	let end = change::suffix(ns, db).encode_key()?;
+	let end = change::suffix(ns, db).encode_key();
 	// Limit the changefeed results with a default
 	let limit = limit.unwrap_or(100).min(1000);
 	// Create an empty buffer for the versionstamp

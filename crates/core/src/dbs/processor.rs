@@ -733,9 +733,9 @@ pub(super) trait Collector {
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		let beg = match &r.start {
 			Bound::Unbounded => thing::prefix(ns, db, tb)?,
-			Bound::Included(v) => thing::new(ns, db, tb, v).encode_key()?,
+			Bound::Included(v) => thing::new(ns, db, tb, v).encode_key(),
 			Bound::Excluded(v) => {
-				let mut key = thing::new(ns, db, tb, v).encode_key()?;
+				let mut key = thing::new(ns, db, tb, v).encode_key();
 				key.push(0x00);
 				key
 			}
@@ -743,9 +743,9 @@ pub(super) trait Collector {
 		// Prepare the range end key
 		let end = match &r.end {
 			Bound::Unbounded => thing::suffix(ns, db, tb)?,
-			Bound::Excluded(v) => thing::new(ns, db, tb, v).encode_key()?,
+			Bound::Excluded(v) => thing::new(ns, db, tb, v).encode_key(),
 			Bound::Included(v) => {
-				let mut key = thing::new(ns, db, tb, v).encode_key()?;
+				let mut key = thing::new(ns, db, tb, v).encode_key();
 				key.push(0x00);
 				key
 			}

@@ -1,13 +1,13 @@
 //! Stores a graph edge pointer
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::val::RecordIdKey;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
 struct Prefix<'a> {
 	__: u8,
 	_a: u8,
@@ -40,7 +40,7 @@ impl<'a> Prefix<'a> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
 struct PrefixFt<'a> {
 	__: u8,
 	_a: u8,
@@ -77,7 +77,7 @@ impl<'a> PrefixFt<'a> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
 struct PrefixFf<'a> {
 	__: u8,
 	_a: u8,
@@ -128,7 +128,7 @@ impl<'a> PrefixFf<'a> {
 // - all references for a given record, filtered by a origin table
 // - all references for a given record, filtered by a origin table and an origin field
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
 pub(crate) struct Ref<'a> {
 	__: u8,
 	_a: u8,
@@ -150,7 +150,7 @@ impl KVKey for Ref<'_> {
 
 impl Ref<'_> {
 	pub fn decode_key(k: &[u8]) -> Result<Ref<'_>> {
-		Ok(storekey::deserialize(k)?)
+		Ok(storekey::decode_borrow(k)?)
 	}
 }
 
