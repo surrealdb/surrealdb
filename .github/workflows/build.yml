@@ -142,7 +142,7 @@ jobs:
               # Build
               extra_args=""
               compile_profile="debug"
-              if [[ "${{ inputs.name }}" == "ci" ]]; then
+              if [[ "${{ inputs.name }}" == "ci" && "${{ inputs.upload }}" == "false" ]]; then
                 extra_args="${extra_args} --features storage-mem,scripting,http,jwks,ml"
               else
                 extra_args="${extra_args} --features default"
@@ -185,7 +185,7 @@ jobs:
               # Build
               extra_args=""
               compile_profile="debug"
-              if [[ "${{ inputs.name }}" == "ci" ]]; then
+              if [[ "${{ inputs.name }}" == "ci" && "${{ inputs.upload }}" == "false" ]]; then
                 extra_args="${extra_args} --features storage-mem,scripting,http,jwks,ml"
               else
                 extra_args="${extra_args} --features default"
@@ -220,7 +220,7 @@ jobs:
               # Build
               extra_args=""
               compile_profile="debug"
-              if [[ "${{ inputs.name }}" == "ci" ]]; then
+              if [[ "${{ inputs.name }}" == "ci" && "${{ inputs.upload }}" == "false" ]]; then
                 extra_args="${extra_args} --features storage-mem,scripting,http,jwks,ml"
               else
                 extra_args="${extra_args} --features default"
@@ -272,7 +272,7 @@ jobs:
               # Build
               extra_args=""
               compile_profile="debug"
-              if [[ "${{ inputs.name }}" == "ci" ]]; then
+              if [[ "${{ inputs.name }}" == "ci" && "${{ inputs.upload }}" == "false" ]]; then
                 extra_args="${extra_args} --features storage-mem,scripting,http,jwks,ml"
               else
                 extra_args="${extra_args} --features default"
@@ -327,7 +327,7 @@ jobs:
               # Build
               extra_args=""
               compile_profile="debug"
-              if [[ "${{ inputs.name }}" == "ci" ]]; then
+              if [[ "${{ inputs.name }}" == "ci" && "${{ inputs.upload }}" == "false" ]]; then
                 extra_args="${extra_args} --features storage-mem,scripting,http,jwks,ml"
               else
                 extra_args="${extra_args} --features default"
