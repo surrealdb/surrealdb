@@ -122,6 +122,7 @@ bincode.workspace = true
 blake3.workspace = true
 bytes.workspace = true
 chrono = { workspace = true, features = ["serde"] }
+chrono-tz.workspace = true
 ciborium.workspace = true
 dashmap.workspace = true
 deunicode.workspace = true

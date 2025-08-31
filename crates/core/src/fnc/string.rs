@@ -267,6 +267,7 @@ pub mod is {
 
 	use anyhow::{Result, bail};
 	use chrono::NaiveDateTime;
+	use chrono_tz::Tz;
 	use regex::Regex;
 	use semver::Version;
 	use ulid::Ulid;
@@ -358,6 +359,14 @@ pub mod is {
 
 	pub fn semver((arg,): (String,)) -> Result<Value> {
 		Ok(Version::parse(arg.as_str()).is_ok().into())
+	}
+
+	pub fn timezone((arg,): (String,)) -> Result<Value> {
+		if arg.is_empty() {
+			Ok(Value::Bool(false))
+		} else {
+			Ok(arg.parse::<Tz>().is_ok().into())
+		}
 	}
 
 	pub fn url((arg,): (String,)) -> Result<Value> {

@@ -76,6 +76,7 @@ blake3 = "1.5.3"
 bytes = "1.5.0"
 castaway = "0.2.3"
 chrono = "0.4.38"
+chrono-tz = "0.10.4"
 ciborium = "0.2.1"
 dashmap = "6.1.0"
 deunicode = "1.6.1"
@@ -464,4 +465,3 @@ inherits = "dev"
 debug = true
 inherits = "release"
 strip = false
-

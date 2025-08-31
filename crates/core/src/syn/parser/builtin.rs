@@ -301,6 +301,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("string::is::longitude") => PathKind::Function,
 		UniCase::ascii("string::is::numeric") => PathKind::Function,
 		UniCase::ascii("string::is::semver") => PathKind::Function,
+		UniCase::ascii("string::is::timezone") => PathKind::Function,
 		UniCase::ascii("string::is::url") => PathKind::Function,
 		UniCase::ascii("string::is::ulid") => PathKind::Function,
 		UniCase::ascii("string::is::uuid") => PathKind::Function,

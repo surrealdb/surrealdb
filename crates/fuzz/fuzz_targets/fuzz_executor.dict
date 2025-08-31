@@ -350,6 +350,7 @@
 "string::is::longitude("
 "string::is::numeric("
 "string::is::semver("
+"string::is::timezone("
 "string::is::url("
 "string::is::ulid("
 "string::is::uuid("
