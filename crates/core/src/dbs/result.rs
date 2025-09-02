@@ -13,6 +13,7 @@ use crate::expr::order::Ordering;
 use crate::idx::planner::RecordStrategy;
 use crate::val::Value;
 
+#[derive(Debug)]
 pub(super) enum Results {
 	None,
 	Memory(MemoryCollector),

@@ -12,13 +12,14 @@ use crate::expr::{Expr, Field, FlowResultExt as _, Function, FunctionCall, Idiom
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Array, TryAdd, TryFloatDiv, Value};
 
+#[derive(Debug)]
 pub(super) struct GroupsCollector {
 	base: Vec<Aggregator>,
 	idioms: Vec<Idiom>,
 	grp: BTreeMap<Array, Vec<Aggregator>>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct Aggregator {
 	array: Option<Array>,
 	first_val: Option<Value>,

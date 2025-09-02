@@ -351,6 +351,7 @@ impl Document {
 		opt: &Options,
 		fdc: FieldDataContext<'_>,
 	) -> Result<()> {
+		eprintln!("\nfdc: {}", fdc.doc.doc.as_ref());
 		//
 		let (set_ops, del_ops) = self.fields(stk, ctx, opt, &fdc).await?;
 		//
@@ -364,6 +365,7 @@ impl Document {
 			data: Some(Data::SetExpression(set_ops)),
 			..UpsertStatement::default()
 		};
+		eprintln!("\n\n{stm}\n\n");
 		stm.compute(stk, ctx, opt, None).await?;
 
 		if let Some(del_cond) = del_ops {
@@ -373,6 +375,7 @@ impl Document {
 				cond: Some(Cond(del_cond)),
 				..DeleteStatement::default()
 			};
+			eprintln!("\n\n{stm}\n\n");
 			stm.compute(stk, ctx, opt, None).await?;
 		}
 		Ok(())
@@ -608,6 +611,9 @@ impl Document {
 		key: Idiom,
 		val: Value,
 	) -> Result<()> {
+		eprintln!("\n{}", key);
+		eprintln!("current: {}", self.current.doc.as_ref());
+		eprintln!("reduced: {}", self.current_reduced.doc.as_ref());
 		// Key for the value count
 		let mut key_c = Idiom(vec![Part::field("__".to_owned()).unwrap()]);
 		key_c.0.push(Part::field(key.to_hash()).unwrap());
@@ -685,6 +691,9 @@ impl Document {
 		key: Idiom,
 		val: Value,
 	) -> Result<()> {
+		eprintln!("\n{}", key);
+		eprintln!("current: {}", self.current.doc.as_ref());
+		eprintln!("reduced: {}", self.current_reduced.doc.as_ref());
 		// Key for the value count
 		let mut key_c = Idiom(vec![Part::field("__".to_owned()).unwrap()]);
 		key_c.0.push(Part::field(key.to_hash()).unwrap());
@@ -762,6 +771,9 @@ impl Document {
 		key: Idiom,
 		val: Value,
 	) -> Result<()> {
+		eprintln!("\n{}", key);
+		eprintln!("current: {}", self.current.doc.as_ref());
+		eprintln!("reduced: {}", self.current_reduced.doc.as_ref());
 		// Key for the value count
 
 		let key_c = Idiom(vec![

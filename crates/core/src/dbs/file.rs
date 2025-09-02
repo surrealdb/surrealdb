@@ -18,6 +18,7 @@ use crate::err::Error;
 use crate::expr::order::Ordering;
 use crate::val::Value;
 
+#[derive(Debug)]
 pub(super) struct FileCollector {
 	dir: TempDir,
 	len: usize,
@@ -186,6 +187,7 @@ impl FileCollector {
 	}
 }
 
+#[derive(Debug)]
 struct FileWriter {
 	index: BufWriter<File>,
 	records: BufWriter<File>,
@@ -241,6 +243,7 @@ impl FileWriter {
 	}
 }
 
+#[derive(Debug)]
 struct FileReader {
 	/// The amount of values present in the file of this reader.
 	len: usize,
@@ -382,7 +385,7 @@ impl ExactSizeIterator for FileRecordsIterator {
 	}
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct FilePaging {
 	start: Option<u32>,
 	limit: Option<u32>,
