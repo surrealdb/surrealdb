@@ -180,7 +180,7 @@ use surrealdb_core::expr::{
 use surrealdb_core::iam;
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::kvs::{Datastore, LockType, TransactionType};
+use surrealdb_core::kvs::Datastore;
 use surrealdb_core::val::{self, Strand};
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::{
@@ -548,15 +548,8 @@ async fn export_ml(
 	// Check the permissions level
 	kvs.check(sess, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))?;
 
-	// Ensure a NS and DB are set
-	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
-	let Some(db) = tx.get_db_by_name(&nsv, &dbv).await? else {
-		anyhow::bail!("Database not found".to_string());
-	};
-	tx.cancel().await?;
-
 	// Attempt to get the model definition
-	let Some(model) = tx.get_db_model(db.namespace_id, db.database_id, &name, &version).await?
+	let Some(model) = kvs.get_db_model(&nsv, &dbv, &name, &version).await?
 	else {
 		// Attempt to get the model definition
 		anyhow::bail!("Model not found".to_string());
@@ -620,19 +613,20 @@ async fn router(
 			namespace,
 			database,
 		} => {
-			if let Some(ns) = namespace {
-				let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-				tx.get_or_add_ns(&ns, kvs.is_strict_mode()).await?;
-				tx.commit().await?;
-				session.write().await.ns = Some(ns);
-			}
-			if let Some(db) = database {
-				let ns = session.read().await.ns.clone().unwrap();
-				let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-				tx.ensure_ns_db(&ns, &db, kvs.is_strict_mode()).await?;
-				tx.commit().await?;
-				session.write().await.db = Some(db);
-			}
+			todo!("STU");
+			// if let Some(ns) = namespace {
+			// 	let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
+			// 	tx.get_or_add_ns(&ns, kvs.is_strict_mode()).await?;
+			// 	tx.commit().await?;
+			// 	session.write().await.ns = Some(ns);
+			// }
+			// if let Some(db) = database {
+			// 	let ns = session.read().await.ns.clone().unwrap();
+			// 	let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
+			// 	tx.ensure_ns_db(&ns, &db, kvs.is_strict_mode()).await?;
+			// 	tx.commit().await?;
+			// 	session.write().await.db = Some(db);
+			// }
 			Ok(DbResponse::Other(val::Value::None))
 		}
 		Command::Signup {

@@ -5,6 +5,7 @@ use rand::Rng;
 use rand::distributions::Alphanumeric;
 
 use super::DefineKind;
+use crate::catalog::providers::NamespaceProvider;
 use crate::catalog::{self, AccessDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;

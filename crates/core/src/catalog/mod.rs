@@ -1,6 +1,7 @@
 mod access;
 mod database;
 mod namespace;
+pub(crate) mod providers;
 mod schema;
 mod subscription;
 mod table;

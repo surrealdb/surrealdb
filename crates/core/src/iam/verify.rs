@@ -6,6 +6,7 @@ use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
 use jsonwebtoken::{DecodingKey, Validation, decode};
 
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, UserProvider};
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::access::{authenticate_generic, authenticate_record};

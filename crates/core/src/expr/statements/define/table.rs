@@ -9,6 +9,7 @@ use super::DefineKind;
 use crate::catalog::{
 	DatabaseId, FieldDefinition, NamespaceId, Permissions, TableDefinition, TableType,
 };
+use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::{Force, Options};
 use crate::doc::CursorDoc;

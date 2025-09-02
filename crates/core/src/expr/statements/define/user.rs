@@ -8,6 +8,7 @@ use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 
 use super::DefineKind;
+use crate::catalog::providers::{NamespaceProvider, UserProvider};
 use crate::catalog::{self, UserDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;

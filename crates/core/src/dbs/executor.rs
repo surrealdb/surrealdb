@@ -13,6 +13,7 @@ use trice::Instant;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
+use crate::catalog::providers::NamespaceProvider;
 use crate::ctx::Context;
 use crate::ctx::reason::Reason;
 use crate::dbs::response::Response;

@@ -6,6 +6,7 @@ use reblessive::tree::Stk;
 
 use super::AlterKind;
 use crate::catalog::{Permissions, TableType};
+use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;

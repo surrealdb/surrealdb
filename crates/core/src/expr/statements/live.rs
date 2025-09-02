@@ -161,7 +161,8 @@ impl fmt::Display for LiveStatement {
 mod tests {
 	use anyhow::Result;
 
-	use crate::dbs::{Action, Capabilities, Notification, Session};
+	use crate::catalog::providers::TableProvider;
+use crate::dbs::{Action, Capabilities, Notification, Session};
 	use crate::expr::Value;
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;

@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use super::access::{authenticate_record, create_refresh_token_record};
 use crate::catalog;
+use crate::catalog::providers::DatabaseProvider;
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Session, Variables};

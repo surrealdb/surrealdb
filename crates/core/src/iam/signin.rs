@@ -16,6 +16,7 @@ use super::access::{
 use super::verify::{verify_db_creds, verify_ns_creds, verify_root_creds};
 use super::{Actor, Level, Role};
 use crate::catalog;
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, UserProvider};
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::capabilities::ExperimentalTarget;

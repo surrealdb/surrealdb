@@ -29,6 +29,7 @@ use super::tx::Transaction;
 use super::version::MajorVersion;
 use crate::buc::BucketConnections;
 use crate::catalog::Index;
+use crate::catalog::providers::{DatabaseProvider, TableProvider, UserProvider};
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
@@ -1411,11 +1412,83 @@ impl Datastore {
 			Ok(())
 		}
 	}
+
+	/// Get a db model by name.
+	///
+	/// TODO: This should not be public, but it is used in `crates/sdk/src/api/engine/local/mod.rs`.
+	pub async fn get_db_model(&self, ns: &str, db: &str, model_name: &str, model_version: &str) -> Result<Option<Arc<crate::catalog::MlModelDefinition>>> {
+		let tx = self.transaction(Read, Optimistic).await?;
+		let db = tx.expect_db_by_name(ns, db).await?;
+		let model = tx.get_db_model(db.namespace_id, db.database_id, model_name, model_version).await?;
+		tx.cancel().await?;
+		Ok(model)
+	}
+
+	/// Get a table by name.
+	///
+	/// TODO: This should not be public, but it is used in `src/net/key.rs`.
+	pub async fn ensure_tb_exists(&self, ns: &str, db: &str, tb: &str) -> Result<()> {
+		let tx =
+			self.transaction(TransactionType::Read, LockType::Optimistic).await?;
+		
+		tx.expect_tb_by_name(&ns, &db, &tb).await?;
+		tx.cancel().await?;
+
+		Ok(())
+	}
 }
 
 #[cfg(test)]
 mod test {
 	use super::*;
+	use crate::iam::verify::verify_root_creds;
+
+	#[tokio::test]
+	async fn test_setup_superuser() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let username = "root";
+		let password = "root";
+
+		// Setup the initial user if there are no root users
+		assert_eq!(
+			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
+			0
+		);
+		ds.initialise_credentials(username, password).await.unwrap();
+		assert_eq!(
+			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
+			1
+		);
+		verify_root_creds(&ds, username, password).await.unwrap();
+
+		// Do not setup the initial root user if there are root users:
+		// Test the scenario by making sure the custom password doesn't change.
+		let sql = "DEFINE USER root ON ROOT PASSWORD 'test' ROLES OWNER";
+		let sess = Session::owner();
+		ds.execute(sql, &sess, None).await.unwrap();
+		let pass_hash = ds
+			.transaction(Read, Optimistic)
+			.await
+			.unwrap()
+			.expect_root_user(username)
+			.await
+			.unwrap()
+			.hash
+			.clone();
+
+		ds.initialise_credentials(username, password).await.unwrap();
+		assert_eq!(
+			pass_hash,
+			ds.transaction(Read, Optimistic)
+				.await
+				.unwrap()
+				.expect_root_user(username)
+				.await
+				.unwrap()
+				.hash
+				.clone()
+		)
+	}
 
 	#[tokio::test]
 	pub async fn very_deep_query() -> Result<()> {

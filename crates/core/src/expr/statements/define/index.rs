@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use super::DefineKind;
 use crate::catalog::{Index, IndexDefinition, TableDefinition};
+use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 #[cfg(target_family = "wasm")]
 use crate::dbs::Force;
