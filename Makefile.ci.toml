@@ -500,6 +500,9 @@ script = """
 [tasks.stop-tikv]
 category = "CI - SERVICES"
 script = """
+    #!/bin/bash -ex
+
+    echo "Cleaning TiKV playground..."
 ${HOME}/.tiup/bin/tiup clean --all
 """
 

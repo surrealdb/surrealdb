@@ -982,7 +982,7 @@ mod tests {
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str("blog.manel.in").unwrap()].into(),
+							[NetTarget::from_str("github.com").unwrap()].into(),
 						))
 						.without_network_targets(Targets::<NetTarget>::Some(
 							[
@@ -1007,7 +1007,8 @@ mod tests {
 						)),
 				),
 				Session::owner(),
-				"RETURN http::get('https://blog.manel.in/')".to_string(),
+				// This will be redirected to: https://github.com/surrealdb/surrealdb/pull/6293
+				"RETURN http::get('https://github.com/surrealdb/surrealdb/issues/6293')".to_string(),
 				true,
 				"<!DOCTYPE html>".to_string(),
 			),
