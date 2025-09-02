@@ -1,7 +1,8 @@
 pub mod table {
 	use anyhow::Result;
 
-	use crate::ctx::Context;
+	use crate::catalog::providers::TableProvider;
+use crate::ctx::Context;
 	use crate::dbs::Options;
 	use crate::expr::Base;
 	use crate::iam::{Action, ResourceKind};

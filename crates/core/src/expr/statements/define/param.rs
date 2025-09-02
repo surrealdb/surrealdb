@@ -4,6 +4,7 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use super::DefineKind;
+use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
 use crate::catalog::{ParamDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;

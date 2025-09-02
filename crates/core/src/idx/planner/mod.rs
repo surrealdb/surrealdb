@@ -13,6 +13,7 @@ use std::sync::atomic::{self, AtomicU8};
 use anyhow::Result;
 use reblessive::tree::Stk;
 
+use crate::catalog::providers::TableProvider;
 use crate::catalog::DatabaseDefinition;
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};

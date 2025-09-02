@@ -4,7 +4,10 @@ use std::sync::Arc;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider, UserProvider};
+use crate::catalog::providers::{
+	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, NamespaceProvider,
+	NodeProvider, TableProvider, UserProvider,
+};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;

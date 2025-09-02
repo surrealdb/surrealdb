@@ -97,7 +97,8 @@ pub mod is {
 	use anyhow::Result;
 	use reblessive::tree::Stk;
 
-	use crate::ctx::Context;
+	use crate::catalog::providers::TableProvider;
+use crate::ctx::Context;
 	use crate::dbs::Options;
 	use crate::doc::CursorDoc;
 	use crate::err::Error;

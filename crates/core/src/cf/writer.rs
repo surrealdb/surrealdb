@@ -152,7 +152,7 @@ impl Writer {
 mod tests {
 	use std::time::Duration;
 
-	use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
+	use crate::catalog::providers::{CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider};
 	use crate::catalog::{
 		DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId, TableDefinition, TableId,
 	};

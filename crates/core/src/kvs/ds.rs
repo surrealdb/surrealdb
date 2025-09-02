@@ -1,4 +1,5 @@
-use std::fmt;
+use std::collections::BTreeMap;
+use std::fmt::{self, Display};
 #[cfg(storage)]
 use std::path::PathBuf;
 use std::pin::pin;
@@ -15,6 +16,7 @@ use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
 use futures::{Future, Stream};
+use http::HeaderMap;
 use reblessive::TreeStack;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
@@ -27,9 +29,14 @@ use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::MajorVersion;
+use crate::api::body::ApiBody;
+use crate::api::invocation::ApiInvocation;
+use crate::api::response::{ApiResponse, ResponseInstruction};
 use crate::buc::BucketConnections;
-use crate::catalog::Index;
-use crate::catalog::providers::{DatabaseProvider, TableProvider, UserProvider};
+use crate::catalog::providers::{
+	ApiProvider, CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider, UserProvider
+};
+use crate::catalog::{ApiDefinition, ApiMethod, Index};
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
@@ -1413,13 +1420,54 @@ impl Datastore {
 		}
 	}
 
+	pub async fn process_use(
+		&self,
+		session: &mut Session,
+		namespace: Option<String>,
+		database: Option<String>,
+	) -> Result<()> {
+		match (namespace, database) {
+			(Some(ns), Some(db)) => {
+				let tx = self.transaction(TransactionType::Write, LockType::Optimistic).await?;
+				tx.ensure_ns_db(&ns, &db, self.strict).await?;
+				tx.commit().await?;
+			}
+			(Some(ns), None) => {
+				let tx = self.transaction(TransactionType::Write, LockType::Optimistic).await?;
+				tx.get_or_add_ns(&ns, self.strict).await?;
+				tx.commit().await?;
+			}
+			(None, Some(db)) => {
+				let Some(ns) = session.ns.clone() else {
+					return Err(anyhow::anyhow!("Cannot use database without namespace"));
+				};
+				let tx = self.transaction(TransactionType::Write, LockType::Optimistic).await?;
+				tx.ensure_ns_db(&ns, &db, self.strict).await?;
+				tx.commit().await?;
+			}
+			(None, None) => {
+				session.ns = None;
+				session.db = None;
+			}
+		}
+
+		Ok(())
+	}
+
 	/// Get a db model by name.
 	///
 	/// TODO: This should not be public, but it is used in `crates/sdk/src/api/engine/local/mod.rs`.
-	pub async fn get_db_model(&self, ns: &str, db: &str, model_name: &str, model_version: &str) -> Result<Option<Arc<crate::catalog::MlModelDefinition>>> {
+	pub async fn get_db_model(
+		&self,
+		ns: &str,
+		db: &str,
+		model_name: &str,
+		model_version: &str,
+	) -> Result<Option<Arc<crate::catalog::MlModelDefinition>>> {
 		let tx = self.transaction(Read, Optimistic).await?;
 		let db = tx.expect_db_by_name(ns, db).await?;
-		let model = tx.get_db_model(db.namespace_id, db.database_id, model_name, model_version).await?;
+		let model =
+			tx.get_db_model(db.namespace_id, db.database_id, model_name, model_version).await?;
 		tx.cancel().await?;
 		Ok(model)
 	}
@@ -1428,13 +1476,75 @@ impl Datastore {
 	///
 	/// TODO: This should not be public, but it is used in `src/net/key.rs`.
 	pub async fn ensure_tb_exists(&self, ns: &str, db: &str, tb: &str) -> Result<()> {
-		let tx =
-			self.transaction(TransactionType::Read, LockType::Optimistic).await?;
-		
-		tx.expect_tb_by_name(&ns, &db, &tb).await?;
+		let tx = self.transaction(TransactionType::Read, LockType::Optimistic).await?;
+
+		tx.expect_tb_by_name(ns, db, tb).await?;
 		tx.cancel().await?;
 
 		Ok(())
+	}
+
+	/// Invoke an API handler.
+	///
+	/// TODO: This should not need to be public, but it is used in `src/net/api.rs`.
+	#[expect(clippy::too_many_arguments)]
+	pub async fn invoke_api_handler<S>(
+		&self,
+		ns: &str,
+		db: &str,
+		path: &str,
+		session: &Session,
+		method: ApiMethod,
+		headers: HeaderMap,
+		query: BTreeMap<String, String>,
+		body: S,
+	) -> Result<Option<(ApiResponse, ResponseInstruction)>>
+	where
+		S: Stream<Item = std::result::Result<Bytes, Box<dyn Display + Send + Sync>>>
+			+ Send
+			+ Unpin
+			+ 'static,
+	{
+		let tx = Arc::new(self.transaction(TransactionType::Write, LockType::Optimistic).await?);
+
+		let db = tx.ensure_ns_db(ns, db, false).await?;
+
+		let apis = tx.all_db_apis(db.namespace_id, db.database_id).await?;
+		let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
+
+		let res = match ApiDefinition::find_definition(apis.as_ref(), segments, method) {
+			Some((api, params)) => {
+				let invocation = ApiInvocation {
+					params,
+					method,
+					headers,
+					query,
+				};
+
+				let opt = self.setup_options(session);
+
+				let mut ctx = self.setup_ctx()?;
+				ctx.set_transaction(Arc::clone(&tx));
+				ctx.attach_session(session)?;
+				let ctx = &ctx.freeze();
+
+				invocation.invoke_with_transaction(ctx, &opt, api, ApiBody::from_stream(body)).await
+			}
+			_ => {
+				return Err(anyhow::anyhow!(Error::ApNotFound {
+					value: path.to_owned(),
+				}));
+			}
+		};
+
+		// Handle committing or cancelling the transaction
+		if res.is_ok() {
+			tx.commit().await?;
+		} else {
+			tx.cancel().await?;
+		}
+
+		res
 	}
 }
 

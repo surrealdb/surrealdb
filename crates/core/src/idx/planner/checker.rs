@@ -6,6 +6,7 @@ use ahash::HashMap;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
+use crate::catalog::providers::TableProvider;
 use crate::catalog::DatabaseDefinition;
 use crate::ctx::Context;
 use crate::dbs::Options;

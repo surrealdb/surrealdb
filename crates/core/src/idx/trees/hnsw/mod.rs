@@ -446,7 +446,8 @@ mod tests {
 	use roaring::RoaringTreemap;
 	use test_log::test;
 
-	use crate::catalog::{
+	use crate::catalog::providers::CatalogProvider;
+use crate::catalog::{
 		DatabaseDefinition, DatabaseId, Distance, HnswParams, NamespaceId, VectorType,
 	};
 	use crate::ctx::{Context, MutableContext};

@@ -6,8 +6,8 @@ use reblessive::tree::Stk;
 use uuid::Uuid;
 
 use super::AlterKind;
-use crate::catalog::{self, Permission, Permissions, TableDefinition};
 use crate::catalog::providers::TableProvider;
+use crate::catalog::{self, Permission, Permissions, TableDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;

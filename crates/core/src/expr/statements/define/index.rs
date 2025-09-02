@@ -7,8 +7,8 @@ use reblessive::tree::Stk;
 use uuid::Uuid;
 
 use super::DefineKind;
+use crate::catalog::providers::{CatalogProvider, TableProvider};
 use crate::catalog::{Index, IndexDefinition, TableDefinition};
-use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 #[cfg(target_family = "wasm")]
 use crate::dbs::Force;

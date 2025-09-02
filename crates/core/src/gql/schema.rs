@@ -39,7 +39,7 @@ pub async fn generate_schema(
 		None => return Err(GqlError::DbError(anyhow::anyhow!("Database not found: {ns} {db}"))),
 	};
 
-	let cg = tx.get_db_config(db_def.namespace_id, db_def.database_id, "graphql").await.map_err(
+	let cg = tx.expect_db_config(db_def.namespace_id, db_def.database_id, "graphql").await.map_err(
 		|e| {
 			if matches!(e.downcast_ref(), Some(crate::err::Error::CgNotFound { .. })) {
 				GqlError::NotConfigured

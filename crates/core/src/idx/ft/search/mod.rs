@@ -9,6 +9,7 @@ use roaring::treemap::IntoIter;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
+use crate::catalog::providers::DatabaseProvider;
 use crate::catalog::{self, DatabaseId, NamespaceId, Scoring, SearchParams};
 use crate::ctx::Context;
 use crate::dbs::Options;

@@ -4,8 +4,8 @@ use anyhow::{Result, bail};
 use uuid::Uuid;
 
 use super::DefineKind;
+use crate::catalog::providers::{CatalogProvider, TableProvider};
 use crate::catalog::{EventDefinition, TableDefinition};
-use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;

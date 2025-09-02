@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, ensure};
 
-use crate::catalog::providers::NamespaceProvider;
+use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
 #[cfg(not(target_family = "wasm"))]
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::capabilities::MethodTarget;

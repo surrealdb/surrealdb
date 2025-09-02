@@ -5,11 +5,11 @@ use anyhow::{Result, bail, ensure};
 use uuid::Uuid;
 
 use super::DefineKind;
+use crate::catalog::providers::{CatalogProvider, TableProvider};
 use crate::catalog::{
 	self, DatabaseId, FieldDefinition, NamespaceId, Permission, Permissions, Relation,
 	TableDefinition, TableType,
 };
-use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
@@ -134,8 +134,7 @@ impl DefineFieldStatement {
 		let definition = self.to_definition();
 
 		// Process the statement
-		let key = crate::key::table::fd::new(ns, db, &tb.name, &fd);
-		txn.set(&key, &definition, None).await?;
+		txn.put_tb_field(ns, db, &tb.name, &definition).await?;
 
 		// Refresh the table cache
 		let mut tb = TableDefinition {

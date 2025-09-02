@@ -6,7 +6,9 @@ use chrono::TimeZone;
 use chrono::prelude::Utc;
 
 use super::Transaction;
-use crate::catalog::providers::{DatabaseProvider, TableProvider, UserProvider};
+use crate::catalog::providers::{
+	AuthorisationProvider, DatabaseProvider, TableProvider, UserProvider,
+};
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;

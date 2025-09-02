@@ -14,6 +14,7 @@ use surrealml::storage::surml_file::SurMlFile;
 
 #[cfg(feature = "ml")]
 use crate::catalog::Permission;
+use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;

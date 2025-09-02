@@ -6,8 +6,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
+use crate::catalog::providers::{CatalogProvider, TableProvider};
 use crate::catalog::{self, DatabaseDefinition, Permission, TableDefinition};
-use crate::catalog::providers::TableProvider;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Workable};
 use crate::expr::{Base, FlowResultExt as _, Ident};

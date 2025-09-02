@@ -7,7 +7,7 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub(crate) struct Ac<'a> {
+pub(crate) struct AccessKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -17,12 +17,12 @@ pub(crate) struct Ac<'a> {
 	pub ac: &'a str,
 }
 
-impl KVKey for Ac<'_> {
+impl KVKey for AccessKey<'_> {
 	type ValueType = AccessDefinition;
 }
 
-pub fn new(ns: NamespaceId, ac: &str) -> Ac<'_> {
-	Ac::new(ns, ac)
+pub fn new(ns: NamespaceId, ac: &str) -> AccessKey<'_> {
+	AccessKey::new(ns, ac)
 }
 
 pub fn prefix(ns: NamespaceId) -> Result<Vec<u8>> {
@@ -37,13 +37,13 @@ pub fn suffix(ns: NamespaceId) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for Ac<'_> {
+impl Categorise for AccessKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::NamespaceAccess
 	}
 }
 
-impl<'a> Ac<'a> {
+impl<'a> AccessKey<'a> {
 	pub fn new(ns: NamespaceId, ac: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -64,11 +64,11 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Ac::new(
+		let val = AccessKey::new(
 			NamespaceId(1),
 			"testac",
 		);
-		let enc = Ac::encode_key(&val).unwrap();
+		let enc = AccessKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01!actestac\0");
 	}
 
