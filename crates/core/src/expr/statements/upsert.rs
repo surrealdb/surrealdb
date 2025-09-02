@@ -74,6 +74,7 @@ impl UpsertStatement {
 
 		// Process the statement
 		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
+		eprintln!("res: {res}");
 		// Catch statement timeout
 		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
 		// Output the results

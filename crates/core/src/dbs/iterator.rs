@@ -108,7 +108,7 @@ pub(crate) struct Processed {
 	pub(crate) ir: Option<Arc<IteratorRecord>>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct Iterator {
 	/// Iterator status
 	run: Canceller,
@@ -522,10 +522,12 @@ impl Iterator {
 			self.start,
 			self.limit,
 		)?;
+		eprintln!("results: {:?}", self.results);
 
 		// Extract the expected behaviour depending on the presence of EXPLAIN with or
 		// without FULL
 		let mut plan = Plan::new(ctx, stm, &self.entries, &self.results);
+		eprintln!("plan: {:?}", plan);
 		// Check if we actually need to process and iterate over the results
 		if plan.do_iterate {
 			if let Some(e) = &mut plan.explanation {
@@ -549,6 +551,7 @@ impl Iterator {
 			} else {
 				false
 			};
+		eprintln!("results before iterate: {:?}", self.results);
 			// Process all documents
 			self.iterate(
 				stk,
@@ -559,6 +562,7 @@ impl Iterator {
 				plan.explanation.as_mut(),
 			)
 			.await?;
+		eprintln!("results after iterate: {:?}", self.results);
 			// Return any document errors
 			if let Some(e) = self.error.take() {
 				return Err(e);

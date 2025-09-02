@@ -7,6 +7,7 @@ use crate::expr::lookup::LookupKind;
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Object, Strand, Value};
 
+#[derive(Debug)]
 pub(super) struct Plan {
 	pub(super) do_iterate: bool,
 	pub(super) explanation: Option<Explanation>,
@@ -42,7 +43,7 @@ impl Plan {
 	}
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(super) struct Explanation(Vec<ExplainItem>);
 
 impl Explanation {
@@ -82,6 +83,7 @@ impl Explanation {
 	}
 }
 
+#[derive(Debug)]
 struct ExplainItem {
 	name: Value,
 	details: Vec<(&'static str, Value)>,

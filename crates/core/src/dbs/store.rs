@@ -16,7 +16,7 @@ use crate::err::Error;
 use crate::expr::order::OrderList;
 use crate::val::Value;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(super) struct MemoryCollector(Vec<Value>);
 
 impl MemoryCollector {
@@ -63,6 +63,7 @@ pub(super) const DEFAULT_BATCH_SIZE: usize = 1024;
 
 /// The struct MemoryRandom represents an in-memory store that aggregates data
 /// randomly.
+#[derive(Debug)]
 pub(in crate::dbs) struct MemoryRandom {
 	/// Collected values
 	values: Vec<Value>,
@@ -175,6 +176,7 @@ impl MemoryRandom {
 
 /// The struct MemoryOrdered represents an in-memory store that aggregates
 /// ordered data.
+#[derive(Debug)]
 pub(in crate::dbs) struct MemoryOrdered {
 	/// Collected values
 	values: Vec<Value>,
@@ -277,6 +279,7 @@ impl MemoryOrdered {
 	}
 }
 
+#[derive(Debug)]
 pub(super) struct OrderedValue {
 	value: Value,
 	orders: Arc<OrderList>,
@@ -301,6 +304,7 @@ impl PartialEq<Self> for OrderedValue {
 	}
 }
 
+#[derive(Debug)]
 pub(super) struct MemoryOrderedLimit {
 	/// The priority list
 	heap: BinaryHeap<Reverse<OrderedValue>>,
