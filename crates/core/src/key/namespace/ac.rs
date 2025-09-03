@@ -1,6 +1,7 @@
 //! Stores a DEFINE ACCESS ON NAMESPACE configuration
 use anyhow::Result;
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{AccessDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
@@ -14,7 +15,7 @@ pub(crate) struct Ac<'a> {
 	_b: u8,
 	_c: u8,
 	_d: u8,
-	pub ac: &'a str,
+	pub ac: Cow<'a, str>,
 }
 
 impl KVKey for Ac<'_> {
@@ -52,7 +53,7 @@ impl<'a> Ac<'a> {
 			_b: b'!',
 			_c: b'a',
 			_d: b'c',
-			ac,
+			ac: Cow::Borrowed(ac),
 		}
 	}
 }

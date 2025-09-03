@@ -1,6 +1,7 @@
 //! Stores a DEFINE USER ON DATABASE config definition
 use anyhow::Result;
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog;
 use crate::catalog::{DatabaseId, NamespaceId};
@@ -17,7 +18,7 @@ pub(crate) struct Us<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub user: &'a str,
+	pub user: Cow<'a, str>,
 }
 
 impl KVKey for Us<'_> {
@@ -57,7 +58,7 @@ impl<'a> Us<'a> {
 			_c: b'!',
 			_d: b'u',
 			_e: b's',
-			user,
+			user: Cow::Borrowed(user),
 		}
 	}
 }

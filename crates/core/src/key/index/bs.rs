@@ -1,5 +1,6 @@
 //! Stores FullText index states
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::ft::search::SearchIndexState;
@@ -14,11 +15,11 @@ pub(crate) struct Bs<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	_e: u8,
 	_f: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 }
 
 impl KVKey for Bs<'_> {
@@ -40,11 +41,11 @@ impl<'a> Bs<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'!',
 			_e: b'b',
 			_f: b's',
-			ix,
+			ix: Cow::Borrowed(ix),
 		}
 	}
 }

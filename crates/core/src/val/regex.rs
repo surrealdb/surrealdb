@@ -10,6 +10,7 @@ use regex::RegexBuilder;
 use revision::revisioned;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use storekey::{BorrowDecode, Encode};
 
 use crate::cnf::{REGEX_CACHE_SIZE, REGEX_SIZE_LIMIT};
 
@@ -146,6 +147,21 @@ impl<'de> Deserialize<'de> for Regex {
 		}
 
 		deserializer.deserialize_newtype_struct(REGEX_TOKEN, RegexNewtypeVisitor)
+	}
+}
+
+impl Encode for Regex {
+	fn encode<W: std::io::Write>(
+		&self,
+		_: &mut storekey::Writer<W>,
+	) -> Result<(), storekey::EncodeError> {
+		Err(storekey::EncodeError::message("Regex cannot be encoded"))
+	}
+}
+
+impl<'de> BorrowDecode<'de> for Regex {
+	fn borrow_decode(_: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
+		Err(storekey::DecodeError::message("Regex cannot be decoded"))
 	}
 }
 

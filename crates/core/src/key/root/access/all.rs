@@ -1,5 +1,6 @@
 //! Stores the key prefix for all keys under a root access method
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
@@ -8,7 +9,7 @@ use crate::kvs::KVKey;
 pub(crate) struct AccessRoot<'a> {
 	__: u8,
 	_a: u8,
-	pub ac: &'a str,
+	pub ac: Cow<'a, str>,
 }
 
 impl KVKey for AccessRoot<'_> {
@@ -30,7 +31,7 @@ impl<'a> AccessRoot<'a> {
 		Self {
 			__: b'/',
 			_a: b'&',
-			ac,
+			ac: Cow::Borrowed(ac),
 		}
 	}
 }

@@ -1,5 +1,6 @@
 //! Stores BTree nodes for postings
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::trees::btree::BState;
@@ -15,9 +16,9 @@ pub(crate) struct BpRoot<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -42,9 +43,9 @@ impl<'a> BpRoot<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'!',
 			_f: b'b',
 			_g: b'p',
@@ -60,9 +61,9 @@ pub(crate) struct Bp<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -88,9 +89,9 @@ impl<'a> Bp<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'!',
 			_f: b'b',
 			_g: b'p',

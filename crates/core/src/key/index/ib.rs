@@ -30,9 +30,10 @@
 //! - **Reduced Contention**: Batch-based allocation minimizes database contention
 //! - **Scalability**: Multiple nodes can index documents concurrently
 //! - **Consistency**: Ensures unique document IDs across the entire cluster
+use std::borrow::Cow;
 use std::ops::Range;
 
-use storekey::{Encode, BorrowDecode};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
@@ -47,9 +48,9 @@ pub(crate) struct Ib<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -81,9 +82,9 @@ impl<'a> Ib<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'!',
 			_f: b'i',
 			_g: b'b',

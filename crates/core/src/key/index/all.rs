@@ -1,5 +1,6 @@
 //! Stores the key prefix for all keys under an index
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
@@ -13,9 +14,9 @@ pub(crate) struct AllIndexRoot<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 }
 
 impl KVKey for AllIndexRoot<'_> {
@@ -41,9 +42,9 @@ impl<'a> AllIndexRoot<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 		}
 	}
 }

@@ -1,7 +1,7 @@
 //! Stores a record document
 use std::ops::Range;
 
-use storekey::{Encode, BorrowDecode};
+use storekey::{BorrowDecode, Encode};
 
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;

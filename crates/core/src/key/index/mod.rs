@@ -2,7 +2,7 @@
 //!
 //! This module defines the on-disk key layout for secondary indexes and helpers
 //! to construct prefixes and full keys. Field values are serialized via
-//! key::value::StoreKeyArray, which normalizes numeric values across Number
+//! key::value::Array, which normalizes numeric values across Number
 //! variants (Int/Float/Decimal) using a lexicographic encoding so that byte
 //! order aligns with numeric order. As a consequence, numerically-equal values
 //! (e.g., 0, 0.0, 0dec) map to identical key bytes and are treated as equal by
@@ -47,13 +47,12 @@ pub mod vm;
 use std::borrow::Cow;
 
 use anyhow::Result;
-use storekey::{Encode, BorrowDecode};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::key::value::StoreKeyArray;
 use crate::kvs::KVKey;
-use crate::val::{RecordId, RecordIdKey};
+use crate::val::{Array, RecordId, RecordIdKey};
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Encode, BorrowDecode)]
 struct Prefix<'a> {
@@ -63,9 +62,9 @@ struct Prefix<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 }
 
@@ -82,9 +81,9 @@ impl<'a> Prefix<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'*',
 		}
 	}
@@ -98,14 +97,14 @@ struct PrefixIds<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
-	/// Encoded index field values. Uses StoreKeyArray which normalizes numeric
+	/// Encoded index field values. Uses Array which normalizes numeric
 	/// types (Int/Float/Decimal) into a lexicographically ordered byte form so
 	/// equal numeric values compare equal in index keys.
-	pub fd: Cow<'a, StoreKeyArray>,
+	pub fd: Cow<'a, Array>,
 }
 
 impl KVKey for PrefixIds<'_> {
@@ -113,13 +112,7 @@ impl KVKey for PrefixIds<'_> {
 }
 
 impl<'a> PrefixIds<'a> {
-	fn new(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a str,
-		ix: &'a str,
-		fd: &'a StoreKeyArray,
-	) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, fd: &'a Array) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -127,9 +120,9 @@ impl<'a> PrefixIds<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'*',
 			fd: Cow::Borrowed(fd),
 		}
@@ -144,14 +137,14 @@ pub(crate) struct Index<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
-	/// Encoded index field values. Uses StoreKeyArray which normalizes numeric
+	/// Encoded index field values. Uses Array which normalizes numeric
 	/// types (Int/Float/Decimal) into a lexicographically ordered byte form so
 	/// equal numeric values compare equal in index keys.
-	pub fd: Cow<'a, StoreKeyArray>,
+	pub fd: Cow<'a, Array>,
 	pub id: Option<Cow<'a, RecordIdKey>>,
 }
 
@@ -171,7 +164,7 @@ impl<'a> Index<'a> {
 		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
-		fd: &'a StoreKeyArray,
+		fd: &'a Array,
 		id: Option<&'a RecordIdKey>,
 	) -> Self {
 		Self {
@@ -181,9 +174,9 @@ impl<'a> Index<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'*',
 			fd: Cow::Borrowed(fd),
 			id: id.map(Cow::Borrowed),
@@ -211,14 +204,14 @@ impl<'a> Index<'a> {
 	}
 
 	/// Build the base prefix for an index including the encoded field values.
-	/// Field values are encoded using StoreKeyArray which zero-terminates
+	/// Field values are encoded using Array which zero-terminates
 	/// components so that composite keys can be parsed unambiguously.
 	fn prefix_ids(
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &str,
 		ix: &str,
-		fd: &StoreKeyArray,
+		fd: &Array,
 	) -> Result<Vec<u8>> {
 		PrefixIds::new(ns, db, tb, ix, fd).encode_key()
 	}
@@ -233,7 +226,7 @@ impl<'a> Index<'a> {
 		db: DatabaseId,
 		tb: &str,
 		ix: &str,
-		fd: &StoreKeyArray,
+		fd: &Array,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		beg.extend_from_slice(&[0x00]);
@@ -250,7 +243,7 @@ impl<'a> Index<'a> {
 		db: DatabaseId,
 		tb: &str,
 		ix: &str,
-		fd: &StoreKeyArray,
+		fd: &Array,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		beg.extend_from_slice(&[0xff]);
@@ -266,7 +259,7 @@ impl<'a> Index<'a> {
 		db: DatabaseId,
 		tb: &str,
 		ix: &str,
-		fd: &StoreKeyArray,
+		fd: &Array,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		*beg.last_mut().unwrap() = 0x00; // set trailing sentinel to 0x00 -> inclusive lower bound within composite tuple
@@ -282,7 +275,7 @@ impl<'a> Index<'a> {
 		db: DatabaseId,
 		tb: &str,
 		ix: &str,
-		fd: &StoreKeyArray,
+		fd: &Array,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		*beg.last_mut().unwrap() = 0xff; // set trailing sentinel to 0xFF -> exclusive upper bound within composite tuple

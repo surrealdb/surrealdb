@@ -5,10 +5,10 @@
 //! This module applies index mutations for a single document across different
 //! index types (UNIQUE, regular, search, fulltext, MTree, Hnsw). Index keys are
 //! constructed via key::index and field values are encoded using
-//! key::value::StoreKeyArray.
+//! key::value::Array.
 //!
 //! Numeric normalization in keys:
-//! - StoreKeyArray normalizes Number values (Int/Float/Decimal) through a lexicographic numeric
+//! - Array normalizes Number values (Int/Float/Decimal) through a lexicographic numeric
 //!   encoding so that byte order mirrors numeric order.
 //! - Numerically equal values (e.g., 0, 0.0, 0dec) map to the same key bytes. On UNIQUE indexes,
 //!   such inserts collide and produce a uniqueness error.
@@ -35,7 +35,6 @@ use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::ft::search::SearchIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
-use crate::key::value::StoreKeyArray;
 use crate::kvs::TransactionType;
 use crate::val::{Array, RecordId, Value};
 
@@ -92,18 +91,18 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
-	/// Build the KV key for a unique index. The StoreKeyArray encodes values in
+	/// Build the KV key for a unique index. The Array encodes values in
 	/// a canonical, lexicographically ordered byte form which normalizes numeric
 	/// types (Int/Float/Decimal). This means equal numeric values like 0, 0.0 and
 	/// 0dec map to the same index key and therefore conflict on UNIQUE indexes.
-	fn get_unique_index_key(&self, v: &'a StoreKeyArray) -> Result<key::index::Index> {
+	fn get_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
 		Ok(key::index::Index::new(self.ns, self.db, &self.ix.what, &self.ix.name, v, None))
 	}
 
 	/// Build the KV key for a non-unique index. The record id is appended
 	/// to the encoded field values so multiple records can share the same field
-	/// bytes; numeric values inside fd are normalized via StoreKeyArray.
-	fn get_non_unique_index_key(&self, v: &'a StoreKeyArray) -> Result<key::index::Index> {
+	/// bytes; numeric values inside fd are normalized via Array.
+	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
 		Ok(key::index::Index::new(
 			self.ns,
 			self.db,

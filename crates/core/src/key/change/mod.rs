@@ -47,12 +47,12 @@ impl<'a> Cf<'a> {
 			_d: b'#',
 			vs,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 		}
 	}
 
 	pub fn decode_key(k: &[u8]) -> Result<Cf<'_>> {
-		Ok(storekey::decode(k)?)
+		Ok(storekey::decode_borrow(k)?)
 	}
 }
 

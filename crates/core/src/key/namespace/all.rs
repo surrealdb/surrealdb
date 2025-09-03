@@ -1,5 +1,5 @@
 //! Stores the key prefix for all keys under a namespace
-use storekey::{Encode, BorrowDecode};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::NamespaceId;
 use crate::key::category::{Categorise, Category};

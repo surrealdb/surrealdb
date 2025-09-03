@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::ctx::Context;
 use crate::dbs::result::Results;
 use crate::dbs::{Iterable, Statement};
+use crate::expr::lookup::LookupKind;
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Object, Strand, Value};
 
@@ -119,12 +120,19 @@ impl ExplainItem {
 				name: "Iterate Defer".into(),
 				details: vec![("thing", Value::RecordId(t.clone()))],
 			},
-			Iterable::Edges {
+			Iterable::Lookup {
 				from,
+				kind,
 				..
-			} => Self {
-				name: "Iterate Edges".into(),
-				details: vec![("from", Value::RecordId(from.clone()))],
+			} => match kind {
+				LookupKind::Graph(_) => Self {
+					name: "Iterate Edges".into(),
+					details: vec![("from", Value::RecordId(from.clone()))],
+				},
+				LookupKind::Reference => Self {
+					name: "Iterate References".into(),
+					details: vec![("from", Value::RecordId(from.clone()))],
+				},
 			},
 			Iterable::Table(t, rs, sc) => Self {
 				name: match rs {

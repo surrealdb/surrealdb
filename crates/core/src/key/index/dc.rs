@@ -15,6 +15,7 @@
 //! - Supporting document length normalization in search results
 //! - Enabling efficient compaction of index data
 //! - Providing accurate document count information for the index
+use std::borrow::Cow;
 
 use anyhow::Result;
 use storekey::{BorrowDecode, Encode};
@@ -34,9 +35,9 @@ pub(crate) struct Dc<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -87,9 +88,9 @@ impl<'a> Dc<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'!',
 			_f: b'd',
 			_g: b'c',
@@ -114,7 +115,12 @@ impl<'a> Dc<'a> {
 	///
 	/// # Returns
 	/// The encoded root key as a byte vector
-	pub(crate) fn new_root(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Vec<u8> {
+	pub(crate) fn new_root(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a str,
+		ix: &'a str,
+	) -> Result<Vec<u8>> {
 		DcPrefix::new(ns, db, tb, ix).encode_key()
 	}
 
@@ -156,9 +162,9 @@ struct DcPrefix<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -177,9 +183,9 @@ impl<'a> DcPrefix<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'!',
 			_f: b'd',
 			_g: b'c',

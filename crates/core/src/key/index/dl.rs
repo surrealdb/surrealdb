@@ -14,7 +14,8 @@
 //! - Supporting document length normalization
 //! - Enabling proper ranking of search results based on term frequency and document length
 //! - Providing document-specific statistics for the full-text search engine
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
@@ -30,9 +31,9 @@ pub(crate) struct Dl<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -71,9 +72,9 @@ impl<'a> Dl<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'!',
 			_f: b'd',
 			_g: b'l',

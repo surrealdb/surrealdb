@@ -5,6 +5,7 @@ use std::str::FromStr;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use super::Datetime;
 use crate::expr::escape::QuoteStr;
@@ -12,7 +13,19 @@ use crate::val::Strand;
 
 #[revisioned(revision = 1)]
 #[derive(
-	Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash,
+	Clone,
+	Copy,
+	Debug,
+	Default,
+	Eq,
+	Ord,
+	PartialEq,
+	PartialOrd,
+	Serialize,
+	Deserialize,
+	Hash,
+	Encode,
+	BorrowDecode,
 )]
 #[serde(rename = "$surrealdb::private::Uuid")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

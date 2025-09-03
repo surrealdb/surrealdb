@@ -52,7 +52,7 @@ impl Postings {
 		doc_id: DocId,
 		term_freq: TermFrequency,
 	) -> Result<()> {
-		let key = self.index_key_base.new_bf_key(term_id, doc_id).encode_key();
+		let key = self.index_key_base.new_bf_key(term_id, doc_id).encode_key()?;
 		self.btree.insert(tx, &mut self.store, key, term_freq).await
 	}
 
@@ -62,7 +62,7 @@ impl Postings {
 		term_id: TermId,
 		doc_id: DocId,
 	) -> Result<Option<TermFrequency>> {
-		let key = self.index_key_base.new_bf_key(term_id, doc_id).encode_key();
+		let key = self.index_key_base.new_bf_key(term_id, doc_id).encode_key()?;
 		self.btree.search(tx, &self.store, &key).await
 	}
 
@@ -72,7 +72,7 @@ impl Postings {
 		term_id: TermId,
 		doc_id: DocId,
 	) -> Result<Option<TermFrequency>> {
-		let key = self.index_key_base.new_bf_key(term_id, doc_id).encode_key();
+		let key = self.index_key_base.new_bf_key(term_id, doc_id).encode_key()?;
 		self.btree.delete(tx, &mut self.store, key).await
 	}
 

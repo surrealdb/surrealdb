@@ -1,6 +1,7 @@
 //! Stores a DEFINE MODEL config definition
 use anyhow::Result;
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, MlModelDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
@@ -16,8 +17,8 @@ pub(crate) struct Ml<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub ml: &'a str,
-	pub vn: &'a str,
+	pub ml: Cow<'a, str>,
+	pub vn: Cow<'a, str>,
 }
 
 impl KVKey for Ml<'_> {
@@ -57,8 +58,8 @@ impl<'a> Ml<'a> {
 			_c: b'!',
 			_d: b'm',
 			_e: b'l',
-			ml,
-			vn,
+			ml: Cow::Borrowed(ml),
+			vn: Cow::Borrowed(vn),
 		}
 	}
 }

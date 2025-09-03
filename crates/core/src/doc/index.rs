@@ -3,10 +3,10 @@
 //! This module orchestrates index mutations for a single document: removing old
 //! entries and inserting new ones across different index types (UNIQUE, regular,
 //! search, fulltext, etc.). Index keys are built with key::index and field
-//! values are encoded via key::value::StoreKeyArray.
+//! values are encoded via key::value::Array.
 //!
 //! Numeric normalization in keys:
-//! - StoreKeyArray normalizes Number values (Int/Float/Decimal) using a lexicographic numeric
+//! - Array normalizes Number values (Int/Float/Decimal) using a lexicographic numeric
 //!   encoding so that byte-wise order matches numeric order. As a result, numerically equal values
 //!   (e.g., 0, 0.0, 0dec) map to the same key bytes.
 //! - UNIQUE index behavior leverages this: equal numerics across variants will collide on the same
@@ -31,7 +31,6 @@ use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::ft::search::SearchIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
-use crate::key::value::StoreKeyArray;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::ConsumeResult;
 use crate::kvs::TransactionType;
@@ -321,18 +320,18 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
-	/// Build the KV key for a unique index. The StoreKeyArray encodes values in
+	/// Build the KV key for a unique index. The Array encodes values in
 	/// a canonical, lexicographically ordered byte form which normalizes numeric
 	/// types (Int/Float/Decimal). This means equal numeric values like 0, 0.0 and
 	/// 0dec map to the same index key and therefore conflict on UNIQUE indexes.
-	fn get_unique_index_key(&self, v: &'a StoreKeyArray) -> Result<key::index::Index> {
+	fn get_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
 		Ok(key::index::Index::new(self.ns, self.db, &self.ix.what, &self.ix.name, v, None))
 	}
 
 	/// Build the KV key for a non-unique index. The record id is appended
 	/// to the encoded field values so multiple records can share the same field
-	/// bytes; numeric values inside fd are normalized via StoreKeyArray.
-	fn get_non_unique_index_key(&self, v: &'a StoreKeyArray) -> Result<key::index::Index> {
+	/// bytes; numeric values inside fd are normalized via Array.
+	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
 		Ok(key::index::Index::new(
 			self.ns,
 			self.db,
@@ -422,7 +421,7 @@ impl<'a> IndexOperation<'a> {
 	/// Construct a consistent uniqueness violation error message.
 	/// Formats the conflicting value as a single value or array depending on
 	/// the number of indexed fields.
-	fn err_index_exists(&self, rid: RecordId, mut n: StoreKeyArray) -> Result<()> {
+	fn err_index_exists(&self, rid: RecordId, mut n: Array) -> Result<()> {
 		bail!(Error::IndexExists {
 			thing: rid,
 			index: self.ix.name.to_string(),

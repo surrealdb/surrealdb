@@ -1,4 +1,6 @@
 //! Stores a graph edge pointer
+use std::borrow::Cow;
+
 use anyhow::Result;
 use storekey::{BorrowDecode, Encode};
 
@@ -15,7 +17,7 @@ struct Prefix<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub id: RecordIdKey,
 }
@@ -33,7 +35,7 @@ impl<'a> Prefix<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'&',
 			id: id.clone(),
 		}
@@ -48,10 +50,10 @@ struct PrefixFt<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub id: RecordIdKey,
-	pub ft: &'a str,
+	pub ft: Cow<'a, str>,
 }
 
 impl KVKey for PrefixFt<'_> {
@@ -69,43 +71,43 @@ impl<'a> PrefixFt<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'&',
 			id: id.clone(),
-			ft,
+			ft: Cow::Borrowed(ft),
 		}
 	}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
-struct PrefixFf<'a> {
+struct PrefixFk<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub id: RecordIdKey,
-	pub ft: &'a str,
-	pub ff: &'a str,
+	pub ft: Cow<'a, str>,
+	pub fk: RecordIdKey,
 }
 
-impl KVKey for PrefixFf<'_> {
+impl KVKey for PrefixFk<'_> {
 	type ValueType = Vec<u8>;
 }
 
 // Code here is used in references which is temporarly removed
 #[allow(dead_code)]
-impl<'a> PrefixFf<'a> {
+impl<'a> PrefixFk<'a> {
 	fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &'a str,
 		id: &RecordIdKey,
 		ft: &'a str,
-		ff: &'a str,
+		fk: &RecordIdKey,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -114,11 +116,11 @@ impl<'a> PrefixFf<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'&',
 			id: id.clone(),
-			ft,
-			ff,
+			ft: Cow::Borrowed(ft),
+			fk: fk.clone(),
 		}
 	}
 }
@@ -136,12 +138,12 @@ pub(crate) struct Ref<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub id: RecordIdKey,
-	pub ft: &'a str,
-	pub ff: &'a str,
-	pub fk: RecordIdKey,
+	pub id: Cow<'a, RecordIdKey>,
+	pub ft: Cow<'a, str>,
+	pub fk: Cow<'a, RecordIdKey>,
+	pub ff: Cow<'a, str>,
 }
 
 impl KVKey for Ref<'_> {
@@ -158,12 +160,12 @@ pub fn new<'a>(
 	ns: NamespaceId,
 	db: DatabaseId,
 	tb: &'a str,
-	id: &RecordIdKey,
+	id: &'a RecordIdKey,
 	ft: &'a str,
+	fk: &'a RecordIdKey,
 	ff: &'a str,
-	fk: &RecordIdKey,
 ) -> Ref<'a> {
-	Ref::new(ns, db, tb, id.to_owned(), ft, ff, fk.to_owned())
+	Ref::new(ns, db, tb, id, ft, fk, ff)
 }
 
 pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey) -> Result<Vec<u8>> {
@@ -174,6 +176,56 @@ pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey) -> Re
 
 pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode_key()?;
+	k.extend_from_slice(&[0xff]);
+	Ok(k)
+}
+
+pub fn ftprefix(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &str,
+	id: &RecordIdKey,
+	ft: &str,
+) -> Result<Vec<u8>> {
+	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_key()?;
+	k.extend_from_slice(&[0x00]);
+	Ok(k)
+}
+
+pub fn ftsuffix(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &str,
+	id: &RecordIdKey,
+	ft: &str,
+) -> Result<Vec<u8>> {
+	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_key()?;
+	k.extend_from_slice(&[0xff]);
+	Ok(k)
+}
+
+pub fn fkprefix(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &str,
+	id: &RecordIdKey,
+	ft: &str,
+	fk: &RecordIdKey,
+) -> Result<Vec<u8>> {
+	let mut k = PrefixFk::new(ns, db, tb, id, ft, fk).encode_key()?;
+	k.extend_from_slice(&[0x00]);
+	Ok(k)
+}
+
+pub fn fksuffix(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &str,
+	id: &RecordIdKey,
+	ft: &str,
+	fk: &RecordIdKey,
+) -> Result<Vec<u8>> {
+	let mut k = PrefixFk::new(ns, db, tb, id, ft, fk).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
@@ -189,10 +241,10 @@ impl<'a> Ref<'a> {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &'a str,
-		id: RecordIdKey,
+		id: &'a RecordIdKey,
 		ft: &'a str,
+		fk: &'a RecordIdKey,
 		ff: &'a str,
-		fk: RecordIdKey,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -201,12 +253,12 @@ impl<'a> Ref<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'&',
-			id,
-			ft,
-			ff,
-			fk,
+			id: Cow::Borrowed(id),
+			ft: Cow::Borrowed(ft),
+			fk: Cow::Borrowed(fk),
+			ff: Cow::Borrowed(ff),
 		}
 	}
 }
@@ -218,19 +270,21 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
+		let binding = RecordIdKey::String("testid".to_owned());
+		let other_binding = RecordIdKey::String("otherid".to_owned());
 		let val = Ref::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
-			RecordIdKey::String("testid".to_owned()),
+			&binding,
 			"othertb",
+			&other_binding,
 			"test.*",
-			RecordIdKey::String("otherid".to_owned()),
 		);
 		let enc = Ref::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\x00&\0\0\0\x01testid\0othertb\0test.*\0\0\0\0\x01otherid\0"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\x00&\0\0\0\x01testid\0othertb\0\0\0\0\x01otherid\0test.*\0"
 		);
 	}
 }

@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/core", "crates/macros", "crates/sdk", "crates/surrealdb-types", "crates/surrealdb-types-derive"]
+members = [".", "crates/core", "crates/sdk", "crates/surrealdb-types", "crates/surrealdb-types-derive"]
 
 [workspace.package]
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -44,7 +44,7 @@ reblessive = "0.4.3"
 revision = "0.11.0"
 ## Maintained by @rushmorem
 serde-content = "0.1.0"
-storekey = "0.5.0"
+storekey = { version = "0.6.0", path = "../storekey", features = ["uuid"] }
 trice = "0.4.0"
 vart = "0.8.1"
 

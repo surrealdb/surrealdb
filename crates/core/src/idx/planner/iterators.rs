@@ -12,10 +12,9 @@ use crate::expr::BinaryOperator;
 use crate::idx::docids::DocId;
 use crate::idx::ft::fulltext::FullTextHitsIterator;
 use crate::idx::ft::search::SearchHitsIterator;
-use crate::idx::planner::plan::StoreRangeValue;
+use crate::idx::planner::plan::RangeValue;
 use crate::idx::planner::tree::IndexReference;
 use crate::key::index::Index;
-use crate::key::value::{StoreKeyArray, StoreKeyValue};
 use crate::kvs::{KVKey, Key, Transaction, Val};
 use crate::val::record::Record;
 use crate::val::{Array, RecordId, Value};
@@ -243,7 +242,7 @@ impl IndexEqualThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		fd: &StoreKeyArray,
+		fd: &Array,
 	) -> Result<Self> {
 		let (beg, end) = Self::get_beg_end(ns, db, ix, fd)?;
 		Ok(Self {
@@ -265,7 +264,7 @@ impl IndexEqualThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		fd: &StoreKeyArray,
+		fd: &Array,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		Ok(if ix.cols.len() == 1 {
 			// Single column index: straightforward key prefix generation
@@ -441,8 +440,8 @@ impl IndexRangeThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: StoreRangeValue,
-		to: StoreRangeValue,
+		from: RangeValue,
+		to: RangeValue,
 	) -> Result<Self> {
 		Ok(Self {
 			irf,
@@ -456,7 +455,7 @@ impl IndexRangeThingIterator {
 		db: DatabaseId,
 		ix: &IndexDefinition,
 	) -> Result<Self> {
-		Self::new(irf, ns, db, ix, StoreRangeValue::default(), StoreRangeValue::default())
+		Self::new(irf, ns, db, ix, RangeValue::default(), RangeValue::default())
 	}
 
 	pub(super) fn compound_range(
@@ -475,16 +474,13 @@ impl IndexRangeThingIterator {
 	}
 
 	/// Determines the lowest and highest values in the range
-	fn reduce_range(
-		ranges: &[(BinaryOperator, Arc<Value>)],
-	) -> Result<(StoreRangeValue, StoreRangeValue)> {
+	fn reduce_range(ranges: &[(BinaryOperator, Arc<Value>)]) -> Result<(RangeValue, RangeValue)> {
 		let mut from = vec![];
 		let mut to = vec![];
 		for (op, v) in ranges {
-			let v: StoreKeyValue = v.as_ref().clone().into();
-			let key = v.encode_key()?;
+			let key = storekey::encode_vec(v.as_ref()).map_err(|_| Error::Unencodable)?;
 			match op {
-				BinaryOperator::LessThan => to.push((key, false, v)),
+				BinaryOperator::LessThan => to.push((key, false, v.clone())),
 				BinaryOperator::LessThanEqual => to.push((key, true, v.clone())),
 				BinaryOperator::MoreThan => from.push((key, true, v.clone())),
 				BinaryOperator::MoreThanEqual => from.push((key, false, v.clone())),
@@ -497,10 +493,9 @@ impl IndexRangeThingIterator {
 		// for upper bounds we want the smallest (min). The comparator orders by key descending
 		// (b1.cmp(a1)), and for equal keys orders by the boolean flag so that strict operators
 		// take precedence when choosing the tightest bound.
-		let cmp = |(a1, a2, _): &(Vec<u8>, bool, StoreKeyValue),
-		           (b1, b2, _): &(Vec<u8>, bool, StoreKeyValue)| {
-			b1.cmp(a1).then_with(|| b2.cmp(a2))
-		};
+		let cmp =
+			|(a1, a2, _): &(Vec<u8>, bool, Arc<Value>),
+			 (b1, b2, _): &(Vec<u8>, bool, Arc<Value>)| { b1.cmp(a1).then_with(|| b2.cmp(a2)) };
 		from.sort_unstable_by(cmp);
 		to.sort_unstable_by(cmp);
 		// Pick the strongest lower bound: first element after sorting (greatest key).
@@ -508,22 +503,22 @@ impl IndexRangeThingIterator {
 		// false for inclusive (>=, <=). For the final bound, inclusive is the inverse for
 		// lower bounds because a strict '>' becomes an exclusive range start.
 		let from = if let Some((_, inclusivity, val)) = from.into_iter().next() {
-			StoreRangeValue {
+			RangeValue {
 				value: val,
 				inclusive: !inclusivity,
 			}
 		} else {
-			StoreRangeValue::default()
+			RangeValue::default()
 		};
 		// Pick the strongest upper bound: last element after sorting (smallest key).
 		// Here the inclusive flag matches the operator: '<=' is inclusive, '<' is exclusive.
 		let to = if let Some((_, inclusivity, val)) = to.into_iter().next_back() {
-			StoreRangeValue {
+			RangeValue {
 				value: val,
 				inclusive: inclusivity,
 			}
 		} else {
-			StoreRangeValue::default()
+			RangeValue::default()
 		};
 		Ok((from, to))
 	}
@@ -532,8 +527,8 @@ impl IndexRangeThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: StoreRangeValue,
-		to: StoreRangeValue,
+		from: RangeValue,
+		to: RangeValue,
 	) -> Result<RangeScan> {
 		let (from_inclusive, to_inclusive) = (from.inclusive, to.inclusive);
 		let beg = Self::compute_beg(ns, db, &ix.what, &ix.name, from)?;
@@ -554,15 +549,27 @@ impl IndexRangeThingIterator {
 		db: DatabaseId,
 		ix_what: &str,
 		ix_name: &str,
-		from: StoreRangeValue,
+		from: RangeValue,
 	) -> Result<Vec<u8>> {
 		if from.value.is_none() {
 			return Index::prefix_beg(ns, db, ix_what, ix_name);
 		}
 		if from.inclusive {
-			Index::prefix_ids_beg(ns, db, ix_what, ix_name, &StoreKeyArray::from(from.value))
+			Index::prefix_ids_beg(
+				ns,
+				db,
+				ix_what,
+				ix_name,
+				&Array::from(vec![from.value.as_ref().clone()]),
+			)
 		} else {
-			Index::prefix_ids_end(ns, db, ix_what, ix_name, &StoreKeyArray::from(from.value))
+			Index::prefix_ids_end(
+				ns,
+				db,
+				ix_what,
+				ix_name,
+				&Array::from(vec![from.value.as_ref().clone()]),
+			)
 		}
 	}
 
@@ -579,15 +586,27 @@ impl IndexRangeThingIterator {
 		db: DatabaseId,
 		ix_what: &str,
 		ix_name: &str,
-		to: StoreRangeValue,
+		to: RangeValue,
 	) -> Result<Vec<u8>> {
 		if to.value.is_none() {
 			return Index::prefix_end(ns, db, ix_what, ix_name);
 		}
 		if to.inclusive {
-			Index::prefix_ids_end(ns, db, ix_what, ix_name, &StoreKeyArray::from(to.value))
+			Index::prefix_ids_end(
+				ns,
+				db,
+				ix_what,
+				ix_name,
+				&Array::from(vec![to.value.as_ref().clone()]),
+			)
 		} else {
-			Index::prefix_ids_beg(ns, db, ix_what, ix_name, &StoreKeyArray::from(to.value))
+			Index::prefix_ids_beg(
+				ns,
+				db,
+				ix_what,
+				ix_name,
+				&Array::from(vec![to.value.as_ref().clone()]),
+			)
 		}
 	}
 
@@ -603,11 +622,11 @@ impl IndexRangeThingIterator {
 		db: DatabaseId,
 		ix: &IndexDefinition,
 		prefix: &[Value],
-		from: StoreRangeValue,
-		to: StoreRangeValue,
+		from: RangeValue,
+		to: RangeValue,
 	) -> Result<RangeScan> {
 		// Prepare the fixed composite prefix (may be empty for the leading column)
-		let prefix_array: StoreKeyArray = if prefix.is_empty() {
+		let prefix_array: Array = if prefix.is_empty() {
 			Array(Vec::with_capacity(1))
 		} else {
 			Array::from(prefix.to_vec())
@@ -641,11 +660,11 @@ impl IndexRangeThingIterator {
 		db: DatabaseId,
 		ix_what: &str,
 		ix_name: &str,
-		prefix: &StoreKeyArray,
-		from: StoreRangeValue,
+		prefix: &Array,
+		from: RangeValue,
 	) -> Result<Vec<u8>> {
 		let mut fd = prefix.clone();
-		fd.0.push(from.value);
+		fd.0.push(from.value.as_ref().clone());
 		if from.inclusive {
 			Index::prefix_ids_beg(ns, db, ix_what, ix_name, &fd)
 		} else {
@@ -665,11 +684,11 @@ impl IndexRangeThingIterator {
 		db: DatabaseId,
 		ix_what: &str,
 		ix_name: &str,
-		prefix: &StoreKeyArray,
-		to: StoreRangeValue,
+		prefix: &Array,
+		to: RangeValue,
 	) -> Result<Vec<u8>> {
 		let mut fd = prefix.clone();
-		fd.0.push(to.value);
+		fd.0.push(to.value.as_ref().clone());
 		if to.inclusive {
 			Index::prefix_ids_end(ns, db, ix_what, ix_name, &fd)
 		} else {
@@ -742,8 +761,8 @@ impl IndexRangeReverseThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: StoreRangeValue,
-		to: StoreRangeValue,
+		from: RangeValue,
+		to: RangeValue,
 	) -> Result<Self> {
 		Ok(Self {
 			irf,
@@ -757,7 +776,7 @@ impl IndexRangeReverseThingIterator {
 		db: DatabaseId,
 		ix: &IndexDefinition,
 	) -> Result<Self> {
-		Self::new(irf, ns, db, ix, StoreRangeValue::default(), StoreRangeValue::default())
+		Self::new(irf, ns, db, ix, RangeValue::default(), RangeValue::default())
 	}
 	/// When scanning in reverse, the KV range APIs do not return the inclusive
 	/// end key. We compensate by explicitly checking and returning the end key
@@ -879,7 +898,7 @@ impl IndexUnionThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		fds: &[StoreKeyArray],
+		fds: &[Array],
 	) -> Result<Self> {
 		// We create a VecDeque to hold the prefix keys (begin and end) for each value
 		// in the array.
@@ -994,7 +1013,7 @@ impl JoinThingIterator {
 		new_iter: F,
 	) -> Result<bool>
 	where
-		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, StoreKeyValue) -> Result<ThingIterator>,
+		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, Value) -> Result<ThingIterator>,
 	{
 		while !ctx.is_done(true).await? {
 			let mut count = 0;
@@ -1003,7 +1022,7 @@ impl JoinThingIterator {
 					break;
 				}
 				let thing = r.thing();
-				let value: StoreKeyValue = Value::from(thing.clone()).into();
+				let value: Value = Value::from(thing.clone()).into();
 				let k: Key = revision::to_vec(thing)?;
 				if self.distinct.insert(k, true).is_none() {
 					self.current_local = Some(new_iter(self.ns, self.db, &self.ix, value)?);
@@ -1026,8 +1045,7 @@ impl JoinThingIterator {
 		new_iter: F,
 	) -> Result<B>
 	where
-		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, StoreKeyValue) -> Result<ThingIterator>
-			+ Copy,
+		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, Value) -> Result<ThingIterator> + Copy,
 	{
 		while !ctx.is_done(true).await? {
 			if let Some(current_local) = &mut self.current_local {
@@ -1051,8 +1069,7 @@ impl JoinThingIterator {
 		new_iter: F,
 	) -> Result<usize>
 	where
-		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, StoreKeyValue) -> Result<ThingIterator>
-			+ Copy,
+		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, Value) -> Result<ThingIterator> + Copy,
 	{
 		while !ctx.is_done(true).await? {
 			if let Some(current_local) = &mut self.current_local {
@@ -1088,22 +1105,20 @@ impl IndexJoinThingIterator {
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<B> {
-		let new_iter =
-			|ns: NamespaceId, db: DatabaseId, ix: &IndexDefinition, value: StoreKeyValue| {
-				let fd = StoreKeyArray::from(value);
-				let it = IndexEqualThingIterator::new(self.0, ns, db, ix, &fd)?;
-				Ok(ThingIterator::IndexEqual(it))
-			};
+		let new_iter = |ns: NamespaceId, db: DatabaseId, ix: &IndexDefinition, value: Value| {
+			let fd = Array::from(vec![value]);
+			let it = IndexEqualThingIterator::new(self.0, ns, db, ix, &fd)?;
+			Ok(ThingIterator::IndexEqual(it))
+		};
 		self.1.next_batch(ctx, tx, limit, new_iter).await
 	}
 
 	async fn next_count(&mut self, ctx: &Context, tx: &Transaction, limit: u32) -> Result<usize> {
-		let new_iter =
-			|ns: NamespaceId, db: DatabaseId, ix: &IndexDefinition, value: StoreKeyValue| {
-				let fd = StoreKeyArray::from(value);
-				let it = IndexEqualThingIterator::new(self.0, ns, db, ix, &fd)?;
-				Ok(ThingIterator::IndexEqual(it))
-			};
+		let new_iter = |ns: NamespaceId, db: DatabaseId, ix: &IndexDefinition, value: Value| {
+			let fd = Array::from(vec![value]);
+			let it = IndexEqualThingIterator::new(self.0, ns, db, ix, &fd)?;
+			Ok(ThingIterator::IndexEqual(it))
+		};
 		self.1.next_count(ctx, tx, limit, new_iter).await
 	}
 }
@@ -1119,7 +1134,7 @@ impl UniqueEqualThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		a: &StoreKeyArray,
+		a: &Array,
 	) -> Result<Self> {
 		let key = Index::new(ns, db, &ix.what, &ix.name, a, None).encode_key()?;
 		Ok(Self {
@@ -1160,11 +1175,11 @@ impl UniqueRangeThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: StoreRangeValue,
-		to: StoreRangeValue,
+		from: RangeValue,
+		to: RangeValue,
 	) -> Result<RangeScan> {
-		let beg = Self::compute_beg(ns, db, &ix.what, &ix.name, from.value)?;
-		let end = Self::compute_end(ns, db, &ix.what, &ix.name, to.value)?;
+		let beg = Self::compute_beg(ns, db, &ix.what, &ix.name, from.value.as_ref().clone())?;
+		let end = Self::compute_end(ns, db, &ix.what, &ix.name, to.value.as_ref().clone())?;
 		Ok(RangeScan::new(beg, from.inclusive, end, to.inclusive))
 	}
 
@@ -1173,8 +1188,8 @@ impl UniqueRangeThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: StoreRangeValue,
-		to: StoreRangeValue,
+		from: RangeValue,
+		to: RangeValue,
 	) -> Result<Self> {
 		let r = Self::range_scan(ns, db, ix, from, to)?;
 		Ok(Self {
@@ -1190,7 +1205,7 @@ impl UniqueRangeThingIterator {
 		db: DatabaseId,
 		ix: &IndexDefinition,
 	) -> Result<Self> {
-		Self::new(irf, ns, db, ix, StoreRangeValue::default(), StoreRangeValue::default())
+		Self::new(irf, ns, db, ix, RangeValue::default(), RangeValue::default())
 	}
 
 	pub(super) fn compound_range(
@@ -1215,12 +1230,12 @@ impl UniqueRangeThingIterator {
 		db: DatabaseId,
 		ix_what: &str,
 		ix_name: &str,
-		from: StoreKeyValue,
+		from: Value,
 	) -> Result<Vec<u8>> {
 		if from.is_none() {
 			return Index::prefix_beg(ns, db, ix_what, ix_name);
 		}
-		Index::new(ns, db, ix_what, ix_name, &StoreKeyArray::from(from), None).encode_key()
+		Index::new(ns, db, ix_what, ix_name, &Array::from(vec![from]), None).encode_key()
 	}
 
 	fn compute_end(
@@ -1228,12 +1243,12 @@ impl UniqueRangeThingIterator {
 		db: DatabaseId,
 		ix_what: &str,
 		ix_name: &str,
-		to: StoreKeyValue,
+		to: Value,
 	) -> Result<Vec<u8>> {
 		if to.is_none() {
 			return Index::prefix_end(ns, db, ix_what, ix_name);
 		}
-		Index::new(ns, db, ix_what, ix_name, &StoreKeyArray::from(to), None).encode_key()
+		Index::new(ns, db, ix_what, ix_name, &Array::from(vec![to]), None).encode_key()
 	}
 
 	async fn next_batch<B: IteratorBatch>(
@@ -1308,8 +1323,8 @@ impl UniqueRangeReverseThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: StoreRangeValue,
-		to: StoreRangeValue,
+		from: RangeValue,
+		to: RangeValue,
 	) -> Result<Self> {
 		let r = ReverseRangeScan::new(UniqueRangeThingIterator::range_scan(ns, db, ix, from, to)?);
 		Ok(Self {
@@ -1325,7 +1340,7 @@ impl UniqueRangeReverseThingIterator {
 		db: DatabaseId,
 		ix: &IndexDefinition,
 	) -> Result<Self> {
-		Self::new(irf, ns, db, ix, StoreRangeValue::default(), StoreRangeValue::default())
+		Self::new(irf, ns, db, ix, RangeValue::default(), RangeValue::default())
 	}
 
 	async fn next_batch<B: IteratorBatch>(
@@ -1428,7 +1443,7 @@ impl UniqueUnionThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		fds: &[StoreKeyArray],
+		fds: &[Array],
 	) -> Result<Self> {
 		// We create a VecDeque to hold the key for each value in the array.
 		let mut keys = VecDeque::with_capacity(fds.len());
@@ -1504,22 +1519,20 @@ impl UniqueJoinThingIterator {
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<B> {
-		let new_iter =
-			|ns: NamespaceId, db: DatabaseId, ix: &IndexDefinition, value: StoreKeyValue| {
-				let array = StoreKeyArray::from(value);
-				let it = UniqueEqualThingIterator::new(self.0, ns, db, ix, &array)?;
-				Ok(ThingIterator::UniqueEqual(it))
-			};
+		let new_iter = |ns: NamespaceId, db: DatabaseId, ix: &IndexDefinition, value: Value| {
+			let array = Array::from(vec![value]);
+			let it = UniqueEqualThingIterator::new(self.0, ns, db, ix, &array)?;
+			Ok(ThingIterator::UniqueEqual(it))
+		};
 		self.1.next_batch(ctx, tx, limit, new_iter).await
 	}
 
 	async fn next_count(&mut self, ctx: &Context, tx: &Transaction, limit: u32) -> Result<usize> {
-		let new_iter =
-			|ns: NamespaceId, db: DatabaseId, ix: &IndexDefinition, value: StoreKeyValue| {
-				let array = StoreKeyArray::from(value);
-				let it = UniqueEqualThingIterator::new(self.0, ns, db, ix, &array)?;
-				Ok(ThingIterator::UniqueEqual(it))
-			};
+		let new_iter = |ns: NamespaceId, db: DatabaseId, ix: &IndexDefinition, value: Value| {
+			let array = Array::from(vec![value]);
+			let it = UniqueEqualThingIterator::new(self.0, ns, db, ix, &array)?;
+			Ok(ThingIterator::UniqueEqual(it))
+		};
 		self.1.next_count(ctx, tx, limit, new_iter).await
 	}
 }

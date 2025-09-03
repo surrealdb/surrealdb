@@ -5,6 +5,7 @@ use std::ops::Bound;
 use nanoid::nanoid;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 use ulid::Ulid;
 
 use crate::cnf::ID_CHARS;
@@ -145,8 +146,68 @@ impl PartialEq<Range> for RecordIdKeyRange {
 	}
 }
 
+impl Encode for RecordIdKeyRange {
+	fn encode<W: std::io::Write>(
+		&self,
+		w: &mut storekey::Writer<W>,
+	) -> Result<(), storekey::EncodeError> {
+		match &self.start {
+			Bound::Excluded(v) => {
+				w.write_u8(5)?;
+				v.encode(w)?;
+			}
+			Bound::Included(v) => {
+				w.write_u8(4)?;
+				v.encode(w)?;
+			}
+			Bound::Unbounded => {
+				w.write_u8(3)?;
+			}
+		}
+
+		match &self.end {
+			Bound::Excluded(v) => {
+				w.write_u8(5)?;
+				v.encode(w)?;
+			}
+			Bound::Included(v) => {
+				w.write_u8(4)?;
+				v.encode(w)?;
+			}
+			Bound::Unbounded => {
+				w.write_u8(3)?;
+			}
+		}
+
+		Ok(())
+	}
+}
+
+impl<'de> BorrowDecode<'de> for RecordIdKeyRange {
+	fn borrow_decode(r: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
+		let start = match r.read_u8()? {
+			3 => Bound::Unbounded,
+			4 => Bound::Included(BorrowDecode::borrow_decode(r)?),
+			5 => Bound::Excluded(BorrowDecode::borrow_decode(r)?),
+			_ => return Err(storekey::DecodeError::InvalidFormat),
+		};
+		let end = match r.read_u8()? {
+			3 => Bound::Unbounded,
+			4 => Bound::Included(BorrowDecode::borrow_decode(r)?),
+			5 => Bound::Excluded(BorrowDecode::borrow_decode(r)?),
+			_ => return Err(storekey::DecodeError::InvalidFormat),
+		};
+		Ok(RecordIdKeyRange {
+			start,
+			end,
+		})
+	}
+}
+
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(
+	Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash, Encode, BorrowDecode,
+)]
 #[serde(rename = "$surrealdb::private::sql::Id")]
 pub enum RecordIdKey {
 	Number(i64),
@@ -329,7 +390,9 @@ impl fmt::Display for RecordIdKey {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(
+	Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash, Encode, BorrowDecode,
+)]
 #[serde(rename = "$surrealdb::private::RecordId")]
 pub struct RecordId {
 	pub table: String,

@@ -16,6 +16,7 @@
 //! - Building the inverted index that maps terms to documents
 //! - Supporting concurrent read and write operations
 //! - Enabling efficient term frequency tracking for relevance scoring
+use std::borrow::Cow;
 
 use anyhow::Result;
 use storekey::{BorrowDecode, Encode};
@@ -34,13 +35,13 @@ pub(crate) struct Tt<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub term: &'a str,
+	pub term: Cow<'a, str>,
 	pub doc_id: DocId,
 	pub nid: Uuid,
 	pub uid: Uuid,
@@ -93,13 +94,13 @@ impl<'a> Tt<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'!',
 			_f: b't',
 			_g: b't',
-			term,
+			term: Cow::Borrowed(term),
 			doc_id,
 			nid,
 			uid,
@@ -179,13 +180,13 @@ struct TtTermPrefix<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub term: &'a str,
+	pub term: Cow<'a, str>,
 }
 
 impl KVKey for TtTermPrefix<'_> {
@@ -201,13 +202,13 @@ impl<'a> TtTermPrefix<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'!',
 			_f: b't',
 			_g: b't',
-			term,
+			term: Cow::Borrowed(term),
 		}
 	}
 }
@@ -220,9 +221,9 @@ struct TtTermsPrefix<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -241,9 +242,9 @@ impl<'a> TtTermsPrefix<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'!',
 			_f: b't',
 			_g: b't',

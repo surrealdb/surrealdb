@@ -1,5 +1,6 @@
 //! Stores the key prefix for all keys under a namespace access method
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::NamespaceId;
 use crate::key::category::{Categorise, Category};
@@ -11,7 +12,7 @@ pub(crate) struct AccessRoot<'a> {
 	_a: u8,
 	pub ns: NamespaceId,
 	_b: u8,
-	pub ac: &'a str,
+	pub ac: Cow<'a, str>,
 }
 
 impl KVKey for AccessRoot<'_> {
@@ -35,7 +36,7 @@ impl<'a> AccessRoot<'a> {
 			_a: b'*',
 			ns,
 			_b: b'&',
-			ac,
+			ac: Cow::Borrowed(ac),
 		}
 	}
 }

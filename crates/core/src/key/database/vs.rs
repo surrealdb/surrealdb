@@ -1,5 +1,5 @@
 //! Stores database versionstamps
-use storekey::{Encode, BorrowDecode};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};

@@ -8,6 +8,7 @@ use std::str;
 use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
 use crate::expr::escape::QuoteStr;
@@ -61,10 +62,23 @@ fn remove_null_bytes(s: String) -> String {
 
 /// A string that doesn't contain NUL bytes.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(
+	Clone,
+	Debug,
+	Default,
+	Eq,
+	PartialEq,
+	Ord,
+	PartialOrd,
+	Serialize,
+	Deserialize,
+	Hash,
+	Encode,
+	BorrowDecode,
+)]
 #[serde(rename = "$surrealdb::private::Strand")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Strand(#[serde(with = "no_nul_bytes")] String);
+pub struct Strand(String);
 
 impl Strand {
 	/// Create a new strand, returns None if the string contains a null byte.
@@ -169,64 +183,5 @@ impl TryAdd for Strand {
 				other.0.len()
 			))))
 		}
-	}
-}
-
-// serde(with = no_nul_bytes) will (de)serialize with no NUL bytes.
-pub(crate) mod no_nul_bytes {
-	use std::fmt;
-
-	use serde::de::{self, Visitor};
-	use serde::{Deserializer, Serializer};
-
-	pub(crate) fn serialize<S>(s: &str, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: Serializer,
-	{
-		if s.contains('\0') {
-			return Err(<S::Error as serde::ser::Error>::custom(
-				"to be serialized string contained a null byte",
-			));
-		}
-		serializer.serialize_str(s)
-	}
-
-	pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<String, D::Error>
-	where
-		D: Deserializer<'de>,
-	{
-		struct NoNulBytesVisitor;
-
-		impl Visitor<'_> for NoNulBytesVisitor {
-			type Value = String;
-
-			fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-				formatter.write_str("a string without any NUL bytes")
-			}
-
-			fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-			where
-				E: de::Error,
-			{
-				if value.contains('\0') {
-					Err(de::Error::custom("contained NUL byte"))
-				} else {
-					Ok(value.to_owned())
-				}
-			}
-
-			fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
-			where
-				E: de::Error,
-			{
-				if value.contains('\0') {
-					Err(de::Error::custom("contained NUL byte"))
-				} else {
-					Ok(value)
-				}
-			}
-		}
-
-		deserializer.deserialize_string(NoNulBytesVisitor)
 	}
 }

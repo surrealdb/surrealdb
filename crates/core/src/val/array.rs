@@ -5,6 +5,7 @@ use std::ops::{Deref, DerefMut};
 use anyhow::{Result, ensure};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
 use crate::expr::Expr;
@@ -12,15 +13,22 @@ use crate::expr::fmt::{Fmt, Pretty, pretty_indent};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(
+	Clone,
+	Debug,
+	Default,
+	Eq,
+	Ord,
+	PartialEq,
+	PartialOrd,
+	Serialize,
+	Deserialize,
+	Hash,
+	Encode,
+	BorrowDecode,
+)]
 #[serde(rename = "$surrealdb::private::Array")]
 pub struct Array(pub Vec<Value>);
-
-impl From<Value> for Array {
-	fn from(v: Value) -> Self {
-		vec![v].into()
-	}
-}
 
 impl<T> From<Vec<T>> for Array
 where

@@ -1,5 +1,6 @@
 //! Stores a DEFINE ACCESS ON ROOT configuration
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::AccessDefinition;
 use crate::key::category::{Categorise, Category};
@@ -11,7 +12,7 @@ pub(crate) struct Ac<'a> {
 	_a: u8,
 	_b: u8,
 	_c: u8,
-	pub ac: &'a str,
+	pub ac: Cow<'a, str>,
 }
 
 impl KVKey for Ac<'_> {
@@ -47,7 +48,7 @@ impl<'a> Ac<'a> {
 			_a: b'!',
 			_b: b'a',
 			_c: b'c',
-			ac,
+			ac: Cow::Borrowed(ac),
 		}
 	}
 }

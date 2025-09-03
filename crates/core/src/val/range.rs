@@ -4,6 +4,7 @@ use std::ops::Bound;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use super::value::CoerceErrorExt;
 use crate::expr;
@@ -175,6 +176,64 @@ impl Range {
 				right: Box::new(y.into_literal()),
 			},
 		}
+	}
+}
+
+impl Encode for Range {
+	fn encode<W: std::io::Write>(
+		&self,
+		w: &mut storekey::Writer<W>,
+	) -> Result<(), storekey::EncodeError> {
+		match &self.start {
+			Bound::Excluded(v) => {
+				w.write_u8(5)?;
+				v.encode(w)?;
+			}
+			Bound::Included(v) => {
+				w.write_u8(4)?;
+				v.encode(w)?;
+			}
+			Bound::Unbounded => {
+				w.write_u8(3)?;
+			}
+		}
+
+		match &self.end {
+			Bound::Excluded(v) => {
+				w.write_u8(5)?;
+				v.encode(w)?;
+			}
+			Bound::Included(v) => {
+				w.write_u8(4)?;
+				v.encode(w)?;
+			}
+			Bound::Unbounded => {
+				w.write_u8(3)?;
+			}
+		}
+
+		Ok(())
+	}
+}
+
+impl<'de> BorrowDecode<'de> for Range {
+	fn borrow_decode(r: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
+		let start = match r.read_u8()? {
+			3 => Bound::Unbounded,
+			4 => Bound::Included(BorrowDecode::borrow_decode(r)?),
+			5 => Bound::Excluded(BorrowDecode::borrow_decode(r)?),
+			_ => return Err(storekey::DecodeError::InvalidFormat),
+		};
+		let end = match r.read_u8()? {
+			3 => Bound::Unbounded,
+			4 => Bound::Included(BorrowDecode::borrow_decode(r)?),
+			5 => Bound::Excluded(BorrowDecode::borrow_decode(r)?),
+			_ => return Err(storekey::DecodeError::InvalidFormat),
+		};
+		Ok(Range {
+			start,
+			end,
+		})
 	}
 }
 

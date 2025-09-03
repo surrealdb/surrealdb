@@ -13,7 +13,7 @@ use jsonwebtoken::errors::Error as JWTError;
 use object_store::Error as ObjectStoreError;
 use revision::Error as RevisionError;
 use serde::Serialize;
-use storekey::Error as DecodeError;
+use storekey::DecodeError;
 use thiserror::Error;
 
 use crate::api::err::ApiError;
@@ -790,6 +790,10 @@ pub enum Error {
 	/// Represents an underlying error with IO encoding / decoding
 	#[error("I/O error: {0}")]
 	Io(#[from] IoError),
+
+	/// Error for when trying to serialize values like Regex and Closure
+	#[error("Tried to serialize a value which cannot be serialized.")]
+	Unencodable,
 
 	/// Represents an error when decoding a key-value entry
 	#[error("Key decoding error: {0}")]

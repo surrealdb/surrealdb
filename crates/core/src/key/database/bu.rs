@@ -1,6 +1,7 @@
 //! Stores a DEFINE BUCKET definition
 use anyhow::Result;
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{BucketDefinition, DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
@@ -16,7 +17,7 @@ pub(crate) struct BucketKey<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub bu: &'a str,
+	pub bu: Cow<'a, str>,
 }
 
 impl KVKey for BucketKey<'_> {
@@ -56,7 +57,7 @@ impl<'a> BucketKey<'a> {
 			_c: b'!', // !
 			_d: b'b', // b
 			_e: b'u', // u
-			bu,
+			bu: Cow::Borrowed(bu),
 		}
 	}
 }

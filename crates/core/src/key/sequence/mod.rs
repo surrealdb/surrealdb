@@ -2,10 +2,11 @@
 pub mod ba;
 pub mod st;
 
+use std::borrow::Cow;
 use std::ops::Range;
 
 use anyhow::Result;
-use storekey::{Encode, BorrowDecode};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::kvs::KVKey;
@@ -20,7 +21,7 @@ pub(crate) struct Prefix<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub sq: &'a str,
+	pub sq: Cow<'a, str>,
 	_f: u8,
 	_g: u8,
 	_h: u8,
@@ -41,7 +42,7 @@ impl<'a> Prefix<'a> {
 			_c: b'!',
 			_d: b's',
 			_e: b'q',
-			sq,
+			sq: Cow::Borrowed(sq),
 			_f: b'!',
 			_g: g,
 			_h: h,

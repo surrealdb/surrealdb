@@ -1,5 +1,6 @@
 //! Stores a DEFINE NAMESPACE config definition
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::NamespaceDefinition;
 use crate::key::category::{Categorise, Category};
@@ -11,7 +12,7 @@ pub(crate) struct NamespaceKey<'key> {
 	_a: u8,
 	_b: u8,
 	_c: u8,
-	pub ns: &'key str,
+	pub ns: Cow<'key, str>,
 }
 
 impl KVKey for NamespaceKey<'_> {
@@ -47,7 +48,7 @@ impl<'key> NamespaceKey<'key> {
 			_a: b'!',
 			_b: b'n',
 			_c: b's',
-			ns,
+			ns: Cow::Borrowed(ns),
 		}
 	}
 }

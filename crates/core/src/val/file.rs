@@ -2,9 +2,12 @@ use std::fmt;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
+#[derive(
+	Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd, Encode, BorrowDecode,
+)]
 #[serde(rename = "$surrealdb::private::File")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct File {

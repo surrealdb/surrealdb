@@ -1,5 +1,6 @@
 //! Stores a record document
 use anyhow::Result;
+use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
@@ -16,7 +17,7 @@ pub(crate) struct ThingKey<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub id: RecordIdKey,
 }
@@ -56,7 +57,7 @@ impl<'a> ThingKey<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'*',
 			id,
 		}

@@ -1,5 +1,5 @@
 //! Stores namespace ID generator state
-use storekey::{Encode, BorrowDecode};
+use storekey::{BorrowDecode, Encode};
 
 use crate::idg::u32::U32;
 use crate::key::category::{Categorise, Category};

@@ -845,7 +845,7 @@ impl Datastore {
 						continue;
 					}
 				}
-				match txn.get_tb_index(ic.ns, ic.db, ic.tb, ic.ix).await {
+				match txn.get_tb_index(ic.ns, ic.db, ic.tb.as_ref(), ic.ix.as_ref()).await {
 					Ok(ix) => {
 						if let Index::FullText(p) = &ix.index {
 							let ft = FullTextIndex::new(

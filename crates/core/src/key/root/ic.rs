@@ -9,6 +9,7 @@
 //! index that needs to be compacted. The compaction thread processes these
 //! entries at regular intervals defined by the `index_compaction_interval`
 //! configuration option.
+use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
@@ -32,8 +33,8 @@ pub(crate) struct Ic<'a> {
 	_c: u8,
 	pub ns: NamespaceId,
 	pub db: DatabaseId,
-	pub tb: &'a str,
-	pub ix: &'a str,
+	pub tb: Cow<'a, str>,
+	pub ix: Cow<'a, str>,
 	pub nid: Uuid,
 	pub uid: Uuid,
 }
@@ -68,8 +69,8 @@ impl<'a> Ic<'a> {
 			_c: b'c',
 			ns,
 			db,
-			tb,
-			ix,
+			tb: Cow::Borrowed(tb),
+			ix: Cow::Borrowed(ix),
 			nid,
 			uid,
 		}

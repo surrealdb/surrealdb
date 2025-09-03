@@ -6,6 +6,7 @@ use std::{fmt, ops, time};
 use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
@@ -22,7 +23,19 @@ pub(crate) static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
 
 #[revisioned(revision = 1)]
 #[derive(
-	Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Ord,
+	Clone,
+	Copy,
+	Debug,
+	Default,
+	Eq,
+	PartialEq,
+	PartialOrd,
+	Serialize,
+	Deserialize,
+	Hash,
+	Ord,
+	Encode,
+	BorrowDecode,
 )]
 #[serde(rename = "$surrealdb::private::Duration")]
 pub struct Duration(pub time::Duration);

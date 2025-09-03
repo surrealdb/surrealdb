@@ -1,5 +1,6 @@
 //! Stores the key prefix for all keys under a table
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
@@ -13,7 +14,7 @@ pub(crate) struct TableRoot<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 }
 
 impl KVKey for TableRoot<'_> {
@@ -40,7 +41,7 @@ impl<'a> TableRoot<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 		}
 	}
 }

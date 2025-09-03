@@ -11,6 +11,7 @@ use geo::Point;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
 use crate::expr::fmt::Pretty;
@@ -62,7 +63,9 @@ pub struct SqlNone;
 pub struct Null;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(
+	Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Encode, BorrowDecode,
+)]
 #[serde(rename = "$surrealdb::private::Value")]
 pub enum Value {
 	#[default]
@@ -902,7 +905,6 @@ subtypes! {
 	Regex(Regex) => (is_regex,as_regex,into_regex),
 	Range(Box<Range>) => (is_range,as_range,into_range),
 	Closure(Box<Closure>) => (is_closure,as_closure,into_closure),
-	//Refs(Refs) => (is_refs,as_refs,into_refs),
 	File(File) => (is_file,as_file,into_file),
 }
 

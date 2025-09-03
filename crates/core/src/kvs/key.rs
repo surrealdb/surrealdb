@@ -12,8 +12,8 @@ pub(crate) trait KVKey: Encode + Debug + Sized {
 
 	/// Encodes the key into a byte vector.
 	#[inline]
-	fn encode_key(&self) -> Vec<u8> {
-		storekey::encode_vec(self)
+	fn encode_key(&self) -> Result<Vec<u8>> {
+		Ok(storekey::encode_vec(self).map_err(|_| Error::Unencodable)?)
 	}
 }
 
@@ -21,8 +21,8 @@ impl KVKey for Vec<u8> {
 	type ValueType = Vec<u8>;
 
 	#[inline]
-	fn encode_key(&self) -> Vec<u8> {
-		self.clone()
+	fn encode_key(&self) -> Result<Vec<u8>> {
+		Ok(self.clone())
 	}
 }
 
@@ -30,8 +30,8 @@ impl KVKey for String {
 	type ValueType = Vec<u8>;
 
 	#[inline]
-	fn encode_key(&self) -> Vec<u8> {
-		self.as_bytes().to_vec()
+	fn encode_key(&self) -> Result<Vec<u8>> {
+		Ok(self.as_bytes().to_vec())
 	}
 }
 
@@ -39,8 +39,8 @@ impl KVKey for &str {
 	type ValueType = Vec<u8>;
 
 	#[inline]
-	fn encode_key(&self) -> Vec<u8> {
-		self.as_bytes().to_vec()
+	fn encode_key(&self) -> Result<Vec<u8>> {
+		Ok(self.as_bytes().to_vec())
 	}
 }
 
@@ -71,6 +71,8 @@ macro_rules! impl_kv_value_revisioned {
 	};
 }
 pub(crate) use impl_kv_value_revisioned;
+
+use crate::err::Error;
 
 impl KVValue for Vec<u8> {
 	#[inline]

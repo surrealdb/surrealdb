@@ -1,6 +1,7 @@
 //! Stores a DEFINE ANALYZER config definition
 use anyhow::Result;
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog;
 use crate::catalog::{DatabaseId, NamespaceId};
@@ -17,7 +18,7 @@ pub(crate) struct Az<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub az: &'a str,
+	pub az: Cow<'a, str>,
 }
 
 impl KVKey for Az<'_> {
@@ -57,7 +58,7 @@ impl<'a> Az<'a> {
 			_c: b'!',
 			_d: b'a',
 			_e: b'z',
-			az,
+			az: Cow::Borrowed(az),
 		}
 	}
 }

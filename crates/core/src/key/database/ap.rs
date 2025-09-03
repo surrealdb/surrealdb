@@ -1,6 +1,7 @@
 //! Stores a DEFINE API definition
 use anyhow::Result;
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{ApiDefinition, DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
@@ -16,7 +17,7 @@ pub(crate) struct Ap<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub ap: &'a str,
+	pub ap: Cow<'a, str>,
 }
 
 impl KVKey for Ap<'_> {
@@ -56,7 +57,7 @@ impl<'a> Ap<'a> {
 			_c: b'!', // !
 			_d: b'a', // a
 			_e: b'p', // p
-			ap,
+			ap: Cow::Borrowed(ap),
 		}
 	}
 }

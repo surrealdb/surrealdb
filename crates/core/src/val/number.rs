@@ -22,14 +22,18 @@ use std::fmt::{self, Debug, Display, Formatter};
 use std::hash;
 use std::iter::{Product, Sum};
 use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
+use std::str::FromStr;
 
 use anyhow::{Result, bail};
 use fastnum::D128;
 use revision::revisioned;
+use rust_decimal::Decimal;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
+use crate::expr::decimal::DecimalLexEncoder;
 use crate::fnc::util::math::ToFloat;
 use crate::val::{Strand, TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 
@@ -369,8 +373,8 @@ impl Number {
 	///
 	/// Returns an ordered byte buffer or an error if Decimal conversion fails
 	/// for Decimal variant values.
-	pub(crate) fn as_decimal_buf(&self) -> Result<Vec<u8>> {
-		let b = match self {
+	pub(crate) fn as_decimal_buf(&self) -> Vec<u8> {
+		match self {
 			Self::Int(v) => {
 				// Convert integer to decimal for consistent encoding across all numeric types
 				DecimalLexEncoder::encode(D128::from(*v))
@@ -381,10 +385,9 @@ impl Number {
 			}
 			Self::Decimal(v) => {
 				// Direct encoding of decimal values using lexicographic encoder
-				DecimalLexEncoder::encode(DecimalLexEncoder::to_d128(*v)?)
+				DecimalLexEncoder::encode(DecimalLexEncoder::to_d128(*v))
 			}
-		};
-		Ok(b)
+		}
 	}
 
 	/// Reconstructs a Number from a lexicographically ordered byte buffer.
@@ -1111,11 +1114,24 @@ impl ToFloat for Number {
 	}
 }
 
-use std::str::FromStr;
+impl Encode for Number {
+	fn encode<W: std::io::Write>(
+		&self,
+		w: &mut storekey::Writer<W>,
+	) -> std::result::Result<(), storekey::EncodeError> {
+		let slice = self.as_decimal_buf();
+		w.write_slice(&slice)
+	}
+}
 
-use rust_decimal::Decimal;
-
-use crate::expr::decimal::DecimalLexEncoder;
+impl<'de> BorrowDecode<'de> for Number {
+	fn borrow_decode(
+		r: &mut storekey::BorrowReader<'de>,
+	) -> std::result::Result<Self, storekey::DecodeError> {
+		let slice = r.read_cow()?;
+		Number::from_decimal_buf(slice.as_ref()).map_err(|_| storekey::DecodeError::InvalidFormat)
+	}
+}
 
 /// A trait to extend the Decimal type with additional functionality.
 pub trait DecimalExt {
@@ -1354,8 +1370,8 @@ mod tests {
 			let n1 = &window[0];
 			let n2 = &window[1];
 			assert!(n1 < n2, "{n1:?} < {n2:?} (before serialization)");
-			let b1 = n1.as_decimal_buf().unwrap();
-			let b2 = n2.as_decimal_buf().unwrap();
+			let b1 = n1.as_decimal_buf();
+			let b2 = n2.as_decimal_buf();
 			assert!(b1 < b2, "{n1:?} < {n2:?} (after serialization) - {b1:?} < {b2:?}");
 			let r1 = Number::from_decimal_buf(&b1).unwrap();
 			let r2 = Number::from_decimal_buf(&b2).unwrap();
@@ -1369,7 +1385,7 @@ mod tests {
 		let check = |numbers: &[Number]| {
 			let mut buffers = HashSet::default();
 			for n1 in numbers {
-				let b = n1.as_decimal_buf().unwrap();
+				let b = n1.as_decimal_buf();
 				let n2 = Number::from_decimal_buf(&b).unwrap();
 				buffers.insert(b);
 				assert!(n1.eq(&n2), "{n1:?} = {n2:?} (after deserialization)");

@@ -1,5 +1,5 @@
 //! Stores the key prefix for all keys
-use storekey::{Encode, BorrowDecode};
+use storekey::{BorrowDecode, Encode};
 
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;

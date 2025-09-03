@@ -1,5 +1,6 @@
 //! Stores the key prefix for all keys under a database access method
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
@@ -13,7 +14,7 @@ pub(crate) struct DbAccess<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub ac: &'a str,
+	pub ac: Cow<'a, str>,
 }
 
 impl KVKey for DbAccess<'_> {
@@ -39,7 +40,7 @@ impl<'a> DbAccess<'a> {
 			_b: b'*',
 			db,
 			_c: b'&',
-			ac,
+			ac: Cow::Borrowed(ac),
 		}
 	}
 }

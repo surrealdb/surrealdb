@@ -1,6 +1,7 @@
 //! Stores a DEFINE CONFIG definition
 use anyhow::Result;
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{ConfigDefinition, DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
@@ -16,7 +17,7 @@ pub(crate) struct Cg<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub ty: &'a str,
+	pub ty: Cow<'a, str>,
 }
 
 impl KVKey for Cg<'_> {
@@ -56,7 +57,7 @@ impl<'a> Cg<'a> {
 			_c: b'!',
 			_d: b'c',
 			_e: b'g',
-			ty,
+			ty: Cow::Borrowed(ty),
 		}
 	}
 }

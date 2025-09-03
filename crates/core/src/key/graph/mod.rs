@@ -1,5 +1,6 @@
 //! Stores a graph edge pointer
 use anyhow::Result;
+use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
@@ -16,7 +17,7 @@ struct Prefix<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub id: RecordIdKey,
 }
@@ -34,7 +35,7 @@ impl<'a> Prefix<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'~',
 			id: id.to_owned(),
 		}
@@ -49,7 +50,7 @@ struct PrefixEg<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub id: RecordIdKey,
 	pub eg: Dir,
@@ -68,7 +69,7 @@ impl<'a> PrefixEg<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'~',
 			id: id.clone(),
 			eg: eg.clone(),
@@ -84,11 +85,11 @@ struct PrefixFt<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub id: RecordIdKey,
 	pub eg: Dir,
-	pub ft: &'a str,
+	pub ft: Cow<'a, str>,
 }
 
 impl KVKey for PrefixFt<'_> {
@@ -111,11 +112,11 @@ impl<'a> PrefixFt<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'~',
 			id: id.to_owned(),
 			eg: eg.to_owned(),
-			ft,
+			ft: Cow::Borrowed(ft),
 		}
 	}
 }
@@ -128,12 +129,12 @@ pub(crate) struct Graph<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub id: RecordIdKey,
 	pub eg: Dir,
-	pub ft: &'a str,
-	pub fk: RecordIdKey,
+	pub ft: Cow<'a, str>,
+	pub fk: Cow<'a, RecordIdKey>,
 }
 
 impl KVKey for Graph<'_> {
@@ -241,12 +242,12 @@ impl<'a> Graph<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'~',
 			id,
 			eg,
-			ft: &fk.table,
-			fk: fk.key.clone(),
+			ft: Cow::Borrowed(&fk.table),
+			fk: Cow::Borrowed(&fk.key),
 		}
 	}
 }

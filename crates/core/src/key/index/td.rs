@@ -15,7 +15,8 @@
 //! - Enabling efficient text search operations
 
 use roaring::RoaringTreemap;
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
@@ -31,13 +32,13 @@ pub(crate) struct TdRoot<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub term: &'a str,
+	pub term: Cow<'a, str>,
 }
 
 impl KVKey for TdRoot<'_> {
@@ -65,13 +66,13 @@ impl<'a> TdRoot<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'!',
 			_f: b't',
 			_g: b'd',
-			term,
+			term: Cow::Borrowed(term),
 		}
 	}
 }
@@ -84,13 +85,13 @@ pub(crate) struct Td<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub term: &'a str,
+	pub term: Cow<'a, str>,
 	pub id: DocId,
 }
 
@@ -133,13 +134,13 @@ impl<'a> Td<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'!',
 			_f: b't',
 			_g: b'd',
-			term,
+			term: Cow::Borrowed(term),
 			id,
 		}
 	}

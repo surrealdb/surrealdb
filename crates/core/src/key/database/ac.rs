@@ -1,6 +1,7 @@
 //! Stores a DEFINE ACCESS ON DATABASE configuration
 use anyhow::Result;
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{AccessDefinition, DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
@@ -16,7 +17,7 @@ pub(crate) struct Ac<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub ac: &'a str,
+	pub ac: Cow<'a, str>,
 }
 
 impl KVKey for Ac<'_> {
@@ -56,7 +57,7 @@ impl<'a> Ac<'a> {
 			_c: b'!',
 			_d: b'a',
 			_e: b'c',
-			ac,
+			ac: Cow::Borrowed(ac),
 		}
 	}
 }

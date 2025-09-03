@@ -1,6 +1,7 @@
 //! Stores a DEFINE FUNCTION config definition
 use anyhow::Result;
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, FunctionDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
@@ -16,7 +17,7 @@ pub(crate) struct Fc<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub fc: &'a str,
+	pub fc: Cow<'a, str>,
 }
 
 impl KVKey for Fc<'_> {
@@ -56,7 +57,7 @@ impl<'a> Fc<'a> {
 			_c: b'!',
 			_d: b'f',
 			_e: b'n',
-			fc,
+			fc: Cow::Borrowed(fc),
 		}
 	}
 }

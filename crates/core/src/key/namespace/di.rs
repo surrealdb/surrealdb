@@ -1,5 +1,5 @@
 //! Stores a database ID generator state
-use storekey::{Encode, BorrowDecode};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::NamespaceId;
 use crate::idg::u32::U32;

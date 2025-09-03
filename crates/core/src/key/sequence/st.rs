@@ -1,4 +1,5 @@
 //! Stores sequence states
+use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
@@ -17,7 +18,7 @@ pub(crate) struct St<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub sq: &'a str,
+	pub sq: Cow<'a, str>,
 	_f: u8,
 	_g: u8,
 	_h: u8,
@@ -45,7 +46,7 @@ impl<'a> St<'a> {
 			_c: b'!',
 			_d: b's',
 			_e: b'q',
-			sq,
+			sq: Cow::Borrowed(sq),
 			_f: b'!',
 			_g: b's',
 			_h: b't',

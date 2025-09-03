@@ -4,6 +4,7 @@ use std::fmt;
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
+use storekey::{BorrowDecode, Encode};
 
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
@@ -103,5 +104,20 @@ impl fmt::Display for Closure {
 			write!(f, " -> {returns}")?;
 		}
 		write!(f, " {}", self.body)
+	}
+}
+
+impl Encode for Closure {
+	fn encode<W: std::io::Write>(
+		&self,
+		_: &mut storekey::Writer<W>,
+	) -> Result<(), storekey::EncodeError> {
+		Err(storekey::EncodeError::message("Closure cannot be encoded"))
+	}
+}
+
+impl<'de> BorrowDecode<'de> for Closure {
+	fn borrow_decode(_: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
+		Err(storekey::DecodeError::message("Closure cannot be decoded"))
 	}
 }

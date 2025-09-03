@@ -1,6 +1,7 @@
 //! Stores a DEFINE FIELD config definition
 use anyhow::Result;
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{self, DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
@@ -14,11 +15,11 @@ pub(crate) struct Fd<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	_e: u8,
 	_f: u8,
-	pub fd: &'a str,
+	pub fd: Cow<'a, str>,
 }
 
 impl KVKey for Fd<'_> {
@@ -56,11 +57,11 @@ impl<'a> Fd<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'!',
 			_e: b'f',
 			_f: b'd',
-			fd,
+			fd: Cow::Borrowed(fd),
 		}
 	}
 }

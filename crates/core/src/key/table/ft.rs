@@ -1,6 +1,7 @@
 //! Stores a DEFINE TABLE AS config definition
+use std::borrow::Cow;
 use anyhow::Result;
-use storekey::{Encode, BorrowDecode};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::key::category::{Categorise, Category};
@@ -14,11 +15,11 @@ pub(crate) struct Ft<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	_e: u8,
 	_f: u8,
-	pub ft: &'a str,
+	pub ft: Cow<'a, str>,
 }
 
 impl KVKey for Ft<'_> {
@@ -56,11 +57,11 @@ impl<'a> Ft<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'!',
 			_e: b'f',
 			_f: b't',
-			ft,
+			ft: Cow::Borrowed(ft),
 		}
 	}
 }

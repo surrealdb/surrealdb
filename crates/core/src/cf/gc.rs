@@ -97,8 +97,8 @@ pub async fn gc_range(
 	vt: VersionStamp,
 ) -> Result<()> {
 	// Calculate the range
-	let beg = change::prefix_ts(ns, db, VersionStamp::ZERO).encode_key();
-	let end = change::prefix_ts(ns, db, vt).encode_key();
+	let beg = change::prefix_ts(ns, db, VersionStamp::ZERO).encode_key()?;
+	let end = change::prefix_ts(ns, db, vt).encode_key()?;
 	// Trace for debugging
 	trace!(
 		"Performing garbage collection on {ns}:{db} for watermark {vt:?}, between {} and {}",

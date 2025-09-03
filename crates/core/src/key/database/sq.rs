@@ -1,6 +1,7 @@
 //! Stores a DEFINE SEQUENCE config definition
 use anyhow::Result;
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId, SequenceDefinition};
 use crate::key::category::{Categorise, Category};
@@ -16,7 +17,7 @@ pub(crate) struct Sq<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub sq: &'a str,
+	pub sq: Cow<'a, str>,
 }
 
 impl KVKey for Sq<'_> {
@@ -52,7 +53,7 @@ impl<'a> Sq<'a> {
 			_c: b'*', // *
 			_d: b's', // s
 			_e: b'q', // q
-			sq,
+			sq: Cow::Borrowed(sq),
 		}
 	}
 }

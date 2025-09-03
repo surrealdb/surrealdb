@@ -1,6 +1,7 @@
 //! Stores a DEFINE PARAM config definition
 use anyhow::Result;
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId, ParamDefinition};
 use crate::key::category::{Categorise, Category};
@@ -16,7 +17,7 @@ pub(crate) struct Pa<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub pa: &'a str,
+	pub pa: Cow<'a, str>,
 }
 
 impl KVKey for Pa<'_> {
@@ -56,7 +57,7 @@ impl<'a> Pa<'a> {
 			_c: b'!',
 			_d: b'p',
 			_e: b'a',
-			pa,
+			pa: Cow::Borrowed(pa),
 		}
 	}
 }

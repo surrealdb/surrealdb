@@ -1,8 +1,8 @@
 //! Stores Things of an HNSW index
+use std::borrow::Cow;
 use std::fmt::Debug;
-use std::sync::Arc;
 
-use storekey::{Encode, BorrowDecode};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::trees::hnsw::docs::ElementDocs;
@@ -17,13 +17,13 @@ pub(crate) struct Hv<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub vec: Arc<SerializedVector>,
+	pub vec: Cow<'a, SerializedVector>,
 }
 
 impl KVKey for Hv<'_> {
@@ -36,7 +36,7 @@ impl<'a> Hv<'a> {
 		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
-		vec: Arc<SerializedVector>,
+		vec: &'a SerializedVector,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -45,13 +45,13 @@ impl<'a> Hv<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'!',
 			_f: b'h',
 			_g: b'v',
-			vec,
+			vec: Cow::Borrowed(vec),
 		}
 	}
 }
@@ -62,13 +62,8 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Hv::new(
-			NamespaceId(1),
-			DatabaseId(2),
-			"testtb",
-			"testix",
-			Arc::new(SerializedVector::I16(vec![2])),
-		);
+		let binding = SerializedVector::I16(vec![2]);
+		let val = Hv::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", &binding);
 		let enc = Hv::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

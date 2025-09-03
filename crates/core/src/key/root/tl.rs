@@ -1,6 +1,6 @@
 //! Stores a task lease to ensure only one node is running the task at a time
 
-use storekey::{Encode, BorrowDecode};
+use storekey::{BorrowDecode, Encode};
 
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;

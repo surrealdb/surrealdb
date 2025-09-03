@@ -22,6 +22,7 @@
 //! - `tb`: Table identifier
 //! - `ix`: Index identifier
 //! - `nid`: Node UUID (16 bytes, compact serialized)
+use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
@@ -38,9 +39,9 @@ pub(crate) struct Is<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -72,9 +73,9 @@ impl<'a> Is<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'!',
 			_f: b'i',
 			_g: b's',

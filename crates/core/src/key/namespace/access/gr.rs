@@ -1,6 +1,7 @@
 //! Stores a grant associated with an access method
 use anyhow::Result;
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog;
 use crate::catalog::NamespaceId;
@@ -13,11 +14,11 @@ pub(crate) struct Gr<'a> {
 	_a: u8,
 	pub ns: NamespaceId,
 	_b: u8,
-	pub ac: &'a str,
+	pub ac: Cow<'a, str>,
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub gr: &'a str,
+	pub gr: Cow<'a, str>,
 }
 
 impl KVKey for Gr<'_> {
@@ -53,11 +54,11 @@ impl<'a> Gr<'a> {
 			_a: b'*',
 			ns,
 			_b: b'&',
-			ac,
+			ac: Cow::Borrowed(ac),
 			_c: b'!',
 			_d: b'g',
 			_e: b'r',
-			gr,
+			gr: Cow::Borrowed(gr),
 		}
 	}
 }

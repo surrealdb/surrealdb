@@ -1,6 +1,7 @@
 //! Stores a DEFINE USER ON NAMESPACE config definition
 use anyhow::Result;
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{self, NamespaceId};
 use crate::key::category::{Categorise, Category};
@@ -14,7 +15,7 @@ pub(crate) struct Us<'a> {
 	_b: u8,
 	_c: u8,
 	_d: u8,
-	pub user: &'a str,
+	pub user: Cow<'a, str>,
 }
 
 impl KVKey for Us<'_> {
@@ -52,7 +53,7 @@ impl<'a> Us<'a> {
 			_b: b'!',
 			_c: b'u',
 			_d: b's',
-			user,
+			user: Cow::Borrowed(user),
 		}
 	}
 }

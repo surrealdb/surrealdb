@@ -1,5 +1,6 @@
 //! Stores a LIVE SELECT query definition on the table
 use anyhow::Result;
+use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
@@ -20,7 +21,7 @@ pub(crate) struct Lq<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	_e: u8,
 	_f: u8,
@@ -62,7 +63,7 @@ impl<'a> Lq<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'!',
 			_e: b'l',
 			_f: b'q',

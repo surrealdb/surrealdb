@@ -1,6 +1,7 @@
 //! Stores a DEFINE DATABASE config definition
 use anyhow::Result;
-use storekey::{Encode, BorrowDecode};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
@@ -14,7 +15,7 @@ pub(crate) struct DatabaseKey<'key> {
 	_b: u8,
 	_c: u8,
 	_d: u8,
-	pub db: &'key str,
+	pub db: Cow<'key, str>,
 }
 
 impl KVKey for DatabaseKey<'_> {
@@ -52,7 +53,7 @@ impl<'key> DatabaseKey<'key> {
 			_b: b'!',
 			_c: b'd',
 			_d: b'b',
-			db,
+			db: Cow::Borrowed(db),
 		}
 	}
 }
