@@ -1,10 +1,8 @@
+use std::fmt;
 use std::fmt::Write;
-use std::{fmt, str};
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::cnf::IDIOM_RECURSION_LIMIT;
 use crate::ctx::Context;
@@ -16,11 +14,10 @@ use crate::expr::fmt::{Fmt, is_pretty, pretty_indent};
 use crate::expr::idiom::recursion::{
 	self, Recursion, clean_iteration, compute_idiom_recursion, is_final,
 };
-use crate::expr::{Expr, FlowResultExt as _, Graph, Ident, Idiom, Literal, Value};
+use crate::expr::{Expr, FlowResultExt as _, Ident, Idiom, Literal, Lookup, Value};
 use crate::val::{Array, RecordId};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Part {
 	All,
 	Flatten,
@@ -28,7 +25,7 @@ pub enum Part {
 	First,
 	Field(Ident),
 	Where(Expr),
-	Graph(Graph),
+	Lookup(Lookup),
 	Value(Expr),
 	/// TODO: Remove, start and move it out of part to elimite invalid state.
 	Start(Expr),
@@ -54,49 +51,6 @@ impl Part {
 
 	pub(crate) fn is_index(&self) -> bool {
 		matches!(self, Part::Value(Expr::Literal(Literal::Integer(_))) | Part::First | Part::Last)
-	}
-
-	/// Returns a raw string representation of this part without any escaping.
-	pub(crate) fn as_raw_string(&self) -> String {
-		match self {
-			Part::All => "[*]".to_string(),
-			Part::Last => "[$]".to_string(),
-			Part::First => "[0]".to_string(),
-			Part::Start(v) => v.to_string(),
-			Part::Field(v) => format!(".{}", v.as_raw_string()),
-			Part::Flatten => "…".to_string(),
-			Part::Where(v) => format!("[WHERE {v}]"),
-			Part::Graph(v) => v.to_string(),
-			Part::Value(v) => format!("[{v}]"),
-			Part::Method(v, a) => format!(".{v}({})", Fmt::comma_separated(a)),
-			Part::Destructure(v) => {
-				let mut s = String::from(".{");
-				for (i, p) in v.iter().enumerate() {
-					s.push_str(&p.as_raw_string());
-					if i != v.len() - 1 {
-						s.push(',');
-					}
-				}
-				s.push('}');
-				s
-			}
-			Part::Optional => "?".to_string(),
-			Part::Recurse(v, nest, instruction) => {
-				let mut s = format!(".{{{v}");
-				if let Some(instruction) = instruction {
-					s.push_str(&format!("+{instruction}"));
-				}
-				s.push('}');
-
-				if let Some(nest) = nest {
-					s.push_str(&format!("({nest})"));
-				}
-
-				s
-			}
-			Part::Doc => "@".to_string(),
-			Part::RepeatRecurse => ".@".to_string(),
-		}
 	}
 
 	/// Returns the idex if this part would have been `Part::Index(x)` before
@@ -133,7 +87,7 @@ impl Part {
 	/// Returns a yield if an alias is specified
 	pub(crate) fn alias(&self) -> Option<&Idiom> {
 		match self {
-			Part::Graph(v) => v.alias.as_ref(),
+			Part::Lookup(v) => v.alias.as_ref(),
 			_ => None,
 		}
 	}
@@ -183,6 +137,14 @@ impl Part {
 			_ => None,
 		}
 	}
+
+	pub(crate) fn to_raw_string(&self) -> String {
+		match self {
+			Part::Start(v) => v.to_raw_string(),
+			Part::Field(v) => format!(".{}", v.to_raw_string()),
+			_ => self.to_string(),
+		}
+	}
 }
 
 impl fmt::Display for Part {
@@ -195,7 +157,7 @@ impl fmt::Display for Part {
 			Part::Field(v) => write!(f, ".{v}"),
 			Part::Flatten => f.write_str("…"),
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
-			Part::Graph(v) => write!(f, "{v}"),
+			Part::Lookup(v) => write!(f, "{v}"),
 			Part::Value(v) => write!(f, "[{v}]"),
 			Part::Method(v, a) => write!(f, ".{v}({})", Fmt::comma_separated(a)),
 			Part::Destructure(v) => {
@@ -319,7 +281,7 @@ impl<'a> RecursionPlan {
 					.catch_return()?
 				{
 					Value::Object(mut obj) => {
-						obj.insert(field.as_raw_string(), v);
+						obj.insert(field.to_raw_string(), v);
 						Ok(Value::Object(obj))
 					}
 					Value::None => Ok(Value::None),
@@ -445,8 +407,7 @@ impl<'a> NextMethod<'a> for &'a Idiom {
 
 // ------------------------------
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum DestructurePart {
 	All(Ident),
 	Field(Ident),
@@ -475,25 +436,6 @@ impl DestructurePart {
 		}
 	}
 
-	pub(crate) fn as_raw_string(&self) -> String {
-		match self {
-			DestructurePart::All(fd) => format!("{}.*", fd.as_raw_string()),
-			DestructurePart::Field(fd) => fd.as_raw_string(),
-			DestructurePart::Aliased(fd, v) => {
-				format!("{}: {}", fd.as_raw_string(), v.as_raw_string())
-			}
-			DestructurePart::Destructure(fd, d) => {
-				let mut s = fd.as_raw_string();
-				s.push('{');
-				for p in d.iter() {
-					s.push_str(&p.as_raw_string());
-				}
-				s.push('}');
-				s
-			}
-		}
-	}
-
 	pub fn idiom(&self) -> Idiom {
 		Idiom(self.path())
 	}
@@ -514,8 +456,7 @@ impl fmt::Display for DestructurePart {
 
 // ------------------------------
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Recurse {
 	Fixed(u32),
 	Range(Option<u32>, Option<u32>),
@@ -565,8 +506,7 @@ impl fmt::Display for Recurse {
 
 // ------------------------------
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RecurseInstruction {
 	Path {
 		// Do we include the starting point in the paths?

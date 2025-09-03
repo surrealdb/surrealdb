@@ -2,8 +2,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::NamespaceId;
-use crate::expr::statements::define::DefineUserStatement;
+use crate::catalog::{self, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
@@ -19,7 +18,7 @@ pub(crate) struct Us<'a> {
 }
 
 impl KVKey for Us<'_> {
-	type ValueType = DefineUserStatement;
+	type ValueType = catalog::UserDefinition;
 }
 
 pub fn new(ns: NamespaceId, user: &str) -> Us<'_> {

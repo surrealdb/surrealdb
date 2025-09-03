@@ -18,7 +18,7 @@ impl Parser<'_> {
 	/// setting table_as_field.
 	///
 	/// Meant to be used when parsing an expression the first time to avoid
-	/// having the depth limit be lowered unnessacrily
+	/// having the depth limit be lowered unnecessarily.
 	pub async fn parse_expr_start(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		self.table_as_field = true;
 		self.pratt_parse_expr(stk, BindingPower::Base).await
@@ -89,7 +89,7 @@ impl Parser<'_> {
 
 			t!("<") => {
 				let peek = self.peek_whitespace1();
-				if matches!(peek.kind, t!("-") | t!("->") | t!("..")) {
+				if matches!(peek.kind, t!("-") | t!("~") | t!("->") | t!("..")) {
 					return None;
 				}
 				Some(BindingPower::Relation)
@@ -146,7 +146,7 @@ impl Parser<'_> {
 			t!("..") => Some(BindingPower::Range),
 			t!("<") => {
 				let peek = self.peek1();
-				if matches!(peek.kind, t!("-") | t!("->")) {
+				if matches!(peek.kind, t!("-") | t!("~") | t!("->")) {
 					return None;
 				}
 				Some(BindingPower::Prefix)

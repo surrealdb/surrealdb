@@ -2,8 +2,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::NamespaceId;
-use crate::expr::statements::define::DefineAccessStatement;
+use crate::catalog::{AccessDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
@@ -19,7 +18,7 @@ pub(crate) struct Ac<'a> {
 }
 
 impl KVKey for Ac<'_> {
-	type ValueType = DefineAccessStatement;
+	type ValueType = AccessDefinition;
 }
 
 pub fn new(ns: NamespaceId, ac: &str) -> Ac<'_> {

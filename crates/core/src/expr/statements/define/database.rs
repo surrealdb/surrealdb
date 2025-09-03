@@ -1,8 +1,6 @@
 use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use super::DefineKind;
 use crate::catalog::DatabaseDefinition;
@@ -14,11 +12,9 @@ use crate::expr::changefeed::ChangeFeed;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Strand, Value};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineDatabaseStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
@@ -26,8 +22,6 @@ pub struct DefineDatabaseStatement {
 	pub comment: Option<Strand>,
 	pub changefeed: Option<ChangeFeed>,
 }
-
-impl_kv_value_revisioned!(DefineDatabaseStatement);
 
 impl DefineDatabaseStatement {
 	/// Process this type returning a computed simple Value
@@ -68,20 +62,17 @@ impl DefineDatabaseStatement {
 			txn.lock().await.get_next_db_id(nsv.namespace_id).await?
 		};
 
+		let name: String = self.name.to_raw_string();
+
 		// Set the database definition, keyed by namespace name and database name.
-		let catalog_key = crate::key::catalog::db::new(ns, &self.name);
 		let db_def = DatabaseDefinition {
 			namespace_id: nsv.namespace_id,
 			database_id,
-			name: self.name.as_raw_string(),
+			name: name.clone(),
 			comment: self.comment.clone().map(|s| s.into_string()),
 			changefeed: self.changefeed,
 		};
-		txn.set(&catalog_key, &db_def, None).await?;
-
-		// Set the database definition, keyed by namespace ID and database ID.
-		let key = crate::key::namespace::db::new(nsv.namespace_id, database_id);
-		txn.set(&key, &db_def, None).await?;
+		txn.put_db(&nsv.name, db_def).await?;
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {

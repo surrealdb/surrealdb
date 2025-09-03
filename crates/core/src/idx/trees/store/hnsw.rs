@@ -5,8 +5,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use tokio::sync::RwLock;
 
+use crate::catalog::HnswParams;
 use crate::ctx::Context;
-use crate::expr::index::HnswParams;
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::hnsw::index::HnswIndex;
 use crate::kvs::{KVKey, Key};

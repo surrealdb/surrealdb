@@ -14,7 +14,7 @@ use crate::expr::field::{Field, Fields};
 use crate::expr::idiom::recursion::{Recursion, compute_idiom_recursion};
 use crate::expr::part::{FindRecursionPlan, Next, NextMethod, Part, Skip, SplitByRepeatRecurse};
 use crate::expr::statements::select::SelectStatement;
-use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Graph, Idiom, Literal};
+use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Idiom, Literal, Lookup};
 use crate::fnc::idiom;
 use crate::val::{RecordIdKey, Value};
 
@@ -120,12 +120,6 @@ impl Value {
 			}
 			// Get the current value at the path
 			Some(p) => match self {
-				// Compute the refs first, then continue the path
-				// TODO: Reimplement references
-				//Value::Refs(r) => {
-				//	let v = r.compute(ctx, opt, doc).await?;
-				//	stk.run(|stk| v.get(stk, ctx, opt, doc, path)).await
-				//}
 				// Current value at path is a geometry
 				Value::Geometry(v) => match p {
 					// If this is the 'type' field then continue
@@ -169,7 +163,7 @@ impl Value {
 				},
 				// Current value at path is an object
 				Value::Object(v) => match p {
-					Part::Graph(_) => match v.rid() {
+					Part::Lookup(_) => match v.rid() {
 						Some(v) => {
 							let v = Value::RecordId(v);
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path)).await
@@ -217,7 +211,7 @@ impl Value {
 						for p in p.iter() {
 							let idiom = p.idiom();
 							obj.insert(
-								p.field().as_raw_string(),
+								p.field().to_raw_string(),
 								stk.run(|stk| idiom.compute(stk, ctx, opt, Some(&cur_doc))).await?,
 							);
 						}
@@ -355,8 +349,8 @@ impl Value {
 						// If we are chaining graph parts, we need to make sure to flatten the
 						// result
 						let mapped = match (path.first(), path.get(1)) {
-							(Some(Part::Graph(_)), Some(Part::Graph(_))) => mapped.flatten(),
-							(Some(Part::Graph(_)), Some(Part::Where(_))) => mapped.flatten(),
+							(Some(Part::Lookup(_)), Some(Part::Lookup(_))) => mapped.flatten(),
+							(Some(Part::Lookup(_)), Some(Part::Where(_))) => mapped.flatten(),
 							_ => mapped,
 						};
 
@@ -374,7 +368,7 @@ impl Value {
 
 					match p {
 						// This is a graph traversal expression
-						Part::Graph(g) => {
+						Part::Lookup(g) => {
 							let last_part = path.len() == 1;
 							let expr = g.expr.clone().unwrap_or(if last_part {
 								Fields::value_id()
@@ -384,9 +378,9 @@ impl Value {
 
 							let what = Expr::Idiom(Idiom(vec![
 								Part::Start(Expr::Literal(Literal::RecordId(val.into_literal()))),
-								Part::Graph(Graph {
+								Part::Lookup(Lookup {
 									what: g.what.clone(),
-									dir: g.dir.clone(),
+									kind: g.kind.clone(),
 									..Default::default()
 								}),
 							]));
@@ -417,7 +411,7 @@ impl Value {
 								// become [1, 2, 3, 4, 5, 6]. This slice access won't panic
 								// as we have already checked the length of the path.
 								Ok(match path[1] {
-									Part::Graph(_) | Part::Where(_) => res.flatten(),
+									Part::Lookup(_) | Part::Where(_) => res.flatten(),
 									_ => res,
 								})
 							}

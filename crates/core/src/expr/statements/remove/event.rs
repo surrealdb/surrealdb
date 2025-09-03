@@ -1,8 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::catalog::TableDefinition;
@@ -12,8 +10,7 @@ use crate::err::Error;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveEventStatement {
 	pub name: Ident,
 	pub table_name: Ident,
@@ -26,6 +23,7 @@ impl RemoveEventStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
 		// Get the NS and DB
+		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 
 		// Get the transaction
@@ -53,16 +51,16 @@ impl RemoveEventStatement {
 		};
 
 		// Refresh the table cache for events
-		let key = crate::key::database::tb::new(ns, db, &self.table_name);
-		txn.set(
-			&key,
+		txn.put_tb(
+			ns_name,
+			db_name,
 			&TableDefinition {
 				cache_events_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
 			},
-			None,
 		)
 		.await?;
+
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
 			cache.clear_tb(ns, db, &self.table_name);

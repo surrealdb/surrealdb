@@ -1,13 +1,9 @@
 use std::fmt;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-
 use crate::expr::Value;
 use crate::expr::statements::info::InfoStructure;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum Algorithm {
 	EdDSA,
 	Es256,

@@ -21,7 +21,6 @@ pub(crate) mod file;
 pub(crate) mod filter;
 pub(crate) mod fmt;
 pub(crate) mod function;
-pub(crate) mod graph;
 pub(crate) mod group;
 pub(crate) mod ident;
 pub(crate) mod idiom;
@@ -29,6 +28,7 @@ pub(crate) mod kind;
 pub(crate) mod language;
 pub(crate) mod limit;
 pub(crate) mod literal;
+pub(crate) mod lookup;
 pub(crate) mod mock;
 pub(crate) mod model;
 pub(crate) mod operator;
@@ -56,6 +56,8 @@ pub mod statements;
 #[cfg(feature = "arbitrary")]
 pub(crate) mod arbitrary;
 
+use std::fmt::Display;
+
 pub use self::access::{Access, Accesses};
 pub use self::access_type::{AccessType, JwtAccess, RecordAccess};
 pub use self::algorithm::Algorithm;
@@ -75,7 +77,6 @@ pub use self::fetch::{Fetch, Fetchs};
 pub use self::field::{Field, Fields};
 pub use self::filter::Filter;
 pub use self::function::{Function, FunctionCall};
-pub use self::graph::Graph;
 pub use self::group::{Group, Groups};
 pub use self::ident::Ident;
 pub use self::idiom::{Idiom, Idioms};
@@ -83,6 +84,7 @@ pub use self::index::Index;
 pub use self::kind::{Kind, KindLiteral};
 pub use self::limit::Limit;
 pub use self::literal::Literal;
+pub use self::lookup::Lookup;
 pub use self::mock::Mock;
 pub use self::model::Model;
 pub use self::operator::{AssignOperator, BinaryOperator, PostfixOperator, PrefixOperator};
@@ -119,4 +121,13 @@ pub use self::with::With;
 /// Trait for types that can be converted to SQL representation
 pub trait ToSql {
 	fn to_sql(&self) -> String;
+}
+
+impl<T> ToSql for T
+where
+	T: Display,
+{
+	fn to_sql(&self) -> String {
+		self.to_string()
+	}
 }

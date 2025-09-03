@@ -11,7 +11,7 @@
 //! Terminology:
 //! - `/`: Root identifier
 //! - `*`: Path separator
-//! - `!`: Configuration identifier
+//! - `!`: Catalog identifier
 //!
 //! - {ns}: NamespaceId
 //! - {db}: DatabaseId
@@ -31,16 +31,12 @@
 //! crate::key::node::all                /${nd}
 //! crate::key::node::lq                 /${nd}!lq{lq}{ns}{db}
 //!
-//! crate::key::catalog::ns              /?{ns_name} -> NamespaceDefinition
-//! crate::key::catalog::db              /?{ns_name}*{db_name} -> DatabaseDefinition
-//! crate::key::catalog::tb              /?{ns_name}*{db_name}*{tb_name} -> TableDefinition
-//!
 //! crate::key::root::access::all        /&{ac}
 //! crate::key::root::access::gr         /&{ac}!gr{gr}
 //!
 //! crate::key::namespace::all           /*{ns}
 //! crate::key::namespace::ac            /*{ns}!ac{ac}
-//! crate::key::namespace::db            /*{ns}!db{db}
+//! crate::key::namespace::db            /*{ns}!db{db_name} -> DatabaseDefinition
 //! crate::key::namespace::di            /+{ns}!di
 //! crate::key::namespace::lg            /*{ns}!lg{lg}
 //! crate::key::namespace::us            /*{ns}!us{us}
@@ -56,7 +52,7 @@
 //! crate::key::database::ml             /*{ns}*{db}!ml{ml}{vn}
 //! crate::key::database::pa             /*{ns}*{db}!pa{pa}
 //! crate::key::database::sq             /*{ns}*{db}!sq{sq}
-//! crate::key::database::tb             /*{ns}*{db}!tb{tb}
+//! crate::key::database::tb             /*{ns}*{db}!tb{tb_name} -> TableDefinition
 //! crate::key::database::ti             /+{ns}*{db}!ti
 //! crate::key::database::ts             /*{ns}*{db}!ts{ts}
 //! crate::key::database::us             /*{ns}*{db}!us{us}
@@ -101,11 +97,10 @@
 //! crate::key::thing                    /*{ns}*{db}*{tb}*{id}
 //!
 //! crate::key::graph                    /*{ns}*{db}*{tb}~{id}{eg}{ft}{fk}
-//! crate::key::ref                      /*{ns}*{db}*{tb}&{id}{ft}{ff}{fk}
+//! crate::key::ref                      /*{ns}*{db}*{tb}&{id}{ft}{fk}{ff}
 //!
 //! crate::key::sequence::st             /*{ns}*{db}*{tb}*{sq}!st{id}
 //! crate::key::sequence::ba             /*{ns}*{db}*{tb}*{sq}!ba{start}
-pub(crate) mod catalog;
 pub(crate) mod category;
 pub(crate) mod change;
 pub(crate) mod database;

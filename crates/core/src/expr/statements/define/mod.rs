@@ -20,21 +20,20 @@ use std::fmt::{self, Display};
 pub use access::DefineAccessStatement;
 pub use analyzer::DefineAnalyzerStatement;
 use anyhow::Result;
-pub use api::{ApiAction, ApiDefinition, DefineApiStatement};
-pub use bucket::{BucketDefinition, DefineBucketStatement};
+pub use api::{ApiAction, DefineApiStatement};
+pub use bucket::DefineBucketStatement;
 pub use config::DefineConfigStatement;
 pub use database::DefineDatabaseStatement;
 pub use event::DefineEventStatement;
 pub use field::{DefineDefault, DefineFieldStatement};
 pub use function::DefineFunctionStatement;
 pub use index::DefineIndexStatement;
+pub(in crate::expr::statements) use index::run_indexing;
 pub use model::DefineModelStatement;
 pub use namespace::DefineNamespaceStatement;
-pub use param::{DefineParamStatement, DefineParamStore};
+pub use param::DefineParamStatement;
 use reblessive::tree::Stk;
-use revision::revisioned;
 pub use sequence::DefineSequenceStatement;
-use serde::{Deserialize, Serialize};
 pub use table::DefineTableStatement;
 pub use user::DefineUserStatement;
 
@@ -43,8 +42,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::val::Value;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 pub enum DefineKind {
 	#[default]
 	Default,
@@ -52,8 +50,7 @@ pub enum DefineKind {
 	IfNotExists,
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),
 	Database(DefineDatabaseStatement),
@@ -123,22 +120,5 @@ impl Display for DefineStatement {
 			Self::Bucket(v) => Display::fmt(v, f),
 			Self::Sequence(v) => Display::fmt(v, f),
 		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-	use crate::expr::Ident;
-
-	#[test]
-	fn check_define_serialize() {
-		let stm = DefineStatement::Namespace(DefineNamespaceStatement {
-			name: Ident::new("test".to_owned()).unwrap(),
-			..Default::default()
-		});
-		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();
-		assert_eq!(13, enc.len());
 	}
 }

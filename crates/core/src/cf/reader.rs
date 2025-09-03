@@ -7,7 +7,7 @@ use crate::expr::statements::show::ShowSince;
 use crate::key::change;
 #[cfg(debug_assertions)]
 use crate::key::debug::Sprintable;
-use crate::kvs::{KVKey, Transaction};
+use crate::kvs::{KVKey, KVValue, Transaction};
 use crate::vs::VersionStamp;
 
 // Reads the change feed for a specific database or a table,
@@ -67,7 +67,7 @@ pub async fn read(
 			continue;
 		}
 		// Decode the byte array into a vector of operations
-		let tb_muts: TableMutations = revision::from_slice(&v)?;
+		let tb_muts = TableMutations::kv_decode_value(v)?;
 		// Get the timestamp of the changefeed entry
 		match vs {
 			Some(x) => {

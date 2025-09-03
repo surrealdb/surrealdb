@@ -1,25 +1,20 @@
 use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::DefineKind;
-use crate::catalog::TableDefinition;
+use crate::catalog::{EventDefinition, TableDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Ident};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::fmt::Fmt;
 use crate::val::{Strand, Value};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineEventStatement {
 	pub kind: DefineKind,
 	pub name: Ident,
@@ -28,8 +23,6 @@ pub struct DefineEventStatement {
 	pub then: Vec<Expr>,
 	pub comment: Option<Strand>,
 }
-
-impl_kv_value_revisioned!(DefineEventStatement);
 
 impl DefineEventStatement {
 	/// Process this type returning a computed simple Value
@@ -42,6 +35,7 @@ impl DefineEventStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
 		// Get the NS and DB
+		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
@@ -70,22 +64,24 @@ impl DefineEventStatement {
 		let key = crate::key::table::ev::new(ns, db, &self.target_table, &self.name);
 		txn.set(
 			&key,
-			&DefineEventStatement {
-				kind: DefineKind::Default,
-				..self.clone()
+			&EventDefinition {
+				name: self.name.to_raw_string(),
+				target_table: self.target_table.to_raw_string(),
+				when: self.when.clone(),
+				then: self.then.clone(),
+				comment: self.comment.clone().map(|x| x.to_raw_string()),
 			},
 			None,
 		)
 		.await?;
 
 		// Refresh the table cache
-		let tb_def = TableDefinition {
+		let tb = TableDefinition {
 			cache_events_ts: Uuid::now_v7(),
 			..tb.as_ref().clone()
 		};
 
-		let key = crate::key::database::tb::new(ns, db, &self.target_table);
-		txn.set(&key, &tb_def, None).await?;
+		txn.put_tb(ns_name, db_name, &tb).await?;
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
@@ -118,17 +114,5 @@ impl Display for DefineEventStatement {
 			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineEventStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"what".to_string() => self.target_table.structure(),
-			"when".to_string() => self.when.structure(),
-			"then".to_string() => self.then.into_iter().map(|x| x.structure()).collect(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
 	}
 }

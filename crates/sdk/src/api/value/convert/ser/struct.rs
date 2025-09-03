@@ -54,11 +54,11 @@ pub(super) fn to_value(content: Content) -> Result<Value> {
 					.map(Into::into)
 					.map_err(Into::into)
 			}
-			"$surrealdb::private::Closure" => {
-				val::Closure::deserialize(Content::Struct(v).into_deserializer())
-					.map(Into::into)
-					.map_err(Into::into)
-			}
+			// "$surrealdb::private::Closure" => {
+			// 	val::Closure::deserialize(Content::Struct(v).into_deserializer())
+			// 		.map(Into::into)
+			// 		.map_err(Into::into)
+			// }
 			"$surrealdb::private::File" => {
 				val::File::deserialize(Content::Struct(v).into_deserializer())
 					.map(Into::into)
@@ -114,16 +114,16 @@ mod test {
 		assert_eq!("$surrealdb::private::Object", val_to_serde_name(val::Object::default()));
 		assert_eq!("$surrealdb::private::Array", val_to_serde_name(val::Array::default()));
 		assert_eq!("$surrealdb::private::Uuid", val_to_serde_name(val::Uuid::default()));
-		assert_eq!("$surrealdb::private::Datetime", val_to_serde_name(val::Datetime::default()));
+		assert_eq!("$surrealdb::private::Datetime", val_to_serde_name(val::Datetime::now()));
 		assert_eq!("$surrealdb::private::Duration", val_to_serde_name(val::Duration::default()));
-		assert_eq!(
-			"$surrealdb::private::Closure",
-			val_to_serde_name(val::Closure {
-				args: Vec::new(),
-				returns: None,
-				body: crate::core::expr::Expr::Break,
-			})
-		);
+		// assert_eq!(
+		// 	"$surrealdb::private::Closure",
+		// 	val_to_serde_name(val::Closure {
+		// 		args: Vec::new(),
+		// 		returns: None,
+		// 		body: crate::core::expr::Expr::Break,
+		// 	})
+		// );
 		assert_eq!(
 			"$surrealdb::private::File",
 			val_to_serde_name(val::File {

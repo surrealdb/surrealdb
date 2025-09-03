@@ -22,13 +22,14 @@ use std::sync::atomic::AtomicBool;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{
+	DatabaseId, FullTextParams, HnswParams, Index, IndexDefinition, MTreeParams, NamespaceId,
+	SearchParams,
+};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::index::{FullTextParams, HnswParams, MTreeParams, SearchParams};
-use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{Index, Part};
+use crate::expr::Part;
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::ft::search::SearchIndex;
@@ -43,7 +44,7 @@ pub(crate) struct IndexOperation<'a> {
 	opt: &'a Options,
 	ns: NamespaceId,
 	db: DatabaseId,
-	ix: &'a DefineIndexStatement,
+	ix: &'a IndexDefinition,
 	/// The old values (if existing)
 	o: Option<Vec<Value>>,
 	/// The new values (if existing)
@@ -58,7 +59,7 @@ impl<'a> IndexOperation<'a> {
 		opt: &'a Options,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix: &'a DefineIndexStatement,
+		ix: &'a IndexDefinition,
 		o: Option<Vec<Value>>,
 		n: Option<Vec<Value>>,
 		rid: &'a RecordId,
@@ -291,7 +292,7 @@ impl<'a> IndexOperation<'a> {
 struct Indexable(Vec<(Value, bool)>);
 
 impl Indexable {
-	fn new(vals: Vec<Value>, ix: &DefineIndexStatement) -> Self {
+	fn new(vals: Vec<Value>, ix: &IndexDefinition) -> Self {
 		let mut source = Vec::with_capacity(vals.len());
 		for (v, i) in vals.into_iter().zip(ix.cols.iter()) {
 			let f = matches!(i.0.last(), Some(&Part::Flatten));

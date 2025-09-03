@@ -69,16 +69,12 @@ pub(crate) enum Lookup<'a> {
 	Rg(&'a str, &'a str),
 	/// A cache key for a namespace
 	NsByName(&'a str),
-	/// A cache key for a namespace by id.
-	NsById(NamespaceId),
 	/// A cache key for a namespace user
 	Nu(NamespaceId, &'a str),
 	/// A cache key for a namespace access
 	Na(NamespaceId, &'a str),
 	/// A cache key for a namespace access grant
 	Ng(NamespaceId, &'a str, &'a str),
-	/// A cache key for a database by id.
-	DbById(NamespaceId, DatabaseId),
 	/// A cache key for a database by name.
 	DbByName(&'a str, &'a str),
 	/// A cache key for a database user
@@ -153,12 +149,10 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Ru(la), Key::Ru(ka)) => la == ka,
 			(Self::Ra(la), Key::Ra(ka)) => la == ka,
 			(Self::Rg(la, lb), Key::Rg(ka, kb)) => la == ka && lb == kb,
-			(Self::NsById(la), Key::NsById(ka)) => la == ka,
 			(Self::NsByName(la), Key::NsByName(ka)) => la == ka,
 			(Self::Nu(la, lb), Key::Nu(ka, kb)) => la == ka && lb == kb,
 			(Self::Na(la, lb), Key::Na(ka, kb)) => la == ka && lb == kb,
 			(Self::Ng(la, lb, lc), Key::Ng(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
-			(Self::DbById(la, lb), Key::DbById(ka, kb)) => la == ka && lb == kb,
 			(Self::DbByName(la, lb), Key::DbByName(ka, kb)) => la == ka && lb == kb,
 			(Self::Du(la, lb, lc), Key::Du(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Da(la, lb, lc), Key::Da(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
@@ -259,16 +253,10 @@ mod tests {
 	#[case(Lookup::Ru("test"), Key::Ru("test".to_string()), true)]
 	#[case(Lookup::Ra("test"), Key::Ra("test".to_string()), true)]
 	#[case(Lookup::Rg("test", "test"), Key::Rg("test".to_string(), "test".to_string()), true)]
-	#[case(Lookup::NsById(NamespaceId(1)), Key::NsById(NamespaceId(1)), true)]
 	#[case(Lookup::NsByName("test"), Key::NsByName("test".to_string()), true)]
 	#[case(Lookup::Nu(NamespaceId(1), "test"), Key::Nu(NamespaceId(1), "test".to_string()), true)]
 	#[case(Lookup::Na(NamespaceId(1), "test"), Key::Na(NamespaceId(1), "test".to_string()), true)]
 	#[case(Lookup::Ng(NamespaceId(1), "test", "test"), Key::Ng(NamespaceId(1), "test".to_string(), "test".to_string()), true)]
-	#[case(
-		Lookup::DbById(NamespaceId(1), DatabaseId(1)),
-		Key::DbById(NamespaceId(1), DatabaseId(1)),
-		true
-	)]
 	#[case(Lookup::DbByName("test", "test"), Key::DbByName("test".to_string(), "test".to_string()), true)]
 	#[case(Lookup::Du(NamespaceId(1), DatabaseId(1), "test"), Key::Du(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::Da(NamespaceId(1), DatabaseId(1), "test"), Key::Da(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]

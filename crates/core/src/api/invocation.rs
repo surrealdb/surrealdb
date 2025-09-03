@@ -9,20 +9,19 @@ use reblessive::tree::Stk;
 use super::body::ApiBody;
 use super::context::InvocationContext;
 use super::convert;
-use super::method::Method;
 use super::middleware::invoke;
 use super::response::{ApiResponse, ResponseInstruction};
+use crate::catalog::{ApiDefinition, ApiMethod};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Session};
 use crate::expr::FlowResultExt as _;
-use crate::expr::statements::define::ApiDefinition;
 use crate::kvs::{Datastore, Transaction};
 use crate::val::{Object, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ApiInvocation {
 	pub params: Object,
-	pub method: Method,
+	pub method: ApiMethod,
 	pub query: BTreeMap<String, String>,
 	pub headers: HeaderMap,
 }

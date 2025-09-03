@@ -30,7 +30,7 @@ permissions:
   contents: read
 
 env:
-  RUST_VERSION: 1.87.0
+  RUST_VERSION: "1.87"
 
 jobs:
   # ----------------------------------------
@@ -262,6 +262,7 @@ jobs:
     uses: ./.github/workflows/build.yml
     with:
       name: ci
+      extra-features: storage-mem,allocator,allocation-tracking,scripting,http,http-compression,jwks,ml
       # Only upload if not a pull request.
       upload: ${{ github.event_name != 'pull_request' }}
       # Only compile with --release when not a pull request.

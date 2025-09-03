@@ -22,7 +22,7 @@ pub enum Index {
 	FullText(FullTextParams),
 }
 
-impl From<Index> for crate::expr::index::Index {
+impl From<Index> for crate::catalog::Index {
 	fn from(v: Index) -> Self {
 		match v {
 			Index::Idx => Self::Idx,
@@ -35,15 +35,15 @@ impl From<Index> for crate::expr::index::Index {
 	}
 }
 
-impl From<crate::expr::index::Index> for Index {
-	fn from(v: crate::expr::index::Index) -> Self {
+impl From<crate::catalog::Index> for Index {
+	fn from(v: crate::catalog::Index) -> Self {
 		match v {
-			crate::expr::index::Index::Idx => Self::Idx,
-			crate::expr::index::Index::Uniq => Self::Uniq,
-			crate::expr::index::Index::Search(p) => Self::Search(p.into()),
-			crate::expr::index::Index::MTree(p) => Self::MTree(p.into()),
-			crate::expr::index::Index::Hnsw(p) => Self::Hnsw(p.into()),
-			crate::expr::index::Index::FullText(p) => Self::FullText(p.into()),
+			crate::catalog::Index::Idx => Self::Idx,
+			crate::catalog::Index::Uniq => Self::Uniq,
+			crate::catalog::Index::Search(p) => Self::Search(p.into()),
+			crate::catalog::Index::MTree(p) => Self::MTree(p.into()),
+			crate::catalog::Index::Hnsw(p) => Self::Hnsw(p.into()),
+			crate::catalog::Index::FullText(p) => Self::FullText(p.into()),
 		}
 	}
 }
@@ -64,10 +64,10 @@ pub struct SearchParams {
 	pub terms_cache: u32,
 }
 
-impl From<SearchParams> for crate::expr::index::SearchParams {
+impl From<SearchParams> for crate::catalog::SearchParams {
 	fn from(v: SearchParams) -> Self {
-		crate::expr::index::SearchParams {
-			az: v.az.into(),
+		crate::catalog::SearchParams {
+			az: v.az.clone().into_string(),
 			hl: v.hl,
 			sc: v.sc.into(),
 			doc_ids_order: v.doc_ids_order,
@@ -81,10 +81,10 @@ impl From<SearchParams> for crate::expr::index::SearchParams {
 		}
 	}
 }
-impl From<crate::expr::index::SearchParams> for SearchParams {
-	fn from(v: crate::expr::index::SearchParams) -> Self {
+impl From<crate::catalog::SearchParams> for SearchParams {
+	fn from(v: crate::catalog::SearchParams) -> Self {
 		Self {
-			az: v.az.into(),
+			az: unsafe { Ident::new_unchecked(v.az) },
 			hl: v.hl,
 			sc: v.sc.into(),
 			doc_ids_order: v.doc_ids_order,
@@ -107,19 +107,19 @@ pub struct FullTextParams {
 	pub sc: Scoring,
 }
 
-impl From<FullTextParams> for crate::expr::index::FullTextParams {
+impl From<FullTextParams> for crate::catalog::FullTextParams {
 	fn from(v: FullTextParams) -> Self {
-		crate::expr::index::FullTextParams {
-			analyzer: v.az.into(),
+		crate::catalog::FullTextParams {
+			analyzer: v.az.clone().into_string(),
 			highlight: v.hl,
 			scoring: v.sc.into(),
 		}
 	}
 }
-impl From<crate::expr::index::FullTextParams> for FullTextParams {
-	fn from(v: crate::expr::index::FullTextParams) -> Self {
+impl From<crate::catalog::FullTextParams> for FullTextParams {
+	fn from(v: crate::catalog::FullTextParams) -> Self {
 		Self {
-			az: v.analyzer.into(),
+			az: unsafe { Ident::new_unchecked(v.analyzer) },
 			hl: v.highlight,
 			sc: v.scoring.into(),
 		}
@@ -138,9 +138,9 @@ pub struct MTreeParams {
 	pub mtree_cache: u32,
 }
 
-impl From<MTreeParams> for crate::expr::index::MTreeParams {
+impl From<MTreeParams> for crate::catalog::MTreeParams {
 	fn from(v: MTreeParams) -> Self {
-		crate::expr::index::MTreeParams {
+		crate::catalog::MTreeParams {
 			dimension: v.dimension,
 			distance: v.distance.into(),
 			vector_type: v.vector_type.into(),
@@ -152,8 +152,8 @@ impl From<MTreeParams> for crate::expr::index::MTreeParams {
 	}
 }
 
-impl From<crate::expr::index::MTreeParams> for MTreeParams {
-	fn from(v: crate::expr::index::MTreeParams) -> Self {
+impl From<crate::catalog::MTreeParams> for MTreeParams {
+	fn from(v: crate::catalog::MTreeParams) -> Self {
 		Self {
 			dimension: v.dimension,
 			distance: v.distance.into(),
@@ -180,9 +180,9 @@ pub struct HnswParams {
 	pub ml: Number,
 }
 
-impl From<HnswParams> for crate::expr::index::HnswParams {
+impl From<HnswParams> for crate::catalog::HnswParams {
 	fn from(v: HnswParams) -> Self {
-		crate::expr::index::HnswParams {
+		crate::catalog::HnswParams {
 			dimension: v.dimension,
 			distance: v.distance.into(),
 			vector_type: v.vector_type.into(),
@@ -196,8 +196,8 @@ impl From<HnswParams> for crate::expr::index::HnswParams {
 	}
 }
 
-impl From<crate::expr::index::HnswParams> for HnswParams {
-	fn from(v: crate::expr::index::HnswParams) -> Self {
+impl From<crate::catalog::HnswParams> for HnswParams {
+	fn from(v: crate::catalog::HnswParams) -> Self {
 		Self {
 			dimension: v.dimension,
 			distance: v.distance.into(),
@@ -241,32 +241,32 @@ impl Display for Distance {
 	}
 }
 
-impl From<Distance> for crate::expr::index::Distance {
+impl From<Distance> for crate::catalog::Distance {
 	fn from(v: Distance) -> Self {
 		match v {
-			Distance::Chebyshev => crate::expr::index::Distance::Chebyshev,
-			Distance::Cosine => crate::expr::index::Distance::Cosine,
-			Distance::Euclidean => crate::expr::index::Distance::Euclidean,
-			Distance::Hamming => crate::expr::index::Distance::Hamming,
-			Distance::Jaccard => crate::expr::index::Distance::Jaccard,
-			Distance::Manhattan => crate::expr::index::Distance::Manhattan,
-			Distance::Minkowski(n) => crate::expr::index::Distance::Minkowski(n),
-			Distance::Pearson => crate::expr::index::Distance::Pearson,
+			Distance::Chebyshev => crate::catalog::Distance::Chebyshev,
+			Distance::Cosine => crate::catalog::Distance::Cosine,
+			Distance::Euclidean => crate::catalog::Distance::Euclidean,
+			Distance::Hamming => crate::catalog::Distance::Hamming,
+			Distance::Jaccard => crate::catalog::Distance::Jaccard,
+			Distance::Manhattan => crate::catalog::Distance::Manhattan,
+			Distance::Minkowski(n) => crate::catalog::Distance::Minkowski(n),
+			Distance::Pearson => crate::catalog::Distance::Pearson,
 		}
 	}
 }
 
-impl From<crate::expr::index::Distance> for Distance {
-	fn from(v: crate::expr::index::Distance) -> Self {
+impl From<crate::catalog::Distance> for Distance {
+	fn from(v: crate::catalog::Distance) -> Self {
 		match v {
-			crate::expr::index::Distance::Chebyshev => Self::Chebyshev,
-			crate::expr::index::Distance::Cosine => Self::Cosine,
-			crate::expr::index::Distance::Euclidean => Self::Euclidean,
-			crate::expr::index::Distance::Hamming => Self::Hamming,
-			crate::expr::index::Distance::Jaccard => Self::Jaccard,
-			crate::expr::index::Distance::Manhattan => Self::Manhattan,
-			crate::expr::index::Distance::Minkowski(n) => Self::Minkowski(n),
-			crate::expr::index::Distance::Pearson => Self::Pearson,
+			crate::catalog::Distance::Chebyshev => Self::Chebyshev,
+			crate::catalog::Distance::Cosine => Self::Cosine,
+			crate::catalog::Distance::Euclidean => Self::Euclidean,
+			crate::catalog::Distance::Hamming => Self::Hamming,
+			crate::catalog::Distance::Jaccard => Self::Jaccard,
+			crate::catalog::Distance::Manhattan => Self::Manhattan,
+			crate::catalog::Distance::Minkowski(n) => Self::Minkowski(n),
+			crate::catalog::Distance::Pearson => Self::Pearson,
 		}
 	}
 }
@@ -357,7 +357,7 @@ impl Display for Index {
 	}
 }
 
-impl From<VectorType> for crate::expr::index::VectorType {
+impl From<VectorType> for crate::catalog::VectorType {
 	fn from(v: VectorType) -> Self {
 		match v {
 			VectorType::F64 => Self::F64,
@@ -369,14 +369,14 @@ impl From<VectorType> for crate::expr::index::VectorType {
 	}
 }
 
-impl From<crate::expr::index::VectorType> for VectorType {
-	fn from(v: crate::expr::index::VectorType) -> Self {
+impl From<crate::catalog::VectorType> for VectorType {
+	fn from(v: crate::catalog::VectorType) -> Self {
 		match v {
-			crate::expr::index::VectorType::F64 => Self::F64,
-			crate::expr::index::VectorType::F32 => Self::F32,
-			crate::expr::index::VectorType::I64 => Self::I64,
-			crate::expr::index::VectorType::I32 => Self::I32,
-			crate::expr::index::VectorType::I16 => Self::I16,
+			crate::catalog::VectorType::F64 => Self::F64,
+			crate::catalog::VectorType::F32 => Self::F32,
+			crate::catalog::VectorType::I64 => Self::I64,
+			crate::catalog::VectorType::I32 => Self::I32,
+			crate::catalog::VectorType::I16 => Self::I16,
 		}
 	}
 }

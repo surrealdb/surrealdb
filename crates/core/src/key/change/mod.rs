@@ -27,15 +27,31 @@ impl KVKey for Cf<'_> {
 	type ValueType = TableMutations;
 }
 
-impl Cf<'_> {
-	pub fn decode_key(k: &[u8]) -> Result<Cf<'_>> {
-		Ok(storekey::deserialize(k)?)
+impl Categorise for Cf<'_> {
+	fn categorise(&self) -> Category {
+		Category::ChangeFeed
 	}
 }
 
-#[expect(unused)]
-pub fn new(ns: NamespaceId, db: DatabaseId, ts: u64, tb: &str) -> Cf<'_> {
-	Cf::new(ns, db, VersionStamp::from_u64(ts), tb)
+impl<'a> Cf<'a> {
+	#[cfg(test)]
+	pub fn new(ns: NamespaceId, db: DatabaseId, vs: VersionStamp, tb: &'a str) -> Self {
+		Cf {
+			__: b'/',
+			_a: b'*',
+			ns,
+			_b: b'*',
+			db,
+			_d: b'#',
+			vs,
+			_c: b'*',
+			tb,
+		}
+	}
+
+	pub fn decode_key(k: &[u8]) -> Result<Cf<'_>> {
+		Ok(storekey::deserialize(k)?)
+	}
 }
 
 pub fn versionstamped_key_prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
@@ -139,28 +155,6 @@ pub fn prefix(ns: NamespaceId, db: DatabaseId) -> DatabaseChangeFeedRange {
 /// Returns the suffix for the whole database change feeds
 pub fn suffix(ns: NamespaceId, db: DatabaseId) -> DatabaseChangeFeedRange {
 	DatabaseChangeFeedRange::new_suffix(ns, db)
-}
-
-impl Categorise for Cf<'_> {
-	fn categorise(&self) -> Category {
-		Category::ChangeFeed
-	}
-}
-
-impl<'a> Cf<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, vs: VersionStamp, tb: &'a str) -> Self {
-		Cf {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_d: b'#',
-			vs,
-			_c: b'*',
-			tb,
-		}
-	}
 }
 
 #[cfg(test)]

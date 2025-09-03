@@ -627,7 +627,6 @@ impl fmt::Display for Value {
 			Value::RecordId(v) => write!(f, "{v}"),
 			Value::Uuid(v) => write!(f, "{v}"),
 			Value::Closure(v) => write!(f, "{v}"),
-			//Value::Refs(v) => write!(f, "{v}"),
 			Value::File(v) => write!(f, "{v}"),
 			Value::Table(v) => write!(f, "{v}"),
 		}
@@ -658,7 +657,7 @@ impl TryAdd for Value {
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_add(v)?),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),
 			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_add(w)?),
-			(Self::Array(v), Self::Array(w)) => Self::Array(v.add(w)),
+			(Self::Array(v), Self::Array(w)) => Self::Array(v.concat(w)),
 			(Self::Object(v), Self::Object(w)) => Self::Object(v.add(w)),
 			(v, w) => bail!(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
 		})
@@ -903,7 +902,6 @@ subtypes! {
 	Regex(Regex) => (is_regex,as_regex,into_regex),
 	Range(Box<Range>) => (is_range,as_range,into_range),
 	Closure(Box<Closure>) => (is_closure,as_closure,into_closure),
-	//Refs(Refs) => (is_refs,as_refs,into_refs),
 	File(File) => (is_file,as_file,into_file),
 }
 
