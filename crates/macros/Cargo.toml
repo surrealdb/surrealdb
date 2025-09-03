@@ -1,14 +1,14 @@
 [package]
 name = "surrealdb-macros"
-publish = false
-edition = "2024"
-version = "0.1.0"
-authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
+publish = true
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
 description = "Private implementation of procedural macros for surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb/tree/main/crates/macros"
 repository = "https://github.com/surrealdb/surrealdb/tree/main/crates/macros"
 keywords = ["surrealdb", "surreal", "database", "derive"]
-license = "MIT"
+license-file.workspace = true
 
 [lib]
 proc-macro = true

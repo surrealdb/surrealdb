@@ -1,6 +1,25 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{DeriveInput, parse_macro_input};
+use syn::{DeriveInput, Error, Item, parse_macro_input};
+mod wasm_async_trait;
+
+/// A proc macro that automatically applies the correct async_trait attribute
+/// for WASM and non-WASM targets on both traits and implementations.
+#[proc_macro_attribute]
+pub fn wasm_async_trait(_args: TokenStream, input: TokenStream) -> TokenStream {
+	let item = parse_macro_input!(input as Item);
+
+	match item {
+		Item::Trait(trait_item) => wasm_async_trait::handle_trait(trait_item),
+		Item::Impl(impl_item) => wasm_async_trait::handle_impl(impl_item),
+		_ => Error::new_spanned(
+			&item,
+			"wasm_async_trait can only be applied to traits or impl blocks",
+		)
+		.to_compile_error()
+		.into(),
+	}
+}
 
 #[proc_macro_derive(Store)]
 pub fn store(input: TokenStream) -> TokenStream {

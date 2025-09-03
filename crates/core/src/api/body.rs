@@ -1,12 +1,7 @@
-#[cfg(not(target_family = "wasm"))]
 use std::fmt::Display;
 
-#[cfg(not(target_family = "wasm"))]
 use bytes::Bytes;
-#[cfg(not(target_family = "wasm"))]
-use futures::Stream;
-#[cfg(not(target_family = "wasm"))]
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use http::header::CONTENT_TYPE;
 
 use super::context::InvocationContext;
@@ -19,13 +14,11 @@ use crate::val;
 use crate::val::Value;
 
 pub enum ApiBody {
-	#[cfg(not(target_family = "wasm"))]
 	Stream(Box<dyn Stream<Item = Result<Bytes, Box<dyn Display + Send + Sync>>> + Send + Unpin>),
 	Native(Value),
 }
 
 impl ApiBody {
-	#[cfg(not(target_family = "wasm"))]
 	pub fn from_stream<S, E>(stream: S) -> Self
 	where
 		S: Stream<Item = Result<Bytes, E>> + Unpin + Send + 'static,
@@ -78,10 +71,6 @@ impl ApiBody {
 		ctx: &InvocationContext,
 		invocation: &ApiInvocation,
 	) -> Result<Value, Error> {
-		#[cfg_attr(
-			target_family = "wasm",
-			expect(irrefutable_let_patterns, reason = "For WASM this is the only pattern.")
-		)]
 		if let ApiBody::Native(value) = self {
 			let max = ctx.request_body_max.unwrap_or(Bytesize::MAX);
 			let size = std::mem::size_of_val(&value);

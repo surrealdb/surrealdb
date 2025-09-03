@@ -4,7 +4,6 @@
 use std::ops::Range;
 
 use anyhow::{Context, Result, ensure};
-use async_trait::async_trait;
 
 use super::tr::Check;
 use super::util;
@@ -56,8 +55,7 @@ mod requirements {
 /// All keys and values are represented as byte arrays, encoding is handled
 /// by [`super::tr::Transactor`].
 #[allow(dead_code, reason = "Not used when none of the storage backends are enabled.")]
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
+#[surrealdb_macros::wasm_async_trait]
 pub trait Transaction: requirements::TransactionRequirements {
 	/// Returns if the transaction supports scanning in reverse.
 	fn supports_reverse_scan(&self) -> bool;

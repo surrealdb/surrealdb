@@ -4,9 +4,9 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use anyhow::Result;
-use async_trait::async_trait;
 use futures::lock::{Mutex, MutexGuard};
 use futures::stream::Stream;
+use surrealdb_macros::wasm_async_trait;
 use uuid::Uuid;
 
 use super::batch::Batch;
@@ -484,7 +484,7 @@ impl Transaction {
 	}
 }
 
-#[async_trait]
+#[wasm_async_trait]
 impl NodeProvider for Transaction {
 	/// Retrieve all nodes belonging to this cluster.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
@@ -524,7 +524,7 @@ impl NodeProvider for Transaction {
 	}
 }
 
-#[async_trait]
+#[wasm_async_trait]
 impl NamespaceProvider for Transaction {
 	/// Retrieve all namespace definitions in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
@@ -590,7 +590,7 @@ impl NamespaceProvider for Transaction {
 	}
 }
 
-#[async_trait]
+#[wasm_async_trait]
 impl DatabaseProvider for Transaction {
 	/// Retrieve all database definitions for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
@@ -1033,7 +1033,7 @@ impl DatabaseProvider for Transaction {
 	}
 }
 
-#[async_trait]
+#[wasm_async_trait]
 impl TableProvider for Transaction {
 	/// Retrieve all table definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
@@ -1568,7 +1568,7 @@ impl TableProvider for Transaction {
 	}
 }
 
-#[async_trait]
+#[wasm_async_trait]
 impl UserProvider for Transaction {
 	/// Retrieve all ROOT level users in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
@@ -1720,7 +1720,7 @@ impl UserProvider for Transaction {
 	}
 }
 
-#[async_trait]
+#[wasm_async_trait]
 impl AuthorisationProvider for Transaction {
 	/// Retrieve all ROOT level accesses in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
@@ -2018,7 +2018,7 @@ impl AuthorisationProvider for Transaction {
 	}
 }
 
-#[async_trait]
+#[wasm_async_trait]
 impl ApiProvider for Transaction {
 	/// Retrieve all api definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
@@ -2073,7 +2073,7 @@ impl ApiProvider for Transaction {
 	}
 }
 
-#[async_trait]
+#[wasm_async_trait]
 impl BucketProvider for Transaction {
 	/// Retrieve all analyzer definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]

@@ -5868,6 +5868,7 @@ dependencies = [
  "storekey",
  "strsim",
  "subtle",
+ "surrealdb-macros",
  "surrealdb-protocol",
  "surrealdb-tikv-client",
  "surrealdb-types",
@@ -5898,7 +5899,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-macros"
-version = "0.1.0"
+version = "3.0.0"
 dependencies = [
  "quote",
  "revision 0.11.0",

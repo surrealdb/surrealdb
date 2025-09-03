@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use async_trait::async_trait;
+use surrealdb_macros::wasm_async_trait;
 use uuid::Uuid;
 
 use crate::catalog;
@@ -19,7 +19,7 @@ use crate::val::RecordIdKey;
 use crate::val::record::Record;
 
 /// SurrealDB Node provider.
-#[async_trait]
+#[wasm_async_trait]
 pub trait NodeProvider {
 	/// Retrieve all node definitions in a datastore.
 	async fn all_nodes(&self) -> Result<Arc<[Node]>>;
@@ -29,7 +29,7 @@ pub trait NodeProvider {
 }
 
 /// Namespace data access provider.
-#[async_trait]
+#[wasm_async_trait]
 pub trait NamespaceProvider {
 	/// Retrieve all namespace definitions in a datastore.
 	async fn all_ns(&self) -> Result<Arc<[NamespaceDefinition]>>;
@@ -81,7 +81,7 @@ pub trait NamespaceProvider {
 }
 
 /// Database data access provider.
-#[async_trait]
+#[wasm_async_trait]
 pub trait DatabaseProvider: NamespaceProvider {
 	/// Retrieve all database definitions in a namespace.
 	async fn all_db(&self, ns: NamespaceId) -> Result<Arc<[DatabaseDefinition]>>;
@@ -246,7 +246,7 @@ pub trait DatabaseProvider: NamespaceProvider {
 }
 
 /// Table data access provider.
-#[async_trait]
+#[wasm_async_trait]
 pub trait TableProvider {
 	/// Retrieve all table definitions for a specific database.
 	async fn all_tb(
@@ -473,7 +473,7 @@ pub trait TableProvider {
 }
 
 /// User data access provider.
-#[async_trait]
+#[wasm_async_trait]
 pub trait UserProvider {
 	/// Retrieve all user definitions in a namespace.
 	async fn all_root_users(&self) -> Result<Arc<[UserDefinition]>>;
@@ -550,7 +550,7 @@ pub trait UserProvider {
 	}
 }
 
-#[async_trait]
+#[wasm_async_trait]
 pub trait AuthorisationProvider {
 	/// Retrieve all ROOT level accesses in a datastore.
 	async fn all_root_accesses(&self) -> Result<Arc<[catalog::AccessDefinition]>>;
@@ -646,7 +646,7 @@ pub trait AuthorisationProvider {
 }
 
 /// API data access provider.
-#[async_trait]
+#[wasm_async_trait]
 pub trait ApiProvider {
 	/// Retrieve all api definitions for a specific database.
 	async fn all_db_apis(
@@ -673,7 +673,7 @@ pub trait ApiProvider {
 }
 
 /// Bucket data access provider.
-#[async_trait]
+#[wasm_async_trait]
 pub trait BucketProvider {
 	/// Retrieve all bucket definitions for a specific database.
 	async fn all_db_buckets(
@@ -707,7 +707,7 @@ pub trait BucketProvider {
 }
 
 /// The catalog provider is a trait that provides access to the catalog of the datastore.
-#[async_trait]
+#[wasm_async_trait]
 pub trait CatalogProvider:
 	NodeProvider
 	+ NamespaceProvider
