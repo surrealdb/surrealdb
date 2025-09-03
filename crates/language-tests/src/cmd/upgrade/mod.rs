@@ -15,7 +15,7 @@ use clap::ArgMatches;
 use process::SurrealProcess;
 use protocol::{ProxyObject, ProxyValue};
 use semver::Version;
-use surrealdb_core::kvs::{Datastore, LockType, TransactionType};
+use surrealdb_core::kvs::Datastore;
 use tokio::task::JoinSet;
 
 use crate::{

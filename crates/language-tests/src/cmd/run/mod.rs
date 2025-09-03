@@ -17,7 +17,7 @@ use std::{io, mem, str, thread, time::Duration};
 use surrealdb_core::{
 	dbs::{capabilities::ExperimentalTarget, Session},
 	env::VERSION,
-	kvs::{Datastore, LockType, TransactionType},
+	kvs::Datastore,
 	syn,
 };
 use tokio::{
