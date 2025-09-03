@@ -100,7 +100,7 @@ impl AlterTableStatement {
 		}
 
 		// Set the table definition
-		txn.put_tb(ns_name, db_name, dt).await?;
+		txn.put_tb(ns_name, db_name, &dt).await?;
 
 		// Clear the cache
 		txn.clear_cache();

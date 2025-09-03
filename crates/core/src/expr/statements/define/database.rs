@@ -62,20 +62,17 @@ impl DefineDatabaseStatement {
 			txn.lock().await.get_next_db_id(nsv.namespace_id).await?
 		};
 
+		let name: String = self.name.to_raw_string();
+
 		// Set the database definition, keyed by namespace name and database name.
-		let catalog_key = crate::key::catalog::db::new(ns, &self.name);
 		let db_def = DatabaseDefinition {
 			namespace_id: nsv.namespace_id,
 			database_id,
-			name: self.name.to_raw_string(),
+			name: name.clone(),
 			comment: self.comment.clone().map(|s| s.into_string()),
 			changefeed: self.changefeed,
 		};
-		txn.set(&catalog_key, &db_def, None).await?;
-
-		// Set the database definition, keyed by namespace ID and database ID.
-		let key = crate::key::namespace::db::new(nsv.namespace_id, database_id);
-		txn.set(&key, &db_def, None).await?;
+		txn.put_db(&nsv.name, db_def).await?;
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {

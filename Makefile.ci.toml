@@ -250,6 +250,7 @@ args = [
     "storage-mem,scripting,http,jwks",
     "--workspace",
     "--",
+    "cf::writer::tests",
     "--skip",
     "api_integration",
     "--skip",

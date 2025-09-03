@@ -2,27 +2,27 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub(crate) struct NsDbRoot {
+pub(crate) struct DatabaseKey<'key> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
 	_b: u8,
 	_c: u8,
 	_d: u8,
-	pub db: DatabaseId,
+	pub db: &'key str,
 }
 
-impl KVKey for NsDbRoot {
+impl KVKey for DatabaseKey<'_> {
 	type ValueType = DatabaseDefinition;
 }
 
-pub fn new(ns: NamespaceId, db: DatabaseId) -> NsDbRoot {
-	NsDbRoot::new(ns, db)
+pub fn new(ns: NamespaceId, db: &str) -> DatabaseKey {
+	DatabaseKey::new(ns, db)
 }
 
 pub fn prefix(ns: NamespaceId) -> Result<Vec<u8>> {
@@ -37,14 +37,14 @@ pub fn suffix(ns: NamespaceId) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for NsDbRoot {
+impl Categorise for DatabaseKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseAlias
 	}
 }
 
-impl NsDbRoot {
-	pub fn new(ns: NamespaceId, db: DatabaseId) -> Self {
+impl<'key> DatabaseKey<'key> {
+	pub fn new(ns: NamespaceId, db: &'key str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -64,12 +64,12 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = NsDbRoot::new(
+		let val = DatabaseKey::new(
 			NamespaceId(1),
-			DatabaseId(2),
+			"test",
 		);
-		let enc = NsDbRoot::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01!db\x00\x00\x00\x02");
+		let enc = DatabaseKey::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01!dbtest\0");
 	}
 
 	#[test]

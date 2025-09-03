@@ -60,7 +60,7 @@ impl RemoveIndexStatement {
 		txn.put_tb(
 			ns_name,
 			db_name,
-			TableDefinition {
+			&TableDefinition {
 				cache_indexes_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
 			},

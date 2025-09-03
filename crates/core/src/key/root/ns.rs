@@ -1,25 +1,25 @@
 //! Stores a DEFINE NAMESPACE config definition
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::{NamespaceDefinition, NamespaceId};
+use crate::catalog::NamespaceDefinition;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub(crate) struct Ns {
+pub(crate) struct NamespaceKey<'key> {
 	__: u8,
 	_a: u8,
 	_b: u8,
 	_c: u8,
-	pub ns: NamespaceId,
+	pub ns: &'key str,
 }
 
-impl KVKey for Ns {
+impl KVKey for NamespaceKey<'_> {
 	type ValueType = NamespaceDefinition;
 }
 
-pub fn new(ns: NamespaceId) -> Ns {
-	Ns::new(ns)
+pub fn new(ns: &str) -> NamespaceKey<'_> {
+	NamespaceKey::new(ns)
 }
 
 pub fn prefix() -> Vec<u8> {
@@ -34,14 +34,14 @@ pub fn suffix() -> Vec<u8> {
 	k
 }
 
-impl Categorise for Ns {
+impl Categorise for NamespaceKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::Namespace
 	}
 }
 
-impl Ns {
-	pub fn new(ns: NamespaceId) -> Self {
+impl<'key> NamespaceKey<'key> {
+	pub fn new(ns: &'key str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'!',
@@ -58,8 +58,8 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Ns::new(NamespaceId(1));
-		let enc = Ns::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/!ns\x00\x00\x00\x01");
+		let val = NamespaceKey::new("test");
+		let enc = NamespaceKey::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/!nstest\0");
 	}
 }

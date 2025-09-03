@@ -1108,32 +1108,12 @@ impl Transaction {
 		}
 	}
 
-	/// Retrieve a specific namespace definition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_ns(&self, ns: NamespaceId) -> Result<Option<Arc<NamespaceDefinition>>> {
-		let qey = cache::tx::Lookup::NsById(ns);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Some),
-			None => {
-				let key = crate::key::root::ns::new(ns);
-				let Some(ns_def) = self.get(&key, None).await? else {
-					return Ok(None);
-				};
-
-				let ns_def = Arc::new(ns_def);
-				let entr = cache::tx::Entry::Any(ns_def.clone());
-				self.cache.insert(qey, entr);
-				Ok(Some(ns_def))
-			}
-		}
-	}
-
 	pub async fn get_ns_by_name(&self, ns: &str) -> Result<Option<Arc<NamespaceDefinition>>> {
 		let qey = cache::tx::Lookup::NsByName(ns);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Some),
 			None => {
-				let key = crate::key::catalog::ns::new(ns);
+				let key = crate::key::root::ns::new(ns);
 				let Some(ns) = self.get(&key, None).await? else {
 					return Ok(None);
 				};
@@ -1156,19 +1136,13 @@ impl Transaction {
 	}
 
 	pub(crate) async fn put_ns(&self, ns: NamespaceDefinition) -> Result<Arc<NamespaceDefinition>> {
-		let key = crate::key::catalog::ns::new(&ns.name);
-		self.put(&key, &ns, None).await?;
-
-		let key = crate::key::root::ns::new(ns.namespace_id);
-		self.put(&key, &ns, None).await?;
+		let key = crate::key::root::ns::new(&ns.name);
+		self.set(&key, &ns, None).await?;
 
 		// Populate cache
 		let cached_ns = Arc::new(ns.clone());
 
-		let qey = cache::tx::Lookup::NsById(ns.namespace_id);
 		let entry = cache::tx::Entry::Any(Arc::clone(&cached_ns) as Arc<dyn Any + Send + Sync>);
-		self.cache.insert(qey, entry.clone());
-
 		let qey = cache::tx::Lookup::NsByName(&ns.name);
 		self.cache.insert(qey, entry);
 
@@ -1180,19 +1154,13 @@ impl Transaction {
 		ns: &str,
 		db: DatabaseDefinition,
 	) -> Result<Arc<DatabaseDefinition>> {
-		let key = crate::key::catalog::db::new(ns, &db.name);
-		self.put(&key, &db, None).await?;
-
-		let key = crate::key::namespace::db::new(db.namespace_id, db.database_id);
-		self.put(&key, &db, None).await?;
+		let key = crate::key::namespace::db::new(db.namespace_id, &db.name);
+		self.set(&key, &db, None).await?;
 
 		// Populate cache
 		let cached_db = Arc::new(db.clone());
 
-		let qey = cache::tx::Lookup::DbById(db.namespace_id, db.database_id);
 		let entry = cache::tx::Entry::Any(Arc::clone(&cached_db) as Arc<dyn Any + Send + Sync>);
-		self.cache.insert(qey, entry.clone());
-
 		let qey = cache::tx::Lookup::DbByName(ns, &db.name);
 		self.cache.insert(qey, entry);
 
@@ -1209,7 +1177,11 @@ impl Transaction {
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Some),
 			None => {
-				let key = crate::key::catalog::tb::new(ns, db, tb);
+				let Some(db) = self.get_db_by_name(ns, db).await? else {
+					return Ok(None);
+				};
+
+				let key = crate::key::database::tb::new(db.namespace_id, db.database_id, tb);
 				let Some(tb) = self.get(&key, None).await? else {
 					return Ok(None);
 				};
@@ -1226,13 +1198,10 @@ impl Transaction {
 		&self,
 		ns: &str,
 		db: &str,
-		tb: TableDefinition,
+		tb: &TableDefinition,
 	) -> Result<Arc<TableDefinition>> {
-		let key = crate::key::catalog::tb::new(ns, db, &tb.name);
-		self.set(&key, &tb, None).await?;
-
 		let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
-		self.set(&key, &tb, None).await?;
+		self.set(&key, tb, None).await?;
 
 		// Populate cache
 		let cached_tb = Arc::new(tb.clone());
@@ -1243,7 +1212,7 @@ impl Transaction {
 		self.cache.insert(qey, cached_entry.clone());
 
 		let qey = cache::tx::Lookup::TbByName(ns, db, &tb.name);
-		self.cache.insert(qey, cached_entry);
+		self.cache.insert(qey, cached_entry.clone());
 
 		Ok(cached_tb)
 	}
@@ -1256,14 +1225,8 @@ impl Transaction {
 			.into());
 		};
 
-		{
-			let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
-			self.del(&key).await?;
-		}
-		{
-			let key = crate::key::catalog::tb::new(ns, db, &tb.name);
-			self.del(&key).await?;
-		}
+		let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
+		self.del(&key).await?;
 
 		// Clear the cache
 		let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, &tb.name);
@@ -1282,14 +1245,8 @@ impl Transaction {
 			.into());
 		};
 
-		{
-			let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
-			self.clr(&key).await?;
-		}
-		{
-			let key = crate::key::catalog::tb::new(ns, db, &tb.name);
-			self.clr(&key).await?;
-		}
+		let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
+		self.clr(&key).await?;
 
 		// Clear the cache
 		let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, &tb.name);
@@ -1373,30 +1330,6 @@ impl Transaction {
 
 	/// Retrieve a specific database definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_db(
-		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
-	) -> Result<Option<Arc<DatabaseDefinition>>> {
-		let qey = cache::tx::Lookup::DbById(ns, db);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Some),
-			None => {
-				let key = crate::key::namespace::db::new(ns, db);
-				let Some(db_def) = self.get(&key, None).await? else {
-					return Ok(None);
-				};
-
-				let val = Arc::new(db_def);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
-				Ok(Some(val))
-			}
-		}
-	}
-
-	/// Retrieve a specific database definition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_by_name(
 		&self,
 		ns: &str,
@@ -1406,12 +1339,11 @@ impl Transaction {
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Some),
 			None => {
-				let catalog_key = crate::key::catalog::db::new(ns, db);
-				let Some(db) = self.get(&catalog_key, None).await? else {
+				let Some(ns) = self.get_ns_by_name(ns).await? else {
 					return Ok(None);
 				};
 
-				let key = crate::key::namespace::db::new(db.namespace_id, db.database_id);
+				let key = crate::key::namespace::db::new(ns.namespace_id, db);
 				let Some(db_def) = self.get(&key, None).await? else {
 					return Ok(None);
 				};
@@ -2121,7 +2053,10 @@ impl Transaction {
 		let qey = cache::tx::Lookup::DbByName(ns, db);
 		match self.cache.get(&qey) {
 			// The entry is in the cache
-			Some(val) => val,
+			Some(val) => {
+				let t = val.try_into_type()?;
+				Ok(t)
+			}
 			// The entry is not in the cache
 			None => {
 				let db_def = self.get_db_by_name(ns, db).await?;
@@ -2170,7 +2105,6 @@ impl Transaction {
 				.into());
 			}
 		}
-		.try_into_type()
 	}
 
 	/// Get or add a table with a default configuration, only if we are in
@@ -2190,22 +2124,6 @@ impl Transaction {
 			Some(val) => val.try_into_type(),
 			// The entry is not in the cache
 			None => {
-				let key = crate::key::catalog::tb::new(ns, db, tb);
-				if let Some(tb_def) = self.get(&key, None).await? {
-					let cached_tb = Arc::new(tb_def);
-					let cached_entry =
-						cache::tx::Entry::Any(Arc::clone(&cached_tb) as Arc<dyn Any + Send + Sync>);
-					self.cache.insert(qey, cached_entry);
-					return Ok(cached_tb);
-				}
-
-				if strict {
-					return Err(Error::TbNotFound {
-						name: tb.to_owned(),
-					}
-					.into());
-				}
-
 				let db_def = if upwards {
 					self.get_or_add_db_upwards(ns, db, strict, upwards).await?
 				} else {
@@ -2226,6 +2144,23 @@ impl Transaction {
 					}
 				};
 
+				let table_key =
+					crate::key::database::tb::new(db_def.namespace_id, db_def.database_id, tb);
+				if let Some(tb_def) = self.get(&table_key, None).await? {
+					let cached_tb = Arc::new(tb_def);
+					let cached_entry =
+						cache::tx::Entry::Any(Arc::clone(&cached_tb) as Arc<dyn Any + Send + Sync>);
+					self.cache.insert(qey, cached_entry);
+					return Ok(cached_tb);
+				}
+
+				if strict {
+					return Err(Error::TbNotFound {
+						name: tb.to_owned(),
+					}
+					.into());
+				}
+
 				let tb_def = TableDefinition::new(
 					db_def.namespace_id,
 					db_def.database_id,
@@ -2235,7 +2170,7 @@ impl Transaction {
 						.await?,
 					tb.to_owned(),
 				);
-				self.put_tb(ns, db, tb_def).await
+				self.put_tb(ns, db, &tb_def).await
 			}
 		}
 	}
