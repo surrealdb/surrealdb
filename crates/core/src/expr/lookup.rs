@@ -16,6 +16,8 @@ use crate::expr::{Cond, Dir, Fields, Groups, Ident, Idiom, Limit, RecordIdKeyRan
 use crate::kvs::KVKey;
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
 
+/// A lookup is a unified way of looking up graph edges and record references.
+/// Since they both work very similarly, they also both support the same operations
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Lookup {
 	pub kind: LookupKind,
@@ -85,6 +87,7 @@ impl Display for Lookup {
 	}
 }
 
+/// This enum instructs whether the lookup is a graph edge or a record reference
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum LookupKind {
 	Graph(Dir),
@@ -106,6 +109,7 @@ impl Display for LookupKind {
 	}
 }
 
+/// This enum instructs whether we scan all edges on a table or just a specific range
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum LookupSubject {
 	Table(Ident),
@@ -145,6 +149,7 @@ impl LookupSubject {
 	}
 }
 
+/// This enum instructs whether we scan all edges on a table or just a specific range
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ComputedLookupSubject {
 	Table(Ident),
@@ -168,6 +173,8 @@ impl ComputedLookupSubject {
 		}
 	}
 
+	/// The presuf function generates the prefix and suffix keys for a lookup
+	/// based on the lookup subject and the lookup kind
 	pub(crate) fn presuf(
 		&self,
 		ns: NamespaceId,
@@ -177,11 +184,14 @@ impl ComputedLookupSubject {
 		kind: &LookupKind,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		match kind {
+			// We're looking up record references
 			LookupKind::Reference => match self {
+				// Scan the entire range
 				Self::Table(t) => Ok((
 					crate::key::r#ref::ftprefix(ns, db, tb, id, t)?,
 					crate::key::r#ref::ftsuffix(ns, db, tb, id, t)?,
 				)),
+				// Scan a specific range
 				Self::Range {
 					table,
 					range,
@@ -209,11 +219,14 @@ impl ComputedLookupSubject {
 					Ok((beg, end))
 				}
 			},
+			// We're looking up graph edges
 			LookupKind::Graph(dir) => match self {
+				// Scan the entire range
 				Self::Table(t) => Ok((
 					crate::key::graph::ftprefix(ns, db, tb, id, dir, t)?,
 					crate::key::graph::ftsuffix(ns, db, tb, id, dir, t)?,
 				)),
+				// Scan a specific range
 				Self::Range {
 					table,
 					range,

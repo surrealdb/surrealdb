@@ -5,6 +5,9 @@ use crate::sql::fmt::Fmt;
 use crate::sql::order::Ordering;
 use crate::sql::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits, Start};
 
+
+/// A lookup is a unified way of looking up graph edges and record references.
+/// Since they both work very similarly, they also both support the same operations
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Lookup {
@@ -103,6 +106,7 @@ impl From<crate::expr::Lookup> for Lookup {
 	}
 }
 
+/// This enum instructs whether the lookup is a graph edge or a record reference
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum LookupKind {
@@ -153,6 +157,7 @@ impl From<crate::expr::lookup::LookupKind> for LookupKind {
 	}
 }
 
+/// This enum instructs whether we scan all edges on a table or just a specific range
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum LookupSubject {
