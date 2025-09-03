@@ -5,6 +5,7 @@ use super::KeyEncode;
 use super::Val;
 use super::Version;
 use crate::cf;
+use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Timestamp;
 use crate::doc::CursorValue;
 use crate::err::Error;
@@ -836,10 +837,12 @@ impl Transactor {
 		} else {
 			// Batch keys to avoid large memory usage when the amount of stored
 			// version stamps get's too big.
-			let mut batch = self.batch_keys(start..end, 1024, None).await?;
+			let mut batch = self.batch_keys(start..end, *NORMAL_FETCH_SIZE, None).await?;
 			let mut last = batch.result.pop();
 			while let Some(next) = batch.next {
-				batch = self.batch_keys(next, 1024, None).await?;
+				// Pause and yield execution
+				yield_now!();
+				batch = self.batch_keys(next, *NORMAL_FETCH_SIZE, None).await?;
 				last = batch.result.pop();
 			}
 			if let Some(last) = last {

@@ -900,7 +900,7 @@ jobs:
         run: sleep 10
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install .
 
       - name: Run Python tests (HTTP)
         run: python -m unittest discover -s tests
