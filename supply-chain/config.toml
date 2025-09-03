@@ -702,6 +702,10 @@ criteria = "safe-to-deploy"
 version = "0.12.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.matchers]]
+version = "0.2.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.matchit]]
 version = "0.7.3"
 criteria = "safe-to-deploy"
@@ -768,6 +772,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.noisy_float]]
 version = "0.2.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.nu-ansi-term]]
+version = "0.50.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.num-bigint]]
