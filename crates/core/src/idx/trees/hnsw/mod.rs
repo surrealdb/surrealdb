@@ -447,7 +447,7 @@ mod tests {
 	use test_log::test;
 
 	use crate::catalog::providers::CatalogProvider;
-use crate::catalog::{
+	use crate::catalog::{
 		DatabaseDefinition, DatabaseId, Distance, HnswParams, NamespaceId, VectorType,
 	};
 	use crate::ctx::{Context, MutableContext};

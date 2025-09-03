@@ -19,7 +19,7 @@ pub enum DefineDefault {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct FieldDefinition {
+pub struct FieldDefinition {
 	// TODO: Needs to be it's own type.
 	// Idiom::Value/Idiom::Start are for example not allowed.
 	pub name: Idiom,

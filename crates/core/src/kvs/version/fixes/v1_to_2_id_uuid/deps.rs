@@ -145,8 +145,8 @@ pub mod key {
 			Ok(storekey::deserialize(k)?)
 		}
 
-		pub fn fix(&self) -> Option<crate::key::thing::Thing> {
-			self.id.fix().map(|id| crate::key::thing::new(self.ns, self.db, self.tb, &id))
+		pub fn fix(&self) -> Option<crate::key::record::RecordKey> {
+			self.id.fix().map(|id| crate::key::record::new(self.ns, self.db, self.tb, &id))
 		}
 	}
 }

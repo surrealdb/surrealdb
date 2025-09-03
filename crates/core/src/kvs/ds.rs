@@ -34,7 +34,7 @@ use crate::api::invocation::ApiInvocation;
 use crate::api::response::{ApiResponse, ResponseInstruction};
 use crate::buc::BucketConnections;
 use crate::catalog::providers::{
-	ApiProvider, CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider, UserProvider
+	ApiProvider, CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider, UserProvider,
 };
 use crate::catalog::{ApiDefinition, ApiMethod, Index};
 use crate::ctx::MutableContext;
@@ -1431,11 +1431,14 @@ impl Datastore {
 				let tx = self.transaction(TransactionType::Write, LockType::Optimistic).await?;
 				tx.ensure_ns_db(&ns, &db, self.strict).await?;
 				tx.commit().await?;
+				session.ns = Some(ns);
+				session.db = Some(db);
 			}
 			(Some(ns), None) => {
 				let tx = self.transaction(TransactionType::Write, LockType::Optimistic).await?;
 				tx.get_or_add_ns(&ns, self.strict).await?;
 				tx.commit().await?;
+				session.ns = Some(ns);
 			}
 			(None, Some(db)) => {
 				let Some(ns) = session.ns.clone() else {
@@ -1444,6 +1447,7 @@ impl Datastore {
 				let tx = self.transaction(TransactionType::Write, LockType::Optimistic).await?;
 				tx.ensure_ns_db(&ns, &db, self.strict).await?;
 				tx.commit().await?;
+				session.db = Some(db);
 			}
 			(None, None) => {
 				session.ns = None;
@@ -1658,6 +1662,94 @@ mod test {
 			.catch_return()
 			.unwrap();
 		assert_eq!(res, Value::Number(Number::Int(1002)));
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn cross_transaction_caching_uuids_updated() -> Result<()> {
+		let ds = Datastore::new("memory")
+			.await?
+			.with_capabilities(Capabilities::all())
+			.with_notifications();
+		let cache = ds.get_cache();
+		let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+
+		let txn = ds.transaction(TransactionType::Write, LockType::Pessimistic).await?;
+		let db = txn.ensure_ns_db("test", "test", false).await?;
+		drop(txn);
+
+		// Define the table, set the initial uuids
+		let sql = r"DEFINE TABLE test;".to_owned();
+		let res = &mut ds.execute(&sql, &ses, None).await?;
+		assert_eq!(res.len(), 1);
+		res.remove(0).result.unwrap();
+		// Obtain the initial uuids
+		let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+		let initial = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+		let initial_live_query_version =
+			cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
+		txn.cancel().await?;
+
+		// Define some resources to refresh the UUIDs
+		let sql = r"
+		DEFINE FIELD test ON test;
+		DEFINE EVENT test ON test WHEN {} THEN {};
+		DEFINE TABLE view AS SELECT * FROM test;
+		DEFINE INDEX test ON test FIELDS test;
+		LIVE SELECT * FROM test;
+	"
+		.to_owned();
+		let res = &mut ds.execute(&sql, &ses, None).await?;
+		assert_eq!(res.len(), 5);
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		let lqid = res.remove(0).result?;
+		assert!(matches!(lqid, Value::Uuid(_)));
+		// Obtain the uuids after definitions
+		let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+		let after_define = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+		let after_define_live_query_version =
+			cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
+		txn.cancel().await?;
+		// Compare uuids after definitions
+		assert_ne!(initial.cache_indexes_ts, after_define.cache_indexes_ts);
+		assert_ne!(initial.cache_tables_ts, after_define.cache_tables_ts);
+		assert_ne!(initial.cache_events_ts, after_define.cache_events_ts);
+		assert_ne!(initial.cache_fields_ts, after_define.cache_fields_ts);
+		assert_ne!(initial_live_query_version, after_define_live_query_version);
+
+		// Remove the defined resources to refresh the UUIDs
+		let sql = r"
+		REMOVE FIELD test ON test;
+		REMOVE EVENT test ON test;
+		REMOVE TABLE view;
+		REMOVE INDEX test ON test;
+		KILL $lqid;
+	"
+		.to_owned();
+		let vars = Variables::from(map! { "lqid".to_string() => lqid });
+		let res = &mut ds.execute(&sql, &ses, Some(vars)).await?;
+		assert_eq!(res.len(), 5);
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		// Obtain the uuids after definitions
+		let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+		let after_remove = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+		let after_remove_live_query_version =
+			cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
+		drop(txn);
+		// Compare uuids after definitions
+		assert_ne!(after_define.cache_fields_ts, after_remove.cache_fields_ts);
+		assert_ne!(after_define.cache_events_ts, after_remove.cache_events_ts);
+		assert_ne!(after_define.cache_tables_ts, after_remove.cache_tables_ts);
+		assert_ne!(after_define.cache_indexes_ts, after_remove.cache_indexes_ts);
+		assert_ne!(after_define_live_query_version, after_remove_live_query_version);
+		//
 		Ok(())
 	}
 }

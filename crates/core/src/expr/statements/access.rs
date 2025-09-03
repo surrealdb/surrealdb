@@ -7,7 +7,9 @@ use rand::Rng;
 use reblessive::tree::Stk;
 use sha2::Sha256;
 
-use crate::catalog::providers::{AuthorisationProvider, CatalogProvider, NamespaceProvider, UserProvider};
+use crate::catalog::providers::{
+	AuthorisationProvider, CatalogProvider, NamespaceProvider, UserProvider,
+};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;

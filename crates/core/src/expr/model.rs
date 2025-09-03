@@ -14,7 +14,6 @@ use surrealml::storage::surml_file::SurMlFile;
 
 #[cfg(feature = "ml")]
 use crate::catalog::Permission;
-use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -53,6 +52,7 @@ impl Model {
 		doc: Option<&CursorDoc>,
 		mut args: Vec<Value>,
 	) -> FlowResult<Value> {
+		use crate::catalog::providers::DatabaseProvider;
 		use crate::val::{CoerceError, Number};
 
 		// Get the full name of this model

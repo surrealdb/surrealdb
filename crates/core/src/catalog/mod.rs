@@ -1,3 +1,11 @@
+//! SurrealDB Catalog definitions.
+//!
+//! The catalog is the collection of definitions (namespaces, databases, tables, fields, indexes,
+//! etc) that are used to describe the state of the database.
+//!
+//! The catalog should be the only structs/enums that are stored physically in the KV Store.
+#![warn(missing_docs)]
+
 mod access;
 mod database;
 mod namespace;
@@ -10,6 +18,7 @@ mod view;
 pub(crate) use access::*;
 pub(crate) use database::*;
 pub(crate) use namespace::*;
+pub use providers::CatalogProvider;
 pub(crate) use schema::*;
 // TODO: These can be private if we move the bench tests from the sdk to the core.
 pub use schema::{ApiDefinition, ApiMethod};
@@ -19,7 +28,6 @@ pub use schema::{
 pub(crate) use subscription::*;
 pub(crate) use table::*;
 pub(crate) use view::*;
-
 #[cfg(test)]
 mod test {
 	use std::str::FromStr;

@@ -6,7 +6,7 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub(crate) struct AccessKey<'a> {
+pub(crate) struct RootAccessKey<'a> {
 	__: u8,
 	_a: u8,
 	_b: u8,
@@ -14,12 +14,12 @@ pub(crate) struct AccessKey<'a> {
 	pub ac: &'a str,
 }
 
-impl KVKey for AccessKey<'_> {
+impl KVKey for RootAccessKey<'_> {
 	type ValueType = AccessDefinition;
 }
 
-pub fn new(ac: &str) -> AccessKey<'_> {
-	AccessKey::new(ac)
+pub fn new(ac: &str) -> RootAccessKey<'_> {
+	RootAccessKey::new(ac)
 }
 
 pub fn prefix() -> Vec<u8> {
@@ -34,13 +34,13 @@ pub fn suffix() -> Vec<u8> {
 	k
 }
 
-impl Categorise for AccessKey<'_> {
+impl Categorise for RootAccessKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::Access
 	}
 }
 
-impl<'a> AccessKey<'a> {
+impl<'a> RootAccessKey<'a> {
 	pub fn new(ac: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -59,8 +59,8 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = AccessKey::new("testac");
-		let enc = AccessKey::encode_key(&val).unwrap();
+		let val = RootAccessKey::new("testac");
+		let enc = RootAccessKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/!actestac\x00");
 	}
 

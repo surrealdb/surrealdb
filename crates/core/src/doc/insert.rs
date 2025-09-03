@@ -2,13 +2,13 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
+use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err;
 use crate::err::Error;
 use crate::expr::statements::InsertStatement;
-use crate::catalog::providers::TableProvider;
 use crate::val::Value;
 
 impl Document {

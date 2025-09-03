@@ -459,6 +459,20 @@ impl Transaction {
 	// Cache methods
 	// --------------------------------------------------
 
+	#[inline]
+	fn set_record_cache(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		id: &RecordIdKey,
+		record: Arc<Record>,
+	) {
+		// Set the value in the cache
+		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
+		self.cache.insert(qey, cache::tx::Entry::Val(record));
+	}
+
 	/// Clears all keys from the transaction cache.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub fn clear_cache(&self) {
@@ -947,7 +961,12 @@ impl DatabaseProvider for Transaction {
 		}
 	}
 
-	async fn put_db_function(&self, ns: NamespaceId, db: DatabaseId, fc: &catalog::FunctionDefinition) -> Result<()> {
+	async fn put_db_function(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		fc: &catalog::FunctionDefinition,
+	) -> Result<()> {
 		let key = crate::key::database::fc::new(ns, db, &fc.name);
 		self.set(&key, fc, None).await?;
 		Ok(())
@@ -975,6 +994,17 @@ impl DatabaseProvider for Transaction {
 				Ok(val)
 			}
 		}
+	}
+
+	async fn put_db_param(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		pa: &catalog::ParamDefinition,
+	) -> Result<()> {
+		let key = crate::key::database::pa::new(ns, db, &pa.name);
+		self.set(&key, pa, None).await?;
+		Ok(())
 	}
 
 	/// Retrieve a specific config definition from a database.
@@ -1376,7 +1406,13 @@ impl TableProvider for Transaction {
 		}
 	}
 
-	async fn put_tb_field(&self, ns: NamespaceId, db: DatabaseId, tb: &str, fd: &catalog::FieldDefinition) -> Result<()> {
+	async fn put_tb_field(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		fd: &catalog::FieldDefinition,
+	) -> Result<()> {
 		let name = fd.name.to_raw_string();
 		let key = crate::key::table::fd::new(ns, db, tb, &name);
 		self.set(&key, fd, None).await?;
@@ -1421,7 +1457,7 @@ impl TableProvider for Transaction {
 		// Cache is not versioned
 		if version.is_some() {
 			// Fetch the record from the datastore
-			let key = crate::key::thing::new(ns, db, tb, id);
+			let key = crate::key::record::new(ns, db, tb, id);
 			match self.get(&key, version).await? {
 				// The value exists in the datastore
 				Some(mut record) => {
@@ -1445,7 +1481,7 @@ impl TableProvider for Transaction {
 				// The entry is not in the cache
 				None => {
 					// Fetch the record from the datastore
-					let key = crate::key::thing::new(ns, db, tb, id);
+					let key = crate::key::record::new(ns, db, tb, id);
 					match self.get(&key, None).await? {
 						// The value exists in the datastore
 						Some(mut record) => {
@@ -1469,27 +1505,19 @@ impl TableProvider for Transaction {
 		}
 	}
 
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	async fn set_record(
+	async fn record_exists(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &str,
 		id: &RecordIdKey,
-		record: Record,
-	) -> Result<()> {
-		// Set the value in the datastore
-		let key = crate::key::thing::new(ns, db, tb, id);
-		self.set(&key, &record, None).await?;
-		// Set the value in the cache
-		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
-		self.cache.insert(qey, cache::tx::Entry::Val(record.into_read_only()));
-		// Return nothing
-		Ok(())
+	) -> Result<bool> {
+		let key = crate::key::record::new(ns, db, tb, id);
+		Ok(self.exists(&key, None).await?)
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	fn set_record_cache(
+	async fn put_record(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -1497,9 +1525,26 @@ impl TableProvider for Transaction {
 		id: &RecordIdKey,
 		record: Arc<Record>,
 	) -> Result<()> {
+		let key = crate::key::record::new(ns, db, tb, id);
+		self.put(&key, &record, None).await?;
+		self.set_record_cache(ns, db, tb, id, record);
+		Ok(())
+	}
+
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	async fn set_record(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		id: &RecordIdKey,
+		record: Arc<Record>,
+	) -> Result<()> {
+		// Set the value in the datastore
+		let key = crate::key::record::new(ns, db, tb, id);
+		self.set(&key, &record, None).await?;
 		// Set the value in the cache
-		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
-		self.cache.insert(qey, cache::tx::Entry::Val(record));
+		self.set_record_cache(ns, db, tb, id, record);
 		// Return nothing
 		Ok(())
 	}
@@ -1513,7 +1558,7 @@ impl TableProvider for Transaction {
 		id: &RecordIdKey,
 	) -> Result<()> {
 		// Delete the value in the datastore
-		let key = crate::key::thing::new(ns, db, tb, id);
+		let key = crate::key::record::new(ns, db, tb, id);
 		self.del(&key).await?;
 		// Clear the value from the cache
 		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
@@ -1663,7 +1708,12 @@ impl UserProvider for Transaction {
 		}
 	}
 
-	async fn put_db_user(&self, ns: NamespaceId, db: DatabaseId, us: &catalog::UserDefinition) -> Result<()> {
+	async fn put_db_user(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		us: &catalog::UserDefinition,
+	) -> Result<()> {
 		let key = crate::key::database::us::new(ns, db, &us.name);
 		self.set(&key, us, None).await?;
 		Ok(())

@@ -9,11 +9,10 @@ use crate::catalog::{
 	DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId, TableDefinition,
 	UserDefinition,
 };
-use crate::val::RecordIdKey;
 use crate::dbs::node::Node;
 use crate::err::Error;
+use crate::val::RecordIdKey;
 use crate::val::record::Record;
-
 
 #[async_trait]
 pub trait NodeProvider {
@@ -180,7 +179,12 @@ pub trait DatabaseProvider: NamespaceProvider {
 	) -> Result<Arc<catalog::FunctionDefinition>>;
 
 	/// Put a function definition into a database.
-	async fn put_db_function(&self, ns: NamespaceId, db: DatabaseId, fc: &catalog::FunctionDefinition) -> Result<()>;
+	async fn put_db_function(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		fc: &catalog::FunctionDefinition,
+	) -> Result<()>;
 
 	/// Retrieve a specific function definition from a database.
 	async fn get_db_param(
@@ -189,6 +193,13 @@ pub trait DatabaseProvider: NamespaceProvider {
 		db: DatabaseId,
 		pa: &str,
 	) -> Result<Arc<catalog::ParamDefinition>>;
+
+	async fn put_db_param(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		pa: &catalog::ParamDefinition,
+	) -> Result<()>;
 
 	/// Retrieve a specific config definition from a database.
 	async fn get_db_config(
@@ -309,7 +320,6 @@ pub trait TableProvider {
 		tb: &str,
 	) -> Result<Arc<[catalog::SubscriptionDefinition]>>;
 
-
 	/// Retrieve a specific table definition.
 	async fn get_tb(
 		&self,
@@ -364,7 +374,13 @@ pub trait TableProvider {
 		fd: &str,
 	) -> Result<Option<Arc<catalog::FieldDefinition>>>;
 
-	async fn put_tb_field(&self, ns: NamespaceId, db: DatabaseId, tb: &str, fd: &catalog::FieldDefinition) -> Result<()>;
+	async fn put_tb_field(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		fd: &catalog::FieldDefinition,
+	) -> Result<()>;
 
 	/// Retrieve an index for a table.
 	async fn get_tb_index(
@@ -385,16 +401,18 @@ pub trait TableProvider {
 		version: Option<u64>,
 	) -> Result<Arc<Record>>;
 
-	async fn set_record(
+	async fn record_exists(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &str,
 		id: &RecordIdKey,
-		record: Record,
-	) -> Result<()>;
+	) -> Result<bool>;
 
-	fn set_record_cache(
+	/// Put record into the datastore.
+	///
+	/// This will error if the record already exists.
+	async fn put_record(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -403,6 +421,19 @@ pub trait TableProvider {
 		record: Arc<Record>,
 	) -> Result<()>;
 
+	/// Set record into the datastore.
+	///
+	/// This will replace the record if it already exists.
+	async fn set_record(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		id: &RecordIdKey,
+		record: Arc<Record>,
+	) -> Result<()>;
+
+	/// Delete record from the datastore.
 	async fn del_record(
 		&self,
 		ns: NamespaceId,
@@ -441,7 +472,8 @@ pub trait UserProvider {
 		us: &str,
 	) -> Result<Option<Arc<UserDefinition>>>;
 
-	async fn put_db_user(&self, ns: NamespaceId, db: DatabaseId, us: &UserDefinition) -> Result<()>;
+	async fn put_db_user(&self, ns: NamespaceId, db: DatabaseId, us: &UserDefinition)
+	-> Result<()>;
 
 	async fn expect_root_user(&self, us: &str) -> Result<Arc<UserDefinition>> {
 		match self.get_root_user(us).await? {
@@ -589,7 +621,12 @@ pub trait ApiProvider {
 		ap: &str,
 	) -> Result<Arc<catalog::ApiDefinition>>;
 
-	async fn put_db_api(&self, ns: NamespaceId, db: DatabaseId, ap: &catalog::ApiDefinition) -> Result<()>;
+	async fn put_db_api(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ap: &catalog::ApiDefinition,
+	) -> Result<()>;
 }
 
 #[async_trait]
@@ -609,6 +646,7 @@ pub trait BucketProvider {
 		bu: &str,
 	) -> Result<Option<Arc<catalog::BucketDefinition>>>;
 
+	/// Retrieve a specific bucket definition returning an error if it does not exist.
 	async fn expect_db_bucket(
 		&self,
 		ns: NamespaceId,
@@ -624,6 +662,7 @@ pub trait BucketProvider {
 	}
 }
 
+/// The catalog provider is a trait that provides access to the catalog of the database.
 #[async_trait]
 pub trait CatalogProvider:
 	NodeProvider
@@ -635,7 +674,6 @@ pub trait CatalogProvider:
 	+ ApiProvider
 	+ BucketProvider
 {
-
 	/// Get or add a database with a default configuration, only if we are in
 	/// dynamic mode.
 	async fn get_or_add_db(
@@ -647,6 +685,7 @@ pub trait CatalogProvider:
 		self.get_or_add_db_upwards(ns, db, strict, false).await
 	}
 
+	/// Ensures that the given namespace and database exist. If they do not, they will be created.
 	async fn ensure_ns_db(
 		&self,
 		ns: &str,
@@ -677,39 +716,5 @@ pub trait CatalogProvider:
 		strict: bool,
 	) -> Result<Arc<TableDefinition>> {
 		self.get_or_add_tb_upwards(ns, db, tb, strict, true).await
-	}
-
-	/// Ensure a specific table (and database, and namespace) exist.
-	async fn check_ns_db_tb(
-		&self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		strict: bool,
-	) -> Result<()> {
-		if !strict {
-			return Ok(());
-		}
-
-		let db = match self.get_db_by_name(ns, db).await? {
-			Some(db) => db,
-			None => {
-				return Err(Error::DbNotFound {
-					name: db.to_owned(),
-				}
-				.into());
-			}
-		};
-
-		match self.get_tb(db.namespace_id, db.database_id, tb).await? {
-			Some(tb) => tb,
-			None => {
-				return Err(Error::TbNotFound {
-					name: tb.to_owned(),
-				}
-				.into());
-			}
-		};
-		Ok(())
 	}
 }
