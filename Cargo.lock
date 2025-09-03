@@ -5955,7 +5955,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types"
-version = "0.1.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -5974,7 +5974,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types-derive"
-version = "0.1.0"
+version = "3.0.0"
 dependencies = [
  "proc-macro2",
  "quote",
