@@ -1,3 +1,7 @@
+//! Catalog providers.
+//!
+//! Providers are used as the data access layer for the catalog.
+
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -14,17 +18,23 @@ use crate::err::Error;
 use crate::val::RecordIdKey;
 use crate::val::record::Record;
 
+/// SurrealDB Node provider.
 #[async_trait]
 pub trait NodeProvider {
+	/// Retrieve all node definitions in a datastore.
 	async fn all_nodes(&self) -> Result<Arc<[Node]>>;
+
+	/// Retrieve a specific node definition.
 	async fn get_node(&self, id: Uuid) -> Result<Arc<Node>>;
 }
 
+/// Namespace data access provider.
 #[async_trait]
 pub trait NamespaceProvider {
 	/// Retrieve all namespace definitions in a datastore.
 	async fn all_ns(&self) -> Result<Arc<[NamespaceDefinition]>>;
 
+	/// Retrieve a specific namespace definition.
 	async fn get_ns_by_name(&self, ns: &str) -> Result<Option<Arc<NamespaceDefinition>>>;
 
 	/// Get or add a namespace with a default configuration, only if we are in
@@ -53,10 +63,13 @@ pub trait NamespaceProvider {
 		}
 	}
 
+	/// Get the next namespace id.
 	async fn get_next_ns_id(&self) -> Result<NamespaceId>;
 
+	/// Put a namespace definition into the datastore.
 	async fn put_ns(&self, ns: NamespaceDefinition) -> Result<Arc<NamespaceDefinition>>;
 
+	/// Retrieve a specific namespace definition returning an error if it does not exist.
 	async fn expect_ns_by_name(&self, ns: &str) -> Result<Arc<NamespaceDefinition>> {
 		match self.get_ns_by_name(ns).await? {
 			Some(val) => Ok(val),
@@ -67,11 +80,13 @@ pub trait NamespaceProvider {
 	}
 }
 
+/// Database data access provider.
 #[async_trait]
 pub trait DatabaseProvider: NamespaceProvider {
 	/// Retrieve all database definitions in a namespace.
 	async fn all_db(&self, ns: NamespaceId) -> Result<Arc<[DatabaseDefinition]>>;
 
+	/// Retrieve a specific database definition.
 	async fn get_db_by_name(&self, ns: &str, db: &str) -> Result<Option<Arc<DatabaseDefinition>>>;
 
 	/// Get or add a database with a default configuration, only if we are in
@@ -84,10 +99,13 @@ pub trait DatabaseProvider: NamespaceProvider {
 		upwards: bool,
 	) -> Result<Arc<DatabaseDefinition>>;
 
+	/// Put a database definition into a namespace.
 	async fn put_db(&self, ns: &str, db: DatabaseDefinition) -> Result<Arc<DatabaseDefinition>>;
 
+	/// Delete a database definition.
 	async fn del_db(&self, ns: &str, db: &str, expunge: bool) -> Result<Option<()>>;
 
+	/// Retrieve a specific database definition returning an error if it does not exist.
 	async fn expect_db_by_name(&self, ns: &str, db: &str) -> Result<Arc<DatabaseDefinition>> {
 		match self.get_db_by_name(ns, db).await? {
 			Some(val) => Ok(val),
@@ -194,6 +212,7 @@ pub trait DatabaseProvider: NamespaceProvider {
 		pa: &str,
 	) -> Result<Arc<catalog::ParamDefinition>>;
 
+	/// Put a param definition into a database.
 	async fn put_db_param(
 		&self,
 		ns: NamespaceId,
@@ -226,6 +245,7 @@ pub trait DatabaseProvider: NamespaceProvider {
 	}
 }
 
+/// Table data access provider.
 #[async_trait]
 pub trait TableProvider {
 	/// Retrieve all table definitions for a specific database.
@@ -244,6 +264,7 @@ pub trait TableProvider {
 		tb: &str,
 	) -> Result<Arc<[TableDefinition]>>;
 
+	/// Retrieve a specific table definition.
 	async fn get_tb_by_name(
 		&self,
 		ns: &str,
@@ -251,6 +272,7 @@ pub trait TableProvider {
 		tb: &str,
 	) -> Result<Option<Arc<TableDefinition>>>;
 
+	/// Retrieve a specific table definition returning an error if it does not exist.
 	async fn expect_tb_by_name(
 		&self,
 		ns: &str,
@@ -276,6 +298,7 @@ pub trait TableProvider {
 		upwards: bool,
 	) -> Result<Arc<TableDefinition>>;
 
+	/// Put a table definition into a database.
 	async fn put_tb(
 		&self,
 		ns: &str,
@@ -283,8 +306,10 @@ pub trait TableProvider {
 		tb: &TableDefinition,
 	) -> Result<Arc<TableDefinition>>;
 
+	/// Delete a table definition.
 	async fn del_tb(&self, ns: &str, db: &str, tb: &str) -> Result<()>;
 
+	/// Clear a table definition.
 	async fn clr_tb(&self, ns: &str, db: &str, tb: &str) -> Result<()>;
 
 	/// Retrieve all event definitions for a specific table.
@@ -328,6 +353,7 @@ pub trait TableProvider {
 		tb: &str,
 	) -> Result<Option<Arc<TableDefinition>>>;
 
+	/// Check if a table exists.
 	async fn check_tb(
 		&self,
 		ns: NamespaceId,
@@ -342,6 +368,7 @@ pub trait TableProvider {
 		Ok(())
 	}
 
+	/// Retrieve a specific table definition returning an error if it does not exist.
 	async fn expect_tb(
 		&self,
 		ns: NamespaceId,
@@ -374,6 +401,7 @@ pub trait TableProvider {
 		fd: &str,
 	) -> Result<Option<Arc<catalog::FieldDefinition>>>;
 
+	/// Put a field definition into a table.
 	async fn put_tb_field(
 		&self,
 		ns: NamespaceId,
@@ -401,6 +429,7 @@ pub trait TableProvider {
 		version: Option<u64>,
 	) -> Result<Arc<Record>>;
 
+	/// Check if a record exists.
 	async fn record_exists(
 		&self,
 		ns: NamespaceId,
@@ -443,6 +472,7 @@ pub trait TableProvider {
 	) -> Result<()>;
 }
 
+/// User data access provider.
 #[async_trait]
 pub trait UserProvider {
 	/// Retrieve all user definitions in a namespace.
@@ -457,11 +487,13 @@ pub trait UserProvider {
 	/// Retrieve a specific root user definition.
 	async fn get_root_user(&self, us: &str) -> Result<Option<Arc<UserDefinition>>>;
 
+	/// Put a user definition into a root.
 	async fn put_root_user(&self, us: &UserDefinition) -> Result<()>;
 
 	/// Retrieve a specific namespace user definition.
 	async fn get_ns_user(&self, ns: NamespaceId, us: &str) -> Result<Option<Arc<UserDefinition>>>;
 
+	/// Put a user definition into a namespace.
 	async fn put_ns_user(&self, ns: NamespaceId, us: &UserDefinition) -> Result<()>;
 
 	/// Retrieve a specific user definition from a database.
@@ -472,9 +504,11 @@ pub trait UserProvider {
 		us: &str,
 	) -> Result<Option<Arc<UserDefinition>>>;
 
+	/// Put a user definition into a database.
 	async fn put_db_user(&self, ns: NamespaceId, db: DatabaseId, us: &UserDefinition)
 	-> Result<()>;
 
+	/// Retrieve a specific user definition from a root returning an error if it does not exist.
 	async fn expect_root_user(&self, us: &str) -> Result<Arc<UserDefinition>> {
 		match self.get_root_user(us).await? {
 			Some(val) => Ok(val),
@@ -484,6 +518,8 @@ pub trait UserProvider {
 		}
 	}
 
+	/// Retrieve a specific user definition from a namespace returning an error if it does not
+	/// exist.
 	#[allow(unused)]
 	async fn expect_ns_user(&self, ns: NamespaceId, us: &str) -> Result<Arc<UserDefinition>> {
 		match self.get_ns_user(ns, us).await? {
@@ -495,6 +531,7 @@ pub trait UserProvider {
 		}
 	}
 
+	/// Retrieve a specific user definition from a database returning an error if it does not exist.
 	#[allow(unused)]
 	async fn expect_db_user(
 		&self,
@@ -549,6 +586,7 @@ pub trait AuthorisationProvider {
 	/// Retrieve a specific root access definition.
 	async fn get_root_access(&self, ra: &str) -> Result<Option<Arc<catalog::AccessDefinition>>>;
 
+	/// Retrieve a specific root access definition returning an error if it does not exist.
 	async fn expect_root_access(&self, ra: &str) -> Result<Arc<catalog::AccessDefinition>> {
 		match self.get_root_access(ra).await? {
 			Some(val) => Ok(val),
@@ -597,13 +635,17 @@ pub trait AuthorisationProvider {
 		gr: &str,
 	) -> Result<Option<Arc<catalog::AccessGrant>>>;
 
+	/// Delete a root access definition.
 	async fn del_root_access(&self, ra: &str) -> Result<()>;
 
+	/// Delete a namespace access definition.
 	async fn del_ns_access(&self, ns: NamespaceId, na: &str) -> Result<()>;
 
+	/// Delete a database access definition.
 	async fn del_db_access(&self, ns: NamespaceId, db: DatabaseId, da: &str) -> Result<()>;
 }
 
+/// API data access provider.
 #[async_trait]
 pub trait ApiProvider {
 	/// Retrieve all api definitions for a specific database.
@@ -621,6 +663,7 @@ pub trait ApiProvider {
 		ap: &str,
 	) -> Result<Arc<catalog::ApiDefinition>>;
 
+	/// Put an api definition into a database.
 	async fn put_db_api(
 		&self,
 		ns: NamespaceId,
@@ -629,6 +672,7 @@ pub trait ApiProvider {
 	) -> Result<()>;
 }
 
+/// Bucket data access provider.
 #[async_trait]
 pub trait BucketProvider {
 	/// Retrieve all bucket definitions for a specific database.
@@ -662,7 +706,7 @@ pub trait BucketProvider {
 	}
 }
 
-/// The catalog provider is a trait that provides access to the catalog of the database.
+/// The catalog provider is a trait that provides access to the catalog of the datastore.
 #[async_trait]
 pub trait CatalogProvider:
 	NodeProvider
