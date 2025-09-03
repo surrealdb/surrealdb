@@ -125,7 +125,6 @@ jobs:
             patch=$(git show --no-patch --format=%ad --date=format:%Y%m%d%H%M%S)
             rev=$(git rev-parse --short HEAD)
             buildMetadata=${date}.${rev}
-            version=${version}-${{ inputs.release-type }}
             environment=${{ inputs.release-type }}
           elif [[  $suffix == "rc" ]]; then
             version=${version}-${{ inputs.release-type }}
