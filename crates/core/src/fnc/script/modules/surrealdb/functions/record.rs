@@ -14,6 +14,5 @@ impl_module_def!(
 	"id" => run,
 	"is" => (is::Package),
 	"table" => run,
-	"tb" => run,
-	"refs" => fut Async
+	"tb" => run
 );

@@ -9,10 +9,11 @@ use crate::doc::{CursorDoc, CursorRecord, Document};
 use crate::err::Error;
 use crate::expr::data::Assignment;
 use crate::expr::dir::Dir;
+use crate::expr::lookup::LookupKind;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::reference::ReferenceDeleteStrategy;
 use crate::expr::statements::{DeleteStatement, UpdateStatement};
-use crate::expr::{AssignOperator, Data, Expr, FlowResultExt as _, Graph, Idiom, Literal, Part};
+use crate::expr::{AssignOperator, Data, Expr, FlowResultExt as _, Idiom, Literal, Lookup, Part};
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
 use crate::val::{RecordId, Value};
@@ -68,8 +69,8 @@ impl Document {
 						Part::Start(Expr::Literal(Literal::RecordId(
 							(**rid).clone().into_literal(),
 						))),
-						Part::Graph(Graph {
-							dir: Dir::Both,
+						Part::Lookup(Lookup {
+							kind: LookupKind::Graph(Dir::Both),
 							..Default::default()
 						}),
 					];
