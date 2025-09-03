@@ -182,7 +182,7 @@ jobs:
           cargo check --no-default-features --features storage-mem
 
           # Commit changes
-          git commit -am "Prepare v${version} release"
+          git commit -am "Prepare v${version} release" || true
 
       - name: Push the release branch
         run: git push
