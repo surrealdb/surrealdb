@@ -89,7 +89,7 @@ impl Parser<'_> {
 
 			t!("<") => {
 				let peek = self.peek_whitespace1();
-				if matches!(peek.kind, t!("-") | t!("->") | t!("..")) {
+				if matches!(peek.kind, t!("-") | t!("~") | t!("->") | t!("..")) {
 					return None;
 				}
 				Some(BindingPower::Relation)
@@ -146,7 +146,7 @@ impl Parser<'_> {
 			t!("..") => Some(BindingPower::Range),
 			t!("<") => {
 				let peek = self.peek1();
-				if matches!(peek.kind, t!("-") | t!("->")) {
+				if matches!(peek.kind, t!("-") | t!("~") | t!("->")) {
 					return None;
 				}
 				Some(BindingPower::Prefix)

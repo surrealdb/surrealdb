@@ -902,7 +902,6 @@ subtypes! {
 	Regex(Regex) => (is_regex,as_regex,into_regex),
 	Range(Box<Range>) => (is_range,as_range,into_range),
 	Closure(Box<Closure>) => (is_closure,as_closure,into_closure),
-	//Refs(Refs) => (is_refs,as_refs,into_refs),
 	File(File) => (is_file,as_file,into_file),
 }
 
