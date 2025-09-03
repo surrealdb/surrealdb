@@ -19,12 +19,13 @@ use crate::sql::value::Value;
 use crate::sql::Base;
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
+use std::fmt::Display;
 use std::pin::{pin, Pin};
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
-use tracing::instrument;
+use tracing::{instrument, warn};
 use trice::Instant;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
@@ -98,11 +99,21 @@ impl Executor {
 		Ok(())
 	}
 
+	fn check_slow_log(&self, start: &Instant, stm: &impl Display) {
+		if let Some(threshold) = self.ctx.slow_log_threshold() {
+			let elapsed = start.elapsed();
+			if elapsed > threshold {
+				warn!("Slow query detected - time: {elapsed:#?} - query: {stm}")
+			}
+		}
+	}
+
 	/// Executes a statement which needs a transaction with the supplied transaction.
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	async fn execute_transaction_statement(
 		&mut self,
 		txn: Arc<Transaction>,
+		start: &Instant,
 		stmt: Statement,
 	) -> Result<Value, Error> {
 		let res = match stmt {
@@ -112,12 +123,14 @@ impl Executor {
 					.ok_or_else(|| fail!("Tried to unfreeze a Context with multiple references"))?
 					.set_transaction(txn);
 				// Run the statement
-				match self
+				let res = self
 					.stack
 					.enter(|stk| stm.compute(stk, &self.ctx, &self.opt, None))
 					.finish()
-					.await
-				{
+					.await;
+				// Check if we dump the slow log
+				self.check_slow_log(start, &stm);
+				match res {
 					// TODO: Maybe catch Error::Return?
 					// Currently unsure of if that should be handled here.
 					Ok(val) => {
@@ -140,7 +153,13 @@ impl Executor {
 					.ok_or_else(|| fail!("Tried to unfreeze a Context with multiple references"))?
 					.set_transaction(txn);
 				// Process the statement
-				self.stack.enter(|stk| stmt.compute(stk, &self.ctx, &self.opt, None)).finish().await
+				let res = self
+					.stack
+					.enter(|stk| stmt.compute(stk, &self.ctx, &self.opt, None))
+					.finish()
+					.await;
+				self.check_slow_log(start, &stmt);
+				res
 			}
 		};
 
@@ -155,13 +174,14 @@ impl Executor {
 			}
 		}
 
-		return res;
+		res
 	}
 
 	/// Execute a query not wrapped in a transaction block.
 	async fn execute_bare_statement(
 		&mut self,
 		kvs: &Datastore,
+		start: &Instant,
 		stmt: Statement,
 	) -> Result<Value, Error> {
 		// Don't even try to run if the query should already be finished.
@@ -187,7 +207,7 @@ impl Executor {
 					recv
 				});
 
-				match self.execute_transaction_statement(txn.clone(), stmt).await {
+				match self.execute_transaction_statement(txn.clone(), start, stmt).await {
 					Ok(value)
 					| Err(Error::Return {
 						value,
@@ -442,8 +462,9 @@ impl Executor {
 				Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
 				stmt => {
 					skip_remaining = matches!(stmt, Statement::Output(_));
-
-					let r = match self.execute_transaction_statement(txn.clone(), stmt).await {
+					let now = Instant::now();
+					let r = match self.execute_transaction_statement(txn.clone(), &now, stmt).await
+					{
 						Ok(x) => Ok(x),
 						Err(Error::Return {
 							value,
@@ -581,7 +602,7 @@ impl Executor {
 					};
 
 					let now = Instant::now();
-					let result = this.execute_bare_statement(kvs, stmt).await;
+					let result = this.execute_bare_statement(kvs, &now, stmt).await;
 					if !skip_success_results || result.is_err() {
 						this.results.push(Response {
 							time: now.elapsed(),

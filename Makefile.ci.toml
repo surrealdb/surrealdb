@@ -466,16 +466,22 @@ script = """
 category = "CI - SERVICES"
 script = """
     #!/bin/bash -ex
+
 	echo "Installing TiKV playground..."
     ${HOME}/.tiup/bin/tiup install pd tikv playground
+
 	echo "Cleaning TiKV playground..."
 	${HOME}/.tiup/bin/tiup clean --all
+    killall -q tiup-playground || true
+    rm -rf ${HOME}/.tiup/data/testing
+
 	echo "Starting TiKV playground..."
-	nohup ${HOME}/.tiup/bin/tiup playground --mode tikv-slim --kv 1 --pd 1 --db 0 --ticdc 0 --tiflash 0 --without-monitor > /tmp/tiup.log &
+	nohup ${HOME}/.tiup/bin/tiup playground --mode tikv-slim --kv 1 --pd 1 --db 0 --ticdc 0 --tiflash 0 --without-monitor --tag "testing" > /tmp/tiup.log &
+
 	set +e
 	tries=0
-	echo "Waiting for TiKV playground to be ready..."
-	while [[ $tries -lt 10 ]]; do
+	echo "Waiting for TiKV playground to start..."
+	while [[ $tries -lt 5 ]]; do
 		sleep 5
 		echo "Displaying playground status..."
 		if ! ${HOME}/.tiup/bin/tiup playground display >/dev/null; then
@@ -484,14 +490,19 @@ script = """
 		fi
 		exit 0;
 	done
-	echo "PANIC: Couldn't start tiup playground! Here are the logs for the last attempt:"
+
+	echo "PANIC: Couldn't start TiKV playground! Here are the logs for the last attempt:"
     cat /tmp/tiup.log
+
     exit 1
 """
 
 [tasks.stop-tikv]
 category = "CI - SERVICES"
 script = """
+    #!/bin/bash -ex
+
+    echo "Cleaning TiKV playground..."
 ${HOME}/.tiup/bin/tiup clean --all
 """
 

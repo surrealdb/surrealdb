@@ -36,6 +36,8 @@ pub struct MutableContext {
 	parent: Option<Context>,
 	// An optional deadline.
 	deadline: Option<Instant>,
+	// An optional slow log threshold
+	slow_log_threshold: Option<Duration>,
 	// Whether or not this context is cancelled.
 	cancelled: Arc<AtomicBool>,
 	// A collection of read only values stored in this context.
@@ -98,6 +100,7 @@ impl MutableContext {
 			values: HashMap::default(),
 			parent: None,
 			deadline: None,
+			slow_log_threshold: None,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: None,
 			query_planner: None,
@@ -120,6 +123,7 @@ impl MutableContext {
 		MutableContext {
 			values: HashMap::default(),
 			deadline: parent.deadline,
+			slow_log_threshold: parent.slow_log_threshold,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: parent.notifications.clone(),
 			query_planner: parent.query_planner.clone(),
@@ -145,6 +149,7 @@ impl MutableContext {
 		Self {
 			values: HashMap::default(),
 			deadline: parent.deadline,
+			slow_log_threshold: parent.slow_log_threshold,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: parent.notifications.clone(),
 			query_planner: parent.query_planner.clone(),
@@ -171,6 +176,7 @@ impl MutableContext {
 		Self {
 			values: HashMap::default(),
 			deadline: None,
+			slow_log_threshold: from.slow_log_threshold,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: from.notifications.clone(),
 			query_planner: from.query_planner.clone(),
@@ -191,6 +197,7 @@ impl MutableContext {
 	/// Creates a new context from a configured datastore.
 	pub(crate) fn from_ds(
 		time_out: Option<Duration>,
+		slow_log_threshold: Option<Duration>,
 		capabilities: Arc<Capabilities>,
 		index_stores: IndexStores,
 		cache: Arc<DatastoreCache>,
@@ -201,6 +208,7 @@ impl MutableContext {
 			values: HashMap::default(),
 			parent: None,
 			deadline: None,
+			slow_log_threshold,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: None,
 			query_planner: None,
@@ -314,6 +322,10 @@ impl MutableContext {
 	/// checking if a long job should be started or not.
 	pub(crate) fn timeout(&self) -> Option<Duration> {
 		self.deadline.map(|v| v.saturating_duration_since(Instant::now()))
+	}
+
+	pub(crate) fn slow_log_threshold(&self) -> Option<Duration> {
+		self.slow_log_threshold
 	}
 
 	pub(crate) fn notifications(&self) -> Option<Sender<Notification>> {
