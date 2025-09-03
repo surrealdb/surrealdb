@@ -45,7 +45,7 @@ pub(crate) struct CursorDoc {
 ///
 /// This struct provides a convenient interface for working with records in cursor contexts.
 /// It implements Deref and DerefMut to allow direct access to the underlying Record's methods.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CursorRecord {
 	/// The underlying record containing data and metadata
 	record: Record,
@@ -212,7 +212,7 @@ impl Document {
 
 	/// Check if document has changed
 	pub fn changed(&self) -> bool {
-		self.initial.doc.as_ref() != self.current.doc.as_ref()
+		self.initial.doc != self.current.doc
 	}
 
 	/// Check if document is being created
