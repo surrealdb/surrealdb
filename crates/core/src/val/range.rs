@@ -186,29 +186,29 @@ impl Encode for Range {
 	) -> Result<(), storekey::EncodeError> {
 		match &self.start {
 			Bound::Excluded(v) => {
-				w.write_u8(5)?;
-				v.encode(w)?;
-			}
-			Bound::Included(v) => {
 				w.write_u8(4)?;
 				v.encode(w)?;
 			}
-			Bound::Unbounded => {
+			Bound::Included(v) => {
 				w.write_u8(3)?;
+				v.encode(w)?;
+			}
+			Bound::Unbounded => {
+				w.write_u8(2)?;
 			}
 		}
 
 		match &self.end {
 			Bound::Excluded(v) => {
-				w.write_u8(5)?;
-				v.encode(w)?;
-			}
-			Bound::Included(v) => {
 				w.write_u8(4)?;
 				v.encode(w)?;
 			}
-			Bound::Unbounded => {
+			Bound::Included(v) => {
 				w.write_u8(3)?;
+				v.encode(w)?;
+			}
+			Bound::Unbounded => {
+				w.write_u8(2)?;
 			}
 		}
 
@@ -219,15 +219,15 @@ impl Encode for Range {
 impl<'de> BorrowDecode<'de> for Range {
 	fn borrow_decode(r: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
 		let start = match r.read_u8()? {
-			3 => Bound::Unbounded,
-			4 => Bound::Included(BorrowDecode::borrow_decode(r)?),
-			5 => Bound::Excluded(BorrowDecode::borrow_decode(r)?),
+			2 => Bound::Unbounded,
+			3 => Bound::Included(BorrowDecode::borrow_decode(r)?),
+			4 => Bound::Excluded(BorrowDecode::borrow_decode(r)?),
 			_ => return Err(storekey::DecodeError::InvalidFormat),
 		};
 		let end = match r.read_u8()? {
-			3 => Bound::Unbounded,
-			4 => Bound::Included(BorrowDecode::borrow_decode(r)?),
-			5 => Bound::Excluded(BorrowDecode::borrow_decode(r)?),
+			2 => Bound::Unbounded,
+			3 => Bound::Included(BorrowDecode::borrow_decode(r)?),
+			4 => Bound::Excluded(BorrowDecode::borrow_decode(r)?),
 			_ => return Err(storekey::DecodeError::InvalidFormat),
 		};
 		Ok(Range {
@@ -397,5 +397,57 @@ impl Iterator for IntegerRangeIter {
 		// handling if u64::MAX > usize::MAX
 		let upper: Option<usize> = len.try_into().ok();
 		(upper.unwrap_or(usize::MAX), upper)
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use crate::{syn, val::Value};
+
+	use super::Range;
+
+	fn r(r: &str) -> Range {
+		let Value::Range(r) = syn::value(r).unwrap() else {
+			panic!()
+		};
+		*r
+	}
+
+	fn round_trip(r: Range) {
+		let enc = storekey::encode_vec(&r).unwrap();
+		let dec = storekey::decode_borrow(&enc).unwrap();
+		assert_eq!(r, dec)
+	}
+
+	fn ensure_order(a: Range, b: Range) {
+		let a_enc = storekey::encode_vec(&a).unwrap();
+		let b_enc = storekey::encode_vec(&b).unwrap();
+
+		assert_eq!(
+			a.cmp(&b),
+			a_enc.cmp(&b_enc),
+			"ordering of {a:?} {b:?} is not correct after encoding"
+		);
+	}
+
+	#[test]
+	fn encode_decode() {
+		round_trip(r("1..2"));
+		round_trip(r(".."));
+		round_trip(r("1>.."));
+		round_trip(r("1>..=3"));
+		round_trip(r("..3"));
+		round_trip(r("'a'..'b'"));
+	}
+
+	#[test]
+	fn encoding_ordering() {
+		ensure_order(r(".."), r(".."));
+		ensure_order(r(".."), r("1.."));
+		ensure_order(r("1.."), r("1>.."));
+		ensure_order(r(".."), r("..1"));
+		ensure_order(r(".."), r("..=1"));
+		ensure_order(r("1.."), r("2.."));
+		ensure_order(r("'a'.."), r("'b'.."));
 	}
 }

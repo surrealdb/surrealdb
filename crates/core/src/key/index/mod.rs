@@ -298,7 +298,7 @@ mod tests {
 		let enc = Index::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0*\0\0\0\x04testfd1\0\0\0\0\x04testfd2\0\x01\x01\0\0\0\x01testid\0"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0*\x06testfd1\0\x06testfd2\0\0\x03\x03testid\0"
 		);
 	}
 
@@ -310,7 +310,7 @@ mod tests {
 		let enc = Index::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0*\0\0\0\x04testfd1\0\0\0\0\x04testfd2\0\x01\0"
+			b"/*\0\0\0\x01*\0\0\0\x02*testtb\0+testix\0*\x06testfd1\0\x06testfd2\0\0\x02"
 		);
 	}
 
@@ -322,17 +322,11 @@ mod tests {
 		let enc =
 			Index::prefix_ids_composite_beg(NamespaceId(1), DatabaseId(2), "testtb", "testix", &fd)
 				.unwrap();
-		assert_eq!(
-			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0*\0\0\0\x04testfd1\0\x00"
-		);
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0*\x06testfd1\0\x00");
 
 		let enc =
 			Index::prefix_ids_composite_end(NamespaceId(1), DatabaseId(2), "testtb", "testix", &fd)
 				.unwrap();
-		assert_eq!(
-			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0*\0\0\0\x04testfd1\0\xff"
-		);
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0*\x06testfd1\0\xff");
 	}
 }

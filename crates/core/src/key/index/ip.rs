@@ -66,7 +66,7 @@ mod tests {
 		let enc = Ip::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!ip\0\0\0\x01id\0",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!ip\x03id\0",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);

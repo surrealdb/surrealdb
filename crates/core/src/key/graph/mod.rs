@@ -275,7 +275,7 @@ mod tests {
 		let enc = Graph::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\x00~\0\0\0\x01testid\0\0\0\0\x01other\0\0\0\0\x01test\0"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0~\x03testid\0\x03other\0\x03test\0"
 		);
 	}
 }

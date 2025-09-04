@@ -153,29 +153,29 @@ impl Encode for RecordIdKeyRange {
 	) -> Result<(), storekey::EncodeError> {
 		match &self.start {
 			Bound::Excluded(v) => {
-				w.write_u8(5)?;
-				v.encode(w)?;
-			}
-			Bound::Included(v) => {
 				w.write_u8(4)?;
 				v.encode(w)?;
 			}
-			Bound::Unbounded => {
+			Bound::Included(v) => {
 				w.write_u8(3)?;
+				v.encode(w)?;
+			}
+			Bound::Unbounded => {
+				w.write_u8(2)?;
 			}
 		}
 
 		match &self.end {
 			Bound::Excluded(v) => {
-				w.write_u8(5)?;
-				v.encode(w)?;
-			}
-			Bound::Included(v) => {
 				w.write_u8(4)?;
 				v.encode(w)?;
 			}
-			Bound::Unbounded => {
+			Bound::Included(v) => {
 				w.write_u8(3)?;
+				v.encode(w)?;
+			}
+			Bound::Unbounded => {
+				w.write_u8(2)?;
 			}
 		}
 
@@ -186,15 +186,15 @@ impl Encode for RecordIdKeyRange {
 impl<'de> BorrowDecode<'de> for RecordIdKeyRange {
 	fn borrow_decode(r: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
 		let start = match r.read_u8()? {
-			3 => Bound::Unbounded,
-			4 => Bound::Included(BorrowDecode::borrow_decode(r)?),
-			5 => Bound::Excluded(BorrowDecode::borrow_decode(r)?),
+			2 => Bound::Unbounded,
+			3 => Bound::Included(BorrowDecode::borrow_decode(r)?),
+			4 => Bound::Excluded(BorrowDecode::borrow_decode(r)?),
 			_ => return Err(storekey::DecodeError::InvalidFormat),
 		};
 		let end = match r.read_u8()? {
-			3 => Bound::Unbounded,
-			4 => Bound::Included(BorrowDecode::borrow_decode(r)?),
-			5 => Bound::Excluded(BorrowDecode::borrow_decode(r)?),
+			2 => Bound::Unbounded,
+			3 => Bound::Included(BorrowDecode::borrow_decode(r)?),
+			4 => Bound::Excluded(BorrowDecode::borrow_decode(r)?),
 			_ => return Err(storekey::DecodeError::InvalidFormat),
 		};
 		Ok(RecordIdKeyRange {
