@@ -216,6 +216,7 @@ pub trait RpcProtocolV1: RpcContext {
 	}
 
 	async fn authenticate(&self, params: Array) -> Result<Data, RpcError> {
+		tracing::debug!("authenticate");
 		// Process the method arguments
 		let Some(Value::Strand(token)) = extract_args(params.0) else {
 			return Err(RpcError::InvalidParams("Expected (token:string)".to_string()));
@@ -231,6 +232,8 @@ pub trait RpcProtocolV1: RpcContext {
 			crate::iam::verify::token(self.kvs(), &mut session, token.as_str())
 				.await
 				.map(|_| Value::None);
+
+		tracing::debug!("authenticate out: {out:?}");
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard

@@ -15,6 +15,8 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 		{
 			let cmd = request.command;
 
+			eprintln!("cmd: {cmd:?}");
+
 			let result = match cmd {
 				Command::Invalidate | Command::Health => Ok(DbResponse::Other(val::Value::None)),
 				Command::Authenticate {

@@ -57,10 +57,10 @@ impl DefineUserStatement {
 
 	pub fn into_definition(&self) -> catalog::UserDefinition {
 		UserDefinition {
-			name: self.name.clone().to_string(),
+			name: self.name.clone().to_raw_string(),
 			hash: self.hash.clone(),
 			code: self.code.clone(),
-			roles: self.roles.iter().map(|x| x.clone().into_string()).collect(),
+			roles: self.roles.iter().map(|x| x.clone().to_raw_string()).collect(),
 			token_duration: self.duration.token.map(|x| x.0),
 			session_duration: self.duration.session.map(|x| x.0),
 			comment: self.comment.as_ref().map(|x| x.clone().into_string()),
