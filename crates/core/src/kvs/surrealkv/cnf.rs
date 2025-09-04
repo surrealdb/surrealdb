@@ -1,5 +1,5 @@
 use std::cmp::max;
-use std::sync::{LazyLock, OnceLock};
+use std::sync::LazyLock;
 
 use sysinfo::System;
 
@@ -34,16 +34,3 @@ pub(super) static SURREALKV_MAX_VALUE_CACHE_SIZE: LazyLock<u64> =
 		// Take the larger of 16MiB or available memory
 		max(memory, 16 * 1024 * 1024)
 	});
-
-pub(super) static SKV_COMMIT_POOL: OnceLock<affinitypool::Threadpool> = OnceLock::new();
-
-pub(super) fn commit_pool() -> &'static affinitypool::Threadpool {
-	SKV_COMMIT_POOL.get_or_init(|| {
-		affinitypool::Builder::new()
-			.thread_name("surrealkv-commitpool")
-			.thread_stack_size(5 * 1024 * 1024)
-			.thread_per_core(false)
-			.worker_threads(1)
-			.build()
-	})
-}

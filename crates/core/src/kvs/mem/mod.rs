@@ -1,8 +1,6 @@
 #![cfg(feature = "kv-mem")]
 
 use std::ops::Range;
-#[cfg(not(target_family = "wasm"))]
-use std::sync::OnceLock;
 
 use anyhow::{Result, bail, ensure};
 use surrealkv::{Options, Store, Transaction as Tx};
@@ -11,20 +9,6 @@ use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::SavePoints;
 use crate::kvs::{Key, Val, Version};
-
-#[cfg(not(target_family = "wasm"))]
-pub(crate) static SKV_COMMIT_POOL: OnceLock<affinitypool::Threadpool> = OnceLock::new();
-#[cfg(not(target_family = "wasm"))]
-pub(crate) fn commit_pool() -> &'static affinitypool::Threadpool {
-	SKV_COMMIT_POOL.get_or_init(|| {
-		affinitypool::Builder::new()
-			.thread_name("surrealkv-memory-commitpool")
-			.thread_stack_size(5 * 1024 * 1024)
-			.thread_per_core(false)
-			.worker_threads(1)
-			.build()
-	})
-}
 
 pub struct Datastore {
 	db: Store,
@@ -131,10 +115,7 @@ impl super::api::Transaction for Transaction {
 		let mut inner =
 			self.inner.take().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
 
-		// Commit this transaction in the pool
-		#[cfg(not(target_family = "wasm"))]
-		commit_pool().spawn(move || inner.commit()).await?;
-		#[cfg(target_family = "wasm")]
+		// Commit this transaction
 		inner.commit()?;
 
 		// Continue

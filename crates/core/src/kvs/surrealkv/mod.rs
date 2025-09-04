@@ -10,7 +10,6 @@ use surrealkv::{Durability, Mode, Options, Store, Transaction as Tx};
 use super::savepoint::SavePoints;
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::surrealkv::cnf::commit_pool;
 use crate::kvs::{Key, Val, Version};
 
 const TARGET: &str = "surrealdb::core::kvs::surrealkv";
@@ -144,9 +143,8 @@ impl super::api::Transaction for Transaction {
 		let mut inner =
 			self.inner.take().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
 
-		// Commit this transaction in the pool
-		commit_pool().spawn(move || inner.commit()).await?;
-
+		// Commit this transaction
+		inner.commit()?;
 		// Continue
 		Ok(())
 	}
@@ -374,23 +372,17 @@ impl super::api::Transaction for Transaction {
 		let inner =
 			self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
 
-		// Execute on the blocking threadpool
-		let res = affinitypool::spawn_local(|| -> Result<_> {
-			// Retrieve the scan range
-			let res = match version {
-				Some(ts) => inner
-					.keys_at_version(beg.as_slice()..end.as_slice(), ts, Some(limit as usize))
-					.map(Key::from)
-					.collect(),
-				None => inner
-					.keys(beg.as_slice()..end.as_slice(), Some(limit as usize))
-					.map(Key::from)
-					.collect(),
-			};
-			// Return result
-			Ok(res)
-		})
-		.await?;
+		// Retrieve the scan range
+		let res = match version {
+			Some(ts) => inner
+				.keys_at_version(beg.as_slice()..end.as_slice(), ts, Some(limit as usize))
+				.map(Key::from)
+				.collect(),
+			None => inner
+				.keys(beg.as_slice()..end.as_slice(), Some(limit as usize))
+				.map(Key::from)
+				.collect(),
+		};
 		// Return result
 		Ok(res)
 	}
@@ -413,31 +405,24 @@ impl super::api::Transaction for Transaction {
 		let inner =
 			self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
 
-		// Execute on the blocking threadpool
-		let res = affinitypool::spawn_local(|| -> Result<_> {
-			// Retrieve the scan range
-			let res = match version {
-				Some(ts) => inner
-					.scan_at_version(beg.as_slice()..end.as_slice(), ts, Some(limit as usize))
-					.map(|r| {
-						r.map(|(k, v)| (k.to_vec(), v))
-							.map_err(Error::from)
-							.map_err(anyhow::Error::new)
-					})
-					.collect::<Result<_>>()?,
-				None => inner
-					.scan(beg.as_slice()..end.as_slice(), Some(limit as usize))
-					.map(|r| {
-						r.map(|(k, v, _)| (k.to_vec(), v))
-							.map_err(Error::from)
-							.map_err(anyhow::Error::new)
-					})
-					.collect::<Result<_>>()?,
-			};
-			// Return result
-			Ok(res)
-		})
-		.await?;
+		// Retrieve the scan range
+		let res = match version {
+			Some(ts) => inner
+				.scan_at_version(beg.as_slice()..end.as_slice(), ts, Some(limit as usize))
+				.map(|r| {
+					r.map(|(k, v)| (k.to_vec(), v)).map_err(Error::from).map_err(anyhow::Error::new)
+				})
+				.collect::<Result<_>>()?,
+			None => inner
+				.scan(beg.as_slice()..end.as_slice(), Some(limit as usize))
+				.map(|r| {
+					r.map(|(k, v, _)| (k.to_vec(), v))
+						.map_err(Error::from)
+						.map_err(anyhow::Error::new)
+				})
+				.collect::<Result<_>>()?,
+		};
+
 		// Return result
 		Ok(res)
 	}
@@ -458,17 +443,11 @@ impl super::api::Transaction for Transaction {
 		let inner =
 			self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
 
-		// Execute on the blocking threadpool
-		let res = affinitypool::spawn_local(|| -> Result<_> {
-			// Retrieve the scan range
-			let res = inner
-				.scan_all_versions(beg.as_slice()..end.as_slice(), Some(limit as usize))
-				.map(|r| r.map(|(k, v, ts, del)| (k.to_vec(), v, ts, del)).map_err(Into::into))
-				.collect::<Result<_>>()?;
-			// Return result
-			Ok(res)
-		})
-		.await?;
+		// Retrieve the scan range
+		let res = inner
+			.scan_all_versions(beg.as_slice()..end.as_slice(), Some(limit as usize))
+			.map(|r| r.map(|(k, v, ts, del)| (k.to_vec(), v, ts, del)).map_err(Into::into))
+			.collect::<Result<_>>()?;
 		// Return result
 		Ok(res)
 	}

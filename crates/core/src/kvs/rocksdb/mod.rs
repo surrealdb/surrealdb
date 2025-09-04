@@ -532,45 +532,44 @@ impl super::api::Transaction for Transaction {
 		limit: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
-		let rng = self.prepare_scan(rng, version).await?;
-		// Execute on the blocking threadpool
-		let res = affinitypool::spawn_local(move || {
-			// Create result set
-			let mut res = vec![];
-			// Set the key range
-			let beg = rng.start.as_slice();
-			let end = rng.end.as_slice();
-			// Set the ReadOptions with the snapshot
-			let mut ro = ReadOptions::default();
-			ro.set_snapshot(&self.inner.as_ref().unwrap().snapshot());
-			ro.set_iterate_lower_bound(beg);
-			ro.set_iterate_upper_bound(end);
-			ro.set_async_io(true);
-			ro.fill_cache(true);
-			// Create the iterator
-			let mut iter = self.inner.as_ref().unwrap().raw_iterator_opt(ro);
-			// Seek to the start key
-			iter.seek(&rng.start);
-			// Check the scan limit
-			while res.len() < limit as usize {
-				// Check the key and value
-				if let Some(k) = iter.key() {
-					// Check the range validity
-					if k >= beg && k < end {
-						res.push(k.to_vec());
-						iter.next();
-						continue;
-					}
+		// RocksDB does not support versioned queries.
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		// Check to see if transaction is closed
+		ensure!(!self.done, Error::TxFinished);
+		// Create result set
+		let mut res = vec![];
+		// Set the key range
+		let beg = rng.start.as_slice();
+		let end = rng.end.as_slice();
+		// Get the innertransaction
+		let inner = self.inner.as_ref().unwrap();
+		// Set the ReadOptions with the snapshot
+		let mut ro = ReadOptions::default();
+		ro.set_snapshot(&inner.snapshot());
+		ro.set_iterate_lower_bound(beg);
+		ro.set_iterate_upper_bound(end);
+		ro.set_async_io(true);
+		ro.fill_cache(true);
+		// Create the iterator
+		let mut iter = inner.raw_iterator_opt(ro);
+		// Seek to the start key
+		iter.seek(&rng.start);
+		// Check the scan limit
+		while res.len() < limit as usize {
+			// Check the key and value
+			if let Some(k) = iter.key() {
+				// Check the range validity
+				if k >= beg && k < end {
+					res.push(k.to_vec());
+					iter.next();
+					continue;
 				}
-				// Exit
-				break;
 			}
-			// Drop the iterator
-			drop(iter);
-			// Return result
-			res
-		})
-		.await;
+			// Exit
+			break;
+		}
+		// Drop the iterator
+		drop(iter);
 		// Return result
 		Ok(res)
 	}
@@ -616,6 +615,8 @@ impl super::api::Transaction for Transaction {
 			// Exit
 			break;
 		}
+		// Drop the iterator
+		drop(iter);
 		// Return result
 		Ok(res)
 	}
@@ -628,45 +629,44 @@ impl super::api::Transaction for Transaction {
 		limit: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
-		let rng = self.prepare_scan(rng, version).await?;
-		// Execute on the blocking threadpool
-		let res = affinitypool::spawn_local(move || {
-			// Create result set
-			let mut res = vec![];
-			// Set the key range
-			let beg = rng.start.as_slice();
-			let end = rng.end.as_slice();
-			// Set the ReadOptions with the snapshot
-			let mut ro = ReadOptions::default();
-			ro.set_snapshot(&self.inner.as_ref().unwrap().snapshot());
-			ro.set_iterate_lower_bound(beg);
-			ro.set_iterate_upper_bound(end);
-			ro.set_async_io(true);
-			ro.fill_cache(true);
-			// Create the iterator
-			let mut iter = self.inner.as_ref().unwrap().raw_iterator_opt(ro);
-			// Seek to the start key
-			iter.seek(&rng.start);
-			// Check the scan limit
-			while res.len() < limit as usize {
-				// Check the key and value
-				if let Some((k, v)) = iter.item() {
-					// Check the range validity
-					if k >= beg && k < end {
-						res.push((k.to_vec(), v.to_vec()));
-						iter.next();
-						continue;
-					}
+		// RocksDB does not support versioned queries.
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		// Check to see if transaction is closed
+		ensure!(!self.done, Error::TxFinished);
+		// Create result set
+		let mut res = vec![];
+		// Set the key range
+		let beg = rng.start.as_slice();
+		let end = rng.end.as_slice();
+		// Get the inner transaction
+		let inner = self.inner.as_ref().unwrap();
+		// Set the ReadOptions with the snapshot
+		let mut ro = ReadOptions::default();
+		ro.set_snapshot(&inner.snapshot());
+		ro.set_iterate_lower_bound(beg);
+		ro.set_iterate_upper_bound(end);
+		ro.set_async_io(true);
+		ro.fill_cache(true);
+		// Create the iterator
+		let mut iter = inner.raw_iterator_opt(ro);
+		// Seek to the start key
+		iter.seek(&rng.start);
+		// Check the scan limit
+		while res.len() < limit as usize {
+			// Check the key and value
+			if let Some((k, v)) = iter.item() {
+				// Check the range validity
+				if k >= beg && k < end {
+					res.push((k.to_vec(), v.to_vec()));
+					iter.next();
+					continue;
 				}
-				// Exit
-				break;
 			}
-			// Drop the iterator
-			drop(iter);
-			// Return result
-			res
-		})
-		.await;
+			// Exit
+			break;
+		}
+		// Drop the iterator
+		drop(iter);
 		// Return result
 		Ok(res)
 	}
@@ -711,6 +711,8 @@ impl super::api::Transaction for Transaction {
 			// Exit
 			break;
 		}
+		// Drop the iterator
+		drop(iter);
 		// Return result
 		Ok(res)
 	}
