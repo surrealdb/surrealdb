@@ -6,10 +6,9 @@
 //!
 //! # Implementation Details
 //!
-//! There are a bunch of common patterns for which this module has some
-//! confinence functions.
-//! - Whenever only one token can be next you should use the `expected!` macro. This macro ensures
-//!   that the given token type is next and if not returns a parser error.
+//! There are a bunch of common patterns for which this module has some convenience functions.
+//! - Whenever only one token can be next you should use the `expected!` macro. This macro
+//!   ensures that the given token type is next and if not returns a parser error.
 //! - Whenever a limited set of tokens can be next it is common to match the token kind and then
 //!   have a catch all arm which calles the macro `unexpected!`. This macro will raise an parse
 //!   error with information about the type of token it recieves and what it expected.
@@ -27,16 +26,14 @@
 //!
 //! ## WhiteSpace Tokens
 //!
-//! The lexer produces whitespace tokens, these are tokens which are normally
-//! ignored in most place in the syntax as they have no bearing on the meaning
-//! of a statements. [`Parser::next`] and [`Parser::peek`] automatically skip
-//! over any whitespace tokens. However in some places, like in a record-id and
-//! when gluing tokens, these white-space tokens are required for correct
-//! parsing. In which case the function [`Parser::next_whitespace`] and others
-//! with `_whitespace` are used. These functions don't skip whitespace tokens.
-//! However these functions do not undo whitespace tokens which might have been
-//! skipped. Implementers must be carefull to not call a functions which
-//! requires whitespace tokens when they may already have been skipped.
+//! The lexer produces whitespace tokens, these are tokens which are normally ignored in most places
+//! in the syntax as they have no bearing on the meaning of a statements. [`Parser::next`] and
+//! [`Parser::peek`] automatically skip over any whitespace tokens. However in some places, like
+//! in a record-id and when gluing tokens, these white-space tokens are required for correct
+//! parsing. In which case the function [`Parser::next_whitespace`] and others with `_whitespace`
+//! are used. These functions don't skip whitespace tokens. However these functions do not undo
+//! whitespace tokens which might have been skipped. Implementers must be carefull to not call a
+//! functions which requires whitespace tokens when they may already have been skipped.
 //!
 //! ## Compound tokens and token gluing.
 //!
