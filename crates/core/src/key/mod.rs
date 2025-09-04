@@ -97,7 +97,7 @@
 //! crate::key::thing                    /*{ns}*{db}*{tb}*{id}
 //!
 //! crate::key::graph                    /*{ns}*{db}*{tb}~{id}{eg}{ft}{fk}
-//! crate::key::ref                      /*{ns}*{db}*{tb}&{id}{ft}{ff}{fk}
+//! crate::key::ref                      /*{ns}*{db}*{tb}&{id}{ft}{fk}{ff}
 //!
 //! crate::key::sequence::st             /*{ns}*{db}*{tb}*{sq}!st{id}
 //! crate::key::sequence::ba             /*{ns}*{db}*{tb}*{sq}!ba{start}

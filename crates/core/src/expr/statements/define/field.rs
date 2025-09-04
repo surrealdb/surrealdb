@@ -343,7 +343,12 @@ impl DefineFieldStatement {
 
 		// If a reference is defined, the field must be a record
 		if self.reference.is_some() {
-			let is_record_id = match &self.field_kind {
+			let kind = match &self.field_kind {
+				Some(Kind::Option(kind)) => Some(kind.as_ref()),
+				x => x.as_ref(),
+			};
+
+			let is_record_id = match &kind {
 				Some(Kind::Either(kinds)) => kinds.iter().all(|k| matches!(k, Kind::Record(_))),
 				Some(Kind::Array(kind, _)) | Some(Kind::Set(kind, _)) => match kind.as_ref() {
 					Kind::Either(kinds) => kinds.iter().all(|k| matches!(k, Kind::Record(_))),

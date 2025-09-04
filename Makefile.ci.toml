@@ -241,8 +241,6 @@ category = "CI - INTEGRATION TESTS"
 command = "cargo"
 args = [
     "llvm-cov",
-    "-j",
-    "10",
     "--html",
     "--locked",
     "--no-default-features",
@@ -250,7 +248,6 @@ args = [
     "storage-mem,scripting,http,jwks",
     "--workspace",
     "--",
-    "cf::writer::tests",
     "--skip",
     "api_integration",
     "--skip",

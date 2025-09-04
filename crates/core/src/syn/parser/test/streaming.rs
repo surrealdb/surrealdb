@@ -7,10 +7,10 @@ use crate::sql::access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessV
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::data::Assignment;
 use crate::sql::filter::Filter;
-use crate::sql::graph::GraphSubject;
 use crate::sql::index::{Distance, MTreeParams, SearchParams, VectorType};
 use crate::sql::language::Language;
 use crate::sql::literal::ObjectEntry;
+use crate::sql::lookup::{LookupKind, LookupSubject};
 use crate::sql::order::{OrderList, Ordering};
 use crate::sql::statements::analyze::AnalyzeStatement;
 use crate::sql::statements::define::{DefineDefault, DefineKind};
@@ -27,8 +27,8 @@ use crate::sql::statements::{
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
 	Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, Explain, Expr, Fetch,
-	Fetchs, Field, Fields, Function, FunctionCall, Graph, Group, Groups, Ident, Idiom, Idioms,
-	Index, Kind, Limit, Literal, Mock, Order, Output, Param, Part, Permission, Permissions,
+	Fetchs, Field, Fields, Function, FunctionCall, Group, Groups, Ident, Idiom, Idioms, Index,
+	Kind, Limit, Literal, Lookup, Mock, Order, Output, Param, Part, Permission, Permissions,
 	RecordAccess, RecordIdKeyLit, RecordIdLit, RemoveFunctionStatement, Scoring, Script, Split,
 	Splits, Start, TableType, Timeout, TopLevelExpr, With,
 };
@@ -431,8 +431,8 @@ fn statements() -> Vec<TopLevelExpr> {
 					table: "a".to_owned(),
 					key: RecordIdKeyLit::String(strand!("b").to_owned()),
 				}))),
-				Part::Graph(Graph {
-					dir: Dir::Out,
+				Part::Graph(Lookup {
+					kind: LookupKind::Graph(Dir::Out),
 					..Default::default()
 				}),
 				Part::Last,
@@ -690,9 +690,9 @@ fn statements() -> Vec<TopLevelExpr> {
 			only: true,
 			what: vec![Expr::Idiom(Idiom(vec![
 				Part::Field(Ident::from_strand(strand!("a").to_owned())),
-				Part::Graph(Graph {
-					dir: Dir::Out,
-					what: vec![GraphSubject::Table(Ident::from_strand(strand!("b").to_owned()))],
+				Part::Graph(Lookup {
+					kind: LookupKind::Graph(Dir::Out),
+					what: vec![LookupSubject::Table(Ident::from_strand(strand!("b").to_owned()))],
 					..Default::default()
 				}),
 			]))],
@@ -705,9 +705,9 @@ fn statements() -> Vec<TopLevelExpr> {
 				]),
 				Idiom(vec![
 					Part::Field(Ident::from_strand(strand!("a").to_owned())),
-					Part::Graph(Graph {
-						dir: Dir::Out,
-						what: vec![GraphSubject::Table(Ident::from_strand(
+					Part::Graph(Lookup {
+						kind: LookupKind::Graph(Dir::Out),
+						what: vec![LookupSubject::Table(Ident::from_strand(
 							strand!("b").to_owned(),
 						))],
 						..Default::default()
@@ -724,9 +724,9 @@ fn statements() -> Vec<TopLevelExpr> {
 			only: true,
 			what: vec![Expr::Idiom(Idiom(vec![
 				Part::Field(Ident::from_strand(strand!("a").to_owned())),
-				Part::Graph(Graph {
-					dir: Dir::Out,
-					what: vec![GraphSubject::Table(Ident::from_strand(strand!("b").to_owned()))],
+				Part::Graph(Lookup {
+					kind: LookupKind::Graph(Dir::Out),
+					what: vec![LookupSubject::Table(Ident::from_strand(strand!("b").to_owned()))],
 					..Default::default()
 				}),
 			]))],
@@ -739,9 +739,9 @@ fn statements() -> Vec<TopLevelExpr> {
 				]),
 				Idiom(vec![
 					Part::Field(Ident::from_strand(strand!("a").to_owned())),
-					Part::Graph(Graph {
-						dir: Dir::Out,
-						what: vec![GraphSubject::Table(Ident::from_strand(
+					Part::Graph(Lookup {
+						kind: LookupKind::Graph(Dir::Out),
+						what: vec![LookupSubject::Table(Ident::from_strand(
 							strand!("b").to_owned(),
 						))],
 						..Default::default()
