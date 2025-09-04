@@ -10,20 +10,37 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::capabilities::MethodTarget;
 use crate::dbs::{QueryType, Response, Variables};
 use crate::err::Error;
+use crate::expr::{RecordIdKeyLit, RecordIdLit};
 use crate::rpc::args::extract_args;
 use crate::rpc::statement_options::StatementOptions;
 use crate::rpc::{Data, Method, RpcContext, RpcError};
 use crate::sql::{
 	Ast, CreateStatement, DeleteStatement, Expr, Fields, Function, FunctionCall, Ident,
-	InsertStatement, KillStatement, LiveStatement, Model, Output, Param, RelateStatement,
+	InsertStatement, KillStatement, Literal, LiveStatement, Model, Output, Param, RelateStatement,
 	SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
-use crate::val::{Array, Object, Strand, Value};
+use crate::val::{Array, Object, RecordIdKey, Strand, Value};
 
 /// utility function converting a `Value::Strand` into a `Expr::Table`
 fn value_to_table(value: Value) -> Expr {
 	match value {
-		Value::Strand(s) => Expr::Table(Ident::from_strand(s)),
+		Value::Strand(s) => match crate::syn::expr(&s) {
+			Ok(expr) if matches!(expr.clone().into(), Expr::FunctionCall(_)) => expr.into(),
+			_ => Expr::Table(Ident::from_strand(s)),
+		},
+		Value::RecordId(ref record_id) => match &record_id.key {
+			RecordIdKey::String(s) => match crate::syn::expr(s) {
+				Ok(expr) if matches!(expr.clone().into(), Expr::FunctionCall(_)) => {
+					let record_id_lit = RecordIdLit {
+						table: record_id.table.clone(),
+						key: RecordIdKeyLit::Expr(Box::new(expr.into())),
+					};
+					Expr::Literal(Literal::RecordId(record_id_lit.into()))
+				}
+				_ => value.into_literal().into(),
+			},
+			_ => value.into_literal().into(),
+		},
 		x => x.into_literal().into(),
 	}
 }

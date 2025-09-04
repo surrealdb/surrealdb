@@ -45,6 +45,7 @@ pub enum RecordIdKeyLit {
 	Object(Vec<ObjectEntry>),
 	Generate(RecordIdKeyGen),
 	Range(Box<RecordIdKeyRangeLit>),
+	Expr(Box<Expr>),
 }
 
 impl RecordIdKeyLit {
@@ -94,6 +95,7 @@ impl From<RecordIdKeyLit> for crate::expr::RecordIdKeyLit {
 			}
 			RecordIdKeyLit::Generate(x) => crate::expr::RecordIdKeyLit::Generate(x.into()),
 			RecordIdKeyLit::Range(x) => crate::expr::RecordIdKeyLit::Range(Box::new((*x).into())),
+			RecordIdKeyLit::Expr(x) => crate::expr::RecordIdKeyLit::Expr(Box::new((*x).into())),
 		}
 	}
 }
@@ -112,6 +114,7 @@ impl From<crate::expr::RecordIdKeyLit> for RecordIdKeyLit {
 			}
 			crate::expr::RecordIdKeyLit::Generate(x) => RecordIdKeyLit::Generate(x.into()),
 			crate::expr::RecordIdKeyLit::Range(x) => RecordIdKeyLit::Range(Box::new((*x).into())),
+			crate::expr::RecordIdKeyLit::Expr(x) => RecordIdKeyLit::Expr(Box::new((*x).into())),
 		}
 	}
 }
@@ -163,6 +166,7 @@ impl Display for RecordIdKeyLit {
 				RecordIdKeyGen::Uuid => Display::fmt("uuid()", f),
 			},
 			Self::Range(v) => Display::fmt(v, f),
+			Self::Expr(v) => Display::fmt(v, f),
 		}
 	}
 }
