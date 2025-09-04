@@ -10,7 +10,7 @@ use crate::key::index::Index;
 use crate::kvs::{Key, Val};
 use crate::kvs::{KeyEncode, Transaction};
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Array, Ident, Number, Thing, Value};
+use crate::sql::{Array, Ident, Number, Operator, Thing, Value};
 use radix_trie::Trie;
 use rust_decimal::Decimal;
 use std::borrow::Cow;
@@ -356,6 +356,9 @@ struct ReverseRangeScan {
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 impl ReverseRangeScan {
 	fn new(r: RangeScan) -> Self {
+		// Capture whether the original forward range considered the endpoints inclusive.
+		// Reverse KV scans typically exclude the end key, so we keep these flags and
+		// later compensate by explicitly fetching the endpoint once per iterator.
 		Self {
 			beg_incl: r.beg_excl_match_checked,
 			end_incl: r.end_excl_match_checked,
@@ -363,11 +366,12 @@ impl ReverseRangeScan {
 		}
 	}
 	fn matches_check(&self, k: &Key) -> bool {
-		// We check if we should match the key matching the beginning of the range
+		// Skip keys that are exactly equal to the range boundaries if we haven't
+		// performed the explicit endpoint compensation yet. This avoids double
+		// returning the endpoints when they are inclusive.
 		if !self.r.beg_excl_match_checked && self.r.beg.eq(k) {
 			return false;
 		}
-		// We check if we should match the key matching the end of the range
 		if !self.r.end_excl_match_checked && self.r.end.eq(k) {
 			return false;
 		}
@@ -506,6 +510,74 @@ impl IndexRangeThingIterator {
 		Self::new(irf, ns, db, ix, &range)
 	}
 
+	pub(super) fn compound_range(
+		irf: IteratorRef,
+		ns: &str,
+		db: &str,
+		ix: &IndexReference,
+		prefix: &[Value],
+		ranges: &[(Operator, Arc<Value>)],
+	) -> Result<Self, Error> {
+		let (from, to) = Self::reduce_range(ranges)?;
+		Ok(Self {
+			irf,
+			r: Self::range_scan_prefix(ns, db, ix, prefix, &from, &to)?,
+		})
+	}
+
+	/// Determines the lowest and highest values in the range
+	fn reduce_range(ranges: &[(Operator, Arc<Value>)]) -> Result<(RangeValue, RangeValue), Error> {
+		let mut from = vec![];
+		let mut to = vec![];
+		for (op, v) in ranges {
+			let v = v.clone();
+			let key = storekey::serialize(&v)?;
+			match op {
+				Operator::LessThan => to.push((key, false, v)),
+				Operator::LessThanOrEqual => to.push((key, true, v.clone())),
+				Operator::MoreThan => from.push((key, true, v.clone())),
+				Operator::MoreThanOrEqual => from.push((key, false, v.clone())),
+				_ => {
+					return Err(Error::Unreachable(format!(
+						"Invalid operator for range extraction {op}"
+					)))
+				}
+			}
+		}
+		// Sort candidates by encoded key. For lower bounds we want the greatest value (max),
+		// for upper bounds we want the smallest (min). The comparator orders by key descending
+		// (b1.cmp(a1)), and for equal keys orders by the boolean flag so that strict operators
+		// take precedence when choosing the tightest bound.
+		let cmp =
+			|(a1, a2, _): &(Vec<u8>, bool, Arc<Value>),
+			 (b1, b2, _): &(Vec<u8>, bool, Arc<Value>)| { b1.cmp(a1).then_with(|| b2.cmp(a2)) };
+		from.sort_unstable_by(cmp);
+		to.sort_unstable_by(cmp);
+		// Pick the strongest lower bound: first element after sorting (greatest key).
+		// The stored boolean reflects the original operator kind: true for strict (>, <),
+		// false for inclusive (>=, <=). For the final bound, inclusive is the inverse for
+		// lower bounds because a strict '>' becomes an exclusive range start.
+		let from = if let Some((_, inclusivity, val)) = from.into_iter().next() {
+			RangeValue {
+				value: val,
+				inclusive: !inclusivity,
+			}
+		} else {
+			RangeValue::default()
+		};
+		// Pick the strongest upper bound: last element after sorting (smallest key).
+		// Here the inclusive flag matches the operator: '<=' is inclusive, '<' is exclusive.
+		let to = if let Some((_, inclusivity, val)) = to.into_iter().next_back() {
+			RangeValue {
+				value: val,
+				inclusive: inclusivity,
+			}
+		} else {
+			RangeValue::default()
+		};
+		Ok((from, to))
+	}
+
 	fn range_scan(
 		ns: &str,
 		db: &str,
@@ -517,6 +589,14 @@ impl IndexRangeThingIterator {
 		Ok(RangeScan::new(beg, range.from.inclusive, end, range.to.inclusive))
 	}
 
+	/// Compute the begin key for a range scan over an index by value.
+	///
+	/// - If `from.value` is `None`, use the index-prefix begin to start at the first key in the
+	///   index keyspace.
+	/// - Otherwise, serialize the `from` value into an index field array and construct the boundary
+	///   key. For an inclusive lower bound use `prefix_ids_beg` (include all records with that
+	///   value); for an exclusive lower bound use `prefix_ids_end` so the scan starts after all
+	///   records with that exact value.
 	fn compute_beg(
 		ns: &str,
 		db: &str,
@@ -525,10 +605,10 @@ impl IndexRangeThingIterator {
 		from: &RangeValue,
 		value_type: ValueType,
 	) -> Result<Vec<u8>, Error> {
-		if from.value == Value::None {
+		if from.value.is_none() {
 			return value_type.prefix_beg(ns, db, ix_what, ix_name);
 		}
-		let fd = Array::from(from.value.to_owned());
+		let fd = Array::from(from.value.as_ref().clone());
 		if from.inclusive {
 			Index::prefix_ids_beg(ns, db, ix_what, ix_name, &fd)
 		} else {
@@ -536,6 +616,14 @@ impl IndexRangeThingIterator {
 		}
 	}
 
+	/// Compute the end key for a range scan over an index by value.
+	///
+	/// - If `to.value` is `None`, use the index-prefix end to stop at the last key in the index
+	///   keyspace.
+	/// - Otherwise, serialize the `to` value and construct the boundary key. For an inclusive upper
+	///   bound use `prefix_ids_end` so the scan can include all records with that exact value; for
+	///   an exclusive upper bound use `prefix_ids_beg` so the scan stops just before any key
+	///   matching that exact value.
 	fn compute_end(
 		ns: &str,
 		db: &str,
@@ -544,10 +632,10 @@ impl IndexRangeThingIterator {
 		to: &RangeValue,
 		value_type: ValueType,
 	) -> Result<Vec<u8>, Error> {
-		if to.value == Value::None {
+		if to.value.as_ref().is_none() {
 			return value_type.prefix_end(ns, db, ix_what, ix_name);
 		}
-		let fd = Array::from(to.value.to_owned());
+		let fd = Array::from(to.value.as_ref().clone());
 		if to.inclusive {
 			Index::prefix_ids_end(ns, db, ix_what, ix_name, &fd)
 		} else {
@@ -555,19 +643,119 @@ impl IndexRangeThingIterator {
 		}
 	}
 
+	/// Build a range scan over a composite index using a fixed `prefix` and
+	/// an optional range on the next column value.
+	///
+	/// - When `from` or `to` values are `None`, we scan the full extent of the composite tuple
+	///   starting at `prefix` by using the composite begin/end sentinels.
+	/// - When values are provided, we append them to the prefix and construct inclusive/exclusive
+	///   boundaries using the appropriate prefix functions.
+	fn range_scan_prefix(
+		ns: &str,
+		db: &str,
+		ix: &DefineIndexStatement,
+		prefix: &[Value],
+		from: &RangeValue,
+		to: &RangeValue,
+	) -> Result<RangeScan, Error> {
+		// Prepare the fixed composite prefix (may be empty for the leading column)
+		let prefix_array = if prefix.is_empty() {
+			Array(Vec::with_capacity(1))
+		} else {
+			Array::from(prefix.to_vec())
+		};
+		let (from_inclusive, to_inclusive) = (from.inclusive, to.inclusive);
+		// Compute the lower bound for the scan
+		let beg = if from.value.is_none() {
+			Index::prefix_ids_composite_beg(ns, db, &ix.what, &ix.name, &prefix_array)?
+		} else {
+			Self::compute_beg_with_prefix(ns, db, &ix.what, &ix.name, &prefix_array, from)?
+		};
+		// Compute the upper bound for the scan
+		let end = if to.value.is_none() {
+			Index::prefix_ids_composite_end(ns, db, &ix.what, &ix.name, &prefix_array)?
+		} else {
+			Self::compute_end_with_prefix(ns, db, &ix.what, &ix.name, &prefix_array, to)?
+		};
+		Ok(RangeScan::new(beg, from_inclusive, end, to_inclusive))
+	}
+
+	/// Compute the begin key for a composite index range when a fixed `prefix`
+	/// (values for leading columns) is provided and an optional `from`
+	/// value applies to the next column.
+	///
+	/// Inclusive `from` uses `prefix_ids_beg` to include all rows equal to the
+	/// boundary value; exclusive `from` uses `prefix_ids_end` to start just
+	/// after all keys equal to that boundary.
+	fn compute_beg_with_prefix(
+		ns: &str,
+		db: &str,
+		ix_what: &Ident,
+		ix_name: &Ident,
+		prefix: &Array,
+		from: &RangeValue,
+	) -> Result<Vec<u8>, Error> {
+		let mut fd = prefix.clone();
+		fd.0.push(from.value.as_ref().clone());
+		if from.inclusive {
+			Index::prefix_ids_beg(ns, db, ix_what, ix_name, &fd)
+		} else {
+			Index::prefix_ids_end(ns, db, ix_what, ix_name, &fd)
+		}
+	}
+
+	/// Compute the end key for a composite index range when a fixed `prefix`
+	/// is provided and an optional `to` value applies to the next
+	/// column.
+	///
+	/// Inclusive `to` uses `prefix_ids_end` so rows equal to the boundary are
+	/// still reachable by the scan; exclusive `to` uses `prefix_ids_beg` to
+	/// stop just before any key matching that boundary value.
+	fn compute_end_with_prefix(
+		ns: &str,
+		db: &str,
+		ix_what: &Ident,
+		ix_name: &Ident,
+		prefix: &Array,
+		to: &RangeValue,
+	) -> Result<Vec<u8>, Error> {
+		let mut fd = prefix.clone();
+		fd.0.push(to.value.as_ref().clone());
+		if to.inclusive {
+			Index::prefix_ids_end(ns, db, ix_what, ix_name, &fd)
+		} else {
+			Index::prefix_ids_beg(ns, db, ix_what, ix_name, &fd)
+		}
+	}
+
+	/// Scan key-value pairs within the current range, up to `limit`, and
+	/// advance the begin key to resume pagination without duplicates.
+	///
+	/// We update `self.r.beg` to be one byte past the last returned key
+	/// (by appending 0x00), which works with lexicographic ordering to ensure
+	/// the next call starts strictly after the last result.
 	async fn next_scan(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<(Key, Val)>, Error> {
 		let res = tx.scan(self.r.range(), limit, None).await?;
 		if let Some((key, _)) = res.last() {
 			self.r.beg.clone_from(key);
+			// Advance begin key one byte past the last returned key to avoid
+			// returning it again on the next paged call. Since keys are
+			// lexicographically ordered, appending 0x00 moves strictly after `key`.
 			self.r.beg.push(0x00);
 		}
 		Ok(res)
 	}
 
+	/// Scan only the keys within the current range, up to `limit`, and advance
+	/// the begin key to resume on the next call without duplicates. This
+	/// mirrors `next_scan` but avoids fetching values for count-only
+	/// operations.
 	async fn next_keys(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<Key>, Error> {
 		let res = tx.keys(self.r.range(), limit, None).await?;
 		if let Some(key) = res.last() {
 			self.r.beg.clone_from(key);
+			// Same pagination technique as in next_scan: move begin strictly past
+			// the last seen key so subsequent calls don't re-count it.
 			self.r.beg.push(0x00);
 		}
 		Ok(res)
@@ -1021,7 +1209,7 @@ impl UniqueEqualThingIterator {
 
 fn full_iterator_range<'a>() -> IteratorRange<'a> {
 	let value = RangeValue {
-		value: Value::None,
+		value: Arc::new(Value::None),
 		inclusive: true,
 	};
 	IteratorRange {
@@ -1074,6 +1262,22 @@ impl UniqueRangeThingIterator {
 		Self::new(irf, ns, db, ix, &rng)
 	}
 
+	pub(super) fn compound_range(
+		irf: IteratorRef,
+		ns: &str,
+		db: &str,
+		ix: &IndexReference,
+		prefix: &[Value],
+		ranges: &[(Operator, Arc<Value>)],
+	) -> Result<Self, Error> {
+		let (from, to) = IndexRangeThingIterator::reduce_range(ranges)?;
+		let r = IndexRangeThingIterator::range_scan_prefix(ns, db, ix, prefix, &from, &to)?;
+		Ok(Self {
+			irf,
+			r,
+			done: false,
+		})
+	}
 	fn compute_beg(
 		ns: &str,
 		db: &str,
@@ -1082,10 +1286,11 @@ impl UniqueRangeThingIterator {
 		from: &RangeValue,
 		value_type: ValueType,
 	) -> Result<Vec<u8>, Error> {
-		if from.value == Value::None {
+		if from.value.is_none() {
 			return value_type.prefix_beg(ns, db, ix_what, ix_name);
 		}
-		Index::new(ns, db, ix_what, ix_name, &Array::from(from.value.to_owned()), None).encode()
+		Index::new(ns, db, ix_what, ix_name, &Array::from(from.value.as_ref().clone()), None)
+			.encode()
 	}
 
 	fn compute_end(
@@ -1096,10 +1301,11 @@ impl UniqueRangeThingIterator {
 		to: &RangeValue,
 		value_type: ValueType,
 	) -> Result<Vec<u8>, Error> {
-		if to.value == Value::None {
+		if to.value.is_none() {
 			return value_type.prefix_end(ns, db, ix_what, ix_name);
 		}
-		Index::new(ns, db, ix_what, ix_name, &Array::from(to.value.to_owned()), None).encode()
+		Index::new(ns, db, ix_what, ix_name, &Array::from(to.value.as_ref().to_owned()), None)
+			.encode()
 	}
 
 	async fn next_batch<B: IteratorBatch>(

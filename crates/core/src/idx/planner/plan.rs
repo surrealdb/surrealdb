@@ -65,7 +65,7 @@ impl PlanBuilder {
 			// We try first the largest compound indexed
 			let mut compound_index = None;
 			for (ixr, vals) in p.compound_indexes {
-				if let Some((cols, io)) = b.check_compound_index(ixr, vals) {
+				if let Some((cols, io)) = b.check_compound_index_all_and(ixr, vals) {
 					if let Some((c, _)) = &compound_index {
 						if cols <= *c {
 							continue;
@@ -76,6 +76,7 @@ impl PlanBuilder {
 					}
 				}
 			}
+
 			if let Some((_, io)) = compound_index {
 				// Evaluate if we can use keys only
 				let record_strategy =
@@ -173,43 +174,90 @@ impl PlanBuilder {
 	}
 
 	/// Check if a compound index can be used.
-	fn check_compound_index(
+	/// Returns the number of columns involved, and the index option
+	fn check_compound_index_all_and(
 		&self,
 		ixr: IndexReference,
-		columns: Vec<Vec<Arc<Value>>>,
+		columns: Vec<Vec<IndexOperator>>,
 	) -> Option<(IdiomCol, IndexOption)> {
 		// Check the index can be used
 		if !self.allowed_index(&ixr) {
 			return None;
 		}
-		// Count continues values (from the left)
-		let mut cont = 0;
+		// Count continues values (from the left) that will be part of an equal search
+		let mut continues_equals_values = 0;
+		// Collect the range parts for any column
+		let mut range_parts = vec![];
 		for vals in &columns {
+			// If the column is empty, we can stop here.
 			if vals.is_empty() {
 				break;
 			}
-			if vals.iter().all(|v| v.is_none_or_null()) {
+			let mut is_equality = false;
+			for iop in vals {
+				match iop {
+					IndexOperator::Equality(val) => {
+						if !val.is_none_or_null() {
+							is_equality = true;
+						}
+					}
+					IndexOperator::RangePart(bo, val) => {
+						if !val.is_none_or_null() {
+							range_parts.push((bo.clone(), val.clone()));
+						}
+					}
+					_ => {
+						return None;
+					}
+				}
+			}
+			if !is_equality {
 				break;
 			}
-			cont += 1;
+			continues_equals_values += 1;
 		}
-		if cont == 0 {
+
+		if continues_equals_values == 0 {
+			if !range_parts.is_empty() {
+				return Some((
+					continues_equals_values + 1,
+					IndexOption::new(
+						ixr,
+						None,
+						IdiomPosition::None,
+						IndexOperator::Range(vec![], range_parts),
+					),
+				));
+			}
 			return None;
 		}
-		let combinations = Self::cartesian_product(&columns);
-		if combinations.len() == 1 {
-			let val: Vec<Value> = combinations[0].iter().map(|v| v.as_ref().clone()).collect();
+
+		let equal_combinations = Self::cartesian_equals_product(&columns, continues_equals_values);
+		if equal_combinations.len() == 1 {
+			let equals: Vec<Value> =
+				equal_combinations[0].iter().map(|v| v.as_ref().clone()).collect();
+			if !range_parts.is_empty() {
+				return Some((
+					continues_equals_values + 1,
+					IndexOption::new(
+						ixr,
+						None,
+						IdiomPosition::None,
+						IndexOperator::Range(equals, range_parts),
+					),
+				));
+			}
 			return Some((
-				cont,
+				continues_equals_values,
 				IndexOption::new(
 					ixr,
 					None,
 					IdiomPosition::None,
-					IndexOperator::Equality(Arc::new(Value::Array(Array(val)))),
+					IndexOperator::Equality(Arc::new(Value::Array(Array(equals)))),
 				),
 			));
 		}
-		let vals: Vec<Value> = combinations
+		let vals: Vec<Value> = equal_combinations
 			.iter()
 			.map(|v| {
 				let a: Vec<Value> = v.iter().map(|v| v.as_ref().clone()).collect();
@@ -217,7 +265,7 @@ impl PlanBuilder {
 			})
 			.collect();
 		Some((
-			cont,
+			continues_equals_values,
 			IndexOption::new(
 				ixr,
 				None,
@@ -227,13 +275,21 @@ impl PlanBuilder {
 		))
 	}
 
-	fn cartesian_product(values: &[Vec<Arc<Value>>]) -> Vec<Vec<Arc<Value>>> {
-		values.iter().fold(vec![vec![]], |acc, v| {
+	fn cartesian_equals_product(
+		columns: &[Vec<IndexOperator>],
+		contigues_equals_value: usize,
+	) -> Vec<Vec<Arc<Value>>> {
+		columns.iter().take(contigues_equals_value).fold(vec![vec![]], |acc, v| {
 			acc.iter()
 				.flat_map(|prev| {
-					v.iter().map(move |x| {
+					v.iter().map(move |iop| {
 						let mut new_vec = prev.clone();
-						new_vec.push(x.clone());
+						let val = if let IndexOperator::Equality(val) = iop {
+							val.clone()
+						} else {
+							Arc::new(Value::None)
+						};
+						new_vec.push(val);
 						new_vec
 					})
 				})
@@ -317,12 +373,13 @@ pub(super) struct IndexOption {
 	op: Arc<IndexOperator>,
 }
 
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub(super) enum IndexOperator {
 	Equality(Arc<Value>),
 	Union(Arc<Value>),
 	Join(Vec<IndexOption>),
 	RangePart(Operator, Arc<Value>),
+	Range(Vec<Value>, Vec<(Operator, Arc<Value>)>),
 	Matches(String, Option<MatchRef>),
 	Knn(Arc<Vec<Number>>, u32),
 	Ann(Arc<Vec<Number>>, u32, u32),
@@ -403,6 +460,20 @@ impl IndexOption {
 				e.insert("operator", Value::from(op.to_string()));
 				e.insert("value", v.as_ref().to_owned());
 			}
+			IndexOperator::Range(equals, ranges) => {
+				e.insert("prefix", Value::from(Array::from(equals.clone())));
+				let a: Vec<Value> = ranges
+					.iter()
+					.map(|(o, v)| {
+						let o = Object::from(BTreeMap::from([
+							("operator", Value::from(o.to_string())),
+							("value", v.as_ref().to_owned()),
+						]));
+						Value::from(o)
+					})
+					.collect();
+				e.insert("ranges", Value::from(a));
+			}
 			IndexOperator::Knn(a, k) => {
 				let op = Value::from(Operator::Knn(*k, None).to_string());
 				let val = Value::Array(Array::from(a.as_ref().clone()));
@@ -432,23 +503,27 @@ impl IndexOption {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Hash)]
 pub(super) struct RangeValue {
-	pub(super) value: Value,
+	pub(super) value: Arc<Value>,
 	pub(super) inclusive: bool,
 }
 
 impl RangeValue {
-	fn set_to(&mut self, v: &Value) {
+	fn set_to(&mut self, v: &Arc<Value>) {
+		// Merge an exclusive upper bound (e.g., < v). We choose the maximum 'to' value.
 		if self.value.is_none() {
 			self.value = v.clone();
 			return;
 		}
 		if self.value.lt(v) {
 			self.value = v.clone();
+			// A stricter (exclusive) bound dominates when we move the upper limit up.
 			self.inclusive = false;
 		}
 	}
 
-	fn set_to_inclusive(&mut self, v: &Value) {
+	fn set_to_inclusive(&mut self, v: &Arc<Value>) {
+		// Merge an inclusive upper bound (e.g., <= v). Prefer the highest value; if
+		// values are equal, inclusive wins over exclusive.
 		if self.value.is_none() {
 			self.value = v.clone();
 			self.inclusive = true;
@@ -464,28 +539,32 @@ impl RangeValue {
 		}
 	}
 
-	fn set_from(&mut self, v: &Value) {
+	fn set_from(&mut self, v: &Arc<Value>) {
+		// Merge an exclusive lower bound (e.g., > v). We choose the minimum 'from' value
+		// that is still >= all constraints; moving the bound down uses exclusive.
 		if self.value.is_none() {
 			self.value = v.clone();
 			return;
 		}
-		if self.value.gt(v) {
+		if self.value.as_ref().gt(v.as_ref()) {
 			self.value = v.clone();
 			self.inclusive = false;
 		}
 	}
 
-	fn set_from_inclusive(&mut self, v: &Value) {
-		if self.value.is_none() {
+	fn set_from_inclusive(&mut self, v: &Arc<Value>) {
+		// Merge an inclusive lower bound (e.g., >= v). If multiple constraints target
+		// the same value, inclusive should override exclusive.
+		if self.value.as_ref().is_none() {
 			self.value = v.clone();
 			self.inclusive = true;
 			return;
 		}
 		if self.inclusive {
-			if self.value.gt(v) {
+			if self.value.as_ref().gt(v.as_ref()) {
 				self.value = v.clone();
 			}
-		} else if self.value.ge(v) {
+		} else if self.value.as_ref().ge(v.as_ref()) {
 			self.value = v.clone();
 			self.inclusive = true;
 		}
@@ -495,7 +574,7 @@ impl RangeValue {
 impl From<&RangeValue> for Value {
 	fn from(rv: &RangeValue) -> Self {
 		Value::from(Object::from(HashMap::from([
-			("value", rv.value.to_owned()),
+			("value", rv.value.as_ref().clone()),
 			("inclusive", Value::from(rv.inclusive)),
 		])))
 	}
@@ -614,90 +693,91 @@ mod tests {
 	#[test]
 	fn test_range_default_value() {
 		let r = RangeValue::default();
-		assert_eq!(r.value, Value::None);
+		assert!(r.value.is_none());
+		assert!(!r.inclusive);
 		assert!(!r.inclusive);
 	}
 	#[test]
 	fn test_range_value_from_inclusive() {
 		let mut r = RangeValue::default();
-		r.set_from_inclusive(&20.into());
-		assert_eq!(r.value, 20.into());
+		r.set_from_inclusive(&Arc::new(20.into()));
+		assert_eq!(r.value.as_ref(), &Value::from(20));
 		assert!(r.inclusive);
-		r.set_from_inclusive(&10.into());
-		assert_eq!(r.value, 10.into());
+		r.set_from_inclusive(&Arc::new(10.into()));
+		assert_eq!(r.value.as_ref(), &Value::from(10));
 		assert!(r.inclusive);
-		r.set_from_inclusive(&20.into());
-		assert_eq!(r.value, 10.into());
+		r.set_from_inclusive(&Arc::new(20.into()));
+		assert_eq!(r.value.as_ref(), &Value::from(10));
 		assert!(r.inclusive);
 	}
 
 	#[test]
 	fn test_range_value_from() {
 		let mut r = RangeValue::default();
-		r.set_from(&20.into());
-		assert_eq!(r.value, 20.into());
+		r.set_from(&Arc::new(20.into()));
+		assert_eq!(r.value.as_ref(), &Value::from(20));
 		assert!(!r.inclusive);
-		r.set_from(&10.into());
-		assert_eq!(r.value, 10.into());
+		r.set_from(&Arc::new(10.into()));
+		assert_eq!(r.value.as_ref(), &Value::from(10));
 		assert!(!r.inclusive);
-		r.set_from(&20.into());
-		assert_eq!(r.value, 10.into());
+		r.set_from(&Arc::new(20.into()));
+		assert_eq!(r.value.as_ref(), &Value::from(10));
 		assert!(!r.inclusive);
 	}
 
 	#[test]
 	fn test_range_value_to_inclusive() {
 		let mut r = RangeValue::default();
-		r.set_to_inclusive(&10.into());
-		assert_eq!(r.value, 10.into());
+		r.set_to_inclusive(&Arc::new(10.into()));
+		assert_eq!(r.value.as_ref(), &Value::from(10));
 		assert!(r.inclusive);
-		r.set_to_inclusive(&20.into());
-		assert_eq!(r.value, 20.into());
+		r.set_to_inclusive(&Arc::new(20.into()));
+		assert_eq!(r.value.as_ref(), &Value::from(20));
 		assert!(r.inclusive);
-		r.set_to_inclusive(&10.into());
-		assert_eq!(r.value, 20.into());
+		r.set_to_inclusive(&Arc::new(10.into()));
+		assert_eq!(r.value.as_ref(), &Value::from(20));
 		assert!(r.inclusive);
 	}
 
 	#[test]
 	fn test_range_value_to() {
 		let mut r = RangeValue::default();
-		r.set_to(&10.into());
-		assert_eq!(r.value, 10.into());
+		r.set_to(&Arc::new(10.into()));
+		assert_eq!(r.value.as_ref(), &Value::from(10));
 		assert!(!r.inclusive);
-		r.set_to(&20.into());
-		assert_eq!(r.value, 20.into());
+		r.set_to(&Arc::new(20.into()));
+		assert_eq!(r.value.as_ref(), &Value::from(20));
 		assert!(!r.inclusive);
-		r.set_to(&10.into());
-		assert_eq!(r.value, 20.into());
+		r.set_to(&Arc::new(10.into()));
+		assert_eq!(r.value.as_ref(), &Value::from(20));
 		assert!(!r.inclusive);
 	}
 
 	#[test]
 	fn test_range_value_to_switch_inclusive() {
 		let mut r = RangeValue::default();
-		r.set_to(&20.into());
-		assert_eq!(r.value, 20.into());
+		r.set_to(&Arc::new(20.into()));
+		assert_eq!(r.value.as_ref(), &Value::from(20));
 		assert!(!r.inclusive);
-		r.set_to_inclusive(&20.into());
-		assert_eq!(r.value, 20.into());
+		r.set_to_inclusive(&Arc::new(20.into()));
+		assert_eq!(r.value.as_ref(), &Value::from(20));
 		assert!(r.inclusive);
-		r.set_to(&20.into());
-		assert_eq!(r.value, 20.into());
+		r.set_to(&Arc::new(20.into()));
+		assert_eq!(r.value.as_ref(), &Value::from(20));
 		assert!(r.inclusive);
 	}
 
 	#[test]
 	fn test_range_value_from_switch_inclusive() {
 		let mut r = RangeValue::default();
-		r.set_from(&20.into());
-		assert_eq!(r.value, 20.into());
+		r.set_from(&Arc::new(20.into()));
+		assert_eq!(r.value.as_ref(), &Value::from(20));
 		assert!(!r.inclusive);
-		r.set_from_inclusive(&20.into());
-		assert_eq!(r.value, 20.into());
+		r.set_from_inclusive(&Arc::new(20.into()));
+		assert_eq!(r.value.as_ref(), &Value::from(20));
 		assert!(r.inclusive);
-		r.set_from(&20.into());
-		assert_eq!(r.value, 20.into());
+		r.set_from(&Arc::new(20.into()));
+		assert_eq!(r.value.as_ref(), &Value::from(20));
 		assert!(r.inclusive);
 	}
 }
