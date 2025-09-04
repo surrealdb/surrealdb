@@ -551,7 +551,7 @@ impl Iterator {
 			} else {
 				false
 			};
-		eprintln!("results before iterate: {:?}", self.results);
+			eprintln!("results before iterate: {:?}", self.results);
 			// Process all documents
 			self.iterate(
 				stk,
@@ -562,7 +562,7 @@ impl Iterator {
 				plan.explanation.as_mut(),
 			)
 			.await?;
-		eprintln!("results after iterate: {:?}", self.results);
+			eprintln!("results after iterate: {:?}", self.results);
 			// Return any document errors
 			if let Some(e) = self.error.take() {
 				return Err(e);

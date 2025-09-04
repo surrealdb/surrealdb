@@ -24,7 +24,7 @@ use crate::expr::{
 	Mock, Param, PostfixOperator, PrefixOperator,
 };
 use crate::fnc;
-use crate::val::{Array, Closure, Range, Strand, Value, Output};
+use crate::val::{Array, Closure, Output, Range, Strand, Value};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Expr {
@@ -226,11 +226,11 @@ impl Expr {
 		let opt = opt.dive(1).map_err(anyhow::Error::new)?;
 
 		match self {
-			Expr::Literal(literal) => literal.compute(stk, ctx, &opt, doc).await.map(Output::Value),
+			Expr::Literal(literal) => literal.compute(stk, ctx, &opt, doc).await,
 			Expr::Param(param) => {
-				param.compute(stk, ctx, &opt, doc).await.map(Output::Value).map_err(ControlFlow::Err)
+				param.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
-			Expr::Idiom(idiom) => idiom.compute(stk, ctx, &opt, doc).await.map(Output::Value),
+			Expr::Idiom(idiom) => idiom.compute(stk, ctx, &opt, doc).await,
 			Expr::Table(ident) => Ok(Output::Value(Value::Table(ident.clone().into()))),
 			Expr::Mock(mock) => {
 				// NOTE(value pr): This is a breaking change but makes the most sense without
@@ -244,7 +244,7 @@ impl Expr {
 				Ok(Output::Value(Value::Array(Array(record_ids))))
 			}
 			Expr::Block(block) => block.compute(stk, ctx, &opt, doc).await,
-			Expr::Constant(constant) => constant.compute().map(Output::Value).map_err(ControlFlow::Err),
+			Expr::Constant(constant) => constant.compute().map_err(ControlFlow::Err),
 			Expr::Prefix {
 				op,
 				expr,
@@ -361,23 +361,24 @@ impl Expr {
 		doc: Option<&CursorDoc>,
 		op: &PrefixOperator,
 		expr: &Expr,
-	) -> FlowResult<Value> {
-		let res = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await?;
+	) -> FlowResult<Output> {
+		let output = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await?;
 
 		match op {
-			PrefixOperator::Not => fnc::operate::not(res).map_err(ControlFlow::Err),
-			PrefixOperator::Positive => Ok(res),
-			PrefixOperator::Negate => fnc::operate::neg(res).map_err(ControlFlow::Err),
-			PrefixOperator::Range => Ok(Value::Range(Box::new(Range {
+			PrefixOperator::Not => fnc::operate::not(output.into_value()).map(Output::Value).map_err(ControlFlow::Err),
+			PrefixOperator::Positive => Ok(output),
+			PrefixOperator::Negate => fnc::operate::neg(output.into_value()).map(Output::Value).map_err(ControlFlow::Err),
+			PrefixOperator::Range => Ok(Output::Value(Value::Range(Box::new(Range {
 				start: Bound::Unbounded,
-				end: Bound::Excluded(res),
-			}))),
-			PrefixOperator::RangeInclusive => Ok(Value::Range(Box::new(Range {
+				end: Bound::Excluded(output.into_value()),
+			})))),
+			PrefixOperator::RangeInclusive => Ok(Output::Value(Value::Range(Box::new(Range {
 				start: Bound::Unbounded,
-				end: Bound::Included(res),
-			}))),
-			PrefixOperator::Cast(kind) => res
+				end: Bound::Included(output.into_value()),
+			})))),
+			PrefixOperator::Cast(kind) => output
 				.cast_to_kind(kind)
+				.map(Output::Value)
 				.map_err(Error::from)
 				.map_err(anyhow::Error::new)
 				.map_err(ControlFlow::Err),
@@ -391,19 +392,19 @@ impl Expr {
 		doc: Option<&CursorDoc>,
 		expr: &Expr,
 		op: &PostfixOperator,
-	) -> FlowResult<Value> {
-		let res = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await?;
+	) -> FlowResult<Output> {
+		let output = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await?;
 		match op {
-			PostfixOperator::Range => Ok(Value::Range(Box::new(Range {
-				start: Bound::Included(res),
+			PostfixOperator::Range => Ok(Output::Value(Value::Range(Box::new(Range {
+				start: Bound::Included(output.into_value()),
 				end: Bound::Unbounded,
-			}))),
-			PostfixOperator::RangeSkip => Ok(Value::Range(Box::new(Range {
-				start: Bound::Excluded(res),
+			})))),
+			PostfixOperator::RangeSkip => Ok(Output::Value(Value::Range(Box::new(Range {
+				start: Bound::Excluded(output.into_value()),
 				end: Bound::Unbounded,
-			}))),
+			})))),
 			PostfixOperator::MethodCall(name, exprs) => {
-				let mut args = Vec::new();
+				let mut args = Vec::with_capacity(exprs.len());
 
 				for e in exprs.iter() {
 					args.push(stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?);

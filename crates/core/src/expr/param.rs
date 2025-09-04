@@ -14,7 +14,7 @@ use crate::err::Error;
 use crate::expr::escape::EscapeKwFreeIdent;
 use crate::expr::ident::Ident;
 use crate::iam::Action;
-use crate::val::{Strand, Value};
+use crate::val::{Output, Strand, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Param(String);
@@ -67,27 +67,27 @@ impl Deref for Param {
 }
 
 impl Param {
-	/// Process this type returning a computed simple Value
+	/// Process this type returning a computed simple Output
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value> {
+	) -> Result<Output> {
 		// Find the variable by name
 		match self.0.as_str() {
 			// This is a special param
 			"this" | "self" => match doc {
 				// The base document exists
-				Some(v) => Ok(v.doc.as_ref().clone()),
+				Some(v) => Ok(Output::Record(v.doc.clone().into_inner())),
 				// The base document does not exist
-				None => Ok(Value::None),
+				None => Ok(Output::Value(Value::None)),
 			},
 			// This is a normal param
 			v => match ctx.value(v) {
 				// The param has been set locally
-				Some(v) => Ok(v.clone()),
+				Some(v) => Ok(Output::Value(v.clone())),
 				// The param has not been set locally
 				None => {
 					// Ensure a database is set
@@ -100,7 +100,7 @@ impl Param {
 						Ok(x) => x,
 						Err(e) => {
 							if matches!(e.downcast_ref(), Some(Error::PaNotFound { .. })) {
-								return Ok(Value::None);
+								return Ok(Output::Value(Value::None));
 							} else {
 								return Err(e);
 							}
@@ -133,7 +133,7 @@ impl Param {
 						}
 					}
 					// Return the computed value
-					Ok(val.value.clone())
+					Ok(Output::Value(val.value.clone()))
 				}
 			},
 		}

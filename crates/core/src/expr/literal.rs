@@ -12,8 +12,8 @@ use crate::expr::escape::EscapeKey;
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::{Expr, FlowResult, RecordIdLit};
 use crate::val::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, Regex,
-	Strand, Uuid, Value,
+	Bytes, Closure, Datetime, Duration, File, Geometry, Number, Output, Range, Regex, Strand, Uuid,
+	Value,
 };
 
 /// A literal value, should be computed to get an actual value.
@@ -76,34 +76,34 @@ impl Literal {
 		}
 	}
 
-	/// Process this type returning a computed simple Value
+	/// Process this type returning a computed simple Output
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
+	) -> FlowResult<Output> {
 		let res = match self {
-			Literal::None => Value::None,
-			Literal::Null => Value::Null,
-			Literal::UnboundedRange => Value::Range(Box::new(Range::unbounded())),
-			Literal::Bool(x) => Value::Bool(*x),
-			Literal::Float(x) => Value::Number(Number::Float(*x)),
-			Literal::Integer(i) => Value::Number(Number::Int(*i)),
-			Literal::Decimal(d) => Value::Number(Number::Decimal(*d)),
-			Literal::Strand(strand) => Value::Strand(strand.clone()),
-			Literal::Bytes(bytes) => Value::Bytes(bytes.clone()),
-			Literal::Regex(regex) => Value::Regex(regex.clone()),
+			Literal::None => Output::Value(Value::None),
+			Literal::Null => Output::Value(Value::Null),
+			Literal::UnboundedRange => Output::Value(Value::Range(Box::new(Range::unbounded()))),
+			Literal::Bool(x) => Output::Value(Value::Bool(*x)),
+			Literal::Float(x) => Output::Value(Value::Number(Number::Float(*x))),
+			Literal::Integer(i) => Output::Value(Value::Number(Number::Int(*i))),
+			Literal::Decimal(d) => Output::Value(Value::Number(Number::Decimal(*d))),
+			Literal::Strand(strand) => Output::Value(Value::Strand(strand.clone())),
+			Literal::Bytes(bytes) => Output::Value(Value::Bytes(bytes.clone())),
+			Literal::Regex(regex) => Output::Value(Value::Regex(regex.clone())),
 			Literal::RecordId(record_id_lit) => {
-				Value::RecordId(record_id_lit.compute(stk, ctx, opt, doc).await?)
+				Output::Value(Value::RecordId(record_id_lit.compute(stk, ctx, opt, doc).await?))
 			}
 			Literal::Array(exprs) => {
 				let mut array = Vec::with_capacity(exprs.len());
 				for e in exprs.iter() {
 					array.push(stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?);
 				}
-				Value::Array(Array(array))
+				Output::Array(array)
 			}
 			Literal::Object(items) => {
 				let mut map = BTreeMap::new();
@@ -111,14 +111,14 @@ impl Literal {
 					let v = stk.run(|stk| i.value.compute(stk, ctx, opt, doc)).await?;
 					map.insert(i.key.clone(), v);
 				}
-				Value::Object(Object(map))
+				Output::Map(map)
 			}
-			Literal::Duration(duration) => Value::Duration(*duration),
-			Literal::Datetime(datetime) => Value::Datetime(datetime.clone()),
-			Literal::Uuid(uuid) => Value::Uuid(*uuid),
-			Literal::Geometry(geometry) => Value::Geometry(geometry.clone()),
-			Literal::File(file) => Value::File(file.clone()),
-			Literal::Closure(closure) => Value::Closure(closure.clone()),
+			Literal::Duration(duration) => Output::Value(Value::Duration(*duration)),
+			Literal::Datetime(datetime) => Output::Value(Value::Datetime(datetime.clone())),
+			Literal::Uuid(uuid) => Output::Value(Value::Uuid(*uuid)),
+			Literal::Geometry(geometry) => Output::Value(Value::Geometry(geometry.clone())),
+			Literal::File(file) => Output::Value(Value::File(file.clone())),
+			Literal::Closure(closure) => Output::Value(Value::Closure(closure.clone())),
 		};
 		Ok(res)
 	}

@@ -225,7 +225,10 @@ impl Executor {
 					})
 					.map_err(anyhow::Error::new)?
 					.set_transaction(txn);
-				s.compute(&self.ctx, &self.opt, None).await.map(Output::Value).map_err(ControlFlow::Err)
+				s.compute(&self.ctx, &self.opt, None)
+					.await
+					.map(Output::Value)
+					.map_err(ControlFlow::Err)
 			}
 			TopLevelExpr::Analyze(s) => {
 				Arc::get_mut(&mut self.ctx)
@@ -247,7 +250,11 @@ impl Executor {
 					})
 					.map_err(anyhow::Error::new)?
 					.set_transaction(txn);
-				self.stack.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None)).finish().await.map(Output::Value)
+				self.stack
+					.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None))
+					.finish()
+					.await
+					.map(Output::Value)
 			}
 			// Process all other normal statements
 			TopLevelExpr::Expr(e) => {
