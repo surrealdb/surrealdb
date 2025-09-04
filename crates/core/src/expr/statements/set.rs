@@ -7,7 +7,8 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{ControlFlow, Expr, FlowResult, Ident, Kind, Value};
+use crate::expr::{ControlFlow, Expr, FlowResult, Ident, Kind};
+use crate::val::{Output, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SetStatement {
@@ -38,7 +39,7 @@ impl SetStatement {
 		ctx: &mut Option<Context>,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
+	) -> FlowResult<Output> {
 		assert!(ctx.is_some(), "SetStatement::compute must be called with a set option.");
 
 		if self.is_protected_set() {
@@ -47,7 +48,7 @@ impl SetStatement {
 			})));
 		}
 
-		let result = stk.run(|stk| self.what.compute(stk, ctx.as_ref().unwrap(), opt, doc)).await?.into_value();
+		let result = stk.run(|stk| self.what.compute(stk, ctx.as_ref().unwrap(), opt, doc)).await?;
 		let result = match &self.kind {
 			Some(kind) => result
 				.coerce_to_kind(kind)
@@ -56,13 +57,15 @@ impl SetStatement {
 					error: Box::new(e),
 				})
 				.map_err(anyhow::Error::new)?,
-			None => result,
+			// TODO(rushmorem): should context be able to store records?
+			// Say we do `LET $foo = CREATE bar`, shouldn't we store the record in the context?
+			None => result.into_value(),
 		};
 
 		let mut c = MutableContext::unfreeze(ctx.take().unwrap())?;
 		c.add_value(self.name.clone().into_string(), result.into());
 		*ctx = Some(c.freeze());
-		Ok(Value::None)
+		Ok(Output::Value(Value::None))
 	}
 }
 

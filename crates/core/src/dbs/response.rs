@@ -4,11 +4,10 @@ use std::time::Duration;
 use anyhow::Result;
 use revision::{Revisioned, revisioned};
 use serde::ser::SerializeStruct;
-use crate::val::Output;
 use serde::{Deserialize, Serialize};
 
 use crate::expr::TopLevelExpr;
-use crate::val::{Object, Strand, Value};
+use crate::val::{Object, Output, Strand, Value};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Response";
 

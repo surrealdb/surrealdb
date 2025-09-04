@@ -8,10 +8,10 @@ use super::FlowResult;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::expr::Expr;
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Expr, Value};
-use crate::val::{Strand, Output};
+use crate::val::{Output, Strand, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -44,7 +44,7 @@ impl Block {
 		let mut res = Output::Value(Value::None);
 		for v in self.iter() {
 			match v {
-				Expr::Let(x) => res = x.compute(stk, &mut ctx, opt, doc).await.map(Output::Value)?,
+				Expr::Let(x) => res = x.compute(stk, &mut ctx, opt, doc).await?,
 				v => res = stk.run(|stk| v.compute(stk, ctx.as_ref().unwrap(), opt, doc)).await?,
 			}
 		}

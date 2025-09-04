@@ -3,7 +3,7 @@ use std::fmt;
 use anyhow::Result;
 use chrono::{TimeZone, Utc};
 
-use crate::val::{Datetime, Duration, Value};
+use crate::val::{Datetime, Duration, Output};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub enum Constant {
@@ -74,12 +74,12 @@ impl Constant {
 		}
 	}
 	/// Process this type returning a computed simple Value
-	pub fn compute(&self) -> Result<Value> {
-		Ok(match self.value() {
+	pub fn compute(&self) -> Result<Output> {
+		Ok(Output::Value(match self.value() {
 			ConstantValue::Datetime(d) => d.into(),
 			ConstantValue::Float(f) => f.into(),
 			ConstantValue::Duration(d) => d.into(),
-		})
+		}))
 	}
 }
 

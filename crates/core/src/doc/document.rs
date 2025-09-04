@@ -89,6 +89,10 @@ impl CursorRecord {
 			Data::Mutable(value) => value,
 		}
 	}
+
+	pub(crate) fn into_inner(self) -> Record {
+		self.record
+	}
 }
 
 impl Deref for CursorRecord {
