@@ -21,36 +21,6 @@ use crate::vs::VersionStamp;
 
 const TARGET: &str = "surrealdb::core::kvs::tr";
 
-/// Used to determine the behaviour when a transaction is not closed correctly
-#[derive(Debug, Default)]
-pub enum Check {
-	#[default]
-	None,
-	Warn,
-	Error,
-}
-
-impl Check {
-	const MSG: &'static str = "A transaction was dropped without being committed or cancelled";
-
-	pub fn drop_check(&self, done: bool, write: bool) {
-		if done || !write {
-			return;
-		}
-		match self {
-			Check::None => {
-				trace!("{}", Self::MSG);
-			}
-			Check::Warn => {
-				warn!("{}", Self::MSG);
-			}
-			Check::Error => {
-				error!("{}", Self::MSG);
-			}
-		}
-	}
-}
-
 /// Specifies whether the transaction is read-only or writeable.
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum TransactionType {
@@ -86,22 +56,19 @@ impl fmt::Display for Transactor {
 	}
 }
 
+#[cfg(debug_assertions)]
+#[cfg(not(test))]
+impl Drop for Transactor {
+	fn drop(&mut self) {
+		if !self.closed() && self.writeable() {
+			panic!("A transaction was dropped without being committed or cancelled");
+		}
+	}
+}
+
 impl Transactor {
 	fn kind(&self) -> &'static str {
 		self.inner.kind()
-	}
-
-	/// Specify how we should handle unclosed transactions.
-	///
-	/// If a transaction is not cancelled or rolled back then
-	/// this can cause issues on some storage engine
-	/// implementations. In tests we can ignore unhandled
-	/// transactions, whilst in development we should panic
-	/// so that any unintended behaviour is detected, and in
-	/// production we should only log a warning.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub(crate) fn check_level(&mut self, check: Check) {
-		self.inner.check_level(check)
 	}
 
 	/// Check if transaction is finished.
@@ -113,6 +80,19 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub(crate) fn closed(&self) -> bool {
 		self.inner.closed()
+	}
+
+	/// Check if transaction is writeable.
+	///
+	/// If the transaction has been marked as a writeable
+	/// transaction, then this function will return [`true`].
+	/// This fuction can be used to check whether a transaction
+	/// allows data to be modified, and if not then the function
+	/// will return an [`Error::TxReadonly`] error when attempting
+	/// to modify any data within the transaction.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub(crate) fn writeable(&self) -> bool {
+		self.inner.writeable()
 	}
 
 	/// Cancel a transaction.

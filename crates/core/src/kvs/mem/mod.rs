@@ -7,7 +7,6 @@ use std::sync::OnceLock;
 use anyhow::{Result, bail, ensure};
 use surrealkv::{Options, Store, Transaction as Tx};
 
-use super::Check;
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::SavePoints;
@@ -36,16 +35,8 @@ pub struct Transaction {
 	done: bool,
 	/// Is the transaction writeable?
 	write: bool,
-	/// Should we check unhandled transactions?
-	check: Check,
 	/// The underlying datastore transaction
 	inner: Option<Tx>,
-}
-
-impl Drop for Transaction {
-	fn drop(&mut self) {
-		self.check.drop_check(self.done, self.write);
-	}
 }
 
 impl Datastore {
@@ -78,16 +69,10 @@ impl Datastore {
 		write: bool,
 		_: bool,
 	) -> Result<Box<dyn crate::kvs::api::Transaction>> {
-		// Specify the check level
-		#[cfg(not(debug_assertions))]
-		let check = Check::Warn;
-		#[cfg(debug_assertions)]
-		let check = Check::Error;
 		// Create a new transaction
 		match self.db.begin() {
 			Ok(inner) => Ok(Box::new(Transaction {
 				done: false,
-				check,
 				write,
 				inner: Some(inner),
 			})),
@@ -105,11 +90,6 @@ impl super::api::Transaction for Transaction {
 
 	fn supports_reverse_scan(&self) -> bool {
 		false
-	}
-
-	/// Behaviour if unclosed
-	fn check_level(&mut self, check: Check) {
-		self.check = check;
 	}
 
 	/// Check if closed

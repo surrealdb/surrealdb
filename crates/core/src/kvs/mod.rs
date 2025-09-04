@@ -53,7 +53,7 @@ pub use clock::SizedClock;
 pub use ds::requirements::{TransactionBuilderFactoryRequirements, TransactionBuilderRequirements};
 pub use ds::{Datastore, DatastoreFlavor, TransactionBuilder, TransactionBuilderFactory};
 pub(crate) use key::{KVKey, KVValue, impl_kv_key_storekey, impl_kv_value_revisioned};
-pub use tr::{Check, LockType, TransactionType, Transactor};
+pub use tr::{LockType, TransactionType, Transactor};
 pub use tx::Transaction;
 
 /// The key part of a key-value pair. An alias for [`Vec<u8>`].

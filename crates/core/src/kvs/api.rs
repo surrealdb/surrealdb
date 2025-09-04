@@ -5,7 +5,6 @@ use std::ops::Range;
 
 use anyhow::{Context, Result, ensure};
 
-use super::tr::Check;
 use super::util;
 use crate::cnf::{COUNT_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::err::Error;
@@ -63,16 +62,6 @@ pub trait Transaction: requirements::TransactionRequirements {
 
 	/// Get the name of the transaction type.
 	fn kind(&self) -> &'static str;
-
-	/// Specify how we should handle unclosed transactions.
-	///
-	/// If a transaction is not cancelled or rolled back then
-	/// this can cause issues on some storage engine
-	/// implementations. In tests we can ignore unhandled
-	/// transactions, whilst in development we should panic
-	/// so that any unintended behaviour is detected, and in
-	/// production we should only log a warning.
-	fn check_level(&mut self, check: Check);
 
 	/// Check if transaction is finished.
 	///

@@ -17,7 +17,7 @@ use rocksdb::{
 use super::savepoint::SavePoints;
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::{Check, Key, Val};
+use crate::kvs::{Key, Val};
 
 const TARGET: &str = "surrealdb::core::kvs::rocksdb";
 
@@ -32,8 +32,6 @@ pub struct Transaction {
 	done: bool,
 	/// Is the transaction writeable?
 	write: bool,
-	/// Should we check unhandled transactions?
-	check: Check,
 	/// The underlying datastore transaction
 	inner: Option<rocksdb::Transaction<'static, OptimisticTransactionDB>>,
 	/// The read options containing the Snapshot
@@ -43,12 +41,6 @@ pub struct Transaction {
 	// the memory is kept alive. This pointer must
 	// be declared last, so that it is dropped last.
 	_db: Pin<Arc<OptimisticTransactionDB>>,
-}
-
-impl Drop for Transaction {
-	fn drop(&mut self) {
-		self.check.drop_check(self.done, self.write);
-	}
 }
 
 impl Datastore {
@@ -351,16 +343,10 @@ impl Datastore {
 		ro.set_snapshot(&inner.snapshot());
 		ro.set_async_io(true);
 		ro.fill_cache(true);
-		// Specify the check level
-		#[cfg(not(debug_assertions))]
-		let check = Check::Warn;
-		#[cfg(debug_assertions)]
-		let check = Check::Error;
 		// Create a new transaction
 		Ok(Box::new(Transaction {
 			done: false,
 			write,
-			check,
 			inner: Some(inner),
 			ro,
 			_db: self.db.clone(),
@@ -377,11 +363,6 @@ impl super::api::Transaction for Transaction {
 
 	fn supports_reverse_scan(&self) -> bool {
 		true
-	}
-
-	/// Behaviour if unclosed
-	fn check_level(&mut self, check: Check) {
-		self.check = check;
 	}
 
 	/// Check if closed

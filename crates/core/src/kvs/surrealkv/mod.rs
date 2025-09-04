@@ -11,7 +11,7 @@ use super::savepoint::SavePoints;
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::surrealkv::cnf::commit_pool;
-use crate::kvs::{Check, Key, Val, Version};
+use crate::kvs::{Key, Val, Version};
 
 const TARGET: &str = "surrealdb::core::kvs::surrealkv";
 
@@ -24,16 +24,8 @@ pub struct Transaction {
 	done: bool,
 	/// Is the transaction writeable?
 	write: bool,
-	/// Should we check unhandled transactions?
-	check: Check,
 	/// The underlying datastore transaction
 	inner: Option<Tx>,
-}
-
-impl Drop for Transaction {
-	fn drop(&mut self) {
-		self.check.drop_check(self.done, self.write);
-	}
 }
 
 impl Datastore {
@@ -83,11 +75,6 @@ impl Datastore {
 		write: bool,
 		_: bool,
 	) -> Result<Box<dyn crate::kvs::api::Transaction>> {
-		// Specify the check level
-		#[cfg(not(debug_assertions))]
-		let check = Check::Warn;
-		#[cfg(debug_assertions)]
-		let check = Check::Error;
 		// Create a new transaction
 		let mut txn = match write {
 			true => self.db.begin_with_mode(Mode::ReadWrite),
@@ -101,7 +88,6 @@ impl Datastore {
 		// Return the new transaction
 		Ok(Box::new(Transaction {
 			done: false,
-			check,
 			write,
 			inner: Some(txn),
 		}))
@@ -117,11 +103,6 @@ impl super::api::Transaction for Transaction {
 
 	fn supports_reverse_scan(&self) -> bool {
 		false
-	}
-
-	/// Behaviour if unclosed
-	fn check_level(&mut self, check: Check) {
-		self.check = check;
 	}
 
 	/// Check if closed

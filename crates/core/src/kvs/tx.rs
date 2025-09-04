@@ -9,7 +9,6 @@ use futures::stream::Stream;
 use uuid::Uuid;
 
 use super::batch::Batch;
-use super::tr::Check;
 use super::{Key, Val, Version, util};
 use crate::catalog::providers::{
 	ApiProvider, AuthorisationProvider, BucketProvider, CatalogProvider, DatabaseProvider,
@@ -435,28 +434,6 @@ impl Transaction {
 		sc: ScanDirection,
 	) -> impl Stream<Item = Result<Key>> + '_ {
 		Scanner::<Key>::new(self, *NORMAL_FETCH_SIZE, rng, None, limit, sc)
-	}
-
-	// --------------------------------------------------
-	// Rollback methods
-	// --------------------------------------------------
-
-	/// Warn if this transaction is dropped without proper handling.
-	pub async fn rollback_with_warning(self) -> Self {
-		self.tx.lock().await.check_level(Check::Warn);
-		self
-	}
-
-	/// Error if this transaction is dropped without proper handling.
-	pub async fn rollback_with_error(self) -> Self {
-		self.tx.lock().await.check_level(Check::Error);
-		self
-	}
-
-	/// Do nothing if this transaction is dropped without proper handling.
-	pub async fn rollback_and_ignore(self) -> Self {
-		self.tx.lock().await.check_level(Check::None);
-		self
 	}
 
 	// --------------------------------------------------
