@@ -61,9 +61,6 @@ value = "[{ id: knows:person, in: person:john, out: person:jane, since: '2023-01
 
 [[test.results]]
 value = "true"
-
-[[test.results]]
-value = "true"
 */
 
 -- Test 1: Non-existent record, using a record ID
@@ -125,6 +122,3 @@ SELECT * FROM knows WHERE record::is::edge(id) = true;
 
 -- Test 20: Check if edge record is an edge with method syntax, using a record ID (should be true)
 knows:person.is_edge();
-
--- Test 21: Same as above but using a string
-"knows:person".is_edge();

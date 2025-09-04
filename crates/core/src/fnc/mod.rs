@@ -1188,7 +1188,6 @@ pub async fn idiom(
 				"is_ascii" => string::is::ascii,
 				"is_datetime" => string::is::datetime,
 				"is_domain" => string::is::domain,
-				"is_edge" => record::is::edge((stk, ctx, Some(opt), doc)).await,
 				"is_email" => string::is::email,
 				"is_hexadecimal" => string::is::hexadecimal,
 				"is_ip" => string::is::ip,
