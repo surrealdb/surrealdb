@@ -144,10 +144,6 @@ impl super::api::Transaction for Transaction {
 		"fdb"
 	}
 
-	fn supports_reverse_scan(&self) -> bool {
-		false
-	}
-
 	/// Check if closed
 	fn closed(&self) -> bool {
 		self.done
@@ -424,6 +420,41 @@ impl super::api::Transaction for Transaction {
 
 	/// Retrieve a range of keys from the databases
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn keysr(
+		&mut self,
+		rng: Range<Key>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>> {
+		// FoundationDB does not support versioned queries.
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		// Check to see if transaction is closed
+		ensure!(!self.done, Error::TxFinished);
+		// Get the transaction
+		let inner = self.inner.as_ref().unwrap();
+
+		// Create result set
+		let mut res = vec![];
+		// Set the key range
+		let opt = RangeOption {
+			reverse: true,
+			limit: Some(limit as usize),
+			..RangeOption::from((rng.start.as_slice(), rng.end.as_slice()))
+		};
+		// Create the scan request
+		let mut req = inner.get_ranges(opt, self.snapshot());
+		// Scan the keys in the iterator
+		while let Some(val) = req.next().await {
+			for v in val?.into_iter() {
+				res.push(Key::from(v.key()));
+			}
+		}
+		// Return result
+		Ok(res)
+	}
+
+	/// Retrieve a range of keys from the databases
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn scan(
 		&mut self,
 		rng: Range<Key>,
@@ -440,6 +471,40 @@ impl super::api::Transaction for Transaction {
 		let mut res = vec![];
 		// Set the key range
 		let opt = RangeOption {
+			limit: Some(limit as usize),
+			..RangeOption::from((rng.start.as_slice(), rng.end.as_slice()))
+		};
+		// Create the scan request
+		let mut req = inner.get_ranges(opt, self.snapshot());
+		// Scan the keys in the iterator
+		while let Some(val) = req.next().await {
+			for v in val?.into_iter() {
+				res.push((Key::from(v.key()), Val::from(v.value())));
+			}
+		}
+		// Return result
+		Ok(res)
+	}
+
+	/// Retrieve a range of keys from the databases
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scanr(
+		&mut self,
+		rng: Range<Key>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>> {
+		// FoundationDB does not support versioned queries.
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		// Check to see if transaction is closed
+		ensure!(!self.done, Error::TxFinished);
+		// Get the transaction
+		let inner = self.inner.as_ref().unwrap();
+		// Create result set
+		let mut res = vec![];
+		// Set the key range
+		let opt = RangeOption {
+			reverse: true,
 			limit: Some(limit as usize),
 			..RangeOption::from((rng.start.as_slice(), rng.end.as_slice()))
 		};

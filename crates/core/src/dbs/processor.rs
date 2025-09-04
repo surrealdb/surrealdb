@@ -653,7 +653,6 @@ pub(super) trait Collector {
 				last_key.push(0xFF);
 				rng.start = last_key;
 			}
-			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 			ScanDirection::Backward => {
 				rng.end = last_key;
 			}

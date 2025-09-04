@@ -72,10 +72,6 @@ impl super::api::Transaction for Transaction {
 		"memory"
 	}
 
-	fn supports_reverse_scan(&self) -> bool {
-		false
-	}
-
 	/// Check if closed
 	fn closed(&self) -> bool {
 		self.done
@@ -364,7 +360,42 @@ impl super::api::Transaction for Transaction {
 		Ok(res)
 	}
 
-	/// Retrieves a range of key-value pairs from the database.
+	/// Retrieve a range of keys, in reverse.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn keysr(
+		&mut self,
+		rng: Range<Key>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>> {
+		// Check to see if transaction is closed
+		ensure!(!self.done, Error::TxFinished);
+		// Set the key range
+		let beg = rng.start;
+		let end = rng.end;
+
+		// Get the inner transaction
+		let inner =
+			self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
+
+		// Retrieve the scan range
+		let res = match version {
+			Some(ts) => inner
+				.keys_at_version(beg.as_slice()..end.as_slice(), ts, Some(limit as usize))
+				.rev()
+				.map(Key::from)
+				.collect(),
+			None => inner
+				.keys(beg.as_slice()..end.as_slice(), Some(limit as usize))
+				.rev()
+				.map(Key::from)
+				.collect(),
+		};
+		// Return result
+		Ok(res)
+	}
+
+	/// Retrieve a range of key-value pairs.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn scan(
 		&mut self,
@@ -399,7 +430,44 @@ impl super::api::Transaction for Transaction {
 		Ok(res)
 	}
 
-	/// Retrieve all the versions from a range of keys from the databases
+	/// Retrieve a range of key-value pairs, in reverse.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scanr(
+		&mut self,
+		rng: Range<Key>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>> {
+		// Check to see if transaction is closed
+		ensure!(!self.done, Error::TxFinished);
+		// Set the key range
+		let beg = rng.start;
+		let end = rng.end;
+
+		// Get the inner transaction
+		let inner =
+			self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
+
+		// Retrieve the scan range
+		let res = match version {
+			Some(ts) => inner
+				.scan_at_version(beg.as_slice()..end.as_slice(), ts, Some(limit as usize))
+				.rev()
+				.map(|r| {
+					r.map(|(k, v)| (k.to_vec(), v)).map_err(Error::from).map_err(anyhow::Error::new)
+				})
+				.collect::<Result<_>>()?,
+			None => inner
+				.scan(beg.as_slice()..end.as_slice(), Some(limit as usize))
+				.rev()
+				.map(|r| r.map(|(k, v, _)| (k.to_vec(), v)).map_err(Into::into))
+				.collect::<Result<_>>()?,
+		};
+		// Return result
+		Ok(res)
+	}
+
+	/// Retrieve all the versions from a range of keys.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn scan_all_versions(
 		&mut self,

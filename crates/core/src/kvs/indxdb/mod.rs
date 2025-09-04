@@ -65,10 +65,6 @@ impl super::api::Transaction for Transaction {
 		"indxdb"
 	}
 
-	fn supports_reverse_scan(&self) -> bool {
-		false
-	}
-
 	/// Check if closed
 	fn closed(&self) -> bool {
 		self.done
@@ -202,7 +198,7 @@ impl super::api::Transaction for Transaction {
 		Ok(res)
 	}
 
-	/// Retrieve a range of keys from the databases
+	/// Retrieve a range of keys
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn keys(
 		&mut self,
@@ -220,7 +216,25 @@ impl super::api::Transaction for Transaction {
 		Ok(res)
 	}
 
-	/// Retrieve a range of keys from the databases
+	/// Retrieve a range of keys, in reverse
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn keysr(
+		&mut self,
+		rng: Range<Key>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>> {
+		// IndxDB does not support versioned queries.
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		// Check to see if transaction is closed
+		ensure!(!self.done, Error::TxFinished);
+		// Scan the keys
+		let res = self.inner.keysr(rng, limit).await?;
+		// Return result
+		Ok(res)
+	}
+
+	/// Retrieve a range of key-value pairs
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn scan(
 		&mut self,
@@ -234,6 +248,24 @@ impl super::api::Transaction for Transaction {
 		ensure!(!self.done, Error::TxFinished);
 		// Scan the keys
 		let res = self.inner.scan(rng, limit).await?;
+		// Return result
+		Ok(res)
+	}
+
+	/// Retrieve a range of key-value pairs, in reverse
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scanr(
+		&mut self,
+		rng: Range<Key>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>> {
+		// IndxDB does not support versioned queries.
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		// Check to see if transaction is closed
+		ensure!(!self.done, Error::TxFinished);
+		// Scan the keys
+		let res = self.inner.scanr(rng, limit).await?;
 		// Return result
 		Ok(res)
 	}

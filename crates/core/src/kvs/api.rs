@@ -57,9 +57,6 @@ pub mod requirements {
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 pub trait Transaction: requirements::TransactionRequirements {
-	/// Returns if the transaction supports scanning in reverse.
-	fn supports_reverse_scan(&self) -> bool;
-
 	/// Get the name of the transaction type.
 	fn kind(&self) -> &'static str;
 
@@ -128,9 +125,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		_rng: Range<Key>,
 		_limit: u32,
 		_version: Option<u64>,
-	) -> Result<Vec<Key>> {
-		Err(anyhow::Error::new(Error::UnsupportedReversedScans))
-	}
+	) -> Result<Vec<Key>>;
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
@@ -141,9 +136,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		_rng: Range<Key>,
 		_limit: u32,
 		_version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>> {
-		Err(anyhow::Error::new(Error::UnsupportedVersionedQueries))
-	}
+	) -> Result<Vec<(Key, Val)>>;
 
 	/// Retrieve a specific range of keys from the datastore in reverse order.
 	///
@@ -154,9 +147,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		_rng: Range<Key>,
 		_limit: u32,
 		_version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>> {
-		Err(anyhow::Error::new(Error::UnsupportedReversedScans))
-	}
+	) -> Result<Vec<(Key, Val)>>;
 
 	/// Insert or replace a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]

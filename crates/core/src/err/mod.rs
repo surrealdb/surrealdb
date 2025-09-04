@@ -1027,9 +1027,18 @@ pub(crate) enum Error {
 	#[error("The underlying datastore does not support versioned queries")]
 	UnsupportedVersionedQueries,
 
-	#[doc(hidden)]
-	#[error("The underlying datastore does not support reversed scans")]
-	UnsupportedReversedScans,
+	/// Found an unexpected value in a range
+	#[error("Expected a range value of '{expected}', but found '{found}'")]
+	InvalidRangeValue {
+		expected: String,
+		found: String,
+	},
+
+	/// Found an unexpected value in a range
+	#[error("The range cannot exceed a size of {max} for this operation")]
+	RangeTooBig {
+		max: usize,
+	},
 
 	/// There was an invalid storage version stored in the database
 	#[error("There was an invalid storage version stored in the database")]

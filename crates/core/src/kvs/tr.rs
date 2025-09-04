@@ -9,7 +9,6 @@ use super::api::Transaction;
 use super::{Key, Val, Version};
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cf;
-use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::doc::CursorRecord;
 use crate::key::database::vs::VsKey;
 use crate::key::debug::Sprintable;
@@ -639,9 +638,9 @@ impl Transactor {
 		// Ensure there are no keys after the ts_key
 		// Otherwise we can go back in time!
 		let mut ts_key = crate::key::database::ts::new(ns, db, ts);
-		let begin = ts_key.encode_key()?;
+		let beg = ts_key.encode_key()?;
 		let end = crate::key::database::ts::suffix(ns, db)?;
-		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(begin..end, None).await?;
+		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(beg..end, None).await?;
 		let latest_ts_pair = ts_pairs.last();
 		if let Some((k, _)) = latest_ts_pair {
 			trace!(
@@ -669,28 +668,10 @@ impl Transactor {
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<Option<VersionStamp>> {
-		let start = crate::key::database::ts::prefix(ns, db)?;
 		let ts_key = crate::key::database::ts::new(ns, db, ts + 1).encode_key()?;
+		let beg = crate::key::database::ts::prefix(ns, db)?;
 		let end = ts_key.encode_key()?;
-		let ts = if self.inner.supports_reverse_scan() {
-			self.scanr(start..end, 1, None).await?.pop().map(|x| x.1)
-		} else {
-			// Batch keys to avoid large memory usage when the amount of stored
-			// version stamps get's too big.
-			let mut batch = self.batch_keys(start..end, *NORMAL_FETCH_SIZE, None).await?;
-			let mut last = batch.result.pop();
-			while let Some(next) = batch.next {
-				// Pause and yield execution
-				yield_now!();
-				batch = self.batch_keys(next, *NORMAL_FETCH_SIZE, None).await?;
-				last = batch.result.pop();
-			}
-			if let Some(last) = last {
-				self.get(&last, None).await?
-			} else {
-				None
-			}
-		};
+		let ts = self.scanr(beg..end, 1, None).await?.pop().map(|x| x.1);
 		if let Some(v) = ts {
 			return Ok(Some(VersionStamp::from_slice(&v)?));
 		}

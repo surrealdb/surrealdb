@@ -31,7 +31,7 @@ surrealdb-types-derive = { version = "=3.0.0-alpha.11", path = "crates/types-der
 # External surreal crates
 affinitypool = "0.3.1"
 dmp = "0.2.3"
-indxdb = "0.6.0"
+indxdb = "0.8.0"
 lexicmp = "0.2.0"
 revision = { version = "0.13.0", features = [
     "chrono",

@@ -42,8 +42,6 @@ pub struct Transaction {
 	cache: TransactionCache,
 	/// Cache the index updates
 	index_caches: IndexTreeCaches,
-	/// Does this support reverse scan?
-	has_reverse_scan: bool,
 	/// The sequences for this store
 	sequences: Sequences,
 }
@@ -53,7 +51,6 @@ impl Transaction {
 	pub fn new(local: bool, tx: Transactor, sequences: Sequences) -> Transaction {
 		Transaction {
 			local,
-			has_reverse_scan: tx.inner.supports_reverse_scan(),
 			tx: Mutex::new(tx),
 			cache: TransactionCache::new(),
 			index_caches: IndexTreeCaches::default(),
@@ -79,11 +76,6 @@ impl Transaction {
 	/// Check if the transaction is local or remote
 	pub fn local(&self) -> bool {
 		self.local
-	}
-
-	/// Check if the transaction supports reverse scan
-	pub fn has_reverse_scan(&self) -> bool {
-		self.has_reverse_scan
 	}
 
 	/// Check if the transaction is finished.

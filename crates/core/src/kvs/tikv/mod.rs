@@ -132,10 +132,6 @@ impl super::api::Transaction for Transaction {
 		"tikv"
 	}
 
-	fn supports_reverse_scan(&self) -> bool {
-		true
-	}
-
 	/// Check if closed
 	fn closed(&self) -> bool {
 		self.done

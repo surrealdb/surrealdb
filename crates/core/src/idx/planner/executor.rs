@@ -21,13 +21,10 @@ use crate::idx::ft::highlighter::HighlightParams;
 use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
 	IndexCountThingIterator, IndexEqualThingIterator, IndexJoinThingIterator,
-	IndexRangeThingIterator, IndexUnionThingIterator, IteratorRecord, IteratorRef, KnnIterator,
-	KnnIteratorResult, MatchesThingIterator, ThingIterator, UniqueEqualThingIterator,
-	UniqueJoinThingIterator, UniqueRangeThingIterator, UniqueUnionThingIterator,
-};
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
-use crate::idx::planner::iterators::{
-	IndexRangeReverseThingIterator, UniqueRangeReverseThingIterator,
+	IndexRangeReverseThingIterator, IndexRangeThingIterator, IndexUnionThingIterator,
+	IteratorRecord, IteratorRef, KnnIterator, KnnIteratorResult, MatchesThingIterator,
+	ThingIterator, UniqueEqualThingIterator, UniqueJoinThingIterator,
+	UniqueRangeReverseThingIterator, UniqueRangeThingIterator, UniqueUnionThingIterator,
 };
 use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
@@ -502,14 +499,9 @@ impl QueryExecutor {
 			}
 			IndexOperator::Order(reverse) => {
 				if *reverse {
-					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
-					{
-						Some(ThingIterator::IndexRangeReverse(
-							IndexRangeReverseThingIterator::full_range(ir, ns, db, ix)?,
-						))
-					}
-					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
-					None
+					Some(ThingIterator::IndexRangeReverse(
+						IndexRangeReverseThingIterator::full_range(ir, ns, db, ix)?,
+					))
 				} else {
 					Some(ThingIterator::IndexRange(IndexRangeThingIterator::full_range(
 						ir, ns, db, ix,
@@ -575,7 +567,6 @@ impl QueryExecutor {
 			ScanDirection::Forward => {
 				ThingIterator::IndexRange(IndexRangeThingIterator::new(ir, ns, db, ix, from, to)?)
 			}
-			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 			ScanDirection::Backward => ThingIterator::IndexRangeReverse(
 				IndexRangeReverseThingIterator::new(ir, ns, db, ix, from, to)?,
 			),
@@ -595,7 +586,6 @@ impl QueryExecutor {
 			ScanDirection::Forward => {
 				ThingIterator::UniqueRange(UniqueRangeThingIterator::new(ir, ns, db, ix, from, to)?)
 			}
-			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 			ScanDirection::Backward => ThingIterator::UniqueRangeReverse(
 				UniqueRangeReverseThingIterator::new(ir, ns, db, ix, from, to)?,
 			),
@@ -637,19 +627,14 @@ impl QueryExecutor {
 			}
 			IndexOperator::Order(reverse) => {
 				if *reverse {
-					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
-					{
-						Some(ThingIterator::UniqueRangeReverse(
-							UniqueRangeReverseThingIterator::full_range(
-								irf,
-								ns,
-								db,
-								io.index_reference(),
-							)?,
-						))
-					}
-					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
-					None
+					Some(ThingIterator::UniqueRangeReverse(
+						UniqueRangeReverseThingIterator::full_range(
+							irf,
+							ns,
+							db,
+							io.index_reference(),
+						)?,
+					))
 				} else {
 					Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::full_range(
 						irf,
