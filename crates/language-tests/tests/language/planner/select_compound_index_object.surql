@@ -42,7 +42,7 @@ value = "[{ detail: { plan: { index: 'idx', prefix: [o:2], ranges: [{ operator: 
 
 */
 BEGIN;
-    DEFINE INDEX idx ON t FIELDS id.id().r,b;
+    DEFINE INDEX idx ON t FIELDS id.r,b;
     CREATE t:{ id: 1, r: o:1 } SET b=2021;
     CREATE t:{ id: 2, r: o:2 } SET b=2021;
     CREATE t:{ id: 3, r: o:1 } SET b=2025;
@@ -51,18 +51,18 @@ BEGIN;
     RETURN "OK";
 COMMIT;
 
-SELECT id FROM t WHERE id.id().r=o:1 AND b=2025;
-SELECT id FROM t WITH NO INDEX WHERE id.id().r=o:1 AND b=2025;
-SELECT id FROM t WHERE id.id().r=o:1 AND b=2025 EXPLAIN;
+SELECT id FROM t WHERE id.r=o:1 AND b=2025;
+SELECT id FROM t WITH NO INDEX WHERE id.r=o:1 AND b=2025;
+SELECT id FROM t WHERE id.r=o:1 AND b=2025 EXPLAIN;
 
-SELECT id FROM t WHERE id.id().r=o:2 AND b>2022;
-SELECT id FROM t WITH NO INDEX WHERE id.id().r=o:2 AND b>2022;
-SELECT id FROM t WHERE id.id().r=o:2 AND b>2022 EXPLAIN;
+SELECT id FROM t WHERE id.r=o:2 AND b>2022;
+SELECT id FROM t WITH NO INDEX WHERE id.r=o:2 AND b>2022;
+SELECT id FROM t WHERE id.r=o:2 AND b>2022 EXPLAIN;
 
-SELECT id FROM t WHERE b>=2025 AND id.id().r=o:2 AND b>2020;
-SELECT id FROM t WITH NO INDEX WHERE b>=2025 AND id.id().r=o:2 AND b>2020;
-SELECT id FROM t WHERE b>=2025 AND id.id().r=o:2 AND b>2020 EXPLAIN;
+SELECT id FROM t WHERE b>=2025 AND id.r=o:2 AND b>2020;
+SELECT id FROM t WITH NO INDEX WHERE b>=2025 AND id.r=o:2 AND b>2020;
+SELECT id FROM t WHERE b>=2025 AND id.r=o:2 AND b>2020 EXPLAIN;
 
-SELECT id FROM t WHERE b>2020 AND id.id().r=o:2 AND b<=2024;
-SELECT id FROM t WITH NO INDEX WHERE b>=2021 AND id.id().r=o:2 AND b<=2024;
-SELECT id FROM t WHERE b>2020 AND id.id().r=o:2 AND b<=2024 EXPLAIN;
+SELECT id FROM t WHERE b>2020 AND id.r=o:2 AND b<=2024;
+SELECT id FROM t WITH NO INDEX WHERE b>=2021 AND id.r=o:2 AND b<=2024;
+SELECT id FROM t WHERE b>2020 AND id.r=o:2 AND b<=2024 EXPLAIN;

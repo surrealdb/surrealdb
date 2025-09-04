@@ -663,8 +663,7 @@ impl IndexRangeThingIterator {
 			Array(Vec::with_capacity(1))
 		} else {
 			Array::from(prefix.to_vec())
-		}
-		.into();
+		};
 		let (from_inclusive, to_inclusive) = (from.inclusive, to.inclusive);
 		// Compute the lower bound for the scan
 		let beg = if from.value.is_none() {
