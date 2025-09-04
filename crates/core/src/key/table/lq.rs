@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId, SubscriptionDefinition};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 /// Lv is used to track a live query and is cluster independent, i.e. it is tied
 /// with a ns/db/tb combo without the cl. The live statement includes the node
@@ -28,9 +28,7 @@ pub(crate) struct Lq<'a> {
 	pub lq: Uuid,
 }
 
-impl KVKey for Lq<'_> {
-	type ValueType = SubscriptionDefinition;
-}
+impl_kv_key_storekey!(Lq<'_> => SubscriptionDefinition);
 
 pub fn new(ns: NamespaceId, db: DatabaseId, tb: &str, lq: Uuid) -> Lq<'_> {
 	Lq::new(ns, db, tb, lq)

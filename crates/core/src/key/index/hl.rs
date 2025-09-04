@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
 pub(crate) struct Hl<'a> {
@@ -25,9 +25,7 @@ pub(crate) struct Hl<'a> {
 	pub chunk: u32,
 }
 
-impl KVKey for Hl<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(Hl<'_> => Vec<u8>);
 
 impl<'a> Hl<'a> {
 	pub fn new(
@@ -60,6 +58,7 @@ impl<'a> Hl<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

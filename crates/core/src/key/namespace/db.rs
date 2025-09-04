@@ -5,7 +5,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct DatabaseKey<'key> {
@@ -18,9 +18,7 @@ pub(crate) struct DatabaseKey<'key> {
 	pub db: Cow<'key, str>,
 }
 
-impl KVKey for DatabaseKey<'_> {
-	type ValueType = DatabaseDefinition;
-}
+impl_kv_key_storekey!(DatabaseKey<'_> => DatabaseDefinition);
 
 pub fn new(ns: NamespaceId, db: &str) -> DatabaseKey {
 	DatabaseKey::new(ns, db)

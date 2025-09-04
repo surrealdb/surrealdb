@@ -5,7 +5,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{ApiDefinition, DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Ap<'a> {
@@ -20,9 +20,7 @@ pub(crate) struct Ap<'a> {
 	pub ap: Cow<'a, str>,
 }
 
-impl KVKey for Ap<'_> {
-	type ValueType = ApiDefinition;
-}
+impl_kv_key_storekey!(Ap<'_> => ApiDefinition);
 
 pub fn new(ns: NamespaceId, db: DatabaseId, ap: &str) -> Ap<'_> {
 	Ap::new(ns, db, ap)

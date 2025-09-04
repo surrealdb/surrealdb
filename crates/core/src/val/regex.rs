@@ -150,7 +150,7 @@ impl<'de> Deserialize<'de> for Regex {
 	}
 }
 
-impl Encode for Regex {
+impl<F> Encode<F> for Regex {
 	fn encode<W: std::io::Write>(
 		&self,
 		_: &mut storekey::Writer<W>,
@@ -159,7 +159,7 @@ impl Encode for Regex {
 	}
 }
 
-impl<'de> BorrowDecode<'de> for Regex {
+impl<'de, F> BorrowDecode<'de, F> for Regex {
 	fn borrow_decode(_: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
 		Err(storekey::DecodeError::message("Regex cannot be decoded"))
 	}

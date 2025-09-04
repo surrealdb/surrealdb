@@ -5,7 +5,7 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 use crate::val::RecordId;
 
 /// Id inverted. DocId -> Thing
@@ -26,9 +26,7 @@ pub(crate) struct Bi<'a> {
 	pub id: DocId,
 }
 
-impl KVKey for Bi<'_> {
-	type ValueType = RecordId;
-}
+impl_kv_key_storekey!(Bi<'_> => RecordId);
 
 impl Categorise for Bi<'_> {
 	fn categorise(&self) -> Category {
@@ -59,6 +57,7 @@ impl<'a> Bi<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

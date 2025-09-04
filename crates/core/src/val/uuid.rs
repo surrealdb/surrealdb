@@ -9,7 +9,7 @@ use storekey::{BorrowDecode, Encode};
 
 use super::Datetime;
 use crate::expr::escape::QuoteStr;
-use crate::val::Strand;
+use crate::val::{IndexFormat, Strand};
 
 #[revisioned(revision = 1)]
 #[derive(
@@ -29,6 +29,8 @@ use crate::val::Strand;
 )]
 #[serde(rename = "$surrealdb::private::Uuid")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub struct Uuid(pub uuid::Uuid);
 
 impl From<uuid::Uuid> for Uuid {

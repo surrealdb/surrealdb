@@ -3,7 +3,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::NamespaceId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct NamespaceRoot {
@@ -12,11 +12,9 @@ pub(crate) struct NamespaceRoot {
 	pub ns: NamespaceId,
 }
 
-/// When querying all keys under a namespace, the output value could be any
-/// value.
-impl KVKey for NamespaceRoot {
-	type ValueType = Vec<u8>;
-}
+// When querying all keys under a namespace, the output value could be any
+// value.
+impl_kv_key_storekey!(NamespaceRoot => Vec<u8>);
 
 pub fn new(ns: NamespaceId) -> NamespaceRoot {
 	NamespaceRoot::new(ns)
@@ -42,6 +40,7 @@ impl NamespaceRoot {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

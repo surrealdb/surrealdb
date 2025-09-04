@@ -4,7 +4,7 @@ use std::ops::Range;
 use storekey::{BorrowDecode, Encode};
 
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Version {
@@ -12,9 +12,7 @@ pub(crate) struct Version {
 	_a: u8,
 }
 
-impl KVKey for Version {
-	type ValueType = crate::kvs::version::MajorVersion;
-}
+impl_kv_key_storekey!(Version => crate::kvs::version::MajorVersion);
 
 pub fn new() -> Version {
 	Version::new()
@@ -48,6 +46,7 @@ impl Default for Version {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

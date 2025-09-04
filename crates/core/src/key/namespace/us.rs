@@ -5,7 +5,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{self, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Us<'a> {
@@ -18,9 +18,7 @@ pub(crate) struct Us<'a> {
 	pub user: Cow<'a, str>,
 }
 
-impl KVKey for Us<'_> {
-	type ValueType = catalog::UserDefinition;
-}
+impl_kv_key_storekey!(Us<'_> => catalog::UserDefinition);
 
 pub fn new(ns: NamespaceId, user: &str) -> Us<'_> {
 	Us::new(ns, user)

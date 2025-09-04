@@ -5,7 +5,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, EventDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{impl_kv_key_storekey,KVKey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Ev<'a> {
@@ -22,9 +22,7 @@ pub(crate) struct Ev<'a> {
 	pub ev: Cow<'a, str>,
 }
 
-impl KVKey for Ev<'_> {
-	type ValueType = EventDefinition;
-}
+impl_kv_key_storekey!(Ev<'_> => EventDefinition);
 
 pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, ev: &'a str) -> Ev<'a> {
 	Ev::new(ns, db, tb, ev)

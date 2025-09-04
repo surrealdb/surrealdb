@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 /// Represents an entry in the index compaction queue
 ///
@@ -39,9 +39,7 @@ pub(crate) struct Ic<'a> {
 	pub uid: Uuid,
 }
 
-impl KVKey for Ic<'_> {
-	type ValueType = ();
-}
+impl_kv_key_storekey!(Ic<'_> => ());
 
 impl Categorise for Ic<'_> {
 	fn categorise(&self) -> Category {
@@ -85,6 +83,7 @@ impl<'a> Ic<'a> {
 mod tests {
 	use super::*;
 	use crate::key::root::ic::Ic;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn range() {

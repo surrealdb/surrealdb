@@ -7,9 +7,10 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::kvs::KVKey;
 use crate::kvs::index::PrimaryAppending;
-use crate::val::RecordIdKey;
+use crate::val::{IndexFormat, RecordIdKey};
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "IndexFormat")]
 pub(crate) struct Ip<'a> {
 	__: u8,
 	_a: u8,
@@ -28,6 +29,10 @@ pub(crate) struct Ip<'a> {
 
 impl KVKey for Ip<'_> {
 	type ValueType = PrimaryAppending;
+	fn encode_key(&self) -> ::anyhow::Result<Vec<u8>> {
+		Ok(storekey::encode_vec_format::<IndexFormat, _>(self)
+			.map_err(|_| crate::err::Error::Unencodable)?)
+	}
 }
 
 impl<'a> Ip<'a> {
@@ -53,6 +58,7 @@ impl<'a> Ip<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

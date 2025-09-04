@@ -3,7 +3,7 @@
 use storekey::{BorrowDecode, Encode};
 
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::tasklease::{TaskLease, TaskLeaseType};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -15,9 +15,7 @@ pub(crate) struct Tl {
 	pub task: u16,
 }
 
-impl KVKey for Tl {
-	type ValueType = TaskLease;
-}
+impl_kv_key_storekey!(Tl => TaskLease);
 
 impl Categorise for Tl {
 	fn categorise(&self) -> Category {
@@ -44,6 +42,7 @@ impl Tl {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key_changefeed_cleanup() {

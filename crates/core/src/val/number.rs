@@ -24,7 +24,7 @@ use std::iter::{Product, Sum};
 use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
 use std::str::FromStr;
 
-use anyhow::{Result, bail};
+use anyhow::{Result, bail, ensure};
 use fastnum::D128;
 use revision::revisioned;
 use rust_decimal::Decimal;
@@ -36,6 +36,15 @@ use crate::err::Error;
 use crate::expr::decimal::DecimalLexEncoder;
 use crate::fnc::util::math::ToFloat;
 use crate::val::{Strand, TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
+
+use super::IndexFormat;
+
+#[derive(Encode, BorrowDecode)]
+pub(crate) enum NumberKind {
+	Int,
+	Float,
+	Decimal,
+}
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug)]
@@ -423,6 +432,36 @@ impl Number {
 			}
 		} else {
 			bail!(Error::Serialization(format!("Invalid decimal value: {dec}")))
+		}
+	}
+
+	pub(crate) fn from_decimal_buf_kind(b: &[u8], kind: NumberKind) -> Result<Self> {
+		let dec = DecimalLexEncoder::decode(b)?;
+		match kind {
+			NumberKind::Int => {
+				ensure!(dec.is_finite(), format!("Invalid integer value: {dec}"));
+				Ok(Number::Int(i64::from_str_radix(&dec.to_string(), 10)?))
+			}
+			NumberKind::Float => {
+				if dec.is_nan() {
+					Ok(Number::Float(f64::NAN))
+				} else if dec.is_infinite() {
+					if dec.is_negative() {
+						Ok(Number::Float(f64::NEG_INFINITY))
+					} else {
+						Ok(Number::Float(f64::INFINITY))
+					}
+				} else {
+					let dec = DecimalLexEncoder::to_decimal(dec)?;
+					dec.to_f64()
+						.ok_or_else(|| anyhow::Error::msg(format!("Invalid f64 {dec}")))
+						.map(Number::Float)
+				}
+			}
+			NumberKind::Decimal => {
+				ensure!(dec.is_finite(), format!("Invalid integer value: {dec}"));
+				Ok(Number::Decimal(DecimalLexEncoder::to_decimal(dec)?))
+			}
 		}
 	}
 
@@ -1114,7 +1153,35 @@ impl ToFloat for Number {
 	}
 }
 
-impl Encode for Number {
+impl Encode<()> for Number {
+	fn encode<W: std::io::Write>(
+		&self,
+		w: &mut storekey::Writer<W>,
+	) -> std::result::Result<(), storekey::EncodeError> {
+		let slice = self.as_decimal_buf();
+		w.write_slice(&slice)?;
+		let kind = match self {
+			Number::Int(_) => NumberKind::Int,
+			Number::Float(_) => NumberKind::Float,
+			Number::Decimal(_) => NumberKind::Decimal,
+		};
+		Encode::<()>::encode(&kind, w)?;
+		Ok(())
+	}
+}
+
+impl<'de> BorrowDecode<'de, ()> for Number {
+	fn borrow_decode(
+		r: &mut storekey::BorrowReader<'de>,
+	) -> std::result::Result<Self, storekey::DecodeError> {
+		let slice = r.read_cow()?;
+		let kind: NumberKind = BorrowDecode::<'de, ()>::borrow_decode(r)?;
+		Number::from_decimal_buf_kind(slice.as_ref(), kind)
+			.map_err(|_| storekey::DecodeError::InvalidFormat)
+	}
+}
+
+impl Encode<IndexFormat> for Number {
 	fn encode<W: std::io::Write>(
 		&self,
 		w: &mut storekey::Writer<W>,
@@ -1124,7 +1191,7 @@ impl Encode for Number {
 	}
 }
 
-impl<'de> BorrowDecode<'de> for Number {
+impl<'de> BorrowDecode<'de, IndexFormat> for Number {
 	fn borrow_decode(
 		r: &mut storekey::BorrowReader<'de>,
 	) -> std::result::Result<Self, storekey::DecodeError> {

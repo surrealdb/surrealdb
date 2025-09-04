@@ -7,7 +7,7 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::cf::TableMutations;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 use crate::vs::VersionStamp;
 
 // Cf stands for change feeds
@@ -24,10 +24,7 @@ pub(crate) struct Cf<'a> {
 	_c: u8,
 	pub tb: Cow<'a, str>,
 }
-
-impl KVKey for Cf<'_> {
-	type ValueType = TableMutations;
-}
+impl_kv_key_storekey!(Cf<'_> => TableMutations);
 
 impl Categorise for Cf<'_> {
 	fn categorise(&self) -> Category {
@@ -109,9 +106,7 @@ impl DatabaseChangeFeedRange {
 	}
 }
 
-impl KVKey for DatabaseChangeFeedRange {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(DatabaseChangeFeedRange => Vec<u8>);
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub struct DatabaseChangeFeedTsRange {
@@ -138,9 +133,7 @@ impl DatabaseChangeFeedTsRange {
 	}
 }
 
-impl KVKey for DatabaseChangeFeedTsRange {
-	type ValueType = TableMutations;
-}
+impl_kv_key_storekey!(DatabaseChangeFeedTsRange => TableMutations);
 
 /// Returns the prefix for the whole database change feeds since the
 /// specified versionstamp.

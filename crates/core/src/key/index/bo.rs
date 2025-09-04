@@ -7,7 +7,7 @@ use crate::idx::docids::DocId;
 use crate::idx::ft::offset::OffsetRecords;
 use crate::idx::ft::search::terms::TermId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Bo<'a> {
@@ -27,9 +27,7 @@ pub(crate) struct Bo<'a> {
 	pub term_id: TermId,
 }
 
-impl KVKey for Bo<'_> {
-	type ValueType = OffsetRecords;
-}
+impl_kv_key_storekey!(Bo<'_> => OffsetRecords);
 
 impl Categorise for Bo<'_> {
 	fn categorise(&self) -> Category {
@@ -68,6 +66,7 @@ impl<'a> Bo<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

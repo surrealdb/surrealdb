@@ -6,7 +6,7 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Az<'a> {
@@ -21,9 +21,7 @@ pub(crate) struct Az<'a> {
 	pub az: Cow<'a, str>,
 }
 
-impl KVKey for Az<'_> {
-	type ValueType = catalog::AnalyzerDefinition;
-}
+impl_kv_key_storekey!(Az<'_> => catalog::AnalyzerDefinition);
 
 pub fn new(ns: NamespaceId, db: DatabaseId, az: &str) -> Az<'_> {
 	Az::new(ns, db, az)

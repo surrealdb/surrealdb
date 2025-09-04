@@ -4,7 +4,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::NamespaceDefinition;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct NamespaceKey<'key> {
@@ -15,9 +15,7 @@ pub(crate) struct NamespaceKey<'key> {
 	pub ns: Cow<'key, str>,
 }
 
-impl KVKey for NamespaceKey<'_> {
-	type ValueType = NamespaceDefinition;
-}
+impl_kv_key_storekey!(NamespaceKey<'_> => NamespaceDefinition);
 
 pub fn new(ns: &str) -> NamespaceKey<'_> {
 	NamespaceKey::new(ns)
@@ -56,6 +54,7 @@ impl<'key> NamespaceKey<'key> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

@@ -51,8 +51,8 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
-use crate::val::{Array, RecordId, RecordIdKey};
+use crate::kvs::{KVKey, impl_kv_key_storekey};
+use crate::val::{Array, IndexFormat, RecordId, RecordIdKey};
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Encode, BorrowDecode)]
 struct Prefix<'a> {
@@ -68,9 +68,7 @@ struct Prefix<'a> {
 	_e: u8,
 }
 
-impl KVKey for Prefix<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(Prefix<'_> => Vec<u8>);
 
 impl<'a> Prefix<'a> {
 	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
@@ -90,6 +88,7 @@ impl<'a> Prefix<'a> {
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "IndexFormat")]
 struct PrefixIds<'a> {
 	__: u8,
 	_a: u8,
@@ -107,8 +106,12 @@ struct PrefixIds<'a> {
 	pub fd: Cow<'a, Array>,
 }
 
-impl KVKey for PrefixIds<'_> {
+impl crate::kvs::KVKey for PrefixIds<'_> {
 	type ValueType = Vec<u8>;
+	fn encode_key(&self) -> anyhow::Result<Vec<u8>> {
+		Ok(storekey::encode_vec_format::<IndexFormat, _>(self)
+			.map_err(|_| crate::err::Error::Unencodable)?)
+	}
 }
 
 impl<'a> PrefixIds<'a> {
@@ -130,6 +133,7 @@ impl<'a> PrefixIds<'a> {
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "IndexFormat")]
 pub(crate) struct Index<'a> {
 	__: u8,
 	_a: u8,
@@ -148,8 +152,12 @@ pub(crate) struct Index<'a> {
 	pub id: Option<Cow<'a, RecordIdKey>>,
 }
 
-impl KVKey for Index<'_> {
+impl crate::kvs::KVKey for Index<'_> {
 	type ValueType = RecordId;
+	fn encode_key(&self) -> ::anyhow::Result<Vec<u8>> {
+		Ok(storekey::encode_vec_format::<IndexFormat, _>(self)
+			.map_err(|_| crate::err::Error::Unencodable)?)
+	}
 }
 
 impl Categorise for Index<'_> {

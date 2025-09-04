@@ -22,7 +22,7 @@ use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::idx::ft::fulltext::TermDocument;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct TdRoot<'a> {
@@ -41,9 +41,7 @@ pub(crate) struct TdRoot<'a> {
 	pub term: Cow<'a, str>,
 }
 
-impl KVKey for TdRoot<'_> {
-	type ValueType = RoaringTreemap;
-}
+impl_kv_key_storekey!(TdRoot<'_> => RoaringTreemap);
 
 impl Categorise for TdRoot<'_> {
 	fn categorise(&self) -> Category {
@@ -95,9 +93,7 @@ pub(crate) struct Td<'a> {
 	pub id: DocId,
 }
 
-impl KVKey for Td<'_> {
-	type ValueType = TermDocument;
-}
+impl_kv_key_storekey!(Td<'_> => TermDocument);
 
 impl Categorise for Td<'_> {
 	fn categorise(&self) -> Category {
@@ -149,6 +145,7 @@ impl<'a> Td<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn root() {

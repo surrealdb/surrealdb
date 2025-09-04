@@ -4,7 +4,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct AllIndexRoot<'a> {
@@ -19,9 +19,7 @@ pub(crate) struct AllIndexRoot<'a> {
 	pub ix: Cow<'a, str>,
 }
 
-impl KVKey for AllIndexRoot<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(AllIndexRoot<'_> => Vec<u8>);
 
 pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> AllIndexRoot<'a> {
 	AllIndexRoot::new(ns, db, tb, ix)
@@ -53,6 +51,7 @@ impl<'a> AllIndexRoot<'a> {
 mod tests {
 
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn root() {

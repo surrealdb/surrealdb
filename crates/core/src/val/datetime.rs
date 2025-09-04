@@ -144,17 +144,17 @@ impl TrySub for Datetime {
 	}
 }
 
-impl Encode for Datetime {
+impl<F> Encode<F> for Datetime {
 	fn encode<W: std::io::Write>(
 		&self,
 		w: &mut storekey::Writer<W>,
 	) -> std::result::Result<(), storekey::EncodeError> {
 		let encode = self.to_rfc3339_opts(SecondsFormat::AutoSi, true);
-		encode.encode(w)
+		Encode::<F>::encode(&encode, w)
 	}
 }
 
-impl<'de> BorrowDecode<'de> for Datetime {
+impl<'de, F> BorrowDecode<'de, F> for Datetime {
 	fn borrow_decode(
 		r: &mut storekey::BorrowReader<'de>,
 	) -> std::result::Result<Self, storekey::DecodeError> {

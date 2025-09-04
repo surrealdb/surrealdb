@@ -44,10 +44,10 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
-use crate::val::RecordIdKey;
+use crate::val::{IndexFormat, RecordIdKey};
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "IndexFormat")]
 pub(crate) struct Id<'a> {
 	__: u8,
 	_a: u8,
@@ -64,8 +64,12 @@ pub(crate) struct Id<'a> {
 	pub id: RecordIdKey,
 }
 
-impl KVKey for Id<'_> {
+impl crate::kvs::KVKey for Id<'_> {
 	type ValueType = DocId;
+	fn encode_key(&self) -> anyhow::Result<Vec<u8>> {
+		Ok(storekey::encode_vec_format::<IndexFormat, _>(self)
+			.map_err(|_| crate::err::Error::Unencodable)?)
+	}
 }
 
 impl Categorise for Id<'_> {
@@ -98,6 +102,7 @@ impl<'a> Id<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

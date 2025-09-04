@@ -107,7 +107,7 @@ impl fmt::Display for Closure {
 	}
 }
 
-impl Encode for Closure {
+impl<F> Encode<F> for Closure {
 	fn encode<W: std::io::Write>(
 		&self,
 		_: &mut storekey::Writer<W>,
@@ -116,7 +116,7 @@ impl Encode for Closure {
 	}
 }
 
-impl<'de> BorrowDecode<'de> for Closure {
+impl<'de, F> BorrowDecode<'de, F> for Closure {
 	fn borrow_decode(_: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
 		Err(storekey::DecodeError::message("Closure cannot be decoded"))
 	}

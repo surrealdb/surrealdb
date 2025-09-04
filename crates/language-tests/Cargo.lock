@@ -3443,15 +3443,15 @@ checksum = "d7beae5182595e9a8b683fa98c4317f956c9a2dec3b9716990d20023cc60c766"
 
 [[package]]
 name = "storekey"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
- "storekey_derive",
+ "storekey-derive",
  "uuid",
 ]
 
 [[package]]
-name = "storekey_derive"
-version = "0.6.0"
+name = "storekey-derive"
+version = "0.8.0"
 dependencies = [
  "proc-macro2",
  "quote",

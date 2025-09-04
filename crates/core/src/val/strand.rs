@@ -12,7 +12,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
 use crate::expr::escape::QuoteStr;
-use crate::val::TryAdd;
+use crate::val::{IndexFormat, TryAdd};
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Debug)]
 #[repr(transparent)]
@@ -78,6 +78,8 @@ fn remove_null_bytes(s: String) -> String {
 )]
 #[serde(rename = "$surrealdb::private::Strand")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub struct Strand(String);
 
 impl Strand {

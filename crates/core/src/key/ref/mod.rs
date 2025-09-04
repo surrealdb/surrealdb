@@ -6,10 +6,11 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 use crate::val::RecordIdKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 struct Prefix<'a> {
 	__: u8,
 	_a: u8,
@@ -22,9 +23,7 @@ struct Prefix<'a> {
 	pub id: RecordIdKey,
 }
 
-impl KVKey for Prefix<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(Prefix<'_> => Vec<u8>);
 
 impl<'a> Prefix<'a> {
 	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &RecordIdKey) -> Self {
@@ -43,6 +42,7 @@ impl<'a> Prefix<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 struct PrefixFt<'a> {
 	__: u8,
 	_a: u8,
@@ -56,9 +56,7 @@ struct PrefixFt<'a> {
 	pub ft: Cow<'a, str>,
 }
 
-impl KVKey for PrefixFt<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(PrefixFt<'_> => Vec<u8>);
 
 // Code here is used in references which is temporarly disabled
 #[allow(dead_code)]
@@ -80,6 +78,7 @@ impl<'a> PrefixFt<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 struct PrefixFk<'a> {
 	__: u8,
 	_a: u8,
@@ -94,9 +93,7 @@ struct PrefixFk<'a> {
 	pub fk: RecordIdKey,
 }
 
-impl KVKey for PrefixFk<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(PrefixFk<'_> => Vec<u8>);
 
 // Code here is used in references which is temporarly removed
 #[allow(dead_code)]
@@ -131,6 +128,7 @@ impl<'a> PrefixFk<'a> {
 // - all references for a given record, filtered by a origin table and an origin field
 
 #[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct Ref<'a> {
 	__: u8,
 	_a: u8,
@@ -146,9 +144,7 @@ pub(crate) struct Ref<'a> {
 	pub ff: Cow<'a, str>,
 }
 
-impl KVKey for Ref<'_> {
-	type ValueType = ();
-}
+impl_kv_key_storekey!(Ref<'_> => ());
 
 impl Ref<'_> {
 	pub fn decode_key(k: &[u8]) -> Result<Ref<'_>> {

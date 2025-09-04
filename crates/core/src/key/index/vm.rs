@@ -5,7 +5,7 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::trees::mtree::MState;
 use crate::idx::trees::store::NodeId;
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode, Hash)]
 pub(crate) struct VmRoot<'a> {
@@ -23,9 +23,7 @@ pub(crate) struct VmRoot<'a> {
 	_g: u8,
 }
 
-impl KVKey for VmRoot<'_> {
-	type ValueType = MState;
-}
+impl_kv_key_storekey!(VmRoot<'_> => MState);
 
 impl<'a> VmRoot<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
@@ -64,9 +62,7 @@ pub(crate) struct Vm<'a> {
 	pub node_id: NodeId,
 }
 
-impl KVKey for Vm<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(Vm<'_> => Vec<u8>);
 
 impl<'a> Vm<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, node_id: NodeId) -> Self {
@@ -91,6 +87,7 @@ impl<'a> Vm<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn root() {

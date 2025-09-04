@@ -6,10 +6,11 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::expr::dir::Dir;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 use crate::val::{RecordId, RecordIdKey};
 
 #[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 struct Prefix<'a> {
 	__: u8,
 	_a: u8,
@@ -22,9 +23,7 @@ struct Prefix<'a> {
 	pub id: RecordIdKey,
 }
 
-impl KVKey for Prefix<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(Prefix<'_> => Vec<u8>);
 
 impl<'a> Prefix<'a> {
 	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &RecordIdKey) -> Self {
@@ -43,6 +42,7 @@ impl<'a> Prefix<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 struct PrefixEg<'a> {
 	__: u8,
 	_a: u8,
@@ -56,9 +56,7 @@ struct PrefixEg<'a> {
 	pub eg: Dir,
 }
 
-impl KVKey for PrefixEg<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(PrefixEg<'_> => Vec<u8>);
 
 impl<'a> PrefixEg<'a> {
 	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &RecordIdKey, eg: &Dir) -> Self {
@@ -78,6 +76,7 @@ impl<'a> PrefixEg<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 struct PrefixFt<'a> {
 	__: u8,
 	_a: u8,
@@ -92,9 +91,7 @@ struct PrefixFt<'a> {
 	pub ft: Cow<'a, str>,
 }
 
-impl KVKey for PrefixFt<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(PrefixFt<'_> => Vec<u8>);
 
 impl<'a> PrefixFt<'a> {
 	fn new(
@@ -122,6 +119,7 @@ impl<'a> PrefixFt<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct Graph<'a> {
 	__: u8,
 	_a: u8,
@@ -137,9 +135,7 @@ pub(crate) struct Graph<'a> {
 	pub fk: Cow<'a, RecordIdKey>,
 }
 
-impl KVKey for Graph<'_> {
-	type ValueType = ();
-}
+impl_kv_key_storekey!(Graph<'_> => ());
 
 impl Graph<'_> {
 	pub fn decode_key(k: &[u8]) -> Result<Graph<'_>> {

@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::index::Appending;
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
@@ -25,9 +25,7 @@ pub(crate) struct Ia<'a> {
 	pub i: u32,
 }
 
-impl KVKey for Ia<'_> {
-	type ValueType = Appending;
-}
+impl_kv_key_storekey!(Ia<'_> => Appending);
 
 impl<'a> Ia<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, i: u32) -> Self {
@@ -52,6 +50,7 @@ impl<'a> Ia<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

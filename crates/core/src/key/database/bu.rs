@@ -5,7 +5,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{BucketDefinition, DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct BucketKey<'a> {
@@ -20,9 +20,7 @@ pub(crate) struct BucketKey<'a> {
 	pub bu: Cow<'a, str>,
 }
 
-impl KVKey for BucketKey<'_> {
-	type ValueType = BucketDefinition;
-}
+impl_kv_key_storekey!(BucketKey<'_> => BucketDefinition);
 
 pub fn new(ns: NamespaceId, db: DatabaseId, bu: &str) -> BucketKey<'_> {
 	BucketKey::new(ns, db, bu)

@@ -5,7 +5,7 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::ft::search::SearchIndexState;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Bs<'a> {
@@ -22,9 +22,7 @@ pub(crate) struct Bs<'a> {
 	pub ix: Cow<'a, str>,
 }
 
-impl KVKey for Bs<'_> {
-	type ValueType = SearchIndexState;
-}
+impl_kv_key_storekey!(Bs<'_> => SearchIndexState);
 
 impl Categorise for Bs<'_> {
 	fn categorise(&self) -> Category {
@@ -53,6 +51,7 @@ impl<'a> Bs<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

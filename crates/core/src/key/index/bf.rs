@@ -7,7 +7,7 @@ use crate::idx::docids::DocId;
 use crate::idx::ft::TermFrequency;
 use crate::idx::ft::search::terms::TermId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Bf<'a> {
@@ -27,9 +27,7 @@ pub(crate) struct Bf<'a> {
 	pub doc_id: DocId,
 }
 
-impl KVKey for Bf<'_> {
-	type ValueType = TermFrequency;
-}
+impl_kv_key_storekey!(Bf<'_> => TermFrequency);
 
 impl Categorise for Bf<'_> {
 	fn categorise(&self) -> Category {
@@ -68,6 +66,7 @@ impl<'a> Bf<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

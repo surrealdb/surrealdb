@@ -21,7 +21,7 @@ use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::idx::ft::DocLength;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Dl<'a> {
@@ -40,9 +40,7 @@ pub(crate) struct Dl<'a> {
 	pub id: DocId,
 }
 
-impl KVKey for Dl<'_> {
-	type ValueType = DocLength;
-}
+impl_kv_key_storekey!(Dl<'_> => DocLength);
 
 impl Categorise for Dl<'_> {
 	fn categorise(&self) -> Category {
@@ -86,6 +84,7 @@ impl<'a> Dl<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

@@ -5,7 +5,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Encode, BorrowDecode)]
 pub(crate) struct Ix<'a> {
@@ -22,9 +22,7 @@ pub(crate) struct Ix<'a> {
 	pub ix: Cow<'a, str>,
 }
 
-impl KVKey for Ix<'_> {
-	type ValueType = IndexDefinition;
-}
+impl_kv_key_storekey!(Ix<'_> => IndexDefinition);
 
 pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Ix<'a> {
 	Ix::new(ns, db, tb, ix)

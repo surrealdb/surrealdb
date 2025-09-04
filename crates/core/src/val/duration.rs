@@ -11,7 +11,7 @@ use storekey::{BorrowDecode, Encode};
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::syn;
-use crate::val::{Datetime, Strand, TryAdd, TrySub, Value};
+use crate::val::{Datetime, IndexFormat, Strand, TryAdd, TrySub, Value};
 
 pub(crate) static SECONDS_PER_YEAR: u64 = 365 * SECONDS_PER_DAY;
 pub(crate) static SECONDS_PER_WEEK: u64 = 7 * SECONDS_PER_DAY;
@@ -38,6 +38,8 @@ pub(crate) static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
 	BorrowDecode,
 )]
 #[serde(rename = "$surrealdb::private::Duration")]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub struct Duration(pub time::Duration);
 
 impl Duration {

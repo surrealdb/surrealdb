@@ -4,7 +4,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::AccessDefinition;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Ac<'a> {
@@ -15,9 +15,7 @@ pub(crate) struct Ac<'a> {
 	pub ac: Cow<'a, str>,
 }
 
-impl KVKey for Ac<'_> {
-	type ValueType = AccessDefinition;
-}
+impl_kv_key_storekey!(Ac<'_> => AccessDefinition);
 
 pub fn new(ac: &str) -> Ac<'_> {
 	Ac::new(ac)
@@ -56,6 +54,7 @@ impl<'a> Ac<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

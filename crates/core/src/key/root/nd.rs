@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::dbs::node::Node;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 // Represents cluster information.
 // In the future, this could also include broadcast addresses and other
@@ -18,9 +18,7 @@ pub(crate) struct Nd {
 	pub nd: Uuid,
 }
 
-impl KVKey for Nd {
-	type ValueType = Node;
-}
+impl_kv_key_storekey!(Nd => Node);
 
 pub fn new(nd: Uuid) -> Nd {
 	Nd::new(nd)
@@ -59,6 +57,7 @@ impl Nd {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

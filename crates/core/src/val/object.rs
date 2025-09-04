@@ -12,7 +12,7 @@ use crate::err::Error;
 use crate::expr::escape::EscapeKey;
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::literal::ObjectEntry;
-use crate::val::{RecordId, Value};
+use crate::val::{IndexFormat, RecordId, Value};
 
 /// Invariant: Keys never contain NUL bytes.
 /// TODO: Null byte validity
@@ -32,6 +32,8 @@ use crate::val::{RecordId, Value};
 	BorrowDecode,
 )]
 #[serde(rename = "$surrealdb::private::Object")]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub struct Object(pub BTreeMap<String, Value>);
 
 impl From<BTreeMap<&str, Value>> for Object {

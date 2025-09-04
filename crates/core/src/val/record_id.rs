@@ -12,10 +12,12 @@ use crate::cnf::ID_CHARS;
 use crate::expr::escape::EscapeRid;
 use crate::expr::{self};
 use crate::kvs::impl_kv_value_revisioned;
-use crate::val::{Array, Number, Object, Range, Strand, Uuid, Value};
+use crate::val::{Array, IndexFormat, Number, Object, Range, Strand, Uuid, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, Encode, BorrowDecode)]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub struct RecordIdKeyRange {
 	pub start: Bound<RecordIdKey>,
 	pub end: Bound<RecordIdKey>,
@@ -146,69 +148,13 @@ impl PartialEq<Range> for RecordIdKeyRange {
 	}
 }
 
-impl Encode for RecordIdKeyRange {
-	fn encode<W: std::io::Write>(
-		&self,
-		w: &mut storekey::Writer<W>,
-	) -> Result<(), storekey::EncodeError> {
-		match &self.start {
-			Bound::Excluded(v) => {
-				w.write_u8(4)?;
-				v.encode(w)?;
-			}
-			Bound::Included(v) => {
-				w.write_u8(3)?;
-				v.encode(w)?;
-			}
-			Bound::Unbounded => {
-				w.write_u8(2)?;
-			}
-		}
-
-		match &self.end {
-			Bound::Excluded(v) => {
-				w.write_u8(4)?;
-				v.encode(w)?;
-			}
-			Bound::Included(v) => {
-				w.write_u8(3)?;
-				v.encode(w)?;
-			}
-			Bound::Unbounded => {
-				w.write_u8(2)?;
-			}
-		}
-
-		Ok(())
-	}
-}
-
-impl<'de> BorrowDecode<'de> for RecordIdKeyRange {
-	fn borrow_decode(r: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
-		let start = match r.read_u8()? {
-			2 => Bound::Unbounded,
-			3 => Bound::Included(BorrowDecode::borrow_decode(r)?),
-			4 => Bound::Excluded(BorrowDecode::borrow_decode(r)?),
-			_ => return Err(storekey::DecodeError::InvalidFormat),
-		};
-		let end = match r.read_u8()? {
-			2 => Bound::Unbounded,
-			3 => Bound::Included(BorrowDecode::borrow_decode(r)?),
-			4 => Bound::Excluded(BorrowDecode::borrow_decode(r)?),
-			_ => return Err(storekey::DecodeError::InvalidFormat),
-		};
-		Ok(RecordIdKeyRange {
-			start,
-			end,
-		})
-	}
-}
-
 #[revisioned(revision = 1)]
 #[derive(
 	Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash, Encode, BorrowDecode,
 )]
 #[serde(rename = "$surrealdb::private::sql::Id")]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub enum RecordIdKey {
 	Number(i64),
 	//TODO: This should definitely be strand, not string as null bytes here can cause a lot of
@@ -394,6 +340,8 @@ impl fmt::Display for RecordIdKey {
 	Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash, Encode, BorrowDecode,
 )]
 #[serde(rename = "$surrealdb::private::RecordId")]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub struct RecordId {
 	pub table: String,
 	pub key: RecordIdKey,

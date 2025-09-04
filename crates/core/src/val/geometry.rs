@@ -793,7 +793,7 @@ impl hash::Hash for Geometry {
 	}
 }
 
-impl Encode for Geometry {
+impl<F> Encode<F> for Geometry {
 	fn encode<W: std::io::Write>(
 		&self,
 		w: &mut storekey::Writer<W>,
@@ -801,15 +801,15 @@ impl Encode for Geometry {
 		match self {
 			Geometry::Point(point) => {
 				w.write_u8(2)?;
-				point.x().encode(w)?;
-				point.y().encode(w)?;
+				Encode::<F>::encode(&point.x(), w)?;
+				Encode::<F>::encode(&point.y(), w)?;
 			}
 			Geometry::Line(line_string) => {
 				w.write_u8(3)?;
 				for p in line_string.points() {
 					w.mark_terminator();
-					p.x().encode(w)?;
-					p.y().encode(w)?;
+					Encode::<F>::encode(&p.x(), w)?;
+					Encode::<F>::encode(&p.y(), w)?;
 				}
 				w.write_terminator()?;
 			}
@@ -817,15 +817,15 @@ impl Encode for Geometry {
 				w.write_u8(4)?;
 				for p in polygon.exterior().points() {
 					w.mark_terminator();
-					p.x().encode(w)?;
-					p.y().encode(w)?;
+					Encode::<F>::encode(&p.x(), w)?;
+					Encode::<F>::encode(&p.y(), w)?;
 				}
 				w.write_terminator()?;
 				for l in polygon.interiors() {
 					for p in l.points() {
 						w.mark_terminator();
-						p.x().encode(w)?;
-						p.y().encode(w)?;
+						Encode::<F>::encode(&p.x(), w)?;
+						Encode::<F>::encode(&p.y(), w)?;
 					}
 					w.write_terminator()?;
 				}
@@ -835,8 +835,8 @@ impl Encode for Geometry {
 				w.write_u8(5)?;
 				for p in multi_point.iter() {
 					w.mark_terminator();
-					p.x().encode(w)?;
-					p.y().encode(w)?;
+					Encode::<F>::encode(&p.x(), w)?;
+					Encode::<F>::encode(&p.y(), w)?;
 				}
 				w.write_terminator()?;
 			}
@@ -845,8 +845,8 @@ impl Encode for Geometry {
 				for l in multi_line_string.iter() {
 					for p in l.points() {
 						w.mark_terminator();
-						p.x().encode(w)?;
-						p.y().encode(w)?;
+						Encode::<F>::encode(&p.x(), w)?;
+						Encode::<F>::encode(&p.y(), w)?;
 					}
 					w.write_terminator()?;
 				}
@@ -857,15 +857,15 @@ impl Encode for Geometry {
 				for p in multi_polygon.iter() {
 					for p in p.exterior().points() {
 						w.mark_terminator();
-						p.x().encode(w)?;
-						p.y().encode(w)?;
+						Encode::<F>::encode(&p.x(), w)?;
+						Encode::<F>::encode(&p.y(), w)?;
 					}
 					w.write_terminator()?;
 					for l in p.interiors() {
 						for p in l.points() {
 							w.mark_terminator();
-							p.x().encode(w)?;
-							p.y().encode(w)?;
+							Encode::<F>::encode(&p.x(), w)?;
+							Encode::<F>::encode(&p.y(), w)?;
 						}
 						w.write_terminator()?;
 					}
@@ -877,7 +877,7 @@ impl Encode for Geometry {
 				w.write_u8(8)?;
 				for g in items.iter() {
 					w.mark_terminator();
-					g.encode(w)?;
+					Encode::<F>::encode(g, w)?;
 				}
 				w.write_terminator()?;
 			}
@@ -886,17 +886,17 @@ impl Encode for Geometry {
 	}
 }
 
-impl<'de> BorrowDecode<'de> for Geometry {
+impl<'de, F> BorrowDecode<'de, F> for Geometry {
 	fn borrow_decode(r: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
 		match r.read_u8()? {
 			2 => {
-				let point = <(f64, f64)>::borrow_decode(r)?;
+				let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
 				Ok(Geometry::Point(Point::from(point)))
 			}
 			3 => {
 				let mut res = Vec::new();
 				while !r.read_terminal()? {
-					let point = <(f64, f64)>::borrow_decode(r)?;
+					let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
 					res.push(Coord::from(point))
 				}
 				Ok(Geometry::Line(LineString::new(res)))
@@ -904,7 +904,7 @@ impl<'de> BorrowDecode<'de> for Geometry {
 			4 => {
 				let mut ext = Vec::new();
 				while !r.read_terminal()? {
-					let point = <(f64, f64)>::borrow_decode(r)?;
+					let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
 					ext.push(Coord::from(point))
 				}
 				let ext = LineString::new(ext);
@@ -912,7 +912,7 @@ impl<'de> BorrowDecode<'de> for Geometry {
 				while !r.read_terminal()? {
 					let mut line = Vec::new();
 					while !r.read_terminal()? {
-						let point = <(f64, f64)>::borrow_decode(r)?;
+						let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
 						line.push(Coord::from(point))
 					}
 					int.push(LineString::new(line))
@@ -922,7 +922,7 @@ impl<'de> BorrowDecode<'de> for Geometry {
 			5 => {
 				let mut res = Vec::new();
 				while !r.read_terminal()? {
-					let point = <(f64, f64)>::borrow_decode(r)?;
+					let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
 					res.push(Point::from(point))
 				}
 				Ok(Geometry::MultiPoint(MultiPoint::new(res)))
@@ -932,7 +932,7 @@ impl<'de> BorrowDecode<'de> for Geometry {
 				while !r.read_terminal()? {
 					let mut res = Vec::new();
 					while !r.read_terminal()? {
-						let point = <(f64, f64)>::borrow_decode(r)?;
+						let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
 						res.push(Coord::from(point))
 					}
 					lines.push(LineString::new(res));
@@ -944,7 +944,7 @@ impl<'de> BorrowDecode<'de> for Geometry {
 				while !r.read_terminal()? {
 					let mut ext = Vec::new();
 					while !r.read_terminal()? {
-						let point = <(f64, f64)>::borrow_decode(r)?;
+						let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
 						ext.push(Coord::from(point))
 					}
 					let ext = LineString::new(ext);
@@ -952,7 +952,7 @@ impl<'de> BorrowDecode<'de> for Geometry {
 					while !r.read_terminal()? {
 						let mut line = Vec::new();
 						while !r.read_terminal()? {
-							let point = <(f64, f64)>::borrow_decode(r)?;
+							let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
 							line.push(Coord::from(point))
 						}
 						int.push(LineString::new(line))
@@ -964,7 +964,7 @@ impl<'de> BorrowDecode<'de> for Geometry {
 			8 => {
 				let mut geoms = Vec::new();
 				while !r.read_terminal()? {
-					geoms.push(Geometry::borrow_decode(r)?)
+					geoms.push(BorrowDecode::<'de, F>::borrow_decode(r)?)
 				}
 				Ok(Geometry::Collection(geoms))
 			}

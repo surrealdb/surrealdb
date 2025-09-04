@@ -5,7 +5,7 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::vector::SerializedVector;
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct He<'a> {
@@ -24,9 +24,7 @@ pub(crate) struct He<'a> {
 	pub element_id: ElementId,
 }
 
-impl KVKey for He<'_> {
-	type ValueType = SerializedVector;
-}
+impl_kv_key_storekey!(He<'_> => SerializedVector);
 
 impl<'a> He<'a> {
 	pub fn new(
@@ -57,6 +55,7 @@ impl<'a> He<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

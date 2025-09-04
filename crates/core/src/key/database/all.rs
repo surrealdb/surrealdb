@@ -3,7 +3,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct DatabaseRoot {
@@ -14,9 +14,7 @@ pub(crate) struct DatabaseRoot {
 	pub db: DatabaseId,
 }
 
-impl KVKey for DatabaseRoot {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(DatabaseRoot => Vec<u8>);
 
 pub fn new(ns: NamespaceId, db: DatabaseId) -> DatabaseRoot {
 	DatabaseRoot::new(ns, db)
@@ -44,6 +42,7 @@ impl DatabaseRoot {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

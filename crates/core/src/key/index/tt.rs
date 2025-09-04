@@ -25,7 +25,7 @@ use uuid::Uuid;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Tt<'a> {
@@ -48,9 +48,7 @@ pub(crate) struct Tt<'a> {
 	pub add: bool,
 }
 
-impl KVKey for Tt<'_> {
-	type ValueType = String;
-}
+impl_kv_key_storekey!(Tt<'_> => String);
 
 impl Categorise for Tt<'_> {
 	fn categorise(&self) -> Category {
@@ -189,9 +187,7 @@ struct TtTermPrefix<'a> {
 	pub term: Cow<'a, str>,
 }
 
-impl KVKey for TtTermPrefix<'_> {
-	type ValueType = String;
-}
+impl_kv_key_storekey!(TtTermPrefix<'_> => String);
 
 impl<'a> TtTermPrefix<'a> {
 	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, term: &'a str) -> Self {
@@ -229,9 +225,7 @@ struct TtTermsPrefix<'a> {
 	_g: u8,
 }
 
-impl KVKey for TtTermsPrefix<'_> {
-	type ValueType = String;
-}
+impl_kv_key_storekey!(TtTermsPrefix<'_> => String);
 
 impl<'a> TtTermsPrefix<'a> {
 	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {

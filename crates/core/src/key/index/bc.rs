@@ -6,7 +6,7 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::ft::search::terms::TermId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Bc<'a> {
@@ -25,9 +25,7 @@ pub(crate) struct Bc<'a> {
 	pub term_id: TermId,
 }
 
-impl KVKey for Bc<'_> {
-	type ValueType = RoaringTreemap;
-}
+impl_kv_key_storekey!(Bc<'_> => RoaringTreemap);
 
 impl Categorise for Bc<'_> {
 	fn categorise(&self) -> Category {
@@ -58,6 +56,7 @@ impl<'a> Bc<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

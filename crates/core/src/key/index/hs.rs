@@ -6,7 +6,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::trees::hnsw::HnswState;
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
 pub(crate) struct Hs<'a> {
@@ -24,9 +24,7 @@ pub(crate) struct Hs<'a> {
 	_g: u8,
 }
 
-impl KVKey for Hs<'_> {
-	type ValueType = HnswState;
-}
+impl_kv_key_storekey!(Hs<'_> => HnswState);
 
 impl<'a> Hs<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
@@ -50,6 +48,7 @@ impl<'a> Hs<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

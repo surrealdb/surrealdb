@@ -5,7 +5,7 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::docs::HnswDocsState;
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 use crate::val::RecordIdKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -24,9 +24,7 @@ pub(crate) struct HdRoot<'a> {
 	_g: u8,
 }
 
-impl KVKey for HdRoot<'_> {
-	type ValueType = HnswDocsState;
-}
+impl_kv_key_storekey!(HdRoot<'_> => HnswDocsState);
 
 impl<'a> HdRoot<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
@@ -64,9 +62,7 @@ pub(crate) struct Hd<'a> {
 	pub doc_id: DocId,
 }
 
-impl KVKey for Hd<'_> {
-	type ValueType = RecordIdKey;
-}
+impl_kv_key_storekey!(Hd<'_> => RecordIdKey);
 
 impl<'a> Hd<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, doc_id: DocId) -> Self {
@@ -91,6 +87,7 @@ impl<'a> Hd<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn root() {

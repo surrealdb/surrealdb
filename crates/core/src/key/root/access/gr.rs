@@ -5,7 +5,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Gr<'a> {
@@ -18,9 +18,7 @@ pub(crate) struct Gr<'a> {
 	pub gr: Cow<'a, str>,
 }
 
-impl KVKey for Gr<'_> {
-	type ValueType = catalog::AccessGrant;
-}
+impl_kv_key_storekey!(Gr<'_> => catalog::AccessGrant);
 
 pub fn new<'a>(ac: &'a str, gr: &'a str) -> Gr<'a> {
 	Gr::new(ac, gr)

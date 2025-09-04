@@ -6,7 +6,7 @@ use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::ft::search::terms::SearchTermsState;
 use crate::idx::trees::store::NodeId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct BtRoot<'a> {
@@ -24,9 +24,7 @@ pub(crate) struct BtRoot<'a> {
 	_g: u8,
 }
 
-impl KVKey for BtRoot<'_> {
-	type ValueType = SearchTermsState;
-}
+impl_kv_key_storekey!(BtRoot<'_> => SearchTermsState);
 
 impl Categorise for BtRoot<'_> {
 	fn categorise(&self) -> Category {
@@ -70,9 +68,7 @@ pub(crate) struct Bt<'a> {
 	pub node_id: NodeId,
 }
 
-impl KVKey for Bt<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(Bt<'_> => Vec<u8>);
 
 impl Categorise for Bt<'_> {
 	fn categorise(&self) -> Category {
@@ -103,6 +99,7 @@ impl<'a> Bt<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn root() {

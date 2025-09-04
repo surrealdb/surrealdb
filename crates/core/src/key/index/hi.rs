@@ -3,10 +3,10 @@ use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::kvs::KVKey;
-use crate::val::RecordIdKey;
+use crate::val::{IndexFormat, RecordIdKey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "IndexFormat")]
 pub(crate) struct Hi<'a> {
 	__: u8,
 	_a: u8,
@@ -23,8 +23,12 @@ pub(crate) struct Hi<'a> {
 	pub id: RecordIdKey,
 }
 
-impl KVKey for Hi<'_> {
+impl crate::kvs::KVKey for Hi<'_> {
 	type ValueType = u64;
+	fn encode_key(&self) -> ::anyhow::Result<Vec<u8>> {
+		Ok(::storekey::encode_vec_format::<IndexFormat, _>(self)
+			.map_err(|_| crate::err::Error::Unencodable)?)
+	}
 }
 
 impl<'a> Hi<'a> {
@@ -50,6 +54,7 @@ impl<'a> Hi<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

@@ -5,7 +5,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{self, DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Fd<'a> {
@@ -22,9 +22,7 @@ pub(crate) struct Fd<'a> {
 	pub fd: Cow<'a, str>,
 }
 
-impl KVKey for Fd<'_> {
-	type ValueType = catalog::FieldDefinition;
-}
+impl_kv_key_storekey!(Fd<'_> => catalog::FieldDefinition);
 
 pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, fd: &'a str) -> Fd<'a> {
 	Fd::new(ns, db, tb, fd)

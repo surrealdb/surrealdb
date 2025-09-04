@@ -5,7 +5,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, MlModelDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Ml<'a> {
@@ -21,9 +21,7 @@ pub(crate) struct Ml<'a> {
 	pub vn: Cow<'a, str>,
 }
 
-impl KVKey for Ml<'_> {
-	type ValueType = MlModelDefinition;
-}
+impl_kv_key_storekey!(Ml<'_> => MlModelDefinition);
 
 pub fn new<'a>(ns: NamespaceId, db: DatabaseId, ml: &'a str, vn: &'a str) -> Ml<'a> {
 	Ml::new(ns, db, ml, vn)

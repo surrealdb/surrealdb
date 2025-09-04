@@ -37,8 +37,8 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
 use crate::kvs::sequences::BatchValue;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Ib<'a> {
@@ -57,9 +57,7 @@ pub(crate) struct Ib<'a> {
 	pub start: i64,
 }
 
-impl KVKey for Ib<'_> {
-	type ValueType = BatchValue;
-}
+impl_kv_key_storekey!(Ib<'_> => BatchValue);
 
 impl Categorise for Ib<'_> {
 	fn categorise(&self) -> Category {

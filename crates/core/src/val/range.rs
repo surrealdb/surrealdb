@@ -10,14 +10,16 @@ use super::value::CoerceErrorExt;
 use crate::expr;
 use crate::expr::kind::HasKind;
 use crate::val::value::{Coerce, CoerceError};
-use crate::val::{Array, Number, Value};
+use crate::val::{Array, IndexFormat, Number, Value};
 
 /// A range of surrealql values,
 ///
 /// Can be any kind of values, "a"..1 is allowed.
 #[revisioned(revision = 1)]
-#[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone, Hash)]
+#[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone, Hash, Encode, BorrowDecode)]
 #[serde(rename = "$surrealdb::private::Range")]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub struct Range {
 	pub start: Bound<Value>,
 	pub end: Bound<Value>,
@@ -176,64 +178,6 @@ impl Range {
 				right: Box::new(y.into_literal()),
 			},
 		}
-	}
-}
-
-impl Encode for Range {
-	fn encode<W: std::io::Write>(
-		&self,
-		w: &mut storekey::Writer<W>,
-	) -> Result<(), storekey::EncodeError> {
-		match &self.start {
-			Bound::Excluded(v) => {
-				w.write_u8(4)?;
-				v.encode(w)?;
-			}
-			Bound::Included(v) => {
-				w.write_u8(3)?;
-				v.encode(w)?;
-			}
-			Bound::Unbounded => {
-				w.write_u8(2)?;
-			}
-		}
-
-		match &self.end {
-			Bound::Excluded(v) => {
-				w.write_u8(4)?;
-				v.encode(w)?;
-			}
-			Bound::Included(v) => {
-				w.write_u8(3)?;
-				v.encode(w)?;
-			}
-			Bound::Unbounded => {
-				w.write_u8(2)?;
-			}
-		}
-
-		Ok(())
-	}
-}
-
-impl<'de> BorrowDecode<'de> for Range {
-	fn borrow_decode(r: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
-		let start = match r.read_u8()? {
-			2 => Bound::Unbounded,
-			3 => Bound::Included(BorrowDecode::borrow_decode(r)?),
-			4 => Bound::Excluded(BorrowDecode::borrow_decode(r)?),
-			_ => return Err(storekey::DecodeError::InvalidFormat),
-		};
-		let end = match r.read_u8()? {
-			2 => Bound::Unbounded,
-			3 => Bound::Included(BorrowDecode::borrow_decode(r)?),
-			4 => Bound::Excluded(BorrowDecode::borrow_decode(r)?),
-			_ => return Err(storekey::DecodeError::InvalidFormat),
-		};
-		Ok(Range {
-			start,
-			end,
-		})
 	}
 }
 

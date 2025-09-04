@@ -54,6 +54,10 @@ pub use self::table::Table;
 pub use self::uuid::Uuid;
 pub use self::value::{CastError, CoerceError};
 
+/// Marker type for a different serialization format for value which does not encode type
+/// information which is not required for indexing.
+pub enum IndexFormat {}
+
 /// Marker type for value conversions from Value::None
 #[derive(Clone, Copy, Eq, PartialEq, PartialOrd)]
 pub struct SqlNone;
@@ -67,6 +71,8 @@ pub struct Null;
 	Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Encode, BorrowDecode,
 )]
 #[serde(rename = "$surrealdb::private::Value")]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub enum Value {
 	#[default]
 	None,

@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::sequences::SequenceState;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -25,9 +25,7 @@ pub(crate) struct St<'a> {
 	pub nid: Uuid,
 }
 
-impl KVKey for St<'_> {
-	type ValueType = SequenceState;
-}
+impl_kv_key_storekey!(St<'_> => SequenceState);
 
 impl Categorise for St<'_> {
 	fn categorise(&self) -> Category {
@@ -58,6 +56,7 @@ impl<'a> St<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {
