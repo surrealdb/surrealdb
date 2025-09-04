@@ -24,7 +24,7 @@ use crate::expr::{
 	Mock, Param, PostfixOperator, PrefixOperator,
 };
 use crate::fnc;
-use crate::val::{Array, Closure, Range, Strand, Value};
+use crate::val::{Array, Closure, Range, Strand, Value, Output};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Expr {
@@ -222,16 +222,16 @@ impl Expr {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
+	) -> FlowResult<Output> {
 		let opt = opt.dive(1).map_err(anyhow::Error::new)?;
 
 		match self {
-			Expr::Literal(literal) => literal.compute(stk, ctx, &opt, doc).await,
+			Expr::Literal(literal) => literal.compute(stk, ctx, &opt, doc).await.map(Output::Value),
 			Expr::Param(param) => {
-				param.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				param.compute(stk, ctx, &opt, doc).await.map(Output::Value).map_err(ControlFlow::Err)
 			}
-			Expr::Idiom(idiom) => idiom.compute(stk, ctx, &opt, doc).await,
-			Expr::Table(ident) => Ok(Value::Table(ident.clone().into())),
+			Expr::Idiom(idiom) => idiom.compute(stk, ctx, &opt, doc).await.map(Output::Value),
+			Expr::Table(ident) => Ok(Output::Value(Value::Table(ident.clone().into()))),
 			Expr::Mock(mock) => {
 				// NOTE(value pr): This is a breaking change but makes the most sense without
 				// having mock be part of the Value type.
@@ -241,10 +241,10 @@ impl Expr {
 				// create we return the array here instead.
 				//
 				let record_ids = mock.clone().into_iter().map(Value::RecordId).collect();
-				Ok(Value::Array(Array(record_ids)))
+				Ok(Output::Value(Value::Array(Array(record_ids))))
 			}
 			Expr::Block(block) => block.compute(stk, ctx, &opt, doc).await,
-			Expr::Constant(constant) => constant.compute().map_err(ControlFlow::Err),
+			Expr::Constant(constant) => constant.compute().map(Output::Value).map_err(ControlFlow::Err),
 			Expr::Prefix {
 				op,
 				expr,

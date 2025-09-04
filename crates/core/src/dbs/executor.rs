@@ -26,7 +26,7 @@ use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 use crate::sql::{self, Ast};
-use crate::val::Value;
+use crate::val::{Output, Value};
 use crate::{err, expr};
 
 const TARGET: &str = "surrealdb::core::dbs";
@@ -83,7 +83,7 @@ impl Executor {
 		txn: Arc<Transaction>,
 		start: &Instant,
 		plan: TopLevelExpr,
-	) -> FlowResult<Value> {
+	) -> FlowResult<Output> {
 		let res = match plan {
 			TopLevelExpr::Use(stmt) => {
 				// Avoid moving in and out of the context via Arc::get_mut
@@ -115,7 +115,7 @@ impl Executor {
 					session.put(DB.as_ref(), db.into_strand().into());
 					ctx.add_value("session", session.into());
 				}
-				Ok(Value::None)
+				Ok(Output::Value(Value::None))
 			}
 			TopLevelExpr::Option(_) => {
 				return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
@@ -167,7 +167,7 @@ impl Executor {
 					.map_err(anyhow::Error::new)?
 					.add_value(stm.name.into_string(), result.into());
 				// Finalise transaction, returning nothing unless it couldn't commit
-				Ok(Value::None)
+				Ok(Output::Value(Value::None))
 			}
 			TopLevelExpr::Begin => {
 				return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
@@ -197,6 +197,7 @@ impl Executor {
 					.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None))
 					.finish()
 					.await
+					.map(Output::Value)
 					.map_err(ControlFlow::Err)
 			}
 			TopLevelExpr::Live(s) => {
@@ -212,6 +213,7 @@ impl Executor {
 					.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None))
 					.finish()
 					.await
+					.map(Output::Value)
 					.map_err(ControlFlow::Err)
 			}
 			TopLevelExpr::Show(s) => {
@@ -223,7 +225,7 @@ impl Executor {
 					})
 					.map_err(anyhow::Error::new)?
 					.set_transaction(txn);
-				s.compute(&self.ctx, &self.opt, None).await.map_err(ControlFlow::Err)
+				s.compute(&self.ctx, &self.opt, None).await.map(Output::Value).map_err(ControlFlow::Err)
 			}
 			TopLevelExpr::Analyze(s) => {
 				Arc::get_mut(&mut self.ctx)
@@ -234,7 +236,7 @@ impl Executor {
 					})
 					.map_err(anyhow::Error::new)?
 					.set_transaction(txn);
-				s.compute(&self.ctx, &self.opt).await.map_err(ControlFlow::Err)
+				s.compute(&self.ctx, &self.opt).await.map(Output::Value).map_err(ControlFlow::Err)
 			}
 			TopLevelExpr::Access(s) => {
 				Arc::get_mut(&mut self.ctx)
@@ -245,7 +247,7 @@ impl Executor {
 					})
 					.map_err(anyhow::Error::new)?
 					.set_transaction(txn);
-				self.stack.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None)).finish().await
+				self.stack.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None)).finish().await.map(Output::Value)
 			}
 			// Process all other normal statements
 			TopLevelExpr::Expr(e) => {
@@ -470,7 +472,7 @@ impl Executor {
 			};
 
 			let before = Instant::now();
-			let value = match stmt {
+			let output = match stmt {
 				TopLevelExpr::Begin => {
 					let _ = txn.cancel().await;
 					// tried to begin a transaction within a transaction.
@@ -638,7 +640,7 @@ impl Executor {
 
 			self.results.push(Response {
 				time: before.elapsed(),
-				result: value,
+				result: output,
 				query_type,
 			});
 		}

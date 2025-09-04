@@ -11,7 +11,7 @@ use crate::doc::CursorDoc;
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Value};
-use crate::val::Strand;
+use crate::val::{Strand, Output};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -37,14 +37,14 @@ impl Block {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
+	) -> FlowResult<Output> {
 		// Duplicate context
 		let mut ctx = Some(MutableContext::new(ctx).freeze());
 		// Loop over the statements
-		let mut res = Value::None;
+		let mut res = Output::Value(Value::None);
 		for v in self.iter() {
 			match v {
-				Expr::Let(x) => res = x.compute(stk, &mut ctx, opt, doc).await?,
+				Expr::Let(x) => res = x.compute(stk, &mut ctx, opt, doc).await.map(Output::Value)?,
 				v => res = stk.run(|stk| v.compute(stk, ctx.as_ref().unwrap(), opt, doc)).await?,
 			}
 		}

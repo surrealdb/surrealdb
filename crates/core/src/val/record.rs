@@ -209,6 +209,13 @@ impl Data {
 			}
 		}
 	}
+
+	pub(crate) fn into_value(self) -> Value {
+		match self {
+			Data::Mutable(value) => value,
+			Data::ReadOnly(arc) => Arc::unwrap_or_clone(arc),
+		}
+	}
 }
 
 impl Default for Data {

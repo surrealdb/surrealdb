@@ -4,6 +4,7 @@ use std::time::Duration;
 use anyhow::Result;
 use revision::{Revisioned, revisioned};
 use serde::ser::SerializeStruct;
+use crate::val::Output;
 use serde::{Deserialize, Serialize};
 
 use crate::expr::TopLevelExpr;
@@ -49,7 +50,7 @@ impl QueryType {
 #[derive(Debug)]
 pub struct Response {
 	pub time: Duration,
-	pub result: Result<Value>,
+	pub result: Result<Output>,
 	// Record the query type in case processing the response is necessary (such as tracking live
 	// queries).
 	pub query_type: QueryType,
@@ -57,7 +58,7 @@ pub struct Response {
 
 impl Response {
 	/// Retrieve the response as a normal result
-	pub fn output(self) -> Result<Value> {
+	pub fn output(self) -> Result<Output> {
 		self.result
 	}
 
@@ -71,9 +72,9 @@ impl Response {
 		}
 
 		match self.result {
-			Ok(v) => {
+			Ok(output) => {
 				res.insert("status".to_owned(), strand!("OK").to_owned().into());
-				res.insert("result".to_owned(), v);
+				res.insert("result".to_owned(), output.into_value());
 			}
 			Err(e) => {
 				res.insert("status".to_owned(), strand!("ERR").to_owned().into());
@@ -114,9 +115,9 @@ impl Serialize for Response {
 		}
 
 		match &self.result {
-			Ok(v) => {
+			Ok(output) => {
 				val.serialize_field("status", &Status::Ok)?;
-				val.serialize_field("result", v)?;
+				val.serialize_field("result", &output.clone().into_value())?;
 			}
 			Err(e) => {
 				val.serialize_field("status", &Status::Err)?;
@@ -139,7 +140,7 @@ impl From<&Response> for QueryMethodResponse {
 	fn from(res: &Response) -> Self {
 		let time = format!("{:?}", res.time);
 		let (status, result) = match &res.result {
-			Ok(value) => (Status::Ok, value.clone()),
+			Ok(value) => (Status::Ok, value.clone().into_value()),
 			Err(error) => (Status::Err, Value::from(error.to_string())),
 		};
 		Self {

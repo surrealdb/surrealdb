@@ -47,7 +47,7 @@ impl SetStatement {
 			})));
 		}
 
-		let result = stk.run(|stk| self.what.compute(stk, ctx.as_ref().unwrap(), opt, doc)).await?;
+		let result = stk.run(|stk| self.what.compute(stk, ctx.as_ref().unwrap(), opt, doc)).await?.into_value();
 		let result = match &self.kind {
 			Some(kind) => result
 				.coerce_to_kind(kind)
