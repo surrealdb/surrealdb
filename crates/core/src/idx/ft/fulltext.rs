@@ -901,7 +901,7 @@ mod tests {
 	use uuid::Uuid;
 
 	use super::{FullTextIndex, TermDocument};
-	use crate::catalog::{DatabaseId, FullTextParams, NamespaceId};
+	use crate::catalog::{DatabaseId, FullTextParams, IndexId, NamespaceId};
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
 	use crate::expr::statements::DefineAnalyzerStatement;
@@ -971,7 +971,7 @@ mod tests {
 				highlight: true,
 			});
 			let nid = Uuid::from_u128(1);
-			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t", "i");
+			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t", IndexId(3));
 			let opt = Options::default()
 				.with_id(nid)
 				.with_ns(Some("testns".into()))

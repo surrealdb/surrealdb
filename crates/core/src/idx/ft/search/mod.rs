@@ -664,7 +664,7 @@ mod tests {
 	use reblessive::tree::Stk;
 	use test_log::test;
 
-	use crate::catalog::{self, DatabaseId, NamespaceId, SearchParams};
+	use crate::catalog::{self, DatabaseId, IndexId, NamespaceId, SearchParams};
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
 	use crate::expr::statements::DefineAnalyzerStatement;
@@ -745,7 +745,7 @@ mod tests {
 			ctx.get_index_stores(),
 			&tx,
 			az,
-			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
+			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
 			&p,
 			tt,
 		)

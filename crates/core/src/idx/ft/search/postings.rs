@@ -95,7 +95,7 @@ impl Postings {
 mod tests {
 	use test_log::test;
 
-	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::search::postings::Postings;
 	use crate::kvs::LockType::*;
@@ -110,7 +110,7 @@ mod tests {
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
 		let p = Postings::new(
 			&tx,
-			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
+			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
 			order,
 			tt,
 			100,

@@ -218,9 +218,7 @@ async fn hnsw(tx: &Transaction) -> HnswIndex {
 		extend_candidates: false,
 		keep_pruned_connections: false,
 	};
-	HnswIndex::new(tx, IndexKeyBase::new(0, 0, "test", "test"), "test".to_string(), &p)
-		.await
-		.unwrap()
+	HnswIndex::new(tx, IndexKeyBase::new(0, 0, "test", 0), "test".to_string(), &p).await.unwrap()
 }
 
 async fn insert_objects(samples: &[(RecordId, Vec<Value>)]) -> (Datastore, HnswIndex) {

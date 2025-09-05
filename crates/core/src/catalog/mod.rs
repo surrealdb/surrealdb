@@ -214,12 +214,13 @@ mod test {
         returns: Some(Kind::Any),
     }, 34)]
 	#[case::index(IndexDefinition {
+        index_id: IndexId(123),
         name: "test".to_string(),
-        what: "what".to_string(),
+        table_name: "what".to_string(),
         cols: vec![Idiom::from_str("field[0]").unwrap()],
         index: Index::Idx,
         comment: Some("comment".to_string()),
-    }, 32)]
+    }, 33)]
 	#[case::model(MlModelDefinition {
         name: "model".to_string(),
         hash: "hash".to_string(),

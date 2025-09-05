@@ -211,7 +211,7 @@ mod tests {
 	use test_log::test;
 
 	use super::*;
-	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::TermFrequency;
 	use crate::idx::ft::search::terms::{SearchTerms, SearchTermsState};
@@ -252,7 +252,7 @@ mod tests {
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
 		let t = SearchTerms::new(
 			&tx,
-			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
+			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
 			order,
 			tt,
 			100,

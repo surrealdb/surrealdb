@@ -17,7 +17,7 @@
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::idx::ft::fulltext::TermDocument;
 use crate::key::category::{Categorise, Category};
@@ -33,7 +33,7 @@ pub(crate) struct TdRoot<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -55,7 +55,7 @@ impl<'a> TdRoot<'a> {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &'a str,
-		ix: &'a str,
+		ix: IndexId,
 		term: &'a str,
 	) -> Self {
 		Self {
@@ -86,7 +86,7 @@ pub(crate) struct Td<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -122,7 +122,7 @@ impl<'a> Td<'a> {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &'a str,
-		ix: &'a str,
+		ix: IndexId,
 		term: &'a str,
 		id: DocId,
 	) -> Self {
@@ -151,18 +151,18 @@ mod tests {
 
 	#[test]
 	fn root() {
-		let val = TdRoot::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", "term");
+		let val = TdRoot::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), "term");
 		let enc = TdRoot::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!tdterm\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!tdterm\0");
 	}
 
 	#[test]
 	fn key() {
-		let val = Td::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", "term", 129);
+		let val = Td::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), "term", 129);
 		let enc = Td::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!tdterm\0\0\0\0\0\0\0\0\x81"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!tdterm\0\0\0\0\0\0\0\0\x81"
 		);
 	}
 }

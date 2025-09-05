@@ -173,8 +173,8 @@ impl InnerQueryExecutor {
 							let ikb = IndexKeyBase::new(
 								db.namespace_id,
 								db.database_id,
-								&ix.what,
-								&ix.name,
+								&ix.table_name,
+								ix.index_id,
 							);
 							let si = SearchIndex::new(
 								ctx,
@@ -225,8 +225,8 @@ impl InnerQueryExecutor {
 							let ikb = IndexKeyBase::new(
 								db.namespace_id,
 								db.database_id,
-								&ix.what,
-								&ix.name,
+								&ix.table_name,
+								ix.index_id,
 							);
 							let ft = FullTextIndex::new(
 								opt.id()?,
@@ -288,8 +288,8 @@ impl InnerQueryExecutor {
 								let ikb = IndexKeyBase::new(
 									db.namespace_id,
 									db.database_id,
-									&ix.what,
-									&ix.name,
+									&ix.table_name,
+									ix.index_id,
 								);
 								let tx = ctx.tx();
 								let mti =
@@ -813,7 +813,7 @@ impl QueryExecutor {
 		match self.0.exp_entries.get(exp) {
 			Some(PerExpressionEntry::Search(se)) => {
 				let ix = se.0.index_option.ix_ref();
-				if self.0.table == ix.what.as_str() {
+				if self.0.table == ix.table_name.as_str() {
 					return self.search_matches_with_doc_id(ctx, thg, se).await;
 				}
 				if let Some(PerIndexReferenceIndex::Search(si)) = self.0.ir_map.get(ix) {
@@ -823,7 +823,7 @@ impl QueryExecutor {
 			Some(PerExpressionEntry::FullText(fte)) => {
 				let ix = fte.0.io.ix_ref();
 				if let Some(PerIndexReferenceIndex::FullText(fti)) = self.0.ir_map.get(ix) {
-					if self.0.table == ix.what.as_str() {
+					if self.0.table == ix.table_name.as_str() {
 						return self.fulltext_matches_with_doc_id(ctx, thg, fti, fte).await;
 					}
 					return self.fulltext_matches_with_value(stk, ctx, opt, fti, fte, l, r).await;

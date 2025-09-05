@@ -235,8 +235,8 @@ impl IndexStores {
 		ix: &IndexDefinition,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex> {
-		let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
-		self.0.hnsw_indexes.get(ctx, &ix.what, &ikb, p).await
+		let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
+		self.0.hnsw_indexes.get(ctx, &ix.table_name, &ikb, p).await
 	}
 
 	pub(crate) async fn index_removed(
@@ -252,7 +252,7 @@ impl IndexStores {
 		if let Some(ib) = ib {
 			ib.remove_index(ns, db, tb, ix)?;
 		}
-		self.remove_index(ns, db, tx.get_tb_index(ns, db, tb, ix).await?.as_ref()).await
+		self.remove_index(ns, db, tx.expect_tb_index(ns, db, tb, ix).await?.as_ref()).await
 	}
 
 	pub(crate) async fn namespace_removed(
@@ -311,7 +311,7 @@ impl IndexStores {
 		ix: &IndexDefinition,
 	) -> Result<()> {
 		if matches!(ix.index, Index::Hnsw(_)) {
-			let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
+			let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
 			self.remove_hnsw_index(ikb).await?;
 		}
 		Ok(())

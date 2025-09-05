@@ -6,30 +6,30 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub(crate) struct Ni {
+pub(crate) struct NamespaceIdGeneratorKey {
 	__: u8,
 	_a: u8,
 	_b: u8,
 	_c: u8,
 }
 
-impl KVKey for Ni {
+impl KVKey for NamespaceIdGeneratorKey {
 	type ValueType = U32;
 }
 
-impl Default for Ni {
+impl Default for NamespaceIdGeneratorKey {
 	fn default() -> Self {
 		Self::new()
 	}
 }
 
-impl Categorise for Ni {
+impl Categorise for NamespaceIdGeneratorKey {
 	fn categorise(&self) -> Category {
 		Category::NamespaceIdentifier
 	}
 }
 
-impl Ni {
+impl NamespaceIdGeneratorKey {
 	pub fn new() -> Self {
 		Self {
 			__: b'/',
@@ -46,8 +46,8 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Ni::new();
-		let enc = Ni::encode_key(&val).unwrap();
+		let val = NamespaceIdGeneratorKey::new();
+		let enc = NamespaceIdGeneratorKey::encode_key(&val).unwrap();
 		assert_eq!(&enc, b"/!ni");
 	}
 }

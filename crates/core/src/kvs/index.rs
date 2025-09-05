@@ -192,7 +192,7 @@ impl IndexBuilder {
 		ix: Arc<IndexDefinition>,
 		blocking: bool,
 	) -> Result<Option<Receiver<Result<()>>>> {
-		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
+		let key = IndexKey::new(ns, db, &ix.table_name, &ix.name);
 		let (rcv, sdr) = if blocking {
 			let (s, r) = channel();
 			(Some(r), Some(s))
@@ -229,7 +229,7 @@ impl IndexBuilder {
 		new_values: Option<Vec<Value>>,
 		rid: &RecordId,
 	) -> Result<ConsumeResult> {
-		let key = IndexKey::new(db.namespace_id, db.database_id, &ix.what, &ix.name);
+		let key = IndexKey::new(db.namespace_id, db.database_id, &ix.table_name, &ix.name);
 		if let Some(r) = self.indexes.get(&key) {
 			let (b, _) = r.value();
 			return b.maybe_consume(ctx, old_values, new_values, rid).await;
@@ -243,7 +243,7 @@ impl IndexBuilder {
 		db: DatabaseId,
 		ix: &IndexDefinition,
 	) -> BuildingStatus {
-		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
+		let key = IndexKey::new(ns, db, &ix.table_name, &ix.name);
 		if let Some(a) = self.indexes.get(&key) {
 			a.value().0.status.read().await.clone()
 		} else {
@@ -343,7 +343,7 @@ impl Building {
 		db: DatabaseId,
 		ix: Arc<IndexDefinition>,
 	) -> Result<Self> {
-		let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
+		let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
 		Ok(Self {
 			ctx: MutableContext::new_concurrent(ctx).freeze(),
 			opt,

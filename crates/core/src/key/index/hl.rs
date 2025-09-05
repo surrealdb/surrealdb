@@ -3,7 +3,7 @@ use std::fmt::Debug;
 
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::kvs::KVKey;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -16,7 +16,7 @@ pub(crate) struct Hl<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -33,7 +33,7 @@ impl<'a> Hl<'a> {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &'a str,
-		ix: &'a str,
+		ix: IndexId,
 		layer: u16,
 		chunk: u32,
 	) -> Self {
@@ -62,11 +62,11 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Hl::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", 7, 8);
+		let val = Hl::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), 7, 8);
 		let enc = Hl::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!hl\0\x07\0\0\0\x08",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hl\0\x07\0\0\0\x08",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);
