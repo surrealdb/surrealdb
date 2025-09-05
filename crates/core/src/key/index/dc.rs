@@ -15,18 +15,19 @@
 //! - Supporting document length normalization in search results
 //! - Enabling efficient compaction of index data
 //! - Providing accurate document count information for the index
+use std::borrow::Cow;
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::idx::ft::fulltext::DocLengthAndCount;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Dc<'a> {
 	__: u8,
 	_a: u8,
@@ -34,22 +35,18 @@ pub(crate) struct Dc<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 	_f: u8,
 	_g: u8,
 	pub doc_id: DocId,
-	#[serde(with = "uuid::serde::compact")]
 	pub nid: Uuid,
-	#[serde(with = "uuid::serde::compact")]
 	pub uid: Uuid,
 }
 
-impl KVKey for Dc<'_> {
-	type ValueType = DocLengthAndCount;
-}
+impl_kv_key_storekey!(Dc<'_> => DocLengthAndCount);
 
 impl Categorise for Dc<'_> {
 	fn categorise(&self) -> Category {
@@ -89,9 +86,9 @@ impl<'a> Dc<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'!',
 			_f: b'd',
 			_g: b'c',
@@ -155,7 +152,7 @@ impl<'a> Dc<'a> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 struct DcPrefix<'a> {
 	__: u8,
 	_a: u8,
@@ -163,17 +160,15 @@ struct DcPrefix<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 	_f: u8,
 	_g: u8,
 }
 
-impl KVKey for DcPrefix<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(DcPrefix<'_> => Vec<u8>);
 
 impl<'a> DcPrefix<'a> {
 	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
@@ -184,9 +179,9 @@ impl<'a> DcPrefix<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'!',
 			_f: b'd',
 			_g: b'c',
@@ -197,6 +192,7 @@ impl<'a> DcPrefix<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key_with_ids() {

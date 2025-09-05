@@ -1,12 +1,13 @@
 //! Stores a DEFINE INDEX config definition
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Encode, BorrowDecode)]
 pub(crate) struct Ix<'a> {
 	__: u8,
 	_a: u8,
@@ -14,16 +15,14 @@ pub(crate) struct Ix<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	_e: u8,
 	_f: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 }
 
-impl KVKey for Ix<'_> {
-	type ValueType = IndexDefinition;
-}
+impl_kv_key_storekey!(Ix<'_> => IndexDefinition);
 
 pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Ix<'a> {
 	Ix::new(ns, db, tb, ix)
@@ -56,11 +55,11 @@ impl<'a> Ix<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'!',
 			_e: b'i',
 			_f: b'x',
-			ix,
+			ix: Cow::Borrowed(ix),
 		}
 	}
 }

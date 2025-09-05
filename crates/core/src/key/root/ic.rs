@@ -9,12 +9,13 @@
 //! index that needs to be compacted. The compaction thread processes these
 //! entries at regular intervals defined by the `index_compaction_interval`
 //! configuration option.
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 /// Represents an entry in the index compaction queue
 ///
@@ -24,7 +25,7 @@ use crate::kvs::KVKey;
 ///
 /// Compaction helps optimize index performance by consolidating changes and
 /// removing unnecessary data.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Ic<'a> {
 	__: u8,
 	_a: u8,
@@ -32,17 +33,13 @@ pub(crate) struct Ic<'a> {
 	_c: u8,
 	pub ns: NamespaceId,
 	pub db: DatabaseId,
-	pub tb: &'a str,
-	pub ix: &'a str,
-	#[serde(with = "uuid::serde::compact")]
+	pub tb: Cow<'a, str>,
+	pub ix: Cow<'a, str>,
 	pub nid: Uuid,
-	#[serde(with = "uuid::serde::compact")]
 	pub uid: Uuid,
 }
 
-impl KVKey for Ic<'_> {
-	type ValueType = ();
-}
+impl_kv_key_storekey!(Ic<'_> => ());
 
 impl Categorise for Ic<'_> {
 	fn categorise(&self) -> Category {
@@ -70,15 +67,15 @@ impl<'a> Ic<'a> {
 			_c: b'c',
 			ns,
 			db,
-			tb,
-			ix,
+			tb: Cow::Borrowed(tb),
+			ix: Cow::Borrowed(ix),
 			nid,
 			uid,
 		}
 	}
 
 	pub fn decode_key(k: &[u8]) -> anyhow::Result<Ic<'_>> {
-		Ok(storekey::deserialize(k)?)
+		Ok(storekey::decode_borrow(k)?)
 	}
 }
 
@@ -86,6 +83,7 @@ impl<'a> Ic<'a> {
 mod tests {
 	use super::*;
 	use crate::key::root::ic::Ic;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn range() {

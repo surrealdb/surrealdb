@@ -1,14 +1,15 @@
 //! Stores doc keys for doc_ids
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 use crate::val::RecordId;
 
 /// Id inverted. DocId -> Thing
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Bi<'a> {
 	__: u8,
 	_a: u8,
@@ -16,18 +17,16 @@ pub(crate) struct Bi<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 	_f: u8,
 	_g: u8,
 	pub id: DocId,
 }
 
-impl KVKey for Bi<'_> {
-	type ValueType = RecordId;
-}
+impl_kv_key_storekey!(Bi<'_> => RecordId);
 
 impl Categorise for Bi<'_> {
 	fn categorise(&self) -> Category {
@@ -44,9 +43,9 @@ impl<'a> Bi<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'!',
 			_f: b'b',
 			_g: b'i',
@@ -58,6 +57,7 @@ impl<'a> Bi<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

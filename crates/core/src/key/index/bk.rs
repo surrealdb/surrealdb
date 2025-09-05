@@ -1,13 +1,14 @@
 //! Stores the term list for doc_ids
 use roaring::RoaringTreemap;
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Bk<'a> {
 	__: u8,
 	_a: u8,
@@ -15,18 +16,16 @@ pub(crate) struct Bk<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 	_f: u8,
 	_g: u8,
 	pub doc_id: DocId,
 }
 
-impl KVKey for Bk<'_> {
-	type ValueType = RoaringTreemap;
-}
+impl_kv_key_storekey!(Bk<'_> => RoaringTreemap);
 
 impl Categorise for Bk<'_> {
 	fn categorise(&self) -> Category {
@@ -43,9 +42,9 @@ impl<'a> Bk<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'!',
 			_f: b'b',
 			_g: b'k',
@@ -57,6 +56,7 @@ impl<'a> Bk<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

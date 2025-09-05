@@ -372,7 +372,7 @@ impl DecimalLexEncoder {
 	///
 	/// This conversion extracts the mantissa, scale, and sign from the Decimal
 	/// and reconstructs them as a D128 value.
-	pub(crate) fn to_d128(dec: Decimal) -> Result<D128> {
+	pub(crate) fn to_d128(dec: Decimal) -> D128 {
 		let scale = dec.scale();
 		let mantissa = dec.mantissa(); // i128
 		let sign = if mantissa < 0 {
@@ -380,10 +380,14 @@ impl DecimalLexEncoder {
 		} else {
 			Sign::Plus
 		};
-		let abs = U128::from_u128(mantissa.unsigned_abs()).map_err(|e| {
-			Error::Serialization(format!("Failed to convert mantissa to u128: {e}"))
-		})?;
-		Ok(D128::from_parts(abs, -(scale as i32), sign, Context::default()))
+		// Investigation of the code of the from_u128 at the time of adding the unwrap shows that
+		// this function cannot panic, weirdly it seems unable to ever return an error.
+		//
+		// The function returns an error when the number has more significant bits then can fit
+		// into the amount of bits of a u128 which seems impossible for a function which takes a
+		// u128.
+		let abs = U128::from_u128(mantissa.unsigned_abs()).unwrap();
+		D128::from_parts(abs, -(scale as i32), sign, Context::default())
 	}
 
 	/// Converts a fastnum::D128 to a rust_decimal::Decimal.

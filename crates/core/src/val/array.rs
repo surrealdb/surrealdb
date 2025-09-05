@@ -2,25 +2,35 @@ use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::{Deref, DerefMut};
 
-use anyhow::{Result, ensure};
+use anyhow::{ensure, Result};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
+use crate::expr::fmt::{pretty_indent, Fmt, Pretty};
 use crate::expr::Expr;
-use crate::expr::fmt::{Fmt, Pretty, pretty_indent};
-use crate::val::Value;
+use crate::val::{IndexFormat, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(
+	Clone,
+	Debug,
+	Default,
+	Eq,
+	Ord,
+	PartialEq,
+	PartialOrd,
+	Serialize,
+	Deserialize,
+	Hash,
+	Encode,
+	BorrowDecode,
+)]
 #[serde(rename = "$surrealdb::private::Array")]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub struct Array(pub Vec<Value>);
-
-impl From<Value> for Array {
-	fn from(v: Value) -> Self {
-		vec![v].into()
-	}
-}
 
 impl<T> From<Vec<T>> for Array
 where

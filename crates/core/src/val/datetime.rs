@@ -8,6 +8,7 @@ use chrono::offset::LocalResult;
 use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
 use crate::expr::escape::QuoteStr;
@@ -140,5 +141,26 @@ impl TrySub for Datetime {
 			.map_err(|_| Error::ArithmeticNegativeOverflow(format!("{self} - {other}")))
 			.map_err(anyhow::Error::new)
 			.map(Duration::from)
+	}
+}
+
+impl<F> Encode<F> for Datetime {
+	fn encode<W: std::io::Write>(
+		&self,
+		w: &mut storekey::Writer<W>,
+	) -> std::result::Result<(), storekey::EncodeError> {
+		let encode = self.to_rfc3339_opts(SecondsFormat::AutoSi, true);
+		Encode::<F>::encode(&encode, w)
+	}
+}
+
+impl<'de, F> BorrowDecode<'de, F> for Datetime {
+	fn borrow_decode(
+		r: &mut storekey::BorrowReader<'de>,
+	) -> std::result::Result<Self, storekey::DecodeError> {
+		let s = r.read_str_cow()?;
+		DateTime::parse_from_rfc3339(s.as_ref())
+			.map_err(|_| storekey::DecodeError::InvalidFormat)
+			.map(|x| Datetime(x.to_utc()))
 	}
 }

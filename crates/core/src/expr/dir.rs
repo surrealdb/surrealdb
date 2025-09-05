@@ -1,8 +1,11 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, PartialOrd, Deserialize, Hash)]
+#[derive(
+	Clone, Debug, Eq, PartialEq, Serialize, PartialOrd, Deserialize, Hash, Encode, BorrowDecode,
+)]
 pub enum Dir {
 	/// `<-`
 	In,

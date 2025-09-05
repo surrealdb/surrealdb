@@ -472,8 +472,8 @@ impl Transaction {
 	) -> String {
 		// Inject the id field into the document before processing.
 		let rid = RecordId {
-			table: k.tb.to_owned(),
-			key: k.id.clone(),
+			table: k.tb.into_owned(),
+			key: k.id,
 		};
 		record.data.to_mut().def(&rid);
 		// Match on the value to determine if it is a graph edge record or a normal
@@ -500,7 +500,7 @@ impl Transaction {
 				if let Some(is_tombstone) = is_tombstone {
 					if is_tombstone {
 						// If the record is a tombstone, format it as a DELETE command.
-						format!("DELETE {}:{};", k.tb, k.id)
+						format!("DELETE {}:{};", rid.table, rid.key)
 					} else {
 						// If the record is not a tombstone and a version exists, format it as an
 						// INSERT VERSION command.

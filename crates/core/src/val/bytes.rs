@@ -5,10 +5,15 @@ use hex;
 use revision::revisioned;
 use serde::de::{self, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
+
+use crate::val::IndexFormat;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub struct Bytes(pub(crate) Vec<u8>);
 
 impl Bytes {

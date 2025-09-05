@@ -1,11 +1,11 @@
 //! Stores the key prefix for all keys under a database
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct DatabaseRoot {
 	__: u8,
 	_a: u8,
@@ -14,9 +14,7 @@ pub(crate) struct DatabaseRoot {
 	pub db: DatabaseId,
 }
 
-impl KVKey for DatabaseRoot {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(DatabaseRoot => Vec<u8>);
 
 pub fn new(ns: NamespaceId, db: DatabaseId) -> DatabaseRoot {
 	DatabaseRoot::new(ns, db)
@@ -44,6 +42,7 @@ impl DatabaseRoot {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

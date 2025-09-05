@@ -101,7 +101,9 @@ impl Document {
 					let key = res?;
 					let ref_key = Ref::decode_key(&key)?;
 					// Obtain the remote field definition
-					let Some(fd) = txn.get_tb_field(ns, db, ref_key.ft, ref_key.ff).await? else {
+					let Some(fd) =
+						txn.get_tb_field(ns, db, ref_key.ft.as_ref(), ref_key.ff.as_ref()).await?
+					else {
 						return Err(Error::FdNotFound {
 							name: ref_key.ff.to_string(),
 						}
@@ -115,8 +117,8 @@ impl Document {
 							// Reject the delete operation, as indicated by the reference
 							ReferenceDeleteStrategy::Reject => {
 								let thing = RecordId {
-									table: ref_key.ft.to_string(),
-									key: ref_key.fk.clone(),
+									table: ref_key.ft.into_owned(),
+									key: ref_key.fk.into_owned(),
 								};
 
 								bail!(Error::DeleteRejectedByReference(
@@ -127,8 +129,8 @@ impl Document {
 							// Delete the remote record which referenced this record
 							ReferenceDeleteStrategy::Cascade => {
 								let record_id = RecordId {
-									table: ref_key.ft.to_string(),
-									key: ref_key.fk.clone(),
+									table: ref_key.ft.into_owned(),
+									key: ref_key.fk.into_owned(),
 								};
 
 								// Setup the delete statement
@@ -149,8 +151,8 @@ impl Document {
 							// Delete only the reference on the remote record
 							ReferenceDeleteStrategy::Unset => {
 								let thing = RecordId {
-									table: ref_key.ft.to_string(),
-									key: ref_key.fk.clone(),
+									table: ref_key.ft.into_owned(),
+									key: ref_key.fk.into_owned(),
 								};
 
 								// Determine how we perform the update
@@ -192,8 +194,8 @@ impl Document {
 								let reference = Value::from(rid.as_ref().clone());
 								// Value for the document is the remote record
 								let this = RecordId {
-									table: ref_key.ft.to_string(),
-									key: ref_key.fk.clone(),
+									table: ref_key.ft.into_owned(),
+									key: ref_key.fk.into_owned(),
 								};
 
 								// Set the `$reference` variable in the context

@@ -3,16 +3,32 @@ use std::ops::Deref;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::expr::Ident;
 use crate::expr::escape::EscapeIdent;
-use crate::val::Strand;
+use crate::val::{IndexFormat, Strand};
 
 /// A value type referencing a specific table.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(
+	Clone,
+	Debug,
+	Default,
+	Eq,
+	PartialEq,
+	Ord,
+	PartialOrd,
+	Serialize,
+	Deserialize,
+	Hash,
+	Encode,
+	BorrowDecode,
+)]
 #[serde(rename = "$surrealdb::private::sql::Table")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub struct Table(String);
 
 impl Table {

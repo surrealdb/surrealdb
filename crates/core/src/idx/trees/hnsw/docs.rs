@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use anyhow::Result;
 use revision::{Revisioned, revisioned};
 use roaring::RoaringTreemap;
@@ -159,7 +157,8 @@ impl VecDocs {
 	}
 
 	pub(super) async fn get_docs(&self, tx: &Transaction, pt: &Vector) -> Result<Option<Ids64>> {
-		let key = self.ikb.new_hv_key(Arc::new(pt.into()));
+		let ser_vec = pt.into();
+		let key = self.ikb.new_hv_key(&ser_vec);
 		if let Some(ed) = tx.get(&key, None).await? {
 			Ok(Some(ed.docs))
 		} else {
@@ -174,8 +173,8 @@ impl VecDocs {
 		d: DocId,
 		h: &mut HnswFlavor,
 	) -> Result<()> {
-		let ser_vec = Arc::new(SerializedVector::from(&o));
-		let key = self.ikb.new_hv_key(ser_vec);
+		let ser_vec = SerializedVector::from(&o);
+		let key = self.ikb.new_hv_key(&ser_vec);
 		if let Some(ed) = match tx.get(&key, None).await? {
 			Some(mut ed) => {
 				// We already have the vector
@@ -206,7 +205,8 @@ impl VecDocs {
 		d: DocId,
 		h: &mut HnswFlavor,
 	) -> Result<()> {
-		let key = self.ikb.new_hv_key(Arc::new(o.into()));
+		let ser_vec = o.into();
+		let key = self.ikb.new_hv_key(&ser_vec);
 		if let Some(mut ed) = tx.get(&key, None).await? {
 			if let Some(new_docs) = ed.docs.remove(d) {
 				if new_docs.is_empty() {

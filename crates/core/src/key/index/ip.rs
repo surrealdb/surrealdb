@@ -1,14 +1,16 @@
 //! Stores the previous value of record for concurrent index building
+use std::borrow::Cow;
 use std::fmt::Debug;
 
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::kvs::KVKey;
 use crate::kvs::index::PrimaryAppending;
-use crate::val::RecordIdKey;
+use crate::val::{IndexFormat, RecordIdKey};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "IndexFormat")]
 pub(crate) struct Ip<'a> {
 	__: u8,
 	_a: u8,
@@ -16,9 +18,9 @@ pub(crate) struct Ip<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -27,6 +29,10 @@ pub(crate) struct Ip<'a> {
 
 impl KVKey for Ip<'_> {
 	type ValueType = PrimaryAppending;
+	fn encode_key(&self) -> ::anyhow::Result<Vec<u8>> {
+		Ok(storekey::encode_vec_format::<IndexFormat, _>(self)
+			.map_err(|_| crate::err::Error::Unencodable)?)
+	}
 }
 
 impl<'a> Ip<'a> {
@@ -38,9 +44,9 @@ impl<'a> Ip<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'!',
 			_f: b'i',
 			_g: b'p',
@@ -52,6 +58,7 @@ impl<'a> Ip<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {
@@ -65,7 +72,7 @@ mod tests {
 		let enc = Ip::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!ip\0\0\0\x01id\0",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!ip\x03id\0",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);

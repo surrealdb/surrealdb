@@ -1,11 +1,12 @@
 //! Stores the key prefix for all keys under an index
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct AllIndexRoot<'a> {
 	__: u8,
 	_a: u8,
@@ -13,14 +14,12 @@ pub(crate) struct AllIndexRoot<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 }
 
-impl KVKey for AllIndexRoot<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(AllIndexRoot<'_> => Vec<u8>);
 
 pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> AllIndexRoot<'a> {
 	AllIndexRoot::new(ns, db, tb, ix)
@@ -41,9 +40,9 @@ impl<'a> AllIndexRoot<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 		}
 	}
 }
@@ -52,6 +51,7 @@ impl<'a> AllIndexRoot<'a> {
 mod tests {
 
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn root() {

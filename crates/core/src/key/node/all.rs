@@ -1,21 +1,18 @@
 //! Stores the key prefix for all nodes
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct All {
 	__: u8,
 	_a: u8,
-	#[serde(with = "uuid::serde::compact")]
 	pub nd: Uuid,
 }
 
-impl KVKey for All {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(All => Vec<u8>);
 
 pub fn new(nd: Uuid) -> All {
 	All::new(nd)
@@ -40,6 +37,7 @@ impl All {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

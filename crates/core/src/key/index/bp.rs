@@ -1,13 +1,14 @@
 //! Stores BTree nodes for postings
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::trees::btree::BState;
 use crate::idx::trees::store::NodeId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct BpRoot<'a> {
 	__: u8,
 	_a: u8,
@@ -15,9 +16,9 @@ pub(crate) struct BpRoot<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -29,9 +30,7 @@ impl Categorise for BpRoot<'_> {
 	}
 }
 
-impl KVKey for BpRoot<'_> {
-	type ValueType = BState;
-}
+impl_kv_key_storekey!(BpRoot<'_> => BState);
 
 impl<'a> BpRoot<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
@@ -42,9 +41,9 @@ impl<'a> BpRoot<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'!',
 			_f: b'b',
 			_g: b'p',
@@ -52,7 +51,7 @@ impl<'a> BpRoot<'a> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Bp<'a> {
 	__: u8,
 	_a: u8,
@@ -60,9 +59,9 @@ pub(crate) struct Bp<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: Cow<'a, str>,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -75,9 +74,7 @@ impl Categorise for Bp<'_> {
 	}
 }
 
-impl KVKey for Bp<'_> {
-	type ValueType = BState;
-}
+impl_kv_key_storekey!(Bp<'_> => BState);
 
 impl<'a> Bp<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, node_id: NodeId) -> Self {
@@ -88,9 +85,9 @@ impl<'a> Bp<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix,
+			ix: Cow::Borrowed(ix),
 			_e: b'!',
 			_f: b'b',
 			_g: b'p',
@@ -102,6 +99,7 @@ impl<'a> Bp<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn root() {

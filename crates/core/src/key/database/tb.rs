@@ -1,13 +1,14 @@
 //! Stores a DEFINE TABLE config definition
+use std::borrow::Cow;
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct TableKey<'a> {
 	__: u8,
 	_a: u8,
@@ -17,12 +18,10 @@ pub(crate) struct TableKey<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 }
 
-impl KVKey for TableKey<'_> {
-	type ValueType = TableDefinition;
-}
+impl_kv_key_storekey!(TableKey<'_> => TableDefinition);
 
 pub fn new(ns: NamespaceId, db: DatabaseId, tb: &str) -> TableKey<'_> {
 	TableKey::new(ns, db, tb)
@@ -57,7 +56,7 @@ impl<'a> TableKey<'a> {
 			_c: b'!',
 			_d: b't',
 			_e: b'b',
-			tb,
+			tb: Cow::Borrowed(tb),
 		}
 	}
 }

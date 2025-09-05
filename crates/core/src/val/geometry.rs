@@ -11,6 +11,7 @@ use geo::{Coord, LineString, LinesIter, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use super::Object;
 use crate::expr::fmt::Fmt;
@@ -789,5 +790,249 @@ impl hash::Hash for Geometry {
 				v.iter().for_each(|v| v.hash(state));
 			}
 		}
+	}
+}
+
+impl<F> Encode<F> for Geometry {
+	fn encode<W: std::io::Write>(
+		&self,
+		w: &mut storekey::Writer<W>,
+	) -> Result<(), storekey::EncodeError> {
+		match self {
+			Geometry::Point(point) => {
+				w.write_u8(2)?;
+				Encode::<F>::encode(&point.x(), w)?;
+				Encode::<F>::encode(&point.y(), w)?;
+			}
+			Geometry::Line(line_string) => {
+				w.write_u8(3)?;
+				for p in line_string.points() {
+					w.mark_terminator();
+					Encode::<F>::encode(&p.x(), w)?;
+					Encode::<F>::encode(&p.y(), w)?;
+				}
+				w.write_terminator()?;
+			}
+			Geometry::Polygon(polygon) => {
+				w.write_u8(4)?;
+				for p in polygon.exterior().points() {
+					w.mark_terminator();
+					Encode::<F>::encode(&p.x(), w)?;
+					Encode::<F>::encode(&p.y(), w)?;
+				}
+				w.write_terminator()?;
+				for l in polygon.interiors() {
+					for p in l.points() {
+						w.mark_terminator();
+						Encode::<F>::encode(&p.x(), w)?;
+						Encode::<F>::encode(&p.y(), w)?;
+					}
+					w.write_terminator()?;
+				}
+				w.write_terminator()?;
+			}
+			Geometry::MultiPoint(multi_point) => {
+				w.write_u8(5)?;
+				for p in multi_point.iter() {
+					w.mark_terminator();
+					Encode::<F>::encode(&p.x(), w)?;
+					Encode::<F>::encode(&p.y(), w)?;
+				}
+				w.write_terminator()?;
+			}
+			Geometry::MultiLine(multi_line_string) => {
+				w.write_u8(6)?;
+				for l in multi_line_string.iter() {
+					for p in l.points() {
+						w.mark_terminator();
+						Encode::<F>::encode(&p.x(), w)?;
+						Encode::<F>::encode(&p.y(), w)?;
+					}
+					w.write_terminator()?;
+				}
+				w.write_terminator()?;
+			}
+			Geometry::MultiPolygon(multi_polygon) => {
+				w.write_u8(7)?;
+				for p in multi_polygon.iter() {
+					for p in p.exterior().points() {
+						w.mark_terminator();
+						Encode::<F>::encode(&p.x(), w)?;
+						Encode::<F>::encode(&p.y(), w)?;
+					}
+					w.write_terminator()?;
+					for l in p.interiors() {
+						for p in l.points() {
+							w.mark_terminator();
+							Encode::<F>::encode(&p.x(), w)?;
+							Encode::<F>::encode(&p.y(), w)?;
+						}
+						w.write_terminator()?;
+					}
+					w.write_terminator()?;
+				}
+				w.write_terminator()?;
+			}
+			Geometry::Collection(items) => {
+				w.write_u8(8)?;
+				for g in items.iter() {
+					w.mark_terminator();
+					Encode::<F>::encode(g, w)?;
+				}
+				w.write_terminator()?;
+			}
+		}
+		Ok(())
+	}
+}
+
+impl<'de, F> BorrowDecode<'de, F> for Geometry {
+	fn borrow_decode(r: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
+		match r.read_u8()? {
+			2 => {
+				let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
+				Ok(Geometry::Point(Point::from(point)))
+			}
+			3 => {
+				let mut res = Vec::new();
+				while !r.read_terminal()? {
+					let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
+					res.push(Coord::from(point))
+				}
+				Ok(Geometry::Line(LineString::new(res)))
+			}
+			4 => {
+				let mut ext = Vec::new();
+				while !r.read_terminal()? {
+					let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
+					ext.push(Coord::from(point))
+				}
+				let ext = LineString::new(ext);
+				let mut int = Vec::new();
+				while !r.read_terminal()? {
+					let mut line = Vec::new();
+					while !r.read_terminal()? {
+						let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
+						line.push(Coord::from(point))
+					}
+					int.push(LineString::new(line))
+				}
+				Ok(Geometry::Polygon(Polygon::new(ext, int)))
+			}
+			5 => {
+				let mut res = Vec::new();
+				while !r.read_terminal()? {
+					let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
+					res.push(Point::from(point))
+				}
+				Ok(Geometry::MultiPoint(MultiPoint::new(res)))
+			}
+			6 => {
+				let mut lines = Vec::new();
+				while !r.read_terminal()? {
+					let mut res = Vec::new();
+					while !r.read_terminal()? {
+						let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
+						res.push(Coord::from(point))
+					}
+					lines.push(LineString::new(res));
+				}
+				Ok(Geometry::MultiLine(MultiLineString::new(lines)))
+			}
+			7 => {
+				let mut polygons = Vec::new();
+				while !r.read_terminal()? {
+					let mut ext = Vec::new();
+					while !r.read_terminal()? {
+						let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
+						ext.push(Coord::from(point))
+					}
+					let ext = LineString::new(ext);
+					let mut int = Vec::new();
+					while !r.read_terminal()? {
+						let mut line = Vec::new();
+						while !r.read_terminal()? {
+							let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
+							line.push(Coord::from(point))
+						}
+						int.push(LineString::new(line))
+					}
+					polygons.push(Polygon::new(ext, int));
+				}
+				Ok(Geometry::MultiPolygon(MultiPolygon::new(polygons)))
+			}
+			8 => {
+				let mut geoms = Vec::new();
+				while !r.read_terminal()? {
+					geoms.push(BorrowDecode::<'de, F>::borrow_decode(r)?)
+				}
+				Ok(Geometry::Collection(geoms))
+			}
+			_ => Err(storekey::DecodeError::InvalidFormat),
+		}
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use core::f64;
+
+	use geo::{Coord, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+
+	use super::Geometry;
+
+	fn round_trip(geom: Geometry) {
+		let enc = storekey::encode_vec(&geom).unwrap();
+		let dec = storekey::decode_borrow(&enc).unwrap();
+		assert_eq!(geom, dec)
+	}
+
+	#[test]
+	fn encode_decode() {
+		round_trip(Geometry::Point(Point::new(0.0, f64::INFINITY)));
+		round_trip(Geometry::Line(LineString::new(vec![
+			Coord::from((0.0, f64::INFINITY)),
+			Coord::from((f64::NEG_INFINITY, 1.0)),
+		])));
+		round_trip(Geometry::Polygon(Polygon::new(
+			LineString::new(vec![
+				Coord::from((0.0, f64::INFINITY)),
+				Coord::from((f64::NEG_INFINITY, 1.0)),
+			]),
+			vec![
+				LineString::new(vec![Coord::from((1.0, 2.0)), Coord::from((3.0, 4.0))]),
+				LineString::new(vec![Coord::from((5.0, 6.0)), Coord::from((7.0, 8.0))]),
+			],
+		)));
+		round_trip(Geometry::MultiPoint(MultiPoint::new(vec![
+			Point::from((0.0, f64::INFINITY)),
+			Point::from((f64::NEG_INFINITY, 1.0)),
+		])));
+		round_trip(Geometry::MultiLine(MultiLineString::new(vec![
+			LineString::new(vec![
+				Coord::from((0.0, f64::INFINITY)),
+				Coord::from((f64::NEG_INFINITY, 1.0)),
+			]),
+			LineString::new(vec![Coord::from((1.0, 2.0)), Coord::from((3.0, 4.0))]),
+		])));
+		round_trip(Geometry::MultiPolygon(MultiPolygon::new(vec![
+			Polygon::new(
+				LineString::new(vec![
+					Coord::from((0.0, f64::INFINITY)),
+					Coord::from((f64::NEG_INFINITY, 1.0)),
+				]),
+				vec![
+					LineString::new(vec![Coord::from((1.0, 2.0)), Coord::from((3.0, 4.0))]),
+					LineString::new(vec![Coord::from((5.0, 6.0)), Coord::from((7.0, 8.0))]),
+				],
+			),
+			Polygon::new(
+				LineString::new(vec![Coord::from((9.0, 10.0)), Coord::from((11.0, 12.0))]),
+				vec![
+					LineString::new(vec![Coord::from((13.0, 14.0)), Coord::from((15.0, 16.0))]),
+					LineString::new(vec![Coord::from((17.0, 18.0)), Coord::from((19.0, 20.0))]),
+				],
+			),
+		])));
 	}
 }

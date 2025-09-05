@@ -543,7 +543,7 @@ impl Building {
 			// Parse the value
 			let val = Record::kv_decode_value(v)?;
 			let rid: Arc<RecordId> = RecordId {
-				table: key.tb.to_owned(),
+				table: key.tb.into_owned(),
 				key: key.id,
 			}
 			.into();

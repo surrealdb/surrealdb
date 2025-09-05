@@ -37,14 +37,13 @@ use crate::idx::planner::iterators::{
 };
 use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
-use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue, StoreRangeValue};
+use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 use crate::idx::planner::{IterationStage, ScanDirection};
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
-use crate::key::value::{StoreKeyArray, StoreKeyValue};
 use crate::kvs::TransactionType;
-use crate::val::{Number, Object, RecordId, Value};
+use crate::val::{Array, Number, Object, RecordId, Value};
 
 pub(super) type KnnBruteForceEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Distance);
 
@@ -478,7 +477,7 @@ impl QueryExecutor {
 			match it_entry {
 				IteratorEntry::Single(_, io) => self.new_single_iterator(ns, db, ir, io).await,
 				IteratorEntry::Range(_, ixr, from, to, sc) => {
-					Ok(self.new_range_iterator(ir, ns, db, ixr, from.into(), to.into(), *sc)?)
+					Ok(self.new_range_iterator(ir, ns, db, ixr, from.clone(), to.clone(), *sc)?)
 				}
 			}
 		} else {
@@ -512,12 +511,11 @@ impl QueryExecutor {
 	/// Values from `IndexOperator::Equality` can be either single values or arrays.
 	/// When it is an array id describe the composite values of one item in the compound index.
 	/// When it is not an array, it is the first column of the compound index.
-	fn equality_to_fd(value: &Value) -> StoreKeyArray {
+	fn equality_to_fd(value: &Value) -> Array {
 		if let Value::Array(a) = value {
-			let a: Vec<_> = a.iter().map(|v| StoreKeyValue::from(v.clone())).collect();
-			StoreKeyArray(a)
+			a.clone()
 		} else {
-			StoreKeyArray::from(StoreKeyValue::from(value.clone()))
+			Array::from(vec![value.clone()])
 		}
 	}
 
@@ -525,7 +523,7 @@ impl QueryExecutor {
 	/// Values fron IndexOperator can be either single values or arrays.
 	/// When it is an array it is different possible values. Each of then needs to be converted to
 	/// an fd. When it is not an array, it is a unique value.
-	fn union_to_fds(value: &Value) -> Vec<StoreKeyArray> {
+	fn union_to_fds(value: &Value) -> Vec<Array> {
 		if let Value::Array(a) = value {
 			a.iter().map(Self::equality_to_fd).collect()
 		} else {
@@ -584,7 +582,7 @@ impl QueryExecutor {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		fd: &StoreKeyArray,
+		fd: &Array,
 	) -> Result<ThingIterator> {
 		Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(irf, ns, db, ix, fd)?))
 	}
@@ -596,8 +594,8 @@ impl QueryExecutor {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: StoreRangeValue,
-		to: StoreRangeValue,
+		from: RangeValue,
+		to: RangeValue,
 		sc: ScanDirection,
 	) -> Result<Option<ThingIterator>> {
 		match ix.index {
@@ -617,8 +615,8 @@ impl QueryExecutor {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: StoreRangeValue,
-		to: StoreRangeValue,
+		from: RangeValue,
+		to: RangeValue,
 		sc: ScanDirection,
 	) -> Result<ThingIterator> {
 		Ok(match sc {
@@ -637,8 +635,8 @@ impl QueryExecutor {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: StoreRangeValue,
-		to: StoreRangeValue,
+		from: RangeValue,
+		to: RangeValue,
 		sc: ScanDirection,
 	) -> Result<ThingIterator> {
 		Ok(match sc {
@@ -705,7 +703,7 @@ impl QueryExecutor {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		fd: &StoreKeyArray,
+		fd: &Array,
 	) -> Result<ThingIterator> {
 		if ix.cols.len() > 1 {
 			// If the index is unique and the index is a composite index,

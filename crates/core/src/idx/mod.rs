@@ -160,7 +160,7 @@ impl IndexKeyBase {
 		Hl::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, layer, chunk)
 	}
 
-	fn new_hv_key(&self, vec: Arc<SerializedVector>) -> Hv<'_> {
+	fn new_hv_key<'a>(&'a self, vec: &'a SerializedVector) -> Hv<'a> {
 		Hv::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, vec)
 	}
 
