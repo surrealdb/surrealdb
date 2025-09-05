@@ -54,7 +54,9 @@ impl DefineIndexStatement {
 		let tb = txn.ensure_ns_db_tb(ns, db, &self.what, opt.strict).await?;
 
 		// Check if the definition exists
-		if txn.get_tb_index(tb.namespace_id, tb.database_id, &tb.name, &self.name).await.is_ok() {
+		let index_id = if let Some(ix) =
+			txn.get_tb_index(tb.namespace_id, tb.database_id, &tb.name, &self.name).await?
+		{
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -82,7 +84,11 @@ impl DefineIndexStatement {
 			ctx.get_index_stores()
 				.index_removed(&txn, tb.namespace_id, tb.database_id, &tb.name, &self.name)
 				.await?;
-		}
+
+			ix.index_id
+		} else {
+			txn.lock().await.get_next_ix_id(tb.namespace_id, tb.database_id).await?
+		};
 
 		// If the table is schemafull, ensure that the fields exist.
 		if tb.schemafull {
@@ -107,15 +113,15 @@ impl DefineIndexStatement {
 		}
 
 		// Process the statement
-		let key = crate::key::table::ix::new(tb.namespace_id, tb.database_id, &tb.name, &self.name);
 		let index_def = IndexDefinition {
+			index_id,
 			name: self.name.to_raw_string(),
-			what: self.what.to_raw_string(),
+			table_name: self.what.to_raw_string(),
 			cols: self.cols.clone(),
 			index: self.index.clone(),
 			comment: self.comment.clone().map(|x| x.to_raw_string()),
 		};
-		txn.set(&key, &index_def, None).await?;
+		txn.put_tb_index(tb.namespace_id, tb.database_id, &tb.name, &index_def).await?;
 
 		// Refresh the table cache
 
@@ -185,7 +191,7 @@ pub(in crate::expr::statements) async fn run_indexing(
 			// Create the remove statement
 			let stm = RemoveIndexStatement {
 				name: Ident::new(index.name.clone()).unwrap(),
-				what: Ident::new(index.what.clone()).unwrap(),
+				what: Ident::new(index.table_name.clone()).unwrap(),
 				if_exists: false,
 			};
 			// Execute the delete statement
@@ -196,7 +202,7 @@ pub(in crate::expr::statements) async fn run_indexing(
 			let opt = &opt.new_with_force(Force::Index(Arc::new([index.clone()])));
 			// Update the index data
 			let stm = crate::expr::UpdateStatement {
-				what: vec![crate::expr::Expr::Table(Ident::new(index.what.clone()).unwrap())],
+				what: vec![crate::expr::Expr::Table(Ident::new(index.table_name.clone()).unwrap())],
 				output: Some(Output::None),
 				..UpdateStatement::default()
 			};

@@ -1,7 +1,7 @@
 //! Stores Things of an HNSW index
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::kvs::KVKey;
 use crate::val::RecordIdKey;
 
@@ -15,7 +15,7 @@ pub(crate) struct Hi<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -27,7 +27,7 @@ impl KVKey for Hi<'_> {
 }
 
 impl<'a> Hi<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, id: RecordIdKey) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, id: RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -56,13 +56,13 @@ mod tests {
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
-			"testix",
+			IndexId(3),
 			RecordIdKey::String("testid".to_string()),
 		);
 		let enc = Hi::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!hi\0\0\0\x01testid\0",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hi\0\0\0\x01testid\0",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);

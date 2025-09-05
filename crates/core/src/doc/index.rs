@@ -51,7 +51,7 @@ impl Document {
 		let ixs = match &opt.force {
 			Force::Index(ix)
 				if ix.first().is_some_and(|ix| {
-					self.id.as_ref().is_some_and(|id| ix.what.as_str() == id.table)
+					self.id.as_ref().is_some_and(|id| ix.table_name.as_str() == id.table)
 				}) =>
 			{
 				ix.clone()
@@ -326,7 +326,7 @@ impl<'a> IndexOperation<'a> {
 	/// types (Int/Float/Decimal). This means equal numeric values like 0, 0.0 and
 	/// 0dec map to the same index key and therefore conflict on UNIQUE indexes.
 	fn get_unique_index_key(&self, v: &'a StoreKeyArray) -> Result<key::index::Index> {
-		Ok(key::index::Index::new(self.ns, self.db, &self.ix.what, &self.ix.name, v, None))
+		Ok(key::index::Index::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id, v, None))
 	}
 
 	/// Build the KV key for a non-unique index. The record id is appended
@@ -336,8 +336,8 @@ impl<'a> IndexOperation<'a> {
 		Ok(key::index::Index::new(
 			self.ns,
 			self.db,
-			&self.ix.what,
-			&self.ix.name,
+			&self.ix.table_name,
+			self.ix.index_id,
 			v,
 			Some(&self.rid.key),
 		))
@@ -434,7 +434,7 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	async fn index_search(&mut self, stk: &mut Stk, ctx: &Context, p: &SearchParams) -> Result<()> {
-		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.what, &self.ix.name);
+		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id);
 
 		let mut ft =
 			SearchIndex::new(ctx, self.ns, self.db, &p.az, ikb, p, TransactionType::Write).await?;
@@ -453,26 +453,26 @@ impl<'a> IndexOperation<'a> {
 		ctx: &Context,
 		p: &FullTextParams,
 	) -> Result<()> {
-		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.what, &self.ix.name);
+		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id);
 		let tx = ctx.tx();
 		// Build a FullText instance
 		let fti =
 			FullTextIndex::new(self.opt.id()?, ctx.get_index_stores(), &tx, ikb.clone(), p).await?;
-		let mut rc = false;
+		let mut require_compaction = false;
 		// Delete the old index data
 		let doc_id = if let Some(o) = self.o.take() {
-			fti.remove_content(stk, ctx, self.opt, self.rid, o, &mut rc).await?
+			fti.remove_content(stk, ctx, self.opt, self.rid, o, &mut require_compaction).await?
 		} else {
 			None
 		};
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			fti.index_content(stk, ctx, self.opt, self.rid, n, &mut rc).await?;
+			fti.index_content(stk, ctx, self.opt, self.rid, n, &mut require_compaction).await?;
 		} else if let Some(doc_id) = doc_id {
 			fti.remove_doc(ctx, doc_id).await?;
 		}
 		// Do we need to trigger the compaction?
-		if rc {
+		if require_compaction {
 			FullTextIndex::trigger_compaction(&ikb, &tx, self.opt.id()?).await?;
 		}
 		Ok(())
@@ -480,7 +480,7 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_mtree(&mut self, stk: &mut Stk, ctx: &Context, p: &MTreeParams) -> Result<()> {
 		let txn = ctx.tx();
-		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.what, &self.ix.name);
+		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id);
 		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write).await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {

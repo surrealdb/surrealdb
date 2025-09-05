@@ -17,8 +17,8 @@ use crate::catalog::providers::{
 	NamespaceProvider, NodeProvider, TableProvider, UserProvider,
 };
 use crate::catalog::{
-	self, ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, NamespaceDefinition,
-	NamespaceId, TableDefinition,
+	self, ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, IndexId,
+	NamespaceDefinition, NamespaceId, TableDefinition,
 };
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
@@ -1427,21 +1427,80 @@ impl TableProvider for Transaction {
 		db: DatabaseId,
 		tb: &str,
 		ix: &str,
-	) -> Result<Arc<catalog::IndexDefinition>> {
+	) -> Result<Option<Arc<catalog::IndexDefinition>>> {
 		let qey = cache::tx::Lookup::Ix(ns, db, tb, ix);
 		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+			Some(val) => val.try_into_type().map(Some),
 			None => {
 				let key = crate::key::table::ix::new(ns, db, tb, ix);
-				let val = self.get(&key, None).await?.ok_or_else(|| Error::IxNotFound {
-					name: ix.to_owned(),
-				})?;
+				let Some(val) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
-				Ok(val)
+				Ok(Some(val))
 			}
 		}
+	}
+
+	async fn get_tb_index_by_id(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		ix: IndexId,
+	) -> Result<Option<Arc<catalog::IndexDefinition>>> {
+		let key = crate::key::table::ix::IndexNameLookupKey::new(ns, db, tb, ix);
+		let Some(index_name) = self.get(&key, None).await? else {
+			return Ok(None);
+		};
+
+		self.get_tb_index(ns, db, tb, &index_name).await
+	}
+
+	async fn put_tb_index(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		ix: &catalog::IndexDefinition,
+	) -> Result<()> {
+		let key = crate::key::table::ix::new(ns, db, tb, &ix.name);
+		self.set(&key, ix, None).await?;
+
+		let name_lookup_key =
+			crate::key::table::ix::IndexNameLookupKey::new(ns, db, tb, ix.index_id);
+		self.set(&name_lookup_key, &ix.name, None).await?;
+
+		// Set the entry in the cache
+		let qey = cache::tx::Lookup::Ix(ns, db, tb, &ix.name);
+		let entry = cache::tx::Entry::Any(Arc::new(ix.clone()));
+		self.cache.insert(qey, entry);
+		Ok(())
+	}
+
+	async fn del_tb_index(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		ix: &str,
+	) -> Result<()> {
+		// Get the index definition
+		let Some(ix) = self.get_tb_index(ns, db, tb, ix).await? else {
+			return Ok(());
+		};
+
+		// Remove the index data
+		let key = crate::key::index::all::new(ns, db, tb, ix.index_id);
+		self.delp(&key).await?;
+
+		// Delete the definition
+		let key = crate::key::table::ix::new(ns, db, tb, &ix.name);
+		self.del(&key).await?;
+
+		Ok(())
 	}
 
 	/// Fetch a specific record value.

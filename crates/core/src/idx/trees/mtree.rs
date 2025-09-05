@@ -1488,7 +1488,9 @@ mod tests {
 	use test_log::test;
 
 	use crate::catalog::providers::CatalogProvider;
-	use crate::catalog::{DatabaseDefinition, DatabaseId, Distance, NamespaceId, VectorType};
+	use crate::catalog::{
+		DatabaseDefinition, DatabaseId, Distance, IndexId, NamespaceId, VectorType,
+	};
 	use crate::ctx::{Context, MutableContext};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::DocId;
@@ -1778,7 +1780,7 @@ mod tests {
 				let doc_ids = BTreeDocIds::new(
 					&tx,
 					TransactionType::Read,
-					IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
+					IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
 					7,
 					100,
 				)
