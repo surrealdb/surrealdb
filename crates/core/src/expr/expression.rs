@@ -9,6 +9,7 @@ use super::SleepStatement;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use std::collections::VecDeque;
 use crate::err::Error;
 use crate::expr::fmt::Pretty;
 use crate::expr::operator::BindingPower;
@@ -365,9 +366,13 @@ impl Expr {
 		let output = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await?;
 
 		match op {
-			PrefixOperator::Not => fnc::operate::not(output.into_value()).map(Output::Value).map_err(ControlFlow::Err),
+			PrefixOperator::Not => {
+				fnc::operate::not(output.into_value()).map(Output::Value).map_err(ControlFlow::Err)
+			}
 			PrefixOperator::Positive => Ok(output),
-			PrefixOperator::Negate => fnc::operate::neg(output.into_value()).map(Output::Value).map_err(ControlFlow::Err),
+			PrefixOperator::Negate => {
+				fnc::operate::neg(output.into_value()).map(Output::Value).map_err(ControlFlow::Err)
+			}
 			PrefixOperator::Range => Ok(Output::Value(Value::Range(Box::new(Range {
 				start: Bound::Unbounded,
 				end: Bound::Excluded(output.into_value()),
@@ -404,18 +409,16 @@ impl Expr {
 				end: Bound::Unbounded,
 			})))),
 			PostfixOperator::MethodCall(name, exprs) => {
-				let mut args = Vec::with_capacity(exprs.len());
+				let mut args = VecDeque::with_capacity(exprs.len());
 
 				for e in exprs.iter() {
-					args.push(stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?);
+					args.push_back(stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?);
 				}
 
-				if let Value::Object(ref x) = res {
-					if let Some(Value::Closure(x)) = x.get(name.as_str()) {
+				if let Some(Value::Closure(x)) = output.get(name.as_str()) {
 						return x.compute(stk, ctx, opt, doc, args).await.map_err(ControlFlow::Err);
-					}
-				};
-				fnc::idiom(stk, ctx, opt, doc, res, name, args).await.map_err(ControlFlow::Err)
+				}
+				fnc::idiom(stk, ctx, opt, doc, output, name, args).await.map_err(ControlFlow::Err)
 			}
 			PostfixOperator::Call(exprs) => {
 				let mut args = Vec::new();
@@ -424,7 +427,7 @@ impl Expr {
 					args.push(stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?);
 				}
 
-				if let Value::Closure(x) = res {
+				if let Value::Closure(x) = ouput {
 					x.compute(stk, ctx, opt, doc, args).await.map_err(ControlFlow::Err)
 				} else {
 					Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidFunction {

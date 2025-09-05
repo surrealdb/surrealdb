@@ -3,8 +3,7 @@ use std::collections::BTreeMap;
 use crate::expr::Kind;
 use crate::val::Value;
 use crate::val::record::Record;
-use crate::val::value::CoerceError;
-use crate::val::value::CastError;
+use crate::val::value::{CastError, CoerceError};
 
 #[derive(Clone, Debug)]
 pub enum Output {
@@ -55,37 +54,50 @@ impl Output {
 		}
 	}
 
-    pub(crate) fn cast_to_kind(self, kind: &Kind) -> Result<Value, CastError> {
+	pub(crate) fn cast_to_kind(self, kind: &Kind) -> Result<Value, CastError> {
 		match self {
 			Output::Record(record) => record.data.into_value().cast_to_kind(kind),
 			Output::Value(value) => value.cast_to_kind(kind),
-			Output::Array(array) => array.into_iter().map(|output| output.cast_to_kind(kind)).collect(),
+			Output::Array(array) => {
+				array.into_iter().map(|output| output.cast_to_kind(kind)).collect()
+			}
 			Output::Map(map) => {
-                let mut res = BTreeMap::new();
-                for (key, value) in map.into_iter() {
-                    res.insert(key, value.cast_to_kind(kind)?);
-                }
-                Ok(res.into())
-            },
+				let mut res = BTreeMap::new();
+				for (key, value) in map.into_iter() {
+					res.insert(key, value.cast_to_kind(kind)?);
+				}
+				Ok(res.into())
+			}
 		}
 	}
 
-    pub(crate) fn get(&self, key: &str) -> Option<&Value> {
-        match self {
-            Output::Record(record) => if let Value::Object(obj) = record.data.as_ref() && Some(value) = obj.get(key) {
-                return Some(value);
-            },
-            Output::Value(value) => if let Value::Object(obj) = value && Some(value) = obj.get(key) {
-                return Some(value);
-            },
-            Output::Array(array) => {},
-            Output::Map(map) => if let Some(output) = map.get(key) {
-                match output {
-                    Output::Value(value) => value,
-                    Output::Record(record) => record.data.as_ref(),
-                    _ => {}
-            }
-        }
-        None
-    }
+	pub(crate) fn get(&self, key: &str) -> Option<&Value> {
+		match self {
+			Output::Record(record) => {
+				if let Value::Object(obj) = record.data.as_ref()
+					&& let Some(value) = obj.get(key)
+				{
+					return Some(value);
+				}
+			}
+			Output::Value(value) => {
+				if let Value::Object(obj) = value
+					&& let Some(value) = obj.get(key)
+				{
+					return Some(value);
+				}
+			}
+			Output::Array(_) => {}
+			Output::Map(map) => {
+				if let Some(output) = map.get(key) {
+					return match output {
+						Output::Value(value) => Some(value),
+						Output::Record(record) => Some(record.data.as_ref()),
+						_ => None,
+					};
+				}
+			}
+		}
+		None
+	}
 }

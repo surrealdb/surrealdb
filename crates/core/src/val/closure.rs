@@ -9,8 +9,9 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use std::collections::VecDeque;
 use crate::expr::{Expr, FlowResultExt, Ident, Kind};
-use crate::val::Value;
+use crate::val::Output;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -42,11 +43,11 @@ impl Closure {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-		args: Vec<Value>,
-	) -> Result<Value> {
+		mut args: VecDeque<Output>,
+	) -> Result<Output> {
 		let mut ctx = MutableContext::new_isolated(ctx);
-		for (i, (name, kind)) in self.args.iter().enumerate() {
-			match (kind, args.get(i)) {
+		for (name, kind) in self.args.iter() {
+			match (kind, args.pop_front()) {
 				(Kind::Option(_), None) => continue,
 				(_, None) => {
 					bail!(Error::InvalidArguments {
@@ -70,17 +71,18 @@ impl Closure {
 		}
 
 		let ctx = ctx.freeze();
-		let result = stk.run(|stk| self.body.compute(stk, &ctx, opt, doc)).await.catch_return()?;
+		let output = stk.run(|stk| self.body.compute(stk, &ctx, opt, doc)).await.catch_return()?;
 		if let Some(returns) = &self.returns {
-			result
+			output
 				.coerce_to_kind(returns)
+				.map(Output::Value)
 				.map_err(|e| Error::ReturnCoerce {
 					name: "ANONYMOUS".to_string(),
 					error: Box::new(e),
 				})
 				.map_err(anyhow::Error::new)
 		} else {
-			Ok(result)
+			Ok(output)
 		}
 	}
 }
