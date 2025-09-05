@@ -1268,7 +1268,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn delete<O>(&self, resource: impl IntoResource<O>) -> Delete<C, O> {
+	pub fn delete<O>(&self, resource: impl IntoResource<O>) -> Delete<C, O> { 
 		Delete {
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
