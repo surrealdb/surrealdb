@@ -142,16 +142,16 @@ impl Executor {
 				// Check if we dump the slow log
 				self.check_slow_log(start, &stm);
 
-				let res = res?;
+				let output = res?;
 				let result = match &stm.kind {
-					Some(kind) => res
+					Some(kind) => output
 						.coerce_to_kind(kind)
 						.map_err(|e| Error::SetCoerce {
 							name: stm.name.to_string(),
 							error: Box::new(e),
 						})
 						.map_err(anyhow::Error::new)?,
-					None => res,
+					None => output.into_value(),
 				};
 
 				if stm.is_protected_set() {

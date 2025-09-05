@@ -3,9 +3,11 @@
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use std::collections::VecDeque;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::val::Output;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::idx::planner::executor::QueryExecutor;
@@ -49,7 +51,7 @@ pub async fn run(
 	doc: Option<&CursorDoc>,
 	name: &str,
 	args: Vec<Value>,
-) -> Result<Value> {
+) -> Result<Output> {
 	if name.eq("sleep")
 		|| name.eq("api::invoke")
 		|| name.eq("array::all")
@@ -604,10 +606,11 @@ pub async fn idiom(
 	ctx: &Context,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
-	value: Value,
+	output: Output,
 	name: &str,
-	mut args: Vec<Value>,
-) -> Result<Value> {
+	mut args: VecDeque<Output>,
+) -> Result<Output> {
+	let value = output.into_value();
 	ctx.check_allowed_function(&idiom_name_to_normal(value.kind_of(), name))?;
 	match value {
 		Value::Array(x) => {
