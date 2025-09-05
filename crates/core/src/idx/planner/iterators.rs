@@ -119,13 +119,13 @@ impl IteratorBatch for VecDeque<IndexItemRecord> {
 pub(crate) enum ThingIterator {
 	IndexEqual(IndexEqualThingIterator),
 	IndexRange(IndexRangeThingIterator),
-	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv", feature = "kv-surrealkv"))]
 	IndexRangeReverse(IndexRangeReverseThingIterator),
 	IndexUnion(IndexUnionThingIterator),
 	IndexJoin(Box<IndexJoinThingIterator>),
 	UniqueEqual(UniqueEqualThingIterator),
 	UniqueRange(UniqueRangeThingIterator),
-	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv", feature = "kv-surrealkv"))]
 	UniqueRangeReverse(UniqueRangeReverseThingIterator),
 	UniqueUnion(UniqueUnionThingIterator),
 	UniqueJoin(Box<UniqueJoinThingIterator>),
@@ -150,10 +150,10 @@ impl ThingIterator {
 			Self::IndexEqual(i) => i.next_batch(txn, size).await,
 			Self::UniqueEqual(i) => i.next_batch(txn).await,
 			Self::IndexRange(i) => i.next_batch(txn, size).await,
-			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv", feature = "kv-surrealkv"))]
 			Self::IndexRangeReverse(i) => i.next_batch(txn, size).await,
 			Self::UniqueRange(i) => i.next_batch(txn, size).await,
-			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv", feature = "kv-surrealkv"))]
 			Self::UniqueRangeReverse(i) => i.next_batch(txn, size).await,
 			Self::IndexUnion(i) => i.next_batch(ctx, txn, size).await,
 			Self::UniqueUnion(i) => i.next_batch(ctx, txn, size).await,
@@ -179,10 +179,10 @@ impl ThingIterator {
 			Self::IndexEqual(i) => i.next_count(txn, size).await,
 			Self::UniqueEqual(i) => i.next_count(txn).await,
 			Self::IndexRange(i) => i.next_count(txn, size).await,
-			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv", feature = "kv-surrealkv"))]
 			Self::IndexRangeReverse(i) => i.next_count(txn, size).await,
 			Self::UniqueRange(i) => i.next_count(txn, size).await,
-			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv", feature = "kv-surrealkv"))]
 			Self::UniqueRangeReverse(i) => i.next_count(txn, size).await,
 			Self::IndexUnion(i) => i.next_count(ctx, txn, size).await,
 			Self::UniqueUnion(i) => i.next_count(ctx, txn, size).await,
@@ -395,7 +395,7 @@ impl RangeScan {
 	}
 }
 
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv", feature = "kv-surrealkv"))]
 struct ReverseRangeScan {
 	r: RangeScan,
 	/// True if the beginning key should be included
@@ -404,7 +404,7 @@ struct ReverseRangeScan {
 	end_incl: bool,
 }
 
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv", feature = "kv-surrealkv"))]
 impl ReverseRangeScan {
 	fn new(r: RangeScan) -> Self {
 		// Capture whether the original forward range considered the endpoints inclusive.
@@ -729,13 +729,13 @@ impl IndexRangeThingIterator {
 	}
 }
 
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv", feature = "kv-surrealkv"))]
 pub(crate) struct IndexRangeReverseThingIterator {
 	irf: IteratorRef,
 	r: ReverseRangeScan,
 }
 
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv", feature = "kv-surrealkv"))]
 impl IndexRangeReverseThingIterator {
 	pub(super) fn new(
 		irf: IteratorRef,
@@ -1294,14 +1294,14 @@ impl UniqueRangeThingIterator {
 	}
 }
 
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv", feature = "kv-surrealkv"))]
 pub(crate) struct UniqueRangeReverseThingIterator {
 	irf: IteratorRef,
 	r: ReverseRangeScan,
 	done: bool,
 }
 
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv", feature = "kv-surrealkv"))]
 impl UniqueRangeReverseThingIterator {
 	pub(super) fn new(
 		irf: IteratorRef,
