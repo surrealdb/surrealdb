@@ -4,6 +4,7 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use uuid::Uuid;
 
+use crate::catalog::providers::CatalogProvider;
 use crate::catalog::{NodeLiveQuery, SubscriptionDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -161,6 +162,7 @@ impl fmt::Display for LiveStatement {
 mod tests {
 	use anyhow::Result;
 
+	use crate::catalog::providers::{CatalogProvider, TableProvider};
 	use crate::dbs::{Action, Capabilities, Notification, Session};
 	use crate::expr::Value;
 	use crate::kvs::Datastore;

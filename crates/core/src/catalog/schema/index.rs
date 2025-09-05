@@ -98,38 +98,61 @@ impl ToSql for Index {
 	}
 }
 
+/// Search index parameters.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SearchParams {
+	/// The analyzer to use.
 	pub az: String,
+	/// Whether to highlight the search results.
 	pub hl: bool,
+	/// The scoring to use.
 	pub sc: Scoring,
+	/// The order of the document IDs.
 	pub doc_ids_order: u32,
+	/// The order of the document lengths.
 	pub doc_lengths_order: u32,
+	/// The order of the postings.
 	pub postings_order: u32,
+	/// The order of the terms.
 	pub terms_order: u32,
+	/// The cache of the document IDs.
 	pub doc_ids_cache: u32,
+	/// The cache of the document lengths.
 	pub doc_lengths_cache: u32,
+	/// The cache of the postings.
 	pub postings_cache: u32,
+	/// The cache of the terms.
 	pub terms_cache: u32,
 }
 
+/// Full-Text search parameters.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct FullTextParams {
+	/// The analyzer to use.
 	pub analyzer: String,
+	/// Whether to highlight the search results.
 	pub highlight: bool,
+	/// The scoring to use.
 	pub scoring: Scoring,
 }
 
+/// Scoring for Full-Text search.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug)]
 pub enum Scoring {
+	/// BestMatching25 scoring.
+	///
+	/// <https://en.wikipedia.org/wiki/Okapi_BM25>
 	Bm {
+		/// The k~1~ parameter.
 		k1: f32,
+		/// The b parameter.
 		b: f32,
-	}, // BestMatching25
-	Vs, // VectorSearch
+	},
+	/// VectorSearch scoring.
+	Vs,
 }
 
 impl Eq for Scoring {}
@@ -177,29 +200,62 @@ impl Default for Scoring {
 	}
 }
 
+/// M-Tree index parameters.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct MTreeParams {
+	/// The dimension of the index.
 	pub dimension: u16,
+	/// The distance metric to use.
 	pub distance: Distance,
+	/// The vector type to use.
 	pub vector_type: VectorType,
+	/// The capacity of the index.
 	pub capacity: u16,
+	/// The order of the document IDs.
 	pub doc_ids_order: u32,
+	/// The cache of the document IDs.
 	pub doc_ids_cache: u32,
+	/// The cache of the M-Tree.
 	pub mtree_cache: u32,
 }
 
+/// Distance metric for calculating distances between vectors.
 #[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash)]
 pub enum Distance {
+	/// Chebyshev distance.
+	///
+	/// <https://en.wikipedia.org/wiki/Chebyshev_distance>
 	Chebyshev,
+	/// Cosine distance.
+	///
+	/// <https://en.wikipedia.org/wiki/Cosine_similarity>
 	Cosine,
+	/// Euclidean distance.
+	///
+	/// <https://en.wikipedia.org/wiki/Euclidean_distance>
 	#[default]
 	Euclidean,
+	/// Hamming distance.
+	///
+	/// <https://en.wikipedia.org/wiki/Hamming_distance>
 	Hamming,
+	/// Jaccard distance.
+	///
+	/// <https://en.wikipedia.org/wiki/Jaccard_index>
 	Jaccard,
+	/// Manhattan distance.
+	///
+	/// <https://en.wikipedia.org/wiki/Manhattan_distance>
 	Manhattan,
+	/// Minkowski distance.
+	///
+	/// <https://en.wikipedia.org/wiki/Minkowski_distance>
 	Minkowski(Number),
+	/// Pearson distance.
+	///
+	/// <https://en.wikipedia.org/wiki/Pearson_correlation_coefficient>
 	Pearson,
 }
 
@@ -237,14 +293,20 @@ impl Display for Distance {
 	}
 }
 
+/// Vector type for storing vectors.
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Hash)]
 pub enum VectorType {
+	/// 64-bit floating point.
 	#[default]
 	F64,
+	/// 32-bit floating point.
 	F32,
+	/// 64-bit signed integer.
 	I64,
+	/// 32-bit signed integer.
 	I32,
+	/// 16-bit signed integer.
 	I16,
 }
 
@@ -260,16 +322,26 @@ impl Display for VectorType {
 	}
 }
 
+/// HNSW index parameters.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct HnswParams {
+	/// The dimension of the index.
 	pub dimension: u16,
+	/// The distance metric to use.
 	pub distance: Distance,
+	/// The vector type to use.
 	pub vector_type: VectorType,
+	/// The m parameter.
 	pub m: u8,
+	/// The m0 parameter.
 	pub m0: u8,
+	/// The ml parameter.
 	pub ml: Number,
+	/// The ef_construction parameter.
 	pub ef_construction: u16,
+	/// Whether to extend candidates.
 	pub extend_candidates: bool,
+	/// Whether to keep pruned connections.
 	pub keep_pruned_connections: bool,
 }

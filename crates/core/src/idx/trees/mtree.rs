@@ -1487,6 +1487,7 @@ mod tests {
 	use reblessive::tree::Stk;
 	use test_log::test;
 
+	use crate::catalog::providers::CatalogProvider;
 	use crate::catalog::{DatabaseDefinition, DatabaseId, Distance, NamespaceId, VectorType};
 	use crate::ctx::{Context, MutableContext};
 	use crate::idx::IndexKeyBase;

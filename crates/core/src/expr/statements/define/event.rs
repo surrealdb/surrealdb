@@ -4,6 +4,7 @@ use anyhow::{Result, bail};
 use uuid::Uuid;
 
 use super::DefineKind;
+use crate::catalog::providers::{CatalogProvider, TableProvider};
 use crate::catalog::{EventDefinition, TableDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;

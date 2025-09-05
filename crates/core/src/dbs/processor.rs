@@ -7,6 +7,7 @@ use anyhow::{Result, bail};
 use futures::StreamExt;
 use reblessive::tree::Stk;
 
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::{Context, MutableContext};
@@ -18,7 +19,7 @@ use crate::expr::dir::Dir;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
-use crate::key::{graph, r#ref, thing};
+use crate::key::{graph, record, r#ref};
 use crate::kvs::{KVKey, KVValue, Key, Transaction, Val};
 use crate::syn;
 use crate::val::record::Record;
@@ -136,7 +137,7 @@ impl Collected {
 			} => Self::process_relatable(ctx, opt, txn, f, v, w, o, rid_only).await,
 			// Direct record ID references - standard record processing
 			Self::RecordId(record_id) => {
-				Self::process_thing(ctx, opt, txn, record_id, rid_only).await
+				Self::process_record(ctx, opt, txn, record_id, rid_only).await
 			}
 			// Table identifiers - used for table-level operations
 			Self::Yield(table) => Self::process_yield(table).await,
@@ -200,7 +201,7 @@ impl Collected {
 	}
 
 	async fn process_range_key(key: Key) -> Result<Processed> {
-		let key = thing::ThingKey::decode_key(&key)?;
+		let key = record::RecordKey::decode_key(&key)?;
 		let val = Record::new(Value::Null.into());
 		let rid = RecordId {
 			table: key.tb.to_owned(),
@@ -220,7 +221,7 @@ impl Collected {
 	}
 
 	async fn process_table_key(key: Key) -> Result<Processed> {
-		let key = thing::ThingKey::decode_key(&key)?;
+		let key = record::RecordKey::decode_key(&key)?;
 		let rid = RecordId {
 			table: key.tb.to_owned(),
 			key: key.id,
@@ -266,7 +267,7 @@ impl Collected {
 		Ok(pro)
 	}
 
-	async fn process_thing(
+	async fn process_record(
 		ctx: &Context,
 		opt: &Options,
 		txn: &Transaction,
@@ -352,7 +353,7 @@ impl Collected {
 	}
 
 	fn process_key_val(key: Key, val: Val) -> Result<Processed> {
-		let key = thing::ThingKey::decode_key(&key)?;
+		let key = record::RecordKey::decode_key(&key)?;
 		let mut val = Record::kv_decode_value(val)?;
 		let rid = RecordId {
 			table: key.tb.to_owned(),
@@ -648,8 +649,8 @@ pub(super) trait Collector {
 		txn.check_tb(ns, db, v.as_str(), opt.strict).await?;
 
 		// Prepare the start and end keys
-		let beg = thing::prefix(ns, db, v)?;
-		let end = thing::suffix(ns, db, v)?;
+		let beg = record::prefix(ns, db, v)?;
+		let end = record::suffix(ns, db, v)?;
 		// Optionally skip keys
 		let rng = if let Some(r) = self.start_skip(ctx, &txn, beg..end, sc).await? {
 			r
@@ -690,8 +691,8 @@ pub(super) trait Collector {
 		txn.check_tb(ns, db, v.as_str(), opt.strict).await?;
 
 		// Prepare the start and end keys
-		let beg = thing::prefix(ns, db, v)?;
-		let end = thing::suffix(ns, db, v)?;
+		let beg = record::prefix(ns, db, v)?;
+		let end = record::suffix(ns, db, v)?;
 		// Optionally skip keys
 		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end, sc).await? {
 			// Returns the next range of keys
@@ -727,8 +728,8 @@ pub(super) trait Collector {
 		// Check that the table exists
 		txn.check_tb(ns, db, v.as_str(), opt.strict).await?;
 
-		let beg = thing::prefix(ns, db, v)?;
-		let end = thing::suffix(ns, db, v)?;
+		let beg = record::prefix(ns, db, v)?;
+		let end = record::suffix(ns, db, v)?;
 		// Create a new iterable range
 		let count = txn.count(beg..end).await?;
 		// Collect the count
@@ -744,20 +745,20 @@ pub(super) trait Collector {
 		r: RecordIdKeyRange,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		let beg = match &r.start {
-			Bound::Unbounded => thing::prefix(ns, db, tb)?,
-			Bound::Included(v) => thing::new(ns, db, tb, v).encode_key()?,
+			Bound::Unbounded => record::prefix(ns, db, tb)?,
+			Bound::Included(v) => record::new(ns, db, tb, v).encode_key()?,
 			Bound::Excluded(v) => {
-				let mut key = thing::new(ns, db, tb, v).encode_key()?;
+				let mut key = record::new(ns, db, tb, v).encode_key()?;
 				key.push(0x00);
 				key
 			}
 		};
 		// Prepare the range end key
 		let end = match &r.end {
-			Bound::Unbounded => thing::suffix(ns, db, tb)?,
-			Bound::Excluded(v) => thing::new(ns, db, tb, v).encode_key()?,
+			Bound::Unbounded => record::suffix(ns, db, tb)?,
+			Bound::Excluded(v) => record::new(ns, db, tb, v).encode_key()?,
 			Bound::Included(v) => {
-				let mut key = thing::new(ns, db, tb, v).encode_key()?;
+				let mut key = record::new(ns, db, tb, v).encode_key()?;
 				key.push(0x00);
 				key
 			}

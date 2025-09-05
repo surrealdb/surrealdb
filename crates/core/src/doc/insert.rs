@@ -2,6 +2,7 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
+use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;

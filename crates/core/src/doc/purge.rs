@@ -2,6 +2,7 @@ use anyhow::{Result, bail};
 use futures::StreamExt;
 use reblessive::tree::Stk;
 
+use crate::catalog::providers::TableProvider;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Options, Statement};

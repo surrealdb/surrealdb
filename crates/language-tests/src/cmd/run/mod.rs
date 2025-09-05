@@ -17,7 +17,7 @@ use std::{io, mem, str, thread, time::Duration};
 use surrealdb_core::{
 	dbs::{capabilities::ExperimentalTarget, Session},
 	env::VERSION,
-	kvs::{Datastore, LockType, TransactionType},
+	kvs::Datastore,
 	syn,
 };
 use tokio::{
@@ -280,9 +280,8 @@ pub async fn grade_task(
 		.await
 		.expect("failed to create datastore for running matching expressions");
 
-	let txn = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
-	txn.ensure_ns_db("match", "match", false).await.unwrap();
-	txn.commit().await.unwrap();
+	let mut session = surrealdb_core::dbs::Session::default();
+	ds.process_use(&mut session, Some("match".to_string()), Some("match".to_string())).await.unwrap();
 
 	loop {
 		let Some((id, res)) = results.recv().await else {
@@ -345,20 +344,7 @@ async fn run_test_with_dbs(
 		.unwrap_or(Duration::from_secs(2));
 
 	let mut import_session = Session::owner();
-	if let Some(ns) = session.ns.as_ref() {
-		import_session = import_session.with_ns(ns);
-		let txn = dbs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-		txn.get_or_add_ns(ns, false).await?;
-		txn.commit().await?;
-
-		if let Some(db) = session.db.as_ref() {
-			import_session = import_session.with_db(db);
-			let txn = dbs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-			txn.get_or_add_db(ns, db, false).await?;
-			txn.commit().await?;
-		};
-
-	};
+	dbs.process_use(&mut import_session, session.ns.clone(), session.db.clone()).await?;
 
 	for import in set[id].config.imports() {
 		let Some(test) = set.find_all(import) else {

@@ -20,6 +20,7 @@ pub enum ConfigDefinition {
 impl_kv_value_revisioned!(ConfigDefinition);
 
 impl ConfigDefinition {
+	/// Get the name of the config.
 	pub fn name(&self) -> String {
 		match self {
 			ConfigDefinition::GraphQL(_) => ConfigKind::GraphQL.to_string(),
@@ -27,6 +28,10 @@ impl ConfigDefinition {
 		}
 	}
 
+	/// Convert the config definition into a graphql config.
+	///
+	/// TODO: This is used in the commented out graphql code.
+	#[allow(unused)]
 	pub fn try_into_graphql(self) -> Result<GraphQLConfig> {
 		match self {
 			ConfigDefinition::GraphQL(g) => Ok(g),

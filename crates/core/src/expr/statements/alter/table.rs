@@ -5,6 +5,7 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 
 use super::AlterKind;
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{Permissions, TableType};
 use crate::ctx::Context;
 use crate::dbs::Options;

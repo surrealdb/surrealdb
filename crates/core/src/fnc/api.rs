@@ -7,6 +7,7 @@ use reblessive::tree::Stk;
 use super::args::Optional;
 use crate::api::body::ApiBody;
 use crate::api::invocation::ApiInvocation;
+use crate::catalog::providers::ApiProvider;
 use crate::catalog::{ApiDefinition, ApiMethod};
 use crate::ctx::Context;
 use crate::dbs::Options;

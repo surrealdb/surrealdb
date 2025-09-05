@@ -6,6 +6,7 @@ use reblessive::tree::Stk;
 use super::config::api::ApiConfig;
 use super::{CursorDoc, DefineKind};
 use crate::api::path::Path;
+use crate::catalog::providers::ApiProvider;
 use crate::catalog::{ApiActionDefinition, ApiDefinition, ApiMethod};
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -58,11 +59,9 @@ impl DefineApiStatement {
 		let path = stk.run(|stk| self.path.compute(stk, ctx, opt, doc)).await.catch_return()?;
 		// Process the statement
 		let path: Path = path.coerce_to::<String>()?.parse()?;
-		let name = path.to_string();
 
 		let config = self.config.compute(stk, ctx, opt, doc).await?;
 
-		let key = crate::key::database::ap::new(ns, db, &name);
 		let mut actions = Vec::new();
 		for action in self.actions.iter() {
 			actions.push(ApiActionDefinition {
@@ -79,7 +78,7 @@ impl DefineApiStatement {
 			config,
 			comment: self.comment.as_ref().map(|c| c.clone().into_string()),
 		};
-		txn.set(&key, &ap, None).await?;
+		txn.put_db_api(ns, db, &ap).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

@@ -6,6 +6,7 @@ use anyhow::{Result, bail};
 use api::ApiConfig;
 use reblessive::tree::Stk;
 
+use crate::catalog::providers::DatabaseProvider;
 use crate::catalog::{ConfigDefinition, GraphQLConfig};
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -49,7 +50,7 @@ impl DefineConfigStatement {
 		};
 		// Check if the definition exists
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-		if txn.get_db_config(ns, db, cg).await.is_ok() {
+		if txn.expect_db_config(ns, db, cg).await.is_ok() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {

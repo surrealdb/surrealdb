@@ -4,6 +4,7 @@ use std::fmt::{Display, Formatter};
 use anyhow::{Result, bail};
 
 use crate::catalog::Index;
+use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;

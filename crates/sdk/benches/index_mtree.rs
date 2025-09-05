@@ -7,7 +7,7 @@ use futures::future::join_all;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use reblessive::TreeStack;
-use surrealdb_core::catalog::{Distance, MTreeParams, VectorType};
+use surrealdb_core::catalog::{CatalogProvider, Distance, MTreeParams, VectorType};
 use surrealdb_core::ctx::MutableContext;
 use surrealdb_core::idx::IndexKeyBase;
 use surrealdb_core::idx::planner::checker::MTreeConditionChecker;

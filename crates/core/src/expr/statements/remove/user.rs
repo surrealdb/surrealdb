@@ -2,12 +2,12 @@ use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
 
+use crate::catalog::providers::UserProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveUserStatement {
 	pub name: Ident,

@@ -1,6 +1,7 @@
 use anyhow::Result;
 
 use super::tasklease::LeaseHandler;
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;

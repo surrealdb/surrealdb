@@ -5,6 +5,7 @@ use reblessive::tree::Stk;
 
 use super::{CursorDoc, DefineKind};
 use crate::buc::{self, BucketConnectionKey};
+use crate::catalog::providers::BucketProvider;
 use crate::catalog::{BucketDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;

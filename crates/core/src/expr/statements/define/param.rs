@@ -4,6 +4,7 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use super::DefineKind;
+use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
 use crate::catalog::{ParamDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -62,16 +63,15 @@ impl DefineParamStatement {
 		};
 
 		// Process the statement
-		let key = crate::key::database::pa::new(db.namespace_id, db.database_id, &self.name);
-		txn.set(
-			&key,
+		txn.put_db_param(
+			db.namespace_id,
+			db.database_id,
 			&ParamDefinition {
 				value,
 				name: self.name.to_raw_string(),
 				comment: self.comment.clone().map(|s| s.into_string()),
 				permissions: self.permissions.clone(),
 			},
-			None,
 		)
 		.await?;
 		// Clear the cache

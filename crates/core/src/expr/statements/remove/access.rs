@@ -2,6 +2,7 @@ use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
 
+use crate::catalog::providers::AuthorisationProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -37,11 +38,7 @@ impl RemoveAccessStatement {
 				};
 
 				// Delete the definition
-				let key = crate::key::root::ac::new(&ac.name);
-				txn.del(&key).await?;
-				// Delete any associated data including access grants.
-				let key = crate::key::root::access::all::new(&ac.name);
-				txn.delp(&key).await?;
+				txn.del_root_access(&ac.name).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -65,11 +62,7 @@ impl RemoveAccessStatement {
 				};
 
 				// Delete the definition
-				let key = crate::key::namespace::ac::new(ns, &ac.name);
-				txn.del(&key).await?;
-				// Delete any associated data including access grants.
-				let key = crate::key::namespace::access::all::new(ns, &ac.name);
-				txn.delp(&key).await?;
+				txn.del_ns_access(ns, &ac.name).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -93,11 +86,7 @@ impl RemoveAccessStatement {
 					}
 				};
 				// Delete the definition
-				let key = crate::key::database::ac::new(ns, db, &ac.name);
-				txn.del(&key).await?;
-				// Delete any associated data including access grants.
-				let key = crate::key::database::access::all::new(ns, db, &ac.name);
-				txn.delp(&key).await?;
+				txn.del_db_access(ns, db, &ac.name).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good

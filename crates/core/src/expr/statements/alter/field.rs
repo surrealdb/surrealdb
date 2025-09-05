@@ -6,6 +6,7 @@ use reblessive::tree::Stk;
 use uuid::Uuid;
 
 use super::AlterKind;
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{self, Permission, Permissions, TableDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -159,8 +160,6 @@ impl AlterFieldStatement {
 			},
 		)
 		.await?;
-		// Clear the cache
-		txn.clear_cache();
 		// Process possible recursive defitions
 		//df.process_recursive_definitions(ns, db, txn.clone()).await?;
 		// Clear the cache

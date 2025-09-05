@@ -6,6 +6,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{self, DatabaseId, Index, IndexDefinition, NamespaceId};
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};

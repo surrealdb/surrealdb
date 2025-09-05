@@ -2,6 +2,7 @@ use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
 
+use crate::catalog::providers::BucketProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;

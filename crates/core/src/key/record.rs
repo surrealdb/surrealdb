@@ -9,7 +9,7 @@ use crate::val::RecordIdKey;
 use crate::val::record::Record;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub(crate) struct ThingKey<'a> {
+pub(crate) struct RecordKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -21,12 +21,12 @@ pub(crate) struct ThingKey<'a> {
 	pub id: RecordIdKey,
 }
 
-impl KVKey for ThingKey<'_> {
+impl KVKey for RecordKey<'_> {
 	type ValueType = Record;
 }
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &RecordIdKey) -> ThingKey<'a> {
-	ThingKey::new(ns, db, tb, id.to_owned())
+pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &RecordIdKey) -> RecordKey<'a> {
+	RecordKey::new(ns, db, tb, id.to_owned())
 }
 
 pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
@@ -41,13 +41,13 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for ThingKey<'_> {
+impl Categorise for RecordKey<'_> {
 	fn categorise(&self) -> Category {
-		Category::Thing
+		Category::Record
 	}
 }
 
-impl<'a> ThingKey<'a> {
+impl<'a> RecordKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: RecordIdKey) -> Self {
 		Self {
 			__: b'/',
@@ -62,7 +62,7 @@ impl<'a> ThingKey<'a> {
 		}
 	}
 
-	pub fn decode_key(k: &[u8]) -> Result<ThingKey<'_>> {
+	pub fn decode_key(k: &[u8]) -> Result<RecordKey<'_>> {
 		Ok(storekey::deserialize(k)?)
 	}
 }
@@ -76,13 +76,13 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = ThingKey::new(
+		let val = RecordKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
 			RecordIdKey::String("testid".to_owned()),
 		);
-		let enc = ThingKey::encode_key(&val).unwrap();
+		let enc = RecordKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\0\0\0\x01testid\0");
 	}
 	#[test]
@@ -91,8 +91,8 @@ mod tests {
 		let id1 = "foo:['test']";
 		let record_id = syn::record_id(id1).expect("Failed to parse the ID");
 		let id1 = record_id.key;
-		let val = ThingKey::new(NamespaceId(1), DatabaseId(2), "testtb", id1);
-		let enc = ThingKey::encode_key(&val).unwrap();
+		let val = RecordKey::new(NamespaceId(1), DatabaseId(2), "testtb", id1);
+		let enc = RecordKey::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\0\0\0\x03\0\0\0\x04test\0\x01"
@@ -101,8 +101,8 @@ mod tests {
 		let id2 = "foo:[u'f8e238f2-e734-47b8-9a16-476b291bd78a']";
 		let record_id = syn::record_id(id2).expect("Failed to parse the ID");
 		let id2 = record_id.key;
-		let val = ThingKey::new(NamespaceId(1), DatabaseId(2), "testtb", id2);
-		let enc = ThingKey::encode_key(&val).unwrap();
+		let val = RecordKey::new(NamespaceId(1), DatabaseId(2), "testtb", id2);
+		let enc = RecordKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\0\0\0\x03\0\0\0\x07\0\0\0\0\0\0\0\x10\xf8\xe2\x38\xf2\xe7\x34\x47\xb8\x9a\x16\x47\x6b\x29\x1b\xd7\x8a\x01");
 	}
 }

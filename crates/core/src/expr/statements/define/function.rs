@@ -3,6 +3,7 @@ use std::fmt::{self, Display, Write};
 use anyhow::{Result, bail};
 
 use super::DefineKind;
+use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
 use crate::catalog::{FunctionDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -59,9 +60,9 @@ impl DefineFunctionStatement {
 			txn.get_or_add_db(ns, db, opt.strict).await?
 		};
 
-		let key = crate::key::database::fc::new(ns, db, &self.name);
-		txn.set(
-			&key,
+		txn.put_db_function(
+			ns,
+			db,
 			&FunctionDefinition {
 				name: self.name.to_raw_string(),
 				args: self.args.clone().into_iter().map(|(n, k)| (n.to_raw_string(), k)).collect(),
@@ -70,7 +71,6 @@ impl DefineFunctionStatement {
 				permissions: self.permissions.clone(),
 				returns: self.returns.clone(),
 			},
-			None,
 		)
 		.await?;
 		// Clear the cache

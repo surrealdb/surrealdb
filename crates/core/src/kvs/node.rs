@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, NodeProvider, TableProvider};
 use crate::catalog::{NodeLiveQuery, SubscriptionDefinition};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;

@@ -4,6 +4,7 @@ use anyhow::{Result, bail};
 
 use super::DefineKind;
 use crate::catalog::DatabaseDefinition;
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;

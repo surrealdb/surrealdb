@@ -1,5 +1,6 @@
 use anyhow::{Result, ensure};
 
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{Relation, TableType};
 use crate::ctx::Context;
 use crate::dbs::{Options, Statement, Workable};
@@ -30,8 +31,6 @@ impl Document {
 			let rid = self.id()?;
 			// Get the transaction
 			let txn = ctx.tx();
-			// Lock the transaction
-			let mut txn = txn.lock().await;
 			// For enforced relations, ensure that the edges exist
 			if matches!(
 				tb.table_type,
@@ -41,22 +40,22 @@ impl Document {
 				})
 			) {
 				// Check that the `in` record exists
-				let key = crate::key::thing::new(ns, db, &l.table, &l.key);
 				ensure!(
-					txn.exists(&key, None).await?,
+					txn.record_exists(ns, db, &l.table, &l.key).await?,
 					Error::IdNotFound {
 						rid: l.to_string(),
 					}
 				);
 				// Check that the `out` record exists
-				let key = crate::key::thing::new(ns, db, &r.table, &r.key);
 				ensure!(
-					txn.exists(&key, None).await?,
+					txn.record_exists(ns, db, &r.table, &r.key).await?,
 					Error::IdNotFound {
 						rid: r.to_string(),
 					}
 				);
 			}
+			// Lock the transaction
+			let mut txn = txn.lock().await;
 			// Get temporary edge references
 			let (ref o, ref i) = (Dir::Out, Dir::In);
 			// Store the left pointer edge

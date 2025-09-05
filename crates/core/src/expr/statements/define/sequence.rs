@@ -4,6 +4,7 @@ use anyhow::{Result, bail};
 
 use super::DefineKind;
 use crate::catalog::SequenceDefinition;
+use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
