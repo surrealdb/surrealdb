@@ -448,6 +448,7 @@ pub trait TableProvider {
 		tb: &str,
 		id: &RecordIdKey,
 		record: Arc<Record>,
+		version: Option<u64>,
 	) -> Result<()>;
 
 	/// Set record into the datastore.
@@ -460,6 +461,7 @@ pub trait TableProvider {
 		tb: &str,
 		id: &RecordIdKey,
 		record: Arc<Record>,
+		version: Option<u64>,
 	) -> Result<()>;
 
 	/// Delete record from the datastore.

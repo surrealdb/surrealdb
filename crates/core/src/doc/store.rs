@@ -50,7 +50,14 @@ impl Document {
 			Statement::Insert(_) if self.is_iteration_initial() => {
 				match ctx
 					.tx()
-					.put_record(ns, db, &rid.table, &rid.key, doc_without_id.into_read_only())
+					.put_record(
+						ns,
+						db,
+						&rid.table,
+						&rid.key,
+						doc_without_id.into_read_only(),
+						opt.version,
+					)
 					.await
 				{
 					// The key already exists, so return an error
@@ -76,7 +83,14 @@ impl Document {
 			Statement::Upsert(_) if self.is_iteration_initial() => {
 				match ctx
 					.tx()
-					.put_record(ns, db, &rid.table, &rid.key, doc_without_id.into_read_only())
+					.put_record(
+						ns,
+						db,
+						&rid.table,
+						&rid.key,
+						doc_without_id.into_read_only(),
+						opt.version,
+					)
 					.await
 				{
 					// The key already exists, so return an error
@@ -102,7 +116,14 @@ impl Document {
 			Statement::Create(_) => {
 				match ctx
 					.tx()
-					.put_record(ns, db, &rid.table, &rid.key, doc_without_id.into_read_only())
+					.put_record(
+						ns,
+						db,
+						&rid.table,
+						&rid.key,
+						doc_without_id.into_read_only(),
+						opt.version,
+					)
 					.await
 				{
 					// The key already exists, so return an error
@@ -121,7 +142,14 @@ impl Document {
 			// Let's update the stored value for the specified key
 			_ => {
 				ctx.tx()
-					.set_record(ns, db, &rid.table, &rid.key, doc_without_id.into_read_only())
+					.set_record(
+						ns,
+						db,
+						&rid.table,
+						&rid.key,
+						doc_without_id.into_read_only(),
+						opt.version,
+					)
 					.await
 			}
 		}?;

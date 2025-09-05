@@ -1524,9 +1524,10 @@ impl TableProvider for Transaction {
 		tb: &str,
 		id: &RecordIdKey,
 		record: Arc<Record>,
+		version: Option<u64>,
 	) -> Result<()> {
 		let key = crate::key::record::new(ns, db, tb, id);
-		self.put(&key, &record, None).await?;
+		self.put(&key, &record, version).await?;
 		self.set_record_cache(ns, db, tb, id, record);
 		Ok(())
 	}
@@ -1539,10 +1540,11 @@ impl TableProvider for Transaction {
 		tb: &str,
 		id: &RecordIdKey,
 		record: Arc<Record>,
+		version: Option<u64>,
 	) -> Result<()> {
 		// Set the value in the datastore
 		let key = crate::key::record::new(ns, db, tb, id);
-		self.set(&key, &record, None).await?;
+		self.set(&key, &record, version).await?;
 		// Set the value in the cache
 		self.set_record_cache(ns, db, tb, id, record);
 		// Return nothing
