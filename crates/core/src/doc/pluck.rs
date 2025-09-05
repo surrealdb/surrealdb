@@ -89,7 +89,7 @@ impl Document {
 			},
 			None => match stm {
 				Statement::Live(_) => {
-					Err(Error::unreachable(".lives() uses .lq_pluck(), not .pluck()"))
+					Err(Error::Unreachable(".lives() uses .lq_pluck(), not .pluck()".to_string()))
 				}
 				Statement::Select(s) => {
 					// Process the permitted documents
