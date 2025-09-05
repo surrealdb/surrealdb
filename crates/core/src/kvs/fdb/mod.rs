@@ -562,6 +562,7 @@ impl super::api::Transaction for Transaction {
 		Ok(())
 	}
 
+	/// Get the save points for this transaction.
 	fn get_save_points(&mut self) -> &mut SavePoints {
 		&mut self.save_points
 	}

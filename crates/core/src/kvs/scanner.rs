@@ -36,7 +36,7 @@ pub(super) struct Scanner<'a, I> {
 	/// An optional maximum number of keys to scan
 	limit: Option<usize>,
 	/// The scan direction
-	sc: ScanDirection,
+	dir: ScanDirection,
 }
 
 impl<'a, I> Scanner<'a, I> {
@@ -46,7 +46,7 @@ impl<'a, I> Scanner<'a, I> {
 		range: Range<Key>,
 		version: Option<u64>,
 		limit: Option<usize>,
-		sc: ScanDirection,
+		dir: ScanDirection,
 	) -> Self {
 		Scanner {
 			store,
@@ -57,7 +57,7 @@ impl<'a, I> Scanner<'a, I> {
 			exhausted: false,
 			version,
 			limit,
-			sc,
+			dir,
 		}
 	}
 
@@ -116,7 +116,7 @@ impl<'a, I> Scanner<'a, I> {
 									"Expected the last key-value pair to not be none",
 								)
 							})?;
-							match self.sc {
+							match self.dir {
 								ScanDirection::Forward => {
 									// Start the next scan from the last result
 									self.range.start.clone_from(key(last));
@@ -150,7 +150,7 @@ impl Stream for Scanner<'_, (Key, Val)> {
 	type Item = Result<(Key, Val)>;
 	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<(Key, Val)>>> {
 		let (store, version) = (self.store, self.version);
-		match self.sc {
+		match self.dir {
 			ScanDirection::Forward => self.next_poll(
 				cx,
 				move |range, batch| Box::pin(store.scan(range, batch, version)),
@@ -169,7 +169,7 @@ impl Stream for Scanner<'_, Key> {
 	type Item = Result<Key>;
 	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<Key>>> {
 		let (store, version) = (self.store, self.version);
-		match self.sc {
+		match self.dir {
 			ScanDirection::Forward => self.next_poll(
 				cx,
 				move |range, batch| Box::pin(store.keys(range, batch, version)),

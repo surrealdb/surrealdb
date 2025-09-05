@@ -192,14 +192,6 @@ impl PlanBuilder {
 		Ok(Plan::TableIterator(reason, rs, sc))
 	}
 
-	/// Check if an index is allowed to be used
-	fn allowed_index(&self, ixr: &IndexReference) -> bool {
-		if !self.with_indexes.allowed_index(ixr.index_id) {
-			return false;
-		}
-		true
-	}
-
 	fn check_range_scan_direction(op: &IndexOperator) -> ScanDirection {
 		if matches!(op, IndexOperator::Order(true)) {
 			return ScanDirection::Backward;

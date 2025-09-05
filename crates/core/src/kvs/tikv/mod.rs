@@ -357,8 +357,6 @@ impl super::api::Transaction for Transaction {
 		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
 		ensure!(self.write, Error::TxReadonly);
-		// TODO: Check if we need savepoint with ranges
-
 		// Delete the key range
 		self.db.unsafe_destroy_range(rng.start..rng.end).await?;
 		// Return result
@@ -373,7 +371,10 @@ impl super::api::Transaction for Transaction {
 		limit: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
-		let rng = self.prepare_scan(rng, version)?;
+		// TiKV does not support versioned queries.
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		// Check to see if transaction is closed
+		ensure!(!self.done, Error::TxFinished);
 		// Scan the keys
 		let res = self.inner.scan_keys(rng, limit).await?.map(Key::from).collect();
 		// Return result
@@ -388,7 +389,10 @@ impl super::api::Transaction for Transaction {
 		limit: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
-		let rng = self.prepare_scan(rng, version)?;
+		// TiKV does not support versioned queries.
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		// Check to see if transaction is closed
+		ensure!(!self.done, Error::TxFinished);
 		// Scan the keys
 		let res = self.inner.scan_keys_reverse(rng, limit).await?.map(Key::from).collect();
 		// Return result
@@ -403,7 +407,10 @@ impl super::api::Transaction for Transaction {
 		limit: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
-		let rng = self.prepare_scan(rng, version)?;
+		// TiKV does not support versioned queries.
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		// Check to see if transaction is closed
+		ensure!(!self.done, Error::TxFinished);
 		// Scan the keys
 		let res = self.inner.scan(rng, limit).await?.map(|kv| (Key::from(kv.0), kv.1)).collect();
 		// Return result
@@ -418,7 +425,10 @@ impl super::api::Transaction for Transaction {
 		limit: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
-		let rng = self.prepare_scan(rng, version)?;
+		// TiKV does not support versioned queries.
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		// Check to see if transaction is closed
+		ensure!(!self.done, Error::TxFinished);
 		// Scan the keys
 		let res =
 			self.inner.scan_reverse(rng, limit).await?.map(|kv| (Key::from(kv.0), kv.1)).collect();
@@ -450,17 +460,8 @@ impl super::api::Transaction for Transaction {
 		Ok(ver)
 	}
 
+	/// Get the save points for this transaction.
 	fn get_save_points(&mut self) -> &mut SavePoints {
 		&mut self.save_points
-	}
-}
-
-impl Transaction {
-	fn prepare_scan(&self, rng: Range<Key>, version: Option<u64>) -> Result<Range<Key>> {
-		// TiKV does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
-		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
-		Ok(rng)
 	}
 }

@@ -122,9 +122,9 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// request to the underlying datastore.
 	async fn keysr(
 		&mut self,
-		_rng: Range<Key>,
-		_limit: u32,
-		_version: Option<u64>,
+		rng: Range<Key>,
+		limit: u32,
+		version: Option<u64>,
 	) -> Result<Vec<Key>>;
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -133,9 +133,9 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// request to the underlying datastore.
 	async fn scan(
 		&mut self,
-		_rng: Range<Key>,
-		_limit: u32,
-		_version: Option<u64>,
+		rng: Range<Key>,
+		limit: u32,
+		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>;
 
 	/// Retrieve a specific range of keys from the datastore in reverse order.
@@ -144,9 +144,9 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// request to the underlying datastore.
 	async fn scanr(
 		&mut self,
-		_rng: Range<Key>,
-		_limit: u32,
-		_version: Option<u64>,
+		rng: Range<Key>,
+		limit: u32,
+		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>;
 
 	/// Insert or replace a key in the datastore.
@@ -269,7 +269,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
 		ensure!(self.writeable(), Error::TxReadonly);
-
+		// Continue with function logic
 		let range = util::to_prefix_range(key)?;
 		self.clrr(range).await
 	}
@@ -395,7 +395,6 @@ pub trait Transaction: requirements::TransactionRequirements {
 				Some((k, _)) => {
 					let mut k = k.clone();
 					util::advance_key(&mut k);
-
 					Ok(Batch::<(Key, Val)>::new(
 						Some(Range {
 							start: k,
@@ -495,16 +494,23 @@ pub trait Transaction: requirements::TransactionRequirements {
 		let mut k: Vec<u8> = prefix;
 		k.extend_from_slice(&ts.as_bytes());
 		k.extend_from_slice(&suffix);
-
 		self.set(k, val, None).await
 	}
 
 	/// Get the save points for this transaction.
-	fn get_save_points(&mut self) -> &mut SavePoints;
+	fn get_save_points(&mut self) -> &mut SavePoints {
+		unimplemented!("Get save points not implemented for this storage backend")
+	}
 
-	/// Set a new current save point for this transaction.
+	/// Set a new save point on the transaction.
 	fn new_save_point(&mut self) {
 		self.get_save_points().new_save_point()
+	}
+
+	/// Release the last save point.
+	fn release_last_save_point(&mut self) -> Result<()> {
+		self.get_save_points().pop()?;
+		Ok(())
 	}
 
 	/// Rollback to the last save point.
@@ -533,12 +539,6 @@ pub trait Transaction: requirements::TransactionRequirements {
 				}
 			}
 		}
-		Ok(())
-	}
-
-	/// Release the last save point.
-	fn release_last_save_point(&mut self) -> Result<()> {
-		self.get_save_points().pop()?;
 		Ok(())
 	}
 

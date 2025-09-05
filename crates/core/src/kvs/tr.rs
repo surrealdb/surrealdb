@@ -45,7 +45,9 @@ impl From<bool> for LockType {
 
 /// A set of undoable updates and requests against a dataset.
 pub struct Transactor {
-	pub(super) inner: Box<dyn Transaction>,
+	// The underlying transaction
+	pub(super) inner: Box<dyn super::api::Transaction>,
+	// The changefeed buffer
 	pub(super) cf: cf::Writer,
 }
 
@@ -139,9 +141,9 @@ impl Transactor {
 	where
 		K: KVKey + Debug,
 	{
-		let keys_encoded = keys.iter().map(|k| k.encode_key()).collect::<Result<Vec<_>>>()?;
-		trace!(target: TARGET, keys = keys_encoded.sprint(), "GetM");
-		let vals = self.inner.getm(keys_encoded).await?;
+		let keys = keys.iter().map(|k| k.encode_key()).collect::<Result<Vec<_>>>()?;
+		trace!(target: TARGET, keys = keys.sprint(), "GetM");
+		let vals = self.inner.getm(keys).await?;
 
 		vals.into_iter()
 			.map(|v| match v {
@@ -431,6 +433,22 @@ impl Transactor {
 		self.inner.scanr(rng, limit, version).await
 	}
 
+	/// Count the total number of keys within a range in the datastore.
+	///
+	/// This function fetches the total count, in batches, with multiple
+	/// requests to the underlying datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn count<K>(&mut self, rng: Range<K>) -> Result<usize>
+	where
+		K: KVKey + Debug,
+	{
+		let beg: Key = rng.start.encode_key()?;
+		let end: Key = rng.end.encode_key()?;
+		let rng = beg..end;
+		trace!(target: TARGET, rng = rng.sprint(), "Count");
+		self.inner.count(rng).await
+	}
+
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
 	/// This function fetches keys, in batches, with multiple requests to the
@@ -450,22 +468,6 @@ impl Transactor {
 		let rng = beg..end;
 		trace!(target: TARGET, rng = rng.sprint(), version = version, "Batch");
 		self.inner.batch_keys(rng, batch, version).await
-	}
-
-	/// Count the total number of keys within a range in the datastore.
-	///
-	/// This function fetches the total count, in batches, with multiple
-	/// requests to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn count<K>(&mut self, rng: Range<K>) -> Result<usize>
-	where
-		K: KVKey + Debug,
-	{
-		let beg: Key = rng.start.encode_key()?;
-		let end: Key = rng.end.encode_key()?;
-		let rng = beg..end;
-		trace!(target: TARGET, rng = rng.sprint(), "Count");
-		self.inner.count(rng).await
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -536,23 +538,33 @@ impl Transactor {
 		let value = val.kv_encode_value()?;
 		self.inner.set_versionstamp(ts_key, prefix, suffix, value).await
 	}
+}
 
+// --------------------------------------------------
+// Savepoint functions
+// --------------------------------------------------
+
+impl Transactor {
+	/// Set a new save point on the transaction.
 	pub(crate) fn new_save_point(&mut self) {
 		self.inner.new_save_point()
 	}
 
-	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<()> {
-		self.inner.rollback_to_save_point().await
-	}
-
+	/// Release the last save point.
 	pub(crate) fn release_last_save_point(&mut self) -> Result<()> {
 		self.inner.release_last_save_point()
+	}
+
+	/// Rollback to the last save point.
+	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<()> {
+		self.inner.rollback_to_save_point().await
 	}
 }
 
 // --------------------------------------------------
-// Additional methods
+// Changefeed functions
 // --------------------------------------------------
+
 impl Transactor {
 	// change will record the change in the changefeed if enabled.
 	// To actually persist the record changes into the underlying kvs,

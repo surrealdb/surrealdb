@@ -42,7 +42,7 @@ revision = { version = "0.13.0", features = [
     "uuid",
 ] }
 storekey = { version = "0.8.0", features = ["uuid"] }
-surrealkv = { version = "0.9.1" }
+surrealkv = { version = "0.9.3" }
 surrealml = { version = "0.1.9", package = "surrealml-core", features = [
     "dynamic",
 ] }
