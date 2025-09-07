@@ -136,6 +136,10 @@ impl HnswIndex {
 		self.hnsw.check_state(tx).await
 	}
 
+	pub(crate) fn estimate_memory_usage(&self) -> usize {
+		self.hnsw.estimate_memory_usage(self.dim, self.vector_type)
+	}
+
 	#[expect(clippy::too_many_arguments)]
 	pub async fn knn_search(
 		&self,

@@ -248,6 +248,16 @@ pub enum VectorType {
 	I16,
 }
 
+impl VectorType {
+	pub(crate) fn memory_usage(&self, dim: usize) -> usize {
+		match self {
+			Self::F64 | Self::I64 => dim * 8,
+			Self::F32 | Self::I32 => dim * 4,
+			Self::I16 => dim * 2,
+		}
+	}
+}
+
 impl Display for VectorType {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		match self {

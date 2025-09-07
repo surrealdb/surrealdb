@@ -404,6 +404,10 @@ where
 		// Rebuild the graph
 		self.graph.reload(&val)
 	}
+
+	pub(super) fn estimate_memory_usage(&self) -> usize {
+		self.graph.estimate_memory_usage()
+	}
 }
 
 #[cfg(test)]

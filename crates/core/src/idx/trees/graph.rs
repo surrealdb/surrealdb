@@ -108,6 +108,14 @@ where
 		}
 		Ok(())
 	}
+
+	pub(super) fn estimate_memory_usage(&self) -> usize {
+		let mut size = 0;
+		for s in self.nodes.values() {
+			size += s.memory_usage();
+		}
+		size
+	}
 }
 
 #[cfg(test)]
@@ -215,5 +223,31 @@ mod tests {
 	#[test]
 	fn test_undirected_graph_hash() {
 		test_undirected_graph::<AHashSet>(10);
+	}
+
+	fn test_estimate_memory_usage<S: DynamicSet>(m_max: usize, nodes: usize) -> usize {
+		// Graph creation
+		let mut g = UndirectedGraph::<S>::new(m_max);
+
+		for i in 0..nodes {
+			let mut e = g.new_edges();
+			e.insert(i as ElementId * 2);
+			e.insert(i as ElementId * 3);
+			g.add_node_and_bidirectional_edges(i as ElementId, e);
+		}
+
+		g.estimate_memory_usage()
+	}
+
+	#[test]
+	fn test_estimate_memory_usage_array() {
+		let m = test_estimate_memory_usage::<ArraySet<10>>(10, 100_000);
+		assert_eq!(m, 17_599_912);
+	}
+
+	#[test]
+	fn test_estimate_memory_usage_hash() {
+		let m = test_estimate_memory_usage::<AHashSet>(100, 100_000);
+		assert_eq!(m, 2_533_320);
 	}
 }

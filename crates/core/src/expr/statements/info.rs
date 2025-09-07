@@ -379,23 +379,28 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Actor, &Base::Db)?;
 
-				// Output
-				#[cfg(not(target_family = "wasm"))]
-				{
-					// Get the transaction
-					let txn = ctx.tx();
+				// Get the transaction
+				let txn = ctx.tx();
 
-					if let Some(ib) = ctx.get_index_builder() {
-						// Obtain the index
-						let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-						let res = txn.get_tb_index(ns, db, table, index).await?;
-						let status = ib.get_status(ns, db, &res).await;
-						let mut out = Object::default();
-						out.insert("building".to_string(), status.into());
-						return Ok(out.into());
-					}
+				// Obtain the index
+				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+				let ix = txn.get_tb_index(ns, db, table, index).await?;
+
+				let mut out = Object::default();
+
+				#[cfg(not(target_family = "wasm"))]
+				if let Some(ib) = ctx.get_index_builder() {
+					let status = ib.get_status(ns, db, &ix).await;
+					out.insert("building".to_string(), status.into());
 				}
-				Ok(Object::default().into())
+
+				if let Some(memory_usage) =
+					ctx.get_index_stores().get_memory_usage(ns, db, ctx, &ix).await?
+				{
+					out.insert("memory".to_string(), memory_usage.into());
+				}
+
+				Ok(out.into())
 			}
 		}
 	}
