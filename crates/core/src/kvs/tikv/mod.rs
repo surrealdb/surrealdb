@@ -5,9 +5,11 @@ mod cnf;
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Result, bail, ensure};
+use futures::lock::Mutex;
 use tikv::{CheckLevel, Config, TimestampExt, TransactionClient, TransactionOptions};
 
 use crate::err::Error;
@@ -26,11 +28,11 @@ pub struct Datastore {
 
 pub struct Transaction {
 	// Is the transaction complete?
-	done: bool,
+	done: AtomicBool,
 	// Is the transaction writeable?
 	write: bool,
 	/// The underlying datastore transaction
-	inner: tikv::Transaction,
+	inner: Mutex<tikv::Transaction>,
 	/// The save point implementation
 	save_points: SavePoints,
 	// The above, supposedly 'static transaction
@@ -113,10 +115,10 @@ impl Datastore {
 		}
 		// Create a new transaction
 		match self.db.begin_with_options(opt).await {
-			Ok(inner) => Ok(Box::new(Transaction {
-				done: false,
+			Ok(txn) => Ok(Box::new(Transaction {
+				done: AtomicBool::new(false),
 				write,
-				inner,
+				inner: Mutex::new(txn),
 				db: self.db.clone(),
 				save_points: Default::default(),
 			})),
@@ -134,7 +136,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Check if closed
 	fn closed(&self) -> bool {
-		self.done
+		self.done.load(Ordering::Relaxed)
 	}
 
 	/// Check if writeable
@@ -144,32 +146,32 @@ impl super::api::Transaction for Transaction {
 
 	/// Cancel a transaction
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn cancel(&mut self) -> Result<()> {
+	async fn cancel(&self) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Mark this transaction as done
-		self.done = true;
+		self.done.store(true, Ordering::Release);
 		// Cancel this transaction
-		if self.write {
-			self.inner.rollback().await?;
-		}
+		self.inner.lock().await.rollback().await?;
 		// Continue
 		Ok(())
 	}
 
 	/// Commit a transaction
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn commit(&mut self) -> Result<()> {
+	async fn commit(&self) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		ensure!(self.writeable(), Error::TxReadonly);
 		// Mark this transaction as done
-		self.done = true;
+		self.done.store(true, Ordering::Release);
+		// Get the inner transaction
+		let mut inner = self.inner.lock().await;
 		// Commit this transaction
-		if let Err(err) = self.inner.commit().await {
-			if let Err(inner_err) = self.inner.rollback().await {
-				error!("Transaction commit failed {} and rollback failed: {}", err, inner_err);
+		if let Err(err) = inner.commit().await {
+			if let Err(inner_err) = inner.rollback().await {
+				error!("Transaction commit failed {err} and rollback failed: {inner_err}");
 			}
 			return Err(err.into());
 		}
@@ -179,39 +181,39 @@ impl super::api::Transaction for Transaction {
 
 	/// Check if a key exists
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn exists(&mut self, key: Key, version: Option<u64>) -> Result<bool> {
+	async fn exists(&self, key: Key, version: Option<u64>) -> Result<bool> {
 		// TiKV does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Check the key
-		let res = self.inner.key_exists(key).await?;
+		let res = self.inner.lock().await.key_exists(key).await?;
 		// Return result
 		Ok(res)
 	}
 
 	/// Fetch a key from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get(&mut self, key: Key, version: Option<u64>) -> Result<Option<Val>> {
+	async fn get(&self, key: Key, version: Option<u64>) -> Result<Option<Val>> {
 		// TiKV does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Get the key
-		let res = self.inner.get(key).await?;
+		let res = self.inner.lock().await.get(key).await?;
 		// Return result
 		Ok(res)
 	}
 
 	/// Insert or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn set(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
+	async fn set(&self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
 		// TiKV does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		ensure!(self.writeable(), Error::TxReadonly);
 		// Prepare the savepoint if any
 		let prep = if self.save_points.is_some() {
 			self.save_point_prepare(&key, version, SaveOperation::Set).await?
@@ -219,7 +221,7 @@ impl super::api::Transaction for Transaction {
 			None
 		};
 		// Set the key
-		self.inner.put(key, val).await?;
+		self.inner.lock().await.put(key, val).await?;
 		// Confirm the save point
 		if let Some(prep) = prep {
 			self.save_points.save(prep);
@@ -230,13 +232,13 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn put(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
+	async fn put(&self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
 		// TiKV does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		ensure!(self.writeable(), Error::TxReadonly);
 		// Hydrate the savepoint if any
 		let prep = if self.save_points.is_some() {
 			self.save_point_prepare(&key, version, SaveOperation::Put).await?
@@ -247,12 +249,12 @@ impl super::api::Transaction for Transaction {
 		let key_exists = if let Some(SavePrepare::NewKey(_, sv)) = &prep {
 			sv.get_val().is_some()
 		} else {
-			self.inner.key_exists(key.clone()).await?
+			self.inner.lock().await.key_exists(key.clone()).await?
 		};
 		// If the key exists we return an error
 		ensure!(!key_exists, Error::TxKeyAlreadyExists);
 		// Set the key if empty
-		self.inner.put(key, val).await?;
+		self.inner.lock().await.put(key, val).await?;
 		// Confirm the save point
 		if let Some(prep) = prep {
 			self.save_points.save(prep);
@@ -263,11 +265,11 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert a key if the current value matches a condition
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<()> {
+	async fn putc(&self, key: Key, val: Val, chk: Option<Val>) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		ensure!(self.writeable(), Error::TxReadonly);
 		// Hydrate the savepoint if any
 		let prep = if self.save_points.is_some() {
 			self.save_point_prepare(&key, None, SaveOperation::Put).await?
@@ -278,12 +280,12 @@ impl super::api::Transaction for Transaction {
 		let current_val = if let Some(SavePrepare::NewKey(_, sv)) = &prep {
 			sv.get_val().cloned()
 		} else {
-			self.inner.get(key.clone()).await?
+			self.inner.lock().await.get(key.clone()).await?
 		};
 		// Delete the key
 		match (current_val, chk) {
-			(Some(v), Some(w)) if v == w => self.inner.put(key, val).await?,
-			(None, None) => self.inner.put(key, val).await?,
+			(Some(v), Some(w)) if v == w => self.inner.lock().await.put(key, val).await?,
+			(None, None) => self.inner.lock().await.put(key, val).await?,
 			_ => bail!(Error::TxConditionNotMet),
 		};
 		// Confirm the save point
@@ -298,9 +300,9 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn del(&mut self, key: Key) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		ensure!(self.writeable(), Error::TxReadonly);
 		// Hydrate the savepoint if any
 		let prep = if self.save_points.is_some() {
 			self.save_point_prepare(&key, None, SaveOperation::Del).await?
@@ -308,7 +310,7 @@ impl super::api::Transaction for Transaction {
 			None
 		};
 		// Delete the key
-		self.inner.delete(key).await?;
+		self.inner.lock().await.delete(key).await?;
 		// Confirm the save point
 		if let Some(prep) = prep {
 			self.save_points.save(prep);
@@ -321,9 +323,9 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn delc(&mut self, key: Key, chk: Option<Val>) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		ensure!(self.writeable(), Error::TxReadonly);
 		// Hydrate the savepoint if any
 		let prep = if self.save_points.is_some() {
 			self.save_point_prepare(&key, None, SaveOperation::Del).await?
@@ -334,12 +336,12 @@ impl super::api::Transaction for Transaction {
 		let current_val = if let Some(SavePrepare::NewKey(_, sv)) = &prep {
 			sv.get_val().cloned()
 		} else {
-			self.inner.get(key.clone()).await?
+			self.inner.lock().await.get(key.clone()).await?
 		};
 		// Delete the key
 		match (current_val, chk) {
-			(Some(v), Some(w)) if v == w => self.inner.delete(key).await?,
-			(None, None) => self.inner.delete(key).await?,
+			(Some(v), Some(w)) if v == w => self.inner.lock().await.delete(key).await?,
+			(None, None) => self.inner.lock().await.delete(key).await?,
 			_ => bail!(Error::TxConditionNotMet),
 		};
 		// Confirm the save point
@@ -354,9 +356,9 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn delr(&mut self, rng: Range<Key>) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		ensure!(self.writeable(), Error::TxReadonly);
 		// Delete the key range
 		self.db.unsafe_destroy_range(rng.start..rng.end).await?;
 		// Return result
@@ -374,9 +376,9 @@ impl super::api::Transaction for Transaction {
 		// TiKV does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Scan the keys
-		let res = self.inner.scan_keys(rng, limit).await?.map(Key::from).collect();
+		let res = self.inner.lock().await.scan_keys(rng, limit).await?.map(Key::from).collect();
 		// Return result
 		Ok(res)
 	}
@@ -392,9 +394,10 @@ impl super::api::Transaction for Transaction {
 		// TiKV does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Scan the keys
-		let res = self.inner.scan_keys_reverse(rng, limit).await?.map(Key::from).collect();
+		let res =
+			self.inner.lock().await.scan_keys_reverse(rng, limit).await?.map(Key::from).collect();
 		// Return result
 		Ok(res)
 	}
@@ -410,9 +413,16 @@ impl super::api::Transaction for Transaction {
 		// TiKV does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Scan the keys
-		let res = self.inner.scan(rng, limit).await?.map(|kv| (Key::from(kv.0), kv.1)).collect();
+		let res = self
+			.inner
+			.lock()
+			.await
+			.scan(rng, limit)
+			.await?
+			.map(|kv| (Key::from(kv.0), kv.1))
+			.collect();
 		// Return result
 		Ok(res)
 	}
@@ -428,10 +438,16 @@ impl super::api::Transaction for Transaction {
 		// TiKV does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Scan the keys
-		let res =
-			self.inner.scan_reverse(rng, limit).await?.map(|kv| (Key::from(kv.0), kv.1)).collect();
+		let res = self
+			.inner
+			.lock()
+			.await
+			.scan_reverse(rng, limit)
+			.await?
+			.map(|kv| (Key::from(kv.0), kv.1))
+			.collect();
 		// Return result
 		Ok(res)
 	}
@@ -440,9 +456,9 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	async fn get_timestamp(&mut self, key: VsKey) -> Result<VersionStamp> {
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Get the transaction version
-		let ver = self.inner.current_timestamp().await?.version();
+		let ver = self.inner.lock().await.current_timestamp().await?.version();
 		let key_encoded = key.encode_key()?;
 		// Calculate the previous version value
 		if let Some(prev) = self.get(key_encoded.clone(), None).await? {

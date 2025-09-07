@@ -546,17 +546,17 @@ impl Transactor {
 
 impl Transactor {
 	/// Set a new save point on the transaction.
-	pub(crate) fn new_save_point(&mut self) {
-		self.inner.new_save_point()
+	pub(crate) async fn new_save_point(&self) -> Result<()> {
+		self.inner.new_save_point().await
 	}
 
 	/// Release the last save point.
-	pub(crate) fn release_last_save_point(&mut self) -> Result<()> {
-		self.inner.release_last_save_point()
+	pub(crate) async fn release_last_save_point(&self) -> Result<()> {
+		self.inner.release_last_save_point().await
 	}
 
 	/// Rollback to the last save point.
-	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<()> {
+	pub(crate) async fn rollback_to_save_point(&self) -> Result<()> {
 		self.inner.rollback_to_save_point().await
 	}
 }

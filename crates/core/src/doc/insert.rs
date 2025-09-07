@@ -35,7 +35,7 @@ impl Document {
 		// it is retryable so generate a save point we can roll back to.
 		// always create a save point even if not retryable, as we have to rollback to original
 		// state.
-		ctx.tx().lock().await.new_save_point();
+		ctx.tx().lock().await.new_save_point().await?;
 
 		// First try to create the value and if that is not possible due to an existing
 		// value fall back to update instead.
@@ -114,12 +114,12 @@ impl Document {
 			},
 			Err(IgnoreError::Ignore) => {
 				// if the error is ignored, we can release the save point.
-				ctx.tx().lock().await.release_last_save_point()?;
+				ctx.tx().lock().await.release_last_save_point().await?;
 				return Err(IgnoreError::Ignore);
 			}
 			Ok(x) => {
 				// if the transaction is successful, we can release the save point.
-				ctx.tx().lock().await.release_last_save_point()?;
+				ctx.tx().lock().await.release_last_save_point().await?;
 				return Ok(x);
 			}
 		};

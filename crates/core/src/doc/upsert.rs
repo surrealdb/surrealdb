@@ -26,7 +26,7 @@ impl Document {
 			return self.upsert_update(stk, ctx, opt, stm).await;
 		}
 
-		ctx.tx().lock().await.new_save_point();
+		ctx.tx().lock().await.new_save_point().await?;
 
 		// First try to create the value and if that is not possible due to an existing
 		// value fall back to update instead.
@@ -71,11 +71,11 @@ impl Document {
 				}
 			},
 			Err(IgnoreError::Ignore) => {
-				ctx.tx().lock().await.release_last_save_point()?;
+				ctx.tx().lock().await.release_last_save_point().await?;
 				return Err(IgnoreError::Ignore);
 			}
 			Ok(x) => {
-				ctx.tx().lock().await.release_last_save_point()?;
+				ctx.tx().lock().await.release_last_save_point().await?;
 				return Ok(x);
 			}
 		};

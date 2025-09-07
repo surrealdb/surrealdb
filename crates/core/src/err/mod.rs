@@ -1027,19 +1027,6 @@ pub(crate) enum Error {
 	#[error("The underlying datastore does not support versioned queries")]
 	UnsupportedVersionedQueries,
 
-	/// Found an unexpected value in a range
-	#[error("Expected a range value of '{expected}', but found '{found}'")]
-	InvalidRangeValue {
-		expected: String,
-		found: String,
-	},
-
-	/// Found an unexpected value in a range
-	#[error("The range cannot exceed a size of {max} for this operation")]
-	RangeTooBig {
-		max: usize,
-	},
-
 	/// There was an invalid storage version stored in the database
 	#[error("There was an invalid storage version stored in the database")]
 	InvalidStorageVersion,
@@ -1241,7 +1228,18 @@ impl From<ToStrError> for Error {
 	}
 }
 
-#[cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
+#[cfg(feature = "kv-mem")]
+impl From<surrealmx::Error> for Error {
+	fn from(e: surrealmx::Error) -> Error {
+		match e {
+			surrealmx::Error::KeyReadConflict => Error::TxRetryable,
+			surrealmx::Error::KeyWriteConflict => Error::TxRetryable,
+			_ => Error::Tx(e.to_string()),
+		}
+	}
+}
+
+#[cfg(feature = "kv-surrealkv")]
 impl From<surrealkv::Error> for Error {
 	fn from(e: surrealkv::Error) -> Error {
 		let s = e.to_string();

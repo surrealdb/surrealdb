@@ -3,6 +3,7 @@
 use std::ops::Range;
 
 use anyhow::{Result, ensure};
+use tokio::sync::RwLock;
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
@@ -15,13 +16,20 @@ pub struct Datastore {
 
 pub struct Transaction {
 	/// Is the transaction complete?
-	done: bool,
+	done: AtomicBool,
 	/// Is the transaction writeable?
 	write: bool,
 	/// The underlying datastore transaction
-	inner: indxdb::Tx,
+	inner: RwLock<TransactionInner>,
 	/// The save point implementation
 	save_points: SavePoints,
+}
+
+struct TransactionInner {
+	/// The underlying datastore transaction
+	tx: indxdb::Tx,
+	/// The savepoints for this transaction
+	sp: SavePoints,
 }
 
 impl Datastore {
@@ -48,7 +56,7 @@ impl Datastore {
 		// Create a new transaction
 		match self.db.begin(write).await {
 			Ok(inner) => Ok(Box::new(Transaction {
-				done: false,
+				done: AtomicBool::new(false),
 				write,
 				inner,
 				save_points: Default::default(),
@@ -67,7 +75,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Check if closed
 	fn closed(&self) -> bool {
-		self.done
+		self.done.load(Ordering::Relaxed)
 	}
 
 	/// Check if writeable
@@ -77,97 +85,111 @@ impl super::api::Transaction for Transaction {
 
 	/// Cancel a transaction
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn cancel(&mut self) -> Result<()> {
+	async fn cancel(&self) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Mark this transaction as done
-		self.done = true;
+		self.done.store(true, Ordering::Release);
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
 		// Cancel this transaction
-		self.inner.cancel().await?;
+		inner.tx.cancel().await?;
 		// Continue
 		Ok(())
 	}
 
 	/// Commit a transaction
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn commit(&mut self) -> Result<()> {
+	async fn commit(&self) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		ensure!(self.writeable(), Error::TxReadonly);
 		// Mark this transaction as done
-		self.done = true;
+		self.done.store(true, Ordering::Release);
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
 		// Cancel this transaction
-		self.inner.commit().await?;
+		inner.tx.commit().await?;
 		// Continue
 		Ok(())
 	}
 
 	/// Check if a key exists
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn exists(&mut self, key: Key, version: Option<u64>) -> Result<bool> {
+	async fn exists(&self, key: Key, version: Option<u64>) -> Result<bool> {
 		// IndxDB does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
 		// Check the key
-		let res = self.inner.exi(key).await?;
+		let res = inner.tx.exi(key).await?;
 		// Return result
 		Ok(res)
 	}
 
 	/// Fetch a key from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get(&mut self, key: Key, version: Option<u64>) -> Result<Option<Val>> {
+	async fn get(&self, key: Key, version: Option<u64>) -> Result<Option<Val>> {
 		// IndxDB does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
 		// Get the key
-		let res = self.inner.get(key).await?;
+		let res = inner.tx.get(key).await?;
 		// Return result
 		Ok(res)
 	}
 
 	/// Insert or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn set(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
+	async fn set(&self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
 		// IndxDB does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		ensure!(self.writeable(), Error::TxReadonly);
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
 		// Set the key
-		self.inner.set(key, val).await?;
+		inner.tx.set(key, val).await?;
 		// Return result
 		Ok(())
 	}
 
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn put(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
+	async fn put(&self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
 		// IndxDB does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		ensure!(self.writeable(), Error::TxReadonly);
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
 		// Set the key
-		self.inner.put(key, val).await?;
+		inner.tx.put(key, val).await?;
 		// Return result
 		Ok(())
 	}
 
 	/// Insert a key if the current value matches a condition
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<()> {
+	async fn putc(&self, key: Key, val: Val, chk: Option<Val>) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		ensure!(self.writeable(), Error::TxReadonly);
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
 		// Set the key
-		self.inner.putc(key, val, chk.map(Into::into)).await?;
+		inner.tx.putc(key, val, chk.map(Into::into)).await?;
 		// Return result
 		Ok(())
 	}
@@ -176,11 +198,13 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn del(&mut self, key: Key) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		ensure!(self.writeable(), Error::TxReadonly);
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
 		// Remove the key
-		let res = self.inner.del(key).await?;
+		let res = inner.tx.del(key).await?;
 		// Return result
 		Ok(res)
 	}
@@ -189,11 +213,13 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn delc(&mut self, key: Key, chk: Option<Val>) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		ensure!(self.writeable(), Error::TxReadonly);
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
 		// Remove the key
-		let res = self.inner.delc(key, chk.map(Into::into)).await?;
+		let res = inner.tx.delc(key, chk.map(Into::into)).await?;
 		// Return result
 		Ok(res)
 	}
@@ -209,9 +235,11 @@ impl super::api::Transaction for Transaction {
 		// IndxDB does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
 		// Scan the keys
-		let res = self.inner.keys(rng, limit).await?;
+		let res = inner.tx.keys(rng, limit).await?;
 		// Return result
 		Ok(res)
 	}
@@ -227,9 +255,11 @@ impl super::api::Transaction for Transaction {
 		// IndxDB does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
 		// Scan the keys
-		let res = self.inner.keysr(rng, limit).await?;
+		let res = inner.tx.keysr(rng, limit).await?;
 		// Return result
 		Ok(res)
 	}
@@ -245,9 +275,11 @@ impl super::api::Transaction for Transaction {
 		// IndxDB does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
 		// Scan the keys
-		let res = self.inner.scan(rng, limit).await?;
+		let res = inner.tx.scan(rng, limit).await?;
 		// Return result
 		Ok(res)
 	}
@@ -263,15 +295,82 @@ impl super::api::Transaction for Transaction {
 		// IndxDB does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		ensure!(!self.closed(), Error::TxFinished);
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
 		// Scan the keys
-		let res = self.inner.scanr(rng, limit).await?;
+		let res = inner.tx.scanr(rng, limit).await?;
 		// Return result
 		Ok(res)
 	}
 
-	/// Get the save points for this transaction.
-	fn get_save_points(&mut self) -> &mut SavePoints {
-		&mut self.save_points
+	/// Set a new save point on the transaction.
+	async fn new_save_point(&self) -> Result<()> {
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
+		// Create a new savepoint
+		inner.sp.new_save_point();
+		// All ok
+		Ok(())
+	}
+
+	/// Release the last save point.
+	async fn release_last_save_point(&self) -> Result<()> {
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
+		// Release the last savepoint
+		inner.sp.pop();
+		// All ok
+		Ok(())
+	}
+
+	/// Rollback to the last save point.
+	async fn rollback_to_save_point(&self) -> Result<()> {
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
+		// Release the last savepoint
+		let sp = inner.sp.pop()?;
+		// Loop over the savepoint entries
+		for (key, val) in sp {
+			match val.last_operation {
+				SaveOperation::Set | SaveOperation::Put => {
+					if let Some(initial_value) = val.saved_val {
+						// If the last operation was a SET or PUT
+						// then we just have set back the key to its initial value
+						inner.tx.set(key, initial_value)?;
+					} else {
+						// If the last operation on this key was not a DEL operation,
+						// then we have to delete the key
+						inner.tx.del(key)?;
+					}
+				}
+				SaveOperation::Del => {
+					if let Some(initial_value) = val.saved_val {
+						// If the last operation was a DEL,
+						// then we have to put back the initial value
+						inner.tx.put(key, initial_value)?;
+					}
+				}
+			}
+		}
+		// All ok
+		Ok(())
+	}
+
+	/// Set a new save point on the transaction.
+	async fn new_save_point(&self) -> Result<()> {
+		self.inner.write().await.set_savepoint()?;
+		Ok(())
+	}
+
+	/// Rollback to the last save point.
+	async fn rollback_to_save_point(&self) -> Result<()> {
+		self.inner.write().await.rollback_to_savepoint()?;
+		Ok(())
+	}
+
+	/// Release the last save point.
+	async fn release_last_save_point(&self) -> Result<()> {
+		Ok(())
 	}
 }

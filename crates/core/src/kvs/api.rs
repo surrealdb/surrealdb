@@ -11,7 +11,6 @@ use crate::err::Error;
 use crate::key::database::vs::VsKey;
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
-use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare, SavedValue};
 use crate::kvs::{KVKey, KVValue, Key, Val, Version};
 use crate::vs::VersionStamp;
 
@@ -80,27 +79,27 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// Cancel a transaction.
 	///
 	/// This reverses all changes made within the transaction.
-	async fn cancel(&mut self) -> Result<()>;
+	async fn cancel(&self) -> Result<()>;
 
 	/// Commit a transaction.
 	///
 	/// This attempts to commit all changes made within the transaction.
-	async fn commit(&mut self) -> Result<()>;
+	async fn commit(&self) -> Result<()>;
 
 	/// Check if a key exists in the datastore.
-	async fn exists(&mut self, key: Key, version: Option<u64>) -> Result<bool>;
+	async fn exists(&self, key: Key, version: Option<u64>) -> Result<bool>;
 
 	/// Fetch a key from the datastore.
-	async fn get(&mut self, key: Key, version: Option<u64>) -> Result<Option<Val>>;
+	async fn get(&self, key: Key, version: Option<u64>) -> Result<Option<Val>>;
 
 	/// Insert or update a key in the datastore.
-	async fn set(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()>;
+	async fn set(&self, key: Key, val: Val, version: Option<u64>) -> Result<()>;
 
 	/// Insert a key if it doesn't exist in the datastore.
-	async fn put(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()>;
+	async fn put(&self, key: Key, val: Val, version: Option<u64>) -> Result<()>;
 
 	/// Update a key in the datastore if the current value matches a condition.
-	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<()>;
+	async fn putc(&self, key: Key, val: Val, chk: Option<Val>) -> Result<()>;
 
 	/// Delete a key from the datastore.
 	async fn del(&mut self, key: Key) -> Result<()>;
@@ -497,67 +496,12 @@ pub trait Transaction: requirements::TransactionRequirements {
 		self.set(k, val, None).await
 	}
 
-	/// Get the save points for this transaction.
-	fn get_save_points(&mut self) -> &mut SavePoints {
-		unimplemented!("Get save points not implemented for this storage backend")
-	}
-
 	/// Set a new save point on the transaction.
-	fn new_save_point(&mut self) {
-		self.get_save_points().new_save_point()
-	}
+	async fn new_save_point(&self) -> Result<()>;
 
 	/// Release the last save point.
-	fn release_last_save_point(&mut self) -> Result<()> {
-		self.get_save_points().pop()?;
-		Ok(())
-	}
+	async fn release_last_save_point(&self) -> Result<()>;
 
 	/// Rollback to the last save point.
-	async fn rollback_to_save_point(&mut self) -> Result<()> {
-		let sp = self.get_save_points().pop()?;
-
-		for (key, saved_value) in sp {
-			match saved_value.last_operation {
-				SaveOperation::Set | SaveOperation::Put => {
-					if let Some(initial_value) = saved_value.saved_val {
-						// If the last operation was a SET or PUT
-						// then we just have set back the key to its initial value
-						self.set(key, initial_value, saved_value.saved_version).await?;
-					} else {
-						// If the last operation on this key was not a DEL operation,
-						// then we have to delete the key
-						self.del(key).await?;
-					}
-				}
-				SaveOperation::Del => {
-					if let Some(initial_value) = saved_value.saved_val {
-						// If the last operation was a DEL,
-						// then we have to put back the initial value
-						self.put(key, initial_value, saved_value.saved_version).await?;
-					}
-				}
-			}
-		}
-		Ok(())
-	}
-
-	/// Prepare a save point for a key.
-	async fn save_point_prepare(
-		&mut self,
-		key: &Key,
-		version: Option<u64>,
-		op: SaveOperation,
-	) -> Result<Option<SavePrepare>> {
-		let is_saved_key = self.get_save_points().is_saved_key(key);
-		let r = match is_saved_key {
-			None => None,
-			Some(true) => Some(SavePrepare::AlreadyPresent(key.clone(), op)),
-			Some(false) => {
-				let val = self.get(key.clone(), version).await?;
-				Some(SavePrepare::NewKey(key.clone(), SavedValue::new(val, version, op)))
-			}
-		};
-		Ok(r)
-	}
+	async fn rollback_to_save_point(&self) -> Result<()>;
 }

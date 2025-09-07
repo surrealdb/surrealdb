@@ -29,9 +29,9 @@ surrealdb-types = { version = "=3.0.0-alpha.11", path = "crates/types" }
 surrealdb-types-derive = { version = "=3.0.0-alpha.11", path = "crates/types-derive" }
 
 # External surreal crates
-affinitypool = "0.3.1"
+affinitypool = "0.4.0"
 dmp = "0.2.3"
-indxdb = "0.8.0"
+indxdb = "0.9.0"
 lexicmp = "0.2.0"
 revision = { version = "0.13.0", features = [
     "chrono",
@@ -41,11 +41,12 @@ revision = { version = "0.13.0", features = [
     "rust_decimal",
     "uuid",
 ] }
-storekey = { version = "0.8.0", features = ["uuid"] }
-surrealkv = { version = "0.9.3" }
+storekey = { version = "0.8.1", features = ["uuid"] }
+surrealkv = { version = "0.13.0" }
 surrealml = { version = "0.1.9", package = "surrealml-core", features = [
     "dynamic",
 ] }
+surrealmx = "0.13.1"
 trice = "0.4.0"
 vart = "0.9.3"
 ## Maintained by @Delskayn
