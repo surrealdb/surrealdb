@@ -125,7 +125,6 @@ jobs:
             patch=$(git show --no-patch --format=%ad --date=format:%Y%m%d%H%M%S)
             rev=$(git rev-parse --short HEAD)
             buildMetadata=${date}.${rev}
-            version=${version}-${{ inputs.release-type }}
             environment=${{ inputs.release-type }}
           elif [[  $suffix == "rc" ]]; then
             version=${version}-${{ inputs.release-type }}
@@ -183,7 +182,7 @@ jobs:
           cargo check --no-default-features --features storage-mem
 
           # Commit changes
-          git commit -am "Prepare v${version} release"
+          git commit -am "Prepare v${version} release" || true
 
       - name: Push the release branch
         run: git push
@@ -353,7 +352,9 @@ jobs:
           ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # stable (Actions must be pinned by commit hash)
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable (Actions must be pinned by commit hash)
+        with:
+          toolchain: stable
 
       - name: Install release-plz
         run: |
@@ -431,7 +432,7 @@ jobs:
       - run: cat crates/core/Cargo.toml
 
       - name: Publish the crate
-        if: ${{ inputs.publish }}
+        if: ${{ inputs.publish && needs.prepare-vars.outputs.environment != 'nightly' }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: release-plz release --config /tmp/release-plz.toml
@@ -459,7 +460,7 @@ jobs:
             artifacts/surreal-${{ needs.prepare-vars.outputs.name }}.*/*.exe
 
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v4.0.2
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v5.0.0
         if: ${{ inputs.publish }}
         with:
           aws-region: us-east-2
@@ -519,7 +520,7 @@ jobs:
           path: arm64
 
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v4.0.2
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v5.0.0
         with:
           aws-region: us-east-2
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
@@ -546,7 +547,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v4.0.2
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v5.0.0
         with:
           aws-region: us-east-2
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
