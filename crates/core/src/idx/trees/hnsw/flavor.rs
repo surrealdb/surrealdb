@@ -1,7 +1,7 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::{DatabaseDefinition, HnswParams};
+use crate::catalog::{DatabaseDefinition, HnswParams, VectorType};
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::{AHashSet, ArraySet};
@@ -26,7 +26,6 @@ pub(super) enum HnswFlavor {
 	H29set(Hnsw<AHashSet, ArraySet<29>>),
 	Hset(Hnsw<AHashSet, AHashSet>),
 }
-
 impl HnswFlavor {
 	pub(super) fn new(ibk: IndexKeyBase, p: &HnswParams) -> Result<Self> {
 		let res = match p.m {
@@ -209,6 +208,26 @@ impl HnswFlavor {
 			HnswFlavor::Hset(h) => h.get_vector(tx, e_id).await,
 		}
 	}
+
+	pub(crate) fn estimate_memory_usage(&self, dim: usize, vt: VectorType) -> usize {
+		match self {
+			HnswFlavor::H5_9(h) => h.estimate_memory_usage(dim, vt),
+			HnswFlavor::H5_17(h) => h.estimate_memory_usage(dim, vt),
+			HnswFlavor::H5_25(h) => h.estimate_memory_usage(dim, vt),
+			HnswFlavor::H5set(h) => h.estimate_memory_usage(dim, vt),
+			HnswFlavor::H9_17(h) => h.estimate_memory_usage(dim, vt),
+			HnswFlavor::H9_25(h) => h.estimate_memory_usage(dim, vt),
+			HnswFlavor::H9set(h) => h.estimate_memory_usage(dim, vt),
+			HnswFlavor::H13_25(h) => h.estimate_memory_usage(dim, vt),
+			HnswFlavor::H13set(h) => h.estimate_memory_usage(dim, vt),
+			HnswFlavor::H17set(h) => h.estimate_memory_usage(dim, vt),
+			HnswFlavor::H21set(h) => h.estimate_memory_usage(dim, vt),
+			HnswFlavor::H25set(h) => h.estimate_memory_usage(dim, vt),
+			HnswFlavor::H29set(h) => h.estimate_memory_usage(dim, vt),
+			HnswFlavor::Hset(h) => h.estimate_memory_usage(dim, vt),
+		}
+	}
+
 	#[cfg(test)]
 	pub(super) fn check_hnsw_properties(&self, expected_count: usize) {
 		match self {

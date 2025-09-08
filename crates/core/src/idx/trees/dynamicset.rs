@@ -12,6 +12,7 @@ pub trait DynamicSet: Debug + Send + Sync {
 	fn len(&self) -> usize;
 	fn is_empty(&self) -> bool;
 	fn iter(&self) -> impl Iterator<Item = &ElementId>;
+	fn memory_usage(&self) -> usize;
 }
 
 #[derive(Debug)]
@@ -51,6 +52,10 @@ impl DynamicSet for AHashSet {
 	#[inline]
 	fn iter(&self) -> impl Iterator<Item = &ElementId> {
 		self.0.iter()
+	}
+
+	fn memory_usage(&self) -> usize {
+		self.0.len() * 8
 	}
 }
 
@@ -110,6 +115,10 @@ impl<const N: usize> DynamicSet for ArraySet<N> {
 	#[inline]
 	fn iter(&self) -> impl Iterator<Item = &ElementId> {
 		self.array[0..self.size].iter()
+	}
+
+	fn memory_usage(&self) -> usize {
+		size_of_val(self)
 	}
 }
 

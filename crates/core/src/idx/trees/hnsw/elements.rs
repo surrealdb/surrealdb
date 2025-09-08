@@ -1,7 +1,7 @@
 use anyhow::Result;
 use dashmap::DashMap;
 
-use crate::catalog::Distance;
+use crate::catalog::{Distance, VectorType};
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
@@ -99,5 +99,34 @@ impl HnswElements {
 		let key = self.ikb.new_he_key(e_id);
 		tx.del(&key).await?;
 		Ok(())
+	}
+
+	pub(super) fn estimate_memory_usage(&self, dim: usize, vt: VectorType) -> usize {
+		self.elements.len() * (vt.memory_usage(dim) + 8/* ElementId + SharedVector */)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use ndarray::Array1;
+
+	use crate::catalog::{Distance, VectorType};
+	use crate::idx::IndexKeyBase;
+	use crate::idx::trees::hnsw::elements::HnswElements;
+	use crate::idx::trees::vector::{SharedVector, Vector};
+
+	#[test]
+	fn test_estimate_memory_usage() {
+		let h = HnswElements::new(IndexKeyBase::new(0, 0, "testtb", "testix"), Distance::Cosine);
+		let vector_size = 1536;
+		let v = SharedVector::from(Vector::I16(Array1::from_vec(vec![1; 0])));
+		for i in 0..1000 {
+			h.elements.insert(i, v.clone());
+		}
+		assert_eq!(h.estimate_memory_usage(vector_size, VectorType::F64), 12296000);
+		assert_eq!(h.estimate_memory_usage(vector_size, VectorType::I64), 12296000);
+		assert_eq!(h.estimate_memory_usage(vector_size, VectorType::F32), 6152000);
+		assert_eq!(h.estimate_memory_usage(vector_size, VectorType::I32), 6152000);
+		assert_eq!(h.estimate_memory_usage(vector_size, VectorType::I16), 3080000);
 	}
 }

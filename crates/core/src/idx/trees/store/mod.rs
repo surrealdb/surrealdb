@@ -239,6 +239,21 @@ impl IndexStores {
 		self.0.hnsw_indexes.get(ctx, &ix.what, &ikb, p).await
 	}
 
+	pub(crate) async fn get_memory_usage(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ctx: &Context,
+		ix: &IndexDefinition,
+	) -> Result<Option<usize>> {
+		if let Index::Hnsw(p) = &ix.index {
+			let ix = self.get_index_hnsw(ns, db, ctx, ix, p).await?;
+			Ok(Some(ix.read().await.estimate_memory_usage()))
+		} else {
+			Ok(None)
+		}
+	}
+
 	pub(crate) async fn index_removed(
 		&self,
 		#[cfg(not(target_family = "wasm"))] ib: Option<&IndexBuilder>,

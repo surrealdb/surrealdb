@@ -12,7 +12,7 @@ use reblessive::tree::Stk;
 use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::{DatabaseDefinition, HnswParams};
+use crate::catalog::{DatabaseDefinition, HnswParams, VectorType};
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
@@ -52,14 +52,14 @@ pub(crate) struct HnswState {
 
 impl KVValue for HnswState {
 	#[inline]
-	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+	fn kv_encode_value(&self) -> Result<Vec<u8>> {
 		let mut val = Vec::new();
 		self.serialize_revisioned(&mut val)?;
 		Ok(val)
 	}
 
 	#[inline]
-	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
+	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
 		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
@@ -415,6 +415,18 @@ where
 	async fn get_vector(&self, tx: &Transaction, e_id: &ElementId) -> Result<Option<SharedVector>> {
 		self.elements.get_vector(tx, e_id).await
 	}
+
+	fn estimate_memory_usage(&self, dim: usize, vt: VectorType) -> usize {
+		// Count the number of vectors in memory
+		let mut size = self.elements.estimate_memory_usage(dim, vt);
+		// Count the layers usage
+		size += self.layer0.estimate_memory_usage();
+		for l in &self.layers {
+			size += l.estimate_memory_usage();
+		}
+		size
+	}
+
 	#[cfg(test)]
 	fn check_hnsw_properties(&self, expected_count: usize) {
 		check_hnsw_props(self, expected_count);
@@ -505,9 +517,6 @@ mod tests {
 					);
 				}
 				let expected_len = collection.len().min(knn);
-				if expected_len != res.len() {
-					info!("expected_len != res.len()")
-				}
 				assert_eq!(
 					expected_len,
 					res.len(),
@@ -582,7 +591,6 @@ mod tests {
 	}
 
 	async fn test_hnsw(collection_size: usize, p: HnswParams) {
-		info!("Collection size: {collection_size} - Params: {p:?}");
 		let collection = TestCollection::new(
 			true,
 			collection_size,
@@ -719,9 +727,7 @@ mod tests {
 		ctx.freeze()
 	}
 
-	async fn test_hnsw_index(collection_size: usize, unique: bool, p: HnswParams) {
-		info!("test_hnsw_index - coll size: {collection_size} - params: {p:?}");
-
+	async fn test_hnsw_index(collection_size: usize, unique: bool, p: HnswParams) -> usize {
 		let ds = Datastore::new("memory").await.unwrap();
 
 		let collection = TestCollection::new(
@@ -750,6 +756,8 @@ mod tests {
 			(h, map)
 		};
 
+		let mem = h.estimate_memory_usage();
+
 		// Search index
 		{
 			let mut stack = reblessive::tree::TreeStack::new();
@@ -773,6 +781,8 @@ mod tests {
 			delete_hnsw_index_collection(&tx, &mut h, &collection, map).await.unwrap();
 			tx.commit().await.unwrap();
 		}
+
+		mem
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
@@ -810,6 +820,32 @@ mod tests {
 			f.await.expect("Task error");
 		}
 		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn test_hnsw_memory_size() {
+		// Uncomment to test memory usage
+		// let mut mmax = 0;
+		// let mut mmin = 1000000000;
+		// for _ in 0..100 {
+		for (vt, min, max) in [
+			(VectorType::F64, 3360, 4368),
+			(VectorType::I64, 3360, 4368),
+			(VectorType::F32, 2560, 3664),
+			(VectorType::I32, 2560, 3664),
+			(VectorType::I16, 2160, 2928),
+		] {
+			let p = new_params(10, vt, Distance::Cosine, 4, 50, true, true);
+			let m = test_hnsw_index(20, false, p).await;
+			assert!(
+				m >= min && m <= max,
+				"{vt} - Wrong memory usage - Expected: {m} to be in the range: {min}-{max}",
+			);
+			// mmax = mmax.max(m);
+			// mmin = mmin.min(m);
+		}
+		// }
+		// info!("Min: {} - Max: {}", mmin, mmax);
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
@@ -852,8 +888,6 @@ mod tests {
 		p: HnswParams,
 		tests_ef_recall: &[(usize, f64)],
 	) -> Result<()> {
-		info!("Build data collection");
-
 		let ds = Arc::new(Datastore::new("memory").await?);
 		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
 		let db = tx.ensure_ns_db("myns", "mydb", false).await.unwrap();
@@ -875,7 +909,6 @@ mod tests {
 			&p,
 		)
 		.await?;
-		info!("Insert collection");
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
 			h.index_document(&tx, &RecordIdKey::Number(*doc_id as i64), &content).await?;
@@ -884,14 +917,12 @@ mod tests {
 
 		let h = Arc::new(h);
 
-		info!("Build query collection");
 		let queries = Arc::new(TestCollection::NonUnique(new_vectors_from_file(
 			p.vector_type,
 			&format!("../../tests/data/{queries_file}"),
 			Some(query_limit),
 		)?));
 
-		info!("Check recall");
 		let mut futures = Vec::with_capacity(tests_ef_recall.len());
 		for &(efs, expected_recall) in tests_ef_recall {
 			let queries = queries.clone();
@@ -922,7 +953,6 @@ mod tests {
 							total_recall += rec;
 						}
 						let recall = total_recall / queries.to_vec_ref().len() as f64;
-						info!("EFS: {efs} - Recall: {recall}");
 						assert!(
 							recall >= expected_recall,
 							"EFS: {efs} - Recall: {recall} - Expected: {expected_recall}"
