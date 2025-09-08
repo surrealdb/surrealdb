@@ -10,40 +10,15 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::capabilities::MethodTarget;
 use crate::dbs::{QueryType, Response, Variables};
 use crate::err::Error;
-use crate::expr::{RecordIdKeyLit, RecordIdLit};
 use crate::rpc::args::extract_args;
 use crate::rpc::statement_options::StatementOptions;
 use crate::rpc::{Data, Method, RpcContext, RpcError};
 use crate::sql::{
 	Ast, CreateStatement, DeleteStatement, Expr, Fields, Function, FunctionCall, Ident,
-	InsertStatement, KillStatement, Literal, LiveStatement, Model, Output, Param, RelateStatement,
+	InsertStatement, KillStatement, LiveStatement, Model, Output, Param, RelateStatement,
 	SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
-use crate::val::{Array, Object, RecordIdKey, Strand, Value};
-
-/// utility function converting a `Value::Strand` into a `Expr::Table`
-fn value_to_table(value: Value) -> Expr {
-	match value {
-		Value::Strand(s) => match crate::syn::expr(&s) {
-			Ok(expr) if matches!(expr.clone().into(), Expr::FunctionCall(_)) => expr.into(),
-			_ => Expr::Table(Ident::from_strand(s)),
-		},
-		Value::RecordId(ref record_id) => match &record_id.key {
-			RecordIdKey::String(s) => match crate::syn::expr(s) {
-				Ok(expr) if matches!(expr.clone().into(), Expr::FunctionCall(_)) => {
-					let record_id_lit = RecordIdLit {
-						table: record_id.table.clone(),
-						key: RecordIdKeyLit::Expr(Box::new(expr.into())),
-					};
-					Expr::Literal(Literal::RecordId(record_id_lit.into()))
-				}
-				_ => value.into_literal().into(),
-			},
-			_ => value.into_literal().into(),
-		},
-		x => x.into_literal().into(),
-	}
-}
+use crate::val::{Array, Object, Strand, Value};
 
 #[expect(async_fn_in_trait)]
 pub trait RpcProtocolV2: RpcContext {
@@ -419,7 +394,7 @@ pub trait RpcProtocolV2: RpcContext {
 			} else {
 				opts.fields.unwrap_or(Fields::all())
 			},
-			what: value_to_table(what),
+			what: what.into(),
 			cond: None,
 			fetch: None,
 		};
@@ -466,7 +441,7 @@ pub trait RpcProtocolV2: RpcContext {
 		let sql = SelectStatement {
 			only: opts.only,
 			expr: opts.fields.unwrap_or_else(Fields::all),
-			what: vec![value_to_table(what)],
+			what: vec![what.into()],
 			start: opts.start,
 			limit: opts.limit,
 			cond: opts.cond,
@@ -612,7 +587,7 @@ pub trait RpcProtocolV2: RpcContext {
 		// Specify the SQL query string
 		let sql = CreateStatement {
 			only: opts.only,
-			what: vec![value_to_table(what)],
+			what: vec![what.into()],
 			data: opts.data_expr(),
 			output: opts.output,
 			timeout: opts.timeout,
@@ -671,7 +646,7 @@ pub trait RpcProtocolV2: RpcContext {
 		// Specify the SQL query string
 		let sql = UpsertStatement {
 			only: opts.only,
-			what: vec![value_to_table(what)],
+			what: vec![what.into()],
 			data: opts.data_expr(),
 			output: opts.output,
 			cond: opts.cond,
@@ -731,7 +706,7 @@ pub trait RpcProtocolV2: RpcContext {
 		// Specify the SQL query string
 		let sql = UpdateStatement {
 			only: opts.only,
-			what: vec![value_to_table(what)],
+			what: vec![what.into()],
 			data: opts.data_expr(),
 			output: opts.output,
 			cond: opts.cond,
@@ -796,7 +771,7 @@ pub trait RpcProtocolV2: RpcContext {
 		let expr = Expr::Relate(Box::new(RelateStatement {
 			only: opts.only,
 			from: from.into_literal().into(),
-			through: value_to_table(kind),
+			through: kind.into(),
 			to: with.into_literal().into(),
 			data: opts.data_expr(),
 			output: opts.output,
@@ -847,7 +822,7 @@ pub trait RpcProtocolV2: RpcContext {
 		// Specify the SQL query string
 		let sql = Expr::Delete(Box::new(DeleteStatement {
 			only: opts.only,
-			what: vec![value_to_table(what)],
+			what: vec![what.into()],
 			output: opts.output,
 			timeout: opts.timeout,
 			cond: opts.cond,
