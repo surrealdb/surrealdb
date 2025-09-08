@@ -67,10 +67,6 @@ criteria = "safe-to-deploy"
 version = "4.0.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.android-tzdata]]
-version = "0.1.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.anstream]]
 version = "0.6.18"
 criteria = "safe-to-deploy"
@@ -479,10 +475,6 @@ criteria = "safe-to-deploy"
 version = "0.4.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.fastrand]]
-version = "2.3.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.filetime]]
 version = "0.2.25"
 criteria = "safe-to-deploy"
@@ -571,10 +563,6 @@ criteria = "safe-to-deploy"
 version = "0.2.12"
 criteria = "safe-to-deploy"
 
-[[exemptions.gimli]]
-version = "0.31.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.glam]]
 version = "0.29.2"
 criteria = "safe-to-deploy"
@@ -601,10 +589,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.hermit-abi]]
 version = "0.4.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.home]]
-version = "0.5.11"
 criteria = "safe-to-deploy"
 
 [[exemptions.html5ever]]
@@ -695,10 +679,6 @@ criteria = "safe-to-deploy"
 version = "0.7.4"
 criteria = "safe-to-deploy"
 
-[[exemptions.libloading]]
-version = "0.8.6"
-criteria = "safe-to-deploy"
-
 [[exemptions.libm]]
 version = "0.2.11"
 criteria = "safe-to-deploy"
@@ -749,6 +729,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.markup5ever]]
 version = "0.12.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.matchers]]
+version = "0.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.matchit]]
@@ -833,6 +817,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.noisy_float]]
 version = "0.2.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.nu-ansi-term]]
+version = "0.50.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.num-bigint]]
@@ -939,20 +927,12 @@ criteria = "safe-to-deploy"
 version = "0.10.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.phf_generator]]
-version = "0.11.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.phf_macros]]
 version = "0.11.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.phf_shared]]
 version = "0.10.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.phf_shared]]
-version = "0.11.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.pico-args]]
@@ -965,10 +945,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.pin-project-internal]]
 version = "1.1.8"
-criteria = "safe-to-deploy"
-
-[[exemptions.pin-project-lite]]
-version = "0.2.16"
 criteria = "safe-to-deploy"
 
 [[exemptions.pkg-config]]
@@ -1087,10 +1063,6 @@ criteria = "safe-to-deploy"
 version = "0.7.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.rand]]
-version = "0.8.5"
-criteria = "safe-to-deploy"
-
 [[exemptions.rand_chacha]]
 version = "0.2.2"
 criteria = "safe-to-deploy"
@@ -1133,10 +1105,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.rgb]]
 version = "0.8.50"
-criteria = "safe-to-deploy"
-
-[[exemptions.ring]]
-version = "0.17.10"
 criteria = "safe-to-deploy"
 
 [[exemptions.ring]]
@@ -1271,10 +1239,6 @@ criteria = "safe-to-deploy"
 version = "2.14.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.semver]]
-version = "1.0.25"
-criteria = "safe-to-deploy"
-
 [[exemptions.send_wrapper]]
 version = "0.6.0"
 criteria = "safe-to-deploy"
@@ -1313,10 +1277,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.siphasher]]
 version = "0.3.11"
-criteria = "safe-to-deploy"
-
-[[exemptions.siphasher]]
-version = "1.0.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.smol_str]]
@@ -1428,15 +1388,7 @@ version = "0.2.17"
 criteria = "safe-to-run"
 
 [[exemptions.thiserror]]
-version = "1.0.69"
-criteria = "safe-to-deploy"
-
-[[exemptions.thiserror]]
 version = "2.0.11"
-criteria = "safe-to-deploy"
-
-[[exemptions.thiserror-impl]]
-version = "1.0.69"
 criteria = "safe-to-deploy"
 
 [[exemptions.thiserror-impl]]
@@ -1477,10 +1429,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tokio-rustls]]
 version = "0.26.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.tokio-stream]]
-version = "0.1.17"
 criteria = "safe-to-deploy"
 
 [[exemptions.tokio-tungstenite]]
@@ -1535,20 +1483,8 @@ criteria = "safe-to-deploy"
 version = "0.3.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.tracing]]
-version = "0.1.41"
-criteria = "safe-to-deploy"
-
 [[exemptions.tracing-appender]]
 version = "0.2.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.tracing-attributes]]
-version = "0.1.28"
-criteria = "safe-to-deploy"
-
-[[exemptions.tracing-core]]
-version = "0.1.33"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing-log]]
@@ -1557,10 +1493,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tracing-opentelemetry]]
 version = "0.25.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.tracing-subscriber]]
-version = "0.3.19"
 criteria = "safe-to-deploy"
 
 [[exemptions.try_map]]
@@ -1611,16 +1543,8 @@ criteria = "safe-to-deploy"
 version = "0.7.6"
 criteria = "safe-to-deploy"
 
-[[exemptions.utf8parse]]
-version = "0.2.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.uuid]]
 version = "1.12.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.valuable]]
-version = "0.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.version_check]]
