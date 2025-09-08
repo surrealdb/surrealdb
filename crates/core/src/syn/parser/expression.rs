@@ -672,14 +672,14 @@ impl Parser<'_> {
 		else {
 			return Ok(());
 		};
-		let Expr::Param(_) = &**left else {
+		let Expr::Param(p) = &**left else {
 			return Ok(());
 		};
 		let BinaryOperator::Equal = op else {
 			return Ok(());
 		};
-		bail!("Omiting let in a paramater declarations is deprecated",
-			@span => "This syntax previously declared a new parameter but in the future will be an equality test")
+		bail!("Parameter declarations without `let` are deprecated.",
+			@span => "Replace with `let {} = ...` to keep the previous behavior.", p)
 	}
 }
 
