@@ -10,7 +10,7 @@ use crate::syn::error::bail;
 use crate::syn::lexer::compound::Numeric;
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser};
-use crate::syn::token::{self, Glued, Token, TokenKind, t};
+use crate::syn::token::{self, Glued, Span, Token, TokenKind, t};
 use crate::val;
 
 impl Parser<'_> {
@@ -661,6 +661,25 @@ impl Parser<'_> {
 		}
 
 		Ok(lhs)
+	}
+
+	pub(crate) fn reject_letless_let(expr: &Expr, span: Span) -> ParseResult<()> {
+		let Expr::Binary {
+			left,
+			op,
+			..
+		} = expr
+		else {
+			return Ok(());
+		};
+		let Expr::Param(_) = &**left else {
+			return Ok(());
+		};
+		let BinaryOperator::Equal = op else {
+			return Ok(());
+		};
+		bail!("Omiting let in a paramater declarations is deprecated",
+			@span => "This syntax previously declared a new parameter but in the future will be an equality test")
 	}
 }
 
