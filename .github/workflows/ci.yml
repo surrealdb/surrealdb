@@ -51,7 +51,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -90,7 +90,7 @@ jobs:
           echo "toolchain=$(cat rust-toolchain.nightly)" >> $GITHUB_OUTPUT
 
       - name: Install nightly toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ steps.info.outputs.toolchain }}
           components: rustfmt
@@ -111,7 +111,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
           components: clippy
@@ -138,7 +138,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -167,7 +167,7 @@ jobs:
 
     steps:
       - name: Install MSRV toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.msrv }}
 
@@ -190,7 +190,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -219,7 +219,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) v1
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: wasm32-unknown-unknown
@@ -246,7 +246,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -262,6 +262,7 @@ jobs:
     uses: ./.github/workflows/build.yml
     with:
       name: ci
+      extra-features: storage-mem,allocator,allocation-tracking,scripting,http,http-compression,jwks,ml
       # Only upload if not a pull request.
       upload: ${{ github.event_name != 'pull_request' }}
       # Only compile with --release when not a pull request.
@@ -277,7 +278,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -300,7 +301,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -323,7 +324,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -346,7 +347,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -369,7 +370,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -396,7 +397,7 @@ jobs:
     runs-on: [ runner-arm64-2xlarge ]
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -438,7 +439,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -463,7 +464,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -494,7 +495,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -525,7 +526,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -556,7 +557,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -587,7 +588,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -618,7 +619,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -649,7 +650,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -680,7 +681,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -718,7 +719,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -754,7 +755,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -794,7 +795,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -818,7 +819,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 

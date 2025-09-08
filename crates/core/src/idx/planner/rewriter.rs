@@ -198,7 +198,7 @@ impl<'a> KnnConditionRewriter<'a> {
 			| Part::Doc
 			| Part::RepeatRecurse => Some(p.clone()),
 			Part::Where(v) => self.rewrite_expr(v).map(Part::Where),
-			Part::Graph(_) => None,
+			Part::Lookup(_) => None,
 			Part::Value(v) => self.rewrite_expr(v).map(Part::Value),
 			Part::Start(v) => self.rewrite_expr(v).map(Part::Start),
 			Part::Method(n, p) => self.eval_exprs(p).map(|v| Part::Method(n.clone(), v)),

@@ -14,7 +14,7 @@ use crate::expr::field::{Field, Fields};
 use crate::expr::idiom::recursion::{Recursion, compute_idiom_recursion};
 use crate::expr::part::{FindRecursionPlan, Next, NextMethod, Part, SplitByRepeatRecurse};
 use crate::expr::statements::select::SelectStatement;
-use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Graph, Idiom, Literal};
+use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Idiom, Literal, Lookup};
 use crate::fnc::idiom;
 use crate::val::{RecordIdKey, Value};
 
@@ -163,7 +163,7 @@ impl Value {
 				},
 				// Current value at path is an object
 				Value::Object(v) => match p {
-					Part::Graph(_) => match v.rid() {
+					Part::Lookup(_) => match v.rid() {
 						Some(v) => {
 							let v = Value::RecordId(v);
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path)).await
@@ -367,14 +367,14 @@ impl Value {
 
 					match p {
 						// This is a graph traversal expression
-						Part::Graph(g) => {
+						Part::Lookup(g) => {
 							let last_part = path.len() == 1;
 							let expr = g.expr.clone().unwrap_or(Fields::value_id());
 							let what = Expr::Idiom(Idiom(vec![
 								Part::Start(Expr::Literal(Literal::RecordId(val.into_literal()))),
-								Part::Graph(Graph {
+								Part::Lookup(Lookup {
 									what: g.what.clone(),
-									dir: g.dir.clone(),
+									kind: g.kind.clone(),
 									..Default::default()
 								}),
 							]));
