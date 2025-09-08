@@ -3,6 +3,7 @@ use std::fmt::{self, Write};
 use anyhow::{Result, bail};
 
 use super::DefineKind;
+use crate::catalog::providers::DatabaseProvider;
 use crate::catalog::{MlModelDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;

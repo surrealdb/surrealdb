@@ -8,6 +8,7 @@ use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 
 use super::DefineKind;
+use crate::catalog::providers::{CatalogProvider, NamespaceProvider, UserProvider};
 use crate::catalog::{self, UserDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -56,10 +57,10 @@ impl DefineUserStatement {
 
 	pub fn into_definition(&self) -> catalog::UserDefinition {
 		UserDefinition {
-			name: self.name.clone().to_string(),
+			name: self.name.clone().to_raw_string(),
 			hash: self.hash.clone(),
 			code: self.code.clone(),
-			roles: self.roles.iter().map(|x| x.clone().into_string()).collect(),
+			roles: self.roles.iter().map(|x| x.clone().to_raw_string()).collect(),
 			token_duration: self.duration.token.map(|x| x.0),
 			session_duration: self.duration.session.map(|x| x.0),
 			comment: self.comment.as_ref().map(|x| x.clone().into_string()),
@@ -111,8 +112,7 @@ impl DefineUserStatement {
 					}
 				}
 				// Process the statement
-				let key = crate::key::root::us::new(&self.name);
-				txn.set(&key, &self.into_definition(), None).await?;
+				txn.put_root_user(&self.into_definition()).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -144,8 +144,7 @@ impl DefineUserStatement {
 				};
 
 				// Process the statement
-				let key = crate::key::namespace::us::new(ns.namespace_id, &self.name);
-				txn.set(&key, &self.into_definition(), None).await?;
+				txn.put_ns_user(ns.namespace_id, &self.into_definition()).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -178,9 +177,7 @@ impl DefineUserStatement {
 				};
 
 				// Process the statement
-				let key =
-					crate::key::database::us::new(db.namespace_id, db.database_id, &self.name);
-				txn.set(&key, &self.into_definition(), None).await?;
+				txn.put_db_user(db.namespace_id, db.database_id, &self.into_definition()).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good

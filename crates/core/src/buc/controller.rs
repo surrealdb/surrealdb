@@ -5,6 +5,7 @@ use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 
 use super::store::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
+use crate::catalog::providers::BucketProvider;
 use crate::catalog::{BucketDefinition, Permission};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;

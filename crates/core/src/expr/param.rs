@@ -6,6 +6,7 @@ use reblessive::tree::Stk;
 
 use super::FlowResultExt as _;
 use crate::catalog::Permission;
+use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;

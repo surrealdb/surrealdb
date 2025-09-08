@@ -6,6 +6,7 @@ use reblessive::tree::Stk;
 use uuid::Uuid;
 
 use super::DefineKind;
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{
 	DatabaseId, FieldDefinition, NamespaceId, Permissions, TableDefinition, TableType,
 };

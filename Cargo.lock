@@ -5891,17 +5891,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "surrealdb-macros"
-version = "0.1.0"
-dependencies = [
- "quote",
- "revision 0.11.0",
- "serde",
- "storekey",
- "syn 2.0.100",
-]
-
-[[package]]
 name = "surrealdb-protocol"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

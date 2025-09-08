@@ -22,7 +22,7 @@ use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
-use crate::key::thing;
+use crate::key::record;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val, impl_kv_value_revisioned};
@@ -429,8 +429,8 @@ impl Building {
 		}
 
 		// First iteration, we index every key
-		let beg = thing::prefix(self.ns, self.db, self.ikb.table())?;
-		let end = thing::suffix(self.ns, self.db, self.ikb.table())?;
+		let beg = record::prefix(self.ns, self.db, self.ikb.table())?;
+		let end = record::suffix(self.ns, self.db, self.ikb.table())?;
 		let mut next = Some(beg..end);
 		let mut initial_count = 0;
 		// Set the initial status
@@ -539,7 +539,7 @@ impl Building {
 				return Ok(());
 			}
 			self.is_beyond_threshold(Some(*count))?;
-			let key = thing::ThingKey::decode_key(&k)?;
+			let key = record::RecordKey::decode_key(&k)?;
 			// Parse the value
 			let val = Record::kv_decode_value(v)?;
 			let rid: Arc<RecordId> = RecordId {

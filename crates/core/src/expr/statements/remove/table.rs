@@ -4,6 +4,7 @@ use anyhow::Result;
 use uuid::Uuid;
 
 use crate::catalog::TableDefinition;
+use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::{self, Notification, Options};
 use crate::err::Error;
