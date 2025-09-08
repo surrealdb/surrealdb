@@ -350,7 +350,7 @@ impl Value {
 					_ => stk
 						.scope(|scope| {
 							let futs =
-								v.iter().map(|v| scope.run(|stk| v.get(stk, ctx, opt, doc, &path)));
+								v.iter().map(|v| scope.run(|stk| v.get(stk, ctx, opt, doc, path)));
 							try_join_all_buffered(futs)
 						})
 						.await
