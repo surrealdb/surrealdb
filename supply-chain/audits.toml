@@ -1,3 +1,4 @@
+
 # cargo-vet audits file
 
 [[audits.async-executor]]
@@ -238,7 +239,7 @@ end = "2025-01-24"
 
 [[trusted.libc]]
 criteria = "safe-to-deploy"
-user-id = 51017
+user-id = 51017 # Yuki Okushi (JohnTitor)
 start = "2020-03-17"
 end = "2025-11-14"
 
