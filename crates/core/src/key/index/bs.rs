@@ -1,7 +1,7 @@
 //! Stores FullText index states
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::ft::search::SearchIndexState;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
@@ -18,7 +18,7 @@ pub(crate) struct Bs<'a> {
 	_d: u8,
 	_e: u8,
 	_f: u8,
-	pub ix: &'a str,
+	pub ix: IndexId,
 }
 
 impl KVKey for Bs<'_> {
@@ -32,7 +32,7 @@ impl Categorise for Bs<'_> {
 }
 
 impl<'a> Bs<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
 		Bs {
 			__: b'/',
 			_a: b'*',
@@ -60,9 +60,9 @@ mod tests {
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
-			"testix",
+			IndexId(3),
 		);
 		let enc = Bs::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!bstestix\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!bs\0\0\0\x03");
 	}
 }

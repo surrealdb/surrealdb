@@ -56,7 +56,7 @@ async fn mtree_index(
 		doc_ids_cache: cache_size as u32,
 		mtree_cache: cache_size as u32,
 	};
-	MTreeIndex::new(tx, IndexKeyBase::new(0, 0, "test", "test"), &p, tt).await.unwrap()
+	MTreeIndex::new(tx, IndexKeyBase::new(0, 0, "test", 0), &p, tt).await.unwrap()
 }
 
 fn runtime() -> Runtime {

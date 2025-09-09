@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::catalog;
 use crate::catalog::{
-	DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId, TableDefinition,
+	DatabaseDefinition, DatabaseId, IndexId, NamespaceDefinition, NamespaceId, TableDefinition,
 	UserDefinition,
 };
 use crate::dbs::node::Node;
@@ -420,7 +420,44 @@ pub trait TableProvider {
 		db: DatabaseId,
 		tb: &str,
 		ix: &str,
-	) -> Result<Arc<catalog::IndexDefinition>>;
+	) -> Result<Option<Arc<catalog::IndexDefinition>>>;
+
+	/// Retrieve an index for a table.
+	async fn get_tb_index_by_id(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		ix: IndexId,
+	) -> Result<Option<Arc<catalog::IndexDefinition>>>;
+
+	/// Retrieve an index for a table returning an error if it does not exist.
+	async fn expect_tb_index(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		ix: &str,
+	) -> Result<Arc<catalog::IndexDefinition>> {
+		self.get_tb_index(ns, db, tb, ix).await?.ok_or_else(|| {
+			Error::IxNotFound {
+				name: ix.to_owned(),
+			}
+			.into()
+		})
+	}
+
+	/// Put an index for a table.
+	async fn put_tb_index(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		ix: &catalog::IndexDefinition,
+	) -> Result<()>;
+
+	async fn del_tb_index(&self, ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str)
+	-> Result<()>;
 
 	/// Fetch a specific record value.
 	async fn get_record(
