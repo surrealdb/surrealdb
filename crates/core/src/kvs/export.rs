@@ -6,13 +6,16 @@ use chrono::TimeZone;
 use chrono::prelude::Utc;
 
 use super::Transaction;
+use crate::catalog::providers::{
+	AuthorisationProvider, DatabaseProvider, TableProvider, UserProvider,
+};
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::define::{DefineAccessStatement, DefineUserStatement};
 use crate::expr::{Base, DefineAnalyzerStatement};
-use crate::key::thing;
+use crate::key::record;
 use crate::kvs::KVValue;
 use crate::sql::ToSql;
 use crate::val::record::Record;
@@ -414,8 +417,8 @@ impl Transaction {
 		chn.send(bytes!("-- ------------------------------")).await?;
 		chn.send(bytes!("")).await?;
 
-		let beg = crate::key::thing::prefix(ns, db, &table.name)?;
-		let end = crate::key::thing::suffix(ns, db, &table.name)?;
+		let beg = crate::key::record::prefix(ns, db, &table.name)?;
+		let end = crate::key::record::suffix(ns, db, &table.name)?;
 		let mut next = Some(beg..end);
 
 		while let Some(rng) = next {
@@ -463,7 +466,7 @@ impl Transaction {
 	/// * `String` - Returns the generated SQL command as a string. If no command is generated,
 	///   returns an empty string.
 	fn process_record(
-		k: thing::ThingKey,
+		k: record::RecordKey,
 		mut record: Record,
 		records_relate: &mut Vec<String>,
 		records_normal: &mut Vec<String>,
@@ -553,7 +556,7 @@ impl Transaction {
 				chn.send(bytes!("BEGIN;")).await?;
 			}
 
-			let k = thing::ThingKey::decode_key(&k)?;
+			let k = record::RecordKey::decode_key(&k)?;
 			let v: Record = if v.is_empty() {
 				Default::default()
 			} else {
@@ -636,7 +639,7 @@ impl Transaction {
 
 		// Process each regular value.
 		for (k, v) in regular_values {
-			let k = thing::ThingKey::decode_key(&k)?;
+			let k = record::RecordKey::decode_key(&k)?;
 			let v = Record::kv_decode_value(v)?;
 			// Process the value and categorize it into records_relate or records_normal.
 			Self::process_record(k, v, &mut records_relate, &mut records_normal, None, None);

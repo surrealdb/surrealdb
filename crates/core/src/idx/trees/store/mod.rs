@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
+use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::catalog::{DatabaseId, HnswParams, Index, IndexDefinition, NamespaceId};
 use crate::ctx::Context;
 use crate::err::Error;

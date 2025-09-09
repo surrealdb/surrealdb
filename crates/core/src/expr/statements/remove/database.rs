@@ -2,6 +2,7 @@ use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
 
+use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -51,15 +52,7 @@ impl RemoveDatabaseStatement {
 		}
 
 		// Delete the definition
-		let key = crate::key::namespace::db::new(db.namespace_id, &db.name);
-		let database_root = crate::key::database::all::new(db.namespace_id, db.database_id);
-		if self.expunge {
-			txn.clr(&key).await?;
-			txn.clrp(&database_root).await?;
-		} else {
-			txn.del(&key).await?;
-			txn.delp(&database_root).await?
-		};
+		txn.del_db(ns, &db.name, self.expunge).await?;
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {

@@ -3,6 +3,7 @@ use std::ops::Deref;
 
 use anyhow::Result;
 
+use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;

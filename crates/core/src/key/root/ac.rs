@@ -7,7 +7,7 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Ac<'a> {
+pub(crate) struct RootAccessKey<'a> {
 	__: u8,
 	_a: u8,
 	_b: u8,
@@ -15,10 +15,10 @@ pub(crate) struct Ac<'a> {
 	pub ac: Cow<'a, str>,
 }
 
-impl_kv_key_storekey!(Ac<'_> => AccessDefinition);
+impl_kv_key_storekey!(RootAccessKey<'_> => AccessDefinition);
 
-pub fn new(ac: &str) -> Ac<'_> {
-	Ac::new(ac)
+pub fn new(ac: &str) -> RootAccessKey<'_> {
+	RootAccessKey::new(ac)
 }
 
 pub fn prefix() -> Vec<u8> {
@@ -33,13 +33,13 @@ pub fn suffix() -> Vec<u8> {
 	k
 }
 
-impl Categorise for Ac<'_> {
+impl Categorise for RootAccessKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::Access
 	}
 }
 
-impl<'a> Ac<'a> {
+impl<'a> RootAccessKey<'a> {
 	pub fn new(ac: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -59,8 +59,8 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Ac::new("testac");
-		let enc = Ac::encode_key(&val).unwrap();
+		let val = RootAccessKey::new("testac");
+		let enc = RootAccessKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/!actestac\x00");
 	}
 

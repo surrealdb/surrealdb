@@ -6,6 +6,9 @@ use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
 use jsonwebtoken::{DecodingKey, Validation, decode};
 
+use crate::catalog::providers::{
+	AuthorisationProvider, DatabaseProvider, NamespaceProvider, UserProvider,
+};
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::access::{authenticate_generic, authenticate_record};
@@ -775,6 +778,7 @@ pub async fn verify_ns_creds(
 		.ok_or(Error::InvalidAuth)?;
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
+
 	// Verify the specified password for the user
 	verify_pass(pass, user.hash.as_ref())?;
 	// Clone the cached user object
@@ -801,6 +805,7 @@ pub async fn verify_db_creds(
 			.into());
 		}
 	};
+
 	// Fetch the specified user from storage
 	let user = tx
 		.get_db_user(db_def.namespace_id, db_def.database_id, user)
@@ -812,6 +817,7 @@ pub async fn verify_db_creds(
 		.ok_or(Error::InvalidAuth)?;
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
+
 	// Verify the specified password for the user
 	verify_pass(pass, user.hash.as_ref())?;
 	// Clone the cached user object

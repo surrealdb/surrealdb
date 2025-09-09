@@ -10,6 +10,7 @@ use roaring::treemap::IntoIter;
 use uuid::Uuid;
 
 use crate::catalog;
+use crate::catalog::providers::DatabaseProvider;
 use crate::catalog::{FullTextParams, Scoring};
 /// This module implements a concurrent full-text search index.
 ///

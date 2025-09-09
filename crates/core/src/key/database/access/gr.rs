@@ -9,7 +9,7 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Gr<'a> {
+pub(crate) struct AccessGrantKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -23,10 +23,10 @@ pub(crate) struct Gr<'a> {
 	pub gr: Cow<'a, str>,
 }
 
-impl_kv_key_storekey!(Gr<'_> => catalog::AccessGrant);
+impl_kv_key_storekey!(AccessGrantKey<'_> => catalog::AccessGrant);
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, ac: &'a str, gr: &'a str) -> Gr<'a> {
-	Gr::new(ns, db, ac, gr)
+pub fn new<'a>(ns: NamespaceId, db: DatabaseId, ac: &'a str, gr: &'a str) -> AccessGrantKey<'a> {
+	AccessGrantKey::new(ns, db, ac, gr)
 }
 
 pub fn prefix(ns: NamespaceId, db: DatabaseId, ac: &str) -> Result<Vec<u8>> {
@@ -41,13 +41,13 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId, ac: &str) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for Gr<'_> {
+impl Categorise for AccessGrantKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseAccessGrant
 	}
 }
 
-impl<'a> Gr<'a> {
+impl<'a> AccessGrantKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, ac: &'a str, gr: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -72,13 +72,13 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Gr::new(
+		let val = AccessGrantKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testac",
 			"testgr",
 		);
-		let enc = Gr::encode_key(&val).unwrap();
+		let enc = AccessGrantKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02&testac\0!grtestgr\0");
 	}
 

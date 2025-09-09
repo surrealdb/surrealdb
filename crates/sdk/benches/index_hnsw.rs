@@ -6,7 +6,7 @@ use criterion::measurement::WallTime;
 use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use flate2::read::GzDecoder;
 use reblessive::TreeStack;
-use surrealdb_core::catalog::{Distance, HnswParams, VectorType};
+use surrealdb_core::catalog::{CatalogProvider, Distance, HnswParams, VectorType};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::idx::IndexKeyBase;
 use surrealdb_core::idx::planner::checker::{HnswChecker, HnswConditionChecker};

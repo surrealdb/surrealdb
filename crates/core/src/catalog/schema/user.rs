@@ -1,10 +1,37 @@
 use std::time::Duration;
 
-use revision::revisioned;
+use revision::{Revisioned, revisioned};
+use serde::{Deserialize, Serialize};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, Value};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[repr(transparent)]
+pub struct UserId(pub u64);
+
+impl_kv_value_revisioned!(UserId);
+
+impl Revisioned for UserId {
+	fn revision() -> u16 {
+		1
+	}
+
+	#[inline]
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
+		self.0.serialize_revisioned(writer)
+	}
+
+	#[inline]
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		Revisioned::deserialize_revisioned(reader).map(UserId)
+	}
+}
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

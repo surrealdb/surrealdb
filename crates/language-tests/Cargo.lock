@@ -3593,6 +3593,7 @@ dependencies = [
  "storekey",
  "strsim",
  "subtle",
+ "surrealdb-macros",
  "surrealdb-protocol",
  "surrealdb-types",
  "surrealkv",
@@ -3610,6 +3611,14 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasmtimer",
  "ws_stream_wasm",
+]
+
+[[package]]
+name = "surrealdb-macros"
+version = "3.0.0"
+dependencies = [
+ "quote",
+ "syn 2.0.100",
 ]
 
 [[package]]
