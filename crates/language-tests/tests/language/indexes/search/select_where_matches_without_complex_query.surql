@@ -20,16 +20,16 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: page:1, sc1: 0f, sc2: -1.5517289638519287f }, { id: page:2, sc1: 0f, sc2: -1.6716052293777466f }]"
+value = "[{ id: page:1, sc1: 0f, sc2: 0f }, { id: page:2, sc1: 0f, sc2: 0f }]"
 
 [[test.results]]
 value = "[{ detail: { plan: { index: 'page_host', operator: '=', value: 'test' }, table: 'page' }, operation: 'Iterate Index' }, { detail: { plan: { index: 'page_title', operator: '@1@', value: 'dog' }, table: 'page' }, operation: 'Iterate Index' }, { detail: { plan: { index: 'page_content', operator: '@2@', value: 'dog' }, table: 'page' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 [[test.results]]
-value = "[{ id: page:1, sc1: 0f, sc2: -1.5517289638519287f }, { id: page:2, sc1: 0f, sc2: -1.6716052293777466f }]"
+value = "[{ id: page:1, sc1: 0f, sc2: -0f }, { id: page:2, sc1: 0f, sc2: 0f }]"
 
 [[test.results]]
-value = "[{ id: page:1, sc1: 0f, sc2: -1.5517289638519287f }, { id: page:2, sc1: 0f, sc2: -1.6716052293777466f }]"
+value = "[{ id: page:1, sc1: 0f, sc2: 0f }, { id: page:2, sc1: 0f, sc2: 0f }]"
 
 */
 CREATE page:1 SET title = 'the quick brown', content = 'fox jumped over the lazy dog', host = 'test';
