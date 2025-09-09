@@ -2090,7 +2090,7 @@ async fn select_with_record_id_link_full_text_index() -> Result<()> {
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
-	let val = syn::value(r#"[{ "id": i:A, "t": t:1}]"#).unwrap();
+	let val = syn::value(r#"[{ "id": i:A, "t": t:1}]"#)?;
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	Ok(())
@@ -2110,10 +2110,12 @@ async fn select_with_record_id_link_full_text_no_record_index() -> Result<()> {
 		CREATE i:A SET t = t:1;
 		SELECT * FROM i WHERE t.name @@ 'world' EXPLAIN;
 		SELECT * FROM i WHERE t.name @@ 'world';
+		SELECT * FROM i WHERE t.name @OR@ 'world dummy';
+		SELECT * FROM i WHERE t.name @AND@ 'world hello';
 	";
 	let mut res = dbs.execute(sql, &ses, None).await?;
 
-	assert_eq!(res.len(), 8);
+	assert_eq!(res.len(), 10);
 	skip_ok(&mut res, 6)?;
 	//
 	let tmp = res.remove(0).result?;
@@ -2133,13 +2135,14 @@ async fn select_with_record_id_link_full_text_no_record_index() -> Result<()> {
 						operation: 'Collector'
 					}
 			]"#,
-	)
-	.unwrap();
+	)?;
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(r#"[{ "id": i:A, "t": t:1}]"#).unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	let val = syn::value(r#"[{ "id": i:A, "t": t:1}]"#)?;
+	for _ in 0..3 {
+		let tmp = res.remove(0).result?;
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
 	//
 	Ok(())
 }

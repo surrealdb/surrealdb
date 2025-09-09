@@ -12,7 +12,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::operator::MatchesOperator;
+use crate::expr::operator::{BooleanOperator, MatchesOperator};
 use crate::expr::{Cond, Expr, FlowResultExt as _, Ident, Idiom};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::MatchRef;
@@ -32,7 +32,7 @@ use crate::idx::planner::iterators::{
 use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue, StoreRangeValue};
-use crate::idx::planner::tree::IndexReference;
+use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 use crate::idx::planner::{IterationStage, ScanDirection};
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
@@ -670,7 +670,7 @@ impl QueryExecutor {
 				if let Some(PerIndexReferenceIndex::FullText(fti)) = self.0.ir_map.get(io.ix_ref())
 				{
 					if let Some(PerExpressionEntry::FullText(fte)) = self.0.exp_entries.get(exp) {
-						let hits = fti.new_hits_iterator(&fte.0.qt, operator.clone());
+						let hits = fti.new_hits_iterator(&fte.0.qt, *operator);
 						let it = MatchesThingIterator::new(ir, hits);
 						return Ok(Some(ThingIterator::FullTextMatches(it)));
 					}
@@ -765,15 +765,27 @@ impl QueryExecutor {
 	#[expect(clippy::too_many_arguments)]
 	async fn fulltext_matches_with_value(
 		&self,
-		_stk: &mut Stk,
-		_ctx: &Context,
-		_opt: &Options,
-		_fti: &FullTextIndex,
-		_fte: &FullTextEntry,
-		_l: Value,
-		_r: Value,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		fti: &FullTextIndex,
+		fte: &FullTextEntry,
+		l: Value,
+		r: Value,
 	) -> Result<bool> {
-		todo!()
+		// If the query terms contains terms that are unknown in the index
+		// of if there are no terms in the query
+		// we are sure that it does not match any document
+		if fte.0.qt.is_empty() {
+			return Ok(false);
+		}
+		let v = match fte.0.io.id_pos() {
+			IdiomPosition::Left => r,
+			IdiomPosition::Right => l,
+			IdiomPosition::None => return Ok(false),
+		};
+		// Check if the value matches the query terms
+		fti.matches_value(stk, ctx, opt, &fte.0.qt, fte.0.bo, v).await
 	}
 
 	fn get_match_ref_entry(&self, match_ref: &Value) -> Option<&PerMatchRefEntry> {
@@ -871,6 +883,7 @@ struct FullTextEntry(Arc<InnerFullTextEntry>);
 struct InnerFullTextEntry {
 	io: IndexOption,
 	qt: QueryTerms,
+	bo: BooleanOperator,
 	scorer: Option<Scorer>,
 }
 
@@ -882,10 +895,11 @@ impl FullTextEntry {
 		fti: &FullTextIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>> {
-		if let Matches(qs, _) = io.op() {
+		if let Matches(qs, mo) = io.op() {
 			let qt = fti.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
 			let scorer = fti.new_scorer(ctx).await?;
 			Ok(Some(Self(Arc::new(InnerFullTextEntry {
+				bo: mo.operator,
 				io,
 				qt,
 				scorer,

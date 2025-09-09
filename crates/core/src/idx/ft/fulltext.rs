@@ -89,6 +89,35 @@ impl QueryTerms {
 		}
 		false
 	}
+
+	pub(in crate::idx::ft) fn matches_or(&self, tks: &[Tokens]) -> Result<bool> {
+		for t in self.tokens.list() {
+			let t = self.tokens.get_token_string(t)?;
+			for tokens in tks {
+				if tokens.try_contains(t)? {
+					return Ok(true);
+				}
+			}
+		}
+		Ok(false)
+	}
+
+	pub(in crate::idx::ft) fn matches_and(&self, tks: &[Tokens]) -> Result<bool> {
+		for t in self.tokens.list() {
+			let t = self.tokens.get_token_string(t)?;
+			let mut found = false;
+			for tokens in tks {
+				if tokens.try_contains(t)? {
+					found = true;
+					break;
+				}
+			}
+			if !found {
+				return Ok(false);
+			}
+		}
+		Ok(true)
+	}
 }
 
 #[derive(Clone)]
@@ -364,6 +393,23 @@ impl FullTextIndex {
 			docs,
 			has_unknown_terms,
 		})
+	}
+
+	pub(in crate::idx) async fn matches_value(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		qt: &QueryTerms,
+		bo: BooleanOperator,
+		val: Value,
+	) -> Result<bool> {
+		let mut tks = vec![];
+		self.analyzer.analyze_value(stk, ctx, opt, val, FilteringStage::Indexing, &mut tks).await?;
+		match bo {
+			BooleanOperator::And => qt.matches_and(&tks),
+			BooleanOperator::Or => qt.matches_or(&tks),
+		}
 	}
 
 	async fn get_docs(&self, tx: &Transaction, term: &str) -> Result<Option<RoaringTreemap>> {
