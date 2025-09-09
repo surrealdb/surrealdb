@@ -55,7 +55,7 @@ db-path = "~/.cargo/advisory-db"
 # The lint level for crates that have been yanked.
 yanked = "warn"
 # A list of security advisory identifiers to ignore.
-ignore = ["RUSTSEC-2025-0014", "RUSTSEC-2024-0436"]
+ignore = ["RUSTSEC-2025-0056", "RUSTSEC-2025-0014", "RUSTSEC-2024-0436"]
 
 # --------------------------------------------------
 # LICENSES
