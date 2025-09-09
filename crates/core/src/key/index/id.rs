@@ -40,7 +40,7 @@ use std::fmt::Debug;
 
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
@@ -56,7 +56,7 @@ pub(crate) struct Id<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -75,7 +75,7 @@ impl Categorise for Id<'_> {
 
 impl<'a> Id<'a> {
 	#[cfg_attr(target_family = "wasm", allow(dead_code))]
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, id: RecordIdKey) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, id: RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -104,13 +104,13 @@ mod tests {
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
-			"testix",
+			IndexId(3),
 			RecordIdKey::from(strand!("id").to_owned()),
 		);
 		let enc = Id::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!id\0\0\0\x01id\0",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!id\0\0\0\x01id\0",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);

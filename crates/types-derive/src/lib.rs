@@ -185,9 +185,9 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 					quote! {
 						let #field_name = <#field_type as surrealdb_types::SurrealValue>::from_value(
 							obj.get(#field_name_str)
-								.ok_or_else(|| anyhow::anyhow!("Failed to convert to {}: Missing field '{}'", Self::kind_of(), #field_name_str))?
+								.ok_or_else(|| surrealdb_types::anyhow::anyhow!("Failed to convert to {}: Missing field '{}'", Self::kind_of(), #field_name_str))?
 								.clone()
-						).map_err(|e| anyhow::anyhow!("Failed to convert to {}: {}", Self::kind_of(), e))?;
+						).map_err(|e| surrealdb_types::anyhow::anyhow!("Failed to convert to {}: {}", Self::kind_of(), e))?;
 					}
 				})
 				.collect();
@@ -225,9 +225,9 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 						])))
 					}
 
-					fn from_value(value: surrealdb_types::Value) -> anyhow::Result<Self> {
+					fn from_value(value: surrealdb_types::Value) -> surrealdb_types::anyhow::Result<Self> {
 						let surrealdb_types::Value::Object(obj) = value else {
-							return Err(anyhow::anyhow!("Failed to convert to {}: Expected Object, got {:?}", Self::kind_of(), value.value_kind()));
+							return Err(surrealdb_types::anyhow::anyhow!("Failed to convert to {}: Expected Object, got {:?}", Self::kind_of(), value.value_kind()));
 						};
 
 						#(#from_value_fields)*
@@ -272,9 +272,9 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 					quote! {
 						let #field_ident = <#field_type as surrealdb_types::SurrealValue>::from_value(
 							values.get(#i)
-								.ok_or_else(|| anyhow::anyhow!("Failed to convert to {}: Missing field at index {}", Self::kind_of(), #i))?
+								.ok_or_else(|| surrealdb_types::anyhow::anyhow!("Failed to convert to {}: Missing field at index {}", Self::kind_of(), #i))?
 								.clone()
-						).map_err(|e| anyhow::anyhow!("Failed to convert to {}: {}", Self::kind_of(), e))?;
+						).map_err(|e| surrealdb_types::anyhow::anyhow!("Failed to convert to {}: {}", Self::kind_of(), e))?;
 					}
 				})
 				.collect();
@@ -318,13 +318,13 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 						]))
 					}
 
-					fn from_value(value: surrealdb_types::Value) -> anyhow::Result<Self> {
+					fn from_value(value: surrealdb_types::Value) -> surrealdb_types::anyhow::Result<Self> {
 						let surrealdb_types::Value::Array(values) = value else {
-							return Err(anyhow::anyhow!("Failed to convert to {}: Expected Array, got {:?}", Self::kind_of(), value.value_kind()));
+							return Err(surrealdb_types::anyhow::anyhow!("Failed to convert to {}: Expected Array, got {:?}", Self::kind_of(), value.value_kind()));
 						};
 
 						if values.len() != #field_count {
-							return Err(anyhow::anyhow!("Failed to convert to {}: Expected Array of length {}, got {}", Self::kind_of(), #field_count, values.len()));
+							return Err(surrealdb_types::anyhow::anyhow!("Failed to convert to {}: Expected Array of length {}, got {}", Self::kind_of(), #field_count, values.len()));
 						}
 
 						#(#from_value_fields)*
@@ -353,10 +353,10 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 						surrealdb_types::Value::Object(surrealdb_types::Object::new())
 					}
 
-					fn from_value(value: surrealdb_types::Value) -> anyhow::Result<Self> {
+					fn from_value(value: surrealdb_types::Value) -> surrealdb_types::anyhow::Result<Self> {
 						match value {
 							surrealdb_types::Value::Object(obj) if obj.is_empty() => Ok(Self),
-							_ => Err(anyhow::anyhow!("Failed to convert to {}: Expected empty Object, got {:?}", Self::kind_of(), value.value_kind())),
+							_ => Err(surrealdb_types::anyhow::anyhow!("Failed to convert to {}: Expected empty Object, got {:?}", Self::kind_of(), value.value_kind())),
 						}
 					}
 				}

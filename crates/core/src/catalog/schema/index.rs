@@ -2,7 +2,8 @@ use std::fmt::{self, Display, Formatter};
 use std::hash::{Hash, Hasher};
 
 use anyhow::Result;
-use revision::revisioned;
+use revision::{Revisioned, revisioned};
+use serde::{Deserialize, Serialize};
 
 use crate::expr::Idiom;
 use crate::expr::statements::info::InfoStructure;
@@ -11,11 +12,44 @@ use crate::sql::statements::define::DefineKind;
 use crate::sql::{Ident, ToSql};
 use crate::val::{Array, Number, Strand, Value};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[repr(transparent)]
+pub struct IndexId(pub u32);
+
+impl_kv_value_revisioned!(IndexId);
+
+impl Revisioned for IndexId {
+	fn revision() -> u16 {
+		1
+	}
+
+	#[inline]
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
+		self.0.serialize_revisioned(writer)
+	}
+
+	#[inline]
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		Revisioned::deserialize_revisioned(reader).map(IndexId)
+	}
+}
+
+impl From<u32> for IndexId {
+	fn from(value: u32) -> Self {
+		IndexId(value)
+	}
+}
+
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct IndexDefinition {
+	pub index_id: IndexId,
 	pub name: String,
-	pub what: String,
+	pub table_name: String,
 	pub cols: Vec<Idiom>,
 	pub index: Index,
 	pub comment: Option<String>,
@@ -28,7 +62,7 @@ impl IndexDefinition {
 		crate::sql::DefineIndexStatement {
 			kind: DefineKind::Default,
 			name: unsafe { Ident::new_unchecked(self.name.clone()) },
-			what: unsafe { Ident::new_unchecked(self.what.clone()) },
+			what: unsafe { Ident::new_unchecked(self.table_name.clone()) },
 			cols: self.cols.iter().cloned().map(Into::into).collect(),
 			index: self.index.to_sql_definition(),
 			comment: self.comment.clone().map(Strand::new_lossy),
@@ -41,7 +75,7 @@ impl InfoStructure for IndexDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
 			"name".to_string() => self.name.into(),
-			"what".to_string() => self.what.into(),
+			"what".to_string() => self.table_name.into(),
 			"cols".to_string() => Value::Array(Array(self.cols.into_iter().map(|x| x.structure()).collect())),
 			"index".to_string() => self.index.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),

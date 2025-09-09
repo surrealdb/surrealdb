@@ -236,7 +236,7 @@ impl BTreeDocIdsState {
 
 #[cfg(test)]
 mod tests {
-	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::btdocids::{BTreeDocIds, Resolved};
 	use crate::kvs::TransactionType::*;
@@ -250,7 +250,7 @@ mod tests {
 		let d = BTreeDocIds::new(
 			&tx,
 			tt,
-			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
+			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
 			BTREE_ORDER,
 			100,
 		)
