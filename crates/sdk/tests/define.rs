@@ -224,7 +224,7 @@ async fn define_statement_index_concurrently_building_status_standard_overwrite(
 async fn define_statement_index_concurrently_building_status_full_text() -> Result<()> {
 	define_statement_index_concurrently_building_status(
 		"DEFINE ANALYZER simple TOKENIZERS blank,class;
-		DEFINE INDEX test ON user FIELDS email SEARCH ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;",
+		DEFINE INDEX test ON user FIELDS email FULLTEXT ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;",
 		2,
 		200,
 		10,
@@ -236,7 +236,7 @@ async fn define_statement_index_concurrently_building_status_full_text() -> Resu
 async fn define_statement_index_concurrently_building_status_full_text_overwrite() -> Result<()> {
 	define_statement_index_concurrently_building_status(
 		"DEFINE ANALYZER simple TOKENIZERS blank,class;
-		DEFINE INDEX OVERWRITE test ON user FIELDS email SEARCH ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;",
+		DEFINE INDEX OVERWRITE test ON user FIELDS email FULLTEXT ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;",
 		2,
 		200, 10
 	)
@@ -289,7 +289,7 @@ async fn define_statement_search_index() -> Result<()> {
 		CREATE blog:1 SET title = 'Understanding SurrealQL and how it is different from PostgreSQL';
 		CREATE blog:3 SET title = 'This blog is going to be deleted';
 		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
-		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
+		DEFINE INDEX blog_title ON blog FIELDS title FULLTEXT ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
 		CREATE blog:2 SET title = 'Behind the scenes of the exciting beta 9 release';
 		DELETE blog:3;
 		INFO FOR TABLE blog;
@@ -313,9 +313,7 @@ async fn define_statement_search_index() -> Result<()> {
 			fields: {},
 			tables: {},
 			indexes: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title \
-			SEARCH ANALYZER simple BM25(1.2,0.75) \
-			DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100 \
-			DOC_IDS_CACHE 100 DOC_LENGTHS_CACHE 100 POSTINGS_CACHE 100 TERMS_CACHE 100 HIGHLIGHTS' },
+			FULLTEXT ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS' },
 			lives: {},
 		}",
 	)

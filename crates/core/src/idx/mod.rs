@@ -12,21 +12,11 @@ use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
-use crate::idx::ft::search::terms::TermId;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::store::NodeId;
 use crate::idx::trees::vector::SerializedVector;
-use crate::key::index::bc::Bc;
 use crate::key::index::bd::{Bd, BdRoot};
-use crate::key::index::bf::Bf;
 use crate::key::index::bi::Bi;
-use crate::key::index::bk::Bk;
-use crate::key::index::bl::{Bl, BlRoot};
-use crate::key::index::bo::Bo;
-use crate::key::index::bp::{Bp, BpRoot};
-use crate::key::index::bs::Bs;
-use crate::key::index::bt::{Bt, BtRoot};
-use crate::key::index::bu::Bu;
 use crate::key::index::dc::Dc;
 use crate::key::index::dl::Dl;
 use crate::key::index::hd::{Hd, HdRoot};
@@ -84,60 +74,12 @@ impl IndexKeyBase {
 		self.0.ix == ic.ix && self.0.tb == ic.tb && self.0.db == ic.db && self.0.ns == ic.ns
 	}
 
-	fn new_bc_key(&self, term_id: TermId) -> Bc<'_> {
-		Bc::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, term_id)
-	}
-
 	fn new_bd_root_key(&self) -> BdRoot<'_> {
 		BdRoot::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix)
 	}
 
 	fn new_bd_key(&self, node_id: NodeId) -> Bd<'_> {
 		Bd::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, node_id)
-	}
-
-	fn new_bk_key(&self, doc_id: DocId) -> Bk<'_> {
-		Bk::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, doc_id)
-	}
-
-	fn new_bl_root_key(&self) -> BlRoot<'_> {
-		BlRoot::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix)
-	}
-
-	fn new_bl_key(&self, node_id: NodeId) -> Bl<'_> {
-		Bl::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, node_id)
-	}
-
-	fn new_bo_key(&self, doc_id: DocId, term_id: TermId) -> Bo<'_> {
-		Bo::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, doc_id, term_id)
-	}
-
-	fn new_bp_root_key(&self) -> BpRoot<'_> {
-		BpRoot::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix)
-	}
-
-	fn new_bp_key(&self, node_id: NodeId) -> Bp<'_> {
-		Bp::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, node_id)
-	}
-
-	fn new_bf_key(&self, term_id: TermId, doc_id: DocId) -> Bf<'_> {
-		Bf::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, term_id, doc_id)
-	}
-
-	fn new_bt_root_key(&self) -> BtRoot<'_> {
-		BtRoot::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix)
-	}
-
-	fn new_bt_key(&self, node_id: NodeId) -> Bt<'_> {
-		Bt::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, node_id)
-	}
-
-	fn new_bs_key(&self) -> Bs<'_> {
-		Bs::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix)
-	}
-
-	fn new_bu_key(&self, term_id: TermId) -> Bu<'_> {
-		Bu::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, term_id)
 	}
 
 	fn new_hd_root_key(&self) -> HdRoot<'_> {

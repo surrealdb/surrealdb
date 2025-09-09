@@ -12,7 +12,6 @@ use crate::expr::Base;
 use crate::expr::ident::Ident;
 use crate::iam::{Action, ResourceKind};
 use crate::idx::IndexKeyBase;
-use crate::idx::ft::search::SearchIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::kvs::TransactionType;
 use crate::val::Value;
@@ -35,19 +34,6 @@ impl AnalyzeStatement {
 				let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 				// Index operation dispatching
 				let value: Value = match &ix.index {
-					Index::Search(p) => {
-						let ft = SearchIndex::new(
-							ctx,
-							ns,
-							db,
-							p.az.as_str(),
-							ikb,
-							p,
-							TransactionType::Read,
-						)
-						.await?;
-						ft.statistics(ctx).await?.into()
-					}
 					Index::MTree(p) => {
 						let tx = ctx.tx();
 						let mt = MTreeIndex::new(&tx, ikb, p, TransactionType::Read).await?;

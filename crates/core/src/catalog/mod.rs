@@ -22,9 +22,7 @@ pub use providers::CatalogProvider;
 pub(crate) use schema::*;
 // TODO: These can be private if we move the bench tests from the sdk to the core.
 pub use schema::{ApiDefinition, ApiMethod};
-pub use schema::{
-	Distance, FullTextParams, HnswParams, MTreeParams, Scoring, SearchParams, VectorType,
-};
+pub use schema::{Distance, FullTextParams, HnswParams, MTreeParams, Scoring, VectorType};
 pub(crate) use subscription::*;
 pub(crate) use table::*;
 pub(crate) use view::*;

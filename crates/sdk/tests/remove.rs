@@ -193,7 +193,7 @@ async fn remove_statement_index() -> Result<()> {
 		DEFINE INDEX uniq_isbn ON book FIELDS isbn UNIQUE;
 		DEFINE INDEX idx_author ON book FIELDS author;
 		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
-		DEFINE INDEX ft_title ON book FIELDS title SEARCH ANALYZER simple BM25 HIGHLIGHTS;
+		DEFINE INDEX ft_title ON book FIELDS title FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
 		CREATE book:1 SET title = 'Rust Web Programming', isbn = '978-1803234694', author = 'Maxwell Flitton';
 		REMOVE INDEX uniq_isbn ON book;
 		REMOVE INDEX idx_author ON book;

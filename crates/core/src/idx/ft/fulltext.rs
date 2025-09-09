@@ -34,14 +34,12 @@ use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
 use crate::idx::ft::highlighter::{HighlightParams, Highlighter, Offseter};
 use crate::idx::ft::offset::Offset;
-use crate::idx::ft::search::Bm25Params;
 use crate::idx::ft::{DocLength, Score, TermFrequency};
 use crate::idx::planner::iterators::MatchesHitsIterator;
 use crate::idx::trees::store::IndexStores;
 use crate::key::index::tt::Tt;
 use crate::kvs::{Transaction, impl_kv_value_revisioned};
 use crate::val::{RecordId, Value};
-
 #[revisioned(revision = 1)]
 #[derive(Debug, Default, PartialEq)]
 /// Represents a term occurrence within a document
@@ -91,6 +89,12 @@ impl QueryTerms {
 		}
 		false
 	}
+}
+
+#[derive(Clone)]
+pub(crate) struct Bm25Params {
+	pub(in crate::idx) k1: f32,
+	pub(in crate::idx) b: f32,
 }
 
 /// The main full-text index implementation that supports concurrent read and

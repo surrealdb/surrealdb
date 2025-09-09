@@ -123,9 +123,6 @@ where
 #[derive(Clone)]
 pub enum TreeNodeProvider {
 	DocIds(IndexKeyBase),
-	DocLengths(IndexKeyBase),
-	Postings(IndexKeyBase),
-	Terms(IndexKeyBase),
 	Vector(IndexKeyBase),
 	Debug,
 }
@@ -134,9 +131,6 @@ impl TreeNodeProvider {
 	pub fn get_key(&self, node_id: NodeId) -> Result<Key> {
 		match self {
 			TreeNodeProvider::DocIds(ikb) => ikb.new_bd_key(node_id).encode_key(),
-			TreeNodeProvider::DocLengths(ikb) => ikb.new_bl_key(node_id).encode_key(),
-			TreeNodeProvider::Postings(ikb) => ikb.new_bp_key(node_id).encode_key(),
-			TreeNodeProvider::Terms(ikb) => ikb.new_bt_key(node_id).encode_key(),
 			TreeNodeProvider::Vector(ikb) => ikb.new_vm_key(node_id).encode_key(),
 			TreeNodeProvider::Debug => Ok(node_id.to_be_bytes().to_vec()),
 		}

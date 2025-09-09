@@ -477,10 +477,6 @@ impl IndexOption {
 		self.id.as_ref().map(|id| id.as_ref())
 	}
 
-	pub(super) fn id_pos(&self) -> IdiomPosition {
-		self.id_pos
-	}
-
 	fn reduce_array(value: &Value) -> Value {
 		if let Value::Array(a) = value {
 			if a.len() == 1 {

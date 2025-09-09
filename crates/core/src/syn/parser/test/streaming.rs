@@ -7,7 +7,7 @@ use crate::sql::access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessV
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::data::Assignment;
 use crate::sql::filter::Filter;
-use crate::sql::index::{Distance, MTreeParams, SearchParams, VectorType};
+use crate::sql::index::{Distance, FullTextParams, MTreeParams, VectorType};
 use crate::sql::language::Language;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::lookup::{LookupKind, LookupSubject};
@@ -347,21 +347,13 @@ fn statements() -> Vec<TopLevelExpr> {
 				Idiom(vec![Part::Field(Ident::from_strand(strand!("a").to_owned()))]),
 				Idiom(vec![Part::Field(Ident::from_strand(strand!("b").to_owned())), Part::All]),
 			],
-			index: Index::Search(SearchParams {
+			index: Index::FullText(FullTextParams {
 				az: Ident::from_strand(strand!("ana").to_owned()),
 				hl: true,
 				sc: Scoring::Bm {
 					k1: 0.1,
 					b: 0.2,
 				},
-				doc_ids_order: 1,
-				doc_lengths_order: 2,
-				postings_order: 3,
-				terms_order: 4,
-				doc_ids_cache: 5,
-				doc_lengths_cache: 6,
-				postings_cache: 7,
-				terms_cache: 8,
 			}),
 			comment: None,
 			concurrently: false,
