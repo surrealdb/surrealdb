@@ -5862,7 +5862,6 @@ dependencies = [
  "storekey",
  "strsim",
  "subtle",
- "surrealdb-macros",
  "surrealdb-protocol",
  "surrealdb-tikv-client",
  "surrealdb-types",
@@ -5889,17 +5888,6 @@ dependencies = [
  "wasmtimer",
  "wiremock",
  "ws_stream_wasm",
-]
-
-[[package]]
-name = "surrealdb-macros"
-version = "3.0.0"
-dependencies = [
- "quote",
- "revision 0.11.0",
- "serde",
- "storekey",
- "syn 2.0.100",
 ]
 
 [[package]]
