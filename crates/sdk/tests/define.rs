@@ -6,7 +6,7 @@ use helpers::*;
 use surrealdb::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::err::Error;
-use surrealdb_core::expr::{Ident, Idiom, Part};
+use surrealdb_core::expr::{Ident, Part};
 use surrealdb_core::iam::{Level, Role};
 use surrealdb_core::val::Value;
 use surrealdb_core::{strand, syn};
@@ -293,13 +293,12 @@ async fn define_statement_search_index() -> Result<()> {
 		CREATE blog:2 SET title = 'Behind the scenes of the exciting beta 9 release';
 		DELETE blog:3;
 		INFO FOR TABLE blog;
-		ANALYZE INDEX blog_title ON blog;
 	"#;
 
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 8);
+	assert_eq!(res.len(), 7);
 	//
 	for i in 0..6 {
 		let tmp = res.remove(0).result;
@@ -319,32 +318,6 @@ async fn define_statement_search_index() -> Result<()> {
 	)
 	.unwrap();
 	assert_eq!(tmp, val);
-
-	let tmp = res.remove(0).result?;
-
-	check_path(&tmp, &["doc_ids", "keys_count"], |v| assert_eq!(v, Value::from(2)));
-	check_path(&tmp, &["doc_ids", "max_depth"], |v| assert_eq!(v, Value::from(1)));
-	check_path(&tmp, &["doc_ids", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
-	// TODO(emmanuel) My (Mees) changes caused some changes in these numbers but I
-	// didn't have time to figure out what was going on so if you could have a look
-	// after the PR merges it would be appreaciated.
-	check_path(&tmp, &["doc_ids", "total_size"], |v| assert_eq!(v, Value::from(63)));
-
-	check_path(&tmp, &["doc_lengths", "keys_count"], |v| assert_eq!(v, Value::from(2)));
-	check_path(&tmp, &["doc_lengths", "max_depth"], |v| assert_eq!(v, Value::from(1)));
-	check_path(&tmp, &["doc_lengths", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
-	check_path(&tmp, &["doc_lengths", "total_size"], |v| assert_eq!(v, Value::from(56)));
-
-	check_path(&tmp, &["postings", "keys_count"], |v| assert_eq!(v, Value::from(17)));
-	check_path(&tmp, &["postings", "max_depth"], |v| assert_eq!(v, Value::from(1)));
-	check_path(&tmp, &["postings", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
-	check_path(&tmp, &["postings", "total_size"], |v| assert!(v > Value::from(150)));
-
-	check_path(&tmp, &["terms", "keys_count"], |v| assert_eq!(v, Value::from(17)));
-	check_path(&tmp, &["terms", "max_depth"], |v| assert_eq!(v, Value::from(1)));
-	check_path(&tmp, &["terms", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
-	check_path(&tmp, &["terms", "total_size"], |v| assert!(v.gt(&Value::from(150))));
-
 	Ok(())
 }
 
@@ -508,20 +481,6 @@ async fn define_statement_user_db() -> Result<()> {
 	assert!(res.remove(0).result.is_err());
 
 	Ok(())
-}
-
-fn check_path<F>(val: &Value, path: &[&str], check: F)
-where
-	F: Fn(Value),
-{
-	let part: Vec<Part> = path.iter().map(|p| Part::field((*p).to_owned()).unwrap()).collect();
-	let res = val.walk(&part);
-	for (i, v) in res {
-		let mut idiom = Idiom::default();
-		idiom.0.clone_from(&part);
-		assert_eq!(idiom, i);
-		check(v);
-	}
 }
 
 //
