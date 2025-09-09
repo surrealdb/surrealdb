@@ -358,11 +358,7 @@ impl Value {
 							.await
 							.map(Value::from)?;
 
-						if matches!(p, Part::Lookup(_)) {
-							Ok(res.flatten())
-						} else {
-							Ok(res)
-						}
+						Ok(res)
 					}
 				},
 				// Current value at path is a thing
@@ -405,7 +401,14 @@ impl Value {
 							if last_part {
 								Ok(res)
 							} else {
-								stk.run(|stk| res.get(stk, ctx, opt, None, path.next())).await
+								let res = stk
+									.run(|stk| res.get(stk, ctx, opt, None, path.next()))
+									.await?;
+								if matches!(path.get(1), Some(Part::Lookup(_))) {
+									Ok(res.flatten())
+								} else {
+									Ok(res)
+								}
 							}
 						}
 						Part::Method(name, args) => {
