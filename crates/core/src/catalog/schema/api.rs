@@ -16,10 +16,15 @@ use crate::val::{Array, Object, Strand, Value};
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct ApiDefinition {
+	/// The URL path of the API.
 	pub path: Path,
+	/// The actions of the API.
 	pub actions: Vec<ApiActionDefinition>,
+	/// The fallback expression of the API.
 	pub fallback: Option<Expr>,
+	/// The config of the API.
 	pub config: ApiConfigDefinition,
+	/// An optional comment for the definition.
 	pub comment: Option<String>,
 }
 
@@ -84,15 +89,22 @@ impl InfoStructure for ApiDefinition {
 	}
 }
 
+/// REST API method.
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum ApiMethod {
+	/// REST DELETE method.
 	Delete,
+	/// REST GET method.
 	Get,
+	/// REST PATCH method.
 	Patch,
+	/// REST POST method.
 	Post,
+	/// REST PUT method.
 	Put,
+	/// REST TRACE method.
 	Trace,
 }
 
@@ -163,14 +175,18 @@ impl InfoStructure for ApiActionDefinition {
 	}
 }
 
+/// The API config definition.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct ApiConfigDefinition {
+	/// The middleware of the API.
 	pub middleware: Vec<MiddlewareDefinition>,
+	/// The permissions of the API.
 	pub permissions: Permission,
 }
 
 impl ApiConfigDefinition {
+	/// Convert the API config definition into a SQL config.
 	pub fn to_sql_config(&self) -> crate::sql::statements::define::config::api::ApiConfig {
 		crate::sql::statements::define::config::api::ApiConfig {
 			middleware: self.middleware.iter().map(|mw| mw.to_sql_middleware()).collect(),
@@ -224,15 +240,18 @@ impl Display for ApiConfigDefinition {
 	}
 }
 
+/// API Middleware definition.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct MiddlewareDefinition {
+	/// The name of function to invoke.
 	pub name: String,
+	/// The arguments to pass to the function.
 	pub args: Vec<Value>,
 }
 
 impl MiddlewareDefinition {
-	pub fn to_sql_middleware(&self) -> crate::sql::statements::define::config::api::Middleware {
+	fn to_sql_middleware(&self) -> crate::sql::statements::define::config::api::Middleware {
 		crate::sql::statements::define::config::api::Middleware {
 			name: self.name.clone(),
 			args: self.args.clone().into_iter().map(crate::sql::Expr::from_value).collect(),

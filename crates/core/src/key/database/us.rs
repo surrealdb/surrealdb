@@ -8,7 +8,7 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub(crate) struct Us<'a> {
+pub(crate) struct UserKey<'key> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -17,15 +17,15 @@ pub(crate) struct Us<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub user: &'a str,
+	pub user: &'key str,
 }
 
-impl KVKey for Us<'_> {
+impl KVKey for UserKey<'_> {
 	type ValueType = catalog::UserDefinition;
 }
 
-pub fn new(ns: NamespaceId, db: DatabaseId, user: &str) -> Us<'_> {
-	Us::new(ns, db, user)
+pub fn new(ns: NamespaceId, db: DatabaseId, user: &str) -> UserKey<'_> {
+	UserKey::new(ns, db, user)
 }
 
 pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
@@ -40,13 +40,13 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for Us<'_> {
+impl Categorise for UserKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseUser
 	}
 }
 
-impl<'a> Us<'a> {
+impl<'a> UserKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, user: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -69,12 +69,12 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Us::new(
+		let val = UserKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testuser",
 		);
-		let enc = Us::encode_key(&val).unwrap();
+		let enc = UserKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!ustestuser\0");
 	}
 

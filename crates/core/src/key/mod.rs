@@ -94,7 +94,7 @@
 //! crate::key::change::vs               /*{ns}*{db}#{ts}/*{ns}/*/{db}!vs*{tb}\0
 //! crate::key::change::suffix_vs        /*{ns}*{db}#{ts}/*{ns}/*/{db}!vs
 //!
-//! crate::key::thing                    /*{ns}*{db}*{tb}*{id}
+//! crate::key::record                   /*{ns}*{db}*{tb}*{id}
 //!
 //! crate::key::graph                    /*{ns}*{db}*{tb}~{id}{eg}{ft}{fk}
 //! crate::key::ref                      /*{ns}*{db}*{tb}&{id}{ft}{fk}{ff}
@@ -109,10 +109,10 @@ pub(crate) mod graph;
 pub(crate) mod index;
 pub(crate) mod namespace;
 pub(crate) mod node;
+pub(crate) mod record;
 pub(crate) mod r#ref;
 pub(crate) mod root;
 pub(crate) mod sequence;
 pub(crate) mod table;
-pub(crate) mod thing;
 pub(crate) mod value;
 pub(crate) mod version;

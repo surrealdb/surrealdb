@@ -6,6 +6,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
+use crate::catalog::providers::{CatalogProvider, TableProvider};
 use crate::catalog::{self, DatabaseDefinition, Permission, TableDefinition};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Workable};

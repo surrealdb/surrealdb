@@ -32,6 +32,7 @@ pub mod is {
 	use anyhow::Result;
 	use reblessive::tree::Stk;
 
+	use crate::catalog::providers::TableProvider;
 	use crate::ctx::Context;
 	use crate::dbs::Options;
 	use crate::doc::CursorDoc;
