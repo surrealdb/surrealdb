@@ -730,7 +730,7 @@ impl QueryExecutor {
 		if let Some(PerExpressionEntry::FullText(fte)) = self.0.exp_entries.get(exp) {
 			let ix = fte.0.io.ix_ref();
 			if let Some(PerIndexReferenceIndex::FullText(fti)) = self.0.ir_map.get(ix) {
-					if self.0.table == ix.table_name.as_str() {
+				if self.0.table == ix.table_name.as_str() {
 					return self.fulltext_matches_with_doc_id(ctx, thg, fti, fte).await;
 				}
 				return self.fulltext_matches_with_value(stk, ctx, opt, fti, fte, l, r).await;
