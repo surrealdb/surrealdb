@@ -404,10 +404,11 @@ impl Value {
 								let res = stk
 									.run(|stk| res.get(stk, ctx, opt, None, path.next()))
 									.await?;
-								if matches!(path.get(1), Some(Part::Lookup(_))) {
-									Ok(res.flatten())
-								} else {
-									Ok(res)
+
+								match path.get(1) {
+									Some(Part::Lookup(_)) => Ok(res.flatten()),
+									Some(Part::Where(_)) => Ok(res.flatten()),
+									_ => Ok(res),
 								}
 							}
 						}
