@@ -95,11 +95,7 @@
 //! crate::key::change::vs               /*{ns}*{db}#{ts}/*{ns}/*/{db}!vs*{tb_name}\0
 //! crate::key::change::suffix_vs        /*{ns}*{db}#{ts}/*{ns}/*/{db}!vs
 //!
-<<<<<<< HEAD
 //! crate::key::record                   /*{ns}*{db}*{tb_name}*{id}
-=======
-//! crate::key::record                   /*{ns}*{db}*{tb}*{id}
->>>>>>> origin/main
 //!
 //! crate::key::graph                    /*{ns}*{db}*{tb_name}~{id}{eg}{ft}{fk}
 //! crate::key::ref                      /*{ns}*{db}*{tb_name}&{id}{ft}{fk}{ff}

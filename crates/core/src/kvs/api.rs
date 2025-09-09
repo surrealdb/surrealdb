@@ -55,12 +55,8 @@ mod requirements {
 /// All keys and values are represented as byte arrays, encoding is handled
 /// by [`super::tr::Transactor`].
 #[allow(dead_code, reason = "Not used when none of the storage backends are enabled.")]
-<<<<<<< HEAD
-#[surrealdb_macros::wasm_async_trait]
-=======
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
->>>>>>> origin/main
 pub trait Transaction: requirements::TransactionRequirements {
 	/// Returns if the transaction supports scanning in reverse.
 	fn supports_reverse_scan(&self) -> bool;

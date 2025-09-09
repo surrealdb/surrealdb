@@ -6,7 +6,6 @@ use std::sync::Arc;
 use anyhow::Result;
 use futures::lock::{Mutex, MutexGuard};
 use futures::stream::Stream;
-use surrealdb_macros::wasm_async_trait;
 use uuid::Uuid;
 
 use super::batch::Batch;
@@ -17,13 +16,8 @@ use crate::catalog::providers::{
 	NamespaceProvider, NodeProvider, TableProvider, UserProvider,
 };
 use crate::catalog::{
-<<<<<<< HEAD
 	self, ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, IndexId,
 	NamespaceDefinition, NamespaceId, TableDefinition,
-=======
-	self, ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, NamespaceDefinition,
-	NamespaceId, TableDefinition,
->>>>>>> origin/main
 };
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
@@ -489,12 +483,8 @@ impl Transaction {
 	}
 }
 
-<<<<<<< HEAD
-#[wasm_async_trait]
-=======
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
->>>>>>> origin/main
 impl NodeProvider for Transaction {
 	/// Retrieve all nodes belonging to this cluster.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
@@ -534,12 +524,8 @@ impl NodeProvider for Transaction {
 	}
 }
 
-<<<<<<< HEAD
-#[wasm_async_trait]
-=======
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
->>>>>>> origin/main
 impl NamespaceProvider for Transaction {
 	/// Retrieve all namespace definitions in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
@@ -605,12 +591,8 @@ impl NamespaceProvider for Transaction {
 	}
 }
 
-<<<<<<< HEAD
-#[wasm_async_trait]
-=======
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
->>>>>>> origin/main
 impl DatabaseProvider for Transaction {
 	/// Retrieve all database definitions for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
@@ -1053,12 +1035,8 @@ impl DatabaseProvider for Transaction {
 	}
 }
 
-<<<<<<< HEAD
-#[wasm_async_trait]
-=======
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
->>>>>>> origin/main
 impl TableProvider for Transaction {
 	/// Retrieve all table definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
@@ -1452,7 +1430,6 @@ impl TableProvider for Transaction {
 		db: DatabaseId,
 		tb: &str,
 		ix: &str,
-<<<<<<< HEAD
 	) -> Result<Option<Arc<catalog::IndexDefinition>>> {
 		let qey = cache::tx::Lookup::Ix(ns, db, tb, ix);
 		match self.cache.get(&qey) {
@@ -1466,26 +1443,10 @@ impl TableProvider for Transaction {
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
 				Ok(Some(val))
-=======
-	) -> Result<Arc<catalog::IndexDefinition>> {
-		let qey = cache::tx::Lookup::Ix(ns, db, tb, ix);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
-			None => {
-				let key = crate::key::table::ix::new(ns, db, tb, ix);
-				let val = self.get(&key, None).await?.ok_or_else(|| Error::IxNotFound {
-					name: ix.to_owned(),
-				})?;
-				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
-				Ok(val)
->>>>>>> origin/main
 			}
 		}
 	}
 
-<<<<<<< HEAD
 	async fn get_tb_index_by_id(
 		&self,
 		ns: NamespaceId,
@@ -1545,8 +1506,6 @@ impl TableProvider for Transaction {
 		Ok(())
 	}
 
-=======
->>>>>>> origin/main
 	/// Fetch a specific record value.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_record(
@@ -1673,12 +1632,8 @@ impl TableProvider for Transaction {
 	}
 }
 
-<<<<<<< HEAD
-#[wasm_async_trait]
-=======
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
->>>>>>> origin/main
 impl UserProvider for Transaction {
 	/// Retrieve all ROOT level users in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
@@ -1830,12 +1785,8 @@ impl UserProvider for Transaction {
 	}
 }
 
-<<<<<<< HEAD
-#[wasm_async_trait]
-=======
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
->>>>>>> origin/main
 impl AuthorisationProvider for Transaction {
 	/// Retrieve all ROOT level accesses in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
@@ -2133,12 +2084,8 @@ impl AuthorisationProvider for Transaction {
 	}
 }
 
-<<<<<<< HEAD
-#[wasm_async_trait]
-=======
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
->>>>>>> origin/main
 impl ApiProvider for Transaction {
 	/// Retrieve all api definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
@@ -2193,12 +2140,8 @@ impl ApiProvider for Transaction {
 	}
 }
 
-<<<<<<< HEAD
-#[wasm_async_trait]
-=======
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
->>>>>>> origin/main
 impl BucketProvider for Transaction {
 	/// Retrieve all analyzer definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
