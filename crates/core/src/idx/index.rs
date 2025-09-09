@@ -94,7 +94,7 @@ impl<'a> IndexOperation<'a> {
 	/// types (Int/Float/Decimal). This means equal numeric values like 0, 0.0 and
 	/// 0dec map to the same index key and therefore conflict on UNIQUE indexes.
 	fn get_unique_index_key(&self, v: &'a StoreKeyArray) -> Result<key::index::Index> {
-		Ok(key::index::Index::new(self.ns, self.db, &self.ix.what, &self.ix.name, v, None))
+		Ok(key::index::Index::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id, v, None))
 	}
 
 	/// Build the KV key for a non-unique index. The record id is appended
@@ -104,8 +104,8 @@ impl<'a> IndexOperation<'a> {
 		Ok(key::index::Index::new(
 			self.ns,
 			self.db,
-			&self.ix.what,
-			&self.ix.name,
+			&self.ix.table_name,
+			self.ix.index_id,
 			v,
 			Some(&self.rid.key),
 		))
@@ -205,7 +205,7 @@ impl<'a> IndexOperation<'a> {
 		p: &FullTextParams,
 		require_compaction: &AtomicBool,
 	) -> Result<()> {
-		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.what, &self.ix.name);
+		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id);
 		let mut rc = false;
 		// Build a FullText instance
 		let s =
@@ -234,7 +234,7 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_mtree(&mut self, stk: &mut Stk, p: &MTreeParams) -> Result<()> {
 		let txn = self.ctx.tx();
-		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.what, &self.ix.name);
+		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id);
 		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write).await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
