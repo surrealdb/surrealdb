@@ -347,14 +347,23 @@ impl Value {
 					Part::Optional => {
 						stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await
 					}
-					_ => stk
-						.scope(|scope| {
-							let futs =
-								v.iter().map(|v| scope.run(|stk| v.get(stk, ctx, opt, doc, path)));
-							try_join_all_buffered(futs)
-						})
-						.await
-						.map(Value::from),
+					_ => {
+						let res = stk
+							.scope(|scope| {
+								let futs = v
+									.iter()
+									.map(|v| scope.run(|stk| v.get(stk, ctx, opt, doc, path)));
+								try_join_all_buffered(futs)
+							})
+							.await
+							.map(Value::from)?;
+
+						if matches!(p, Part::Lookup(_)) {
+							Ok(res.flatten())
+						} else {
+							Ok(res)
+						}
+					}
 				},
 				// Current value at path is a thing
 				Value::RecordId(v) => {
@@ -396,12 +405,7 @@ impl Value {
 							if last_part {
 								Ok(res)
 							} else {
-								let res = stk
-									.run(|stk| res.get(stk, ctx, opt, None, path.next()))
-									.await?
-									.flatten();
-
-								Ok(res)
+								stk.run(|stk| res.get(stk, ctx, opt, None, path.next())).await
 							}
 						}
 						Part::Method(name, args) => {
