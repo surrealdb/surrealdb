@@ -88,26 +88,9 @@ impl Document {
 				}
 			},
 			None => match stm {
-				Statement::Live(s) => match s.expr.len() {
-					0 => {
-						// Process the permitted documents
-						let (initial, current) = match self.reduced(stk, ctx, opt, Both).await? {
-							true => (&self.initial_reduced, &self.current_reduced),
-							false => (&self.initial, &self.current),
-						};
-						// Output a DIFF of any changes applied to the document
-						Ok(initial.doc.as_ref().diff(current.doc.as_ref(), Idiom::default()).into())
-					}
-					_ => {
-						// Process the permitted documents
-						let current = match self.reduced(stk, ctx, opt, Current).await? {
-							true => &self.current_reduced,
-							false => &self.current,
-						};
-						// Process the LIVE SELECT statement fields
-						s.expr.compute(stk, ctx, opt, Some(current), false).await
-					}
-				},
+				Statement::Live(_) => {
+					Err(Error::Unreachable(".lives() uses .lq_pluck(), not .pluck()".to_string()))
+				}
 				Statement::Select(s) => {
 					// Process the permitted documents
 					let current = match self.reduced(stk, ctx, opt, Current).await? {

@@ -670,7 +670,7 @@ mod tests {
 				"1".to_string(),
 			),
 			//
-			// 9 - Some functions are not allowed
+			// 7 - Some functions are not allowed
 			//
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
@@ -687,7 +687,7 @@ mod tests {
 				false,
 				"Function 'string::len' is not allowed".to_string(),
 			),
-			// 10 -
+			// 8 -
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -703,7 +703,7 @@ mod tests {
 				true,
 				"a".to_string(),
 			),
-			// 11 -
+			// 9 -
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -720,7 +720,7 @@ mod tests {
 				"Function 'time::now' is not allowed".to_string(),
 			),
 			//
-			// 12 - Some net targets are not allowed
+			// 10 - Some net targets are not allowed
 			//
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
@@ -742,7 +742,7 @@ mod tests {
 				false,
 				format!("Access to network target '{}' is not allowed", server1.address()),
 			),
-			// 13 -
+			// 11 -
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -763,7 +763,7 @@ mod tests {
 				false,
 				"Access to network target '1.1.1.1:80' is not allowed".to_string(),
 			),
-			// 14 -
+			// 12 -
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -785,7 +785,7 @@ mod tests {
 				"SUCCESS".to_string(),
 			),
 			(
-				// 15 - Ensure redirect fails
+				// 13 - Ensure redirect fails
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
@@ -806,7 +806,7 @@ mod tests {
 				),
 			),
 			(
-				// 16 - Ensure connecting via localhost succeed
+				// 14 - Ensure connecting via localhost succeed
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
@@ -817,7 +817,7 @@ mod tests {
 				true,
 				"SUCCESS".to_string(),
 			),
-			// - 17
+			// - 15
 			(
 				// Ensure redirect fails
 				Datastore::new("memory").await.unwrap().with_capabilities(
@@ -833,13 +833,13 @@ mod tests {
 				false,
 				"Access to network target '127.0.0.1/32' is not allowed".to_string(),
 			),
-			// 18 - Ensure redirect succeed
+			// 16 - Ensure redirect succeed
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str("blog.manel.in").unwrap()].into(),
+							[NetTarget::from_str("github.com").unwrap()].into(),
 						))
 						.without_network_targets(Targets::<NetTarget>::Some(
 							[
@@ -864,7 +864,9 @@ mod tests {
 						)),
 				),
 				Session::owner(),
-				"RETURN http::get('https://blog.manel.in/')".to_string(),
+				// This will be redirected to: https://github.com/surrealdb/surrealdb/pull/6293
+				"RETURN http::get('https://github.com/surrealdb/surrealdb/issues/6293')"
+					.to_string(),
 				true,
 				"<!DOCTYPE html>".to_string(),
 			),
