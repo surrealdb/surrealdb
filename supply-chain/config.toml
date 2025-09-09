@@ -1631,16 +1631,8 @@ criteria = "safe-to-deploy"
 version = "0.3.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.tracing]]
-version = "0.1.40"
-criteria = "safe-to-deploy"
-
 [[exemptions.tracing-appender]]
 version = "0.2.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.tracing-attributes]]
-version = "0.1.27"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing-attributes]]
@@ -1657,10 +1649,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tracing-opentelemetry]]
 version = "0.25.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.tracing-serde]]
-version = "0.1.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.try_map]]
