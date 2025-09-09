@@ -16,7 +16,7 @@ use crate::idx::ft::analyzer::tokenizer::{Tokenizer, Tokens};
 use crate::idx::ft::offset::Offset;
 use crate::idx::ft::{DocLength, TermFrequency};
 use crate::idx::trees::store::IndexStores;
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 pub(in crate::idx::ft) mod filter;
 pub(in crate::idx) mod mapper;
@@ -62,9 +62,7 @@ impl Analyzer {
 		tks: &mut Vec<Tokens>,
 	) -> Result<()> {
 		match val {
-			Value::Strand(s) => {
-				tks.push(self.generate_tokens(stk, ctx, opt, stage, s.into_string()).await?)
-			}
+			Value::Strand(s) => tks.push(self.generate_tokens(stk, ctx, opt, stage, s).await?),
 			Value::Number(n) => {
 				tks.push(self.generate_tokens(stk, ctx, opt, stage, n.to_string()).await?)
 			}
@@ -107,7 +105,7 @@ impl Analyzer {
 				.await
 				.catch_return()?;
 			if let Value::Strand(val) = val {
-				input = val.into_string();
+				input = val;
 			} else {
 				bail!(Error::InvalidFunction {
 					name: function_name,

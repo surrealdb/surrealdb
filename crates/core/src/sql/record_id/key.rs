@@ -5,7 +5,7 @@ use crate::sql::escape::{EscapeKey, EscapeRid};
 use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{Expr, RecordIdKeyRangeLit};
-use crate::val::{RecordIdKey, Strand, Uuid};
+use crate::val::{RecordIdKey, Uuid};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

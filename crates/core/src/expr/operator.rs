@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::catalog::Distance;
 use crate::expr::fmt::Fmt;
-use crate::expr::{Expr, Ident, Kind};
+use crate::expr::{Expr, Kind};
 use crate::idx::ft::MatchRef;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

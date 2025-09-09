@@ -98,7 +98,7 @@ impl Executor {
 
 					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
 					self.opt.set_ns(Some(ns.as_str().into()));
-					session.put(NS.as_ref(), ns.into_strand().into());
+					session.put(NS.as_ref(), ns.into_string().into());
 					ctx.add_value("session", session.into());
 				}
 				if let Some(db) = stmt.db {

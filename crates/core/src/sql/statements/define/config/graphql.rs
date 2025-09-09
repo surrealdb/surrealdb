@@ -1,6 +1,5 @@
 use std::fmt::{self, Display, Write};
 
-use crate::sql::Ident;
 use crate::sql::fmt::{Fmt, Pretty, pretty_indent};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

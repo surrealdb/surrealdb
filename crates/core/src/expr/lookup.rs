@@ -12,7 +12,7 @@ use crate::doc::CursorDoc;
 use crate::expr::fmt::Fmt;
 use crate::expr::order::Ordering;
 use crate::expr::start::Start;
-use crate::expr::{Cond, Dir, Fields, Groups, Ident, Idiom, Limit, RecordIdKeyRangeLit, Splits};
+use crate::expr::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits};
 use crate::kvs::KVKey;
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
 

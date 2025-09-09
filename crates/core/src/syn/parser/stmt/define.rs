@@ -22,14 +22,14 @@ use crate::sql::statements::{
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	AccessType, Expr, Ident, Index, Kind, Literal, Param, Permission, Permissions, Scoring,
-	TableType, access_type, table_type,
+	AccessType, Expr, Index, Kind, Literal, Param, Permission, Permissions, Scoring, TableType,
+	access_type, table_type,
 };
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Token, TokenKind, t};
-use crate::val::{Duration, Strand};
+use crate::val::Duration;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_define_stmt(
@@ -209,9 +209,9 @@ impl Parser<'_> {
 			name,
 			base,
 			// Safety: "Viewer" does not contain a null byte
-			roles: vec![unsafe { Ident::new_unchecked("Viewer".to_owned()) }], /* New users get
-			                                                                    * the viewer role
-			                                                                    * by default */
+			roles: vec!["Viewer".to_owned()], /* New users get
+			                                   * the viewer role
+			                                   * by default */
 			// TODO: Move out of the parser
 			token_duration: Some(Duration::from_secs(3600)), // defaults to 1 hour.
 			..DefineUserStatement::default()
@@ -228,16 +228,14 @@ impl Parser<'_> {
 					if let PassType::Hash(_) = res.pass_type {
 						bail!("Unexpected token `PASSWORD`", @token.span => "Can't set both a passhash and a password");
 					}
-					res.pass_type =
-						PassType::Password(self.next_token_value::<Strand>()?.into_string());
+					res.pass_type = PassType::Password(self.next_token_value::<String>()?);
 				}
 				t!("PASSHASH") => {
 					let token = self.pop_peek();
 					if let PassType::Password(_) = res.pass_type {
 						bail!("Unexpected token `PASSHASH`", @token.span => "Can't set both a passhash and a password");
 					}
-					res.pass_type =
-						PassType::Hash(self.next_token_value::<Strand>()?.into_string());
+					res.pass_type = PassType::Hash(self.next_token_value::<String>()?);
 				}
 				t!("ROLES") => {
 					self.pop_peek();
@@ -914,7 +912,7 @@ impl Parser<'_> {
 				}
 				t!("SEARCH") => {
 					self.pop_peek();
-					let mut analyzer: Option<Ident> = None;
+					let mut analyzer: Option<String> = None;
 					let mut scoring = None;
 					let mut doc_ids_order = 100;
 					let mut doc_lengths_order = 100;
@@ -1044,7 +1042,7 @@ impl Parser<'_> {
 						}
 					}
 					res.index = Index::FullText(crate::sql::index::FullTextParams {
-						az: analyzer.unwrap_or_else(|| Ident::from(strand!("like").to_owned())),
+						az: analyzer.unwrap_or_else(|| Ident::from("like".to_owned())),
 						sc: scoring.unwrap_or_else(Default::default),
 						hl,
 					});
@@ -1242,7 +1240,7 @@ impl Parser<'_> {
 							}
 							t!("MAPPER") => {
 								let open_span = expected!(self, t!("(")).span;
-								let path: Strand = self.next_token_value()?;
+								let path: String = self.next_token_value()?;
 								self.expect_closing_delimiter(t!(")"), open_span)?;
 								filters.push(Filter::Mapper(path.into_string()))
 							}
@@ -1606,7 +1604,7 @@ impl Parser<'_> {
 						let next = self.next();
 						match next.kind {
 							t!("KEY") => {
-								let key = self.next_token_value::<Strand>()?.into_string();
+								let key = self.next_token_value::<String>()?.into_string();
 								res.verify = access_type::JwtAccessVerify::Key(
 									access_type::JwtAccessVerifyKey {
 										alg,
@@ -1636,7 +1634,7 @@ impl Parser<'_> {
 			}
 			t!("URL") => {
 				self.pop_peek();
-				let url = self.next_token_value::<Strand>()?.into_string();
+				let url = self.next_token_value::<String>()?.into_string();
 				res.verify = access_type::JwtAccessVerify::Jwks(access_type::JwtAccessVerifyJwks {
 					url,
 				});
@@ -1672,7 +1670,7 @@ impl Parser<'_> {
 					}
 					t!("KEY") => {
 						self.pop_peek();
-						let key = self.next_token_value::<Strand>()?.into_string();
+						let key = self.next_token_value::<String>()?.into_string();
 						// If the algorithm is symmetric and a key is already defined, a different
 						// key is not expected.
 						if let JwtAccessVerify::Key(ref ver) = res.verify {

@@ -10,7 +10,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Base;
-use crate::expr::ident::Ident;
 use crate::expr::statements::define::run_indexing;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;

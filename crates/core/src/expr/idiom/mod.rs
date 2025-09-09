@@ -15,7 +15,7 @@ use crate::expr::fmt::Fmt;
 use crate::expr::part::{Next, NextMethod};
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{FlowResult, Ident, Part, Value};
+use crate::expr::{FlowResult, Part, Value};
 
 pub mod recursion;
 
@@ -319,7 +319,6 @@ mod tests {
 	use rstest::rstest;
 
 	use super::*;
-	use crate::val::Strand;
 
 	#[rstest]
 	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("name".to_string())))]), "name")]

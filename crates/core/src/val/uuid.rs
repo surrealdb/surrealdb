@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 
 use super::Datetime;
 use crate::expr::escape::QuoteStr;
-use crate::val::Strand;
 
 #[revisioned(revision = 1)]
 #[derive(

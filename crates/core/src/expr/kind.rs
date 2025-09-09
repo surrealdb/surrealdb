@@ -13,7 +13,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Literal, Part, Value};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
-	Regex, Strand, Uuid,
+	Regex, Uuid,
 };
 
 #[revisioned(revision = 1)]

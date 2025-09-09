@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Write};
 
+use crate::sql::Timeout;
 use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::{Ident, Timeout};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

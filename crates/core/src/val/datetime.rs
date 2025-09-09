@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::err::Error;
 use crate::expr::escape::QuoteStr;
 use crate::syn;
-use crate::val::{Duration, Strand, TrySub};
+use crate::val::{Duration, TrySub};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Hash)]

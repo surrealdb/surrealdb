@@ -12,18 +12,18 @@ use crate::err::Error;
 use crate::expr::filter::Filter;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::tokenizer::Tokenizer;
-use crate::expr::{Base, Ident, Value};
+use crate::expr::{Base, Value};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Array, Strand};
+use crate::val::Array;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineAnalyzerStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub function: Option<String>,
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl DefineAnalyzerStatement {

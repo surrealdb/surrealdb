@@ -47,7 +47,7 @@ use crate::dbs::node::Timestamp;
 use crate::dbs::{Capabilities, Executor, Notification, Options, Response, Session, Variables};
 use crate::err::Error;
 use crate::expr::statements::DefineUserStatement;
-use crate::expr::{Base, Expr, FlowResultExt as _, Ident, LogicalPlan};
+use crate::expr::{Base, Expr, FlowResultExt as _, LogicalPlan};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
@@ -68,7 +68,7 @@ use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 use crate::kvs::{LockType, TransactionType};
 use crate::sql::Ast;
 use crate::syn::parser::{ParserSettings, StatementStream};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 use crate::{cf, syn};
 
 const TARGET: &str = "surrealdb::core::kvs::ds";

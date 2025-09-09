@@ -1,14 +1,13 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::sql::{Expr, Ident, Permission};
-use crate::val::Strand;
+use crate::sql::{Expr, Permission};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineBucketStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub backend: Option<Expr>,
 	pub permissions: Permission,
 	pub readonly: bool,

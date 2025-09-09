@@ -5,14 +5,13 @@ use std::ops::Bound;
 use reblessive::Stk;
 
 use super::{ParseResult, Parser};
-use crate::sql::Ident;
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::{self, Numeric};
 use crate::syn::parser::mac::{expected, pop_glued};
 use crate::syn::parser::unexpected;
 use crate::syn::token::{Glued, Span, TokenKind, t};
 use crate::val::{
-	self, Array, Duration, Geometry, Number, Object, Range, RecordId, RecordIdKey, Strand, Value,
+	self, Array, Duration, Geometry, Number, Object, Range, RecordId, RecordIdKey, Value,
 };
 
 trait ValueParseFunc {

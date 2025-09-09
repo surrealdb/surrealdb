@@ -13,9 +13,9 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::reference::Reference;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind};
+use crate::expr::{Base, Expr, Idiom, Kind};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum AlterDefault {
@@ -29,7 +29,7 @@ pub enum AlterDefault {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AlterFieldStatement {
 	pub name: Idiom,
-	pub what: Ident,
+	pub what: String,
 	pub if_exists: bool,
 	pub flex: AlterKind<()>,
 	pub kind: AlterKind<Kind>,
@@ -38,7 +38,7 @@ pub struct AlterFieldStatement {
 	pub assert: AlterKind<Expr>,
 	pub default: AlterDefault,
 	pub permissions: Option<Permissions>,
-	pub comment: AlterKind<Strand>,
+	pub comment: AlterKind<String>,
 	pub reference: AlterKind<Reference>,
 }
 

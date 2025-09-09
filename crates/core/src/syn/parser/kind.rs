@@ -5,12 +5,12 @@ use reblessive::Stk;
 use super::basic::NumberToken;
 use super::mac::unexpected;
 use super::{ParseResult, Parser};
+use crate::sql::Kind;
 use crate::sql::kind::{GeometryKind, KindLiteral};
-use crate::sql::{Ident, Kind};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::expected;
 use crate::syn::token::{Glued, Keyword, Span, TokenKind, t};
-use crate::val::{Duration, Strand};
+use crate::val::Duration;
 
 impl Parser<'_> {
 	/// Parse a kind production.

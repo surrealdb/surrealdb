@@ -24,8 +24,8 @@ use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Session, Variables};
 use crate::err::Error;
+use crate::expr::access_type;
 use crate::expr::statements::access;
-use crate::expr::{Ident, access_type};
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, HEADER};
 use crate::iam::{self, Auth, algorithm_to_jwt_algorithm};
@@ -877,7 +877,7 @@ mod tests {
 	use crate::iam::Role;
 	use crate::sql::statements::define::DefineKind;
 	use crate::sql::statements::define::user::PassType;
-	use crate::sql::{Ast, Expr, Ident, TopLevelExpr};
+	use crate::sql::{Ast, Expr, TopLevelExpr};
 
 	struct TestLevel {
 		level: &'static str,

@@ -1,7 +1,5 @@
 use std::fmt;
 
-use crate::sql::ident::Ident;
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct OptionStatement {

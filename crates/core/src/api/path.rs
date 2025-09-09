@@ -8,7 +8,7 @@ use crate::err::Error;
 use crate::expr::Kind;
 use crate::expr::fmt::{Fmt, fmt_separated_by};
 use crate::syn;
-use crate::val::{Array, Object, Strand, Value};
+use crate::val::{Array, Object, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Path(pub Vec<Segment>);
@@ -272,7 +272,7 @@ impl Segment {
 					let values = segments
 						.iter()
 						.copied()
-						.map(|x| Value::Strand(Strand::new(x.to_owned()).unwrap()))
+						.map(|x| Value::Strand(x.to_owned()))
 						.collect::<Vec<_>>();
 
 					Some(Some((x.to_owned(), Value::Array(Array(values)))))

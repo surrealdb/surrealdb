@@ -1,8 +1,8 @@
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
+use crate::sql::Part;
 use crate::sql::fmt::{Fmt, fmt_separated_by};
-use crate::sql::{Ident, Part};
 
 // TODO: Remove unnessacry newtype.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

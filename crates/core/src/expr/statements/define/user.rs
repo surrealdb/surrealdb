@@ -14,24 +14,24 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::Base;
 use crate::expr::escape::QuoteStr;
 use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::user::UserDuration;
-use crate::expr::{Base, Ident};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{self, Strand, Value};
+use crate::val::{self, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineUserStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub base: Base,
 	pub hash: String,
 	pub code: String,
-	pub roles: Vec<Ident>,
+	pub roles: Vec<String>,
 	pub duration: UserDuration,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl DefineUserStatement {
@@ -39,7 +39,7 @@ impl DefineUserStatement {
 		DefineUserStatement {
 			kind: DefineKind::Default,
 			base,
-			name: Ident::from_strand(user),
+			name: user,
 			hash: Argon2::default()
 				.hash_password(pass.as_ref(), &SaltString::generate(&mut OsRng))
 				.unwrap()

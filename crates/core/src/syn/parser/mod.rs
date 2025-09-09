@@ -69,7 +69,7 @@ use crate::syn::error::{SyntaxError, bail};
 use crate::syn::lexer::Lexer;
 use crate::syn::lexer::compound::NumberKind;
 use crate::syn::token::{Span, Token, TokenKind, t};
-use crate::val::{Bytes, Datetime, Duration, File, Strand, Uuid};
+use crate::val::{Bytes, Datetime, Duration, File, Uuid};
 
 mod basic;
 mod builtin;

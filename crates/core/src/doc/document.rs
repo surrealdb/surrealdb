@@ -10,7 +10,7 @@ use crate::catalog::providers::{CatalogProvider, TableProvider};
 use crate::catalog::{self, DatabaseDefinition, Permission, TableDefinition};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Workable};
-use crate::expr::{Base, FlowResultExt as _, Ident};
+use crate::expr::{Base, FlowResultExt as _};
 use crate::iam::{Action, ResourceKind};
 use crate::idx::planner::RecordStrategy;
 use crate::idx::planner::iterators::IteratorRecord;

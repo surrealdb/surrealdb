@@ -12,7 +12,7 @@ use crate::syn;
 use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Null, Number, Object,
-	Range, RecordId, Regex, Strand, Uuid, Value,
+	Range, RecordId, Regex, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]
@@ -459,7 +459,7 @@ impl Cast for Bytes {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Bytes(b) => Ok(b),
-			Value::Strand(s) => Ok(Bytes(s.into_string().into_bytes())),
+			Value::Strand(s) => Ok(Bytes(s.into_bytes())),
 			Value::Array(x) => {
 				// Optimization to check first if the conversion can succeed to avoid possibly
 				// cloning large values.

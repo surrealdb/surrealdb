@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use anyhow::{Result, bail};
 
 use crate::err::Error;
-use crate::val::{Array, Object, Strand, Value};
+use crate::val::{Array, Object, Value};
 
 pub fn entries((object,): (Object,)) -> Result<Value> {
 	Ok(Value::Array(Array(
@@ -26,7 +26,7 @@ pub fn from_entries((array,): (Array,)) -> Result<Value> {
 			Value::Array(Array(entry)) if entry.len() == 2 => {
 				let key = match entry.first() {
 					Some(v) => match v {
-						Value::Strand(v) => v.clone().into_string(),
+						Value::Strand(v) => v.clone(),
 						v => v.to_string(),
 					},
 					_ => {

@@ -5,7 +5,7 @@ use reblessive::Stk;
 use super::enter_query_recursion;
 use super::mac::unexpected;
 use crate::sql::operator::{BindingPower, BooleanOperator, MatchesOperator, NearestNeighbor};
-use crate::sql::{BinaryOperator, Expr, Ident, Literal, Part, PostfixOperator, PrefixOperator};
+use crate::sql::{BinaryOperator, Expr, Literal, Part, PostfixOperator, PrefixOperator};
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::Numeric;
 use crate::syn::parser::mac::expected;

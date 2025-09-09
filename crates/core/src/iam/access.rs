@@ -7,7 +7,7 @@ use crate::ctx::MutableContext;
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::expr::statements::access;
-use crate::expr::{Base, Expr, Ident};
+use crate::expr::{Base, Expr};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;

@@ -20,11 +20,11 @@ use crate::expr::statements::{
 	UpsertStatement,
 };
 use crate::expr::{
-	BinaryOperator, Block, Constant, ControlFlow, FlowResult, FunctionCall, Ident, Idiom, Literal,
-	Mock, Param, PostfixOperator, PrefixOperator,
+	BinaryOperator, Block, Constant, ControlFlow, FlowResult, FunctionCall, Idiom, Literal, Mock,
+	Param, PostfixOperator, PrefixOperator,
 };
 use crate::fnc;
-use crate::val::{Array, Closure, Range, Strand, Value};
+use crate::val::{Array, Closure, Range, Value};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Expr {
@@ -188,12 +188,12 @@ impl Expr {
 			Expr::Param(i) => Idiom::field(i.clone().ident()),
 			Expr::FunctionCall(x) => x.receiver.to_idiom(),
 			Expr::Literal(l) => match l {
-				Literal::Strand(s) => Idiom::field(Ident::from_strand(s.clone())),
+				Literal::Strand(s) => Idiom::field(Ident::new(s.clone())),
 				// TODO: Null byte validity
-				Literal::Datetime(d) => Idiom::field(Ident::new(d.into_raw_string()).unwrap()),
-				x => Idiom::field(Ident::new(x.to_string()).unwrap()),
+				Literal::Datetime(d) => Idiom::field(Ident::new(d.into_raw_string())),
+				x => Idiom::field(Ident::new(x.to_string())),
 			},
-			x => Idiom::field(Ident::new(x.to_string()).unwrap()),
+			x => Idiom::field(Ident::new(x.to_string())),
 		}
 	}
 
@@ -731,8 +731,7 @@ impl fmt::Display for Expr {
 
 impl InfoStructure for Expr {
 	fn structure(self) -> Value {
-		// TODO: null byte validity
-		Strand::new(self.to_string()).unwrap().into()
+		self.to_string().into()
 	}
 }
 

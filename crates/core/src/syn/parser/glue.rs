@@ -2,7 +2,7 @@
 use super::{GluedValue, ParseResult, Parser};
 use crate::syn::lexer::compound;
 use crate::syn::token::{Glued, Token, TokenKind, t};
-use crate::val::{Datetime, Duration, Strand, Uuid};
+use crate::val::{Datetime, Duration, Uuid};
 
 impl Parser<'_> {
 	/// Glues the next token and returns the token after.

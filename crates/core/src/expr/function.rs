@@ -11,7 +11,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::Fmt;
-use crate::expr::{Expr, Ident, Idiom, Model, Script, Value};
+use crate::expr::{Expr, Idiom, Model, Script, Value};
 use crate::fnc;
 use crate::iam::Action;
 

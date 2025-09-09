@@ -5,7 +5,7 @@ use crate::dbs::result::Results;
 use crate::dbs::{Iterable, Statement};
 use crate::expr::lookup::LookupKind;
 use crate::idx::planner::RecordStrategy;
-use crate::val::{Object, Strand, Value};
+use crate::val::{Object, Value};
 
 pub(super) struct Plan {
 	pub(super) do_iterate: bool,
@@ -155,7 +155,7 @@ impl ExplainItem {
 				.into(),
 				details: vec![
 					//TODO: Properly handle possible null byte.
-					("table", Value::Strand(Strand::new(tb.to_owned()).unwrap())),
+					("table", Value::Strand(tb.clone())),
 					("range", Value::Range(Box::new(r.clone().into_value_range()))),
 					("direction", sc.to_string().into()),
 				],

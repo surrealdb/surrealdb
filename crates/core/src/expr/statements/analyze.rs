@@ -9,7 +9,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::Base;
-use crate::expr::ident::Ident;
 use crate::iam::{Action, ResourceKind};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::search::SearchIndex;

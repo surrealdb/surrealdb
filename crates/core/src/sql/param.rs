@@ -1,8 +1,6 @@
 use std::fmt;
 
-use crate::sql::Ident;
 use crate::sql::escape::EscapeKwFreeIdent;
-use crate::val::Strand;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -39,12 +37,6 @@ impl Param {
 	// Convert into a string.
 	pub fn into_string(self) -> String {
 		self.0
-	}
-}
-
-impl From<Ident> for Param {
-	fn from(value: Ident) -> Self {
-		Param(value.into_string())
 	}
 }
 

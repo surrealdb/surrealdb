@@ -11,7 +11,7 @@ use crate::catalog::{self, DatabaseId, Index, IndexDefinition, NamespaceId};
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
 use crate::expr::{
-	BinaryOperator, Cond, Expr, FlowResultExt as _, Ident, Idiom, Kind, Literal, Order, Part, With,
+	BinaryOperator, Cond, Expr, FlowResultExt as _, Idiom, Kind, Literal, Order, Part, With,
 };
 use crate::idx::planner::StatementContext;
 use crate::idx::planner::executor::{

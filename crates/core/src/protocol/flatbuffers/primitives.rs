@@ -4,7 +4,7 @@ use rust_decimal::Decimal;
 use surrealdb_protocol::fb::v1 as proto_fb;
 
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
-use crate::val::{Bytes, Duration, Strand, Uuid};
+use crate::val::{Bytes, Duration, Uuid};
 
 impl ToFlatbuffers for bool {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::BoolValue<'bldr>>;

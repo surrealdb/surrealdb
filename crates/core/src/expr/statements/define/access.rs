@@ -17,19 +17,19 @@ use crate::expr::access_type::{
 	JwtAccessVerifyJwks, JwtAccessVerifyKey,
 };
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{AccessType, Algorithm, Base, Expr, Ident, JwtAccess, RecordAccess};
+use crate::expr::{AccessType, Algorithm, Base, Expr, JwtAccess, RecordAccess};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{self, Strand, Value};
+use crate::val::{self, Value};
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash)]
 pub struct DefineAccessStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub base: Base,
 	pub access_type: AccessType,
 	pub authenticate: Option<Expr>,
 	pub duration: AccessDuration,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl DefineAccessStatement {

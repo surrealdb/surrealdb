@@ -7,9 +7,9 @@ use revision::revisioned;
 use crate::expr::Idiom;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::ToSql;
 use crate::sql::statements::define::DefineKind;
-use crate::sql::{Ident, ToSql};
-use crate::val::{Array, Number, Strand, Value};
+use crate::val::{Array, Number, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -31,7 +31,7 @@ impl IndexDefinition {
 			what: unsafe { Ident::new_unchecked(self.what.clone()) },
 			cols: self.cols.iter().cloned().map(Into::into).collect(),
 			index: self.index.to_sql_definition(),
-			comment: self.comment.clone().map(Strand::new_lossy),
+			comment: self.comment.clone(),
 			concurrently: false,
 		}
 	}

@@ -5,7 +5,6 @@ use super::config::api::ApiConfig;
 use crate::catalog::ApiMethod;
 use crate::sql::Expr;
 use crate::sql::fmt::{Fmt, pretty_indent};
-use crate::val::Strand;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

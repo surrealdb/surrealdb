@@ -3,7 +3,6 @@ use std::str::FromStr;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::expr::Ident;
 use crate::iam::Error;
 
 // In the future, we will allow for custom roles. For now, provide predefined

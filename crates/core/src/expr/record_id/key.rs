@@ -10,7 +10,7 @@ use crate::expr::escape::{EscapeKey, EscapeRid};
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::literal::ObjectEntry;
 use crate::expr::{Expr, FlowResultExt as _, RecordIdKeyRangeLit};
-use crate::val::{Array, Object, RecordIdKey, Strand, Uuid};
+use crate::val::{Array, Object, RecordIdKey, Uuid};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RecordIdKeyGen {

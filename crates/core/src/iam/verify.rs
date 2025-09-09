@@ -862,9 +862,9 @@ mod tests {
 
 	use super::*;
 	use crate::iam::token::{Audience, HEADER};
+	use crate::sql::Ast;
 	use crate::sql::statements::define::DefineKind;
 	use crate::sql::statements::define::user::PassType;
-	use crate::sql::{Ast, Ident};
 
 	struct TestLevel {
 		level: &'static str,

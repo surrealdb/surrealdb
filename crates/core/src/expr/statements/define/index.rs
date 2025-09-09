@@ -19,20 +19,20 @@ use crate::err::Error;
 use crate::expr::Output;
 #[cfg(target_family = "wasm")]
 use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
-use crate::expr::{Base, Ident, Idiom, Part};
+use crate::expr::{Base, Idiom, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ToSql;
 use crate::sql::fmt::Fmt;
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineIndexStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
-	pub what: Ident,
+	pub name: String,
+	pub what: String,
 	pub cols: Vec<Idiom>,
 	pub index: Index,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 	pub concurrently: bool,
 }
 

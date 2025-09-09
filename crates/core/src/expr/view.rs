@@ -3,7 +3,7 @@ use std::fmt;
 use crate::catalog::ViewDefinition;
 use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Cond, Fields, Groups, Ident, Value};
+use crate::expr::{Cond, Fields, Groups, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct View {

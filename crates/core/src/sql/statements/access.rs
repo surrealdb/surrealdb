@@ -1,8 +1,8 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use crate::sql::{Base, Cond, Ident, RecordIdLit};
-use crate::val::{Datetime, Duration, Strand, Uuid};
+use crate::sql::{Base, Cond, RecordIdLit};
+use crate::val::{Datetime, Duration, Uuid};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

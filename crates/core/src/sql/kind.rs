@@ -5,7 +5,7 @@ use rust_decimal::Decimal;
 
 use super::escape::EscapeKey;
 use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
-use crate::val::{Duration, Strand};
+use crate::val::Duration;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

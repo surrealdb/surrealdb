@@ -1,7 +1,5 @@
 use std::fmt;
 
-use crate::sql::Ident;
-
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct File {

@@ -19,7 +19,7 @@ use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
-use crate::expr::{Cond, Fields, Groups, Ident};
+use crate::expr::{Cond, Fields, Groups};
 use crate::idx::planner::executor::{InnerQueryExecutor, IteratorEntry, QueryExecutor};
 use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::knn::KnnBruteForceResults;

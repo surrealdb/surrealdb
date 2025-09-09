@@ -21,7 +21,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::kvs::KVKey;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
-	RecordIdKey, RecordIdKeyRange, Regex, Strand, Table, Uuid, Value,
+	RecordIdKey, RecordIdKeyRange, Regex, Table, Uuid, Value,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

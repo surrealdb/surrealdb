@@ -5,7 +5,7 @@ use super::mac::{expected, unexpected};
 use super::{ParseResult, Parser};
 use crate::sql::lookup::LookupKind;
 use crate::sql::part::{DestructurePart, Recurse, RecurseInstruction};
-use crate::sql::{Dir, Expr, Field, Fields, Ident, Idiom, Literal, Lookup, Param, Part};
+use crate::sql::{Dir, Expr, Field, Fields, Idiom, Literal, Lookup, Param, Part};
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::{self, Numeric};
 use crate::syn::token::{Glued, Span, TokenKind, t};
@@ -1008,21 +1008,17 @@ mod tests {
 			Expr::Idiom(Idiom(vec![
 				Part::Start(Expr::Literal(Literal::RecordId(RecordIdLit {
 					table: "person".to_owned(),
-					key: RecordIdKeyLit::String(strand!("test").to_owned())
+					key: RecordIdKeyLit::String("test".to_owned())
 				}))),
 				f("friend"),
 				Part::Graph(Lookup {
 					kind: LookupKind::Graph(Dir::Out),
-					what: vec![LookupSubject::Table(Ident::from_strand(
-						strand!("like").to_owned()
-					))],
+					what: vec![LookupSubject::Table(Ident::from_strand("like".to_owned()))],
 					..Default::default()
 				}),
 				Part::Graph(Lookup {
 					kind: LookupKind::Graph(Dir::Out),
-					what: vec![LookupSubject::Table(Ident::from_strand(
-						strand!("person").to_owned()
-					))],
+					what: vec![LookupSubject::Table(Ident::from_strand("person".to_owned()))],
 					..Default::default()
 				}),
 			]))
@@ -1066,7 +1062,7 @@ mod tests {
 			out,
 			Expr::Idiom(Idiom(vec![
 				Part::Start(Expr::Literal(Literal::Object(Vec::new()))),
-				Part::Value(Expr::Param(Param::from_strand(strand!("param").to_owned())))
+				Part::Value(Expr::Param(Param::from_strand("param".to_owned())))
 			]))
 		);
 	}
@@ -1176,7 +1172,7 @@ mod tests {
 					table: "test".to_owned(),
 					key: RecordIdKeyLit::Number(1),
 				}))),
-				Part::Value(Expr::Literal(Literal::Strand(strand!("foo").to_owned()))),
+				Part::Value(Expr::Literal(Literal::Strand("foo".to_owned()))),
 			]))
 		);
 	}

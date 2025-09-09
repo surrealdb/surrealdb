@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::sql::fmt::Fmt;
 use crate::sql::index::Distance;
-use crate::sql::{Expr, Ident, Kind};
+use crate::sql::{Expr, Kind};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

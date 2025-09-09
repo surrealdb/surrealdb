@@ -12,9 +12,7 @@ use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, Document, IgnoreError};
 use crate::err::Error;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
-use crate::expr::{
-	self, ControlFlow, Expr, Fields, FlowResultExt, Ident, Literal, Lookup, Mock, Part,
-};
+use crate::expr::{self, ControlFlow, Expr, Fields, FlowResultExt, Literal, Lookup, Mock, Part};
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
 	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,

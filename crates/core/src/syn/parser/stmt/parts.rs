@@ -6,8 +6,8 @@ use crate::sql::changefeed::ChangeFeed;
 use crate::sql::index::{Distance, VectorType};
 use crate::sql::reference::{Reference, ReferenceDeleteStrategy};
 use crate::sql::{
-	Base, Cond, Data, Explain, Expr, Fetch, Fetchs, Field, Fields, Group, Groups, Ident, Idiom,
-	Output, Permission, Permissions, Timeout, View, With,
+	Base, Cond, Data, Explain, Expr, Fetch, Fetchs, Field, Fields, Group, Groups, Idiom, Output,
+	Permission, Permissions, Timeout, View, With,
 };
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};

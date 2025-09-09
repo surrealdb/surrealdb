@@ -3,7 +3,7 @@ use std::fmt::Write;
 
 use super::fmt::{is_pretty, pretty_indent};
 use crate::sql::fmt::Fmt;
-use crate::sql::{Expr, Ident, Idiom, Lookup};
+use crate::sql::{Expr, Idiom, Lookup};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -12,7 +12,7 @@ pub enum Part {
 	Flatten,
 	Last,
 	First,
-	Field(Ident),
+	Field(String),
 	Where(Expr),
 	Graph(Lookup),
 	Value(Expr),

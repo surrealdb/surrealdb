@@ -6,7 +6,7 @@ use surrealdb_protocol::fb::v1 as proto_fb;
 use crate::expr::Kind;
 use crate::expr::kind::{GeometryKind, KindLiteral};
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
-use crate::val::{Duration, Strand, Table};
+use crate::val::{Duration, Table};
 
 impl ToFlatbuffers for Kind {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Kind<'bldr>>;
@@ -116,7 +116,7 @@ impl ToFlatbuffers for Kind {
 			Self::Record(tables) => {
 				let table_offsets: Vec<_> = tables
 					.iter()
-					.map(|t| unsafe { Table::new_unchecked(t.clone()) }.to_fb(builder))
+					.map(|t| t.clone().to_fb(builder))
 					.collect::<anyhow::Result<Vec<_>>>()?;
 				let tables = builder.create_vector(&table_offsets);
 				proto_fb::KindArgs {
@@ -637,7 +637,7 @@ mod tests {
 
 	use super::*;
 	use crate::expr::{Kind, KindLiteral};
-	use crate::val::{Duration, Strand};
+	use crate::val::Duration;
 
 	#[rstest]
 	#[case::any(Kind::Any)]

@@ -10,18 +10,18 @@ use crate::catalog::{BucketDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Base, Expr, FlowResultExt, Ident};
+use crate::expr::{Base, Expr, FlowResultExt};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineBucketStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub backend: Option<Expr>,
 	pub permissions: Permission,
 	pub readonly: bool,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl DefineBucketStatement {

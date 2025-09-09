@@ -10,7 +10,7 @@ use crate::sql::statements::{
 	UpdateStatement, UpsertStatement,
 };
 use crate::sql::{
-	BinaryOperator, Block, Closure, Constant, FunctionCall, Ident, Idiom, Literal, Mock, Param,
+	BinaryOperator, Block, Closure, Constant, FunctionCall, Idiom, Literal, Mock, Param,
 	PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
 use crate::val::{Number, Value};
@@ -22,7 +22,7 @@ pub enum Expr {
 
 	Param(Param),
 	Idiom(Idiom),
-	Table(Ident),
+	Table(String),
 	Mock(Mock),
 	// TODO(3.0) maybe unbox? check size.
 	Block(Box<Block>),

@@ -18,10 +18,10 @@ use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, KindLiteral, Part};
+use crate::expr::{Base, Expr, Idiom, Kind, KindLiteral, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum DefineDefault {
@@ -35,7 +35,7 @@ pub enum DefineDefault {
 pub struct DefineFieldStatement {
 	pub kind: DefineKind,
 	pub name: Idiom,
-	pub what: Ident,
+	pub what: String,
 	/// Whether the field is marked as flexible.
 	/// Flexible allows the field to be schemaless even if the table is marked as schemafull.
 	pub flex: bool,
@@ -46,7 +46,7 @@ pub struct DefineFieldStatement {
 	pub computed: Option<Expr>,
 	pub default: DefineDefault,
 	pub permissions: Permissions,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 	pub reference: Option<Reference>,
 }
 

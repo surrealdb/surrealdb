@@ -10,17 +10,17 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::{Base, Block, Ident, Kind};
+use crate::expr::{Base, Block, Kind};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineFunctionStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
-	pub args: Vec<(Ident, Kind)>,
+	pub name: String,
+	pub args: Vec<(String, Kind)>,
 	pub block: Block,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 	pub permissions: Permission,
 	pub returns: Option<Kind>,
 }

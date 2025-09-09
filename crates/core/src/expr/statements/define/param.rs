@@ -11,16 +11,16 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::{Base, Expr, FlowResultExt as _, Ident};
+use crate::expr::{Base, Expr, FlowResultExt as _};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineParamStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub value: Expr,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 	pub permissions: Permission,
 }
 

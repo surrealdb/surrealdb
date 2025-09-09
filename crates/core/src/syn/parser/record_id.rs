@@ -5,12 +5,11 @@ use reblessive::Stk;
 
 use super::{ParseResult, Parser};
 use crate::sql::lookup::LookupSubject;
-use crate::sql::{Ident, Param, RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit};
+use crate::sql::{Param, RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit};
 use crate::syn::error::bail;
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
 use crate::syn::token::{Glued, TokenKind, t};
-use crate::val::Strand;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_record_string(

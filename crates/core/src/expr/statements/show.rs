@@ -5,7 +5,7 @@ use anyhow::Result;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Base, Ident, Value};
+use crate::expr::{Base, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Datetime;
 use crate::vs::VersionStamp;

@@ -1,6 +1,5 @@
 use std::fmt;
 
-use crate::expr::Ident;
 use crate::expr::escape::EscapeIdent;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

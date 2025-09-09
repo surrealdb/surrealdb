@@ -4,7 +4,7 @@ use super::args::{Any, Cast, Optional};
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
 use crate::fnc::util::string;
-use crate::val::{Regex, Strand, Value};
+use crate::val::{Regex, Value};
 
 /// Returns `true` if a string of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<()> {

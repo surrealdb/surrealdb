@@ -1,7 +1,5 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::sql::Ident;
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveSequenceStatement {

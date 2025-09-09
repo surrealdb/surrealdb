@@ -1,4 +1,3 @@
-use crate::expr::Ident;
 use crate::expr::idiom::Idiom;
 use crate::val::Value;
 

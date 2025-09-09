@@ -14,7 +14,7 @@ use crate::sql::statements::{
 	ForeachStatement, InfoStatement, KillStatement, LiveStatement, OptionStatement,
 	OutputStatement, RebuildStatement, SetStatement, ShowStatement, SleepStatement, UseStatement,
 };
-use crate::sql::{AssignOperator, Expr, Fields, Ident, Literal, Param, TopLevelExpr};
+use crate::sql::{AssignOperator, Expr, Fields, Literal, Param, TopLevelExpr};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::unexpected;
 use crate::syn::token::{Glued, TokenKind, t};

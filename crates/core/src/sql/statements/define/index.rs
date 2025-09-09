@@ -2,8 +2,7 @@ use std::fmt::{self, Display};
 
 use super::DefineKind;
 use crate::sql::fmt::Fmt;
-use crate::sql::{Ident, Idiom, Index};
-use crate::val::Strand;
+use crate::sql::{Idiom, Index};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

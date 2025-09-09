@@ -1,9 +1,9 @@
 use anyhow::{Result, ensure};
 
 use crate::err::Error;
+use crate::expr::Operation;
 use crate::expr::operation::PatchError;
 use crate::expr::part::Part;
-use crate::expr::{Ident, Operation};
 use crate::val::Value;
 
 impl Value {
@@ -106,7 +106,7 @@ impl Value {
 					if let Value::Strand(p) = value {
 						if let Value::Strand(v) = this.pick(&path) {
 							let dmp = dmp::new();
-							let pch = dmp.patch_from_text(p.into_string()).map_err(|e| {
+							let pch = dmp.patch_from_text(p).map_err(|e| {
 								Error::InvalidPatch(PatchError {
 									message: format!("{e:?}"),
 								})

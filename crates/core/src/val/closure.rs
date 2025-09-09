@@ -9,7 +9,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Expr, FlowResultExt, Ident, Kind};
+use crate::expr::{Expr, FlowResultExt, Kind};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
@@ -55,7 +55,7 @@ impl Closure {
 					})
 				}
 				(kind, Some(val)) => {
-					if let Ok(val) = val.to_owned().coerce_to_kind(kind) {
+					if let Ok(val) = val.clone().coerce_to_kind(kind) {
 						ctx.add_value(name.to_string(), val.into());
 					} else {
 						bail!(Error::InvalidArguments {

@@ -2,7 +2,7 @@ use revision::revisioned;
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Fields, Groups};
-use crate::sql::{Ident, ToSql, View};
+use crate::sql::{ToSql, View};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]

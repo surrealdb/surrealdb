@@ -6,7 +6,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::ToSql;
 use crate::sql::statements::define::{DefineBucketStatement, DefineKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -29,12 +29,11 @@ impl BucketDefinition {
 	pub fn to_sql_definition(&self) -> DefineBucketStatement {
 		DefineBucketStatement {
 			kind: DefineKind::Default,
-			name: unsafe { crate::sql::Ident::new_unchecked(self.name.clone()) },
-			backend: self.backend.clone().map(|v| {
-				crate::sql::Expr::Literal(crate::sql::Literal::Strand(unsafe {
-					Strand::new_unchecked(v)
-				}))
-			}),
+			name: unsafe { crate::sql::Ident::new(self.name.clone()) },
+			backend: self
+				.backend
+				.clone()
+				.map(|v| crate::sql::Expr::Literal(crate::sql::Literal::Strand(v))),
 			permissions: self.permissions.clone().into(),
 			readonly: self.readonly,
 			comment: self.comment.clone().map(Into::into),
@@ -48,7 +47,7 @@ impl InfoStructure for BucketDefinition {
 			"name".to_string() => self.name.into(),
 			"permissions".to_string() => self.permissions.structure(),
 			// TODO: Null byte validity
-			"backend".to_string(), if let Some(backend) = self.backend => Value::Strand(Strand::new(backend.to_string()).unwrap()),
+			"backend".to_string(), if let Some(backend) = self.backend => Value::Strand(backend.to_string()),
 			"readonly".to_string() => self.readonly.into(),
 			"comment".to_string(), if let Some(comment) = self.comment => comment.into(),
 		})

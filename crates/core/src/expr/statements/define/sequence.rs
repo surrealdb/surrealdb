@@ -8,7 +8,7 @@ use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Base, Ident, Timeout, Value};
+use crate::expr::{Base, Timeout, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;

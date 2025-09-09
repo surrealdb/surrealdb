@@ -14,7 +14,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::operator::{BooleanOperator, MatchesOperator};
-use crate::expr::{Cond, Expr, FlowResultExt as _, Ident, Idiom};
+use crate::expr::{Cond, Expr, FlowResultExt as _, Idiom};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::btdocids::BTreeDocIds;
 use crate::idx::ft::MatchRef;

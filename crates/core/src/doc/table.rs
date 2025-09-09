@@ -16,7 +16,7 @@ use crate::expr::statements::ifelse::IfelseStatement;
 use crate::expr::statements::upsert::UpsertStatement;
 use crate::expr::{
 	AssignOperator, BinaryOperator, Cond, Data, Expr, Field, Fields, FlowResultExt as _, Function,
-	FunctionCall, Groups, Ident, Idiom, Literal, Part,
+	FunctionCall, Groups, Idiom, Literal, Part,
 };
 use crate::val::{Array, RecordId, RecordIdKey, Value};
 

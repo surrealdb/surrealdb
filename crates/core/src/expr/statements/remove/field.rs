@@ -8,7 +8,7 @@ use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Base, Ident, Idiom, Value};
+use crate::expr::{Base, Idiom, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]

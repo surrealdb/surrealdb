@@ -11,7 +11,6 @@ use crate::doc::CursorDoc;
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Value};
-use crate::val::Strand;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -100,7 +99,6 @@ impl Display for Block {
 
 impl InfoStructure for Block {
 	fn structure(self) -> Value {
-		// TODO: Null byte validity
-		Value::Strand(Strand::new(self.to_string()).unwrap())
+		Value::Strand(self.to_string())
 	}
 }

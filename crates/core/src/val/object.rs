@@ -18,7 +18,7 @@ use crate::val::{RecordId, Value};
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::Object")]
-pub struct Object(#[serde(with = "no_nul_bytes_in_keys")] pub BTreeMap<String, Value>);
+pub struct Object(pub BTreeMap<String, Value>);
 
 impl From<BTreeMap<&str, Value>> for Object {
 	fn from(v: BTreeMap<&str, Value>) -> Self {

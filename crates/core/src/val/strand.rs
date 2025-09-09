@@ -61,7 +61,7 @@ fn remove_null_bytes(s: String) -> String {
 
 /// A string that doesn't contain NUL bytes.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)
 #[serde(rename = "$surrealdb::private::Strand")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Strand(#[serde(with = "no_nul_bytes")] String);

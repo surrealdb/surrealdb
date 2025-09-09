@@ -14,7 +14,7 @@ use crate::expr::fmt::{Fmt, is_pretty, pretty_indent};
 use crate::expr::idiom::recursion::{
 	self, Recursion, clean_iteration, compute_idiom_recursion, is_final,
 };
-use crate::expr::{Expr, FlowResultExt as _, Ident, Idiom, Literal, Lookup, Value};
+use crate::expr::{Expr, FlowResultExt as _, Idiom, Literal, Lookup, Value};
 use crate::val::{Array, RecordId};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -23,7 +23,7 @@ pub enum Part {
 	Flatten,
 	Last,
 	First,
-	Field(Ident),
+	Field(String),
 	Where(Expr),
 	Lookup(Lookup),
 	Value(Expr),

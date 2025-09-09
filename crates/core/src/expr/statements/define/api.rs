@@ -14,7 +14,6 @@ use crate::err::Error;
 use crate::expr::fmt::{Fmt, pretty_indent};
 use crate::expr::{Base, Expr, FlowResultExt as _, Value};
 use crate::iam::{Action, ResourceKind};
-use crate::val::Strand;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineApiStatement {
@@ -23,7 +22,7 @@ pub struct DefineApiStatement {
 	pub actions: Vec<ApiAction>,
 	pub fallback: Option<Expr>,
 	pub config: ApiConfig,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl DefineApiStatement {

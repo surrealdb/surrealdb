@@ -19,22 +19,22 @@ use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::UpdateStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, Output, View};
+use crate::expr::{Base, Expr, Idiom, Kind, Output, View};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineTableStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
-	pub name: Ident,
+	pub name: String,
 	pub drop: bool,
 	pub full: bool,
 	pub view: Option<View>,
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 	pub table_type: TableType,
 }
 

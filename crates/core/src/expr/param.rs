@@ -12,9 +12,8 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::escape::EscapeKwFreeIdent;
-use crate::expr::ident::Ident;
 use crate::iam::Action;
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Param(String);

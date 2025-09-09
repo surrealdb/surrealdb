@@ -36,13 +36,13 @@ use crate::sql::statements::{
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
 	Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, Explain, Expr, Fetch,
-	Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Idioms, Index, Kind, Limit, Literal,
-	Lookup, Mock, Order, Output, Param, Part, Permission, Permissions, RecordIdKeyLit, RecordIdLit,
-	Scoring, Split, Splits, Start, TableType, Timeout, TopLevelExpr, With,
+	Fetchs, Field, Fields, Group, Groups, Idiom, Idioms, Index, Kind, Limit, Literal, Lookup, Mock,
+	Order, Output, Param, Part, Permission, Permissions, RecordIdKeyLit, RecordIdLit, Scoring,
+	Split, Splits, Start, TableType, Timeout, TopLevelExpr, With,
 };
 use crate::syn;
 use crate::syn::parser::ParserSettings;
-use crate::val::{Datetime, Duration, Number, Strand, Uuid};
+use crate::val::{Datetime, Duration, Number, Uuid};
 
 fn ident_field(name: &str) -> Expr {
 	Expr::Idiom(Idiom(vec![Part::Field(Ident::new(name.to_string()).unwrap())]))

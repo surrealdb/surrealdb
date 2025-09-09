@@ -1,7 +1,7 @@
 use js::JsLifetime;
 use js::class::Trace;
 
-use crate::val::{RecordId, Strand, Value};
+use crate::val::{RecordId, Value};
 
 #[derive(Clone, Trace, JsLifetime)]
 #[js::class]

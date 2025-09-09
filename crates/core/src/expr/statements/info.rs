@@ -14,7 +14,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{
 	Base, DefineAccessStatement, DefineAnalyzerStatement, DefineUserStatement, Expr, FlowResultExt,
-	Ident,
 };
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ToSql;
@@ -69,7 +68,7 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_root_accesses().await?.iter() {
 								let def = DefineAccessStatement::from_definition(Base::Root, v).redact();
-								out.insert(def.name.to_raw_string(), def.to_string().into());
+								out.insert(def.name.clone(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -120,7 +119,7 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_ns_accesses(ns).await?.iter() {
 								let def = DefineAccessStatement::from_definition(Base::Ns, v).redact();
-								out.insert(def.name.to_raw_string(), def.to_string().into());
+								out.insert(def.name.clone(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -182,7 +181,7 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_db_accesses(ns, db).await?.iter() {
 								let def = DefineAccessStatement::from_definition(Base::Db, v).redact();
-								out.insert(def.name.to_raw_string(), def.to_string().into());
+								out.insert(def.name.clone(), def.to_string().into());
 							}
 							out.into()
 						},

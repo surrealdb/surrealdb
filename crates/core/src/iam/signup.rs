@@ -14,7 +14,6 @@ use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Session, Variables};
 use crate::err::Error;
-use crate::expr::Ident;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::Claims;
 use crate::iam::{Actor, Auth, Level, algorithm_to_jwt_algorithm};

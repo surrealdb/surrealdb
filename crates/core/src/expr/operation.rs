@@ -2,7 +2,7 @@ use std::fmt;
 
 use revision::revisioned;
 
-use crate::val::{Array, Object, Strand, Value};
+use crate::val::{Array, Object, Value};
 
 #[derive(Debug)]
 pub struct PatchError {
@@ -65,7 +65,7 @@ impl Operation {
 				res.push('/');
 				res.push_str(p);
 			}
-			Strand::new(res).unwrap().into()
+			res.into()
 		}
 
 		let res = match self {
@@ -74,7 +74,7 @@ impl Operation {
 				value,
 			} => {
 				map! {
-					"op".to_owned() => Value::Strand(strand!("add").to_owned()),
+					"op".to_owned() => Value::Strand("add".to_owned()),
 					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 					"value".to_owned() => value,
@@ -85,7 +85,7 @@ impl Operation {
 			} => {
 				map! {
 					// safety: does not contain null bytes.
-					"op".to_owned() => Value::Strand(strand!("remove").to_owned()),
+					"op".to_owned() => Value::Strand("remove".to_owned()),
 					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 				}
@@ -96,7 +96,7 @@ impl Operation {
 			} => {
 				map! {
 					// safety: does not contain null bytes.
-					"op".to_owned() => Value::Strand(strand!("replace").to_owned()),
+					"op".to_owned() => Value::Strand("replace".to_owned()),
 					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 					"value".to_owned() => value,
@@ -108,7 +108,7 @@ impl Operation {
 			} => {
 				map! {
 					// safety: does not contain null bytes.
-					"op".to_owned() => Value::Strand(strand!("change").to_owned()),
+					"op".to_owned() => Value::Strand("change".to_owned()),
 					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 					"value".to_owned() => value,
@@ -120,7 +120,7 @@ impl Operation {
 			} => {
 				map! {
 					// safety: does not contain null bytes.
-					"op".to_owned() => Value::Strand(strand!("copy").to_owned()),
+					"op".to_owned() => Value::Strand("copy".to_owned()),
 					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 					"from".to_owned() => path_to_strand(&from),
@@ -132,7 +132,7 @@ impl Operation {
 			} => {
 				map! {
 					// safety: does not contain null bytes.
-					"op".to_owned() => Value::Strand(strand!("map").to_owned()),
+					"op".to_owned() => Value::Strand("map".to_owned()),
 					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 					"from".to_owned() => path_to_strand(&from),
@@ -144,7 +144,7 @@ impl Operation {
 			} => {
 				map! {
 					// safety: does not contain null bytes.
-					"op".to_owned() => Value::Strand(strand!("test").to_owned()),
+					"op".to_owned() => Value::Strand("test".to_owned()),
 					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 					"value".to_owned() => value,

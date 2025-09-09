@@ -8,7 +8,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::{Base, Ident, Timeout, Value};
+use crate::expr::{Base, Timeout, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 

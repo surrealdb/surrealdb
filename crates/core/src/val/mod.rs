@@ -31,7 +31,6 @@ pub mod range;
 pub mod record;
 pub mod record_id;
 pub mod regex;
-pub mod strand;
 pub mod table;
 pub mod uuid;
 pub mod value;
@@ -48,7 +47,6 @@ pub use self::object::Object;
 pub use self::range::Range;
 pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::regex::Regex;
-pub use self::strand::{Strand, StrandRef};
 pub use self::table::Table;
 pub use self::uuid::Uuid;
 pub use self::value::{CastError, CoerceError};
@@ -70,7 +68,7 @@ pub enum Value {
 	Null,
 	Bool(bool),
 	Number(Number),
-	Strand(Strand),
+	Strand(String),
 	Duration(Duration),
 	Datetime(Datetime),
 	Uuid(Uuid),
@@ -247,7 +245,7 @@ impl Value {
 	/// Converts this Value into an unquoted String
 	pub fn as_raw_string(self) -> String {
 		match self {
-			Value::Strand(v) => v.into_string(),
+			Value::Strand(v) => v,
 			Value::Uuid(v) => v.to_raw(),
 			Value::Datetime(v) => v.into_raw_string(),
 			_ => self.to_string(),
@@ -257,7 +255,7 @@ impl Value {
 	/// Converts this Value into an unquoted String
 	pub fn to_raw_string(&self) -> String {
 		match self {
-			Value::Strand(v) => v.clone().into_string(),
+			Value::Strand(v) => v.clone(),
 			Value::Uuid(v) => v.to_raw(),
 			Value::Datetime(v) => v.into_raw_string(),
 			_ => self.to_string(),
@@ -653,7 +651,10 @@ impl TryAdd for Value {
 	fn try_add(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_add(w)?),
-			(Self::Strand(v), Self::Strand(w)) => Self::Strand(v.try_add(w)?),
+			(Self::Strand(v), Self::Strand(w)) => {
+				v.push_str(&w);
+				Ok(Value::Strand(v))
+			}
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_add(v)?),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),
 			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_add(w)?),
@@ -889,7 +890,7 @@ subtypes! {
 	Null => (is_null,_unused,_unused),
 	Bool(bool) => (is_bool,as_bool,into_bool),
 	Number(Number) => (is_number,as_number,into_number),
-	Strand(Strand) => (is_strand,as_strand,into_strand),
+	Strand(String) => (is_strand,as_strand,into_strand),
 	Table(Table) => (is_table,as_table,into_table),
 	Duration(Duration) => (is_duration,as_duration,into_duration),
 	Datetime(Datetime) => (is_datetime,as_datetime,into_datetime),
@@ -956,15 +957,9 @@ impl From<usize> for Value {
 	}
 }
 
-impl From<String> for Value {
-	fn from(v: String) -> Self {
-		Self::Strand(Strand::from(v))
-	}
-}
-
 impl From<&str> for Value {
 	fn from(v: &str) -> Self {
-		Self::Strand(Strand::from(v))
+		Self::Strand(v.to_owned())
 	}
 }
 

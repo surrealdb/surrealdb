@@ -7,7 +7,7 @@ use rust_decimal::Decimal;
 use crate::sql::escape::EscapeKey;
 use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::sql::{Closure, Expr, RecordIdLit};
-use crate::val::{Bytes, Datetime, Duration, File, Geometry, Regex, Strand, Uuid};
+use crate::val::{Bytes, Datetime, Duration, File, Geometry, Regex, Uuid};
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -23,7 +23,7 @@ pub enum Literal {
 	Decimal(Decimal),
 	Duration(Duration),
 
-	Strand(Strand),
+	Strand(String),
 	RecordId(RecordIdLit),
 	Datetime(Datetime),
 	Uuid(Uuid),

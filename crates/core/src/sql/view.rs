@@ -1,7 +1,7 @@
 use std::fmt;
 
 use crate::sql::fmt::Fmt;
-use crate::sql::{Cond, Fields, Groups, Ident};
+use crate::sql::{Cond, Fields, Groups};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

@@ -10,19 +10,19 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Expr, Ident};
+use crate::expr::{Base, Expr};
 use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::Fmt;
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineEventStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
-	pub target_table: Ident,
+	pub name: String,
+	pub target_table: String,
 	pub when: Expr,
 	pub then: Vec<Expr>,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl DefineEventStatement {

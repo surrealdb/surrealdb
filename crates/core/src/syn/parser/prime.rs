@@ -5,15 +5,14 @@ use super::mac::pop_glued;
 use super::{ParseResult, Parser};
 use crate::sql::lookup::LookupKind;
 use crate::sql::{
-	Closure, Dir, Expr, Function, FunctionCall, Ident, Idiom, Kind, Literal, Mock, Param, Part,
-	Script,
+	Closure, Dir, Expr, Function, FunctionCall, Idiom, Kind, Literal, Mock, Param, Part, Script,
 };
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::{self, Numeric};
 use crate::syn::parser::enter_object_recursion;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::token::{Glued, Span, TokenKind, t};
-use crate::val::{Duration, Strand};
+use crate::val::Duration;
 
 impl Parser<'_> {
 	pub(super) fn parse_number_like_prime(&mut self) -> ParseResult<Expr> {

@@ -1,6 +1,5 @@
 use std::fmt;
 
-use crate::sql::Ident;
 use crate::val::Datetime;
 use crate::vs::VersionStamp;
 

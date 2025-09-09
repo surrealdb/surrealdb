@@ -3,7 +3,7 @@ use serde::Serialize;
 
 use crate::dbs;
 use crate::dbs::Notification;
-use crate::val::{Object, Strand, Value};
+use crate::val::{Object, Value};
 
 /// The data returned by the database
 // The variants here should be in exactly the same order as `crate::engine::remote::ws::Data`

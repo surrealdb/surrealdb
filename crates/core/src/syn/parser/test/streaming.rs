@@ -27,13 +27,13 @@ use crate::sql::statements::{
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
 	Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, Explain, Expr, Fetch,
-	Fetchs, Field, Fields, Function, FunctionCall, Group, Groups, Ident, Idiom, Idioms, Index,
-	Kind, Limit, Literal, Lookup, Mock, Order, Output, Param, Part, Permission, Permissions,
+	Fetchs, Field, Fields, Function, FunctionCall, Group, Groups, Idiom, Idioms, Index, Kind,
+	Limit, Literal, Lookup, Mock, Order, Output, Param, Part, Permission, Permissions,
 	RecordAccess, RecordIdKeyLit, RecordIdLit, RemoveFunctionStatement, Scoring, Script, Split,
 	Splits, Start, TableType, Timeout, TopLevelExpr, With,
 };
 use crate::syn::parser::StatementStream;
-use crate::val::{Datetime, Duration, Number, Regex, Strand, Uuid};
+use crate::val::{Datetime, Duration, Number, Regex, Uuid};
 
 fn ident_field(name: &str) -> Expr {
 	Expr::Idiom(Idiom(vec![Part::Field(Ident::new(name.to_string()).unwrap())]))

@@ -9,18 +9,18 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::Base;
 use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::{Base, Ident};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineModelStatement {
 	pub kind: DefineKind,
 	pub hash: String,
-	pub name: Ident,
+	pub name: String,
 	pub version: String,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 	pub permissions: Permission,
 }
 

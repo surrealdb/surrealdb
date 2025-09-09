@@ -8,7 +8,7 @@ use crate::expr::Operation;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::ToSql;
-use crate::val::{Array, Number, Object, RecordId, Strand, Value};
+use crate::val::{Array, Number, Object, RecordId, Value};
 use crate::vs::VersionStamp;
 
 // Mutation is a single mutation to a table.
@@ -35,7 +35,7 @@ impl From<TableDefinition> for Value {
 	fn from(v: TableDefinition) -> Self {
 		let mut h = HashMap::<&str, Value>::new();
 		h.insert("id", Value::Number(Number::Int(v.table_id.0 as i64)));
-		h.insert("name", Value::Strand(Strand::from(v.name.clone())));
+		h.insert("name", Value::Strand(v.name.clone()));
 		Value::Object(Object::from(h))
 	}
 }

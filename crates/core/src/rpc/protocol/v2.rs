@@ -14,16 +14,16 @@ use crate::rpc::args::extract_args;
 use crate::rpc::statement_options::StatementOptions;
 use crate::rpc::{Data, Method, RpcContext, RpcError};
 use crate::sql::{
-	Ast, CreateStatement, DeleteStatement, Expr, Fields, Function, FunctionCall, Ident,
-	InsertStatement, KillStatement, LiveStatement, Model, Output, Param, RelateStatement,
-	SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
+	Ast, CreateStatement, DeleteStatement, Expr, Fields, Function, FunctionCall, InsertStatement,
+	KillStatement, LiveStatement, Model, Output, Param, RelateStatement, SelectStatement,
+	TopLevelExpr, UpdateStatement, UpsertStatement,
 };
-use crate::val::{Array, Object, Strand, Value};
+use crate::val::{Array, Object, Value};
 
 /// utility function converting a `Value::Strand` into a `Expr::Table`
 fn value_to_table(value: Value) -> Expr {
 	match value {
-		Value::Strand(s) => Expr::Table(Ident::from_strand(s)),
+		Value::Strand(s) => Expr::Table(s),
 		x => x.into_literal().into(),
 	}
 }
@@ -102,7 +102,7 @@ pub trait RpcProtocolV2: RpcContext {
 		match ns {
 			Value::None => (),
 			Value::Null => session.ns = None,
-			Value::Strand(ns) => session.ns = Some(ns.into_string()),
+			Value::Strand(ns) => session.ns = Some(ns),
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
 					"Expected ns to be string, got {unexpected:?}"
@@ -113,7 +113,7 @@ pub trait RpcProtocolV2: RpcContext {
 		match db {
 			Value::None => (),
 			Value::Null => session.db = None,
-			Value::Strand(db) => session.db = Some(db.into_string()),
+			Value::Strand(db) => session.db = Some(db),
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
 					"Expected db to be string, got {unexpected:?}"
@@ -150,12 +150,7 @@ pub trait RpcProtocolV2: RpcContext {
 		let out: Result<Value> = crate::iam::signup::signup(self.kvs(), &mut session, params)
 			.await
 			// TODO: Null byte validity
-			.map(|v| {
-				v.token
-					.clone()
-					.map(|x| Value::Strand(Strand::new(x).unwrap()))
-					.unwrap_or(Value::None)
-			});
+			.map(|v| v.token.clone().map(|x| Value::Strand(x)).unwrap_or(Value::None));
 
 		// Store the updated session
 		self.set_session(Arc::new(session));
@@ -183,7 +178,7 @@ pub trait RpcProtocolV2: RpcContext {
 		let out: Result<Value> = crate::iam::signin::signin(self.kvs(), &mut session, params)
 			.await
 			// TODO: Null byte validity
-			.map(|v| Strand::new(v.token.clone()).unwrap().into());
+			.map(|v| v.token.clone().into());
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -257,7 +252,7 @@ pub trait RpcProtocolV2: RpcContext {
 	// ------------------------------
 
 	async fn info(&self) -> Result<Data, RpcError> {
-		let what = vec![Expr::Param(Param::from_strand(strand!("auth").to_owned()))];
+		let what = vec![Expr::Param(Param::from_strand("auth".to_owned()))];
 
 		// TODO: Check if this can be replaced by just evaluating the param or a
 		// `$auth.*` expression
@@ -315,7 +310,7 @@ pub trait RpcProtocolV2: RpcContext {
 		let mut session = self.session().as_ref().clone();
 		match val {
 			None | Some(Value::None) => session.variables.remove(key.as_str()),
-			Some(val) => session.variables.insert(key.into_string(), val),
+			Some(val) => session.variables.insert(key, val),
 		}
 		self.set_session(Arc::new(session));
 
@@ -515,7 +510,7 @@ pub trait RpcProtocolV2: RpcContext {
 		}
 
 		let into = match what {
-			Value::Strand(x) => Some(Expr::Table(Ident::from_strand(x))),
+			Value::Strand(x) => Some(Expr::Table(x)),
 			x => {
 				if x.is_nullish() {
 					None
@@ -913,7 +908,7 @@ pub trait RpcProtocolV2: RpcContext {
 			))?;
 		// Parse the function name argument
 		let name = match name {
-			Value::Strand(v) => v.into_string(),
+			Value::Strand(v) => v,
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
 					"Expected name to be string, got {unexpected:?}"
@@ -922,7 +917,7 @@ pub trait RpcProtocolV2: RpcContext {
 		};
 		// Parse any function version argument
 		let version = match version {
-			Some(Value::Strand(v)) => Some(v.into_string()),
+			Some(Value::Strand(v)) => Some(v),
 			None | Some(Value::None | Value::Null) => None,
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
