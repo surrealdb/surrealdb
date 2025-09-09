@@ -292,7 +292,7 @@ impl Executor {
 		kvs: &Datastore,
 		start: &Instant,
 		stmt: TopLevelExpr,
-	) -> Result<Value> {
+	) -> Result<Output> {
 		// Don't even try to run if the query should already be finished.
 		match self.ctx.done(true)? {
 			None => {}
@@ -312,7 +312,7 @@ impl Executor {
 		kvs: &Datastore,
 		start: &Instant,
 		plan: TopLevelExpr,
-	) -> Result<Value> {
+	) -> Result<Output> {
 		let transaction_type = if plan.read_only() {
 			TransactionType::Read
 		} else {

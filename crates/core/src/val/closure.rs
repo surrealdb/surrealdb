@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::collections::VecDeque;
 use std::fmt;
 
 use anyhow::{Result, bail};
@@ -9,7 +10,6 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use std::collections::VecDeque;
 use crate::expr::{Expr, FlowResultExt, Ident, Kind};
 use crate::val::Output;
 

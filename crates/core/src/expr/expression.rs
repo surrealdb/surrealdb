@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::fmt;
 use std::ops::Bound;
 
@@ -9,7 +10,6 @@ use super::SleepStatement;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use std::collections::VecDeque;
 use crate::err::Error;
 use crate::expr::fmt::Pretty;
 use crate::expr::operator::BindingPower;
@@ -416,7 +416,7 @@ impl Expr {
 				}
 
 				if let Some(Value::Closure(x)) = output.get(name.as_str()) {
-						return x.compute(stk, ctx, opt, doc, args).await.map_err(ControlFlow::Err);
+					return x.compute(stk, ctx, opt, doc, args).await.map_err(ControlFlow::Err);
 				}
 				fnc::idiom(stk, ctx, opt, doc, output, name, args).await.map_err(ControlFlow::Err)
 			}

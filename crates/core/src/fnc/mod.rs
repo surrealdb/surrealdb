@@ -1,17 +1,17 @@
 //! Executes functions from SQL. If there is an SQL function it will be defined
 //! in this module.
 
+use std::collections::VecDeque;
+
 use anyhow::Result;
 use reblessive::tree::Stk;
-use std::collections::VecDeque;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::val::Output;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::idx::planner::executor::QueryExecutor;
-use crate::val::{RecordId, Value};
+use crate::val::{Output, RecordId, Value};
 pub mod api;
 pub mod args;
 pub mod array;
