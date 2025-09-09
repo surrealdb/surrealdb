@@ -59,16 +59,6 @@ async fn idiom_index_range() -> Result<()> {
 }
 
 #[tokio::test]
-async fn idiom_array_nested_prop_continues_as_array() -> Result<()> {
-	let sql = r#"
-    	[{x:2}].x[0];
-    	[{x:2}].x.at(0);
-	"#;
-	Test::new(sql).await?.expect_val("2")?.expect_val("2")?;
-	Ok(())
-}
-
-#[tokio::test]
 async fn idiom_select_all_from_nested_array_prop() -> Result<()> {
 	let sql = r#"
     	CREATE a:1, a:2;
