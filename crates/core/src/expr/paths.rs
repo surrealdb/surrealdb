@@ -1,5 +1,6 @@
 use std::sync::LazyLock;
 
+use crate::catalog::{FieldName, FieldNamePart};
 use crate::expr::Part;
 
 pub const OBJ_PATH_ACCESS: &str = "ac";
@@ -25,6 +26,12 @@ pub static OR: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::field("or".to_owned
 pub static TK: LazyLock<[Part; 1]> =
 	LazyLock::new(|| [Part::field(OBJ_PATH_TOKEN.to_owned()).unwrap()]);
 
-pub static IN: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::field("in".to_owned()).unwrap()]);
+pub static IN_IDIOM: LazyLock<[Part; 1]> =
+	LazyLock::new(|| [Part::field("in".to_owned()).unwrap()]);
+pub static IN: LazyLock<FieldName> =
+	LazyLock::new(|| FieldName(vec![FieldNamePart::Field("in".to_owned())]));
 
-pub static OUT: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::field("out".to_owned()).unwrap()]);
+pub static OUT_IDIOM: LazyLock<[Part; 1]> =
+	LazyLock::new(|| [Part::field("out".to_owned()).unwrap()]);
+pub static OUT: LazyLock<FieldName> =
+	LazyLock::new(|| FieldName(vec![FieldNamePart::Field("out".to_owned())]));

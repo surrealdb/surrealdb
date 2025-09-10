@@ -133,7 +133,7 @@ impl Document {
 				// Loop through all field statements
 				for fd in self.fd(ctx, opt).await?.iter() {
 					// Loop over each field in document
-					for k in out.each(&fd.name).iter() {
+					for k in out.each(&fd.name.to_idiom()).iter() {
 						// Process the field permissions
 						match &fd.select_permission {
 							catalog::Permission::Full => (),

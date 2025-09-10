@@ -11,7 +11,7 @@ use crate::err::Error;
 use crate::expr::data::Assignment;
 use crate::expr::dir::Dir;
 use crate::expr::lookup::LookupKind;
-use crate::expr::paths::{IN, OUT};
+use crate::expr::paths::{IN_IDIOM, OUT_IDIOM};
 use crate::expr::reference::ReferenceDeleteStrategy;
 use crate::expr::statements::{DeleteStatement, UpdateStatement};
 use crate::expr::{AssignOperator, Data, Expr, FlowResultExt as _, Idiom, Literal, Lookup, Part};
@@ -42,8 +42,8 @@ impl Document {
 			// Purge the record edges
 			match (
 				self.initial.doc.is_edge(),
-				self.initial.doc.as_ref().pick(&*IN),
-				self.initial.doc.as_ref().pick(&*OUT),
+				self.initial.doc.as_ref().pick(&*IN_IDIOM),
+				self.initial.doc.as_ref().pick(&*OUT_IDIOM),
 			) {
 				(true, Value::RecordId(ref l), Value::RecordId(ref r)) => {
 					// Lock the transaction
@@ -154,12 +154,15 @@ impl Document {
 									key: ref_key.fk.clone(),
 								};
 
+								let fd_name_idiom = fd.name.to_idiom();
+
 								// Determine how we perform the update
-								let data = match fd.name.last() {
+								let data = match fd_name_idiom.last() {
 									// This is a part of an array, remove all values like it
 									Some(Part::All) => Data::SetExpression(vec![Assignment {
 										place: Idiom(
-											fd.name.as_ref()[..fd.name.len() - 1].to_vec(),
+											fd_name_idiom.as_ref()[..fd_name_idiom.len() - 1]
+												.to_vec(),
 										),
 										operator: AssignOperator::Subtract,
 										value: Expr::Literal(Literal::RecordId(
@@ -167,7 +170,7 @@ impl Document {
 										)),
 									}]),
 									// This is a self contained value, we can set it NONE
-									_ => Data::UnsetExpression(vec![fd.name.clone()]),
+									_ => Data::UnsetExpression(vec![fd_name_idiom.clone()]),
 								};
 
 								// Setup the delete statement

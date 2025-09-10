@@ -7,7 +7,7 @@ use uuid::Uuid;
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, TableProvider};
 use crate::catalog::{
-	self, DatabaseId, FieldDefinition, NamespaceId, Permission, Permissions, Relation,
+	self, DatabaseId, FieldDefinition, FieldName, NamespaceId, Permission, Permissions, Relation,
 	TableDefinition, TableType,
 };
 use crate::ctx::Context;
@@ -18,7 +18,7 @@ use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, KindLiteral, Part};
+use crate::expr::{Base, Expr, Ident, Kind, KindLiteral, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::{Strand, Value};
@@ -31,10 +31,10 @@ pub enum DefineDefault {
 	Set(Expr),
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineFieldStatement {
 	pub kind: DefineKind,
-	pub name: Idiom,
+	pub name: FieldName,
 	pub what: Ident,
 	/// Whether the field is marked as flexible.
 	/// Flexible allows the field to be schemaless even if the table is marked as schemafull.
@@ -108,7 +108,7 @@ impl DefineFieldStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the name of the field
-		let fd = self.name.to_raw_string();
+		let fd = self.name.to_string();
 		// Check if the definition exists
 		if let Some(fd) = txn.get_tb_field(ns, db, &self.what, &fd).await? {
 			match self.kind {
@@ -229,7 +229,7 @@ impl DefineFieldStatement {
 		let fields = txn.all_tb_fields(ns, db, &self.what, None).await.ok();
 		// Process possible recursive_definitions
 		if let Some(mut cur_kind) = self.field_kind.as_ref().and_then(|x| x.inner_kind()) {
-			let mut name = self.name.clone();
+			let mut name_idiom = self.name.to_idiom();
 			loop {
 				// Check if the subtype is an `any` type
 				if let Kind::Any = cur_kind {
@@ -247,13 +247,13 @@ impl DefineFieldStatement {
 				// Get the kind of this sub field
 				let new_kind = cur_kind.inner_kind();
 				// Add a new subtype
-				name.0.push(Part::All);
+				name_idiom.0.push(Part::All);
 				// Get the field name
-				let fd = name.to_string();
+				let fd = name_idiom.to_string();
 				// Set the subtype `DEFINE FIELD` definition
 				let key = crate::key::table::fd::new(ns, db, &self.what, &fd);
 				let val = if let Some(existing) =
-					fields.as_ref().and_then(|x| x.iter().find(|x| x.name == name))
+					fields.as_ref().and_then(|x| x.iter().find(|x| x.name == self.name))
 				{
 					FieldDefinition {
 						field_kind: Some(cur_kind),
@@ -261,14 +261,13 @@ impl DefineFieldStatement {
 						..existing.clone()
 					}
 				} else {
-					FieldDefinition {
-						name: name.clone(),
-						what: self.what.clone().into_string(),
-						flexible: self.flex,
-						field_kind: Some(cur_kind),
-						reference: self.reference.clone(),
-						..Default::default()
-					}
+					FieldDefinition::new(
+						self.name.clone(),
+						self.what.clone().into_string(),
+						self.flex,
+						Some(cur_kind),
+						self.reference.clone(),
+					)
 				};
 				txn.set(&key, &val, None).await?;
 				// Process to any sub field
@@ -292,8 +291,9 @@ impl DefineFieldStatement {
 		// Find all existing field definitions
 		let fields = txn.all_tb_fields(ns, db, &self.what, None).await?;
 		if self.computed.is_some() {
+			let fd_name_idiom = self.name.to_idiom();
 			// Ensure the field is not the `id` field
-			ensure!(!self.name.is_id(), Error::IdFieldKeywordConflict("COMPUTED".into()));
+			ensure!(!fd_name_idiom.is_id(), Error::IdFieldKeywordConflict("COMPUTED".into()));
 
 			// Ensure the field is top-level
 			ensure!(self.name.len() == 1, Error::ComputedNestedField(self.name.to_string()));
@@ -385,7 +385,7 @@ impl DefineFieldStatement {
 			for fd in fds.iter() {
 				if self.name.starts_with(&fd.name) && self.name != fd.name {
 					if let Some(fd_kind) = &fd.field_kind {
-						let path = self.name[fd.name.len()..].to_vec();
+						let path = self.name.to_idiom()[fd.name.len()..].to_vec();
 						if !fd_kind.allows_nested_kind(&path, self_kind) {
 							bail!(Error::MismatchedFieldTypes {
 								name: self.name.to_string(),

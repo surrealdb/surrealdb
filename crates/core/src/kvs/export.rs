@@ -12,7 +12,7 @@ use crate::catalog::providers::{
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
-use crate::expr::paths::{IN, OUT};
+use crate::expr::paths::{IN_IDIOM, OUT_IDIOM};
 use crate::expr::statements::define::{DefineAccessStatement, DefineUserStatement};
 use crate::expr::{Base, DefineAnalyzerStatement};
 use crate::key::record;
@@ -481,8 +481,11 @@ impl Transaction {
 		record.data.to_mut().def(&rid);
 		// Match on the value to determine if it is a graph edge record or a normal
 		// record.
-		match (record.is_edge(), record.data.as_ref().pick(&*IN), record.data.as_ref().pick(&*OUT))
-		{
+		match (
+			record.is_edge(),
+			record.data.as_ref().pick(&*IN_IDIOM),
+			record.data.as_ref().pick(&*OUT_IDIOM),
+		) {
 			// If the value is a graph edge record (indicated by EDGE, IN, and OUT fields):
 			(true, Value::RecordId(_), Value::RecordId(_)) => {
 				if let Some(version) = version {

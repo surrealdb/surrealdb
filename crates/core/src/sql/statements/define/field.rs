@@ -1,9 +1,10 @@
 use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
+use crate::catalog::FieldName;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
-use crate::sql::{Expr, Ident, Idiom, Kind, Permissions};
+use crate::sql::{Expr, Ident, Kind, Permissions};
 use crate::val::Strand;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -43,11 +44,11 @@ impl From<crate::expr::statements::define::DefineDefault> for DefineDefault {
 	}
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineFieldStatement {
 	pub kind: DefineKind,
-	pub name: Idiom,
+	pub name: FieldName,
 	pub what: Ident,
 	/// Whether the field is marked as flexible.
 	/// Flexible allows the field to be schemaless even if the table is marked

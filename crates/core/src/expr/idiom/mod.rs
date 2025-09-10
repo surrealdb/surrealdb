@@ -13,7 +13,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::fmt::Fmt;
 use crate::expr::part::{Next, NextMethod};
-use crate::expr::paths::{ID, IN, OUT};
+use crate::expr::paths::{ID, IN_IDIOM, OUT_IDIOM};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{FlowResult, Ident, Part, Value};
 
@@ -99,7 +99,7 @@ impl Idiom {
 	}
 	/// Check if this Idiom is a special field such as `id`, `in` or `out`.
 	pub(crate) fn is_special(&self) -> bool {
-		self.0.len() == 1 && [&ID[0], &IN[0], &OUT[0]].contains(&&self.0[0])
+		self.0.len() == 1 && [&ID[0], &IN_IDIOM[0], &OUT_IDIOM[0]].contains(&&self.0[0])
 	}
 	/// Check if this Idiom is an specific field
 	pub(crate) fn is_field(&self, other: &str) -> bool {

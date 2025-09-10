@@ -1,6 +1,6 @@
 use reblessive::Stk;
 
-use crate::catalog::ApiMethod;
+use crate::catalog::{ApiMethod, FieldName};
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::base::Base;
@@ -25,7 +25,7 @@ use crate::sql::{
 	AccessType, Expr, Ident, Index, Kind, Literal, Param, Permission, Permissions, Scoring,
 	TableType, access_type, table_type,
 };
-use crate::syn::error::bail;
+use crate::syn::error::{SyntaxError, bail};
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Token, TokenKind, t};
@@ -803,11 +803,22 @@ impl Parser<'_> {
 		self.eat(t!("TABLE"));
 		let what = self.next_token_value()?;
 
+		let name = FieldName::from_idiom(name.into())
+			.map_err(|err| SyntaxError::new(format!("Invalid defined field name: {err}")))?;
 		let mut res = DefineFieldStatement {
 			name,
 			what,
 			kind,
-			..Default::default()
+			flex: false,
+			field_kind: None,
+			readonly: false,
+			value: None,
+			assert: None,
+			computed: None,
+			default: DefineDefault::default(),
+			permissions: Permissions::default(),
+			comment: None,
+			reference: None,
 		};
 
 		loop {

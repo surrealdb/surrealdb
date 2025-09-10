@@ -188,7 +188,7 @@ mod test {
         comment: Some("comment".to_string()),
     }, 35)]
 	#[case::field(FieldDefinition {
-        name: Idiom::from_str("field[0]").unwrap(),
+        name: FieldName::from_str("field[0]").unwrap(),
         what: "what".to_string(),
         flexible: false,
         field_kind: None,

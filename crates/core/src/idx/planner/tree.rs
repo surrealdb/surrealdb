@@ -366,7 +366,7 @@ impl<'a> TreeBuilder<'a> {
 	) -> Result<Option<RecordOptions>> {
 		for field in fields.iter() {
 			if let Some(Kind::Record(tables)) = &field.field_kind {
-				if idiom.starts_with(&field.name.0) {
+				if idiom.starts_with(&field.name.to_idiom()) {
 					let (local_field, remote_field) = idiom.0.split_at(field.name.0.len());
 					if remote_field.is_empty() {
 						return Ok(None);

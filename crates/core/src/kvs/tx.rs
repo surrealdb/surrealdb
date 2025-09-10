@@ -1416,7 +1416,7 @@ impl TableProvider for Transaction {
 		tb: &str,
 		fd: &catalog::FieldDefinition,
 	) -> Result<()> {
-		let name = fd.name.to_raw_string();
+		let name = fd.name.to_string();
 		let key = crate::key::table::fd::new(ns, db, tb, &name);
 		self.set(&key, fd, None).await?;
 		Ok(())

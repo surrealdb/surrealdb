@@ -10,7 +10,7 @@ use crate::doc::Permitted::*;
 use crate::doc::compute::DocKind;
 use crate::err::Error;
 use crate::expr::FlowResultExt as _;
-use crate::expr::paths::{ID, IN, OUT};
+use crate::expr::paths::{ID, IN_IDIOM, OUT_IDIOM};
 use crate::iam::Action;
 use crate::sql::ToSql;
 use crate::val::Value;
@@ -252,7 +252,7 @@ impl Document {
 					}
 				}
 				// Check that the 'in' field matches
-				match data.pick(&*IN) {
+				match data.pick(&*IN_IDIOM) {
 					// You cannot store a range id as the in field on a document
 					Value::RecordId(v) if v.key.is_range() => {
 						bail!(Error::InInvalid {
@@ -271,7 +271,7 @@ impl Document {
 					}
 				}
 				// Check that the 'out' field matches
-				match data.pick(&*OUT) {
+				match data.pick(&*OUT_IDIOM) {
 					// You cannot store a range id as the out field on a document
 					Value::RecordId(v) if v.key.is_range() => {
 						bail!(Error::OutInvalid {

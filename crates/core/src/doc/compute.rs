@@ -63,7 +63,7 @@ impl Document {
 					})?;
 				}
 
-				doc.doc.to_mut().put(&fd.name, val);
+				doc.doc.to_mut().put(&fd.name.to_idiom(), val);
 			}
 		}
 

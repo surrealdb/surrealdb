@@ -9,7 +9,7 @@ use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::err::Error;
 use crate::expr::data::Data;
-use crate::expr::paths::{ID, IN, OUT};
+use crate::expr::paths::{ID, IN_IDIOM, OUT_IDIOM};
 use crate::expr::{AssignOperator, FlowResultExt};
 use crate::val::record::RecordType;
 use crate::val::{RecordId, Value};
@@ -111,14 +111,14 @@ impl Document {
 			// Mark that this is an edge node
 			self.current.doc.set_record_type(RecordType::Edge);
 			// If this document existed before, check the `in` field
-			match (self.initial.doc.as_ref().pick(&*IN), self.is_new()) {
+			match (self.initial.doc.as_ref().pick(&*IN_IDIOM), self.is_new()) {
 				// If the document id matches, then all good
 				(Value::RecordId(id), false) if id.eq(l) => {
-					self.current.doc.to_mut().put(&*IN, l.clone().into());
+					self.current.doc.to_mut().put(&*IN_IDIOM, l.clone().into());
 				}
 				// If the document is new then all good
 				(_, true) => {
-					self.current.doc.to_mut().put(&*IN, l.clone().into());
+					self.current.doc.to_mut().put(&*IN_IDIOM, l.clone().into());
 				}
 				// Otherwise this is attempting to override the `in` field
 				(v, _) => {
@@ -128,14 +128,14 @@ impl Document {
 				}
 			}
 			// If this document existed before, check the `out` field
-			match (self.initial.doc.as_ref().pick(&*OUT), self.is_new()) {
+			match (self.initial.doc.as_ref().pick(&*OUT_IDIOM), self.is_new()) {
 				// If the document id matches, then all good
 				(Value::RecordId(id), false) if id.eq(r) => {
-					self.current.doc.to_mut().put(&*OUT, r.clone().into());
+					self.current.doc.to_mut().put(&*OUT_IDIOM, r.clone().into());
 				}
 				// If the document is new then all good
 				(_, true) => {
-					self.current.doc.to_mut().put(&*OUT, r.clone().into());
+					self.current.doc.to_mut().put(&*OUT_IDIOM, r.clone().into());
 				}
 				// Otherwise this is attempting to override the `in` field
 				(v, _) => {
@@ -148,8 +148,8 @@ impl Document {
 		// This is an UPDATE of a graph edge, so reset fields
 		if self.initial.doc.is_edge() {
 			self.current.doc.set_record_type(RecordType::Edge);
-			self.current.doc.to_mut().put(&*IN, self.initial.doc.as_ref().pick(&*IN));
-			self.current.doc.to_mut().put(&*OUT, self.initial.doc.as_ref().pick(&*OUT));
+			self.current.doc.to_mut().put(&*IN_IDIOM, self.initial.doc.as_ref().pick(&*IN_IDIOM));
+			self.current.doc.to_mut().put(&*OUT_IDIOM, self.initial.doc.as_ref().pick(&*OUT_IDIOM));
 		}
 		// Carry on
 		Ok(())

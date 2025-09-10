@@ -2,6 +2,7 @@ use bytes::BytesMut;
 use chrono::offset::TimeZone;
 use chrono::{NaiveDate, Offset, Utc};
 
+use crate::catalog::FieldName;
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey};
 use crate::sql::changefeed::ChangeFeed;
@@ -313,12 +314,15 @@ fn statements() -> Vec<TopLevelExpr> {
 		})))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Field(DefineFieldStatement {
 			kind: DefineKind::Default,
-			name: Idiom(vec![
-				Part::Field(Ident::from_strand(strand!("foo").to_owned())),
-				Part::All,
-				Part::All,
-				Part::Flatten,
-			]),
+			name: FieldName::from_idiom(
+				Idiom(vec![
+					Part::Field(Ident::from_strand(strand!("foo").to_owned())),
+					Part::All,
+					Part::All,
+				])
+				.into(),
+			)
+			.unwrap(),
 			what: Ident::from_strand(strand!("bar").to_owned()),
 			flex: true,
 			field_kind: Some(Kind::Option(Box::new(Kind::Either(vec![

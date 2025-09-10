@@ -62,7 +62,7 @@ impl Document {
 			for fd in self.fd(ctx, opt).await?.iter() {
 				let is_flex = fd.flexible;
 				let is_literal = fd.field_kind.as_ref().is_some_and(Kind::contains_literal);
-				for k in self.current.doc.as_ref().each(&fd.name).into_iter() {
+				for k in self.current.doc.as_ref().each(&fd.name.to_idiom()).into_iter() {
 					defined_field_names.insert(&k, is_flex || is_literal);
 				}
 			}
@@ -162,14 +162,16 @@ impl Document {
 		// When set, any matching embedded object fields
 		// which are prefixed with the specified idiom
 		// will be skipped, as the parent object is optional
-		let mut skip: Option<&Idiom> = None;
+		let mut skip: Option<Idiom> = None;
 		// Loop through all field statements
 		for fd in self.fd(ctx, opt).await?.iter() {
+			let fd_name_idiom = fd.name.to_idiom();
+
 			// Check if we should skip this field
-			let skipped = match skip {
+			let skipped = match skip.as_ref() {
 				// We are skipping a parent field
 				// Check if this field is a child field
-				Some(inner) => fd.name.starts_with(inner),
+				Some(inner) => fd_name_idiom.starts_with(inner),
 				None => false,
 			};
 
@@ -180,13 +182,13 @@ impl Document {
 			}
 
 			// Loop over each field in document
-			for (k, mut val) in self.current.doc.as_ref().walk(&fd.name).into_iter() {
+			for (k, mut val) in self.current.doc.as_ref().walk(&fd.name.to_idiom()).into_iter() {
 				// Get the initial value
 				let old = Arc::new(self.initial.doc.as_ref().pick(&k));
 				// Get the input value
 				let inp = Arc::new(inp.pick(&k));
 				// Check for the `id` field
-				if fd.name.is_id() {
+				if fd_name_idiom.is_id() {
 					ensure!(
 						self.is_new() || val == *old,
 						Error::FieldReadonly {
@@ -283,7 +285,7 @@ impl Document {
 				if !skipped {
 					// If the field is empty, mark child fields as skippable
 					if val.is_none() && fd.field_kind.as_ref().is_some_and(Kind::can_be_none) {
-						skip = Some(&fd.name);
+						skip = Some(fd.name.to_idiom());
 					}
 					// Set the new value of the field, or delete it if empty
 					self.current.doc.to_mut().put(&k, val);
@@ -317,7 +319,7 @@ impl Document {
 			}
 
 			// Loop over each value in document
-			for (_, val) in self.current.doc.as_ref().walk(&fd.name).into_iter() {
+			for (_, val) in self.current.doc.as_ref().walk(&fd.name.to_idiom()).into_iter() {
 				// Skip if the value is empty
 				if val.is_none() || val.is_empty_array() {
 					continue;
@@ -377,7 +379,7 @@ impl FieldEditContext<'_> {
 		// Check for a TYPE clause
 		if let Some(kind) = &self.def.field_kind {
 			// Check if this is the `id` field
-			if self.def.name.is_id() {
+			if self.def.name.to_idiom().is_id() {
 				// Ensure that the outer value is a record
 				if let Value::RecordId(ref id) = val {
 					// See if we should check the inner type
@@ -664,7 +666,7 @@ impl FieldEditContext<'_> {
 					.current
 					.doc
 					.as_ref()
-					.get(self.stk, self.ctx, self.opt, doc, &self.def.name)
+					.get(self.stk, self.ctx, self.opt, doc, &self.def.name.to_idiom())
 					.await
 					.catch_return()?;
 
@@ -703,7 +705,7 @@ impl FieldEditContext<'_> {
 			// Try to delete the references here where needed
 			if let Value::Array(oldarr) = old {
 				// For array based references, we always store the foreign field as the nested field
-				let ff = self.def.name.clone().push(Part::All).to_string();
+				let ff = self.def.name.clone().to_idiom().push(Part::All).to_string();
 				// If the new value is still an array, we only filter out the record ids that
 				// are not present in the new array
 				if let Value::Array(newarr) = val {

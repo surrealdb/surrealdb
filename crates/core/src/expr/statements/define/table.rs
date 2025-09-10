@@ -19,7 +19,7 @@ use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::UpdateStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, Output, View};
+use crate::expr::{Base, Expr, Ident, Kind, Output, View};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::{Strand, Value};
@@ -195,12 +195,7 @@ impl DefineTableStatement {
 				let val = rel.from.clone().unwrap_or(Kind::Record(vec![]));
 				txn.set(
 					&key,
-					&FieldDefinition {
-						name: Idiom::from(IN.to_vec()),
-						what: tb.name.clone(),
-						field_kind: Some(val),
-						..Default::default()
-					},
+					&FieldDefinition::new(IN.clone(), tb.name.clone(), false, Some(val), None),
 					None,
 				)
 				.await?;
@@ -211,12 +206,7 @@ impl DefineTableStatement {
 				let val = rel.to.clone().unwrap_or(Kind::Record(vec![]));
 				txn.set(
 					&key,
-					&FieldDefinition {
-						name: Idiom::from(OUT.to_vec()),
-						what: tb.name.clone(),
-						field_kind: Some(val),
-						..Default::default()
-					},
+					&FieldDefinition::new(OUT.clone(), tb.name.clone(), false, Some(val), None),
 					None,
 				)
 				.await?;

@@ -7,7 +7,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::paths::{IN, OUT};
+use crate::expr::paths::{IN_IDIOM, OUT_IDIOM};
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Datetime, RecordId, Table};
@@ -170,7 +170,7 @@ impl fmt::Display for InsertStatement {
 
 fn iterable(id: RecordId, v: Value, relation: bool) -> Result<Iterable> {
 	if relation {
-		let f = match v.pick(&*IN) {
+		let f = match v.pick(&*IN_IDIOM) {
 			Value::RecordId(v) => v,
 			v => {
 				bail!(Error::InsertStatementIn {
@@ -178,7 +178,7 @@ fn iterable(id: RecordId, v: Value, relation: bool) -> Result<Iterable> {
 				})
 			}
 		};
-		let w = match v.pick(&*OUT) {
+		let w = match v.pick(&*OUT_IDIOM) {
 			Value::RecordId(v) => v,
 			v => {
 				bail!(Error::InsertStatementOut {

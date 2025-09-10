@@ -1,6 +1,7 @@
 use chrono::offset::TimeZone;
 use chrono::{NaiveDate, Offset, Utc};
 
+use crate::catalog::FieldName;
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::{
 	AccessType, BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess, JwtAccessIssue,
@@ -1638,18 +1639,21 @@ fn parse_define_event() {
 fn parse_define_field() {
 	// General
 	{
-		let res = syn::parse_with(r#"DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+		let res = syn::parse_with(r#"DEFINE FIELD foo.*[*] ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
 
 		assert_eq!(
 			res,
 			Expr::Define(Box::new(DefineStatement::Field(DefineFieldStatement {
 				kind: DefineKind::Default,
-				name: Idiom(vec![
-					Part::Field(Ident::from_strand(strand!("foo").to_owned())),
-					Part::All,
-					Part::All,
-					Part::Flatten,
-				]),
+				name: FieldName::from_idiom(
+					Idiom(vec![
+						Part::Field(Ident::from_strand(strand!("foo").to_owned())),
+						Part::All,
+						Part::All,
+					])
+					.into()
+				)
+				.unwrap(),
 				what: Ident::from_strand(strand!("bar").to_owned()),
 				flex: true,
 				field_kind: Some(Kind::Option(Box::new(Kind::Either(vec![
@@ -1687,7 +1691,10 @@ fn parse_define_field() {
 			res,
 			Expr::Define(Box::new(DefineStatement::Field(DefineFieldStatement {
 				kind: DefineKind::Default,
-				name: Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned())),]),
+				name: FieldName::from_idiom(
+					Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned()))]).into()
+				)
+				.unwrap(),
 				what: Ident::from_strand(strand!("bar").to_owned()),
 				flex: false,
 				field_kind: None,

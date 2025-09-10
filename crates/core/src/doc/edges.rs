@@ -7,7 +7,7 @@ use crate::dbs::{Options, Statement, Workable};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::expr::Dir;
-use crate::expr::paths::{IN, OUT};
+use crate::expr::paths::{IN_IDIOM, OUT_IDIOM};
 use crate::val::record::RecordType;
 
 impl Document {
@@ -73,8 +73,8 @@ impl Document {
 			// Store the edges on the record
 			// Mark this record as an edge type in its metadata for efficient identification
 			self.current.doc.set_record_type(RecordType::Edge);
-			self.current.doc.to_mut().put(&*IN, l.clone().into());
-			self.current.doc.to_mut().put(&*OUT, r.clone().into());
+			self.current.doc.to_mut().put(&*IN_IDIOM, l.clone().into());
+			self.current.doc.to_mut().put(&*OUT_IDIOM, r.clone().into());
 		}
 		// Carry on
 		Ok(())

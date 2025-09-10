@@ -374,7 +374,7 @@ impl Document {
 		// Loop over each field in document
 		for fd in fds.iter() {
 			// Loop over each field in document
-			for k in reduced.as_ref().each(&fd.name).iter() {
+			for k in reduced.as_ref().each(&fd.name.to_idiom()).iter() {
 				// Process the field permissions
 				match &fd.select_permission {
 					Permission::Full => (),

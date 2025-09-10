@@ -19,7 +19,7 @@ use thiserror::Error;
 
 use crate::api::err::ApiError;
 use crate::buc::BucketOperation;
-use crate::catalog::Distance;
+use crate::catalog::{Distance, FieldName};
 use crate::expr::operation::PatchError;
 use crate::expr::{Expr, Idiom};
 use crate::iam::Error as IamError;
@@ -635,7 +635,7 @@ pub enum Error {
 	FieldValue {
 		thing: String,
 		value: String,
-		field: Idiom,
+		field: FieldName,
 		check: String,
 	},
 
@@ -675,7 +675,7 @@ pub enum Error {
 	)]
 	FieldReadonly {
 		thing: String,
-		field: Idiom,
+		field: FieldName,
 	},
 
 	/// The specified field on a SCHEMAFUL table was not defined
