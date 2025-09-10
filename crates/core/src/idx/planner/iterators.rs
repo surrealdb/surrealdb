@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use radix_trie::Trie;
 
-use crate::catalog::{DatabaseId, IndexDefinition, NamespaceId};
+use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId};
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::expr::BinaryOperator;
@@ -269,14 +269,14 @@ impl IndexEqualThingIterator {
 		Ok(if ix.cols.len() == 1 {
 			// Single column index: straightforward key prefix generation
 			(
-				Index::prefix_ids_beg(ns, db, &ix.what, &ix.name, fd)?,
-				Index::prefix_ids_end(ns, db, &ix.what, &ix.name, fd)?,
+				Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, fd)?,
+				Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, fd)?,
 			)
 		} else {
 			// Composite index: handles multiple column values with proper ordering
 			(
-				Index::prefix_ids_composite_beg(ns, db, &ix.what, &ix.name, fd)?,
-				Index::prefix_ids_composite_end(ns, db, &ix.what, &ix.name, fd)?,
+				Index::prefix_ids_composite_beg(ns, db, &ix.table_name, ix.index_id, fd)?,
+				Index::prefix_ids_composite_end(ns, db, &ix.table_name, ix.index_id, fd)?,
 			)
 		})
 	}
@@ -531,8 +531,8 @@ impl IndexRangeThingIterator {
 		to: RangeValue,
 	) -> Result<RangeScan> {
 		let (from_inclusive, to_inclusive) = (from.inclusive, to.inclusive);
-		let beg = Self::compute_beg(ns, db, &ix.what, &ix.name, from)?;
-		let end = Self::compute_end(ns, db, &ix.what, &ix.name, to)?;
+		let beg = Self::compute_beg(ns, db, &ix.table_name, ix.index_id, from)?;
+		let end = Self::compute_end(ns, db, &ix.table_name, ix.index_id, to)?;
 		Ok(RangeScan::new(beg, from_inclusive, end, to_inclusive))
 	}
 
@@ -548,18 +548,18 @@ impl IndexRangeThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix_what: &str,
-		ix_name: &str,
+		index_id: IndexId,
 		from: RangeValue,
 	) -> Result<Vec<u8>> {
 		if from.value.is_none() {
-			return Index::prefix_beg(ns, db, ix_what, ix_name);
+			return Index::prefix_beg(ns, db, ix_what, index_id);
 		}
 		if from.inclusive {
 			Index::prefix_ids_beg(
 				ns,
 				db,
 				ix_what,
-				ix_name,
+				index_id,
 				&Array::from(vec![from.value.as_ref().clone()]),
 			)
 		} else {
@@ -567,7 +567,7 @@ impl IndexRangeThingIterator {
 				ns,
 				db,
 				ix_what,
-				ix_name,
+				index_id,
 				&Array::from(vec![from.value.as_ref().clone()]),
 			)
 		}
@@ -585,18 +585,18 @@ impl IndexRangeThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix_what: &str,
-		ix_name: &str,
+		index_id: IndexId,
 		to: RangeValue,
 	) -> Result<Vec<u8>> {
 		if to.value.is_none() {
-			return Index::prefix_end(ns, db, ix_what, ix_name);
+			return Index::prefix_end(ns, db, ix_what, index_id);
 		}
 		if to.inclusive {
 			Index::prefix_ids_end(
 				ns,
 				db,
 				ix_what,
-				ix_name,
+				index_id,
 				&Array::from(vec![to.value.as_ref().clone()]),
 			)
 		} else {
@@ -604,7 +604,7 @@ impl IndexRangeThingIterator {
 				ns,
 				db,
 				ix_what,
-				ix_name,
+				index_id,
 				&Array::from(vec![to.value.as_ref().clone()]),
 			)
 		}
@@ -635,15 +635,15 @@ impl IndexRangeThingIterator {
 		let (from_inclusive, to_inclusive) = (from.inclusive, to.inclusive);
 		// Compute the lower bound for the scan
 		let beg = if from.value.is_none() {
-			Index::prefix_ids_composite_beg(ns, db, &ix.what, &ix.name, &prefix_array)?
+			Index::prefix_ids_composite_beg(ns, db, &ix.table_name, ix.index_id, &prefix_array)?
 		} else {
-			Self::compute_beg_with_prefix(ns, db, &ix.what, &ix.name, &prefix_array, from)?
+			Self::compute_beg_with_prefix(ns, db, &ix.table_name, ix.index_id, &prefix_array, from)?
 		};
 		// Compute the upper bound for the scan
 		let end = if to.value.is_none() {
-			Index::prefix_ids_composite_end(ns, db, &ix.what, &ix.name, &prefix_array)?
+			Index::prefix_ids_composite_end(ns, db, &ix.table_name, ix.index_id, &prefix_array)?
 		} else {
-			Self::compute_end_with_prefix(ns, db, &ix.what, &ix.name, &prefix_array, to)?
+			Self::compute_end_with_prefix(ns, db, &ix.table_name, ix.index_id, &prefix_array, to)?
 		};
 		Ok(RangeScan::new(beg, from_inclusive, end, to_inclusive))
 	}
@@ -659,16 +659,16 @@ impl IndexRangeThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix_what: &str,
-		ix_name: &str,
+		index_id: IndexId,
 		prefix: &Array,
 		from: RangeValue,
 	) -> Result<Vec<u8>> {
 		let mut fd = prefix.clone();
 		fd.0.push(from.value.as_ref().clone());
 		if from.inclusive {
-			Index::prefix_ids_beg(ns, db, ix_what, ix_name, &fd)
+			Index::prefix_ids_beg(ns, db, ix_what, index_id, &fd)
 		} else {
-			Index::prefix_ids_end(ns, db, ix_what, ix_name, &fd)
+			Index::prefix_ids_end(ns, db, ix_what, index_id, &fd)
 		}
 	}
 
@@ -683,16 +683,16 @@ impl IndexRangeThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix_what: &str,
-		ix_name: &str,
+		index_id: IndexId,
 		prefix: &Array,
 		to: RangeValue,
 	) -> Result<Vec<u8>> {
 		let mut fd = prefix.clone();
 		fd.0.push(to.value.as_ref().clone());
 		if to.inclusive {
-			Index::prefix_ids_end(ns, db, ix_what, ix_name, &fd)
+			Index::prefix_ids_end(ns, db, ix_what, index_id, &fd)
 		} else {
-			Index::prefix_ids_beg(ns, db, ix_what, ix_name, &fd)
+			Index::prefix_ids_beg(ns, db, ix_what, index_id, &fd)
 		}
 	}
 
@@ -1136,7 +1136,7 @@ impl UniqueEqualThingIterator {
 		ix: &IndexDefinition,
 		a: &Array,
 	) -> Result<Self> {
-		let key = Index::new(ns, db, &ix.what, &ix.name, a, None).encode_key()?;
+		let key = Index::new(ns, db, &ix.table_name, ix.index_id, a, None).encode_key()?;
 		Ok(Self {
 			irf,
 			key: Some(key),
@@ -1178,8 +1178,8 @@ impl UniqueRangeThingIterator {
 		from: RangeValue,
 		to: RangeValue,
 	) -> Result<RangeScan> {
-		let beg = Self::compute_beg(ns, db, &ix.what, &ix.name, from.value.as_ref().clone())?;
-		let end = Self::compute_end(ns, db, &ix.what, &ix.name, to.value.as_ref().clone())?;
+		let beg = Self::compute_beg(ns, db, &ix.table_name, ix.index_id, from.value)?;
+		let end = Self::compute_end(ns, db, &ix.table_name, ix.index_id, to.value)?;
 		Ok(RangeScan::new(beg, from.inclusive, end, to.inclusive))
 	}
 
@@ -1229,26 +1229,26 @@ impl UniqueRangeThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix_what: &str,
-		ix_name: &str,
+		index_id: IndexId,
 		from: Value,
 	) -> Result<Vec<u8>> {
 		if from.is_none() {
-			return Index::prefix_beg(ns, db, ix_what, ix_name);
+			return Index::prefix_beg(ns, db, ix_what, index_id);
 		}
-		Index::new(ns, db, ix_what, ix_name, &Array::from(vec![from]), None).encode_key()
+		Index::new(ns, db, ix_what, index_id, &Array::from(vec![from]), None).encode_key()
 	}
 
 	fn compute_end(
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix_what: &str,
-		ix_name: &str,
+		index_id: IndexId,
 		to: Value,
 	) -> Result<Vec<u8>> {
 		if to.is_none() {
-			return Index::prefix_end(ns, db, ix_what, ix_name);
+			return Index::prefix_end(ns, db, ix_what, index_id);
 		}
-		Index::new(ns, db, ix_what, ix_name, &Array::from(vec![to]), None).encode_key()
+		Index::new(ns, db, ix_what, index_id, &Array::from(vec![to]), None).encode_key()
 	}
 
 	async fn next_batch<B: IteratorBatch>(
@@ -1448,7 +1448,7 @@ impl UniqueUnionThingIterator {
 		// We create a VecDeque to hold the key for each value in the array.
 		let mut keys = VecDeque::with_capacity(fds.len());
 		for fd in fds {
-			let key = Index::new(ns, db, &ix.what, &ix.name, fd, None).encode_key()?;
+			let key = Index::new(ns, db, &ix.table_name, ix.index_id, fd, None).encode_key()?;
 			keys.push_back(key);
 		}
 		Ok(Self {

@@ -54,7 +54,7 @@ use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::trees::store::IndexStores;
-use crate::key::root::ic::Ic;
+use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::kvs::cache::ds::DatastoreCache;
@@ -838,45 +838,40 @@ impl Datastore {
 			// Create a new transaction
 			let txn = self.transaction(Write, Optimistic).await?;
 			// Collect every item in the queue
-			let (beg, end) = Ic::range();
+			let (beg, end) = IndexCompactionKey::range();
 			let range = beg..end;
-			let mut previous: Option<IndexKeyBase> = None;
+			let mut previous: Option<IndexCompactionKey<'static>> = None;
 			let mut count = 0;
 			// Returns an ordered list of indexes that require compaction
 			for (k, _) in txn.getr(range.clone(), None).await? {
 				count += 1;
 				lh.try_maintain_lease().await?;
-				let ic = Ic::decode_key(&k)?;
+				let ic = IndexCompactionKey::decode_key(&k)?;
 				// If the index has already been compacted, we can ignore the task
 				if let Some(p) = &previous {
-					if p.match_ic(&ic) {
+					if p.index_matches(&ic) {
 						continue;
 					}
 				}
-				match txn.get_tb_index(ic.ns, ic.db, ic.tb.as_ref(), ic.ix.as_ref()).await {
-					Ok(ix) => {
+				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
+					Some(ix) => {
 						if let Index::FullText(p) = &ix.index {
 							let ft = FullTextIndex::new(
 								self.id(),
 								&self.index_stores,
 								&txn,
-								IndexKeyBase::from_ic(&ic),
+								IndexKeyBase::new(ic.ns, ic.db, &ix.table_name, ix.index_id),
 								p,
 							)
 							.await?;
 							ft.compaction(&txn).await?;
 						}
 					}
-					Err(e) => {
-						error!(target: TARGET, "Index compaction: Failed to get index: {}", e);
-						if matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
-							trace!(target: TARGET, "Index compaction: Index {} not found, skipping", ic.ix);
-						} else {
-							bail!(e);
-						}
+					None => {
+						trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ic.ix);
 					}
 				}
-				previous = Some(IndexKeyBase::from_ic(&ic));
+				previous = Some(ic.into_owned());
 			}
 			if count > 0 {
 				txn.delr(range).await?;

@@ -2,7 +2,7 @@
 use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::ft::search::terms::SearchTermsState;
 use crate::idx::trees::store::NodeId;
 use crate::key::category::{Categorise, Category};
@@ -18,7 +18,7 @@ pub(crate) struct BtRoot<'a> {
 	_c: u8,
 	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: Cow<'a, str>,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -33,7 +33,7 @@ impl Categorise for BtRoot<'_> {
 }
 
 impl<'a> BtRoot<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -43,7 +43,7 @@ impl<'a> BtRoot<'a> {
 			_c: b'*',
 			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix: Cow::Borrowed(ix),
+			ix,
 			_e: b'!',
 			_f: b'b',
 			_g: b't',
@@ -61,7 +61,7 @@ pub(crate) struct Bt<'a> {
 	_c: u8,
 	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: Cow<'a, str>,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -77,7 +77,7 @@ impl Categorise for Bt<'_> {
 }
 
 impl<'a> Bt<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, node_id: NodeId) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, node_id: NodeId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -87,7 +87,7 @@ impl<'a> Bt<'a> {
 			_c: b'*',
 			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix: Cow::Borrowed(ix),
+			ix,
 			_e: b'!',
 			_f: b'b',
 			_g: b't',
@@ -108,10 +108,10 @@ mod tests {
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
-			"testix",
+			IndexId(3),
 		);
 		let enc = BtRoot::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!bt");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!bt");
 	}
 
 	#[test]
@@ -121,13 +121,13 @@ mod tests {
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
-			"testix",
+			IndexId(3),
 			7
 		);
 		let enc = Bt::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!bt\0\0\0\0\0\0\0\x07"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!bt\0\0\0\0\0\0\0\x07"
 		);
 	}
 }

@@ -22,7 +22,7 @@ use anyhow::Result;
 use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
@@ -37,7 +37,7 @@ pub(crate) struct Tt<'a> {
 	_c: u8,
 	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: Cow<'a, str>,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -78,7 +78,7 @@ impl<'a> Tt<'a> {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &'a str,
-		ix: &'a str,
+		ix: IndexId,
 		term: &'a str,
 		doc_id: DocId,
 		nid: Uuid,
@@ -94,7 +94,7 @@ impl<'a> Tt<'a> {
 			_c: b'*',
 			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix: Cow::Borrowed(ix),
+			ix,
 			_e: b'!',
 			_f: b't',
 			_g: b't',
@@ -125,7 +125,7 @@ impl<'a> Tt<'a> {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &'a str,
-		ix: &'a str,
+		ix: IndexId,
 		term: &'a str,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		let prefix = TtTermPrefix::new(ns, db, tb, ix, term);
@@ -155,7 +155,7 @@ impl<'a> Tt<'a> {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &'a str,
-		ix: &'a str,
+		ix: IndexId,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		let prefix = TtTermsPrefix::new(ns, db, tb, ix);
 		let mut beg = prefix.encode_key()?;
@@ -180,7 +180,7 @@ struct TtTermPrefix<'a> {
 	_c: u8,
 	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: Cow<'a, str>,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -190,7 +190,7 @@ struct TtTermPrefix<'a> {
 impl_kv_key_storekey!(TtTermPrefix<'_> => String);
 
 impl<'a> TtTermPrefix<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, term: &'a str) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, term: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -200,7 +200,7 @@ impl<'a> TtTermPrefix<'a> {
 			_c: b'*',
 			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix: Cow::Borrowed(ix),
+			ix,
 			_e: b'!',
 			_f: b't',
 			_g: b't',
@@ -219,7 +219,7 @@ struct TtTermsPrefix<'a> {
 	_c: u8,
 	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: Cow<'a, str>,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -228,7 +228,7 @@ struct TtTermsPrefix<'a> {
 impl_kv_key_storekey!(TtTermsPrefix<'_> => String);
 
 impl<'a> TtTermsPrefix<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -256,7 +256,7 @@ mod tests {
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
-			"testix",
+			IndexId(3),
 			"term",
 			129,
 			Uuid::from_u128(1),
@@ -264,25 +264,25 @@ mod tests {
 			true,
 		);
 		let enc = Tt::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!ttterm\0\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02\x03");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ttterm\0\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02\x03");
 	}
 
 	#[test]
 	fn term_range() {
 		let (beg, end) =
-			Tt::term_range(NamespaceId(1), DatabaseId(2), "testtb", "testix", "term").unwrap();
-		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!ttterm\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
+			Tt::term_range(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), "term").unwrap();
+		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ttterm\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
 		assert_eq!(
 			end,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!ttterm\0\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ttterm\0\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
 		);
 	}
 
 	#[test]
 	fn terms_range() {
 		let (beg, end) =
-			Tt::terms_range(NamespaceId(1), DatabaseId(2), "testtb", "testix").unwrap();
-		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!tt\0");
-		assert_eq!(end, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!tt\xff");
+			Tt::terms_range(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3)).unwrap();
+		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!tt\0");
+		assert_eq!(end, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!tt\xff");
 	}
 }

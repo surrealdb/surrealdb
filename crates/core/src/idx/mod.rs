@@ -4,13 +4,14 @@ pub(crate) mod index;
 pub mod planner;
 pub mod trees;
 
+use std::borrow::Cow;
 use std::ops::Range;
 use std::sync::Arc;
 
 use anyhow::Result;
 use uuid::Uuid;
 
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::idx::ft::search::terms::TermId;
 use crate::idx::trees::hnsw::ElementId;
@@ -46,7 +47,7 @@ use crate::key::index::is::Is;
 use crate::key::index::td::{Td, TdRoot};
 use crate::key::index::tt::Tt;
 use crate::key::index::vm::{Vm, VmRoot};
-use crate::key::root::ic::Ic;
+use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::Key;
 use crate::val::RecordIdKey;
 
@@ -58,168 +59,167 @@ struct Inner {
 	ns: NamespaceId,
 	db: DatabaseId,
 	tb: String,
-	ix: String,
+	ix: IndexId,
 }
 
 impl IndexKeyBase {
-	pub fn new(ns: impl Into<NamespaceId>, db: impl Into<DatabaseId>, tb: &str, ix: &str) -> Self {
+	pub fn new(
+		ns: impl Into<NamespaceId>,
+		db: impl Into<DatabaseId>,
+		tb: &str,
+		ix: impl Into<IndexId>,
+	) -> Self {
 		Self(Arc::new(Inner {
 			ns: ns.into(),
 			db: db.into(),
 			tb: tb.to_string(),
-			ix: ix.to_string(),
+			ix: ix.into(),
 		}))
-	}
-
-	pub(crate) fn from_ic(ic: &Ic) -> Self {
-		Self(Arc::new(Inner {
-			ns: ic.ns,
-			db: ic.db,
-			tb: ic.tb.to_string(),
-			ix: ic.ix.to_string(),
-		}))
-	}
-
-	pub(crate) fn match_ic(&self, ic: &Ic) -> bool {
-		self.0.ix == ic.ix && self.0.tb == ic.tb && self.0.db == ic.db && self.0.ns == ic.ns
 	}
 
 	fn new_bc_key(&self, term_id: TermId) -> Bc<'_> {
-		Bc::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, term_id)
+		Bc::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, term_id)
 	}
 
 	fn new_bd_root_key(&self) -> BdRoot<'_> {
-		BdRoot::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix)
+		BdRoot::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
 	}
 
 	fn new_bd_key(&self, node_id: NodeId) -> Bd<'_> {
-		Bd::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, node_id)
+		Bd::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, node_id)
 	}
 
 	fn new_bk_key(&self, doc_id: DocId) -> Bk<'_> {
-		Bk::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, doc_id)
+		Bk::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, doc_id)
 	}
 
 	fn new_bl_root_key(&self) -> BlRoot<'_> {
-		BlRoot::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix)
+		BlRoot::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
 	}
 
 	fn new_bl_key(&self, node_id: NodeId) -> Bl<'_> {
-		Bl::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, node_id)
+		Bl::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, node_id)
 	}
 
 	fn new_bo_key(&self, doc_id: DocId, term_id: TermId) -> Bo<'_> {
-		Bo::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, doc_id, term_id)
+		Bo::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, doc_id, term_id)
 	}
 
 	fn new_bp_root_key(&self) -> BpRoot<'_> {
-		BpRoot::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix)
+		BpRoot::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
 	}
 
 	fn new_bp_key(&self, node_id: NodeId) -> Bp<'_> {
-		Bp::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, node_id)
+		Bp::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, node_id)
 	}
 
 	fn new_bf_key(&self, term_id: TermId, doc_id: DocId) -> Bf<'_> {
-		Bf::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, term_id, doc_id)
+		Bf::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, term_id, doc_id)
 	}
 
 	fn new_bt_root_key(&self) -> BtRoot<'_> {
-		BtRoot::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix)
+		BtRoot::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
 	}
 
 	fn new_bt_key(&self, node_id: NodeId) -> Bt<'_> {
-		Bt::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, node_id)
+		Bt::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, node_id)
 	}
 
 	fn new_bs_key(&self) -> Bs<'_> {
-		Bs::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix)
+		Bs::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
 	}
 
 	fn new_bu_key(&self, term_id: TermId) -> Bu<'_> {
-		Bu::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, term_id)
+		Bu::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, term_id)
 	}
 
 	fn new_hd_root_key(&self) -> HdRoot<'_> {
-		HdRoot::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix)
+		HdRoot::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
 	}
 
 	fn new_hd_key(&self, doc_id: DocId) -> Hd<'_> {
-		Hd::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, doc_id)
+		Hd::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, doc_id)
 	}
 
 	fn new_he_key(&self, element_id: ElementId) -> He<'_> {
-		He::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, element_id)
+		He::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, element_id)
 	}
 
 	fn new_hi_key(&self, id: RecordIdKey) -> Hi<'_> {
-		Hi::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, id)
+		Hi::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, id)
 	}
 
 	fn new_hl_key(&self, layer: u16, chunk: u32) -> Hl<'_> {
-		Hl::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, layer, chunk)
+		Hl::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, layer, chunk)
 	}
 
 	fn new_hv_key<'a>(&'a self, vec: &'a SerializedVector) -> Hv<'a> {
-		Hv::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, vec)
+		Hv::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, vec)
 	}
 
 	fn new_hs_key(&self) -> Hs<'_> {
-		Hs::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix)
+		Hs::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
 	}
 
 	fn new_vm_root_key(&self) -> VmRoot<'_> {
-		VmRoot::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix)
+		VmRoot::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
 	}
 
 	fn new_vm_key(&self, node_id: NodeId) -> Vm<'_> {
-		Vm::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, node_id)
+		Vm::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, node_id)
 	}
 
 	fn new_bi_key(&self, doc_id: DocId) -> Bi<'_> {
-		Bi::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, doc_id)
+		Bi::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, doc_id)
 	}
 
 	fn new_ii_key(&self, doc_id: DocId) -> Ii<'_> {
-		Ii::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, doc_id)
+		Ii::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, doc_id)
 	}
 
 	fn new_id_key(&self, id: RecordIdKey) -> IdKey {
-		IdKey::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, id)
+		IdKey::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, id)
 	}
 
 	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn new_ia_key(&self, i: u32) -> Ia<'_> {
-		Ia::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, i)
+		Ia::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, i)
 	}
 
 	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn new_ip_key(&self, id: RecordIdKey) -> Ip {
-		Ip::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, id)
+		Ip::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, id)
 	}
 
 	pub(crate) fn new_ib_key(&self, start: i64) -> Ib<'_> {
-		Ib::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, start)
+		Ib::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, start)
 	}
 
-	pub(crate) fn new_ic_key(&self, nid: Uuid) -> Ic {
-		Ic::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, nid, Uuid::now_v7())
+	pub(crate) fn new_ic_key(&self, nid: Uuid) -> IndexCompactionKey {
+		IndexCompactionKey::new(
+			self.0.ns,
+			self.0.db,
+			Cow::Borrowed(&self.0.tb),
+			self.0.ix,
+			nid,
+			Uuid::now_v7(),
+		)
 	}
 
 	pub(crate) fn new_ib_range(&self) -> Result<Range<Key>> {
-		Ib::new_range(self.0.ns, self.0.db, &self.0.tb, &self.0.ix)
+		Ib::new_range(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
 	}
 
 	pub(crate) fn new_is_key(&self, nid: Uuid) -> Is<'_> {
-		Is::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, nid)
+		Is::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, nid)
 	}
 
 	fn new_td_root<'a>(&'a self, term: &'a str) -> TdRoot<'a> {
-		TdRoot::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, term)
+		TdRoot::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, term)
 	}
 
 	fn new_td<'a>(&'a self, term: &'a str, doc_id: DocId) -> Td<'a> {
-		Td::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, term, doc_id)
+		Td::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, term, doc_id)
 	}
 
 	fn new_tt<'a>(
@@ -230,31 +230,31 @@ impl IndexKeyBase {
 		uid: Uuid,
 		add: bool,
 	) -> Tt<'a> {
-		Tt::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, term, doc_id, nid, uid, add)
+		Tt::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, term, doc_id, nid, uid, add)
 	}
 
 	fn new_tt_term_range(&self, term: &str) -> Result<(Key, Key)> {
-		Tt::term_range(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, term)
+		Tt::term_range(self.0.ns, self.0.db, &self.0.tb, self.0.ix, term)
 	}
 
 	fn new_tt_terms_range(&self) -> Result<(Key, Key)> {
-		Tt::terms_range(self.0.ns, self.0.db, &self.0.tb, &self.0.ix)
+		Tt::terms_range(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
 	}
 
 	fn new_dc_with_id(&self, doc_id: DocId, nid: Uuid, uid: Uuid) -> Dc {
-		Dc::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, doc_id, nid, uid)
+		Dc::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, doc_id, nid, uid)
 	}
 
 	fn new_dc_compacted(&self) -> Result<Key> {
-		Dc::new_root(self.0.ns, self.0.db, &self.0.tb, &self.0.ix)
+		Dc::new_root(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
 	}
 
 	fn new_dc_range(&self) -> Result<(Key, Key)> {
-		Dc::range(self.0.ns, self.0.db, &self.0.tb, &self.0.ix)
+		Dc::range(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
 	}
 
 	fn new_dl(&self, doc_id: DocId) -> Dl<'_> {
-		Dl::new(self.0.ns, self.0.db, &self.0.tb, &self.0.ix, doc_id)
+		Dl::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, doc_id)
 	}
 
 	pub(crate) fn table(&self) -> &str {
@@ -262,7 +262,7 @@ impl IndexKeyBase {
 	}
 
 	#[cfg(not(target_family = "wasm"))]
-	pub(crate) fn index(&self) -> &str {
-		&self.0.ix
+	pub(crate) fn index(&self) -> IndexId {
+		self.0.ix
 	}
 }

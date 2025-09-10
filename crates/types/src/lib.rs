@@ -7,6 +7,7 @@ mod traits;
 pub(crate) mod utils;
 mod value;
 
+pub use anyhow;
 pub use flatbuffers::*;
 pub use kind::*;
 // Re-export the derive macro

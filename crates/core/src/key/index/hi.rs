@@ -2,8 +2,8 @@
 use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::val::{IndexFormat, RecordIdKey};
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+use crate::val::RecordIdKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 #[storekey(format = "IndexFormat")]
@@ -16,7 +16,7 @@ pub(crate) struct Hi<'a> {
 	_c: u8,
 	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: Cow<'a, str>,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -32,7 +32,7 @@ impl crate::kvs::KVKey for Hi<'_> {
 }
 
 impl<'a> Hi<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, id: RecordIdKey) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, id: RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -42,7 +42,7 @@ impl<'a> Hi<'a> {
 			_c: b'*',
 			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix: Cow::Borrowed(ix),
+			ix,
 			_e: b'!',
 			_f: b'h',
 			_g: b'i',
@@ -62,13 +62,13 @@ mod tests {
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
-			"testix",
+			IndexId(3),
 			RecordIdKey::String("testid".to_string()),
 		);
 		let enc = Hi::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!hi\x03testid\0",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03\0!hi\x03testid\0",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);

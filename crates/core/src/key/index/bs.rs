@@ -2,7 +2,7 @@
 use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::ft::search::SearchIndexState;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
@@ -19,7 +19,7 @@ pub(crate) struct Bs<'a> {
 	_d: u8,
 	_e: u8,
 	_f: u8,
-	pub ix: Cow<'a, str>,
+	pub ix: IndexId,
 }
 
 impl_kv_key_storekey!(Bs<'_> => SearchIndexState);
@@ -31,7 +31,7 @@ impl Categorise for Bs<'_> {
 }
 
 impl<'a> Bs<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
 		Bs {
 			__: b'/',
 			_a: b'*',
@@ -43,7 +43,7 @@ impl<'a> Bs<'a> {
 			_d: b'!',
 			_e: b'b',
 			_f: b's',
-			ix: Cow::Borrowed(ix),
+			ix,
 		}
 	}
 }
@@ -60,9 +60,9 @@ mod tests {
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
-			"testix",
+			IndexId(3),
 		);
 		let enc = Bs::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!bstestix\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!bs\0\0\0\x03");
 	}
 }

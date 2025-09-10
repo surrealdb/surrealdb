@@ -17,7 +17,7 @@
 use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::idx::ft::DocLength;
 use crate::key::category::{Categorise, Category};
@@ -33,7 +33,7 @@ pub(crate) struct Dl<'a> {
 	_c: u8,
 	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: Cow<'a, str>,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -62,7 +62,7 @@ impl<'a> Dl<'a> {
 	/// * `tb` - Table identifier
 	/// * `ix` - Index identifier
 	/// * `id` - The document ID whose length is being stored
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, id: DocId) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, id: DocId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -72,7 +72,7 @@ impl<'a> Dl<'a> {
 			_c: b'*',
 			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix: Cow::Borrowed(ix),
+			ix,
 			_e: b'!',
 			_f: b'd',
 			_g: b'l',
@@ -88,11 +88,11 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Dl::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", 16);
+		let val = Dl::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), 16);
 		let enc = Dl::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!dl\0\0\0\0\0\0\0\x10"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dl\0\0\0\0\0\0\0\x10"
 		);
 	}
 }

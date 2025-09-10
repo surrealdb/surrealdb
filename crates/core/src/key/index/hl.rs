@@ -6,6 +6,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::kvs::impl_kv_key_storekey;
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
 pub(crate) struct Hl<'a> {
@@ -17,7 +18,7 @@ pub(crate) struct Hl<'a> {
 	_c: u8,
 	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: Cow<'a, str>,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -32,7 +33,7 @@ impl<'a> Hl<'a> {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &'a str,
-		ix: &'a str,
+		ix: IndexId,
 		layer: u16,
 		chunk: u32,
 	) -> Self {
@@ -45,7 +46,7 @@ impl<'a> Hl<'a> {
 			_c: b'*',
 			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix: Cow::Borrowed(ix),
+			ix,
 			_e: b'!',
 			_f: b'h',
 			_g: b'l',
@@ -62,11 +63,11 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Hl::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", 7, 8);
+		let val = Hl::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), 7, 8);
 		let enc = Hl::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!hl\0\x07\0\0\0\x08",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hl\0\x07\0\0\0\x08",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);

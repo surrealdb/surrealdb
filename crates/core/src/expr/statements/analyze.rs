@@ -31,8 +31,8 @@ impl AnalyzeStatement {
 				opt.is_allowed(Action::View, ResourceKind::Index, &Base::Db)?;
 				// Read the index
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-				let ix = ctx.tx().get_tb_index(ns, db, tb, idx).await?;
-				let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
+				let ix = ctx.tx().expect_tb_index(ns, db, tb, idx).await?;
+				let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
 				// Index operation dispatching
 				let value: Value = match &ix.index {
 					Index::Search(p) => {
