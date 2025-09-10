@@ -88,7 +88,7 @@ impl From<crate::expr::Part> for Part {
 impl fmt::Display for Part {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Part::All => f.write_str("[*]"),
+			Part::All => f.write_str(".*"),
 			Part::Last => f.write_str("[$]"),
 			Part::First => f.write_str("[0]"),
 			Part::Start(v) => write!(f, "{v}"),

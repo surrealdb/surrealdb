@@ -1,13 +1,15 @@
 //! Stores the DocIds -> Thing of an HNSW index
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
-use crate::catalog::{DatabaseId, NamespaceId};
+use storekey::{BorrowDecode, Encode};
+
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::docs::HnswDocsState;
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 use crate::val::RecordIdKey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct HdRoot<'a> {
 	__: u8,
 	_a: u8,
@@ -15,20 +17,18 @@ pub(crate) struct HdRoot<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
 }
 
-impl KVKey for HdRoot<'_> {
-	type ValueType = HnswDocsState;
-}
+impl_kv_key_storekey!(HdRoot<'_> => HnswDocsState);
 
 impl<'a> HdRoot<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -36,7 +36,7 @@ impl<'a> HdRoot<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 			_e: b'!',
@@ -46,7 +46,7 @@ impl<'a> HdRoot<'a> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Hd<'a> {
 	__: u8,
 	_a: u8,
@@ -54,21 +54,19 @@ pub(crate) struct Hd<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
 	pub doc_id: DocId,
 }
 
-impl KVKey for Hd<'_> {
-	type ValueType = RecordIdKey;
-}
+impl_kv_key_storekey!(Hd<'_> => RecordIdKey);
 
 impl<'a> Hd<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, doc_id: DocId) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, doc_id: DocId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -76,7 +74,7 @@ impl<'a> Hd<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 			_e: b'!',
@@ -90,12 +88,13 @@ impl<'a> Hd<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn root() {
-		let val = HdRoot::new(NamespaceId(1), DatabaseId(2), "testtb", "testix");
+		let val = HdRoot::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3));
 		let enc = HdRoot::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!hd");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hd");
 	}
 
 	#[test]
@@ -105,13 +104,13 @@ mod tests {
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
-			"testix",
+			IndexId(3),
 			7
 		);
 		let enc = Hd::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!hd\0\0\0\0\0\0\0\x07"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hd\0\0\0\0\0\0\0\x07"
 		);
 	}
 }

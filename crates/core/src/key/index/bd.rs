@@ -1,13 +1,15 @@
 //! Stores BTree nodes for doc ids
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
-use crate::catalog::{DatabaseId, NamespaceId};
+use storekey::{BorrowDecode, Encode};
+
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::docids::btdocids::BTreeDocIdsState;
 use crate::idx::trees::store::NodeId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct BdRoot<'a> {
 	__: u8,
 	_a: u8,
@@ -15,17 +17,15 @@ pub(crate) struct BdRoot<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
 }
 
-impl KVKey for BdRoot<'_> {
-	type ValueType = BTreeDocIdsState;
-}
+impl_kv_key_storekey!(BdRoot<'_> => BTreeDocIdsState);
 
 impl Categorise for BdRoot<'_> {
 	fn categorise(&self) -> Category {
@@ -34,7 +34,7 @@ impl Categorise for BdRoot<'_> {
 }
 
 impl<'a> BdRoot<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -42,7 +42,7 @@ impl<'a> BdRoot<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 			_e: b'!',
@@ -52,7 +52,7 @@ impl<'a> BdRoot<'a> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Bd<'a> {
 	__: u8,
 	_a: u8,
@@ -60,18 +60,16 @@ pub(crate) struct Bd<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
 	pub node_id: NodeId,
 }
 
-impl KVKey for Bd<'_> {
-	type ValueType = BTreeDocIdsState;
-}
+impl_kv_key_storekey!(Bd<'_> => BTreeDocIdsState);
 
 impl Categorise for Bd<'_> {
 	fn categorise(&self) -> Category {
@@ -80,7 +78,7 @@ impl Categorise for Bd<'_> {
 }
 
 impl<'a> Bd<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, node_id: NodeId) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, node_id: NodeId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -88,7 +86,7 @@ impl<'a> Bd<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 			_e: b'!',
@@ -103,12 +101,13 @@ impl<'a> Bd<'a> {
 mod tests {
 
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn root() {
-		let val = BdRoot::new(NamespaceId(1), DatabaseId(2), "testtb", "testix");
+		let val = BdRoot::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3));
 		let enc = BdRoot::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!bd");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!bd");
 	}
 
 	#[test]
@@ -118,13 +117,13 @@ mod tests {
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
-			"testix",
+			IndexId(3),
 			7
 		);
 		let enc = Bd::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!bd\0\0\0\0\0\0\0\x07"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!bd\0\0\0\0\0\0\0\x07"
 		);
 	}
 }

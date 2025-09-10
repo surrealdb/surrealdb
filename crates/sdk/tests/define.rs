@@ -6,7 +6,7 @@ use helpers::*;
 use surrealdb::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::err::Error;
-use surrealdb_core::expr::{Ident, Idiom, Part};
+use surrealdb_core::expr::{Ident, Part};
 use surrealdb_core::iam::{Level, Role};
 use surrealdb_core::val::Value;
 use surrealdb_core::{strand, syn};
@@ -224,7 +224,7 @@ async fn define_statement_index_concurrently_building_status_standard_overwrite(
 async fn define_statement_index_concurrently_building_status_full_text() -> Result<()> {
 	define_statement_index_concurrently_building_status(
 		"DEFINE ANALYZER simple TOKENIZERS blank,class;
-		DEFINE INDEX test ON user FIELDS email SEARCH ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;",
+		DEFINE INDEX test ON user FIELDS email FULLTEXT ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;",
 		2,
 		200,
 		10,
@@ -236,7 +236,7 @@ async fn define_statement_index_concurrently_building_status_full_text() -> Resu
 async fn define_statement_index_concurrently_building_status_full_text_overwrite() -> Result<()> {
 	define_statement_index_concurrently_building_status(
 		"DEFINE ANALYZER simple TOKENIZERS blank,class;
-		DEFINE INDEX OVERWRITE test ON user FIELDS email SEARCH ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;",
+		DEFINE INDEX OVERWRITE test ON user FIELDS email FULLTEXT ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;",
 		2,
 		200, 10
 	)
@@ -289,17 +289,16 @@ async fn define_statement_search_index() -> Result<()> {
 		CREATE blog:1 SET title = 'Understanding SurrealQL and how it is different from PostgreSQL';
 		CREATE blog:3 SET title = 'This blog is going to be deleted';
 		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
-		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
+		DEFINE INDEX blog_title ON blog FIELDS title FULLTEXT ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
 		CREATE blog:2 SET title = 'Behind the scenes of the exciting beta 9 release';
 		DELETE blog:3;
 		INFO FOR TABLE blog;
-		ANALYZE INDEX blog_title ON blog;
 	"#;
 
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 8);
+	assert_eq!(res.len(), 7);
 	//
 	for i in 0..6 {
 		let tmp = res.remove(0).result;
@@ -313,40 +312,12 @@ async fn define_statement_search_index() -> Result<()> {
 			fields: {},
 			tables: {},
 			indexes: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title \
-			SEARCH ANALYZER simple BM25(1.2,0.75) \
-			DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100 \
-			DOC_IDS_CACHE 100 DOC_LENGTHS_CACHE 100 POSTINGS_CACHE 100 TERMS_CACHE 100 HIGHLIGHTS' },
+			FULLTEXT ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS' },
 			lives: {},
 		}",
 	)
 	.unwrap();
 	assert_eq!(tmp, val);
-
-	let tmp = res.remove(0).result?;
-
-	check_path(&tmp, &["doc_ids", "keys_count"], |v| assert_eq!(v, Value::from(2)));
-	check_path(&tmp, &["doc_ids", "max_depth"], |v| assert_eq!(v, Value::from(1)));
-	check_path(&tmp, &["doc_ids", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
-	// TODO(emmanuel) My (Mees) changes caused some changes in these numbers but I
-	// didn't have time to figure out what was going on so if you could have a look
-	// after the PR merges it would be appreaciated.
-	check_path(&tmp, &["doc_ids", "total_size"], |v| assert_eq!(v, Value::from(63)));
-
-	check_path(&tmp, &["doc_lengths", "keys_count"], |v| assert_eq!(v, Value::from(2)));
-	check_path(&tmp, &["doc_lengths", "max_depth"], |v| assert_eq!(v, Value::from(1)));
-	check_path(&tmp, &["doc_lengths", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
-	check_path(&tmp, &["doc_lengths", "total_size"], |v| assert_eq!(v, Value::from(56)));
-
-	check_path(&tmp, &["postings", "keys_count"], |v| assert_eq!(v, Value::from(17)));
-	check_path(&tmp, &["postings", "max_depth"], |v| assert_eq!(v, Value::from(1)));
-	check_path(&tmp, &["postings", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
-	check_path(&tmp, &["postings", "total_size"], |v| assert!(v > Value::from(150)));
-
-	check_path(&tmp, &["terms", "keys_count"], |v| assert_eq!(v, Value::from(17)));
-	check_path(&tmp, &["terms", "max_depth"], |v| assert_eq!(v, Value::from(1)));
-	check_path(&tmp, &["terms", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
-	check_path(&tmp, &["terms", "total_size"], |v| assert!(v.gt(&Value::from(150))));
-
 	Ok(())
 }
 
@@ -510,20 +481,6 @@ async fn define_statement_user_db() -> Result<()> {
 	assert!(res.remove(0).result.is_err());
 
 	Ok(())
-}
-
-fn check_path<F>(val: &Value, path: &[&str], check: F)
-where
-	F: Fn(Value),
-{
-	let part: Vec<Part> = path.iter().map(|p| Part::field((*p).to_owned()).unwrap()).collect();
-	let res = val.walk(&part);
-	for (i, v) in res {
-		let mut idiom = Idiom::default();
-		idiom.0.clone_from(&part);
-		assert_eq!(idiom, i);
-		check(v);
-	}
 }
 
 //

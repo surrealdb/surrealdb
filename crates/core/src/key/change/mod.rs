@@ -1,15 +1,17 @@
 //! Stores change feeds
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::cf::TableMutations;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 use crate::vs::VersionStamp;
 
 // Cf stands for change feeds
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Cf<'a> {
 	__: u8,
 	_a: u8,
@@ -20,12 +22,9 @@ pub(crate) struct Cf<'a> {
 	// vs is the versionstamp of the change feed entry that is encoded in big-endian.
 	pub vs: VersionStamp,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 }
-
-impl KVKey for Cf<'_> {
-	type ValueType = TableMutations;
-}
+impl_kv_key_storekey!(Cf<'_> => TableMutations);
 
 impl Categorise for Cf<'_> {
 	fn categorise(&self) -> Category {
@@ -45,12 +44,12 @@ impl<'a> Cf<'a> {
 			_d: b'#',
 			vs,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 		}
 	}
 
 	pub fn decode_key(k: &[u8]) -> Result<Cf<'_>> {
-		Ok(storekey::deserialize(k)?)
+		Ok(storekey::decode_borrow(k)?)
 	}
 }
 
@@ -70,7 +69,7 @@ pub fn versionstamped_key_suffix(tb: &str) -> Vec<u8> {
 }
 
 /// A prefix or suffix for a database change feed
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub struct DatabaseChangeFeedRange {
 	__: u8,
 	_a: u8,
@@ -107,11 +106,9 @@ impl DatabaseChangeFeedRange {
 	}
 }
 
-impl KVKey for DatabaseChangeFeedRange {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(DatabaseChangeFeedRange => Vec<u8>);
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub struct DatabaseChangeFeedTsRange {
 	__: u8,
 	_a: u8,
@@ -136,9 +133,7 @@ impl DatabaseChangeFeedTsRange {
 	}
 }
 
-impl KVKey for DatabaseChangeFeedTsRange {
-	type ValueType = TableMutations;
-}
+impl_kv_key_storekey!(DatabaseChangeFeedTsRange => TableMutations);
 
 /// Returns the prefix for the whole database change feeds since the
 /// specified versionstamp.

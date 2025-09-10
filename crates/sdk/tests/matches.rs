@@ -12,7 +12,7 @@ async fn select_where_matches_partial_highlight() -> Result<()> {
 	let sql = r"
 		CREATE blog:1 SET content = 'Hello World!';
 		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase,edgengram(2,100);
-		DEFINE INDEX blog_content ON blog FIELDS content SEARCH ANALYZER simple BM25 HIGHLIGHTS;
+		DEFINE INDEX blog_content ON blog FIELDS content FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
 		SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'he';
 		SELECT id, search::highlight('<em>', '</em>', 1, false) AS content FROM blog WHERE content @1@ 'he';
 		SELECT id, search::highlight('<em>', '</em>', 1, true) AS content FROM blog WHERE content @1@ 'he';
@@ -100,7 +100,7 @@ async fn select_where_matches_partial_highlight_ngram() -> Result<()> {
 	let sql = r"
 		CREATE blog:1 SET content = 'Hello World!';
 		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase,ngram(1,32);
-		DEFINE INDEX blog_content ON blog FIELDS content SEARCH ANALYZER simple BM25 HIGHLIGHTS;
+		DEFINE INDEX blog_content ON blog FIELDS content FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
 		SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'Hello';
 		SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'el';
 		SELECT id, search::highlight('<em>', '</em>', 1, false) AS content FROM blog WHERE content @1@ 'el';
@@ -189,8 +189,8 @@ async fn select_where_matches_using_index_offsets() -> Result<()> {
 	let sql = r"
 		CREATE blog:1 SET title = 'Blog title!', content = ['Hello World!', 'Be Bop', 'Foo Bãr'];
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
-		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
-		DEFINE INDEX blog_content ON blog FIELDS content SEARCH ANALYZER simple BM25 HIGHLIGHTS;
+		DEFINE INDEX blog_title ON blog FIELDS title FULLTEXT ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
+		DEFINE INDEX blog_content ON blog FIELDS content FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
 		SELECT id, search::offsets(0) AS title, search::offsets(1) AS content FROM blog WHERE title @0@ 'title' AND content @1@ 'Hello Bãr';
 	";
 	let dbs = new_ds().await?;
@@ -228,7 +228,7 @@ async fn select_where_matches_using_index_and_score() -> Result<()> {
 		CREATE blog:3 SET title = 'the other animals sat there watching';
 		CREATE blog:4 SET title = 'the dog sat there and did nothing';
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
-		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
+		DEFINE INDEX blog_title ON blog FIELDS title FULLTEXT ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
 		SELECT id,search::score(1) AS score FROM blog WHERE title @1@ 'animals';
 	";
 	let dbs = new_ds().await?;
@@ -260,7 +260,7 @@ async fn select_where_matches_without_using_index_and_score() -> Result<()> {
 		CREATE blog:3 SET title = 'the other animals sat there watching', label = 'test';
 		CREATE blog:4 SET title = 'the dog sat there and did nothing', label = 'test';
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
-		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25 HIGHLIGHTS;
+		DEFINE INDEX blog_title ON blog FIELDS title FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
 		LET $keywords = 'animals';
  		SELECT id,search::score(1) AS score FROM blog
  			WHERE (title @1@ $keywords AND label = 'test')
@@ -301,7 +301,7 @@ async fn select_where_matches_analyser_without_tokenizer() -> Result<()> {
 	let sql = r"
 		DEFINE ANALYZER az FILTERS lowercase,ngram(1,5);
 		CREATE t:1 SET text = 'ab';
-		DEFINE INDEX search_idx ON TABLE t COLUMNS text SEARCH ANALYZER az BM25 HIGHLIGHTS;
+		DEFINE INDEX search_idx ON TABLE t COLUMNS text FULLTEXT ANALYZER az BM25 HIGHLIGHTS;
 		SELECT * FROM t WHERE text @@ 'a';";
 	let mut t = Test::new(sql).await?;
 	t.expect_size(4)?;
@@ -315,7 +315,7 @@ async fn select_where_matches_analyser_with_mapper() -> Result<()> {
 	let sql = r"
 		DEFINE ANALYZER mapper TOKENIZERS blank,class FILTERS lowercase,mapper('../../tests/data/lemmatization-en.txt');
 		CREATE t:1 SET text = 'He drives to work every day, taking the scenic route through town';
-		DEFINE INDEX search_idx ON TABLE t COLUMNS text SEARCH ANALYZER mapper BM25;
+		DEFINE INDEX search_idx ON TABLE t COLUMNS text FULLTEXT ANALYZER mapper BM25;
 		SELECT * FROM t WHERE text @@ 'driven'";
 	let mut t = Test::new(sql).await?;
 	t.expect_size(4)?;

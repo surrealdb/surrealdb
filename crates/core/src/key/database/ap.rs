@@ -1,12 +1,14 @@
 //! Stores a DEFINE API definition
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{ApiDefinition, DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Ap<'a> {
 	__: u8,
 	_a: u8,
@@ -16,12 +18,10 @@ pub(crate) struct Ap<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub ap: &'a str,
+	pub ap: Cow<'a, str>,
 }
 
-impl KVKey for Ap<'_> {
-	type ValueType = ApiDefinition;
-}
+impl_kv_key_storekey!(Ap<'_> => ApiDefinition);
 
 pub fn new(ns: NamespaceId, db: DatabaseId, ap: &str) -> Ap<'_> {
 	Ap::new(ns, db, ap)
@@ -56,7 +56,7 @@ impl<'a> Ap<'a> {
 			_c: b'!', // !
 			_d: b'a', // a
 			_e: b'p', // p
-			ap,
+			ap: Cow::Borrowed(ap),
 		}
 	}
 }

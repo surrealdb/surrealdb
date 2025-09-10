@@ -1,12 +1,14 @@
 //! Stores a DEFINE SEQUENCE config definition
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId, SequenceDefinition};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Sq<'a> {
 	__: u8,
 	_a: u8,
@@ -16,12 +18,10 @@ pub(crate) struct Sq<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub sq: &'a str,
+	pub sq: Cow<'a, str>,
 }
 
-impl KVKey for Sq<'_> {
-	type ValueType = SequenceDefinition;
-}
+impl_kv_key_storekey!(Sq<'_> => SequenceDefinition);
 
 pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db).encode_key()?;
@@ -52,7 +52,7 @@ impl<'a> Sq<'a> {
 			_c: b'*', // *
 			_d: b's', // s
 			_e: b'q', // q
-			sq,
+			sq: Cow::Borrowed(sq),
 		}
 	}
 }

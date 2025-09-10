@@ -774,7 +774,13 @@ end = "2026-05-06"
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2022-03-16"
-end = "2025-01-24"
+end = "2026-09-10"
+
+[[trusted.storekey-derive]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-09-03"
+end = "2026-09-10"
 
 [[trusted.surrealdb]]
 criteria = "safe-to-deploy"
