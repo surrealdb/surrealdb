@@ -311,6 +311,7 @@
 "search::score("
 "search::highlight("
 "search::offsets("
+"search::tokens("
 "sequence::nextval("
 "session"
 "session::"

@@ -584,6 +584,7 @@ pub async fn asynchronous(
 		"search::score" => search::score((ctx, doc)).await,
 		"search::highlight" => search::highlight((ctx, doc)).await,
 		"search::offsets" => search::offsets((ctx, doc)).await,
+		"search::tokens" => search::tokens((ctx, doc)).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
 		//

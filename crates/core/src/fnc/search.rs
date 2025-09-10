@@ -67,6 +67,10 @@ pub async fn offsets(
 	Ok(Value::None)
 }
 
+pub async fn tokens((_ctx, _doc): (&Context, Option<&CursorDoc>), _index: Value) -> Result<Value> {
+	todo!()
+}
+
 /// Internal structure for storing documents during RRF (Reciprocal Rank Fusion)
 /// processing.
 ///

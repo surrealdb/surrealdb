@@ -43,6 +43,10 @@ value = "[]"
 [[test.results]]
 value = "[]"
 
+[[test.results]]
+value = "[ { titleTokens: ['yet', 'another', 'world'] }]"
+
+
 */
 
 CREATE b:1 SET t = 'Hello World!';
@@ -59,3 +63,4 @@ DELETE b:1;
 SELECT search::highlight('{', '}', 1) AS title, search::score(1) * search::score(2) AS score FROM b WHERE t @1@ 'Hello' OR t @2@ 'Bar';
 DELETE b:4;
 SELECT search::highlight('{', '}', 1) AS title, search::score(1) * search::score(2) AS score FROM b WHERE t @1@ 'Hello' OR t @2@ 'Bar';
+SELECT search::tokens('i') AS titleTokens FROM b:2;
