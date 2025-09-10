@@ -810,7 +810,7 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test Memory engine
+      - name: Test Memory KVS
         run: cargo make ci-mem-kvs
 
   rocksdb-kvs:
@@ -833,7 +833,7 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test RocksDB engine
+      - name: Test RocksDB KVS
         run: cargo make ci-rocksdb-kvs
 
   surrealkv-kvs:
@@ -856,7 +856,7 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test SurrealKV engine
+      - name: Test SurrealKV KVS
         run: cargo make ci-surrealkv-kvs
 
   tikv-kvs:
@@ -886,7 +886,7 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test TiKV engine
+      - name: Test TiKV KVS
         run: cargo make ci-tikv-kvs
 
   fdb-7-1-kvs:
@@ -914,7 +914,7 @@ jobs:
         with:
           version: "7.1.61"
 
-      - name: Test FoundationDB engine
+      - name: Test FoundationDB 7.1 KVS
         run: cargo make ci-fdb-7_1-kvs
 
   fdb-7-3-kvs:
@@ -942,7 +942,7 @@ jobs:
         with:
           version: "7.3.47"
 
-      - name: Test FoundationDB engine
+      - name: Test FoundationDB 7.3 KVS
         run: cargo make ci-fdb-7_3-kvs
 
   # ----------------------------------------
