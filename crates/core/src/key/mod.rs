@@ -115,5 +115,4 @@ pub(crate) mod r#ref;
 pub(crate) mod root;
 pub(crate) mod sequence;
 pub(crate) mod table;
-pub(crate) mod value;
 pub(crate) mod version;

@@ -1,17 +1,15 @@
 use std::any::Any;
 
-use super::cmp::{RoughlyEq, RoughlyEqConfig};
-use crate::tests::schema::{self, TestConfig};
-use crate::tests::{
-	TestSet,
-	schema::{BoolOr, TestDetailsResults},
-	set::TestId,
-};
 use surrealdb_core::dbs::{Session, Variables};
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::sql::{Ast, Expr, TopLevelExpr};
 use surrealdb_core::syn::error::RenderedError;
 use surrealdb_core::val::Value as SurValue;
+
+use super::cmp::{RoughlyEq, RoughlyEqConfig};
+use crate::tests::TestSet;
+use crate::tests::schema::{self, BoolOr, TestConfig, TestDetailsResults};
+use crate::tests::set::TestId;
 
 mod display;
 mod update;

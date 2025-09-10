@@ -1,12 +1,14 @@
 //! Stores MTree state and nodes
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::trees::mtree::MState;
 use crate::idx::trees::store::NodeId;
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode, Hash)]
 pub(crate) struct VmRoot<'a> {
 	__: u8,
 	_a: u8,
@@ -14,7 +16,7 @@ pub(crate) struct VmRoot<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -22,9 +24,7 @@ pub(crate) struct VmRoot<'a> {
 	_g: u8,
 }
 
-impl KVKey for VmRoot<'_> {
-	type ValueType = MState;
-}
+impl_kv_key_storekey!(VmRoot<'_> => MState);
 
 impl<'a> VmRoot<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
@@ -36,7 +36,7 @@ impl<'a> VmRoot<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 			_e: b'!',
@@ -46,7 +46,7 @@ impl<'a> VmRoot<'a> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Vm<'a> {
 	__: u8,
 	_a: u8,
@@ -54,7 +54,7 @@ pub(crate) struct Vm<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -63,9 +63,7 @@ pub(crate) struct Vm<'a> {
 	pub node_id: NodeId,
 }
 
-impl KVKey for Vm<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(Vm<'_> => Vec<u8>);
 
 impl<'a> Vm<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, node_id: NodeId) -> Self {
@@ -76,7 +74,7 @@ impl<'a> Vm<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 			_e: b'!',
@@ -90,6 +88,7 @@ impl<'a> Vm<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn root() {

@@ -12,6 +12,7 @@ use num_traits::Zero;
 use revision::{Revisioned, revisioned};
 use rust_decimal::prelude::FromPrimitive;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{Distance, VectorType};
 use crate::err::Error;
@@ -31,7 +32,7 @@ pub enum Vector {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Encode, BorrowDecode)]
 pub enum SerializedVector {
 	F64(Vec<f64>),
 	F32(Vec<f32>),

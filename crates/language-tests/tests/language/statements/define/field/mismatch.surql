@@ -4,12 +4,12 @@
 [[test.results]]
 value = "NONE"
 [[test.results]]
-error = "Cannot set field `fd[*]` with type `number` as it mismatched with field `fd` with type `array<string>`"
+error = "Cannot set field `fd.*` with type `number` as it mismatched with field `fd` with type `array<string>`"
 
 [[test.results]]
 value = "NONE"
 [[test.results]]
-error = "Cannot set field `fd[*]` with type `number` as it mismatched with field `fd` with type `[string, number]`"
+error = "Cannot set field `fd.*` with type `number` as it mismatched with field `fd` with type `[string, number]`"
 [[test.results]]
 error = "Cannot set field `fd[0]` with type `number` as it mismatched with field `fd` with type `[string, number]`"
 [[test.results]]
@@ -18,7 +18,7 @@ value = "NONE"
 [[test.results]]
 value = "NONE"
 [[test.results]]
-error = "Cannot set field `fd[*]` with type `number` as it mismatched with field `fd` with type `{ a: string, b: number }`"
+error = "Cannot set field `fd.*` with type `number` as it mismatched with field `fd` with type `{ a: string, b: number }`"
 [[test.results]]
 error = "Cannot set field `fd.a` with type `number` as it mismatched with field `fd` with type `{ a: string, b: number }`"
 [[test.results]]
@@ -27,13 +27,13 @@ value = "NONE"
 [[test.results]]
 value = "NONE"
 [[test.results]]
-error = "Cannot set field `fd[*]` with type `number` as it mismatched with field `fd` with type `{ a: string, b: number } | { a: string, b: bool }`"
+error = "Cannot set field `fd.*` with type `number` as it mismatched with field `fd` with type `{ a: string, b: number } | { a: string, b: bool }`"
 [[test.results]]
 error = "Cannot set field `fd.a` with type `number` as it mismatched with field `fd` with type `{ a: string, b: number } | { a: string, b: bool }`"
 [[test.results]]
 error = "Cannot set field `fd.b` with type `number` as it mismatched with field `fd` with type `{ a: string, b: number } | { a: string, b: bool }`"
 [[test.results]]
-error = "Cannot set field `fd[*]` with type `string` as it mismatched with field `fd` with type `{ a: string, b: number } | { a: string, b: bool }`"
+error = "Cannot set field `fd.*` with type `string` as it mismatched with field `fd` with type `{ a: string, b: number } | { a: string, b: bool }`"
 [[test.results]]
 value = "NONE"
 [[test.results]]
@@ -78,14 +78,14 @@ value = "NONE"
 [[test.results]]
 value = "NONE"
 [[test.results]]
-error = "Cannot set field `fd[*]` with type `'a'` as it mismatched with field `fd` with type `array<'a' | 'b'>`"
+error = "Cannot set field `fd.*` with type `'a'` as it mismatched with field `fd` with type `array<'a' | 'b'>`"
 
 [[test.results]]
 value = "NONE"
 [[test.results]]
 value = "NONE"
 [[test.results]]
-error = "Cannot set field `fd[*]` with type `'a' | 'b'` as it mismatched with field `fd` with type `array<'a'>`"
+error = "Cannot set field `fd.*` with type `'a' | 'b'` as it mismatched with field `fd` with type `array<'a'>`"
 
 [[test.results]]
 value = "NONE"

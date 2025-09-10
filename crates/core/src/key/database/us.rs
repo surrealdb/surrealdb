@@ -1,13 +1,15 @@
 //! Stores a DEFINE USER ON DATABASE config definition
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct UserKey<'key> {
 	__: u8,
 	_a: u8,
@@ -17,12 +19,10 @@ pub(crate) struct UserKey<'key> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub user: &'key str,
+	pub user: Cow<'key, str>,
 }
 
-impl KVKey for UserKey<'_> {
-	type ValueType = catalog::UserDefinition;
-}
+impl_kv_key_storekey!(UserKey<'_> => catalog::UserDefinition);
 
 pub fn new(ns: NamespaceId, db: DatabaseId, user: &str) -> UserKey<'_> {
 	UserKey::new(ns, db, user)
@@ -57,7 +57,7 @@ impl<'a> UserKey<'a> {
 			_c: b'!',
 			_d: b'u',
 			_e: b's',
-			user,
+			user: Cow::Borrowed(user),
 		}
 	}
 }

@@ -906,7 +906,7 @@ async fn compute_revoke(
 	_doc: Option<&CursorDoc>,
 ) -> Result<Value> {
 	let revoked = revoke_grant(stmt, stk, ctx, opt).await?;
-	Ok(Value::Array(revoked.into()))
+	Ok(Value::Array(vec![revoked].into()))
 }
 
 async fn compute_purge(

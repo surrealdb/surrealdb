@@ -1,7 +1,8 @@
-use revision::revisioned;
-/// Manual implementations of the oldest revision of surrealdb structs for backwards compatibility.
-/// Only the variants that are needed to controll surrealdb are implemented.
+/// Manual implementations of the oldest revision of surrealdb structs for backwards
+/// compatibility. Only the variants that are needed to controll surrealdb are implemented.
 use std::collections::BTreeMap;
+
+use revision::revisioned;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Hash)]

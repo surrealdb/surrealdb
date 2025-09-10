@@ -1,12 +1,14 @@
 //! Stores sequence batches
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::sequences::BatchValue;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Ba<'a> {
 	__: u8,
 	_a: u8,
@@ -16,16 +18,14 @@ pub(crate) struct Ba<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub sq: &'a str,
+	pub sq: Cow<'a, str>,
 	_f: u8,
 	_g: u8,
 	_h: u8,
 	pub start: i64,
 }
 
-impl KVKey for Ba<'_> {
-	type ValueType = BatchValue;
-}
+impl_kv_key_storekey!(Ba<'_> => BatchValue);
 
 impl Categorise for Ba<'_> {
 	fn categorise(&self) -> Category {
@@ -44,7 +44,7 @@ impl<'a> Ba<'a> {
 			_c: b'!',
 			_d: b's',
 			_e: b'q',
-			sq,
+			sq: Cow::Borrowed(sq),
 			_f: b'!',
 			_g: b'b',
 			_h: b'a',
@@ -56,6 +56,7 @@ impl<'a> Ba<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

@@ -1,4 +1,6 @@
-use std::{io::Write, path::Path, process::Stdio};
+use std::io::Write;
+use std::path::Path;
+use std::process::Stdio;
 
 use anyhow::{Context, bail};
 use semver::Version;
