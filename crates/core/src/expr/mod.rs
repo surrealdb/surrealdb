@@ -3,7 +3,8 @@
 use anyhow::Result;
 
 use crate::err::Error;
-use crate::val::Output;
+use crate::val;
+use crate::expr::output::Output;
 
 pub(crate) mod access;
 pub(crate) mod access_type;
@@ -123,7 +124,7 @@ pub type FlowResult<T> = Result<T, ControlFlow>;
 pub enum ControlFlow {
 	Break,
 	Continue,
-	Return(Output),
+	Return(val::Output),
 	Err(anyhow::Error),
 }
 
@@ -141,11 +142,11 @@ pub trait FlowResultExt {
 	/// If the error value is either `ControlFlow::Break` or
 	/// `ControlFlow::Continue` it will instead create an error that
 	/// break/continue was used within an invalid location.
-	fn catch_return(self) -> Result<Output, anyhow::Error>;
+	fn catch_return(self) -> Result<val::Output, anyhow::Error>;
 }
 
-impl FlowResultExt for FlowResult<Output> {
-	fn catch_return(self) -> Result<Output, anyhow::Error> {
+impl FlowResultExt for FlowResult<val::Output> {
+	fn catch_return(self) -> Result<val::Output, anyhow::Error> {
 		match self {
 			Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
 				Err(anyhow::Error::new(Error::InvalidControlFlow))

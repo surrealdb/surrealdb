@@ -401,8 +401,8 @@ impl Iterator {
 		stm_ctx: &StatementContext<'_>,
 		expr: &Expr,
 	) -> Result<()> {
-		let v = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await.catch_return()?;
-		match v {
+		let output = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await.catch_return()?;
+		match output.into_value() {
 			Value::Object(o) if !stm_ctx.stm.is_select() => {
 				self.prepare_object(stm_ctx.stm, o)?;
 			}

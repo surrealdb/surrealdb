@@ -128,9 +128,9 @@ impl ApiInvocation {
 			unreachable!()
 		};
 
-		let res = stk.run(|stk| action.compute(stk, &ctx, &opt, None)).await.catch_return()?;
+		let output = stk.run(|stk| action.compute(stk, &ctx, &opt, None)).await.catch_return()?;
 
-		let mut res = ApiResponse::from_action_result(res)?;
+		let mut res = ApiResponse::from_action_result(output.into_value())?;
 		if let Some(headers) = inv_ctx.response_headers {
 			let mut headers = headers;
 			headers.extend(res.headers);

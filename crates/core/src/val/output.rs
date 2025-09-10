@@ -46,7 +46,7 @@ impl Output {
 			}
 			Output::Map(map) => {
 				let mut res = BTreeMap::new();
-				for (key, value) in map.into_iter() {
+				for (key, value) in map {
 					res.insert(key, value.coerce_to_kind(kind)?);
 				}
 				Ok(res.into())
@@ -63,7 +63,7 @@ impl Output {
 			}
 			Output::Map(map) => {
 				let mut res = BTreeMap::new();
-				for (key, value) in map.into_iter() {
+				for (key, value) in map {
 					res.insert(key, value.cast_to_kind(kind)?);
 				}
 				Ok(res.into())
