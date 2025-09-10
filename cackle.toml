@@ -1396,3 +1396,9 @@ allow_apis = ["fs", "net"]
 
 [pkg.console-api]
 allow_apis = ["net"]
+
+[pkg.storekey-derive]
+allow_proc_macro = true
+
+[pkg.storekey]
+allow_unsafe = true
