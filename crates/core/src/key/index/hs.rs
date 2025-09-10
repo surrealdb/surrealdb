@@ -1,13 +1,14 @@
 //! Store state of an HNSW index
+use std::borrow::Cow;
 use std::fmt::Debug;
 
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::trees::hnsw::HnswState;
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
 pub(crate) struct Hs<'a> {
 	__: u8,
 	_a: u8,
@@ -15,7 +16,7 @@ pub(crate) struct Hs<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -23,9 +24,7 @@ pub(crate) struct Hs<'a> {
 	_g: u8,
 }
 
-impl KVKey for Hs<'_> {
-	type ValueType = HnswState;
-}
+impl_kv_key_storekey!(Hs<'_> => HnswState);
 
 impl<'a> Hs<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
@@ -36,7 +35,7 @@ impl<'a> Hs<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 			_e: b'!',
@@ -49,6 +48,7 @@ impl<'a> Hs<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

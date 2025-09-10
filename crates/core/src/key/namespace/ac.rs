@@ -1,12 +1,14 @@
 //! Stores a DEFINE ACCESS ON NAMESPACE configuration
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{AccessDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct NamespaceAccessKey<'a> {
 	__: u8,
 	_a: u8,
@@ -14,12 +16,10 @@ pub(crate) struct NamespaceAccessKey<'a> {
 	_b: u8,
 	_c: u8,
 	_d: u8,
-	pub ac: &'a str,
+	pub ac: Cow<'a, str>,
 }
 
-impl KVKey for NamespaceAccessKey<'_> {
-	type ValueType = AccessDefinition;
-}
+impl_kv_key_storekey!(NamespaceAccessKey<'_> => AccessDefinition);
 
 pub fn new(ns: NamespaceId, ac: &str) -> NamespaceAccessKey<'_> {
 	NamespaceAccessKey::new(ns, ac)
@@ -52,7 +52,7 @@ impl<'a> NamespaceAccessKey<'a> {
 			_b: b'!',
 			_c: b'a',
 			_d: b'c',
-			ac,
+			ac: Cow::Borrowed(ac),
 		}
 	}
 }

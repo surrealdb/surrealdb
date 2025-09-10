@@ -1,12 +1,14 @@
 //! Stores Vector of an HNSW index
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::vector::SerializedVector;
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct He<'a> {
 	__: u8,
 	_a: u8,
@@ -14,7 +16,7 @@ pub(crate) struct He<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -23,9 +25,7 @@ pub(crate) struct He<'a> {
 	pub element_id: ElementId,
 }
 
-impl KVKey for He<'_> {
-	type ValueType = SerializedVector;
-}
+impl_kv_key_storekey!(He<'_> => SerializedVector);
 
 impl<'a> He<'a> {
 	pub fn new(
@@ -42,7 +42,7 @@ impl<'a> He<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 			_e: b'!',
@@ -56,6 +56,7 @@ impl<'a> He<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

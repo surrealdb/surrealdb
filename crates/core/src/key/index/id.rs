@@ -36,17 +36,18 @@
 //! - **Cache Friendly**: Sequential numeric IDs improve cache locality
 //! - **Concurrent Safe**: Works with distributed sequence mechanism to prevent ID conflicts
 //! - **Scalable**: Efficient lookups scale with the number of indexed documents
+use std::borrow::Cow;
 use std::fmt::Debug;
 
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
-use crate::val::RecordIdKey;
+use crate::val::{IndexFormat, RecordIdKey};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "IndexFormat")]
 pub(crate) struct Id<'a> {
 	__: u8,
 	_a: u8,
@@ -54,7 +55,7 @@ pub(crate) struct Id<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -63,8 +64,12 @@ pub(crate) struct Id<'a> {
 	pub id: RecordIdKey,
 }
 
-impl KVKey for Id<'_> {
+impl crate::kvs::KVKey for Id<'_> {
 	type ValueType = DocId;
+	fn encode_key(&self) -> anyhow::Result<Vec<u8>> {
+		Ok(storekey::encode_vec_format::<IndexFormat, _>(self)
+			.map_err(|_| crate::err::Error::Unencodable)?)
+	}
 }
 
 impl Categorise for Id<'_> {
@@ -83,7 +88,7 @@ impl<'a> Id<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 			_e: b'!',
@@ -97,6 +102,7 @@ impl<'a> Id<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {
@@ -110,7 +116,7 @@ mod tests {
 		let enc = Id::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!id\0\0\0\x01id\0",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!id\x03id\0",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);

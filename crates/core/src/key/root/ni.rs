@@ -1,11 +1,11 @@
 //! Stores namespace ID generator state
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::idg::u32::U32;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct NamespaceIdGeneratorKey {
 	__: u8,
 	_a: u8,
@@ -13,9 +13,7 @@ pub(crate) struct NamespaceIdGeneratorKey {
 	_c: u8,
 }
 
-impl KVKey for NamespaceIdGeneratorKey {
-	type ValueType = U32;
-}
+impl_kv_key_storekey!(NamespaceIdGeneratorKey=> U32);
 
 impl Default for NamespaceIdGeneratorKey {
 	fn default() -> Self {
@@ -43,6 +41,7 @@ impl NamespaceIdGeneratorKey {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

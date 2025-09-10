@@ -672,8 +672,15 @@ user-login = "sfackler"
 user-name = "Steven Fackler"
 
 [[publisher.storekey]]
-version = "0.5.0"
-when = "2023-04-28"
+version = "0.8.1"
+when = "2025-09-10"
+user-id = 145457
+user-login = "tobiemh"
+user-name = "Tobie Morgan Hitchcock"
+
+[[publisher.storekey-derive]]
+version = "0.8.1"
+when = "2025-09-10"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"

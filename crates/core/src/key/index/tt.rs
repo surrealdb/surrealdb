@@ -16,17 +16,18 @@
 //! - Building the inverted index that maps terms to documents
 //! - Supporting concurrent read and write operations
 //! - Enabling efficient term frequency tracking for relevance scoring
+use std::borrow::Cow;
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Tt<'a> {
 	__: u8,
 	_a: u8,
@@ -34,24 +35,20 @@ pub(crate) struct Tt<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub term: &'a str,
+	pub term: Cow<'a, str>,
 	pub doc_id: DocId,
-	#[serde(with = "uuid::serde::compact")]
 	pub nid: Uuid,
-	#[serde(with = "uuid::serde::compact")]
 	pub uid: Uuid,
 	pub add: bool,
 }
 
-impl KVKey for Tt<'_> {
-	type ValueType = String;
-}
+impl_kv_key_storekey!(Tt<'_> => String);
 
 impl Categorise for Tt<'_> {
 	fn categorise(&self) -> Category {
@@ -95,13 +92,13 @@ impl<'a> Tt<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 			_e: b'!',
 			_f: b't',
 			_g: b't',
-			term,
+			term: Cow::Borrowed(term),
 			doc_id,
 			nid,
 			uid,
@@ -169,11 +166,11 @@ impl<'a> Tt<'a> {
 	}
 
 	pub fn decode_key(k: &[u8]) -> Result<Tt<'_>> {
-		Ok(storekey::deserialize(k)?)
+		Ok(storekey::decode_borrow(k)?)
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 struct TtTermPrefix<'a> {
 	__: u8,
 	_a: u8,
@@ -181,18 +178,16 @@ struct TtTermPrefix<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub term: &'a str,
+	pub term: Cow<'a, str>,
 }
 
-impl KVKey for TtTermPrefix<'_> {
-	type ValueType = String;
-}
+impl_kv_key_storekey!(TtTermPrefix<'_> => String);
 
 impl<'a> TtTermPrefix<'a> {
 	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, term: &'a str) -> Self {
@@ -203,18 +198,18 @@ impl<'a> TtTermPrefix<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 			_e: b'!',
 			_f: b't',
 			_g: b't',
-			term,
+			term: Cow::Borrowed(term),
 		}
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 struct TtTermsPrefix<'a> {
 	__: u8,
 	_a: u8,
@@ -222,7 +217,7 @@ struct TtTermsPrefix<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -230,9 +225,7 @@ struct TtTermsPrefix<'a> {
 	_g: u8,
 }
 
-impl KVKey for TtTermsPrefix<'_> {
-	type ValueType = String;
-}
+impl_kv_key_storekey!(TtTermsPrefix<'_> => String);
 
 impl<'a> TtTermsPrefix<'a> {
 	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
@@ -243,7 +236,7 @@ impl<'a> TtTermsPrefix<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 			_e: b'!',
@@ -271,7 +264,7 @@ mod tests {
 			true,
 		);
 		let enc = Tt::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ttterm\0\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02\x01");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ttterm\0\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02\x03");
 	}
 
 	#[test]
