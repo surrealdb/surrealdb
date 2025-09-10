@@ -24,7 +24,7 @@ value = "[{ id: person:1, name: 'Tobie', securityNumber: '123456' }]"
 
 */
 DEFINE ANALYZER edgeNgram TOKENIZERS class FILTERS lowercase,ascii,edgeNgram(1,10);
-DEFINE INDEX idxPersonName ON TABLE person COLUMNS name SEARCH ANALYZER edgeNgram BM25;
+DEFINE INDEX idxPersonName ON TABLE person COLUMNS name FULLTEXT ANALYZER edgeNgram BM25;
 DEFINE INDEX idxSecurityNumber ON TABLE person COLUMNS securityNumber UNIQUE;
 CREATE person:1 content {name: 'Tobie', securityNumber: '123456'};
 CREATE person:2 content {name: 'Jaime', securityNumber: 'ABCDEF'};

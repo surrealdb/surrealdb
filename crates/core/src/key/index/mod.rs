@@ -13,17 +13,8 @@
 //! using zero-terminated components where appropriate to ensure parsers stop at
 //! the correct boundaries when decoding.
 pub mod all;
-pub mod bc;
 pub mod bd;
-pub mod bf;
 pub mod bi;
-pub mod bk;
-pub mod bl;
-pub mod bo;
-pub mod bp;
-pub mod bs;
-pub mod bt;
-pub mod bu;
 pub mod dc;
 pub mod dl;
 pub mod hd;
