@@ -97,13 +97,11 @@ pub enum Index {
 	Idx,
 	/// Unique index
 	Uniq,
-	/// Index with Full-Text search capabilities
-	Search(SearchParams),
 	/// M-Tree index for distance based metrics
 	MTree(MTreeParams),
-	/// HNSW index for distance based metrics
+	/// HNSW index for distance-based metrics
 	Hnsw(HnswParams),
-	/// Index with Full-Text search capabilities supporting multiple writers
+	/// Index with Full-Text search capabilities
 	FullText(FullTextParams),
 }
 
@@ -112,7 +110,6 @@ impl Index {
 		match self {
 			Self::Idx => crate::sql::index::Index::Idx,
 			Self::Uniq => crate::sql::index::Index::Uniq,
-			Self::Search(params) => crate::sql::index::Index::Search(params.clone().into()),
 			Self::MTree(params) => crate::sql::index::Index::MTree(params.clone().into()),
 			Self::Hnsw(params) => crate::sql::index::Index::Hnsw(params.clone().into()),
 			Self::FullText(params) => crate::sql::index::Index::FullText(params.clone().into()),
@@ -130,34 +127,6 @@ impl ToSql for Index {
 	fn to_sql(&self) -> String {
 		self.to_sql_definition().to_string()
 	}
-}
-
-/// Search index parameters.
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct SearchParams {
-	/// The analyzer to use.
-	pub az: String,
-	/// Whether to highlight the search results.
-	pub hl: bool,
-	/// The scoring to use.
-	pub sc: Scoring,
-	/// The order of the document IDs.
-	pub doc_ids_order: u32,
-	/// The order of the document lengths.
-	pub doc_lengths_order: u32,
-	/// The order of the postings.
-	pub postings_order: u32,
-	/// The order of the terms.
-	pub terms_order: u32,
-	/// The cache of the document IDs.
-	pub doc_ids_cache: u32,
-	/// The cache of the document lengths.
-	pub doc_lengths_cache: u32,
-	/// The cache of the postings.
-	pub postings_cache: u32,
-	/// The cache of the terms.
-	pub terms_cache: u32,
 }
 
 /// Full-Text search parameters.

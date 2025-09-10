@@ -19,7 +19,7 @@ use reblessive::tree::Stk;
 
 use crate::catalog::{
 	DatabaseDefinition, DatabaseId, FullTextParams, HnswParams, Index, IndexDefinition,
-	MTreeParams, NamespaceId, SearchParams,
+	MTreeParams, NamespaceId,
 };
 use crate::ctx::Context;
 use crate::dbs::{Force, Options, Statement};
@@ -28,7 +28,6 @@ use crate::err::Error;
 use crate::expr::{FlowResultExt as _, Part};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
-use crate::idx::ft::search::SearchIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
 use crate::key::value::StoreKeyArray;
@@ -118,7 +117,6 @@ impl Document {
 		match &ix.index {
 			Index::Uniq => ic.index_unique(ctx).await?,
 			Index::Idx => ic.index_non_unique(ctx).await?,
-			Index::Search(p) => ic.index_search(stk, ctx, p).await?,
 			Index::FullText(p) => ic.index_fulltext(stk, ctx, p).await?,
 			Index::MTree(p) => ic.index_mtree(stk, ctx, p).await?,
 			Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
@@ -431,20 +429,6 @@ impl<'a> IndexOperation<'a> {
 				_ => Array::from(n).to_string(),
 			},
 		})
-	}
-
-	async fn index_search(&mut self, stk: &mut Stk, ctx: &Context, p: &SearchParams) -> Result<()> {
-		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id);
-
-		let mut ft =
-			SearchIndex::new(ctx, self.ns, self.db, &p.az, ikb, p, TransactionType::Write).await?;
-
-		if let Some(n) = self.n.take() {
-			ft.index_document(stk, ctx, self.opt, self.rid, n).await?;
-		} else {
-			ft.remove_document(ctx, self.rid).await?;
-		}
-		ft.finish(ctx).await
 	}
 
 	async fn index_fulltext(

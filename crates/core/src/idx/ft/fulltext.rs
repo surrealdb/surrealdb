@@ -34,14 +34,12 @@ use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
 use crate::idx::ft::highlighter::{HighlightParams, Highlighter, Offseter};
 use crate::idx::ft::offset::Offset;
-use crate::idx::ft::search::Bm25Params;
 use crate::idx::ft::{DocLength, Score, TermFrequency};
 use crate::idx::planner::iterators::MatchesHitsIterator;
 use crate::idx::trees::store::IndexStores;
 use crate::key::index::tt::Tt;
 use crate::kvs::{Transaction, impl_kv_value_revisioned};
 use crate::val::{RecordId, Value};
-
 #[revisioned(revision = 1)]
 #[derive(Debug, Default, PartialEq)]
 /// Represents a term occurrence within a document
@@ -91,6 +89,41 @@ impl QueryTerms {
 		}
 		false
 	}
+
+	pub(in crate::idx::ft) fn matches_or(&self, tks: &[Tokens]) -> Result<bool> {
+		for t in self.tokens.list() {
+			let t = self.tokens.get_token_string(t)?;
+			for tokens in tks {
+				if tokens.try_contains(t)? {
+					return Ok(true);
+				}
+			}
+		}
+		Ok(false)
+	}
+
+	pub(in crate::idx::ft) fn matches_and(&self, tks: &[Tokens]) -> Result<bool> {
+		for t in self.tokens.list() {
+			let t = self.tokens.get_token_string(t)?;
+			let mut found = false;
+			for tokens in tks {
+				if tokens.try_contains(t)? {
+					found = true;
+					break;
+				}
+			}
+			if !found {
+				return Ok(false);
+			}
+		}
+		Ok(true)
+	}
+}
+
+#[derive(Clone)]
+pub(crate) struct Bm25Params {
+	pub(in crate::idx) k1: f32,
+	pub(in crate::idx) b: f32,
 }
 
 /// The main full-text index implementation that supports concurrent read and
@@ -360,6 +393,23 @@ impl FullTextIndex {
 			docs,
 			has_unknown_terms,
 		})
+	}
+
+	pub(in crate::idx) async fn matches_value(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		qt: &QueryTerms,
+		bo: BooleanOperator,
+		val: Value,
+	) -> Result<bool> {
+		let mut tks = vec![];
+		self.analyzer.analyze_value(stk, ctx, opt, val, FilteringStage::Indexing, &mut tks).await?;
+		match bo {
+			BooleanOperator::And => qt.matches_and(&tks),
+			BooleanOperator::Or => qt.matches_or(&tks),
+		}
 	}
 
 	async fn get_docs(&self, tx: &Transaction, term: &str) -> Result<Option<RoaringTreemap>> {

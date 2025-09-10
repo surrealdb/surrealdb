@@ -19,6 +19,6 @@ value = "[{ id: blog:1, title: '<em>Hello</em> World!' }]"
 */
 CREATE blog:1 SET title = 'Hello World!';
 DEFINE ANALYZER simple TOKENIZERS blank,class;
-DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25 HIGHLIGHTS;
+DEFINE INDEX blog_title ON blog FIELDS title FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
 SELECT id FROM blog WHERE title @1@ 'Hello' EXPLAIN;
 SELECT id, search::highlight('<em>', '</em>', 1) AS title FROM blog WHERE title @1@ 'Hello';

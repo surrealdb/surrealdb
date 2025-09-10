@@ -19,6 +19,6 @@ value = "[{ content: ['<em>Hello</em> World!', 'Be Bop', 'Foo <em>Bãr</em>'], i
 */
 CREATE blog:1 SET content = ['Hello World!', 'Be Bop', 'Foo Bãr'];
 DEFINE ANALYZER simple TOKENIZERS blank,class;
-DEFINE INDEX blog_content ON blog FIELDS content SEARCH ANALYZER simple BM25 HIGHLIGHTS;
+DEFINE INDEX blog_content ON blog FIELDS content FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
 SELECT id FROM blog WHERE content @1@ 'Hello Bãr' EXPLAIN;
 SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'Hello Bãr';

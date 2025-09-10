@@ -11,7 +11,6 @@ use crate::err::Error;
 use crate::expr::BinaryOperator;
 use crate::idx::docids::DocId;
 use crate::idx::ft::fulltext::FullTextHitsIterator;
-use crate::idx::ft::search::SearchHitsIterator;
 use crate::idx::planner::plan::StoreRangeValue;
 use crate::idx::planner::tree::IndexReference;
 use crate::key::index::Index;
@@ -129,7 +128,6 @@ pub(crate) enum ThingIterator {
 	UniqueRangeReverse(UniqueRangeReverseThingIterator),
 	UniqueUnion(UniqueUnionThingIterator),
 	UniqueJoin(Box<UniqueJoinThingIterator>),
-	SearchMatches(MatchesThingIterator<SearchHitsIterator>),
 	FullTextMatches(MatchesThingIterator<FullTextHitsIterator>),
 	Knn(KnnIterator),
 }
@@ -157,7 +155,6 @@ impl ThingIterator {
 			Self::UniqueRangeReverse(i) => i.next_batch(txn, size).await,
 			Self::IndexUnion(i) => i.next_batch(ctx, txn, size).await,
 			Self::UniqueUnion(i) => i.next_batch(ctx, txn, size).await,
-			Self::SearchMatches(i) => i.next_batch(ctx, txn, size).await,
 			Self::FullTextMatches(i) => i.next_batch(ctx, txn, size).await,
 			Self::Knn(i) => i.next_batch(ctx, size).await,
 			Self::IndexJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
@@ -186,7 +183,6 @@ impl ThingIterator {
 			Self::UniqueRangeReverse(i) => i.next_count(txn, size).await,
 			Self::IndexUnion(i) => i.next_count(ctx, txn, size).await,
 			Self::UniqueUnion(i) => i.next_count(ctx, txn, size).await,
-			Self::SearchMatches(i) => i.next_count(ctx, txn, size).await,
 			Self::FullTextMatches(i) => i.next_count(ctx, txn, size).await,
 			Self::Knn(i) => i.next_count(ctx, size).await,
 			Self::IndexJoin(i) => Box::pin(i.next_count(ctx, txn, size)).await,

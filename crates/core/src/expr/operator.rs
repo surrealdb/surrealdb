@@ -165,7 +165,7 @@ impl fmt::Display for MatchesOperator {
 
 /// Boolean operation executed by the full-text index
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum BooleanOperator {
 	And,
 	Or,
