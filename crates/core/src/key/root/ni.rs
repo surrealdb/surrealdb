@@ -13,7 +13,7 @@ pub(crate) struct NamespaceIdGeneratorKey {
 	_c: u8,
 }
 
-impl_kv_key_storekey!(Ni => U32);
+impl_kv_key_storekey!(NamespaceIdGeneratorKey=> U32);
 
 impl Default for NamespaceIdGeneratorKey {
 	fn default() -> Self {

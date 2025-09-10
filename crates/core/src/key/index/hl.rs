@@ -4,9 +4,8 @@ use std::fmt::Debug;
 
 use storekey::{BorrowDecode, Encode};
 
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::kvs::impl_kv_key_storekey;
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
 pub(crate) struct Hl<'a> {

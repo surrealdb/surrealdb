@@ -1,14 +1,14 @@
 //! Stores the next and available freed IDs for documents
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idg::u32::U32;
 use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 // Index ID generator
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct IndexIdGeneratorKey {
 	table_root: DatabaseRoot,
 	_c: u8,
@@ -16,9 +16,7 @@ pub(crate) struct IndexIdGeneratorKey {
 	_e: u8,
 }
 
-impl KVKey for IndexIdGeneratorKey {
-	type ValueType = U32;
-}
+impl_kv_key_storekey!(IndexIdGeneratorKey => U32);
 
 pub fn new(ns: NamespaceId, db: DatabaseId) -> IndexIdGeneratorKey {
 	IndexIdGeneratorKey::new(ns, db)
@@ -43,6 +41,8 @@ impl IndexIdGeneratorKey {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::KVKey;
+
 	use super::*;
 
 	#[test]

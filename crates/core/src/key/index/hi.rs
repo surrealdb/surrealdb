@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
-use crate::val::RecordIdKey;
+use crate::val::{IndexFormat, RecordIdKey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 #[storekey(format = "IndexFormat")]

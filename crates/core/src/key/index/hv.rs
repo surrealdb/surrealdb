@@ -61,13 +61,8 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Hv::new(
-			NamespaceId(1),
-			DatabaseId(2),
-			"testtb",
-			IndexId(3),
-			&SerializedVector::I16(vec![2]),
-		);
+		let vec = SerializedVector::I16(vec![2]);
+		let val = Hv::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), &vec);
 		let enc = Hv::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

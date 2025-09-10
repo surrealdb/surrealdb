@@ -18,7 +18,7 @@ pub(crate) struct UserKey<'key> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub user: Cow<'a, str>,
+	pub user: Cow<'key, str>,
 }
 
 impl_kv_key_storekey!(UserKey<'_> => catalog::UserDefinition);

@@ -15,14 +15,14 @@ pub(crate) struct IndexNameLookupKey<'key> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'key, str>,
 	_d: u8,
 	_e: u8,
 	_f: u8,
 	pub ix: IndexId,
 }
 
-impl_kv_key_storekey!(IndexNameLookupKey<'_> => IndexDefinition);
+impl_kv_key_storekey!(IndexNameLookupKey<'_> => String);
 
 impl<'key> IndexNameLookupKey<'key> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'key str, ix: IndexId) -> Self {
@@ -42,7 +42,7 @@ impl<'key> IndexNameLookupKey<'key> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Encode, BorrowDecode)]
 pub(crate) struct IndexDefinitionKey<'key> {
 	__: u8,
 	_a: u8,
@@ -50,11 +50,11 @@ pub(crate) struct IndexDefinitionKey<'key> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'key,str>,
+	pub tb: Cow<'key, str>,
 	_d: u8,
 	_e: u8,
 	_f: u8,
-	pub ix: Cow<'key,str>,
+	pub ix: Cow<'key, str>,
 }
 
 impl_kv_key_storekey!(IndexDefinitionKey<'_> => IndexDefinition);

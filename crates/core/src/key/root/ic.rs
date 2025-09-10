@@ -35,12 +35,11 @@ pub(crate) struct IndexCompactionKey<'key> {
 	pub db: DatabaseId,
 	pub tb: Cow<'key, str>,
 	pub ix: IndexId,
-	pub tb: Cow<'key, str>,
 	pub nid: Uuid,
 	pub uid: Uuid,
 }
 
-impl_kv_key_storekey!(Ic<'_> => ());
+impl_kv_key_storekey!(IndexCompactionKey<'_> => ());
 
 impl Categorise for IndexCompactionKey<'_> {
 	fn categorise(&self) -> Category {
@@ -98,7 +97,7 @@ impl<'key> IndexCompactionKey<'key> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::key::root::ic::IndexCompactionKey;
+	use crate::{key::root::ic::IndexCompactionKey, kvs::KVKey};
 
 	#[test]
 	fn range() {

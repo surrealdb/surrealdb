@@ -5,6 +5,7 @@ use std::fmt::Debug;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::index::Appending;
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]

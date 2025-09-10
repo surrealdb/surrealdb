@@ -238,7 +238,7 @@ impl<'a> TtTermsPrefix<'a> {
 			_c: b'*',
 			tb: Cow::Borrowed(tb),
 			_d: b'+',
-			ix: Cow::Borrowed(ix),
+			ix,
 			_e: b'!',
 			_f: b't',
 			_g: b't',

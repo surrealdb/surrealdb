@@ -18,7 +18,7 @@ pub(crate) struct NamespaceAccessKey<'a> {
 	pub ac: Cow<'a, str>,
 }
 
-impl_kv_key_storekey!(NameSpaceAccessKey<'_> => AccessDefinition);
+impl_kv_key_storekey!(NamespaceAccessKey<'_> => AccessDefinition);
 
 pub fn new(ns: NamespaceId, ac: &str) -> NamespaceAccessKey<'_> {
 	NamespaceAccessKey::new(ns, ac)

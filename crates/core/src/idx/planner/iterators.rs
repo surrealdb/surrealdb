@@ -1178,8 +1178,8 @@ impl UniqueRangeThingIterator {
 		from: RangeValue,
 		to: RangeValue,
 	) -> Result<RangeScan> {
-		let beg = Self::compute_beg(ns, db, &ix.table_name, ix.index_id, from.value)?;
-		let end = Self::compute_end(ns, db, &ix.table_name, ix.index_id, to.value)?;
+		let beg = Self::compute_beg(ns, db, &ix.table_name, ix.index_id, from.value.as_ref())?;
+		let end = Self::compute_end(ns, db, &ix.table_name, ix.index_id, to.value.as_ref())?;
 		Ok(RangeScan::new(beg, from.inclusive, end, to.inclusive))
 	}
 
@@ -1230,12 +1230,12 @@ impl UniqueRangeThingIterator {
 		db: DatabaseId,
 		ix_what: &str,
 		index_id: IndexId,
-		from: Value,
+		from: &Value,
 	) -> Result<Vec<u8>> {
 		if from.is_none() {
 			return Index::prefix_beg(ns, db, ix_what, index_id);
 		}
-		Index::new(ns, db, ix_what, index_id, &Array::from(vec![from]), None).encode_key()
+		Index::new(ns, db, ix_what, index_id, &Array::from(vec![from.clone()]), None).encode_key()
 	}
 
 	fn compute_end(
@@ -1243,12 +1243,12 @@ impl UniqueRangeThingIterator {
 		db: DatabaseId,
 		ix_what: &str,
 		index_id: IndexId,
-		to: Value,
+		to: &Value,
 	) -> Result<Vec<u8>> {
 		if to.is_none() {
 			return Index::prefix_end(ns, db, ix_what, index_id);
 		}
-		Index::new(ns, db, ix_what, index_id, &Array::from(vec![to]), None).encode_key()
+		Index::new(ns, db, ix_what, index_id, &Array::from(vec![to.clone()]), None).encode_key()
 	}
 
 	async fn next_batch<B: IteratorBatch>(
