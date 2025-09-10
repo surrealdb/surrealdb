@@ -6,9 +6,9 @@
 //! values are encoded via key::value::Array.
 //!
 //! Numeric normalization in keys:
-//! - Array normalizes Number values (Int/Float/Decimal) using a lexicographic numeric
-//!   encoding so that byte-wise order matches numeric order. As a result, numerically equal values
-//!   (e.g., 0, 0.0, 0dec) map to the same key bytes.
+//! - Array normalizes Number values (Int/Float/Decimal) using a lexicographic numeric encoding so
+//!   that byte-wise order matches numeric order. As a result, numerically equal values (e.g., 0,
+//!   0.0, 0dec) map to the same key bytes.
 //! - UNIQUE index behavior leverages this: equal numerics across variants will collide on the same
 //!   index key and cause a uniqueness violation.
 //!

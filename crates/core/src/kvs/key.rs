@@ -1,8 +1,9 @@
 //! Key and value traits for the key-value store.
 
+use std::fmt::Debug;
+
 use anyhow::{Context, Result};
 use roaring::{RoaringBitmap, RoaringTreemap};
-use std::fmt::Debug;
 
 /// KVKey is a trait that defines a key for the key-value store.
 pub(crate) trait KVKey: Debug + Sized {

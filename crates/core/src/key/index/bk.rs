@@ -1,6 +1,7 @@
 //! Stores the term list for doc_ids
-use roaring::RoaringTreemap;
 use std::borrow::Cow;
+
+use roaring::RoaringTreemap;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};

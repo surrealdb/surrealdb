@@ -1,6 +1,7 @@
 //! Stores a DEFINE BUCKET definition
-use anyhow::Result;
 use std::borrow::Cow;
+
+use anyhow::Result;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{BucketDefinition, DatabaseId, NamespaceId};

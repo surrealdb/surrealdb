@@ -1,5 +1,6 @@
 //! Stores sequence states
 use std::borrow::Cow;
+
 use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 

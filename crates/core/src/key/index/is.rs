@@ -23,6 +23,7 @@
 //! - `ix`: Index identifier
 //! - `nid`: Node UUID (16 bytes, compact serialized)
 use std::borrow::Cow;
+
 use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 

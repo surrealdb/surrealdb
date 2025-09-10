@@ -1,5 +1,6 @@
 //! Stores a DEFINE USER ON ROOT config definition
 use std::borrow::Cow;
+
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog;

@@ -1,5 +1,6 @@
 //! Stores BTree nodes for postings
 use std::borrow::Cow;
+
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};

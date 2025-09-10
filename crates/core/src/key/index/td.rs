@@ -14,8 +14,9 @@
 //! - Supporting term-based document retrieval
 //! - Enabling efficient text search operations
 
-use roaring::RoaringTreemap;
 use std::borrow::Cow;
+
+use roaring::RoaringTreemap;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};

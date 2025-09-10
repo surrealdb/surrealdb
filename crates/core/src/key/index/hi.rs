@@ -1,5 +1,6 @@
 //! Stores Things of an HNSW index
 use std::borrow::Cow;
+
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};

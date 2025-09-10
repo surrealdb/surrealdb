@@ -1,11 +1,12 @@
 //! Stores a DEFINE EVENT config definition
-use anyhow::Result;
 use std::borrow::Cow;
+
+use anyhow::Result;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, EventDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::{impl_kv_key_storekey,KVKey};
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Ev<'a> {

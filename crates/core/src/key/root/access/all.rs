@@ -1,5 +1,6 @@
 //! Stores the key prefix for all keys under a root access method
 use std::borrow::Cow;
+
 use storekey::{BorrowDecode, Encode};
 
 use crate::key::category::{Categorise, Category};

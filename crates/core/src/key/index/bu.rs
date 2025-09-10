@@ -1,5 +1,6 @@
 //! Stores terms for term_ids
 use std::borrow::Cow;
+
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};

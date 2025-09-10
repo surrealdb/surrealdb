@@ -2,14 +2,14 @@ use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::{Deref, DerefMut};
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
-use crate::expr::fmt::{pretty_indent, Fmt, Pretty};
 use crate::expr::Expr;
+use crate::expr::fmt::{Fmt, Pretty, pretty_indent};
 use crate::val::{IndexFormat, Value};
 
 #[revisioned(revision = 1)]

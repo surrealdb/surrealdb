@@ -1,6 +1,7 @@
 //! Stores a DEFINE ACCESS ON DATABASE configuration
-use anyhow::Result;
 use std::borrow::Cow;
+
+use anyhow::Result;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{AccessDefinition, DatabaseId, NamespaceId};

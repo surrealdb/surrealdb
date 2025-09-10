@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::catalog::NodeLiveQuery;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::{impl_kv_key_storekey,KVKey};
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 /// The Lq key is used to quickly discover which live queries belong to which
 /// nodes This is used in networking for clustered environments such as

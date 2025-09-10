@@ -15,6 +15,7 @@
 //! - Enabling proper ranking of search results based on term frequency and document length
 //! - Providing document-specific statistics for the full-text search engine
 use std::borrow::Cow;
+
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};

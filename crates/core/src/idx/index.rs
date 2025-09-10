@@ -8,8 +8,8 @@
 //! key::value::Array.
 //!
 //! Numeric normalization in keys:
-//! - Array normalizes Number values (Int/Float/Decimal) through a lexicographic numeric
-//!   encoding so that byte order mirrors numeric order.
+//! - Array normalizes Number values (Int/Float/Decimal) through a lexicographic numeric encoding so
+//!   that byte order mirrors numeric order.
 //! - Numerically equal values (e.g., 0, 0.0, 0dec) map to the same key bytes. On UNIQUE indexes,
 //!   such inserts collide and produce a uniqueness error.
 //!

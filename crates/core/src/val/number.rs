@@ -32,12 +32,11 @@ use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 
+use super::IndexFormat;
 use crate::err::Error;
 use crate::expr::decimal::DecimalLexEncoder;
 use crate::fnc::util::math::ToFloat;
 use crate::val::{Strand, TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
-
-use super::IndexFormat;
 
 #[derive(Encode, BorrowDecode)]
 pub(crate) enum NumberKind {

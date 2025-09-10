@@ -1,6 +1,7 @@
 //! Stores a LIVE SELECT query definition on the table
-use anyhow::Result;
 use std::borrow::Cow;
+
+use anyhow::Result;
 use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 

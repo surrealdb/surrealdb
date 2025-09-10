@@ -115,13 +115,7 @@ impl crate::kvs::KVKey for PrefixIds<'_> {
 }
 
 impl<'a> PrefixIds<'a> {
-	fn new(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a str,
-		ix: IndexId,
-		fd: &'a Array,
-	) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, fd: &'a Array) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -341,7 +335,10 @@ mod tests {
 			&fd,
 		)
 		.unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03*\x06testfd1\0\x00");
+		assert_eq!(
+			enc,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03*\x06testfd1\0\x00"
+		);
 
 		let enc = Index::prefix_ids_composite_end(
 			NamespaceId(1),
@@ -351,6 +348,9 @@ mod tests {
 			&fd,
 		)
 		.unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03*\x06testfd1\0\xff");
+		assert_eq!(
+			enc,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03*\x06testfd1\0\xff"
+		);
 	}
 }

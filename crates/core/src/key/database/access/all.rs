@@ -1,5 +1,6 @@
 //! Stores the key prefix for all keys under a database access method
 use std::borrow::Cow;
+
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};

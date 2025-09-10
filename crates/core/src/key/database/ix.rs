@@ -41,9 +41,8 @@ impl IndexIdGeneratorKey {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KVKey;
-
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

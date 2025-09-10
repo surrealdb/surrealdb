@@ -1,6 +1,7 @@
 //! Stores a DEFINE USER ON NAMESPACE config definition
-use anyhow::Result;
 use std::borrow::Cow;
+
+use anyhow::Result;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{self, NamespaceId};

@@ -10,6 +10,7 @@
 //! entries at regular intervals defined by the `index_compaction_interval`
 //! configuration option.
 use std::borrow::Cow;
+
 use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
@@ -97,7 +98,8 @@ impl<'key> IndexCompactionKey<'key> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{key::root::ic::IndexCompactionKey, kvs::KVKey};
+	use crate::key::root::ic::IndexCompactionKey;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn range() {

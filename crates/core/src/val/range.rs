@@ -346,9 +346,9 @@ impl Iterator for IntegerRangeIter {
 
 #[cfg(test)]
 mod test {
-	use crate::{syn, val::Value};
-
 	use super::Range;
+	use crate::syn;
+	use crate::val::Value;
 
 	fn r(r: &str) -> Range {
 		let Value::Range(r) = syn::value(r).unwrap() else {

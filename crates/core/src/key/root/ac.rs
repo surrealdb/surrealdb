@@ -1,5 +1,6 @@
 //! Stores a DEFINE ACCESS ON ROOT configuration
 use std::borrow::Cow;
+
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::AccessDefinition;
