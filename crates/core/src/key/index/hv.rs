@@ -66,7 +66,7 @@ mod tests {
 		let enc = Hv::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv0\x06\x80\x02\x01",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x06\x80\x02\0",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);
