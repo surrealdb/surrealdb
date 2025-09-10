@@ -351,7 +351,6 @@ impl<'a> IndexOperation<'a> {
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
 			for o in i {
-				let o = o.into();
 				let key = self.get_unique_index_key(&o)?;
 				match txn.delc(&key, Some(self.rid)).await {
 					Err(e) => {
@@ -370,7 +369,6 @@ impl<'a> IndexOperation<'a> {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
 				if !n.is_all_none_or_null() {
-					let n = n.into();
 					let key = self.get_unique_index_key(&n)?;
 					if txn.putc(&key, self.rid, None).await.is_err() {
 						let key = self.get_unique_index_key(&n)?;
@@ -392,7 +390,6 @@ impl<'a> IndexOperation<'a> {
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
 			for o in i {
-				let o = o.into();
 				let key = self.get_non_unique_index_key(&o)?;
 				match txn.delc(&key, Some(self.rid)).await {
 					Err(e) => {
@@ -410,7 +407,6 @@ impl<'a> IndexOperation<'a> {
 		if let Some(n) = self.n.take() {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
-				let n = n.into();
 				let key = self.get_non_unique_index_key(&n)?;
 				txn.set(&key, self.rid, None).await?;
 			}
@@ -426,8 +422,8 @@ impl<'a> IndexOperation<'a> {
 			thing: rid,
 			index: self.ix.name.to_string(),
 			value: match n.0.len() {
-				1 => Value::from(n.0.remove(0)).to_string(),
-				_ => Array::from(n).to_string(),
+				1 => n.0.remove(0).to_string(),
+				_ => n.to_string(),
 			},
 		})
 	}

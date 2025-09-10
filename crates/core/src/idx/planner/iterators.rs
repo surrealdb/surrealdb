@@ -630,8 +630,7 @@ impl IndexRangeThingIterator {
 			Array(Vec::with_capacity(1))
 		} else {
 			Array::from(prefix.to_vec())
-		}
-		.into();
+		};
 		let (from_inclusive, to_inclusive) = (from.inclusive, to.inclusive);
 		// Compute the lower bound for the scan
 		let beg = if from.value.is_none() {
@@ -1022,7 +1021,7 @@ impl JoinThingIterator {
 					break;
 				}
 				let thing = r.thing();
-				let value: Value = Value::from(thing.clone()).into();
+				let value: Value = Value::from(thing.clone());
 				let k: Key = revision::to_vec(thing)?;
 				if self.distinct.insert(k, true).is_none() {
 					self.current_local = Some(new_iter(self.ns, self.db, &self.ix, value)?);

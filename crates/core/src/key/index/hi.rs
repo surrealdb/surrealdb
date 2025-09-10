@@ -69,7 +69,7 @@ mod tests {
 		let enc = Hi::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03\0!hi\x03testid\0",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hi\x03testid\0",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);

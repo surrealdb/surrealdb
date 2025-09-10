@@ -300,7 +300,6 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let fd: Array = vec!["testfd1", "testfd2"].into();
-		let fd = fd.into();
 		let id = RecordIdKey::String("testid".to_owned());
 		let val = Index::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), &fd, Some(&id));
 		let enc = Index::encode_key(&val).unwrap();
@@ -313,7 +312,6 @@ mod tests {
 	#[test]
 	fn key_none() {
 		let fd: Array = vec!["testfd1", "testfd2"].into();
-		let fd = fd.into();
 		let val = Index::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), &fd, None);
 		let enc = Index::encode_key(&val).unwrap();
 		assert_eq!(
@@ -325,7 +323,6 @@ mod tests {
 	#[test]
 	fn check_composite() {
 		let fd: Array = vec!["testfd1"].into();
-		let fd = fd.into();
 
 		let enc = Index::prefix_ids_composite_beg(
 			NamespaceId(1),

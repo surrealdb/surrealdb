@@ -439,7 +439,7 @@ impl Number {
 		match kind {
 			NumberKind::Int => {
 				ensure!(dec.is_finite(), format!("Invalid integer value: {dec}"));
-				Ok(Number::Int(i64::from_str_radix(&dec.to_string(), 10)?))
+				Ok(Number::Int(dec.to_string().parse::<i64>()?))
 			}
 			NumberKind::Float => {
 				if dec.is_nan() {
