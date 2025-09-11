@@ -1,6 +1,7 @@
 use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
+use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog::NamespaceDefinition;
@@ -9,37 +10,52 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Ident};
+use crate::expr::{Base, Expr, Literal};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineNamespaceStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
-	pub name: Ident,
-	pub comment: Option<Strand>,
+	pub name: Expr,
+	pub comment: Option<Expr>,
+}
+
+impl Default for DefineNamespaceStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			id: None,
+			name: Expr::Literal(Literal::Strand(Strand::new(String::new()).unwrap())),
+			comment: None,
+		}
+	}
 }
 
 impl DefineNamespaceStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
+		// Process the name
+		let name = process_definition_ident!(stk, ctx, opt, doc, &self.name, "namespace name");
+
 		// Check if the definition exists
-		let namespace_id = if let Some(ns) = txn.get_ns_by_name(&self.name).await? {
+		let namespace_id = if let Some(ns) = txn.get_ns_by_name(&name).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::NsAlreadyExists {
-							name: self.name.to_string(),
+							name: name.clone(),
 						});
 					}
 				}
@@ -54,8 +70,8 @@ impl DefineNamespaceStatement {
 		// Process the statement
 		let ns_def = NamespaceDefinition {
 			namespace_id,
-			name: self.name.to_raw_string(),
-			comment: self.comment.clone().map(|c| c.into_string()),
+			name,
+			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 		};
 		txn.put_ns(ns_def).await?;
 		// Clear the cache

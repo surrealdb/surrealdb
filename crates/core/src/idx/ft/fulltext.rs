@@ -777,7 +777,7 @@ impl FullTextIndex {
 					or.highlight(tk.get_char_len(), o.o);
 				}
 			}
-			return or.try_into().map_err(anyhow::Error::new);
+			return Ok(or.into());
 		}
 		Ok(Value::None)
 	}

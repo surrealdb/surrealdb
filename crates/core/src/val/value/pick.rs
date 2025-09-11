@@ -13,9 +13,7 @@ impl Value {
 						Some(v) => v.pick(path.next()),
 						None => Value::None,
 					},
-					Part::All => {
-						v.values().map(|v| v.pick(path.next())).collect::<Vec<_>>().into()
-					}
+					Part::All => v.values().map(|v| v.pick(path.next())).collect::<Vec<_>>().into(),
 					x => {
 						if let Some(idx) = x.as_old_index() {
 							match v.get(&idx.to_string()) {

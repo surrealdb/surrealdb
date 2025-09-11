@@ -34,19 +34,37 @@ impl From<DefineNamespaceStatement> for crate::expr::statements::DefineNamespace
 		Self {
 			kind: v.kind.into(),
 			id: v.id,
-			name: v.name.into(),
-			comment: v.comment,
+			name: crate::expr::Expr::Idiom(crate::expr::Idiom::from(vec![
+				crate::expr::Part::Field(v.name.into()),
+			])),
+			comment: v.comment.map(|s| crate::expr::Expr::Literal(crate::expr::Literal::Strand(s))),
 		}
 	}
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<crate::expr::statements::DefineNamespaceStatement> for DefineNamespaceStatement {
 	fn from(v: crate::expr::statements::DefineNamespaceStatement) -> Self {
 		Self {
 			kind: v.kind.into(),
 			id: v.id,
-			name: v.name.into(),
-			comment: v.comment,
+			name: match v.name {
+				crate::expr::Expr::Idiom(idiom) if idiom.len() == 1 => {
+					if let Some(crate::expr::Part::Field(field)) = idiom.first() {
+						field.clone().into()
+					} else {
+						crate::sql::Ident::new(String::new()).unwrap()
+					}
+				}
+				_ => crate::sql::Ident::new(String::new()).unwrap(),
+			},
+			comment: v.comment.and_then(|expr| {
+				if let crate::expr::Expr::Literal(crate::expr::Literal::Strand(s)) = expr {
+					Some(s)
+				} else {
+					None
+				}
+			}),
 		}
 	}
 }

@@ -18,8 +18,7 @@ use crate::expr::access_type::{
 	JwtAccessVerifyJwks, JwtAccessVerifyKey,
 };
 use crate::expr::{
-	AccessType, Algorithm, Base, Expr, FlowResultExt, Ident, Idiom, JwtAccess, Literal,
-	RecordAccess,
+	AccessType, Algorithm, Base, Expr, Ident, Idiom, JwtAccess, Literal, RecordAccess,
 };
 use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Strand, Value};

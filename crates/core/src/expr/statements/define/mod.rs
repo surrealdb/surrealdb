@@ -80,7 +80,7 @@ impl DefineStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		match self {
-			Self::Namespace(v) => v.compute(ctx, opt, doc).await,
+			Self::Namespace(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Database(v) => v.compute(ctx, opt, doc).await,
 			Self::Function(v) => v.compute(ctx, opt, doc).await,
 			Self::Param(v) => v.compute(stk, ctx, opt, doc).await,

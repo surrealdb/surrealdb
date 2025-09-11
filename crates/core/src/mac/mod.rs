@@ -90,13 +90,15 @@ macro_rules! map_opt {
 
 /// Computes a value and coerces it to a type
 macro_rules! compute_to {
-	($stk:ident, $ctx:ident, $opt:ident, $doc:ident, $x:expr => $t:ty) => {
+	($stk:ident, $ctx:ident, $opt:ident, $doc:ident, $x:expr => $t:ty) => {{
+		use crate::expr::FlowResultExt;
 		$stk.run(|stk| $x.compute(stk, $ctx, $opt, $doc)).await.catch_return()?.coerce_to::<$t>()?
-	};
+	}};
 }
 
 macro_rules! process_definition_ident {
-	($stk:ident, $ctx:ident, $opt:ident, $doc:ident, $x:expr, $into:expr) => {
+	($stk:ident, $ctx:ident, $opt:ident, $doc:ident, $x:expr, $into:expr) => {{
+		use crate::expr::FlowResultExt;
 		match $x {
 			crate::expr::Expr::Idiom(x) if x.is_field(None) => {
 				let Some(crate::expr::Part::Field(x)) = x.first() else {
@@ -121,7 +123,32 @@ macro_rules! process_definition_ident {
 				x => x,
 			}?,
 		}
-	};
+	}};
+}
+
+#[allow(unused_macros)]
+macro_rules! process_definition_idiom {
+	($stk:ident, $ctx:ident, $opt:ident, $doc:ident, $x:expr, $into:expr) => {{
+		use crate::expr::FlowResultExt;
+		match $x {
+			crate::expr::Expr::Idiom(x) => x.to_raw_string(),
+			x => match $stk
+				.run(|stk| x.compute(stk, $ctx, $opt, $doc))
+				.await
+				.catch_return()?
+				.coerce_to::<String>()
+			{
+				Err(crate::val::value::CoerceError::InvalidKind {
+					from,
+					..
+				}) => Err(crate::val::value::CoerceError::InvalidKind {
+					from,
+					into: $into.to_string(),
+				}),
+				x => x,
+			}?,
+		}
+	}};
 }
 
 /// Extends a b-tree map of key-value pairs.
