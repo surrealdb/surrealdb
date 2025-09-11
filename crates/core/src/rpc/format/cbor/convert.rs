@@ -395,7 +395,7 @@ pub fn from_value(val: Value) -> Result<CborValue, &'static str> {
 				CborValue::Text(v.table),
 				match v.key {
 					RecordIdKey::Number(v) => CborValue::Integer(v.into()),
-					RecordIdKey::String(v) => CborValue::Text(v),
+					RecordIdKey::String(v) => CborValue::Text(v.into()),
 					RecordIdKey::Uuid(v) => from_uuid(v),
 					RecordIdKey::Array(v) => from_array(v)?,
 					RecordIdKey::Object(v) => from_object(v)?,
@@ -556,7 +556,7 @@ fn to_record_id_key_range(val: CborValue) -> Result<RecordIdKeyRange, &'static s
 fn from_record_id_key(v: RecordIdKey) -> Result<CborValue, &'static str> {
 	match v {
 		RecordIdKey::Number(v) => Ok(CborValue::Integer(v.into())),
-		RecordIdKey::String(v) => Ok(CborValue::Text(v)),
+		RecordIdKey::String(v) => Ok(CborValue::Text(v.into())),
 		RecordIdKey::Array(v) => from_array(v),
 		RecordIdKey::Object(v) => from_object(v),
 		RecordIdKey::Range(v) => {
@@ -571,7 +571,7 @@ fn from_record_id_key(v: RecordIdKey) -> Result<CborValue, &'static str> {
 fn to_record_id_key(val: CborValue) -> Result<RecordIdKey, &'static str> {
 	match val {
 		CborValue::Integer(v) => Ok(RecordIdKey::Number(i128::from(v) as i64)),
-		CborValue::Text(v) => Ok(RecordIdKey::String(v)),
+		CborValue::Text(v) => Ok(RecordIdKey::String(v.into())),
 		CborValue::Array(v) => Ok(RecordIdKey::Array(to_array(v)?)),
 		CborValue::Map(v) => Ok(RecordIdKey::Object(to_object(v)?)),
 		CborValue::Tag(TAG_RANGE, v) => {

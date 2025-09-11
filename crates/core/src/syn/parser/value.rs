@@ -408,7 +408,7 @@ impl Parser<'_> {
 				if let Ok(number) = digits_str.parse() {
 					RecordIdKey::Number(number)
 				} else {
-					RecordIdKey::String(digits_str.to_owned())
+					RecordIdKey::String(digits_str.into())
 				}
 			}
 			t!("-") => {
@@ -420,12 +420,12 @@ impl Parser<'_> {
 					match number.value.cmp(&((i64::MAX as u64) + 1)) {
 						Ordering::Less => RecordIdKey::Number(-(number.value as i64)),
 						Ordering::Equal => RecordIdKey::Number(i64::MIN),
-						Ordering::Greater => {
-							RecordIdKey::String(format!("-{}", self.lexer.span_str(number.span)))
-						}
+						Ordering::Greater => RecordIdKey::String(
+							format!("-{}", self.lexer.span_str(number.span)).into(),
+						),
 					}
 				} else {
-					RecordIdKey::String(format!("-{}", self.lexer.span_str(token.span)))
+					RecordIdKey::String(format!("-{}", self.lexer.span_str(token.span)).into())
 				}
 			}
 			TokenKind::Digits => {
@@ -433,7 +433,7 @@ impl Parser<'_> {
 					&& Self::kind_is_identifier(self.peek_whitespace1().kind)
 				{
 					let ident = self.parse_flexible_ident()?;
-					RecordIdKey::String(ident.into_string())
+					RecordIdKey::String(ident.into_string().into())
 				} else {
 					self.pop_peek();
 
@@ -441,7 +441,7 @@ impl Parser<'_> {
 					if let Ok(number) = digits_str.parse::<i64>() {
 						RecordIdKey::Number(number)
 					} else {
-						RecordIdKey::String(digits_str.to_owned())
+						RecordIdKey::String(digits_str.into())
 					}
 				}
 			}
@@ -452,7 +452,7 @@ impl Parser<'_> {
 				}
 				// Should be valid utf-8 as it was already parsed by the lexer
 				let text = String::from_utf8(slice.to_vec()).unwrap();
-				RecordIdKey::String(text)
+				RecordIdKey::String(text.into())
 			}
 			_ => {
 				let ident = if self.settings.flexible_record_id {
@@ -460,7 +460,7 @@ impl Parser<'_> {
 				} else {
 					self.next_token_value::<Ident>()?
 				};
-				RecordIdKey::String(ident.into_string())
+				RecordIdKey::String(ident.into())
 			}
 		};
 

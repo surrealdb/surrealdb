@@ -126,7 +126,7 @@ impl FromFlatbuffers for RecordIdKey {
 					key_value
 						.value()
 						.ok_or_else(|| anyhow::anyhow!("Missing String value"))?
-						.to_string(),
+						.into(),
 				))
 			}
 			proto_fb::RecordIdKeyType::Uuid => {

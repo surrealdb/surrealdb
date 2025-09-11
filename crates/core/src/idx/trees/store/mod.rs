@@ -58,17 +58,6 @@ where
 		}
 	}
 
-	pub(in crate::idx) async fn get_node(
-		&self,
-		tx: &Transaction,
-		node_id: NodeId,
-	) -> Result<Arc<StoredNode<N>>> {
-		match self {
-			Self::Read(r) => r.get_node(tx, node_id).await,
-			_ => fail!("TreeStore::get_node"),
-		}
-	}
-
 	pub(in crate::idx) async fn get_node_txn(
 		&self,
 		ctx: &Context,
@@ -122,7 +111,6 @@ where
 
 #[derive(Clone)]
 pub enum TreeNodeProvider {
-	DocIds(IndexKeyBase),
 	Vector(IndexKeyBase),
 	Debug,
 }
@@ -130,7 +118,6 @@ pub enum TreeNodeProvider {
 impl TreeNodeProvider {
 	pub fn get_key(&self, node_id: NodeId) -> Result<Key> {
 		match self {
-			TreeNodeProvider::DocIds(ikb) => ikb.new_bd_key(node_id).encode_key(),
 			TreeNodeProvider::Vector(ikb) => ikb.new_vm_key(node_id).encode_key(),
 			TreeNodeProvider::Debug => Ok(node_id.to_be_bytes().to_vec()),
 		}

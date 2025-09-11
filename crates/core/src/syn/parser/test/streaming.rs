@@ -12,7 +12,6 @@ use crate::sql::language::Language;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::lookup::{LookupKind, LookupSubject};
 use crate::sql::order::{OrderList, Ordering};
-use crate::sql::statements::analyze::AnalyzeStatement;
 use crate::sql::statements::define::{DefineDefault, DefineKind};
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
@@ -122,10 +121,6 @@ fn statements() -> Vec<TopLevelExpr> {
 		.with_timezone(&Utc);
 
 	vec![
-		TopLevelExpr::Analyze(AnalyzeStatement::Idx(
-			Ident::from_strand(strand!("a").to_owned()),
-			Ident::from_strand(strand!("b").to_owned()),
-		)),
 		TopLevelExpr::Begin,
 		TopLevelExpr::Begin,
 		TopLevelExpr::Expr(Expr::Break),
@@ -367,8 +362,6 @@ fn statements() -> Vec<TopLevelExpr> {
 				dimension: 4,
 				distance: Distance::Minkowski(Number::Int(5)),
 				capacity: 6,
-				doc_ids_order: 7,
-				doc_ids_cache: 8,
 				mtree_cache: 9,
 				vector_type: VectorType::F64,
 			}),

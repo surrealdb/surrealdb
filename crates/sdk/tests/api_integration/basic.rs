@@ -749,7 +749,7 @@ pub async fn select_record_ranges(new_db: impl CreateDb) {
 				let val::RecordIdKey::String(ref x) = user.id.into_inner().key else {
 					panic!()
 				};
-				x.clone()
+				x.to_raw_string()
 			})
 			.collect()
 	};

@@ -192,7 +192,7 @@ pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> 
 							value: arg2.as_raw_string(),
 						}
 					);
-					RecordIdKey::String(s)
+					RecordIdKey::String(s.into())
 				}
 			},
 			table: arg1.as_raw_string(),
