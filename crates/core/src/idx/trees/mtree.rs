@@ -4,6 +4,15 @@ use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
 use std::sync::Arc;
 
+use ahash::{HashMap, HashMapExt, HashSet};
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::{Revisioned, revisioned};
+use roaring::RoaringTreemap;
+use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
+use uuid::Uuid;
+
 use crate::catalog::{DatabaseDefinition, Distance, MTreeParams, VectorType};
 use crate::ctx::Context;
 use crate::err::Error;
@@ -16,14 +25,6 @@ use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider, T
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val};
 use crate::val::{Number, RecordId, Value};
-use ahash::{HashMap, HashMapExt, HashSet};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use revision::{Revisioned, revisioned};
-use roaring::RoaringTreemap;
-use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
-use uuid::Uuid;
 
 pub struct MTreeIndex {
 	ikb: IndexKeyBase,
@@ -1451,7 +1452,13 @@ impl KVValue for MState {
 #[cfg(test)]
 mod tests {
 	use std::collections::VecDeque;
+	use std::fmt::Debug;
 	use std::sync::Arc;
+
+	use ahash::{HashMap, HashMapExt, HashSet};
+	use anyhow::Result;
+	use reblessive::tree::Stk;
+	use test_log::test;
 
 	use crate::catalog::providers::CatalogProvider;
 	use crate::catalog::{
@@ -1467,14 +1474,12 @@ mod tests {
 	use crate::idx::trees::vector::SharedVector;
 	use crate::kvs::LockType::*;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
-	use ahash::{HashMap, HashMapExt, HashSet};
-	use anyhow::Result;
-	use reblessive::tree::Stk;
-	use test_log::test;
 
 	async fn get_db(ds: &Datastore) -> Arc<DatabaseDefinition> {
 		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
-		tx.ensure_ns_db("myns", "mydb", false).await.unwrap()
+		let def = tx.ensure_ns_db("myns", "mydb", false).await.unwrap();
+		tx.cancel().await.unwrap();
+		def
 	}
 
 	async fn new_operation(
@@ -2074,7 +2079,7 @@ mod tests {
 			if depth > checks.max_depth {
 				checks.max_depth = depth;
 			}
-			let node = st.get_node_mut(tx, node_id).await?;
+			let node = st.get_node(tx, node_id).await?;
 			debug!(
 				"Node id: {} - depth: {} - len: {} - {:?}",
 				node.id,

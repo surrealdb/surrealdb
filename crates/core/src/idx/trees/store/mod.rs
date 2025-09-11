@@ -58,6 +58,18 @@ where
 		}
 	}
 
+	#[cfg(test)]
+	pub(in crate::idx) async fn get_node(
+		&self,
+		tx: &Transaction,
+		node_id: NodeId,
+	) -> Result<Arc<StoredNode<N>>> {
+		match self {
+			Self::Read(r) => r.get_node(tx, node_id).await,
+			_ => fail!("TreeStore::get_node"),
+		}
+	}
+
 	pub(in crate::idx) async fn get_node_txn(
 		&self,
 		ctx: &Context,

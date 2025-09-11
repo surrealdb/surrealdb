@@ -1743,7 +1743,7 @@ fn parse_define_index() {
 	);
 
 	let res =
-		syn::parse_with( r#"DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 TYPE I16 DOC_IDS_ORDER 7 DOC_IDS_CACHE 8 MTREE_CACHE 9"#.as_bytes(),async |parser,stk| parser.parse_expr_inherit(stk).await).unwrap();
+		syn::parse_with( r#"DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 TYPE I16 MTREE_CACHE 9"#.as_bytes(),async |parser,stk| parser.parse_expr_inherit(stk).await).unwrap();
 
 	assert_eq!(
 		res,
