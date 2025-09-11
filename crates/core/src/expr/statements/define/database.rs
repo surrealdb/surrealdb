@@ -1,6 +1,7 @@
 use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
+use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog::DatabaseDefinition;
@@ -11,26 +12,39 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident};
+use crate::expr::{Base, Expr, Literal};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineDatabaseStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
-	pub name: Ident,
-	pub comment: Option<Strand>,
+	pub name: Expr,
+	pub comment: Option<Expr>,
 	pub changefeed: Option<ChangeFeed>,
+}
+
+impl Default for DefineDatabaseStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			id: None,
+			name: Expr::Literal(Literal::Strand(Strand::new(String::new()).unwrap())),
+			comment: None,
+			changefeed: None,
+		}
+	}
 }
 
 impl DefineDatabaseStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
@@ -42,13 +56,16 @@ impl DefineDatabaseStatement {
 		let txn = ctx.tx();
 		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
 
+		// Process the name
+		let name = process_definition_ident!(stk, ctx, opt, doc, &self.name, "database name");
+
 		// Check if the definition exists
-		let database_id = if let Some(db) = txn.get_db_by_name(ns, &self.name).await? {
+		let database_id = if let Some(db) = txn.get_db_by_name(ns, &name).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::DbAlreadyExists {
-							name: self.name.to_string(),
+							name: name.clone(),
 						});
 					}
 				}
@@ -63,14 +80,12 @@ impl DefineDatabaseStatement {
 			txn.lock().await.get_next_db_id(nsv.namespace_id).await?
 		};
 
-		let name: String = self.name.to_raw_string();
-
 		// Set the database definition, keyed by namespace name and database name.
 		let db_def = DatabaseDefinition {
 			namespace_id: nsv.namespace_id,
 			database_id,
 			name: name.clone(),
-			comment: self.comment.clone().map(|s| s.into_string()),
+			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 			changefeed: self.changefeed,
 		};
 		txn.put_db(&nsv.name, db_def).await?;
@@ -110,7 +125,7 @@ impl InfoStructure for DefineDatabaseStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
 			"name".to_string() => self.name.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+			"comment".to_string(), if let Some(v) = self.comment => v.structure(),
 		})
 	}
 }

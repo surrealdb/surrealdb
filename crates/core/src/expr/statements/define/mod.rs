@@ -81,7 +81,7 @@ impl DefineStatement {
 	) -> Result<Value> {
 		match self {
 			Self::Namespace(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Database(v) => v.compute(ctx, opt, doc).await,
+			Self::Database(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Function(v) => v.compute(ctx, opt, doc).await,
 			Self::Param(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Table(v) => v.compute(stk, ctx, opt, doc).await,
