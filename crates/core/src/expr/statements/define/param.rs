@@ -2,44 +2,20 @@ use std::fmt::{self, Display, Write};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use super::DefineKind;
+use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
+use crate::catalog::{ParamDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, FlowResultExt as _, Ident, Permission};
+use crate::expr::{Base, Expr, FlowResultExt as _, Ident};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Strand, Value};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-pub struct DefineParamStore {
-	pub name: Ident,
-	pub value: Value,
-	pub comment: Option<Strand>,
-	pub permissions: Permission,
-}
-impl_kv_value_revisioned!(DefineParamStore);
-
-impl InfoStructure for DefineParamStore {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"value".to_string() => self.value.structure(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
-	}
-}
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineParamStatement {
 	pub kind: DefineKind,
 	pub name: Ident,
@@ -87,42 +63,21 @@ impl DefineParamStatement {
 		};
 
 		// Process the statement
-		let key = crate::key::database::pa::new(db.namespace_id, db.database_id, &self.name);
-		txn.set(
-			&key,
-			&DefineParamStore {
-				// Compute the param
+		txn.put_db_param(
+			db.namespace_id,
+			db.database_id,
+			&ParamDefinition {
 				value,
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				name: self.name.clone(),
-				comment: self.comment.clone(),
+				name: self.name.to_raw_string(),
+				comment: self.comment.clone().map(|s| s.into_string()),
 				permissions: self.permissions.clone(),
 			},
-			None,
 		)
 		.await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for DefineParamStore {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE PARAM")?;
-		write!(f, " ${} VALUE {}", self.name, self.value)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
-		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
-		write!(f, "PERMISSIONS {}", self.permissions)?;
-		Ok(())
 	}
 }
 

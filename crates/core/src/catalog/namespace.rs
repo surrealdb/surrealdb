@@ -1,6 +1,8 @@
 use std::fmt::{Display, Formatter};
 
 use revision::{Revisioned, revisioned};
+use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
@@ -9,7 +11,18 @@ use crate::sql::{Ident, ToSql};
 use crate::val::Value;
 
 #[derive(
-	Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+	Debug,
+	Clone,
+	Copy,
+	PartialEq,
+	Eq,
+	PartialOrd,
+	Ord,
+	Hash,
+	Serialize,
+	Deserialize,
+	Encode,
+	BorrowDecode,
 )]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[repr(transparent)]

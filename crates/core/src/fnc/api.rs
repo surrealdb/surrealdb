@@ -7,10 +7,10 @@ use reblessive::tree::Stk;
 use super::args::Optional;
 use crate::api::body::ApiBody;
 use crate::api::invocation::ApiInvocation;
-use crate::api::method::Method;
+use crate::catalog::providers::ApiProvider;
+use crate::catalog::{ApiDefinition, ApiMethod};
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::expr::statements::define::ApiDefinition;
 use crate::val::{Object, Value};
 
 pub async fn invoke(
@@ -24,9 +24,9 @@ pub async fn invoke(
 		};
 
 		let method = if let Some(v) = opts.get("method") {
-			Method::try_from(v)?
+			ApiMethod::try_from(v)?
 		} else {
-			Method::Get
+			ApiMethod::Get
 		};
 
 		let query: BTreeMap<String, String> = if let Some(v) = opts.get("query") {
@@ -43,7 +43,7 @@ pub async fn invoke(
 
 		(body, method, query, headers)
 	} else {
-		(Default::default(), Method::Get, Default::default(), Default::default())
+		(Default::default(), ApiMethod::Get, Default::default(), Default::default())
 	};
 
 	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;

@@ -1,23 +1,20 @@
 use std::fmt::{self, Write};
 
 use anyhow::{Result, bail};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use super::DefineKind;
+use crate::catalog::providers::DatabaseProvider;
+use crate::catalog::{MlModelDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Permission};
+use crate::expr::{Base, Ident};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Strand, Value};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineModelStatement {
 	pub kind: DefineKind,
 	pub hash: String,
@@ -26,8 +23,6 @@ pub struct DefineModelStatement {
 	pub comment: Option<Strand>,
 	pub permissions: Permission,
 }
-
-impl_kv_value_revisioned!(DefineModelStatement);
 
 impl DefineModelStatement {
 	/// Process this type returning a computed simple Value
@@ -61,10 +56,12 @@ impl DefineModelStatement {
 		let key = crate::key::database::ml::new(ns, db, &self.name, &self.version);
 		txn.set(
 			&key,
-			&DefineModelStatement {
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				kind: DefineKind::Default,
-				..self.clone()
+			&MlModelDefinition {
+				hash: self.hash.clone(),
+				name: self.name.to_raw_string(),
+				version: self.version.clone(),
+				comment: self.comment.clone().map(|x| x.to_raw_string()),
+				permissions: self.permissions.clone(),
 			},
 			None,
 		)
@@ -96,16 +93,5 @@ impl fmt::Display for DefineModelStatement {
 		};
 		write!(f, "PERMISSIONS {}", self.permissions)?;
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineModelStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"version".to_string() => self.version.into(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
 	}
 }

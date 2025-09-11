@@ -12,7 +12,6 @@ use crate::idx::planner::tree::{
 	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node,
 };
 use crate::idx::planner::{GrantedPermission, RecordStrategy, ScanDirection, StatementContext};
-use crate::key::value::StoreKeyValue;
 use crate::val::{Array, Number, Object, Value};
 
 /// The `PlanBuilder` struct represents a builder for constructing query plans.
@@ -492,7 +491,7 @@ impl IndexOption {
 
 	pub(crate) fn explain(&self) -> Value {
 		let mut e = HashMap::new();
-		e.insert("index", Value::from(self.ix_ref().name.clone().into_strand()));
+		e.insert("index", Value::from(self.ix_ref().name.clone()));
 		match self.op() {
 			IndexOperator::Equality(v) => {
 				e.insert("operator", Value::from(BinaryOperator::Equal.to_string()));
@@ -638,30 +637,6 @@ impl From<&RangeValue> for Value {
 			("value", rv.value.as_ref().clone()),
 			("inclusive", Value::from(rv.inclusive)),
 		])))
-	}
-}
-
-#[derive(Clone)]
-pub(super) struct StoreRangeValue {
-	pub(super) value: StoreKeyValue,
-	pub(super) inclusive: bool,
-}
-
-impl Default for StoreRangeValue {
-	fn default() -> Self {
-		Self {
-			value: StoreKeyValue::None,
-			inclusive: false,
-		}
-	}
-}
-
-impl From<&RangeValue> for StoreRangeValue {
-	fn from(rv: &RangeValue) -> Self {
-		Self {
-			value: rv.value.as_ref().clone().into(),
-			inclusive: rv.inclusive,
-		}
 	}
 }
 

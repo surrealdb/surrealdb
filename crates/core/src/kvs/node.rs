@@ -2,13 +2,14 @@ use std::time::Duration;
 
 use anyhow::Result;
 
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, NodeProvider, TableProvider};
+use crate::catalog::{NodeLiveQuery, SubscriptionDefinition};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
-use crate::expr::statements::LiveStatement;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::kvs::{Datastore, Live};
+use crate::kvs::{Datastore, KVValue};
 
 const TARGET: &str = "surrealdb::core::kvs::node";
 
@@ -107,7 +108,7 @@ impl Datastore {
 			nds.iter()
 				.filter_map(|n| {
 					// Check that the node is active and has expired
-					match n.is_active() && n.hb < now - Duration::from_secs(30) {
+					match n.is_active() && n.heartbeat < now - Duration::from_secs(30) {
 						true => Some(n.to_owned()),
 						false => None,
 					}
@@ -173,7 +174,7 @@ impl Datastore {
 					next = res.next;
 					for (k, v) in res.result.iter() {
 						// Decode the data for this live query
-						let val: Live = revision::from_slice(v)?;
+						let val: NodeLiveQuery = KVValue::kv_decode_value(v.clone())?;
 						// Get the key for this node live query
 						let nlq = catch!(txn, crate::key::node::lq::Lq::decode_key(k.clone()));
 						// Check that the node for this query is archived
@@ -267,9 +268,9 @@ impl Datastore {
 						next = res.next;
 						for (k, v) in res.result.iter() {
 							// Decode the LIVE query statement
-							let stm: LiveStatement = revision::from_slice(v)?;
+							let stm: SubscriptionDefinition = KVValue::kv_decode_value(v.clone())?;
 							// Get the node id and the live query id
-							let (nid, lid) = (stm.node.0, stm.id.0);
+							let (nid, lid) = (stm.node, stm.id);
 							// Check that the node for this query is archived
 							if archived.contains(&stm.node) {
 								// Get the key for this node live query

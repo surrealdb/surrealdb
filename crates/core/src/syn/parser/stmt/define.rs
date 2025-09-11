@@ -1,6 +1,6 @@
 use reblessive::Stk;
 
-use crate::api::method::Method;
+use crate::catalog::ApiMethod;
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::base::Base;
@@ -202,7 +202,7 @@ impl Parser<'_> {
 		};
 		let name = self.next_token_value()?;
 		expected!(self, t!("ON"));
-		let base = self.parse_base(false)?;
+		let base = self.parse_base()?;
 
 		let mut res = DefineUserStatement {
 			kind,
@@ -323,7 +323,7 @@ impl Parser<'_> {
 		let name = self.next_token_value()?;
 		expected!(self, t!("ON"));
 		// TODO: Parse base should no longer take an argument.
-		let base = self.parse_base(false)?;
+		let base = self.parse_base()?;
 
 		let mut res = DefineAccessStatement {
 			name,
@@ -691,15 +691,15 @@ impl Parser<'_> {
 					}
 				}
 				t!("DELETE") | t!("GET") | t!("PATCH") | t!("POST") | t!("PUT") | t!("TRACE") => {
-					let mut methods: Vec<Method> = vec![];
+					let mut methods: Vec<ApiMethod> = vec![];
 					loop {
 						let method = match self.peek().kind {
-							t!("DELETE") => Method::Delete,
-							t!("GET") => Method::Get,
-							t!("PATCH") => Method::Patch,
-							t!("POST") => Method::Post,
-							t!("PUT") => Method::Put,
-							t!("TRACE") => Method::Trace,
+							t!("DELETE") => ApiMethod::Delete,
+							t!("GET") => ApiMethod::Get,
+							t!("PATCH") => ApiMethod::Patch,
+							t!("POST") => ApiMethod::Post,
+							t!("PUT") => ApiMethod::Put,
+							t!("TRACE") => ApiMethod::Trace,
 							found => {
 								bail!(
 									"Expected one of `delete`, `get`, `patch`, `post`, `put` or `trace`, found {found}"
@@ -759,7 +759,7 @@ impl Parser<'_> {
 		let mut res = DefineEventStatement {
 			kind,
 			name,
-			what,
+			target_table: what,
 			when: Expr::Literal(Literal::Bool(true)),
 			then: Vec::new(),
 			comment: None,
@@ -911,102 +911,6 @@ impl Parser<'_> {
 				t!("UNIQUE") => {
 					self.pop_peek();
 					res.index = Index::Uniq;
-				}
-				t!("SEARCH") => {
-					self.pop_peek();
-					let mut analyzer: Option<Ident> = None;
-					let mut scoring = None;
-					let mut doc_ids_order = 100;
-					let mut doc_lengths_order = 100;
-					let mut postings_order = 100;
-					let mut terms_order = 100;
-					let mut doc_ids_cache = 100;
-					let mut doc_lengths_cache = 100;
-					let mut postings_cache = 100;
-					let mut terms_cache = 100;
-					let mut hl = false;
-
-					loop {
-						match self.peek_kind() {
-							t!("ANALYZER") => {
-								self.pop_peek();
-								analyzer = Some(self.next_token_value()).transpose()?;
-							}
-							t!("VS") => {
-								self.pop_peek();
-								scoring = Some(Scoring::Vs);
-							}
-							t!("BM25") => {
-								self.pop_peek();
-								if self.eat(t!("(")) {
-									let open = self.last_span();
-									let k1 = self.next_token_value()?;
-									expected!(self, t!(","));
-									let b = self.next_token_value()?;
-									self.expect_closing_delimiter(t!(")"), open)?;
-									scoring = Some(Scoring::Bm {
-										k1,
-										b,
-									})
-								} else {
-									scoring = Some(Default::default());
-								};
-							}
-							t!("DOC_IDS_ORDER") => {
-								self.pop_peek();
-								doc_ids_order = self.next_token_value()?;
-							}
-							t!("DOC_LENGTHS_ORDER") => {
-								self.pop_peek();
-								doc_lengths_order = self.next_token_value()?;
-							}
-							t!("POSTINGS_ORDER") => {
-								self.pop_peek();
-								postings_order = self.next_token_value()?;
-							}
-							t!("TERMS_ORDER") => {
-								self.pop_peek();
-								terms_order = self.next_token_value()?;
-							}
-							t!("DOC_IDS_CACHE") => {
-								self.pop_peek();
-								doc_ids_cache = self.next_token_value()?;
-							}
-							t!("DOC_LENGTHS_CACHE") => {
-								self.pop_peek();
-								doc_lengths_cache = self.next_token_value()?;
-							}
-							t!("POSTINGS_CACHE") => {
-								self.pop_peek();
-								postings_cache = self.next_token_value()?;
-							}
-							t!("TERMS_CACHE") => {
-								self.pop_peek();
-								terms_cache = self.next_token_value()?;
-							}
-							t!("HIGHLIGHTS") => {
-								self.pop_peek();
-								hl = true;
-							}
-							_ => break,
-						}
-					}
-
-					res.index = Index::Search(crate::sql::index::SearchParams {
-						// Safety: "like" does not contain a null byte
-						az: analyzer
-							.unwrap_or_else(|| unsafe { Ident::new_unchecked("like".to_owned()) }),
-						sc: scoring.unwrap_or_else(Default::default),
-						hl,
-						doc_ids_order,
-						doc_lengths_order,
-						postings_order,
-						terms_order,
-						doc_ids_cache,
-						doc_lengths_cache,
-						postings_cache,
-						terms_cache,
-					});
 				}
 				t!("FULLTEXT") => {
 					self.pop_peek();

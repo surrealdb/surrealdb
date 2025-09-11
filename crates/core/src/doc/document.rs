@@ -6,14 +6,10 @@ use std::sync::Arc;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::{DatabaseDefinition, TableDefinition};
+use crate::catalog::providers::{CatalogProvider, TableProvider};
+use crate::catalog::{self, DatabaseDefinition, Permission, TableDefinition};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Workable};
-use crate::expr::permission::Permission;
-use crate::expr::statements::define::{
-	DefineEventStatement, DefineFieldStatement, DefineIndexStatement,
-};
-use crate::expr::statements::live::LiveStatement;
 use crate::expr::{Base, FlowResultExt as _, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::idx::planner::RecordStrategy;
@@ -272,8 +268,8 @@ impl Document {
 		}
 	}
 
-	/// Retur true if the document has been extracted by an iterator that
-	/// already matcheed the condition.
+	/// Retur true if the document has been extracted by an iterator that already matcheed the
+	/// condition.
 	pub(crate) fn is_condition_checked(&self) -> bool {
 		matches!(self.record_strategy, RecordStrategy::Count | RecordStrategy::KeysOnly)
 	}
@@ -380,7 +376,7 @@ impl Document {
 			// Loop over each field in document
 			for k in reduced.as_ref().each(&fd.name).iter() {
 				// Process the field permissions
-				match &fd.permissions.select {
+				match &fd.select_permission {
 					Permission::Full => (),
 					Permission::None => reduced.to_mut().cut(k),
 					Permission::Specific(e) => {
@@ -535,7 +531,11 @@ impl Document {
 	}
 
 	/// Get the events for this document
-	pub async fn ev(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineEventStatement]>> {
+	pub async fn ev(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Arc<[catalog::EventDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
@@ -564,7 +564,11 @@ impl Document {
 	}
 
 	/// Get the fields for this document
-	pub async fn fd(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineFieldStatement]>> {
+	pub async fn fd(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Arc<[catalog::FieldDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
@@ -577,23 +581,25 @@ impl Document {
 				let key = cache::ds::Lookup::Fds(ns, db, &tb.name, tb.cache_fields_ts);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_fds(),
 					None => {
 						let val = ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await?;
-						let val = cache::ds::Entry::Fds(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Fds(val.clone()));
+						Ok(val)
 					}
 				}
 			}
-			.try_into_fds(),
 			// No cache is present on the context
 			None => ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await,
 		}
 	}
 
 	/// Get the indexes for this document
-	pub async fn ix(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineIndexStatement]>> {
+	pub async fn ix(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Arc<[catalog::IndexDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
@@ -622,7 +628,11 @@ impl Document {
 	}
 
 	// Get the lives for this document
-	pub async fn lv(&self, ctx: &Context, opt: &Options) -> Result<Arc<[LiveStatement]>> {
+	pub async fn lv(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Arc<[catalog::SubscriptionDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table

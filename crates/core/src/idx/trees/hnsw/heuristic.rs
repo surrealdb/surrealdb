@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::expr::index::HnswParams;
+use crate::catalog::HnswParams;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::layer::HnswLayer;
 use crate::idx::trees::hnsw::{ElementId, HnswElements};

@@ -1,23 +1,27 @@
 use std::fmt;
 use std::sync::Arc;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
+use crate::catalog::providers::{
+	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, NamespaceProvider,
+	NodeProvider, TableProvider, UserProvider,
+};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Expr, FlowResultExt, Ident};
+use crate::expr::{
+	Base, DefineAccessStatement, DefineAnalyzerStatement, DefineUserStatement, Expr, FlowResultExt,
+	Ident,
+};
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ToSql;
 use crate::sys::INFORMATION;
 use crate::val::{Datetime, Object, Value};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum InfoStatement {
 	// revision discriminant override accounting for previous behavior when adding variants and
 	// removing not at the end of the enum definition.
@@ -52,7 +56,7 @@ impl InfoStatement {
 				// Create the result set
 				if *structured {
 					let object = map! {
-						"accesses".to_string() => process(txn.all_root_accesses().await?.iter().map(|v| v.redacted()).collect()),
+						"accesses".to_string() => process(txn.all_root_accesses().await?),
 						"namespaces".to_string() => process(txn.all_ns().await?),
 						"nodes".to_string() => process(txn.all_nodes().await?),
 						"system".to_string() => system().await,
@@ -63,8 +67,9 @@ impl InfoStatement {
 					let object = map! {
 						"accesses".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_root_accesses().await?.iter().map(|v| v.redacted()) {
-								out.insert(v.name.as_raw_string(), v.to_string().into());
+							for v in txn.all_root_accesses().await?.iter() {
+								let def = DefineAccessStatement::from_definition(Base::Root, v).redact();
+								out.insert(def.name.to_raw_string(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -86,7 +91,7 @@ impl InfoStatement {
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_root_users().await?.iter() {
-								out.insert(v.name.as_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(),DefineUserStatement::from_definition(Base::Root,v).to_string().into());
 							}
 							out.into()
 						}
@@ -104,7 +109,7 @@ impl InfoStatement {
 				// Create the result set
 				if *structured {
 					let object = map! {
-						"accesses".to_string() => process(txn.all_ns_accesses(ns).await?.iter().map(|v| v.redacted()).collect()),
+						"accesses".to_string() => process(txn.all_ns_accesses(ns).await?),
 						"databases".to_string() => process(txn.all_db(ns).await?),
 						"users".to_string() => process(txn.all_ns_users(ns).await?),
 					};
@@ -113,8 +118,9 @@ impl InfoStatement {
 					let object = map! {
 						"accesses".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_ns_accesses(ns).await?.iter().map(|v| v.redacted()) {
-								out.insert(v.name.as_raw_string(), v.to_string().into());
+							for v in txn.all_ns_accesses(ns).await?.iter() {
+								let def = DefineAccessStatement::from_definition(Base::Ns, v).redact();
+								out.insert(def.name.to_raw_string(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -128,7 +134,7 @@ impl InfoStatement {
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_ns_users(ns).await?.iter() {
-								out.insert(v.name.as_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(),DefineUserStatement::from_definition(Base::Ns,v).to_string().into());
 							}
 							out.into()
 						},
@@ -157,7 +163,7 @@ impl InfoStatement {
 				// Create the result set
 				let res = if *structured {
 					let object = map! {
-						"accesses".to_string() => process(txn.all_db_accesses(ns, db).await?.iter().map(|v| v.redacted()).collect()),
+						"accesses".to_string() => process(txn.all_db_accesses(ns, db).await?),
 						"apis".to_string() => process(txn.all_db_apis(ns, db).await?),
 						"analyzers".to_string() => process(txn.all_db_analyzers(ns, db).await?),
 						"buckets".to_string() => process(txn.all_db_buckets(ns, db).await?),
@@ -174,50 +180,51 @@ impl InfoStatement {
 					let object = map! {
 						"accesses".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_db_accesses(ns, db).await?.iter().map(|v| v.redacted()) {
-								out.insert(v.name.as_raw_string(), v.to_string().into());
+							for v in txn.all_db_accesses(ns, db).await?.iter() {
+								let def = DefineAccessStatement::from_definition(Base::Db, v).redact();
+								out.insert(def.name.to_raw_string(), def.to_string().into());
 							}
 							out.into()
 						},
 						"apis".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_apis(ns, db).await?.iter() {
-								out.insert(v.path.to_string(), v.to_string().into());
+								out.insert(v.path.to_string(), v.to_sql().into());
 							}
 							out.into()
 						},
 						"analyzers".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_analyzers( ns, db).await?.iter() {
-								out.insert(v.name.as_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(), DefineAnalyzerStatement::from_definition(v).to_string().into());
 							}
 							out.into()
 						},
 						"buckets".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_buckets(ns, db).await?.iter() {
-								out.insert(v.name.to_string(), v.to_string().into());
+								out.insert(v.name.to_string(), v.to_sql().into());
 							}
 							out.into()
 						},
 						"functions".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_functions(ns, db).await?.iter() {
-								out.insert(v.name.as_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
 						"models".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_models(ns, db).await?.iter() {
-								out.insert(v.name.as_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
 						"params".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_params(ns, db).await?.iter() {
-								out.insert(v.name.as_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -231,7 +238,7 @@ impl InfoStatement {
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_users(ns, db).await?.iter() {
-								out.insert(v.name.as_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(),DefineUserStatement::from_definition(Base::Db,v).to_string().into());
 							}
 							out.into()
 						},
@@ -245,7 +252,7 @@ impl InfoStatement {
 						"sequences".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_sequences( ns, db).await?.iter() {
-								out.insert(v.name.as_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -286,28 +293,28 @@ impl InfoStatement {
 						"events".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_events(ns, db, tb).await?.iter() {
-								out.insert(v.name.as_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
 						"fields".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_fields(ns, db, tb, version).await?.iter() {
-								out.insert(v.name.to_string(), v.to_string().into());
+								out.insert(v.name.to_string(), v.to_sql().into());
 							}
 							out.into()
 						},
 						"indexes".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_indexes(ns, db, tb).await?.iter() {
-								out.insert(v.name.as_raw_string(), v.to_string().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
 						"lives".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_lives(ns, db, tb).await?.iter() {
-								out.insert(v.id.to_raw(), v.to_string().into());
+								out.insert(v.id.to_string(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -363,13 +370,12 @@ impl InfoStatement {
 								db: db.to_string(),
 							})?
 					}
-					_ => bail!(Error::InvalidLevel(base.to_string())),
 				};
 				// Ok all good
 				Ok(if *structured {
 					res.as_ref().clone().structure()
 				} else {
-					Value::from(res.to_string())
+					Value::from(DefineUserStatement::from_definition(base, &res).to_string())
 				})
 			}
 			#[cfg_attr(target_family = "wasm", expect(unused_variables))]
@@ -386,7 +392,7 @@ impl InfoStatement {
 					if let Some(ib) = ctx.get_index_builder() {
 						// Obtain the index
 						let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-						let res = txn.get_tb_index(ns, db, table, index).await?;
+						let res = txn.expect_tb_index(ns, db, table, index).await?;
 						let status = ib.get_status(ns, db, &res).await;
 						let mut out = Object::default();
 						out.insert("building".to_string(), status.into());

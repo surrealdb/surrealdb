@@ -1,13 +1,14 @@
 //! Stores a DEFINE FUNCTION config definition
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::expr::statements::define::DefineFunctionStatement;
+use crate::catalog::{DatabaseId, FunctionDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Fc<'a> {
 	__: u8,
 	_a: u8,
@@ -17,12 +18,10 @@ pub(crate) struct Fc<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub fc: &'a str,
+	pub fc: Cow<'a, str>,
 }
 
-impl KVKey for Fc<'_> {
-	type ValueType = DefineFunctionStatement;
-}
+impl_kv_key_storekey!(Fc<'_> => FunctionDefinition);
 
 pub fn new(ns: NamespaceId, db: DatabaseId, fc: &str) -> Fc<'_> {
 	Fc::new(ns, db, fc)
@@ -57,7 +56,7 @@ impl<'a> Fc<'a> {
 			_c: b'!',
 			_d: b'f',
 			_e: b'n',
-			fc,
+			fc: Cow::Borrowed(fc),
 		}
 	}
 }

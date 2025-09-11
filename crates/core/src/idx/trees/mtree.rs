@@ -12,10 +12,9 @@ use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use crate::catalog::DatabaseDefinition;
+use crate::catalog::{DatabaseDefinition, Distance, MTreeParams, VectorType};
 use crate::ctx::Context;
 use crate::err::Error;
-use crate::expr::index::{Distance, MTreeParams, VectorType};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::docids::btdocids::BTreeDocIds;
@@ -1488,9 +1487,11 @@ mod tests {
 	use reblessive::tree::Stk;
 	use test_log::test;
 
-	use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
+	use crate::catalog::providers::CatalogProvider;
+	use crate::catalog::{
+		DatabaseDefinition, DatabaseId, Distance, IndexId, NamespaceId, VectorType,
+	};
 	use crate::ctx::{Context, MutableContext};
-	use crate::expr::index::{Distance, VectorType};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::DocId;
 	use crate::idx::docids::btdocids::BTreeDocIds;
@@ -1779,7 +1780,7 @@ mod tests {
 				let doc_ids = BTreeDocIds::new(
 					&tx,
 					TransactionType::Read,
-					IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
+					IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
 					7,
 					100,
 				)

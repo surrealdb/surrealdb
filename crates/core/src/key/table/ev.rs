@@ -1,13 +1,14 @@
 //! Stores a DEFINE EVENT config definition
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::expr::statements::define::DefineEventStatement;
+use crate::catalog::{DatabaseId, EventDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Ev<'a> {
 	__: u8,
 	_a: u8,
@@ -15,16 +16,14 @@ pub(crate) struct Ev<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	_e: u8,
 	_f: u8,
-	pub ev: &'a str,
+	pub ev: Cow<'a, str>,
 }
 
-impl KVKey for Ev<'_> {
-	type ValueType = DefineEventStatement;
-}
+impl_kv_key_storekey!(Ev<'_> => EventDefinition);
 
 pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, ev: &'a str) -> Ev<'a> {
 	Ev::new(ns, db, tb, ev)
@@ -57,11 +56,11 @@ impl<'a> Ev<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'!',
 			_e: b'e',
 			_f: b'v',
-			ev,
+			ev: Cow::Borrowed(ev),
 		}
 	}
 }

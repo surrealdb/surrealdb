@@ -7,10 +7,10 @@ use crate::sql::access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessV
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::data::Assignment;
 use crate::sql::filter::Filter;
-use crate::sql::graph::GraphSubject;
-use crate::sql::index::{Distance, MTreeParams, SearchParams, VectorType};
+use crate::sql::index::{Distance, FullTextParams, MTreeParams, VectorType};
 use crate::sql::language::Language;
 use crate::sql::literal::ObjectEntry;
+use crate::sql::lookup::{LookupKind, LookupSubject};
 use crate::sql::order::{OrderList, Ordering};
 use crate::sql::statements::analyze::AnalyzeStatement;
 use crate::sql::statements::define::{DefineDefault, DefineKind};
@@ -27,8 +27,8 @@ use crate::sql::statements::{
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
 	Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, Explain, Expr, Fetch,
-	Fetchs, Field, Fields, Function, FunctionCall, Graph, Group, Groups, Ident, Idiom, Idioms,
-	Index, Kind, Limit, Literal, Mock, Order, Output, Param, Part, Permission, Permissions,
+	Fetchs, Field, Fields, Function, FunctionCall, Group, Groups, Ident, Idiom, Idioms, Index,
+	Kind, Limit, Literal, Lookup, Mock, Order, Output, Param, Part, Permission, Permissions,
 	RecordAccess, RecordIdKeyLit, RecordIdLit, RemoveFunctionStatement, Scoring, Script, Split,
 	Splits, Start, TableType, Timeout, TopLevelExpr, With,
 };
@@ -62,16 +62,7 @@ static SOURCE: &str = r#"
 	DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo;
 	DEFINE EVENT event ON TABLE table WHEN null THEN null,none;
 	DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true;
-	DEFINE INDEX index ON TABLE table FIELDS a,b[*] SEARCH ANALYZER ana BM25 (0.1,0.2)
-			DOC_IDS_ORDER 1
-			DOC_LENGTHS_ORDER 2
-			POSTINGS_ORDER 3
-			TERMS_ORDER 4
-			DOC_IDS_CACHE 5
-			DOC_LENGTHS_CACHE 6
-			POSTINGS_CACHE 7
-			TERMS_CACHE 8
-			HIGHLIGHTS;
+	DEFINE INDEX index ON TABLE table FIELDS a,b[*] FULLTEXT ANALYZER ana BM25 (0.1,0.2) HIGHLIGHTS;
 	DEFINE INDEX index ON TABLE table FIELDS a UNIQUE;
 	DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 DOC_IDS_ORDER 7 DOC_IDS_CACHE 8 MTREE_CACHE 9;
 	DEFINE ANALYZER ana FILTERS ASCII, EDGENGRAM(1,2), NGRAM(3,4), LOWERCASE, SNOWBALL(NLD), UPPERCASE TOKENIZERS BLANK, CAMEL, CLASS, PUNCT FUNCTION fn::foo::bar;
@@ -306,7 +297,7 @@ fn statements() -> Vec<TopLevelExpr> {
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Event(DefineEventStatement {
 			kind: DefineKind::Default,
 			name: Ident::from_strand(strand!("event").to_owned()),
-			what: Ident::from_strand(strand!("table").to_owned()),
+			target_table: Ident::from_strand(strand!("table").to_owned()),
 			when: Expr::Literal(Literal::Null),
 			then: vec![Expr::Literal(Literal::Null), Expr::Literal(Literal::None)],
 			comment: None,
@@ -347,21 +338,13 @@ fn statements() -> Vec<TopLevelExpr> {
 				Idiom(vec![Part::Field(Ident::from_strand(strand!("a").to_owned()))]),
 				Idiom(vec![Part::Field(Ident::from_strand(strand!("b").to_owned())), Part::All]),
 			],
-			index: Index::Search(SearchParams {
+			index: Index::FullText(FullTextParams {
 				az: Ident::from_strand(strand!("ana").to_owned()),
 				hl: true,
 				sc: Scoring::Bm {
 					k1: 0.1,
 					b: 0.2,
 				},
-				doc_ids_order: 1,
-				doc_lengths_order: 2,
-				postings_order: 3,
-				terms_order: 4,
-				doc_ids_cache: 5,
-				doc_lengths_cache: 6,
-				postings_cache: 7,
-				terms_cache: 8,
 			}),
 			comment: None,
 			concurrently: false,
@@ -431,8 +414,8 @@ fn statements() -> Vec<TopLevelExpr> {
 					table: "a".to_owned(),
 					key: RecordIdKeyLit::String(strand!("b").to_owned()),
 				}))),
-				Part::Graph(Graph {
-					dir: Dir::Out,
+				Part::Graph(Lookup {
+					kind: LookupKind::Graph(Dir::Out),
 					..Default::default()
 				}),
 				Part::Last,
@@ -690,9 +673,9 @@ fn statements() -> Vec<TopLevelExpr> {
 			only: true,
 			what: vec![Expr::Idiom(Idiom(vec![
 				Part::Field(Ident::from_strand(strand!("a").to_owned())),
-				Part::Graph(Graph {
-					dir: Dir::Out,
-					what: vec![GraphSubject::Table(Ident::from_strand(strand!("b").to_owned()))],
+				Part::Graph(Lookup {
+					kind: LookupKind::Graph(Dir::Out),
+					what: vec![LookupSubject::Table(Ident::from_strand(strand!("b").to_owned()))],
 					..Default::default()
 				}),
 			]))],
@@ -705,9 +688,9 @@ fn statements() -> Vec<TopLevelExpr> {
 				]),
 				Idiom(vec![
 					Part::Field(Ident::from_strand(strand!("a").to_owned())),
-					Part::Graph(Graph {
-						dir: Dir::Out,
-						what: vec![GraphSubject::Table(Ident::from_strand(
+					Part::Graph(Lookup {
+						kind: LookupKind::Graph(Dir::Out),
+						what: vec![LookupSubject::Table(Ident::from_strand(
 							strand!("b").to_owned(),
 						))],
 						..Default::default()
@@ -724,9 +707,9 @@ fn statements() -> Vec<TopLevelExpr> {
 			only: true,
 			what: vec![Expr::Idiom(Idiom(vec![
 				Part::Field(Ident::from_strand(strand!("a").to_owned())),
-				Part::Graph(Graph {
-					dir: Dir::Out,
-					what: vec![GraphSubject::Table(Ident::from_strand(strand!("b").to_owned()))],
+				Part::Graph(Lookup {
+					kind: LookupKind::Graph(Dir::Out),
+					what: vec![LookupSubject::Table(Ident::from_strand(strand!("b").to_owned()))],
 					..Default::default()
 				}),
 			]))],
@@ -739,9 +722,9 @@ fn statements() -> Vec<TopLevelExpr> {
 				]),
 				Idiom(vec![
 					Part::Field(Ident::from_strand(strand!("a").to_owned())),
-					Part::Graph(Graph {
-						dir: Dir::Out,
-						what: vec![GraphSubject::Table(Ident::from_strand(
+					Part::Graph(Lookup {
+						kind: LookupKind::Graph(Dir::Out),
+						what: vec![LookupSubject::Table(Ident::from_strand(
 							strand!("b").to_owned(),
 						))],
 						..Default::default()

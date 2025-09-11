@@ -1,12 +1,12 @@
 //! Stores a database ID generator state
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::NamespaceId;
 use crate::idg::u32::U32;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Di {
 	__: u8,
 	_a: u8,
@@ -16,9 +16,7 @@ pub(crate) struct Di {
 	_d: u8,
 }
 
-impl KVKey for Di {
-	type ValueType = U32;
-}
+impl_kv_key_storekey!(Di => U32);
 
 pub fn new(ns: NamespaceId) -> Di {
 	Di::new(ns)
@@ -45,6 +43,7 @@ impl Di {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

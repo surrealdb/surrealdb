@@ -3,6 +3,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use super::CreateDs;
+use crate::catalog::providers::CatalogProvider;
 use crate::dbs::Session;
 use crate::dbs::node::Timestamp;
 use crate::kvs::KVKey;

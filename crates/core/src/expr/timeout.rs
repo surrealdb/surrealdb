@@ -1,14 +1,16 @@
 use std::fmt;
 use std::ops::Deref;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-
 use crate::val::Duration;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Timeout(pub Duration);
+
+impl Timeout {
+	pub fn as_std_duration(&self) -> &std::time::Duration {
+		&self.0.0
+	}
+}
 
 impl Deref for Timeout {
 	type Target = Duration;

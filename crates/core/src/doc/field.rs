@@ -3,6 +3,7 @@ use std::sync::Arc;
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 
+use crate::catalog::{self, FieldDefinition};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Options, Statement};
@@ -11,17 +12,14 @@ use crate::err::Error;
 use crate::expr::data::Data;
 use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
 use crate::expr::kind::Kind;
-use crate::expr::permission::Permission;
-use crate::expr::statements::DefineFieldStatement;
-use crate::expr::statements::define::DefineDefault;
 use crate::expr::{FlowResultExt as _, Part};
 use crate::iam::Action;
 use crate::val::value::CoerceError;
 use crate::val::value::every::ArrayBehaviour;
 use crate::val::{RecordId, Value};
 
-/// Removes `NONE` values recursively from objects, but not when `NONE` is a
-/// direct child of an array
+/// Removes `NONE` values recursively from objects, but not when `NONE` is a direct child of an
+/// array
 fn clean_none(v: &mut Value) -> bool {
 	match v {
 		Value::None => false,
@@ -62,7 +60,7 @@ impl Document {
 
 			// Loop through all field definitions
 			for fd in self.fd(ctx, opt).await?.iter() {
-				let is_flex = fd.flex;
+				let is_flex = fd.flexible;
 				let is_literal = fd.field_kind.as_ref().is_some_and(Kind::contains_literal);
 				for k in self.current.doc.as_ref().each(&fd.name).into_iter() {
 					defined_field_names.insert(&k, is_flex || is_literal);
@@ -256,15 +254,6 @@ impl Document {
 					old,
 					user_input: inp,
 				};
-				/*
-				// Process a potential `references` TYPE
-				if let Some(v) = field.process_refs_type().await? {
-					todo!()
-					// We found a `references` TYPE
-					// No other clauses will be present, so no need to process them
-					val = v;
-				} else {
-				*/
 				// Skip this field?
 				if !skipped {
 					if field.def.computed.is_some() {
@@ -360,7 +349,7 @@ struct FieldEditContext<'a> {
 	/// The mutable request context
 	context: Option<MutableContext>,
 	/// The defined field statement
-	def: &'a DefineFieldStatement,
+	def: &'a FieldDefinition,
 	/// The current request stack
 	stk: &'a mut Stk,
 	/// The current request context
@@ -378,9 +367,8 @@ struct FieldEditContext<'a> {
 }
 
 enum RefAction<'a> {
-	Set(&'a RecordId),
-	Delete(Vec<&'a RecordId>, String),
-	Ignore,
+	Set(&'a RecordId, String),
+	Delete(&'a RecordId, String),
 }
 
 impl FieldEditContext<'_> {
@@ -440,12 +428,12 @@ impl FieldEditContext<'_> {
 			return Ok(val);
 		}
 		// The document is not being created
-		if !self.doc.is_new() && !matches!(self.def.default, DefineDefault::Always(_)) {
+		if !self.doc.is_new() && !matches!(self.def.default, catalog::DefineDefault::Always(_)) {
 			return Ok(val);
 		}
 		// Get the default value
 		let def = match &self.def.default {
-			DefineDefault::Set(v) | DefineDefault::Always(v) => Some(v),
+			catalog::DefineDefault::Set(v) | catalog::DefineDefault::Always(v) => Some(v),
 			_ => match &self.def.value {
 				// The VALUE clause doesn't
 				Some(v) if v.is_static() => Some(v),
@@ -581,20 +569,20 @@ impl FieldEditContext<'_> {
 		if self.opt.check_perms(Action::Edit)? {
 			// Get the permission clause
 			let perms = if self.doc.is_new() {
-				&self.def.permissions.create
+				&self.def.create_permission
 			} else {
-				&self.def.permissions.update
+				&self.def.update_permission
 			};
 			// Match the permission clause
 			let val = match perms {
 				// The field PERMISSIONS clause
 				// is FULL, enabling this field
 				// to be updated without checks.
-				Permission::Full => val,
+				catalog::Permission::Full => val,
 				// The field PERMISSIONS clause
 				// is NONE, meaning that this
 				// change will be reverted.
-				Permission::None => {
+				catalog::Permission::None => {
 					if val != *self.old {
 						self.old.as_ref().clone()
 					} else {
@@ -605,7 +593,7 @@ impl FieldEditContext<'_> {
 				// is a custom expression, so
 				// we check the expression and
 				// revert the field if denied.
-				Permission::Specific(expr) => {
+				catalog::Permission::Specific(expr) => {
 					// Arc the current value
 					let now = Arc::new(val.clone());
 					// Get the current document
@@ -668,12 +656,9 @@ impl FieldEditContext<'_> {
 			let doc = Some(&self.doc.current);
 			let old = self.old.as_ref();
 
-			// If the value has not changed, there is no need to update any references
-			let action = if val == old {
-				RefAction::Ignore
-			// Check if the old value was a record id
-			} else if let Value::RecordId(thing) = old {
-				// We need to check if this reference is contained in an array
+			// The current value might be contained inside an array of references
+			// Try to find other references with a similar path to the current one
+			let mut check_others = async || -> Result<Vec<Value>> {
 				let others = self
 					.doc
 					.current
@@ -682,106 +667,102 @@ impl FieldEditContext<'_> {
 					.get(self.stk, self.ctx, self.opt, doc, &self.def.name)
 					.await
 					.catch_return()?;
-				// If the reference is contained in an array, we only delete it from the array
-				// if there is no other reference to the same record id in the array
+
 				if let Value::Array(arr) = others {
-					if arr.iter().any(|v| v == old) {
-						RefAction::Ignore
-					} else {
-						RefAction::Delete(vec![thing], self.def.name.to_string())
-					}
+					Ok(arr.0)
 				} else {
-					// Otherwise we delete the reference
-					RefAction::Delete(vec![thing], self.def.name.to_string())
+					Ok(vec![])
 				}
-			} else if let Value::Array(oldarr) = old {
-				// If the new value is still an array, we only filter out the record ids that
-				// are not present in the new array
-				let removed = if let Value::Array(newarr) = val {
-					oldarr
-						.iter()
-						.filter_map(|v| {
-							// If the record id is still present in the new array, we do not remove
-							// the reference
-							if newarr.contains(v) {
-								None
-							} else if let Value::RecordId(thing) = v {
-								Some(thing)
-							} else {
-								None
-							}
-						})
-						.collect()
-
-				// If the new value is not an array, then all record ids in the
-				// old array are removed
-				} else {
-					oldarr
-						.iter()
-						.filter_map(|v| {
-							if let Value::RecordId(thing) = v {
-								Some(thing)
-							} else {
-								None
-							}
-						})
-						.collect()
-				};
-
-				RefAction::Delete(removed, self.def.name.clone().push(Part::All).to_string())
-			// We found a new reference, let's create the link
-			} else if let Value::RecordId(thing) = val {
-				RefAction::Set(thing)
-			} else {
-				// This value is not a record id, nothing to process
-				// This can be a containing array for record ids, for example
-				RefAction::Ignore
 			};
 
-			// Process the action
-			match action {
-				// Nothing to process
-				RefAction::Ignore => Ok(()),
-				// Create the reference, if it does not exist yet.
-				RefAction::Set(thing) => {
-					let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
-					let name = self.def.name.to_string();
-					let key = crate::key::r#ref::new(
-						ns,
-						db,
-						&thing.table,
-						&thing.key,
-						&self.rid.table,
-						&name,
-						&self.rid.key,
-					);
+			// Check if the value has actually changed
+			if old == val {
+				// Nothing changed
+				return Ok(());
+			}
 
-					self.ctx.tx().set(&key, &(), None).await?;
+			let mut actions = vec![];
 
-					Ok(())
+			// A value might be contained inside an array of references
+			// If so, we skip it. Otherwise, we delete the reference.
+			if let Value::RecordId(rid) = old {
+				let others = check_others().await?;
+				if !others.iter().any(|v| v == old) {
+					actions.push(RefAction::Delete(rid, self.def.name.to_string()));
 				}
-				// Delete the reference, if it exists
-				RefAction::Delete(things, ff) => {
-					let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
-					for thing in things {
+			}
+
+			// New references, wether on their own or inside an array
+			// are always processed through here. Always add the new reference
+			// if the key already exists it will just overwrite which is fine.
+			if let Value::RecordId(rid) = val {
+				actions.push(RefAction::Set(rid, self.def.name.to_string()));
+			}
+
+			// Values removed from an array are not always processed via the above
+			// Try to delete the references here where needed
+			if let Value::Array(oldarr) = old {
+				// For array based references, we always store the foreign field as the nested field
+				let ff = self.def.name.clone().push(Part::All).to_string();
+				// If the new value is still an array, we only filter out the record ids that
+				// are not present in the new array
+				if let Value::Array(newarr) = val {
+					for old_rid in oldarr.iter() {
+						if newarr.contains(old_rid) {
+							continue;
+						}
+
+						if let Value::RecordId(rid) = old_rid {
+							actions.push(RefAction::Delete(rid, ff.clone()));
+						}
+					}
+
+					// If the new value is not an array, then all record ids in the old array are
+					// removed
+				} else {
+					for old_rid in oldarr.iter() {
+						if let Value::RecordId(rid) = old_rid {
+							actions.push(RefAction::Delete(rid, ff.clone()));
+						}
+					}
+				}
+			}
+
+			// Process the actions
+			for action in actions.into_iter() {
+				match action {
+					RefAction::Set(rid, ff) => {
+						let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
 						let key = crate::key::r#ref::new(
 							ns,
 							db,
-							&thing.table,
-							&thing.key,
+							&rid.table,
+							&rid.key,
 							&self.rid.table,
-							&ff,
 							&self.rid.key,
+							&ff,
+						);
+
+						self.ctx.tx().set(&key, &(), None).await?;
+					}
+					RefAction::Delete(rid, ff) => {
+						let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
+						let key = crate::key::r#ref::new(
+							ns,
+							db,
+							&rid.table,
+							&rid.key,
+							&self.rid.table,
+							&self.rid.key,
+							&ff,
 						);
 
 						self.ctx.tx().del(&key).await?;
 					}
-
-					Ok(())
 				}
 			}
-		} else {
-			Ok(())
 		}
+
+		Ok(())
 	}
 }

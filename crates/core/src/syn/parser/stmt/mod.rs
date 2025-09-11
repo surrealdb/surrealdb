@@ -117,14 +117,19 @@ impl Parser<'_> {
 				self.pop_peek();
 				self.parse_show_stmt().map(TopLevelExpr::Show)
 			}
-			_ => self.parse_expr_start(stk).await.map(TopLevelExpr::Expr),
+			_ => {
+				let expr = self.parse_expr_start(stk).await?;
+				let span = token.span.covers(self.last_span);
+				Self::reject_letless_let(&expr, span)?;
+				Ok(TopLevelExpr::Expr(expr))
+			}
 		}
 	}
 
 	/// Parsers an access statement.
 	async fn parse_access(&mut self, stk: &mut Stk) -> ParseResult<AccessStatement> {
 		let ac = self.next_token_value()?;
-		let base = self.eat(t!("ON")).then(|| self.parse_base(false)).transpose()?;
+		let base = self.eat(t!("ON")).then(|| self.parse_base()).transpose()?;
 		let peek = self.peek();
 		match peek.kind {
 			t!("GRANT") => {
@@ -381,7 +386,7 @@ impl Parser<'_> {
 			}
 			t!("USER") => {
 				let ident = self.next_token_value()?;
-				let base = self.eat(t!("ON")).then(|| self.parse_base(false)).transpose()?;
+				let base = self.eat(t!("ON")).then(|| self.parse_base()).transpose()?;
 				let structure = self.eat(t!("STRUCTURE"));
 				InfoStatement::User(ident, base, structure)
 			}
@@ -440,7 +445,7 @@ impl Parser<'_> {
 		let fetch = self.try_parse_fetch(stk).await?;
 
 		Ok(LiveStatement {
-			expr,
+			fields: expr,
 			what,
 			cond,
 			fetch,

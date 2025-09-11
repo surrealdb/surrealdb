@@ -2,32 +2,26 @@ mod binaries;
 mod process;
 mod protocol;
 
-use std::{
-	collections::HashMap,
-	net::{Ipv4Addr, SocketAddr},
-	path::Path,
-	sync::Arc,
-	thread,
-};
+use std::collections::HashMap;
+use std::net::{Ipv4Addr, SocketAddr};
+use std::path::Path;
+use std::sync::Arc;
+use std::thread;
 
 use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
 use process::SurrealProcess;
 use protocol::{ProxyObject, ProxyValue};
 use semver::Version;
-use surrealdb_core::kvs::{Datastore, LockType, TransactionType};
+use surrealdb_core::kvs::Datastore;
 use tokio::task::JoinSet;
 
-use crate::{
-	cli::{ColorMode, DsVersion, ResultsMode, UpgradeBackend},
-	format::Progress,
-	temp_dir::TempDir,
-	tests::{
-		TestSet,
-		report::{TestGrade, TestReport, TestTaskResult},
-		set::TestId,
-	},
-};
+use crate::cli::{ColorMode, DsVersion, ResultsMode, UpgradeBackend};
+use crate::format::Progress;
+use crate::temp_dir::TempDir;
+use crate::tests::TestSet;
+use crate::tests::report::{TestGrade, TestReport, TestTaskResult};
+use crate::tests::set::TestId;
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub struct TaskId(usize);
@@ -241,9 +235,10 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		.await
 		.expect("failed to create datastore for running matching expressions");
 
-	let txn = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
-	txn.ensure_ns_db("match", "match", false).await.unwrap();
-	txn.commit().await.unwrap();
+	let mut session = surrealdb_core::dbs::Session::default();
+	ds.process_use(&mut session, Some("match".to_string()), Some("match".to_string()))
+		.await
+		.unwrap();
 
 	// Port distribution variables.
 	let mut start_port = 9000u16;

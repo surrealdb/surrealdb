@@ -1,19 +1,17 @@
 use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::catalog::TableDefinition;
+use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::{self, Notification, Options};
 use crate::err::Error;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveTableStatement {
 	pub name: Ident,
 	pub if_exists: bool,
@@ -26,6 +24,7 @@ impl RemoveTableStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Get the NS and DB
+		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the transaction
 		let txn = ctx.tx();
@@ -55,11 +54,9 @@ impl RemoveTableStatement {
 
 		// Delete the definition
 		if self.expunge {
-			let (ns, db) = opt.ns_db()?;
-			txn.clr_tb(ns, db, &self.name).await?
+			txn.clr_tb(ns_name, db_name, &self.name).await?
 		} else {
-			let (ns, db) = opt.ns_db()?;
-			txn.del_tb(ns, db, &self.name).await?
+			txn.del_tb(ns_name, db_name, &self.name).await?
 		};
 
 		// Remove the resource data
@@ -73,11 +70,10 @@ impl RemoveTableStatement {
 		for ft in fts.iter() {
 			// Refresh the table cache
 			let foreign_tb = txn.expect_tb(ns, db, &ft.name).await?;
-			let (ns, db) = opt.ns_db()?;
 			txn.put_tb(
-				ns,
-				db,
-				TableDefinition {
+				ns_name,
+				db_name,
+				&TableDefinition {
 					cache_tables_ts: Uuid::now_v7(),
 					..foreign_tb.as_ref().clone()
 				},
@@ -93,11 +89,10 @@ impl RemoveTableStatement {
 				txn.del(&key).await?;
 				// Refresh the table cache for foreign tables
 				let foreign_tb = txn.expect_tb(ns, db, ft).await?;
-				let (ns, db) = opt.ns_db()?;
 				txn.put_tb(
-					ns,
-					db,
-					TableDefinition {
+					ns_name,
+					db_name,
+					&TableDefinition {
 						cache_tables_ts: Uuid::now_v7(),
 						..foreign_tb.as_ref().clone()
 					},
@@ -108,7 +103,7 @@ impl RemoveTableStatement {
 		if let Some(chn) = opt.sender.as_ref() {
 			for lv in lvs.iter() {
 				chn.send(Notification {
-					id: lv.id,
+					id: lv.id.into(),
 					action: dbs::Action::Killed,
 					record: Value::None,
 					result: Value::None,

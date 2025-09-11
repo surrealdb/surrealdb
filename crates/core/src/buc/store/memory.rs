@@ -8,7 +8,7 @@ use url::Url;
 use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 use crate::val::Datetime;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Entry {
 	bytes: Bytes,
 	updated: Datetime,
@@ -18,7 +18,7 @@ impl From<Bytes> for Entry {
 	fn from(bytes: Bytes) -> Self {
 		Self {
 			bytes,
-			..Default::default()
+			updated: Datetime::now(),
 		}
 	}
 }

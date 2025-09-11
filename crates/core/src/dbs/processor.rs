@@ -7,6 +7,7 @@ use anyhow::{Result, bail};
 use futures::StreamExt;
 use reblessive::tree::Stk;
 
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::{Context, MutableContext};
@@ -15,10 +16,10 @@ use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement};
 use crate::err::Error;
 use crate::expr::Ident;
 use crate::expr::dir::Dir;
-use crate::expr::graph::ComputedGraphSubject;
+use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
-use crate::key::{graph, thing};
+use crate::key::{graph, record, r#ref};
 use crate::kvs::{KVKey, KVValue, Key, Transaction, Val};
 use crate::syn;
 use crate::val::record::Record;
@@ -75,7 +76,7 @@ impl Iterable {
 }
 
 pub(super) enum Collected {
-	Edge(Key),
+	Lookup(LookupKind, Key),
 	RangeKey(Key),
 	TableKey(Key),
 	Relatable {
@@ -120,7 +121,9 @@ impl Collected {
 	) -> Result<Processed> {
 		match self {
 			// Graph edge traversal results - requires special graph parsing and record lookup
-			Self::Edge(key) => Self::process_edge(ctx, opt, txn, key, rid_only).await,
+			Self::Lookup(kind, key) => {
+				Self::process_lookup(ctx, opt, txn, kind, key, rid_only).await
+			}
 			// Range scan results - lightweight processing for range queries
 			Self::RangeKey(key) => Self::process_range_key(key).await,
 			// Table scan results - basic key-only processing for full table scans
@@ -134,7 +137,7 @@ impl Collected {
 			} => Self::process_relatable(ctx, opt, txn, f, v, w, o, rid_only).await,
 			// Direct record ID references - standard record processing
 			Self::RecordId(record_id) => {
-				Self::process_thing(ctx, opt, txn, record_id, rid_only).await
+				Self::process_record(ctx, opt, txn, record_id, rid_only).await
 			}
 			// Table identifiers - used for table-level operations
 			Self::Yield(table) => Self::process_yield(table).await,
@@ -155,25 +158,35 @@ impl Collected {
 		}
 	}
 
-	async fn process_edge(
+	async fn process_lookup(
 		ctx: &Context,
 		opt: &Options,
 		txn: &Transaction,
+		kind: LookupKind,
 		key: Key,
 		rid_only: bool,
 	) -> Result<Processed> {
 		// Parse the data from the store
-		let gra = graph::Graph::decode_key(&key)?;
+		let (ft, fk) = match kind {
+			LookupKind::Graph(_) => {
+				let gra = graph::Graph::decode_key(&key)?;
+				(gra.ft, gra.fk)
+			}
+			LookupKind::Reference => {
+				let refe = r#ref::Ref::decode_key(&key)?;
+				(refe.ft, refe.fk)
+			}
+		};
 		// Fetch the data from the store
 		let record = if rid_only {
 			Arc::new(Default::default())
 		} else {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-			txn.get_record(ns, db, gra.ft, &gra.fk, None).await?
+			txn.get_record(ns, db, ft.as_ref(), &fk, None).await?
 		};
 		let rid = RecordId {
-			table: gra.ft.to_owned(),
-			key: gra.fk,
+			table: ft.into_owned(),
+			key: fk.into_owned(),
 		};
 		// Parse the data from the store
 		let val = Operable::Value(record);
@@ -188,10 +201,10 @@ impl Collected {
 	}
 
 	async fn process_range_key(key: Key) -> Result<Processed> {
-		let key = thing::ThingKey::decode_key(&key)?;
+		let key = record::RecordKey::decode_key(&key)?;
 		let val = Record::new(Value::Null.into());
 		let rid = RecordId {
-			table: key.tb.to_owned(),
+			table: key.tb.into_owned(),
 			key: key.id,
 		};
 		// Create a new operable value
@@ -208,9 +221,9 @@ impl Collected {
 	}
 
 	async fn process_table_key(key: Key) -> Result<Processed> {
-		let key = thing::ThingKey::decode_key(&key)?;
+		let key = record::RecordKey::decode_key(&key)?;
 		let rid = RecordId {
-			table: key.tb.to_owned(),
+			table: key.tb.into_owned(),
 			key: key.id,
 		};
 		// Process the record
@@ -254,7 +267,7 @@ impl Collected {
 		Ok(pro)
 	}
 
-	async fn process_thing(
+	async fn process_record(
 		ctx: &Context,
 		opt: &Options,
 		txn: &Transaction,
@@ -340,10 +353,10 @@ impl Collected {
 	}
 
 	fn process_key_val(key: Key, val: Val) -> Result<Processed> {
-		let key = thing::ThingKey::decode_key(&key)?;
+		let key = record::RecordKey::decode_key(&key)?;
 		let mut val = Record::kv_decode_value(val)?;
 		let rid = RecordId {
-			table: key.tb.to_owned(),
+			table: key.tb.into_owned(),
 			key: key.id,
 		};
 		// Inject the id field into the document
@@ -513,11 +526,11 @@ pub(super) trait Collector {
 				Iterable::Yield(v) => self.collect(Collected::Yield(v)).await?,
 				Iterable::Thing(v) => self.collect(Collected::RecordId(v)).await?,
 				Iterable::Defer(v) => self.collect(Collected::Defer(v)).await?,
-				Iterable::Edges {
+				Iterable::Lookup {
 					from,
-					dir,
+					kind,
 					what,
-				} => self.collect_edges(ctx, opt, from, dir, what).await?,
+				} => self.collect_lookup(ctx, opt, from, kind, what).await?,
 				// For Table and Range iterables, the RecordStrategy determines whether we
 				// collect only keys, keys+values, or just a count without materializing records.
 				Iterable::Range(tb, v, rs, sc) => match rs {
@@ -636,8 +649,8 @@ pub(super) trait Collector {
 		txn.check_tb(ns, db, v.as_str(), opt.strict).await?;
 
 		// Prepare the start and end keys
-		let beg = thing::prefix(ns, db, v)?;
-		let end = thing::suffix(ns, db, v)?;
+		let beg = record::prefix(ns, db, v)?;
+		let end = record::suffix(ns, db, v)?;
 		// Optionally skip keys
 		let rng = if let Some(r) = self.start_skip(ctx, &txn, beg..end, sc).await? {
 			r
@@ -678,8 +691,8 @@ pub(super) trait Collector {
 		txn.check_tb(ns, db, v.as_str(), opt.strict).await?;
 
 		// Prepare the start and end keys
-		let beg = thing::prefix(ns, db, v)?;
-		let end = thing::suffix(ns, db, v)?;
+		let beg = record::prefix(ns, db, v)?;
+		let end = record::suffix(ns, db, v)?;
 		// Optionally skip keys
 		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end, sc).await? {
 			// Returns the next range of keys
@@ -715,8 +728,8 @@ pub(super) trait Collector {
 		// Check that the table exists
 		txn.check_tb(ns, db, v.as_str(), opt.strict).await?;
 
-		let beg = thing::prefix(ns, db, v)?;
-		let end = thing::suffix(ns, db, v)?;
+		let beg = record::prefix(ns, db, v)?;
+		let end = record::suffix(ns, db, v)?;
 		// Create a new iterable range
 		let count = txn.count(beg..end).await?;
 		// Collect the count
@@ -732,20 +745,20 @@ pub(super) trait Collector {
 		r: RecordIdKeyRange,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		let beg = match &r.start {
-			Bound::Unbounded => thing::prefix(ns, db, tb)?,
-			Bound::Included(v) => thing::new(ns, db, tb, v).encode_key()?,
+			Bound::Unbounded => record::prefix(ns, db, tb)?,
+			Bound::Included(v) => record::new(ns, db, tb, v).encode_key()?,
 			Bound::Excluded(v) => {
-				let mut key = thing::new(ns, db, tb, v).encode_key()?;
+				let mut key = record::new(ns, db, tb, v).encode_key()?;
 				key.push(0x00);
 				key
 			}
 		};
 		// Prepare the range end key
 		let end = match &r.end {
-			Bound::Unbounded => thing::suffix(ns, db, tb)?,
-			Bound::Excluded(v) => thing::new(ns, db, tb, v).encode_key()?,
+			Bound::Unbounded => record::suffix(ns, db, tb)?,
+			Bound::Excluded(v) => record::new(ns, db, tb, v).encode_key()?,
 			Bound::Included(v) => {
-				let mut key = thing::new(ns, db, tb, v).encode_key()?;
+				let mut key = record::new(ns, db, tb, v).encode_key()?;
 				key.push(0x00);
 				key
 			}
@@ -855,13 +868,13 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
-	async fn collect_edges(
+	async fn collect_lookup(
 		&mut self,
 		ctx: &Context,
 		opt: &Options,
 		from: RecordId,
-		dir: Dir,
-		what: Vec<ComputedGraphSubject>,
+		kind: LookupKind,
+		what: Vec<ComputedLookupSubject>,
 	) -> Result<()> {
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 
@@ -869,36 +882,37 @@ pub(super) trait Collector {
 		let tb = &from.table;
 		let id = &from.key;
 		// Fetch start and end key pairs
-		let keys = if what.is_empty() {
-			match dir {
+		let keys = match (what.is_empty(), &kind) {
+			(true, LookupKind::Reference) => {
+				vec![(r#ref::prefix(ns, db, tb, id)?, r#ref::suffix(ns, db, tb, id)?)]
+			}
+			(true, LookupKind::Graph(dir)) => match dir {
 				// /ns/db/tb/id
 				Dir::Both => {
-					vec![(graph::prefix(ns, db, tb, id), graph::suffix(ns, db, tb, id))]
+					vec![(graph::prefix(ns, db, tb, id)?, graph::suffix(ns, db, tb, id)?)]
 				}
 				// /ns/db/tb/id/IN
 				Dir::In => vec![(
-					graph::egprefix(ns, db, tb, id, &dir),
-					graph::egsuffix(ns, db, tb, id, &dir),
+					graph::egprefix(ns, db, tb, id, dir)?,
+					graph::egsuffix(ns, db, tb, id, dir)?,
 				)],
 				// /ns/db/tb/id/OUT
 				Dir::Out => vec![(
-					graph::egprefix(ns, db, tb, id, &dir),
-					graph::egsuffix(ns, db, tb, id, &dir),
+					graph::egprefix(ns, db, tb, id, dir)?,
+					graph::egsuffix(ns, db, tb, id, dir)?,
 				)],
-			}
-		} else {
-			match dir {
-				// /ns/db/tb/id/IN/TB
-				Dir::In => what.iter().map(|v| v.presuf(ns, db, tb, id, &dir)).collect::<Vec<_>>(),
-				// /ns/db/tb/id/OUT/TB
-				Dir::Out => what.iter().map(|v| v.presuf(ns, db, tb, id, &dir)).collect::<Vec<_>>(),
-				// /ns/db/tb/id/IN/TB, /ns/db/tb/id/OUT/TB
-				Dir::Both => what
-					.iter()
-					.flat_map(|v| {
-						[v.presuf(ns, db, tb, id, &Dir::In), v.presuf(ns, db, tb, id, &Dir::Out)]
-					})
-					.collect::<Vec<_>>(),
+			},
+			(false, LookupKind::Graph(Dir::Both)) => what
+				.iter()
+				.flat_map(|v| {
+					[
+						v.presuf(ns, db, tb, id, &LookupKind::Graph(Dir::In)),
+						v.presuf(ns, db, tb, id, &LookupKind::Graph(Dir::Out)),
+					]
+				})
+				.collect::<Result<Vec<_>>>()?,
+			(false, kind) => {
+				what.iter().map(|v| v.presuf(ns, db, tb, id, kind)).collect::<Result<Vec<_>>>()?
 			}
 		};
 		// Get the transaction
@@ -907,7 +921,7 @@ pub(super) trait Collector {
 		// Loop over the chosen edge types
 		for (beg, end) in keys.into_iter() {
 			// Create a new iterable range
-			let mut stream = txn.stream(beg?..end?, None, None, ScanDirection::Forward);
+			let mut stream = txn.stream(beg..end, None, None, ScanDirection::Forward);
 			// Loop until no more entries
 			let mut count = 0;
 			while let Some(res) = stream.next().await {
@@ -918,7 +932,7 @@ pub(super) trait Collector {
 				// Parse the key from the result
 				let key = res?.0;
 				// Collector the key
-				self.collect(Collected::Edge(key)).await?;
+				self.collect(Collected::Lookup(kind.clone(), key)).await?;
 				count += 1;
 			}
 		}

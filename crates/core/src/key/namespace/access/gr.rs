@@ -1,28 +1,28 @@
 //! Stores a grant associated with an access method
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
+use crate::catalog;
 use crate::catalog::NamespaceId;
-use crate::expr::statements::access::AccessGrantStore;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Gr<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
 	_b: u8,
-	pub ac: &'a str,
+	pub ac: Cow<'a, str>,
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub gr: &'a str,
+	pub gr: Cow<'a, str>,
 }
 
-impl KVKey for Gr<'_> {
-	type ValueType = AccessGrantStore;
-}
+impl_kv_key_storekey!(Gr<'_> => catalog::AccessGrant);
 
 pub fn new<'a>(ns: NamespaceId, ac: &'a str, gr: &'a str) -> Gr<'a> {
 	Gr::new(ns, ac, gr)
@@ -53,11 +53,11 @@ impl<'a> Gr<'a> {
 			_a: b'*',
 			ns,
 			_b: b'&',
-			ac,
+			ac: Cow::Borrowed(ac),
 			_c: b'!',
 			_d: b'g',
 			_e: b'r',
-			gr,
+			gr: Cow::Borrowed(gr),
 		}
 	}
 }

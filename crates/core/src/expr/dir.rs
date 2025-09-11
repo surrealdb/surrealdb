@@ -1,10 +1,11 @@
 use std::fmt;
 
-use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, PartialOrd, Deserialize, Hash)]
+#[derive(
+	Clone, Debug, Eq, PartialEq, Serialize, PartialOrd, Deserialize, Hash, Encode, BorrowDecode,
+)]
 pub enum Dir {
 	/// `<-`
 	In,

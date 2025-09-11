@@ -179,7 +179,6 @@ keyword! {
 	Schemafull => "SCHEMAFULL",
 	Schemaless => "SCHEMALESS",
 	Scope => "SCOPE",
-	Search => "SEARCH",
 	Select => "SELECT",
 	Sequence => "SEQUENCE",
 	Session => "SESSION",

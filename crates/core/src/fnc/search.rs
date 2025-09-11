@@ -5,6 +5,7 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 
 use super::args::Optional;
+use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;

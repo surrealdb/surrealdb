@@ -179,7 +179,7 @@ fn three_multi_index_query(with: &str, parallel: &str) -> String {
 		CREATE person:lizzie SET name = 'Lizzie', genre='f', company='SurrealDB';
 		CREATE person:neytiry SET name = 'Neytiri', genre='f', company='Metkayina';
 		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
-		DEFINE INDEX ft_company ON person FIELDS company SEARCH ANALYZER simple BM25;
+		DEFINE INDEX ft_company ON person FIELDS company FULLTEXT ANALYZER simple BM25;
 		DEFINE INDEX uniq_name ON TABLE person COLUMNS name UNIQUE;
 		DEFINE INDEX idx_genre ON TABLE person COLUMNS genre;
 		SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb' ORDER BY name {parallel};
@@ -2044,7 +2044,7 @@ async fn select_with_record_id_link_full_text_index() -> Result<()> {
 	//
 	let sql = "
 		DEFINE ANALYZER name TOKENIZERS class FILTERS lowercase,ngram(1,128);
-		DEFINE INDEX t_name_search_idx ON TABLE t COLUMNS name SEARCH ANALYZER name BM25 HIGHLIGHTS;
+		DEFINE INDEX t_name_search_idx ON TABLE t COLUMNS name FULLTEXT ANALYZER name BM25 HIGHLIGHTS;
 		DEFINE INDEX i_t_id ON TABLE i COLUMNS t;
 		DEFINE FIELD name ON TABLE t TYPE string;
 		DEFINE FIELD t ON TABLE i TYPE record<t>;
@@ -2090,7 +2090,7 @@ async fn select_with_record_id_link_full_text_index() -> Result<()> {
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
-	let val = syn::value(r#"[{ "id": i:A, "t": t:1}]"#).unwrap();
+	let val = syn::value(r#"[{ "id": i:A, "t": t:1}]"#)?;
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	Ok(())
@@ -2103,17 +2103,19 @@ async fn select_with_record_id_link_full_text_no_record_index() -> Result<()> {
 	//
 	let sql = "
 		DEFINE ANALYZER name TOKENIZERS class FILTERS lowercase,ngram(1,128);
-		DEFINE INDEX t_name_search_idx ON TABLE t COLUMNS name SEARCH ANALYZER name BM25 HIGHLIGHTS;
+		DEFINE INDEX t_name_search_idx ON TABLE t COLUMNS name FULLTEXT ANALYZER name BM25 HIGHLIGHTS;
 		DEFINE FIELD name ON TABLE t TYPE string;
 		DEFINE FIELD t ON TABLE i TYPE record<t>;
 		CREATE t:1 SET name = 'Hello World';
 		CREATE i:A SET t = t:1;
 		SELECT * FROM i WHERE t.name @@ 'world' EXPLAIN;
 		SELECT * FROM i WHERE t.name @@ 'world';
+		SELECT * FROM i WHERE t.name @OR@ 'world dummy';
+		SELECT * FROM i WHERE t.name @AND@ 'world hello';
 	";
 	let mut res = dbs.execute(sql, &ses, None).await?;
 
-	assert_eq!(res.len(), 8);
+	assert_eq!(res.len(), 10);
 	skip_ok(&mut res, 6)?;
 	//
 	let tmp = res.remove(0).result?;
@@ -2133,13 +2135,14 @@ async fn select_with_record_id_link_full_text_no_record_index() -> Result<()> {
 						operation: 'Collector'
 					}
 			]"#,
-	)
-	.unwrap();
+	)?;
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(r#"[{ "id": i:A, "t": t:1}]"#).unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	let val = syn::value(r#"[{ "id": i:A, "t": t:1}]"#)?;
+	for _ in 0..3 {
+		let tmp = res.remove(0).result?;
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
 	//
 	Ok(())
 }

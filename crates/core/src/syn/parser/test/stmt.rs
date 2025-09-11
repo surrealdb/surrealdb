@@ -9,10 +9,10 @@ use crate::sql::access_type::{
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::data::Assignment;
 use crate::sql::filter::Filter;
-use crate::sql::graph::GraphSubject;
-use crate::sql::index::{Distance, HnswParams, MTreeParams, SearchParams, VectorType};
+use crate::sql::index::{Distance, FullTextParams, HnswParams, MTreeParams, VectorType};
 use crate::sql::language::Language;
 use crate::sql::literal::ObjectEntry;
+use crate::sql::lookup::{LookupKind, LookupSubject};
 use crate::sql::order::{OrderList, Ordering};
 use crate::sql::statements::access::{
 	self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke, AccessStatementShow,
@@ -36,8 +36,8 @@ use crate::sql::statements::{
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
 	Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, Explain, Expr, Fetch,
-	Fetchs, Field, Fields, Graph, Group, Groups, Ident, Idiom, Idioms, Index, Kind, Limit, Literal,
-	Mock, Order, Output, Param, Part, Permission, Permissions, RecordIdKeyLit, RecordIdLit,
+	Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Idioms, Index, Kind, Limit, Literal,
+	Lookup, Mock, Order, Output, Param, Part, Permission, Permissions, RecordIdKeyLit, RecordIdLit,
 	Scoring, Split, Splits, Start, TableType, Timeout, TopLevelExpr, With,
 };
 use crate::syn;
@@ -1626,7 +1626,7 @@ fn parse_define_event() {
 		Expr::Define(Box::new(DefineStatement::Event(DefineEventStatement {
 			kind: DefineKind::Default,
 			name: Ident::from_strand(strand!("event").to_owned()),
-			what: Ident::from_strand(strand!("table").to_owned()),
+			target_table: Ident::from_strand(strand!("table").to_owned()),
 			when: Expr::Literal(Literal::Null),
 			then: vec![Expr::Literal(Literal::Null), Expr::Literal(Literal::None)],
 			comment: None,
@@ -1712,17 +1712,7 @@ fn parse_define_field() {
 #[test]
 fn parse_define_index() {
 	let res = syn::parse_with(
-		r#"DEFINE INDEX index ON TABLE table FIELDS a,b[*] SEARCH ANALYZER ana BM25 (0.1,0.2)
-		DOC_IDS_ORDER 1
-		DOC_LENGTHS_ORDER 2
-		POSTINGS_ORDER 3
-		TERMS_ORDER 4
-		DOC_IDS_CACHE 5
-		DOC_LENGTHS_CACHE 6
-		POSTINGS_CACHE 7
-		TERMS_CACHE 8
-		HIGHLIGHTS
-		"#
+		"DEFINE INDEX index ON TABLE table FIELDS a,b[*] FULLTEXT ANALYZER ana BM25 (0.1,0.2) HIGHLIGHTS"
 		.as_bytes(),
 		async |parser, stk| parser.parse_expr_inherit(stk).await,
 	)
@@ -1737,21 +1727,13 @@ fn parse_define_index() {
 				Idiom(vec![Part::Field(Ident::from_strand(strand!("a").to_owned()))]),
 				Idiom(vec![Part::Field(Ident::from_strand(strand!("b").to_owned())), Part::All])
 			],
-			index: Index::Search(SearchParams {
+			index: Index::FullText(FullTextParams {
 				az: Ident::from_strand(strand!("ana").to_owned()),
 				hl: true,
 				sc: Scoring::Bm {
 					k1: 0.1,
 					b: 0.2
 				},
-				doc_ids_order: 1,
-				doc_lengths_order: 2,
-				postings_order: 3,
-				terms_order: 4,
-				doc_ids_cache: 5,
-				doc_lengths_cache: 6,
-				postings_cache: 7,
-				terms_cache: 8,
 			}),
 			comment: None,
 			concurrently: false
@@ -1885,8 +1867,8 @@ fn parse_delete_2() {
 					table: "a".to_owned(),
 					key: RecordIdKeyLit::String(strand!("b").to_owned()),
 				}))),
-				Part::Graph(Graph {
-					dir: Dir::Out,
+				Part::Graph(Lookup {
+					kind: LookupKind::Graph(Dir::Out),
 					..Default::default()
 				}),
 				Part::Last,
@@ -2472,7 +2454,7 @@ fn parse_live() {
 	let TopLevelExpr::Live(stmt) = res else {
 		panic!()
 	};
-	assert_eq!(stmt.expr, Fields::Select(vec![Field::All]));
+	assert_eq!(stmt.fields, Fields::Select(vec![Field::All]));
 	assert_eq!(stmt.what, Expr::Param(Param::from_strand(strand!("foo").to_owned())));
 
 	let res = syn::parse_with(
@@ -2484,7 +2466,7 @@ fn parse_live() {
 		panic!()
 	};
 	assert_eq!(
-		stmt.expr,
+		stmt.fields,
 		Fields::Select(vec![Field::Single {
 			expr: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(
 				strand!("foo").to_owned()
@@ -2752,9 +2734,9 @@ fn parse_update() {
 			only: true,
 			what: vec![Expr::Idiom(Idiom(vec![
 				Part::Field(Ident::from_strand(strand!("a").to_owned())),
-				Part::Graph(Graph {
-					dir: Dir::Out,
-					what: vec![GraphSubject::Table(Ident::from_strand(strand!("b").to_owned()))],
+				Part::Graph(Lookup {
+					kind: LookupKind::Graph(Dir::Out),
+					what: vec![LookupSubject::Table(Ident::from_strand(strand!("b").to_owned()))],
 					..Default::default()
 				})
 			]))],
@@ -2767,9 +2749,9 @@ fn parse_update() {
 				]),
 				Idiom(vec![
 					Part::Field(Ident::from_strand(strand!("a").to_owned())),
-					Part::Graph(Graph {
-						dir: Dir::Out,
-						what: vec![GraphSubject::Table(Ident::from_strand(
+					Part::Graph(Lookup {
+						kind: LookupKind::Graph(Dir::Out),
+						what: vec![LookupSubject::Table(Ident::from_strand(
 							strand!("b").to_owned()
 						))],
 						..Default::default()
@@ -2794,9 +2776,9 @@ fn parse_upsert() {
 			only: true,
 			what: vec![Expr::Idiom(Idiom(vec![
 				Part::Field(Ident::from_strand(strand!("a").to_owned())),
-				Part::Graph(Graph {
-					dir: Dir::Out,
-					what: vec![GraphSubject::Table(Ident::from_strand(strand!("b").to_owned()))],
+				Part::Graph(Lookup {
+					kind: LookupKind::Graph(Dir::Out),
+					what: vec![LookupSubject::Table(Ident::from_strand(strand!("b").to_owned()))],
 					..Default::default()
 				})
 			]))],
@@ -2809,9 +2791,9 @@ fn parse_upsert() {
 				]),
 				Idiom(vec![
 					Part::Field(Ident::from_strand(strand!("a").to_owned())),
-					Part::Graph(Graph {
-						dir: Dir::Out,
-						what: vec![GraphSubject::Table(Ident::from_strand(
+					Part::Graph(Lookup {
+						kind: LookupKind::Graph(Dir::Out),
+						what: vec![LookupSubject::Table(Ident::from_strand(
 							strand!("b").to_owned()
 						))],
 						..Default::default()

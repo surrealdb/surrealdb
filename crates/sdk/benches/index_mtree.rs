@@ -7,8 +7,8 @@ use futures::future::join_all;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use reblessive::TreeStack;
+use surrealdb_core::catalog::{CatalogProvider, Distance, MTreeParams, VectorType};
 use surrealdb_core::ctx::MutableContext;
-use surrealdb_core::expr::index::{Distance, MTreeParams, VectorType};
 use surrealdb_core::idx::IndexKeyBase;
 use surrealdb_core::idx::planner::checker::MTreeConditionChecker;
 use surrealdb_core::idx::trees::mtree::MTreeIndex;
@@ -56,7 +56,7 @@ async fn mtree_index(
 		doc_ids_cache: cache_size as u32,
 		mtree_cache: cache_size as u32,
 	};
-	MTreeIndex::new(tx, IndexKeyBase::new(0, 0, "test", "test"), &p, tt).await.unwrap()
+	MTreeIndex::new(tx, IndexKeyBase::new(0, 0, "test", 0), &p, tt).await.unwrap()
 }
 
 fn runtime() -> Runtime {

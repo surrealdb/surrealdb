@@ -13,17 +13,16 @@ use tokio::sync::RwLock;
 use tokio::task;
 use tokio::task::JoinHandle;
 
-use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseDefinition, DatabaseId, IndexDefinition, NamespaceId};
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
-use crate::expr::statements::DefineIndexStatement;
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
-use crate::key::thing;
+use crate::key::record;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val, impl_kv_value_revisioned};
@@ -165,7 +164,7 @@ impl IndexBuilder {
 		opt: Options,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix: Arc<DefineIndexStatement>,
+		ix: Arc<IndexDefinition>,
 		sdr: Option<Sender<Result<()>>>,
 	) -> Result<IndexBuilding> {
 		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ns, db, ix)?);
@@ -190,10 +189,10 @@ impl IndexBuilder {
 		opt: Options,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix: Arc<DefineIndexStatement>,
+		ix: Arc<IndexDefinition>,
 		blocking: bool,
 	) -> Result<Option<Receiver<Result<()>>>> {
-		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
+		let key = IndexKey::new(ns, db, &ix.table_name, &ix.name);
 		let (rcv, sdr) = if blocking {
 			let (s, r) = channel();
 			(Some(r), Some(s))
@@ -225,12 +224,12 @@ impl IndexBuilder {
 		&self,
 		db: &DatabaseDefinition,
 		ctx: &Context,
-		ix: &DefineIndexStatement,
+		ix: &IndexDefinition,
 		old_values: Option<Vec<Value>>,
 		new_values: Option<Vec<Value>>,
 		rid: &RecordId,
 	) -> Result<ConsumeResult> {
-		let key = IndexKey::new(db.namespace_id, db.database_id, &ix.what, &ix.name);
+		let key = IndexKey::new(db.namespace_id, db.database_id, &ix.table_name, &ix.name);
 		if let Some(r) = self.indexes.get(&key) {
 			let (b, _) = r.value();
 			return b.maybe_consume(ctx, old_values, new_values, rid).await;
@@ -242,9 +241,9 @@ impl IndexBuilder {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix: &DefineIndexStatement,
+		ix: &IndexDefinition,
 	) -> BuildingStatus {
-		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
+		let key = IndexKey::new(ns, db, &ix.table_name, &ix.name);
 		if let Some(a) = self.indexes.get(&key) {
 			a.value().0.status.read().await.clone()
 		} else {
@@ -329,7 +328,7 @@ struct Building {
 	db: DatabaseId,
 	ikb: IndexKeyBase,
 	tf: TransactionFactory,
-	ix: Arc<DefineIndexStatement>,
+	ix: Arc<IndexDefinition>,
 	status: Arc<RwLock<BuildingStatus>>,
 	queue: Arc<RwLock<QueueSequences>>,
 	aborted: AtomicBool,
@@ -342,9 +341,9 @@ impl Building {
 		opt: Options,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix: Arc<DefineIndexStatement>,
+		ix: Arc<IndexDefinition>,
 	) -> Result<Self> {
-		let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
+		let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
 		Ok(Self {
 			ctx: MutableContext::new_concurrent(ctx).freeze(),
 			opt,
@@ -430,8 +429,8 @@ impl Building {
 		}
 
 		// First iteration, we index every key
-		let beg = thing::prefix(self.ns, self.db, self.ikb.table())?;
-		let end = thing::suffix(self.ns, self.db, self.ikb.table())?;
+		let beg = record::prefix(self.ns, self.db, self.ikb.table())?;
+		let end = record::suffix(self.ns, self.db, self.ikb.table())?;
 		let mut next = Some(beg..end);
 		let mut initial_count = 0;
 		// Set the initial status
@@ -540,11 +539,11 @@ impl Building {
 				return Ok(());
 			}
 			self.is_beyond_threshold(Some(*count))?;
-			let key = thing::ThingKey::decode_key(&k)?;
+			let key = record::RecordKey::decode_key(&k)?;
 			// Parse the value
 			let val = Record::kv_decode_value(v)?;
 			let rid: Arc<RecordId> = RecordId {
-				table: key.tb.to_owned(),
+				table: key.tb.into_owned(),
 				key: key.id,
 			}
 			.into();

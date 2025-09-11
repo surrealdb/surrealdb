@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use anyhow::Result;
 use http::HeaderMap;
@@ -9,20 +8,19 @@ use reblessive::tree::Stk;
 use super::body::ApiBody;
 use super::context::InvocationContext;
 use super::convert;
-use super::method::Method;
 use super::middleware::invoke;
 use super::response::{ApiResponse, ResponseInstruction};
+use crate::catalog::providers::DatabaseProvider;
+use crate::catalog::{ApiDefinition, ApiMethod};
 use crate::ctx::{Context, MutableContext};
-use crate::dbs::{Options, Session};
+use crate::dbs::Options;
 use crate::expr::FlowResultExt as _;
-use crate::expr::statements::define::ApiDefinition;
-use crate::kvs::{Datastore, Transaction};
 use crate::val::{Object, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ApiInvocation {
 	pub params: Object,
-	pub method: Method,
+	pub method: ApiMethod,
 	pub query: BTreeMap<String, String>,
 	pub headers: HeaderMap,
 }
@@ -42,21 +40,13 @@ impl ApiInvocation {
 
 	pub async fn invoke_with_transaction(
 		self,
-		tx: Arc<Transaction>,
-		ds: Arc<Datastore>,
-		sess: &Session,
+		ctx: &Context,
+		opt: &Options,
 		api: &ApiDefinition,
 		body: ApiBody,
 	) -> Result<Option<(ApiResponse, ResponseInstruction)>> {
-		let opt = ds.setup_options(sess);
-
-		let mut ctx = ds.setup_ctx()?;
-		ctx.set_transaction(tx);
-		ctx.attach_session(sess)?;
-		let ctx = &ctx.freeze();
-
 		let mut stack = TreeStack::new();
-		stack.enter(|stk| self.invoke_with_context(stk, ctx, &opt, api, body)).finish().await
+		stack.enter(|stk| self.invoke_with_context(stk, ctx, opt, api, body)).finish().await
 	}
 
 	// The `invoke` method accepting a parameter like `Option<&mut Stk>`
@@ -82,7 +72,7 @@ impl ApiInvocation {
 
 		// first run the middleware which is globally configured for the database.
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		let global = ctx.tx().get_db_optional_config(ns, db, "api").await?;
+		let global = ctx.tx().get_db_config(ns, db, "api").await?;
 		if let Some(config) = global.as_ref().map(|v| v.try_as_api()).transpose()? {
 			for m in config.middleware.iter() {
 				invoke::invoke(&mut inv_ctx, &m.name, m.args.clone())?;

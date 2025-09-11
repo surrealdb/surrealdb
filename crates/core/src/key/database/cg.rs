@@ -1,13 +1,14 @@
 //! Stores a DEFINE CONFIG definition
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::expr::statements::define::config::ConfigStore;
+use crate::catalog::{ConfigDefinition, DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Cg<'a> {
 	__: u8,
 	_a: u8,
@@ -17,12 +18,10 @@ pub(crate) struct Cg<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub ty: &'a str,
+	pub ty: Cow<'a, str>,
 }
 
-impl KVKey for Cg<'_> {
-	type ValueType = ConfigStore;
-}
+impl_kv_key_storekey!(Cg<'_> => ConfigDefinition);
 
 pub fn new(ns: NamespaceId, db: DatabaseId, ty: &str) -> Cg<'_> {
 	Cg::new(ns, db, ty)
@@ -57,7 +56,7 @@ impl<'a> Cg<'a> {
 			_c: b'!',
 			_d: b'c',
 			_e: b'g',
-			ty,
+			ty: Cow::Borrowed(ty),
 		}
 	}
 }

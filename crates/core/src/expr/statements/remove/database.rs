@@ -1,17 +1,15 @@
 use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
+use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveDatabaseStatement {
 	pub name: Ident,
 	pub if_exists: bool,
@@ -54,20 +52,7 @@ impl RemoveDatabaseStatement {
 		}
 
 		// Delete the definition
-		let key = crate::key::namespace::db::new(db.namespace_id, db.database_id);
-		let catalog_key = crate::key::catalog::db::new(ns, &self.name);
-		let database_root = crate::key::database::all::new(db.namespace_id, db.database_id);
-		if self.expunge {
-			txn.clr(&key).await?;
-			txn.clr(&catalog_key).await?;
-			txn.clrp(&catalog_key).await?;
-			txn.clrp(&database_root).await?;
-		} else {
-			txn.del(&key).await?;
-			txn.del(&catalog_key).await?;
-			txn.delp(&catalog_key).await?;
-			txn.delp(&database_root).await?
-		};
+		txn.del_db(ns, &db.name, self.expunge).await?;
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {

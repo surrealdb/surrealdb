@@ -11,6 +11,7 @@ use geo::Point;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
 use crate::expr::fmt::Pretty;
@@ -53,6 +54,10 @@ pub use self::table::Table;
 pub use self::uuid::Uuid;
 pub use self::value::{CastError, CoerceError};
 
+/// Marker type for a different serialization format for value which does not encode type
+/// information which is not required for indexing.
+pub enum IndexFormat {}
+
 /// Marker type for value conversions from Value::None
 #[derive(Clone, Copy, Eq, PartialEq, PartialOrd)]
 pub struct SqlNone;
@@ -62,8 +67,12 @@ pub struct SqlNone;
 pub struct Null;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(
+	Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Encode, BorrowDecode,
+)]
 #[serde(rename = "$surrealdb::private::Value")]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub enum Value {
 	#[default]
 	None,
@@ -627,7 +636,6 @@ impl fmt::Display for Value {
 			Value::RecordId(v) => write!(f, "{v}"),
 			Value::Uuid(v) => write!(f, "{v}"),
 			Value::Closure(v) => write!(f, "{v}"),
-			//Value::Refs(v) => write!(f, "{v}"),
 			Value::File(v) => write!(f, "{v}"),
 			Value::Table(v) => write!(f, "{v}"),
 		}
@@ -658,7 +666,7 @@ impl TryAdd for Value {
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_add(v)?),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),
 			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_add(w)?),
-			(Self::Array(v), Self::Array(w)) => Self::Array(v.add(w)),
+			(Self::Array(v), Self::Array(w)) => Self::Array(v.concat(w)),
 			(Self::Object(v), Self::Object(w)) => Self::Object(v.add(w)),
 			(v, w) => bail!(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
 		})
@@ -903,7 +911,6 @@ subtypes! {
 	Regex(Regex) => (is_regex,as_regex,into_regex),
 	Range(Box<Range>) => (is_range,as_range,into_range),
 	Closure(Box<Closure>) => (is_closure,as_closure,into_closure),
-	//Refs(Refs) => (is_refs,as_refs,into_refs),
 	File(File) => (is_file,as_file,into_file),
 }
 

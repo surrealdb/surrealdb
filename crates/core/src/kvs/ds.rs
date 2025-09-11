@@ -1,4 +1,5 @@
-use std::fmt;
+use std::collections::BTreeMap;
+use std::fmt::{self, Display};
 #[cfg(storage)]
 use std::path::PathBuf;
 use std::pin::pin;
@@ -15,6 +16,7 @@ use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
 use futures::{Future, Stream};
+use http::HeaderMap;
 use reblessive::TreeStack;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
@@ -27,7 +29,14 @@ use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::MajorVersion;
+use crate::api::body::ApiBody;
+use crate::api::invocation::ApiInvocation;
+use crate::api::response::{ApiResponse, ResponseInstruction};
 use crate::buc::BucketConnections;
+use crate::catalog::providers::{
+	ApiProvider, CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider, UserProvider,
+};
+use crate::catalog::{ApiDefinition, ApiMethod, Index};
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
@@ -38,14 +47,14 @@ use crate::dbs::node::Timestamp;
 use crate::dbs::{Capabilities, Executor, Notification, Options, Response, Session, Variables};
 use crate::err::Error;
 use crate::expr::statements::DefineUserStatement;
-use crate::expr::{Base, Expr, FlowResultExt as _, Ident, Index, LogicalPlan};
+use crate::expr::{Base, Expr, FlowResultExt as _, Ident, LogicalPlan};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::trees::store::IndexStores;
-use crate::key::root::ic::Ic;
+use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::kvs::cache::ds::DatastoreCache;
@@ -851,45 +860,40 @@ impl Datastore {
 			// Create a new transaction
 			let txn = self.transaction(Write, Optimistic).await?;
 			// Collect every item in the queue
-			let (beg, end) = Ic::range();
+			let (beg, end) = IndexCompactionKey::range();
 			let range = beg..end;
-			let mut previous: Option<IndexKeyBase> = None;
+			let mut previous: Option<IndexCompactionKey<'static>> = None;
 			let mut count = 0;
 			// Returns an ordered list of indexes that require compaction
 			for (k, _) in txn.getr(range.clone(), None).await? {
 				count += 1;
 				lh.try_maintain_lease().await?;
-				let ic = Ic::decode_key(&k)?;
+				let ic = IndexCompactionKey::decode_key(&k)?;
 				// If the index has already been compacted, we can ignore the task
 				if let Some(p) = &previous {
-					if p.match_ic(&ic) {
+					if p.index_matches(&ic) {
 						continue;
 					}
 				}
-				match txn.get_tb_index(ic.ns, ic.db, ic.tb, ic.ix).await {
-					Ok(ix) => {
+				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
+					Some(ix) => {
 						if let Index::FullText(p) = &ix.index {
 							let ft = FullTextIndex::new(
 								self.id(),
 								&self.index_stores,
 								&txn,
-								IndexKeyBase::from_ic(&ic),
+								IndexKeyBase::new(ic.ns, ic.db, &ix.table_name, ix.index_id),
 								p,
 							)
 							.await?;
 							ft.compaction(&txn).await?;
 						}
 					}
-					Err(e) => {
-						error!(target: TARGET, "Index compaction: Failed to get index: {}", e);
-						if matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
-							trace!(target: TARGET, "Index compaction: Index {} not found, skipping", ic.ix);
-						} else {
-							bail!(e);
-						}
+					None => {
+						trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ic.ix);
 					}
 				}
-				previous = Some(IndexKeyBase::from_ic(&ic));
+				previous = Some(ic.into_owned());
 			}
 			if count > 0 {
 				txn.delr(range).await?;
@@ -954,6 +958,28 @@ impl Datastore {
 	/// ```
 	pub async fn transaction(&self, write: TransactionType, lock: LockType) -> Result<Transaction> {
 		self.transaction_factory.transaction(write, lock).await
+	}
+
+	pub async fn health_check(&self) -> Result<()> {
+		let tx = self.transaction(Read, Optimistic).await?;
+
+		// Cancel the transaction
+		trace!("Cancelling health check transaction");
+		// Attempt to fetch data
+		match tx.get(&vec![0x00], None).await {
+			Err(err) => {
+				// Ensure the transaction is cancelled
+				let _ = tx.cancel().await;
+				// Return an error for this endpoint
+				Err(err)
+			}
+			Ok(_) => {
+				// Ensure the transaction is cancelled
+				let _ = tx.cancel().await;
+				// Return success for this endpoint
+				Ok(())
+			}
+		}
 	}
 
 	/// Parse and execute an SQL query
@@ -1410,11 +1436,190 @@ impl Datastore {
 			Ok(())
 		}
 	}
+
+	pub async fn process_use(
+		&self,
+		session: &mut Session,
+		namespace: Option<String>,
+		database: Option<String>,
+	) -> Result<()> {
+		match (namespace, database) {
+			(Some(ns), Some(db)) => {
+				let tx = self.transaction(TransactionType::Write, LockType::Optimistic).await?;
+				tx.ensure_ns_db(&ns, &db, self.strict).await?;
+				tx.commit().await?;
+				session.ns = Some(ns);
+				session.db = Some(db);
+			}
+			(Some(ns), None) => {
+				let tx = self.transaction(TransactionType::Write, LockType::Optimistic).await?;
+				tx.get_or_add_ns(&ns, self.strict).await?;
+				tx.commit().await?;
+				session.ns = Some(ns);
+			}
+			(None, Some(db)) => {
+				let Some(ns) = session.ns.clone() else {
+					return Err(anyhow::anyhow!("Cannot use database without namespace"));
+				};
+				let tx = self.transaction(TransactionType::Write, LockType::Optimistic).await?;
+				tx.ensure_ns_db(&ns, &db, self.strict).await?;
+				tx.commit().await?;
+				session.db = Some(db);
+			}
+			(None, None) => {
+				session.ns = None;
+				session.db = None;
+			}
+		}
+
+		Ok(())
+	}
+
+	/// Get a db model by name.
+	///
+	/// TODO: This should not be public, but it is used in `crates/sdk/src/api/engine/local/mod.rs`.
+	pub async fn get_db_model(
+		&self,
+		ns: &str,
+		db: &str,
+		model_name: &str,
+		model_version: &str,
+	) -> Result<Option<Arc<crate::catalog::MlModelDefinition>>> {
+		let tx = self.transaction(Read, Optimistic).await?;
+		let db = tx.expect_db_by_name(ns, db).await?;
+		let model =
+			tx.get_db_model(db.namespace_id, db.database_id, model_name, model_version).await?;
+		tx.cancel().await?;
+		Ok(model)
+	}
+
+	/// Get a table by name.
+	///
+	/// TODO: This should not be public, but it is used in `src/net/key.rs`.
+	pub async fn ensure_tb_exists(&self, ns: &str, db: &str, tb: &str) -> Result<()> {
+		let tx = self.transaction(TransactionType::Read, LockType::Optimistic).await?;
+
+		tx.expect_tb_by_name(ns, db, tb).await?;
+		tx.cancel().await?;
+
+		Ok(())
+	}
+
+	/// Invoke an API handler.
+	///
+	/// TODO: This should not need to be public, but it is used in `src/net/api.rs`.
+	#[expect(clippy::too_many_arguments)]
+	pub async fn invoke_api_handler<S>(
+		&self,
+		ns: &str,
+		db: &str,
+		path: &str,
+		session: &Session,
+		method: ApiMethod,
+		headers: HeaderMap,
+		query: BTreeMap<String, String>,
+		body: S,
+	) -> Result<Option<(ApiResponse, ResponseInstruction)>>
+	where
+		S: Stream<Item = std::result::Result<Bytes, Box<dyn Display + Send + Sync>>>
+			+ Send
+			+ Unpin
+			+ 'static,
+	{
+		let tx = Arc::new(self.transaction(TransactionType::Write, LockType::Optimistic).await?);
+
+		let db = tx.ensure_ns_db(ns, db, false).await?;
+
+		let apis = tx.all_db_apis(db.namespace_id, db.database_id).await?;
+		let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
+
+		let res = match ApiDefinition::find_definition(apis.as_ref(), segments, method) {
+			Some((api, params)) => {
+				let invocation = ApiInvocation {
+					params,
+					method,
+					headers,
+					query,
+				};
+
+				let opt = self.setup_options(session);
+
+				let mut ctx = self.setup_ctx()?;
+				ctx.set_transaction(Arc::clone(&tx));
+				ctx.attach_session(session)?;
+				let ctx = &ctx.freeze();
+
+				invocation.invoke_with_transaction(ctx, &opt, api, ApiBody::from_stream(body)).await
+			}
+			_ => {
+				return Err(anyhow::anyhow!(Error::ApNotFound {
+					value: path.to_owned(),
+				}));
+			}
+		};
+
+		// Handle committing or cancelling the transaction
+		if res.is_ok() {
+			tx.commit().await?;
+		} else {
+			tx.cancel().await?;
+		}
+
+		res
+	}
 }
 
 #[cfg(test)]
 mod test {
 	use super::*;
+	use crate::iam::verify::verify_root_creds;
+
+	#[tokio::test]
+	async fn test_setup_superuser() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let username = "root";
+		let password = "root";
+
+		// Setup the initial user if there are no root users
+		assert_eq!(
+			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
+			0
+		);
+		ds.initialise_credentials(username, password).await.unwrap();
+		assert_eq!(
+			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
+			1
+		);
+		verify_root_creds(&ds, username, password).await.unwrap();
+
+		// Do not setup the initial root user if there are root users:
+		// Test the scenario by making sure the custom password doesn't change.
+		let sql = "DEFINE USER root ON ROOT PASSWORD 'test' ROLES OWNER";
+		let sess = Session::owner();
+		ds.execute(sql, &sess, None).await.unwrap();
+		let pass_hash = ds
+			.transaction(Read, Optimistic)
+			.await
+			.unwrap()
+			.expect_root_user(username)
+			.await
+			.unwrap()
+			.hash
+			.clone();
+
+		ds.initialise_credentials(username, password).await.unwrap();
+		assert_eq!(
+			pass_hash,
+			ds.transaction(Read, Optimistic)
+				.await
+				.unwrap()
+				.expect_root_user(username)
+				.await
+				.unwrap()
+				.hash
+				.clone()
+		)
+	}
 
 	#[tokio::test]
 	pub async fn very_deep_query() -> Result<()> {
@@ -1474,6 +1679,94 @@ mod test {
 			.catch_return()
 			.unwrap();
 		assert_eq!(res, Value::Number(Number::Int(1002)));
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn cross_transaction_caching_uuids_updated() -> Result<()> {
+		let ds = Datastore::new("memory")
+			.await?
+			.with_capabilities(Capabilities::all())
+			.with_notifications();
+		let cache = ds.get_cache();
+		let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+
+		let txn = ds.transaction(TransactionType::Write, LockType::Pessimistic).await?;
+		let db = txn.ensure_ns_db("test", "test", false).await?;
+		drop(txn);
+
+		// Define the table, set the initial uuids
+		let sql = r"DEFINE TABLE test;".to_owned();
+		let res = &mut ds.execute(&sql, &ses, None).await?;
+		assert_eq!(res.len(), 1);
+		res.remove(0).result.unwrap();
+		// Obtain the initial uuids
+		let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+		let initial = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+		let initial_live_query_version =
+			cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
+		txn.cancel().await?;
+
+		// Define some resources to refresh the UUIDs
+		let sql = r"
+		DEFINE FIELD test ON test;
+		DEFINE EVENT test ON test WHEN {} THEN {};
+		DEFINE TABLE view AS SELECT * FROM test;
+		DEFINE INDEX test ON test FIELDS test;
+		LIVE SELECT * FROM test;
+	"
+		.to_owned();
+		let res = &mut ds.execute(&sql, &ses, None).await?;
+		assert_eq!(res.len(), 5);
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		let lqid = res.remove(0).result?;
+		assert!(matches!(lqid, Value::Uuid(_)));
+		// Obtain the uuids after definitions
+		let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+		let after_define = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+		let after_define_live_query_version =
+			cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
+		txn.cancel().await?;
+		// Compare uuids after definitions
+		assert_ne!(initial.cache_indexes_ts, after_define.cache_indexes_ts);
+		assert_ne!(initial.cache_tables_ts, after_define.cache_tables_ts);
+		assert_ne!(initial.cache_events_ts, after_define.cache_events_ts);
+		assert_ne!(initial.cache_fields_ts, after_define.cache_fields_ts);
+		assert_ne!(initial_live_query_version, after_define_live_query_version);
+
+		// Remove the defined resources to refresh the UUIDs
+		let sql = r"
+		REMOVE FIELD test ON test;
+		REMOVE EVENT test ON test;
+		REMOVE TABLE view;
+		REMOVE INDEX test ON test;
+		KILL $lqid;
+	"
+		.to_owned();
+		let vars = Variables::from(map! { "lqid".to_string() => lqid });
+		let res = &mut ds.execute(&sql, &ses, Some(vars)).await?;
+		assert_eq!(res.len(), 5);
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		// Obtain the uuids after definitions
+		let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+		let after_remove = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+		let after_remove_live_query_version =
+			cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
+		drop(txn);
+		// Compare uuids after definitions
+		assert_ne!(after_define.cache_fields_ts, after_remove.cache_fields_ts);
+		assert_ne!(after_define.cache_events_ts, after_remove.cache_events_ts);
+		assert_ne!(after_define.cache_tables_ts, after_remove.cache_tables_ts);
+		assert_ne!(after_define.cache_indexes_ts, after_remove.cache_indexes_ts);
+		assert_ne!(after_define_live_query_version, after_remove_live_query_version);
+		//
 		Ok(())
 	}
 }

@@ -3,23 +3,21 @@ use std::ops::Deref;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use super::AlterKind;
-use crate::catalog::TableType;
+use crate::catalog::providers::TableProvider;
+use crate::catalog::{Permissions, TableType};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::DefineTableStatement;
-use crate::expr::{Base, ChangeFeed, Ident, Kind, Permissions};
+use crate::expr::{Base, ChangeFeed, Ident, Kind};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AlterTableStatement {
 	pub name: Ident,
 	pub if_exists: bool,
@@ -41,6 +39,7 @@ impl AlterTableStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Get the NS and DB
+		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
@@ -60,7 +59,6 @@ impl AlterTableStatement {
 			}
 		};
 		// Process the statement
-		let key = crate::key::database::tb::new(ns, db, &self.name);
 		match self.schemafull {
 			AlterKind::Set(_) => dt.schemafull = true,
 			AlterKind::Drop => dt.schemafull = false,
@@ -96,12 +94,15 @@ impl AlterTableStatement {
 		if matches!(self.kind, Some(TableType::Relation(_))) {
 			DefineTableStatement::add_in_out_fields(&txn, ns, db, &mut dt).await?;
 		}
-		// Set the table definition
-		txn.set(&key, &dt, None).await?;
+
 		// Record definition change
 		if changefeed_replaced {
 			txn.lock().await.record_table_change(ns, db, &self.name, &dt);
 		}
+
+		// Set the table definition
+		txn.put_tb(ns_name, db_name, &dt).await?;
+
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

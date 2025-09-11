@@ -3,12 +3,12 @@
 //! This module orchestrates index mutations for a single document: removing old
 //! entries and inserting new ones across different index types (UNIQUE, regular,
 //! search, fulltext, etc.). Index keys are built with key::index and field
-//! values are encoded via key::value::StoreKeyArray.
+//! values are encoded via key::value::Array.
 //!
 //! Numeric normalization in keys:
-//! - StoreKeyArray normalizes Number values (Int/Float/Decimal) using a lexicographic numeric
-//!   encoding so that byte-wise order matches numeric order. As a result, numerically equal values
-//!   (e.g., 0, 0.0, 0dec) map to the same key bytes.
+//! - Array normalizes Number values (Int/Float/Decimal) using a lexicographic numeric encoding so
+//!   that byte-wise order matches numeric order. As a result, numerically equal values (e.g., 0,
+//!   0.0, 0dec) map to the same key bytes.
 //! - UNIQUE index behavior leverages this: equal numerics across variants will collide on the same
 //!   index key and cause a uniqueness violation.
 //!
@@ -17,20 +17,19 @@
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
-use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
+use crate::catalog::{
+	DatabaseDefinition, DatabaseId, FullTextParams, HnswParams, Index, IndexDefinition,
+	MTreeParams, NamespaceId,
+};
 use crate::ctx::Context;
 use crate::dbs::{Force, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
-use crate::expr::index::{FullTextParams, HnswParams, Index, MTreeParams, SearchParams};
-use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{FlowResultExt as _, Part};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
-use crate::idx::ft::search::SearchIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
-use crate::key::value::StoreKeyArray;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::ConsumeResult;
 use crate::kvs::TransactionType;
@@ -50,7 +49,7 @@ impl Document {
 		let ixs = match &opt.force {
 			Force::Index(ix)
 				if ix.first().is_some_and(|ix| {
-					self.id.as_ref().is_some_and(|id| ix.what.as_str() == id.table)
+					self.id.as_ref().is_some_and(|id| ix.table_name.as_str() == id.table)
 				}) =>
 			{
 				ix.clone()
@@ -91,7 +90,7 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		ix: &DefineIndexStatement,
+		ix: &IndexDefinition,
 		o: Option<Vec<Value>>,
 		n: Option<Vec<Value>>,
 		rid: &RecordId,
@@ -117,7 +116,6 @@ impl Document {
 		match &ix.index {
 			Index::Uniq => ic.index_unique(ctx).await?,
 			Index::Idx => ic.index_non_unique(ctx).await?,
-			Index::Search(p) => ic.index_search(stk, ctx, p).await?,
 			Index::FullText(p) => ic.index_fulltext(stk, ctx, p).await?,
 			Index::MTree(p) => ic.index_mtree(stk, ctx, p).await?,
 			Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
@@ -125,16 +123,15 @@ impl Document {
 		Ok(())
 	}
 
-	/// Extract from the given document, the values required by the index and
-	/// put then in an array. Eg. IF the index is composed of the columns
-	/// `name` and `instrument` Given this doc: { "id": 1,
-	/// "instrument":"piano", "name":"Tobie" } It will return: ["Tobie",
-	/// "piano"]
+	/// Extract from the given document, the values required by the index and put then in an array.
+	/// Eg. IF the index is composed of the columns `name` and `instrument`
+	/// Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie" }
+	/// It will return: ["Tobie", "piano"]
 	pub(crate) async fn build_opt_values(
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		ix: &DefineIndexStatement,
+		ix: &IndexDefinition,
 		doc: &CursorDoc,
 	) -> Result<Option<Vec<Value>>> {
 		if doc.doc.as_ref().is_nullish() {
@@ -149,14 +146,14 @@ impl Document {
 	}
 }
 
-/// Extract from the given document, the values required by the index and put
-/// then in an array. Eg. IF the index is composed of the columns `name` and
-/// `instrument` Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie"
-/// } It will return: ["Tobie", "piano"]
+/// Extract from the given document, the values required by the index and put then in an array.
+/// Eg. IF the index is composed of the columns `name` and `instrument`
+/// Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie" }
+/// It will return: ["Tobie", "piano"]
 struct Indexable(Vec<(Value, bool)>);
 
 impl Indexable {
-	fn new(vals: Vec<Value>, ix: &DefineIndexStatement) -> Self {
+	fn new(vals: Vec<Value>, ix: &IndexDefinition) -> Self {
 		let mut source = Vec::with_capacity(vals.len());
 		for (v, i) in vals.into_iter().zip(ix.cols.iter()) {
 			let f = matches!(i.0.last(), Some(&Part::Flatten));
@@ -292,7 +289,7 @@ struct IndexOperation<'a> {
 	opt: &'a Options,
 	ns: NamespaceId,
 	db: DatabaseId,
-	ix: &'a DefineIndexStatement,
+	ix: &'a IndexDefinition,
 	/// The old values (if existing)
 	o: Option<Vec<Value>>,
 	/// The new values (if existing)
@@ -305,7 +302,7 @@ impl<'a> IndexOperation<'a> {
 		opt: &'a Options,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix: &'a DefineIndexStatement,
+		ix: &'a IndexDefinition,
 		o: Option<Vec<Value>>,
 		n: Option<Vec<Value>>,
 		rid: &'a RecordId,
@@ -321,23 +318,23 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
-	/// Build the KV key for a unique index. The StoreKeyArray encodes values in
+	/// Build the KV key for a unique index. The Array encodes values in
 	/// a canonical, lexicographically ordered byte form which normalizes numeric
 	/// types (Int/Float/Decimal). This means equal numeric values like 0, 0.0 and
 	/// 0dec map to the same index key and therefore conflict on UNIQUE indexes.
-	fn get_unique_index_key(&self, v: &'a StoreKeyArray) -> Result<key::index::Index> {
-		Ok(key::index::Index::new(self.ns, self.db, &self.ix.what, &self.ix.name, v, None))
+	fn get_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
+		Ok(key::index::Index::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id, v, None))
 	}
 
 	/// Build the KV key for a non-unique index. The record id is appended
 	/// to the encoded field values so multiple records can share the same field
-	/// bytes; numeric values inside fd are normalized via StoreKeyArray.
-	fn get_non_unique_index_key(&self, v: &'a StoreKeyArray) -> Result<key::index::Index> {
+	/// bytes; numeric values inside fd are normalized via Array.
+	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
 		Ok(key::index::Index::new(
 			self.ns,
 			self.db,
-			&self.ix.what,
-			&self.ix.name,
+			&self.ix.table_name,
+			self.ix.index_id,
 			v,
 			Some(&self.rid.key),
 		))
@@ -352,7 +349,6 @@ impl<'a> IndexOperation<'a> {
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
 			for o in i {
-				let o = o.into();
 				let key = self.get_unique_index_key(&o)?;
 				match txn.delc(&key, Some(self.rid)).await {
 					Err(e) => {
@@ -371,7 +367,6 @@ impl<'a> IndexOperation<'a> {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
 				if !n.is_all_none_or_null() {
-					let n = n.into();
 					let key = self.get_unique_index_key(&n)?;
 					if txn.putc(&key, self.rid, None).await.is_err() {
 						let key = self.get_unique_index_key(&n)?;
@@ -393,7 +388,6 @@ impl<'a> IndexOperation<'a> {
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
 			for o in i {
-				let o = o.into();
 				let key = self.get_non_unique_index_key(&o)?;
 				match txn.delc(&key, Some(self.rid)).await {
 					Err(e) => {
@@ -411,7 +405,6 @@ impl<'a> IndexOperation<'a> {
 		if let Some(n) = self.n.take() {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
-				let n = n.into();
 				let key = self.get_non_unique_index_key(&n)?;
 				txn.set(&key, self.rid, None).await?;
 			}
@@ -422,29 +415,15 @@ impl<'a> IndexOperation<'a> {
 	/// Construct a consistent uniqueness violation error message.
 	/// Formats the conflicting value as a single value or array depending on
 	/// the number of indexed fields.
-	fn err_index_exists(&self, rid: RecordId, mut n: StoreKeyArray) -> Result<()> {
+	fn err_index_exists(&self, rid: RecordId, mut n: Array) -> Result<()> {
 		bail!(Error::IndexExists {
 			thing: rid,
 			index: self.ix.name.to_string(),
 			value: match n.0.len() {
-				1 => Value::from(n.0.remove(0)).to_string(),
-				_ => Array::from(n).to_string(),
+				1 => n.0.remove(0).to_string(),
+				_ => n.to_string(),
 			},
 		})
-	}
-
-	async fn index_search(&mut self, stk: &mut Stk, ctx: &Context, p: &SearchParams) -> Result<()> {
-		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.what, &self.ix.name);
-
-		let mut ft =
-			SearchIndex::new(ctx, self.ns, self.db, &p.az, ikb, p, TransactionType::Write).await?;
-
-		if let Some(n) = self.n.take() {
-			ft.index_document(stk, ctx, self.opt, self.rid, n).await?;
-		} else {
-			ft.remove_document(ctx, self.rid).await?;
-		}
-		ft.finish(ctx).await
 	}
 
 	async fn index_fulltext(
@@ -453,26 +432,26 @@ impl<'a> IndexOperation<'a> {
 		ctx: &Context,
 		p: &FullTextParams,
 	) -> Result<()> {
-		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.what, &self.ix.name);
+		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id);
 		let tx = ctx.tx();
 		// Build a FullText instance
 		let fti =
 			FullTextIndex::new(self.opt.id()?, ctx.get_index_stores(), &tx, ikb.clone(), p).await?;
-		let mut rc = false;
+		let mut require_compaction = false;
 		// Delete the old index data
 		let doc_id = if let Some(o) = self.o.take() {
-			fti.remove_content(stk, ctx, self.opt, self.rid, o, &mut rc).await?
+			fti.remove_content(stk, ctx, self.opt, self.rid, o, &mut require_compaction).await?
 		} else {
 			None
 		};
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			fti.index_content(stk, ctx, self.opt, self.rid, n, &mut rc).await?;
+			fti.index_content(stk, ctx, self.opt, self.rid, n, &mut require_compaction).await?;
 		} else if let Some(doc_id) = doc_id {
 			fti.remove_doc(ctx, doc_id).await?;
 		}
 		// Do we need to trigger the compaction?
-		if rc {
+		if require_compaction {
 			FullTextIndex::trigger_compaction(&ikb, &tx, self.opt.id()?).await?;
 		}
 		Ok(())
@@ -480,7 +459,7 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_mtree(&mut self, stk: &mut Stk, ctx: &Context, p: &MTreeParams) -> Result<()> {
 		let txn = ctx.tx();
-		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.what, &self.ix.name);
+		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id);
 		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write).await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {

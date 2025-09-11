@@ -3,17 +3,17 @@
 
 use std::ops::Range;
 
-use anyhow::{Result, ensure};
-use async_trait::async_trait;
+use anyhow::{Context, Result, ensure};
 
 use super::tr::Check;
 use super::util;
 use crate::cnf::{COUNT_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::err::Error;
+use crate::key::database::vs::VsKey;
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
 use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare, SavedValue};
-use crate::kvs::{Key, Val, Version};
+use crate::kvs::{KVKey, KVValue, Key, Val, Version};
 use crate::vs::VersionStamp;
 
 mod requirements {
@@ -55,8 +55,8 @@ mod requirements {
 /// All keys and values are represented as byte arrays, encoding is handled
 /// by [`super::tr::Transactor`].
 #[allow(dead_code, reason = "Not used when none of the storage backends are enabled.")]
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
+#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 pub trait Transaction: requirements::TransactionRequirements {
 	/// Returns if the transaction supports scanning in reverse.
 	fn supports_reverse_scan(&self) -> bool;
@@ -478,28 +478,30 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// entries for this transaction, which should be done immediately before
 	/// the transaction commit. That is to keep other transactions commit
 	/// delay(pessimistic) or conflict(optimistic) as less as possible.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get_timestamp(&mut self, key: Key) -> Result<VersionStamp> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
+	async fn get_timestamp(&mut self, key: VsKey) -> Result<VersionStamp> {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
+
+		let key_encoded = key.encode_key()?;
 		// Calculate the version number
-		let ver = match self.get(key.clone(), None).await? {
-			Some(prev) => VersionStamp::from_slice(prev.as_slice())?
+		let ver = match self.get(key_encoded.clone(), None).await? {
+			Some(prev) => <VsKey as KVKey>::ValueType::kv_decode_value(prev)?
 				.next()
-				.expect("exhausted all possible timestamps"),
+				.context("exhausted all possible timestamps")?,
 			None => VersionStamp::from_u64(1),
 		};
 		// Store the timestamp to prevent other transactions from committing
-		self.set(key, ver.to_vec(), None).await?;
+		self.set(key_encoded, ver.kv_encode_value()?, None).await?;
 		// Return the uint64 representation of the timestamp as the result
 		Ok(ver)
 	}
 
 	/// Insert the versionstamped key into the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(ts_key = ts_key.sprint()))]
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	async fn set_versionstamp(
 		&mut self,
-		ts_key: Key,
+		ts_key: VsKey,
 		prefix: Key,
 		suffix: Key,
 		val: Val,

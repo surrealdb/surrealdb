@@ -6,6 +6,7 @@
 pub use std::{error, fmt, mem};
 
 use revision::Revisioned;
+use storekey::{BorrowDecode, Encode};
 
 use crate::kvs::KVValue;
 
@@ -21,7 +22,7 @@ use crate::kvs::KVValue;
 /// 262144
 /// 327680
 /// 393216
-#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, PartialOrd)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, PartialOrd, Encode, BorrowDecode)]
 #[repr(transparent)]
 pub struct VersionStamp([u8; 10]);
 

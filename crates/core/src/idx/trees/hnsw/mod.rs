@@ -12,8 +12,7 @@ use reblessive::tree::Stk;
 use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::DatabaseDefinition;
-use crate::expr::index::HnswParams;
+use crate::catalog::{DatabaseDefinition, HnswParams};
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
@@ -447,9 +446,11 @@ mod tests {
 	use roaring::RoaringTreemap;
 	use test_log::test;
 
-	use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
+	use crate::catalog::providers::CatalogProvider;
+	use crate::catalog::{
+		DatabaseDefinition, DatabaseId, Distance, HnswParams, IndexId, NamespaceId, VectorType,
+	};
 	use crate::ctx::{Context, MutableContext};
-	use crate::expr::index::{Distance, HnswParams, VectorType};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::DocId;
 	use crate::idx::planner::checker::HnswConditionChecker;
@@ -536,7 +537,7 @@ mod tests {
 	async fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut h =
-			HnswFlavor::new(IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"), p)
+			HnswFlavor::new(IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)), p)
 				.unwrap();
 		let map = {
 			let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
@@ -567,17 +568,17 @@ mod tests {
 	) -> HnswParams {
 		let m = m as u8;
 		let m0 = m * 2;
-		HnswParams::new(
-			dimension as u16,
+		HnswParams {
+			dimension: dimension as u16,
 			distance,
 			vector_type,
 			m,
 			m0,
-			(1.0 / (m as f64).ln()).into(),
-			efc as u16,
+			ml: (1.0 / (m as f64).ln()).into(),
+			ef_construction: efc as u16,
 			extend_candidates,
 			keep_pruned_connections,
-		)
+		}
 	}
 
 	async fn test_hnsw(collection_size: usize, p: HnswParams) {
@@ -737,7 +738,7 @@ mod tests {
 			let tx = ctx.tx();
 			let mut h = HnswIndex::new(
 				&tx,
-				IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
+				IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
 				"test".to_string(),
 				&p,
 			)
@@ -826,7 +827,7 @@ mod tests {
 			(9, new_i16_vec(-4, -2)),
 			(10, new_i16_vec(0, 3)),
 		]);
-		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix");
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3));
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true);
 		let mut h = HnswFlavor::new(ikb, &p).unwrap();
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
@@ -869,7 +870,7 @@ mod tests {
 		let tx = ctx.tx();
 		let mut h = HnswIndex::new(
 			&tx,
-			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
+			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
 			"Index".to_string(),
 			&p,
 		)

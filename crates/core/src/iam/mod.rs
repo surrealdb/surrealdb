@@ -19,6 +19,7 @@ pub mod verify;
 
 pub use self::auth::*;
 pub use self::entities::*;
+use crate::catalog;
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
@@ -32,6 +33,24 @@ pub enum Error {
 		action: String,
 		resource: String,
 	},
+}
+
+fn algorithm_to_jwt_algorithm(alg: catalog::Algorithm) -> jsonwebtoken::Algorithm {
+	match alg {
+		catalog::Algorithm::Hs256 => jsonwebtoken::Algorithm::HS256,
+		catalog::Algorithm::Hs384 => jsonwebtoken::Algorithm::HS384,
+		catalog::Algorithm::Hs512 => jsonwebtoken::Algorithm::HS512,
+		catalog::Algorithm::EdDSA => jsonwebtoken::Algorithm::EdDSA,
+		catalog::Algorithm::Es256 => jsonwebtoken::Algorithm::ES256,
+		catalog::Algorithm::Es384 => jsonwebtoken::Algorithm::ES384,
+		catalog::Algorithm::Es512 => jsonwebtoken::Algorithm::ES384,
+		catalog::Algorithm::Ps256 => jsonwebtoken::Algorithm::PS256,
+		catalog::Algorithm::Ps384 => jsonwebtoken::Algorithm::PS384,
+		catalog::Algorithm::Ps512 => jsonwebtoken::Algorithm::PS512,
+		catalog::Algorithm::Rs256 => jsonwebtoken::Algorithm::RS256,
+		catalog::Algorithm::Rs384 => jsonwebtoken::Algorithm::RS384,
+		catalog::Algorithm::Rs512 => jsonwebtoken::Algorithm::RS512,
+	}
 }
 
 pub fn is_allowed_check(actor: &Actor, action: &Action, resource: &Resource) -> bool {
