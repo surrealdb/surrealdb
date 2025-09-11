@@ -119,7 +119,7 @@ impl IndexKeyBase {
 		Ii::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, doc_id)
 	}
 
-	fn new_id_key(&self, id: RecordIdKey) -> IdKey {
+	fn new_id_key(&self, id: RecordIdKey) -> IdKey<'_> {
 		IdKey::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, id)
 	}
 
@@ -129,7 +129,7 @@ impl IndexKeyBase {
 	}
 
 	#[cfg(not(target_family = "wasm"))]
-	pub(crate) fn new_ip_key(&self, id: RecordIdKey) -> Ip {
+	pub(crate) fn new_ip_key(&self, id: RecordIdKey) -> Ip<'_> {
 		Ip::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, id)
 	}
 
@@ -137,7 +137,7 @@ impl IndexKeyBase {
 		Ib::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, start)
 	}
 
-	pub(crate) fn new_ic_key(&self, nid: Uuid) -> IndexCompactionKey {
+	pub(crate) fn new_ic_key(&self, nid: Uuid) -> IndexCompactionKey<'_> {
 		IndexCompactionKey::new(
 			self.0.ns,
 			self.0.db,
@@ -183,7 +183,7 @@ impl IndexKeyBase {
 		Tt::terms_range(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
 	}
 
-	fn new_dc_with_id(&self, doc_id: DocId, nid: Uuid, uid: Uuid) -> Dc {
+	fn new_dc_with_id(&self, doc_id: DocId, nid: Uuid, uid: Uuid) -> Dc<'_> {
 		Dc::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, doc_id, nid, uid)
 	}
 

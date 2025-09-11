@@ -15,7 +15,7 @@ impl KVKey for AccessRoot<'_> {
 	type ValueType = Vec<u8>;
 }
 
-pub fn new(ac: &str) -> AccessRoot {
+pub fn new(ac: &str) -> AccessRoot<'_> {
 	AccessRoot::new(ac)
 }
 

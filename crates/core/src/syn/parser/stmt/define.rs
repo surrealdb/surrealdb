@@ -320,7 +320,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
 		// TODO: Parse base should no longer take an argument.
 		let base = self.parse_base()?;
@@ -339,7 +339,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				t!("TYPE") => {
 					self.pop_peek();
@@ -475,7 +475,10 @@ impl Parser<'_> {
 										self.pop_peek();
 										res.duration.grant = None
 									}
-									_ => res.duration.grant = Some(self.next_token_value()?),
+									_ => {
+										res.duration.grant =
+											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+									}
 								}
 							}
 							t!("TOKEN") => {
@@ -491,7 +494,10 @@ impl Parser<'_> {
 										// parties that support it.
 										unexpected!(self, peek, "a token duration");
 									}
-									_ => res.duration.token = Some(self.next_token_value()?),
+									_ => {
+										res.duration.token =
+											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+									}
 								}
 							}
 							t!("SESSION") => {
@@ -501,7 +507,10 @@ impl Parser<'_> {
 										self.pop_peek();
 										res.duration.session = None
 									}
-									_ => res.duration.session = Some(self.next_token_value()?),
+									_ => {
+										res.duration.session =
+											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+									}
 								}
 							}
 							_ => unexpected!(self, peek, "GRANT, TOKEN or SESSIONS"),

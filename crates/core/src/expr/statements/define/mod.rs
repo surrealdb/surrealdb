@@ -91,7 +91,7 @@ impl DefineStatement {
 			Self::Analyzer(v) => v.compute(ctx, opt, doc).await,
 			Self::User(v) => v.compute(ctx, opt, doc).await,
 			Self::Model(v) => v.compute(ctx, opt, doc).await,
-			Self::Access(v) => v.compute(ctx, opt, doc).await,
+			Self::Access(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Config(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Api(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Bucket(v) => v.compute(stk, ctx, opt, doc).await,

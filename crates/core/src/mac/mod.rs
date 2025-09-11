@@ -77,6 +77,53 @@ macro_rules! map {
     }};
 }
 
+/// Maps an optional value to a new value if the optional value is some, otherwise returns none.
+/// Useful when the computation is async
+macro_rules! map_opt {
+	($x:ident as $opt:expr => $exp:expr) => {
+		match $opt {
+			Some($x) => Some($exp),
+			None => None,
+		}
+	};
+}
+
+/// Computes a value and coerces it to a type
+macro_rules! compute_to {
+	($stk:ident, $ctx:ident, $opt:ident, $doc:ident, $x:expr => $t:ty) => {
+		$stk.run(|stk| $x.compute(stk, $ctx, $opt, $doc)).await.catch_return()?.coerce_to::<$t>()?
+	};
+}
+
+macro_rules! process_definition_ident {
+	($stk:ident, $ctx:ident, $opt:ident, $doc:ident, $x:expr, $into:expr) => {
+		match $x {
+			crate::expr::Expr::Idiom(x) if x.is_field(None) => {
+				let Some(crate::expr::Part::Field(x)) = x.first() else {
+					fail!("Expected a field idiom");
+				};
+
+				x.to_raw_string()
+			}
+			x => match $stk
+				.run(|stk| x.compute(stk, $ctx, $opt, $doc))
+				.await
+				.catch_return()?
+				.coerce_to::<String>()
+			{
+				Err(crate::val::value::CoerceError::InvalidKind {
+					from,
+					..
+				}) => Err(crate::val::value::CoerceError::InvalidKind {
+					from,
+					into: $into.to_string(),
+				}),
+				x => x,
+			}?,
+		}
+	};
+}
+
 /// Extends a b-tree map of key-value pairs.
 ///
 /// This macro extends the supplied map, by cloning

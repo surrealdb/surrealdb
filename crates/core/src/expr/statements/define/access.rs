@@ -3,6 +3,7 @@ use std::fmt::{self, Display};
 use anyhow::{Result, bail};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
+use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog::providers::{AuthorisationProvider, NamespaceProvider};
@@ -16,20 +17,36 @@ use crate::expr::access_type::{
 	BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccessIssue, JwtAccessVerify,
 	JwtAccessVerifyJwks, JwtAccessVerifyKey,
 };
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{AccessType, Algorithm, Base, Expr, Ident, JwtAccess, RecordAccess};
+use crate::expr::{
+	AccessType, Algorithm, Base, Expr, FlowResultExt, Ident, Idiom, JwtAccess, Literal,
+	RecordAccess,
+};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Strand, Value};
 
-#[derive(Clone, Default, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineAccessStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: Expr,
 	pub base: Base,
 	pub access_type: AccessType,
 	pub authenticate: Option<Expr>,
 	pub duration: AccessDuration,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
+}
+
+impl Default for DefineAccessStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::Strand(Strand::new(String::new()).unwrap())),
+			base: Base::Root,
+			access_type: AccessType::default(),
+			authenticate: None,
+			duration: AccessDuration::default(),
+			comment: None,
+		}
+	}
 }
 
 impl DefineAccessStatement {
@@ -96,13 +113,22 @@ impl DefineAccessStatement {
 		DefineAccessStatement {
 			kind: DefineKind::Default,
 			base,
-			name: Ident::new(def.name.clone()).unwrap(),
+			name: Expr::Idiom(Idiom::field(Ident::new(def.name.clone()).unwrap())),
 			duration: AccessDuration {
-				grant: def.grant_duration.map(val::Duration),
-				token: def.token_duration.map(val::Duration),
-				session: def.session_duration.map(val::Duration),
+				grant: def
+					.grant_duration
+					.map(|v| Expr::Literal(Literal::Duration(val::Duration(v)))),
+				token: def
+					.token_duration
+					.map(|v| Expr::Literal(Literal::Duration(val::Duration(v)))),
+				session: def
+					.session_duration
+					.map(|v| Expr::Literal(Literal::Duration(val::Duration(v)))),
 			},
-			comment: def.comment.clone().map(|x| Strand::new(x).unwrap()),
+			comment: def
+				.comment
+				.clone()
+				.map(|x| Expr::Literal(Literal::Strand(Strand::new(x).unwrap()))),
 			authenticate: def.authenticate.clone(),
 			access_type: match &def.access_type {
 				catalog::AccessType::Record(record_access) => AccessType::Record(RecordAccess {
@@ -140,7 +166,13 @@ impl DefineAccessStatement {
 		das
 	}
 
-	fn to_definition(&self) -> AccessDefinition {
+	async fn to_definition(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<AccessDefinition> {
 		fn convert_algorithm(access: &Algorithm) -> catalog::Algorithm {
 			match access {
 				Algorithm::EdDSA => catalog::Algorithm::EdDSA,
@@ -195,12 +227,12 @@ impl DefineAccessStatement {
 			}
 		}
 
-		AccessDefinition {
-			name: self.name.clone().to_raw_string(),
-			grant_duration: self.duration.grant.map(|x| x.0),
-			token_duration: self.duration.token.map(|x| x.0),
-			session_duration: self.duration.session.map(|x| x.0),
-			comment: self.comment.clone().map(|x| x.into_string()),
+		Ok(AccessDefinition {
+			name: process_definition_ident!(stk, ctx, opt, doc, &self.name, "access name"),
+			grant_duration: map_opt!(x as &self.duration.grant => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),
+			token_duration: map_opt!(x as &self.duration.token => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),
+			session_duration: map_opt!(x as &self.duration.session => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),
+			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 			authenticate: self.authenticate.clone(),
 			access_type: match &self.access_type {
 				AccessType::Record(record_access) => {
@@ -218,7 +250,7 @@ impl DefineAccessStatement {
 					catalog::AccessType::Bearer(convert_bearer_access(bearer_access))
 				}
 			},
-		}
+		})
 	}
 }
 
@@ -226,19 +258,22 @@ impl DefineAccessStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
+		// Compute the definition
+		let definition = self.to_definition(stk, ctx, opt, doc).await?;
 		// Check the statement type
 		match &self.base {
 			Base::Root => {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if access method already exists
-				if let Some(access) = txn.get_root_access(&self.name).await? {
+				if let Some(access) = txn.get_root_access(&definition.name).await? {
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
@@ -252,8 +287,8 @@ impl DefineAccessStatement {
 					}
 				}
 				// Process the statement
-				let key = crate::key::root::ac::new(&self.name);
-				txn.set(&key, &self.to_definition(), None).await?;
+				let key = crate::key::root::ac::new(&definition.name);
+				txn.set(&key, &definition, None).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -264,7 +299,7 @@ impl DefineAccessStatement {
 				let txn = ctx.tx();
 				// Check if the definition exists
 				let ns = ctx.get_ns_id(opt).await?;
-				if let Some(access) = txn.get_ns_access(ns, &self.name).await? {
+				if let Some(access) = txn.get_ns_access(ns, &definition.name).await? {
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
@@ -279,9 +314,9 @@ impl DefineAccessStatement {
 					}
 				}
 				// Process the statement
-				let key = crate::key::namespace::ac::new(ns, &self.name);
+				let key = crate::key::namespace::ac::new(ns, &definition.name);
 				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-				txn.set(&key, &self.to_definition(), None).await?;
+				txn.set(&key, &definition, None).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -292,7 +327,7 @@ impl DefineAccessStatement {
 				let txn = ctx.tx();
 				// Check if the definition exists
 				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-				if let Some(access) = txn.get_db_access(ns, db, &self.name).await? {
+				if let Some(access) = txn.get_db_access(ns, db, &definition.name).await? {
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
@@ -308,8 +343,8 @@ impl DefineAccessStatement {
 					}
 				}
 				// Process the statement
-				let key = crate::key::database::ac::new(ns, db, &self.name);
-				txn.set(&key, &self.to_definition(), None).await?;
+				let key = crate::key::database::ac::new(ns, db, &definition.name);
+				txn.set(&key, &definition, None).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -372,7 +407,7 @@ impl Display for DefineAccessStatement {
 				f,
 				" FOR GRANT {},",
 				match self.duration.grant {
-					Some(dur) => format!("{}", dur),
+					Some(ref dur) => format!("{}", dur),
 					None => "NONE".to_string(),
 				}
 			)?;
@@ -382,7 +417,7 @@ impl Display for DefineAccessStatement {
 				f,
 				" FOR TOKEN {},",
 				match self.duration.token {
-					Some(dur) => format!("{}", dur),
+					Some(ref dur) => format!("{}", dur),
 					None => "NONE".to_string(),
 				}
 			)?;
@@ -391,7 +426,7 @@ impl Display for DefineAccessStatement {
 			f,
 			" FOR SESSION {}",
 			match self.duration.session {
-				Some(dur) => format!("{}", dur),
+				Some(ref dur) => format!("{}", dur),
 				None => "NONE".to_string(),
 			}
 		)?;
@@ -399,22 +434,5 @@ impl Display for DefineAccessStatement {
 			write!(f, " COMMENT {comment}")?
 		}
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineAccessStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"base".to_string() => self.base.structure(),
-			"authenticate".to_string(), if let Some(v) = self.authenticate => v.structure(),
-			"duration".to_string() => Value::from(map!{
-				"session".to_string() => self.duration.session.map(Value::from).unwrap_or(Value::None),
-				"grant".to_string(), if self.access_type.can_issue_grants() => self.duration.grant.map(Value::from).unwrap_or(Value::None),
-				"token".to_string(), if self.access_type.can_issue_tokens() => self.duration.token.map(Value::from).unwrap_or(Value::None),
-			}),
-			"kind".to_string() => self.access_type.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
 	}
 }

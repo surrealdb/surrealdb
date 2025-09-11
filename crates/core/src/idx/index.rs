@@ -93,14 +93,14 @@ impl<'a> IndexOperation<'a> {
 	/// a canonical, lexicographically ordered byte form which normalizes numeric
 	/// types (Int/Float/Decimal). This means equal numeric values like 0, 0.0 and
 	/// 0dec map to the same index key and therefore conflict on UNIQUE indexes.
-	fn get_unique_index_key(&self, v: &'a StoreKeyArray) -> Result<key::index::Index> {
+	fn get_unique_index_key(&self, v: &'a StoreKeyArray) -> Result<key::index::Index<'_>> {
 		Ok(key::index::Index::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id, v, None))
 	}
 
 	/// Build the KV key for a non-unique index. The record id is appended
 	/// to the encoded field values so multiple records can share the same field
 	/// bytes; numeric values inside fd are normalized via StoreKeyArray.
-	fn get_non_unique_index_key(&self, v: &'a StoreKeyArray) -> Result<key::index::Index> {
+	fn get_non_unique_index_key(&self, v: &'a StoreKeyArray) -> Result<key::index::Index<'_>> {
 		Ok(key::index::Index::new(
 			self.ns,
 			self.db,

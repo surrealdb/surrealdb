@@ -54,21 +54,6 @@ impl From<crate::expr::AccessType> for AccessType {
 	}
 }
 
-// Allows retrieving the JWT configuration for any access type.
-pub trait Jwt {
-	fn jwt(&self) -> &JwtAccess;
-}
-
-impl Jwt for AccessType {
-	fn jwt(&self) -> &JwtAccess {
-		match self {
-			AccessType::Record(at) => &at.jwt,
-			AccessType::Jwt(at) => at.jwt(),
-			AccessType::Bearer(at) => at.jwt(),
-		}
-	}
-}
-
 impl Display for AccessType {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
@@ -151,12 +136,6 @@ impl Default for JwtAccess {
 				key,
 			}),
 		}
-	}
-}
-
-impl Jwt for JwtAccess {
-	fn jwt(&self) -> &JwtAccess {
-		self
 	}
 }
 
@@ -350,12 +329,6 @@ impl Default for BearerAccess {
 			subject: BearerAccessSubject::User,
 			jwt: JwtAccess::default(),
 		}
-	}
-}
-
-impl Jwt for BearerAccess {
-	fn jwt(&self) -> &JwtAccess {
-		&self.jwt
 	}
 }
 

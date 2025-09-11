@@ -219,7 +219,7 @@ fn statements() -> Vec<TopLevelExpr> {
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Access(
 			DefineAccessStatement {
 				kind: DefineKind::Default,
-				name: Ident::from_strand(strand!("a").to_owned()),
+				name: Expr::Idiom(Idiom::field(Ident::from_strand(strand!("a").to_owned()))),
 				base: Base::Db,
 				access_type: AccessType::Record(RecordAccess {
 					signup: None,
@@ -236,11 +236,13 @@ fn statements() -> Vec<TopLevelExpr> {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Duration::from_days(30).unwrap()),
-					token: Some(Duration::from_hours(1).unwrap()),
+					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
+					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
 					session: None,
 				},
-				comment: Some(strand!("bar").to_owned()),
+				comment: Some(Expr::Literal(Literal::Strand(
+					Strand::new("bar".to_string()).unwrap(),
+				))),
 			},
 		)))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Param(DefineParamStatement {
