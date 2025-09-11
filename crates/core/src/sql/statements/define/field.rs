@@ -128,7 +128,9 @@ impl From<DefineFieldStatement> for crate::expr::statements::DefineFieldStatemen
 		Self {
 			kind: v.kind.into(),
 			name: v.name.into(),
-			what: v.what.into(),
+			what: crate::expr::Expr::Idiom(crate::expr::Idiom::from(vec![
+				crate::expr::Part::Field(v.what.into()),
+			])),
 			flex: v.flex,
 			readonly: v.readonly,
 			field_kind: v.field_kind.map(Into::into),
@@ -137,18 +139,28 @@ impl From<DefineFieldStatement> for crate::expr::statements::DefineFieldStatemen
 			computed: v.computed.map(Into::into),
 			default: v.default.into(),
 			permissions: v.permissions.into(),
-			comment: v.comment,
+			comment: v.comment.map(|s| crate::expr::Expr::Literal(crate::expr::Literal::Strand(s))),
 			reference: v.reference.map(Into::into),
 		}
 	}
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<crate::expr::statements::DefineFieldStatement> for DefineFieldStatement {
 	fn from(v: crate::expr::statements::DefineFieldStatement) -> Self {
 		Self {
 			kind: v.kind.into(),
 			name: v.name.into(),
-			what: v.what.into(),
+			what: match v.what {
+				crate::expr::Expr::Idiom(idiom) if idiom.len() == 1 => {
+					if let Some(crate::expr::Part::Field(field)) = idiom.first() {
+						field.clone().into()
+					} else {
+						crate::sql::Ident::new(String::new()).unwrap()
+					}
+				}
+				_ => crate::sql::Ident::new(String::new()).unwrap(),
+			},
 			flex: v.flex,
 			readonly: v.readonly,
 			field_kind: v.field_kind.map(Into::into),
@@ -157,7 +169,13 @@ impl From<crate::expr::statements::DefineFieldStatement> for DefineFieldStatemen
 			computed: v.computed.map(Into::into),
 			default: v.default.into(),
 			permissions: v.permissions.into(),
-			comment: v.comment,
+			comment: v.comment.and_then(|expr| {
+				if let crate::expr::Expr::Literal(crate::expr::Literal::Strand(s)) = expr {
+					Some(s)
+				} else {
+					None
+				}
+			}),
 			reference: v.reference.map(Into::into),
 		}
 	}

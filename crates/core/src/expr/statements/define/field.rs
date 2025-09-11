@@ -2,6 +2,7 @@ use std::fmt::{self, Display, Write};
 use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
+use reblessive::tree::Stk;
 use uuid::Uuid;
 
 use super::DefineKind;
@@ -18,10 +19,10 @@ use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, KindLiteral, Part};
+use crate::expr::{Base, Expr, Idiom, Kind, KindLiteral, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum DefineDefault {
@@ -31,11 +32,11 @@ pub enum DefineDefault {
 	Set(Expr),
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineFieldStatement {
 	pub kind: DefineKind,
 	pub name: Idiom,
-	pub what: Ident,
+	pub what: Expr,
 	/// Whether the field is marked as flexible.
 	/// Flexible allows the field to be schemaless even if the table is marked as schemafull.
 	pub flex: bool,
@@ -46,12 +47,38 @@ pub struct DefineFieldStatement {
 	pub computed: Option<Expr>,
 	pub default: DefineDefault,
 	pub permissions: Permissions,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 	pub reference: Option<Reference>,
 }
 
+impl Default for DefineFieldStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Idiom::default(),
+			what: Expr::Literal(crate::expr::Literal::Strand(
+				crate::val::Strand::new(String::new()).unwrap(),
+			)),
+			flex: false,
+			field_kind: None,
+			readonly: false,
+			value: None,
+			assert: None,
+			computed: None,
+			default: DefineDefault::None,
+			permissions: Permissions::default(),
+			comment: None,
+			reference: None,
+		}
+	}
+}
+
 impl DefineFieldStatement {
-	pub(crate) fn to_definition(&self) -> catalog::FieldDefinition {
+	pub(crate) fn to_definition(
+		&self,
+		what: &str,
+		comment: Option<String>,
+	) -> catalog::FieldDefinition {
 		fn convert_permission(permission: &Permission) -> catalog::Permission {
 			match permission {
 				Permission::None => catalog::Permission::None,
@@ -62,7 +89,7 @@ impl DefineFieldStatement {
 
 		catalog::FieldDefinition {
 			name: self.name.clone(),
-			what: self.what.clone().to_raw_string(),
+			what: what.to_string(),
 			flexible: self.flex,
 			field_kind: self.field_kind.clone(),
 			readonly: self.readonly,
@@ -77,7 +104,7 @@ impl DefineFieldStatement {
 			select_permission: convert_permission(&self.permissions.select),
 			create_permission: convert_permission(&self.permissions.create),
 			update_permission: convert_permission(&self.permissions.update),
-			comment: self.comment.clone().map(|x| x.into_string()),
+			comment,
 			reference: self.reference.clone(),
 		}
 	}
@@ -85,10 +112,14 @@ impl DefineFieldStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
 	) -> Result<Value> {
+		let what = process_definition_ident!(stk, ctx, opt, _doc, &self.what, "table name");
+		let comment = map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, _doc, x => String));
+
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 
@@ -97,20 +128,20 @@ impl DefineFieldStatement {
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 
 		// Validate computed options
-		self.validate_computed_options(ns, db, ctx.tx()).await?;
+		self.validate_computed_options(ns, db, ctx.tx(), &what).await?;
 
 		// Validate reference options
 		self.validate_reference_options(ctx)?;
 
 		// Disallow mismatched types
-		self.disallow_mismatched_types(ctx, ns, db).await?;
+		self.disallow_mismatched_types(ctx, ns, db, &what).await?;
 
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the name of the field
 		let fd = self.name.to_raw_string();
 		// Check if the definition exists
-		if let Some(fd) = txn.get_tb_field(ns, db, &self.what, &fd).await? {
+		if let Some(fd) = txn.get_tb_field(ns, db, &what, &fd).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -128,10 +159,10 @@ impl DefineFieldStatement {
 
 		let tb = {
 			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?
+			txn.get_or_add_tb(ns, db, &what, opt.strict).await?
 		};
 
-		let definition = self.to_definition();
+		let definition = self.to_definition(&what, comment);
 
 		// Process the statement
 		txn.put_tb_field(ns, db, &tb.name, &definition).await?;
@@ -163,7 +194,7 @@ impl DefineFieldStatement {
 						txn.put_tb(ns_name, db_name, &tb).await?;
 						// Clear the cache
 						if let Some(cache) = ctx.get_cache() {
-							cache.clear_tb(ns, db, &self.what);
+							cache.clear_tb(ns, db, &what);
 						}
 
 						txn.clear_cache();
@@ -193,7 +224,7 @@ impl DefineFieldStatement {
 						txn.put_tb(ns_name, db_name, &tb).await?;
 						// Clear the cache
 						if let Some(cache) = ctx.get_cache() {
-							cache.clear_tb(ns, db, &self.what);
+							cache.clear_tb(ns, db, &what);
 						}
 
 						txn.clear_cache();
@@ -206,11 +237,11 @@ impl DefineFieldStatement {
 		txn.put_tb(ns_name, db_name, &tb).await?;
 
 		// Process possible recursive defitions
-		self.process_recursive_definitions(ns, db, txn.clone()).await?;
+		self.process_recursive_definitions(ns, db, txn.clone(), &what).await?;
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &self.what);
+			cache.clear_tb(ns, db, &what);
 		}
 
 		// Clear the cache
@@ -224,9 +255,10 @@ impl DefineFieldStatement {
 		ns: NamespaceId,
 		db: DatabaseId,
 		txn: Arc<Transaction>,
+		what: &str,
 	) -> Result<()> {
 		// Find all existing field definitions
-		let fields = txn.all_tb_fields(ns, db, &self.what, None).await.ok();
+		let fields = txn.all_tb_fields(ns, db, what, None).await.ok();
 		// Process possible recursive_definitions
 		if let Some(mut cur_kind) = self.field_kind.as_ref().and_then(|x| x.inner_kind()) {
 			let mut name = self.name.clone();
@@ -251,7 +283,7 @@ impl DefineFieldStatement {
 				// Get the field name
 				let fd = name.to_string();
 				// Set the subtype `DEFINE FIELD` definition
-				let key = crate::key::table::fd::new(ns, db, &self.what, &fd);
+				let key = crate::key::table::fd::new(ns, db, what, &fd);
 				let val = if let Some(existing) =
 					fields.as_ref().and_then(|x| x.iter().find(|x| x.name == name))
 				{
@@ -263,7 +295,7 @@ impl DefineFieldStatement {
 				} else {
 					FieldDefinition {
 						name: name.clone(),
-						what: self.what.clone().into_string(),
+						what: what.to_string(),
 						flexible: self.flex,
 						field_kind: Some(cur_kind),
 						reference: self.reference.clone(),
@@ -288,9 +320,10 @@ impl DefineFieldStatement {
 		ns: NamespaceId,
 		db: DatabaseId,
 		txn: Arc<Transaction>,
+		what: &str,
 	) -> Result<()> {
 		// Find all existing field definitions
-		let fields = txn.all_tb_fields(ns, db, &self.what, None).await?;
+		let fields = txn.all_tb_fields(ns, db, what, None).await?;
 		if self.computed.is_some() {
 			// Ensure the field is not the `id` field
 			ensure!(!self.name.is_id(), Error::IdFieldKeywordConflict("COMPUTED".into()));
@@ -378,8 +411,9 @@ impl DefineFieldStatement {
 		ctx: &Context,
 		ns: NamespaceId,
 		db: DatabaseId,
+		what: &str,
 	) -> Result<()> {
-		let fds = ctx.tx().all_tb_fields(ns, db, &self.what, None).await?;
+		let fds = ctx.tx().all_tb_fields(ns, db, what, None).await?;
 
 		if let Some(self_kind) = &self.field_kind {
 			for fd in fds.iter() {
@@ -471,7 +505,7 @@ impl InfoStructure for DefineFieldStatement {
 			"reference".to_string(), if let Some(v) = self.reference => v.structure(),
 			"readonly".to_string() => self.readonly.into(),
 			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+			"comment".to_string(), if let Some(v) = self.comment => v.structure(),
 		})
 	}
 }

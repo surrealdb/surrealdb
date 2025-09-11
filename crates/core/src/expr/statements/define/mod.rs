@@ -86,7 +86,7 @@ impl DefineStatement {
 			Self::Param(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Table(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Event(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Field(v) => v.compute(ctx, opt, doc).await,
+			Self::Field(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Index(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Analyzer(v) => v.compute(ctx, opt, doc).await,
 			Self::User(v) => v.compute(ctx, opt, doc).await,
