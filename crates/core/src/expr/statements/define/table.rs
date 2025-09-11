@@ -19,23 +19,40 @@ use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::UpdateStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, Output, View};
+use crate::expr::{Base, Expr, Idiom, Kind, Literal, Output, View};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::{Strand, Value};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineTableStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
-	pub name: Ident,
+	pub name: Expr,
 	pub drop: bool,
 	pub full: bool,
 	pub view: Option<View>,
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 	pub table_type: TableType,
+}
+
+impl Default for DefineTableStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			id: None,
+			name: Expr::Literal(Literal::Strand(Strand::new(String::new()).unwrap())),
+			drop: false,
+			full: false,
+			view: None,
+			permissions: Permissions::default(),
+			changefeed: None,
+			comment: None,
+			table_type: TableType::Normal,
+		}
+	}
 }
 
 impl DefineTableStatement {
@@ -48,18 +65,22 @@ impl DefineTableStatement {
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
+
+		// Process the name
+		let name = process_definition_ident!(stk, ctx, opt, doc, &self.name, "table name");
+
 		// Get the NS and DB
 		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
-		let table_id = if let Some(tb) = txn.get_tb(ns, db, &self.name).await? {
+		let table_id = if let Some(tb) = txn.get_tb(ns, db, &name).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::TbAlreadyExists {
-							name: self.name.to_string(),
+							name: name.clone(),
 						});
 					}
 				}
@@ -78,13 +99,13 @@ impl DefineTableStatement {
 			namespace_id: ns,
 			database_id: db,
 			table_id,
-			name: self.name.to_raw_string(),
+			name: name.clone(),
 			drop: self.drop,
 			schemafull: self.full,
 			table_type: self.table_type.clone(),
 			view: self.view.clone().map(|v| v.to_definition()),
 			permissions: self.permissions.clone(),
-			comment: self.comment.clone().map(|c| c.to_raw_string()),
+			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 			changefeed: self.changefeed,
 
 			cache_fields_ts: cache_ts,
@@ -98,7 +119,7 @@ impl DefineTableStatement {
 
 		// Record definition change
 		if self.changefeed.is_some() {
-			txn.lock().await.record_table_change(ns, db, &self.name, &tb_def);
+			txn.lock().await.record_table_change(ns, db, &name, &tb_def);
 		}
 
 		// Update the catalog
@@ -106,7 +127,7 @@ impl DefineTableStatement {
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &self.name);
+			cache.clear_tb(ns, db, &name);
 		}
 		// Clear the cache
 		txn.clear_cache();
@@ -115,12 +136,12 @@ impl DefineTableStatement {
 			// Force queries to run
 			let opt = &opt.new_with_force(Force::Table(Arc::new([tb_def.clone()])));
 			// Remove the table data
-			let key = crate::key::table::all::new(ns, db, &self.name);
+			let key = crate::key::table::all::new(ns, db, &name);
 			txn.delp(&key).await?;
 			// Process each foreign table
 			for ft in view.what.iter() {
 				// Save the view config
-				let key = crate::key::table::ft::new(ns, db, ft, &self.name);
+				let key = crate::key::table::ft::new(ns, db, ft, &name);
 				txn.set(&key, &tb_def, None).await?;
 				// Refresh the table cache
 				let Some(foreign_tb) = txn.get_tb(ns, db, ft).await? else {
@@ -156,7 +177,7 @@ impl DefineTableStatement {
 		}
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &self.name);
+			cache.clear_tb(ns, db, &name);
 		}
 		// Clear the cache
 		txn.clear_cache();
@@ -308,7 +329,7 @@ impl InfoStructure for DefineTableStatement {
 			"view".to_string(), if let Some(v) = self.view => v.structure(),
 			"changefeed".to_string(), if let Some(v) = self.changefeed => v.structure(),
 			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+			"comment".to_string(), if let Some(v) = self.comment => v.structure(),
 		})
 	}
 }
