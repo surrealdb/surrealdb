@@ -43,24 +43,53 @@ impl From<DefineEventStatement> for crate::expr::statements::DefineEventStatemen
 	fn from(v: DefineEventStatement) -> Self {
 		crate::expr::statements::DefineEventStatement {
 			kind: v.kind.into(),
-			name: v.name.into(),
-			target_table: v.target_table.into(),
+			name: crate::expr::Expr::Idiom(crate::expr::Idiom::from(vec![
+				crate::expr::Part::Field(v.name.into()),
+			])),
+			target_table: crate::expr::Expr::Idiom(crate::expr::Idiom::from(vec![
+				crate::expr::Part::Field(v.target_table.into()),
+			])),
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
-			comment: v.comment,
+			comment: v.comment.map(|s| crate::expr::Expr::Literal(crate::expr::Literal::Strand(s))),
 		}
 	}
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<crate::expr::statements::DefineEventStatement> for DefineEventStatement {
 	fn from(v: crate::expr::statements::DefineEventStatement) -> Self {
 		DefineEventStatement {
 			kind: v.kind.into(),
-			name: v.name.into(),
-			target_table: v.target_table.into(),
+			name: match v.name {
+				crate::expr::Expr::Idiom(idiom) if idiom.len() == 1 => {
+					if let Some(crate::expr::Part::Field(field)) = idiom.first() {
+						field.clone().into()
+					} else {
+						crate::sql::Ident::new(String::new()).unwrap()
+					}
+				}
+				_ => crate::sql::Ident::new(String::new()).unwrap(),
+			},
+			target_table: match v.target_table {
+				crate::expr::Expr::Idiom(idiom) if idiom.len() == 1 => {
+					if let Some(crate::expr::Part::Field(field)) = idiom.first() {
+						field.clone().into()
+					} else {
+						crate::sql::Ident::new(String::new()).unwrap()
+					}
+				}
+				_ => crate::sql::Ident::new(String::new()).unwrap(),
+			},
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
-			comment: v.comment,
+			comment: v.comment.and_then(|expr| {
+				if let crate::expr::Expr::Literal(crate::expr::Literal::Strand(s)) = expr {
+					Some(s)
+				} else {
+					None
+				}
+			}),
 		}
 	}
 }
