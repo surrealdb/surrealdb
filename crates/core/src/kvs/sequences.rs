@@ -3,11 +3,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use dashmap::DashMap;
-use dashmap::mapref::entry::Entry;
+use dashmap::{DashMap, Entry};
 use rand::{Rng, thread_rng};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 use tokio::time::sleep;
 use uuid::Uuid;
 
@@ -26,7 +26,7 @@ use crate::kvs::{KVKey, LockType, Transaction, TransactionType, impl_kv_value_re
 #[derive(Clone)]
 pub(crate) struct Sequences {
 	tf: TransactionFactory,
-	sequences: Arc<DashMap<Arc<SequenceDomain>, Sequence>>,
+	sequences: Arc<DashMap<Arc<SequenceDomain>, Arc<Mutex<Sequence>>>>,
 }
 
 #[derive(Hash, PartialEq, Eq)]
@@ -124,16 +124,18 @@ impl Sequences {
 	where
 		F: FnOnce() -> (i64, Option<Duration>) + Send + Sync + 'static,
 	{
-		match self.sequences.entry(seq.clone()) {
-			Entry::Occupied(mut e) => e.get_mut().next(ctx, nid, &seq, batch).await,
+		let s = match self.sequences.entry(seq.clone()) {
+			Entry::Occupied(e) => e.get().clone(),
 			Entry::Vacant(e) => {
 				let (start, timeout) = init_params();
-				let s =
+				let s = Arc::new(Mutex::new(
 					Sequence::load(self.tf.clone(), &ctx.tx(), nid, &seq, start, batch, timeout)
-						.await?;
-				e.insert(s).next(ctx, nid, &seq, batch).await
+						.await?,
+				));
+				e.insert(s).clone()
 			}
-		}
+		};
+		s.lock().await.next(ctx, nid, &seq, batch).await
 	}
 
 	pub(crate) async fn next_val_user(
