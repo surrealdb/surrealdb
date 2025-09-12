@@ -1,4 +1,4 @@
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum Method {
 	Unknown,
