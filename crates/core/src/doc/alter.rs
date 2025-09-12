@@ -175,8 +175,6 @@ impl Document {
 		if let Workable::Relate(_, _, Some(v)) = &self.extras {
 			self.current.doc.to_mut().merge(Value::clone(v))?;
 		}
-		// Set default field values
-		self.current.doc.to_mut().def(&rid);
 		// Carry on
 		Ok(())
 	}
@@ -509,8 +507,6 @@ impl Document {
 				x => fail!("Unexpected data clause type: {x:?}"),
 			};
 		};
-		// Set default field values
-		self.current.doc.to_mut().def(&rid);
 		// Carry on
 		Ok(())
 	}
