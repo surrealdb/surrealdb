@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Display, Formatter, Write};
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
@@ -65,6 +65,8 @@ impl FromStr for GeometryKind {
 pub enum Kind {
 	/// The most generic type, can be anything.
 	Any,
+	/// None type.
+	None,
 	/// Null type.
 	Null,
 	/// Boolean type.
@@ -98,8 +100,6 @@ pub enum Kind {
 	/// The vec contains the geometry types as strings, for example `"point"` or
 	/// `"polygon"`.
 	Geometry(Vec<GeometryKind>),
-	/// An optional type.
-	Option(Box<Kind>),
 	/// An either type.
 	/// Can be any of the kinds in the vec.
 	Either(Vec<Kind>),
@@ -149,24 +149,20 @@ impl Kind {
 
 	/// Returns true if this type is optional
 	pub(crate) fn can_be_none(&self) -> bool {
-		matches!(self, Kind::Option(_) | Kind::Any)
+		match self {
+			Kind::None | Kind::Any => true,
+			Kind::Either(x) => x.iter().any(|x| x.can_be_none()),
+			_ => false,
+		}
 	}
 
 	/// Returns true if this type is a literal, or contains a literal
 	pub(crate) fn contains_literal(&self) -> bool {
-		if matches!(self, Kind::Literal(_)) {
-			return true;
+		match self {
+			Kind::None | Kind::Any => true,
+			Kind::Either(x) => x.iter().any(|x| x.contains_literal()),
+			_ => false,
 		}
-
-		if let Kind::Option(x) = self {
-			return x.contains_literal();
-		}
-
-		if let Kind::Either(x) = self {
-			return x.iter().any(|x| x.contains_literal());
-		}
-
-		false
 	}
 
 	// Return the kind of the contained value.
@@ -174,10 +170,10 @@ impl Kind {
 	// For example: for `array<number>` or `set<number>` this returns `number`.
 	// For `array<number> | set<float>` this returns `number | float`.
 	pub(crate) fn inner_kind(&self) -> Option<Kind> {
-		let mut this = self;
 		loop {
-			match &this {
+			match self {
 				Kind::Any
+				| Kind::None
 				| Kind::Null
 				| Kind::Bool
 				| Kind::Bytes
@@ -197,9 +193,6 @@ impl Kind {
 				| Kind::Range
 				| Kind::Literal(_)
 				| Kind::File(_) => return None,
-				Kind::Option(x) => {
-					this = x;
-				}
 				Kind::Array(x, _) | Kind::Set(x, _) => return Some(x.as_ref().clone()),
 				Kind::Either(x) => {
 					// a either shouldn't be able to contain a either itself so recursing here
@@ -224,7 +217,7 @@ impl Kind {
 			match self {
 				Kind::Object => return matches!(path.first(), Some(Part::Field(_) | Part::All)),
 				Kind::Either(kinds) => {
-					return kinds.iter().all(|k| k.allows_nested_kind(path, kind));
+					return kinds.iter().all(|k| matches!(k, Kind::None) || k.allows_nested_kind(path, kind));
 				}
 				Kind::Array(inner, len) | Kind::Set(inner, len) => {
 					return match path.first() {
@@ -246,11 +239,41 @@ impl Kind {
 		}
 
 		match self {
+			// Check if the two kinds match when we reach the end of the path
+			_ if path.is_empty() && self == kind => true,
+			// Check if the literal matches the kind
 			Kind::Literal(lit) => lit.allows_nested_kind(path, kind),
-			Kind::Option(inner) => inner.allows_nested_kind(path, kind),
-			_ if path.is_empty() => self == kind,
+			// Check if any of the kinds in the either match the kind
+			Kind::Either(kinds) => {
+				return kinds.iter().all(|k| matches!(k, Kind::None) || k.allows_nested_kind(path, kind));
+			}
 			_ => false,
 		}
+	}
+
+	pub(crate) fn flatten(self) -> Vec<Kind> {
+		match self {
+			Kind::Either(x) => x.into_iter().flat_map(|k| k.flatten()).collect(),
+			_ => vec![self],
+		}
+	}
+	
+	pub(crate) fn either(kinds: Vec<Kind>) -> Kind {
+		let mut seen = HashSet::new();
+		let mut kinds = kinds
+			.into_iter()
+			.flat_map(|k| k.flatten())
+			.filter(|k| seen.insert(k.clone()))
+			.collect::<Vec<_>>();
+		match kinds.len() {
+			0 => Kind::None,
+			1 => kinds.remove(0),
+			_ => Kind::Either(kinds),
+		}
+	}
+
+	pub(crate) fn option(kind: Kind) -> Kind {
+		Kind::either(vec![Kind::None, kind])
 	}
 }
 
@@ -267,12 +290,7 @@ pub trait HasKind {
 
 impl<T: HasKind> HasKind for Option<T> {
 	fn kind() -> Kind {
-		let kind = T::kind();
-		if matches!(kind, Kind::Option(_)) {
-			kind
-		} else {
-			Kind::Option(Box::new(kind))
-		}
+		Kind::option(T::kind())
 	}
 }
 
@@ -388,6 +406,7 @@ impl Display for Kind {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Kind::Any => f.write_str("any"),
+			Kind::None => f.write_str("none"),
 			Kind::Null => f.write_str("null"),
 			Kind::Bool => f.write_str("bool"),
 			Kind::Bytes => f.write_str("bytes"),
@@ -402,7 +421,6 @@ impl Display for Kind {
 			Kind::Uuid => f.write_str("uuid"),
 			Kind::Regex => f.write_str("regex"),
 			Kind::Function(_, _) => f.write_str("function"),
-			Kind::Option(k) => write!(f, "option<{}>", k),
 			Kind::Record(k) => {
 				if k.is_empty() {
 					f.write_str("record")
@@ -427,7 +445,11 @@ impl Display for Kind {
 				(k, None) => write!(f, "array<{}>", k),
 				(k, Some(l)) => write!(f, "array<{}, {}>", k, l),
 			},
-			Kind::Either(k) => write!(f, "{}", Fmt::verbar_separated(k)),
+			Kind::Either(k) => if k.contains(&Kind::None) {
+				write!(f, "option<{}>", Fmt::verbar_separated(k.iter().filter(|k| **k != Kind::None).collect::<Vec<_>>()))
+			} else {
+				write!(f, "{}", Fmt::verbar_separated(k))
+			},
 			Kind::Range => f.write_str("range"),
 			Kind::Literal(l) => write!(f, "{}", l),
 			Kind::File(k) => {

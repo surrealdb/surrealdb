@@ -343,20 +343,24 @@ impl DefineFieldStatement {
 
 		// If a reference is defined, the field must be a record
 		if self.reference.is_some() {
-			let kind = match &self.field_kind {
-				Some(Kind::Option(kind)) => Some(kind.as_ref()),
-				x => x.as_ref(),
-			};
+			fn valid(kind: &Kind, outer: bool) -> bool {
+				match kind {
+					Kind::None | Kind::Record(_) => true,
+					Kind::Array(kind, _) | Kind::Set(kind, _) => outer && valid(kind, false),
+					Kind::Literal(KindLiteral::Array(kinds)) => outer && kinds.iter().all(|k| valid(k, false)),
+					_ => false,
+				}
+			}
 
-			let is_record_id = match &kind {
-				Some(Kind::Either(kinds)) => kinds.iter().all(|k| matches!(k, Kind::Record(_))),
+			let is_record_id = match self.field_kind.as_ref() {
+				Some(Kind::Either(kinds)) => kinds.iter().all(|k| valid(k, true)),
 				Some(Kind::Array(kind, _)) | Some(Kind::Set(kind, _)) => match kind.as_ref() {
-					Kind::Either(kinds) => kinds.iter().all(|k| matches!(k, Kind::Record(_))),
+					Kind::Either(kinds) => kinds.iter().all(|k| valid(k, true)),
 					Kind::Record(_) => true,
 					_ => false,
 				},
 				Some(Kind::Literal(KindLiteral::Array(kinds))) => {
-					kinds.iter().all(|k| matches!(k, Kind::Record(_)))
+					kinds.iter().all(|k| valid(k, true))
 				}
 				Some(Kind::Record(_)) => true,
 				_ => false,
