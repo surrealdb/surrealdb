@@ -35,5 +35,3 @@ INFO FOR TABLE product STRUCTURE;
 --
 CREATE product:a;
 UPSERT product:b;
-// INSERT INTO product [{'id': r'product:c'}];
-
