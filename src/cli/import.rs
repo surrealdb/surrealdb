@@ -91,7 +91,7 @@ pub async fn init(
 			"Surreal import failed, import might only be partially completed or have failed entirely."
 		)
 	})?;
-	info!("The SurrealQL file was imported successfully");
+	info!("Import executed with no errors");
 	// All ok
 	Ok(())
 }
