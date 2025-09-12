@@ -278,11 +278,7 @@ impl Display for Kind {
 				(k, None) => write!(f, "array<{k}>"),
 				(k, Some(l)) => write!(f, "array<{k}, {l}>"),
 			},
-			Kind::Either(k) => if k.contains(&Kind::None) {
-				write!(f, "option<{}>", Fmt::verbar_separated(k.iter().filter(|k| **k != Kind::None).collect::<Vec<_>>()))
-			} else {
-				write!(f, "{}", Fmt::verbar_separated(k))
-			},
+			Kind::Either(k) => write!(f, "{}", Fmt::verbar_separated(k)),
 			Kind::Range => f.write_str("range"),
 			Kind::Literal(l) => write!(f, "{}", l),
 			Kind::File(k) => {

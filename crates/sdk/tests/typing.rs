@@ -312,7 +312,7 @@ async fn literal_typing() -> Result<()> {
 		}",
 	)?;
 	t.expect_error(
-		"Couldn't coerce value for field `obj` of `test:3`: Expected `{ a: int, b: option<string> }` but found `{ a: 3, b: 'bar', c: 'forbidden' }`"
+		"Couldn't coerce value for field `obj` of `test:3`: Expected `{ a: int, b: none | string }` but found `{ a: 3, b: 'bar', c: 'forbidden' }`"
 	)?;
 	//
 	Ok(())

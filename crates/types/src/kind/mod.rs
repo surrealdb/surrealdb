@@ -145,11 +145,7 @@ impl Display for Kind {
 					write!(f, "geometry<{}>", join_displayable(kinds, " | "))
 				}
 			}
-			Kind::Either(kinds) => if kinds.contains(&Kind::None) {
-				write!(f, "option<{}>", join_displayable(&kinds.iter().filter(|k| **k != Kind::None).collect::<Vec<_>>(), " | "))
-			} else {
-				write!(f, "{}", join_displayable(kinds, " | "))
-			},
+			Kind::Either(kinds) => write!(f, "{}", join_displayable(kinds, " | ")),
 			Kind::Set(kind, max) => match max {
 				Some(max) => write!(f, "set<{}, {}>", kind, max),
 				None => write!(f, "set<{}>", kind),

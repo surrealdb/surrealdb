@@ -454,7 +454,7 @@ mod tests {
 		let sql = "option<int>";
 		let res = kind(sql);
 		let out = res.unwrap();
-		assert_eq!("option<int>", format!("{}", out));
+		assert_eq!("none | int", format!("{}", out));
 		assert_eq!(out, Kind::Either(vec![Kind::None, Kind::Int]));
 	}
 
@@ -463,7 +463,25 @@ mod tests {
 		let sql = "option<int | float>";
 		let res = kind(sql);
 		let out = res.unwrap();
-		assert_eq!("option<int | float>", format!("{}", out));
+		assert_eq!("none | int | float", format!("{}", out));
+		assert_eq!(out, Kind::Either(vec![Kind::None, Kind::Int, Kind::Float]));
+	}
+
+	#[test]
+	fn kind_none() {
+		let sql = "none";
+		let res = kind(sql);
+		let out = res.unwrap();
+		assert_eq!("none", format!("{}", out));
+		assert_eq!(out, Kind::None);
+	}
+
+	#[test]
+	fn kind_none_tuple() {
+		let sql = "none | int | float";
+		let res = kind(sql);
+		let out = res.unwrap();
+		assert_eq!("none | int | float", format!("{}", out));
 		assert_eq!(out, Kind::Either(vec![Kind::None, Kind::Int, Kind::Float]));
 	}
 
