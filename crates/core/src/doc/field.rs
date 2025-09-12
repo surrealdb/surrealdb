@@ -264,13 +264,23 @@ impl Document {
 						val = field.process_default_clause(val).await?;
 						// Check for the existance of a VALUE clause
 						if field.def.value.is_some() {
+							// If the value is NONE (field doesn't exist), process VALUE first
+							// Otherwise, do TYPE check first to validate explicit input
+							if val.is_none() {
+								// Process any VALUE clause first when field is missing
+								val = field.process_value_clause(val).await?;
+								// Process any TYPE clause
+								val = field.process_type_clause(val).await?;
+							} else {
+								// Process any TYPE clause first for explicit values
+								val = field.process_type_clause(val).await?;
+								// Process any VALUE clause
+								val = field.process_value_clause(val).await?;
+							}
+						} else {
 							// Process any TYPE clause
 							val = field.process_type_clause(val).await?;
-							// Process any VALUE clause
-							val = field.process_value_clause(val).await?;
 						}
-						// Process any TYPE clause
-						val = field.process_type_clause(val).await?;
 						// Process any ASSERT clause
 						val = field.process_assert_clause(val).await?;
 						// Process any REFERENCE clause
