@@ -912,6 +912,10 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.index = Index::Uniq;
 				}
+				t!("COUNT") => {
+					self.pop_peek();
+					res.index = Index::Count;
+				}
 				t!("FULLTEXT") => {
 					self.pop_peek();
 					let mut analyzer: Option<Ident> = None;

@@ -65,6 +65,7 @@ keyword! {
 	Content => "CONTENT",
 	Continue => "CONTINUE",
 	Computed => "COMPUTED",
+	Count => "COUNT",
 	Create => "CREATE",
 	Database => "DATABASE",
 	Default => "DEFAULT",

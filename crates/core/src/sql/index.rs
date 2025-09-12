@@ -18,6 +18,8 @@ pub enum Index {
 	Hnsw(HnswParams),
 	/// Index with Full-Text search capabilities - single writer
 	FullText(FullTextParams),
+	/// Count index
+	Count,
 }
 
 impl From<Index> for crate::catalog::Index {
@@ -28,6 +30,7 @@ impl From<Index> for crate::catalog::Index {
 			Index::MTree(p) => Self::MTree(p.into()),
 			Index::Hnsw(p) => Self::Hnsw(p.into()),
 			Index::FullText(p) => Self::FullText(p.into()),
+			Index::Count => Self::Count,
 		}
 	}
 }
@@ -40,6 +43,7 @@ impl From<crate::catalog::Index> for Index {
 			crate::catalog::Index::MTree(p) => Self::MTree(p.into()),
 			crate::catalog::Index::Hnsw(p) => Self::Hnsw(p.into()),
 			crate::catalog::Index::FullText(p) => Self::FullText(p.into()),
+			crate::catalog::Index::Count => Self::Count,
 		}
 	}
 }
@@ -244,6 +248,7 @@ impl Display for Index {
 		match self {
 			Self::Idx => Ok(()),
 			Self::Uniq => f.write_str("UNIQUE"),
+			Self::Count => f.write_str("COUNT"),
 			Self::FullText(p) => {
 				write!(f, "FULLTEXT ANALYZER {} {}", p.az, p.sc,)?;
 				if p.hl {

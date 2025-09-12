@@ -119,6 +119,7 @@ impl Document {
 			Index::FullText(p) => ic.index_fulltext(stk, ctx, p).await?,
 			Index::MTree(p) => ic.index_mtree(stk, ctx, p).await?,
 			Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
+			Index::Count => ic.index_count(ctx).await?,
 		}
 		Ok(())
 	}
@@ -410,6 +411,10 @@ impl<'a> IndexOperation<'a> {
 			}
 		}
 		Ok(())
+	}
+
+	async fn index_count(&mut self, _ctx: &Context) -> Result<()> {
+		bail!(Error::Unimplemented("Index count not implemented".to_string()))
 	}
 
 	/// Construct a consistent uniqueness violation error message.
