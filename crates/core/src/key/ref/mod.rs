@@ -266,8 +266,8 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let binding = RecordIdKey::String("testid".to_owned());
-		let other_binding = RecordIdKey::String("otherid".to_owned());
+		let binding = RecordIdKey::String("testid".into());
+		let other_binding = RecordIdKey::String("otherid".into());
 		let val = Ref::new(
 			NamespaceId(1),
 			DatabaseId(2),

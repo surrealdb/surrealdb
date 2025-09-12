@@ -157,9 +157,7 @@ impl PartialEq<Range> for RecordIdKeyRange {
 #[storekey(format = "IndexFormat")]
 pub enum RecordIdKey {
 	Number(i64),
-	//TODO: This should definitely be strand, not string as null bytes here can cause a lot of
-	//issues.
-	String(String),
+	String(Strand),
 	Uuid(Uuid),
 	Array(Array),
 	Object(Object),
@@ -171,11 +169,11 @@ impl_kv_value_revisioned!(RecordIdKey);
 impl RecordIdKey {
 	/// Generate a new random ID
 	pub fn rand() -> Self {
-		Self::String(nanoid!(20, &ID_CHARS))
+		Self::String(nanoid!(20, &ID_CHARS).into())
 	}
 	/// Generate a new random ULID
 	pub fn ulid() -> Self {
-		Self::String(Ulid::new().to_string())
+		Self::String(Ulid::new().to_string().into())
 	}
 	/// Generate a new random UUID
 	pub fn uuid() -> Self {
@@ -191,11 +189,7 @@ impl RecordIdKey {
 	pub fn into_value(self) -> Value {
 		match self {
 			RecordIdKey::Number(n) => Value::Number(Number::Int(n)),
-			RecordIdKey::String(s) => {
-				//TODO: Null byte validity
-				let s = unsafe { Strand::new_unchecked(s) };
-				Value::Strand(s)
-			}
+			RecordIdKey::String(s) => Value::Strand(s),
 			RecordIdKey::Uuid(u) => Value::Uuid(u),
 			RecordIdKey::Object(object) => Value::Object(object),
 			RecordIdKey::Array(array) => Value::Array(array),
@@ -217,7 +211,7 @@ impl RecordIdKey {
 		// rejected.
 		match value {
 			Value::Number(Number::Int(i)) => Some(RecordIdKey::Number(i)),
-			Value::Strand(strand) => Some(RecordIdKey::String(strand.into_string())),
+			Value::Strand(strand) => Some(RecordIdKey::String(strand)),
 			// NOTE: This was previously (before expr inversion pr) also rejected in this
 			// conversion, a bug I assume.
 			Value::Uuid(uuid) => Some(RecordIdKey::Uuid(uuid)),
@@ -235,7 +229,7 @@ impl RecordIdKey {
 		match self {
 			RecordIdKey::Number(n) => expr::RecordIdKeyLit::Number(n),
 			// TODO: Null byte validity
-			RecordIdKey::String(s) => expr::RecordIdKeyLit::String(Strand::new(s).unwrap()),
+			RecordIdKey::String(s) => expr::RecordIdKeyLit::String(s),
 			RecordIdKey::Uuid(uuid) => expr::RecordIdKeyLit::Uuid(uuid),
 			RecordIdKey::Object(object) => expr::RecordIdKeyLit::Object(object.into_literal()),
 			RecordIdKey::Array(array) => expr::RecordIdKeyLit::Array(array.into_literal()),
@@ -254,7 +248,7 @@ impl From<i64> for RecordIdKey {
 
 impl From<Strand> for RecordIdKey {
 	fn from(value: Strand) -> Self {
-		RecordIdKey::String(value.into_string())
+		RecordIdKey::String(value)
 	}
 }
 

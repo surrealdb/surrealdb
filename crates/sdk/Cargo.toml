@@ -185,14 +185,6 @@ name = "hash_trie_btree"
 harness = false
 
 [[bench]]
-name = "index_btree"
-harness = false
-
-[[bench]]
-name = "index_mtree"
-harness = false
-
-[[bench]]
 name = "index_hnsw"
 harness = false
 

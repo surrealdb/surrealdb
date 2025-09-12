@@ -51,7 +51,7 @@ impl RecordIdKeyLit {
 	pub fn from_record_id_key(key: RecordIdKey) -> Self {
 		match key {
 			RecordIdKey::Number(x) => RecordIdKeyLit::Number(x),
-			RecordIdKey::String(x) => RecordIdKeyLit::String(Strand::new_lossy(x)),
+			RecordIdKey::String(x) => RecordIdKeyLit::String(x.clone()),
 			RecordIdKey::Uuid(x) => RecordIdKeyLit::Uuid(x),
 			RecordIdKey::Array(x) => {
 				RecordIdKeyLit::Array(x.into_iter().map(Expr::from_value).collect())

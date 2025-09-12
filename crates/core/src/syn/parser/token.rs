@@ -8,7 +8,6 @@ impl Parser<'_> {
 			kind,
 			t!("ACCESS")
 				| t!("ALTER")
-				| t!("ANALYZE")
 				| t!("BEGIN")
 				| t!("BREAK")
 				| t!("CANCEL")
@@ -118,8 +117,7 @@ impl Parser<'_> {
 	pub(super) fn starts_disallowed_subquery_statement(kind: TokenKind) -> bool {
 		matches!(
 			kind,
-			t!("ANALYZE")
-				| t!("BEGIN")
+			t!("BEGIN")
 				| t!("BREAK")
 				| t!("CANCEL")
 				| t!("COMMIT")

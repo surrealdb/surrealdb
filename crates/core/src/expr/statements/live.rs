@@ -243,7 +243,7 @@ mod tests {
 				Action::Create,
 				Value::RecordId(RecordId {
 					table: tb.to_owned(),
-					key: RecordIdKey::String("test_true".to_owned())
+					key: RecordIdKey::String("test_true".into())
 				}),
 				syn::value(&format!(
 					"{{

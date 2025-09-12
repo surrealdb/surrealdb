@@ -452,8 +452,8 @@ mod tests {
 	};
 	use crate::ctx::{Context, MutableContext};
 	use crate::idx::IndexKeyBase;
-	use crate::idx::docids::DocId;
 	use crate::idx::planner::checker::HnswConditionChecker;
+	use crate::idx::seqdocids::DocId;
 	use crate::idx::trees::hnsw::flavor::HnswFlavor;
 	use crate::idx::trees::hnsw::index::HnswIndex;
 	use crate::idx::trees::hnsw::{ElementId, HnswSearch};

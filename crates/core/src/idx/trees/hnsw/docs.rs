@@ -4,7 +4,7 @@ use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
 use crate::idx::IndexKeyBase;
-use crate::idx::docids::DocId;
+use crate::idx::seqdocids::DocId;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::hnsw::flavor::HnswFlavor;
 use crate::idx::trees::knn::Ids64;

@@ -64,7 +64,7 @@ mod tests {
 			DatabaseId(2),
 			"testtb",
 			IndexId(3),
-			RecordIdKey::String("testid".to_string()),
+			RecordIdKey::String("testid".into()),
 		);
 		let enc = Hi::encode_key(&val).unwrap();
 		assert_eq!(
