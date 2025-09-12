@@ -301,14 +301,18 @@ impl Datastore {
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
-					// Initialise the storage engine
-					info!(target: TARGET, "Starting kvs store at {}", path);
-					warn!("file:// is deprecated, please use surrealkv:// or rocksdb://");
-					let s = s.trim_start_matches("file://");
+
 					let s = s.trim_start_matches("file:");
+					let s = s.trim_start_matches("/");
+					// Initialise the storage engine
+					info!(target: TARGET, "Starting kvs store at rocksdb://{s}");
+					warn!(
+						"file:// is deprecated, please use surrealkv:// or surrealkv+versioned:// or rocksdb://"
+					);
+
 					let v = super::rocksdb::Datastore::new(s).await.map(DatastoreFlavor::RocksDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store at {}", path);
+					info!(target: TARGET, "Started kvs store at rocksdb://{s}");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
@@ -321,12 +325,13 @@ impl Datastore {
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
 					// Initialise the storage engine
-					info!(target: TARGET, "Starting kvs store at {}", path);
-					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
+					let s = s.trim_start_matches("/");
+					info!(target: TARGET, "Starting kvs store at rocksdb://{s}");
+
 					let v = super::rocksdb::Datastore::new(s).await.map(DatastoreFlavor::RocksDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store at {}", path);
+					info!(target: TARGET, "Started kvs store at rocksdb://{s}");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
@@ -339,14 +344,28 @@ impl Datastore {
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
 					// Initialise the storage engine
-					info!(target: TARGET, "Starting kvs store at {}", s);
-					let (path, enable_versions) =
-						super::surrealkv::Datastore::parse_start_string(s)?;
-					let v = super::surrealkv::Datastore::new(path, enable_versions)
+
+					let enable_versions = s.starts_with("surrealkv+versioned");
+					let s = s.trim_start_matches("surrealkv+versioned:");
+					let s = s.trim_start_matches("surrealkv:");
+					let s = s.trim_start_matches("/");
+
+					let path = format!(
+						"{}//{s}",
+						if enable_versions {
+							"surrealkv+versioned:"
+						} else {
+							"surrealkv:"
+						}
+					);
+
+					info!(target: TARGET, "Starting kvs store at {path}");
+
+					let v = super::surrealkv::Datastore::new(&path, enable_versions)
 						.await
 						.map(DatastoreFlavor::SurrealKV);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store at {} with versions {}", path, if enable_versions { "enabled" } else { "disabled" });
+					info!(target: TARGET, "Started kvs store at {path} with versions {}", if enable_versions { "enabled" } else { "disabled" });
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
@@ -356,12 +375,13 @@ impl Datastore {
 			s if s.starts_with("indxdb:") => {
 				#[cfg(feature = "kv-indxdb")]
 				{
-					info!(target: TARGET, "Starting kvs store at {}", path);
-					let s = s.trim_start_matches("indxdb://");
 					let s = s.trim_start_matches("indxdb:");
+					let s = s.trim_start_matches("/");
+					info!(target: TARGET, "Starting kvs store at indxdb://{s}");
+
 					let v = super::indxdb::Datastore::new(s).await.map(DatastoreFlavor::IndxDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store at {}", path);
+					info!(target: TARGET, "Started kvs store at indxdb://{s}");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
@@ -371,12 +391,13 @@ impl Datastore {
 			s if s.starts_with("tikv:") => {
 				#[cfg(feature = "kv-tikv")]
 				{
-					info!(target: TARGET, "Connecting to kvs store at {}", path);
-					let s = s.trim_start_matches("tikv://");
 					let s = s.trim_start_matches("tikv:");
+					let s = s.trim_start_matches("/");
+					info!(target: TARGET, "Connecting to kvs store at tikv://{s}");
+
 					let v = super::tikv::Datastore::new(s).await.map(DatastoreFlavor::TiKV);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Connected to kvs store at {}", path);
+					info!(target: TARGET, "Connected to kvs store at tikv://{s}");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-tikv"))]
@@ -386,12 +407,13 @@ impl Datastore {
 			s if s.starts_with("fdb:") => {
 				#[cfg(feature = "kv-fdb")]
 				{
-					info!(target: TARGET, "Connecting to kvs store at {}", path);
-					let s = s.trim_start_matches("fdb://");
 					let s = s.trim_start_matches("fdb:");
+					let s = s.trim_start_matches("/");
+					info!(target: TARGET, "Connecting to kvs store at fdb://{s}");
+
 					let v = super::fdb::Datastore::new(s).await.map(DatastoreFlavor::FoundationDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Connected to kvs store at {}", path);
+					info!(target: TARGET, "Connected to kvs store at fdb://{s}");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-fdb"))]
