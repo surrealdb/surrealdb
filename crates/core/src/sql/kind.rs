@@ -139,7 +139,7 @@ impl Kind {
 			_ => vec![self],
 		}
 	}
-	
+
 	pub(crate) fn either(kinds: Vec<Kind>) -> Kind {
 		let mut seen = HashSet::new();
 		let mut kinds = kinds

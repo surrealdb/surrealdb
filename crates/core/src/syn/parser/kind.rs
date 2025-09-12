@@ -53,10 +53,8 @@ impl Parser<'_> {
 				self.pop_peek();
 
 				let delim = expected!(self, t!("<")).span;
-				let mut kinds = vec![
-					Kind::None,
-					stk.run(|ctx| self.parse_concrete_kind(ctx)).await?
-				];
+				let mut kinds =
+					vec![Kind::None, stk.run(|ctx| self.parse_concrete_kind(ctx)).await?];
 				if self.peek_kind() == t!("|") {
 					while self.eat(t!("|")) {
 						kinds.push(stk.run(|ctx| self.parse_concrete_kind(ctx)).await?);

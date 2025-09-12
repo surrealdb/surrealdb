@@ -347,7 +347,9 @@ impl DefineFieldStatement {
 				match kind {
 					Kind::None | Kind::Record(_) => true,
 					Kind::Array(kind, _) | Kind::Set(kind, _) => outer && valid(kind, false),
-					Kind::Literal(KindLiteral::Array(kinds)) => outer && kinds.iter().all(|k| valid(k, false)),
+					Kind::Literal(KindLiteral::Array(kinds)) => {
+						outer && kinds.iter().all(|k| valid(k, false))
+					}
 					_ => false,
 				}
 			}

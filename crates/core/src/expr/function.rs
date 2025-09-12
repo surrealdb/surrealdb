@@ -136,8 +136,8 @@ impl Function {
 				let max_args_len = val.args.len();
 				// Track the number of required arguments
 				// Check for any final optional arguments
-				let min_args_len =
-					val.args.iter().rev().map(|x| &x.1).fold(0, |acc, kind| if kind.can_be_none() {
+				let min_args_len = val.args.iter().rev().map(|x| &x.1).fold(0, |acc, kind| {
+					if kind.can_be_none() {
 						if acc == 0 {
 							0
 						} else {
@@ -145,7 +145,8 @@ impl Function {
 						}
 					} else {
 						acc + 1
-					});
+					}
+				});
 				// Check the necessary arguments are passed
 				//TODO(planner): Move this check out of the call.
 				if !(min_args_len..=max_args_len).contains(&args.len()) {

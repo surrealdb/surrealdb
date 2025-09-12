@@ -9,7 +9,8 @@ use crate::expr::Kind;
 use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::val::array::Uniq;
 use crate::val::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range, RecordId, Regex, SqlNone, Strand, Uuid, Value
+	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range,
+	RecordId, Regex, SqlNone, Strand, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]

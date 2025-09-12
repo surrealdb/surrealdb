@@ -170,38 +170,37 @@ impl Kind {
 	// For example: for `array<number>` or `set<number>` this returns `number`.
 	// For `array<number> | set<float>` this returns `number | float`.
 	pub(crate) fn inner_kind(&self) -> Option<Kind> {
-		loop {
-			match self {
-				Kind::Any
-				| Kind::None
-				| Kind::Null
-				| Kind::Bool
-				| Kind::Bytes
-				| Kind::Datetime
-				| Kind::Decimal
-				| Kind::Duration
-				| Kind::Float
-				| Kind::Int
-				| Kind::Number
-				| Kind::Object
-				| Kind::String
-				| Kind::Uuid
-				| Kind::Regex
-				| Kind::Record(_)
-				| Kind::Geometry(_)
-				| Kind::Function(_, _)
-				| Kind::Range
-				| Kind::Literal(_)
-				| Kind::File(_) => return None,
-				Kind::Array(x, _) | Kind::Set(x, _) => return Some(x.as_ref().clone()),
-				Kind::Either(x) => {
-					// a either shouldn't be able to contain a either itself so recursing here
-					// should be fine.
-					let kinds: Vec<Kind> = x.iter().filter_map(Self::inner_kind).collect();
-					if kinds.is_empty() {
-						return None;
-					}
-					return Some(Kind::Either(kinds));
+		match self {
+			Kind::Any
+			| Kind::None
+			| Kind::Null
+			| Kind::Bool
+			| Kind::Bytes
+			| Kind::Datetime
+			| Kind::Decimal
+			| Kind::Duration
+			| Kind::Float
+			| Kind::Int
+			| Kind::Number
+			| Kind::Object
+			| Kind::String
+			| Kind::Uuid
+			| Kind::Regex
+			| Kind::Record(_)
+			| Kind::Geometry(_)
+			| Kind::Function(_, _)
+			| Kind::Range
+			| Kind::Literal(_)
+			| Kind::File(_) => None,
+			Kind::Array(x, _) | Kind::Set(x, _) => Some(x.as_ref().clone()),
+			Kind::Either(x) => {
+				// a either shouldn't be able to contain a either itself so recursing here
+				// should be fine.
+				let kinds: Vec<Kind> = x.iter().filter_map(Self::inner_kind).collect();
+				if kinds.is_empty() {
+					None
+				} else {
+					Some(Kind::Either(kinds))
 				}
 			}
 		}
@@ -217,7 +216,9 @@ impl Kind {
 			match self {
 				Kind::Object => return matches!(path.first(), Some(Part::Field(_) | Part::All)),
 				Kind::Either(kinds) => {
-					return kinds.iter().all(|k| matches!(k, Kind::None) || k.allows_nested_kind(path, kind));
+					return kinds
+						.iter()
+						.all(|k| matches!(k, Kind::None) || k.allows_nested_kind(path, kind));
 				}
 				Kind::Array(inner, len) | Kind::Set(inner, len) => {
 					return match path.first() {
@@ -245,7 +246,7 @@ impl Kind {
 			Kind::Literal(lit) => lit.allows_nested_kind(path, kind),
 			// Check if any of the kinds in the either match the kind
 			Kind::Either(kinds) => {
-				return kinds.iter().all(|k| matches!(k, Kind::None) || k.allows_nested_kind(path, kind));
+				kinds.iter().all(|k| matches!(k, Kind::None) || k.allows_nested_kind(path, kind))
 			}
 			_ => false,
 		}
@@ -257,7 +258,7 @@ impl Kind {
 			_ => vec![self],
 		}
 	}
-	
+
 	pub(crate) fn either(kinds: Vec<Kind>) -> Kind {
 		let mut seen = HashSet::new();
 		let mut kinds = kinds

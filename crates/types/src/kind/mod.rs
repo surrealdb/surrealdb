@@ -1,7 +1,8 @@
 mod geometry;
 mod literal;
 
-use std::{collections::HashSet, fmt::Display};
+use std::collections::HashSet;
+use std::fmt::Display;
 
 pub use geometry::*;
 pub use literal::*;
@@ -92,7 +93,8 @@ impl Kind {
 	/// Create an either kind from a vector of kinds.
 	/// If after dedeplication the vector is empty, return `Kind::None`.
 	/// If after dedeplication the vector has one element, return that element.
-	/// If after dedeplication the vector has multiple elements, return an `Either` kind with the elements.
+	/// If after dedeplication the vector has multiple elements, return an `Either` kind with the
+	/// elements.
 	pub fn either(kinds: Vec<Kind>) -> Kind {
 		let mut seen = HashSet::new();
 		let mut kinds = kinds
