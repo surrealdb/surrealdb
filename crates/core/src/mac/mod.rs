@@ -130,23 +130,30 @@ macro_rules! process_definition_ident {
 macro_rules! process_definition_idiom {
 	($stk:ident, $ctx:ident, $opt:ident, $doc:ident, $x:expr, $into:expr) => {{
 		use crate::expr::FlowResultExt;
+		use crate::expr::Idiom;
+		use std::str::FromStr;
+
 		match $x {
-			crate::expr::Expr::Idiom(x) => x.to_raw_string(),
-			x => match $stk
-				.run(|stk| x.compute(stk, $ctx, $opt, $doc))
-				.await
-				.catch_return()?
-				.coerce_to::<String>()
-			{
-				Err(crate::val::value::CoerceError::InvalidKind {
-					from,
-					..
-				}) => Err(crate::val::value::CoerceError::InvalidKind {
-					from,
-					into: $into.to_string(),
-				}),
-				x => x,
-			}?,
+			crate::expr::Expr::Idiom(x) => x.clone(),
+			x => {
+				let raw = match $stk
+					.run(|stk| x.compute(stk, $ctx, $opt, $doc))
+					.await
+					.catch_return()?
+					.coerce_to::<String>()
+				{
+					Err(crate::val::value::CoerceError::InvalidKind {
+						from,
+						..
+					}) => Err(crate::val::value::CoerceError::InvalidKind {
+						from,
+						into: $into.to_string(),
+					}),
+					x => x,
+				}?;
+
+				Idiom::from_str(&raw).map_err(|e| anyhow::anyhow!("Failed to parse {} from string: {e}", $into))?
+			}
 		}
 	}};
 }

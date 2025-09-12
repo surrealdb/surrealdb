@@ -48,8 +48,8 @@ impl FieldDefinition {
 	pub fn to_sql_definition(&self) -> DefineFieldStatement {
 		DefineFieldStatement {
 			kind: crate::sql::statements::define::DefineKind::Default,
-			name: self.name.clone().into(),
-			what: unsafe { crate::sql::Ident::new_unchecked(self.what.clone()) },
+			name: Expr::Idiom(self.name.clone()).into(),
+			what: crate::sql::Expr::Idiom(crate::sql::Idiom::field(unsafe { crate::sql::Ident::new_unchecked(self.what.clone()) })),
 			flex: self.flexible,
 			field_kind: self.field_kind.clone().map(|x| x.into()),
 			readonly: self.readonly,

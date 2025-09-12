@@ -1700,13 +1700,13 @@ fn parse_define_field() {
 			res,
 			Expr::Define(Box::new(DefineStatement::Field(DefineFieldStatement {
 				kind: DefineKind::Default,
-				name: Idiom(vec![
+				name: Expr::Idiom(Idiom(vec![
 					Part::Field(Ident::from_strand(strand!("foo").to_owned())),
 					Part::All,
 					Part::All,
 					Part::Flatten,
-				]),
-				what: Ident::from_strand(strand!("bar").to_owned()),
+				])),
+				what: Expr::Idiom(Idiom::field(Ident::from_strand(strand!("bar").to_owned()))),
 				flex: true,
 				field_kind: Some(Kind::Option(Box::new(Kind::Either(vec![
 					Kind::Number,
@@ -1743,8 +1743,8 @@ fn parse_define_field() {
 			res,
 			Expr::Define(Box::new(DefineStatement::Field(DefineFieldStatement {
 				kind: DefineKind::Default,
-				name: Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned())),]),
-				what: Ident::from_strand(strand!("bar").to_owned()),
+				name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned())),])),
+				what: Expr::Idiom(Idiom::field(Ident::from_strand(strand!("bar").to_owned()))),
 				flex: false,
 				field_kind: None,
 				readonly: false,

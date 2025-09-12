@@ -3,7 +3,7 @@ use std::fmt::{self, Display, Write};
 use super::DefineKind;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
-use crate::sql::{Expr, Ident, Idiom, Kind, Permissions};
+use crate::sql::{Expr, Idiom, Kind, Permissions};
 use crate::val::Strand;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -43,12 +43,12 @@ impl From<crate::expr::statements::define::DefineDefault> for DefineDefault {
 	}
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineFieldStatement {
 	pub kind: DefineKind,
-	pub name: Idiom,
-	pub what: Ident,
+	pub name: Expr,
+	pub what: Expr,
 	/// Whether the field is marked as flexible.
 	/// Flexible allows the field to be schemaless even if the table is marked
 	/// as schemafull.
@@ -62,6 +62,28 @@ pub struct DefineFieldStatement {
 	pub permissions: Permissions,
 	pub comment: Option<Strand>,
 	pub reference: Option<Reference>,
+}
+
+impl Default for DefineFieldStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Idiom(Idiom::default()),
+			what: Expr::Literal(crate::sql::Literal::Strand(
+				crate::val::Strand::new(String::new()).unwrap(),
+			)),
+			flex: false,
+			field_kind: None,
+			readonly: false,
+			value: None,
+			assert: None,
+			computed: None,
+			default: DefineDefault::None,
+			permissions: Permissions::default(),
+			comment: None,
+			reference: None,
+		}
+	}
 }
 
 impl Display for DefineFieldStatement {
@@ -128,9 +150,7 @@ impl From<DefineFieldStatement> for crate::expr::statements::DefineFieldStatemen
 		Self {
 			kind: v.kind.into(),
 			name: v.name.into(),
-			what: crate::expr::Expr::Idiom(crate::expr::Idiom::from(vec![
-				crate::expr::Part::Field(v.what.into()),
-			])),
+			what: v.what.into(),
 			flex: v.flex,
 			readonly: v.readonly,
 			field_kind: v.field_kind.map(Into::into),
@@ -151,16 +171,7 @@ impl From<crate::expr::statements::DefineFieldStatement> for DefineFieldStatemen
 		Self {
 			kind: v.kind.into(),
 			name: v.name.into(),
-			what: match v.what {
-				crate::expr::Expr::Idiom(idiom) if idiom.len() == 1 => {
-					if let Some(crate::expr::Part::Field(field)) = idiom.first() {
-						field.clone().into()
-					} else {
-						crate::sql::Ident::new(String::new()).unwrap()
-					}
-				}
-				_ => crate::sql::Ident::new(String::new()).unwrap(),
-			},
+			what: v.what.into(),
 			flex: v.flex,
 			readonly: v.readonly,
 			field_kind: v.field_kind.map(Into::into),

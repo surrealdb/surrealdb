@@ -807,10 +807,10 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.parse_local_idiom(stk).await?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = self.next_token_value()?;
+		let what = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 
 		let mut res = DefineFieldStatement {
 			name,
