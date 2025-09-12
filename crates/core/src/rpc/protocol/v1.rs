@@ -19,14 +19,6 @@ use crate::sql::{
 };
 use crate::val::{Array, Object, RecordIdKey, Strand, Value};
 
-/// utility function converting a `Value::Strand` into a `Expr::Table`
-fn value_to_table(value: Value) -> Expr {
-	match value {
-		Value::Strand(s) => Expr::Table(Ident::from_strand(s)),
-		x => x.into_literal().into(),
-	}
-}
-
 /// returns if the expression returns a singular value when selected.
 ///
 /// As this rpc is some what convuluted the singular conditions is not the same
@@ -619,7 +611,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Specify the SQL query string
 		let sql = CreateStatement {
 			only,
-			what: vec![value_to_table(what)],
+			what: vec![what.into()],
 			data,
 			output: Some(Output::After),
 			timeout: None,
@@ -668,7 +660,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Specify the SQL query string
 		let sql = UpsertStatement {
 			only,
-			what: vec![value_to_table(what)],
+			what: vec![what.into()],
 			data,
 			output: Some(Output::After),
 			with: None,
@@ -720,7 +712,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Specify the SQL query string
 		let sql = UpdateStatement {
 			only,
-			what: vec![value_to_table(what)],
+			what: vec![what.into()],
 			data,
 			output: Some(Output::After),
 			with: None,
@@ -772,7 +764,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Specify the SQL query string
 		let sql = UpdateStatement {
 			only,
-			what: vec![value_to_table(what)],
+			what: vec![what.into()],
 			data,
 			output: Some(Output::After),
 			..Default::default()
@@ -826,7 +818,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Specify the SQL query string
 		let expr = Expr::Update(Box::new(UpdateStatement {
 			only,
-			what: vec![value_to_table(what)],
+			what: vec![what.into()],
 			data,
 			output: if diff {
 				Some(Output::Diff)
@@ -885,7 +877,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let expr = Expr::Relate(Box::new(RelateStatement {
 			only,
 			from: from.into_literal().into(),
-			through: value_to_table(kind),
+			through: kind.into(),
 			to: with.into_literal().into(),
 			data,
 			output: Some(Output::After),
@@ -920,7 +912,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Specify the SQL query string
 		let sql = Expr::Delete(Box::new(DeleteStatement {
 			only: singular(&what),
-			what: vec![value_to_table(what)],
+			what: vec![what.into()],
 			output: Some(Output::Before),
 			with: None,
 			cond: None,

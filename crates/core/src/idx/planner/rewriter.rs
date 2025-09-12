@@ -171,6 +171,9 @@ impl<'a> KnnConditionRewriter<'a> {
 			RecordIdKeyLit::Range(r) => {
 				self.eval_id_range(r).map(|v| RecordIdKeyLit::Range(Box::new(v)))
 			}
+			RecordIdKeyLit::Expr(expr) => {
+				self.rewrite_expr(expr).map(|e| RecordIdKeyLit::Expr(Box::new(e)))
+			}
 		}
 	}
 
