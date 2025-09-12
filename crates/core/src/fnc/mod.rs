@@ -953,6 +953,7 @@ pub async fn idiom(
 				"no such method found for the record type",
 				//
 				"exists" => record::exists((stk, ctx, Some(opt), doc)).await,
+				"is_edge" => record::is::edge((stk, ctx, Some(opt), doc)).await,
 				"id" => record::id,
 				"table" => record::tb,
 				"tb" => record::tb,
