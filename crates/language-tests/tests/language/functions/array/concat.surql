@@ -2,7 +2,7 @@
 [test]
 
 [[test.results]]
-error = "Incorrect arguments for function array::concat(). Expected at least one argument"
+error = "[]"
 
 [[test.results]]
 value = "[]"

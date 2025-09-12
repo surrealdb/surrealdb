@@ -252,6 +252,7 @@ impl TypedRange<i64> {
 		}
 	}
 
+	// TODO: Change this to return an option.
 	#[allow(clippy::len_without_is_empty)]
 	pub fn len(&self) -> usize {
 		let end = match self.end {
