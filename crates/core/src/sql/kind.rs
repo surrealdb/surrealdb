@@ -1,5 +1,6 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Display, Formatter, Write};
+use std::hash;
 
 use rust_decimal::Decimal;
 
@@ -62,11 +63,13 @@ impl From<crate::expr::kind::GeometryKind> for GeometryKind {
 }
 
 /// The kind, or data type, of a value or field.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Kind {
 	/// The most generic type, can be anything.
 	Any,
+	/// None type.
+	None,
 	/// Null type.
 	Null,
 	/// Boolean type.
@@ -98,8 +101,6 @@ pub enum Kind {
 	Record(Vec<String>),
 	/// A geometry type.
 	Geometry(Vec<GeometryKind>),
-	/// An optional type.
-	Option(Box<Kind>),
 	/// An either type.
 	/// Can be any of the kinds in the vec.
 	Either(Vec<Kind>),
@@ -131,10 +132,34 @@ impl Default for Kind {
 	}
 }
 
+impl Kind {
+	pub(crate) fn flatten(self) -> Vec<Kind> {
+		match self {
+			Kind::Either(x) => x.into_iter().flat_map(|k| k.flatten()).collect(),
+			_ => vec![self],
+		}
+	}
+
+	pub(crate) fn either(kinds: Vec<Kind>) -> Kind {
+		let mut seen = HashSet::new();
+		let mut kinds = kinds
+			.into_iter()
+			.flat_map(|k| k.flatten())
+			.filter(|k| seen.insert(k.clone()))
+			.collect::<Vec<_>>();
+		match kinds.len() {
+			0 => Kind::None,
+			1 => kinds.remove(0),
+			_ => Kind::Either(kinds),
+		}
+	}
+}
+
 impl From<Kind> for crate::expr::Kind {
 	fn from(v: Kind) -> Self {
 		match v {
 			Kind::Any => crate::expr::Kind::Any,
+			Kind::None => crate::expr::Kind::None,
 			Kind::Null => crate::expr::Kind::Null,
 			Kind::Bool => crate::expr::Kind::Bool,
 			Kind::Bytes => crate::expr::Kind::Bytes,
@@ -152,7 +177,6 @@ impl From<Kind> for crate::expr::Kind {
 			Kind::Geometry(geometries) => {
 				crate::expr::Kind::Geometry(geometries.into_iter().map(Into::into).collect())
 			}
-			Kind::Option(k) => crate::expr::Kind::Option(Box::new(k.as_ref().clone().into())),
 			Kind::Either(kinds) => {
 				crate::expr::Kind::Either(kinds.into_iter().map(Into::into).collect())
 			}
@@ -173,6 +197,7 @@ impl From<crate::expr::Kind> for Kind {
 	fn from(v: crate::expr::Kind) -> Self {
 		match v {
 			crate::expr::Kind::Any => Kind::Any,
+			crate::expr::Kind::None => Kind::None,
 			crate::expr::Kind::Null => Kind::Null,
 			crate::expr::Kind::Bool => Kind::Bool,
 			crate::expr::Kind::Bytes => Kind::Bytes,
@@ -190,7 +215,6 @@ impl From<crate::expr::Kind> for Kind {
 			crate::expr::Kind::Geometry(geometries) => {
 				Kind::Geometry(geometries.into_iter().map(Into::into).collect())
 			}
-			crate::expr::Kind::Option(k) => Kind::Option(Box::new((*k).into())),
 			crate::expr::Kind::Either(kinds) => {
 				let kinds: Vec<Kind> = kinds.into_iter().map(Into::into).collect();
 				if kinds.is_empty() {
@@ -215,6 +239,7 @@ impl Display for Kind {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Kind::Any => f.write_str("any"),
+			Kind::None => f.write_str("none"),
 			Kind::Null => f.write_str("null"),
 			Kind::Bool => f.write_str("bool"),
 			Kind::Bytes => f.write_str("bytes"),
@@ -229,7 +254,6 @@ impl Display for Kind {
 			Kind::Uuid => f.write_str("uuid"),
 			Kind::Regex => f.write_str("regex"),
 			Kind::Function(_, _) => f.write_str("function"),
-			Kind::Option(k) => write!(f, "option<{}>", k),
 			Kind::Record(k) => {
 				if k.is_empty() {
 					write!(f, "record")
@@ -279,6 +303,21 @@ pub enum KindLiteral {
 	Array(Vec<Kind>),
 	Object(BTreeMap<String, Kind>),
 	Bool(bool),
+}
+
+impl hash::Hash for KindLiteral {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
+		match self {
+			Self::String(v) => v.hash(state),
+			Self::Integer(v) => v.hash(state),
+			Self::Float(v) => v.to_bits().hash(state),
+			Self::Decimal(v) => v.hash(state),
+			Self::Duration(v) => v.hash(state),
+			Self::Array(v) => v.hash(state),
+			Self::Object(v) => v.hash(state),
+			Self::Bool(v) => v.hash(state),
+		}
+	}
 }
 
 impl PartialEq for KindLiteral {

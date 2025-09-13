@@ -27,14 +27,13 @@ impl Parser<'_> {
 	pub(crate) async fn parse_inner_kind(&mut self, stk: &mut Stk) -> ParseResult<Kind> {
 		match self.parse_inner_single_kind(stk).await? {
 			Kind::Any => Ok(Kind::Any),
-			Kind::Option(k) => Ok(Kind::Option(k)),
 			first => {
 				if self.peek_kind() == t!("|") {
 					let mut kind = vec![first];
 					while self.eat(t!("|")) {
 						kind.push(stk.run(|ctx| self.parse_concrete_kind(ctx)).await?);
 					}
-					let kind = Kind::Either(kind);
+					let kind = Kind::either(kind);
 					Ok(kind)
 				} else {
 					Ok(first)
@@ -54,17 +53,15 @@ impl Parser<'_> {
 				self.pop_peek();
 
 				let delim = expected!(self, t!("<")).span;
-				let mut first = stk.run(|ctx| self.parse_concrete_kind(ctx)).await?;
+				let mut kinds =
+					vec![Kind::None, stk.run(|ctx| self.parse_concrete_kind(ctx)).await?];
 				if self.peek_kind() == t!("|") {
-					let mut kind = vec![first];
 					while self.eat(t!("|")) {
-						kind.push(stk.run(|ctx| self.parse_concrete_kind(ctx)).await?);
+						kinds.push(stk.run(|ctx| self.parse_concrete_kind(ctx)).await?);
 					}
-
-					first = Kind::Either(kind);
 				}
 				self.expect_closing_delimiter(t!(">"), delim)?;
-				Ok(Kind::Option(Box::new(first)))
+				Ok(Kind::either(kinds))
 			}
 			_ => stk.run(|ctx| self.parse_concrete_kind(ctx)).await,
 		}
@@ -80,6 +77,7 @@ impl Parser<'_> {
 		let next = self.next();
 		match next.kind {
 			t!("BOOL") => Ok(Kind::Bool),
+			t!("NONE") => Ok(Kind::None),
 			t!("NULL") => Ok(Kind::Null),
 			t!("BYTES") => Ok(Kind::Bytes),
 			t!("DATETIME") => Ok(Kind::Datetime),
@@ -143,9 +141,6 @@ impl Parser<'_> {
 				} else {
 					Ok(Kind::Set(Box::new(Kind::Any), None))
 				}
-			}
-			t!("NONE") => {
-				unexpected!(self, next, "a kind name.", => "to define a field that can be NONE, use option<type_name> instead.")
 			}
 			t!("FILE") => {
 				let span = self.peek().span;
@@ -457,8 +452,8 @@ mod tests {
 		let sql = "option<int>";
 		let res = kind(sql);
 		let out = res.unwrap();
-		assert_eq!("option<int>", format!("{}", out));
-		assert_eq!(out, Kind::Option(Box::new(Kind::Int)));
+		assert_eq!("none | int", format!("{}", out));
+		assert_eq!(out, Kind::Either(vec![Kind::None, Kind::Int]));
 	}
 
 	#[test]
@@ -466,8 +461,26 @@ mod tests {
 		let sql = "option<int | float>";
 		let res = kind(sql);
 		let out = res.unwrap();
-		assert_eq!("option<int | float>", format!("{}", out));
-		assert_eq!(out, Kind::Option(Box::new(Kind::Either(vec![Kind::Int, Kind::Float]))));
+		assert_eq!("none | int | float", format!("{}", out));
+		assert_eq!(out, Kind::Either(vec![Kind::None, Kind::Int, Kind::Float]));
+	}
+
+	#[test]
+	fn kind_none() {
+		let sql = "none";
+		let res = kind(sql);
+		let out = res.unwrap();
+		assert_eq!("none", format!("{}", out));
+		assert_eq!(out, Kind::None);
+	}
+
+	#[test]
+	fn kind_none_tuple() {
+		let sql = "none | int | float";
+		let res = kind(sql);
+		let out = res.unwrap();
+		assert_eq!("none | int | float", format!("{}", out));
+		assert_eq!(out, Kind::Either(vec![Kind::None, Kind::Int, Kind::Float]));
 	}
 
 	#[test]

@@ -23,6 +23,10 @@ impl ToFlatbuffers for Kind {
 					proto_fb::AnyKind::create(builder, &proto_fb::AnyKindArgs {}).as_union_value(),
 				),
 			},
+			Self::None => proto_fb::KindArgs {
+				kind_type: proto_fb::KindType::NONE,
+				kind: None,
+			},
 			Self::Null => proto_fb::KindArgs {
 				kind_type: proto_fb::KindType::Null,
 				kind: Some(
@@ -144,21 +148,6 @@ impl ToFlatbuffers for Kind {
 							builder,
 							&proto_fb::GeometryKindArgs {
 								types: Some(types),
-							},
-						)
-						.as_union_value(),
-					),
-				}
-			}
-			Self::Option(kind) => {
-				let inner = kind.to_fb(builder)?;
-				proto_fb::KindArgs {
-					kind_type: proto_fb::KindType::Option,
-					kind: Some(
-						proto_fb::OptionKind::create(
-							builder,
-							&proto_fb::OptionKindArgs {
-								inner: Some(inner),
 							},
 						)
 						.as_union_value(),
@@ -393,6 +382,7 @@ impl FromFlatbuffers for Kind {
 
 		match kind_type {
 			KindType::Any => Ok(Kind::Any),
+			KindType::NONE => Ok(Kind::None),
 			KindType::Null => Ok(Kind::Null),
 			KindType::Bool => Ok(Kind::Bool),
 			KindType::Int => Ok(Kind::Int),
@@ -467,7 +457,7 @@ impl FromFlatbuffers for Kind {
 				} else {
 					Vec::new()
 				};
-				Ok(Kind::Either(kinds))
+				Ok(Kind::either(kinds))
 			}
 			KindType::Function => {
 				let Some(function) = input.kind_as_function() else {
@@ -510,7 +500,7 @@ impl FromFlatbuffers for Kind {
 				let Some(inner) = option.inner() else {
 					return Err(anyhow::anyhow!("Missing option item kind"));
 				};
-				Ok(Kind::Option(Box::new(Kind::from_fb(inner)?)))
+				Ok(Kind::option(Kind::from_fb(inner)?))
 			}
 			KindType::Regex => Ok(Kind::Regex),
 			_ => Err(anyhow::anyhow!("Unknown kind type")),
@@ -657,7 +647,6 @@ mod tests {
 	#[case::range(Kind::Range)]
 	#[case::record(Kind::Record(vec!["test_table".to_string()]))]
 	#[case::geometry(Kind::Geometry(vec![GeometryKind::Point, GeometryKind::Polygon]))]
-	#[case::option(Kind::Option(Box::new(Kind::String)))]
 	#[case::either(Kind::Either(vec![Kind::String, Kind::Number]))]
 	#[case::set(Kind::Set(Box::new(Kind::String), Some(10)))]
 	#[case::array(Kind::Array(Box::new(Kind::String), Some(5)))]

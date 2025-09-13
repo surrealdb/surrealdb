@@ -59,6 +59,7 @@ error = "Cannot set field `fd[0]` with type `number` as it mismatched with field
 
 [[test.results]]
 value = "NONE"
+
 [[test.results]]
 value = "NONE"
 [[test.results]]
