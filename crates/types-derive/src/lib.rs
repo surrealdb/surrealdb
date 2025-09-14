@@ -116,7 +116,7 @@ use syn::{Data, DeriveInput, Fields, Ident, Type, parse_macro_input};
 ///
 /// // Works with any type that implements SurrealValue
 /// let container = Container {
-///     data: vec![1, 2, 3],
+///     data: vec![1i64, 2i64, 3i64],
 ///     metadata: "numbers".to_string(),
 /// };
 ///
