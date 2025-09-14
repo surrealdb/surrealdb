@@ -10,35 +10,52 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::{Base, Ident};
+use crate::expr::{Base, Expr, Literal};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
+use reblessive::tree::Stk;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineModelStatement {
 	pub kind: DefineKind,
 	pub hash: String,
-	pub name: Ident,
+	pub name: Expr,
 	pub version: String,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 	pub permissions: Permission,
+}
+
+impl Default for DefineModelStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			hash: String::new(),
+			name: Expr::Literal(Literal::None),
+			version: String::new(),
+			comment: None,
+			permissions: Permission::default(),
+		}
+	}
 }
 
 impl DefineModelStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
+		// Compute name and version
+		let name = process_definition_ident!(stk, ctx, opt, doc, &self.name, "model name");
 		// Check if the definition exists
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-		if let Some(model) = txn.get_db_model(ns, db, &self.name, &self.version).await? {
+		if let Some(model) = txn.get_db_model(ns, db, &name, &self.version).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -53,14 +70,14 @@ impl DefineModelStatement {
 		}
 
 		// Process the statement
-		let key = crate::key::database::ml::new(ns, db, &self.name, &self.version);
+		let key = crate::key::database::ml::new(ns, db, &name, &self.version);
 		txn.set(
 			&key,
 			&MlModelDefinition {
 				hash: self.hash.clone(),
-				name: self.name.to_raw_string(),
+				name: name.clone(),
 				version: self.version.clone(),
-				comment: self.comment.clone().map(|x| x.to_raw_string()),
+				comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 				permissions: self.permissions.clone(),
 			},
 			None,

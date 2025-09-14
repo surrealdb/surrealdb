@@ -11,16 +11,16 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::{Base, Expr, FlowResultExt as _, Ident};
+use crate::expr::{Base, Ident, Expr, FlowResultExt as _};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineParamStatement {
 	pub kind: DefineKind,
 	pub name: Ident,
 	pub value: Expr,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 	pub permissions: Permission,
 }
 
@@ -69,7 +69,7 @@ impl DefineParamStatement {
 			&ParamDefinition {
 				value,
 				name: self.name.to_raw_string(),
-				comment: self.comment.clone().map(|s| s.into_string()),
+				comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 				permissions: self.permissions.clone(),
 			},
 		)

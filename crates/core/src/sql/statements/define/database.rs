@@ -1,18 +1,29 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::sql::Ident;
+use crate::sql::{Expr, Literal};
 use crate::sql::changefeed::ChangeFeed;
-use crate::val::Strand;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineDatabaseStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
-	pub name: Ident,
-	pub comment: Option<Strand>,
+	pub name: Expr,
+	pub comment: Option<Expr>,
 	pub changefeed: Option<ChangeFeed>,
+}
+
+impl Default for DefineDatabaseStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			id: None,
+			name: Expr::Literal(Literal::None),
+			comment: None,
+			changefeed: None,
+		}
+	}
 }
 
 impl Display for DefineDatabaseStatement {
@@ -25,7 +36,7 @@ impl Display for DefineDatabaseStatement {
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?;
 		}
 		if let Some(ref v) = self.changefeed {
 			write!(f, " {v}")?;
@@ -39,10 +50,8 @@ impl From<DefineDatabaseStatement> for crate::expr::statements::DefineDatabaseSt
 		crate::expr::statements::DefineDatabaseStatement {
 			kind: v.kind.into(),
 			id: v.id,
-			name: crate::expr::Expr::Idiom(crate::expr::Idiom::from(vec![
-				crate::expr::Part::Field(v.name.into()),
-			])),
-			comment: v.comment.map(|s| crate::expr::Expr::Literal(crate::expr::Literal::Strand(s))),
+			name: v.name.into(),
+			comment: v.comment.map(|x| x.into()),
 			changefeed: v.changefeed.map(Into::into),
 		}
 	}
@@ -54,23 +63,8 @@ impl From<crate::expr::statements::DefineDatabaseStatement> for DefineDatabaseSt
 		DefineDatabaseStatement {
 			kind: v.kind.into(),
 			id: v.id,
-			name: match v.name {
-				crate::expr::Expr::Idiom(idiom) if idiom.len() == 1 => {
-					if let Some(crate::expr::Part::Field(field)) = idiom.first() {
-						field.clone().into()
-					} else {
-						crate::sql::Ident::new(String::new()).unwrap()
-					}
-				}
-				_ => crate::sql::Ident::new(String::new()).unwrap(),
-			},
-			comment: v.comment.and_then(|expr| {
-				if let crate::expr::Expr::Literal(crate::expr::Literal::Strand(s)) = expr {
-					Some(s)
-				} else {
-					None
-				}
-			}),
+			name: v.name.into(),
+			comment: v.comment.map(|x| x.into()),
 			changefeed: v.changefeed.map(Into::into),
 		}
 	}

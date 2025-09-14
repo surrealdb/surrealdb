@@ -50,7 +50,7 @@ impl Default for DefineTableStatement {
 			permissions: Permissions::default(),
 			changefeed: None,
 			comment: None,
-			table_type: TableType::Normal,
+			table_type: TableType::default(),
 		}
 	}
 }

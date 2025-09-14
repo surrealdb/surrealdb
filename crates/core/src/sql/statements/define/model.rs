@@ -2,18 +2,30 @@ use std::fmt::{self, Write};
 
 use super::DefineKind;
 use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::{Ident, Permission};
-use crate::val::Strand;
+use crate::sql::{Expr, Literal, Permission};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineModelStatement {
 	pub kind: DefineKind,
 	pub hash: String,
-	pub name: Ident,
+	pub name: Expr,
 	pub version: String,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 	pub permissions: Permission,
+}
+
+impl Default for DefineModelStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			hash: String::new(),
+			name: Expr::Literal(Literal::None),
+			version: String::new(),
+			comment: None,
+			permissions: Permission::default(),
+		}
+	}
 }
 
 impl fmt::Display for DefineModelStatement {
@@ -46,7 +58,7 @@ impl From<DefineModelStatement> for crate::expr::statements::DefineModelStatemen
 			hash: v.hash,
 			name: v.name.into(),
 			version: v.version,
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 			permissions: v.permissions.into(),
 		}
 	}
@@ -59,7 +71,7 @@ impl From<crate::expr::statements::DefineModelStatement> for DefineModelStatemen
 			hash: v.hash,
 			name: v.name.into(),
 			version: v.version,
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 			permissions: v.permissions.into(),
 		}
 	}

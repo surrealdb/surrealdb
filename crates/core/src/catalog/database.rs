@@ -8,8 +8,8 @@ use crate::expr::ChangeFeed;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::define::DefineDatabaseStatement;
-use crate::sql::{Ident, ToSql};
-use crate::val::Value;
+use crate::sql::{Expr, Ident, Idiom, Literal, ToSql};
+use crate::val::{Strand, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -64,8 +64,8 @@ impl DatabaseDefinition {
 		DefineDatabaseStatement {
 			// SAFETY: we know the name is valid because it was validated when the database was
 			// created.
-			name: unsafe { Ident::new_unchecked(self.name.clone()) },
-			comment: self.comment.clone().map(|v| v.into()),
+			name: Expr::Idiom(Idiom::field(Ident::new(self.name.clone()).unwrap())),
+			comment: self.comment.clone().map(|v| Expr::Literal(Literal::Strand(Strand::new(v).unwrap()))),
 			changefeed: self.changefeed.map(|v| v.into()),
 			..Default::default()
 		}

@@ -2,8 +2,7 @@ use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
 use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::{Block, Ident, Kind, Permission};
-use crate::val::Strand;
+use crate::sql::{Block, Expr, Ident, Kind, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -12,7 +11,7 @@ pub struct DefineFunctionStatement {
 	pub name: Ident,
 	pub args: Vec<(Ident, Kind)>,
 	pub block: Block,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 	pub permissions: Permission,
 	pub returns: Option<Kind>,
 }
@@ -58,7 +57,7 @@ impl From<DefineFunctionStatement> for crate::expr::statements::DefineFunctionSt
 			name: v.name.into(),
 			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
 			block: v.block.into(),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 			permissions: v.permissions.into(),
 			returns: v.returns.map(Into::into),
 		}
@@ -72,7 +71,7 @@ impl From<crate::expr::statements::DefineFunctionStatement> for DefineFunctionSt
 			name: v.name.into(),
 			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
 			block: v.block.into(),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 			permissions: v.permissions.into(),
 			returns: v.returns.map(Into::into),
 		}

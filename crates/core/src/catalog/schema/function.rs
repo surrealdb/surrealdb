@@ -6,7 +6,7 @@ use crate::expr::{Block, Kind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::define::DefineKind;
 use crate::sql::{DefineFunctionStatement, ToSql};
-use crate::val::Value;
+use crate::val::{Strand, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -37,7 +37,7 @@ impl FunctionDefinition {
 			block: self.block.clone().into(),
 			permissions: self.permissions.clone().into(),
 			returns: self.returns.clone().map(|k| k.into()),
-			comment: self.comment.clone().map(Into::into),
+			comment: self.comment.clone().map(|x| crate::sql::Expr::Literal(crate::sql::Literal::Strand(Strand::new(x).unwrap()))),
 		}
 	}
 }

@@ -7,35 +7,51 @@ use crate::catalog::SequenceDefinition;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Ident, Timeout, Value};
+use crate::expr::{Base, Expr, Literal, Timeout, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
+use reblessive::tree::Stk;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineSequenceStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: Expr,
 	pub batch: u32,
 	pub start: i64,
 	pub timeout: Option<Timeout>,
 }
 
+impl Default for DefineSequenceStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::None),
+			batch: 0,
+			start: 0,
+			timeout: None,
+		}
+	}
+}
+
 impl DefineSequenceStatement {
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+	pub(crate) async fn compute(&self, stk: &mut Stk, ctx: &Context, opt: &Options, doc: Option<&CursorDoc>) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
+		// Compute name
+		let name = process_definition_ident!(stk, ctx, opt, doc, &self.name, "sequence name");
 		// Fetch the transaction
 		let txn = ctx.tx();
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
-		if txn.get_db_sequence(ns, db, &self.name).await.is_ok() {
+		if txn.get_db_sequence(ns, db, &name).await.is_ok() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::SeqAlreadyExists {
-							name: self.name.to_string(),
+							name: name.to_string(),
 						});
 					}
 				}
@@ -52,9 +68,9 @@ impl DefineSequenceStatement {
 		};
 
 		// Process the statement
-		let key = Sq::new(db.namespace_id, db.database_id, &self.name);
+		let key = Sq::new(db.namespace_id, db.database_id, &name);
 		let sq = SequenceDefinition {
-			name: self.name.to_raw_string(),
+			name: name.clone(),
 			batch: self.batch,
 			start: self.start,
 			timeout: self.timeout.as_ref().map(|t| *t.as_std_duration()),

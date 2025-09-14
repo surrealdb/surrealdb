@@ -71,7 +71,7 @@ impl FieldDefinition {
 				update: self.update_permission.to_sql_definition(),
 				delete: crate::sql::Permission::Full,
 			},
-			comment: self.comment.clone().map(|x| unsafe { Strand::new_unchecked(x) }),
+			comment: self.comment.clone().map(|x| crate::sql::Expr::Literal(crate::sql::Literal::Strand(Strand::new(x).unwrap()))),
 			reference: self.reference.clone().map(|x| x.into()),
 		}
 	}

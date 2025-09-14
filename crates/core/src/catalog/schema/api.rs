@@ -9,7 +9,7 @@ use crate::expr::Expr;
 use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
+use crate::sql::{Literal, ToSql};
 use crate::val::{Array, Object, Strand, Value};
 
 /// The API definition.
@@ -65,7 +65,7 @@ impl ApiDefinition {
 			actions: self.actions.iter().map(|x| x.to_sql_action()).collect(),
 			fallback: self.fallback.clone().map(|x| x.into()),
 			config: self.config.to_sql_config(),
-			comment: self.comment.clone().map(|x| unsafe { Strand::new_unchecked(x) }),
+			comment: self.comment.clone().map(|x| crate::sql::Expr::Literal(Literal::Strand(Strand::new(x).unwrap()))),
 		}
 	}
 }

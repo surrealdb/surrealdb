@@ -19,21 +19,35 @@ use crate::err::Error;
 use crate::expr::Output;
 #[cfg(target_family = "wasm")]
 use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
-use crate::expr::{Base, Ident, Idiom, Part};
+use crate::expr::{Base, Expr, Idiom, Literal, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ToSql;
 use crate::sql::fmt::Fmt;
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineIndexStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
-	pub what: Ident,
+	pub name: Expr,
+	pub what: Expr,
 	pub cols: Vec<Idiom>,
 	pub index: Index,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 	pub concurrently: bool,
+}
+
+impl Default for DefineIndexStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::None),
+			what: Expr::Literal(Literal::None),
+			cols: Vec::new(),
+			index: Index::Idx,
+			comment: None,
+			concurrently: false,
+		}
+	}
 }
 
 impl DefineIndexStatement {
@@ -50,12 +64,16 @@ impl DefineIndexStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 
+		// Compute name and what
+		let name = process_definition_ident!(stk, ctx, opt, doc, &self.name, "index name");
+		let what = process_definition_ident!(stk, ctx, opt, doc, &self.what, "index table");
+
 		let (ns, db) = opt.ns_db()?;
-		let tb = txn.ensure_ns_db_tb(ns, db, &self.what, opt.strict).await?;
+		let tb = txn.ensure_ns_db_tb(ns, db, &what, opt.strict).await?;
 
 		// Check if the definition exists
 		let index_id = if let Some(ix) =
-			txn.get_tb_index(tb.namespace_id, tb.database_id, &tb.name, &self.name).await?
+			txn.get_tb_index(tb.namespace_id, tb.database_id, &tb.name, &name).await?
 		{
 			match self.kind {
 				DefineKind::Default => {
@@ -77,12 +95,12 @@ impl DefineIndexStatement {
 					tb.namespace_id,
 					tb.database_id,
 					&tb.name,
-					&self.name,
+					&name,
 				)
 				.await?;
 			#[cfg(target_family = "wasm")]
 			ctx.get_index_stores()
-				.index_removed(&txn, tb.namespace_id, tb.database_id, &tb.name, &self.name)
+				.index_removed(&txn, tb.namespace_id, tb.database_id, &tb.name, &name)
 				.await?;
 
 			ix.index_id
@@ -115,11 +133,11 @@ impl DefineIndexStatement {
 		// Process the statement
 		let index_def = IndexDefinition {
 			index_id,
-			name: self.name.to_raw_string(),
-			table_name: self.what.to_raw_string(),
+			name,
+			table_name: what,
 			cols: self.cols.clone(),
 			index: self.index.clone(),
-			comment: self.comment.clone().map(|x| x.to_raw_string()),
+			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 		};
 		txn.put_tb_index(tb.namespace_id, tb.database_id, &tb.name, &index_def).await?;
 

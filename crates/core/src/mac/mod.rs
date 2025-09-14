@@ -126,7 +126,6 @@ macro_rules! process_definition_ident {
 	}};
 }
 
-#[allow(unused_macros)]
 macro_rules! process_definition_idiom {
 	($stk:ident, $ctx:ident, $opt:ident, $doc:ident, $x:expr, $into:expr) => {{
 		use crate::expr::FlowResultExt;
@@ -278,7 +277,7 @@ mod test {
 		let Ok(Error::Unreachable(msg)) = fail_func().unwrap_err().downcast() else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:188: Reached unreachable code", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:268: Reached unreachable code", msg);
 	}
 
 	#[test]
@@ -286,7 +285,7 @@ mod test {
 		let Error::Unreachable(msg) = Error::unreachable("Reached unreachable code") else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:205: Reached unreachable code", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:285: Reached unreachable code", msg);
 	}
 
 	#[test]
@@ -294,6 +293,6 @@ mod test {
 		let Ok(Error::Unreachable(msg)) = fail_func_args().unwrap_err().downcast() else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:192: Found test but expected other", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:272: Found test but expected other", msg);
 	}
 }

@@ -14,7 +14,6 @@ use crate::err::Error;
 use crate::expr::fmt::{Fmt, pretty_indent};
 use crate::expr::{Base, Expr, FlowResultExt as _, Value};
 use crate::iam::{Action, ResourceKind};
-use crate::val::Strand;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineApiStatement {
@@ -23,7 +22,7 @@ pub struct DefineApiStatement {
 	pub actions: Vec<ApiAction>,
 	pub fallback: Option<Expr>,
 	pub config: ApiConfig,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 }
 
 impl DefineApiStatement {
@@ -76,7 +75,7 @@ impl DefineApiStatement {
 			actions,
 			fallback: self.fallback.clone(),
 			config,
-			comment: self.comment.as_ref().map(|c| c.clone().into_string()),
+			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 		};
 		txn.put_db_api(ns, db, &ap).await?;
 		// Clear the cache

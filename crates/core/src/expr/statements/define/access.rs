@@ -38,7 +38,7 @@ impl Default for DefineAccessStatement {
 	fn default() -> Self {
 		Self {
 			kind: DefineKind::Default,
-			name: Expr::Literal(Literal::Strand(Strand::new(String::new()).unwrap())),
+			name: Expr::Literal(Literal::None),
 			base: Base::Root,
 			access_type: AccessType::default(),
 			authenticate: None,

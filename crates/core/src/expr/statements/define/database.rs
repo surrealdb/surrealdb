@@ -14,7 +14,7 @@ use crate::expr::changefeed::ChangeFeed;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Literal};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineDatabaseStatement {
@@ -30,7 +30,7 @@ impl Default for DefineDatabaseStatement {
 		Self {
 			kind: DefineKind::Default,
 			id: None,
-			name: Expr::Literal(Literal::Strand(Strand::new(String::new()).unwrap())),
+			name: Expr::Literal(Literal::None),
 			comment: None,
 			changefeed: None,
 		}

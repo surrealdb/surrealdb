@@ -3,22 +3,38 @@ use std::fmt::{self, Display, Write};
 use super::DefineKind;
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::{Ident, Kind, Permissions, TableType, View};
-use crate::val::Strand;
+use crate::sql::{Expr, Kind, Literal, Permissions, TableType, View};		
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineTableStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
-	pub name: Ident,
+	pub name: Expr,
 	pub drop: bool,
 	pub full: bool,
 	pub view: Option<View>,
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 	pub table_type: TableType,
+}
+
+impl Default for DefineTableStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			id: None,
+			name: Expr::Literal(Literal::None),
+			drop: false,
+			full: false,
+			view: None,
+			permissions: Permissions::none(),
+			changefeed: None,
+			comment: None,
+			table_type: TableType::default(),
+		}
+	}
 }
 
 impl Display for DefineTableStatement {
@@ -97,15 +113,13 @@ impl From<DefineTableStatement> for crate::expr::statements::DefineTableStatemen
 		crate::expr::statements::DefineTableStatement {
 			kind: v.kind.into(),
 			id: v.id,
-			name: crate::expr::Expr::Idiom(crate::expr::Idiom::from(vec![
-				crate::expr::Part::Field(v.name.into()),
-			])),
+			name: v.name.into(),
 			drop: v.drop,
 			full: v.full,
 			view: v.view.map(Into::into),
 			permissions: v.permissions.into(),
 			changefeed: v.changefeed.map(Into::into),
-			comment: v.comment.map(|s| crate::expr::Expr::Literal(crate::expr::Literal::Strand(s))),
+			comment: v.comment.map(|x| x.into()),
 			table_type: v.table_type.into(),
 		}
 	}
@@ -117,28 +131,13 @@ impl From<crate::expr::statements::DefineTableStatement> for DefineTableStatemen
 		DefineTableStatement {
 			kind: v.kind.into(),
 			id: v.id,
-			name: match v.name {
-				crate::expr::Expr::Idiom(idiom) if idiom.len() == 1 => {
-					if let Some(crate::expr::Part::Field(field)) = idiom.first() {
-						field.clone().into()
-					} else {
-						crate::sql::Ident::new(String::new()).unwrap()
-					}
-				}
-				_ => crate::sql::Ident::new(String::new()).unwrap(),
-			},
+			name: v.name.into(),
 			drop: v.drop,
 			full: v.full,
 			view: v.view.map(Into::into),
 			permissions: v.permissions.into(),
 			changefeed: v.changefeed.map(Into::into),
-			comment: v.comment.and_then(|expr| {
-				if let crate::expr::Expr::Literal(crate::expr::Literal::Strand(s)) = expr {
-					Some(s)
-				} else {
-					None
-				}
-			}),
+			comment: v.comment.map(|x| x.into()),
 			table_type: v.table_type.into(),
 		}
 	}

@@ -33,7 +33,7 @@ use syn::{Data, DeriveInput, Fields, Ident, Type, parse_macro_input};
 /// let value: Value = person.into_value();
 ///
 /// // Convert SurrealDB Value back to struct
-/// let restored_person = Person::from_value(value).unwrap();
+/// let restored_person = Person::from_value(value.clone()).unwrap();
 /// assert_eq!(restored_person.name, "Alice");
 /// assert_eq!(restored_person.age, 30);
 /// assert_eq!(restored_person.active, true);
@@ -109,7 +109,7 @@ use syn::{Data, DeriveInput, Fields, Ident, Type, parse_macro_input};
 /// use surrealdb_types::{SurrealValue, Value};
 ///
 /// #[derive(SurrealValue)]
-/// struct Container<T> {
+/// struct Container<T: SurrealValue> {
 ///     data: T,
 ///     metadata: String,
 /// }

@@ -2,18 +2,17 @@ use std::fmt::{self, Display};
 
 use super::DefineKind;
 use crate::sql::fmt::Fmt;
-use crate::sql::{Ident, Idiom, Index};
-use crate::val::Strand;
+use crate::sql::{Expr, Idiom, Index};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineIndexStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
-	pub what: Ident,
+	pub name: Expr,
+	pub what: Expr,
 	pub cols: Vec<Idiom>,
 	pub index: Index,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 	pub concurrently: bool,
 }
 
@@ -53,7 +52,7 @@ impl From<DefineIndexStatement> for crate::expr::statements::DefineIndexStatemen
 			what: v.what.into(),
 			cols: v.cols.into_iter().map(From::from).collect(),
 			index: v.index.into(),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 			concurrently: v.concurrently,
 		}
 	}
@@ -67,7 +66,7 @@ impl From<crate::expr::statements::DefineIndexStatement> for DefineIndexStatemen
 			what: v.what.into(),
 			cols: v.cols.into_iter().map(From::from).collect(),
 			index: v.index.into(),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 			concurrently: v.concurrently,
 		}
 	}

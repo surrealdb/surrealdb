@@ -987,7 +987,17 @@ mod tests {
 			let DefineStatement::Analyzer(az) = *q else {
 				panic!()
 			};
-			let az = Arc::new(DefineAnalyzerStatement::from(az).to_definition());
+			let mut stack = reblessive::TreeStack::new();
+
+			let opts = Options::default();
+			let stk_ctx = ctx.clone();
+			let az = stack
+				.enter(|stk| async move {
+					
+					Arc::new(DefineAnalyzerStatement::from(az).to_definition(stk, &stk_ctx, &opts, None).await.unwrap())
+				})
+				.finish()
+				.await;
 			let content = Arc::new(Value::from(Array::from(vec![
 				"Enter a search term",
 				"Welcome",

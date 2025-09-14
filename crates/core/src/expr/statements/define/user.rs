@@ -16,30 +16,45 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::escape::QuoteStr;
 use crate::expr::fmt::Fmt;
-use crate::expr::statements::info::InfoStructure;
 use crate::expr::user::UserDuration;
-use crate::expr::{Base, Ident};
+use crate::expr::{Base, Expr, Ident, Idiom, Literal};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{self, Strand, Value};
+use crate::val::{self, Duration, Strand, Value};
+use reblessive::tree::Stk;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineUserStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: Expr,
 	pub base: Base,
 	pub hash: String,
 	pub code: String,
 	pub roles: Vec<Ident>,
 	pub duration: UserDuration,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
+}
+
+impl Default for DefineUserStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::None),
+			base: Base::Root,
+			hash: String::new(),
+			code: String::new(),
+			roles: vec![],
+			duration: UserDuration::default(),
+			comment: None,
+		}
+	}
 }
 
 impl DefineUserStatement {
-	pub fn new_with_password(base: Base, user: Strand, pass: &str, role: Ident) -> Self {
+	pub(crate) fn new_with_password(base: Base, user: Strand, pass: &str, role: Ident) -> Self {
 		DefineUserStatement {
 			kind: DefineKind::Default,
 			base,
-			name: Ident::from_strand(user),
+			name: Expr::Idiom(Idiom::field(Ident::from_strand(user))),
 			hash: Argon2::default()
 				.hash_password(pass.as_ref(), &SaltString::generate(&mut OsRng))
 				.unwrap()
@@ -55,50 +70,53 @@ impl DefineUserStatement {
 		}
 	}
 
-	pub fn into_definition(&self) -> catalog::UserDefinition {
-		UserDefinition {
-			name: self.name.clone().to_raw_string(),
+	pub(crate) async fn into_definition(&self, stk: &mut Stk, ctx: &Context, opt: &Options, doc: Option<&CursorDoc>) -> Result<catalog::UserDefinition> {
+		Ok(UserDefinition {
+			name: process_definition_ident!(stk, ctx, opt, doc, &self.name, "user name"),
 			hash: self.hash.clone(),
 			code: self.code.clone(),
 			roles: self.roles.iter().map(|x| x.clone().to_raw_string()).collect(),
-			token_duration: self.duration.token.map(|x| x.0),
-			session_duration: self.duration.session.map(|x| x.0),
-			comment: self.comment.as_ref().map(|x| x.clone().into_string()),
-		}
+			token_duration: map_opt!(x as &self.duration.token => compute_to!(stk, ctx, opt, doc, x => Duration).0),
+			session_duration:  map_opt!(x as &self.duration.session => compute_to!(stk, ctx, opt, doc, x => Duration).0),
+			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+		})
 	}
 
 	pub fn from_definition(base: Base, def: &catalog::UserDefinition) -> Self {
 		Self {
 			kind: DefineKind::Default,
 			base,
-			name: Ident::new(def.name.clone()).unwrap(),
+			name: Expr::Idiom(Idiom::field(Ident::new(def.name.clone()).unwrap())),
 			hash: def.hash.clone(),
 			code: def.code.clone(),
 			roles: def.roles.iter().map(|x| Ident::new(x.clone()).unwrap()).collect(),
 			duration: UserDuration {
-				token: def.token_duration.map(val::Duration),
-				session: def.session_duration.map(val::Duration),
+				token: def.token_duration.map(|x| Expr::Literal(Literal::Duration(val::Duration(x)))),
+				session: def.session_duration.map(|x| Expr::Literal(Literal::Duration(val::Duration(x)))),
 			},
-			comment: def.comment.as_ref().map(|x| Strand::new(x.clone()).unwrap()),
+			comment: def.comment.as_ref().map(|x| Expr::Idiom(Idiom::field(Ident::new(x.clone()).unwrap()))),
 		}
 	}
 
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
+		// Compute definition
+		let definition = self.into_definition(stk, ctx, opt, doc).await?;
 		// Check the statement type
 		match self.base {
 			Base::Root => {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if the definition exists
-				if let Some(user) = txn.get_root_user(&self.name).await? {
+				if let Some(user) = txn.get_root_user(&definition.name).await? {
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
@@ -112,7 +130,7 @@ impl DefineUserStatement {
 					}
 				}
 				// Process the statement
-				txn.put_root_user(&self.into_definition()).await?;
+				txn.put_root_user(&definition).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -123,7 +141,7 @@ impl DefineUserStatement {
 				let txn = ctx.tx();
 				let ns = ctx.get_ns_id(opt).await?;
 				// Check if the definition exists
-				if let Some(user) = txn.get_ns_user(ns, &self.name).await? {
+				if let Some(user) = txn.get_ns_user(ns, &definition.name).await? {
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
@@ -144,7 +162,7 @@ impl DefineUserStatement {
 				};
 
 				// Process the statement
-				txn.put_ns_user(ns.namespace_id, &self.into_definition()).await?;
+				txn.put_ns_user(ns.namespace_id, &definition).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -155,7 +173,7 @@ impl DefineUserStatement {
 				let txn = ctx.tx();
 				// Check if the definition exists
 				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-				if let Some(user) = txn.get_db_user(ns, db, &self.name).await? {
+				if let Some(user) = txn.get_db_user(ns, db, &definition.name).await? {
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
@@ -177,7 +195,7 @@ impl DefineUserStatement {
 				};
 
 				// Process the statement
-				txn.put_db_user(db.namespace_id, db.database_id, &self.into_definition()).await?;
+				txn.put_db_user(db.namespace_id, db.database_id, &definition).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -213,7 +231,7 @@ impl Display for DefineUserStatement {
 			f,
 			" FOR TOKEN {},",
 			match self.duration.token {
-				Some(dur) => format!("{}", dur),
+				Some(ref dur) => format!("{}", dur),
 				None => "NONE".to_string(),
 			}
 		)?;
@@ -221,7 +239,7 @@ impl Display for DefineUserStatement {
 			f,
 			" FOR SESSION {}",
 			match self.duration.session {
-				Some(dur) => format!("{}", dur),
+				Some(ref dur) => format!("{}", dur),
 				None => "NONE".to_string(),
 			}
 		)?;
@@ -229,21 +247,5 @@ impl Display for DefineUserStatement {
 			write!(f, " COMMENT {comment}")?
 		}
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineUserStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"base".to_string() => self.base.structure(),
-			"hash".to_string() => self.hash.into(),
-			"roles".to_string() => self.roles.into_iter().map(Ident::structure).collect(),
-			"duration".to_string() => Value::from(map! {
-				"token".to_string() => self.duration.token.map(Value::from).unwrap_or(Value::None),
-				"session".to_string() => self.duration.session.map(Value::from).unwrap_or(Value::None),
-			}),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
 	}
 }

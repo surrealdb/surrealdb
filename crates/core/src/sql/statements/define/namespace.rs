@@ -1,16 +1,26 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::sql::Ident;
-use crate::val::Strand;
+use crate::sql::{Expr, Literal};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineNamespaceStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
-	pub name: Ident,
-	pub comment: Option<Strand>,
+	pub name: Expr,
+	pub comment: Option<Expr>,
+}
+
+impl Default for DefineNamespaceStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			id: None,
+			name: Expr::Literal(Literal::None),
+			comment: None,
+		}
+	}
 }
 
 impl Display for DefineNamespaceStatement {
@@ -34,10 +44,8 @@ impl From<DefineNamespaceStatement> for crate::expr::statements::DefineNamespace
 		Self {
 			kind: v.kind.into(),
 			id: v.id,
-			name: crate::expr::Expr::Idiom(crate::expr::Idiom::from(vec![
-				crate::expr::Part::Field(v.name.into()),
-			])),
-			comment: v.comment.map(|s| crate::expr::Expr::Literal(crate::expr::Literal::Strand(s))),
+			name: v.name.into(),
+			comment: v.comment.map(|x| x.into()),
 		}
 	}
 }
@@ -48,23 +56,8 @@ impl From<crate::expr::statements::DefineNamespaceStatement> for DefineNamespace
 		Self {
 			kind: v.kind.into(),
 			id: v.id,
-			name: match v.name {
-				crate::expr::Expr::Idiom(idiom) if idiom.len() == 1 => {
-					if let Some(crate::expr::Part::Field(field)) = idiom.first() {
-						field.clone().into()
-					} else {
-						crate::sql::Ident::new(String::new()).unwrap()
-					}
-				}
-				_ => crate::sql::Ident::new(String::new()).unwrap(),
-			},
-			comment: v.comment.and_then(|expr| {
-				if let crate::expr::Expr::Literal(crate::expr::Literal::Strand(s)) = expr {
-					Some(s)
-				} else {
-					None
-				}
-			}),
+			name: v.name.into(),
+			comment: v.comment.map(|x| x.into()),
 		}
 	}
 }

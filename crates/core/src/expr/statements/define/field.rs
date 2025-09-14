@@ -19,7 +19,7 @@ use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, Idiom, Kind, KindLiteral, Part};
+use crate::expr::{Base, Expr, Kind, KindLiteral, Literal, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::Value;
@@ -55,10 +55,8 @@ impl Default for DefineFieldStatement {
 	fn default() -> Self {
 		Self {
 			kind: DefineKind::Default,
-			name: Expr::Idiom(Idiom::default()),
-			what: Expr::Literal(crate::expr::Literal::Strand(
-				crate::val::Strand::new(String::new()).unwrap(),
-			)),
+			name: Expr::Literal(Literal::None),
+			what: Expr::Literal(Literal::None),
 			flex: false,
 			field_kind: None,
 			readonly: false,

@@ -10,9 +10,10 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::{Base, Block, Ident, Kind};
+use crate::expr::{Base, Block, Expr, Ident, Kind};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
+use reblessive::tree::Stk;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineFunctionStatement {
@@ -20,7 +21,7 @@ pub struct DefineFunctionStatement {
 	pub name: Ident,
 	pub args: Vec<(Ident, Kind)>,
 	pub block: Block,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 	pub permissions: Permission,
 	pub returns: Option<Kind>,
 }
@@ -29,9 +30,10 @@ impl DefineFunctionStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
@@ -67,7 +69,7 @@ impl DefineFunctionStatement {
 				name: self.name.to_raw_string(),
 				args: self.args.clone().into_iter().map(|(n, k)| (n.to_raw_string(), k)).collect(),
 				block: self.block.clone(),
-				comment: self.comment.clone().map(|c| c.into_string()),
+				comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 				permissions: self.permissions.clone(),
 				returns: self.returns.clone(),
 			},

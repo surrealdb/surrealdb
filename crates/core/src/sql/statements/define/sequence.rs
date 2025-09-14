@@ -1,16 +1,28 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::sql::{Ident, Timeout};
+use crate::sql::{Expr, Literal, Timeout};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineSequenceStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: Expr,
 	pub batch: u32,
 	pub start: i64,
 	pub timeout: Option<Timeout>,
+}
+
+impl Default for DefineSequenceStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::None),
+			batch: 0,
+			start: 0,
+			timeout: None,
+		}
+	}
 }
 
 impl Display for DefineSequenceStatement {
