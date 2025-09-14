@@ -27,10 +27,10 @@ use crate::sql::statements::{
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
 	Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, Explain, Expr, Fetch,
-	Fetchs, Field, Fields, Function, FunctionCall, Group, Groups, Ident, Idiom, Idioms, Index,
-	Kind, Limit, Literal, Lookup, Mock, Order, Output, Param, Part, Permission, Permissions,
-	RecordAccess, RecordIdKeyLit, RecordIdLit, RemoveFunctionStatement, Scoring, Script, Split,
-	Splits, Start, TableType, Timeout, TopLevelExpr, With,
+	Fetchs, Field, Fields, Function, FunctionCall, Group, Groups, Ident, Idiom, Index, Kind, Limit,
+	Literal, Lookup, Mock, Order, Output, Param, Part, Permission, Permissions, RecordAccess,
+	RecordIdKeyLit, RecordIdLit, RemoveFunctionStatement, Scoring, Script, Split, Splits, Start,
+	TableType, Timeout, TopLevelExpr, With,
 };
 use crate::syn::parser::StatementStream;
 use crate::val::{Datetime, Duration, Number, Regex, Strand, Uuid};
@@ -447,7 +447,7 @@ fn statements() -> Vec<TopLevelExpr> {
 						alias: None,
 					}]),
 					what: vec![Expr::Table(Ident::from_strand(strand!("bar").to_owned()))],
-					omit: None,
+					omit: vec![],
 					only: false,
 					with: None,
 					cond: None,
@@ -509,9 +509,9 @@ fn statements() -> Vec<TopLevelExpr> {
 					alias: None,
 				},
 			]),
-			omit: Some(Idioms(vec![Idiom(vec![Part::Field(Ident::from_strand(
+			omit: vec![Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(
 				strand!("bar").to_owned(),
-			))])])),
+			))]))],
 			only: true,
 			what: vec![
 				Expr::Table(Ident::from_strand(strand!("a").to_owned())),

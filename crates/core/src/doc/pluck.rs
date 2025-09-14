@@ -164,8 +164,11 @@ impl Document {
 		}
 		// Remove any omitted fields from output
 		if let Some(v) = stm.omit() {
-			for v in v.iter() {
-				out.del(stk, ctx, opt, v).await?;
+			let doc = Some(&self.current);
+			let fields = expr_to_idioms!(stk, ctx, opt, doc, v => Vec<Idiom>);
+
+			for field in fields {
+				out.del(stk, ctx, opt, &field).await?;
 			}
 		}
 		// Output result

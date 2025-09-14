@@ -11,7 +11,6 @@ use crate::expr::data::Data;
 use crate::expr::fetch::Fetchs;
 use crate::expr::field::Fields;
 use crate::expr::group::Groups;
-use crate::expr::idiom::Idioms;
 use crate::expr::limit::Limit;
 use crate::expr::order::Ordering;
 use crate::expr::output::Output;
@@ -27,7 +26,7 @@ use crate::expr::statements::select::SelectStatement;
 use crate::expr::statements::show::ShowStatement;
 use crate::expr::statements::update::UpdateStatement;
 use crate::expr::statements::upsert::UpsertStatement;
-use crate::expr::{Explain, Timeout, With};
+use crate::expr::{Explain, Expr, Timeout, With};
 use crate::idx::planner::QueryPlanner;
 
 #[derive(Clone, Debug)]
@@ -256,9 +255,9 @@ impl Statement<'_> {
 	}
 
 	/// Returns any OMIT clause if specified
-	pub(crate) fn omit(&self) -> Option<&Idioms> {
+	pub(crate) fn omit(&self) -> Option<&Vec<Expr>> {
 		match self {
-			Statement::Select(v) => v.omit.as_ref(),
+			Statement::Select(v) => Some(&v.omit),
 			_ => None,
 		}
 	}

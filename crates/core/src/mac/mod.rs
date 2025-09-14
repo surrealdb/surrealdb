@@ -158,6 +158,129 @@ macro_rules! process_definition_idiom {
 	}};
 }
 
+macro_rules! expr_to_idioms {
+	($stk:ident, $ctx:ident, $opt:ident, $doc:ident, $x:expr => Idiom) => {{
+		use crate::expr::{Expr, Function};
+		use crate::doc::IgnoreError;
+
+		match $x {
+			Expr::Idiom(x) => x.clone(),
+			Expr::FunctionCall(x) => match &x.receiver {
+				Function::Normal(fnc) if fnc == "type::field" => {
+					expr_to_idioms!(@compute type_field(x, $stk, $ctx, $opt, $doc))
+				},
+				_ => return Err(IgnoreError::Error(anyhow::anyhow!("Expected a type::field function call"))),
+			},
+			_ => return Err(IgnoreError::Error(anyhow::anyhow!("Expected an idiom or type::field function call"))),
+		}
+	}};
+
+	($stk:ident, $ctx:ident, $opt:ident, $doc:ident, $x:expr => Vec<Idiom>) => {{
+		use crate::expr::{Expr, Function};
+		use crate::doc::IgnoreError;
+
+		let mut idioms = Vec::new();
+		for x in $x.iter() {
+			match x {
+				Expr::Idiom(x) => {
+					idioms.push(x.clone());
+				}
+				Expr::FunctionCall(x) => match &x.receiver {
+					Function::Normal(fnc) if fnc == "type::field" => {
+						idioms.push(expr_to_idioms!(@compute type_field(x, $stk, $ctx, $opt, $doc)));
+					},
+					Function::Normal(fnc) if fnc == "type::fields" => {
+						idioms.append(&mut expr_to_idioms!(@compute type_fields(x, $stk, $ctx, $opt, $doc)));
+					},
+					_ => return Err(IgnoreError::Error(anyhow::anyhow!("Expected a type::field function call"))),
+				},
+				_ => return Err(IgnoreError::Error(anyhow::anyhow!("Expected an idiom or type::field function call"))),
+			}
+		}
+
+		idioms
+	}};
+
+	(@compute type_field($v:ident, $stk:ident, $ctx:ident, $opt:ident, $doc:ident)) => {{
+		use crate::expr::FlowResultExt;
+		use crate::doc::IgnoreError;
+
+		$v
+			.arguments
+			.first()
+			.ok_or(IgnoreError::Error(anyhow::anyhow!("Expected a string")))?
+			.compute($stk, $ctx, $opt, $doc)
+			.await
+			.catch_return()?
+			.coerce_to::<String>()
+			.map_err(|_| IgnoreError::Error(anyhow::anyhow!("Expected a string")))
+			.map(|v| crate::syn::idiom(&v).map(Into::into))??
+	}};
+
+	(@compute type_fields($v:ident, $stk:ident, $ctx:ident, $opt:ident, $doc:ident)) => {{
+		use crate::expr::FlowResultExt;
+		use crate::doc::IgnoreError;
+		use crate::expr::Idiom;
+
+		$v
+			.arguments
+			.first()
+			.ok_or(IgnoreError::Error(anyhow::anyhow!("Expected an array of strings")))?
+			.compute($stk, $ctx, $opt, $doc)
+			.await
+			.catch_return()?
+			.coerce_to::<Vec<String>>()
+			.map_err(|_| IgnoreError::Error(anyhow::anyhow!("Expected an array of strings")))?
+			.into_iter()
+			.map(|v| crate::syn::idiom(&v).map(Into::into))
+			.collect::<anyhow::Result<Vec<Idiom>>>()?
+	}};
+}
+
+// let mut fields = Vec::new();
+
+// for v in v.iter() {
+// 	match v {
+// 		Expr::Idiom(v) => {
+// 			fields.push(v.clone());
+// 		},
+// 		Expr::FunctionCall(v) => match &v.receiver {
+// 			Function::Normal(fnc) if fnc == "type::fields" => {
+// 				let mut x = v
+// 					.arguments
+// 					.first()
+// 					.ok_or(IgnoreError::Error(anyhow::anyhow!("Expected an array of strings")))?
+// 					.compute(stk, ctx, opt, Some(&self.current))
+// 					.await
+// 					.catch_return()?
+// 					.coerce_to::<Vec<String>>()
+// 					.map_err(|_| IgnoreError::Error(anyhow::anyhow!("Expected an array of strings")))?
+// 					.into_iter()
+// 					.map(|v| crate::syn::idiom(&v).map(Into::into))
+// 					.collect::<anyhow::Result<Vec<Idiom>>>()?;
+
+// 				fields.append(&mut x);
+// 			},
+// 			Function::Normal(fnc) if fnc == "type::field" => {
+// 				let field = v
+// 					.arguments
+// 					.first()
+// 					.ok_or(IgnoreError::Error(anyhow::anyhow!("Expected a string")))?
+// 					.compute(stk, ctx, opt, Some(&self.current))
+// 					.await
+// 					.catch_return()?
+// 					.coerce_to::<String>()
+// 					.map_err(|_| IgnoreError::Error(anyhow::anyhow!("Expected a string")))
+// 					.map(|v| crate::syn::idiom(&v).map(Into::into))??;
+
+// 				fields.push(field);
+// 			},
+// 			_ => return Err(IgnoreError::Error(anyhow::anyhow!("Expected a type::fields or type::field
+// function call"))), 		},
+// 		_ => return Err(IgnoreError::Error(anyhow::anyhow!("Expected an idiom, type::fields or
+// type::field function call"))), 	};
+// }
+
 /// Extends a b-tree map of key-value pairs.
 ///
 /// This macro extends the supplied map, by cloning

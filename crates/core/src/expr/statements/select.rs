@@ -11,8 +11,8 @@ use crate::err::Error;
 use crate::expr::fmt::Fmt;
 use crate::expr::order::Ordering;
 use crate::expr::{
-	Cond, Explain, Expr, Fetchs, Fields, FlowResultExt as _, Groups, Idioms, Limit, Splits, Start,
-	Timeout, With,
+	Cond, Explain, Expr, Fetchs, Fields, FlowResultExt as _, Groups, Limit, Splits, Start, Timeout,
+	With,
 };
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::{Datetime, Value};
@@ -21,7 +21,7 @@ use crate::val::{Datetime, Value};
 pub struct SelectStatement {
 	/// The foo,bar part in SELECT foo,bar FROM baz.
 	pub expr: Fields,
-	pub omit: Option<Idioms>,
+	pub omit: Vec<Expr>,
 	pub only: bool,
 	/// The baz part in SELECT foo,bar FROM baz.
 	pub what: Vec<Expr>,
@@ -44,7 +44,7 @@ impl Default for SelectStatement {
 	fn default() -> Self {
 		SelectStatement {
 			expr: Fields::all(),
-			omit: None,
+			omit: vec![],
 			only: false,
 			what: Vec::new(),
 			with: None,
@@ -147,8 +147,8 @@ impl SelectStatement {
 impl fmt::Display for SelectStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SELECT {}", self.expr)?;
-		if let Some(ref v) = self.omit {
-			write!(f, " OMIT {v}")?
+		if !self.omit.is_empty() {
+			write!(f, " OMIT {}", Fmt::comma_separated(self.omit.iter()))?
 		}
 		write!(f, " FROM")?;
 		if self.only {
