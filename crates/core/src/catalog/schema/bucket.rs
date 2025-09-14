@@ -29,7 +29,9 @@ impl BucketDefinition {
 	pub fn to_sql_definition(&self) -> DefineBucketStatement {
 		DefineBucketStatement {
 			kind: DefineKind::Default,
-			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(crate::sql::Ident::new(self.name.clone()).unwrap())),
+			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(
+				crate::sql::Ident::new(self.name.clone()).unwrap(),
+			)),
 			backend: self.backend.clone().map(|v| {
 				crate::sql::Expr::Literal(crate::sql::Literal::Strand(unsafe {
 					Strand::new_unchecked(v)
@@ -37,7 +39,9 @@ impl BucketDefinition {
 			}),
 			permissions: self.permissions.clone().into(),
 			readonly: self.readonly,
-			comment: self.comment.clone().map(|v| crate::sql::Expr::Literal(crate::sql::Literal::Strand(Strand::new(v).unwrap()))),
+			comment: self.comment.clone().map(|v| {
+				crate::sql::Expr::Literal(crate::sql::Literal::Strand(Strand::new(v).unwrap()))
+			}),
 		}
 	}
 }

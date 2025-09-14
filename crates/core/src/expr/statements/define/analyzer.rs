@@ -1,6 +1,7 @@
 use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
+use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog;
@@ -14,7 +15,6 @@ use crate::expr::tokenizer::Tokenizer;
 use crate::expr::{Base, Expr, Ident, Idiom, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Strand;
-use reblessive::tree::Stk;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineAnalyzerStatement {
@@ -27,7 +27,6 @@ pub struct DefineAnalyzerStatement {
 }
 
 impl Default for DefineAnalyzerStatement {
-
 	fn default() -> Self {
 		Self {
 			kind: DefineKind::Default,
@@ -64,7 +63,10 @@ impl DefineAnalyzerStatement {
 			function: def.function.clone(),
 			tokenizers: def.tokenizers.clone(),
 			filters: def.filters.clone(),
-			comment: def.comment.as_ref().map(|x| Expr::Literal(Literal::Strand(Strand::new(x.clone()).unwrap()))),
+			comment: def
+				.comment
+				.as_ref()
+				.map(|x| Expr::Literal(Literal::Strand(Strand::new(x.clone()).unwrap()))),
 		}
 	}
 

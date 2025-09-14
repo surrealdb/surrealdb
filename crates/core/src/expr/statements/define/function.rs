@@ -1,6 +1,7 @@
 use std::fmt::{self, Display, Write};
 
 use anyhow::{Result, bail};
+use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
@@ -13,7 +14,6 @@ use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::{Base, Block, Expr, Ident, Kind};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
-use reblessive::tree::Stk;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineFunctionStatement {

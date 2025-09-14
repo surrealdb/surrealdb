@@ -213,11 +213,17 @@ mod tests {
 			.enter(|stk| async move {
 				let a = Analyzer::new(
 					ctx.get_index_stores(),
-					Arc::new(DefineAnalyzerStatement::from(az).to_definition(stk, &ctx, &opts, None).await.unwrap()),
+					Arc::new(
+						DefineAnalyzerStatement::from(az)
+							.to_definition(stk, &ctx, &opts, None)
+							.await
+							.unwrap(),
+					),
 				)
 				.unwrap();
 
-				a.generate_tokens(stk, &ctx, &opts, FilteringStage::Indexing, input.to_string()).await
+				a.generate_tokens(stk, &ctx, &opts, FilteringStage::Indexing, input.to_string())
+					.await
 			})
 			.finish()
 			.await

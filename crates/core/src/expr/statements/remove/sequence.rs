@@ -1,18 +1,17 @@
 use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
+use reblessive::tree::Stk;
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Expr, Value};
+use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
-use crate::expr::Literal;
 use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
-use crate::doc::CursorDoc;
-use reblessive::tree::Stk;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RemoveSequenceStatement {
@@ -30,7 +29,13 @@ impl Default for RemoveSequenceStatement {
 }
 
 impl RemoveSequenceStatement {
-	pub(crate) async fn compute(&self, stk: &mut Stk, ctx: &Context, opt: &Options, doc: Option<&CursorDoc>) -> Result<Value> {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
 		// Compute the name

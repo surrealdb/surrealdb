@@ -6,6 +6,7 @@ use argon2::password_hash::{PasswordHasher, SaltString};
 use rand::Rng as _;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
+use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, UserProvider};
@@ -20,7 +21,6 @@ use crate::expr::user::UserDuration;
 use crate::expr::{Base, Expr, Ident, Idiom, Literal};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Duration, Strand, Value};
-use reblessive::tree::Stk;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineUserStatement {
@@ -70,14 +70,20 @@ impl DefineUserStatement {
 		}
 	}
 
-	pub(crate) async fn into_definition(&self, stk: &mut Stk, ctx: &Context, opt: &Options, doc: Option<&CursorDoc>) -> Result<catalog::UserDefinition> {
+	pub(crate) async fn to_definition(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<catalog::UserDefinition> {
 		Ok(UserDefinition {
 			name: process_definition_ident!(stk, ctx, opt, doc, &self.name, "user name"),
 			hash: self.hash.clone(),
 			code: self.code.clone(),
 			roles: self.roles.iter().map(|x| x.clone().to_raw_string()).collect(),
 			token_duration: map_opt!(x as &self.duration.token => compute_to!(stk, ctx, opt, doc, x => Duration).0),
-			session_duration:  map_opt!(x as &self.duration.session => compute_to!(stk, ctx, opt, doc, x => Duration).0),
+			session_duration: map_opt!(x as &self.duration.session => compute_to!(stk, ctx, opt, doc, x => Duration).0),
 			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 		})
 	}
@@ -91,10 +97,17 @@ impl DefineUserStatement {
 			code: def.code.clone(),
 			roles: def.roles.iter().map(|x| Ident::new(x.clone()).unwrap()).collect(),
 			duration: UserDuration {
-				token: def.token_duration.map(|x| Expr::Literal(Literal::Duration(val::Duration(x)))),
-				session: def.session_duration.map(|x| Expr::Literal(Literal::Duration(val::Duration(x)))),
+				token: def
+					.token_duration
+					.map(|x| Expr::Literal(Literal::Duration(val::Duration(x)))),
+				session: def
+					.session_duration
+					.map(|x| Expr::Literal(Literal::Duration(val::Duration(x)))),
 			},
-			comment: def.comment.as_ref().map(|x| Expr::Idiom(Idiom::field(Ident::new(x.clone()).unwrap()))),
+			comment: def
+				.comment
+				.as_ref()
+				.map(|x| Expr::Idiom(Idiom::field(Ident::new(x.clone()).unwrap()))),
 		}
 	}
 
@@ -109,7 +122,7 @@ impl DefineUserStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
 		// Compute definition
-		let definition = self.into_definition(stk, ctx, opt, doc).await?;
+		let definition = self.to_definition(stk, ctx, opt, doc).await?;
 		// Check the statement type
 		match self.base {
 			Base::Root => {

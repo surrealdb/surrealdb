@@ -1,16 +1,15 @@
 use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
+use reblessive::tree::Stk;
 
 use crate::catalog::providers::AuthorisationProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::err::Error;
-use crate::expr::{Base, Expr, Value};
-use crate::iam::{Action, ResourceKind};
-use crate::expr::Literal;
 use crate::doc::CursorDoc;
-use reblessive::tree::Stk;
+use crate::err::Error;
+use crate::expr::{Base, Expr, Literal, Value};
+use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RemoveAccessStatement {
@@ -31,7 +30,13 @@ impl Default for RemoveAccessStatement {
 
 impl RemoveAccessStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, stk: &mut Stk, ctx: &Context, opt: &Options, doc: Option<&CursorDoc>) -> Result<Value> {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
 		// Compute the name
@@ -47,7 +52,7 @@ impl RemoveAccessStatement {
 						return Ok(Value::None);
 					} else {
 						return Err(anyhow::Error::new(Error::AccessRootNotFound {
-							ac: name
+							ac: name,
 						}));
 					}
 				};

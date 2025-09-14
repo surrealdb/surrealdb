@@ -3,7 +3,7 @@ use std::fmt::{self, Display, Write};
 use super::DefineKind;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
-use crate::sql::{Expr, Kind, Permissions, Literal};
+use crate::sql::{Expr, Kind, Literal, Permissions};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

@@ -164,7 +164,9 @@ fn statements() -> Vec<TopLevelExpr> {
 				kind: DefineKind::Default,
 				id: None,
 				name: Expr::Idiom(Idiom::field(Ident::from_strand(strand!("a").to_owned()))),
-				comment: Some(Expr::Literal(Literal::Strand(Strand::new("test".to_string()).unwrap()))),
+				comment: Some(Expr::Literal(Literal::Strand(
+					Strand::new("test".to_string()).unwrap(),
+				))),
 			},
 		)))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Namespace(
@@ -180,7 +182,9 @@ fn statements() -> Vec<TopLevelExpr> {
 				kind: DefineKind::Default,
 				id: None,
 				name: Expr::Idiom(Idiom::field(Ident::from_strand(strand!("a").to_owned()))),
-				comment: Some(Expr::Literal(Literal::Strand(Strand::new("test".to_string()).unwrap()))),
+				comment: Some(Expr::Literal(Literal::Strand(
+					Strand::new("test".to_string()).unwrap(),
+				))),
 				changefeed: Some(ChangeFeed {
 					expiry: std::time::Duration::from_secs(60) * 10,
 					store_diff: false,
@@ -211,7 +215,9 @@ fn statements() -> Vec<TopLevelExpr> {
 					what: ident_field("a"),
 					fetch: None,
 				}))]),
-				comment: Some(Expr::Literal(Literal::Strand(Strand::new("test".to_string()).unwrap()))),
+				comment: Some(Expr::Literal(Literal::Strand(
+					Strand::new("test".to_string()).unwrap(),
+				))),
 				permissions: Permission::Full,
 				returns: None,
 			},
@@ -299,7 +305,9 @@ fn statements() -> Vec<TopLevelExpr> {
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Event(DefineEventStatement {
 			kind: DefineKind::Default,
 			name: Expr::Idiom(Idiom::field(Ident::from_strand(strand!("event").to_owned()))),
-			target_table: Expr::Idiom(Idiom::field(Ident::from_strand(strand!("table").to_owned()))),
+			target_table: Expr::Idiom(Idiom::field(Ident::from_strand(
+				strand!("table").to_owned(),
+			))),
 			when: Expr::Literal(Literal::Null),
 			then: vec![Expr::Literal(Literal::Null), Expr::Literal(Literal::None)],
 			comment: None,
@@ -668,7 +676,9 @@ fn statements() -> Vec<TopLevelExpr> {
 				Part::Field(Ident::from_strand(strand!("bar").to_owned())),
 				Part::Value(Expr::Literal(Literal::Integer(10))),
 			])),
-			what: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("bar").to_owned()))])),
+			what: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(
+				strand!("bar").to_owned(),
+			))])),
 			if_exists: false,
 		})))),
 		TopLevelExpr::Expr(Expr::Update(Box::new(UpdateStatement {

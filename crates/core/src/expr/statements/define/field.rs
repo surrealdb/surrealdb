@@ -326,7 +326,10 @@ impl DefineFieldStatement {
 			ensure!(!definition.name.is_id(), Error::IdFieldKeywordConflict("COMPUTED".into()));
 
 			// Ensure the field is top-level
-			ensure!(definition.name.len() == 1, Error::ComputedNestedField(definition.name.to_string()));
+			ensure!(
+				definition.name.len() == 1,
+				Error::ComputedNestedField(definition.name.to_string())
+			);
 
 			// Ensure there are no conflicting clauses
 			ensure!(self.value.is_none(), Error::ComputedKeywordConflict("VALUE".into()));

@@ -1,18 +1,17 @@
 use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
+use reblessive::tree::Stk;
 use uuid::Uuid;
 
 use crate::catalog::TableDefinition;
 use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::{self, Notification, Options};
-use crate::err::Error;
-use crate::expr::{Base, Expr, Value};
-use crate::iam::{Action, ResourceKind};
-use crate::expr::Literal;
 use crate::doc::CursorDoc;
-use reblessive::tree::Stk;
+use crate::err::Error;
+use crate::expr::{Base, Expr, Literal, Value};
+use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RemoveTableStatement {
@@ -33,7 +32,13 @@ impl Default for RemoveTableStatement {
 
 impl RemoveTableStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, stk: &mut Stk, ctx: &Context, opt: &Options, doc: Option<&CursorDoc>) -> Result<Value> {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Compute the name
@@ -45,9 +50,7 @@ impl RemoveTableStatement {
 		let txn = ctx.tx();
 		// Remove the index stores
 		#[cfg(not(target_family = "wasm"))]
-		ctx.get_index_stores()
-			.table_removed(ctx.get_index_builder(), &txn, ns, db, &name)
-			.await?;
+		ctx.get_index_stores().table_removed(ctx.get_index_builder(), &txn, ns, db, &name).await?;
 		#[cfg(target_family = "wasm")]
 		ctx.get_index_stores().table_removed(&txn, ns, db, &name).await?;
 		// Get the defined table

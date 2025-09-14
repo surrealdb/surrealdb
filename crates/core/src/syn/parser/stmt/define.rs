@@ -38,7 +38,9 @@ impl Parser<'_> {
 	) -> ParseResult<DefineStatement> {
 		let next = self.next();
 		match next.kind {
-			t!("NAMESPACE") => self.parse_define_namespace(stk).await.map(DefineStatement::Namespace),
+			t!("NAMESPACE") => {
+				self.parse_define_namespace(stk).await.map(DefineStatement::Namespace)
+			}
 			t!("DATABASE") => self.parse_define_database(stk).await.map(DefineStatement::Database),
 			t!("FUNCTION") => self.parse_define_function(stk).await.map(DefineStatement::Function),
 			t!("USER") => self.parse_define_user(stk).await.map(DefineStatement::User),
@@ -63,7 +65,10 @@ impl Parser<'_> {
 		}
 	}
 
-	pub(crate) async fn parse_define_namespace(&mut self, stk: &mut Stk) -> ParseResult<DefineNamespaceStatement> {
+	pub(crate) async fn parse_define_namespace(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineNamespaceStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -89,7 +94,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_database(&mut self, stk: &mut Stk) -> ParseResult<DefineDatabaseStatement> {
+	pub async fn parse_define_database(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineDatabaseStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -213,7 +221,7 @@ impl Parser<'_> {
 			                                                                    * the viewer role
 			                                                                    * by default */
 			// TODO: Move out of the parser
-			token_duration: Some(Expr::Literal(Literal::Duration(Duration::from_secs(3600)))), // defaults to 1 hour.
+			token_duration: Some(Expr::Literal(Literal::Duration(Duration::from_secs(3600)))), /* defaults to 1 hour. */
 			..DefineUserStatement::default()
 		};
 
@@ -277,7 +285,10 @@ impl Parser<'_> {
 										// duration must be set.
 										unexpected!(self, peek, "a token duration");
 									}
-									_ => res.token_duration = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?),
+									_ => {
+										res.token_duration =
+											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+									}
 								}
 							}
 							t!("SESSION") => {
@@ -287,7 +298,10 @@ impl Parser<'_> {
 										self.pop_peek();
 										res.session_duration = None;
 									}
-									_ => res.session_duration = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?),
+									_ => {
+										res.session_duration =
+											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+									}
 								}
 							}
 							_ => unexpected!(self, token, "`TOKEN` or `SESSION`"),
@@ -1093,7 +1107,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_analyzer(&mut self, stk: &mut Stk) -> ParseResult<DefineAnalyzerStatement> {
+	pub async fn parse_define_analyzer(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineAnalyzerStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -1264,7 +1281,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_sequence(&mut self, stk: &mut Stk) -> ParseResult<DefineSequenceStatement> {
+	pub async fn parse_define_sequence(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineSequenceStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));

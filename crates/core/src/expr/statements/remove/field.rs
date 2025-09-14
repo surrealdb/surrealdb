@@ -1,18 +1,17 @@
 use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
+use reblessive::tree::Stk;
 use uuid::Uuid;
 
 use crate::catalog::TableDefinition;
 use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::err::Error;
-use crate::expr::{Base, Expr, Value};
-use crate::iam::{Action, ResourceKind};
-use crate::expr::Literal;
 use crate::doc::CursorDoc;
-use reblessive::tree::Stk;
+use crate::err::Error;
+use crate::expr::{Base, Expr, Literal, Value};
+use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RemoveFieldStatement {
@@ -33,11 +32,18 @@ impl Default for RemoveFieldStatement {
 
 impl RemoveFieldStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, stk: &mut Stk, ctx: &Context, opt: &Options, doc: Option<&CursorDoc>) -> Result<Value> {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Compute the table name
-		let table_name = process_definition_ident!(stk, ctx, opt, doc, &self.table_name, "table name");
+		let table_name =
+			process_definition_ident!(stk, ctx, opt, doc, &self.table_name, "table name");
 		// Compute the name
 		let name = process_definition_idiom!(stk, ctx, opt, doc, &self.name, "field name");
 		// Get the NS and DB

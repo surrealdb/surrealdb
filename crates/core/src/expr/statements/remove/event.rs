@@ -1,18 +1,17 @@
 use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
+use reblessive::tree::Stk;
 use uuid::Uuid;
 
 use crate::catalog::TableDefinition;
 use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::err::Error;
-use crate::expr::{Base, Expr, Value};
-use crate::iam::{Action, ResourceKind};
-use crate::expr::Literal;
 use crate::doc::CursorDoc;
-use reblessive::tree::Stk;
+use crate::err::Error;
+use crate::expr::{Base, Expr, Literal, Value};
+use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RemoveEventStatement {
@@ -33,13 +32,20 @@ impl Default for RemoveEventStatement {
 
 impl RemoveEventStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, stk: &mut Stk, ctx: &Context, opt: &Options, doc: Option<&CursorDoc>) -> Result<Value> {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
 		// Get the NS and DB
 		let (ns_name, db_name) = opt.ns_db()?;
 		// Compute the table name
-		let table_name = process_definition_ident!(stk, ctx, opt, doc, &self.table_name, "table name");
+		let table_name =
+			process_definition_ident!(stk, ctx, opt, doc, &self.table_name, "table name");
 		// Compute the name
 		let name = process_definition_ident!(stk, ctx, opt, doc, &self.name, "event name");
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;

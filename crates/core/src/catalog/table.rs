@@ -5,8 +5,8 @@ use crate::catalog::{DatabaseId, NamespaceId, Permissions, ViewDefinition};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{ChangeFeed, Kind};
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::statements::DefineTableStatement;
 use crate::sql::ToSql;
+use crate::sql::statements::DefineTableStatement;
 use crate::val::{Strand, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -108,13 +108,17 @@ impl TableDefinition {
 			id: Some(self.table_id.0),
 			// SAFETY: we know the name is valid because it was validated when the table was
 			// created.
-			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(crate::sql::Ident::new(self.name.clone()).unwrap())),
+			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(
+				crate::sql::Ident::new(self.name.clone()).unwrap(),
+			)),
 			drop: self.drop,
 			full: self.schemafull,
 			view: self.view.clone().map(|v| v.to_sql_definition()),
 			permissions: self.permissions.clone().into(),
 			changefeed: self.changefeed.map(|v| v.into()),
-			comment: self.comment.clone().map(|v| crate::sql::Expr::Literal(crate::sql::Literal::Strand(Strand::new(v).unwrap()))),
+			comment: self.comment.clone().map(|v| {
+				crate::sql::Expr::Literal(crate::sql::Literal::Strand(Strand::new(v).unwrap()))
+			}),
 			table_type: self.table_type.clone().into(),
 			..Default::default()
 		}

@@ -128,9 +128,9 @@ macro_rules! process_definition_ident {
 
 macro_rules! process_definition_idiom {
 	($stk:ident, $ctx:ident, $opt:ident, $doc:ident, $x:expr, $into:expr) => {{
-		use crate::expr::FlowResultExt;
-		use crate::expr::Idiom;
 		use std::str::FromStr;
+
+		use crate::expr::{FlowResultExt, Idiom};
 
 		match $x {
 			crate::expr::Expr::Idiom(x) => x.clone(),
@@ -151,7 +151,8 @@ macro_rules! process_definition_idiom {
 					x => x,
 				}?;
 
-				Idiom::from_str(&raw).map_err(|e| anyhow::anyhow!("Failed to parse {} from string: {e}", $into))?
+				Idiom::from_str(&raw)
+					.map_err(|e| anyhow::anyhow!("Failed to parse {} from string: {e}", $into))?
 			}
 		}
 	}};

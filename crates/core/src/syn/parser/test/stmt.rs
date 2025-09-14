@@ -288,12 +288,21 @@ fn parse_define_user() {
 			panic!()
 		};
 
-		assert_eq!(stmt.name, Expr::Idiom(Idiom::field(Ident::from_strand(strand!("user").to_owned()))));
+		assert_eq!(
+			stmt.name,
+			Expr::Idiom(Idiom::field(Ident::from_strand(strand!("user").to_owned())))
+		);
 		assert_eq!(stmt.base, Base::Root);
 		assert_eq!(stmt.pass_type, PassType::Password("hunter2".to_owned()));
 		assert_eq!(stmt.roles, vec![Ident::from_strand(strand!("Viewer").to_owned())]);
-		assert_eq!(stmt.comment, Some(Expr::Literal(Literal::Strand(Strand::new("*******".to_string()).unwrap()))));
-		assert_eq!(stmt.token_duration, Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))));
+		assert_eq!(
+			stmt.comment,
+			Some(Expr::Literal(Literal::Strand(Strand::new("*******".to_string()).unwrap())))
+		);
+		assert_eq!(
+			stmt.token_duration,
+			Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap())))
+		);
 		assert_eq!(stmt.session_duration, None);
 	}
 	// Passhash.
@@ -312,12 +321,21 @@ fn parse_define_user() {
 			panic!()
 		};
 
-		assert_eq!(stmt.name, Expr::Idiom(Idiom::field(Ident::from_strand(strand!("user").to_owned()))));
+		assert_eq!(
+			stmt.name,
+			Expr::Idiom(Idiom::field(Ident::from_strand(strand!("user").to_owned())))
+		);
 		assert_eq!(stmt.base, Base::Root);
 		assert_eq!(stmt.pass_type, PassType::Hash("hunter2".to_owned()));
 		assert_eq!(stmt.roles, vec![Ident::from_strand(strand!("Viewer").to_owned())]);
-		assert_eq!(stmt.comment, Some(Expr::Literal(Literal::Strand(Strand::new("*******".to_string()).unwrap()))));
-		assert_eq!(stmt.token_duration, Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))));
+		assert_eq!(
+			stmt.comment,
+			Some(Expr::Literal(Literal::Strand(Strand::new("*******".to_string()).unwrap())))
+		);
+		assert_eq!(
+			stmt.token_duration,
+			Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap())))
+		);
 		assert_eq!(stmt.session_duration, None);
 	}
 	// With roles.
@@ -336,7 +354,10 @@ fn parse_define_user() {
 			panic!()
 		};
 
-		assert_eq!(stmt.name, Expr::Idiom(Idiom::field(Ident::from_strand(strand!("user").to_owned()))));
+		assert_eq!(
+			stmt.name,
+			Expr::Idiom(Idiom::field(Ident::from_strand(strand!("user").to_owned())))
+		);
 		assert_eq!(stmt.base, Base::Root);
 		assert_eq!(stmt.pass_type, PassType::Hash("hunter2".to_owned()));
 		assert_eq!(
@@ -346,7 +367,10 @@ fn parse_define_user() {
 				Ident::from_strand(strand!("OWNER").to_owned())
 			]
 		);
-		assert_eq!(stmt.token_duration, Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))));
+		assert_eq!(
+			stmt.token_duration,
+			Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap())))
+		);
 		assert_eq!(stmt.session_duration, None);
 	}
 	// With session duration.
@@ -365,12 +389,21 @@ fn parse_define_user() {
 			panic!()
 		};
 
-		assert_eq!(stmt.name, Expr::Idiom(Idiom::field(Ident::from_strand(strand!("user").to_owned()))));
+		assert_eq!(
+			stmt.name,
+			Expr::Idiom(Idiom::field(Ident::from_strand(strand!("user").to_owned())))
+		);
 		assert_eq!(stmt.base, Base::Root);
 		assert_eq!(stmt.pass_type, PassType::Hash("hunter2".to_owned()));
 		assert_eq!(stmt.roles, vec![Ident::from_strand(strand!("Viewer").to_owned())]);
-		assert_eq!(stmt.token_duration, Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))));
-		assert_eq!(stmt.session_duration, Some(Expr::Literal(Literal::Duration(Duration::from_hours(6).unwrap()))));
+		assert_eq!(
+			stmt.token_duration,
+			Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap())))
+		);
+		assert_eq!(
+			stmt.session_duration,
+			Some(Expr::Literal(Literal::Duration(Duration::from_hours(6).unwrap())))
+		);
 	}
 	// With session and token duration.
 	{
@@ -387,12 +420,21 @@ fn parse_define_user() {
 			panic!()
 		};
 
-		assert_eq!(stmt.name, Expr::Idiom(Idiom::field(Ident::from_strand(strand!("user").to_owned()))));
+		assert_eq!(
+			stmt.name,
+			Expr::Idiom(Idiom::field(Ident::from_strand(strand!("user").to_owned())))
+		);
 		assert_eq!(stmt.base, Base::Root);
 		assert_eq!(stmt.pass_type, PassType::Hash("hunter2".to_owned()));
 		assert_eq!(stmt.roles, vec![Ident::from_strand(strand!("Viewer").to_owned())]);
-		assert_eq!(stmt.token_duration, Some(Expr::Literal(Literal::Duration(Duration::from_mins(15).unwrap()))));
-		assert_eq!(stmt.session_duration, Some(Expr::Literal(Literal::Duration(Duration::from_hours(6).unwrap()))));
+		assert_eq!(
+			stmt.token_duration,
+			Some(Expr::Literal(Literal::Duration(Duration::from_mins(15).unwrap())))
+		);
+		assert_eq!(
+			stmt.session_duration,
+			Some(Expr::Literal(Literal::Duration(Duration::from_hours(6).unwrap())))
+		);
 	}
 	// With none token duration.
 	{
@@ -1682,7 +1724,9 @@ fn parse_define_event() {
 		Expr::Define(Box::new(DefineStatement::Event(DefineEventStatement {
 			kind: DefineKind::Default,
 			name: Expr::Idiom(Idiom::field(Ident::from_strand(strand!("event").to_owned()))),
-			target_table: Expr::Idiom(Idiom::field(Ident::from_strand(strand!("table").to_owned()))),
+			target_table: Expr::Idiom(Idiom::field(Ident::from_strand(
+				strand!("table").to_owned()
+			))),
 			when: Expr::Literal(Literal::Null),
 			then: vec![Expr::Literal(Literal::Null), Expr::Literal(Literal::None)],
 			comment: None,
@@ -1743,7 +1787,9 @@ fn parse_define_field() {
 			res,
 			Expr::Define(Box::new(DefineStatement::Field(DefineFieldStatement {
 				kind: DefineKind::Default,
-				name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned())),])),
+				name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(
+					strand!("foo").to_owned()
+				)),])),
 				what: Expr::Idiom(Idiom::field(Ident::from_strand(strand!("bar").to_owned()))),
 				flex: false,
 				field_kind: None,
@@ -2628,7 +2674,9 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Namespace(RemoveNamespaceStatement {
-			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("ns").to_owned()))])),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(
+				strand!("ns").to_owned()
+			))])),
 			if_exists: false,
 			expunge: false,
 		})))
@@ -2641,7 +2689,9 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Database(RemoveDatabaseStatement {
-			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("database").to_owned()))])),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(
+				strand!("database").to_owned()
+			))])),
 			if_exists: false,
 			expunge: false,
 		})))
@@ -2679,7 +2729,9 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Access(RemoveAccessStatement {
-			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned()))])),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(
+				strand!("foo").to_owned()
+			))])),
 			base: Base::Db,
 			if_exists: false,
 		})))
@@ -2704,7 +2756,9 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Table(RemoveTableStatement {
-			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned()))])),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(
+				strand!("foo").to_owned()
+			))])),
 			if_exists: false,
 			expunge: false,
 		})))
@@ -2718,8 +2772,12 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Event(RemoveEventStatement {
-			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned()))])),
-			what: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("bar").to_owned()))])),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(
+				strand!("foo").to_owned()
+			))])),
+			what: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(
+				strand!("bar").to_owned()
+			))])),
 			if_exists: false,
 		})))
 	);
@@ -2737,7 +2795,9 @@ fn parse_remove() {
 				Part::Field(Ident::from_strand(strand!("bar").to_owned())),
 				Part::Value(Expr::Literal(Literal::Integer(10)))
 			])),
-			what: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("bar").to_owned()))])),
+			what: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(
+				strand!("bar").to_owned()
+			))])),
 			if_exists: false,
 		})))
 	);
@@ -2749,8 +2809,12 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Index(RemoveIndexStatement {
-			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned()))])),
-			what: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("bar").to_owned()))])),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(
+				strand!("foo").to_owned()
+			))])),
+			what: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(
+				strand!("bar").to_owned()
+			))])),
 			if_exists: false,
 		})))
 	);
@@ -2762,7 +2826,9 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Analyzer(RemoveAnalyzerStatement {
-			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned()))])),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(
+				strand!("foo").to_owned()
+			))])),
 			if_exists: false,
 		})))
 	);
@@ -2774,7 +2840,9 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::User(RemoveUserStatement {
-			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned()))])),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(
+				strand!("foo").to_owned()
+			))])),
 			base: Base::Db,
 			if_exists: false,
 		})))

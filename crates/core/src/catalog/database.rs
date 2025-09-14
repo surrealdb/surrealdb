@@ -65,7 +65,10 @@ impl DatabaseDefinition {
 			// SAFETY: we know the name is valid because it was validated when the database was
 			// created.
 			name: Expr::Idiom(Idiom::field(Ident::new(self.name.clone()).unwrap())),
-			comment: self.comment.clone().map(|v| Expr::Literal(Literal::Strand(Strand::new(v).unwrap()))),
+			comment: self
+				.comment
+				.clone()
+				.map(|v| Expr::Literal(Literal::Strand(Strand::new(v).unwrap()))),
 			changefeed: self.changefeed.map(|v| v.into()),
 			..Default::default()
 		}

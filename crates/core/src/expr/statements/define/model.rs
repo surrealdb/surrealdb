@@ -1,6 +1,7 @@
 use std::fmt::{self, Write};
 
 use anyhow::{Result, bail};
+use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog::providers::DatabaseProvider;
@@ -13,7 +14,6 @@ use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::{Base, Expr, Literal};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
-use reblessive::tree::Stk;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineModelStatement {

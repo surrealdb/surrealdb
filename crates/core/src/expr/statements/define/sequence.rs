@@ -1,6 +1,7 @@
 use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
+use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog::SequenceDefinition;
@@ -13,7 +14,6 @@ use crate::expr::{Base, Expr, Literal, Timeout, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
-use reblessive::tree::Stk;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineSequenceStatement {
@@ -37,7 +37,13 @@ impl Default for DefineSequenceStatement {
 }
 
 impl DefineSequenceStatement {
-	pub(crate) async fn compute(&self, stk: &mut Stk, ctx: &Context, opt: &Options, doc: Option<&CursorDoc>) -> Result<Value> {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
 		// Compute name

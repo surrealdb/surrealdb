@@ -1,8 +1,8 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::sql::{Expr, Literal};
 use crate::sql::changefeed::ChangeFeed;
+use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

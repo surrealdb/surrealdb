@@ -23,7 +23,9 @@ impl ParamDefinition {
 			kind: DefineKind::Default,
 			name: unsafe { crate::sql::Ident::new_unchecked(self.name.clone()) },
 			value: crate::sql::Expr::from_value(self.value.clone()),
-			comment: self.comment.clone().map(|x| crate::sql::Expr::Literal(crate::sql::Literal::Strand(Strand::new(x).unwrap()))),
+			comment: self.comment.clone().map(|x| {
+				crate::sql::Expr::Literal(crate::sql::Literal::Strand(Strand::new(x).unwrap()))
+			}),
 			permissions: self.permissions.clone().into(),
 		}
 	}

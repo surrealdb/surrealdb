@@ -11,7 +11,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::{Base, Ident, Expr, FlowResultExt as _};
+use crate::expr::{Base, Expr, FlowResultExt as _, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 

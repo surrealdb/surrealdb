@@ -65,7 +65,10 @@ impl ApiDefinition {
 			actions: self.actions.iter().map(|x| x.to_sql_action()).collect(),
 			fallback: self.fallback.clone().map(|x| x.into()),
 			config: self.config.to_sql_config(),
-			comment: self.comment.clone().map(|x| crate::sql::Expr::Literal(Literal::Strand(Strand::new(x).unwrap()))),
+			comment: self
+				.comment
+				.clone()
+				.map(|x| crate::sql::Expr::Literal(Literal::Strand(Strand::new(x).unwrap()))),
 		}
 	}
 }

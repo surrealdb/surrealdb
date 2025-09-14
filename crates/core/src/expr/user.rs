@@ -1,4 +1,5 @@
-use crate::{expr::{Expr, Literal}, val::Duration};
+use crate::expr::{Expr, Literal};
+use crate::val::Duration;
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 // Durations representing the expiration of different elements of user
@@ -15,7 +16,9 @@ impl Default for UserDuration {
 	fn default() -> Self {
 		Self {
 			// By default, tokens expire after one hour
-			token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).expect("1 hour should fit in a duration")))),
+			token: Some(Expr::Literal(Literal::Duration(
+				Duration::from_hours(1).expect("1 hour should fit in a duration"),
+			))),
 			// By default, sessions do not expire
 			session: None,
 		}

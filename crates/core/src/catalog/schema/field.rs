@@ -49,7 +49,9 @@ impl FieldDefinition {
 		DefineFieldStatement {
 			kind: crate::sql::statements::define::DefineKind::Default,
 			name: Expr::Idiom(self.name.clone()).into(),
-			what: crate::sql::Expr::Idiom(crate::sql::Idiom::field(unsafe { crate::sql::Ident::new_unchecked(self.what.clone()) })),
+			what: crate::sql::Expr::Idiom(crate::sql::Idiom::field(unsafe {
+				crate::sql::Ident::new_unchecked(self.what.clone())
+			})),
 			flex: self.flexible,
 			field_kind: self.field_kind.clone().map(|x| x.into()),
 			readonly: self.readonly,
@@ -71,7 +73,9 @@ impl FieldDefinition {
 				update: self.update_permission.to_sql_definition(),
 				delete: crate::sql::Permission::Full,
 			},
-			comment: self.comment.clone().map(|x| crate::sql::Expr::Literal(crate::sql::Literal::Strand(Strand::new(x).unwrap()))),
+			comment: self.comment.clone().map(|x| {
+				crate::sql::Expr::Literal(crate::sql::Literal::Strand(Strand::new(x).unwrap()))
+			}),
 			reference: self.reference.clone().map(|x| x.into()),
 		}
 	}

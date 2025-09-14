@@ -37,7 +37,9 @@ impl FunctionDefinition {
 			block: self.block.clone().into(),
 			permissions: self.permissions.clone().into(),
 			returns: self.returns.clone().map(|k| k.into()),
-			comment: self.comment.clone().map(|x| crate::sql::Expr::Literal(crate::sql::Literal::Strand(Strand::new(x).unwrap()))),
+			comment: self.comment.clone().map(|x| {
+				crate::sql::Expr::Literal(crate::sql::Literal::Strand(Strand::new(x).unwrap()))
+			}),
 		}
 	}
 }

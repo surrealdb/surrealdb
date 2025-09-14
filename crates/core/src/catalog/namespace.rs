@@ -61,8 +61,13 @@ impl NamespaceDefinition {
 		DefineNamespaceStatement {
 			// SAFETY: we know the name is valid because it was validated when the namespace was
 			// created.
-			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(crate::sql::Ident::new(self.name.clone()).unwrap())),
-			comment: self.comment.clone().map(|v| Expr::Literal(Literal::Strand(Strand::new(v).unwrap()))),
+			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(
+				crate::sql::Ident::new(self.name.clone()).unwrap(),
+			)),
+			comment: self
+				.comment
+				.clone()
+				.map(|v| Expr::Literal(Literal::Strand(Strand::new(v).unwrap()))),
 			..Default::default()
 		}
 	}

@@ -1,8 +1,8 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::sql::fmt::Fmt;
 use crate::sql::Expr;
+use crate::sql::fmt::Fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -42,7 +42,7 @@ impl From<DefineEventStatement> for crate::expr::statements::DefineEventStatemen
 	fn from(v: DefineEventStatement) -> Self {
 		crate::expr::statements::DefineEventStatement {
 			kind: v.kind.into(),
-				name: v.name.into(),
+			name: v.name.into(),
 			target_table: v.target_table.into(),
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),

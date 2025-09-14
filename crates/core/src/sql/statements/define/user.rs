@@ -35,7 +35,6 @@ pub struct DefineUserStatement {
 }
 
 impl Default for DefineUserStatement {
-
 	fn default() -> Self {
 		Self {
 			kind: DefineKind::Default,

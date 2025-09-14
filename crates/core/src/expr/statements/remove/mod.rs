@@ -27,6 +27,7 @@ pub use index::RemoveIndexStatement;
 pub use model::RemoveModelStatement;
 pub use namespace::RemoveNamespaceStatement;
 pub use param::RemoveParamStatement;
+use reblessive::tree::Stk;
 pub use sequence::RemoveSequenceStatement;
 pub use table::RemoveTableStatement;
 pub use user::RemoveUserStatement;
@@ -35,7 +36,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::Value;
-use reblessive::tree::Stk;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RemoveStatement {
