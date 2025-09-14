@@ -1,13 +1,23 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::sql::Ident;
+use crate::sql::{Expr, Literal};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveEventStatement {
-	pub name: Ident,
-	pub what: Ident,
+	pub name: Expr,
+	pub what: Expr,
 	pub if_exists: bool,
+}
+
+impl Default for RemoveEventStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			what: Expr::Literal(Literal::None),
+			if_exists: false,
+		}
+	}
 }
 
 impl Display for RemoveEventStatement {

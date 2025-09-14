@@ -2628,7 +2628,7 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Namespace(RemoveNamespaceStatement {
-			name: Ident::from_strand(strand!("ns").to_owned()),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("ns").to_owned()))])),
 			if_exists: false,
 			expunge: false,
 		})))
@@ -2641,7 +2641,7 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Database(RemoveDatabaseStatement {
-			name: Ident::from_strand(strand!("database").to_owned()),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("database").to_owned()))])),
 			if_exists: false,
 			expunge: false,
 		})))
@@ -2679,7 +2679,7 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Access(RemoveAccessStatement {
-			name: Ident::from_strand(strand!("foo").to_owned()),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned()))])),
 			base: Base::Db,
 			if_exists: false,
 		})))
@@ -2704,7 +2704,7 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Table(RemoveTableStatement {
-			name: Ident::from_strand(strand!("foo").to_owned()),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned()))])),
 			if_exists: false,
 			expunge: false,
 		})))
@@ -2718,8 +2718,8 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Event(RemoveEventStatement {
-			name: Ident::from_strand(strand!("foo").to_owned()),
-			what: Ident::from_strand(strand!("bar").to_owned()),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned()))])),
+			what: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("bar").to_owned()))])),
 			if_exists: false,
 		})))
 	);
@@ -2732,12 +2732,12 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Field(RemoveFieldStatement {
-			name: Idiom(vec![
+			name: Expr::Idiom(Idiom(vec![
 				Part::Field(Ident::from_strand(strand!("foo").to_owned())),
 				Part::Field(Ident::from_strand(strand!("bar").to_owned())),
 				Part::Value(Expr::Literal(Literal::Integer(10)))
-			]),
-			what: Ident::from_strand(strand!("bar").to_owned()),
+			])),
+			what: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("bar").to_owned()))])),
 			if_exists: false,
 		})))
 	);
@@ -2749,8 +2749,8 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Index(RemoveIndexStatement {
-			name: Ident::from_strand(strand!("foo").to_owned()),
-			what: Ident::from_strand(strand!("bar").to_owned()),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned()))])),
+			what: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("bar").to_owned()))])),
 			if_exists: false,
 		})))
 	);
@@ -2762,7 +2762,7 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Analyzer(RemoveAnalyzerStatement {
-			name: Ident::from_strand(strand!("foo").to_owned()),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned()))])),
 			if_exists: false,
 		})))
 	);
@@ -2774,7 +2774,7 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::User(RemoveUserStatement {
-			name: Ident::from_strand(strand!("foo").to_owned()),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned()))])),
 			base: Base::Db,
 			if_exists: false,
 		})))

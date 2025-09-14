@@ -663,12 +663,12 @@ fn statements() -> Vec<TopLevelExpr> {
 			},
 		)))),
 		TopLevelExpr::Expr(Expr::Remove(Box::new(RemoveStatement::Field(RemoveFieldStatement {
-			name: Idiom(vec![
+			name: Expr::Idiom(Idiom(vec![
 				Part::Field(Ident::from_strand(strand!("foo").to_owned())),
 				Part::Field(Ident::from_strand(strand!("bar").to_owned())),
 				Part::Value(Expr::Literal(Literal::Integer(10))),
-			]),
-			what: Ident::from_strand(strand!("bar").to_owned()),
+			])),
+			what: Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("bar").to_owned()))])),
 			if_exists: false,
 		})))),
 		TopLevelExpr::Expr(Expr::Update(Box::new(UpdateStatement {

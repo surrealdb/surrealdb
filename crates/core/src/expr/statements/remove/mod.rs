@@ -35,6 +35,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::Value;
+use reblessive::tree::Stk;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RemoveStatement {
@@ -58,25 +59,26 @@ impl RemoveStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		match self {
-			Self::Namespace(v) => v.compute(ctx, opt).await,
-			Self::Database(v) => v.compute(ctx, opt).await,
+			Self::Namespace(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Database(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Function(v) => v.compute(ctx, opt).await,
-			Self::Access(v) => v.compute(ctx, opt).await,
+			Self::Access(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Param(v) => v.compute(ctx, opt).await,
-			Self::Table(v) => v.compute(ctx, opt).await,
-			Self::Event(v) => v.compute(ctx, opt).await,
-			Self::Field(v) => v.compute(ctx, opt).await,
-			Self::Index(v) => v.compute(ctx, opt).await,
-			Self::Analyzer(v) => v.compute(ctx, opt).await,
-			Self::User(v) => v.compute(ctx, opt).await,
-			Self::Model(v) => v.compute(ctx, opt).await,
-			Self::Bucket(v) => v.compute(ctx, opt).await,
-			Self::Sequence(v) => v.compute(ctx, opt).await,
+			Self::Table(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Event(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Field(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Index(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Analyzer(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::User(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Model(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Bucket(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
 		}
 	}
 }
