@@ -197,9 +197,10 @@ impl Datastore {
 		// TODO: Background error recovery options are not yet available in rocksdb crate v0.23.0
 		// These would help handle Out of Disk (OOD) errors gracefully by allowing automatic resume
 		// after background errors. When available, uncomment the following:
-		// info!(target: TARGET, "Maximum background error resume count: {}", *cnf::ROCKSDB_MAX_BGERROR_RESUME_COUNT);
-		// opts.set_max_bgerror_resume_count(*cnf::ROCKSDB_MAX_BGERROR_RESUME_COUNT);
-		// info!(target: TARGET, "Background error resume retry interval: {}μs", *cnf::ROCKSDB_BGERROR_RESUME_RETRY_INTERVAL);
+		// info!(target: TARGET, "Maximum background error resume count: {}",
+		// *cnf::ROCKSDB_MAX_BGERROR_RESUME_COUNT); opts.set_max_bgerror_resume_count(*
+		// cnf::ROCKSDB_MAX_BGERROR_RESUME_COUNT); info!(target: TARGET, "Background error resume
+		// retry interval: {}μs", *cnf::ROCKSDB_BGERROR_RESUME_RETRY_INTERVAL);
 		// opts.set_bgerror_resume_retry_interval(*cnf::ROCKSDB_BGERROR_RESUME_RETRY_INTERVAL);
 		// Configure background WAL flush behaviour and handle OOD errors during startup
 		let (db, ood_readonly) = match Self::open(opts.clone(), false, path).await {
