@@ -43,7 +43,8 @@ impl RemoveModelStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Compute the name
-		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "model name").await?.to_raw_string();
+		let name =
+			expr_to_ident(stk, ctx, opt, doc, &self.name, "model name").await?.to_raw_string();
 		// Get the defined model
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let ml = match txn.get_db_model(ns, db, &name, &self.version).await? {

@@ -36,9 +36,11 @@ impl DefineEventStatement {
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
 	) -> Result<Value> {
-		let name = expr_to_ident(stk, ctx, opt, _doc, &self.name, "event name").await?.to_raw_string();
-		let target_table =
-			expr_to_ident(stk, ctx, opt, _doc, &self.target_table, "target table").await?.to_raw_string();
+		let name =
+			expr_to_ident(stk, ctx, opt, _doc, &self.name, "event name").await?.to_raw_string();
+		let target_table = expr_to_ident(stk, ctx, opt, _doc, &self.target_table, "target table")
+			.await?
+			.to_raw_string();
 		let comment = map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, _doc, x => String));
 
 		// Allowed to run?

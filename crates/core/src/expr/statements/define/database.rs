@@ -11,8 +11,8 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
-use crate::expr::statements::info::InfoStructure;
 use crate::expr::parameterize::expr_to_ident;
+use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Literal};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
@@ -58,7 +58,8 @@ impl DefineDatabaseStatement {
 		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
 
 		// Process the name
-		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "database name").await?.to_raw_string();
+		let name =
+			expr_to_ident(stk, ctx, opt, doc, &self.name, "database name").await?.to_raw_string();
 
 		// Check if the definition exists
 		let database_id = if let Some(db) = txn.get_db_by_name(ns, &name).await? {

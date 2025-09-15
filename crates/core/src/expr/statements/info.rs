@@ -267,7 +267,7 @@ impl InfoStatement {
 				// Get the NS and DB
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 				// Compute table name
-				let tb = expr_to_ident(stk, ctx, opt, doc, &tb, "table name").await?;
+				let tb = expr_to_ident(stk, ctx, opt, doc, tb, "table name").await?;
 				// Convert the version to u64 if present
 				let version = match version {
 					Some(v) => Some(
@@ -336,7 +336,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Actor, &base)?;
 				// Compute user name
-				let user = expr_to_ident(stk, ctx, opt, doc, &user, "user name").await?;
+				let user = expr_to_ident(stk, ctx, opt, doc, user, "user name").await?;
 				// Get the transaction
 				let txn = ctx.tx();
 				// Process the user
@@ -386,8 +386,8 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Actor, &Base::Db)?;
 				// Compute table & index names
-				let index = expr_to_ident(stk, ctx, opt, doc, &index, "index name").await?;
-				let table = expr_to_ident(stk, ctx, opt, doc, &table, "table name").await?;
+				let index = expr_to_ident(stk, ctx, opt, doc, index, "index name").await?;
+				let table = expr_to_ident(stk, ctx, opt, doc, table, "table name").await?;
 				// Output
 				#[cfg(not(target_family = "wasm"))]
 				{

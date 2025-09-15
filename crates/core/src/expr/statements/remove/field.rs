@@ -10,9 +10,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
 use crate::expr::{Base, Expr, Literal, Value};
-use crate::expr::parameterize::expr_to_ident;
-use crate::expr::parameterize::expr_to_idiom;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -44,8 +43,9 @@ impl RemoveFieldStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Compute the table name
-		let table_name =
-			expr_to_ident(stk, ctx, opt, doc, &self.table_name, "table name").await?.to_raw_string();
+		let table_name = expr_to_ident(stk, ctx, opt, doc, &self.table_name, "table name")
+			.await?
+			.to_raw_string();
 		// Compute the name
 		let name = expr_to_idiom(stk, ctx, opt, doc, &self.name, "field name").await?;
 		// Get the NS and DB

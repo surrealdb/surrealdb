@@ -49,7 +49,9 @@ impl DefineAnalyzerStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<catalog::AnalyzerDefinition> {
 		Ok(catalog::AnalyzerDefinition {
-			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "analyzer name").await?.to_raw_string(),
+			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "analyzer name")
+				.await?
+				.to_raw_string(),
 			function: self.function.clone(),
 			tokenizers: self.tokenizers.clone(),
 			filters: self.filters.clone(),

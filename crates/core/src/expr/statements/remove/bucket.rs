@@ -8,9 +8,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
-use crate::expr::parameterize::expr_to_ident;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RemoveBucketStatement {
@@ -39,7 +39,8 @@ impl RemoveBucketStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Bucket, &Base::Db)?;
 		// Compute the name
-		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "bucket name").await?.to_raw_string();
+		let name =
+			expr_to_ident(stk, ctx, opt, doc, &self.name, "bucket name").await?.to_raw_string();
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the definition

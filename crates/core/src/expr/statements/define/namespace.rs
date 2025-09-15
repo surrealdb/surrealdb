@@ -48,7 +48,8 @@ impl DefineNamespaceStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Process the name
-		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "namespace name").await?.to_raw_string();
+		let name =
+			expr_to_ident(stk, ctx, opt, doc, &self.name, "namespace name").await?.to_raw_string();
 
 		// Check if the definition exists
 		let namespace_id = if let Some(ns) = txn.get_ns_by_name(&name).await? {

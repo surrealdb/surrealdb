@@ -48,7 +48,8 @@ impl DefineSequenceStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
 		// Compute name
-		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "sequence name").await?.to_raw_string();
+		let name =
+			expr_to_ident(stk, ctx, opt, doc, &self.name, "sequence name").await?.to_raw_string();
 		// Compute timeout
 		let timeout = map_opt!(x as &self.timeout => x.compute(stk, ctx, opt, doc).await?.0);
 		// Fetch the transaction

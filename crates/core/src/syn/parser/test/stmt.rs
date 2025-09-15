@@ -1829,7 +1829,10 @@ fn parse_define_index() {
 			what: Expr::Idiom(Idiom::field(Ident::from_strand(strand!("table").to_owned()))),
 			cols: vec![
 				Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("a").to_owned()))])),
-				Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("b").to_owned())), Part::All]))
+				Expr::Idiom(Idiom(vec![
+					Part::Field(Ident::from_strand(strand!("b").to_owned())),
+					Part::All
+				]))
 			],
 			index: Index::FullText(FullTextParams {
 				az: Ident::from_strand(strand!("ana").to_owned()),
@@ -1856,7 +1859,9 @@ fn parse_define_index() {
 			kind: DefineKind::Default,
 			name: Expr::Idiom(Idiom::field(Ident::from_strand(strand!("index").to_owned()))),
 			what: Expr::Idiom(Idiom::field(Ident::from_strand(strand!("table").to_owned()))),
-			cols: vec![Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("a").to_owned()))])),],
+			cols: vec![Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(
+				strand!("a").to_owned()
+			))])),],
 			index: Index::Uniq,
 			comment: None,
 			concurrently: false
@@ -1872,7 +1877,9 @@ fn parse_define_index() {
 			kind: DefineKind::Default,
 			name: Expr::Idiom(Idiom::field(Ident::from_strand(strand!("index").to_owned()))),
 			what: Expr::Idiom(Idiom::field(Ident::from_strand(strand!("table").to_owned()))),
-			cols: vec![Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("a").to_owned()))])),],
+			cols: vec![Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(
+				strand!("a").to_owned()
+			))])),],
 			index: Index::MTree(MTreeParams {
 				dimension: 4,
 				distance: Distance::Minkowski(Number::Int(5)),
@@ -1895,7 +1902,9 @@ fn parse_define_index() {
 			kind: DefineKind::Default,
 			name: Expr::Idiom(Idiom::field(Ident::from_strand(strand!("index").to_owned()))),
 			what: Expr::Idiom(Idiom::field(Ident::from_strand(strand!("table").to_owned()))),
-			cols: vec![Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(strand!("a").to_owned()))])),],
+			cols: vec![Expr::Idiom(Idiom(vec![Part::Field(Ident::from_strand(
+				strand!("a").to_owned()
+			))])),],
 			index: Index::Hnsw(HnswParams {
 				dimension: 128,
 				distance: Distance::Manhattan,

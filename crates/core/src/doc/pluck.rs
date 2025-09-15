@@ -165,7 +165,9 @@ impl Document {
 		}
 		// Remove any omitted fields from output
 		if let Some(v) = stm.omit() {
-			let fields = exprs_to_fields(stk, ctx, opt, Some(&self.current), v.as_slice()).await.map_err(IgnoreError::from)?;
+			let fields = exprs_to_fields(stk, ctx, opt, Some(&self.current), v.as_slice())
+				.await
+				.map_err(IgnoreError::from)?;
 
 			for field in fields {
 				out.del(stk, ctx, opt, &field).await?;

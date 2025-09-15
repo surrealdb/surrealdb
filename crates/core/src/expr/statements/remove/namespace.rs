@@ -8,8 +8,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Expr, Literal, Value};
 use crate::expr::parameterize::expr_to_ident;
+use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -43,7 +43,8 @@ impl RemoveNamespaceStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Compute the name
-		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "namespace name").await?.to_raw_string();
+		let name =
+			expr_to_ident(stk, ctx, opt, doc, &self.name, "namespace name").await?.to_raw_string();
 		let ns = match txn.get_ns_by_name(&name).await? {
 			Some(x) => x,
 			None => {

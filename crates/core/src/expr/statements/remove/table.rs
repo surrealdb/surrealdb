@@ -10,9 +10,9 @@ use crate::ctx::Context;
 use crate::dbs::{self, Notification, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
-use crate::expr::parameterize::expr_to_ident;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RemoveTableStatement {
@@ -43,7 +43,8 @@ impl RemoveTableStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Compute the name
-		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "table name").await?.to_raw_string();
+		let name =
+			expr_to_ident(stk, ctx, opt, doc, &self.name, "table name").await?.to_raw_string();
 		// Get the NS and DB
 		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;

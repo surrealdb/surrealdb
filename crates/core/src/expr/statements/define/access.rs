@@ -228,7 +228,9 @@ impl DefineAccessStatement {
 		}
 
 		Ok(AccessDefinition {
-			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "access name").await?.to_raw_string(),
+			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "access name")
+				.await?
+				.to_raw_string(),
 			grant_duration: map_opt!(x as &self.duration.grant => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),
 			token_duration: map_opt!(x as &self.duration.token => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),
 			session_duration: map_opt!(x as &self.duration.session => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),

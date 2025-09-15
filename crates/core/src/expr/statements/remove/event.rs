@@ -10,9 +10,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
-use crate::expr::parameterize::expr_to_ident;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RemoveEventStatement {
@@ -45,10 +45,12 @@ impl RemoveEventStatement {
 		// Get the NS and DB
 		let (ns_name, db_name) = opt.ns_db()?;
 		// Compute the table name
-		let table_name =
-			expr_to_ident(stk, ctx, opt, doc, &self.table_name, "table name").await?.to_raw_string();
+		let table_name = expr_to_ident(stk, ctx, opt, doc, &self.table_name, "table name")
+			.await?
+			.to_raw_string();
 		// Compute the name
-		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "event name").await?.to_raw_string();
+		let name =
+			expr_to_ident(stk, ctx, opt, doc, &self.name, "event name").await?.to_raw_string();
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 
 		// Get the transaction

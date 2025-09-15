@@ -39,7 +39,8 @@ impl RemoveAnalyzerStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
 		// Compute the name
-		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "analyzer name").await?.to_raw_string();
+		let name =
+			expr_to_ident(stk, ctx, opt, doc, &self.name, "analyzer name").await?.to_raw_string();
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the definition
