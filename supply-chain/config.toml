@@ -59,10 +59,6 @@ criteria = "safe-to-deploy"
 version = "0.2.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.allocator-api2]]
-version = "0.2.21"
-criteria = "safe-to-deploy"
-
 [[exemptions.ammonia]]
 version = "4.0.0"
 criteria = "safe-to-deploy"
@@ -687,10 +683,6 @@ criteria = "safe-to-deploy"
 version = "0.2.11"
 criteria = "safe-to-deploy"
 
-[[exemptions.libmimalloc-sys]]
-version = "0.1.40"
-criteria = "safe-to-deploy"
-
 [[exemptions.libredox]]
 version = "0.1.3"
 criteria = "safe-to-deploy"
@@ -765,10 +757,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.miette-derive]]
 version = "5.10.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.mimalloc]]
-version = "0.1.44"
 criteria = "safe-to-deploy"
 
 [[exemptions.mime_guess]]
