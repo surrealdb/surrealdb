@@ -1381,7 +1381,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.tikv-jemalloc-sys]
-allow_apis = ["process"]
+allow_apis = ["fs", "process"]
 
 [pkg.surrealdb-tikv-client]
 allow_unsafe = true
