@@ -641,6 +641,7 @@ allow_unsafe = true
 
 [pkg.dashmap]
 allow_unsafe = true
+allow_apis = ["net"]
 
 [pkg.tokio-stream]
 allow_unsafe = true
