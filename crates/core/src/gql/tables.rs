@@ -450,6 +450,8 @@ fn filter_id() -> InputObject {
 	filter_impl!(filter, ty, "ne");
 	filter
 }
+
+
 fn filter_from_type(
 	kind: Kind,
 	filter_name: String,
@@ -499,12 +501,14 @@ fn filter_from_type(
 	Ok(filter)
 }
 
+
 fn cond_from_filter(
 	filter: &IndexMap<Name, GqlValue>,
 	fds: &[DefineFieldStatement],
 ) -> Result<Cond, GqlError> {
 	val_from_filter(filter, fds).map(IntoExt::intox)
 }
+
 
 fn val_from_filter(
 	filter: &IndexMap<Name, GqlValue>,
@@ -526,6 +530,7 @@ fn val_from_filter(
 	cond
 }
 
+
 fn parse_op(name: impl AsRef<str>) -> Result<sql::Operator, GqlError> {
 	match name.as_ref() {
 		"eq" => Ok(sql::Operator::Equal),
@@ -533,6 +538,7 @@ fn parse_op(name: impl AsRef<str>) -> Result<sql::Operator, GqlError> {
 		op => Err(resolver_error(format!("Unsupported op: {op}"))),
 	}
 }
+
 
 fn negate(filter: &GqlValue, fds: &[DefineFieldStatement]) -> Result<SqlValue, GqlError> {
 	let obj = filter.as_object().ok_or(resolver_error("Value of NOT must be object"))?;
@@ -549,6 +555,7 @@ enum AggregateOp {
 	And,
 	Or,
 }
+
 
 fn aggregate(
 	filter: &GqlValue,
@@ -588,6 +595,7 @@ fn aggregate(
 
 	Ok(cond)
 }
+
 
 fn binop(
 	field_name: &str,

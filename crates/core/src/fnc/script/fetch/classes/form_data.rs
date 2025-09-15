@@ -36,7 +36,7 @@ impl<'js> FormDataValue<'js> {
 				filename,
 			})
 		} else if filename.into_inner().is_some() {
-			return Err(Exception::throw_type(ctx, error));
+			Err(Exception::throw_type(ctx, error))
 		} else {
 			let value = Coerced::<String>::from_js(ctx, value)?;
 			Ok(FormDataValue::String(value.0))

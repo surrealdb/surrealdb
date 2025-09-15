@@ -24,8 +24,7 @@ pub async fn init(args: ValidateCommandArguments) -> Result<(), Error> {
 			Err(error) => {
 				eprintln!("Error parsing glob pattern {pattern}: {error}");
 
-				return Err(Error::Io(IoError::new(
-					ErrorKind::Other,
+				return Err(Error::Io(IoError::other(
 					format!("Error parsing glob pattern {pattern}: {error}"),
 				)));
 			}

@@ -66,6 +66,8 @@ args = [
     "--",
     "-D",
     "warnings",
+    "-A",
+    "clippy::result-large-err",
 ]
 
 [tasks.ci-clippy-release]

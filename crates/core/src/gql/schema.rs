@@ -184,6 +184,7 @@ pub async fn generate_schema(
 		.map_err(|e| schema_error(format!("there was an error generating schema: {e:?}")))
 }
 
+
 pub fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
 	let out = match v {
 		SqlValue::None => GqlValue::Null,
@@ -216,6 +217,7 @@ pub fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
 	};
 	Ok(out)
 }
+
 
 pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> {
 	let (optional, match_kind) = match kind {
@@ -391,6 +393,7 @@ macro_rules! any_try_kinds {
 		$(any_try_kind!($val, $kind));+
 	};
 }
+
 
 pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 	use crate::syn;

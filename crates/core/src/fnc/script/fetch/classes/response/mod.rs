@@ -273,7 +273,7 @@ impl<'js> Response<'js> {
 
 	// Creates a new response with a different URL
 	#[qjs(static)]
-	pub fn redirect(ctx: Ctx<'_>, url: String, status: Opt<u32>) -> Result<Response> {
+	pub fn redirect(ctx: Ctx<'_>, url: String, status: Opt<u32>) -> Result<Response<'_>> {
 		let url = url
 			.parse::<Url>()
 			.map_err(|e| Exception::throw_type(&ctx, &format!("Invalid url: {e}")))?;

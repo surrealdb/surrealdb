@@ -271,6 +271,7 @@ pub async fn init(
 	Ok(())
 }
 
+
 fn process(
 	pretty: bool,
 	json: bool,

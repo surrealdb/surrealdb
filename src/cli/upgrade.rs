@@ -161,8 +161,7 @@ pub async fn init(args: UpgradeCommandArguments) -> Result<(), Error> {
 	let response = reqwest::get(&url).await?;
 
 	if !response.status().is_success() {
-		return Err(Error::Io(IoError::new(
-			ErrorKind::Other,
+		return Err(Error::Io(IoError::other(
 			format!("received status {} when downloading from {url}", response.status()),
 		)));
 	}
@@ -188,8 +187,7 @@ pub async fn init(args: UpgradeCommandArguments) -> Result<(), Error> {
 			.arg(tmp_dir.path())
 			.output()?;
 		if !output.status.success() {
-			return Err(Error::Io(IoError::new(
-				ErrorKind::Other,
+			return Err(Error::Io(IoError::other(
 				format!("failed to unarchive: {}", output.status),
 			)));
 		}

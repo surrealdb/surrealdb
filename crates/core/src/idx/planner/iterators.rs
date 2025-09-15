@@ -106,6 +106,7 @@ impl IteratorBatch for VecDeque<IndexItemRecord> {
 	}
 }
 
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum ThingIterator {
 	IndexEqual(IndexEqualThingIterator),
 	IndexRange(IndexRangeThingIterator),

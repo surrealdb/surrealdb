@@ -13,7 +13,7 @@ pub struct Access<'a> {
 }
 impl_key!(Access<'a>);
 
-pub fn new(ac: &str) -> Access {
+pub fn new(ac: &str) -> Access<'_> {
 	Access::new(ac)
 }
 

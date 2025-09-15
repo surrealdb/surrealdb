@@ -322,6 +322,7 @@ pub trait CreateResource<Output> {
 	fn into_resource(self) -> Result<Resource>;
 }
 
+
 fn no_colon(a: &str) -> Result<()> {
 	if a.contains(':') {
 		return Err(Error::TableColonId {

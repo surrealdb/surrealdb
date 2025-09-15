@@ -353,12 +353,12 @@ impl Building {
 		Ok(ConsumeResult::Enqueued)
 	}
 
-	fn new_ia_key(&self, i: u32) -> Result<Ia, Error> {
+	fn new_ia_key(&self, i: u32) -> Result<Ia<'_>, Error> {
 		let (ns, db) = self.opt.ns_db()?;
 		Ok(Ia::new(ns, db, &self.ix.what, &self.ix.name, i))
 	}
 
-	fn new_ip_key(&self, id: Id) -> Result<Ip, Error> {
+	fn new_ip_key(&self, id: Id) -> Result<Ip<'_>, Error> {
 		let (ns, db) = self.opt.ns_db()?;
 		Ok(Ip::new(ns, db, &self.ix.what, &self.ix.name, id))
 	}

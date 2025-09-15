@@ -7,7 +7,6 @@ use std::borrow::Cow;
 #[cfg(test)]
 use std::collections::BTreeMap;
 use std::io::Error as IoError;
-use std::io::ErrorKind;
 use std::time::Duration;
 
 pub(crate) trait VersionClient {
@@ -34,8 +33,7 @@ impl VersionClient for ReqwestVersionClient {
 		let request = self.client.get(format!("{ROOT}/{version}.txt")).build().unwrap();
 		let response = self.client.execute(request).await?;
 		if !response.status().is_success() {
-			return Err(Error::Io(IoError::new(
-				ErrorKind::Other,
+			return Err(Error::Io(IoError::other(
 				format!("received status {} when fetching version", response.status()),
 			)));
 		}
