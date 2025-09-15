@@ -17,7 +17,7 @@ pub fn core_capabilities_from_test_config(config: &TestConfig) -> Capabilities {
 		none_on_missing: bool,
 	) -> Targets<T>
 	where
-		T: std::cmp::Eq + std::hash::Hash + Clone,
+		T: Eq + std::hash::Hash + Ord + Clone,
 	{
 		v.as_ref()
 			.map(|x| match x {

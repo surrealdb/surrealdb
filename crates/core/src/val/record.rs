@@ -392,4 +392,26 @@ impl Record {
 	pub(crate) fn remove_field_stats(&mut self, field_name: &str) -> Option<FieldStats> {
 		self.metadata.as_mut()?.stats.as_mut()?.remove(field_name)
 	}
+
+	/// Checks if any count field has become zero (indicating the record should be deleted)
+	///
+	/// # Returns
+	///
+	/// `true` if any field has a count of 0, indicating the record should be purged
+	pub(crate) fn has_zero_count(&self) -> bool {
+		if let Some(metadata) = &self.metadata {
+			if let Some(stats_map) = &metadata.stats {
+				for stats in stats_map.values() {
+					match stats {
+						FieldStats::Count(count) if *count == 0 => return true,
+						FieldStats::Sum { count } if *count == 0 => return true,
+						FieldStats::Mean { count, .. } if *count == 0 => return true,
+						FieldStats::MinMax { count } if *count == 0 => return true,
+						_ => {}
+					}
+				}
+			}
+		}
+		false
+	}
 }

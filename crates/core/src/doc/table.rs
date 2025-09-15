@@ -1033,6 +1033,7 @@ impl Document {
 		}
 
 		// Apply metadata deltas and update field values where needed
+		let mut any_field_stats_removed = false;
 		for (field_name, delta) in metadata_deltas {
 			// Get the existing stats for this field
 			let existing_stats = record.get_field_stats(&field_name).cloned();
@@ -1057,6 +1058,7 @@ impl Document {
 			} else {
 				// If delta results in None, remove the field stats (count reached 0)
 				record.remove_field_stats(&field_name);
+				any_field_stats_removed = true;
 
 				// Also remove the field value if it was a computed aggregation
 				if matches!(
@@ -1072,12 +1074,17 @@ impl Document {
 		}
 
 		// Check delete condition
-		let should_delete = if let Some(del_condition) = del_ops {
+		let mut should_delete = if let Some(del_condition) = del_ops {
 			let doc = CursorDoc::new(Some(rid.clone().into()), None, record.clone());
 			del_condition.compute(stk, ctx, opt, Some(&doc)).await.catch_return()?.is_truthy()
 		} else {
 			false
 		};
+		
+		// Check if any field stats were removed (count became 0) or if any remaining count field is 0
+		if !should_delete {
+			should_delete = any_field_stats_removed || record.has_zero_count();
+		}
 
 		if should_delete {
 			// Delete the record
@@ -1334,7 +1341,7 @@ impl Document {
 	fn chg(
 		&self,
 		set_ops: &mut Vec<Assignment>,
-		del_cond: &mut Option<Expr>,
+		_del_cond: &mut Option<Expr>,
 		metadata_deltas: &mut HashMap<String, FieldStatsDelta>,
 		act: &FieldAction,
 		key: Idiom,
@@ -1392,15 +1399,8 @@ impl Document {
 					metadata_deltas.insert(field_name.clone(), new_delta);
 				}
 
-				// Add a purge condition (delete record if the number of values would be 0)
-				accumulate_delete_expr(
-					del_cond,
-					Expr::Binary {
-						left: Box::new(Expr::Idiom(key)),
-						op: BinaryOperator::Equal,
-						right: Box::new(Expr::Literal(Literal::Integer(0))),
-					},
-				);
+				// Add a purge condition based on metadata count becoming 0
+				// This will be handled in handle_record_with_metadata based on final count state
 			}
 		}
 		// Everything ok
