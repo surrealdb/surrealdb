@@ -495,23 +495,23 @@ impl Iterator {
 		Ok(())
 	}
 
- /// Returns true if START can be applied as a storage-level skip (start_skip)
- /// without changing the semantics of the query.
- ///
- /// What this actually checks (mirrors the code below):
- /// - GROUP BY: disallowed, because grouping changes the result count/order. → false
- /// - Multiple iterators: disallowed, because START must apply to the merged set. → false
- /// - WHERE: allowed only if the sole iterator is an index whose executor applies the
- ///   WHERE predicate at the iterator level (`exe.is_iterator_condition`). Otherwise,
- ///   START must apply to the filtered set and cannot be pushed down. → conditional
- /// - ORDER BY absent: allowed, natural storage order is fine. → true
- /// - ORDER BY present: allowed only if the sole iterator is a sorted index that provides
- ///   the requested order (`qp.is_order`). → conditional
- ///
- /// In short: push START down to storage only for a single iterator where any filtering is
- /// performed by the index itself and, if ORDER BY is used, the iterator natively yields
- /// rows in the required order.
- fn can_start_skip(&self, ctx: &Context, stm: &Statement<'_>) -> bool {
+	/// Returns true if START can be applied as a storage-level skip (start_skip)
+	/// without changing the semantics of the query.
+	///
+	/// What this actually checks (mirrors the code below):
+	/// - GROUP BY: disallowed, because grouping changes the result count/order. → false
+	/// - Multiple iterators: disallowed, because START must apply to the merged set. → false
+	/// - WHERE: allowed only if the sole iterator is an index whose executor applies the
+	///   WHERE predicate at the iterator level (`exe.is_iterator_condition`). Otherwise,
+	///   START must apply to the filtered set and cannot be pushed down. → conditional
+	/// - ORDER BY absent: allowed, natural storage order is fine. → true
+	/// - ORDER BY present: allowed only if the sole iterator is a sorted index that provides
+	///   the requested order (`qp.is_order`). → conditional
+	///
+	/// In short: push START down to storage only for a single iterator where any filtering is
+	/// performed by the index itself and, if ORDER BY is used, the iterator natively yields
+	/// rows in the required order.
+	fn can_start_skip(&self, ctx: &Context, stm: &Statement<'_>) -> bool {
 		// GROUP BY operations change the result structure and count
 		if stm.group().is_some() {
 			return false;
@@ -557,21 +557,21 @@ impl Iterator {
 		false
 	}
 
- /// Returns true if iteration can be cancelled early on LIMIT (cancel_on_limit)
- /// without changing the semantics of the query.
- ///
- /// What this actually checks (mirrors the code below):
- /// - GROUP BY: disallowed; grouping can change the number of output rows and needs
- ///   to see all inputs. → false
- /// - ORDER BY absent: allowed; we count accepted rows after WHERE filtering, so we can
- ///   stop as soon as we have enough outputs. → true
- /// - ORDER BY present: allowed only if there's exactly one iterator and it is a sorted
- ///   index that matches the ORDER BY (`qp.is_order`). Otherwise we must iterate all
- ///   rows to sort correctly. → conditional
- ///
- /// Note: WHERE filtering is fine here because cancellation is based on the number of
- /// accepted results after filtering, not on the raw scanned rows.
- fn can_cancel_on_limit(&self, ctx: &Context, stm: &Statement<'_>) -> bool {
+	/// Returns true if iteration can be cancelled early on LIMIT (cancel_on_limit)
+	/// without changing the semantics of the query.
+	///
+	/// What this actually checks (mirrors the code below):
+	/// - GROUP BY: disallowed; grouping can change the number of output rows and needs
+	///   to see all inputs. → false
+	/// - ORDER BY absent: allowed; we count accepted rows after WHERE filtering, so we can
+	///   stop as soon as we have enough outputs. → true
+	/// - ORDER BY present: allowed only if there's exactly one iterator and it is a sorted
+	///   index that matches the ORDER BY (`qp.is_order`). Otherwise we must iterate all
+	///   rows to sort correctly. → conditional
+	///
+	/// Note: WHERE filtering is fine here because cancellation is based on the number of
+	/// accepted results after filtering, not on the raw scanned rows.
+	fn can_cancel_on_limit(&self, ctx: &Context, stm: &Statement<'_>) -> bool {
 		// GROUP BY changes result count post-iteration.
 		// Cannot cancel early as we need to evalute every records.
 		if stm.group().is_some() {
