@@ -16,7 +16,7 @@ use crate::val::array::{
 	Clump, Combine, Complement, Difference, Flatten, Intersect, Matches, Union, Uniq, Windows,
 };
 use crate::val::range::TypedRange;
-use crate::val::{Array, Closure, Range, Value};
+use crate::val::{Array, Closure, Value};
 
 /// Returns an error if an array of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
@@ -225,13 +225,22 @@ pub fn fill(
 			start: Bound::Included(start),
 			end: Bound::Excluded(end),
 		}
+	} else if range_start.is_range() {
+		// Condition checked above, unwrap cannot trigger.
+		let range = range_start.into_range().unwrap();
+		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?
 	} else {
-		range_start.coerce_to::<Box<Range>>().and_then(|x| x.coerce_to_typed::<i64>()).map_err(
-			|e| Error::InvalidArguments {
-				name: String::from("array::range"),
-				message: format!("Argument 1 was the wrong type. {e}"),
-			},
-		)?
+		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?;
+		TypedRange {
+			start: Bound::Included(start),
+			end: Bound::Unbounded,
+		}
 	};
 
 	let array_len = array.len() as i64;
@@ -261,14 +270,14 @@ pub fn fill(
 	let end = match range.end {
 		Bound::Included(x) => {
 			if x < 0 {
-				array_len.saturating_add(x).max(0) as usize
+				array_len.saturating_add(x).clamp(0, array_len) as usize
 			} else {
-				x as usize
+				x.min(array_len) as usize
 			}
 		}
 		Bound::Excluded(x) => {
 			if x < 0 {
-				let end = array_len.saturating_add(x).saturating_sub(1);
+				let end = array_len.saturating_add(x).min(array_len).saturating_sub(1);
 				if end < start as i64 {
 					return Ok(array.into());
 				}
@@ -277,10 +286,10 @@ pub fn fill(
 				if x <= start as i64 {
 					return Ok(array.into());
 				}
-				x.saturating_sub(1) as usize
+				x.min(array_len).saturating_sub(1) as usize
 			}
 		}
-		Bound::Unbounded => range.len(),
+		Bound::Unbounded => array.len() - 1,
 	};
 
 	if end < start {
@@ -639,13 +648,22 @@ pub fn range((start_range, Optional(end)): (Value, Optional<i64>)) -> Result<Val
 			start: Bound::Included(start),
 			end: Bound::Excluded(end),
 		}
+	} else if start_range.is_range() {
+		// Condition checked above, unwrap cannot trigger.
+		let range = start_range.into_range().unwrap();
+		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?
 	} else {
-		start_range.coerce_to::<Box<Range>>().and_then(|x| x.coerce_to_typed::<i64>()).map_err(
-			|e| Error::InvalidArguments {
-				name: String::from("array::range"),
-				message: format!("Argument 1 was the wrong type. {e}"),
-			},
-		)?
+		let start = start_range.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?;
+		TypedRange {
+			start: Bound::Included(start),
+			end: Bound::Unbounded,
+		}
 	};
 
 	limit("array::range", mem::size_of::<Value>().saturating_mul(range.len()))?;
@@ -742,13 +760,22 @@ pub fn slice(
 			start: Bound::Included(start),
 			end: Bound::Excluded(end),
 		}
+	} else if range_start.is_range() {
+		// Condition checked above, unwrap cannot trigger.
+		let range = range_start.into_range().unwrap();
+		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?
 	} else {
-		range_start.coerce_to::<Box<Range>>().and_then(|x| x.coerce_to_typed::<i64>()).map_err(
-			|e| Error::InvalidArguments {
-				name: String::from("array::range"),
-				message: format!("Argument 1 was the wrong type. {e}"),
-			},
-		)?
+		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?;
+		TypedRange {
+			start: Bound::Included(start),
+			end: Bound::Unbounded,
+		}
 	};
 
 	let array_len = array.len() as i64;

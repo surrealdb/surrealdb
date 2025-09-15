@@ -2,7 +2,7 @@
 [test]
 
 [[test.results]]
-error = "[]"
+value = "[]"
 
 [[test.results]]
 value = "[]"

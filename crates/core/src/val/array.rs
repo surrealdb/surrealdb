@@ -175,28 +175,17 @@ impl Array {
 			.max()
 			.unwrap_or(0);
 
-		let mut transposed_vec = vec![Vec::new(); height];
-
-		fn insert_fill(value: Value, at: usize, vec: &mut Vec<Value>) {
-			if vec.len() > at {
-				vec[at] = value;
-				return;
-			}
-			for _ in vec.len()..at {
-				vec.push(Value::None);
-			}
-			vec.push(value);
-		}
+		let mut transposed_vec = vec![vec![Value::None; self.len()]; height];
 
 		for (idx, i) in self.into_iter().enumerate() {
 			match i {
 				Value::Array(j) => {
 					for (jdx, j) in j.into_iter().enumerate() {
-						insert_fill(j, idx, &mut transposed_vec[jdx]);
+						transposed_vec[jdx][idx] = j;
 					}
 				}
 				x => {
-					insert_fill(x, idx, &mut transposed_vec[0]);
+					transposed_vec[0][idx] = x;
 				}
 			}
 		}

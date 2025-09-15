@@ -60,7 +60,7 @@ value = "[]"
 value = "[{ id: knows:person, in: person:john, out: person:jane, since: '2023-01-01' }]"
 */
 
--- Test 1: Non-existent record, using a record ID
+-- Test 1: Non-existent record, using a record I
 record::is_edge(person:nonexistent);
 
 -- Test 2: Non-existent record, using a string
@@ -100,10 +100,10 @@ record::is_edge('knows:person');
 record::is_edge(type::thing('knows', 'person'));
 
 -- Test 14: JavaScript function call for a regular record (should be false)
-function() { return surrealdb.functions.record.is.edge("person:john"); };
+function() { return surrealdb.functions.record.is_edge("person:john"); };
 
 -- Test 15: JavaScript function call for an edge record (should be true)
-function() { return surrealdb.functions.record.is.edge("knows:person"); };
+function() { return surrealdb.functions.record.is_edge("knows:person"); };
 
 -- Test 16: Check if the function works as expected inside a select predicate (should be false)
 SELECT *, record::is_edge(id) as is_edge FROM person;

@@ -51,7 +51,7 @@ pub mod from {
 
 		Duration::from_days(val)
 			.map(|x| x.into())
-			.ok_or_else(|| Error::ArithmeticOverflow(format!("duration::from::days({val})")))
+			.ok_or_else(|| Error::ArithmeticOverflow(format!("duration::from_days({val})")))
 			.map_err(anyhow::Error::new)
 	}
 
@@ -61,7 +61,7 @@ pub mod from {
 
 		Duration::from_hours(val)
 			.map(|x| x.into())
-			.ok_or_else(|| Error::ArithmeticOverflow(format!("duration::from::hours({val})")))
+			.ok_or_else(|| Error::ArithmeticOverflow(format!("duration::from_hours({val})")))
 			.map_err(anyhow::Error::new)
 	}
 
@@ -85,7 +85,7 @@ pub mod from {
 
 		Duration::from_mins(val)
 			.map(|x| x.into())
-			.ok_or_else(|| Error::ArithmeticOverflow(format!("duration::from::mins({val})")))
+			.ok_or_else(|| Error::ArithmeticOverflow(format!("duration::from_mins({val})")))
 			.map_err(anyhow::Error::new)
 	}
 
@@ -109,7 +109,7 @@ pub mod from {
 
 		Duration::from_weeks(val)
 			.map(|x| x.into())
-			.ok_or_else(|| Error::ArithmeticOverflow(format!("duration::from::weeks({val})")))
+			.ok_or_else(|| Error::ArithmeticOverflow(format!("duration::from_weeks({val})")))
 			.map_err(anyhow::Error::new)
 	}
 }

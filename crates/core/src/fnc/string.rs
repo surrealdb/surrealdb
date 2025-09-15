@@ -7,7 +7,7 @@ use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
 use crate::fnc::util::string;
 use crate::val::range::TypedRange;
-use crate::val::{Range, Regex, Strand, Value};
+use crate::val::{Regex, Strand, Value};
 
 /// Returns `true` if a string of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<()> {
@@ -139,13 +139,22 @@ pub fn slice(
 			start: Bound::Included(start),
 			end: Bound::Excluded(end),
 		}
+	} else if range_start.is_range() {
+		// Condition checked above, unwrap cannot trigger.
+		let range = range_start.into_range().unwrap();
+		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?
 	} else {
-		range_start.coerce_to::<Box<Range>>().and_then(|x| x.coerce_to_typed::<i64>()).map_err(
-			|e| Error::InvalidArguments {
-				name: String::from("array::range"),
-				message: format!("Argument 1 was the wrong type. {e}"),
-			},
-		)?
+		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?;
+		TypedRange {
+			start: Bound::Included(start),
+			end: Bound::Unbounded,
+		}
 	};
 
 	// Only count the chars if we need to and only do it once.
@@ -192,10 +201,10 @@ pub fn slice(
 				x.saturating_sub(1) as usize
 			}
 		}
-		Bound::Unbounded => range.len(),
+		Bound::Unbounded => usize::MAX,
 	};
 
-	let len = end.saturating_sub(start);
+	let len = end.saturating_sub(start) + 1;
 
 	Ok(val.chars().skip(start).take(len).collect::<String>().into())
 }
@@ -421,7 +430,7 @@ pub mod is {
 				Some(Value::Table(tb)) => t.table.as_str() == tb.as_str(),
 				Some(_) => {
 					bail!(Error::InvalidArguments {
-						name: "string::is::record()".into(),
+						name: "string::is_record()".into(),
 						message:
 							"Expected an optional string or table type for the second argument"
 								.into(),
