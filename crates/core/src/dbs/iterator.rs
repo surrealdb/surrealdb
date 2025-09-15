@@ -546,48 +546,72 @@ impl Iterator {
 	///
 	/// - `true`: Safe to apply START/LIMIT optimization at storage level
 	/// - `false`: Must apply START/LIMIT after all query processing is complete
-	fn check_set_start_limit(&self, ctx: &Context, stm: &Statement<'_>) -> bool {
-		// GROUP BY operations change the result structure and count, making
-		// storage-level limiting meaningless
+	/// Determines whether START can be applied at the storage level (start_skip)
+	fn can_start_skip(&self, ctx: &Context, stm: &Statement<'_>) -> bool {
+		// GROUP BY operations change the result structure and count
 		if stm.group().is_some() {
 			return false;
 		}
-
-		// Multiple iterators require merging records from different sources,
-		// so individual iterator limits would be incorrect
+		// Only safe when a single iterator is used
 		if self.entries.len() != 1 {
 			return false;
 		}
-
-		// Check for WHERE clause
+		// START must apply to the filtered set. Therefore, disallow with WHERE
+		// unless the iterator itself applies the condition (index executor).
 		if let Some(cond) = stm.cond() {
-			// WHERE clauses filter records, so START should skip from the filtered set,
-			// not from the raw storage. However, if there's exactly one index iterator
-			// and the index is handling both the WHERE condition and ORDER BY clause,
-			// then the optimization is safe because the index iterator is already
-			// doing the appropriate filtering and ordering.
 			if let Some(Iterable::Index(t, irf, _)) = self.entries.first() {
 				if let Some(qp) = ctx.get_query_planner() {
 					if let Some(exe) = qp.get_query_executor(t) {
 						if exe.is_iterator_condition(*irf, cond) {
-							return true;
+							// Allowed: index handles the filtering
+						} else {
+							return false;
 						}
+					} else {
+						return false;
 					}
+				} else {
+					return false;
 				}
+			} else {
+				// WHERE exists but iterator is not an index -> cannot start-skip
+				return false;
 			}
 		}
-
-		// Without ORDER BY, the natural storage order is acceptable for START/LIMIT
+		// Without ORDER BY, natural order is acceptable
 		if stm.order().is_none() {
 			return true;
 		}
-
-		// With ORDER BY, optimization is only safe if the iterator is backed by
-		// a sorted index that matches the ORDER BY clause exactly
+		// With ORDER BY, only safe if iterator is a sorted index matching ORDER
 		if let Some(Iterable::Index(_, irf, _)) = self.entries.first() {
 			if let Some(qp) = ctx.get_query_planner() {
 				if qp.is_order(irf) {
 					return true;
+				}
+			}
+		}
+		false
+	}
+
+	/// Determines whether LIMIT can cancel iteration early (cancel_on_limit)
+	fn can_cancel_on_limit(&self, ctx: &Context, stm: &Statement<'_>) -> bool {
+		// GROUP BY changes result count post-iteration.
+		// Cannot cancel early as we need to evalute every records.
+		if stm.group().is_some() {
+			return false;
+		}
+		// WHERE is allowed: we count accepted results after filtering
+		// ORDER requires special handling
+		if stm.order().is_none() {
+			return true;
+		}
+		// With ORDER BY, only safe if the only iterator is backed by a sorted index
+		if self.entries.len() == 1 {
+			if let Some(Iterable::Index(_, irf, _)) = self.entries.first() {
+				if let Some(qp) = ctx.get_query_planner() {
+					if qp.is_order(irf) {
+						return true;
+					}
 				}
 			}
 		}
@@ -600,16 +624,17 @@ impl Iterator {
 		stm: &Statement<'_>,
 		is_specific_permission: bool,
 	) {
-		if self.check_set_start_limit(ctx, stm) {
+		// Determine if we can stop iteration early once enough results are accepted
+		if self.can_cancel_on_limit(ctx, stm) {
 			if let Some(l) = self.limit {
 				self.cancel_on_limit = Some(l);
 			}
-			// Check if we can skip processing the document below "start".
-			if !is_specific_permission {
-				let s = self.start.unwrap_or(0) as usize;
-				if s > 0 {
-					self.start_skip = Some(s);
-				}
+		}
+		// Determine if we can skip records at the storage level for START
+		if !is_specific_permission && self.can_start_skip(ctx, stm) {
+			let s = self.start.unwrap_or(0) as usize;
+			if s > 0 {
+				self.start_skip = Some(s);
 			}
 		}
 	}
@@ -818,7 +843,15 @@ impl Iterator {
 		}
 		// Check if we have enough results
 		if let Some(l) = self.cancel_on_limit {
-			if self.results.len() == l as usize {
+			let cancel_threshold: usize = if self.start_skip.is_some() {
+				l as usize
+			} else {
+				// If we are not skipping at the storage level, we must collect
+				// start + limit results before we can safely cancel, because START
+				// will be applied later.
+				self.start.unwrap_or(0) as usize + l as usize
+			};
+			if self.results.len() == cancel_threshold {
 				self.run.cancel()
 			}
 		}
