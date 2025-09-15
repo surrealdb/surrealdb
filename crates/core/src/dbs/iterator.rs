@@ -123,6 +123,11 @@ pub(crate) struct Iterator {
 	guaranteed: Option<Iterable>,
 	/// Set if the iterator can be cancelled once it reaches start/limit
 	cancel_on_limit: Option<u32>,
+	/// Precomputed number of accepted results after which we can stop iterating early.
+	/// - When storage-level START skip is active (`start_skip.is_some()`), this is just `limit`.
+	/// - Otherwise, we must collect `start + limit` results so that the final START can be applied
+	///   in post-processing without starving the LIMIT.
+	cancel_threshold: Option<usize>,
 }
 
 impl Clone for Iterator {
@@ -138,6 +143,7 @@ impl Clone for Iterator {
 			entries: self.entries.clone(),
 			guaranteed: None,
 			cancel_on_limit: None,
+			cancel_threshold: None,
 		}
 	}
 }
@@ -624,17 +630,34 @@ impl Iterator {
 		stm: &Statement<'_>,
 		is_specific_permission: bool,
 	) {
-		// Determine if we can stop iteration early once enough results are accepted
-		if self.can_cancel_on_limit(ctx, stm) {
-			if let Some(l) = self.limit {
-				self.cancel_on_limit = Some(l);
-			}
-		}
 		// Determine if we can skip records at the storage level for START
 		if !is_specific_permission && self.can_start_skip(ctx, stm) {
 			let s = self.start.unwrap_or(0) as usize;
 			if s > 0 {
 				self.start_skip = Some(s);
+			}
+		}
+		// Determine if we can stop iteration early once enough results are accepted
+		//
+		// We precompute a single cancellation threshold because the condition that
+		// influences it (whether START is applied at storage-level via `start_skip`)
+		// is fixed for the whole iteration. Even though `start_skip`'s internal
+		// counter is decremented during scanning, the fact that the initial START
+		// was applied at the storage level does not change — therefore the threshold
+		// does not need to be recomputed per result.
+		if self.can_cancel_on_limit(ctx, stm) {
+			if let Some(l) = self.limit {
+				self.cancel_on_limit = Some(l);
+				if self.start_skip.is_some() {
+					// START is applied by the storage iterator. We are only collecting
+					// post-START results, so we can cancel as soon as we accepted `limit`.
+					self.cancel_threshold = Some(l as usize)
+				} else {
+					// START cannot be applied by the storage iterator. We must accumulate
+					// enough accepted results to later drop `start` of them during
+					// post-processing and still return `limit` items. Hence `start + limit`.
+					self.cancel_threshold = Some((l + self.start.unwrap_or(0)) as usize);
+				}
 			}
 		}
 	}
@@ -841,17 +864,12 @@ impl Iterator {
 				}
 			}
 		}
-		// Check if we have enough results
-		if let Some(l) = self.cancel_on_limit {
-			let cancel_threshold: usize = if self.start_skip.is_some() {
-				l as usize
-			} else {
-				// If we are not skipping at the storage level, we must collect
-				// start + limit results before we can safely cancel, because START
-				// will be applied later.
-				self.start.unwrap_or(0) as usize + l as usize
-			};
-			if self.results.len() == cancel_threshold {
+		// Check if we have collected enough accepted results to stop.
+		// We use equality here because results are appended one-by-one; once the
+		// threshold is reached, further work would be wasted as START/LIMIT
+		// post-processing (if any) already has enough input to produce the final output.
+		if let Some(l) = self.cancel_threshold {
+			if self.results.len() == l {
 				self.run.cancel()
 			}
 		}
