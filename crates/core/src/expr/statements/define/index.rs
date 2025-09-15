@@ -15,11 +15,12 @@ use crate::dbs::Force;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::parameterize::exprs_to_fields;
 #[cfg(target_family = "wasm")]
 use crate::expr::Output;
 #[cfg(target_family = "wasm")]
 use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
-use crate::expr::{Base, Expr, Idiom, Literal, Part};
+use crate::expr::{Base, Expr, Literal, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ToSql;
 use crate::sql::fmt::Fmt;
@@ -30,7 +31,7 @@ pub struct DefineIndexStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub what: Expr,
-	pub cols: Vec<Idiom>,
+	pub cols: Vec<Expr>,
 	pub index: Index,
 	pub comment: Option<Expr>,
 	pub concurrently: bool,
@@ -108,10 +109,13 @@ impl DefineIndexStatement {
 			txn.lock().await.get_next_ix_id(tb.namespace_id, tb.database_id).await?
 		};
 
+		// Compute columns
+		let cols = exprs_to_fields(stk, ctx, opt, doc, self.cols.as_slice()).await?;
+
 		// If the table is schemafull, ensure that the fields exist.
 		if tb.schemafull {
 			// Check that the fields exist
-			for idiom in self.cols.iter() {
+			for idiom in cols.iter() {
 				// TODO: Was this correct? Can users not index data on sub-fields?
 				let Some(Part::Field(first)) = idiom.0.first() else {
 					continue;
@@ -135,7 +139,7 @@ impl DefineIndexStatement {
 			index_id,
 			name,
 			table_name: what,
-			cols: self.cols.clone(),
+			cols: cols.clone(),
 			index: self.index.clone(),
 			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 		};

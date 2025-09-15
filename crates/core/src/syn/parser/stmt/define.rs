@@ -926,9 +926,9 @@ impl Parser<'_> {
 				// COLUMNS and FIELDS are the same tokenkind
 				t!("FIELDS") => {
 					self.pop_peek();
-					res.cols = vec![self.parse_local_idiom(stk).await?];
+					res.cols = vec![stk.run(|ctx| self.parse_expr_field(ctx)).await?];
 					while self.eat(t!(",")) {
-						res.cols.push(self.parse_local_idiom(stk).await?);
+						res.cols.push(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 					}
 				}
 				t!("UNIQUE") => {

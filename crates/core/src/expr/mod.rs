@@ -38,6 +38,7 @@ pub(crate) mod operation;
 pub(crate) mod operator;
 pub(crate) mod order;
 pub(crate) mod output;
+pub(crate) mod parameterize;
 pub(crate) mod param;
 pub(crate) mod part;
 pub(crate) mod paths;

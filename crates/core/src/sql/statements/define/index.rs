@@ -2,7 +2,7 @@ use std::fmt::{self, Display};
 
 use super::DefineKind;
 use crate::sql::fmt::Fmt;
-use crate::sql::{Expr, Idiom, Index};
+use crate::sql::{Expr, Index};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -10,7 +10,7 @@ pub struct DefineIndexStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub what: Expr,
-	pub cols: Vec<Idiom>,
+	pub cols: Vec<Expr>,
 	pub index: Index,
 	pub comment: Option<Expr>,
 	pub concurrently: bool,

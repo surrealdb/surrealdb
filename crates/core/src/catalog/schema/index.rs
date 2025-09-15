@@ -67,7 +67,7 @@ impl IndexDefinition {
 			what: crate::sql::Expr::Idiom(crate::sql::Idiom::field(
 				crate::sql::Ident::new(self.table_name.clone()).unwrap(),
 			)),
-			cols: self.cols.iter().cloned().map(Into::into).collect(),
+			cols: self.cols.iter().cloned().map(|x| crate::sql::Expr::Idiom(x.into())).collect(),
 			index: self.index.to_sql_definition(),
 			comment: self.comment.clone().map(|x| {
 				crate::sql::Expr::Literal(crate::sql::Literal::Strand(Strand::new(x).unwrap()))

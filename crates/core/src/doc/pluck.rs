@@ -10,6 +10,7 @@ use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::doc::compute::DocKind;
 use crate::expr::output::Output;
+use crate::expr::parameterize::exprs_to_fields;
 use crate::expr::{FlowResultExt as _, Operation};
 use crate::iam::Action;
 use crate::val::Value;
@@ -164,8 +165,7 @@ impl Document {
 		}
 		// Remove any omitted fields from output
 		if let Some(v) = stm.omit() {
-			let doc = Some(&self.current);
-			let fields = expr_to_idioms!(stk, ctx, opt, doc, v => Vec<Idiom>);
+			let fields = exprs_to_fields(stk, ctx, opt, Some(&self.current), v.as_slice()).await.map_err(IgnoreError::from)?;
 
 			for field in fields {
 				out.del(stk, ctx, opt, &field).await?;
