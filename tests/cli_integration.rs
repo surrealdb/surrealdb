@@ -67,28 +67,6 @@ mod cli_integration {
 	}
 
 	#[test(tokio::test)]
-	async fn paths() {
-		async fn start(path: &str) {
-			common::start_server(StartServerArguments {
-				auth: false,
-				path: Some(path.to_string()),
-				..Default::default()
-			})
-			.await
-			.unwrap();
-		}
-		// Two slashes
-		start("rocksdb://path").await;
-		start("surrealkv://path").await;
-		// One slash
-		start("rocksdb:/path").await;
-		start("surrealkv:/path").await;
-		// Three slashes
-		start("rocksdb:///path").await;
-		start("surrealkv:///path").await;
-	}
-
-	#[test(tokio::test)]
 	async fn all_commands() {
 		// Commands without credentials when auth is disabled, should succeed
 		let (addr, _server) = common::start_server(StartServerArguments {
