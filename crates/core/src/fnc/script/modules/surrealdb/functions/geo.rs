@@ -2,7 +2,6 @@ use super::run;
 use crate::fnc::script::modules::impl_module_def;
 
 mod hash;
-mod is;
 
 pub struct Package;
 

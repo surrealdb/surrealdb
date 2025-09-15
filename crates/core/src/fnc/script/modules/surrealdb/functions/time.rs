@@ -1,9 +1,6 @@
 use super::run;
 use crate::fnc::script::modules::impl_module_def;
 
-mod from;
-mod is;
-
 pub struct Package;
 
 impl_module_def!(
