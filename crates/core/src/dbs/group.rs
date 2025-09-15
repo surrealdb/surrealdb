@@ -407,7 +407,7 @@ impl Aggregator {
 	fn take(&mut self) -> Value {
 		// We return a clone because the same value may be returned for different groups
 		if let Some(v) = self.first_val.as_ref().cloned() {
-			Array::from(v).into()
+			Array::from(vec![v]).into()
 		} else if let Some(a) = self.array.as_ref().cloned() {
 			a.into()
 		} else {

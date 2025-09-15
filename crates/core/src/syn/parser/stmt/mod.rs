@@ -117,7 +117,12 @@ impl Parser<'_> {
 				self.pop_peek();
 				self.parse_show_stmt().map(TopLevelExpr::Show)
 			}
-			_ => self.parse_expr_start(stk).await.map(TopLevelExpr::Expr),
+			_ => {
+				let expr = self.parse_expr_start(stk).await?;
+				let span = token.span.covers(self.last_span);
+				Self::reject_letless_let(&expr, span)?;
+				Ok(TopLevelExpr::Expr(expr))
+			}
 		}
 	}
 

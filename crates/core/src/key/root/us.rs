@@ -1,22 +1,22 @@
 //! Stores a DEFINE USER ON ROOT config definition
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Us<'a> {
 	__: u8,
 	_a: u8,
 	_b: u8,
 	_c: u8,
-	pub user: &'a str,
+	pub user: Cow<'a, str>,
 }
 
-impl KVKey for Us<'_> {
-	type ValueType = catalog::UserDefinition;
-}
+impl_kv_key_storekey!(Us<'_> => catalog::UserDefinition);
 
 pub fn new(user: &str) -> Us<'_> {
 	Us::new(user)
@@ -47,7 +47,7 @@ impl<'a> Us<'a> {
 			_a: b'!',
 			_b: b'u',
 			_c: b's',
-			user,
+			user: Cow::Borrowed(user),
 		}
 	}
 }
@@ -55,6 +55,7 @@ impl<'a> Us<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

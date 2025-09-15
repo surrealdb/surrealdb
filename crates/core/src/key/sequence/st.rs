@@ -1,13 +1,15 @@
 //! Stores sequence states
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+
+use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::sequences::SequenceState;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct St<'a> {
 	__: u8,
 	_a: u8,
@@ -17,17 +19,14 @@ pub(crate) struct St<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub sq: &'a str,
+	pub sq: Cow<'a, str>,
 	_f: u8,
 	_g: u8,
 	_h: u8,
-	#[serde(with = "uuid::serde::compact")]
 	pub nid: Uuid,
 }
 
-impl KVKey for St<'_> {
-	type ValueType = SequenceState;
-}
+impl_kv_key_storekey!(St<'_> => SequenceState);
 
 impl Categorise for St<'_> {
 	fn categorise(&self) -> Category {
@@ -46,7 +45,7 @@ impl<'a> St<'a> {
 			_c: b'!',
 			_d: b's',
 			_e: b'q',
-			sq,
+			sq: Cow::Borrowed(sq),
 			_f: b'!',
 			_g: b's',
 			_h: b't',
@@ -58,6 +57,7 @@ impl<'a> St<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

@@ -3,7 +3,7 @@ use std::hash::{Hash, Hasher};
 
 use anyhow::Result;
 use revision::{Revisioned, revisioned};
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::expr::Idiom;
 use crate::expr::statements::info::InfoStructure;
@@ -12,7 +12,7 @@ use crate::sql::ToSql;
 use crate::sql::statements::define::DefineKind;
 use crate::val::{Array, Number, Strand, Value};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Encode, BorrowDecode)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[repr(transparent)]
 pub struct IndexId(pub u32);

@@ -3,12 +3,12 @@
 //! This module orchestrates index mutations for a single document: removing old
 //! entries and inserting new ones across different index types (UNIQUE, regular,
 //! search, fulltext, etc.). Index keys are built with key::index and field
-//! values are encoded via key::value::StoreKeyArray.
+//! values are encoded via key::value::Array.
 //!
 //! Numeric normalization in keys:
-//! - StoreKeyArray normalizes Number values (Int/Float/Decimal) using a lexicographic numeric
-//!   encoding so that byte-wise order matches numeric order. As a result, numerically equal values
-//!   (e.g., 0, 0.0, 0dec) map to the same key bytes.
+//! - Array normalizes Number values (Int/Float/Decimal) using a lexicographic numeric encoding so
+//!   that byte-wise order matches numeric order. As a result, numerically equal values (e.g., 0,
+//!   0.0, 0dec) map to the same key bytes.
 //! - UNIQUE index behavior leverages this: equal numerics across variants will collide on the same
 //!   index key and cause a uniqueness violation.
 //!
@@ -30,7 +30,6 @@ use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
-use crate::key::value::StoreKeyArray;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::ConsumeResult;
 use crate::kvs::TransactionType;
@@ -319,18 +318,18 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
-	/// Build the KV key for a unique index. The StoreKeyArray encodes values in
+	/// Build the KV key for a unique index. The Array encodes values in
 	/// a canonical, lexicographically ordered byte form which normalizes numeric
 	/// types (Int/Float/Decimal). This means equal numeric values like 0, 0.0 and
 	/// 0dec map to the same index key and therefore conflict on UNIQUE indexes.
-	fn get_unique_index_key(&'_ self, v: &'a StoreKeyArray) -> Result<key::index::Index<'_>> {
+	fn get_unique_index_key(&'_ self, v: &'a Array) -> Result<key::index::Index<'_>> {
 		Ok(key::index::Index::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id, v, None))
 	}
 
 	/// Build the KV key for a non-unique index. The record id is appended
 	/// to the encoded field values so multiple records can share the same field
-	/// bytes; numeric values inside fd are normalized via StoreKeyArray.
-	fn get_non_unique_index_key(&'_ self, v: &'a StoreKeyArray) -> Result<key::index::Index<'_>> {
+	/// bytes; numeric values inside fd are normalized via Array.
+	fn get_non_unique_index_key(&'_ self, v: &'a Array) -> Result<key::index::Index<'_>> {
 		Ok(key::index::Index::new(
 			self.ns,
 			self.db,
@@ -350,7 +349,6 @@ impl<'a> IndexOperation<'a> {
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
 			for o in i {
-				let o = o.into();
 				let key = self.get_unique_index_key(&o)?;
 				match txn.delc(&key, Some(self.rid)).await {
 					Err(e) => {
@@ -369,7 +367,6 @@ impl<'a> IndexOperation<'a> {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
 				if !n.is_all_none_or_null() {
-					let n = n.into();
 					let key = self.get_unique_index_key(&n)?;
 					if txn.putc(&key, self.rid, None).await.is_err() {
 						let key = self.get_unique_index_key(&n)?;
@@ -391,7 +388,6 @@ impl<'a> IndexOperation<'a> {
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
 			for o in i {
-				let o = o.into();
 				let key = self.get_non_unique_index_key(&o)?;
 				match txn.delc(&key, Some(self.rid)).await {
 					Err(e) => {
@@ -409,7 +405,6 @@ impl<'a> IndexOperation<'a> {
 		if let Some(n) = self.n.take() {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
-				let n = n.into();
 				let key = self.get_non_unique_index_key(&n)?;
 				txn.set(&key, self.rid, None).await?;
 			}
@@ -420,13 +415,13 @@ impl<'a> IndexOperation<'a> {
 	/// Construct a consistent uniqueness violation error message.
 	/// Formats the conflicting value as a single value or array depending on
 	/// the number of indexed fields.
-	fn err_index_exists(&self, rid: RecordId, mut n: StoreKeyArray) -> Result<()> {
+	fn err_index_exists(&self, rid: RecordId, mut n: Array) -> Result<()> {
 		bail!(Error::IndexExists {
 			thing: rid,
 			index: self.ix.name.to_string(),
 			value: match n.0.len() {
-				1 => Value::from(n.0.remove(0)).to_string(),
-				_ => Array::from(n).to_string(),
+				1 => n.0.remove(0).to_string(),
+				_ => n.to_string(),
 			},
 		})
 	}

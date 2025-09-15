@@ -1,22 +1,22 @@
 //! Stores a DEFINE NAMESPACE config definition
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::NamespaceDefinition;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct NamespaceKey<'key> {
 	__: u8,
 	_a: u8,
 	_b: u8,
 	_c: u8,
-	pub ns: &'key str,
+	pub ns: Cow<'key, str>,
 }
 
-impl KVKey for NamespaceKey<'_> {
-	type ValueType = NamespaceDefinition;
-}
+impl_kv_key_storekey!(NamespaceKey<'_> => NamespaceDefinition);
 
 pub fn new(ns: &str) -> NamespaceKey<'_> {
 	NamespaceKey::new(ns)
@@ -47,7 +47,7 @@ impl<'key> NamespaceKey<'key> {
 			_a: b'!',
 			_b: b'n',
 			_c: b's',
-			ns,
+			ns: Cow::Borrowed(ns),
 		}
 	}
 }
@@ -55,6 +55,7 @@ impl<'key> NamespaceKey<'key> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

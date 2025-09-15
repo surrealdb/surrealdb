@@ -1,12 +1,14 @@
 //! Stores a DEFINE USER ON NAMESPACE config definition
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{self, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Us<'a> {
 	__: u8,
 	_a: u8,
@@ -14,12 +16,10 @@ pub(crate) struct Us<'a> {
 	_b: u8,
 	_c: u8,
 	_d: u8,
-	pub user: &'a str,
+	pub user: Cow<'a, str>,
 }
 
-impl KVKey for Us<'_> {
-	type ValueType = catalog::UserDefinition;
-}
+impl_kv_key_storekey!(Us<'_> => catalog::UserDefinition);
 
 pub fn new(ns: NamespaceId, user: &str) -> Us<'_> {
 	Us::new(ns, user)
@@ -52,7 +52,7 @@ impl<'a> Us<'a> {
 			_b: b'!',
 			_c: b'u',
 			_d: b's',
-			user,
+			user: Cow::Borrowed(user),
 		}
 	}
 }

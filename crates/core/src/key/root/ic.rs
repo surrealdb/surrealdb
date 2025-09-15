@@ -11,12 +11,12 @@
 //! configuration option.
 use std::borrow::Cow;
 
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 /// Represents an entry in the index compaction queue
 ///
@@ -26,7 +26,7 @@ use crate::kvs::KVKey;
 ///
 /// Compaction helps optimize index performance by consolidating changes and
 /// removing unnecessary data.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct IndexCompactionKey<'key> {
 	__: u8,
 	_a: u8,
@@ -36,15 +36,11 @@ pub(crate) struct IndexCompactionKey<'key> {
 	pub db: DatabaseId,
 	pub tb: Cow<'key, str>,
 	pub ix: IndexId,
-	#[serde(with = "uuid::serde::compact")]
 	pub nid: Uuid,
-	#[serde(with = "uuid::serde::compact")]
 	pub uid: Uuid,
 }
 
-impl KVKey for IndexCompactionKey<'_> {
-	type ValueType = ();
-}
+impl_kv_key_storekey!(IndexCompactionKey<'_> => ());
 
 impl Categorise for IndexCompactionKey<'_> {
 	fn categorise(&self) -> Category {
@@ -95,7 +91,7 @@ impl<'key> IndexCompactionKey<'key> {
 	}
 
 	pub fn decode_key(k: &[u8]) -> anyhow::Result<IndexCompactionKey<'_>> {
-		Ok(storekey::deserialize(k)?)
+		Ok(storekey::decode_borrow(k)?)
 	}
 }
 
@@ -103,6 +99,7 @@ impl<'key> IndexCompactionKey<'key> {
 mod tests {
 	use super::*;
 	use crate::key::root::ic::IndexCompactionKey;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn range() {

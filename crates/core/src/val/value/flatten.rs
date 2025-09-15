@@ -1,17 +1,23 @@
-use crate::val::Value;
-use crate::val::array::Array;
+use crate::val::{Array, Value};
 
 impl Value {
 	pub fn flatten(self) -> Self {
 		match self {
 			Value::Array(v) => {
-				v.0.into_iter()
-					.flat_map(|v| match v {
-						Value::Array(v) => v,
-						_ => Array::from(v),
-					})
-					.collect::<Vec<_>>()
-					.into()
+				let mut res = Vec::with_capacity(v.len());
+
+				for v in v.into_iter() {
+					match v {
+						Value::Array(x) => {
+							for x in x {
+								res.push(x);
+							}
+						}
+						x => res.push(x),
+					}
+				}
+
+				Value::Array(Array(res))
 			}
 			v => v,
 		}

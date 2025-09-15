@@ -1,12 +1,14 @@
 //! Stores a DEFINE INDEX config definition
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Encode, BorrowDecode)]
 pub(crate) struct IndexNameLookupKey<'key> {
 	__: u8,
 	_a: u8,
@@ -14,16 +16,14 @@ pub(crate) struct IndexNameLookupKey<'key> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'key str,
+	pub tb: Cow<'key, str>,
 	_d: u8,
 	_e: u8,
 	_f: u8,
 	pub ix: IndexId,
 }
 
-impl<'key> KVKey for IndexNameLookupKey<'key> {
-	type ValueType = String;
-}
+impl_kv_key_storekey!(IndexNameLookupKey<'_> => String);
 
 impl<'key> IndexNameLookupKey<'key> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'key str, ix: IndexId) -> Self {
@@ -34,7 +34,7 @@ impl<'key> IndexNameLookupKey<'key> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'!',
 			_e: b'i',
 			_f: b'l',
@@ -43,7 +43,7 @@ impl<'key> IndexNameLookupKey<'key> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Encode, BorrowDecode)]
 pub(crate) struct IndexDefinitionKey<'key> {
 	__: u8,
 	_a: u8,
@@ -51,16 +51,14 @@ pub(crate) struct IndexDefinitionKey<'key> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'key str,
+	pub tb: Cow<'key, str>,
 	_d: u8,
 	_e: u8,
 	_f: u8,
-	pub ix: &'key str,
+	pub ix: Cow<'key, str>,
 }
 
-impl KVKey for IndexDefinitionKey<'_> {
-	type ValueType = IndexDefinition;
-}
+impl_kv_key_storekey!(IndexDefinitionKey<'_> => IndexDefinition);
 
 pub fn new<'key>(
 	ns: NamespaceId,
@@ -98,11 +96,11 @@ impl<'key> IndexDefinitionKey<'key> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'!',
 			_e: b'i',
 			_f: b'x',
-			ix,
+			ix: Cow::Borrowed(ix),
 		}
 	}
 }

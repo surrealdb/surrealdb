@@ -8,7 +8,7 @@ value = "10.04987562112089f"
 value = "10.074720839804943f"
 
 [[test.results]]
-value = "NONE"
+value = "NaN"
 
 */
 math::sqrt(101);

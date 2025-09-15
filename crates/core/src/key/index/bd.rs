@@ -1,13 +1,15 @@
 //! Stores BTree nodes for doc ids
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::docids::btdocids::BTreeDocIdsState;
 use crate::idx::trees::store::NodeId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct BdRoot<'a> {
 	__: u8,
 	_a: u8,
@@ -15,7 +17,7 @@ pub(crate) struct BdRoot<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -23,9 +25,7 @@ pub(crate) struct BdRoot<'a> {
 	_g: u8,
 }
 
-impl KVKey for BdRoot<'_> {
-	type ValueType = BTreeDocIdsState;
-}
+impl_kv_key_storekey!(BdRoot<'_> => BTreeDocIdsState);
 
 impl Categorise for BdRoot<'_> {
 	fn categorise(&self) -> Category {
@@ -42,7 +42,7 @@ impl<'a> BdRoot<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 			_e: b'!',
@@ -52,7 +52,7 @@ impl<'a> BdRoot<'a> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Bd<'a> {
 	__: u8,
 	_a: u8,
@@ -60,7 +60,7 @@ pub(crate) struct Bd<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -69,9 +69,7 @@ pub(crate) struct Bd<'a> {
 	pub node_id: NodeId,
 }
 
-impl KVKey for Bd<'_> {
-	type ValueType = BTreeDocIdsState;
-}
+impl_kv_key_storekey!(Bd<'_> => BTreeDocIdsState);
 
 impl Categorise for Bd<'_> {
 	fn categorise(&self) -> Category {
@@ -88,7 +86,7 @@ impl<'a> Bd<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 			_e: b'!',
@@ -103,6 +101,7 @@ impl<'a> Bd<'a> {
 mod tests {
 
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn root() {

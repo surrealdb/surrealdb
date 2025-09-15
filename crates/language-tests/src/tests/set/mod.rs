@@ -1,23 +1,20 @@
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::collections::hash_map::Values;
+use std::fmt::Write;
+use std::hash::Hash;
+use std::io::{self, IsTerminal as _};
+use std::mem;
+use std::ops::Index;
+use std::path::{self, Path};
+use std::sync::Arc;
+
 use anyhow::{Context, Result, anyhow};
-use std::{
-	borrow::Cow,
-	collections::{HashMap, hash_map::Values},
-	fmt::Write,
-	hash::Hash,
-	io::{self, IsTerminal as _},
-	mem,
-	ops::Index,
-	path::{self, Path},
-	sync::Arc,
-};
 use tokio::fs;
 
-use crate::{
-	cli::ColorMode,
-	format::{IndentFormatter, ansi},
-};
-
 use super::{ResolvedImport, TestCase};
+use crate::cli::ColorMode;
+use crate::format::{IndentFormatter, ansi};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub struct TestId(usize);
