@@ -1272,6 +1272,13 @@ allow_unsafe = true
 [pkg.tinystr]
 allow_unsafe = true
 
+[pkg.tikv-jemallocator]
+allow_unsafe = true
+
+[pkg.tikv-jemalloc-sys]
+allow_unsafe = true
+allow_apis = ["fs", "process"]
+
 [pkg.writeable]
 allow_unsafe = true
 

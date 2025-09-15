@@ -53,7 +53,7 @@ scripting = ["dep:js"]
 http = ["dep:reqwest"]
 ml = ["dep:surrealml"]
 jwks = ["dep:reqwest"]
-allocator = ["dep:jemallocator", "dep:mimalloc"]
+allocator = ["dep:jemallocator"]
 arbitrary = [
     "dep:arbitrary",
     "dep:regex-syntax",
@@ -233,10 +233,8 @@ tokio = { workspace = true, default-features = false, features = [
 tokio-tungstenite = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
-[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))'.dependencies]
-mimalloc = { workspace = true, optional = true, default-features = false }
-
-[target.'cfg(any(target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
+# OS-SPECIFIC ALLOCATOR DEPENDENCIES
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios", target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
 jemallocator = { workspace = true, optional = true }
 
 [lints.rust]
