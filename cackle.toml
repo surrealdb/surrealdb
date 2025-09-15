@@ -1278,6 +1278,12 @@ allow_unsafe = true
 [pkg.tikv-jemalloc-sys]
 allow_unsafe = true
 allow_apis = ["fs", "process"]
+build.allow_build_instructions = [
+    "cargo:root=*",
+    "cargo:rustc-link-lib=static=jemalloc_pic",
+    "cargo:rustc-link-search=native=*",
+    "cargo:rustc-link-arg=-pthread",
+]
 
 [pkg.writeable]
 allow_unsafe = true
