@@ -15,6 +15,7 @@ use std::fmt::{self, Display, Formatter};
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
+#[allow(clippy::large_enum_variant)]
 pub enum TableMutation {
 	// Although the Value is supposed to contain a field "id" of Thing,
 	// we do include it in the first field for convenience.

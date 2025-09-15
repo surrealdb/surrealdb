@@ -23,6 +23,7 @@ use super::{
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
+#[allow(clippy::large_enum_variant)]
 pub enum Part {
 	All,
 	Flatten,

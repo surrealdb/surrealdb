@@ -987,7 +987,7 @@ async fn router(
 		Command::ImportFile {
 			path,
 		} => {
-			let mut file = match OpenOptions::new().read(true).open(&path).await {
+			let file = match OpenOptions::new().read(true).open(&path).await {
 				Ok(path) => path,
 				Err(error) => {
 					return Err(Error::FileOpen {

@@ -287,12 +287,12 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
-	fn get_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index, Error> {
+	fn get_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index<'_>, Error> {
 		let (ns, db) = self.opt.ns_db()?;
 		Ok(key::index::Index::new(ns, db, &self.ix.what, &self.ix.name, v, None))
 	}
 
-	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index, Error> {
+	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index<'_>, Error> {
 		let (ns, db) = self.opt.ns_db()?;
 		Ok(key::index::Index::new(ns, db, &self.ix.what, &self.ix.name, v, Some(&self.rid.id)))
 	}

@@ -75,7 +75,24 @@ pub static SCRIPTING_MAX_MEMORY_LIMIT: LazyLock<usize> =
 pub static SCRIPTING_MAX_TIME_LIMIT: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_SCRIPTING_MAX_TIME_LIMIT", usize, 1000 * 5);
 
-/// Forward all signup/signin/authenticate query errors to a client performing authentication. Do not use in production.
+/// The maximum number of idle HTTP connections to maintain per host (default: 128)
+pub static MAX_HTTP_IDLE_CONNECTIONS_PER_HOST: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_MAX_HTTP_IDLE_CONNECTIONS_PER_HOST", usize, 128);
+
+/// The maximum number of total idle HTTP connections to maintain (default: 1000)
+pub static MAX_HTTP_IDLE_CONNECTIONS: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_MAX_HTTP_IDLE_CONNECTIONS", usize, 1000);
+
+/// The timeout for idle HTTP connections before closing (default: 90 seconds)
+pub static HTTP_IDLE_TIMEOUT_SECS: LazyLock<u64> =
+	lazy_env_parse!("SURREAL_HTTP_IDLE_TIMEOUT_SECS", u64, 90);
+
+/// The timeout for connecting to HTTP endpoints (default: 30 seconds)
+pub static HTTP_CONNECT_TIMEOUT_SECS: LazyLock<u64> =
+	lazy_env_parse!("SURREAL_HTTP_CONNECT_TIMEOUT_SECS", u64, 30);
+
+/// Forward all authentication errors to the client. Do not use in production
+/// (default: false)
 pub static INSECURE_FORWARD_ACCESS_ERRORS: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_INSECURE_FORWARD_ACCESS_ERRORS", bool, false);
 
