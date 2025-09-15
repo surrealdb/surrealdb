@@ -1080,8 +1080,9 @@ impl Document {
 		} else {
 			false
 		};
-		
-		// Check if any field stats were removed (count became 0) or if any remaining count field is 0
+
+		// Check if any field stats were removed (count became 0) or if any remaining count field is
+		// 0
 		if !should_delete {
 			should_delete = any_field_stats_removed || record.has_zero_count();
 		}

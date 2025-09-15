@@ -404,9 +404,16 @@ impl Record {
 				for stats in stats_map.values() {
 					match stats {
 						FieldStats::Count(count) if *count == 0 => return true,
-						FieldStats::Sum { count } if *count == 0 => return true,
-						FieldStats::Mean { count, .. } if *count == 0 => return true,
-						FieldStats::MinMax { count } if *count == 0 => return true,
+						FieldStats::Sum {
+							count,
+						} if *count == 0 => return true,
+						FieldStats::Mean {
+							count,
+							..
+						} if *count == 0 => return true,
+						FieldStats::MinMax {
+							count,
+						} if *count == 0 => return true,
 						_ => {}
 					}
 				}
