@@ -2106,7 +2106,7 @@ fn parse_info() {
 	assert_eq!(
 		res,
 		Expr::Info(Box::new(InfoStatement::Tb(
-			Ident::from_strand(strand!("table").to_owned()),
+			Expr::Idiom(Idiom::field(Ident::from_strand(strand!("table").to_owned()))),
 			false,
 			None
 		)))
@@ -2119,7 +2119,7 @@ fn parse_info() {
 	assert_eq!(
 		res,
 		Expr::Info(Box::new(InfoStatement::User(
-			Ident::from_strand(strand!("user").to_owned()),
+			Expr::Idiom(Idiom::field(Ident::from_strand(strand!("user").to_owned()))),
 			None,
 			false
 		)))
@@ -2132,7 +2132,7 @@ fn parse_info() {
 	assert_eq!(
 		res,
 		Expr::Info(Box::new(InfoStatement::User(
-			Ident::from_strand(strand!("user").to_owned()),
+			Expr::Idiom(Idiom::field(Ident::from_strand(strand!("user").to_owned()))),
 			Some(Base::Ns),
 			false
 		)))

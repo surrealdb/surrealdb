@@ -491,7 +491,7 @@ fn statements() -> Vec<TopLevelExpr> {
 		TopLevelExpr::Expr(Expr::Info(Box::new(InfoStatement::Root(false)))),
 		TopLevelExpr::Expr(Expr::Info(Box::new(InfoStatement::Ns(false)))),
 		TopLevelExpr::Expr(Expr::Info(Box::new(InfoStatement::User(
-			Ident::from_strand(strand!("user").to_owned()),
+			Expr::Idiom(Idiom::field(Ident::from_strand(strand!("user").to_owned()))),
 			Some(Base::Ns),
 			false,
 		)))),

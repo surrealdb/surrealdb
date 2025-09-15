@@ -14,7 +14,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{
 	Base, DefineAccessStatement, DefineAnalyzerStatement, DefineUserStatement, Expr, FlowResultExt,
-	Ident,
 };
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ToSql;
@@ -31,11 +30,11 @@ pub enum InfoStatement {
 
 	Db(bool, Option<Expr>),
 
-	Tb(Ident, bool, Option<Expr>),
+	Tb(Expr, bool, Option<Expr>),
 
-	User(Ident, Option<Base>, bool),
+	User(Expr, Option<Base>, bool),
 
-	Index(Ident, Ident, bool),
+	Index(Expr, Expr, bool),
 }
 
 impl InfoStatement {
@@ -45,7 +44,7 @@ impl InfoStatement {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		match self {
 			InfoStatement::Root(structured) => {
@@ -266,6 +265,8 @@ impl InfoStatement {
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Get the NS and DB
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+				// Compute table name
+				let tb = process_definition_ident!(stk, ctx, opt, doc, &tb, "table name");
 				// Convert the version to u64 if present
 				let version = match version {
 					Some(v) => Some(
@@ -282,45 +283,45 @@ impl InfoStatement {
 				// Create the result set
 				Ok(if *structured {
 					Value::from(map! {
-						"events".to_string() => process(txn.all_tb_events(ns, db, tb).await?),
-						"fields".to_string() => process(txn.all_tb_fields(ns, db, tb, version).await?),
-						"indexes".to_string() => process(txn.all_tb_indexes(ns, db, tb).await?),
-						"lives".to_string() => process(txn.all_tb_lives(ns, db, tb).await?),
-						"tables".to_string() => process(txn.all_tb_views(ns, db, tb).await?),
+						"events".to_string() => process(txn.all_tb_events(ns, db, &tb).await?),
+						"fields".to_string() => process(txn.all_tb_fields(ns, db, &tb, version).await?),
+						"indexes".to_string() => process(txn.all_tb_indexes(ns, db, &tb).await?),
+						"lives".to_string() => process(txn.all_tb_lives(ns, db, &tb).await?),
+						"tables".to_string() => process(txn.all_tb_views(ns, db, &tb).await?),
 					})
 				} else {
 					Value::from(map! {
 						"events".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_tb_events(ns, db, tb).await?.iter() {
+							for v in txn.all_tb_events(ns, db, &tb).await?.iter() {
 								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
 						"fields".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_tb_fields(ns, db, tb, version).await?.iter() {
+							for v in txn.all_tb_fields(ns, db, &tb, version).await?.iter() {
 								out.insert(v.name.to_string(), v.to_sql().into());
 							}
 							out.into()
 						},
 						"indexes".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_tb_indexes(ns, db, tb).await?.iter() {
+							for v in txn.all_tb_indexes(ns, db, &tb).await?.iter() {
 								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
 						"lives".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_tb_lives(ns, db, tb).await?.iter() {
+							for v in txn.all_tb_lives(ns, db, &tb).await?.iter() {
 								out.insert(v.id.to_string(), v.to_sql().into());
 							}
 							out.into()
 						},
 						"tables".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_tb_views(ns, db, tb).await?.iter() {
+							for v in txn.all_tb_views(ns, db, &tb).await?.iter() {
 								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
@@ -331,21 +332,22 @@ impl InfoStatement {
 			InfoStatement::User(user, base, structured) => {
 				// Get the base type
 				let base = base.clone().unwrap_or(opt.selected_base()?);
-
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Actor, &base)?;
+				// Compute user name
+				let user = process_definition_ident!(stk, ctx, opt, doc, &user, "user name");
 				// Get the transaction
 				let txn = ctx.tx();
 				// Process the user
 				let res = match base {
-					Base::Root => txn.expect_root_user(user).await?,
+					Base::Root => txn.expect_root_user(&user).await?,
 					Base::Ns => {
 						let ns = txn.expect_ns_by_name(opt.ns()?).await?;
-						match txn.get_ns_user(ns.namespace_id, user).await? {
+						match txn.get_ns_user(ns.namespace_id, &user).await? {
 							Some(user) => user,
 							None => {
 								return Err(Error::UserNsNotFound {
-									name: user.to_string(),
+									name: user.clone(),
 									ns: ns.name.clone(),
 								}
 								.into());
@@ -356,16 +358,16 @@ impl InfoStatement {
 						let (ns, db) = opt.ns_db()?;
 						let Some(db_def) = txn.get_db_by_name(ns, db).await? else {
 							return Err(Error::UserDbNotFound {
-								name: user.to_string(),
+								name: user.clone(),
 								ns: ns.to_string(),
 								db: db.to_string(),
 							}
 							.into());
 						};
-						txn.get_db_user(db_def.namespace_id, db_def.database_id, user)
+						txn.get_db_user(db_def.namespace_id, db_def.database_id, &user)
 							.await?
 							.ok_or_else(|| Error::UserDbNotFound {
-								name: user.to_string(),
+								name: user.clone(),
 								ns: ns.to_string(),
 								db: db.to_string(),
 							})?
@@ -382,7 +384,9 @@ impl InfoStatement {
 			InfoStatement::Index(index, table, _structured) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Actor, &Base::Db)?;
-
+				// Compute table & index names
+				let index = process_definition_ident!(stk, ctx, opt, doc, &index, "index name");
+				let table = process_definition_ident!(stk, ctx, opt, doc, &table, "table name");
 				// Output
 				#[cfg(not(target_family = "wasm"))]
 				{
@@ -392,7 +396,7 @@ impl InfoStatement {
 					if let Some(ib) = ctx.get_index_builder() {
 						// Obtain the index
 						let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-						let res = txn.expect_tb_index(ns, db, table, index).await?;
+						let res = txn.expect_tb_index(ns, db, &table, &index).await?;
 						let status = ib.get_status(ns, db, &res).await;
 						let mut out = Object::default();
 						out.insert("building".to_string(), status.into());

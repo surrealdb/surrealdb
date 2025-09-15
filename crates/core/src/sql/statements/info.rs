@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::sql::{Base, Expr, Ident};
+use crate::sql::{Base, Expr};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -10,9 +10,9 @@ pub enum InfoStatement {
 	Root(bool),
 	Ns(bool),
 	Db(bool, Option<Expr>),
-	Tb(Ident, bool, Option<Expr>),
-	User(Ident, Option<Base>, bool),
-	Index(Ident, Ident, bool),
+	Tb(Expr, bool, Option<Expr>),
+	User(Expr, Option<Base>, bool),
+	Index(Expr, Expr, bool),
 }
 
 impl fmt::Display for InfoStatement {
