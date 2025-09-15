@@ -1,6 +1,7 @@
 #![allow(clippy::result_large_err)]
 use std::backtrace;
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use async_graphql::{InputType, InputValueError};
 use thiserror::Error;
@@ -58,5 +59,15 @@ where
 {
 	fn from(value: InputValueError<T>) -> Self {
 		GqlError::ResolverError(format!("{value:?}"))
+	}
+}
+
+impl From<GqlError> for async_graphql::Error {
+	fn from(value: GqlError) -> Self {
+		async_graphql::Error {
+			message: value.to_string(),
+			source: Some(Arc::new(value)),
+			extensions: None,
+		}
 	}
 }
