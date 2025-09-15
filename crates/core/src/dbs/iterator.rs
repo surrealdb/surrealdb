@@ -575,7 +575,6 @@ impl Iterator {
 					}
 				}
 			}
-			return false;
 		}
 
 		// Without ORDER BY, the natural storage order is acceptable for START/LIMIT
