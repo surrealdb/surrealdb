@@ -14,5 +14,5 @@ impl_module_def!(
 	"centroid" => run,
 	"distance" => run,
 	"hash" => (hash::Package),
-	"is" => (is::Package)
+	"is_valid" => run
 );

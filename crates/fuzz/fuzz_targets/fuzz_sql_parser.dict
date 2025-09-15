@@ -329,7 +329,7 @@
 "string::distance::levenshtein("
 "string::distance::normalized_damerau_levenshtein("
 "string::distance::normalized_levenshtein("
-"string::distance::osa_distance("
+"string::distance::osa("
 "string::ends_with("
 "string::html::encode("
 "string::html::sanitize("

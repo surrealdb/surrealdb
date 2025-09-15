@@ -808,7 +808,7 @@ pub fn slice(
 				x.saturating_sub(1) as usize
 			}
 		}
-		Bound::Unbounded => range.len(),
+		Bound::Unbounded => usize::MAX,
 	};
 
 	if end < start {
@@ -949,6 +949,7 @@ mod tests {
 
 	#[test]
 	fn array_slice() {
+		#[track_caller]
 		fn test(initial: &[u8], beg: Option<i64>, end: Option<i64>, expected: &[u8]) {
 			let initial_values =
 				initial.iter().map(|n| Value::from(*n as i64)).collect::<Vec<_>>().into();
@@ -963,10 +964,10 @@ mod tests {
 		let array = b"abcdefg";
 		test(array, None, None, array);
 		test(array, Some(2), None, &array[2..]);
-		test(array, Some(2), Some(3), &array[2..5]);
+		test(array, Some(2), Some(3), &array[2..3]);
 		test(array, Some(2), Some(-1), b"cdef");
 		test(array, Some(-2), None, b"fg");
-		test(array, Some(-4), Some(2), b"de");
+		test(array, Some(-4), Some(2), b"");
 		test(array, Some(-4), Some(-1), b"def");
 	}
 

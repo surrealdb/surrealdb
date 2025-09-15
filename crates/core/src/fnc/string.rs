@@ -173,7 +173,10 @@ pub fn slice(
 			if x < 0 {
 				str_len().saturating_add(x).saturating_add(1).max(0) as usize
 			} else {
-				x.saturating_add(1) as usize
+				let Some(x) = x.checked_add(1) else {
+					return Ok(String::new().into());
+				};
+				x as usize
 			}
 		}
 		Bound::Unbounded => 0,
@@ -204,7 +207,7 @@ pub fn slice(
 		Bound::Unbounded => usize::MAX,
 	};
 
-	let len = end.saturating_sub(start) + 1;
+	let len = end.saturating_add(1).saturating_sub(start);
 
 	Ok(val.chars().skip(start).take(len).collect::<String>().into())
 }
@@ -630,17 +633,18 @@ mod tests {
 		let string = "abcdefg";
 		test(string, None, None, string);
 		test(string, Some(2), None, &string[2..]);
-		test(string, Some(2), Some(3), &string[2..5]);
+		test(string, Some(2), Some(3), &string[2..3]);
 		test(string, Some(2), Some(-1), "cdef");
 		test(string, Some(-2), None, "fg");
-		test(string, Some(-4), Some(2), "de");
+		test(string, Some(-4), Some(2), "");
 		test(string, Some(-4), Some(-1), "def");
 
 		let string = "你好世界";
 		test(string, None, None, string);
 		test(string, Some(1), None, "好世界");
 		test(string, Some(-1), None, "界");
-		test(string, Some(-2), Some(1), "世");
+		test(string, Some(-2), Some(1), "");
+		test(string, Some(-2), Some(3), "世");
 	}
 
 	#[test]

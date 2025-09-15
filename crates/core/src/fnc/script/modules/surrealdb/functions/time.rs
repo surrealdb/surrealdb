@@ -33,6 +33,12 @@ impl_module_def!(
 	"week" => run,
 	"yday" => run,
 	"year" => run,
-	"from" => (from::Package),
-	"is" => (is::Package)
+	"from_nanos" => run,
+	"from_micros" => run,
+	"from_millis" => run,
+	"from_secs" => run,
+	"from_ulid" => run,
+	"from_unix" => run,
+	"from_uuid" => run,
+	"is_leap_year" => run
 );
