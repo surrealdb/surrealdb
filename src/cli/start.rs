@@ -1,24 +1,23 @@
-use super::config::{CF, Config};
-use crate::cnf::LOGO;
-use crate::dbs;
-use crate::dbs::StartCommandDbsOptions;
-use crate::env;
-use crate::net::{self, client_ip::ClientIp};
-use anyhow::Result;
-use clap::Args;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use surrealdb::engine::any;
-use surrealdb::engine::tasks;
-use surrealdb::options::EngineOptions;
-use tokio_util::sync::CancellationToken;
 
 #[cfg(feature = "ml")]
 use anyhow::Context;
+use anyhow::Result;
+use clap::Args;
+use surrealdb::engine::{any, tasks};
+use tokio_util::sync::CancellationToken;
+
+use super::config::{CF, Config};
+use crate::cnf::LOGO;
 #[cfg(feature = "ml")]
-use surrealdb_core::ml::execution::session::set_environment;
+use crate::core::ml::execution::session::set_environment;
+use crate::core::options::EngineOptions;
+use crate::dbs::StartCommandDbsOptions;
+use crate::net::client_ip::ClientIp;
+use crate::{dbs, env, net};
 
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
@@ -38,7 +37,6 @@ pub struct StartCommandArguments {
 	key: Option<String>,
 	//
 	// Tasks
-	//
 	#[arg(
 		help = "The interval at which to refresh node registration information",
 		help_heading = "Database"
@@ -67,9 +65,11 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_CHANGEFEED_GC_INTERVAL", long = "changefeed-gc-interval", value_parser = super::validator::duration)]
 	#[arg(default_value = "10s")]
 	changefeed_gc_interval: Duration,
+	#[arg(env = "SURREAL_INDEX_COMPACTION_INTERVAL", long = "index-compaction-interval", value_parser = super::validator::duration)]
+	#[arg(default_value = "5s")]
+	index_compaction_interval: Duration,
 	//
 	// Authentication
-	//
 	#[arg(
 		help = "The username for the initial database root user. Only if no other root user exists",
 		help_heading = "Authentication"
@@ -96,13 +96,11 @@ pub struct StartCommandArguments {
 	password: Option<String>,
 	//
 	// Datastore connection
-	//
 	#[command(next_help_heading = "Datastore connection")]
 	#[command(flatten)]
 	kvs: Option<StartCommandRemoteTlsOptions>,
 	//
 	// HTTP Server
-	//
 	#[command(next_help_heading = "HTTP server")]
 	#[command(flatten)]
 	web: Option<StartCommandWebTlsOptions>,
@@ -120,7 +118,6 @@ pub struct StartCommandArguments {
 	no_identification_headers: bool,
 	//
 	// Database options
-	//
 	#[command(flatten)]
 	#[command(next_help_heading = "Database")]
 	dbs: StartCommandDbsOptions,
@@ -164,6 +161,7 @@ pub async fn init(
 		node_membership_check_interval,
 		node_membership_cleanup_interval,
 		changefeed_gc_interval,
+		index_compaction_interval,
 		no_banner,
 		no_identification_headers,
 		..
@@ -191,7 +189,8 @@ pub async fn init(
 		.with_node_membership_refresh_interval(node_membership_refresh_interval)
 		.with_node_membership_check_interval(node_membership_check_interval)
 		.with_node_membership_cleanup_interval(node_membership_cleanup_interval)
-		.with_changefeed_gc_interval(changefeed_gc_interval);
+		.with_changefeed_gc_interval(changefeed_gc_interval)
+		.with_index_compaction_interval(index_compaction_interval);
 	// Configure the config
 	let config = Config {
 		bind: listen_addresses.first().copied().unwrap(),

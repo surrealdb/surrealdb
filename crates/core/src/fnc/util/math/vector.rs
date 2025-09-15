@@ -1,9 +1,11 @@
+use std::collections::HashSet;
+
+use anyhow::{Result, ensure};
+
 use crate::err::Error;
-use crate::expr::Number;
 use crate::fnc::util::math::deviation::deviation;
 use crate::fnc::util::math::mean::Mean;
-use anyhow::{Result, ensure};
-use std::collections::HashSet;
+use crate::val::Number;
 
 pub(crate) fn check_same_dimension<T>(fnc: &str, a: &[T], b: &[T]) -> Result<()> {
 	ensure!(
@@ -306,6 +308,7 @@ pub trait Normalize {
 impl Normalize for Vec<Number> {
 	fn normalize(&self) -> Vec<Number> {
 		let m = self.magnitude();
+		// TODO: What about zero magnitude vectors?
 		self.iter().map(|a| vector_div(a, &m)).collect()
 	}
 }

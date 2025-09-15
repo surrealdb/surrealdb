@@ -1,9 +1,7 @@
-use std::{
-	io,
-	path::{Path, PathBuf},
-	sync::atomic::{AtomicUsize, Ordering},
-	time::SystemTime,
-};
+use std::io;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::SystemTime;
 
 pub struct TempDir {
 	path: Option<PathBuf>,

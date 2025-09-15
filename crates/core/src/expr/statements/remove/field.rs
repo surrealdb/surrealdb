@@ -1,24 +1,20 @@
+use std::fmt::{self, Display, Formatter};
+
+use anyhow::Result;
+use uuid::Uuid;
+
+use crate::catalog::TableDefinition;
+use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::statements::define::DefineTableStatement;
 use crate::expr::{Base, Ident, Idiom, Value};
 use crate::iam::{Action, ResourceKind};
-use anyhow::Result;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
-use uuid::Uuid;
-
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveFieldStatement {
 	pub name: Idiom,
-	pub what: Ident,
-	#[revision(start = 2)]
+	pub table_name: Ident,
 	pub if_exists: bool,
 }
 
@@ -28,43 +24,52 @@ impl RemoveFieldStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns_name, db_name) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the field name
-		let na = self.name.to_string();
+		let name = self.name.to_string();
 		// Get the definition
-		let fd = match txn.get_tb_field(ns, db, &self.what, &na).await {
-			Ok(x) => x,
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::FdNotFound { .. })) {
+		let _fd = match txn.get_tb_field(ns, db, &self.table_name, &name).await? {
+			Some(x) => x,
+			None => {
+				if self.if_exists {
 					return Ok(Value::None);
 				} else {
-					return Err(e);
+					return Err(Error::FdNotFound {
+						name,
+					}
+					.into());
 				}
 			}
 		};
 		// Delete the definition
-		let key = crate::key::table::fd::new(ns, db, &fd.what, &na);
-		txn.del(key).await?;
+		let key = crate::key::table::fd::new(ns, db, &self.table_name, &name);
+		txn.del(&key).await?;
 		// Refresh the table cache for fields
-		let key = crate::key::database::tb::new(ns, db, &self.what);
-		let tb = txn.get_tb(ns, db, &self.what).await?;
-		txn.set(
-			key,
-			revision::to_vec(&DefineTableStatement {
+		let Some(tb) = txn.get_tb(ns, db, &self.table_name).await? else {
+			return Err(Error::TbNotFound {
+				name: self.table_name.to_string(),
+			}
+			.into());
+		};
+
+		txn.put_tb(
+			ns_name,
+			db_name,
+			&TableDefinition {
 				cache_fields_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
-			})?,
-			None,
+			},
 		)
 		.await?;
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &self.what);
+			cache.clear_tb(ns, db, &self.table_name);
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -76,7 +81,7 @@ impl Display for RemoveFieldStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", self.name, self.table_name)?;
 		Ok(())
 	}
 }

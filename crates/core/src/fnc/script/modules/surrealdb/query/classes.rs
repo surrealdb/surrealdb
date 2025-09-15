@@ -1,30 +1,27 @@
-use std::collections::BTreeMap;
+use js::class::Trace;
+use js::prelude::{Coerced, Opt};
+use js::{Array, Ctx, Exception, FromJs, JsLifetime, Result, Value};
 
-use crate::expr::Value as SurValue;
-use crate::sql;
-use js::{
-	Array, Ctx, Exception, FromJs, JsLifetime, Result, Value,
-	class::Trace,
-	prelude::{Coerced, Opt},
-};
+use crate::dbs::Variables;
+use crate::expr::Expr;
+use crate::syn;
+use crate::val::Value as SurValue;
 
 #[js::class]
 #[derive(Trace, Clone, JsLifetime)]
-#[non_exhaustive]
 pub struct Query {
 	#[qjs(skip_trace)]
-	pub(crate) query: SurValue,
+	pub(crate) query: Expr,
 	#[qjs(skip_trace)]
-	pub(crate) vars: Option<BTreeMap<String, SurValue>>,
+	pub(crate) vars: Option<Variables>,
 }
 
 #[derive(Default, Clone)]
-#[non_exhaustive]
-pub struct QueryVariables(pub BTreeMap<String, SurValue>);
+pub struct QueryVariables(pub Variables);
 
 impl QueryVariables {
 	pub fn new() -> Self {
-		QueryVariables(BTreeMap::new())
+		QueryVariables(Variables::new())
 	}
 
 	pub fn from_value<'js>(ctx: &Ctx<'js>, val: Value<'js>) -> Result<Self> {
@@ -96,7 +93,7 @@ impl<'js> FromJs<'js> for QueryVariables {
 impl Query {
 	#[qjs(constructor)]
 	pub fn new(ctx: Ctx<'_>, text: String, variables: Opt<QueryVariables>) -> Result<Self> {
-		let query = sql::value(&text)
+		let query = syn::expr(&text)
 			.map_err(|e| {
 				let error_text = format!("{}", e);
 				Exception::throw_type(&ctx, &error_text)
@@ -115,6 +112,6 @@ impl Query {
 	}
 
 	pub fn bind(&mut self, key: Coerced<String>, value: SurValue) {
-		self.vars.get_or_insert_with(BTreeMap::new).insert(key.0, value);
+		self.vars.get_or_insert_with(Variables::new).insert(key.0, value);
 	}
 }

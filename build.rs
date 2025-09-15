@@ -1,12 +1,14 @@
-use semver::BuildMetadata;
 use std::process::Command;
 use std::{env, str};
+
+use semver::BuildMetadata;
 
 const BUILD_METADATA: &str = "SURREAL_BUILD_METADATA";
 
 fn main() {
 	println!("cargo:rerun-if-env-changed={BUILD_METADATA}");
-	println!("cargo:rerun-if-changed=sdk");
+	println!("cargo:rerun-if-changed=crates/core");
+	println!("cargo:rerun-if-changed=crates/sdk");
 	println!("cargo:rerun-if-changed=src");
 	println!("cargo:rerun-if-changed=build.rs");
 	println!("cargo:rerun-if-changed=Cargo.toml");

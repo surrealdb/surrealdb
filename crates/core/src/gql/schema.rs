@@ -2,22 +2,18 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::dbs::Session;
-use crate::expr;
-use crate::expr::Geometry;
 use crate::expr::Kind;
-use crate::expr::kind::Literal;
+use crate::expr::kind::KindLiteral;
 use crate::expr::statements::define::config::graphql::{FunctionsConfig, TablesConfig};
+use crate::expr::{self, Expr};
 use crate::gql::functions::process_fns;
 use crate::gql::tables::process_tbs;
 use crate::kvs::Datastore;
-use async_graphql::Name;
-use async_graphql::Value as GqlValue;
-use async_graphql::dynamic::Interface;
-use async_graphql::dynamic::InterfaceField;
-use async_graphql::dynamic::Object;
-use async_graphql::dynamic::Schema;
-use async_graphql::dynamic::{Enum, Type, Union};
-use async_graphql::dynamic::{Scalar, TypeRef};
+use crate::val::{Geometry, Number as SurNumber, Value as SurValue};
+use async_graphql::dynamic::{
+	Enum, Interface, InterfaceField, Object, Scalar, Schema, Type, TypeRef, Union,
+};
+use async_graphql::{Name, Value as GqlValue};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use serde_json::Number;
@@ -25,11 +21,9 @@ use serde_json::Number;
 use super::error::{GqlError, resolver_error};
 #[cfg(debug_assertions)]
 use super::ext::ValidatorExt;
-use crate::expr::Value as SurValue;
 use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::ext::NamedContainer;
-use crate::kvs::LockType;
-use crate::kvs::TransactionType;
+use crate::kvs::{LockType, TransactionType};
 
 pub async fn generate_schema(
 	datastore: &Arc<Datastore>,
@@ -40,16 +34,23 @@ pub async fn generate_schema(
 	let ns = session.ns.as_ref().ok_or(GqlError::UnspecifiedNamespace)?;
 	let db = session.db.as_ref().ok_or(GqlError::UnspecifiedDatabase)?;
 
-	let cg = tx.get_db_config(ns, db, "graphql").await.map_err(|e| {
-		if matches!(e.downcast_ref(), Some(crate::err::Error::CgNotFound { .. })) {
-			GqlError::NotConfigured
-		} else {
-			GqlError::DbError(e)
-		}
-	})?;
+	let db_def = match tx.get_db_by_name(ns, db).await? {
+		Some(db) => db,
+		None => return Err(GqlError::DbError(anyhow::anyhow!("Database not found: {ns} {db}"))),
+	};
+
+	let cg = tx.expect_db_config(db_def.namespace_id, db_def.database_id, "graphql").await.map_err(
+		|e| {
+			if matches!(e.downcast_ref(), Some(crate::err::Error::CgNotFound { .. })) {
+				GqlError::NotConfigured
+			} else {
+				GqlError::DbError(e)
+			}
+		},
+	)?;
 	let config = cg.inner.clone().try_into_graphql()?;
 
-	let tbs = tx.all_tb(ns, db, None).await?;
+	let tbs = tx.all_tb(db_def.namespace_id, db_def.database_id, None).await?;
 
 	let tbs = match config.tables {
 		TablesConfig::None => None,
@@ -62,7 +63,7 @@ pub async fn generate_schema(
 		}
 	};
 
-	let fns = tx.all_db_functions(ns, db).await?;
+	let fns = tx.all_db_functions(db_def.namespace_id, db_def.database_id).await?;
 
 	let fns = match config.functions {
 		FunctionsConfig::None => None,
@@ -96,7 +97,17 @@ pub async fn generate_schema(
 
 	match tbs {
 		Some(tbs) if !tbs.is_empty() => {
-			query = process_tbs(tbs, query, &mut types, &tx, ns, db, session, datastore).await?;
+			query = process_tbs(
+				tbs,
+				query,
+				&mut types,
+				&tx,
+				db_def.namespace_id,
+				db_def.database_id,
+				session,
+				datastore,
+			)
+			.await?;
 		}
 		_ => {}
 	}
@@ -185,18 +196,19 @@ pub async fn generate_schema(
 		.map_err(|e| schema_error(format!("there was an error generating schema: {e:?}")))
 }
 
+#[allow(clippy::result_large_err)]
 pub fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> {
 	let out = match v {
 		SurValue::None => GqlValue::Null,
 		SurValue::Null => GqlValue::Null,
 		SurValue::Bool(b) => GqlValue::Boolean(b),
 		SurValue::Number(n) => match n {
-			crate::expr::Number::Int(i) => GqlValue::Number(i.into()),
-			crate::expr::Number::Float(f) => GqlValue::Number(
+			SurNumber::Int(i) => GqlValue::Number(i.into()),
+			SurNumber::Float(f) => GqlValue::Number(
 				Number::from_f64(f)
 					.ok_or(resolver_error("unimplemented: graceful NaN and Inf handling"))?,
 			),
-			num @ crate::expr::Number::Decimal(_) => GqlValue::String(num.to_string()),
+			num @ SurNumber::Decimal(_) => GqlValue::String(num.to_string()),
 		},
 		SurValue::Strand(s) => GqlValue::String(s.0),
 		d @ SurValue::Duration(_) => GqlValue::String(d.to_string()),
@@ -212,12 +224,13 @@ pub fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> {
 		),
 		SurValue::Geometry(_) => return Err(resolver_error("unimplemented: Geometry types")),
 		SurValue::Bytes(b) => GqlValue::Binary(b.into_inner().into()),
-		SurValue::Thing(t) => GqlValue::String(t.to_string()),
+		SurValue::RecordId(t) => GqlValue::String(t.to_string()),
 		v => return Err(internal_error(format!("found unsupported value variant: {v:?}"))),
 	};
 	Ok(out)
 }
 
+#[allow(clippy::result_large_err)]
 pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> {
 	let (optional, match_kind) = match kind {
 		Kind::Option(op_ty) => (true, *op_ty),
@@ -235,7 +248,6 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 		Kind::Int => TypeRef::named(TypeRef::INT),
 		Kind::Number => TypeRef::named("number"),
 		Kind::Object => TypeRef::named("object"),
-		Kind::Point => return Err(schema_error("Kind::Point is not yet supported")),
 		Kind::Regex => return Err(schema_error("Kind::Regex is not yet supported")),
 		Kind::String => TypeRef::named(TypeRef::STRING),
 		Kind::Uuid => TypeRef::named("uuid"),
@@ -266,13 +278,13 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 		}
 		Kind::Either(ks) => {
 			let (ls, others): (Vec<Kind>, Vec<Kind>) =
-				ks.into_iter().partition(|k| matches!(k, Kind::Literal(Literal::String(_))));
+				ks.into_iter().partition(|k| matches!(k, Kind::Literal(KindLiteral::String(_))));
 
 			let enum_ty = if !ls.is_empty() {
 				let vals: Vec<String> = ls
 					.into_iter()
 					.map(|l| {
-						let Kind::Literal(Literal::String(out)) = l else {
+						let Kind::Literal(KindLiteral::String(out)) = l else {
 							unreachable!(
 								"just checked that this is a Kind::Literal(Literal::String(_))"
 							);
@@ -319,14 +331,6 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 		// TODO(raphaeldarley): check if union is of literals and generate enum
 		// generate custom scalar from other literals?
 		Kind::Literal(_) => return Err(schema_error("Kind::Literal is not yet supported")),
-		Kind::References(ft, _) => {
-			let inner = match ft.clone() {
-				Some(ft) => Kind::Record(vec![ft]),
-				None => Kind::Record(vec![]),
-			};
-
-			TypeRef::List(Box::new(kind_to_type(inner, types)?))
-		}
 		Kind::File(_) => return Err(schema_error("Kind::File is not yet supported")),
 	};
 
@@ -394,6 +398,7 @@ macro_rules! any_try_kinds {
 	};
 }
 
+#[allow(clippy::result_large_err)]
 pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError> {
 	use crate::syn;
 	match kind {
@@ -401,7 +406,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 			GqlValue::String(s) => {
 				use Kind::*;
 				any_try_kinds!(val, Datetime, Duration, Uuid);
-				syn::value_legacy_strand(s.as_str())
+				syn::expr_legacy_strand(s.as_str())
 					.map(Into::into)
 					.map_err(|_| type_error(kind, val))
 			}
@@ -435,23 +440,24 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 		Kind::Decimal => match val {
 			GqlValue::Number(n) => {
 				if let Some(int) = n.as_i64() {
-					Ok(SurValue::Number(expr::Number::Decimal(int.into())))
+					Ok(Expr::Literal(expr::Literal::Decimal(int.into())))
 				} else if let Some(d) = n.as_f64().and_then(Decimal::from_f64) {
-					Ok(SurValue::Number(expr::Number::Decimal(d)))
+					Ok(Expr::Literal(expr::Literal::Decimal(d)))
 				} else if let Some(uint) = n.as_u64() {
-					Ok(SurValue::Number(expr::Number::Decimal(uint.into())))
+					Ok(Expr::Literal(expr::Literal::Decimal(uint.into())))
 				} else {
 					Err(type_error(kind, val))
 				}
 			}
-			GqlValue::String(s) => match syn::value(s).map(Into::into) {
+			//TODO: Verify correctness of code here.
+			GqlValue::String(s) => match syn::expr(s).map(Into::into) {
 				Ok(SurValue::Number(n)) => match n {
-					expr::Number::Int(i) => Ok(SurValue::Number(expr::Number::Decimal(i.into()))),
-					expr::Number::Float(f) => match Decimal::from_f64(f) {
-						Some(d) => Ok(SurValue::Number(expr::Number::Decimal(d))),
+					SurNumber::Int(i) => Ok(SurValue::from(i.into())),
+					SurNumber::Float(f) => match Decimal::from_f64(f) {
+						Some(d) => Ok(SurValue::Number(SurNumber::Decimal(d))),
 						None => Err(type_error(kind, val)),
 					},
-					expr::Number::Decimal(d) => Ok(SurValue::Number(expr::Number::Decimal(d))),
+					SurNumber::Decimal(d) => Ok(SurValue::Number(SurNumber::Decimal(d))),
 				},
 				_ => Err(type_error(kind, val)),
 			},
@@ -467,21 +473,21 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 		Kind::Float => match val {
 			GqlValue::Number(n) => {
 				if let Some(i) = n.as_i64() {
-					Ok(SurValue::Number(expr::Number::Float(i as f64)))
+					Ok(SurValue::Number(SurNumber::Float(i as f64)))
 				} else if let Some(f) = n.as_f64() {
-					Ok(SurValue::Number(expr::Number::Float(f)))
+					Ok(SurValue::Number(SurNumber::Float(f)))
 				} else if let Some(uint) = n.as_u64() {
-					Ok(SurValue::Number(expr::Number::Float(uint as f64)))
+					Ok(SurValue::Number(SurNumber::Float(uint as f64)))
 				} else {
 					unreachable!("serde_json::Number must be either i64, u64 or f64")
 				}
 			}
-			GqlValue::String(s) => match syn::value(s).map(Into::into) {
+			GqlValue::String(s) => match syn::expr(s).map(Into::into) {
 				Ok(SurValue::Number(n)) => match n {
-					expr::Number::Int(int) => Ok(SurValue::Number(expr::Number::Float(int as f64))),
-					expr::Number::Float(float) => Ok(SurValue::Number(expr::Number::Float(float))),
-					expr::Number::Decimal(d) => match d.try_into() {
-						Ok(f) => Ok(SurValue::Number(expr::Number::Float(f))),
+					SurNumber::Int(int) => Ok(SurValue::Number(SurNumber::Float(int as f64))),
+					SurNumber::Float(float) => Ok(SurValue::Number(SurNumber::Float(float))),
+					SurNumber::Decimal(d) => match d.try_into() {
+						Ok(f) => Ok(SurValue::Number(SurNumber::Float(f))),
 						_ => Err(type_error(kind, val)),
 					},
 				},
@@ -492,23 +498,23 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 		Kind::Int => match val {
 			GqlValue::Number(n) => {
 				if let Some(i) = n.as_i64() {
-					Ok(SurValue::Number(expr::Number::Int(i)))
+					Ok(SurValue::Number(SurNumber::Int(i)))
 				} else {
 					Err(type_error(kind, val))
 				}
 			}
-			GqlValue::String(s) => match syn::value(s).map(Into::into) {
+			GqlValue::String(s) => match syn::expr(s).map(Into::into) {
 				Ok(SurValue::Number(n)) => match n {
-					expr::Number::Int(int) => Ok(SurValue::Number(expr::Number::Int(int))),
-					expr::Number::Float(float) => {
+					SurNumber::Int(int) => Ok(SurValue::Number(SurNumber::Int(int))),
+					SurNumber::Float(float) => {
 						if float.fract() == 0.0 {
-							Ok(SurValue::Number(expr::Number::Int(float as i64)))
+							Ok(SurValue::Number(SurNumber::Int(float as i64)))
 						} else {
 							Err(type_error(kind, val))
 						}
 					}
-					expr::Number::Decimal(d) => match d.try_into() {
-						Ok(i) => Ok(SurValue::Number(expr::Number::Int(i))),
+					SurNumber::Decimal(d) => match d.try_into() {
+						Ok(i) => Ok(SurValue::Number(SurNumber::Int(i))),
 						_ => Err(type_error(kind, val)),
 					},
 				},
@@ -519,16 +525,16 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 		Kind::Number => match val {
 			GqlValue::Number(n) => {
 				if let Some(i) = n.as_i64() {
-					Ok(SurValue::Number(expr::Number::Int(i)))
+					Ok(SurValue::Number(SurNumber::Int(i)))
 				} else if let Some(f) = n.as_f64() {
-					Ok(SurValue::Number(expr::Number::Float(f)))
+					Ok(SurValue::Number(SurNumber::Float(f)))
 				} else if let Some(uint) = n.as_u64() {
-					Ok(SurValue::Number(expr::Number::Decimal(uint.into())))
+					Ok(SurValue::Number(SurNumber::Decimal(uint.into())))
 				} else {
 					unreachable!("serde_json::Number must be either i64, u64 or f64")
 				}
 			}
-			GqlValue::String(s) => match syn::value(s).map(Into::into) {
+			GqlValue::String(s) => match syn::expr(s).map(Into::into) {
 				Ok(SurValue::Number(n)) => Ok(SurValue::Number(n)),
 				_ => Err(type_error(kind, val)),
 			},
@@ -542,18 +548,8 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 					.collect();
 				Ok(SurValue::Object(out?.into()))
 			}
-			GqlValue::String(s) => match syn::value_legacy_strand(s.as_str()).map(Into::into) {
+			GqlValue::String(s) => match syn::expr_legacy_strand(s.as_str()).map(Into::into) {
 				Ok(obj @ SurValue::Object(_)) => Ok(obj),
-				_ => Err(type_error(kind, val)),
-			},
-			_ => Err(type_error(kind, val)),
-		},
-		Kind::Point => match val {
-			GqlValue::List(l) => match l.as_slice() {
-				[GqlValue::Number(x), GqlValue::Number(y)] => match (x.as_f64(), y.as_f64()) {
-					(Some(x), Some(y)) => Ok(SurValue::Geometry(Geometry::Point((x, y).into()))),
-					_ => Err(type_error(kind, val)),
-				},
 				_ => Err(type_error(kind, val)),
 			},
 			_ => Err(type_error(kind, val)),
@@ -573,7 +569,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 		Kind::Record(ref ts) => match val {
 			GqlValue::String(s) => match syn::thing(s) {
 				Ok(t) => match ts.contains(&t.tb.as_str().into()) {
-					true => Ok(SurValue::Thing(t.into())),
+					true => Ok(SurValue::RecordId(t.into())),
 					false => Err(type_error(kind, val)),
 				},
 				Err(_) => Err(type_error(kind, val)),
@@ -653,11 +649,10 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 			}
 			_ => Err(type_error(kind, val)),
 		},
-		Kind::Function(_, _) => Err(resolver_error("Sets are not yet supported")),
+		Kind::Function(_, _) => Err(resolver_error("Functions are not yet supported")),
 		Kind::Range => Err(resolver_error("Ranges are not yet supported")),
 		Kind::Literal(_) => Err(resolver_error("Literals are not yet supported")),
 		Kind::Regex => Err(resolver_error("Regexes are not yet supported")),
-		Kind::References(_, _) => Err(resolver_error("Cannot convert value into references")),
 		Kind::File(_) => Err(resolver_error("Files are not yet supported")),
 	}
 }

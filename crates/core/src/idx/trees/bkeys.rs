@@ -1,14 +1,14 @@
-use crate::err::Error;
-use crate::idx::trees::btree::Payload;
-use crate::kvs::Key;
-use anyhow::Result;
-use fst::{IntoStreamer, Map, MapBuilder, Streamer};
-use radix_trie::{SubTrie, Trie, TrieCommon};
-use serde::ser;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter};
 use std::io;
 use std::io::Cursor;
+
+use anyhow::Result;
+use fst::{Map, Streamer};
+use radix_trie::{SubTrie, Trie, TrieCommon};
+
+use crate::idx::trees::btree::Payload;
+use crate::kvs::Key;
 
 pub trait BKeys: Default + Debug + Display + Sized {
 	fn with_key_val(key: Key, payload: Payload) -> Result<Self>;
@@ -33,7 +33,6 @@ pub trait BKeys: Default + Debug + Display + Sized {
 	fn compile(&mut self) {}
 }
 
-#[non_exhaustive]
 pub struct SplitKeys<BK>
 where
 	BK: BKeys,
@@ -45,250 +44,7 @@ where
 	pub(in crate::idx) median_payload: Payload,
 }
 
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct FstKeys {
-	i: Inner,
-}
-
-#[derive(Debug, Clone)]
-enum Inner {
-	Map(Map<Vec<u8>>),
-	Trie(TrieKeys),
-}
-
-impl FstKeys {
-	fn edit(&mut self) {
-		if let Inner::Map(m) = &self.i {
-			let t: TrieKeys = m.into();
-			self.i = Inner::Trie(t);
-		}
-	}
-}
-
-impl Default for FstKeys {
-	fn default() -> Self {
-		Self {
-			i: Inner::Trie(TrieKeys::default()),
-		}
-	}
-}
-
-impl BKeys for FstKeys {
-	fn with_key_val(key: Key, payload: Payload) -> Result<Self> {
-		let i = Inner::Trie(TrieKeys::with_key_val(key, payload)?);
-		Ok(Self {
-			i,
-		})
-	}
-
-	fn len(&self) -> u32 {
-		match &self.i {
-			Inner::Map(m) => m.len() as u32,
-			Inner::Trie(t) => t.len(),
-		}
-	}
-
-	fn is_empty(&self) -> bool {
-		match &self.i {
-			Inner::Map(m) => m.is_empty(),
-			Inner::Trie(t) => t.is_empty(),
-		}
-	}
-
-	fn get(&self, key: &Key) -> Option<Payload> {
-		match &self.i {
-			Inner::Map(m) => m.get(key),
-			Inner::Trie(t) => t.get(key),
-		}
-	}
-
-	fn collect_with_prefix(&self, _prefix_key: &Key) -> Result<VecDeque<(Key, Payload)>> {
-		fail!("BKeys/FSTKeys::collect_with_prefix")
-	}
-
-	fn insert(&mut self, key: Key, payload: Payload) -> Option<Payload> {
-		self.edit();
-		if let Inner::Trie(t) = &mut self.i {
-			return t.insert(key, payload);
-		}
-		unreachable!()
-	}
-
-	fn append(&mut self, keys: Self) {
-		if keys.is_empty() {
-			return;
-		}
-		self.edit();
-		match keys.i {
-			Inner::Map(other) => {
-				let mut s = other.stream();
-				while let Some((key, payload)) = s.next() {
-					self.insert(key.to_vec(), payload);
-				}
-			}
-			Inner::Trie(other) => {
-				if let Inner::Trie(t) = &mut self.i {
-					t.append(other)
-				}
-			}
-		}
-	}
-
-	fn remove(&mut self, key: &Key) -> Option<Payload> {
-		self.edit();
-		if let Inner::Trie(t) = &mut self.i {
-			t.remove(key)
-		} else {
-			None
-		}
-	}
-
-	fn split_keys(mut self) -> Result<SplitKeys<Self>> {
-		self.edit();
-		if let Inner::Trie(t) = self.i {
-			let s = t.split_keys()?;
-			Ok(SplitKeys {
-				left: Self {
-					i: Inner::Trie(s.left),
-				},
-				right: Self {
-					i: Inner::Trie(s.right),
-				},
-				median_idx: s.median_idx,
-				median_key: s.median_key,
-				median_payload: s.median_payload,
-			})
-		} else {
-			fail!("BKeys/FSTKeys::split_keys")
-		}
-	}
-
-	fn get_key(&self, mut idx: usize) -> Option<Key> {
-		match &self.i {
-			Inner::Map(m) => {
-				let mut s = m.keys().into_stream();
-				while let Some(key) = s.next() {
-					if idx == 0 {
-						return Some(key.to_vec());
-					}
-					idx -= 1;
-				}
-				None
-			}
-			Inner::Trie(t) => t.get_key(idx),
-		}
-	}
-
-	fn get_child_idx(&self, searched_key: &Key) -> usize {
-		match &self.i {
-			Inner::Map(m) => {
-				let searched_key = searched_key.as_slice();
-				let mut s = m.keys().into_stream();
-				let mut child_idx = 0;
-				while let Some(key) = s.next() {
-					if searched_key.le(key) {
-						break;
-					}
-					child_idx += 1;
-				}
-				child_idx
-			}
-			Inner::Trie(t) => t.get_child_idx(searched_key),
-		}
-	}
-
-	fn get_first_key(&self) -> Option<(Key, Payload)> {
-		match &self.i {
-			Inner::Map(m) => m.stream().next().map(|(k, p)| (k.to_vec(), p)),
-			Inner::Trie(t) => t.get_first_key(),
-		}
-	}
-
-	fn get_last_key(&self) -> Option<(Key, Payload)> {
-		match &self.i {
-			Inner::Map(m) => {
-				let mut last = None;
-				let mut s = m.stream();
-				while let Some((k, p)) = s.next() {
-					last = Some((k.to_vec(), p));
-				}
-				last
-			}
-			Inner::Trie(t) => t.get_last_key(),
-		}
-	}
-
-	fn compile(&mut self) {
-		if let Inner::Trie(t) = &self.i {
-			let mut builder = MapBuilder::memory();
-			for (key, payload) in t.keys.iter() {
-				builder.insert(key, *payload).unwrap();
-			}
-			let m = Map::new(builder.into_inner().unwrap()).unwrap();
-			self.i = Inner::Map(m);
-		}
-	}
-
-	fn read_from(c: &mut Cursor<Vec<u8>>) -> Result<Self> {
-		let bytes: Vec<u8> = bincode::deserialize_from(c)?;
-		Ok(Self::try_from(bytes)?)
-	}
-
-	fn write_to(&self, c: &mut Cursor<Vec<u8>>) -> Result<()> {
-		if let Inner::Map(m) = &self.i {
-			let b = m.as_fst().as_bytes();
-			bincode::serialize_into(c, b)?;
-			Ok(())
-		} else {
-			Err(anyhow::Error::new(Error::Bincode(ser::Error::custom(
-				"bkeys.to_map() should be called prior serializing",
-			))))
-		}
-	}
-}
-
-impl TryFrom<MapBuilder<Vec<u8>>> for FstKeys {
-	type Error = fst::Error;
-	fn try_from(builder: MapBuilder<Vec<u8>>) -> Result<Self, Self::Error> {
-		Self::try_from(builder.into_inner()?)
-	}
-}
-
-impl TryFrom<Vec<u8>> for FstKeys {
-	type Error = fst::Error;
-	fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
-		let map = Map::new(bytes)?;
-		Ok(Self {
-			i: Inner::Map(map),
-		})
-	}
-}
-
-impl Display for FstKeys {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		match &self.i {
-			Inner::Map(m) => {
-				let mut s = m.stream();
-				let mut start = true;
-				while let Some((key, val)) = s.next() {
-					let key = String::from_utf8_lossy(key);
-					if start {
-						start = false;
-					} else {
-						f.write_str(", ")?;
-					}
-					write!(f, "{}=>{}", key, val)?;
-				}
-				Ok(())
-			}
-			Inner::Trie(t) => write!(f, "{}", t),
-		}
-	}
-}
-
 #[derive(Default, Debug, Clone)]
-#[non_exhaustive]
 pub struct TrieKeys {
 	keys: Trie<Key, Payload>,
 }
@@ -495,11 +251,12 @@ impl<'a> KeysIterator<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
-	use crate::idx::trees::btree::Payload;
-	use crate::kvs::Key;
 	use std::collections::{HashMap, HashSet, VecDeque};
 	use std::io::Cursor;
+
+	use crate::idx::trees::bkeys::{BKeys, TrieKeys};
+	use crate::idx::trees::btree::Payload;
+	use crate::kvs::Key;
 
 	fn test_keys_serde<BK: BKeys>(expected_size: usize) {
 		let key: Key = "a".as_bytes().into();
@@ -514,11 +271,6 @@ mod tests {
 		let mut cur = Cursor::new(buf);
 		let keys = BK::read_from(&mut cur).unwrap();
 		assert_eq!(keys.get(&key), Some(130));
-	}
-
-	#[test]
-	fn test_fst_keys_serde() {
-		test_keys_serde::<FstKeys>(48);
 	}
 
 	#[test]
@@ -546,11 +298,6 @@ mod tests {
 	}
 
 	#[test]
-	fn test_fst_keys_additions() {
-		test_keys_additions(FstKeys::default())
-	}
-
-	#[test]
 	fn test_trie_keys_additions() {
 		test_keys_additions(TrieKeys::default())
 	}
@@ -569,11 +316,6 @@ mod tests {
 		assert_eq!(keys.len(), 0);
 		assert_eq!(keys.remove(&"foo".into()), None);
 		assert_eq!(keys.len(), 0);
-	}
-
-	#[test]
-	fn test_fst_keys_deletions() {
-		test_keys_deletions(FstKeys::default())
 	}
 
 	#[test]
@@ -665,11 +407,6 @@ mod tests {
 		assert_eq!(r.right.len(), 2);
 		assert_eq!(r.right.get(&"d".into()), Some(4));
 		assert_eq!(r.right.get(&"e".into()), Some(5));
-	}
-
-	#[test]
-	fn test_fst_keys_split() {
-		test_keys_split(FstKeys::default());
 	}
 
 	#[test]

@@ -1,25 +1,25 @@
-use crate::err::Error;
-use crate::expr::{Object, Value};
-use crate::idx::VersionedStore;
-use crate::idx::trees::bkeys::BKeys;
-use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeStore};
-use crate::kvs::{Key, Transaction, Val};
+use std::collections::VecDeque;
+use std::fmt::{Debug, Display, Formatter};
+use std::io::Cursor;
+use std::marker::PhantomData;
+
 #[cfg(debug_assertions)]
 use ahash::HashSet;
 use anyhow::{Result, bail};
 use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
-use std::fmt::{Debug, Display, Formatter};
-use std::io::Cursor;
-use std::marker::PhantomData;
+
+use crate::err::Error;
+use crate::idx::trees::bkeys::BKeys;
+use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeStore};
+use crate::kvs::{KVValue, Key, Transaction, Val};
+use crate::val::{Object, Value};
 
 pub type Payload = u64;
 
 type BStoredNode<BK> = StoredNode<BTreeNode<BK>>;
 pub(in crate::idx) type BTreeStore<BK> = TreeStore<BTreeNode<BK>>;
 
-#[non_exhaustive]
 pub struct BTree<BK>
 where
 	BK: BKeys,
@@ -31,7 +31,6 @@ where
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Serialize, Deserialize)]
-#[non_exhaustive]
 pub struct BState {
 	minimum_degree: u32,
 	root: Option<NodeId>,
@@ -40,8 +39,16 @@ pub struct BState {
 	generation: StoreGeneration,
 }
 
-impl VersionedStore for BState {
-	fn try_from(val: Val) -> Result<Self> {
+impl KVValue for BState {
+	#[inline]
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let mut val = Vec::new();
+		self.serialize_revisioned(&mut val)?;
+		Ok(val)
+	}
+
+	#[inline]
+	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
 		match Self::deserialize_revisioned(&mut val.as_slice()) {
 			Ok(r) => Ok(r),
 			// If it fails here, there is the chance it was an old version of BState
@@ -146,7 +153,6 @@ impl From<BStatistics> for Value {
 }
 
 #[derive(Debug, Clone)]
-#[non_exhaustive]
 pub enum BTreeNode<BK>
 where
 	BK: BKeys + Clone,
@@ -652,7 +658,8 @@ where
 
 		// CLRS: 2c
 		// Merge children
-		// The payload is set to 0. The payload does not matter, as the key will be deleted after anyway.
+		// The payload is set to 0. The payload does not matter, as the key will be
+		// deleted after anyway.
 		#[cfg(debug_assertions)]
 		{
 			left_node.n.check();
@@ -1003,27 +1010,24 @@ where
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::VersionedStore;
-	use crate::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
-	use crate::idx::trees::btree::{
-		BState, BStatistics, BStoredNode, BTree, BTreeNode, BTreeStore, Payload,
-	};
-	use crate::idx::trees::store::{NodeId, TreeNode, TreeNodeProvider};
-	use crate::kvs::{Datastore, Key, LockType::*, Transaction, TransactionType};
-	use anyhow::Result;
-	use rand::prelude::SliceRandom;
-	use rand::thread_rng;
 	use std::cmp::Ordering;
-	use std::collections::{BTreeMap, VecDeque};
-	use std::fmt::Debug;
+	use std::collections::BTreeMap;
 	use std::sync::Arc;
+
+	use rand::seq::SliceRandom;
+	use rand::thread_rng;
 	use test_log::test;
+
+	use super::*;
+	use crate::idx::trees::bkeys::TrieKeys;
+	use crate::idx::trees::store::TreeNodeProvider;
+	use crate::kvs::{Datastore, LockType, TransactionType};
 
 	#[test]
 	fn test_btree_state_serde() {
 		let s = BState::new(3);
-		let val = VersionedStore::try_into(&s).unwrap();
-		let s: BState = VersionedStore::try_from(val).unwrap();
+		let val = s.kv_encode_value().unwrap();
+		let s: BState = BState::kv_decode_value(val).unwrap();
 		assert_eq!(s.minimum_degree, 3);
 		assert_eq!(s.root, None);
 		assert_eq!(s.next_node_id, 0);
@@ -1031,10 +1035,10 @@ mod tests {
 
 	#[test]
 	fn test_node_serde_internal() {
-		let mut node = BTreeNode::Internal(FstKeys::default(), vec![]);
+		let mut node = BTreeNode::Internal(TrieKeys::default(), vec![]);
 		node.prepare_save();
 		let val = node.try_into_val().unwrap();
-		let _: BTreeNode<FstKeys> = BTreeNode::try_from_val(val).unwrap();
+		let _: BTreeNode<TrieKeys> = BTreeNode::try_from_val(val).unwrap();
 	}
 
 	#[test]
@@ -1085,24 +1089,6 @@ mod tests {
 		(format!("{}", idx).into(), (idx * 10) as Payload)
 	}
 
-	async fn new_operation_fst<BK>(
-		ds: &Datastore,
-		t: &BTree<BK>,
-		tt: TransactionType,
-		cache_size: usize,
-	) -> (Transaction, BTreeStore<FstKeys>)
-	where
-		BK: BKeys + Debug + Clone,
-	{
-		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		let st = tx
-			.index_caches()
-			.get_store_btree_fst(TreeNodeProvider::Debug, t.state.generation, tt, cache_size)
-			.await
-			.unwrap();
-		(tx, st)
-	}
-
 	async fn new_operation_trie<BK>(
 		ds: &Datastore,
 		t: &BTree<BK>,
@@ -1112,44 +1098,13 @@ mod tests {
 	where
 		BK: BKeys + Debug + Clone,
 	{
-		let tx = ds.transaction(tt, Optimistic).await.unwrap();
+		let tx = ds.transaction(tt, LockType::Optimistic).await.unwrap();
 		let st = tx
 			.index_caches()
 			.get_store_btree_trie(TreeNodeProvider::Debug, t.state.generation, tt, cache_size)
 			.await
 			.unwrap();
 		(tx, st)
-	}
-
-	#[test(tokio::test)]
-	async fn test_btree_fst_small_order_sequential_insertions() {
-		let ds = Datastore::new("memory").await.unwrap();
-
-		let mut t = BTree::new(BState::new(5));
-
-		{
-			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Write, 20).await;
-			insertions_test::<_, FstKeys>(tx, st, &mut t, 100, get_key_value).await;
-		}
-
-		{
-			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
-			check_insertions(tx, st, &mut t, 100, get_key_value).await;
-		}
-
-		{
-			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
-			assert_eq!(
-				t.statistics(&tx, &st).await.unwrap(),
-				BStatistics {
-					keys_count: 100,
-					max_depth: 3,
-					nodes_count: 22,
-					total_size: 1691,
-				}
-			);
-			tx.cancel().await.unwrap();
-		}
 	}
 
 	#[test(tokio::test)]
@@ -1183,33 +1138,6 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	async fn test_btree_fst_small_order_random_insertions() {
-		let ds = Datastore::new("memory").await.unwrap();
-		let mut t = BTree::new(BState::new(8));
-
-		let mut samples: Vec<usize> = (0..100).collect();
-		let mut rng = thread_rng();
-		samples.shuffle(&mut rng);
-
-		{
-			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Write, 20).await;
-			insertions_test(tx, st, &mut t, 100, |i| get_key_value(samples[i])).await;
-		}
-
-		{
-			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
-			check_insertions(tx, st, &mut t, 100, |i| get_key_value(samples[i])).await;
-		}
-
-		{
-			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
-			let s = t.statistics(&tx, &st).await.unwrap();
-			assert_eq!(s.keys_count, 100);
-			tx.cancel().await.unwrap();
-		}
-	}
-
-	#[test(tokio::test)]
 	async fn test_btree_trie_small_order_random_insertions() {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::new(BState::new(75));
@@ -1232,36 +1160,6 @@ mod tests {
 			let (tx, st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
 			let s = t.statistics(&tx, &st).await.unwrap();
 			assert_eq!(s.keys_count, 100);
-			tx.cancel().await.unwrap();
-		}
-	}
-
-	#[test(tokio::test)]
-	async fn test_btree_fst_keys_large_order_sequential_insertions() {
-		let ds = Datastore::new("memory").await.unwrap();
-		let mut t = BTree::new(BState::new(60));
-
-		{
-			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Write, 20).await;
-			insertions_test(tx, st, &mut t, 10000, get_key_value).await;
-		}
-
-		{
-			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
-			check_insertions(tx, st, &mut t, 10000, get_key_value).await;
-		}
-
-		{
-			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
-			assert_eq!(
-				t.statistics(&tx, &st).await.unwrap(),
-				BStatistics {
-					keys_count: 10000,
-					max_depth: 3,
-					nodes_count: 158,
-					total_size: 57486,
-				}
-			);
 			tx.cancel().await.unwrap();
 		}
 	}
@@ -1311,24 +1209,6 @@ mod tests {
 		"nothing", "the", "other", "animals", "sat", "there", "watching",
 	];
 
-	async fn test_btree_fst_real_world_insertions(default_minimum_degree: u32) -> BStatistics {
-		let ds = Datastore::new("memory").await.unwrap();
-		let mut t = BTree::new(BState::new(default_minimum_degree));
-
-		{
-			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Write, 20).await;
-			insertions_test(tx, st, &mut t, REAL_WORLD_TERMS.len(), |i| {
-				(REAL_WORLD_TERMS[i].as_bytes().to_vec(), i as Payload)
-			})
-			.await;
-		}
-
-		let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
-		let statistics = t.statistics(&tx, &st).await.unwrap();
-		tx.cancel().await.unwrap();
-		statistics
-	}
-
 	async fn test_btree_trie_real_world_insertions(default_minimum_degree: u32) -> BStatistics {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::new(BState::new(default_minimum_degree));
@@ -1346,30 +1226,6 @@ mod tests {
 		tx.cancel().await.unwrap();
 
 		statistics
-	}
-
-	#[test(tokio::test)]
-	async fn test_btree_fst_keys_real_world_insertions_small_order() {
-		let expected = BStatistics {
-			keys_count: 17,
-			max_depth: 2,
-			nodes_count: 5,
-			total_size: 421,
-		};
-		let s = test_btree_fst_real_world_insertions(4).await;
-		assert_eq!(s, expected);
-	}
-
-	#[test(tokio::test)]
-	async fn test_btree_fst_keys_real_world_insertions_large_order() {
-		let expected = BStatistics {
-			keys_count: 17,
-			max_depth: 1,
-			nodes_count: 1,
-			total_size: 189,
-		};
-		let s = test_btree_fst_real_world_insertions(100).await;
-		assert_eq!(s, expected);
 	}
 
 	#[test(tokio::test)]
@@ -1717,7 +1573,7 @@ mod tests {
 	#[test(tokio::test)]
 	async fn test_delete_adjust() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
-		let mut t = BTree::<FstKeys>::new(BState::new(3));
+		let mut t = BTree::<TrieKeys>::new(BState::new(3));
 
 		let terms = [
 			"aliquam",
@@ -1836,7 +1692,7 @@ mod tests {
 		];
 		let mut keys = BTreeMap::new();
 		{
-			let (tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Write, 100).await;
+			let (tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Write, 100).await;
 			for term in terms {
 				t.insert(&tx, &mut st, term.into(), 0).await?;
 				keys.insert(term.to_string(), 0);
@@ -1847,11 +1703,11 @@ mod tests {
 			tx.commit().await?;
 		}
 		{
-			let (tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Read, 100).await;
+			let (tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read, 100).await;
 			print_tree(&tx, &mut st, &t).await;
 		}
 		{
-			let (tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Write, 100).await;
+			let (tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Write, 100).await;
 			for term in terms {
 				debug!("Delete {term}");
 				t.delete(&tx, &mut st, term.into()).await?;
@@ -1864,7 +1720,7 @@ mod tests {
 			tx.commit().await?;
 		}
 		{
-			let (tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Write, 100).await;
+			let (tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Write, 100).await;
 			assert_eq!(check_btree_properties(&t, &tx, &mut st).await?.0, 0);
 			st.finish(&tx).await?;
 			tx.cancel().await?;

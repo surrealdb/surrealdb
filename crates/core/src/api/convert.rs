@@ -1,8 +1,11 @@
-use crate::err::Error;
-use crate::expr::{Object, Value};
+use std::collections::BTreeMap;
+use std::mem;
+
 use anyhow::Result;
 use http::HeaderMap;
-use std::{collections::BTreeMap, mem};
+
+use crate::err::Error;
+use crate::val::{Object, Value};
 
 pub(crate) fn headermap_to_object(headers: HeaderMap) -> Result<Object> {
 	let mut next_key = None;
@@ -11,8 +14,8 @@ pub(crate) fn headermap_to_object(headers: HeaderMap) -> Result<Object> {
 	let mut res = BTreeMap::new();
 
 	// Header map can contain multiple values for each header.
-	// This is handled by returning the key name first and then return multiple values with key
-	// name = None.
+	// This is handled by returning the key name first and then return multiple
+	// values with key name = None.
 	for (k, v) in headers.into_iter() {
 		let v = Value::Strand(v.to_str().map_err(Error::from)?.to_owned().into());
 
@@ -28,8 +31,8 @@ pub(crate) fn headermap_to_object(headers: HeaderMap) -> Result<Object> {
 			next_value = v;
 			first_value = true;
 		} else if first_value {
-			// no new key, but this is directly after the first value, turn the header value into an array of
-			// values.
+			// no new key, but this is directly after the first value, turn the header value
+			// into an array of values.
 			first_value = false;
 			next_value = Value::Array(vec![next_value, v].into())
 		} else {

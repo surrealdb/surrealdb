@@ -1,9 +1,7 @@
+pub use base64::Engine;
 use base64::alphabet::STANDARD;
 use base64::engine::DecodePaddingMode;
-use base64::engine::general_purpose::GeneralPurpose;
-use base64::engine::general_purpose::GeneralPurposeConfig;
-
-pub use base64::Engine;
+use base64::engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig};
 
 pub const BASE64: GeneralPurpose = GeneralPurpose::new(&STANDARD, CONFIG);
 

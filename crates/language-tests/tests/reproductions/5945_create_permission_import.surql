@@ -1,4 +1,5 @@
 /**
+
 [test]
 
 [[test.results]]
@@ -22,7 +23,7 @@ DEFINE ACCESS account ON DATABASE TYPE RECORD
 		(CREATE user SET email = $email, pass = crypto::argon2::generate($pass)).id
 	})
 	SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
-	DURATION FOR TOKEN 15m, FOR SESSION 12h;
+	DURATION FOR TOKEN 16m, FOR SESSION 12h;
 
 
 DEFINE TABLE OVERWRITE something SCHEMAFULL

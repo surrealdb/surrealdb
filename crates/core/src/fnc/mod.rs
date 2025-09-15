@@ -1,14 +1,15 @@
-//! Executes functions from SQL. If there is an SQL function it will be defined in this module.
+//! Executes functions from SQL. If there is an SQL function it will be defined
+//! in this module.
+
+use anyhow::Result;
+use reblessive::tree::Stk;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
-use crate::expr::Thing;
-use crate::expr::value::Value;
 use crate::idx::planner::executor::QueryExecutor;
-use anyhow::Result;
-use reblessive::tree::Stk;
+use crate::val::{RecordId, Value};
 pub mod api;
 pub mod args;
 pub mod array;
@@ -27,6 +28,7 @@ pub mod operate;
 pub mod parse;
 pub mod rand;
 pub mod record;
+pub mod schema;
 pub mod script;
 pub mod search;
 pub mod sequence;
@@ -75,7 +77,7 @@ pub async fn run(
 		|| name.eq("file::rename_if_not_exists")
 		|| name.eq("file::list")
 		|| name.eq("record::exists")
-		|| name.eq("record::refs")
+		|| name.eq("record::is::edge")
 		|| name.eq("type::field")
 		|| name.eq("type::fields")
 		|| name.eq("value::diff")
@@ -87,6 +89,7 @@ pub async fn run(
 		|| name.starts_with("crypto::bcrypt")
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
+		|| name.eq("schema::table::exists")
 	{
 		stk.run(|stk| asynchronous(stk, ctx, opt, doc, name, args)).await
 	} else {
@@ -94,10 +97,11 @@ pub async fn run(
 	}
 }
 
-/// Each function is specified by its name (a string literal) followed by its path. The path
-/// may be followed by one parenthesized argument, e.g. ctx, which is passed to the function
-/// before the remainder of the arguments. The path may be followed by `.await` to signify that
-/// it is `async`. Finally, the path may be prefixed by a parenthesized wrapper function e.g.
+/// Each function is specified by its name (a string literal) followed by its
+/// path. The path may be followed by one parenthesized argument, e.g. ctx,
+/// which is passed to the function before the remainder of the arguments. The
+/// path may be followed by `.await` to signify that it is `async`. Finally, the
+/// path may be prefixed by a parenthesized wrapper function e.g.
 /// `cpu_intensive`.
 macro_rules! dispatch {
     ($ctx: ident, $name: ident, $args: expr_2021, $message: expr_2021,
@@ -199,6 +203,7 @@ pub fn synchronous(
 		"count" => count::count,
 		//
 		"crypto::blake3" => crypto::blake3,
+		"crypto::joaat" => crypto::joaat,
 		"crypto::md5" => crypto::md5,
 		"crypto::sha1" => crypto::sha1,
 		"crypto::sha256" => crypto::sha256,
@@ -504,12 +509,12 @@ pub async fn asynchronous(
 	name: &str,
 	args: Vec<Value>,
 ) -> Result<Value> {
-	// Wrappers return a function as opposed to a value so that the dispatch! method can always
-	// perform a function call.
+	// Wrappers return a function as opposed to a value so that the dispatch! method
+	// can always perform a function call.
 	#[cfg(not(target_family = "wasm"))]
 	fn cpu_intensive<R: Send + 'static>(
 		function: impl FnOnce() -> R + Send + 'static,
-	) -> impl FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = R> + Send>> {
+	) -> impl FnOnce() -> std::pin::Pin<Box<dyn Future<Output = R> + Send>> {
 		|| Box::pin(crate::exe::spawn(function))
 	}
 
@@ -571,9 +576,11 @@ pub async fn asynchronous(
 		"http::delete" => http::delete(ctx).await,
 		//
 		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
-		"record::refs" => record::refs((stk, ctx, opt, doc)).await,
+		"record::is::edge" => record::is::edge((stk, ctx, Some(opt), doc)).await,
 		//
 		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
+		"search::linear" => search::linear(ctx).await,
+		"search::rrf" => search::rrf(ctx).await,
 		"search::score" => search::score((ctx, doc)).await,
 		"search::highlight" => search::highlight((ctx, doc)).await,
 		"search::offsets" => search::offsets((ctx, doc)).await,
@@ -585,8 +592,9 @@ pub async fn asynchronous(
 		"type::field" => r#type::field((stk, ctx, Some(opt), doc)).await,
 		"type::fields" => r#type::fields((stk, ctx, Some(opt), doc)).await,
 		//
-		"value::diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-		"value::patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+		"value::diff" => value::diff.await,
+		"value::patch" => value::patch.await,
+		"schema::table::exists" => schema::table::exists((ctx, Some(opt))).await,
 	)
 }
 
@@ -600,7 +608,7 @@ pub async fn idiom(
 	name: &str,
 	mut args: Vec<Value>,
 ) -> Result<Value> {
-	ctx.check_allowed_function(&idiom_name_to_normal(value.kindof(), name))?;
+	ctx.check_allowed_function(&idiom_name_to_normal(value.kind_of(), name))?;
 	match value {
 		Value::Array(x) => {
 			args.insert(0, Value::Array(x));
@@ -737,8 +745,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -796,8 +804,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -863,8 +871,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 
@@ -930,14 +938,14 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
 		}
-		Value::Thing(t) => {
-			args.insert(0, Value::Thing(t));
+		Value::RecordId(t) => {
+			args.insert(0, Value::RecordId(t));
 			dispatch!(
 				ctx,
 				name,
@@ -948,8 +956,6 @@ pub async fn idiom(
 				"id" => record::id,
 				"table" => record::tb,
 				"tb" => record::tb,
-				"refs" => record::refs((stk, ctx, opt, doc)).await,
-
 
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
@@ -994,8 +1000,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -1060,8 +1066,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -1138,8 +1144,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -1251,8 +1257,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 			)
 		}
 		Value::Datetime(d) => {
@@ -1327,8 +1333,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -1399,14 +1405,14 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
 		}
 		x => {
-			let message = format!("no such method found for the {} type", x.kindof());
+			let message = format!("no such method found for the {} type", x.kind_of());
 			args.insert(0, x);
 			dispatch!(
 				ctx,
@@ -1457,8 +1463,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -1469,11 +1475,11 @@ pub async fn idiom(
 fn get_execution_context<'a>(
 	ctx: &'a Context,
 	doc: Option<&'a CursorDoc>,
-) -> Option<(&'a QueryExecutor, &'a CursorDoc, &'a Thing)> {
+) -> Option<(&'a QueryExecutor, &'a CursorDoc, &'a RecordId)> {
 	if let Some(doc) = doc {
 		if let Some(thg) = &doc.rid {
 			if let Some(pla) = ctx.get_query_planner() {
-				if let Some(exe) = pla.get_query_executor(&thg.tb) {
+				if let Some(exe) = pla.get_query_executor(&thg.table) {
 					return Some((exe, doc, thg));
 				}
 			}
@@ -1580,14 +1586,13 @@ mod tests {
 	use regex::Regex;
 
 	use crate::dbs::Capabilities;
-	use crate::{
-		dbs::capabilities::ExperimentalTarget,
-		sql::{Function, Query, SqlValue, Statement, statements::OutputStatement},
-	};
+	use crate::dbs::capabilities::ExperimentalTarget;
+	use crate::sql::{Expr, Function};
 
 	#[tokio::test]
 	async fn implementations_are_present() {
-		// Accumulate and display all problems at once to avoid a test -> fix -> test -> fix cycle.
+		// Accumulate and display all problems at once to avoid a test -> fix -> test ->
+		// fix cycle.
 		let mut problems = Vec::new();
 
 		// Read the source code of this file
@@ -1615,27 +1620,18 @@ mod tests {
 			let (quote, _) = line.split_once("=>").unwrap();
 			let name = quote.trim().trim_matches('"');
 
-			let res = crate::syn::parse_with_capabilities(
-				&format!("RETURN {}()", name),
+			let res = crate::syn::expr_with_capabilities(
+				&format!("{}()", name),
 				&Capabilities::all().with_experimental(ExperimentalTarget::DefineApi.into()),
 			);
 
-			if let Ok(Query(mut x)) = res {
-				match x.0.pop() {
-					Some(Statement::Output(OutputStatement {
-						what: SqlValue::Function(x),
-						..
-					})) => match *x {
-						Function::Normal(parsed_name, _) => {
-							if parsed_name != name {
-								problems
-									.push(format!("function `{name}` parsed as `{parsed_name}`"));
-							}
+			if let Ok(Expr::FunctionCall(call)) = res {
+				match call.receiver {
+					Function::Normal(parsed_name) => {
+						if parsed_name != name {
+							problems.push(format!("function `{name}` parsed as `{parsed_name}`"));
 						}
-						_ => {
-							problems.push(format!("couldn't parse {name} function"));
-						}
-					},
+					}
 					_ => {
 						problems.push(format!("couldn't parse {name} function"));
 					}
@@ -1646,7 +1642,7 @@ mod tests {
 
 			#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 			{
-				use crate::expr::Value;
+				use crate::val::Value;
 
 				let name = name.replace("::", ".");
 				let sql =
@@ -1658,9 +1654,12 @@ mod tests {
 				let ses = crate::dbs::Session::owner().with_ns("test").with_db("test");
 				let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 				let tmp = res.remove(0).result.unwrap();
-				if tmp == Value::from("object") {
-					// Assume this function is superseded by a module of the same name.
-				} else if tmp != Value::from("function") {
+				if tmp == Value::Strand(crate::val::Strand::new("object".to_owned()).unwrap()) {
+					// Assume this function is superseded by a module of the
+					// same name.
+				} else if tmp
+					!= Value::Strand(crate::val::Strand::new("function".to_owned()).unwrap())
+				{
 					problems.push(format!("function {name} not exported to JavaScript: {tmp:?}"));
 				}
 			}

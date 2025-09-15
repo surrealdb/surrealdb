@@ -1,7 +1,7 @@
-use crate::ctx::Context;
-use crate::expr::Duration;
-use crate::expr::Value;
 use anyhow::Result;
+
+use crate::ctx::Context;
+use crate::val::{Duration, Value};
 
 /// Sleep during the provided duration parameter.
 pub async fn sleep(ctx: &Context, (dur,): (Duration,)) -> Result<Value> {

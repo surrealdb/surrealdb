@@ -1,9 +1,9 @@
-use js::{Class, Ctx, Function, Module, Result, String as JsString, Value, module::ModuleDef};
+use js::module::ModuleDef;
+use js::{Class, Ctx, Function, Module, Result, String as JsString, Value};
 
 mod functions;
 pub mod query;
 
-#[non_exhaustive]
 pub struct Package;
 
 impl ModuleDef for Package {

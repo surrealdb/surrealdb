@@ -1,37 +1,28 @@
-use crate::ctx::Context;
-use crate::ctx::MutableContext;
-use crate::dbs::Options;
-use crate::dbs::Workable;
-use crate::err::Error;
-use crate::expr::Base;
-use crate::expr::FlowResultExt as _;
-use crate::expr::permission::Permission;
-use crate::expr::statements::define::DefineDatabaseStatement;
-use crate::expr::statements::define::DefineEventStatement;
-use crate::expr::statements::define::DefineFieldStatement;
-use crate::expr::statements::define::DefineIndexStatement;
-use crate::expr::statements::define::DefineTableStatement;
-use crate::expr::statements::live::LiveStatement;
-use crate::expr::table::Table;
-use crate::expr::thing::Thing;
-use crate::expr::value::Value;
-use crate::iam::Action;
-use crate::iam::ResourceKind;
+use std::fmt::{Debug, Formatter};
+use std::mem;
+use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+
+use crate::catalog::providers::{CatalogProvider, TableProvider};
+use crate::catalog::{self, DatabaseDefinition, Permission, TableDefinition};
+use crate::ctx::{Context, MutableContext};
+use crate::dbs::{Options, Workable};
+use crate::expr::{Base, FlowResultExt as _, Ident};
+use crate::iam::{Action, ResourceKind};
 use crate::idx::planner::RecordStrategy;
 use crate::idx::planner::iterators::IteratorRecord;
 use crate::kvs::cache;
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::fmt::{Debug, Formatter};
-use std::mem;
-use std::ops::Deref;
-use std::sync::Arc;
+use crate::val::record::{Data, Record};
+use crate::val::{RecordId, Value};
 
 pub(crate) struct Document {
 	/// The record id of this document
-	pub(super) id: Option<Arc<Thing>>,
+	pub(super) id: Option<Arc<RecordId>>,
 	/// The table that we should generate a record id from
-	pub(super) r#gen: Option<Table>,
+	pub(super) r#gen: Option<Ident>,
 	/// Whether this is the second iteration of the processing
 	pub(super) retry: bool,
 	pub(super) extras: Workable,
@@ -42,67 +33,81 @@ pub(crate) struct Document {
 	pub(super) record_strategy: RecordStrategy,
 }
 
-#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub(crate) struct CursorDoc {
-	pub(crate) rid: Option<Arc<Thing>>,
+	pub(crate) rid: Option<Arc<RecordId>>,
 	pub(crate) ir: Option<Arc<IteratorRecord>>,
-	pub(crate) doc: CursorValue,
+	pub(crate) doc: CursorRecord,
+	pub(crate) fields_computed: bool,
 }
 
-#[non_exhaustive]
+/// Wrapper around a Record for cursor operations
+///
+/// This struct provides a convenient interface for working with records in cursor contexts.
+/// It implements Deref and DerefMut to allow direct access to the underlying Record's methods.
 #[derive(Clone, Debug)]
-pub(crate) struct CursorValue {
-	mutable: Value,
-	read_only: Option<Arc<Value>>,
+pub(crate) struct CursorRecord {
+	/// The underlying record containing data and metadata
+	record: Record,
 }
 
-impl CursorValue {
+impl CursorRecord {
+	/// Returns a mutable reference to the underlying value
+	///
+	/// This method delegates to the Record's data, converting read-only data to mutable if
+	/// necessary.
 	pub(crate) fn to_mut(&mut self) -> &mut Value {
-		if let Some(ro) = self.read_only.take() {
-			self.mutable = ro.as_ref().clone();
-		}
-		&mut self.mutable
+		self.record.data.to_mut()
 	}
 
+	/// Converts the data to read-only format and returns an Arc reference
+	///
+	/// This method delegates to the Record's data, ensuring the data is in read-only format.
 	pub(crate) fn as_arc(&mut self) -> Arc<Value> {
-		match &self.read_only {
-			None => {
-				let v = Arc::new(mem::take(&mut self.mutable));
-				self.read_only = Some(v.clone());
-				v
-			}
-			Some(v) => v.clone(),
-		}
+		self.record.data.read_only()
 	}
 
+	/// Converts the cursor record to a read-only record
+	///
+	/// This method ensures the underlying data is in read-only format for better sharing.
+	pub(crate) fn into_read_only(self) -> Arc<Record> {
+		self.record.into_read_only()
+	}
+
+	/// Returns a reference to the underlying value
+	///
+	/// This method provides uniform access to the value regardless of its storage format.
 	pub(crate) fn as_ref(&self) -> &Value {
-		if let Some(ro) = &self.read_only {
-			ro.as_ref()
-		} else {
-			&self.mutable
-		}
+		self.record.data.as_ref()
 	}
 
-	pub(crate) fn into_owned(self) -> Value {
-		if let Some(ro) = &self.read_only {
-			ro.as_ref().clone()
-		} else {
-			self.mutable
+	/// Converts the cursor record to an owned Value
+	///
+	/// This method extracts the underlying value, taking ownership of the data.
+	pub(crate) fn into_owned(mut self) -> Value {
+		match self.record.data {
+			Data::ReadOnly(ref mut arc) => mem::take(Arc::make_mut(arc)),
+			Data::Mutable(value) => value,
 		}
 	}
 }
 
-impl Deref for CursorValue {
-	type Target = Value;
+impl Deref for CursorRecord {
+	type Target = Record;
 	fn deref(&self) -> &Self::Target {
-		self.as_ref()
+		&self.record
+	}
+}
+
+impl DerefMut for CursorRecord {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.record
 	}
 }
 
 impl CursorDoc {
-	pub(crate) fn new<T: Into<CursorValue>>(
-		rid: Option<Arc<Thing>>,
+	pub(crate) fn new<T: Into<CursorRecord>>(
+		rid: Option<Arc<RecordId>>,
 		ir: Option<Arc<IteratorRecord>>,
 		doc: T,
 	) -> Self {
@@ -110,24 +115,39 @@ impl CursorDoc {
 			rid,
 			ir,
 			doc: doc.into(),
+			fields_computed: false,
 		}
 	}
 }
 
-impl From<Value> for CursorValue {
+impl From<Record> for CursorRecord {
+	fn from(record: Record) -> Self {
+		Self {
+			record,
+		}
+	}
+}
+
+impl From<Arc<Record>> for CursorRecord {
+	fn from(arc: Arc<Record>) -> Self {
+		Self {
+			record: arc.as_ref().clone(),
+		}
+	}
+}
+
+impl From<Value> for CursorRecord {
 	fn from(value: Value) -> Self {
 		Self {
-			mutable: value,
-			read_only: None,
+			record: Record::new(value.into()),
 		}
 	}
 }
 
-impl From<Arc<Value>> for CursorValue {
-	fn from(value: Arc<Value>) -> Self {
+impl From<Arc<Value>> for CursorRecord {
+	fn from(arc: Arc<Value>) -> Self {
 		Self {
-			mutable: Value::None,
-			read_only: Some(value),
+			record: Record::new(arc.into()),
 		}
 	}
 }
@@ -137,10 +157,8 @@ impl From<Value> for CursorDoc {
 		Self {
 			rid: None,
 			ir: None,
-			doc: CursorValue {
-				mutable: val,
-				read_only: None,
-			},
+			doc: val.into(),
+			fields_computed: false,
 		}
 	}
 }
@@ -150,10 +168,8 @@ impl From<Arc<Value>> for CursorDoc {
 		Self {
 			rid: None,
 			ir: None,
-			doc: CursorValue {
-				mutable: Value::None,
-				read_only: Some(doc),
-			},
+			doc: doc.into(),
+			fields_computed: false,
 		}
 	}
 }
@@ -173,10 +189,10 @@ pub(crate) enum Permitted {
 impl Document {
 	/// Initialise a new document
 	pub fn new(
-		id: Option<Arc<Thing>>,
+		id: Option<Arc<RecordId>>,
 		ir: Option<Arc<IteratorRecord>>,
-		r#gen: Option<Table>,
-		val: Arc<Value>,
+		r#gen: Option<Ident>,
+		val: Arc<Record>,
 		extras: Workable,
 		retry: bool,
 		rs: RecordStrategy,
@@ -246,26 +262,27 @@ impl Document {
 	/// DELETE some:from..to;
 	pub(crate) fn is_specific_record_id(&self) -> bool {
 		match self.extras {
-			Workable::Insert(ref v) if v.rid().is_some() => true,
-			Workable::Normal if self.r#gen.is_none() => true,
+			Workable::Insert(ref v) => !v.rid().is_nullish(),
+			Workable::Normal => self.r#gen.is_none(),
 			_ => false,
 		}
 	}
 
-	/// Retur true if the document has been extracted by an iterator that already matcheed the condition.
+	/// Retur true if the document has been extracted by an iterator that already matcheed the
+	/// condition.
 	pub(crate) fn is_condition_checked(&self) -> bool {
 		matches!(self.record_strategy, RecordStrategy::Count | RecordStrategy::KeysOnly)
 	}
 
 	/// Update the document for a retry to update after an insert failed.
-	pub fn modify_for_update_retry(&mut self, id: Thing, value: Arc<Value>) {
+	pub fn modify_for_update_retry(&mut self, id: RecordId, record: Arc<Record>) {
 		let retry = Arc::new(id);
 		self.id = Some(retry.clone());
 		self.r#gen = None;
 		self.retry = true;
 		self.record_strategy = RecordStrategy::KeysAndValues;
 
-		self.current = CursorDoc::new(Some(retry), None, value);
+		self.current = CursorDoc::new(Some(retry), None, record);
 		self.initial = self.current.clone();
 	}
 
@@ -303,6 +320,33 @@ impl Document {
 		opt: &Options,
 		permitted: Permitted,
 	) -> Result<bool> {
+		// Check if reduction is required
+		if !self.check_reduction_required(opt)? {
+			return Ok(false);
+		}
+
+		match permitted {
+			Permitted::Initial => {
+				self.initial_reduced =
+					self.compute_reduced_target(stk, ctx, opt, &self.initial).await?;
+			}
+			Permitted::Current => {
+				self.current_reduced =
+					self.compute_reduced_target(stk, ctx, opt, &self.current).await?;
+			}
+			Permitted::Both => {
+				self.initial_reduced =
+					self.compute_reduced_target(stk, ctx, opt, &self.initial).await?;
+				self.current_reduced =
+					self.compute_reduced_target(stk, ctx, opt, &self.current).await?;
+			}
+		}
+
+		// Document has been reduced
+		Ok(true)
+	}
+
+	pub(crate) fn check_reduction_required(&self, opt: &Options) -> Result<bool> {
 		// Check if this record exists
 		if self.id.is_none() {
 			return Ok(false);
@@ -311,63 +355,58 @@ impl Document {
 		if !opt.check_perms(Action::View)? {
 			return Ok(false);
 		}
+
+		// Reduction is required
+		Ok(true)
+	}
+
+	pub(crate) async fn compute_reduced_target(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		full: &CursorDoc,
+	) -> Result<CursorDoc> {
 		// Fetch the fields for the table
 		let fds = self.fd(ctx, opt).await?;
-		// Fetch the targets to process
-		let targets = match permitted {
-			Permitted::Initial => vec![(&self.initial, &mut self.initial_reduced)],
-			Permitted::Current => vec![(&self.current, &mut self.current_reduced)],
-			Permitted::Both => vec![
-				(&self.initial, &mut self.initial_reduced),
-				(&self.current, &mut self.current_reduced),
-			],
-		};
-		// Loop over the targets to process
-		for target in targets {
-			// Get the full document
-			let full = target.0;
-			// Process the full document
-			let mut out =
-				full.doc.as_ref().compute(stk, ctx, opt, Some(full)).await.catch_return()?;
+		// The document to be reduced
+		let mut reduced = full.doc.clone();
+		// Loop over each field in document
+		for fd in fds.iter() {
 			// Loop over each field in document
-			for fd in fds.iter() {
-				// Loop over each field in document
-				for k in out.each(&fd.name).iter() {
-					// Process the field permissions
-					match &fd.permissions.select {
-						Permission::Full => (),
-						Permission::None => out.cut(k),
-						Permission::Specific(e) => {
-							// Disable permissions
-							let opt = &opt.new_with_perms(false);
-							// Get the initial value
-							let val = Arc::new(full.doc.as_ref().pick(k));
-							// Configure the context
-							let mut ctx = MutableContext::new(ctx);
-							ctx.add_value("value", val);
-							let ctx = ctx.freeze();
-							// Process the PERMISSION clause
-							if !e
-								.compute(stk, &ctx, opt, Some(full))
-								.await
-								.catch_return()?
-								.is_truthy()
-							{
-								out.cut(k);
-							}
+			for k in reduced.as_ref().each(&fd.name).iter() {
+				// Process the field permissions
+				match &fd.select_permission {
+					Permission::Full => (),
+					Permission::None => reduced.to_mut().cut(k),
+					Permission::Specific(e) => {
+						// Disable permissions
+						let opt = &opt.new_with_perms(false);
+						// Get the initial value
+						let val = Arc::new(full.doc.as_ref().pick(k));
+						// Configure the context
+						let mut ctx = MutableContext::new(ctx);
+						ctx.add_value("value", val);
+						let ctx = ctx.freeze();
+						// Process the PERMISSION clause
+						if !stk
+							.run(|stk| e.compute(stk, &ctx, opt, Some(full)))
+							.await
+							.catch_return()?
+							.is_truthy()
+						{
+							reduced.to_mut().cut(k);
 						}
 					}
 				}
 			}
-			// Update the permitted document
-			target.1.doc = out.into();
 		}
-		// Return the permitted document
-		Ok(true)
+		// Ok
+		Ok(CursorDoc::new(full.rid.clone(), full.ir.clone(), reduced))
 	}
 
 	/// Retrieve the record id for this document
-	pub fn id(&self) -> Result<Arc<Thing>> {
+	pub fn id(&self) -> Result<Arc<RecordId>> {
 		match self.id.clone() {
 			Some(id) => Ok(id),
 			_ => fail!("Expected a document id to be present"),
@@ -375,7 +414,7 @@ impl Document {
 	}
 
 	/// Retrieve the record id for this document
-	pub fn inner_id(&self) -> Result<Thing> {
+	pub fn inner_id(&self) -> Result<RecordId> {
 		match self.id.clone() {
 			Some(id) => Ok(Arc::unwrap_or_clone(id)),
 			_ => fail!("Expected a document id to be present"),
@@ -383,7 +422,7 @@ impl Document {
 	}
 
 	/// Get the database for this document
-	pub async fn db(&self, ctx: &Context, opt: &Options) -> Result<Arc<DefineDatabaseStatement>> {
+	pub async fn db(&self, ctx: &Context, opt: &Options) -> Result<Arc<DatabaseDefinition>> {
 		// Get the NS + DB
 		let (ns, db) = opt.ns_db()?;
 		// Get transaction
@@ -412,9 +451,9 @@ impl Document {
 	}
 
 	/// Get the table for this document
-	pub async fn tb(&self, ctx: &Context, opt: &Options) -> Result<Arc<DefineTableStatement>> {
+	pub async fn tb(&self, ctx: &Context, opt: &Options) -> Result<Arc<TableDefinition>> {
 		// Get the NS + DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the record id
 		let id = self.id()?;
 		// Get transaction
@@ -424,61 +463,48 @@ impl Document {
 			// A cache is present on the context
 			Some(cache) if txn.local() => {
 				// Get the cache entry key
-				let key = cache::ds::Lookup::Tb(ns, db, &id.tb);
+				let key = cache::ds::Lookup::Tb(ns, db, &id.table);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_type(),
 					None => {
-						let val = match txn.get_tb(ns, db, &id.tb).await {
-							Err(e) => {
-								// The table doesn't exist
-								if matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
-									// Allowed to run?
-									opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
-									// We can create the table automatically
-									txn.ensure_ns_db_tb(ns, db, &id.tb, opt.strict).await
-								} else {
-									// There was an error
-									Err(e)
-								}
+						let val = match txn.get_tb(ns, db, &id.table).await? {
+							Some(tb) => tb,
+							None => {
+								// Allowed to run?
+								opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
+								// We can create the table automatically
+								let (ns, db) = opt.ns_db()?;
+								txn.ensure_ns_db_tb(ns, db, &id.table, opt.strict).await?
 							}
-							// The table exists
-							Ok(tb) => Ok(tb),
-						}?;
+						};
 						let val = cache::ds::Entry::Any(val.clone());
 						cache.insert(key, val.clone());
-						val
+						val.try_into_type()
 					}
 				}
-				.try_into_type()
 			}
 			// No cache is present on the context
 			_ => {
 				// Return the table or attempt to define it
-				match txn.get_tb(ns, db, &id.tb).await {
-					Err(e) => {
-						// The table doesn't exist
-						if matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
-							// Allowed to run?
-							opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
-							// We can create the table automatically
-							txn.ensure_ns_db_tb(ns, db, &id.tb, opt.strict).await
-						} else {
-							// There was an error
-							Err(e)
-						}
+				match txn.get_tb(ns, db, &id.table).await? {
+					Some(tb) => Ok(tb),
+					None => {
+						// Allowed to run?
+						opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
+						// We can create the table automatically
+						let (ns, db) = opt.ns_db()?;
+						txn.ensure_ns_db_tb(ns, db, &id.table, opt.strict).await
 					}
-					// The table exists
-					Ok(tb) => Ok(tb),
 				}
 			}
 		}
 	}
 
 	/// Get the foreign tables for this document
-	pub async fn ft(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineTableStatement]>> {
+	pub async fn ft(&self, ctx: &Context, opt: &Options) -> Result<Arc<[TableDefinition]>> {
 		// Get the NS + DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context
@@ -505,9 +531,13 @@ impl Document {
 	}
 
 	/// Get the events for this document
-	pub async fn ev(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineEventStatement]>> {
+	pub async fn ev(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Arc<[catalog::EventDefinition]>> {
 		// Get the NS + DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context
@@ -534,9 +564,13 @@ impl Document {
 	}
 
 	/// Get the fields for this document
-	pub async fn fd(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineFieldStatement]>> {
+	pub async fn fd(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Arc<[catalog::FieldDefinition]>> {
 		// Get the NS + DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context
@@ -547,25 +581,27 @@ impl Document {
 				let key = cache::ds::Lookup::Fds(ns, db, &tb.name, tb.cache_fields_ts);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_fds(),
 					None => {
 						let val = ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await?;
-						let val = cache::ds::Entry::Fds(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Fds(val.clone()));
+						Ok(val)
 					}
 				}
 			}
-			.try_into_fds(),
 			// No cache is present on the context
 			None => ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await,
 		}
 	}
 
 	/// Get the indexes for this document
-	pub async fn ix(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineIndexStatement]>> {
+	pub async fn ix(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Arc<[catalog::IndexDefinition]>> {
 		// Get the NS + DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context
@@ -592,9 +628,13 @@ impl Document {
 	}
 
 	// Get the lives for this document
-	pub async fn lv(&self, ctx: &Context, opt: &Options) -> Result<Arc<[LiveStatement]>> {
+	pub async fn lv(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Arc<[catalog::SubscriptionDefinition]>> {
 		// Get the NS + DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context

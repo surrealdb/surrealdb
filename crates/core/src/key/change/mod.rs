@@ -1,36 +1,60 @@
 //! Stores change feeds
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
-use crate::vs::VersionStamp;
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
-use std::str;
+use storekey::{BorrowDecode, Encode};
+
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::cf::TableMutations;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::{KVKey, impl_kv_key_storekey};
+use crate::vs::VersionStamp;
 
 // Cf stands for change feeds
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Cf<'a> {
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+pub(crate) struct Cf<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_d: u8,
 	// vs is the versionstamp of the change feed entry that is encoded in big-endian.
 	pub vs: VersionStamp,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 }
-impl_key!(Cf<'a>);
+impl_kv_key_storekey!(Cf<'_> => TableMutations);
 
-#[expect(unused)]
-pub fn new<'a>(ns: &'a str, db: &'a str, ts: u64, tb: &'a str) -> Cf<'a> {
-	Cf::new(ns, db, VersionStamp::from_u64(ts), tb)
+impl Categorise for Cf<'_> {
+	fn categorise(&self) -> Category {
+		Category::ChangeFeed
+	}
 }
 
-pub fn versionstamped_key_prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = crate::key::database::all::new(ns, db).encode()?;
+impl<'a> Cf<'a> {
+	#[cfg(test)]
+	pub fn new(ns: NamespaceId, db: DatabaseId, vs: VersionStamp, tb: &'a str) -> Self {
+		Cf {
+			__: b'/',
+			_a: b'*',
+			ns,
+			_b: b'*',
+			db,
+			_d: b'#',
+			vs,
+			_c: b'*',
+			tb: Cow::Borrowed(tb),
+		}
+	}
+
+	pub fn decode_key(k: &[u8]) -> Result<Cf<'_>> {
+		Ok(storekey::decode_borrow(k)?)
+	}
+}
+
+pub fn versionstamped_key_prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
+	let mut k = crate::key::database::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"#");
 	Ok(k)
 }
@@ -44,72 +68,139 @@ pub fn versionstamped_key_suffix(tb: &str) -> Vec<u8> {
 	k
 }
 
-/// Returns the prefix for the whole database change feeds since the
-/// specified versionstamp.
-pub fn prefix_ts(ns: &str, db: &str, vs: VersionStamp) -> Result<Vec<u8>> {
-	let mut k = crate::key::database::all::new(ns, db).encode()?;
-	k.extend_from_slice(b"#");
-	k.extend_from_slice(&vs.as_bytes());
-	Ok(k)
+/// A prefix or suffix for a database change feed
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+pub struct DatabaseChangeFeedRange {
+	__: u8,
+	_a: u8,
+	pub ns: NamespaceId,
+	_b: u8,
+	pub db: DatabaseId,
+	_c: u8,
+	_xx: u8,
 }
 
-/// Returns the prefix for the whole database change feeds
-#[expect(unused)]
-pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = crate::key::database::all::new(ns, db).encode()?;
-	k.extend_from_slice(b"#");
-	Ok(k)
-}
-
-/// Returns the suffix for the whole database change feeds
-pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = crate::key::database::all::new(ns, db).encode()?;
-	k.extend_from_slice(&[b'#', 0xff]);
-	Ok(k)
-}
-
-impl Categorise for Cf<'_> {
-	fn categorise(&self) -> Category {
-		Category::ChangeFeed
-	}
-}
-
-impl<'a> Cf<'a> {
-	pub fn new(ns: &'a str, db: &'a str, vs: VersionStamp, tb: &'a str) -> Self {
-		Cf {
+impl DatabaseChangeFeedRange {
+	pub fn new_prefix(ns: NamespaceId, db: DatabaseId) -> Self {
+		Self {
 			__: b'/',
 			_a: b'*',
 			ns,
 			_b: b'*',
 			db,
-			_d: b'#',
-			vs,
-			_c: b'*',
-			tb,
+			_c: b'#',
+			_xx: 0x00,
+		}
+	}
+
+	pub fn new_suffix(ns: NamespaceId, db: DatabaseId) -> Self {
+		Self {
+			__: b'/',
+			_a: b'*',
+			ns,
+			_b: b'*',
+			db,
+			_c: b'#',
+			_xx: 0xff,
 		}
 	}
 }
 
+impl_kv_key_storekey!(DatabaseChangeFeedRange => Vec<u8>);
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+pub struct DatabaseChangeFeedTsRange {
+	__: u8,
+	_a: u8,
+	pub ns: NamespaceId,
+	_b: u8,
+	pub db: DatabaseId,
+	_c: u8,
+	pub ts: VersionStamp,
+}
+
+impl DatabaseChangeFeedTsRange {
+	pub fn new(ns: NamespaceId, db: DatabaseId, vs: VersionStamp) -> Self {
+		Self {
+			__: b'/',
+			_a: b'*',
+			ns,
+			_b: b'*',
+			db,
+			_c: b'#',
+			ts: vs,
+		}
+	}
+}
+
+impl_kv_key_storekey!(DatabaseChangeFeedTsRange => TableMutations);
+
+/// Returns the prefix for the whole database change feeds since the
+/// specified versionstamp.
+pub fn prefix_ts(ns: NamespaceId, db: DatabaseId, vs: VersionStamp) -> DatabaseChangeFeedTsRange {
+	DatabaseChangeFeedTsRange::new(ns, db, vs)
+}
+
+/// Returns the prefix for the whole database change feeds
+#[expect(unused)]
+pub fn prefix(ns: NamespaceId, db: DatabaseId) -> DatabaseChangeFeedRange {
+	DatabaseChangeFeedRange::new_prefix(ns, db)
+}
+
+/// Returns the suffix for the whole database change feeds
+pub fn suffix(ns: NamespaceId, db: DatabaseId) -> DatabaseChangeFeedRange {
+	DatabaseChangeFeedRange::new_suffix(ns, db)
+}
+
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+	use super::*;
 	use crate::vs::*;
-	use std::ascii::escape_default;
 
 	#[test]
-	fn key() {
-		use super::*;
-		#[rustfmt::skip]
+	fn cf_key() {
 		let val = Cf::new(
-			"test",
-			"test",
+			NamespaceId(1),
+			DatabaseId(2),
 			VersionStamp::try_from_u128(12345).unwrap(),
 			"test",
 		);
-		let enc = Cf::encode(&val).unwrap();
-		println!("enc={}", show(&enc));
-		let dec = Cf::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = Cf::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02#\x00\x00\x00\x00\x00\x00\x00\x00\x30\x39*test\x00");
+
+		let val = Cf::new(
+			NamespaceId(1),
+			DatabaseId(2),
+			VersionStamp::try_from_u128(12346).unwrap(),
+			"test",
+		);
+		let enc = Cf::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02#\x00\x00\x00\x00\x00\x00\x00\x00\x30\x3a*test\x00");
+	}
+
+	#[test]
+	fn range_key() {
+		let val = DatabaseChangeFeedRange::new_prefix(NamespaceId(1), DatabaseId(2));
+		let enc = DatabaseChangeFeedRange::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02#\x00");
+
+		let val = DatabaseChangeFeedRange::new_suffix(NamespaceId(1), DatabaseId(2));
+		let enc = DatabaseChangeFeedRange::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02#\xff");
+	}
+
+	#[test]
+	fn ts_prefix_key() {
+		let val = DatabaseChangeFeedTsRange::new(
+			NamespaceId(1),
+			DatabaseId(2),
+			VersionStamp::try_from_u128(12345).unwrap(),
+		);
+		let enc = DatabaseChangeFeedTsRange::encode_key(&val).unwrap();
+		assert_eq!(
+			enc,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02#\x00\x00\x00\x00\x00\x00\x00\x00\x30\x39"
+		);
 	}
 
 	#[test]
@@ -121,14 +212,5 @@ mod tests {
 		let a = VersionStamp::try_from_u128(12345).unwrap();
 		let b = a.into_u128();
 		assert_eq!(12345, b);
-	}
-
-	fn show(bs: &[u8]) -> String {
-		let mut visible = String::new();
-		for &b in bs {
-			let part: Vec<u8> = escape_default(b).collect();
-			visible.push_str(std::str::from_utf8(&part).unwrap());
-		}
-		visible
 	}
 }

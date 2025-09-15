@@ -1,38 +1,29 @@
-use anyhow::{Context, Result, bail};
 use core::fmt;
+use std::future::Future;
+use std::path::Path;
+use std::process::Stdio;
+use std::time::Duration;
+
+use anyhow::{Context, Result, bail};
 use futures::{SinkExt, StreamExt};
 use revision::revisioned;
-use std::{future::Future, path::Path, process::Stdio, time::Duration};
-use surrealdb_core::{
-	dbs::{self, Status},
-	expr::Value,
+use surrealdb_core::dbs::{self, Status};
+use surrealdb_core::val::Value;
+use tokio::io::AsyncReadExt;
+use tokio::net::TcpStream;
+use tokio::process::{Child, Command};
+use tokio::select;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::handshake::client::generate_key;
+use tokio_tungstenite::tungstenite::http::header::{
+	CONNECTION, HOST, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_PROTOCOL, SEC_WEBSOCKET_VERSION,
 };
-use tokio::{
-	io::AsyncReadExt,
-	net::TcpStream,
-	process::{Child, Command},
-	select,
-};
-use tokio_tungstenite::{
-	MaybeTlsStream, WebSocketStream, connect_async,
-	tungstenite::{
-		Message,
-		handshake::client::generate_key,
-		http::header::{
-			CONNECTION, HOST, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_PROTOCOL, SEC_WEBSOCKET_VERSION,
-		},
-	},
-};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
-use crate::{
-	cli::{DsVersion, UpgradeBackend},
-	tests::report::TestTaskResult,
-};
-
-use super::{
-	Config,
-	protocol::{ProxyObject, ProxyValue},
-};
+use super::Config;
+use super::protocol::{ProxyObject, ProxyValue};
+use crate::cli::{DsVersion, UpgradeBackend};
+use crate::tests::report::TestTaskResult;
 
 #[revisioned(revision = 1)]
 #[derive(Debug)]

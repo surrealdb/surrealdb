@@ -13,8 +13,16 @@ pub use context::RpcContext;
 pub use error::RpcError;
 pub use format::Format;
 pub use method::Method;
+pub use protocol::v1::RpcProtocolV1;
+pub use protocol::v2::RpcProtocolV2;
 pub use request::Request;
 pub use response::Data;
 
-pub use protocol::v1::RpcProtocolV1;
-pub use protocol::v2::RpcProtocolV2;
+use crate::cnf::PROTECTED_PARAM_NAMES;
+
+pub fn check_protected_param(key: &str) -> Result<(), RpcError> {
+	if PROTECTED_PARAM_NAMES.contains(&key) {
+		return Err(RpcError::InvalidParams(format!("Cannot set protected variable: {key}")));
+	}
+	Ok(())
+}

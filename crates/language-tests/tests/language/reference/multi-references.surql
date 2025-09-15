@@ -23,7 +23,7 @@ value = "[{ id: a:1, refs: [b:1, c:1] }]"
 allow-experimental = ["record_references"]
 
 */
-DEFINE FIELD refs ON a TYPE references<b> | references<c>;
+DEFINE FIELD refs ON a COMPUTED <~(b, c);
 DEFINE FIELD ref ON b TYPE record<a> REFERENCE;
 DEFINE FIELD ref ON c TYPE record<a> REFERENCE;
 

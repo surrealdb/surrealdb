@@ -1,21 +1,17 @@
-use std::{
-	fmt::{self, Write},
-	io::{self, IsTerminal as _},
-	time::{Duration, Instant},
-};
+use std::fmt::{self, Write};
+use std::io::{self, IsTerminal as _};
+use std::time::{Duration, Instant};
 
-use crate::{
-	cli::ColorMode,
-	format::{IndentFormatter, ansi},
-	tests::TestSet,
-};
+use similar::{Algorithm, TextDiff};
+use surrealdb_core::val::Value as SurValue;
 
 use super::{
 	MatchValueType, MatcherMismatch, Mismatch, MismatchKind, ResultTypeMismatchReport, TestError,
 	TestGrade, TestOutputs, TestReport, TestValueExpectation, ValueMismatchKind,
 };
-use similar::{Algorithm, TextDiff};
-use surrealdb_core::expr::Value as SurValue;
+use crate::cli::ColorMode;
+use crate::format::{IndentFormatter, ansi};
+use crate::tests::TestSet;
 
 type Fmt<'a> = IndentFormatter<&'a mut String>;
 
@@ -218,7 +214,7 @@ impl TestReport {
 		f.indent(|f| {
 			writeln!(f, "= Got:")?;
 			f.indent(|f| match outputs {
-				TestOutputs::Values(res) => Self::display_value_list(res, f),
+				TestOutputs::Values(res) => Self::display_value_list(&res, f),
 				TestOutputs::ParsingError(res) => {
 					writeln!(f, "- Parsing error: {res}")
 				}
@@ -353,7 +349,7 @@ impl TestReport {
 									f.indent(|f| writeln!(f, "- Any value"))?;
 								}
 								writeln!(f, "= Got:")?;
-								f.indent(|f| writeln!(f, "- Value: {got}"))
+								f.indent(|f| writeln!(f, "- Error: {got}"))
 							})
 						}
 					}

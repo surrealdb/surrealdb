@@ -1,25 +1,19 @@
-use crate::sql::{Cond, Data, Explain, Output, SqlValues, Timeout, With};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use crate::sql::fmt::Fmt;
+use crate::sql::{Cond, Data, Explain, Expr, Output, Timeout, With};
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct UpdateStatement {
-	#[revision(start = 2)]
 	pub only: bool,
-	pub what: SqlValues,
-	#[revision(start = 3)]
+	pub what: Vec<Expr>,
 	pub with: Option<With>,
 	pub data: Option<Data>,
 	pub cond: Option<Cond>,
 	pub output: Option<Output>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
-	#[revision(start = 3)]
 	pub explain: Option<Explain>,
 }
 
@@ -29,7 +23,7 @@ impl fmt::Display for UpdateStatement {
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {}", self.what)?;
+		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
 		if let Some(ref v) = self.with {
 			write!(f, " {v}")?
 		}
@@ -59,7 +53,7 @@ impl From<UpdateStatement> for crate::expr::statements::UpdateStatement {
 	fn from(v: UpdateStatement) -> Self {
 		crate::expr::statements::UpdateStatement {
 			only: v.only,
-			what: v.what.into(),
+			what: v.what.into_iter().map(From::from).collect(),
 			with: v.with.map(Into::into),
 			data: v.data.map(Into::into),
 			cond: v.cond.map(Into::into),
@@ -75,7 +69,7 @@ impl From<crate::expr::statements::UpdateStatement> for UpdateStatement {
 	fn from(v: crate::expr::statements::UpdateStatement) -> Self {
 		UpdateStatement {
 			only: v.only,
-			what: v.what.into(),
+			what: v.what.into_iter().map(From::from).collect(),
 			with: v.with.map(Into::into),
 			data: v.data.map(Into::into),
 			cond: v.cond.map(Into::into),

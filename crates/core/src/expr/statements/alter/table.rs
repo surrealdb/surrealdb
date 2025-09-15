@@ -1,45 +1,34 @@
+use std::fmt::{self, Display, Write};
+use std::ops::Deref;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+
+use super::AlterKind;
+use crate::catalog::providers::TableProvider;
+use crate::catalog::{Permissions, TableType};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::DefineTableStatement;
-use crate::expr::{Base, ChangeFeed, Ident, Permissions, Strand, Value};
-use crate::expr::{Kind, TableType};
+use crate::expr::{Base, ChangeFeed, Ident, Kind};
 use crate::iam::{Action, ResourceKind};
-use anyhow::Result;
+use crate::val::{Strand, Value};
 
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
-use std::ops::Deref;
-
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AlterTableStatement {
 	pub name: Ident,
 	pub if_exists: bool,
-	#[revision(end = 2, convert_fn = "convert_drop")]
-	pub _drop: Option<bool>,
-	pub full: Option<bool>,
+	pub schemafull: AlterKind<()>,
 	pub permissions: Option<Permissions>,
-	pub changefeed: Option<Option<ChangeFeed>>,
-	pub comment: Option<Option<Strand>>,
+	pub changefeed: AlterKind<ChangeFeed>,
+	pub comment: AlterKind<Strand>,
 	pub kind: Option<TableType>,
 }
 
 impl AlterTableStatement {
-	fn convert_drop(
-		&mut self,
-		_revision: u16,
-		_value: Option<bool>,
-	) -> Result<(), revision::Error> {
-		Ok(())
-	}
-
 	pub(crate) async fn compute(
 		&self,
 		_stk: &mut Stk,
@@ -50,51 +39,72 @@ impl AlterTableStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns_name, db_name) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 
 		// Get the table definition
-		let mut dt = match txn.get_tb(ns, db, &self.name).await {
-			Ok(tb) => tb.deref().clone(),
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
+		let mut dt = match txn.get_tb(ns, db, &self.name).await? {
+			Some(tb) => tb.deref().clone(),
+			None => {
+				if self.if_exists {
 					return Ok(Value::None);
 				} else {
-					return Err(e);
+					return Err(Error::TbNotFound {
+						name: self.name.to_string(),
+					}
+					.into());
 				}
 			}
 		};
 		// Process the statement
-		let key = crate::key::database::tb::new(ns, db, &self.name);
-		if let Some(full) = &self.full {
-			dt.full = *full;
+		match self.schemafull {
+			AlterKind::Set(_) => dt.schemafull = true,
+			AlterKind::Drop => dt.schemafull = false,
+			AlterKind::None => {}
 		}
+
 		if let Some(permissions) = &self.permissions {
 			dt.permissions = permissions.clone();
 		}
-		if let Some(changefeed) = &self.changefeed {
-			dt.changefeed = *changefeed;
+
+		let mut changefeed_replaced = false;
+		match self.changefeed {
+			AlterKind::Set(x) => {
+				changefeed_replaced = dt.changefeed.is_some();
+				dt.changefeed = Some(x)
+			}
+			AlterKind::Drop => dt.changefeed = None,
+			AlterKind::None => {}
 		}
-		if let Some(comment) = &self.comment {
-			dt.comment.clone_from(comment);
+
+		match self.comment {
+			AlterKind::Set(ref x) => dt.comment = Some(x.clone().into_string()),
+
+			AlterKind::Drop => dt.comment = None,
+			AlterKind::None => {}
 		}
+
 		if let Some(kind) = &self.kind {
-			dt.kind = kind.clone();
+			dt.table_type = kind.clone();
 		}
 
 		// Add table relational fields
 		if matches!(self.kind, Some(TableType::Relation(_))) {
 			DefineTableStatement::add_in_out_fields(&txn, ns, db, &mut dt).await?;
 		}
-		// Set the table definition
-		txn.set(key, revision::to_vec(&dt)?, None).await?;
+
 		// Record definition change
-		if self.changefeed.is_some() && dt.changefeed.is_some() {
+		if changefeed_replaced {
 			txn.lock().await.record_table_change(ns, db, &self.name, &dt);
 		}
+
+		// Set the table definition
+		txn.put_tb(ns_name, db_name, &dt).await?;
+
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -116,18 +126,22 @@ impl Display for AlterTableStatement {
 				TableType::Relation(rel) => {
 					f.write_str(" RELATION")?;
 					if let Some(Kind::Record(kind)) = &rel.from {
-						write!(
-							f,
-							" IN {}",
-							kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
-						)?;
+						write!(f, " IN ",)?;
+						for (idx, k) in kind.iter().enumerate() {
+							if idx != 0 {
+								" | ".fmt(f)?
+							}
+							k.fmt(f)?
+						}
 					}
 					if let Some(Kind::Record(kind)) = &rel.to {
-						write!(
-							f,
-							" OUT {}",
-							kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
-						)?;
+						write!(f, " OUT ",)?;
+						for (idx, k) in kind.iter().enumerate() {
+							if idx != 0 {
+								" | ".fmt(f)?
+							}
+							k.fmt(f)?
+						}
 					}
 				}
 				TableType::Any => {
@@ -135,27 +149,25 @@ impl Display for AlterTableStatement {
 				}
 			}
 		}
-		if let Some(full) = self.full {
-			f.write_str(if full {
-				" SCHEMAFULL"
-			} else {
-				" SCHEMALESS"
-			})?;
+
+		match self.schemafull {
+			AlterKind::Set(_) => writeln!(f, " SCHEMAFULL")?,
+			AlterKind::Drop => writeln!(f, " SCHEMALESS")?,
+			AlterKind::None => {}
 		}
-		if let Some(comment) = &self.comment {
-			if let Some(comment) = comment {
-				write!(f, " COMMENT {}", comment.clone())?;
-			} else {
-				write!(f, " DROP COMMENT")?;
-			}
+
+		match self.comment {
+			AlterKind::Set(ref x) => writeln!(f, " COMMENT {x}")?,
+			AlterKind::Drop => writeln!(f, " DROP COMMENT")?,
+			AlterKind::None => {}
 		}
-		if let Some(changefeed) = &self.changefeed {
-			if let Some(changefeed) = changefeed {
-				write!(f, " CHANGEFEED {}", changefeed.clone())?;
-			} else {
-				write!(f, " DROP CHANGEFEED")?;
-			}
+
+		match self.changefeed {
+			AlterKind::Set(ref x) => writeln!(f, " CHANGEFEED {x}")?,
+			AlterKind::Drop => writeln!(f, " DROP CHANGEFEED")?,
+			AlterKind::None => {}
 		}
+
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
 		} else {

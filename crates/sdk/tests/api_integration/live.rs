@@ -15,27 +15,21 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use futures::Stream;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use surrealdb::Action;
-use surrealdb::Notification;
-use surrealdb::RecordId;
-use surrealdb::Value;
 use surrealdb::method::QueryStream;
 use surrealdb::opt::Resource;
-use surrealdb_core::expr::Value as CoreValue;
+use surrealdb::{Action, Notification, RecordId, Value};
+use surrealdb_core::val;
 use tokio::sync::RwLock;
 use tracing::info;
 use ulid::Ulid;
 
+use super::{CreateDb, NS};
 use crate::api_integration::ApiRecordId;
 
-use super::CreateDb;
-use super::NS;
-
-const LQ_TIMEOUT: Duration = Duration::from_secs(1);
+const LQ_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_NOTIFICATIONS: usize = 100;
 
 pub async fn live_select_table(new_db: impl CreateDb) {
@@ -215,7 +209,7 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 		// Create a record
 		let created_value =
 			match db.create(Resource::from((table, "job"))).await.unwrap().into_inner() {
-				CoreValue::Object(created_value) => created_value,
+				val::Value::Object(created_value) => created_value,
 				_ => panic!("Expected an object"),
 			};
 
@@ -229,7 +223,7 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 
 		// Delete the record
 		let thing = match created_value.get("id").unwrap() {
-			CoreValue::Thing(thing) => thing,
+			val::Value::RecordId(thing) => thing,
 			_ => panic!("Expected a thing"),
 		};
 		db.query("DELETE $item").bind(("item", RecordId::from_inner(thing.clone()))).await.unwrap();
@@ -241,7 +235,7 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 		// It should be deleted
 		assert_eq!(notification.action, Action::Delete);
 		let notification = match notification.data.into_inner() {
-			CoreValue::Object(notification) => notification,
+			val::Value::Object(notification) => notification,
 			_ => panic!("Expected an object"),
 		};
 		assert_eq!(notification, created_value);
@@ -401,6 +395,32 @@ pub async fn live_select_query(new_db: impl CreateDb) {
 	drop(permit);
 }
 
+pub async fn live_query_delete_notifications(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
+
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+
+	let mut stream =
+		db.query("LIVE SELECT foo FROM bar").await.unwrap().stream::<Value>(0).unwrap();
+
+	db.query("CREATE bar CONTENT { foo: 'baz' }").await.unwrap().check().unwrap();
+	let notification = tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.unwrap().unwrap();
+	assert_eq!(notification.data, "{ foo: 'baz' }".parse().unwrap());
+	assert_eq!(notification.action, Action::Create);
+
+	db.query("UPDATE bar MERGE { data: 123 }").await.unwrap().check().unwrap();
+	let notification = tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.unwrap().unwrap();
+	assert_eq!(notification.data, "{ foo: 'baz' }".parse().unwrap());
+	assert_eq!(notification.action, Action::Update);
+
+	db.query("DELETE bar").await.unwrap().check().unwrap();
+	let notification = tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.unwrap().unwrap();
+	assert_eq!(notification.data, "{ foo: 'baz' }".parse().unwrap());
+	assert_eq!(notification.action, Action::Delete);
+
+	drop(permit);
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq, PartialOrd)]
 struct ApiRecordIdWithFetchedLink {
 	id: RecordId,
@@ -528,4 +548,6 @@ define_include_tests!(live => {
 	live_select_query,
 	#[test_log::test(tokio::test)]
 	live_select_with_fetch,
+	#[test_log::test(tokio::test)]
+	live_query_delete_notifications,
 });

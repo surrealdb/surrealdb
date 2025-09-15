@@ -1,30 +1,34 @@
 //! Store appended records for concurrent index building
-use crate::kvs::impl_key;
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::fmt::Debug;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Ia<'a> {
+use storekey::{BorrowDecode, Encode};
+
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+use crate::kvs::impl_kv_key_storekey;
+use crate::kvs::index::Appending;
+
+#[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
+pub(crate) struct Ia<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
 	pub i: u32,
 }
-impl_key!(Ia<'a>);
+
+impl_kv_key_storekey!(Ia<'_> => Appending);
 
 impl<'a> Ia<'a> {
-	#[cfg_attr(target_family = "wasm", allow(dead_code))]
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, i: u32) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, i: u32) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -32,7 +36,7 @@ impl<'a> Ia<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 			_e: b'!',
@@ -45,21 +49,18 @@ impl<'a> Ia<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {
-		use super::*;
-		let val = Ia::new("testns", "testdb", "testtb", "testix", 1);
-		let enc = Ia::encode(&val).unwrap();
+		let val = Ia::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), 1);
+		let enc = Ia::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\0*testdb\0*testtb\0+testix\0!ia\x00\x00\x00\x01",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ia\x00\x00\x00\x01",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);
-
-		let dec = Ia::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

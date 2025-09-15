@@ -1,13 +1,10 @@
+use std::sync::LazyLock;
 use std::time::Instant;
 
+use opentelemetry::metrics::{Counter, Histogram, Meter, MetricsError, UpDownCounter};
+use opentelemetry::{Context as TelemetryContext, KeyValue, global};
+
 use crate::cnf::TELEMETRY_NAMESPACE;
-use opentelemetry::metrics::Meter;
-use opentelemetry::{
-	Context as TelemetryContext,
-	metrics::{Counter, Histogram, MetricsError, UpDownCounter},
-};
-use opentelemetry::{KeyValue, global};
-use std::sync::LazyLock;
 
 static METER: LazyLock<Meter> = LazyLock::new(|| global::meter("surrealdb.rpc"));
 
@@ -152,7 +149,8 @@ pub fn record_rpc(cx: &TelemetryContext, res_size: usize, is_error: bool) {
 			KeyValue::new("rpc.live_id", cx.live_id.clone()),
 		]);
 	} else {
-		// If a bug causes the RequestContent to be empty, we still want to record the metrics to avoid a silent failure.
+		// If a bug causes the RequestContent to be empty, we still want to record the
+		// metrics to avoid a silent failure.
 		warn!("record_rpc: no request context found, resulting metrics will be invalid");
 		attrs.extend_from_slice(&[
 			KeyValue::new("rpc.method", "unknown"),

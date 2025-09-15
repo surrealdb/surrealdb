@@ -1,30 +1,24 @@
-use crate::{
-	cli::{Backend, ColorMode, ResultsMode},
-	format::Progress,
-	runner::Schedular,
-	tests::{
-		TestSet,
-		report::{TestGrade, TestReport, TestTaskResult},
-		set::TestId,
-	},
-};
+use std::time::Duration;
+use std::{io, mem, str, thread};
 
 use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
 use provisioner::{Permit, PermitError, Provisioner};
 use semver::Version;
-use std::{io, mem, str, thread, time::Duration};
-use surrealdb_core::{
-	dbs::{Session, capabilities::ExperimentalTarget},
-	env::VERSION,
-	kvs::Datastore,
-	syn,
-};
-use tokio::{
-	select,
-	sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender},
-	time,
-};
+use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::capabilities::ExperimentalTarget;
+use surrealdb_core::env::VERSION;
+use surrealdb_core::kvs::Datastore;
+use surrealdb_core::syn;
+use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
+use tokio::{select, time};
+
+use crate::cli::{Backend, ColorMode, ResultsMode};
+use crate::format::Progress;
+use crate::runner::Schedular;
+use crate::tests::TestSet;
+use crate::tests::report::{TestGrade, TestReport, TestTaskResult};
+use crate::tests::set::TestId;
 
 mod provisioner;
 mod util;
@@ -280,6 +274,11 @@ pub async fn grade_task(
 		.await
 		.expect("failed to create datastore for running matching expressions");
 
+	let mut session = surrealdb_core::dbs::Session::default();
+	ds.process_use(&mut session, Some("match".to_string()), Some("match".to_string()))
+		.await
+		.unwrap();
+
 	loop {
 		let Some((id, res)) = results.recv().await else {
 			break;
@@ -338,15 +337,10 @@ async fn run_test_with_dbs(
 		.env
 		.as_ref()
 		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
-		.unwrap_or(Duration::from_secs(1));
+		.unwrap_or(Duration::from_secs(2));
 
 	let mut import_session = Session::owner();
-	if let Some(ns) = session.ns.as_ref() {
-		import_session = import_session.with_ns(ns)
-	};
-	if let Some(db) = session.db.as_ref() {
-		import_session = import_session.with_db(db)
-	};
+	dbs.process_use(&mut import_session, session.ns.clone(), session.db.clone()).await?;
 
 	for import in set[id].config.imports() {
 		let Some(test) = set.find_all(import) else {

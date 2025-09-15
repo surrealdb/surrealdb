@@ -1,4 +1,7 @@
-use std::{fmt, str::Chars};
+use std::fmt;
+use std::str::Chars;
+
+// TODO: Remove duplicated code between sql and expr
 
 #[derive(Clone)]
 pub struct Escape<'a> {
@@ -56,13 +59,28 @@ impl fmt::Display for QuoteStr<'_> {
 	}
 }
 
+/// Escapes identifiers which might be used in the same place as a keyword.
 pub struct EscapeIdent<'a>(pub &'a str);
 impl fmt::Display for EscapeIdent<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let s = self.0;
+		if crate::syn::could_be_reserved_keyword(s) {
+			return f.write_fmt(format_args!("`{}`", Escape::escape_str(s, '`')));
+		}
+		EscapeKwFreeIdent(s).fmt(f)
+	}
+}
+
+/// Escapes identifiers which can never be used in the same place as a keyword.
+///
+/// Examples of this is a Param as '$' is in front of the identifier so it
+/// cannot be an
+pub struct EscapeKwFreeIdent<'a>(pub &'a str);
+impl fmt::Display for EscapeKwFreeIdent<'_> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let s = self.0;
 		// Not a keyword, any non 'normal' characters or does it start with a digit?
-		if crate::syn::could_be_reserved_keyword(s)
-			|| s.starts_with(|x: char| x.is_ascii_digit())
+		if s.starts_with(|x: char| x.is_ascii_digit())
 			|| s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
 		{
 			return f.write_fmt(format_args!("`{}`", Escape::escape_str(s, '`')));
@@ -94,7 +112,10 @@ impl fmt::Display for EscapeRid<'_> {
 		if s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
 			|| !s.contains(|x: char| !x.is_ascii_digit() && x != '_')
 		{
-			return f.write_fmt(format_args!("⟨{}⟩", Escape::escape_str(s, '⟩')));
+			return match *crate::cnf::ACCESSIBLE_OUTPUT {
+				true => f.write_fmt(format_args!("`{}`", Escape::escape_str(s, '`'))),
+				false => f.write_fmt(format_args!("⟨{}⟩", Escape::escape_str(s, '⟩'))),
+			};
 		}
 
 		f.write_str(s)

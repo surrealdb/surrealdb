@@ -1,3 +1,4 @@
+/*
 use axum::Router;
 use std::sync::Arc;
 
@@ -15,3 +16,4 @@ where
 	let service = GraphQL::new(Pessimistic, ds);
 	Router::new().route("/graphql", post_service(service))
 }
+*/

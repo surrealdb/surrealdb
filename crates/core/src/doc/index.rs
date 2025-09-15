@@ -1,21 +1,39 @@
+//! Index operation helpers for constructing and maintaining KV index entries.
+//!
+//! This module orchestrates index mutations for a single document: removing old
+//! entries and inserting new ones across different index types (UNIQUE, regular,
+//! search, fulltext, etc.). Index keys are built with key::index and field
+//! values are encoded via key::value::Array.
+//!
+//! Numeric normalization in keys:
+//! - Array normalizes Number values (Int/Float/Decimal) using a lexicographic numeric encoding so
+//!   that byte-wise order matches numeric order. As a result, numerically equal values (e.g., 0,
+//!   0.0, 0dec) map to the same key bytes.
+//! - UNIQUE index behavior leverages this: equal numerics across variants will collide on the same
+//!   index key and cause a uniqueness violation.
+//!
+//! Range scans and lookups benefit because a single probe/range can be used for
+//! numeric predicates without fanning out per numeric variant.
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+
+use crate::catalog::{
+	DatabaseDefinition, DatabaseId, FullTextParams, HnswParams, Index, IndexDefinition,
+	MTreeParams, NamespaceId,
+};
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::{Force, Statement};
+use crate::dbs::{Force, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
-use crate::expr::array::Array;
-use crate::expr::index::{HnswParams, Index, MTreeParams, SearchParams};
-use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{FlowResultExt as _, Part, Thing, Value};
+use crate::expr::{FlowResultExt as _, Part};
 use crate::idx::IndexKeyBase;
-use crate::idx::ft::FtIndex;
+use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::ConsumeResult;
 use crate::kvs::TransactionType;
-use anyhow::{Result, bail};
-use reblessive::tree::Stk;
+use crate::val::{Array, RecordId, Value};
 
 impl Document {
 	pub(super) async fn store_index_data(
@@ -30,9 +48,9 @@ impl Document {
 		// Collect indexes or skip
 		let ixs = match &opt.force {
 			Force::Index(ix)
-				if ix
-					.first()
-					.is_some_and(|ix| self.id.as_ref().is_some_and(|id| ix.what.0 == id.tb)) =>
+				if ix.first().is_some_and(|ix| {
+					self.id.as_ref().is_some_and(|id| ix.table_name.as_str() == id.table)
+				}) =>
 			{
 				ix.clone()
 			}
@@ -44,6 +62,9 @@ impl Document {
 		if self.tb(ctx, opt).await?.drop {
 			return Ok(());
 		}
+
+		let db = self.db(ctx, opt).await?;
+
 		// Get the record id
 		let rid = self.id()?;
 		// Loop through all index statements
@@ -56,29 +77,32 @@ impl Document {
 
 			// Update the index entries
 			if targeted_force || o != n {
-				Self::one_index(stk, ctx, opt, ix, o, n, &rid).await?;
+				Self::one_index(&db, stk, ctx, opt, ix, o, n, &rid).await?;
 			}
 		}
 		// Carry on
 		Ok(())
 	}
 
+	#[expect(clippy::too_many_arguments)]
 	async fn one_index(
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		ix: &DefineIndexStatement,
+		ix: &IndexDefinition,
 		o: Option<Vec<Value>>,
 		n: Option<Vec<Value>>,
-		rid: &Thing,
+		rid: &RecordId,
 	) -> Result<()> {
 		#[cfg(not(target_family = "wasm"))]
 		let (o, n) = if let Some(ib) = ctx.get_index_builder() {
-			match ib.consume(ctx, opt.ns_db()?, ix, o, n, rid).await? {
-				// The index builder consumed the value, which means it is currently building the index asynchronously,
-				// we don't index the document and let the index builder do it later.
+			match ib.consume(db, ctx, ix, o, n, rid).await? {
+				// The index builder consumed the value, which means it is currently building the
+				// index asynchronously, we don't index the document and let the index builder
+				// do it later.
 				ConsumeResult::Enqueued => return Ok(()),
-				// The index builder is done, the index has been built, we can proceed normally
+				// The index builder is done, the index has been built; we can proceed normally
 				ConsumeResult::Ignored(o, n) => (o, n),
 			}
 		} else {
@@ -86,13 +110,13 @@ impl Document {
 		};
 
 		// Store all the variable and parameters required by the index operation
-		let mut ic = IndexOperation::new(opt, ix, o, n, rid);
+		let mut ic = IndexOperation::new(opt, db.namespace_id, db.database_id, ix, o, n, rid);
 
 		// Index operation dispatching
 		match &ix.index {
 			Index::Uniq => ic.index_unique(ctx).await?,
 			Index::Idx => ic.index_non_unique(ctx).await?,
-			Index::Search(p) => ic.index_full_text(stk, ctx, p).await?,
+			Index::FullText(p) => ic.index_fulltext(stk, ctx, p).await?,
 			Index::MTree(p) => ic.index_mtree(stk, ctx, p).await?,
 			Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
 		}
@@ -107,10 +131,10 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		ix: &DefineIndexStatement,
+		ix: &IndexDefinition,
 		doc: &CursorDoc,
 	) -> Result<Option<Vec<Value>>> {
-		if !doc.doc.as_ref().is_some() {
+		if doc.doc.as_ref().is_nullish() {
 			return Ok(None);
 		}
 		let mut o = Vec::with_capacity(ix.cols.len());
@@ -129,9 +153,9 @@ impl Document {
 struct Indexable(Vec<(Value, bool)>);
 
 impl Indexable {
-	fn new(vals: Vec<Value>, ix: &DefineIndexStatement) -> Self {
+	fn new(vals: Vec<Value>, ix: &IndexDefinition) -> Self {
 		let mut source = Vec::with_capacity(vals.len());
-		for (v, i) in vals.into_iter().zip(ix.cols.0.iter()) {
+		for (v, i) in vals.into_iter().zip(ix.cols.iter()) {
 			let f = matches!(i.0.last(), Some(&Part::Flatten));
 			source.push((v, f));
 		}
@@ -263,24 +287,30 @@ impl ValuesIterator for SingleValueIterator {
 
 struct IndexOperation<'a> {
 	opt: &'a Options,
-	ix: &'a DefineIndexStatement,
+	ns: NamespaceId,
+	db: DatabaseId,
+	ix: &'a IndexDefinition,
 	/// The old values (if existing)
 	o: Option<Vec<Value>>,
 	/// The new values (if existing)
 	n: Option<Vec<Value>>,
-	rid: &'a Thing,
+	rid: &'a RecordId,
 }
 
 impl<'a> IndexOperation<'a> {
 	fn new(
 		opt: &'a Options,
-		ix: &'a DefineIndexStatement,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix: &'a IndexDefinition,
 		o: Option<Vec<Value>>,
 		n: Option<Vec<Value>>,
-		rid: &'a Thing,
+		rid: &'a RecordId,
 	) -> Self {
 		Self {
 			opt,
+			ns,
+			db,
 			ix,
 			o,
 			n,
@@ -288,14 +318,26 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
+	/// Build the KV key for a unique index. The Array encodes values in
+	/// a canonical, lexicographically ordered byte form which normalizes numeric
+	/// types (Int/Float/Decimal). This means equal numeric values like 0, 0.0 and
+	/// 0dec map to the same index key and therefore conflict on UNIQUE indexes.
 	fn get_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
-		let (ns, db) = self.opt.ns_db()?;
-		Ok(key::index::Index::new(ns, db, &self.ix.what, &self.ix.name, v, None))
+		Ok(key::index::Index::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id, v, None))
 	}
 
+	/// Build the KV key for a non-unique index. The record id is appended
+	/// to the encoded field values so multiple records can share the same field
+	/// bytes; numeric values inside fd are normalized via Array.
 	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
-		let (ns, db) = self.opt.ns_db()?;
-		Ok(key::index::Index::new(ns, db, &self.ix.what, &self.ix.name, v, Some(&self.rid.id)))
+		Ok(key::index::Index::new(
+			self.ns,
+			self.db,
+			&self.ix.table_name,
+			self.ix.index_id,
+			v,
+			Some(&self.rid.key),
+		))
 	}
 
 	async fn index_unique(&mut self, ctx: &Context) -> Result<()> {
@@ -308,7 +350,7 @@ impl<'a> IndexOperation<'a> {
 			let i = Indexable::new(o, self.ix);
 			for o in i {
 				let key = self.get_unique_index_key(&o)?;
-				match txn.delc(key, Some(revision::to_vec(self.rid)?)).await {
+				match txn.delc(&key, Some(self.rid)).await {
 					Err(e) => {
 						if matches!(e.downcast_ref(), Some(Error::TxConditionNotMet)) {
 							Ok(())
@@ -326,10 +368,9 @@ impl<'a> IndexOperation<'a> {
 			for n in i {
 				if !n.is_all_none_or_null() {
 					let key = self.get_unique_index_key(&n)?;
-					if txn.putc(key, revision::to_vec(self.rid)?, None).await.is_err() {
+					if txn.putc(&key, self.rid, None).await.is_err() {
 						let key = self.get_unique_index_key(&n)?;
-						let val = txn.get(key, None).await?.unwrap();
-						let rid: Thing = revision::from_slice(&val)?;
+						let rid = txn.get(&key, None).await?.unwrap();
 						return self.err_index_exists(rid, n);
 					}
 				}
@@ -348,7 +389,7 @@ impl<'a> IndexOperation<'a> {
 			let i = Indexable::new(o, self.ix);
 			for o in i {
 				let key = self.get_non_unique_index_key(&o)?;
-				match txn.delc(key, Some(revision::to_vec(self.rid)?)).await {
+				match txn.delc(&key, Some(self.rid)).await {
 					Err(e) => {
 						if matches!(e.downcast_ref(), Some(Error::TxConditionNotMet)) {
 							Ok(())
@@ -365,51 +406,60 @@ impl<'a> IndexOperation<'a> {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
 				let key = self.get_non_unique_index_key(&n)?;
-				if txn.putc(key, revision::to_vec(self.rid)?, None).await.is_err() {
-					let key = self.get_non_unique_index_key(&n)?;
-					let val = txn.get(key, None).await?.unwrap();
-					let rid: Thing = revision::from_slice(&val)?;
-					return self.err_index_exists(rid, n);
-				}
+				txn.set(&key, self.rid, None).await?;
 			}
 		}
 		Ok(())
 	}
 
-	fn err_index_exists(&self, rid: Thing, n: Array) -> Result<()> {
+	/// Construct a consistent uniqueness violation error message.
+	/// Formats the conflicting value as a single value or array depending on
+	/// the number of indexed fields.
+	fn err_index_exists(&self, rid: RecordId, mut n: Array) -> Result<()> {
 		bail!(Error::IndexExists {
 			thing: rid,
 			index: self.ix.name.to_string(),
-			value: match n.len() {
-				1 => n.first().unwrap().to_string(),
+			value: match n.0.len() {
+				1 => n.0.remove(0).to_string(),
 				_ => n.to_string(),
 			},
 		})
 	}
 
-	async fn index_full_text(
+	async fn index_fulltext(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
-		p: &SearchParams,
+		p: &FullTextParams,
 	) -> Result<()> {
-		let (ns, db) = self.opt.ns_db()?;
-		let ikb = IndexKeyBase::new(ns, db, self.ix)?;
-
-		let mut ft = FtIndex::new(ctx, self.opt, &p.az, ikb, p, TransactionType::Write).await?;
-
-		if let Some(n) = self.n.take() {
-			ft.index_document(stk, ctx, self.opt, self.rid, n).await?;
+		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id);
+		let tx = ctx.tx();
+		// Build a FullText instance
+		let fti =
+			FullTextIndex::new(self.opt.id()?, ctx.get_index_stores(), &tx, ikb.clone(), p).await?;
+		let mut require_compaction = false;
+		// Delete the old index data
+		let doc_id = if let Some(o) = self.o.take() {
+			fti.remove_content(stk, ctx, self.opt, self.rid, o, &mut require_compaction).await?
 		} else {
-			ft.remove_document(ctx, self.rid).await?;
+			None
+		};
+		// Create the new index data
+		if let Some(n) = self.n.take() {
+			fti.index_content(stk, ctx, self.opt, self.rid, n, &mut require_compaction).await?;
+		} else if let Some(doc_id) = doc_id {
+			fti.remove_doc(ctx, doc_id).await?;
 		}
-		ft.finish(ctx).await
+		// Do we need to trigger the compaction?
+		if require_compaction {
+			FullTextIndex::trigger_compaction(&ikb, &tx, self.opt.id()?).await?;
+		}
+		Ok(())
 	}
 
 	async fn index_mtree(&mut self, stk: &mut Stk, ctx: &Context, p: &MTreeParams) -> Result<()> {
 		let txn = ctx.tx();
-		let (ns, db) = self.opt.ns_db()?;
-		let ikb = IndexKeyBase::new(ns, db, self.ix)?;
+		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id);
 		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write).await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
@@ -423,15 +473,15 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	async fn index_hnsw(&mut self, ctx: &Context, p: &HnswParams) -> Result<()> {
-		let hnsw = ctx.get_index_stores().get_index_hnsw(ctx, self.opt, self.ix, p).await?;
+		let hnsw = ctx.get_index_stores().get_index_hnsw(self.ns, self.db, ctx, self.ix, p).await?;
 		let mut hnsw = hnsw.write().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
-			hnsw.remove_document(&ctx.tx(), self.rid.id.clone(), &o).await?;
+			hnsw.remove_document(&ctx.tx(), self.rid.key.clone(), &o).await?;
 		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			hnsw.index_document(&ctx.tx(), &self.rid.id, &n).await?;
+			hnsw.index_document(&ctx.tx(), &self.rid.key, &n).await?;
 		}
 		Ok(())
 	}

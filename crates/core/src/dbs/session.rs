@@ -1,14 +1,13 @@
-use crate::ctx::MutableContext;
-use crate::expr::value::Value;
-use crate::iam::Auth;
-use crate::iam::{Level, Role};
-use chrono::Utc;
-use std::collections::BTreeMap;
 use std::sync::Arc;
+
+use chrono::Utc;
+
+use crate::dbs::Variables;
+use crate::iam::{Auth, Level, Role};
+use crate::val::{Strand, Value};
 
 /// Specifies the current session information when processing a query.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[non_exhaustive]
 pub struct Session {
 	/// The current session [`Auth`] information
 	pub au: Arc<Auth>,
@@ -32,8 +31,8 @@ pub struct Session {
 	pub rd: Option<Value>,
 	/// The current expiration time of the session
 	pub exp: Option<i64>,
-	/// The parameters set
-	pub parameters: BTreeMap<String, Value>,
+	/// The variables set
+	pub variables: Variables,
 }
 
 impl Session {
@@ -86,29 +85,23 @@ impl Session {
 	}
 
 	pub(crate) fn values(&self) -> Vec<(&'static str, Value)> {
-		let access: Value = self.ac.clone().into();
-		let auth: Value = self.rd.clone().into();
-		let token: Value = self.tk.clone().into();
-		let session: Value = Value::from(map! {
-			"ac".to_string() => self.ac.clone().into(),
-			"exp".to_string() => self.exp.into(),
-			"db".to_string() => self.db.clone().into(),
-			"id".to_string() => self.id.clone().into(),
-			"ip".to_string() => self.ip.clone().into(),
-			"ns".to_string() => self.ns.clone().into(),
-			"or".to_string() => self.or.clone().into(),
-			"rd".to_string() => self.rd.clone().into(),
-			"tk".to_string() => self.tk.clone().into(),
+		// TODO: Null byte validity.
+		let access = self.ac.clone().map(|x| Strand::new(x).unwrap().into()).unwrap_or(Value::None);
+		let auth = self.rd.clone().unwrap_or(Value::None);
+		let token = self.tk.clone().unwrap_or(Value::None);
+		let session = Value::from(map! {
+			"ac".to_string() => access.clone(),
+			"exp".to_string() => self.exp.map(Value::from).unwrap_or(Value::None),
+			"db".to_string() => self.db.clone().map(|x| Strand::new(x).unwrap().into()).unwrap_or(Value::None),
+			"id".to_string() => self.id.clone().map(|x| Strand::new(x).unwrap().into()).unwrap_or(Value::None),
+			"ip".to_string() => self.ip.clone().map(|x| Strand::new(x).unwrap().into()).unwrap_or(Value::None),
+			"ns".to_string() => self.ns.clone().map(|x| Strand::new(x).unwrap().into()).unwrap_or(Value::None),
+			"or".to_string() => self.or.clone().map(|x| Strand::new(x).unwrap().into()).unwrap_or(Value::None),
+			"rd".to_string() => auth.clone(),
+			"tk".to_string() => token.clone(),
 		});
 
 		vec![("access", access), ("auth", auth), ("token", token), ("session", session)]
-	}
-
-	/// Convert a session into a runtime
-	pub(crate) fn context(&self, ctx: &mut MutableContext) {
-		let vars = self.values().into_iter();
-
-		ctx.add_values(vars);
 	}
 
 	/// Create a system session for a given level and role
@@ -148,7 +141,7 @@ impl Session {
 			tk: None,
 			rd: Some(rid),
 			exp: None,
-			parameters: Default::default(),
+			variables: Default::default(),
 		}
 	}
 

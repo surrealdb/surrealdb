@@ -1,55 +1,39 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::Base;
-use crate::expr::ident::Ident;
-use crate::expr::index::Index;
-use crate::expr::value::Value;
-use crate::iam::{Action, ResourceKind};
-use crate::idx::IndexKeyBase;
-use crate::idx::ft::FtIndex;
-use crate::idx::trees::mtree::MTreeIndex;
-use crate::kvs::TransactionType;
-use anyhow::{Result, bail};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+use anyhow::{Result, bail};
+
+use crate::catalog::Index;
+use crate::catalog::providers::TableProvider;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::err::Error;
+use crate::expr::Base;
+use crate::expr::ident::Ident;
+use crate::iam::{Action, ResourceKind};
+use crate::idx::IndexKeyBase;
+use crate::idx::trees::mtree::MTreeIndex;
+use crate::kvs::TransactionType;
+use crate::val::Value;
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum AnalyzeStatement {
 	Idx(Ident, Ident),
 }
 
 impl AnalyzeStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value> {
+	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
 		match self {
 			AnalyzeStatement::Idx(tb, idx) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Index, &Base::Db)?;
 				// Read the index
-				let (ns, db) = opt.ns_db()?;
-				let ix = ctx.tx().get_tb_index(ns, db, tb, idx).await?;
-				let ikb = IndexKeyBase::new(ns, db, &ix)?;
+				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+				let ix = ctx.tx().expect_tb_index(ns, db, tb, idx).await?;
+				let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
 				// Index operation dispatching
 				let value: Value = match &ix.index {
-					Index::Search(p) => {
-						let ft =
-							FtIndex::new(ctx, opt, p.az.as_str(), ikb, p, TransactionType::Read)
-								.await?;
-						ft.statistics(ctx).await?.into()
-					}
 					Index::MTree(p) => {
 						let tx = ctx.tx();
 						let mt = MTreeIndex::new(&tx, ikb, p, TransactionType::Read).await?;

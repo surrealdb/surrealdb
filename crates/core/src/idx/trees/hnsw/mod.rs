@@ -1,30 +1,29 @@
-pub(in crate::idx) mod docs;
+pub(crate) mod docs;
 mod elements;
 mod flavor;
 mod heuristic;
 pub mod index;
 mod layer;
 
-use crate::idx::planner::checker::HnswConditionChecker;
-use crate::idx::trees::dynamicset::DynamicSet;
-use crate::idx::trees::hnsw::docs::HnswDocs;
-use crate::idx::trees::hnsw::docs::VecDocs;
-use crate::idx::trees::hnsw::elements::HnswElements;
-use crate::idx::trees::hnsw::heuristic::Heuristic;
-use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
 use anyhow::Result;
-
-use crate::expr::index::HnswParams;
-use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
-use crate::idx::trees::knn::DoublePriorityQueue;
-use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
-use crate::idx::{IndexKeyBase, VersionedStore};
-use crate::kvs::{Key, Transaction, Val};
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use reblessive::tree::Stk;
-use revision::revisioned;
+use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
+
+use crate::catalog::{DatabaseDefinition, HnswParams};
+use crate::idx::IndexKeyBase;
+use crate::idx::planner::checker::HnswConditionChecker;
+use crate::idx::trees::dynamicset::DynamicSet;
+use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
+use crate::idx::trees::hnsw::elements::HnswElements;
+use crate::idx::trees::hnsw::heuristic::Heuristic;
+use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
+use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
+use crate::idx::trees::knn::DoublePriorityQueue;
+use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
+use crate::kvs::{KVValue, Transaction};
 
 struct HnswSearch {
 	pt: SharedVector,
@@ -44,14 +43,26 @@ impl HnswSearch {
 
 #[revisioned(revision = 1)]
 #[derive(Default, Serialize, Deserialize)]
-pub(super) struct HnswState {
+pub(crate) struct HnswState {
 	enter_point: Option<ElementId>,
 	next_element_id: ElementId,
 	layer0: LayerState,
 	layers: Vec<LayerState>,
 }
 
-impl VersionedStore for HnswState {}
+impl KVValue for HnswState {
+	#[inline]
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let mut val = Vec::new();
+		self.serialize_revisioned(&mut val)?;
+		Ok(val)
+	}
+
+	#[inline]
+	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
+		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
+	}
+}
 
 struct Hnsw<L0, L>
 where
@@ -59,7 +70,6 @@ where
 	L: DynamicSet,
 {
 	ikb: IndexKeyBase,
-	state_key: Key,
 	state: HnswState,
 	m: usize,
 	efc: usize,
@@ -80,9 +90,7 @@ where
 {
 	fn new(ikb: IndexKeyBase, p: &HnswParams) -> Result<Self> {
 		let m0 = p.m0 as usize;
-		let state_key = ikb.new_hs_key()?;
 		Ok(Self {
-			state_key,
 			state: Default::default(),
 			m: p.m as usize,
 			efc: p.ef_construction as usize,
@@ -98,11 +106,7 @@ where
 
 	async fn check_state(&mut self, tx: &Transaction) -> Result<()> {
 		// Read the state
-		let st: HnswState = if let Some(val) = tx.get(self.state_key.clone(), None).await? {
-			VersionedStore::try_from(val)?
-		} else {
-			Default::default()
-		};
+		let st: HnswState = tx.get(&self.ikb.new_hs_key(), None).await?.unwrap_or_default();
 		// Compare versions
 		if st.layer0.version != self.state.layer0.version {
 			self.layer0.load(tx, &st.layer0).await?;
@@ -272,8 +276,8 @@ where
 	}
 
 	async fn save_state(&self, tx: &Transaction) -> Result<()> {
-		let val: Val = VersionedStore::try_into(&self.state)?;
-		tx.set(self.state_key.clone(), val, None).await?;
+		let state_key = self.ikb.new_hs_key();
+		tx.set(&state_key, &self.state, None).await?;
 		Ok(())
 	}
 
@@ -350,8 +354,10 @@ where
 		}
 	}
 
+	#[expect(clippy::too_many_arguments)]
 	async fn knn_search_checked(
 		&self,
+		db: &DatabaseDefinition,
 		tx: &Transaction,
 		stk: &mut Stk,
 		search: &HnswSearch,
@@ -370,7 +376,7 @@ where
 				);
 				let w = self
 					.layer0
-					.search_single_checked(tx, stk, &search_ctx, &ep_pt, ep_dist, ep_id, chk)
+					.search_single_checked(db, tx, stk, &search_ctx, &ep_pt, ep_dist, ep_id, chk)
 					.await?;
 				return Ok(w.to_vec_limit(search.k));
 			}
@@ -429,9 +435,22 @@ where
 
 #[cfg(test)]
 mod tests {
+	use std::collections::hash_map::Entry;
+	use std::ops::Deref;
+	use std::sync::Arc;
+
+	use ahash::{HashMap, HashSet};
+	use anyhow::Result;
+	use ndarray::Array1;
+	use reblessive::tree::Stk;
+	use roaring::RoaringTreemap;
+	use test_log::test;
+
+	use crate::catalog::providers::CatalogProvider;
+	use crate::catalog::{
+		DatabaseDefinition, DatabaseId, Distance, HnswParams, IndexId, NamespaceId, VectorType,
+	};
 	use crate::ctx::{Context, MutableContext};
-	use crate::expr::index::{Distance, HnswParams, VectorType};
-	use crate::expr::{Id, Value};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::DocId;
 	use crate::idx::planner::checker::HnswConditionChecker;
@@ -443,15 +462,7 @@ mod tests {
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
-	use ahash::{HashMap, HashSet};
-	use anyhow::Result;
-	use ndarray::Array1;
-	use reblessive::tree::Stk;
-	use roaring::RoaringTreemap;
-	use std::collections::hash_map::Entry;
-	use std::ops::Deref;
-	use std::sync::Arc;
-	use test_log::test;
+	use crate::val::{RecordIdKey, Value};
 
 	async fn insert_collection_hnsw(
 		tx: &Transaction,
@@ -525,7 +536,9 @@ mod tests {
 
 	async fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut h = HnswFlavor::new(IndexKeyBase::default(), p).unwrap();
+		let mut h =
+			HnswFlavor::new(IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)), p)
+				.unwrap();
 		let map = {
 			let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
 			let map = insert_collection_hnsw(&tx, &mut h, collection).await;
@@ -555,17 +568,17 @@ mod tests {
 	) -> HnswParams {
 		let m = m as u8;
 		let m0 = m * 2;
-		HnswParams::new(
-			dimension as u16,
+		HnswParams {
+			dimension: dimension as u16,
 			distance,
 			vector_type,
 			m,
 			m0,
-			(1.0 / (m as f64).ln()).into(),
-			efc as u16,
+			ml: (1.0 / (m as f64).ln()).into(),
+			ef_construction: efc as u16,
 			extend_candidates,
 			keep_pruned_connections,
-		)
+		}
 	}
 
 	async fn test_hnsw(collection_size: usize, p: HnswParams) {
@@ -623,7 +636,7 @@ mod tests {
 		let mut map: HashMap<SharedVector, HashSet<DocId>> = HashMap::default();
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.index_document(tx, &Id::Number(*doc_id as i64), &content).await.unwrap();
+			h.index_document(tx, &RecordIdKey::Number(*doc_id as i64), &content).await.unwrap();
 			match map.entry(obj.clone()) {
 				Entry::Occupied(mut e) => {
 					e.get_mut().insert(*doc_id);
@@ -639,6 +652,7 @@ mod tests {
 
 	async fn find_collection_hnsw_index(
 		tx: &Transaction,
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		h: &mut HnswIndex,
 		collection: &TestCollection,
@@ -648,7 +662,7 @@ mod tests {
 			for knn in 1..max_knn {
 				let mut chk = HnswConditionChecker::new();
 				let search = HnswSearch::new(obj.clone(), knn, 500);
-				let res = h.search(tx, stk, &search, &mut chk).await.unwrap();
+				let res = h.search(db, tx, stk, &search, &mut chk).await.unwrap();
 				if knn == 1 && res.docs.len() == 1 && res.docs[0].1 > 0.0 {
 					let docs: Vec<DocId> = res.docs.iter().map(|(d, _)| *d).collect();
 					if collection.is_unique() {
@@ -684,7 +698,7 @@ mod tests {
 	) -> Result<()> {
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.remove_document(tx, Id::Number(*doc_id as i64), &content).await?;
+			h.remove_document(tx, RecordIdKey::Number(*doc_id as i64), &content).await?;
 			if let Entry::Occupied(mut e) = map.entry(obj.clone()) {
 				let set = e.get_mut();
 				set.remove(doc_id);
@@ -722,8 +736,14 @@ mod tests {
 		let (mut h, map) = {
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
-			let mut h =
-				HnswIndex::new(&tx, IndexKeyBase::default(), "test".to_string(), &p).await.unwrap();
+			let mut h = HnswIndex::new(
+				&tx,
+				IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
+				"test".to_string(),
+				&p,
+			)
+			.await
+			.unwrap();
 			// Fill index
 			let map = insert_collection_hnsw_index(&tx, &mut h, &collection).await.unwrap();
 			tx.commit().await.unwrap();
@@ -733,11 +753,14 @@ mod tests {
 		// Search index
 		{
 			let mut stack = reblessive::tree::TreeStack::new();
-			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
+
+			let db = tx.ensure_ns_db("myns", "mydb", false).await.unwrap();
+
 			stack
 				.enter(|stk| async {
-					find_collection_hnsw_index(&tx, stk, &mut h, &collection).await;
+					find_collection_hnsw_index(&tx, &db, stk, &mut h, &collection).await;
 				})
 				.finish()
 				.await;
@@ -804,7 +827,7 @@ mod tests {
 			(9, new_i16_vec(-4, -2)),
 			(10, new_i16_vec(0, 3)),
 		]);
-		let ikb = IndexKeyBase::default();
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3));
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true);
 		let mut h = HnswFlavor::new(ikb, &p).unwrap();
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
@@ -832,6 +855,9 @@ mod tests {
 		info!("Build data collection");
 
 		let ds = Arc::new(Datastore::new("memory").await?);
+		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
+		let db = tx.ensure_ns_db("myns", "mydb", false).await.unwrap();
+		tx.commit().await.unwrap();
 
 		let collection: Arc<TestCollection> =
 			Arc::new(TestCollection::NonUnique(new_vectors_from_file(
@@ -842,11 +868,17 @@ mod tests {
 
 		let ctx = new_ctx(&ds, TransactionType::Write).await;
 		let tx = ctx.tx();
-		let mut h = HnswIndex::new(&tx, IndexKeyBase::default(), "Index".to_string(), &p).await?;
+		let mut h = HnswIndex::new(
+			&tx,
+			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
+			"Index".to_string(),
+			&p,
+		)
+		.await?;
 		info!("Insert collection");
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.index_document(&tx, &Id::Number(*doc_id as i64), &content).await?;
+			h.index_document(&tx, &RecordIdKey::Number(*doc_id as i64), &content).await?;
 		}
 		tx.commit().await?;
 
@@ -866,6 +898,7 @@ mod tests {
 			let collection = collection.clone();
 			let h = h.clone();
 			let ds = ds.clone();
+			let db = db.clone();
 			let f = tokio::spawn(async move {
 				let mut stack = reblessive::tree::TreeStack::new();
 				stack
@@ -875,9 +908,11 @@ mod tests {
 							let knn = 10;
 							let mut chk = HnswConditionChecker::new();
 							let search = HnswSearch::new(pt.clone(), knn, efs);
+
 							let ctx = new_ctx(&ds, TransactionType::Read).await;
 							let tx = ctx.tx();
-							let hnsw_res = h.search(&tx, stk, &search, &mut chk).await.unwrap();
+							let hnsw_res =
+								h.search(&db, &tx, stk, &search, &mut chk).await.unwrap();
 							assert_eq!(hnsw_res.docs.len(), knn, "Different size - knn: {knn}",);
 							let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
 							let rec = brute_force_res.recall(&hnsw_res);

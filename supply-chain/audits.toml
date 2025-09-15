@@ -320,6 +320,12 @@ user-id = 1 # Alex Crichton (alexcrichton)
 start = "2019-04-23"
 end = "2026-05-06"
 
+[[trusted.flatbuffers]]
+criteria = "safe-to-deploy"
+user-id = 178443 # Derek Bailey (dbaileychess)
+start = "2024-12-23"
+end = "2026-07-18"
+
 [[trusted.fslock]]
 criteria = "safe-to-deploy"
 user-id = 23043 # brunoczim
@@ -669,10 +675,22 @@ start = "2025-02-22"
 end = "2026-02-26"
 
 [[trusted.rstest]]
+criteria = "safe-to-deploy"
+user-id = 30606 # Michele d'Amico (la10736)
+start = "2019-06-28"
+end = "2026-08-26"
+
+[[trusted.rstest]]
 criteria = "safe-to-run"
 user-id = 30606 # Michele d'Amico (la10736)
 start = "2019-06-28"
 end = "2026-05-01"
+
+[[trusted.rstest_macros]]
+criteria = "safe-to-deploy"
+user-id = 30606 # Michele d'Amico (la10736)
+start = "2022-05-15"
+end = "2026-08-26"
 
 [[trusted.rstest_macros]]
 criteria = "safe-to-run"
@@ -756,7 +774,13 @@ end = "2026-05-06"
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2022-03-16"
-end = "2025-01-24"
+end = "2026-09-10"
+
+[[trusted.storekey-derive]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-09-03"
+end = "2026-09-10"
 
 [[trusted.surrealdb]]
 criteria = "safe-to-deploy"
@@ -787,6 +811,12 @@ criteria = "safe-to-deploy"
 user-id = 3987 # Rushmore Mushambi (rushmorem)
 start = "2023-08-29"
 end = "2025-01-24"
+
+[[trusted.surrealdb-protocol]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-07-04"
+end = "2026-07-18"
 
 [[trusted.surrealdb-tikv-client]]
 criteria = "safe-to-deploy"
@@ -907,6 +937,12 @@ criteria = "safe-to-deploy"
 user-id = 1139 # Manish Goregaokar (Manishearth)
 start = "2020-01-01"
 end = "2026-05-06"
+
+[[trusted.uuid]]
+criteria = "safe-to-deploy"
+user-id = 3204 # Ashley Mannix (KodrAus)
+start = "2019-10-18"
+end = "2026-07-18"
 
 [[trusted.vart]]
 criteria = "safe-to-deploy"

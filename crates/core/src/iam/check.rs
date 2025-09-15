@@ -1,6 +1,7 @@
+use anyhow::Result;
+
 use crate::dbs::Session;
 use crate::err::Error;
-use anyhow::Result;
 
 pub fn check_ns_db(sess: &Session) -> Result<(String, String)> {
 	// Ensure that a namespace was specified

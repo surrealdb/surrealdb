@@ -21,6 +21,10 @@ setup: check-deps
 docs: check-deps
 	cargo make docs
 
+.PHONY: fmt
+fmt: check-deps
+	cargo make fmt
+
 .PHONY: test
 test: check-deps
 	cargo make test

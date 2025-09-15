@@ -8,28 +8,28 @@ value = "NONE"
 value = "[{ id: test:int, number: 0 }]"
 
 [[test.results]]
-value = "[{ id: test:float, number: 0f }]"
+error = "Database index `index` already contains 0f, with record `test:int`"
 
 [[test.results]]
-value = "[{ id: test:dec_int, number: 0dec }]"
+error = "Database index `index` already contains 0dec, with record `test:int`"
 
 [[test.results]]
-error = "Database index `index` already contains 0dec, with record `test:dec_int`"
+error = "Database index `index` already contains 0dec, with record `test:int`"
 
 [[test.results]]
-value = "[{ id: test:dec_int, number: 0dec }, { id: test:float, number: 0f }, { id: test:int, number: 0 }]"
+value = "[{ id: test:int, number: 0 }]"
 
 [[test.results]]
-value = "[{ id: test:dec_int, number: 0dec }, { id: test:float, number: 0f }, { id: test:int, number: 0 }]"
+value = "[{ id: test:int, number: 0 }]"
 
 [[test.results]]
-value = "[{ id: test:dec_int, number: 0dec }, { id: test:float, number: 0f }, { id: test:int, number: 0 }]"
+value = "[{ id: test:int, number: 0 }]"
 
 [[test.results]]
-value = "[{ id: test:dec_int, number: 0dec }, { id: test:float, number: 0f }, { id: test:int, number: 0 }]"
+value = "[{ id: test:int, number: 0 }]"
 
 [[test.results]]
-value = "[{ id: test:dec_int, number: 0dec }, { id: test:float, number: 0f }, { id: test:int, number: 0 }]"
+value = "[{ id: test:int, number: 0 }]"
 
 */
 

@@ -1,10 +1,13 @@
-use crate::expr::Ident;
-use crate::iam::Error;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-// In the future, we will allow for custom roles. For now, provide predefined roles.
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use crate::expr::Ident;
+use crate::iam::Error;
+
+// In the future, we will allow for custom roles. For now, provide predefined
+// roles.
 #[revisioned(revision = 1)]
 #[derive(Hash, Copy, Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -40,6 +43,10 @@ impl FromStr for Role {
 
 impl std::convert::From<Role> for Ident {
 	fn from(role: Role) -> Self {
-		role.to_string().into()
+		match role {
+			Role::Viewer => unsafe { Ident::new_unchecked("Viewer".to_owned()) },
+			Role::Editor => unsafe { Ident::new_unchecked("Editor".to_owned()) },
+			Role::Owner => unsafe { Ident::new_unchecked("Owner".to_owned()) },
+		}
 	}
 }

@@ -1,54 +1,23 @@
 use hex;
 use revision::revisioned;
-use serde::de::SeqAccess;
-use serde::{
-	Deserialize, Serialize,
-	de::{self, Visitor},
-};
+use serde::de::{self, SeqAccess, Visitor};
+use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Bytes(pub(crate) Vec<u8>);
 
-impl Bytes {
-	pub fn into_inner(self) -> Vec<u8> {
-		self.0
-	}
-}
-
-impl From<Vec<u8>> for Bytes {
-	fn from(v: Vec<u8>) -> Self {
-		Self(v)
-	}
-}
-
-impl From<Bytes> for Vec<u8> {
-	fn from(val: Bytes) -> Self {
-		val.0
-	}
-}
-
-impl From<Bytes> for crate::expr::Bytes {
+impl From<Bytes> for crate::val::Bytes {
 	fn from(v: Bytes) -> Self {
-		crate::expr::Bytes(v.0)
+		crate::val::Bytes(v.0)
 	}
 }
 
-impl From<crate::expr::Bytes> for Bytes {
-	fn from(v: crate::expr::Bytes) -> Self {
+impl From<crate::val::Bytes> for Bytes {
+	fn from(v: crate::val::Bytes) -> Self {
 		Bytes(v.0)
-	}
-}
-
-impl Deref for Bytes {
-	type Target = Vec<u8>;
-
-	fn deref(&self) -> &Self::Target {
-		&self.0
 	}
 }
 
@@ -121,7 +90,7 @@ mod tests {
 		let val = SqlValue::Bytes(Bytes(vec![1, 2, 3, 5]));
 		let serialized: Vec<u8> = revision::to_vec(&val).unwrap();
 		println!("{serialized:?}");
-		let deserialized = revision::from_slice(&serialized).unwrap();
+		let deserialized: SqlValue = revision::from_slice(&serialized).unwrap();
 		assert_eq!(val, deserialized);
 	}
 

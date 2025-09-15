@@ -1,37 +1,39 @@
 //! Stores database versionstamps
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::impl_key;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
+
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::key::category::{Categorise, Category};
+use crate::kvs::impl_kv_key_storekey;
+use crate::vs::VersionStamp;
 
 // Vs stands for Database Versionstamp
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Vs<'a> {
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+pub(crate) struct VsKey {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	_d: u8,
 	_e: u8,
 }
-impl_key!(Vs<'a>);
 
-pub fn new<'a>(ns: &'a str, db: &'a str) -> Vs<'a> {
-	Vs::new(ns, db)
+impl_kv_key_storekey!(VsKey => VersionStamp);
+
+pub fn new(ns: NamespaceId, db: DatabaseId) -> VsKey {
+	VsKey::new(ns, db)
 }
 
-impl Categorise for Vs<'_> {
+impl Categorise for VsKey {
 	fn categorise(&self) -> Category {
 		Category::DatabaseVersionstamp
 	}
 }
 
-impl<'a> Vs<'a> {
-	pub fn new(ns: &'a str, db: &'a str) -> Self {
-		Vs {
+impl VsKey {
+	pub fn new(ns: NamespaceId, db: DatabaseId) -> Self {
+		VsKey {
 			__: b'/',
 			_a: b'*',
 			ns,
@@ -46,17 +48,17 @@ impl<'a> Vs<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+	use crate::kvs::KVKey;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
-		let val = Vs::new(
-			"test",
-			"test",
+		let val = VsKey::new(
+			NamespaceId(1),
+			DatabaseId(2),
 		);
-		let enc = Vs::encode(&val).unwrap();
-		let dec = Vs::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = VsKey::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!vs");
 	}
 }

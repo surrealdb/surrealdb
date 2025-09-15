@@ -1,22 +1,25 @@
 //! Stores a DEFINE ACCESS ON ROOT configuration
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::impl_key;
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Ac<'a> {
+use storekey::{BorrowDecode, Encode};
+
+use crate::catalog::AccessDefinition;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::impl_kv_key_storekey;
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+pub(crate) struct RootAccessKey<'a> {
 	__: u8,
 	_a: u8,
 	_b: u8,
 	_c: u8,
-	pub ac: &'a str,
+	pub ac: Cow<'a, str>,
 }
-impl_key!(Ac<'a>);
 
-pub fn new(ac: &str) -> Ac<'_> {
-	Ac::new(ac)
+impl_kv_key_storekey!(RootAccessKey<'_> => AccessDefinition);
+
+pub fn new(ac: &str) -> RootAccessKey<'_> {
+	RootAccessKey::new(ac)
 }
 
 pub fn prefix() -> Vec<u8> {
@@ -31,36 +34,35 @@ pub fn suffix() -> Vec<u8> {
 	k
 }
 
-impl Categorise for Ac<'_> {
+impl Categorise for RootAccessKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::Access
 	}
 }
 
-impl<'a> Ac<'a> {
+impl<'a> RootAccessKey<'a> {
 	pub fn new(ac: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'!',
 			_b: b'a',
 			_c: b'c',
-			ac,
+			ac: Cow::Borrowed(ac),
 		}
 	}
 }
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+	use crate::kvs::KVKey;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
-		let val = Ac::new("testac");
-		let enc = Ac::encode(&val).unwrap();
+		let val = RootAccessKey::new("testac");
+		let enc = RootAccessKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/!actestac\x00");
-		let dec = Ac::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 
 	#[test]

@@ -27,7 +27,7 @@ on:
       rust-version:
         required: false
         type: string
-        default: "1.86.0"
+        default: "1.87.0"
         description: "The Rust version to use for building binaries"
       onnx-version:
         required: false
@@ -74,7 +74,7 @@ jobs:
           toolchain: ${{ inputs.rust-version }}
 
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ inputs.git-ref }}
           ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
@@ -125,7 +125,6 @@ jobs:
             patch=$(git show --no-patch --format=%ad --date=format:%Y%m%d%H%M%S)
             rev=$(git rev-parse --short HEAD)
             buildMetadata=${date}.${rev}
-            version=${version}-${{ inputs.release-type }}
             environment=${{ inputs.release-type }}
           elif [[  $suffix == "rc" ]]; then
             version=${version}-${{ inputs.release-type }}
@@ -183,15 +182,15 @@ jobs:
           cargo check --no-default-features --features storage-mem
 
           # Commit changes
-          git commit -am "Prepare v${version} release"
+          git commit -am "Prepare v${version} release" || true
 
       - name: Push the release branch
         run: git push
 
   test:
     name: Test
-    needs: [prepare-vars]
-    runs-on: [runner-amd64-2xlarge]
+    needs: [ prepare-vars ]
+    runs-on: [ runner-amd64-2xlarge ]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
@@ -233,13 +232,62 @@ jobs:
           path: target/llvm-cov/html/
           retention-days: 5
 
-  lint:
-    name: Lint
-    needs: [prepare-vars]
-    runs-on: [runner-amd64-2xlarge]
+  format:
+    name: Check format
+    needs: [ prepare-vars ]
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        with:
+          ref: ${{ needs.prepare-vars.outputs.release-branch }}
+
+      - name: Lookup the nightly toolchain
+        id: info
+        run: |
+          set -x
+          echo "toolchain=$(cat rust-toolchain.nightly)" >> $GITHUB_OUTPUT
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
+        with:
+          toolchain: ${{ steps.info.outputs.toolchain }}
+          components: rustfmt
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Check format
+        run: cargo make ci-format
+
+  check:
+    name: Check workspace
+    needs: [ prepare-vars ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        with:
+          ref: ${{ needs.prepare-vars.outputs.release-branch }}
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
+        with:
+          toolchain: ${{ inputs.rust-version }}
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Check workspace
+        run: cargo make ci-check
+
+  check-wasm:
+    name: Check wasm
+    needs: [ prepare-vars ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
         with:
           ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
@@ -248,26 +296,38 @@ jobs:
         with:
           toolchain: ${{ inputs.rust-version }}
           targets: wasm32-unknown-unknown
-          components: rustfmt, clippy
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Check workspace
-        run: cargo make ci-check
-
-      - name: Check format
-        run: cargo make ci-format
-
       - name: Check wasm
         run: cargo make ci-check-wasm
+
+  clippy:
+    name: Check clippy
+    needs: [ prepare-vars ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        with:
+          ref: ${{ needs.prepare-vars.outputs.release-branch }}
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
+        with:
+          toolchain: ${{ inputs.rust-version }}
+          components: clippy
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
 
       - name: Check clippy
         run: cargo make ci-clippy
 
   build:
     name: Release binaries
-    needs: [prepare-vars]
+    needs: [ prepare-vars ]
     uses: ./.github/workflows/build.yml
     with:
       name: ${{ needs.prepare-vars.outputs.name }}
@@ -281,10 +341,10 @@ jobs:
 
   publish:
     name: Publish crate and artifacts binaries
-    permissions: 
+    permissions:
       contents: write
-    needs: [prepare-vars, test, lint, build]
-    runs-on: [runner-amd64-2xlarge]
+    needs: [ prepare-vars, test, format, check, check-wasm, clippy, build ]
+    runs-on: [ runner-amd64-2xlarge ]
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -292,7 +352,9 @@ jobs:
           ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # stable (Actions must be pinned by commit hash)
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable (Actions must be pinned by commit hash)
+        with:
+          toolchain: stable
 
       - name: Install release-plz
         run: |
@@ -370,7 +432,7 @@ jobs:
       - run: cat crates/core/Cargo.toml
 
       - name: Publish the crate
-        if: ${{ inputs.publish }}
+        if: ${{ inputs.publish && needs.prepare-vars.outputs.environment != 'nightly' }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: release-plz release --config /tmp/release-plz.toml
@@ -398,7 +460,7 @@ jobs:
             artifacts/surreal-${{ needs.prepare-vars.outputs.name }}.*/*.exe
 
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v4.0.2
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v5.0.0
         if: ${{ inputs.publish }}
         with:
           aws-region: us-east-2
@@ -426,7 +488,7 @@ jobs:
 
   docker:
     name: Docker images
-    needs: [prepare-vars, publish]
+    needs: [ prepare-vars, publish ]
     if: ${{ inputs.publish }}
     uses: ./.github/workflows/docker.yml
     with:
@@ -440,7 +502,7 @@ jobs:
 
   package-macos:
     name: Package and publish macOS universal binary
-    needs: [prepare-vars, publish]
+    needs: [ prepare-vars, publish ]
     runs-on: macos-latest
     env:
       FILE: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-universal
@@ -458,7 +520,7 @@ jobs:
           path: arm64
 
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v4.0.2
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v5.0.0
         with:
           aws-region: us-east-2
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
@@ -481,11 +543,11 @@ jobs:
     name: Propagate binaries to all regions
     if: ${{ inputs.publish }}
     environment: ${{ needs.prepare-vars.outputs.environment }}
-    needs: [publish, package-macos, prepare-vars]
+    needs: [ publish, package-macos, prepare-vars ]
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v4.0.2
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v5.0.0
         with:
           aws-region: us-east-2
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
@@ -502,13 +564,13 @@ jobs:
     name: Cleanup
     permissions:
       contents: write
-    needs: [publish, prepare-vars]
+    needs: [ publish, prepare-vars ]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }} 
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
 
       - name: Delete ${{ needs.prepare-vars.outputs.release-branch }}
         run: git push origin --delete ${{ needs.prepare-vars.outputs.release-branch }} || true

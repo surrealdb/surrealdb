@@ -1,11 +1,11 @@
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
+
+#[derive(
+	Clone, Debug, Eq, PartialEq, Serialize, PartialOrd, Deserialize, Hash, Encode, BorrowDecode,
+)]
 pub enum Dir {
 	/// `<-`
 	In,

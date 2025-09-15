@@ -1,0 +1,65 @@
+name: Macros crate
+
+run-name: "Release '${{ inputs.git-ref }}' (publish: ${{ inputs.publish }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      git-ref:
+        required: true
+        type: string
+        default: main
+        description: "The git ref of this release"
+      publish:
+        required: false
+        type: boolean
+        default: false
+        description: "Publish the release"
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish crate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        with:
+          ref: ${{ inputs.git-ref }}
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # stable (Actions must be pinned by commit hash)
+
+      - name: Create a temporary branch
+        run: git checkout -b crate
+
+      - name: Configure git
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+
+      - name: Enable crate publishing
+        run: |
+          set -x
+          sed -i "s/publish = false/publish = true/" crates/macros/Cargo.toml
+          git commit -am "Enable crate publishing"
+
+      - run: cat crates/macros/Cargo.toml
+
+      - name: Publish the crate
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -x
+
+          if [[ "${{ inputs.publish }}" == "false" ]]; then
+            extraArgs="--dry-run"
+          fi
+
+          cargo publish --package surrealdb-macros ${extraArgs}
