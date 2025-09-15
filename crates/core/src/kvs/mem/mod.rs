@@ -1,34 +1,18 @@
 #![cfg(feature = "kv-mem")]
 
 use std::ops::Range;
-#[cfg(not(target_family = "wasm"))]
-use std::sync::OnceLock;
 
 use anyhow::{Result, bail, ensure};
-use surrealkv::{Options, Store, Transaction as Tx};
+use surrealkv::{InternalKey, Transaction as Tx, Tree, TreeBuilder};
 
 use super::Check;
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::SavePoints;
-use crate::kvs::{Key, Val, Version};
-
-#[cfg(not(target_family = "wasm"))]
-pub(crate) static SKV_COMMIT_POOL: OnceLock<affinitypool::Threadpool> = OnceLock::new();
-#[cfg(not(target_family = "wasm"))]
-pub(crate) fn commit_pool() -> &'static affinitypool::Threadpool {
-	SKV_COMMIT_POOL.get_or_init(|| {
-		affinitypool::Builder::new()
-			.thread_name("surrealkv-memory-commitpool")
-			.thread_stack_size(5 * 1024 * 1024)
-			.thread_per_core(false)
-			.worker_threads(1)
-			.build()
-	})
-}
+use crate::kvs::{Key, Val};
 
 pub struct Datastore {
-	db: Store,
+	db: Tree,
 }
 
 pub struct Transaction {
@@ -39,7 +23,7 @@ pub struct Transaction {
 	/// Should we check unhandled transactions?
 	check: Check,
 	/// The underlying datastore transaction
-	inner: Option<Tx>,
+	inner: Option<Tx<InternalKey>>,
 }
 
 impl Drop for Transaction {
@@ -64,13 +48,11 @@ impl Datastore {
 	/// Open a new database
 	pub(crate) async fn new() -> Result<Datastore> {
 		// Create new configuration options
-		let mut opts = Options::new();
-		// Ensure versions are disabled
-		opts.enable_versions = false;
+		let builder = TreeBuilder::new();
 		// Ensure persistence is disabled
-		opts.disk_persistence = false;
+		let builder = builder.with_in_memory_only(true);
 		// Create a new datastore
-		match Store::new(opts) {
+		match builder.build() {
 			Ok(db) => Ok(Datastore {
 				db,
 			}),
@@ -163,11 +145,8 @@ impl super::api::Transaction for Transaction {
 		let mut inner =
 			self.inner.take().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
 
-		// Commit this transaction in the pool
-		#[cfg(not(target_family = "wasm"))]
-		commit_pool().spawn(move || inner.commit()).await?;
-		#[cfg(target_family = "wasm")]
-		inner.commit()?;
+		// Commit this transaction directly (memory backend doesn't need thread pool)
+		inner.commit().await?;
 
 		// Continue
 		Ok(())
@@ -184,7 +163,7 @@ impl super::api::Transaction for Transaction {
 
 		// Get the key
 		let res = match version {
-			Some(ts) => inner.get_at_version(&key, ts)?.is_some(),
+			Some(_ts) => inner.get(&key)?.is_some(), // TODO: Replace with get_at_version once it is implemented
 			None => inner.get(&key)?.is_some(),
 		};
 
@@ -194,7 +173,6 @@ impl super::api::Transaction for Transaction {
 
 	/// Fetch a key from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-
 	async fn get(&mut self, key: Key, version: Option<u64>) -> Result<Option<Val>> {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
@@ -204,16 +182,16 @@ impl super::api::Transaction for Transaction {
 
 		// Get the key
 		let res = match version {
-			Some(ts) => inner.get_at_version(&key, ts)?,
-			None => inner.get(&key)?,
+			Some(_ts) => inner.get(&key)?.map(|v| v.to_vec()), // TODO: Replace with get_at_version once it is implemented
+			None => inner.get(&key)?.map(|v| v.to_vec()),
 		};
+
 		// Return result
 		Ok(res)
 	}
 
 	/// Insert or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-
 	async fn set(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
@@ -226,36 +204,34 @@ impl super::api::Transaction for Transaction {
 
 		// Set the key
 		match version {
-			Some(ts) => inner.set_at_ts(&key, &val, ts)?,
+			Some(_ts) => inner.set(&key, &val)?, // TODO: Replace with set_at_version once it is implemented
 			None => inner.set(&key, &val)?,
 		}
 		// Return result
 		Ok(())
 	}
 
-	/// Insert or replace a key in the database
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	// /// Insert or replace a key in the database
+	// #[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	// async fn replace(&mut self, key: Key, val: Val) -> Result<()> {
+	// 	// Check to see if transaction is closed
+	// 	ensure!(!self.done, Error::TxFinished);
+	// 	// Check to see if transaction is writable
+	// 	ensure!(self.write, Error::TxReadonly);
 
-	async fn replace(&mut self, key: Key, val: Val) -> Result<()> {
-		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
-		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+	// 	// Get the inner transaction
+	// 	let inner =
+	// 		self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
 
-		// Get the inner transaction
-		let inner =
-			self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
+	// 	// Replace the key (just use set for memory backend)
+	// 	inner.set(&key, &val)?;
 
-		// Replace the key
-		inner.insert_or_replace(&key, &val)?;
-
-		// Return result
-		Ok(())
-	}
+	// 	// Return result
+	// 	Ok(())
+	// }
 
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-
 	async fn put(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
@@ -266,8 +242,8 @@ impl super::api::Transaction for Transaction {
 			self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
 
 		// Set the key if empty
-		if let Some(ts) = version {
-			inner.set_at_ts(&key, &val, ts)?;
+		if let Some(_ts) = version {
+			inner.set(&key, &val)?; // TODO: Replace with set_at_version once it is implemented
 		} else {
 			match inner.get(&key)? {
 				None => inner.set(&key, &val)?,
@@ -281,7 +257,6 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert a key if the current value matches a condition
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-
 	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<()> {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
@@ -293,7 +268,7 @@ impl super::api::Transaction for Transaction {
 
 		// Set the key if valid
 		match (inner.get(&key)?, chk) {
-			(Some(v), Some(w)) if v == w => inner.set(&key, &val)?,
+			(Some(v), Some(w)) if v.as_ref() == w.as_slice() => inner.set(&key, &val)?,
 			(None, None) => inner.set(&key, &val)?,
 			_ => bail!(Error::TxConditionNotMet),
 		};
@@ -303,7 +278,6 @@ impl super::api::Transaction for Transaction {
 
 	/// Deletes a key from the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-
 	async fn del(&mut self, key: Key) -> Result<()> {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
@@ -314,7 +288,7 @@ impl super::api::Transaction for Transaction {
 			self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
 
 		// Remove the key
-		inner.soft_delete(&key)?;
+		inner.delete(&key)?;
 		// Return result
 		Ok(())
 	}
@@ -334,8 +308,8 @@ impl super::api::Transaction for Transaction {
 
 		// Set the key if valid
 		match (inner.get(&key)?, chk) {
-			(Some(v), Some(w)) if v == w => inner.soft_delete(&key)?,
-			(None, None) => inner.soft_delete(&key)?,
+			(Some(v), Some(w)) if v.as_ref() == w.as_slice() => inner.delete(&key)?,
+			(None, None) => inner.delete(&key)?,
 			_ => bail!(Error::TxConditionNotMet),
 		};
 		// Return result
@@ -372,7 +346,7 @@ impl super::api::Transaction for Transaction {
 
 		// Set the key if valid
 		match (inner.get(&key)?, chk) {
-			(Some(v), Some(w)) if v == w => inner.delete(&key)?,
+			(Some(v), Some(w)) if v.as_ref() == w.as_slice() => inner.delete(&key)?,
 			(None, None) => inner.delete(&key)?,
 			_ => bail!(Error::TxConditionNotMet),
 		};
@@ -388,7 +362,7 @@ impl super::api::Transaction for Transaction {
 		&mut self,
 		rng: Range<Key>,
 		limit: u32,
-		version: Option<u64>,
+		_version: Option<u64>,
 	) -> Result<Vec<Key>> {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
@@ -401,16 +375,11 @@ impl super::api::Transaction for Transaction {
 			self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
 
 		// Retrieve the scan range
-		let res = match version {
-			Some(ts) => inner
-				.keys_at_version(beg.as_slice()..end.as_slice(), ts, Some(limit as usize))
-				.map(Key::from)
-				.collect(),
-			None => inner
-				.keys(beg.as_slice()..end.as_slice(), Some(limit as usize))
-				.map(Key::from)
-				.collect(),
-		};
+		let res = inner
+			.keys(beg.as_slice(), end.as_slice(), Some(limit as usize))?
+			.map(|r| r.map(|(k, _)| k.to_vec()))
+			.collect::<Result<Vec<_>, _>>()?;
+
 		// Return result
 		Ok(res)
 	}
@@ -421,7 +390,7 @@ impl super::api::Transaction for Transaction {
 		&mut self,
 		rng: Range<Key>,
 		limit: u32,
-		version: Option<u64>,
+		_version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
@@ -434,43 +403,11 @@ impl super::api::Transaction for Transaction {
 			self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
 
 		// Retrieve the scan range
-		let res = match version {
-			Some(ts) => inner
-				.scan_at_version(beg.as_slice()..end.as_slice(), ts, Some(limit as usize))
-				.map(|r| {
-					r.map(|(k, v)| (k.to_vec(), v)).map_err(Error::from).map_err(anyhow::Error::new)
-				})
-				.collect::<Result<_>>()?,
-			None => inner
-				.scan(beg.as_slice()..end.as_slice(), Some(limit as usize))
-				.map(|r| r.map(|(k, v, _)| (k.to_vec(), v)).map_err(Into::into))
-				.collect::<Result<_>>()?,
-		};
-		// Return result
-		Ok(res)
-	}
-
-	/// Retrieve all the versions from a range of keys from the databases
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn scan_all_versions(
-		&mut self,
-		rng: Range<Key>,
-		limit: u32,
-	) -> Result<Vec<(Key, Val, Version, bool)>> {
-		ensure!(!self.done, Error::TxFinished);
-		// Set the key range
-		let beg = rng.start;
-		let end = rng.end;
-
-		// Get the inner transaction
-		let inner =
-			self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
-
-		// Retrieve the scan range
 		let res = inner
-			.scan_all_versions(beg.as_slice()..end.as_slice(), Some(limit as usize))
-			.map(|r| r.map(|(k, v, ts, del)| (k.to_vec(), v, ts, del)).map_err(Into::into))
-			.collect::<Result<_>>()?;
+			.range(beg.as_slice(), end.as_slice(), Some(limit as usize))?
+			.map(|r| r.map(|(k, v)| (k.to_vec(), v.map(|v| v.to_vec()).unwrap_or_default())))
+			.collect::<Result<Vec<_>, _>>()?;
+
 		// Return result
 		Ok(res)
 	}
