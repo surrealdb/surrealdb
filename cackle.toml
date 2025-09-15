@@ -1380,6 +1380,9 @@ allow_unsafe = true
 [pkg.take_mut]
 allow_unsafe = true
 
+[pkg.tikv-jemallocator]
+allow_unsafe = true
+
 [pkg.tikv-jemalloc-sys]
 allow_unsafe = true
 allow_apis = ["fs", "process"]
