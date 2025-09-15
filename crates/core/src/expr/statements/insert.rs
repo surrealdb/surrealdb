@@ -54,8 +54,9 @@ impl InsertStatement {
 		// Check if there is a timeout
 		let ctx = match self.timeout.as_ref() {
 			Some(timeout) => {
+				let x = timeout.compute(stk, ctx, opt, doc).await?.0;
 				let mut ctx = MutableContext::new(ctx);
-				ctx.add_timeout(*timeout.0)?;
+				ctx.add_timeout(x)?;
 				ctx.freeze()
 			}
 			None => ctx.clone(),

@@ -2,10 +2,12 @@ use std::borrow::Cow;
 use std::fmt;
 
 use anyhow::Result;
+use reblessive::tree::Stk;
 
 use crate::catalog::{Permission, TableDefinition};
 use crate::ctx::{Context, MutableContext};
-use crate::err::Error;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::expr::cond::Cond;
 use crate::expr::data::Data;
 use crate::expr::fetch::Fetchs;
@@ -419,10 +421,17 @@ impl Statement<'_> {
 			_ => None,
 		}
 	}
-	pub(crate) fn setup_timeout<'a>(&self, ctx: &'a Context) -> Result<Cow<'a, Context>, Error> {
+	pub(crate) async fn setup_timeout<'a>(
+		&self,
+		stk: &mut Stk,
+		ctx: &'a Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Cow<'a, Context>> {
 		if let Some(t) = self.timeout() {
+			let x = t.compute(stk, ctx, opt, doc).await?.0;
 			let mut ctx = MutableContext::new(ctx);
-			ctx.add_timeout(*t.0)?;
+			ctx.add_timeout(x)?;
 			Ok(Cow::Owned(ctx.freeze()))
 		} else {
 			Ok(Cow::Borrowed(ctx))

@@ -159,7 +159,9 @@ fn parse_create() {
 				expr: ident_field("foo"),
 				alias: Some(Idiom(vec![Part::Field(Ident::new("bar".to_string()).unwrap())])),
 			})))),
-			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
+			timeout: Some(Timeout(Expr::Literal(Literal::Duration(Duration(
+				std::time::Duration::from_secs(1)
+			))))),
 			parallel: true,
 			version: None,
 		})),
@@ -1950,7 +1952,9 @@ fn parse_delete() {
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Expr::Literal(Literal::Integer(2)))),
 			output: Some(Output::After),
-			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
+			timeout: Some(Timeout(Expr::Literal(Literal::Duration(Duration(
+				std::time::Duration::from_secs(1)
+			))))),
 			parallel: true,
 			explain: Some(Explain(true)),
 		}))
@@ -1979,7 +1983,9 @@ fn parse_delete_2() {
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Expr::Literal(Literal::Null))),
 			output: Some(Output::Null),
-			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(60 * 60)))),
+			timeout: Some(Timeout(Expr::Literal(Literal::Duration(Duration(
+				std::time::Duration::from_secs(60 * 60)
+			))))),
 			parallel: true,
 			explain: Some(Explain(false)),
 		}))
@@ -2884,7 +2890,9 @@ fn parse_update() {
 				Idiom(vec![Part::Field(Ident::from_strand(strand!("c").to_owned())), Part::All])
 			])),
 			output: Some(Output::Diff),
-			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
+			timeout: Some(Timeout(Expr::Literal(Literal::Duration(Duration(
+				std::time::Duration::from_secs(1)
+			))))),
 			parallel: true,
 			explain: Some(Explain(true))
 		}))
@@ -2926,7 +2934,9 @@ fn parse_upsert() {
 				Idiom(vec![Part::Field(Ident::from_strand(strand!("c").to_owned())), Part::All])
 			])),
 			output: Some(Output::Diff),
-			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
+			timeout: Some(Timeout(Expr::Literal(Literal::Duration(Duration(
+				std::time::Duration::from_secs(1)
+			))))),
 			parallel: true,
 			explain: Some(Explain(false))
 		}))

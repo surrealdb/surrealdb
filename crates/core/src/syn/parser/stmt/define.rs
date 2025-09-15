@@ -1305,7 +1305,7 @@ impl Parser<'_> {
 		} else {
 			0
 		};
-		let timeout = self.try_parse_timeout()?;
+		let timeout = self.try_parse_timeout(stk).await?;
 		Ok(DefineSequenceStatement {
 			name,
 			kind,

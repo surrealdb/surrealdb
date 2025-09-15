@@ -2,10 +2,12 @@ use std::fmt::{self, Display, Write};
 use std::ops::Deref;
 
 use anyhow::Result;
+use reblessive::tree::Stk;
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::{Base, Ident, Timeout, Value};
@@ -20,7 +22,13 @@ pub struct AlterSequenceStatement {
 }
 
 impl AlterSequenceStatement {
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
 		// Get the NS and DB
@@ -40,10 +48,11 @@ impl AlterSequenceStatement {
 		};
 		// Process the statement
 		if let Some(timeout) = &self.timeout {
+			let timeout = timeout.compute(stk, ctx, opt, doc).await?.0;
 			if timeout.is_zero() {
 				sq.timeout = None;
 			} else {
-				sq.timeout = Some(*timeout.as_std_duration());
+				sq.timeout = Some(timeout);
 			}
 		}
 		// Set the table definition

@@ -48,6 +48,8 @@ impl DefineSequenceStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
 		// Compute name
 		let name = process_definition_ident!(stk, ctx, opt, doc, &self.name, "sequence name");
+		// Compute timeout
+		let timeout = map_opt!(x as &self.timeout => x.compute(stk, ctx, opt, doc).await?.0);
 		// Fetch the transaction
 		let txn = ctx.tx();
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
@@ -79,7 +81,7 @@ impl DefineSequenceStatement {
 			name: name.clone(),
 			batch: self.batch,
 			start: self.start,
-			timeout: self.timeout.as_ref().map(|t| *t.as_std_duration()),
+			timeout,
 		};
 		// Set the definition
 		txn.set(&key, &sq, None).await?;
