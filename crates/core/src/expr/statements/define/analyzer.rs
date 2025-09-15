@@ -11,6 +11,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::filter::Filter;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::tokenizer::Tokenizer;
 use crate::expr::{Base, Expr, Ident, Idiom, Literal, Value};
 use crate::iam::{Action, ResourceKind};
@@ -48,7 +49,7 @@ impl DefineAnalyzerStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<catalog::AnalyzerDefinition> {
 		Ok(catalog::AnalyzerDefinition {
-			name: process_definition_ident!(stk, ctx, opt, doc, &self.name, "analyzer name"),
+			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "analyzer name").await?.to_raw_string(),
 			function: self.function.clone(),
 			tokenizers: self.tokenizers.clone(),
 			filters: self.filters.clone(),

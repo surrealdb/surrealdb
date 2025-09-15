@@ -10,6 +10,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
@@ -47,7 +48,7 @@ impl DefineNamespaceStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Process the name
-		let name = process_definition_ident!(stk, ctx, opt, doc, &self.name, "namespace name");
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "namespace name").await?.to_raw_string();
 
 		// Check if the definition exists
 		let namespace_id = if let Some(ns) = txn.get_ns_by_name(&name).await? {

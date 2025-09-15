@@ -10,6 +10,7 @@ use crate::catalog::{BucketDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt, Literal};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
@@ -48,7 +49,7 @@ impl DefineBucketStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Bucket, &Base::Db)?;
 		// Process the name
-		let name = process_definition_ident!(stk, ctx, opt, doc, &self.name, "bucket name");
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "bucket name").await?.to_raw_string();
 		// Fetch the transaction
 		let txn = ctx.tx();
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;

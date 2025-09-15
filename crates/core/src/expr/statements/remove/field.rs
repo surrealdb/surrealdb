@@ -11,6 +11,8 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Expr, Literal, Value};
+use crate::expr::parameterize::expr_to_ident;
+use crate::expr::parameterize::expr_to_idiom;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -43,9 +45,9 @@ impl RemoveFieldStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Compute the table name
 		let table_name =
-			process_definition_ident!(stk, ctx, opt, doc, &self.table_name, "table name");
+			expr_to_ident(stk, ctx, opt, doc, &self.table_name, "table name").await?.to_raw_string();
 		// Compute the name
-		let name = process_definition_idiom!(stk, ctx, opt, doc, &self.name, "field name");
+		let name = expr_to_idiom(stk, ctx, opt, doc, &self.name, "field name").await?;
 		// Get the NS and DB
 		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;

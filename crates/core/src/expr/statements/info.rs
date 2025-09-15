@@ -12,6 +12,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{
 	Base, DefineAccessStatement, DefineAnalyzerStatement, DefineUserStatement, Expr, FlowResultExt,
 };
@@ -266,7 +267,7 @@ impl InfoStatement {
 				// Get the NS and DB
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 				// Compute table name
-				let tb = process_definition_ident!(stk, ctx, opt, doc, &tb, "table name");
+				let tb = expr_to_ident(stk, ctx, opt, doc, &tb, "table name").await?;
 				// Convert the version to u64 if present
 				let version = match version {
 					Some(v) => Some(
@@ -335,7 +336,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Actor, &base)?;
 				// Compute user name
-				let user = process_definition_ident!(stk, ctx, opt, doc, &user, "user name");
+				let user = expr_to_ident(stk, ctx, opt, doc, &user, "user name").await?;
 				// Get the transaction
 				let txn = ctx.tx();
 				// Process the user
@@ -347,7 +348,7 @@ impl InfoStatement {
 							Some(user) => user,
 							None => {
 								return Err(Error::UserNsNotFound {
-									name: user.clone(),
+									name: user.to_raw_string(),
 									ns: ns.name.clone(),
 								}
 								.into());
@@ -358,7 +359,7 @@ impl InfoStatement {
 						let (ns, db) = opt.ns_db()?;
 						let Some(db_def) = txn.get_db_by_name(ns, db).await? else {
 							return Err(Error::UserDbNotFound {
-								name: user.clone(),
+								name: user.to_raw_string(),
 								ns: ns.to_string(),
 								db: db.to_string(),
 							}
@@ -367,7 +368,7 @@ impl InfoStatement {
 						txn.get_db_user(db_def.namespace_id, db_def.database_id, &user)
 							.await?
 							.ok_or_else(|| Error::UserDbNotFound {
-								name: user.clone(),
+								name: user.to_raw_string(),
 								ns: ns.to_string(),
 								db: db.to_string(),
 							})?
@@ -385,8 +386,8 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Actor, &Base::Db)?;
 				// Compute table & index names
-				let index = process_definition_ident!(stk, ctx, opt, doc, &index, "index name");
-				let table = process_definition_ident!(stk, ctx, opt, doc, &table, "table name");
+				let index = expr_to_ident(stk, ctx, opt, doc, &index, "index name").await?;
+				let table = expr_to_ident(stk, ctx, opt, doc, &table, "table name").await?;
 				// Output
 				#[cfg(not(target_family = "wasm"))]
 				{

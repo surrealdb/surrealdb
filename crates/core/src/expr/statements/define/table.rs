@@ -17,6 +17,7 @@ use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::paths::{IN, OUT};
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::statements::UpdateStatement;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Idiom, Kind, Literal, Output, View};
@@ -67,7 +68,7 @@ impl DefineTableStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 
 		// Process the name
-		let name = process_definition_ident!(stk, ctx, opt, doc, &self.name, "table name");
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "table name").await?.to_raw_string();
 
 		// Get the NS and DB
 		let (ns_name, db_name) = opt.ns_db()?;

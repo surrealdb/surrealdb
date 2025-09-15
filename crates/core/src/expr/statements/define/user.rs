@@ -17,6 +17,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::escape::QuoteStr;
 use crate::expr::fmt::Fmt;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::user::UserDuration;
 use crate::expr::{Base, Expr, Ident, Idiom, Literal};
 use crate::iam::{Action, ResourceKind};
@@ -78,7 +79,7 @@ impl DefineUserStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<catalog::UserDefinition> {
 		Ok(UserDefinition {
-			name: process_definition_ident!(stk, ctx, opt, doc, &self.name, "user name"),
+			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "user name").await?.to_raw_string(),
 			hash: self.hash.clone(),
 			code: self.code.clone(),
 			roles: self.roles.iter().map(|x| x.clone().to_raw_string()).collect(),

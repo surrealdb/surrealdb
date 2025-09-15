@@ -15,6 +15,7 @@ use crate::dbs::Force;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::parameterize::exprs_to_fields;
 #[cfg(target_family = "wasm")]
 use crate::expr::Output;
@@ -66,8 +67,8 @@ impl DefineIndexStatement {
 		let txn = ctx.tx();
 
 		// Compute name and what
-		let name = process_definition_ident!(stk, ctx, opt, doc, &self.name, "index name");
-		let what = process_definition_ident!(stk, ctx, opt, doc, &self.what, "index table");
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "index name").await?.to_raw_string();
+		let what = expr_to_ident(stk, ctx, opt, doc, &self.what, "index table").await?.to_raw_string();
 
 		let (ns, db) = opt.ns_db()?;
 		let tb = txn.ensure_ns_db_tb(ns, db, &what, opt.strict).await?;

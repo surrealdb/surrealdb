@@ -8,6 +8,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
@@ -43,7 +44,7 @@ impl RemoveDatabaseStatement {
 		let txn = ctx.tx();
 
 		// Compute the name
-		let name = process_definition_ident!(stk, ctx, opt, doc, &self.name, "database name");
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "database name").await?.to_raw_string();
 		let ns = opt.ns()?;
 		let db = match txn.get_db_by_name(ns, &name).await? {
 			Some(x) => x,

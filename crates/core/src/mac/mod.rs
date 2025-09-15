@@ -96,68 +96,6 @@ macro_rules! compute_to {
 	}};
 }
 
-macro_rules! process_definition_ident {
-	($stk:ident, $ctx:ident, $opt:ident, $doc:ident, $x:expr, $into:expr) => {{
-		use crate::expr::FlowResultExt;
-		match $x {
-			crate::expr::Expr::Idiom(x) if x.is_field(None) => {
-				let Some(crate::expr::Part::Field(x)) = x.first() else {
-					fail!("Expected a field idiom");
-				};
-
-				x.to_raw_string()
-			}
-			x => match $stk
-				.run(|stk| x.compute(stk, $ctx, $opt, $doc))
-				.await
-				.catch_return()?
-				.coerce_to::<String>()
-			{
-				Err(crate::val::value::CoerceError::InvalidKind {
-					from,
-					..
-				}) => Err(crate::val::value::CoerceError::InvalidKind {
-					from,
-					into: $into.to_string(),
-				}),
-				x => x,
-			}?,
-		}
-	}};
-}
-
-macro_rules! process_definition_idiom {
-	($stk:ident, $ctx:ident, $opt:ident, $doc:ident, $x:expr, $into:expr) => {{
-		use std::str::FromStr;
-
-		use crate::expr::{FlowResultExt, Idiom};
-
-		match $x {
-			crate::expr::Expr::Idiom(x) => x.clone(),
-			x => {
-				let raw = match $stk
-					.run(|stk| x.compute(stk, $ctx, $opt, $doc))
-					.await
-					.catch_return()?
-					.coerce_to::<String>()
-				{
-					Err(crate::val::value::CoerceError::InvalidKind {
-						from,
-						..
-					}) => Err(crate::val::value::CoerceError::InvalidKind {
-						from,
-						into: $into.to_string(),
-					}),
-					x => x,
-				}?;
-
-				Idiom::from_str(&raw)
-					.map_err(|e| anyhow::anyhow!("Failed to parse {} from string: {e}", $into))?
-			}
-		}
-	}};
-}
-
 /// Extends a b-tree map of key-value pairs.
 ///
 /// This macro extends the supplied map, by cloning
@@ -278,7 +216,7 @@ mod test {
 		let Ok(Error::Unreachable(msg)) = fail_func().unwrap_err().downcast() else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:268: Reached unreachable code", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:207: Reached unreachable code", msg);
 	}
 
 	#[test]
@@ -286,7 +224,7 @@ mod test {
 		let Error::Unreachable(msg) = Error::unreachable("Reached unreachable code") else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:285: Reached unreachable code", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:224: Reached unreachable code", msg);
 	}
 
 	#[test]
@@ -294,6 +232,6 @@ mod test {
 		let Ok(Error::Unreachable(msg)) = fail_func_args().unwrap_err().downcast() else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:272: Found test but expected other", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:211: Found test but expected other", msg);
 	}
 }

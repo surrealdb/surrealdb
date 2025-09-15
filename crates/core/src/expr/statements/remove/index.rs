@@ -11,6 +11,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Expr, Literal, Value};
+use crate::expr::parameterize::expr_to_ident;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -42,9 +43,9 @@ impl RemoveIndexStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Compute the name
-		let name = process_definition_ident!(stk, ctx, opt, doc, &self.name, "index name");
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "index name").await?.to_raw_string();
 		// Compute the what
-		let what = process_definition_ident!(stk, ctx, opt, doc, &self.what, "what");
+		let what = expr_to_ident(stk, ctx, opt, doc, &self.what, "what").await?.to_raw_string();
 		// Get the NS and DB
 		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;

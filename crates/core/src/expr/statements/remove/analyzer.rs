@@ -8,6 +8,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
@@ -38,7 +39,7 @@ impl RemoveAnalyzerStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
 		// Compute the name
-		let name = process_definition_ident!(stk, ctx, opt, doc, &self.name, "analyzer name");
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "analyzer name").await?.to_raw_string();
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the definition

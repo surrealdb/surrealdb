@@ -19,6 +19,8 @@ use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
+use crate::expr::parameterize::expr_to_ident;
+use crate::expr::parameterize::expr_to_idiom;
 use crate::expr::{Base, Expr, Kind, KindLiteral, Literal, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
@@ -88,8 +90,8 @@ impl DefineFieldStatement {
 		}
 
 		Ok(catalog::FieldDefinition {
-			name: process_definition_idiom!(stk, ctx, opt, doc, &self.name, "field name"),
-			what: process_definition_ident!(stk, ctx, opt, doc, &self.what, "table name"),
+			name: expr_to_idiom(stk, ctx, opt, doc, &self.name, "field name").await?,
+			what: expr_to_ident(stk, ctx, opt, doc, &self.what, "table name").await?.to_raw_string(),
 			flexible: self.flex,
 			field_kind: self.field_kind.clone(),
 			readonly: self.readonly,

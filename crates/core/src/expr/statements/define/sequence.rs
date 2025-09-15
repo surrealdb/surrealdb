@@ -10,6 +10,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Timeout, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
@@ -47,7 +48,7 @@ impl DefineSequenceStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
 		// Compute name
-		let name = process_definition_ident!(stk, ctx, opt, doc, &self.name, "sequence name");
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "sequence name").await?.to_raw_string();
 		// Compute timeout
 		let timeout = map_opt!(x as &self.timeout => x.compute(stk, ctx, opt, doc).await?.0);
 		// Fetch the transaction

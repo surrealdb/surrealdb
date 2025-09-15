@@ -1,10 +1,12 @@
+use std::str::FromStr;
+
 use anyhow::Result;
 use reblessive::tree::Stk;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Expr, FlowResultExt, Function, Idiom};
+use crate::expr::{Expr, FlowResultExt, Function, Ident, Idiom};
 
 pub async fn exprs_to_fields(stk: &mut Stk, ctx: &Context, opt: &Options, doc: Option<&CursorDoc>, expr: &[Expr]) -> Result<Vec<Idiom>> {
     let mut fields = Vec::new();
@@ -49,4 +51,62 @@ pub async fn exprs_to_fields(stk: &mut Stk, ctx: &Context, opt: &Options, doc: O
         }
     }
     Ok(fields)
+}
+
+pub async fn expr_to_ident(stk: &mut Stk, ctx: &Context, opt: &Options, doc: Option<&CursorDoc>, expr: &Expr, into: &str) -> Result<Ident> {
+    match expr {
+        crate::expr::Expr::Idiom(x) if x.is_field(None) => {
+            let Some(crate::expr::Part::Field(x)) = x.first() else {
+                fail!("Expected a field idiom");
+            };
+
+            Ok(x.clone())
+        }
+        x => {
+            let raw = match stk
+                .run(|stk| x.compute(stk, ctx, opt, doc))
+                .await
+                .catch_return()?
+                .coerce_to::<String>()
+            {
+                Err(crate::val::value::CoerceError::InvalidKind {
+                    from,
+                    ..
+                }) => Err(crate::val::value::CoerceError::InvalidKind {
+                    from,
+                    into: into.to_string(),
+                }),
+                x => x,
+            }?;
+
+            Ident::new(raw).ok_or_else(|| anyhow::anyhow!("Failed to parse {} from string", into))
+        },
+    }
+}
+
+pub async fn expr_to_idiom(stk: &mut Stk, ctx: &Context, opt: &Options, doc: Option<&CursorDoc>, expr: &Expr, into: &str) -> Result<Idiom> {
+    match expr {
+        crate::expr::Expr::Idiom(x) => {
+            Ok(x.clone())
+        }
+        x => {
+            let raw = match stk
+                .run(|stk| x.compute(stk, ctx, opt, doc))
+                .await
+                .catch_return()?
+                .coerce_to::<String>()
+            {
+                Err(crate::val::value::CoerceError::InvalidKind {
+                    from,
+                    ..
+                }) => Err(crate::val::value::CoerceError::InvalidKind {
+                    from,
+                    into: into.to_string(),
+                }),
+                x => x,
+            }?;
+
+            Idiom::from_str(&raw).map_err(|e| anyhow::anyhow!("Failed to parse {} from string: {e}", into))
+        },
+    }
 }

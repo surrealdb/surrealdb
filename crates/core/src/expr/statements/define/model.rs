@@ -14,6 +14,7 @@ use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::{Base, Expr, Literal};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
+use crate::expr::parameterize::expr_to_ident;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineModelStatement {
@@ -52,7 +53,7 @@ impl DefineModelStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Compute name and version
-		let name = process_definition_ident!(stk, ctx, opt, doc, &self.name, "model name");
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "model name").await?.to_raw_string();
 		// Check if the definition exists
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		if let Some(model) = txn.get_db_model(ns, db, &name, &self.version).await? {
