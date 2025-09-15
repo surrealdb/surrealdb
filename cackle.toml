@@ -169,6 +169,9 @@ allow_proc_macro = true
 [pkg.serial_test_derive]
 allow_proc_macro = true
 
+[pkg.surrealdb-types-derive]
+allow_proc_macro = true
+
 [pkg.time-macros]
 allow_proc_macro = true
 allow_unsafe = true
@@ -249,9 +252,6 @@ allow_proc_macro = true
 build.allow_apis = ["process"]
 
 [pkg.surrealdb-derive]
-allow_proc_macro = true
-
-[pkg.surrealdb-macros]
 allow_proc_macro = true
 
 [pkg.tokio-macros]
@@ -1396,3 +1396,9 @@ allow_apis = ["fs", "net"]
 
 [pkg.console-api]
 allow_apis = ["net"]
+
+[pkg.storekey-derive]
+allow_proc_macro = true
+
+[pkg.storekey]
+allow_unsafe = true

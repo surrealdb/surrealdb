@@ -6,11 +6,10 @@ use std::sync::Arc;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::expr::index::Index;
+use crate::catalog::providers::TableProvider;
+use crate::catalog::{self, DatabaseId, Index, IndexDefinition, NamespaceId};
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
-use crate::expr::statements::{DefineFieldStatement, DefineIndexStatement};
 use crate::expr::{
 	BinaryOperator, Cond, Expr, FlowResultExt as _, Ident, Idiom, Kind, Literal, Order, Part, With,
 };
@@ -185,8 +184,7 @@ impl<'a> TreeBuilder<'a> {
 				self.check_boolean_operator(group, op);
 				let left_node = stk.run(|stk| self.eval_value(stk, group, left)).await?;
 				let right_node = stk.run(|stk| self.eval_value(stk, group, right)).await?;
-				// If both values are computable, then we can delegate the computation to the
-				// parent
+				// If both values are computable, then we can delegate the computation to the parent
 				if left_node == Node::Computable && right_node == Node::Computable {
 					return Ok(Node::Computable);
 				}
@@ -363,7 +361,7 @@ impl<'a> TreeBuilder<'a> {
 	async fn resolve_record_field(
 		&mut self,
 		tx: &Transaction,
-		fields: &[DefineFieldStatement],
+		fields: &[catalog::FieldDefinition],
 		idiom: &Arc<Idiom>,
 	) -> Result<Option<RecordOptions>> {
 		for field in fields.iter() {
@@ -482,10 +480,7 @@ impl<'a> TreeBuilder<'a> {
 			let op = match &ixr.index {
 				Index::Idx => self.eval_index_operator(ixr, op, n, p, *col),
 				Index::Uniq => self.eval_index_operator(ixr, op, n, p, *col),
-				Index::Search {
-					..
-				}
-				| Index::FullText {
+				Index::FullText {
 					..
 				} if *col == 0 => Self::eval_matches_operator(op, n),
 				Index::MTree(_) if *col == 0 => self.eval_mtree_knn(e, op, n)?,
@@ -601,9 +596,10 @@ impl<'a> TreeBuilder<'a> {
 		if let Some(v) = n.is_computed() {
 			match (op, v, p) {
 				(BinaryOperator::Equal | BinaryOperator::ExactEqual, v, _) => {
-					self.index_map.check_compound(ixr, col, &v);
+					let iop = IndexOperator::Equality(v);
+					self.index_map.check_compound(ixr, col, &iop);
 					if col == 0 {
-						return Some(IndexOperator::Equality(v));
+						return Some(iop);
 					}
 				}
 				(BinaryOperator::Contain, v, IdiomPosition::Left) => {
@@ -641,8 +637,10 @@ impl<'a> TreeBuilder<'a> {
 					v,
 					p,
 				) => {
+					let iop = IndexOperator::RangePart(p.transform(op), v);
+					self.index_map.check_compound(ixr, col, &iop);
 					if col == 0 {
-						return Some(IndexOperator::RangePart(p.transform(op), v));
+						return Some(iop);
 					}
 				}
 				_ => {}
@@ -652,7 +650,7 @@ impl<'a> TreeBuilder<'a> {
 	}
 }
 
-pub(super) type CompoundIndexes = HashMap<IndexReference, Vec<Vec<Arc<Value>>>>;
+pub(super) type CompoundIndexes = HashMap<IndexReference, Vec<Vec<IndexOperator>>>;
 
 /// For each expression a possible index option
 #[derive(Default)]
@@ -664,29 +662,30 @@ pub(super) struct IndexesMap {
 }
 
 impl IndexesMap {
-	pub(crate) fn check_compound(&mut self, ixr: &IndexReference, col: usize, val: &Arc<Value>) {
+	pub(crate) fn check_compound(&mut self, ixr: &IndexReference, col: usize, iop: &IndexOperator) {
 		let cols = ixr.cols.len();
 		let values = self.compound_indexes.entry(ixr.clone()).or_insert(vec![vec![]; cols]);
 		if let Some(a) = values.get_mut(col) {
-			a.push(val.clone());
+			a.push(iop.clone());
 		}
 	}
 
 	pub(crate) fn check_compound_array(&mut self, ixr: &IndexReference, col: usize, a: &Array) {
 		for v in a.iter() {
-			self.check_compound(ixr, col, &Arc::new(v.clone()))
+			let iop = IndexOperator::Equality(Arc::new(v.clone()));
+			self.check_compound(ixr, col, &iop)
 		}
 	}
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct IndexReference {
-	indexes: Arc<[DefineIndexStatement]>,
+	indexes: Arc<[IndexDefinition]>,
 	idx: usize,
 }
 
 impl IndexReference {
-	pub(super) fn new(indexes: Arc<[DefineIndexStatement]>, idx: usize) -> Self {
+	pub(super) fn new(indexes: Arc<[IndexDefinition]>, idx: usize) -> Self {
 		Self {
 			indexes,
 			idx,
@@ -709,7 +708,7 @@ impl PartialEq for IndexReference {
 impl Eq for IndexReference {}
 
 impl Deref for IndexReference {
-	type Target = DefineIndexStatement;
+	type Target = IndexDefinition;
 
 	fn deref(&self) -> &Self::Target {
 		&self.indexes[self.idx]
@@ -718,8 +717,8 @@ impl Deref for IndexReference {
 
 #[derive(Clone)]
 struct SchemaCache {
-	indexes: Arc<[DefineIndexStatement]>,
-	fields: Arc<[DefineFieldStatement]>,
+	indexes: Arc<[IndexDefinition]>,
+	fields: Arc<[catalog::FieldDefinition]>,
 }
 
 impl SchemaCache {
@@ -739,7 +738,7 @@ impl SchemaCache {
 
 pub(super) type GroupRef = u16;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) enum Node {
 	Expression {
 		group: GroupRef,

@@ -9,8 +9,9 @@ use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::err::Error;
 use crate::expr::data::Data;
-use crate::expr::paths::{EDGE, ID, IN, OUT};
+use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::{AssignOperator, FlowResultExt};
+use crate::val::record::RecordType;
 use crate::val::{RecordId, Value};
 
 impl Document {
@@ -35,7 +36,7 @@ impl Document {
 			// This is a CREATE, UPSERT, UPDATE statement
 			if let Workable::Normal = &self.extras {
 				// Check if the document already has an ID from the current data
-				let existing_id = self.current.doc.pick(&*ID);
+				let existing_id = self.current.doc.as_ref().pick(&*ID);
 				if !existing_id.is_none() {
 					// The document already has an ID, use it
 					let id = existing_id.generate(tb.clone().into_strand(), false)?;
@@ -86,7 +87,7 @@ impl Document {
 	/// This function only clears the document in
 	/// memory, and does not store this on disk.
 	pub(super) fn clear_record_data(&mut self) {
-		*self.current.doc.to_mut() = Value::None
+		*self.current.doc = Default::default();
 	}
 	/// Sets the default field data that should be
 	/// present on this document. For normal records
@@ -108,11 +109,11 @@ impl Document {
 		// This is a RELATE statement, so reset fields
 		if let Workable::Relate(l, r, _) = &self.extras {
 			// Mark that this is an edge node
-			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));
+			self.current.doc.set_record_type(RecordType::Edge);
 			// If this document existed before, check the `in` field
-			match (self.initial.doc.pick(&*IN), self.is_new()) {
+			match (self.initial.doc.as_ref().pick(&*IN), self.is_new()) {
 				// If the document id matches, then all good
-				(Value::RecordId(id), false) if id.eq(l) => {
+				(Value::RecordId(id), false) if id == *l => {
 					self.current.doc.to_mut().put(&*IN, l.clone().into());
 				}
 				// If the document is new then all good
@@ -127,9 +128,9 @@ impl Document {
 				}
 			}
 			// If this document existed before, check the `out` field
-			match (self.initial.doc.pick(&*OUT), self.is_new()) {
+			match (self.initial.doc.as_ref().pick(&*OUT), self.is_new()) {
 				// If the document id matches, then all good
-				(Value::RecordId(id), false) if id.eq(r) => {
+				(Value::RecordId(id), false) if id == *r => {
 					self.current.doc.to_mut().put(&*OUT, r.clone().into());
 				}
 				// If the document is new then all good
@@ -145,10 +146,10 @@ impl Document {
 			}
 		}
 		// This is an UPDATE of a graph edge, so reset fields
-		if self.initial.doc.pick(&*EDGE).is_true() {
-			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));
-			self.current.doc.to_mut().put(&*IN, self.initial.doc.pick(&*IN));
-			self.current.doc.to_mut().put(&*OUT, self.initial.doc.pick(&*OUT));
+		if self.initial.doc.is_edge() {
+			self.current.doc.set_record_type(RecordType::Edge);
+			self.current.doc.to_mut().put(&*IN, self.initial.doc.as_ref().pick(&*IN));
+			self.current.doc.to_mut().put(&*OUT, self.initial.doc.as_ref().pick(&*OUT));
 		}
 		// Carry on
 		Ok(())
@@ -174,8 +175,6 @@ impl Document {
 		if let Workable::Relate(_, _, Some(v)) = &self.extras {
 			self.current.doc.to_mut().merge(Value::clone(v))?;
 		}
-		// Set default field values
-		self.current.doc.to_mut().def(&rid);
 		// Carry on
 		Ok(())
 	}
@@ -508,8 +507,6 @@ impl Document {
 				x => fail!("Unexpected data clause type: {x:?}"),
 			};
 		};
-		// Set default field values
-		self.current.doc.to_mut().def(&rid);
 		// Carry on
 		Ok(())
 	}

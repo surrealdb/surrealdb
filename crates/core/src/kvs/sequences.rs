@@ -1,16 +1,18 @@
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use dashmap::DashMap;
-use dashmap::mapref::entry::Entry;
 use rand::{Rng, thread_rng};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use tokio::sync::{Mutex, RwLock};
 use tokio::time::sleep;
 use uuid::Uuid;
 
+use crate::catalog::providers::DatabaseProvider;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -22,10 +24,12 @@ use crate::key::sequence::st::St;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{KVKey, LockType, Transaction, TransactionType, impl_kv_value_revisioned};
 
+type SequencesMap = Arc<RwLock<HashMap<Arc<SequenceDomain>, Arc<Mutex<Sequence>>>>>;
+
 #[derive(Clone)]
 pub(crate) struct Sequences {
 	tf: TransactionFactory,
-	sequences: Arc<DashMap<Arc<SequenceDomain>, Sequence>>,
+	sequences: SequencesMap,
 }
 
 #[derive(Hash, PartialEq, Eq)]
@@ -102,14 +106,14 @@ impl Sequences {
 		db: DatabaseId,
 	) -> Result<()> {
 		for sqs in tx.all_db_sequences(ns, db).await?.iter() {
-			self.sequence_removed(ns, db, &sqs.name);
+			self.sequence_removed(ns, db, &sqs.name).await;
 		}
 		Ok(())
 	}
 
-	pub(crate) fn sequence_removed(&self, ns: NamespaceId, db: DatabaseId, sq: &str) {
+	pub(crate) async fn sequence_removed(&self, ns: NamespaceId, db: DatabaseId, sq: &str) {
 		let key = SequenceDomain::new_user(ns, db, sq);
-		self.sequences.remove(&key);
+		self.sequences.write().await.remove(&key);
 	}
 
 	async fn next_val<F>(
@@ -123,16 +127,22 @@ impl Sequences {
 	where
 		F: FnOnce() -> (i64, Option<Duration>) + Send + Sync + 'static,
 	{
-		match self.sequences.entry(seq.clone()) {
-			Entry::Occupied(mut e) => e.get_mut().next(ctx, nid, &seq, batch).await,
+		let sequence = self.sequences.read().await.get(&seq).cloned();
+		if let Some(s) = sequence {
+			return s.lock().await.next(ctx, nid, &seq, batch).await;
+		}
+		let s = match self.sequences.write().await.entry(seq.clone()) {
+			Entry::Occupied(e) => e.get().clone(),
 			Entry::Vacant(e) => {
 				let (start, timeout) = init_params();
-				let s =
+				let s = Arc::new(Mutex::new(
 					Sequence::load(self.tf.clone(), &ctx.tx(), nid, &seq, start, batch, timeout)
-						.await?;
-				e.insert(s).next(ctx, nid, &seq, batch).await
+						.await?,
+				));
+				e.insert(s).clone()
 			}
-		}
+		};
+		s.lock().await.next(ctx, nid, &seq, batch).await
 	}
 
 	pub(crate) async fn next_val_user(
@@ -144,10 +154,7 @@ impl Sequences {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let seq = ctx.tx().get_db_sequence(ns, db, sq).await?;
 		let key = Arc::new(SequenceDomain::new_user(ns, db, sq));
-		self.next_val(ctx, opt.id()?, key, seq.batch, move || {
-			(seq.start, seq.timeout.clone().map(|d| d.0.0))
-		})
-		.await
+		self.next_val(ctx, opt.id()?, key, seq.batch, move || (seq.start, seq.timeout)).await
 	}
 
 	pub(crate) async fn next_val_fts_idx(

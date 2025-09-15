@@ -1,5 +1,6 @@
 use anyhow::Result;
 
+use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
@@ -24,8 +25,7 @@ impl Document {
 		let rid = self.id()?;
 		// Get NS & DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		// Store the record data
-		let key = crate::key::thing::new(ns, db, &rid.table, &rid.key);
+
 		// Remove the id field from the doc so that it's not duplicated,
 		// because it's always present as a key in the underlying key-value
 		// datastore. When the doc is read from the datastore, the key is set
@@ -48,7 +48,18 @@ impl Document {
 			// set and update the key, without checking if the key
 			// already exists in the storage engine.
 			Statement::Insert(_) if self.is_iteration_initial() => {
-				match ctx.tx().put(&key, doc_without_id.as_ref(), opt.version).await {
+				match ctx
+					.tx()
+					.put_record(
+						ns,
+						db,
+						&rid.table,
+						&rid.key,
+						doc_without_id.into_read_only(),
+						opt.version,
+					)
+					.await
+				{
 					// The key already exists, so return an error
 					Err(e) => {
 						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
@@ -70,7 +81,18 @@ impl Document {
 			// key does not exist.  If the record value exists then we
 			// retry and attempt to update the record which exists.
 			Statement::Upsert(_) if self.is_iteration_initial() => {
-				match ctx.tx().put(&key, doc_without_id.as_ref(), opt.version).await {
+				match ctx
+					.tx()
+					.put_record(
+						ns,
+						db,
+						&rid.table,
+						&rid.key,
+						doc_without_id.into_read_only(),
+						opt.version,
+					)
+					.await
+				{
 					// The key already exists, so return an error
 					Err(e) => {
 						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
@@ -92,7 +114,18 @@ impl Document {
 			// key does not exist. If it already exists, then we
 			// return an error, and the statement fails.
 			Statement::Create(_) => {
-				match ctx.tx().put(&key, doc_without_id.as_ref(), opt.version).await {
+				match ctx
+					.tx()
+					.put_record(
+						ns,
+						db,
+						&rid.table,
+						&rid.key,
+						doc_without_id.into_read_only(),
+						opt.version,
+					)
+					.await
+				{
 					// The key already exists, so return an error
 					Err(e) => {
 						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
@@ -107,10 +140,19 @@ impl Document {
 				}
 			}
 			// Let's update the stored value for the specified key
-			_ => ctx.tx().set(&key, doc_without_id.as_ref(), opt.version).await,
+			_ => {
+				ctx.tx()
+					.set_record(
+						ns,
+						db,
+						&rid.table,
+						&rid.key,
+						doc_without_id.into_read_only(),
+						opt.version,
+					)
+					.await
+			}
 		}?;
-		// Update the cache
-		ctx.tx().set_record_cache(ns, db, &rid.table, &rid.key, doc_without_id.as_arc())?;
 		// Carry on
 		Ok(())
 	}

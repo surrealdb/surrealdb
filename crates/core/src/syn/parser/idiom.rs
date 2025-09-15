@@ -3,8 +3,9 @@ use reblessive::Stk;
 use super::basic::NumberToken;
 use super::mac::{expected, unexpected};
 use super::{ParseResult, Parser};
+use crate::sql::lookup::LookupKind;
 use crate::sql::part::{DestructurePart, Recurse, RecurseInstruction};
-use crate::sql::{Dir, Expr, Field, Fields, Graph, Ident, Idiom, Literal, Param, Part};
+use crate::sql::{Dir, Expr, Field, Fields, Ident, Idiom, Literal, Lookup, Param, Part};
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::{self, Numeric};
 use crate::syn::token::{Glued, Span, TokenKind, t};
@@ -15,7 +16,7 @@ impl Parser<'_> {
 		if matches!(peek, t!("->") | t!("[") | t!(".") | t!("...") | t!("?")) {
 			return true;
 		}
-		peek == t!("<") && matches!(self.peek1().kind, t!("-") | t!("->"))
+		peek == t!("<") && matches!(self.peek1().kind, t!("-") | t!("~") | t!("->"))
 	}
 
 	/// Parse fields of a selecting query: `foo, bar` in `SELECT foo, bar FROM
@@ -103,21 +104,39 @@ impl Parser<'_> {
 				}
 				t!("->") => {
 					self.pop_peek();
-					let graph = stk.run(|stk| self.parse_graph(stk, Dir::Out)).await?;
-					res.push(Part::Graph(graph))
+					let lookup =
+						stk.run(|stk| self.parse_lookup(stk, LookupKind::Graph(Dir::Out))).await?;
+					res.push(Part::Graph(lookup))
 				}
 				t!("<") => {
 					let peek = self.peek_whitespace1();
-					if peek.kind == t!("-") {
+					if peek.kind == t!("~") {
 						self.pop_peek();
 						self.pop_peek();
-						let graph = stk.run(|stk| self.parse_graph(stk, Dir::In)).await?;
-						res.push(Part::Graph(graph))
+						if !self.settings.references_enabled {
+							bail!(
+								"Experimental capability `record_references` is not enabled",
+								@self.last_span() => "Use of `<~` reference lookup is still experimental"
+							)
+						}
+
+						let lookup =
+							stk.run(|stk| self.parse_lookup(stk, LookupKind::Reference)).await?;
+						res.push(Part::Graph(lookup))
+					} else if peek.kind == t!("-") {
+						self.pop_peek();
+						self.pop_peek();
+						let lookup = stk
+							.run(|stk| self.parse_lookup(stk, LookupKind::Graph(Dir::In)))
+							.await?;
+						res.push(Part::Graph(lookup))
 					} else if peek.kind == t!("->") {
 						self.pop_peek();
 						self.pop_peek();
-						let graph = stk.run(|stk| self.parse_graph(stk, Dir::Both)).await?;
-						res.push(Part::Graph(graph))
+						let lookup = stk
+							.run(|stk| self.parse_lookup(stk, LookupKind::Graph(Dir::Both)))
+							.await?;
+						res.push(Part::Graph(lookup))
 					} else {
 						break;
 					}
@@ -167,23 +186,33 @@ impl Parser<'_> {
 				}
 				t!("->") => {
 					self.pop_peek();
-					let x = self.parse_graph(stk, Dir::Out).await?;
+					let x = self.parse_lookup(stk, LookupKind::Graph(Dir::Out)).await?;
 					res.push(Part::Graph(x))
 				}
 				t!("<") => {
 					let peek = self.peek_whitespace1();
-					if peek.kind == t!("-") {
+					if peek.kind == t!("~") {
 						self.pop_peek();
 						self.pop_peek();
+						if !self.settings.references_enabled {
+							bail!(
+								"Experimental capability `record_references` is not enabled",
+								@self.last_span() => "Use of `<~` reference lookup is still experimental"
+							)
+						}
 
-						let graph = self.parse_graph(stk, Dir::In).await?;
-						res.push(Part::Graph(graph));
+						let lookup = self.parse_lookup(stk, LookupKind::Reference).await?;
+						res.push(Part::Graph(lookup))
+					} else if peek.kind == t!("-") {
+						self.pop_peek();
+						self.pop_peek();
+						let lookup = self.parse_lookup(stk, LookupKind::Graph(Dir::In)).await?;
+						res.push(Part::Graph(lookup))
 					} else if peek.kind == t!("->") {
 						self.pop_peek();
 						self.pop_peek();
-
-						let graph = self.parse_graph(stk, Dir::Both).await?;
-						res.push(Part::Graph(graph));
+						let lookup = self.parse_lookup(stk, LookupKind::Graph(Dir::Both)).await?;
+						res.push(Part::Graph(lookup))
 					} else {
 						break;
 					}
@@ -204,19 +233,29 @@ impl Parser<'_> {
 		let start = match self.peek_kind() {
 			t!("->") => {
 				self.pop_peek();
-				let graph = stk.run(|ctx| self.parse_graph(ctx, Dir::Out)).await?;
-				Part::Graph(graph)
+				let lookup =
+					stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::Out))).await?;
+				Part::Graph(lookup)
 			}
 			t!("<") => {
 				let t = self.pop_peek();
-				let graph = if self.eat_whitespace(t!("-")) {
-					stk.run(|ctx| self.parse_graph(ctx, Dir::In)).await?
+				let lookup = if self.eat_whitespace(t!("~")) {
+					if !self.settings.references_enabled {
+						bail!(
+							"Experimental capability `record_references` is not enabled",
+							@self.last_span() => "Use of `<~` reference lookup is still experimental"
+						)
+					}
+
+					stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Reference)).await?
+				} else if self.eat_whitespace(t!("-")) {
+					stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::In))).await?
 				} else if self.eat_whitespace(t!("->")) {
-					stk.run(|ctx| self.parse_graph(ctx, Dir::Both)).await?
+					stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::Both))).await?
 				} else {
 					unexpected!(self, t, "either `<-` `<->` or `->`")
 				};
-				Part::Graph(graph)
+				Part::Graph(lookup)
 			}
 			_ => Part::Field(self.next_token_value()?),
 		};
@@ -618,13 +657,17 @@ impl Parser<'_> {
 	/// # Parser state
 	/// Expects to just have eaten a direction (e.g. <-, <->, or ->) and be at
 	/// the field like part of the graph
-	pub(super) async fn parse_graph(&mut self, stk: &mut Stk, dir: Dir) -> ParseResult<Graph> {
+	pub(super) async fn parse_lookup(
+		&mut self,
+		stk: &mut Stk,
+		kind: LookupKind,
+	) -> ParseResult<Lookup> {
 		let token = self.peek();
 		match token.kind {
 			t!("?") => {
 				self.pop_peek();
-				Ok(Graph {
-					dir,
+				Ok(Lookup {
+					kind,
 					..Default::default()
 				})
 			}
@@ -647,10 +690,10 @@ impl Parser<'_> {
 						Vec::new()
 					}
 					x if Self::kind_is_identifier(x) => {
-						let subject = self.parse_graph_subject(stk).await?;
+						let subject = self.parse_lookup_subject(stk).await?;
 						let mut subjects = vec![subject];
 						while self.eat(t!(",")) {
-							subjects.push(self.parse_graph_subject(stk).await?);
+							subjects.push(self.parse_lookup_subject(stk).await?);
 						}
 						subjects
 					}
@@ -685,8 +728,8 @@ impl Parser<'_> {
 
 				self.expect_closing_delimiter(t!(")"), span)?;
 
-				Ok(Graph {
-					dir,
+				Ok(Lookup {
+					kind,
 					what,
 					cond,
 					alias,
@@ -701,9 +744,9 @@ impl Parser<'_> {
 			x if Self::kind_is_identifier(x) => {
 				// The following function should always succeed here,
 				// returning an error here would be a bug, so unwrap.
-				let subject = self.parse_graph_subject(stk).await?;
-				Ok(Graph {
-					dir,
+				let subject = self.parse_lookup_subject(stk).await?;
+				Ok(Lookup {
+					kind,
 					what: vec![subject],
 					..Default::default()
 				})
@@ -716,7 +759,7 @@ impl Parser<'_> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::graph::GraphSubject;
+	use crate::sql::lookup::LookupSubject;
 	use crate::sql::{self, BinaryOperator, RecordIdKeyLit, RecordIdLit};
 	use crate::syn;
 
@@ -878,7 +921,7 @@ mod tests {
 	fn idiom_nested_array_all() {
 		let sql = "test.temp[*]";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("test.temp[*]", format!("{}", out));
+		assert_eq!("test.temp.*", format!("{}", out));
 		assert_eq!(out, sql::Expr::Idiom(Idiom(vec![f("test"), f("temp"), Part::All])));
 	}
 
@@ -894,7 +937,7 @@ mod tests {
 	fn idiom_nested_array_value() {
 		let sql = "test.temp[*].text";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("test.temp[*].text", format!("{}", out));
+		assert_eq!("test.temp.*.text", format!("{}", out));
 		assert_eq!(out, sql::Expr::Idiom(Idiom(vec![f("test"), f("temp"), Part::All, f("text")])));
 	}
 
@@ -968,14 +1011,16 @@ mod tests {
 					key: RecordIdKeyLit::String(strand!("test").to_owned())
 				}))),
 				f("friend"),
-				Part::Graph(Graph {
-					dir: Dir::Out,
-					what: vec![GraphSubject::Table(Ident::from_strand(strand!("like").to_owned()))],
+				Part::Graph(Lookup {
+					kind: LookupKind::Graph(Dir::Out),
+					what: vec![LookupSubject::Table(Ident::from_strand(
+						strand!("like").to_owned()
+					))],
 					..Default::default()
 				}),
-				Part::Graph(Graph {
-					dir: Dir::Out,
-					what: vec![GraphSubject::Table(Ident::from_strand(
+				Part::Graph(Lookup {
+					kind: LookupKind::Graph(Dir::Out),
+					what: vec![LookupSubject::Table(Ident::from_strand(
 						strand!("person").to_owned()
 					))],
 					..Default::default()
@@ -988,7 +1033,7 @@ mod tests {
 	fn part_all() {
 		let sql = "{}[*]";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("{  }[*]", format!("{}", out));
+		assert_eq!("{  }.*", format!("{}", out));
 		assert_eq!(
 			out,
 			Expr::Idiom(Idiom(vec![

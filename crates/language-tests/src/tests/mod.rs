@@ -1,10 +1,12 @@
-use anyhow::{Context, Result, bail};
-use schema::TestConfig;
-use serde::{Deserialize, de::IntoDeserializer};
-use set::TestId;
-pub use set::TestSet;
 use std::ops::Range;
 use std::sync::Arc;
+
+use anyhow::{Context, Result, bail};
+use schema::TestConfig;
+use serde::Deserialize;
+use serde::de::IntoDeserializer;
+use set::TestId;
+pub use set::TestSet;
 use toml_edit::DocumentMut;
 
 pub mod cmp;

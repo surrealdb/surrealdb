@@ -9,7 +9,7 @@ impl Value {
 			Some(p) => match self {
 				// Current value at path is an object
 				Value::Object(v) => match p {
-					Part::Graph(g) => {
+					Part::Lookup(g) => {
 						let entry = v.entry(g.to_raw()).or_insert_with(Value::empty_object);
 						if !entry.is_nullish() {
 							entry.put(path.next(), val);
@@ -20,7 +20,7 @@ impl Value {
 						}
 					}
 					Part::Field(f) => {
-						let entry = v.entry(f.as_raw_string()).or_insert_with(Value::empty_object);
+						let entry = v.entry(f.to_raw_string()).or_insert_with(Value::empty_object);
 						entry.put(path.next(), val);
 					}
 					Part::All => {

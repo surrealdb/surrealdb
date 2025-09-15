@@ -1,6 +1,8 @@
 use std::fmt::{Display, Formatter};
 
 use revision::{Revisioned, revisioned};
+use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::NamespaceId;
 use crate::expr::ChangeFeed;
@@ -11,10 +13,20 @@ use crate::sql::{Ident, ToSql};
 use crate::val::Value;
 
 #[derive(
-	Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+	Debug,
+	Clone,
+	Copy,
+	PartialEq,
+	Eq,
+	PartialOrd,
+	Ord,
+	Hash,
+	Serialize,
+	Deserialize,
+	Encode,
+	BorrowDecode,
 )]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[repr(transparent)]
 pub struct DatabaseId(pub u32);
 
 impl_kv_value_revisioned!(DatabaseId);

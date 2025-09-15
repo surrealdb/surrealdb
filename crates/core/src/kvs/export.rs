@@ -6,12 +6,19 @@ use chrono::TimeZone;
 use chrono::prelude::Utc;
 
 use super::Transaction;
+use crate::catalog::providers::{
+	AuthorisationProvider, DatabaseProvider, TableProvider, UserProvider,
+};
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
-use crate::expr::paths::{EDGE, IN, OUT};
-use crate::key::thing;
+use crate::expr::paths::{IN, OUT};
+use crate::expr::statements::define::{DefineAccessStatement, DefineUserStatement};
+use crate::expr::{Base, DefineAnalyzerStatement};
+use crate::key::record;
+use crate::kvs::KVValue;
 use crate::sql::ToSql;
+use crate::val::record::Record;
 use crate::val::{RecordId, Strand, Value};
 
 #[derive(Clone, Debug)]
@@ -248,54 +255,74 @@ impl Transaction {
 		db: DatabaseId,
 	) -> Result<()> {
 		// Output OPTIONS
-		self.export_section("OPTION", vec!["OPTION IMPORT"], chn).await?;
+		self.export_section("OPTION", ["OPTION IMPORT"].iter(), chn).await?;
 
 		// Output USERS
 		if cfg.users {
 			let users = self.all_db_users(ns, db).await?;
-			self.export_section("USERS", users.to_vec(), chn).await?;
+			self.export_section(
+				"USERS",
+				users.iter().map(|x| DefineUserStatement::from_definition(Base::Db, x)),
+				chn,
+			)
+			.await?;
 		}
 
 		// Output ACCESSES
 		if cfg.accesses {
 			let accesses = self.all_db_accesses(ns, db).await?;
-			self.export_section("ACCESSES", accesses.to_vec(), chn).await?;
+			self.export_section(
+				"ACCESSES",
+				accesses
+					.iter()
+					.map(|x| DefineAccessStatement::from_definition(Base::Db, x).redact()),
+				chn,
+			)
+			.await?;
 		}
 
 		// Output PARAMS
 		if cfg.params {
 			let params = self.all_db_params(ns, db).await?;
-			self.export_section("PARAMS", params.to_vec(), chn).await?;
+			self.export_section("PARAMS", params.iter(), chn).await?;
 		}
 
 		// Output FUNCTIONS
 		if cfg.functions {
 			let functions = self.all_db_functions(ns, db).await?;
-			self.export_section("FUNCTIONS", functions.to_vec(), chn).await?;
+			self.export_section("FUNCTIONS", functions.iter(), chn).await?;
 		}
 
 		// Output ANALYZERS
 		if cfg.analyzers {
 			let analyzers = self.all_db_analyzers(ns, db).await?;
-			self.export_section("ANALYZERS", analyzers.to_vec(), chn).await?;
+			self.export_section(
+				"ANALYZERS",
+				analyzers.iter().map(DefineAnalyzerStatement::from_definition),
+				chn,
+			)
+			.await?;
 		}
 
 		// Output SEQUENCES
 		if cfg.sequences {
 			let sequences = self.all_db_sequences(ns, db).await?;
-			self.export_section("SEQUENCES", sequences.to_vec(), chn).await?;
+			self.export_section("SEQUENCES", sequences.iter(), chn).await?;
 		}
 
 		Ok(())
 	}
 
-	async fn export_section<T: ToString>(
+	async fn export_section<T>(
 		&self,
 		title: &str,
-		items: Vec<T>,
+		items: impl ExactSizeIterator<Item = T>,
 		chn: &Sender<Vec<u8>>,
-	) -> Result<()> {
-		if items.is_empty() {
+	) -> Result<()>
+	where
+		T: ToSql,
+	{
+		if items.len() == 0 {
 			return Ok(());
 		}
 
@@ -305,7 +332,7 @@ impl Transaction {
 		chn.send(bytes!("")).await?;
 
 		for item in items {
-			chn.send(bytes!(format!("{};", item.to_string()))).await?;
+			chn.send(bytes!(format!("{};", item.to_sql()))).await?;
 		}
 
 		chn.send(bytes!("")).await?;
@@ -358,19 +385,19 @@ impl Transaction {
 		// Export all table field definitions for this table
 		let fields = self.all_tb_fields(ns, db, &table.name, None).await?;
 		for field in fields.iter() {
-			chn.send(bytes!(format!("{};", field))).await?;
+			chn.send(bytes!(format!("{};", field.to_sql()))).await?;
 		}
 		chn.send(bytes!("")).await?;
 		// Export all table index definitions for this table
 		let indexes = self.all_tb_indexes(ns, db, &table.name).await?;
 		for index in indexes.iter() {
-			chn.send(bytes!(format!("{};", index))).await?;
+			chn.send(bytes!(format!("{};", index.to_sql()))).await?;
 		}
 		chn.send(bytes!("")).await?;
 		// Export all table event definitions for this table
 		let events = self.all_tb_events(ns, db, &table.name).await?;
 		for event in events.iter() {
-			chn.send(bytes!(format!("{};", event))).await?;
+			chn.send(bytes!(format!("{};", event.to_sql()))).await?;
 		}
 		chn.send(bytes!("")).await?;
 		// Everything ok
@@ -390,8 +417,8 @@ impl Transaction {
 		chn.send(bytes!("-- ------------------------------")).await?;
 		chn.send(bytes!("")).await?;
 
-		let beg = crate::key::thing::prefix(ns, db, &table.name)?;
-		let end = crate::key::thing::suffix(ns, db, &table.name)?;
+		let beg = crate::key::record::prefix(ns, db, &table.name)?;
+		let end = crate::key::record::suffix(ns, db, &table.name)?;
 		let mut next = Some(beg..end);
 
 		while let Some(rng) = next {
@@ -438,9 +465,9 @@ impl Transaction {
 	///
 	/// * `String` - Returns the generated SQL command as a string. If no command is generated,
 	///   returns an empty string.
-	fn process_value(
-		k: thing::ThingKey,
-		mut v: Value,
+	fn process_record(
+		k: record::RecordKey,
+		mut record: Record,
 		records_relate: &mut Vec<String>,
 		records_normal: &mut Vec<String>,
 		is_tombstone: Option<bool>,
@@ -448,24 +475,26 @@ impl Transaction {
 	) -> String {
 		// Inject the id field into the document before processing.
 		let rid = RecordId {
-			table: k.tb.to_owned(),
-			key: k.id.clone(),
+			table: k.tb.into_owned(),
+			key: k.id,
 		};
-		v.def(&rid);
+		record.data.to_mut().def(&rid);
 		// Match on the value to determine if it is a graph edge record or a normal
 		// record.
-		match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
+		match (record.is_edge(), record.data.as_ref().pick(&*IN), record.data.as_ref().pick(&*OUT))
+		{
 			// If the value is a graph edge record (indicated by EDGE, IN, and OUT fields):
-			(Value::Bool(true), Value::RecordId(_), Value::RecordId(_)) => {
+			(true, Value::RecordId(_), Value::RecordId(_)) => {
 				if let Some(version) = version {
 					// If a version exists, format the value as an INSERT RELATION VERSION command.
 					let ts = Utc.timestamp_nanos(version as i64);
-					let sql = format!("INSERT RELATION {} VERSION d'{:?}';", v, ts);
+					let sql =
+						format!("INSERT RELATION {} VERSION d'{:?}';", record.data.as_ref(), ts);
 					records_relate.push(sql);
 					String::new()
 				} else {
 					// If no version exists, push the value to the records_relate vector.
-					records_relate.push(v.to_string());
+					records_relate.push(record.data.as_ref().to_string());
 					String::new()
 				}
 			}
@@ -474,17 +503,17 @@ impl Transaction {
 				if let Some(is_tombstone) = is_tombstone {
 					if is_tombstone {
 						// If the record is a tombstone, format it as a DELETE command.
-						format!("DELETE {}:{};", k.tb, k.id)
+						format!("DELETE {}:{};", rid.table, rid.key)
 					} else {
 						// If the record is not a tombstone and a version exists, format it as an
 						// INSERT VERSION command.
 						let ts = Utc.timestamp_nanos(version.unwrap() as i64);
-						format!("INSERT {} VERSION d'{:?}';", v, ts)
+						format!("INSERT {} VERSION d'{:?}';", record.data.as_ref(), ts)
 					}
 				} else {
 					// If no tombstone or version information is provided, push the value to the
 					// records_normal vector.
-					records_normal.push(v.to_string());
+					records_normal.push(record.data.as_ref().to_string());
 					String::new()
 				}
 			}
@@ -527,14 +556,14 @@ impl Transaction {
 				chn.send(bytes!("BEGIN;")).await?;
 			}
 
-			let k = thing::ThingKey::decode_key(&k)?;
-			let v: Value = if v.is_empty() {
-				Value::None
+			let k = record::RecordKey::decode_key(&k)?;
+			let v: Record = if v.is_empty() {
+				Default::default()
 			} else {
-				revision::from_slice(&v)?
+				KVValue::kv_decode_value(v)?
 			};
 			// Process the value and generate the appropriate SQL command.
-			let sql = Self::process_value(
+			let sql = Self::process_record(
 				k,
 				v,
 				&mut records_relate,
@@ -610,10 +639,10 @@ impl Transaction {
 
 		// Process each regular value.
 		for (k, v) in regular_values {
-			let k = thing::ThingKey::decode_key(&k)?;
-			let v: Value = revision::from_slice(&v)?;
+			let k = record::RecordKey::decode_key(&k)?;
+			let v = Record::kv_decode_value(v)?;
 			// Process the value and categorize it into records_relate or records_normal.
-			Self::process_value(k, v, &mut records_relate, &mut records_normal, None, None);
+			Self::process_record(k, v, &mut records_relate, &mut records_normal, None, None);
 		}
 
 		// If there are normal records, generate and send the INSERT SQL command.

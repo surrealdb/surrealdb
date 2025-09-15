@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/core", "crates/macros", "crates/sdk"]
+members = [".", "crates/core", "crates/sdk", "crates/types", "crates/types-derive"]
 
 [workspace.package]
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -24,6 +24,9 @@ categories = ["database-implementations", "data-structures", "embedded"]
 # workspace internal dependencies
 surrealdb = { version = "=3.0.0", package = "surrealdb", path = "./crates/sdk" }
 surrealdb-core = { version = "=3.0.0", package = "surrealdb-core", path = "./crates/core", default-features = false }
+surrealdb-macros = { version = "=3.0.0", package = "surrealdb-macros", path = "./crates/macros" }
+surrealdb-types = { version = "=3.0.0", package = "surrealdb-types", path = "./crates/types" }
+surrealdb-types-derive = { version = "=3.0.0", package = "surrealdb-types-derive", path = "./crates/types-derive" }
 
 # External surreal crates
 affinitypool = { version = "0.3.1" }
@@ -42,7 +45,7 @@ reblessive = "0.4.3"
 revision = "0.11.0"
 ## Maintained by @rushmorem
 serde-content = "0.1.0"
-storekey = "0.5.0"
+storekey = { version = "0.8.0", features = ["uuid"] }
 trice = "0.4.0"
 vart = "0.8.1"
 
@@ -121,9 +124,6 @@ ring = "0.17.13"
 roaring = "0.10.6"
 rustls = { version = "0.23.12", default-features = false }
 rust_decimal = { version = "1.37.2" }
-# Sub dependency of the rustls dependency, should be updated whenever rustls is.
-# Defined so we can enable features on this dependency.
-rustls-pki-types = "1.7.0"
 rust-s3 = "0.35.1"
 # TODO: Look at dependency, 5 years old seems unmaintained.
 rust-stemmers = "1.2.0"

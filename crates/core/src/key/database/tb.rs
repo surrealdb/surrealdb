@@ -1,14 +1,15 @@
 //! Stores a DEFINE TABLE config definition
+use std::borrow::Cow;
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub(crate) struct Tb<'a> {
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+pub(crate) struct TableKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -17,15 +18,13 @@ pub(crate) struct Tb<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 }
 
-impl KVKey for Tb<'_> {
-	type ValueType = TableDefinition;
-}
+impl_kv_key_storekey!(TableKey<'_> => TableDefinition);
 
-pub fn new(ns: NamespaceId, db: DatabaseId, tb: &str) -> Tb<'_> {
-	Tb::new(ns, db, tb)
+pub fn new(ns: NamespaceId, db: DatabaseId, tb: &str) -> TableKey<'_> {
+	TableKey::new(ns, db, tb)
 }
 
 pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
@@ -40,13 +39,13 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for Tb<'_> {
+impl Categorise for TableKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseTable
 	}
 }
 
-impl<'a> Tb<'a> {
+impl<'a> TableKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -57,7 +56,7 @@ impl<'a> Tb<'a> {
 			_c: b'!',
 			_d: b't',
 			_e: b'b',
-			tb,
+			tb: Cow::Borrowed(tb),
 		}
 	}
 }
@@ -69,12 +68,12 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Tb::new(
+		let val = TableKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
 		);
-		let enc = Tb::encode_key(&val).unwrap();
+		let enc = TableKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!tbtesttb\0");
 	}
 }

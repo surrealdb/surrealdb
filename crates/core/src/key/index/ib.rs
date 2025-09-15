@@ -30,16 +30,17 @@
 //! - **Reduced Contention**: Batch-based allocation minimizes database contention
 //! - **Scalability**: Multiple nodes can index documents concurrently
 //! - **Consistency**: Ensures unique document IDs across the entire cluster
+use std::borrow::Cow;
 use std::ops::Range;
 
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
 use crate::kvs::sequences::BatchValue;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Ib<'a> {
 	__: u8,
 	_a: u8,
@@ -47,18 +48,16 @@ pub(crate) struct Ib<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
 	pub start: i64,
 }
 
-impl KVKey for Ib<'_> {
-	type ValueType = BatchValue;
-}
+impl_kv_key_storekey!(Ib<'_> => BatchValue);
 
 impl Categorise for Ib<'_> {
 	fn categorise(&self) -> Category {
@@ -71,7 +70,7 @@ impl<'a> Ib<'a> {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &'a str,
-		ix: &'a str,
+		ix: IndexId,
 		start: i64,
 	) -> Self {
 		Self {
@@ -81,7 +80,7 @@ impl<'a> Ib<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 			_e: b'!',
@@ -95,7 +94,7 @@ impl<'a> Ib<'a> {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &'a str,
-		ix: &'a str,
+		ix: IndexId,
 	) -> anyhow::Result<Range<Vec<u8>>> {
 		let beg = Self::new(ns, db, tb, ix, i64::MIN).encode_key()?;
 		let end = Self::new(ns, db, tb, ix, i64::MAX).encode_key()?;
@@ -109,14 +108,14 @@ mod tests {
 
 	#[test]
 	fn ib_range() {
-		let ib_range = Ib::new_range(NamespaceId(1), DatabaseId(2), "testtb", "testix").unwrap();
+		let ib_range = Ib::new_range(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3)).unwrap();
 		assert_eq!(
 			ib_range.start,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!ib\0\0\0\0\0\0\0\0"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ib\0\0\0\0\0\0\0\0"
 		);
 		assert_eq!(
 			ib_range.end,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!ib\xff\xff\xff\xff\xff\xff\xff\xff"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ib\xff\xff\xff\xff\xff\xff\xff\xff"
 		);
 	}
 }

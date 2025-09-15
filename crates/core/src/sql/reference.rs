@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::sql::{Expr, Ident, Idiom};
+use crate::sql::Expr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -92,27 +92,5 @@ impl From<crate::expr::reference::ReferenceDeleteStrategy> for ReferenceDeleteSt
 				ReferenceDeleteStrategy::Custom(v.into())
 			}
 		}
-	}
-}
-
-#[derive(Clone, Debug)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Refs(pub Vec<(Option<Ident>, Option<Idiom>)>);
-
-impl fmt::Display for Refs {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "[]")
-	}
-}
-
-impl From<Refs> for crate::expr::reference::Refs {
-	fn from(v: Refs) -> Self {
-		Self(v.0.into_iter().map(|(t, i)| (t.map(Into::into), i.map(Into::into))).collect())
-	}
-}
-
-impl From<crate::expr::reference::Refs> for Refs {
-	fn from(v: crate::expr::reference::Refs) -> Self {
-		Self(v.0.into_iter().map(|(t, i)| (t.map(Into::into), i.map(Into::into))).collect())
 	}
 }

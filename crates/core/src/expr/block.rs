@@ -3,7 +3,6 @@ use std::ops::Deref;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use super::FlowResult;
 use crate::ctx::{Context, MutableContext};
@@ -15,7 +14,7 @@ use crate::expr::{Expr, Value};
 use crate::val::Strand;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Block(pub Vec<Expr>);
 
 impl Deref for Block {

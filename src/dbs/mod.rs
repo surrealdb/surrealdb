@@ -629,64 +629,11 @@ pub async fn init(
 mod tests {
 	use std::str::FromStr;
 
-	use surrealdb::opt::auth::Root;
 	use test_log::test;
 	use wiremock::matchers::{method, path};
 	use wiremock::{Mock, MockServer, ResponseTemplate};
 
 	use super::*;
-	use crate::core::iam::verify::verify_root_creds;
-	use crate::core::kvs::LockType::*;
-	use crate::core::kvs::TransactionType::*;
-
-	#[test(tokio::test)]
-	async fn test_setup_superuser() {
-		let ds = Datastore::new("memory").await.unwrap();
-		let creds = Root {
-			username: "root",
-			password: "root",
-		};
-
-		// Setup the initial user if there are no root users
-		assert_eq!(
-			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
-			0
-		);
-		ds.initialise_credentials(creds.username, creds.password).await.unwrap();
-		assert_eq!(
-			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
-			1
-		);
-		verify_root_creds(&ds, creds.username, creds.password).await.unwrap();
-
-		// Do not setup the initial root user if there are root users:
-		// Test the scenario by making sure the custom password doesn't change.
-		let sql = "DEFINE USER root ON ROOT PASSWORD 'test' ROLES OWNER";
-		let sess = Session::owner();
-		ds.execute(sql, &sess, None).await.unwrap();
-		let pass_hash = ds
-			.transaction(Read, Optimistic)
-			.await
-			.unwrap()
-			.expect_root_user(creds.username)
-			.await
-			.unwrap()
-			.hash
-			.clone();
-
-		ds.initialise_credentials(creds.username, creds.password).await.unwrap();
-		assert_eq!(
-			pass_hash,
-			ds.transaction(Read, Optimistic)
-				.await
-				.unwrap()
-				.expect_root_user(creds.username)
-				.await
-				.unwrap()
-				.hash
-				.clone()
-		)
-	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_capabilities() {
@@ -1016,7 +963,7 @@ mod tests {
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str("blog.manel.in").unwrap()].into(),
+							[NetTarget::from_str("github.com").unwrap()].into(),
 						))
 						.without_network_targets(Targets::<NetTarget>::Some(
 							[
@@ -1041,7 +988,9 @@ mod tests {
 						)),
 				),
 				Session::owner(),
-				"RETURN http::get('https://blog.manel.in/')".to_string(),
+				// This will be redirected to: https://github.com/surrealdb/surrealdb/pull/6293
+				"RETURN http::get('https://github.com/surrealdb/surrealdb/issues/6293')"
+					.to_string(),
 				true,
 				"<!DOCTYPE html>".to_string(),
 			),

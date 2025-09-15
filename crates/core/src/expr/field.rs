@@ -5,7 +5,6 @@ use std::slice::Iter;
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use super::paths::ID;
 use crate::ctx::Context;
@@ -20,7 +19,7 @@ use crate::val::{Array, Value};
 
 /// The `foo,bar,*` part of statements like `SELECT foo,bar.* FROM faz`.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Fields {
 	/// Fields had the `VALUE` clause and should only return the given selector
 	///
@@ -385,7 +384,7 @@ impl<'a> Iterator for FieldsIter<'a> {
 impl ExactSizeIterator for FieldsIter<'_> {}
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum Field {
 	/// The `*` in `SELECT * FROM ...`
 	#[default]

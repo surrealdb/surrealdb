@@ -1,10 +1,10 @@
 use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use super::DefineKind;
+use crate::catalog;
+use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -14,11 +14,9 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::tokenizer::Tokenizer;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, Strand};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineAnalyzerStatement {
 	pub kind: DefineKind,
 	pub name: Ident,
@@ -28,9 +26,28 @@ pub struct DefineAnalyzerStatement {
 	pub comment: Option<Strand>,
 }
 
-impl_kv_value_revisioned!(DefineAnalyzerStatement);
-
 impl DefineAnalyzerStatement {
+	pub(crate) fn to_definition(&self) -> catalog::AnalyzerDefinition {
+		catalog::AnalyzerDefinition {
+			name: self.name.clone().into_string(),
+			function: self.function.clone(),
+			tokenizers: self.tokenizers.clone(),
+			filters: self.filters.clone(),
+			comment: self.comment.as_ref().map(|x| x.clone().into_string()),
+		}
+	}
+
+	pub fn from_definition(def: &catalog::AnalyzerDefinition) -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Ident::new(def.name.clone()).unwrap(),
+			function: def.function.clone(),
+			tokenizers: def.tokenizers.clone(),
+			filters: def.filters.clone(),
+			comment: def.comment.as_ref().map(|x| Strand::new(x.clone()).unwrap()),
+		}
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context,
@@ -58,11 +75,7 @@ impl DefineAnalyzerStatement {
 		}
 		// Process the statement
 		let key = crate::key::database::az::new(ns, db, &self.name);
-		let az = DefineAnalyzerStatement {
-			// Don't persist the `IF NOT EXISTS` clause to schema
-			kind: DefineKind::Default,
-			..self.clone()
-		};
+		let az = self.to_definition();
 		ctx.get_index_stores().mappers().load(&az).await?;
 		txn.set(&key, &az, None).await?;
 		// Clear the cache

@@ -64,6 +64,15 @@ impl Tokens {
 	pub(in crate::idx::ft) fn list(&self) -> &Vec<Token> {
 		&self.t
 	}
+
+	pub(in crate::idx::ft) fn try_contains(&self, s: &str) -> Result<bool> {
+		for t in &self.t {
+			if self.get_token_string(t)?.eq(s) {
+				return Ok(true);
+			}
+		}
+		Ok(false)
+	}
 }
 
 impl TryFrom<Tokens> for Value {

@@ -138,9 +138,9 @@ impl Display for Permissions {
 	}
 }
 
-impl From<Permissions> for crate::expr::Permissions {
+impl From<Permissions> for crate::catalog::Permissions {
 	fn from(v: Permissions) -> Self {
-		crate::expr::Permissions {
+		Self {
 			select: v.select.into(),
 			create: v.create.into(),
 			update: v.update.into(),
@@ -149,9 +149,9 @@ impl From<Permissions> for crate::expr::Permissions {
 	}
 }
 
-impl From<crate::expr::Permissions> for Permissions {
-	fn from(v: crate::expr::Permissions) -> Self {
-		Permissions {
+impl From<crate::catalog::Permissions> for Permissions {
+	fn from(v: crate::catalog::Permissions) -> Self {
+		Self {
 			select: v.select.into(),
 			create: v.create.into(),
 			update: v.update.into(),
@@ -193,22 +193,22 @@ impl Display for Permission {
 	}
 }
 
-impl From<Permission> for crate::expr::Permission {
+impl From<Permission> for crate::catalog::Permission {
 	fn from(v: Permission) -> Self {
 		match v {
-			Permission::None => crate::expr::Permission::None,
-			Permission::Full => crate::expr::Permission::Full,
-			Permission::Specific(v) => crate::expr::Permission::Specific(v.into()),
+			Permission::None => Self::None,
+			Permission::Full => Self::Full,
+			Permission::Specific(v) => Self::Specific(v.into()),
 		}
 	}
 }
 
-impl From<crate::expr::Permission> for Permission {
-	fn from(v: crate::expr::Permission) -> Self {
+impl From<crate::catalog::Permission> for Permission {
+	fn from(v: crate::catalog::Permission) -> Self {
 		match v {
-			crate::expr::Permission::None => Self::None,
-			crate::expr::Permission::Full => Self::Full,
-			crate::expr::Permission::Specific(v) => Self::Specific(v.into()),
+			crate::catalog::Permission::None => Self::None,
+			crate::catalog::Permission::Full => Self::Full,
+			crate::catalog::Permission::Specific(v) => Self::Specific(v.into()),
 		}
 	}
 }

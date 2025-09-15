@@ -1,19 +1,20 @@
 //! Stores a LIVE SELECT query definition on the table
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::expr::LiveStatement;
+use crate::catalog::{DatabaseId, NamespaceId, SubscriptionDefinition};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 /// Lv is used to track a live query and is cluster independent, i.e. it is tied
 /// with a ns/db/tb combo without the cl. The live statement includes the node
 /// id, so lq can be derived purely from an lv.
 ///
 /// The value of the lv is the statement.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Lq<'a> {
 	__: u8,
 	_a: u8,
@@ -21,17 +22,14 @@ pub(crate) struct Lq<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	_e: u8,
 	_f: u8,
-	#[serde(with = "uuid::serde::compact")]
 	pub lq: Uuid,
 }
 
-impl KVKey for Lq<'_> {
-	type ValueType = LiveStatement;
-}
+impl_kv_key_storekey!(Lq<'_> => SubscriptionDefinition);
 
 pub fn new(ns: NamespaceId, db: DatabaseId, tb: &str, lq: Uuid) -> Lq<'_> {
 	Lq::new(ns, db, tb, lq)
@@ -64,7 +62,7 @@ impl<'a> Lq<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'!',
 			_e: b'l',
 			_f: b'q',
@@ -73,7 +71,7 @@ impl<'a> Lq<'a> {
 	}
 
 	pub fn decode_key(k: &[u8]) -> anyhow::Result<Lq<'_>> {
-		Ok(storekey::deserialize(k)?)
+		Ok(storekey::decode_borrow(k)?)
 	}
 }
 

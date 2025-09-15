@@ -1,27 +1,36 @@
 use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::fmt::{self, Display, Formatter, Write};
-use std::ops;
 use std::ops::{Deref, DerefMut};
 
 use anyhow::{Result, ensure};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
 use crate::expr::Expr;
 use crate::expr::fmt::{Fmt, Pretty, pretty_indent};
-use crate::val::Value;
+use crate::val::{IndexFormat, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(
+	Clone,
+	Debug,
+	Default,
+	Eq,
+	Ord,
+	PartialEq,
+	PartialOrd,
+	Serialize,
+	Deserialize,
+	Hash,
+	Encode,
+	BorrowDecode,
+)]
 #[serde(rename = "$surrealdb::private::Array")]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub struct Array(pub Vec<Value>);
-
-impl From<Value> for Array {
-	fn from(v: Value) -> Self {
-		vec![v].into()
-	}
-}
 
 impl<T> From<Vec<T>> for Array
 where
@@ -86,66 +95,50 @@ impl Array {
 	pub fn into_literal(self) -> Vec<Expr> {
 		self.into_iter().map(|x| x.into_literal()).collect()
 	}
-}
 
-impl Array {
 	pub(crate) fn is_all_none_or_null(&self) -> bool {
 		self.0.iter().all(|v| v.is_nullish())
 	}
-}
 
-impl Display for Array {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+	/// Removes all values in the array which are equal to the given value.
+	pub fn remove_value(mut self, other: &Value) -> Self {
+		self.retain(|x| x != other);
+		self
+	}
+
+	/// Removes all values in the array which are equal to a value in the given slice.
+	pub fn remove_all(mut self, other: &[Value]) -> Self {
+		self.retain(|x| !other.contains(x));
+		self
+	}
+
+	/// Concatenates the two arrays returning an array with the values of both arrays.
+	pub fn concat(mut self, mut other: Array) -> Self {
+		self.0.append(&mut other.0);
+		self
+	}
+
+	/// Pushes a value but takes self as a value.
+	pub fn with_push(mut self, other: Value) -> Self {
+		self.0.push(other);
+		self
+	}
+
+	pub(crate) fn display<V: Display>(v: &[V], f: &mut Formatter) -> fmt::Result {
 		let mut f = Pretty::from(f);
 		f.write_char('[')?;
-		if !self.is_empty() {
+		if !v.is_empty() {
 			let indent = pretty_indent();
-			write!(f, "{}", Fmt::pretty_comma_separated(self.as_slice()))?;
+			write!(f, "{}", Fmt::pretty_comma_separated(v))?;
 			drop(indent);
 		}
 		f.write_char(']')
 	}
 }
 
-// ------------------------------
-
-impl ops::Add<Value> for Array {
-	type Output = Self;
-	fn add(mut self, other: Value) -> Self {
-		self.0.push(other);
-		self
-	}
-}
-
-impl ops::Add for Array {
-	type Output = Self;
-	fn add(mut self, mut other: Self) -> Self {
-		self.0.append(&mut other.0);
-		self
-	}
-}
-
-// ------------------------------
-
-impl ops::Sub<Value> for Array {
-	type Output = Self;
-	fn sub(mut self, other: Value) -> Self {
-		if let Some(p) = self.0.iter().position(|x| *x == other) {
-			self.0.remove(p);
-		}
-		self
-	}
-}
-
-impl ops::Sub for Array {
-	type Output = Self;
-	fn sub(mut self, other: Self) -> Self {
-		for v in other.0 {
-			if let Some(p) = self.0.iter().position(|x| *x == v) {
-				self.0.remove(p);
-			}
-		}
-		self
+impl Display for Array {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		Array::display(&self.0, f)
 	}
 }
 

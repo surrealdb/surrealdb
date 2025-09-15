@@ -3,24 +3,21 @@ use std::ops::Deref;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::AlterKind;
-use crate::catalog::TableDefinition;
+use crate::catalog::providers::TableProvider;
+use crate::catalog::{self, Permission, Permissions, TableDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::reference::Reference;
-use crate::expr::statements::define::DefineDefault;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, Permissions};
+use crate::expr::{Base, Expr, Ident, Idiom, Kind};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum AlterDefault {
 	#[default]
 	None,
@@ -29,8 +26,7 @@ pub enum AlterDefault {
 	Set(Expr),
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AlterFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
@@ -57,6 +53,7 @@ impl AlterFieldStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Get the NS and DB
+		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
@@ -77,8 +74,8 @@ impl AlterFieldStatement {
 		};
 
 		match self.flex {
-			AlterKind::Set(_) => df.flex = true,
-			AlterKind::Drop => df.flex = false,
+			AlterKind::Set(_) => df.flexible = true,
+			AlterKind::Drop => df.flexible = false,
 			AlterKind::None => {}
 		}
 
@@ -108,56 +105,63 @@ impl AlterFieldStatement {
 
 		match self.default {
 			AlterDefault::None => {}
-			AlterDefault::Drop => df.default = DefineDefault::None,
-			AlterDefault::Always(ref expr) => df.default = DefineDefault::Always(expr.clone()),
-			AlterDefault::Set(ref expr) => df.default = DefineDefault::Set(expr.clone()),
+			AlterDefault::Drop => df.default = catalog::DefineDefault::None,
+			AlterDefault::Always(ref expr) => {
+				df.default = catalog::DefineDefault::Always(expr.clone())
+			}
+			AlterDefault::Set(ref expr) => df.default = catalog::DefineDefault::Set(expr.clone()),
+		}
+
+		fn convert_permission(perm: &Permission) -> catalog::Permission {
+			match perm {
+				Permission::None => catalog::Permission::None,
+				Permission::Full => catalog::Permission::Full,
+				Permission::Specific(expr) => catalog::Permission::Specific(expr.clone()),
+			}
 		}
 
 		if let Some(permissions) = &self.permissions {
-			df.permissions = permissions.clone();
+			df.select_permission = convert_permission(&permissions.select);
+			df.create_permission = convert_permission(&permissions.create);
+			df.update_permission = convert_permission(&permissions.update);
 		}
 
 		match self.comment {
-			AlterKind::Set(ref k) => df.comment = Some(k.clone()),
+			AlterKind::Set(ref k) => df.comment = Some(k.clone().into_string()),
 			AlterKind::Drop => df.comment = None,
 			AlterKind::None => {}
 		}
 
 		match self.reference {
-			AlterKind::Set(ref k) => {
-				df.reference = Some(k.clone());
-			}
+			AlterKind::Set(ref k) => df.reference = Some(k.clone()),
 			AlterKind::Drop => df.reference = None,
 			AlterKind::None => {}
 		}
 
 		// Disallow mismatched types
-		df.disallow_mismatched_types(ctx, ns, db).await?;
+		//df.disallow_mismatched_types(ctx, ns, db).await?;
 
 		// Set the table definition
 		let key = crate::key::table::fd::new(ns, db, &self.what, &name);
 		txn.set(&key, &df, None).await?;
 		// Refresh the table cache
-		let key = crate::key::database::tb::new(ns, db, &self.what);
 		let Some(tb) = txn.get_tb(ns, db, &self.what).await? else {
 			return Err(Error::TbNotFound {
 				name: self.what.to_string(),
 			}
 			.into());
 		};
-		txn.set(
-			&key,
+		txn.put_tb(
+			ns_name,
+			db_name,
 			&TableDefinition {
 				cache_fields_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
 			},
-			None,
 		)
 		.await?;
-		// Clear the cache
-		txn.clear_cache();
 		// Process possible recursive defitions
-		df.process_recursive_definitions(ns, db, txn.clone()).await?;
+		//df.process_recursive_definitions(ns, db, txn.clone()).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

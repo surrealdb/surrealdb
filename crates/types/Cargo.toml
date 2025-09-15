@@ -1,0 +1,40 @@
+[package]
+name = "surrealdb-types"
+version.workspace = true
+publish.workspace = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-types/"
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+rust-version.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+bytes.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+flatbuffers.workspace = true
+geo = { workspace = true, features = ["use-serde"] }
+hex.workspace = true
+regex.workspace = true
+rstest.workspace = true
+rust_decimal.workspace = true
+serde = { workspace = true, features = ["derive"] }
+surrealdb-protocol = { workspace = true, features = ["flatbuffers"] }
+surrealdb-types-derive.workspace = true
+
+# WASM DEPENDENCY CONFIGURATION
+[target.'cfg(target_family = "wasm")'.dependencies]
+uuid = { workspace = true, features = ["serde", "v4", "v7", "js"] }
+
+# NON-WASM DEPENDENCY CONFIGURATION
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+
+[lints]
+workspace = true

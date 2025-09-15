@@ -4,18 +4,16 @@ use std::str;
 
 use anyhow::Result;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 use crate::expr::Value;
 use crate::expr::escape::EscapeIdent;
 use crate::expr::statements::info::InfoStructure;
-use crate::val::strand::no_nul_bytes;
 use crate::val::{Strand, Table};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Ident(#[serde(with = "no_nul_bytes")] String);
+pub struct Ident(String);
 
 impl Ident {
 	/// Create a new identifier
@@ -70,14 +68,10 @@ impl Ident {
 	}
 
 	/// Convert the Ident to a raw String
-	pub fn as_raw_string(&self) -> String {
+	pub fn to_raw_string(&self) -> String {
 		self.0.clone()
 	}
 
-	/// Checks if this field is the `id` field
-	pub(crate) fn is_id(&self) -> bool {
-		self.0.as_str() == "id"
-	}
 	/// Checks if this field is the `type` field
 	pub(crate) fn is_type(&self) -> bool {
 		self.0.as_str() == "type"
@@ -113,6 +107,6 @@ impl From<Table> for Ident {
 
 impl InfoStructure for Ident {
 	fn structure(self) -> Value {
-		self.as_raw_string().into()
+		self.to_raw_string().into()
 	}
 }

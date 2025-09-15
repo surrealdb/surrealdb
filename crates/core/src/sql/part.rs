@@ -3,7 +3,7 @@ use std::fmt::Write;
 
 use super::fmt::{is_pretty, pretty_indent};
 use crate::sql::fmt::Fmt;
-use crate::sql::{Expr, Graph, Ident, Idiom};
+use crate::sql::{Expr, Ident, Idiom, Lookup};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -14,7 +14,7 @@ pub enum Part {
 	First,
 	Field(Ident),
 	Where(Expr),
-	Graph(Graph),
+	Graph(Lookup),
 	Value(Expr),
 	Start(Expr),
 	Method(String, Vec<Expr>),
@@ -34,7 +34,7 @@ impl From<Part> for crate::expr::Part {
 			Part::First => Self::First,
 			Part::Field(ident) => Self::Field(ident.into()),
 			Part::Where(value) => Self::Where(value.into()),
-			Part::Graph(graph) => Self::Graph(graph.into()),
+			Part::Graph(graph) => Self::Lookup(graph.into()),
 			Part::Value(value) => Self::Value(value.into()),
 			Part::Start(value) => Self::Start(value.into()),
 			Part::Method(method, values) => {
@@ -64,7 +64,7 @@ impl From<crate::expr::Part> for Part {
 			crate::expr::Part::First => Self::First,
 			crate::expr::Part::Field(ident) => Self::Field(ident.into()),
 			crate::expr::Part::Where(value) => Self::Where(value.into()),
-			crate::expr::Part::Graph(graph) => Self::Graph(graph.into()),
+			crate::expr::Part::Lookup(graph) => Self::Graph(graph.into()),
 			crate::expr::Part::Value(value) => Self::Value(value.into()),
 			crate::expr::Part::Start(value) => Self::Start(value.into()),
 			crate::expr::Part::Method(method, values) => {
@@ -88,7 +88,7 @@ impl From<crate::expr::Part> for Part {
 impl fmt::Display for Part {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Part::All => f.write_str("[*]"),
+			Part::All => f.write_str(".*"),
 			Part::Last => f.write_str("[$]"),
 			Part::First => f.write_str("[0]"),
 			Part::Start(v) => write!(f, "{v}"),

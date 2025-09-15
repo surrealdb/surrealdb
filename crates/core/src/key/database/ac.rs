@@ -1,13 +1,14 @@
 //! Stores a DEFINE ACCESS ON DATABASE configuration
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::expr::statements::define::DefineAccessStatement;
+use crate::catalog::{AccessDefinition, DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Ac<'a> {
 	__: u8,
 	_a: u8,
@@ -17,12 +18,10 @@ pub(crate) struct Ac<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub ac: &'a str,
+	pub ac: Cow<'a, str>,
 }
 
-impl KVKey for Ac<'_> {
-	type ValueType = DefineAccessStatement;
-}
+impl_kv_key_storekey!(Ac<'_> => AccessDefinition);
 
 pub fn new(ns: NamespaceId, db: DatabaseId, ac: &str) -> Ac<'_> {
 	Ac::new(ns, db, ac)
@@ -57,7 +56,7 @@ impl<'a> Ac<'a> {
 			_c: b'!',
 			_d: b'a',
 			_e: b'c',
-			ac,
+			ac: Cow::Borrowed(ac),
 		}
 	}
 }

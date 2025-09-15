@@ -6,8 +6,8 @@ use criterion::measurement::WallTime;
 use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use flate2::read::GzDecoder;
 use reblessive::TreeStack;
+use surrealdb_core::catalog::{CatalogProvider, Distance, HnswParams, VectorType};
 use surrealdb_core::dbs::Session;
-use surrealdb_core::expr::index::{Distance, HnswParams, VectorType};
 use surrealdb_core::idx::IndexKeyBase;
 use surrealdb_core::idx::planner::checker::{HnswChecker, HnswConditionChecker};
 use surrealdb_core::idx::trees::hnsw::index::HnswIndex;
@@ -207,20 +207,18 @@ async fn init_datastore(session: &Session, with_index: bool) -> Datastore {
 }
 
 async fn hnsw(tx: &Transaction) -> HnswIndex {
-	let p = HnswParams::new(
-		DIMENSION,
-		Distance::Euclidean,
-		VectorType::F32,
-		M,
-		M0,
-		(1.0 / (M as f64).ln()).into(),
-		EF_CONSTRUCTION,
-		false,
-		false,
-	);
-	HnswIndex::new(tx, IndexKeyBase::new(0, 0, "test", "test"), "test".to_string(), &p)
-		.await
-		.unwrap()
+	let p = HnswParams {
+		dimension: DIMENSION,
+		distance: Distance::Euclidean,
+		vector_type: VectorType::F32,
+		m: M,
+		m0: M0,
+		ml: (1.0 / (M as f64).ln()).into(),
+		ef_construction: EF_CONSTRUCTION,
+		extend_candidates: false,
+		keep_pruned_connections: false,
+	};
+	HnswIndex::new(tx, IndexKeyBase::new(0, 0, "test", 0), "test".to_string(), &p).await.unwrap()
 }
 
 async fn insert_objects(samples: &[(RecordId, Vec<Value>)]) -> (Datastore, HnswIndex) {

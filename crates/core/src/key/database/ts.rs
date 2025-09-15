@@ -1,16 +1,16 @@
 //! Stores database timestamps
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 use crate::vs::VersionStamp;
 
 // Ts stands for Database Timestamps that corresponds to Versionstamps.
 // Each Ts key is suffixed by a timestamp.
 // The value is the versionstamp that corresponds to the timestamp.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Ts {
 	__: u8,
 	_a: u8,
@@ -23,9 +23,7 @@ pub(crate) struct Ts {
 	pub ts: u64,
 }
 
-impl KVKey for Ts {
-	type ValueType = VersionStamp;
-}
+impl_kv_key_storekey!(Ts => VersionStamp);
 
 pub fn new(ns: NamespaceId, db: DatabaseId, ts: u64) -> Ts {
 	Ts::new(ns, db, ts)
@@ -67,7 +65,7 @@ impl Ts {
 	}
 
 	pub fn decode_key(k: &[u8]) -> anyhow::Result<Ts> {
-		Ok(storekey::deserialize(k)?)
+		Ok(storekey::decode_borrow(k)?)
 	}
 }
 

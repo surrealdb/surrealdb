@@ -10,7 +10,7 @@ use crate::syn::error::bail;
 use crate::syn::lexer::compound::Numeric;
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser};
-use crate::syn::token::{self, Glued, Token, TokenKind, t};
+use crate::syn::token::{self, Glued, Span, Token, TokenKind, t};
 use crate::val;
 
 impl Parser<'_> {
@@ -18,7 +18,7 @@ impl Parser<'_> {
 	/// setting table_as_field.
 	///
 	/// Meant to be used when parsing an expression the first time to avoid
-	/// having the depth limit be lowered unnessacrily
+	/// having the depth limit be lowered unnecessarily.
 	pub async fn parse_expr_start(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		self.table_as_field = true;
 		self.pratt_parse_expr(stk, BindingPower::Base).await
@@ -89,7 +89,7 @@ impl Parser<'_> {
 
 			t!("<") => {
 				let peek = self.peek_whitespace1();
-				if matches!(peek.kind, t!("-") | t!("->") | t!("..")) {
+				if matches!(peek.kind, t!("-") | t!("~") | t!("->") | t!("..")) {
 					return None;
 				}
 				Some(BindingPower::Relation)
@@ -146,7 +146,7 @@ impl Parser<'_> {
 			t!("..") => Some(BindingPower::Range),
 			t!("<") => {
 				let peek = self.peek1();
-				if matches!(peek.kind, t!("-") | t!("->")) {
+				if matches!(peek.kind, t!("-") | t!("~") | t!("->")) {
 					return None;
 				}
 				Some(BindingPower::Prefix)
@@ -661,6 +661,25 @@ impl Parser<'_> {
 		}
 
 		Ok(lhs)
+	}
+
+	pub(crate) fn reject_letless_let(expr: &Expr, span: Span) -> ParseResult<()> {
+		let Expr::Binary {
+			left,
+			op,
+			..
+		} = expr
+		else {
+			return Ok(());
+		};
+		let Expr::Param(p) = &**left else {
+			return Ok(());
+		};
+		let BinaryOperator::Equal = op else {
+			return Ok(());
+		};
+		bail!("Parameter declarations without `let` are deprecated.",
+			@span => "Replace with `let {} = ...` to keep the previous behavior.", p)
 	}
 }
 

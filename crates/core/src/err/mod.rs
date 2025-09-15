@@ -13,13 +13,12 @@ use jsonwebtoken::errors::Error as JWTError;
 use object_store::Error as ObjectStoreError;
 use revision::Error as RevisionError;
 use serde::Serialize;
-use storekey::decode::Error as DecodeError;
-use storekey::encode::Error as EncodeError;
+use storekey::DecodeError;
 use thiserror::Error;
 
 use crate::api::err::ApiError;
 use crate::buc::BucketOperation;
-use crate::expr::index::Distance;
+use crate::catalog::Distance;
 use crate::expr::operation::PatchError;
 use crate::expr::{Expr, Idiom};
 use crate::iam::Error as IamError;
@@ -792,9 +791,9 @@ pub enum Error {
 	#[error("I/O error: {0}")]
 	Io(#[from] IoError),
 
-	/// Represents an error when encoding a key-value entry
-	#[error("Key encoding error: {0}")]
-	Encode(#[from] EncodeError),
+	/// Error for when trying to serialize values like Regex and Closure
+	#[error("Tried to serialize a value which cannot be serialized.")]
+	Unencodable,
 
 	/// Represents an error when decoding a key-value entry
 	#[error("Key decoding error: {0}")]
@@ -1397,6 +1396,26 @@ pub enum Error {
 
 	#[error("Failed to connect to bucket: {0}")]
 	BucketConnectionFailed(String),
+
+	/// The `COMPUTED` clause cannot be used with other clauses altering or
+	/// working with the value
+	#[error("Cannot use the `{0}` keyword with `COMPUTED`.")]
+	ComputedKeywordConflict(String),
+
+	/// The `COMPUTED` clause cannot be used with other nested fields
+	#[error("Cannot define field `{0}` as `COMPUTED` since a nested field `{1}` already exists.")]
+	ComputedNestedFieldConflict(String, String),
+
+	/// The `COMPUTED` clause cannot be used with other nested fields
+	#[error("Cannot define nested field `{0}` as parent field `{1}` is a `COMPUTED` field.")]
+	ComputedParentFieldConflict(String, String),
+
+	#[error("Cannot define field `{0}` as `COMPUTED` fields must be top-level.")]
+	ComputedNestedField(String),
+
+	/// Cannot use the `{0}` keyword on the `id` field
+	#[error("Cannot use the `{0}` keyword on the `id` field.")]
+	IdFieldKeywordConflict(String),
 }
 
 impl Error {

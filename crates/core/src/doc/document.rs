@@ -1,24 +1,21 @@
 use std::fmt::{Debug, Formatter};
 use std::mem;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::{DatabaseDefinition, TableDefinition};
+use crate::catalog::providers::{CatalogProvider, TableProvider};
+use crate::catalog::{self, DatabaseDefinition, Permission, TableDefinition};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Workable};
-use crate::expr::permission::Permission;
-use crate::expr::statements::define::{
-	DefineEventStatement, DefineFieldStatement, DefineIndexStatement,
-};
-use crate::expr::statements::live::LiveStatement;
 use crate::expr::{Base, FlowResultExt as _, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::idx::planner::RecordStrategy;
 use crate::idx::planner::iterators::IteratorRecord;
 use crate::kvs::cache;
+use crate::val::record::{Data, Record};
 use crate::val::{RecordId, Value};
 
 pub(crate) struct Document {
@@ -40,60 +37,76 @@ pub(crate) struct Document {
 pub(crate) struct CursorDoc {
 	pub(crate) rid: Option<Arc<RecordId>>,
 	pub(crate) ir: Option<Arc<IteratorRecord>>,
-	pub(crate) doc: CursorValue,
+	pub(crate) doc: CursorRecord,
+	pub(crate) fields_computed: bool,
 }
 
+/// Wrapper around a Record for cursor operations
+///
+/// This struct provides a convenient interface for working with records in cursor contexts.
+/// It implements Deref and DerefMut to allow direct access to the underlying Record's methods.
 #[derive(Clone, Debug)]
-pub(crate) struct CursorValue {
-	mutable: Value,
-	read_only: Option<Arc<Value>>,
+pub(crate) struct CursorRecord {
+	/// The underlying record containing data and metadata
+	record: Record,
 }
 
-impl CursorValue {
+impl CursorRecord {
+	/// Returns a mutable reference to the underlying value
+	///
+	/// This method delegates to the Record's data, converting read-only data to mutable if
+	/// necessary.
 	pub(crate) fn to_mut(&mut self) -> &mut Value {
-		if let Some(ro) = self.read_only.take() {
-			self.mutable = ro.as_ref().clone();
-		}
-		&mut self.mutable
+		self.record.data.to_mut()
 	}
 
+	/// Converts the data to read-only format and returns an Arc reference
+	///
+	/// This method delegates to the Record's data, ensuring the data is in read-only format.
 	pub(crate) fn as_arc(&mut self) -> Arc<Value> {
-		match &self.read_only {
-			None => {
-				let v = Arc::new(mem::take(&mut self.mutable));
-				self.read_only = Some(v.clone());
-				v
-			}
-			Some(v) => v.clone(),
-		}
+		self.record.data.read_only()
 	}
 
+	/// Converts the cursor record to a read-only record
+	///
+	/// This method ensures the underlying data is in read-only format for better sharing.
+	pub(crate) fn into_read_only(self) -> Arc<Record> {
+		self.record.into_read_only()
+	}
+
+	/// Returns a reference to the underlying value
+	///
+	/// This method provides uniform access to the value regardless of its storage format.
 	pub(crate) fn as_ref(&self) -> &Value {
-		if let Some(ro) = &self.read_only {
-			ro.as_ref()
-		} else {
-			&self.mutable
-		}
+		self.record.data.as_ref()
 	}
 
-	pub(crate) fn into_owned(self) -> Value {
-		if let Some(ro) = &self.read_only {
-			ro.as_ref().clone()
-		} else {
-			self.mutable
+	/// Converts the cursor record to an owned Value
+	///
+	/// This method extracts the underlying value, taking ownership of the data.
+	pub(crate) fn into_owned(mut self) -> Value {
+		match self.record.data {
+			Data::ReadOnly(ref mut arc) => mem::take(Arc::make_mut(arc)),
+			Data::Mutable(value) => value,
 		}
 	}
 }
 
-impl Deref for CursorValue {
-	type Target = Value;
+impl Deref for CursorRecord {
+	type Target = Record;
 	fn deref(&self) -> &Self::Target {
-		self.as_ref()
+		&self.record
+	}
+}
+
+impl DerefMut for CursorRecord {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.record
 	}
 }
 
 impl CursorDoc {
-	pub(crate) fn new<T: Into<CursorValue>>(
+	pub(crate) fn new<T: Into<CursorRecord>>(
 		rid: Option<Arc<RecordId>>,
 		ir: Option<Arc<IteratorRecord>>,
 		doc: T,
@@ -102,24 +115,39 @@ impl CursorDoc {
 			rid,
 			ir,
 			doc: doc.into(),
+			fields_computed: false,
 		}
 	}
 }
 
-impl From<Value> for CursorValue {
+impl From<Record> for CursorRecord {
+	fn from(record: Record) -> Self {
+		Self {
+			record,
+		}
+	}
+}
+
+impl From<Arc<Record>> for CursorRecord {
+	fn from(arc: Arc<Record>) -> Self {
+		Self {
+			record: arc.as_ref().clone(),
+		}
+	}
+}
+
+impl From<Value> for CursorRecord {
 	fn from(value: Value) -> Self {
 		Self {
-			mutable: value,
-			read_only: None,
+			record: Record::new(value.into()),
 		}
 	}
 }
 
-impl From<Arc<Value>> for CursorValue {
-	fn from(value: Arc<Value>) -> Self {
+impl From<Arc<Value>> for CursorRecord {
+	fn from(arc: Arc<Value>) -> Self {
 		Self {
-			mutable: Value::None,
-			read_only: Some(value),
+			record: Record::new(arc.into()),
 		}
 	}
 }
@@ -129,10 +157,8 @@ impl From<Value> for CursorDoc {
 		Self {
 			rid: None,
 			ir: None,
-			doc: CursorValue {
-				mutable: val,
-				read_only: None,
-			},
+			doc: val.into(),
+			fields_computed: false,
 		}
 	}
 }
@@ -142,10 +168,8 @@ impl From<Arc<Value>> for CursorDoc {
 		Self {
 			rid: None,
 			ir: None,
-			doc: CursorValue {
-				mutable: Value::None,
-				read_only: Some(doc),
-			},
+			doc: doc.into(),
+			fields_computed: false,
 		}
 	}
 }
@@ -168,7 +192,7 @@ impl Document {
 		id: Option<Arc<RecordId>>,
 		ir: Option<Arc<IteratorRecord>>,
 		r#gen: Option<Ident>,
-		val: Arc<Value>,
+		val: Arc<Record>,
 		extras: Workable,
 		retry: bool,
 		rs: RecordStrategy,
@@ -244,21 +268,21 @@ impl Document {
 		}
 	}
 
-	/// Retur true if the document has been extracted by an iterator that
-	/// already matcheed the condition.
+	/// Retur true if the document has been extracted by an iterator that already matcheed the
+	/// condition.
 	pub(crate) fn is_condition_checked(&self) -> bool {
 		matches!(self.record_strategy, RecordStrategy::Count | RecordStrategy::KeysOnly)
 	}
 
 	/// Update the document for a retry to update after an insert failed.
-	pub fn modify_for_update_retry(&mut self, id: RecordId, value: Arc<Value>) {
+	pub fn modify_for_update_retry(&mut self, id: RecordId, record: Arc<Record>) {
 		let retry = Arc::new(id);
 		self.id = Some(retry.clone());
 		self.r#gen = None;
 		self.retry = true;
 		self.record_strategy = RecordStrategy::KeysAndValues;
 
-		self.current = CursorDoc::new(Some(retry), None, value);
+		self.current = CursorDoc::new(Some(retry), None, record);
 		self.initial = self.current.clone();
 	}
 
@@ -346,15 +370,15 @@ impl Document {
 		// Fetch the fields for the table
 		let fds = self.fd(ctx, opt).await?;
 		// The document to be reduced
-		let mut reduced = (*full.doc).clone();
+		let mut reduced = full.doc.clone();
 		// Loop over each field in document
 		for fd in fds.iter() {
 			// Loop over each field in document
-			for k in reduced.each(&fd.name).iter() {
+			for k in reduced.as_ref().each(&fd.name).iter() {
 				// Process the field permissions
-				match &fd.permissions.select {
+				match &fd.select_permission {
 					Permission::Full => (),
-					Permission::None => reduced.cut(k),
+					Permission::None => reduced.to_mut().cut(k),
 					Permission::Specific(e) => {
 						// Disable permissions
 						let opt = &opt.new_with_perms(false);
@@ -371,7 +395,7 @@ impl Document {
 							.catch_return()?
 							.is_truthy()
 						{
-							reduced.cut(k);
+							reduced.to_mut().cut(k);
 						}
 					}
 				}
@@ -507,7 +531,11 @@ impl Document {
 	}
 
 	/// Get the events for this document
-	pub async fn ev(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineEventStatement]>> {
+	pub async fn ev(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Arc<[catalog::EventDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
@@ -536,7 +564,11 @@ impl Document {
 	}
 
 	/// Get the fields for this document
-	pub async fn fd(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineFieldStatement]>> {
+	pub async fn fd(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Arc<[catalog::FieldDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
@@ -549,23 +581,25 @@ impl Document {
 				let key = cache::ds::Lookup::Fds(ns, db, &tb.name, tb.cache_fields_ts);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_fds(),
 					None => {
 						let val = ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await?;
-						let val = cache::ds::Entry::Fds(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Fds(val.clone()));
+						Ok(val)
 					}
 				}
 			}
-			.try_into_fds(),
 			// No cache is present on the context
 			None => ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await,
 		}
 	}
 
 	/// Get the indexes for this document
-	pub async fn ix(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineIndexStatement]>> {
+	pub async fn ix(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Arc<[catalog::IndexDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
@@ -594,7 +628,11 @@ impl Document {
 	}
 
 	// Get the lives for this document
-	pub async fn lv(&self, ctx: &Context, opt: &Options) -> Result<Arc<[LiveStatement]>> {
+	pub async fn lv(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Arc<[catalog::SubscriptionDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table

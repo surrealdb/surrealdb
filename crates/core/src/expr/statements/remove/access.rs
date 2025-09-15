@@ -1,17 +1,15 @@
 use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
+use crate::catalog::providers::AuthorisationProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveAccessStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -34,17 +32,13 @@ impl RemoveAccessStatement {
 						return Ok(Value::None);
 					} else {
 						return Err(anyhow::Error::new(Error::AccessRootNotFound {
-							ac: self.name.as_raw_string(),
+							ac: self.name.to_raw_string(),
 						}));
 					}
 				};
 
 				// Delete the definition
-				let key = crate::key::root::ac::new(&ac.name);
-				txn.del(&key).await?;
-				// Delete any associated data including access grants.
-				let key = crate::key::root::access::all::new(&ac.name);
-				txn.delp(&key).await?;
+				txn.del_root_access(&ac.name).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -61,18 +55,14 @@ impl RemoveAccessStatement {
 					} else {
 						let ns = opt.ns()?;
 						return Err(anyhow::Error::new(Error::AccessNsNotFound {
-							ac: self.name.as_raw_string(),
+							ac: self.name.to_raw_string(),
 							ns: ns.to_string(),
 						}));
 					}
 				};
 
 				// Delete the definition
-				let key = crate::key::namespace::ac::new(ns, &ac.name);
-				txn.del(&key).await?;
-				// Delete any associated data including access grants.
-				let key = crate::key::namespace::access::all::new(ns, &ac.name);
-				txn.delp(&key).await?;
+				txn.del_ns_access(ns, &ac.name).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -89,24 +79,19 @@ impl RemoveAccessStatement {
 					} else {
 						let (ns, db) = opt.ns_db()?;
 						return Err(anyhow::Error::new(Error::AccessDbNotFound {
-							ac: self.name.as_raw_string(),
+							ac: self.name.to_raw_string(),
 							ns: ns.to_string(),
 							db: db.to_string(),
 						}));
 					}
 				};
 				// Delete the definition
-				let key = crate::key::database::ac::new(ns, db, &ac.name);
-				txn.del(&key).await?;
-				// Delete any associated data including access grants.
-				let key = crate::key::database::access::all::new(ns, db, &ac.name);
-				txn.delp(&key).await?;
+				txn.del_db_access(ns, db, &ac.name).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
 				Ok(Value::None)
 			}
-			_ => Err(anyhow::Error::new(Error::InvalidLevel(self.base.to_string()))),
 		}
 	}
 }

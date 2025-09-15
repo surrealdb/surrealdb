@@ -1,12 +1,16 @@
-use std::{cmp::Ordering, fmt::Write, ops::Range};
+use std::cmp::Ordering;
+use std::fmt::Write;
+use std::ops::Range;
 
-use crate::tests::{ConfigKind, TestSet, report::TestOutputs};
 use anyhow::Result;
 use surrealdb_core::val::Value as SurValue;
-use tokio::{fs, io::AsyncWriteExt};
+use tokio::fs;
+use tokio::io::AsyncWriteExt;
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
 
 use super::TestReport;
+use crate::tests::report::TestOutputs;
+use crate::tests::{ConfigKind, TestSet};
 
 impl TestReport {
 	pub async fn update_config_results(&self, set: &TestSet) -> Result<()> {

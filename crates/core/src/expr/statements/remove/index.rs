@@ -1,19 +1,17 @@
 use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::catalog::TableDefinition;
+use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -26,6 +24,7 @@ impl RemoveIndexStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Get the NS and DB
+		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the transaction
 		let txn = ctx.tx();
@@ -45,14 +44,10 @@ impl RemoveIndexStatement {
 			return Err(e);
 		}
 
-		// Delete the definition
-		let key = crate::key::table::ix::new(ns, db, &self.what, &self.name);
-		txn.del(&key).await?;
-		// Remove the index data
-		let key = crate::key::index::all::new(ns, db, &self.what, &self.name);
-		txn.delp(&key).await?;
+		// Delete the index data.
+		txn.del_tb_index(ns, db, &self.what, &self.name).await?;
+
 		// Refresh the table cache for indexes
-		let key = crate::key::database::tb::new(ns, db, &self.what);
 		let Some(tb) = txn.get_tb(ns, db, &self.what).await? else {
 			return Err(Error::TbNotFound {
 				name: self.what.to_string(),
@@ -60,13 +55,13 @@ impl RemoveIndexStatement {
 			.into());
 		};
 
-		txn.set(
-			&key,
+		txn.put_tb(
+			ns_name,
+			db_name,
 			&TableDefinition {
 				cache_indexes_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
 			},
-			None,
 		)
 		.await?;
 		// Clear the cache

@@ -1,17 +1,15 @@
 use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
+use crate::catalog::providers::NamespaceProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveNamespaceStatement {
 	pub name: Ident,
 	pub if_exists: bool,
@@ -34,7 +32,7 @@ impl RemoveNamespaceStatement {
 				}
 
 				return Err(Error::NsNotFound {
-					name: self.name.to_string(),
+					name: self.name.to_raw_string(),
 				}
 				.into());
 			}
@@ -53,18 +51,13 @@ impl RemoveNamespaceStatement {
 		}
 
 		// Delete the definition
-		let key = crate::key::root::ns::new(ns.namespace_id);
-		let catalog_key = crate::key::catalog::ns::new(&ns.name);
+		let key = crate::key::root::ns::new(&ns.name);
 		let namespace_root = crate::key::namespace::all::new(ns.namespace_id);
 		if self.expunge {
 			txn.clr(&key).await?;
-			txn.clr(&catalog_key).await?;
-			txn.clrp(&catalog_key).await?;
 			txn.clrp(&namespace_root).await?;
 		} else {
 			txn.del(&key).await?;
-			txn.del(&catalog_key).await?;
-			txn.delp(&catalog_key).await?;
 			txn.delp(&namespace_root).await?;
 		};
 

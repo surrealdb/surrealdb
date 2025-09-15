@@ -9,7 +9,6 @@ use axum_extra::TypedHeader;
 use axum_extra::extract::Query;
 use bytes::Bytes;
 use serde::Deserialize;
-use surrealdb_core::kvs::{LockType, TransactionType};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::AppState;
@@ -138,12 +137,7 @@ async fn select_all(
 	let (ns, db) = check_ns_db(&session).map_err(ResponseError)?;
 
 	// Check if the table exists
-	let tx =
-		ds.transaction(TransactionType::Read, LockType::Optimistic).await.map_err(ResponseError)?;
-	if tx.get_tb_by_name(&ns, &db, &table).await.map_err(ResponseError)?.is_none() {
-		return Err(ResponseError(anyhow::anyhow!("Table `{table}` not found")));
-	}
-	tx.cancel().await.map_err(ResponseError)?;
+	ds.ensure_tb_exists(&ns, &db, &table).await.map_err(ResponseError)?;
 
 	// Specify the request statement
 	let sql = match query.fields {

@@ -1,7 +1,6 @@
 //! The module defining the key value store.
-//! Everything related the transaction for the key value store is defined in the
-//! `tx.rs` file. This module enables the following operations on the key value
-//! store:
+//! Everything related the transaction for the key value store is defined in the `tx.rs` file.
+//! This module enables the following operations on the key value store:
 //! - get
 //! - set
 //! - delete
@@ -25,7 +24,6 @@ mod cf;
 mod clock;
 mod ds;
 mod key;
-pub(crate) mod live;
 mod node;
 mod scanner;
 mod stash;
@@ -55,9 +53,7 @@ mod util;
 pub use ds::Datastore;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) use index::{ConsumeResult, IndexBuilder};
-pub(crate) use key::impl_kv_value_revisioned;
-pub use key::{KVKey, KVValue};
-pub(crate) use live::Live;
+pub(crate) use key::{KVKey, KVValue, impl_kv_key_storekey, impl_kv_value_revisioned};
 pub use tr::{Check, LockType, TransactionType, Transactor};
 pub use tx::Transaction;
 

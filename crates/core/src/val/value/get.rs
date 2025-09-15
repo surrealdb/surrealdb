@@ -12,11 +12,11 @@ use crate::err::Error;
 use crate::exe::try_join_all_buffered;
 use crate::expr::field::{Field, Fields};
 use crate::expr::idiom::recursion::{Recursion, compute_idiom_recursion};
-use crate::expr::part::{FindRecursionPlan, Next, NextMethod, Part, Skip, SplitByRepeatRecurse};
+use crate::expr::part::{FindRecursionPlan, Next, NextMethod, Part, SplitByRepeatRecurse};
 use crate::expr::statements::select::SelectStatement;
-use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Graph, Idiom, Literal};
+use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Idiom, Literal, Lookup};
 use crate::fnc::idiom;
-use crate::val::{RecordId, RecordIdKey, Value};
+use crate::val::{RecordIdKey, Value};
 
 impl Value {
 	/// Asynchronous method for getting a local or remote field from a `Value`
@@ -120,12 +120,6 @@ impl Value {
 			}
 			// Get the current value at the path
 			Some(p) => match self {
-				// Compute the refs first, then continue the path
-				// TODO: Reimplement references
-				//Value::Refs(r) => {
-				//	let v = r.compute(ctx, opt, doc).await?;
-				//	stk.run(|stk| v.get(stk, ctx, opt, doc, path)).await
-				//}
 				// Current value at path is a geometry
 				Value::Geometry(v) => match p {
 					// If this is the 'type' field then continue
@@ -169,28 +163,7 @@ impl Value {
 				},
 				// Current value at path is an object
 				Value::Object(v) => match p {
-					// If requesting an `id` field, check if it is a complex Record ID
-					Part::Field(f) if f.is_id() && path.len() > 1 => match v.get(f.as_str()) {
-						Some(Value::RecordId(RecordId {
-							key: RecordIdKey::Object(v),
-							..
-						})) => {
-							let v = Value::Object(v.clone());
-							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
-						}
-						Some(Value::RecordId(RecordId {
-							key: RecordIdKey::Array(v),
-							..
-						})) => {
-							let v = Value::Array(v.clone());
-							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
-						}
-						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
-						None => {
-							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
-						}
-					},
-					Part::Graph(_) => match v.rid() {
+					Part::Lookup(_) => match v.rid() {
 						Some(v) => {
 							let v = Value::RecordId(v);
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path)).await
@@ -227,18 +200,14 @@ impl Value {
 						},
 						_ => stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await,
 					},
-					Part::All => {
-						let v: Value =
-							v.values().map(|v| v.to_owned()).collect::<Vec<Value>>().into();
-						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
-					}
+					Part::All => stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await,
 					Part::Destructure(p) => {
 						let cur_doc = CursorDoc::from(self.clone());
 						let mut obj = BTreeMap::<String, Value>::new();
 						for p in p.iter() {
 							let idiom = p.idiom();
 							obj.insert(
-								p.field().as_raw_string(),
+								p.field().to_raw_string(),
 								stk.run(|stk| idiom.compute(stk, ctx, opt, Some(&cur_doc))).await?,
 							);
 						}
@@ -276,7 +245,30 @@ impl Value {
 				// Current value at path is an array
 				Value::Array(v) => match p {
 					// Current path is an `*` part
-					Part::All | Part::Flatten => {
+					Part::All => {
+						stk.scope(|scope| {
+							let futs = v.iter().map(|v| {
+								scope.run(|stk| {
+									let path = if v.is_thing() {
+										path
+									} else {
+										// .* applies to the elements of the array it was applied
+										// to, not recursively if one of the values is an
+										// array, we skip the .* part, as it implied that
+										// the user collected all values of the nested array. See
+										// `array_range.surql`.
+										path.next()
+									};
+
+									v.get(stk, ctx, opt, doc, path)
+								})
+							});
+							try_join_all_buffered(futs)
+						})
+						.await
+						.map(Into::into)
+					}
+					Part::Flatten => {
 						let path = path.next();
 						stk.scope(|scope| {
 							let futs =
@@ -356,32 +348,17 @@ impl Value {
 						stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await
 					}
 					_ => {
-						let len = match path.get(1) {
-							// Say that we have a path like `[a:1].out.*`, then `.*`
-							// references `out` and not the resulting array of `[a:1].out`
-							Some(Part::All) => 2,
-							_ => 1,
-						};
-
-						let mapped = stk
+						let res = stk
 							.scope(|scope| {
-								let futs = v.iter().map(|v| {
-									scope.run(|stk| v.get(stk, ctx, opt, doc, &path[0..len]))
-								});
+								let futs = v
+									.iter()
+									.map(|v| scope.run(|stk| v.get(stk, ctx, opt, doc, path)));
 								try_join_all_buffered(futs)
 							})
 							.await
 							.map(Value::from)?;
 
-						// If we are chaining graph parts, we need to make sure to flatten the
-						// result
-						let mapped = match (path.first(), path.get(1)) {
-							(Some(Part::Graph(_)), Some(Part::Graph(_))) => mapped.flatten(),
-							(Some(Part::Graph(_)), Some(Part::Where(_))) => mapped.flatten(),
-							_ => mapped,
-						};
-
-						stk.run(|stk| mapped.get(stk, ctx, opt, doc, path.skip(len))).await
+						Ok(res)
 					}
 				},
 				// Current value at path is a thing
@@ -395,19 +372,14 @@ impl Value {
 
 					match p {
 						// This is a graph traversal expression
-						Part::Graph(g) => {
+						Part::Lookup(g) => {
 							let last_part = path.len() == 1;
-							let expr = g.expr.clone().unwrap_or(if last_part {
-								Fields::value_id()
-							} else {
-								Fields::all()
-							});
-
+							let expr = g.expr.clone().unwrap_or(Fields::value_id());
 							let what = Expr::Idiom(Idiom(vec![
 								Part::Start(Expr::Literal(Literal::RecordId(val.into_literal()))),
-								Part::Graph(Graph {
+								Part::Lookup(Lookup {
 									what: g.what.clone(),
-									dir: g.dir.clone(),
+									kind: g.kind.clone(),
 									..Default::default()
 								}),
 							]));
@@ -424,23 +396,20 @@ impl Value {
 								..SelectStatement::default()
 							};
 
+							let res = stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.all();
+
 							if last_part {
-								Ok(stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.all())
+								Ok(res)
 							} else {
-								let v =
-									stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.all();
-								let res =
-									stk.run(|stk| v.get(stk, ctx, opt, None, path.next())).await?;
-								// We only want to flatten the results if the next part
-								// is a graph or where part. Reason being that if we flatten
-								// fields, the results of those fields (which could be arrays)
-								// will be merged into each other. So [1, 2, 3], [4, 5, 6] would
-								// become [1, 2, 3, 4, 5, 6]. This slice access won't panic
-								// as we have already checked the length of the path.
-								Ok(match path[1] {
-									Part::Graph(_) | Part::Where(_) => res.flatten(),
-									_ => res,
-								})
+								let res = stk
+									.run(|stk| res.get(stk, ctx, opt, None, path.next()))
+									.await?;
+
+								match path.get(1) {
+									Some(Part::Lookup(_)) => Ok(res.flatten()),
+									Some(Part::Where(_)) => Ok(res.flatten()),
+									_ => Ok(res),
+								}
 							}
 						}
 						Part::Method(name, args) => {
@@ -461,24 +430,50 @@ impl Value {
 						Part::Optional => {
 							stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await
 						}
-						// This is a remote field expression
-						_ => {
+						// This is a remote field expression with one exception
+						// If the RecordId is array-based, and we try to access an index,
+						// then we return that index of the RecordId's array.
+						p => {
+							// Discover what the path is that we need to continue with
+							let next = match (p, &val.key) {
+								// If the computed value is a number, and the RecordIdKey is an
+								// array, then we return the value at the index of the
+								// array. Otherwise, we return the computed value and the
+								// next path part.
+								(Part::Value(x), RecordIdKey::Array(arr)) => {
+									match stk
+										.run(|stk| x.compute(stk, ctx, opt, doc))
+										.await
+										.catch_return()?
+									{
+										Value::Number(n) => {
+											return match arr.get(n.to_usize()) {
+												Some(v) => {
+													stk.run(|stk| {
+														v.get(stk, ctx, opt, doc, path.next())
+													})
+													.await
+												}
+												None => Ok(Value::None),
+											};
+										}
+										x => &[&[Part::Value(x.into_literal())], path.next()]
+											.concat(),
+									}
+								}
+
+								// No special case, fetch the document and continue processing the
+								// path
+								_ => path,
+							};
+
+							// Fetch the record id's contents
 							let stm = SelectStatement {
 								expr: Fields::Select(vec![Field::All]),
 								what: vec![Expr::Literal(Literal::RecordId(val.into_literal()))],
 								..SelectStatement::default()
 							};
 							let v = stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.first();
-
-							// .* on a record id means fetch the record's contents
-							// The above select statement results in an object, if
-							// we apply `.*` on that, we can an array with the record's
-							// values instead of just the content. Therefore, if we
-							// encounter the first part to be `.*`, we simply skip it here
-							let next = match path.first() {
-								Some(Part::All) => path.next(),
-								_ => path,
-							};
 
 							// Continue processing the path on the now fetched record
 							stk.run(|stk| v.get(stk, ctx, opt, None, next)).await
@@ -532,6 +527,7 @@ mod tests {
 	use crate::expr::idiom::Idiom;
 	use crate::sql::idiom::Idiom as SqlIdiom;
 	use crate::syn;
+	use crate::val::RecordId;
 
 	#[tokio::test]
 	async fn get_none() {

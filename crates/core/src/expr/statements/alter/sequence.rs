@@ -2,9 +2,8 @@ use std::fmt::{self, Display, Write};
 use std::ops::Deref;
 
 use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
+use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -13,8 +12,7 @@ use crate::expr::{Base, Ident, Timeout, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AlterSequenceStatement {
 	pub name: Ident,
 	pub if_exists: bool,
@@ -45,7 +43,7 @@ impl AlterSequenceStatement {
 			if timeout.is_zero() {
 				sq.timeout = None;
 			} else {
-				sq.timeout = Some(timeout.clone());
+				sq.timeout = Some(*timeout.as_std_duration());
 			}
 		}
 		// Set the table definition

@@ -66,7 +66,6 @@ features = ["kv-mem", "kv-rocksdb", "http", "scripting"]
 targets = []
 
 [dependencies]
-# workspace internal dependencies
 
 # External surreal crates
 surrealkv = { workspace = true, optional = true }
@@ -204,6 +203,7 @@ ws_stream_wasm.workspace = true
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 rust-s3 = { workspace = true, optional = true }
 surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers", "rpc"] }
+surrealdb-types = { workspace = true }
 tokio = { workspace = true, default-features = false, features = [
     "macros",
     "io-util",
@@ -228,6 +228,7 @@ jemallocator = { workspace = true, optional = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true
+hashbrown.workspace = true
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 rstest.workspace = true
 serial_test.workspace = true
@@ -237,7 +238,6 @@ time = { workspace = true, features = ["serde"] }
 tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 wiremock.workspace = true
-
 
 [lints]
 workspace = true

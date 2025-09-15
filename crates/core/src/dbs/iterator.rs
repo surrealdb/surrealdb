@@ -11,15 +11,16 @@ use crate::dbs::result::Results;
 use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, Document, IgnoreError};
 use crate::err::Error;
-use crate::expr::graph::ComputedGraphSubject;
+use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
 use crate::expr::{
-	self, ControlFlow, Dir, Expr, Fields, FlowResultExt, Graph, Ident, Literal, Mock, Part,
+	self, ControlFlow, Expr, Fields, FlowResultExt, Ident, Literal, Lookup, Mock, Part,
 };
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
 	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
 	StatementContext,
 };
+use crate::val::record::Record;
 use crate::val::{Object, RecordId, RecordIdKey, RecordIdKeyRange, Value};
 
 const TARGET: &str = "surrealdb::core::dbs";
@@ -45,10 +46,10 @@ pub(crate) enum Iterable {
 	Thing(RecordId),
 	/// An iterable which needs to fetch the related edges
 	/// of a record before processing each document.
-	Edges {
-		dir: Dir,
+	Lookup {
+		kind: LookupKind,
 		from: RecordId,
-		what: Vec<ComputedGraphSubject>,
+		what: Vec<ComputedLookupSubject>,
 	},
 	/// An iterable which needs to iterate over the records
 	/// in a table before processing each document.
@@ -80,9 +81,9 @@ pub(crate) enum Iterable {
 
 #[derive(Debug)]
 pub(crate) enum Operable {
-	Value(Arc<Value>),
-	Insert(Arc<Value>, Arc<Value>),
-	Relate(RecordId, Arc<Value>, RecordId, Option<Arc<Value>>),
+	Value(Arc<Record>),
+	Insert(Arc<Record>, Arc<Value>),
+	Relate(RecordId, Arc<Record>, RecordId, Option<Arc<Value>>),
 	Count(usize),
 }
 
@@ -185,18 +186,18 @@ impl Iterator {
 					return self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, val).await;
 				};
 
-				let Part::Graph(ref graph) = x[1] else {
+				let Part::Lookup(ref lookup) = x[1] else {
 					return self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, val).await;
 				};
 
-				if graph.alias.is_none()
-					&& graph.cond.is_none()
-					&& graph.group.is_none()
-					&& graph.limit.is_none()
-					&& graph.order.is_none()
-					&& graph.split.is_none()
-					&& graph.start.is_none()
-					&& graph.expr.is_none()
+				if lookup.alias.is_none()
+					&& lookup.cond.is_none()
+					&& lookup.group.is_none()
+					&& lookup.limit.is_none()
+					&& lookup.order.is_none()
+					&& lookup.split.is_none()
+					&& lookup.start.is_none()
+					&& lookup.expr.is_none()
 				{
 					// TODO: Do we support `RETURN a:b` here? What do we do when it is not of the
 					// right type?
@@ -207,11 +208,11 @@ impl Iterator {
 						//
 					};
 					let mut what = Vec::new();
-					for s in graph.what.iter() {
-						what.push(s.compute(stk, ctx, opt, doc).await?);
+					for s in lookup.what.iter() {
+						what.push(s.compute(stk, ctx, opt, doc, &lookup.kind).await?);
 					}
 					// idiom matches the Edges pattern.
-					self.prepare_edges(stm_ctx.stm, from, graph.dir.clone(), what)?;
+					self.prepare_lookup(stm_ctx.stm, from, lookup.kind.clone(), what)?;
 				}
 			}
 			Expr::Literal(Literal::Array(array)) => {
@@ -301,12 +302,12 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) fn prepare_edges(
+	pub(crate) fn prepare_lookup(
 		&mut self,
 		stm: &Statement<'_>,
 		from: RecordId,
-		dir: Dir,
-		what: Vec<ComputedGraphSubject>,
+		kind: LookupKind,
+		what: Vec<ComputedLookupSubject>,
 	) -> Result<()> {
 		ensure!(!stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
 		// Check if this is a create statement
@@ -314,8 +315,8 @@ impl Iterator {
 			// recreate the expression for the error.
 			let value = expr::Idiom(vec![
 				expr::Part::Start(Expr::Literal(Literal::RecordId(from.into_literal()))),
-				expr::Part::Graph(Graph {
-					dir,
+				expr::Part::Lookup(Lookup {
+					kind,
 					what: what.into_iter().map(|x| x.into_literal()).collect(),
 					..Default::default()
 				}),
@@ -325,12 +326,13 @@ impl Iterator {
 				value,
 			})
 		}
-		// Add the record to the iterator
-		self.ingest(Iterable::Edges {
+		let x = Iterable::Lookup {
 			from,
-			dir,
+			kind,
 			what,
-		});
+		};
+		// Add the record to the iterator
+		self.ingest(x);
 		// All ingested ok
 		Ok(())
 	}
@@ -453,20 +455,20 @@ impl Iterator {
 							.await;
 					};
 
-					let Part::Graph(ref graph) = x[0] else {
+					let Part::Lookup(ref lookup) = x[0] else {
 						return self
 							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
 							.await;
 					};
 
-					if graph.alias.is_none()
-						&& graph.cond.is_none()
-						&& graph.group.is_none()
-						&& graph.limit.is_none()
-						&& graph.order.is_none()
-						&& graph.split.is_none()
-						&& graph.start.is_none()
-						&& graph.expr.is_none()
+					if lookup.alias.is_none()
+						&& lookup.cond.is_none()
+						&& lookup.group.is_none()
+						&& lookup.limit.is_none()
+						&& lookup.order.is_none()
+						&& lookup.split.is_none()
+						&& lookup.start.is_none()
+						&& lookup.expr.is_none()
 					{
 						// TODO: Do we support `RETURN a:b` here? What do we do when it is not of
 						// the right type?
@@ -477,11 +479,11 @@ impl Iterator {
 							//
 						};
 						let mut what = Vec::new();
-						for s in graph.what.iter() {
-							what.push(s.compute(stk, ctx, opt, doc).await?);
+						for s in lookup.what.iter() {
+							what.push(s.compute(stk, ctx, opt, doc, &lookup.kind).await?);
 						}
 						// idiom matches the Edges pattern.
-						return self.prepare_edges(stm_ctx.stm, from, graph.dir.clone(), what);
+						return self.prepare_lookup(stm_ctx.stm, from, lookup.kind.clone(), what);
 					}
 
 					self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v).await?
