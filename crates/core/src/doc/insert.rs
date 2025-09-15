@@ -32,7 +32,8 @@ impl Document {
 		// it is retryable when some data is present on the insert statement to update.
 		let retryable = stm.update.is_some();
 		// it is retryable so generate a save point we can roll back to.
-		// always create a save point even if not retryable, as we have to rollback to original state.
+		// always create a save point even if not retryable, as we have to rollback to original
+		// state.
 		ctx.tx().lock().await.new_save_point();
 
 		// First try to create the value and if that is not possible due to an existing
