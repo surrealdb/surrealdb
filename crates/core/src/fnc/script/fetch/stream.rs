@@ -1,21 +1,6 @@
 use std::{future::Future, pin::Pin};
 
-use async_channel::Receiver;
 use futures::{Stream, StreamExt};
-
-/// A newtype struct over receiver implementing the [`Stream`] trait.
-#[non_exhaustive]
-pub struct ChannelStream<R>(Pin<Box<Receiver<R>>>);
-
-impl<R> Stream for ChannelStream<R> {
-	type Item = R;
-	fn poll_next(
-		mut self: Pin<&mut Self>,
-		cx: &mut std::task::Context,
-	) -> std::task::Poll<Option<Self::Item>> {
-		self.0.poll_next_unpin(cx)
-	}
-}
 
 /// A struct representing a Javascript `ReadableStream`.
 #[non_exhaustive]

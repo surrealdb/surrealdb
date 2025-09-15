@@ -108,7 +108,7 @@ pub mod key {
 		}
 		*/
 
-		pub fn fix(&self) -> Option<crate::key::graph::Graph> {
+		pub fn fix(&self) -> Option<crate::key::graph::Graph<'_>> {
 			let fixed = match (self.id.fix(), self.fk.fix()) {
 				(None, None) => return None,
 				(Some(id), None) => crate::key::graph::Graph::new_from_id(
@@ -176,7 +176,7 @@ pub mod key {
 		}
 		*/
 
-		pub fn fix(&self) -> Option<crate::key::thing::Thing> {
+		pub fn fix(&self) -> Option<crate::key::thing::Thing<'_>> {
 			self.id.fix().map(|id| crate::key::thing::new(self.ns, self.db, self.tb, &id))
 		}
 	}

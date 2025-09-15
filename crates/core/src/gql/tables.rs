@@ -450,6 +450,7 @@ fn filter_id() -> InputObject {
 	filter_impl!(filter, ty, "ne");
 	filter
 }
+
 fn filter_from_type(
 	kind: Kind,
 	filter_name: String,

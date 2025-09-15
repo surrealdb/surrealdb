@@ -39,14 +39,14 @@ pub fn add((mut array, value): (Array, Value)) -> Result<Value, Error> {
 	match value {
 		Value::Array(value) => {
 			for v in value.0 {
-				if !array.0.iter().any(|x| *x == v) {
+				if !array.0.contains(&v) {
 					array.0.push(v)
 				}
 			}
 			Ok(array.into())
 		}
 		value => {
-			if !array.0.iter().any(|x| *x == value) {
+			if !array.0.contains(&value) {
 				array.0.push(value)
 			}
 			Ok(array.into())
@@ -101,7 +101,7 @@ pub async fn any(
 				Value::None
 			}
 		}
-		Some(value) => array.iter().any(|v: &Value| *v == value).into(),
+		Some(value) => array.contains(&value).into(),
 		None => array.iter().any(Value::is_truthy).into(),
 	})
 }
