@@ -3,7 +3,6 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str::FromStr;
 
-use md5::{Digest, Md5};
 use reblessive::Stack;
 use reblessive::tree::Stk;
 use revision::Revisioned;
@@ -77,13 +76,6 @@ impl Idiom {
 		self.0.push(n);
 		self
 	}
-	/// Convert this Idiom to a unique hash
-	pub(crate) fn to_hash(&self) -> String {
-		let mut hasher = Md5::new();
-		hasher.update(self.to_string().as_str());
-		format!("{:x}", hasher.finalize())
-	}
-
 	/// Simplifies this Idiom for use in object keys
 	pub(crate) fn simplify(&self) -> Idiom {
 		self.0
