@@ -495,65 +495,23 @@ impl Iterator {
 		Ok(())
 	}
 
-	/// Determines whether START/LIMIT clauses can be optimized at the storage level.
-	///
-	/// This method enables a critical performance optimization where START and LIMIT clauses
-	/// can be applied directly at the storage/iterator level (using `start_skip` and
-	/// `cancel_on_limit`) rather than after all query processing is complete.
-	///
-	/// ## The Optimization
-	///
-	/// When this method returns `true`, the query engine can:
-	/// - Skip records at the storage level before any processing (`start_skip`)
-	/// - Cancel iteration early when the limit is reached (`cancel_on_limit`)
-	///
-	/// This provides significant performance benefits for queries with large result sets,
-	/// as it avoids unnecessary processing of records that would be filtered out anyway.
-	///
-	/// ## Safety Conditions
-	///
-	/// The optimization is only safe when the order of records at the storage level
-	/// matches the order of records in the final result set. This method returns `false`
-	/// when any of the following conditions would change the record order or filtering:
-	///
-	/// ### GROUP BY clauses
-	/// Grouping operations fundamentally change the result structure and record count,
-	/// making storage-level limiting meaningless.
-	///
-	/// ### Multiple iterators
-	/// When multiple iterators are involved (e.g., JOINs, UNIONs), records from different
-	/// sources need to be merged, so individual iterator limits would be incorrect.
-	///
-	/// ### WHERE clauses
-	/// Filtering operations change which records appear in the final result set.
-	/// START should skip records from the filtered set, not from the raw storage.
-	///
-	/// Example problem:
-	/// ```sql
-	/// -- Given: t:1(f=true), t:2(f=true), t:3(f=false), t:4(f=false)
-	/// SELECT * FROM t WHERE !f START 1;
-	/// -- Correct: Skip first filtered record → [t:4]
-	/// -- Wrong with optimization: Skip t:1 at storage, then filter → [t:3, t:4]
-	/// ```
-	///
-	/// ### ORDER BY clauses (conditional)
-	/// When there's an ORDER BY clause, the optimization is only safe if:
-	/// - There's exactly one iterator
-	/// - The iterator is backed by a sorted index
-	/// - The index sort order matches the ORDER BY clause
-	///
-	/// ## Performance Impact
-	///
-	/// - **When enabled**: Significant performance improvement for large result sets
-	/// - **When disabled**: Slight performance cost as all records must be processed
-	///   before START/LIMIT is applied
-	///
-	/// ## Returns
-	///
-	/// - `true`: Safe to apply START/LIMIT optimization at storage level
-	/// - `false`: Must apply START/LIMIT after all query processing is complete
-	/// Determines whether START can be applied at the storage level (start_skip)
-	fn can_start_skip(&self, ctx: &Context, stm: &Statement<'_>) -> bool {
+ /// Returns true if START can be applied as a storage-level skip (start_skip)
+ /// without changing the semantics of the query.
+ ///
+ /// What this actually checks (mirrors the code below):
+ /// - GROUP BY: disallowed, because grouping changes the result count/order. → false
+ /// - Multiple iterators: disallowed, because START must apply to the merged set. → false
+ /// - WHERE: allowed only if the sole iterator is an index whose executor applies the
+ ///   WHERE predicate at the iterator level (`exe.is_iterator_condition`). Otherwise,
+ ///   START must apply to the filtered set and cannot be pushed down. → conditional
+ /// - ORDER BY absent: allowed, natural storage order is fine. → true
+ /// - ORDER BY present: allowed only if the sole iterator is a sorted index that provides
+ ///   the requested order (`qp.is_order`). → conditional
+ ///
+ /// In short: push START down to storage only for a single iterator where any filtering is
+ /// performed by the index itself and, if ORDER BY is used, the iterator natively yields
+ /// rows in the required order.
+ fn can_start_skip(&self, ctx: &Context, stm: &Statement<'_>) -> bool {
 		// GROUP BY operations change the result structure and count
 		if stm.group().is_some() {
 			return false;
@@ -599,8 +557,21 @@ impl Iterator {
 		false
 	}
 
-	/// Determines whether LIMIT can cancel iteration early (cancel_on_limit)
-	fn can_cancel_on_limit(&self, ctx: &Context, stm: &Statement<'_>) -> bool {
+ /// Returns true if iteration can be cancelled early on LIMIT (cancel_on_limit)
+ /// without changing the semantics of the query.
+ ///
+ /// What this actually checks (mirrors the code below):
+ /// - GROUP BY: disallowed; grouping can change the number of output rows and needs
+ ///   to see all inputs. → false
+ /// - ORDER BY absent: allowed; we count accepted rows after WHERE filtering, so we can
+ ///   stop as soon as we have enough outputs. → true
+ /// - ORDER BY present: allowed only if there's exactly one iterator and it is a sorted
+ ///   index that matches the ORDER BY (`qp.is_order`). Otherwise we must iterate all
+ ///   rows to sort correctly. → conditional
+ ///
+ /// Note: WHERE filtering is fine here because cancellation is based on the number of
+ /// accepted results after filtering, not on the raw scanned rows.
+ fn can_cancel_on_limit(&self, ctx: &Context, stm: &Statement<'_>) -> bool {
 		// GROUP BY changes result count post-iteration.
 		// Cannot cancel early as we need to evalute every records.
 		if stm.group().is_some() {
