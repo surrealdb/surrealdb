@@ -487,112 +487,96 @@ pub fn len((array,): (Array,)) -> Result<Value> {
 	Ok(array.len().into())
 }
 
-pub fn logical_and((lh, rh): (Array, Array)) -> Result<Value> {
-	let (mut res, comp, swapped) = if lh.len() < rh.len() {
-		(rh, lh, true)
-	} else {
-		(lh, rh, false)
-	};
-
-	let comp_len = comp.len();
-
-	if swapped {
-		for (idx, b) in comp.into_iter().enumerate() {
+pub fn logical_and((mut lh, mut rh): (Array, Array)) -> Result<Value> {
+	if lh.len() < rh.len() {
+		let lh_len = lh.len();
+		for (idx, b) in lh.into_iter().enumerate() {
 			if !b.is_truthy() {
-				res[idx] = b;
+				rh[idx] = b;
 			}
 		}
 
-		res[comp_len..].fill(Value::Null)
+		rh[lh_len..].fill(Value::Null);
+		Ok(rh.into())
 	} else {
-		for (idx, b) in comp.into_iter().enumerate() {
-			if res[idx].is_truthy() {
-				res[idx] = b
+		let rh_len = rh.len();
+		for (idx, b) in rh.into_iter().enumerate() {
+			if lh[idx].is_truthy() {
+				lh[idx] = b
 			}
 		}
 
-		for i in &mut res[comp_len..] {
+		for i in &mut lh[rh_len..] {
 			if i.is_truthy() {
 				*i = Value::Null
 			}
 		}
+		Ok(lh.into())
 	}
-
-	Ok(res.into())
 }
 
-pub fn logical_or((lh, rh): (Array, Array)) -> Result<Value> {
-	let (mut res, comp, swapped) = if lh.len() < rh.len() {
-		(rh, lh, true)
-	} else {
-		(lh, rh, false)
-	};
-
-	let comp_len = comp.len();
-
-	if swapped {
-		for (idx, b) in comp.into_iter().enumerate() {
+pub fn logical_or((mut lh, mut rh): (Array, Array)) -> Result<Value> {
+	if lh.len() < rh.len() {
+		for (idx, b) in lh.into_iter().enumerate() {
 			if b.is_truthy() {
-				res[idx] = b;
-			}
-		}
-	} else {
-		for (idx, b) in comp.into_iter().enumerate() {
-			if !res[idx].is_truthy() {
-				res[idx] = b
+				rh[idx] = b;
 			}
 		}
 
-		for i in &mut res[comp_len..] {
+		Ok(rh.into())
+	} else {
+		let rh_len = rh.len();
+		for (idx, b) in rh.into_iter().enumerate() {
+			if !lh[idx].is_truthy() {
+				lh[idx] = b
+			}
+		}
+
+		for i in &mut lh[rh_len..] {
 			if !i.is_truthy() {
 				*i = Value::Null
 			}
 		}
-	}
 
-	Ok(res.into())
+		Ok(lh.into())
+	}
 }
 
-pub fn logical_xor((lh, rh): (Array, Array)) -> Result<Value> {
-	let (mut res, comp, swapped) = if lh.len() < rh.len() {
-		(rh, lh, true)
-	} else {
-		(lh, rh, false)
-	};
-
-	let comp_len = comp.len();
-
-	if swapped {
-		for (idx, b) in comp.into_iter().enumerate() {
-			let v = b.is_truthy() ^ res[idx].is_truthy();
+pub fn logical_xor((mut lh, mut rh): (Array, Array)) -> Result<Value> {
+	if lh.len() < rh.len() {
+		let lh_len = lh.len();
+		for (idx, b) in lh.into_iter().enumerate() {
+			let v = b.is_truthy() ^ rh[idx].is_truthy();
 			if b.is_truthy() == v {
-				res[idx] = b;
-			} else if res[idx].is_truthy() != v {
-				res[idx] = v.into();
+				rh[idx] = b;
+			} else if rh[idx].is_truthy() != v {
+				rh[idx] = v.into();
 			}
 		}
 
-		for i in &mut res[comp_len..] {
+		for i in &mut rh[lh_len..] {
 			if !i.is_truthy() {
 				*i = Value::Null;
 			}
 		}
+
+		Ok(rh.into())
 	} else {
-		for (idx, b) in comp.into_iter().enumerate() {
-			let v = b.is_truthy() ^ res[idx].is_truthy();
-			if res[idx].is_truthy() == v {
+		for (idx, b) in rh.into_iter().enumerate() {
+			let v = b.is_truthy() ^ lh[idx].is_truthy();
+			if lh[idx].is_truthy() == v {
 				continue;
 			}
 
 			if b.is_truthy() == v {
-				res[idx] = b;
+				lh[idx] = b;
 			} else {
-				res[idx] = v.into();
+				lh[idx] = v.into();
 			}
 		}
-	}
 
-	Ok(res.into())
+		Ok(lh.into())
+	}
 }
 
 pub async fn map(
