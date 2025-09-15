@@ -1,19 +1,19 @@
 //! Stores the key prefix for all keys under a root access method
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+
+use storekey::{BorrowDecode, Encode};
 
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct AccessRoot<'a> {
 	__: u8,
 	_a: u8,
-	pub ac: &'a str,
+	pub ac: Cow<'a, str>,
 }
 
-impl KVKey for AccessRoot<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(AccessRoot<'_> => Vec<u8>);
 
 pub fn new(ac: &str) -> AccessRoot {
 	AccessRoot::new(ac)
@@ -30,7 +30,7 @@ impl<'a> AccessRoot<'a> {
 		Self {
 			__: b'/',
 			_a: b'&',
-			ac,
+			ac: Cow::Borrowed(ac),
 		}
 	}
 }
@@ -38,6 +38,7 @@ impl<'a> AccessRoot<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

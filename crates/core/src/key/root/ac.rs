@@ -1,22 +1,22 @@
 //! Stores a DEFINE ACCESS ON ROOT configuration
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::AccessDefinition;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct RootAccessKey<'a> {
 	__: u8,
 	_a: u8,
 	_b: u8,
 	_c: u8,
-	pub ac: &'a str,
+	pub ac: Cow<'a, str>,
 }
 
-impl KVKey for RootAccessKey<'_> {
-	type ValueType = AccessDefinition;
-}
+impl_kv_key_storekey!(RootAccessKey<'_> => AccessDefinition);
 
 pub fn new(ac: &str) -> RootAccessKey<'_> {
 	RootAccessKey::new(ac)
@@ -47,7 +47,7 @@ impl<'a> RootAccessKey<'a> {
 			_a: b'!',
 			_b: b'a',
 			_c: b'c',
-			ac,
+			ac: Cow::Borrowed(ac),
 		}
 	}
 }
@@ -55,6 +55,7 @@ impl<'a> RootAccessKey<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

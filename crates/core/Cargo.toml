@@ -228,6 +228,7 @@ jemallocator = { workspace = true, optional = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true
+hashbrown.workspace = true
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 rstest.workspace = true
 serial_test.workspace = true
@@ -237,7 +238,6 @@ time = { workspace = true, features = ["serde"] }
 tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 wiremock.workspace = true
-
 
 [lints]
 workspace = true

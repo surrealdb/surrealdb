@@ -8,7 +8,7 @@ use crate::idx::docids::{DocId, Resolved};
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BState1, BState1skip, BStatistics, BTree, BTreeStore};
 use crate::idx::trees::store::TreeNodeProvider;
-use crate::kvs::{KVValue, Key, Transaction, TransactionType};
+use crate::kvs::{KVValue, Transaction, TransactionType};
 use crate::val::RecordId;
 
 /// BTree based DocIds store
@@ -67,14 +67,6 @@ impl BTreeDocIds {
 		let doc_id = self.next_doc_id;
 		self.next_doc_id += 1;
 		doc_id
-	}
-
-	pub(crate) async fn get_doc_id(
-		&self,
-		tx: &Transaction,
-		doc_key: Key,
-	) -> anyhow::Result<Option<DocId>> {
-		self.btree.search(tx, &self.store, &doc_key).await
 	}
 
 	/// Returns the doc_id for the given doc_key.
@@ -236,7 +228,7 @@ impl BTreeDocIdsState {
 
 #[cfg(test)]
 mod tests {
-	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::btdocids::{BTreeDocIds, Resolved};
 	use crate::kvs::TransactionType::*;
@@ -250,7 +242,7 @@ mod tests {
 		let d = BTreeDocIds::new(
 			&tx,
 			tt,
-			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
+			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
 			BTREE_ORDER,
 			100,
 		)

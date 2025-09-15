@@ -44,12 +44,9 @@ impl RemoveIndexStatement {
 			return Err(e);
 		}
 
-		// Delete the definition
-		let key = crate::key::table::ix::new(ns, db, &self.what, &self.name);
-		txn.del(&key).await?;
-		// Remove the index data
-		let key = crate::key::index::all::new(ns, db, &self.what, &self.name);
-		txn.delp(&key).await?;
+		// Delete the index data.
+		txn.del_tb_index(ns, db, &self.what, &self.name).await?;
+
 		// Refresh the table cache for indexes
 		let Some(tb) = txn.get_tb(ns, db, &self.what).await? else {
 			return Err(Error::TbNotFound {

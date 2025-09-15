@@ -12,13 +12,11 @@ pub enum Index {
 	Idx,
 	/// Unique index
 	Uniq,
-	/// Index with Full-Text search capabilities - single writer
-	Search(SearchParams),
 	/// M-Tree index for distance-based metrics
 	MTree(MTreeParams),
 	/// HNSW index for distance based metrics
 	Hnsw(HnswParams),
-	/// Index with Full-Text search capabilities supporting multiple writers
+	/// Index with Full-Text search capabilities - single writer
 	FullText(FullTextParams),
 }
 
@@ -27,7 +25,6 @@ impl From<Index> for crate::catalog::Index {
 		match v {
 			Index::Idx => Self::Idx,
 			Index::Uniq => Self::Uniq,
-			Index::Search(p) => Self::Search(p.into()),
 			Index::MTree(p) => Self::MTree(p.into()),
 			Index::Hnsw(p) => Self::Hnsw(p.into()),
 			Index::FullText(p) => Self::FullText(p.into()),
@@ -40,61 +37,9 @@ impl From<crate::catalog::Index> for Index {
 		match v {
 			crate::catalog::Index::Idx => Self::Idx,
 			crate::catalog::Index::Uniq => Self::Uniq,
-			crate::catalog::Index::Search(p) => Self::Search(p.into()),
 			crate::catalog::Index::MTree(p) => Self::MTree(p.into()),
 			crate::catalog::Index::Hnsw(p) => Self::Hnsw(p.into()),
 			crate::catalog::Index::FullText(p) => Self::FullText(p.into()),
-		}
-	}
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct SearchParams {
-	pub az: Ident,
-	pub hl: bool,
-	pub sc: Scoring,
-	pub doc_ids_order: u32,
-	pub doc_lengths_order: u32,
-	pub postings_order: u32,
-	pub terms_order: u32,
-	pub doc_ids_cache: u32,
-	pub doc_lengths_cache: u32,
-	pub postings_cache: u32,
-	pub terms_cache: u32,
-}
-
-impl From<SearchParams> for crate::catalog::SearchParams {
-	fn from(v: SearchParams) -> Self {
-		crate::catalog::SearchParams {
-			az: v.az.clone().into_string(),
-			hl: v.hl,
-			sc: v.sc.into(),
-			doc_ids_order: v.doc_ids_order,
-			doc_lengths_order: v.doc_lengths_order,
-			postings_order: v.postings_order,
-			terms_order: v.terms_order,
-			doc_ids_cache: v.doc_ids_cache,
-			doc_lengths_cache: v.doc_lengths_cache,
-			postings_cache: v.postings_cache,
-			terms_cache: v.terms_cache,
-		}
-	}
-}
-impl From<crate::catalog::SearchParams> for SearchParams {
-	fn from(v: crate::catalog::SearchParams) -> Self {
-		Self {
-			az: unsafe { Ident::new_unchecked(v.az) },
-			hl: v.hl,
-			sc: v.sc.into(),
-			doc_ids_order: v.doc_ids_order,
-			doc_lengths_order: v.doc_lengths_order,
-			postings_order: v.postings_order,
-			terms_order: v.terms_order,
-			doc_ids_cache: v.doc_ids_cache,
-			doc_lengths_cache: v.doc_lengths_cache,
-			postings_cache: v.postings_cache,
-			terms_cache: v.terms_cache,
 		}
 	}
 }
@@ -299,26 +244,6 @@ impl Display for Index {
 		match self {
 			Self::Idx => Ok(()),
 			Self::Uniq => f.write_str("UNIQUE"),
-			Self::Search(p) => {
-				write!(
-					f,
-					"SEARCH ANALYZER {} {} DOC_IDS_ORDER {} DOC_LENGTHS_ORDER {} POSTINGS_ORDER {} TERMS_ORDER {} DOC_IDS_CACHE {} DOC_LENGTHS_CACHE {} POSTINGS_CACHE {} TERMS_CACHE {}",
-					p.az,
-					p.sc,
-					p.doc_ids_order,
-					p.doc_lengths_order,
-					p.postings_order,
-					p.terms_order,
-					p.doc_ids_cache,
-					p.doc_lengths_cache,
-					p.postings_cache,
-					p.terms_cache
-				)?;
-				if p.hl {
-					f.write_str(" HIGHLIGHTS")?
-				}
-				Ok(())
-			}
 			Self::FullText(p) => {
 				write!(f, "FULLTEXT ANALYZER {} {}", p.az, p.sc,)?;
 				if p.hl {

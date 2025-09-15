@@ -182,11 +182,11 @@ impl Collected {
 			Arc::new(Default::default())
 		} else {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-			txn.get_record(ns, db, ft, &fk, None).await?
+			txn.get_record(ns, db, ft.as_ref(), &fk, None).await?
 		};
 		let rid = RecordId {
-			table: ft.to_owned(),
-			key: fk,
+			table: ft.into_owned(),
+			key: fk.into_owned(),
 		};
 		// Parse the data from the store
 		let val = Operable::Value(record);
@@ -204,7 +204,7 @@ impl Collected {
 		let key = record::RecordKey::decode_key(&key)?;
 		let val = Record::new(Value::Null.into());
 		let rid = RecordId {
-			table: key.tb.to_owned(),
+			table: key.tb.into_owned(),
 			key: key.id,
 		};
 		// Create a new operable value
@@ -223,7 +223,7 @@ impl Collected {
 	async fn process_table_key(key: Key) -> Result<Processed> {
 		let key = record::RecordKey::decode_key(&key)?;
 		let rid = RecordId {
-			table: key.tb.to_owned(),
+			table: key.tb.into_owned(),
 			key: key.id,
 		};
 		// Process the record
@@ -356,7 +356,7 @@ impl Collected {
 		let key = record::RecordKey::decode_key(&key)?;
 		let mut val = Record::kv_decode_value(val)?;
 		let rid = RecordId {
-			table: key.tb.to_owned(),
+			table: key.tb.into_owned(),
 			key: key.id,
 		};
 		// Inject the id field into the document

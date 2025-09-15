@@ -1,15 +1,14 @@
-use crate::tests::schema::{AuthLevel, BoolOr, SchemaTarget, TestAuth, TestConfig};
-use surrealdb_core::dbs::{
-	Session,
-	capabilities::{Capabilities, Targets},
-};
+use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::capabilities::{Capabilities, Targets};
 use surrealdb_core::val::Value as SurValue;
+
+use crate::tests::schema::{AuthLevel, BoolOr, SchemaTarget, TestAuth, TestConfig};
 
 /// Creates the right core capabilities from a test config.
 pub fn core_capabilities_from_test_config(config: &TestConfig) -> Capabilities {
 	/// Returns Targets::All if there is no value and none_on_missing is false,
-	/// Returns Targets::None if there is no value and none_on_missing is true ensuring the default behaviour
-	/// is to allow everything.
+	/// Returns Targets::None if there is no value and none_on_missing is true ensuring the default
+	/// behaviour is to allow everything.
 	///
 	/// If there is a value it will return Targets::All on the value true, Targets::None on the
 	/// value false, and otherwise the returns the specified values.
@@ -18,7 +17,7 @@ pub fn core_capabilities_from_test_config(config: &TestConfig) -> Capabilities {
 		none_on_missing: bool,
 	) -> Targets<T>
 	where
-		T: std::cmp::Eq + std::hash::Hash + Clone,
+		T: Eq + std::hash::Hash + Ord + Clone,
 	{
 		v.as_ref()
 			.map(|x| match x {

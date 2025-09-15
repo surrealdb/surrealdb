@@ -12,7 +12,7 @@ use crate::err::Error;
 use crate::exe::try_join_all_buffered;
 use crate::expr::field::{Field, Fields};
 use crate::expr::idiom::recursion::{Recursion, compute_idiom_recursion};
-use crate::expr::part::{FindRecursionPlan, Next, NextMethod, Part, Skip, SplitByRepeatRecurse};
+use crate::expr::part::{FindRecursionPlan, Next, NextMethod, Part, SplitByRepeatRecurse};
 use crate::expr::statements::select::SelectStatement;
 use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Idiom, Literal, Lookup};
 use crate::fnc::idiom;
@@ -200,11 +200,7 @@ impl Value {
 						},
 						_ => stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await,
 					},
-					Part::All => {
-						let v: Value =
-							v.values().map(|v| v.to_owned()).collect::<Vec<Value>>().into();
-						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
-					}
+					Part::All => stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await,
 					Part::Destructure(p) => {
 						let cur_doc = CursorDoc::from(self.clone());
 						let mut obj = BTreeMap::<String, Value>::new();
@@ -249,7 +245,30 @@ impl Value {
 				// Current value at path is an array
 				Value::Array(v) => match p {
 					// Current path is an `*` part
-					Part::All | Part::Flatten => {
+					Part::All => {
+						stk.scope(|scope| {
+							let futs = v.iter().map(|v| {
+								scope.run(|stk| {
+									let path = if v.is_thing() {
+										path
+									} else {
+										// .* applies to the elements of the array it was applied
+										// to, not recursively if one of the values is an
+										// array, we skip the .* part, as it implied that
+										// the user collected all values of the nested array. See
+										// `array_range.surql`.
+										path.next()
+									};
+
+									v.get(stk, ctx, opt, doc, path)
+								})
+							});
+							try_join_all_buffered(futs)
+						})
+						.await
+						.map(Into::into)
+					}
+					Part::Flatten => {
 						let path = path.next();
 						stk.scope(|scope| {
 							let futs =
@@ -329,32 +348,17 @@ impl Value {
 						stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await
 					}
 					_ => {
-						let len = match path.get(1) {
-							// Say that we have a path like `[a:1].out.*`, then `.*`
-							// references `out` and not the resulting array of `[a:1].out`
-							Some(Part::All) => 2,
-							_ => 1,
-						};
-
-						let mapped = stk
+						let res = stk
 							.scope(|scope| {
-								let futs = v.iter().map(|v| {
-									scope.run(|stk| v.get(stk, ctx, opt, doc, &path[0..len]))
-								});
+								let futs = v
+									.iter()
+									.map(|v| scope.run(|stk| v.get(stk, ctx, opt, doc, path)));
 								try_join_all_buffered(futs)
 							})
 							.await
 							.map(Value::from)?;
 
-						// If we are chaining graph parts, we need to make sure to flatten the
-						// result
-						let mapped = match (path.first(), path.get(1)) {
-							(Some(Part::Lookup(_)), Some(Part::Lookup(_))) => mapped.flatten(),
-							(Some(Part::Lookup(_)), Some(Part::Where(_))) => mapped.flatten(),
-							_ => mapped,
-						};
-
-						stk.run(|stk| mapped.get(stk, ctx, opt, doc, path.skip(len))).await
+						Ok(res)
 					}
 				},
 				// Current value at path is a thing
@@ -370,12 +374,7 @@ impl Value {
 						// This is a graph traversal expression
 						Part::Lookup(g) => {
 							let last_part = path.len() == 1;
-							let expr = g.expr.clone().unwrap_or(if last_part {
-								Fields::value_id()
-							} else {
-								Fields::all()
-							});
-
+							let expr = g.expr.clone().unwrap_or(Fields::value_id());
 							let what = Expr::Idiom(Idiom(vec![
 								Part::Start(Expr::Literal(Literal::RecordId(val.into_literal()))),
 								Part::Lookup(Lookup {
@@ -397,23 +396,20 @@ impl Value {
 								..SelectStatement::default()
 							};
 
+							let res = stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.all();
+
 							if last_part {
-								Ok(stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.all())
+								Ok(res)
 							} else {
-								let v =
-									stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.all();
-								let res =
-									stk.run(|stk| v.get(stk, ctx, opt, None, path.next())).await?;
-								// We only want to flatten the results if the next part
-								// is a graph or where part. Reason being that if we flatten
-								// fields, the results of those fields (which could be arrays)
-								// will be merged into each other. So [1, 2, 3], [4, 5, 6] would
-								// become [1, 2, 3, 4, 5, 6]. This slice access won't panic
-								// as we have already checked the length of the path.
-								Ok(match path[1] {
-									Part::Lookup(_) | Part::Where(_) => res.flatten(),
-									_ => res,
-								})
+								let res = stk
+									.run(|stk| res.get(stk, ctx, opt, None, path.next()))
+									.await?;
+
+								match path.get(1) {
+									Some(Part::Lookup(_)) => Ok(res.flatten()),
+									Some(Part::Where(_)) => Ok(res.flatten()),
+									_ => Ok(res),
+								}
 							}
 						}
 						Part::Method(name, args) => {
@@ -444,19 +440,13 @@ impl Value {
 								// array, then we return the value at the index of the
 								// array. Otherwise, we return the computed value and the
 								// next path part.
-								(Part::Value(x), RecordIdKey::Array(_)) => {
+								(Part::Value(x), RecordIdKey::Array(arr)) => {
 									match stk
 										.run(|stk| x.compute(stk, ctx, opt, doc))
 										.await
 										.catch_return()?
 									{
 										Value::Number(n) => {
-											let RecordIdKey::Array(arr) = val.key else {
-												unreachable!(
-													"Previously asserted that the RecordIdKey is an array, but it is not"
-												);
-											};
-
 											return match arr.get(n.to_usize()) {
 												Some(v) => {
 													stk.run(|stk| {
@@ -471,13 +461,6 @@ impl Value {
 											.concat(),
 									}
 								}
-
-								// .* on a record id means fetch the record's contents
-								// The above select statement results in an object, if
-								// we apply `.*` on that, we can an array with the record's
-								// values instead of just the content. Therefore, if we
-								// encounter the first part to be `.*`, we simply skip it here
-								(Part::All, _) => path.next(),
 
 								// No special case, fetch the document and continue processing the
 								// path

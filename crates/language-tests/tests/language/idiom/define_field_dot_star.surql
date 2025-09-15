@@ -8,7 +8,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "Couldn't coerce value for field `obj[*]` of `test:1`: Expected `number` but found `'a'`"
+error = "Couldn't coerce value for field `obj.*` of `test:1`: Expected `number` but found `'a'`"
 
 */
 

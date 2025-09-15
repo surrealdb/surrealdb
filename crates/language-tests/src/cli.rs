@@ -1,10 +1,7 @@
 use std::fmt;
 
-use clap::{
-	ArgMatches, Command, ValueEnum, arg,
-	builder::{EnumValueParser, PossibleValue},
-	command, value_parser,
-};
+use clap::builder::{EnumValueParser, PossibleValue};
+use clap::{ArgMatches, Command, ValueEnum, arg, command, value_parser};
 use semver::Version;
 
 #[derive(Clone, Copy, Eq, PartialEq)]

@@ -2931,7 +2931,7 @@ DEFINE ANALYZER blank_snowball
 DEFINE INDEX review_content
     ON TABLE review
     FIELDS review_text
-    SEARCH ANALYZER blank_snowball BM25 HIGHLIGHTS;
+    FULLTEXT ANALYZER blank_snowball BM25 HIGHLIGHTS;
 
 -- ------------------------------
 -- TABLE DATA: address_history

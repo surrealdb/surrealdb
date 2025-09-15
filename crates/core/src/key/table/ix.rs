@@ -1,32 +1,72 @@
 //! Stores a DEFINE INDEX config definition
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
-use crate::catalog::{DatabaseId, IndexDefinition, NamespaceId};
+use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
-pub(crate) struct Ix<'a> {
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Encode, BorrowDecode)]
+pub(crate) struct IndexNameLookupKey<'key> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'key, str>,
 	_d: u8,
 	_e: u8,
 	_f: u8,
-	pub ix: &'a str,
+	pub ix: IndexId,
 }
 
-impl KVKey for Ix<'_> {
-	type ValueType = IndexDefinition;
+impl_kv_key_storekey!(IndexNameLookupKey<'_> => String);
+
+impl<'key> IndexNameLookupKey<'key> {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'key str, ix: IndexId) -> Self {
+		Self {
+			__: b'/',
+			_a: b'*',
+			ns,
+			_b: b'*',
+			db,
+			_c: b'*',
+			tb: Cow::Borrowed(tb),
+			_d: b'!',
+			_e: b'i',
+			_f: b'l',
+			ix,
+		}
+	}
 }
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Ix<'a> {
-	Ix::new(ns, db, tb, ix)
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Encode, BorrowDecode)]
+pub(crate) struct IndexDefinitionKey<'key> {
+	__: u8,
+	_a: u8,
+	pub ns: NamespaceId,
+	_b: u8,
+	pub db: DatabaseId,
+	_c: u8,
+	pub tb: Cow<'key, str>,
+	_d: u8,
+	_e: u8,
+	_f: u8,
+	pub ix: Cow<'key, str>,
+}
+
+impl_kv_key_storekey!(IndexDefinitionKey<'_> => IndexDefinition);
+
+pub fn new<'key>(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &'key str,
+	ix: &'key str,
+) -> IndexDefinitionKey<'key> {
+	IndexDefinitionKey::new(ns, db, tb, ix)
 }
 
 pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
@@ -41,14 +81,14 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for Ix<'_> {
+impl Categorise for IndexDefinitionKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::IndexDefinition
 	}
 }
 
-impl<'a> Ix<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
+impl<'key> IndexDefinitionKey<'key> {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'key str, ix: &'key str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -56,11 +96,11 @@ impl<'a> Ix<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'!',
 			_e: b'i',
 			_f: b'x',
-			ix,
+			ix: Cow::Borrowed(ix),
 		}
 	}
 }
@@ -72,13 +112,13 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Ix::new(
+		let val = IndexDefinitionKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
 			"testix",
 		);
-		let enc = Ix::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!ixtestix\0");
+		let enc = IndexDefinitionKey::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\0\0\0\x01*\0\0\0\x02*testtb\0!ixtestix\0");
 	}
 }
