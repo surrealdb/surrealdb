@@ -17,6 +17,8 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 #[cfg(target_family = "wasm")]
 use crate::expr::Output;
+#[cfg(target_family = "wasm")]
+use crate::expr::{Ident, Idiom};
 use crate::expr::parameterize::{expr_to_ident, exprs_to_fields};
 #[cfg(target_family = "wasm")]
 use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
@@ -214,12 +216,12 @@ pub(in crate::expr::statements) async fn run_indexing(
 		{
 			// Create the remove statement
 			let stm = RemoveIndexStatement {
-				name: Ident::new(index.name.clone()).unwrap(),
-				what: Ident::new(index.table_name.clone()).unwrap(),
+				name: Expr::Idiom(Idiom::field(Ident::new(index.name.clone()).unwrap())),
+				what: Expr::Idiom(Idiom::field(Ident::new(index.table_name.clone()).unwrap())),
 				if_exists: false,
 			};
 			// Execute the delete statement
-			stm.compute(ctx, opt).await?;
+			stm.compute(stk, ctx, opt, doc).await?;
 		}
 		{
 			// Force queries to run
