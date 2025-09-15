@@ -131,8 +131,8 @@ pub mod resolver {
 	use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 	use tokio::net::lookup_host;
 
-	use crate::dbs::Capabilities;
 	use crate::dbs::capabilities::NetTarget;
+	use crate::dbs::Capabilities;
 
 	pub struct FilteringResolver {
 		pub cap: Arc<Capabilities>,

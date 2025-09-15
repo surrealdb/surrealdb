@@ -589,7 +589,6 @@ pub(crate) async fn run_router(
 }
 
 impl Response {
-	
 	fn try_from(message: &Message) -> Result<Option<Self>> {
 		match message {
 			Message::Text(text) => {

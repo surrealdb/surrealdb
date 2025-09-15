@@ -1435,7 +1435,6 @@ where
 	}
 }
 
-
 fn validate_data(data: &CoreValue, error_message: &str) -> crate::Result<()> {
 	match data {
 		CoreValue::Object(_) => Ok(()),

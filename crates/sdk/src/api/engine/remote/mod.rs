@@ -116,7 +116,6 @@ impl From<Failure> for crate::Error {
 }
 
 impl DbResponse {
-	
 	fn from_server_result(result: ServerResult) -> Result<Self> {
 		match result.map_err(Error::from)? {
 			Data::Other(value) => Ok(DbResponse::Other(value)),
@@ -160,7 +159,6 @@ pub(crate) struct Response {
 	pub(crate) result: ServerResult,
 }
 
-
 fn serialize<V>(value: &V, revisioned: bool) -> Result<Vec<u8>>
 where
 	V: serde::Serialize + Revisioned,
@@ -172,7 +170,6 @@ where
 	}
 	surrealdb_core::sql::serde::serialize(value).map_err(|error| crate::Error::Db(error.into()))
 }
-
 
 fn deserialize<T>(bytes: &[u8], revisioned: bool) -> Result<T>
 where

@@ -381,7 +381,6 @@ trait OnceLockExt {
 		}
 	}
 
-	
 	fn extract(&self) -> Result<&Router>;
 }
 

@@ -117,8 +117,8 @@ async fn get_http_client(
 use crate::cnf::SURREALDB_USER_AGENT;
 use crate::ctx::Context;
 use crate::err::Error;
-use crate::syn;
 use crate::sql::{Bytes, Object, Strand, Value};
+use crate::syn;
 
 pub(crate) fn uri_is_valid(uri: &str) -> bool {
 	reqwest::Url::parse(uri).is_ok()
@@ -142,8 +142,7 @@ async fn decode_response(res: Response) -> Result<Value, Error> {
 			Some(mime) => match mime.to_str() {
 				Ok(v) if v.starts_with("application/json") => {
 					let txt = res.text().await.map_err(Error::from)?;
-					let val = syn::json(&txt)
-						.map_err(|e| Error::Http(e.to_string()))?;
+					let val = syn::json(&txt).map_err(|e| Error::Http(e.to_string()))?;
 					Ok(val)
 				}
 				Ok(v) if v.starts_with("application/octet-stream") => {
