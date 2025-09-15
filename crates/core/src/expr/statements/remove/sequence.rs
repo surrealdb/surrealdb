@@ -60,7 +60,7 @@ impl RemoveSequenceStatement {
 		};
 		// Remove the sequence
 		if let Some(seq) = ctx.get_sequences() {
-			seq.sequence_removed(ns, db, &name).await?;
+			seq.sequence_removed(ns, db, &name).await;
 		}
 		// Delete any sequence records
 		let ba_range = Prefix::new_ba_range(ns, db, &sq.name)?;
