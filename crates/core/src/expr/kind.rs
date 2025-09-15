@@ -159,7 +159,7 @@ impl Kind {
 	/// Returns true if this type is a literal, or contains a literal
 	pub(crate) fn contains_literal(&self) -> bool {
 		match self {
-			Kind::None | Kind::Any => true,
+			Kind::Literal(_) => true,
 			Kind::Either(x) => x.iter().any(|x| x.contains_literal()),
 			_ => false,
 		}
