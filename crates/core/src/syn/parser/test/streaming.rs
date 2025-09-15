@@ -312,10 +312,11 @@ fn statements() -> Vec<TopLevelExpr> {
 			]),
 			what: Ident::from_strand(strand!("bar").to_owned()),
 			flex: true,
-			field_kind: Some(Kind::Option(Box::new(Kind::Either(vec![
+			field_kind: Some(Kind::Either(vec![
+				Kind::None,
 				Kind::Number,
 				Kind::Array(Box::new(Kind::Record(vec!["foo".to_owned()])), Some(10)),
-			])))),
+			])),
 			readonly: false,
 			value: Some(Expr::Literal(Literal::Null)),
 			assert: Some(Expr::Literal(Literal::Bool(true))),

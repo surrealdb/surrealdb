@@ -477,6 +477,7 @@ fn filter_from_type(
 
 	match kind {
 		Kind::Any => {}
+		Kind::None => {}
 		Kind::Null => {}
 		Kind::Bool => {}
 		Kind::Bytes => {}
@@ -492,7 +493,6 @@ fn filter_from_type(
 		Kind::Regex => {}
 		Kind::Record(_) => {}
 		Kind::Geometry(_) => {}
-		Kind::Option(_) => {}
 		Kind::Either(_) => {}
 		Kind::Set(_, _) => {}
 		Kind::Array(_, _) => {}
