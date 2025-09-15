@@ -5,10 +5,11 @@ on:
         required: true
         type: string
         description: "The git ref of this release version. All 'actions/checkout' steps will use it"
-      release-type:
-        type: string
-        default: nightly
-        description: "The type of release, e.g. release or nightly"
+      nightly-release:
+        required: false
+        type: boolean
+        default: true
+        description: "Make this a nightly release"
       latest:
         required: false
         type: boolean
@@ -82,14 +83,14 @@ jobs:
           version=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
           echo "version=${version}" >> $GITHUB_OUTPUT
 
-          if [[ "${{ inputs.release-type }}" == "nightly" ]]; then
+          if [[ "${{ inputs.nightly-release }}" == "true" ]]; then
             date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
             rev=$(git rev-parse --short HEAD)
             buildMetadata=${date}.${rev}
             echo "build-metadata=${buildMetadata}" >> $GITHUB_OUTPUT
-            echo "name=${{ inputs.release-type }}" >> $GITHUB_OUTPUT
+            echo "name=nightly" >> $GITHUB_OUTPUT
             echo "pre-release=true" >> $GITHUB_OUTPUT
-            echo "release-name=${{ inputs.release-type }}" >> $GITHUB_OUTPUT
+            echo "release-name=nightly" >> $GITHUB_OUTPUT
           else
             echo "name=v${version}" >> $GITHUB_OUTPUT
             if [[ $version == *"-"* ]]; then
@@ -291,7 +292,7 @@ jobs:
           EOF
 
       - name: Publish the crate
-        if: ${{ inputs.publish && inputs.release-type != 'nightly' }}
+        if: ${{ inputs.publish && !inputs.nightly-release }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: release-plz release --config /tmp/release-plz.toml
