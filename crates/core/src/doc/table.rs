@@ -1677,7 +1677,7 @@ impl Document {
 					Expr::Binary {
 						left: Box::new(Expr::Idiom(key.clone())),
 						op: BinaryOperator::ExactEqual,
-						right: Box::new(Expr::Literal(Literal::Decimal(Decimal::ZERO))),
+						right: Box::new(Expr::Literal(Literal::None)),
 					},
 				);
 			}
