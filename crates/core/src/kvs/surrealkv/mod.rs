@@ -265,8 +265,8 @@ impl super::api::Transaction for Transaction {
 	}
 
 	// /// Insert or replace a key in the database
-	// #[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	// async fn replace(&mut self, key: Key, val: Val) -> Result<()> {
+	// #[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key =
+	// key.sprint()))] async fn replace(&mut self, key: Key, val: Val) -> Result<()> {
 	// 	// Check to see if transaction is closed
 	// 	ensure!(!self.done, Error::TxFinished);
 	// 	// Check to see if transaction is writable
@@ -461,7 +461,10 @@ impl super::api::Transaction for Transaction {
 			let res = inner
 				.keys(beg.as_slice(), end.as_slice(), Some(limit as usize))?
 				.map(|r| r.map(|(k, _)| k.to_vec()))
-				.collect::<Result<Vec<_>, _>>()?;
+				.collect::<Result<Vec<_>, _>>()?
+				.into_iter()
+				.filter(|k| k.as_slice() < end.as_slice()) // Filter out keys equal to end bound
+				.collect();
 			// Return result
 			Ok(res)
 		})
@@ -522,7 +525,10 @@ impl super::api::Transaction for Transaction {
 			let res = inner
 				.range(beg.as_slice(), end.as_slice(), Some(limit as usize))?
 				.map(|r| r.map(|(k, v)| (k.to_vec(), v.map(|v| v.to_vec()).unwrap_or_default())))
-				.collect::<Result<Vec<_>, _>>()?;
+				.collect::<Result<Vec<_>, _>>()?
+				.into_iter()
+				.filter(|(k, _)| k.as_slice() < end.as_slice()) // Filter out keys equal to end bound
+				.collect();
 			// Return result
 			Ok(res)
 		})
@@ -533,8 +539,8 @@ impl super::api::Transaction for Transaction {
 	}
 
 	// /// Retrieve all the versions from a range of keys from the databases
-	// #[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	// async fn scan_all_versions(
+	// #[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng =
+	// rng.sprint()))] async fn scan_all_versions(
 	// 	&mut self,
 	// 	rng: Range<Key>,
 	// 	limit: u32,
