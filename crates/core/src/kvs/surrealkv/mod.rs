@@ -301,16 +301,19 @@ impl super::api::Transaction for Transaction {
 
 		// // Set the key if empty
 		// if let Some(ts) = version {
-		// 	inner.set_at_ts(&key, &val, ts)?;
+		//      inner.set_at_ts(&key, &val, ts)?;
 		// } else {
-		// 	match inner.get(&key)? {
-		// 		None => inner.set(&key, &val)?,
-		// 		_ => bail!(Error::TxKeyAlreadyExists),
-		// 	}
+		//      match inner.get(&key)? {
+		//              None => inner.set(&key, &val)?,
+		//              _ => bail!(Error::TxKeyAlreadyExists),
+		//      }
 		// }
 
 		// Set the key if empty
-		inner.set(&key, &val)?;
+		match inner.get(&key)? {
+			None => inner.set(&key, &val)?,
+			_ => bail!(Error::TxKeyAlreadyExists),
+		}
 
 		// Return result
 		Ok(())
@@ -430,8 +433,8 @@ impl super::api::Transaction for Transaction {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Set the key range
-		let beg = rng.start;
-		let end = rng.end;
+		let beg = rng.start.as_slice();
+		let end = rng.end.as_slice();
 
 		// Get the inner transaction
 		let inner =
@@ -459,11 +462,11 @@ impl super::api::Transaction for Transaction {
 		let res = affinitypool::spawn_local(|| -> Result<_> {
 			// Retrieve the scan range
 			let res = inner
-				.keys(beg.as_slice(), end.as_slice(), Some(limit as usize))?
+				.keys(beg, end, Some(limit as usize))?
 				.map(|r| r.map(|(k, _)| k.to_vec()))
 				.collect::<Result<Vec<_>, _>>()?
 				.into_iter()
-				.filter(|k| k.as_slice() < end.as_slice()) // Filter out keys equal to end bound
+				.filter(|k| k.as_slice() < end) // Filter out keys equal to end bound
 				.collect();
 			// Return result
 			Ok(res)
@@ -486,8 +489,8 @@ impl super::api::Transaction for Transaction {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Set the key range
-		let beg = rng.start;
-		let end = rng.end;
+		let beg = rng.start.as_slice();
+		let end = rng.end.as_slice();
 
 		// Get the inner transaction
 		let inner =
@@ -523,11 +526,11 @@ impl super::api::Transaction for Transaction {
 		let res = affinitypool::spawn_local(|| -> Result<_> {
 			// Retrieve the scan range
 			let res = inner
-				.range(beg.as_slice(), end.as_slice(), Some(limit as usize))?
+				.range(beg, end, Some(limit as usize))?
 				.map(|r| r.map(|(k, v)| (k.to_vec(), v.map(|v| v.to_vec()).unwrap_or_default())))
 				.collect::<Result<Vec<_>, _>>()?
 				.into_iter()
-				.filter(|(k, _)| k.as_slice() < end.as_slice()) // Filter out keys equal to end bound
+				.filter(|(k, _)| k.as_slice() < end) // Filter out keys equal to end bound
 				.collect();
 			// Return result
 			Ok(res)
