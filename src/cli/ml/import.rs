@@ -80,7 +80,7 @@ pub async fn init(
 	client.use_ns(namespace).use_db(database).await?;
 	// Import the data into the database
 	client.import(file).ml().await?;
-	info!("The SurrealML file was imported successfully");
+	info!("Import executed with no errors");
 	// All ok
 	Ok(())
 }
