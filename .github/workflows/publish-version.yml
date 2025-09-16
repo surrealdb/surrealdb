@@ -166,6 +166,11 @@ jobs:
     needs: [ prepare-vars, build ]
     runs-on: [ runner-amd64-2xlarge ]
     steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.git-ref }}
+
       - name: Download artifacts
         if: ${{ inputs.publish }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
