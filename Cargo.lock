@@ -2022,13 +2022,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "fs4"
-version = "0.8.4"
+name = "fs2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7e180ac76c23b45e767bd7ae9579bc0bb458618c4bc71835926e098e61d15f8"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
 dependencies = [
- "rustix 0.38.44",
- "windows-sys 0.52.0",
+ "libc",
+ "winapi",
 ]
 
 [[package]]
@@ -6008,9 +6008,9 @@ dependencies = [
 
 [[package]]
 name = "surrealkv"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c91bedef7298d6c9a115bff4578c9cf14f90714e35d19a3642bd3d4d46136380"
+checksum = "6147be920dbae5fbbbc5928af5fdcdadef5dd4119fce86c2c7f276c5ff58a877"
 dependencies = [
  "ahash 0.8.11",
  "async-channel",
@@ -6023,8 +6023,9 @@ dependencies = [
  "crossbeam",
  "crossbeam-skiplist",
  "double-ended-peekable",
- "fs4",
+ "fs2",
  "futures",
+ "getrandom 0.2.15",
  "guardian",
  "integer-encoding",
  "interval-heap",
@@ -6035,7 +6036,6 @@ dependencies = [
  "scopeguard",
  "sha2",
  "snap",
- "tempfile",
  "tokio",
 ]
 
