@@ -18,6 +18,7 @@ use crate::ctx::Context;
 use crate::ctx::reason::Reason;
 use crate::dbs::response::Response;
 use crate::dbs::{Force, Options, QueryType};
+use crate::doc::DefaultBroker;
 use crate::err::Error;
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
@@ -301,7 +302,7 @@ impl Executor {
 		let txn = Arc::new(kvs.transaction(transaction_type, LockType::Optimistic).await?);
 		let receiver = self.ctx.has_notifications().then(|| {
 			let (send, recv) = async_channel::unbounded();
-			self.opt.sender = Some(send);
+			self.opt.broker = Some(DefaultBroker::new(send));
 			recv
 		});
 
@@ -333,7 +334,7 @@ impl Executor {
 
 				// flush notifications.
 				if let Some(recv) = receiver {
-					self.opt.sender = None;
+					self.opt.broker = None;
 					if let Some(sink) = self.ctx.notifications() {
 						spawn(async move {
 							while let Ok(x) = recv.recv().await {
@@ -394,7 +395,7 @@ impl Executor {
 		// notifications.
 		let receiver = self.ctx.has_notifications().then(|| {
 			let (send, recv) = async_channel::unbounded();
-			self.opt.sender = Some(send);
+			self.opt.broker = Some(DefaultBroker::new(send));
 			recv
 		});
 
@@ -479,7 +480,7 @@ impl Executor {
 						query_type: QueryType::Other,
 					});
 
-					self.opt.sender = None;
+					self.opt.broker = None;
 
 					while let Some(stmt) = stream.next().await {
 						yield_now!();
@@ -507,7 +508,7 @@ impl Executor {
 						res.result = Err(anyhow!(Error::QueryCancelled));
 					}
 
-					self.opt.sender = None;
+					self.opt.broker = None;
 
 					return Ok(());
 				}
@@ -526,7 +527,7 @@ impl Executor {
 
 						// flush notifications.
 						if let Some(recv) = receiver {
-							self.opt.sender = None;
+							self.opt.broker = None;
 							if let Some(sink) = self.ctx.notifications() {
 								spawn(async move {
 									while let Ok(x) = recv.recv().await {
@@ -549,7 +550,7 @@ impl Executor {
 						}));
 					}
 
-					self.opt.sender = None;
+					self.opt.broker = None;
 
 					return Ok(());
 				}
@@ -593,7 +594,7 @@ impl Executor {
 
 							let _ = txn.cancel().await;
 
-							self.opt.sender = None;
+							self.opt.broker = None;
 
 							while let Some(stmt) = stream.next().await {
 								yield_now!();
@@ -643,7 +644,7 @@ impl Executor {
 			}));
 		}
 
-		self.opt.sender = None;
+		self.opt.broker = None;
 
 		Ok(())
 	}

@@ -1,9 +1,10 @@
+use std::pin::Pin;
 use std::sync::Arc;
 
 use super::IgnoreError;
 use crate::catalog::{Permission, SubscriptionDefinition};
 use crate::ctx::{Context, MutableContext};
-use crate::dbs::{Action, Notification, Options, Statement};
+use crate::dbs::{Action, MessageBroker, Notification, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::FlowResultExt as _;
@@ -11,6 +12,7 @@ use crate::expr::paths::{AC, RD, TK};
 use crate::kvs::Transaction;
 use crate::val::Value;
 use anyhow::Result;
+use async_channel::Sender;
 use async_graphql::futures_util::future::try_join_all;
 use reblessive::TreeStack;
 use reblessive::tree::Stk;
@@ -34,8 +36,8 @@ impl Document {
 		}
 
 		// Check if we can send notifications
-		if opt.sender.is_none() {
-			// no channel so nothing to do.
+		if opt.broker.is_none() {
+			// no sender, so nothing to do.
 			return Ok(());
 		};
 
@@ -122,7 +124,7 @@ impl Document {
 		};
 		let opt = opt.with_auth(auth.into());
 
-		let Some(chn) = opt.sender.as_ref() else {
+		let Some(sender) = opt.broker.as_ref() else {
 			return Ok(());
 		};
 
@@ -202,57 +204,45 @@ impl Document {
 			Err(IgnoreError::Error(e)) => return Err(e),
 			Ok(_) => (),
 		}
+		if !sender.can_be_sent(&opt, &live_subscription)? {
+			return Ok(());
+		}
 		// Let's check what type of statement
 		// caused this LIVE query to run, and obtain
 		// the relevant result.
 		let (action, mut result) = if is_delete {
 			// Prepare a DELETE notification
-			if opt.id()? == live_subscription.node {
-				// An error ignore here is about livequery not the query which invoked the
-				// livequery trigger. So we should catch the ignore and skip this entry in this
-				// case.
-				let result = match self.lq_pluck(stk, &ctx, &opt, &live_subscription, &doc).await {
-					Err(IgnoreError::Ignore) => return Ok(()),
-					Err(IgnoreError::Error(e)) => return Err(e),
-					Ok(x) => x,
-				};
-				(Action::Delete, result)
-			} else {
-				// TODO: Send to message broker
-				return Ok(());
-			}
+			// An error ignore here is about livequery not the query which invoked the
+			// livequery trigger. So we should catch the ignore and skip this entry in this
+			// case.
+			let result = match self.lq_pluck(stk, &ctx, &opt, &live_subscription, &doc).await {
+				Err(IgnoreError::Ignore) => return Ok(()),
+				Err(IgnoreError::Error(e)) => return Err(e),
+				Ok(x) => x,
+			};
+			(Action::Delete, result)
 		} else if self.is_new() {
 			// Prepare a CREATE notification
-			if opt.id()? == live_subscription.node {
-				// An error ignore here is about livequery not the query which invoked the
-				// livequery trigger. So we should catch the ignore and skip this entry in this
-				// case.
-				let result = match self.lq_pluck(stk, &ctx, &opt, &live_subscription, &doc).await {
-					Err(IgnoreError::Ignore) => return Ok(()),
-					Err(IgnoreError::Error(e)) => return Err(e),
-					Ok(x) => x,
-				};
-				(Action::Create, result)
-			} else {
-				// TODO: Send to message broker
-				return Ok(());
-			}
+			// An error ignore here is about livequery not the query which invoked the
+			// livequery trigger. So we should catch the ignore and skip this entry in this
+			// case.
+			let result = match self.lq_pluck(stk, &ctx, &opt, &live_subscription, &doc).await {
+				Err(IgnoreError::Ignore) => return Ok(()),
+				Err(IgnoreError::Error(e)) => return Err(e),
+				Ok(x) => x,
+			};
+			(Action::Create, result)
 		} else {
 			// Prepare a UPDATE notification
-			if opt.id()? == live_subscription.node {
-				// An error ignore here is about livequery not the query which invoked the
-				// livequery trigger. So we should catch the ignore and skip this entry in this
-				// case.
-				let result = match self.lq_pluck(stk, &ctx, &opt, &live_subscription, &doc).await {
-					Err(IgnoreError::Ignore) => return Ok(()),
-					Err(IgnoreError::Error(e)) => return Err(e),
-					Ok(x) => x,
-				};
-				(Action::Update, result)
-			} else {
-				// TODO: Send to message broker
-				return Ok(());
-			}
+			// An error ignore here is about livequery not the query which invoked the
+			// livequery trigger. So we should catch the ignore and skip this entry in this
+			// case.
+			let result = match self.lq_pluck(stk, &ctx, &opt, &live_subscription, &doc).await {
+				Err(IgnoreError::Ignore) => return Ok(()),
+				Err(IgnoreError::Error(e)) => return Err(e),
+				Ok(x) => x,
+			};
+			(Action::Update, result)
 		};
 
 		// Process any potential `FETCH` clause on the live statement
@@ -266,17 +256,15 @@ impl Document {
 			}
 		}
 
+		let notification = Notification {
+			id: live_subscription.id.into(),
+			action,
+			record: Value::RecordId(rid.as_ref().clone()),
+			result,
+		};
+
 		// Send the notification
-		// If there is an error, we can just ignore it,
-		// as it means that the channel was closed.
-		let _ = chn
-			.send(Notification {
-				id: live_subscription.id.into(),
-				action,
-				record: Value::RecordId(rid.as_ref().clone()),
-				result,
-			})
-			.await;
+		sender.send(notification).await;
 
 		Ok(())
 	}
@@ -357,5 +345,27 @@ impl Document {
 			.compute(stk, ctx, opt, Some(doc), false)
 			.await
 			.map_err(IgnoreError::from)
+	}
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct DefaultBroker(Sender<Notification>);
+
+impl DefaultBroker {
+	pub(crate) fn new(sender: Sender<Notification>) -> Arc<Self> {
+		Arc::new(Self(sender))
+	}
+}
+impl MessageBroker for DefaultBroker {
+	fn can_be_sent(&self, opt: &Options, subscription: &SubscriptionDefinition) -> Result<bool> {
+		Ok(opt.id()? == subscription.node)
+	}
+
+	fn send(&self, notification: Notification) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+		Box::pin(async move {
+			// If there is an error, we can just ignore it,
+			// as it means that the channel was closed.
+			let _ = self.0.send(notification).await;
+		})
 	}
 }
