@@ -17,7 +17,6 @@ use crate::sql::order::{OrderList, Ordering};
 use crate::sql::statements::access::{
 	self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke, AccessStatementShow,
 };
-use crate::sql::statements::analyze::AnalyzeStatement;
 use crate::sql::statements::define::user::PassType;
 use crate::sql::statements::define::{DefineDefault, DefineKind};
 use crate::sql::statements::show::{ShowSince, ShowStatement};
@@ -46,22 +45,6 @@ use crate::val::{Datetime, Duration, Number, Strand, Uuid};
 
 fn ident_field(name: &str) -> Expr {
 	Expr::Idiom(Idiom(vec![Part::Field(Ident::new(name.to_string()).unwrap())]))
-}
-
-#[test]
-pub fn parse_analyze() {
-	let mut res = syn::parse_with(r#"ANALYZE INDEX b on a"#.as_bytes(), async |parser, stk| {
-		parser.parse_query(stk).await
-	})
-	.unwrap();
-	let res = res.expressions.pop().unwrap();
-	assert_eq!(
-		res,
-		TopLevelExpr::Analyze(AnalyzeStatement::Idx(
-			Ident::from_strand(strand!("a").to_owned()),
-			Ident::from_strand(strand!("b").to_owned())
-		))
-	)
 }
 
 #[test]
@@ -1761,7 +1744,7 @@ fn parse_define_index() {
 	);
 
 	let res =
-		syn::parse_with( r#"DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 TYPE I16 DOC_IDS_ORDER 7 DOC_IDS_CACHE 8 MTREE_CACHE 9"#.as_bytes(),async |parser,stk| parser.parse_expr_inherit(stk).await).unwrap();
+		syn::parse_with( r#"DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 TYPE I16 MTREE_CACHE 9"#.as_bytes(),async |parser,stk| parser.parse_expr_inherit(stk).await).unwrap();
 
 	assert_eq!(
 		res,
@@ -1774,8 +1757,6 @@ fn parse_define_index() {
 				dimension: 4,
 				distance: Distance::Minkowski(Number::Int(5)),
 				capacity: 6,
-				doc_ids_order: 7,
-				doc_ids_cache: 8,
 				mtree_cache: 9,
 				vector_type: VectorType::I16,
 			}),

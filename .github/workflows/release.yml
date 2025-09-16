@@ -2,7 +2,7 @@
 
 name: Release
 
-run-name: "Release '${{ inputs.git-ref }}' (release type: ${{ inputs.release-type }}, publish: ${{ inputs.publish }}, latest: ${{ inputs.latest }})"
+run-name: "Release '${{ inputs.git-ref }}' (nightly release: ${{ inputs.nightly-release }}, publish: ${{ inputs.publish }}, latest: ${{ inputs.latest }})"
 
 on:
   workflow_dispatch:
@@ -12,10 +12,11 @@ on:
         type: string
         default: main
         description: "The git ref of this release"
-      release-type:
-        type: string
-        default: nightly
-        description: "The type of release, e.g. release, patch, nightly, alpha.1 or beta.1"
+      nightly-release:
+        required: false
+        type: boolean
+        default: true
+        description: "Make this a nightly release"
       latest:
         required: false
         type: boolean
@@ -48,9 +49,9 @@ jobs:
     uses: ./.github/workflows/publish-version.yml
     with:
       git-ref: ${{ inputs.git-ref }}
-      latest: ${{ inputs.latest && (inputs.release-type == 'patch' || inputs.release-type == 'release') }}
-      release-type: ${{ inputs.release-type }}
+      latest: ${{ inputs.latest && !inputs.nightly-release }}
+      nightly-release: ${{ inputs.nightly-release }}
       publish: ${{ inputs.publish }}
       extra-features: ${{ inputs.extra-features }}
-      create-release: ${{ inputs.publish && inputs.release-type != 'nightly' }}
+      create-release: ${{ inputs.publish && !inputs.nightly-release }}
     secrets: inherit

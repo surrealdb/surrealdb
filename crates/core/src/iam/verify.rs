@@ -1870,7 +1870,7 @@ mod tests {
 							ALGORITHM HS512 KEY '{1}'
 							AUTHENTICATE {{
 								IF $token.iss != "surrealdb-test" {{ {2} "Invalid token issuer" }};
-								IF type::is::array($token.aud) {{
+								IF type::is_array($token.aud) {{
 									IF "surrealdb-test" NOT IN $token.aud {{ {2} "Invalid token audience array" }}
 								}} ELSE {{
 									IF $token.aud IS NOT "surrealdb-test" {{ {2} "Invalid token audience string" }}

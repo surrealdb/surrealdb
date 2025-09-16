@@ -46,27 +46,25 @@ impl Closure {
 		args: Vec<Value>,
 	) -> Result<Value> {
 		let mut ctx = MutableContext::new_isolated(ctx);
-		for (i, (name, kind)) in self.args.iter().enumerate() {
-			match (kind, args.get(i)) {
-				(kind, None) if kind.can_be_none() => continue,
-				(_, None) => {
-					bail!(Error::InvalidArguments {
-						name: "ANONYMOUS".to_string(),
-						message: format!("Expected a value for ${name}"),
-					})
-				}
-				(kind, Some(val)) => {
-					if let Ok(val) = val.to_owned().coerce_to_kind(kind) {
-						ctx.add_value(name.to_string(), val.into());
-					} else {
-						bail!(Error::InvalidArguments {
-							name: "ANONYMOUS".to_string(),
-							message: format!(
-								"Expected a value of type '{kind}' for argument ${name}"
-							),
-						});
-					}
-				}
+
+		// check for missing arguments.
+		if self.args.len() > args.len() {
+			if let Some(x) = self.args[args.len()..].iter().find(|x| !x.1.can_be_none()) {
+				bail!(Error::InvalidArguments {
+					name: "ANONYMOUS".to_string(),
+					message: format!("Expected a value for ${}", x.0),
+				})
+			}
+		}
+
+		for ((name, kind), val) in self.args.iter().zip(args.into_iter()) {
+			if let Ok(val) = val.coerce_to_kind(kind) {
+				ctx.add_value(name.to_string(), val.into());
+			} else {
+				bail!(Error::InvalidArguments {
+					name: "ANONYMOUS".to_string(),
+					message: format!("Expected a value of type '{kind}' for argument ${name}"),
+				});
 			}
 		}
 

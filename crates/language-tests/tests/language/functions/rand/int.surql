@@ -24,10 +24,10 @@ error = "Incorrect arguments for function rand::int(). Argument 1 was the wrong 
 
 */
 let $a = (<array> 0..1000).map(|$_| rand::int());
-$a.all(|$x| type::is::int($x));
+$a.all(|$x| type::is_int($x));
 
 let $b = (<array> 0..1000).map(|$_| rand::int(10,20));
-$b.all(|$x| type::is::int($x));
+$b.all(|$x| type::is_int($x));
 $b.all(|$x| $x >= 10 && $x <= 20);
 
 
