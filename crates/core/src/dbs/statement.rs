@@ -16,6 +16,7 @@ use crate::expr::group::Groups;
 use crate::expr::limit::Limit;
 use crate::expr::order::Ordering;
 use crate::expr::output::Output;
+use crate::expr::parameterize::exprs_to_fields;
 use crate::expr::split::Splits;
 use crate::expr::start::Start;
 use crate::expr::statements::access::AccessStatement;
@@ -28,14 +29,17 @@ use crate::expr::statements::select::SelectStatement;
 use crate::expr::statements::show::ShowStatement;
 use crate::expr::statements::update::UpdateStatement;
 use crate::expr::statements::upsert::UpsertStatement;
-use crate::expr::{Explain, Expr, Timeout, With};
+use crate::expr::{Explain, Idiom, Timeout, With};
 use crate::idx::planner::QueryPlanner;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Statement<'a> {
 	Live(&'a LiveStatement),
 	Show(&'a ShowStatement),
-	Select(&'a SelectStatement),
+	Select {
+		stmt: &'a SelectStatement,
+		omit: Vec<Idiom>,
+	},
 	Create(&'a CreateStatement),
 	Upsert(&'a UpsertStatement),
 	Update(&'a UpdateStatement),
@@ -54,12 +58,6 @@ impl<'a> From<&'a LiveStatement> for Statement<'a> {
 impl<'a> From<&'a ShowStatement> for Statement<'a> {
 	fn from(v: &'a ShowStatement) -> Self {
 		Statement::Show(v)
-	}
-}
-
-impl<'a> From<&'a SelectStatement> for Statement<'a> {
-	fn from(v: &'a SelectStatement) -> Self {
-		Statement::Select(v)
 	}
 }
 
@@ -110,7 +108,10 @@ impl fmt::Display for Statement<'_> {
 		match self {
 			Statement::Live(v) => write!(f, "{v}"),
 			Statement::Show(v) => write!(f, "{v}"),
-			Statement::Select(v) => write!(f, "{v}"),
+			Statement::Select {
+				stmt,
+				..
+			} => write!(f, "{stmt}"),
 			Statement::Create(v) => write!(f, "{v}"),
 			Statement::Upsert(v) => write!(f, "{v}"),
 			Statement::Update(v) => write!(f, "{v}"),
@@ -125,7 +126,7 @@ impl fmt::Display for Statement<'_> {
 impl Statement<'_> {
 	/// Check if this is a SELECT statement
 	pub(crate) fn is_select(&self) -> bool {
-		matches!(self, Statement::Select(_))
+		matches!(self, Statement::Select { .. })
 	}
 
 	/// Check if this is a CREATE statement
@@ -250,16 +251,22 @@ impl Statement<'_> {
 	/// Returns any query fields if specified
 	pub(crate) fn expr(&self) -> Option<&Fields> {
 		match self {
-			Statement::Select(v) => Some(&v.expr),
+			Statement::Select {
+				stmt,
+				..
+			} => Some(&stmt.expr),
 			Statement::Live(v) => Some(&v.fields),
 			_ => None,
 		}
 	}
 
 	/// Returns any OMIT clause if specified
-	pub(crate) fn omit(&self) -> Option<&Vec<Expr>> {
+	pub(crate) fn omit(&self) -> Option<&Vec<Idiom>> {
 		match self {
-			Statement::Select(v) => Some(&v.omit),
+			Statement::Select {
+				omit,
+				..
+			} => Some(omit),
 			_ => None,
 		}
 	}
@@ -280,7 +287,10 @@ impl Statement<'_> {
 	pub(crate) fn cond(&self) -> Option<&Cond> {
 		match self {
 			Statement::Live(v) => v.cond.as_ref(),
-			Statement::Select(v) => v.cond.as_ref(),
+			Statement::Select {
+				stmt,
+				..
+			} => stmt.cond.as_ref(),
 			Statement::Upsert(v) => v.cond.as_ref(),
 			Statement::Update(v) => v.cond.as_ref(),
 			Statement::Delete(v) => v.cond.as_ref(),
@@ -291,7 +301,10 @@ impl Statement<'_> {
 	/// Returns any SPLIT clause if specified
 	pub(crate) fn split(&self) -> Option<&Splits> {
 		match self {
-			Statement::Select(v) => v.split.as_ref(),
+			Statement::Select {
+				stmt,
+				..
+			} => stmt.split.as_ref(),
 			_ => None,
 		}
 	}
@@ -299,7 +312,10 @@ impl Statement<'_> {
 	/// Returns any GROUP clause if specified
 	pub(crate) fn group(&self) -> Option<&Groups> {
 		match self {
-			Statement::Select(v) => v.group.as_ref(),
+			Statement::Select {
+				stmt,
+				..
+			} => stmt.group.as_ref(),
 			_ => None,
 		}
 	}
@@ -307,7 +323,10 @@ impl Statement<'_> {
 	/// Returns any ORDER clause if specified
 	pub(crate) fn order(&self) -> Option<&Ordering> {
 		match self {
-			Statement::Select(v) => v.order.as_ref(),
+			Statement::Select {
+				stmt,
+				..
+			} => stmt.order.as_ref(),
 			_ => None,
 		}
 	}
@@ -315,7 +334,10 @@ impl Statement<'_> {
 	/// Returns any WITH clause if specified
 	pub(crate) fn with(&self) -> Option<&With> {
 		match self {
-			Statement::Select(s) => s.with.as_ref(),
+			Statement::Select {
+				stmt,
+				..
+			} => stmt.with.as_ref(),
 			Statement::Update(s) => s.with.as_ref(),
 			Statement::Upsert(s) => s.with.as_ref(),
 			Statement::Delete(s) => s.with.as_ref(),
@@ -326,7 +348,10 @@ impl Statement<'_> {
 	/// Returns any FETCH clause if specified
 	pub(crate) fn fetch(&self) -> Option<&Fetchs> {
 		match self {
-			Statement::Select(v) => v.fetch.as_ref(),
+			Statement::Select {
+				stmt,
+				..
+			} => stmt.fetch.as_ref(),
 			_ => None,
 		}
 	}
@@ -334,7 +359,10 @@ impl Statement<'_> {
 	/// Returns any START clause if specified
 	pub(crate) fn start(&self) -> Option<&Start> {
 		match self {
-			Statement::Select(v) => v.start.as_ref(),
+			Statement::Select {
+				stmt,
+				..
+			} => stmt.start.as_ref(),
 			_ => None,
 		}
 	}
@@ -342,7 +370,10 @@ impl Statement<'_> {
 	/// Returns any LIMIT clause if specified
 	pub(crate) fn limit(&self) -> Option<&Limit> {
 		match self {
-			Statement::Select(v) => v.limit.as_ref(),
+			Statement::Select {
+				stmt,
+				..
+			} => stmt.limit.as_ref(),
 			_ => None,
 		}
 	}
@@ -352,7 +383,10 @@ impl Statement<'_> {
 			Statement::Create(v) => v.only,
 			Statement::Delete(v) => v.only,
 			Statement::Relate(v) => v.only,
-			Statement::Select(v) => v.only,
+			Statement::Select {
+				stmt,
+				..
+			} => stmt.only,
 			Statement::Upsert(v) => v.only,
 			Statement::Update(v) => v.only,
 			_ => false,
@@ -376,7 +410,10 @@ impl Statement<'_> {
 	#[cfg(storage)]
 	pub(crate) fn tempfiles(&self) -> bool {
 		match self {
-			Statement::Select(v) => v.tempfiles,
+			Statement::Select {
+				stmt,
+				..
+			} => stmt.tempfiles,
 			_ => false,
 		}
 	}
@@ -384,7 +421,10 @@ impl Statement<'_> {
 	/// Returns any EXPLAIN clause if specified
 	pub(crate) fn explain(&self) -> Option<&Explain> {
 		match self {
-			Statement::Select(s) => s.explain.as_ref(),
+			Statement::Select {
+				stmt,
+				..
+			} => stmt.explain.as_ref(),
 			Statement::Update(s) => s.explain.as_ref(),
 			Statement::Upsert(s) => s.explain.as_ref(),
 			Statement::Delete(s) => s.explain.as_ref(),
@@ -415,7 +455,10 @@ impl Statement<'_> {
 			Statement::Create(s) => s.timeout.as_ref(),
 			Statement::Delete(s) => s.timeout.as_ref(),
 			Statement::Insert(s) => s.timeout.as_ref(),
-			Statement::Select(s) => s.timeout.as_ref(),
+			Statement::Select {
+				stmt,
+				..
+			} => stmt.timeout.as_ref(),
 			Statement::Update(s) => s.timeout.as_ref(),
 			Statement::Upsert(s) => s.timeout.as_ref(),
 			_ => None,
@@ -452,5 +495,20 @@ impl Statement<'_> {
 		} else {
 			ctx
 		}
+	}
+
+	pub(crate) async fn from_select<'a>(
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+		stmt: &'a SelectStatement,
+	) -> Result<Statement<'a>> {
+		let omit = exprs_to_fields(stk, ctx, opt, doc, stmt.omit.as_slice()).await?;
+
+		Ok(Statement::Select {
+			stmt,
+			omit,
+		})
 	}
 }

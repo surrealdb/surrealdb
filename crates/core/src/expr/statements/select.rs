@@ -83,7 +83,7 @@ impl SelectStatement {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Assign the statement
-		let stm = Statement::from(self);
+		let stm = Statement::from_select(stk, ctx, opt, doc, self).await?;
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored and the version is set if specified

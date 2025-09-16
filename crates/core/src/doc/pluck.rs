@@ -10,7 +10,6 @@ use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::doc::compute::DocKind;
 use crate::expr::output::Output;
-use crate::expr::parameterize::exprs_to_fields;
 use crate::expr::{FlowResultExt as _, Operation};
 use crate::iam::Action;
 use crate::val::Value;
@@ -95,7 +94,10 @@ impl Document {
 				Statement::Live(_) => Err(IgnoreError::Error(anyhow::anyhow!(
 					".lives() uses .lq_pluck(), not .pluck()"
 				))),
-				Statement::Select(s) => {
+				Statement::Select {
+					stmt,
+					..
+				} => {
 					// Process the permitted documents
 					let current = if self.reduced(stk, ctx, opt, Current).await? {
 						self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced).await?;
@@ -105,8 +107,8 @@ impl Document {
 						&self.current
 					};
 					// Process the SELECT statement fields
-					s.expr
-						.compute(stk, ctx, opt, Some(current), s.group.is_some())
+					stmt.expr
+						.compute(stk, ctx, opt, Some(current), stmt.group.is_some())
 						.await
 						.map_err(IgnoreError::from)
 				}
@@ -164,13 +166,9 @@ impl Document {
 			}
 		}
 		// Remove any omitted fields from output
-		if let Some(v) = stm.omit() {
-			let fields = exprs_to_fields(stk, ctx, opt, Some(&self.current), v.as_slice())
-				.await
-				.map_err(IgnoreError::from)?;
-
+		if let Some(fields) = stm.omit() {
 			for field in fields {
-				out.del(stk, ctx, opt, &field).await?;
+				out.del(stk, ctx, opt, field).await?;
 			}
 		}
 		// Output result
