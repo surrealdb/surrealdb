@@ -298,6 +298,7 @@
 "record::"
 "record::exists("
 "record::id("
+"record::is::edge("
 "record::table("
 "record::tb("
 "uuid"
