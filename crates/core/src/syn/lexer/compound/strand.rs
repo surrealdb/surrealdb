@@ -30,9 +30,6 @@ pub fn strand(lexer: &mut Lexer, start: Token) -> Result<String, SyntaxError> {
 					let res = mem::take(&mut lexer.scratch);
 					return Ok(res);
 				}
-				b'\0' => {
-					bail!("Invalid null byte in source, null bytes are not valid SurrealQL characters",@lexer.current_span());
-				}
 				b'\\' => {
 					// Handle escape sequences.
 					let Some(next) = lexer.reader.next() else {
@@ -68,6 +65,9 @@ pub fn strand(lexer: &mut Lexer, start: Token) -> Result<String, SyntaxError> {
 						b't' => {
 							lexer.scratch.push(chars::TAB);
 						}
+						b'0' => {
+							lexer.scratch.push('\0');
+						}
 						b'u' => {
 							let c = lex_unicode_sequence(lexer)?;
 							lexer.scratch.push(c);
@@ -79,7 +79,7 @@ pub fn strand(lexer: &mut Lexer, start: Token) -> Result<String, SyntaxError> {
 								} else {
 									'\''
 								};
-								bail!("Invalid escape character `{char}`, valid characters are `\\`, `{valid_escape}`, `/`, `b`, `f`, `n`, `r`, `t`, or `u` ", @lexer.current_span());
+								bail!("Invalid escape character `{char}`, valid characters are `\\`, `{valid_escape}`, `/`, `b`, `f`, `n`, `r`, `t`, `0` or `u` ", @lexer.current_span());
 							}
 							Err(e) => {
 								lexer.scratch.clear();
@@ -131,10 +131,6 @@ fn lex_unicode_sequence(lexer: &mut Lexer) -> Result<char, SyntaxError> {
 
 	let c = char::from_u32(leading as u32)
 		.ok_or_else(|| syntax_error!("Unicode escape sequences encode invalid character codepoint", @lexer.current_span()))?;
-
-	if c == '\0' {
-		return Err(syntax_error!("Null bytes are not allowed in strings",@lexer.current_span()));
-	}
 
 	Ok(c)
 }
