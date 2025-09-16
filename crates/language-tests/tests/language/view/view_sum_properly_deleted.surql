@@ -22,6 +22,21 @@ value = "[]"
 [[test.results]]
 value = "[]"
 
+[[test.results]]
+value = "[{ awards: 1, department: 'Engineering', id: employee:EMP004 }]"
+
+[[test.results]]
+value = "[{ awards: 1, department: 'Engineering', id: employee:EMP004 }]"
+
+[[test.results]]
+value = "[{ department: 'Engineering', id: department:['Engineering'], totalAwards: 1 }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
 */
 
 BEGIN;
@@ -60,3 +75,13 @@ DELETE employee:EMP001;
 DELETE employee:EMP003;
 SELECT * FROM department;
 SELECT * FROM employee;
+
+CREATE employee:EMP004 CONTENT {
+	department: "Engineering",
+	awards: 1
+};
+SELECT * FROM employee;
+SELECT * FROM department;
+
+DELETE employee:EMP004;
+SELECT * FROM department;

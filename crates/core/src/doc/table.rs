@@ -1357,11 +1357,14 @@ impl Document {
 					FieldStatsDelta::SumAdd
 				};
 
-				if let Some(existing_delta) = metadata_deltas.remove(&field_name) {
-					metadata_deltas
-						.insert(field_name, combine_field_deltas(existing_delta, new_delta));
-				} else {
-					metadata_deltas.insert(field_name, new_delta);
+				match metadata_deltas.entry(field_name.clone()) {
+					Entry::Occupied(mut occupied_entry) => {
+						let existing = occupied_entry.insert(FieldStatsDelta::CountAdd(count_val));
+						occupied_entry.insert(combine_field_deltas(existing, new_delta));
+					}
+					Entry::Vacant(vacant_entry) => {
+						vacant_entry.insert(new_delta);
+					}
 				}
 			}
 			FieldAction::Sub | FieldAction::UpdateSub => {
@@ -1378,13 +1381,14 @@ impl Document {
 					FieldStatsDelta::SumSub
 				};
 
-				if let Some(existing_delta) = metadata_deltas.remove(&field_name.clone()) {
-					metadata_deltas.insert(
-						field_name.clone(),
-						combine_field_deltas(existing_delta, new_delta),
-					);
-				} else {
-					metadata_deltas.insert(field_name.clone(), new_delta);
+				match metadata_deltas.entry(field_name.clone()) {
+					Entry::Occupied(mut occupied_entry) => {
+						let existing = occupied_entry.insert(FieldStatsDelta::CountSub(count_val));
+						occupied_entry.insert(combine_field_deltas(existing, new_delta));
+					}
+					Entry::Vacant(vacant_entry) => {
+						vacant_entry.insert(new_delta);
+					}
 				}
 
 				// Add a purge condition based on metadata count becoming 0
@@ -1438,11 +1442,14 @@ impl Document {
 
 				// Update metadata for min/max tracking, combining with any existing delta
 				let new_delta = FieldStatsDelta::MinMaxAdd;
-				if let Some(existing_delta) = metadata_deltas.remove(&field_name) {
-					metadata_deltas
-						.insert(field_name, combine_field_deltas(existing_delta, new_delta));
-				} else {
-					metadata_deltas.insert(field_name, new_delta);
+				match metadata_deltas.entry(field_name.clone()) {
+					Entry::Occupied(mut occupied_entry) => {
+						let existing = occupied_entry.insert(FieldStatsDelta::MinMaxAdd);
+						occupied_entry.insert(combine_field_deltas(existing, new_delta));
+					}
+					Entry::Vacant(vacant_entry) => {
+						vacant_entry.insert(new_delta);
+					}
 				}
 			}
 			FieldAction::Sub => {
@@ -1458,11 +1465,14 @@ impl Document {
 
 				// Update metadata for min/max tracking, combining with any existing delta
 				let new_delta = FieldStatsDelta::MinMaxSub;
-				if let Some(existing_delta) = metadata_deltas.remove(&field_name) {
-					metadata_deltas
-						.insert(field_name, combine_field_deltas(existing_delta, new_delta));
-				} else {
-					metadata_deltas.insert(field_name, new_delta);
+				match metadata_deltas.entry(field_name.clone()) {
+					Entry::Occupied(mut occupied_entry) => {
+						let existing = occupied_entry.insert(FieldStatsDelta::MinMaxSub);
+						occupied_entry.insert(combine_field_deltas(existing, new_delta));
+					}
+					Entry::Vacant(vacant_entry) => {
+						vacant_entry.insert(new_delta);
+					}
 				}
 
 				// Add a purge condition (delete record if the number of values is 0)
@@ -1540,11 +1550,14 @@ impl Document {
 
 				// Update metadata for min/max tracking, combining with any existing delta
 				let new_delta = FieldStatsDelta::MinMaxAdd;
-				if let Some(existing_delta) = metadata_deltas.remove(&field_name) {
-					metadata_deltas
-						.insert(field_name, combine_field_deltas(existing_delta, new_delta));
-				} else {
-					metadata_deltas.insert(field_name, new_delta);
+				match metadata_deltas.entry(field_name.clone()) {
+					Entry::Occupied(mut occupied_entry) => {
+						let existing = occupied_entry.insert(FieldStatsDelta::MinMaxAdd);
+						occupied_entry.insert(combine_field_deltas(existing, new_delta));
+					}
+					Entry::Vacant(vacant_entry) => {
+						vacant_entry.insert(new_delta);
+					}
 				}
 			}
 			FieldAction::Sub => {
@@ -1560,11 +1573,14 @@ impl Document {
 
 				// Update metadata for min/max tracking, combining with any existing delta
 				let new_delta = FieldStatsDelta::MinMaxSub;
-				if let Some(existing_delta) = metadata_deltas.remove(&field_name) {
-					metadata_deltas
-						.insert(field_name, combine_field_deltas(existing_delta, new_delta));
-				} else {
-					metadata_deltas.insert(field_name, new_delta);
+				match metadata_deltas.entry(field_name.clone()) {
+					Entry::Occupied(mut occupied_entry) => {
+						let existing = occupied_entry.insert(FieldStatsDelta::MinMaxSub);
+						occupied_entry.insert(combine_field_deltas(existing, new_delta));
+					}
+					Entry::Vacant(vacant_entry) => {
+						vacant_entry.insert(new_delta);
+					}
 				}
 
 				// Add a purge condition (delete record if the number of values is 0)
@@ -1625,13 +1641,16 @@ impl Document {
 				let new_delta = FieldStatsDelta::MeanAdd {
 					value: decimal_val,
 				};
-				if let Some(existing_delta) = metadata_deltas.remove(&field_name.clone()) {
-					metadata_deltas.insert(
-						field_name.clone(),
-						combine_field_deltas(existing_delta, new_delta),
-					);
-				} else {
-					metadata_deltas.insert(field_name.clone(), new_delta);
+				match metadata_deltas.entry(field_name.clone()) {
+					Entry::Occupied(mut occupied_entry) => {
+						let existing = occupied_entry.insert(FieldStatsDelta::MeanAdd {
+							value: decimal_val,
+						});
+						occupied_entry.insert(combine_field_deltas(existing, new_delta));
+					}
+					Entry::Vacant(vacant_entry) => {
+						vacant_entry.insert(new_delta);
+					}
 				}
 				// Field value will be calculated from metadata during record processing
 			}
@@ -1639,13 +1658,17 @@ impl Document {
 				let new_delta = FieldStatsDelta::MeanSub {
 					value: decimal_val,
 				};
-				if let Some(existing_delta) = metadata_deltas.remove(&field_name.clone()) {
-					metadata_deltas.insert(
-						field_name.clone(),
-						combine_field_deltas(existing_delta, new_delta),
-					);
-				} else {
-					metadata_deltas.insert(field_name.clone(), new_delta);
+				match metadata_deltas.entry(field_name.clone()) {
+					Entry::Occupied(mut occupied_entry) => {
+						// Temporarly replace the value to take ownership
+						let existing = occupied_entry.insert(FieldStatsDelta::MeanSub {
+							value: decimal_val,
+						});
+						occupied_entry.insert(combine_field_deltas(existing, new_delta));
+					}
+					Entry::Vacant(vacant_entry) => {
+						vacant_entry.insert(new_delta);
+					}
 				}
 
 				// For mean, we need to potentially delete the record if count becomes 0
