@@ -307,6 +307,9 @@ jobs:
             # Update crate version to make sure we test publishing
             # Without this, already published versions will be skipped
             release-plz-new update
+
+            # Update Cargo.lock without updating dependency versions
+            cargo check --no-default-features --features storage-mem
           
             # Dry run publishing to test publishing
             extra_args="${extra_args} --dry-run --allow-dirty"
