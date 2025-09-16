@@ -18,6 +18,7 @@ use crate::kvs::cache;
 use crate::val::record::{Data, Record};
 use crate::val::{RecordId, Value};
 
+#[derive(Clone)]
 pub(crate) struct Document {
 	/// The record id of this document
 	pub(super) id: Option<Arc<RecordId>>,

@@ -87,7 +87,7 @@ pub(crate) enum Operable {
 	Count(usize),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum Workable {
 	Normal,
 	Insert(Arc<Value>),
