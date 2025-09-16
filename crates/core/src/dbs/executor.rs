@@ -17,7 +17,7 @@ use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
 use crate::ctx::Context;
 use crate::ctx::reason::Reason;
 use crate::dbs::response::Response;
-use crate::dbs::{Force, Options, QueryType};
+use crate::dbs::{Force, Options, QueryType, Notification};
 use crate::doc::DefaultBroker;
 use crate::err::Error;
 use crate::expr::paths::{DB, NS};
@@ -37,6 +37,21 @@ pub struct Executor {
 	results: Vec<Response>,
 	opt: Options,
 	ctx: Context,
+}
+
+impl Executor {
+	fn prepare_broker(&mut self) -> Option<async_channel::Receiver<Notification>> {
+		if !self.ctx.has_notifications() {
+			return None;
+		}
+		// If a broker is already provided by a higher layer, don't override it here.
+		if self.opt.broker.is_some() {
+			return None;
+		}
+		let (send, recv) = async_channel::unbounded();
+		self.opt.broker = Some(DefaultBroker::new(send));
+		Some(recv)
+	}
 }
 
 impl Executor {
@@ -300,11 +315,7 @@ impl Executor {
 			TransactionType::Write
 		};
 		let txn = Arc::new(kvs.transaction(transaction_type, LockType::Optimistic).await?);
-		let receiver = self.ctx.has_notifications().then(|| {
-			let (send, recv) = async_channel::unbounded();
-			self.opt.broker = Some(DefaultBroker::new(send));
-			recv
-		});
+		let receiver = self.prepare_broker();
 
 		match self.execute_plan_in_transaction(txn.clone(), start, plan).await {
 			Ok(value) | Err(ControlFlow::Return(value)) => {
@@ -393,11 +404,7 @@ impl Executor {
 
 		// Create a sender for this transaction only if the context allows for
 		// notifications.
-		let receiver = self.ctx.has_notifications().then(|| {
-			let (send, recv) = async_channel::unbounded();
-			self.opt.broker = Some(DefaultBroker::new(send));
-			recv
-		});
+		let receiver = self.prepare_broker();
 
 		let txn = Arc::new(txn);
 		let start_results = self.results.len();
