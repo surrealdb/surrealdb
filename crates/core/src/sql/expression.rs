@@ -13,7 +13,7 @@ use crate::sql::{
 	BinaryOperator, Block, Closure, Constant, FunctionCall, Ident, Idiom, Literal, Mock, Param,
 	PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
-use crate::val::{Number, Value};
+use crate::val::{Number, RecordIdKey, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -342,6 +342,81 @@ impl From<crate::expr::Expr> for Expr {
 			crate::expr::Expr::Foreach(s) => Expr::Foreach(Box::new((*s).into())),
 			crate::expr::Expr::Let(s) => Expr::Let(Box::new((*s).into())),
 			crate::expr::Expr::Sleep(s) => Expr::Sleep(Box::new((*s).into())),
+		}
+	}
+}
+
+impl From<Value> for Expr {
+	fn from(v: Value) -> Self {
+		match v {
+			Value::Strand(s) => match crate::syn::expr(&s) {
+				Ok(expr) if matches!(expr.clone().into(), Expr::FunctionCall(_)) => expr.into(),
+				_ => Expr::Table(Ident::from_strand(s)),
+			},
+			Value::RecordId(ref record_id) => match &record_id.key {
+				RecordIdKey::String(s) => match crate::syn::expr(s) {
+					Ok(expr) if matches!(expr.clone().into(), Expr::FunctionCall(_)) => {
+						let record_id_lit = RecordIdLit {
+							table: record_id.table.clone(),
+							key: RecordIdKeyLit::Expr(Box::new(expr.into())),
+						};
+						Expr::Literal(Literal::RecordId(record_id_lit.into()))
+					}
+					_ => v.into_literal().into(),
+				},
+				RecordIdKey::Array(arr) => {
+					let converted_array: Vec<Expr> = arr
+						.iter()
+						.map(|value| match value {
+							Value::Strand(s) => match crate::syn::expr(s) {
+								Ok(expr)
+									if matches!(expr.clone().into(), Expr::FunctionCall(_)) =>
+								{
+									expr.into()
+								}
+								_ => value.clone().into_literal().into(),
+							},
+							_ => value.clone().into_literal().into(),
+						})
+						.collect();
+
+					let record_id_lit = RecordIdLit {
+						table: record_id.table.clone(),
+						key: RecordIdKeyLit::Array(converted_array),
+					};
+					Expr::Literal(Literal::RecordId(record_id_lit.into()))
+				}
+				RecordIdKey::Object(obj) => {
+					let converted_object = obj
+						.iter()
+						.map(|(key, value)| {
+							let converted_value = match value {
+								Value::Strand(s) => match crate::syn::expr(s) {
+									Ok(expr)
+										if matches!(expr.clone().into(), Expr::FunctionCall(_)) =>
+									{
+										expr.into()
+									}
+									_ => value.clone().into_literal().into(),
+								},
+								_ => value.clone().into_literal().into(),
+							};
+							ObjectEntry {
+								key: key.clone(),
+								value: converted_value,
+							}
+						})
+						.collect();
+
+					let record_id_lit = RecordIdLit {
+						table: record_id.table.clone(),
+						key: RecordIdKeyLit::Object(converted_object),
+					};
+					Expr::Literal(Literal::RecordId(record_id_lit.into()))
+				}
+				_ => v.into_literal().into(),
+			},
+			x => x.into_literal().into(),
 		}
 	}
 }
