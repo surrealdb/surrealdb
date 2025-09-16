@@ -163,7 +163,8 @@ impl super::api::Transaction for Transaction {
 
 		// Get the key
 		let res = match version {
-			Some(_ts) => inner.get(&key)?.is_some(), // TODO: Replace with get_at_version once it is implemented
+			Some(_ts) => inner.get(&key)?.is_some(), /* TODO: Replace with get_at_version once */
+			// it is implemented
 			None => inner.get(&key)?.is_some(),
 		};
 
@@ -182,7 +183,9 @@ impl super::api::Transaction for Transaction {
 
 		// Get the key
 		let res = match version {
-			Some(_ts) => inner.get(&key)?.map(|v| v.to_vec()), // TODO: Replace with get_at_version once it is implemented
+			Some(_ts) => inner.get(&key)?.map(|v| v.to_vec()), /* TODO: Replace with */
+			// get_at_version once it is
+			// implemented
 			None => inner.get(&key)?.map(|v| v.to_vec()),
 		};
 
@@ -204,7 +207,8 @@ impl super::api::Transaction for Transaction {
 
 		// Set the key
 		match version {
-			Some(_ts) => inner.set(&key, &val)?, // TODO: Replace with set_at_version once it is implemented
+			Some(_ts) => inner.set(&key, &val)?, /* TODO: Replace with set_at_version once it is */
+			// implemented
 			None => inner.set(&key, &val)?,
 		}
 		// Return result
@@ -212,8 +216,8 @@ impl super::api::Transaction for Transaction {
 	}
 
 	// /// Insert or replace a key in the database
-	// #[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	// async fn replace(&mut self, key: Key, val: Val) -> Result<()> {
+	// #[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key =
+	// key.sprint()))] async fn replace(&mut self, key: Key, val: Val) -> Result<()> {
 	// 	// Check to see if transaction is closed
 	// 	ensure!(!self.done, Error::TxFinished);
 	// 	// Check to see if transaction is writable
@@ -378,7 +382,10 @@ impl super::api::Transaction for Transaction {
 		let res = inner
 			.keys(beg.as_slice(), end.as_slice(), Some(limit as usize))?
 			.map(|r| r.map(|(k, _)| k.to_vec()))
-			.collect::<Result<Vec<_>, _>>()?;
+			.collect::<Result<Vec<_>, _>>()?
+			.into_iter()
+			.filter(|k| k.as_slice() < end.as_slice()) // Filter out keys equal to end bound
+			.collect();
 
 		// Return result
 		Ok(res)
@@ -406,7 +413,10 @@ impl super::api::Transaction for Transaction {
 		let res = inner
 			.range(beg.as_slice(), end.as_slice(), Some(limit as usize))?
 			.map(|r| r.map(|(k, v)| (k.to_vec(), v.map(|v| v.to_vec()).unwrap_or_default())))
-			.collect::<Result<Vec<_>, _>>()?;
+			.collect::<Result<Vec<_>, _>>()?
+			.into_iter()
+			.filter(|(k, _)| k.as_slice() < end.as_slice()) // Filter out keys equal to end bound
+			.collect();
 
 		// Return result
 		Ok(res)
