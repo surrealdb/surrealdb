@@ -12,7 +12,6 @@ use crate::sql::language::Language;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::lookup::{LookupKind, LookupSubject};
 use crate::sql::order::{OrderList, Ordering};
-use crate::sql::statements::analyze::AnalyzeStatement;
 use crate::sql::statements::define::{DefineDefault, DefineKind};
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
@@ -40,7 +39,6 @@ fn ident_field(name: &str) -> Expr {
 }
 
 static SOURCE: &str = r#"
-	ANALYZE INDEX b on a;
 	BEGIN;
 	BEGIN TRANSACTION;
 	BREAK;
@@ -64,7 +62,7 @@ static SOURCE: &str = r#"
 	DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true;
 	DEFINE INDEX index ON TABLE table FIELDS a,b[*] FULLTEXT ANALYZER ana BM25 (0.1,0.2) HIGHLIGHTS;
 	DEFINE INDEX index ON TABLE table FIELDS a UNIQUE;
-	DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 DOC_IDS_ORDER 7 DOC_IDS_CACHE 8 MTREE_CACHE 9;
+	DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 MTREE_CACHE 9;
 	DEFINE ANALYZER ana FILTERS ASCII, EDGENGRAM(1,2), NGRAM(3,4), LOWERCASE, SNOWBALL(NLD), UPPERCASE TOKENIZERS BLANK, CAMEL, CLASS, PUNCT FUNCTION fn::foo::bar;
 	DELETE FROM ONLY |foo:32..64| WITH INDEX index,index_2 Where 2 RETURN AFTER TIMEOUT 1s PARALLEL EXPLAIN FULL;
 	DELETE FROM ONLY a:b->?[$][?true] WITH INDEX index,index_2 WHERE null RETURN NULL TIMEOUT 1h PARALLEL EXPLAIN FULL;
@@ -122,10 +120,6 @@ fn statements() -> Vec<TopLevelExpr> {
 		.with_timezone(&Utc);
 
 	vec![
-		TopLevelExpr::Analyze(AnalyzeStatement::Idx(
-			Ident::from_strand(strand!("a").to_owned()),
-			Ident::from_strand(strand!("b").to_owned()),
-		)),
 		TopLevelExpr::Begin,
 		TopLevelExpr::Begin,
 		TopLevelExpr::Expr(Expr::Break),
@@ -368,8 +362,6 @@ fn statements() -> Vec<TopLevelExpr> {
 				dimension: 4,
 				distance: Distance::Minkowski(Number::Int(5)),
 				capacity: 6,
-				doc_ids_order: 7,
-				doc_ids_cache: 8,
 				mtree_cache: 9,
 				vector_type: VectorType::F64,
 			}),

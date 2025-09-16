@@ -215,10 +215,6 @@ pub struct MTreeParams {
 	pub vector_type: VectorType,
 	/// The capacity of the index.
 	pub capacity: u16,
-	/// The order of the document IDs.
-	pub doc_ids_order: u32,
-	/// The cache of the document IDs.
-	pub doc_ids_cache: u32,
 	/// The cache of the M-Tree.
 	pub mtree_cache: u32,
 }
