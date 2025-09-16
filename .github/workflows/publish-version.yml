@@ -304,6 +304,9 @@ jobs:
             # Without this, already published versions will be skipped
             sed -i "s#^version = \".*\"#version = \"0.0.0-alpha.1\"#" Cargo.toml
 
+            # Remove local dependencies
+            sed -i "s#, path = \".*\"##" Cargo.toml
+
             # Update Cargo.lock without updating dependency versions
             # cargo check --no-default-features --features storage-mem
           
