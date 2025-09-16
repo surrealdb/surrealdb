@@ -67,7 +67,7 @@ mod tests {
 			DatabaseId(2),
 			"testtb",
 			IndexId(3),
-			RecordIdKey::String("id".to_string()),
+			RecordIdKey::String("id".into()),
 		);
 		let enc = Ip::encode_key(&val).unwrap();
 		assert_eq!(
