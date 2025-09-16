@@ -123,7 +123,7 @@ impl TryFrom<RecordIdKey> for Object {
 //TODO: Null byte validity
 impl From<String> for RecordIdKey {
 	fn from(value: String) -> Self {
-		Self(val::RecordIdKey::String(value.into()))
+		Self(val::RecordIdKey::String(value))
 	}
 }
 
@@ -132,7 +132,7 @@ impl TryFrom<RecordIdKey> for String {
 
 	fn try_from(value: RecordIdKey) -> Result<Self> {
 		if let val::RecordIdKey::String(x) = value.0 {
-			Ok(x.into_string())
+			Ok(x)
 		} else {
 			Err(anyhow::Error::new(ApiError::FromValue {
 				value: value.into(),
@@ -144,13 +144,13 @@ impl TryFrom<RecordIdKey> for String {
 
 impl From<&String> for RecordIdKey {
 	fn from(value: &String) -> Self {
-		Self(val::RecordIdKey::String(value.as_str().into()))
+		Self(val::RecordIdKey::String(value.clone()))
 	}
 }
 
 impl From<&str> for RecordIdKey {
 	fn from(value: &str) -> Self {
-		Self(val::RecordIdKey::String(value.into()))
+		Self(val::RecordIdKey::String(value.to_owned()))
 	}
 }
 
@@ -248,7 +248,9 @@ impl TryFrom<Value> for RecordIdKey {
 
 	fn try_from(key: Value) -> std::result::Result<Self, Self::Error> {
 		match key.0 {
-			val::Value::Strand(x) => Ok(RecordIdKey::from_inner(val::RecordIdKey::String(x))),
+			val::Value::Strand(x) => {
+				Ok(RecordIdKey::from_inner(val::RecordIdKey::String(x.into_string())))
+			}
 			val::Value::Number(val::Number::Int(x)) => {
 				Ok(RecordIdKey::from_inner(val::RecordIdKey::Number(x)))
 			}

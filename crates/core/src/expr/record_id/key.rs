@@ -120,7 +120,7 @@ impl RecordIdKeyLit {
 	) -> Result<RecordIdKey> {
 		match self {
 			RecordIdKeyLit::Number(v) => Ok(RecordIdKey::Number(*v)),
-			RecordIdKeyLit::String(v) => Ok(RecordIdKey::String(v.clone())),
+			RecordIdKeyLit::String(v) => Ok(RecordIdKey::String(v.clone().into_string())),
 			RecordIdKeyLit::Uuid(v) => Ok(RecordIdKey::Uuid(*v)),
 			RecordIdKeyLit::Array(v) => {
 				let mut res = Vec::new();

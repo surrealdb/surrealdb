@@ -81,7 +81,7 @@ mod tests {
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
-			RecordIdKey::String("testid".into()),
+			RecordIdKey::String("testid".to_owned()),
 		);
 		let enc = RecordKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\x03testid\0");
