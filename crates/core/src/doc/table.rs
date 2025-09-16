@@ -1357,7 +1357,7 @@ impl Document {
 					FieldStatsDelta::SumAdd
 				};
 
-				match metadata_deltas.entry(field_name.clone()) {
+				match metadata_deltas.entry(field_name) {
 					Entry::Occupied(mut occupied_entry) => {
 						let existing = occupied_entry.insert(FieldStatsDelta::CountAdd(count_val));
 						occupied_entry.insert(combine_field_deltas(existing, new_delta));
@@ -1381,7 +1381,7 @@ impl Document {
 					FieldStatsDelta::SumSub
 				};
 
-				match metadata_deltas.entry(field_name.clone()) {
+				match metadata_deltas.entry(field_name) {
 					Entry::Occupied(mut occupied_entry) => {
 						let existing = occupied_entry.insert(FieldStatsDelta::CountSub(count_val));
 						occupied_entry.insert(combine_field_deltas(existing, new_delta));
@@ -1442,7 +1442,7 @@ impl Document {
 
 				// Update metadata for min/max tracking, combining with any existing delta
 				let new_delta = FieldStatsDelta::MinMaxAdd;
-				match metadata_deltas.entry(field_name.clone()) {
+				match metadata_deltas.entry(field_name) {
 					Entry::Occupied(mut occupied_entry) => {
 						let existing = occupied_entry.insert(FieldStatsDelta::MinMaxAdd);
 						occupied_entry.insert(combine_field_deltas(existing, new_delta));
@@ -1465,7 +1465,7 @@ impl Document {
 
 				// Update metadata for min/max tracking, combining with any existing delta
 				let new_delta = FieldStatsDelta::MinMaxSub;
-				match metadata_deltas.entry(field_name.clone()) {
+				match metadata_deltas.entry(field_name) {
 					Entry::Occupied(mut occupied_entry) => {
 						let existing = occupied_entry.insert(FieldStatsDelta::MinMaxSub);
 						occupied_entry.insert(combine_field_deltas(existing, new_delta));
@@ -1481,7 +1481,7 @@ impl Document {
 				accumulate_delete_expr(
 					del_cond,
 					Expr::Binary {
-						left: Box::new(Expr::Idiom(key.clone())),
+						left: Box::new(Expr::Idiom(key)),
 						op: BinaryOperator::ExactEqual,
 						right: Box::new(Expr::Literal(Literal::None)),
 					},
@@ -1496,7 +1496,7 @@ impl Document {
 				// We need to unconditionally recompute because the value has changed
 				let recompute_expr = Self::group_recompute_query(fdc, field)?;
 				set_ops.push(Assignment {
-					place: key.clone(),
+					place: key,
 					operator: AssignOperator::Assign,
 					value: recompute_expr,
 				});
@@ -1550,7 +1550,7 @@ impl Document {
 
 				// Update metadata for min/max tracking, combining with any existing delta
 				let new_delta = FieldStatsDelta::MinMaxAdd;
-				match metadata_deltas.entry(field_name.clone()) {
+				match metadata_deltas.entry(field_name) {
 					Entry::Occupied(mut occupied_entry) => {
 						let existing = occupied_entry.insert(FieldStatsDelta::MinMaxAdd);
 						occupied_entry.insert(combine_field_deltas(existing, new_delta));
@@ -1573,7 +1573,7 @@ impl Document {
 
 				// Update metadata for min/max tracking, combining with any existing delta
 				let new_delta = FieldStatsDelta::MinMaxSub;
-				match metadata_deltas.entry(field_name.clone()) {
+				match metadata_deltas.entry(field_name) {
 					Entry::Occupied(mut occupied_entry) => {
 						let existing = occupied_entry.insert(FieldStatsDelta::MinMaxSub);
 						occupied_entry.insert(combine_field_deltas(existing, new_delta));
@@ -1589,7 +1589,7 @@ impl Document {
 				accumulate_delete_expr(
 					del_cond,
 					Expr::Binary {
-						left: Box::new(Expr::Idiom(key.clone())),
+						left: Box::new(Expr::Idiom(key)),
 						op: BinaryOperator::ExactEqual,
 						right: Box::new(Expr::Literal(Literal::None)),
 					},
@@ -1604,7 +1604,7 @@ impl Document {
 				// We need to unconditionally recompute because the value has changed
 				let recompute_expr = Self::group_recompute_query(fdc, field)?;
 				set_ops.push(Assignment {
-					place: key.clone(),
+					place: key,
 					operator: AssignOperator::Assign,
 					value: recompute_expr,
 				});
@@ -1641,7 +1641,7 @@ impl Document {
 				let new_delta = FieldStatsDelta::MeanAdd {
 					value: decimal_val,
 				};
-				match metadata_deltas.entry(field_name.clone()) {
+				match metadata_deltas.entry(field_name) {
 					Entry::Occupied(mut occupied_entry) => {
 						let existing = occupied_entry.insert(FieldStatsDelta::MeanAdd {
 							value: decimal_val,
@@ -1658,7 +1658,7 @@ impl Document {
 				let new_delta = FieldStatsDelta::MeanSub {
 					value: decimal_val,
 				};
-				match metadata_deltas.entry(field_name.clone()) {
+				match metadata_deltas.entry(field_name) {
 					Entry::Occupied(mut occupied_entry) => {
 						// Temporarly replace the value to take ownership
 						let existing = occupied_entry.insert(FieldStatsDelta::MeanSub {
@@ -1675,7 +1675,7 @@ impl Document {
 				accumulate_delete_expr(
 					del_cond,
 					Expr::Binary {
-						left: Box::new(Expr::Idiom(key.clone())),
+						left: Box::new(Expr::Idiom(key)),
 						op: BinaryOperator::ExactEqual,
 						right: Box::new(Expr::Literal(Literal::None)),
 					},
