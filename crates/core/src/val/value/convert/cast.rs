@@ -12,7 +12,7 @@ use crate::syn;
 use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Null, Number, Object,
-	Range, RecordId, Regex, Strand, Uuid, Value,
+	Range, RecordId, Regex, SqlNone, Strand, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]
@@ -118,6 +118,22 @@ impl Cast for Value {
 
 	fn cast(v: Value) -> Result<Self, CastError> {
 		Ok(v)
+	}
+}
+
+impl Cast for SqlNone {
+	fn can_cast(v: &Value) -> bool {
+		matches!(v, Value::None)
+	}
+
+	fn cast(v: Value) -> Result<Self, CastError> {
+		match v {
+			Value::None => Ok(SqlNone),
+			x => Err(CastError::InvalidKind {
+				from: x,
+				into: "none".to_string(),
+			}),
+		}
 	}
 }
 
@@ -345,14 +361,14 @@ impl Cast for Strand {
 				}),
 			},
 
-			Value::Null | Value::None => Err(CastError::InvalidKind {
-				from: v,
-				into: "string".into(),
-			}),
-
+			Value::Null => Ok("NULL".into()),
+			Value::None => Ok("NONE".into()),
 			Value::Strand(x) => Ok(x),
 			Value::Uuid(x) => Ok(x.to_raw().into()),
 			Value::Datetime(x) => Ok(x.into_raw_string().into()),
+			Value::Number(Number::Decimal(x)) => {
+				Ok(unsafe { Strand::new_unchecked(x.to_string()) })
+			}
 			// TODO: Handle null bytes
 			x => Ok(unsafe { Strand::new_unchecked(x.to_string()) }),
 		}
@@ -711,6 +727,7 @@ impl Value {
 	pub fn can_cast_to_kind(&self, kind: &Kind) -> bool {
 		match kind {
 			Kind::Any => true,
+			Kind::None => self.can_cast_to::<SqlNone>(),
 			Kind::Null => self.can_cast_to::<Null>(),
 			Kind::Bool => self.can_cast_to::<bool>(),
 			Kind::Int => self.can_cast_to::<i64>(),
@@ -748,10 +765,6 @@ impl Value {
 					self.can_cast_to_geometry(t)
 				}
 			}
-			Kind::Option(k) => match self {
-				Self::None => true,
-				v => v.can_cast_to_kind(k),
-			},
 			Kind::Either(k) => k.iter().any(|x| self.can_cast_to_kind(x)),
 			Kind::Literal(lit) => self.can_cast_to_literal(lit),
 			Kind::File(buckets) => {
@@ -806,6 +819,7 @@ impl Value {
 		// Attempt to convert to the desired type
 		match kind {
 			Kind::Any => Ok(self),
+			Kind::None => self.cast_to::<SqlNone>().map(|_| Value::None),
 			Kind::Null => self.cast_to::<Null>().map(|_| Value::Null),
 			Kind::Bool => self.cast_to::<bool>().map(Value::from),
 			Kind::Int => self.cast_to::<i64>().map(Value::from),
@@ -836,10 +850,6 @@ impl Value {
 			Kind::Geometry(t) => match t.is_empty() {
 				true => self.cast_to::<Geometry>().map(Value::from),
 				false => self.cast_to_geometry(t).map(Value::from),
-			},
-			Kind::Option(k) => match self {
-				Self::None => Ok(Self::None),
-				v => v.cast_to_kind(k),
 			},
 			Kind::Either(k) => {
 				let Some(k) = k.iter().find(|x| self.can_cast_to_kind(x)) else {
