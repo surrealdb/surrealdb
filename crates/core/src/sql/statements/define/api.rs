@@ -48,7 +48,7 @@ impl Display for DefineApiStatement {
 			write!(f, "{}", self.config)?;
 
 			if let Some(fallback) = &self.fallback {
-				write!(f, "THEN {}", fallback)?;
+				write!(f, " THEN {}", fallback)?;
 			}
 
 			drop(indent);
@@ -106,7 +106,7 @@ impl Display for ApiAction {
 		write!(f, "FOR {}", Fmt::comma_separated(self.methods.iter()))?;
 		let _indent = pretty_indent();
 		write!(f, "{}", self.config)?;
-		write!(f, "THEN {}", self.action)?;
+		write!(f, " THEN {}", self.action)?;
 		Ok(())
 	}
 }

@@ -96,21 +96,21 @@ impl fmt::Display for DefineApiStatement {
 		write!(f, " {}", self.path)?;
 		let indent = pretty_indent();
 
-		write!(f, "FOR any")?;
+		write!(f, " FOR any")?;
 		{
 			let indent = pretty_indent();
 
 			write!(f, "{}", self.config)?;
 
 			if let Some(fallback) = &self.fallback {
-				write!(f, "THEN {fallback}")?;
+				write!(f, " THEN {fallback}")?;
 			}
 
 			drop(indent);
 		}
 
 		for action in &self.actions {
-			write!(f, "{action}")?;
+			write!(f, " {action}")?;
 		}
 
 		if let Some(ref comment) = self.comment {
@@ -134,7 +134,7 @@ impl fmt::Display for ApiAction {
 		write!(f, "FOR {}", Fmt::comma_separated(self.methods.iter()))?;
 		let indent = pretty_indent();
 		write!(f, "{}", &self.config)?;
-		write!(f, "THEN {}", self.action)?;
+		write!(f, " THEN {}", self.action)?;
 		drop(indent);
 		Ok(())
 	}

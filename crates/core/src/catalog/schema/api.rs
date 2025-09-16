@@ -223,7 +223,7 @@ impl InfoStructure for ApiConfigDefinition {
 
 impl Display for ApiConfigDefinition {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, " API")?;
+		write!(f, "API")?;
 
 		if !self.middleware.is_empty() {
 			write!(f, " MIDDLEWARE ")?;

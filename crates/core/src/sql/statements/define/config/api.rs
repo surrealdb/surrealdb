@@ -12,8 +12,6 @@ pub struct ApiConfig {
 
 impl Display for ApiConfig {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, " API")?;
-
 		if !self.middleware.is_empty() {
 			write!(f, " MIDDLEWARE ")?;
 			write!(
