@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 use anyhow::{Result, bail};
 use futures::future::try_join_all;
@@ -350,10 +351,15 @@ fn merge_metadata_deltas(
 	source: HashMap<String, FieldStatsDelta>,
 ) {
 	for (field_name, delta) in source {
-		if let Some(existing) = target.remove(&field_name) {
-			target.insert(field_name, combine_field_deltas(existing, delta));
-		} else {
-			target.insert(field_name, delta);
+		match target.entry(field_name) {
+			Entry::Occupied(mut occupied_entry) => {
+				// Temporarly replace the value to take ownership
+				let existing = occupied_entry.insert(FieldStatsDelta::SumAdd);
+				occupied_entry.insert(combine_field_deltas(existing, delta));
+			}
+			Entry::Vacant(vacant_entry) => {
+				vacant_entry.insert(delta);
+			}
 		}
 	}
 }
@@ -983,9 +989,6 @@ impl Document {
 		// Get the transaction
 		let txn = ctx.tx();
 
-		// Clear cache to ensure we get the latest version
-		txn.clear_cache();
-
 		// Retrieve the existing record (if any)
 		let record = txn.get_record(ns, db, &rid.table, &rid.key, None).await?;
 		let mut record = (*record).clone(); // Convert from Arc to owned
@@ -1136,14 +1139,7 @@ impl Document {
 									.compute(stk, ctx, opt, Some(fdc.doc))
 									.await
 									.catch_return()?;
-								self.chg(
-									&mut set_ops,
-									&mut del_ops,
-									&mut metadata_deltas,
-									&fdc.act,
-									idiom,
-									val,
-								)?;
+								self.chg(&mut set_ops, &mut metadata_deltas, &fdc.act, idiom, val)?;
 								continue;
 							}
 							"time::min" => {
@@ -1219,14 +1215,7 @@ impl Document {
 										})
 									}
 								};
-								self.chg(
-									&mut set_ops,
-									&mut del_ops,
-									&mut metadata_deltas,
-									&fdc.act,
-									idiom,
-									val,
-								)?;
+								self.chg(&mut set_ops, &mut metadata_deltas, &fdc.act, idiom, val)?;
 								continue;
 							}
 
@@ -1304,7 +1293,6 @@ impl Document {
 									}
 								};
 								self.mean(
-									&mut set_ops,
 									&mut del_ops,
 									&mut metadata_deltas,
 									&fdc.act,
@@ -1342,7 +1330,6 @@ impl Document {
 	fn chg(
 		&self,
 		set_ops: &mut Vec<Assignment>,
-		_del_cond: &mut Option<Expr>,
 		metadata_deltas: &mut HashMap<String, FieldStatsDelta>,
 		act: &FieldAction,
 		key: Idiom,
@@ -1616,7 +1603,6 @@ impl Document {
 	/// Set the new average value for the field in the foreign table
 	fn mean(
 		&self,
-		_set_ops: &mut [Assignment],
 		del_cond: &mut Option<Expr>,
 		metadata_deltas: &mut HashMap<String, FieldStatsDelta>,
 		act: &FieldAction,
@@ -1668,7 +1654,7 @@ impl Document {
 					Expr::Binary {
 						left: Box::new(Expr::Idiom(key.clone())),
 						op: BinaryOperator::ExactEqual,
-						right: Box::new(Expr::Literal(Literal::None)),
+						right: Box::new(Expr::Literal(Literal::Decimal(Decimal::ZERO))),
 					},
 				);
 			}

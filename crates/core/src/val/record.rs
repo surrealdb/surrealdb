@@ -79,7 +79,7 @@ impl Record {
 		matches!(
 			&self.metadata,
 			Some(Metadata {
-				record_type: Some(RecordType::Edge),
+				record_type: RecordType::Edge,
 				..
 			})
 		)
@@ -115,12 +115,12 @@ impl Record {
 	pub(crate) fn set_record_type(&mut self, rtype: RecordType) {
 		match &mut self.metadata {
 			Some(metadata) => {
-				metadata.record_type = Some(rtype);
+				metadata.record_type = rtype;
 			}
 			metadata => {
 				*metadata = Some(Metadata {
-					record_type: Some(rtype),
-					stats: None,
+					record_type: rtype,
+					stats: HashMap::new(),
 				});
 			}
 		}
@@ -326,8 +326,11 @@ pub(crate) enum FieldStats {
 /// Currently, only Edge is supported, but this can be extended to support
 /// other record types in the future.
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub(crate) enum RecordType {
+	/// Represents a normal table record
+	#[default]
+	Table,
 	/// Represents an edge in a graph
 	Edge,
 }
@@ -338,13 +341,13 @@ pub(crate) enum RecordType {
 /// aggregation statistics for materialized view records.
 /// The metadata is revisioned to ensure compatibility across different versions
 /// of the database.
-#[revisioned(revision = 2)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Metadata {
 	/// The type of the record (e.g., Edge for graph edges)
-	record_type: Option<RecordType>,
+	record_type: RecordType,
 	/// Aggregation statistics for materialized view records
-	stats: Option<HashMap<String, FieldStats>>,
+	stats: HashMap<String, FieldStats>,
 }
 
 impl Record {
@@ -358,7 +361,7 @@ impl Record {
 	///
 	/// An optional reference to the field statistics
 	pub(crate) fn get_field_stats(&self, field_name: &str) -> Option<&FieldStats> {
-		self.metadata.as_ref()?.stats.as_ref()?.get(field_name)
+		self.metadata.as_ref()?.stats.get(field_name)
 	}
 
 	/// Sets aggregation statistics for a specific field
@@ -372,12 +375,11 @@ impl Record {
 	/// * `stats` - The field statistics to set
 	pub(crate) fn set_field_stats(&mut self, field_name: String, stats: FieldStats) {
 		let metadata = self.metadata.get_or_insert_with(|| Metadata {
-			record_type: None,
-			stats: Some(HashMap::new()),
+			record_type: RecordType::default(),
+			stats: HashMap::new(),
 		});
 
-		let stats_map = metadata.stats.get_or_insert_with(HashMap::new);
-		stats_map.insert(field_name, stats);
+		metadata.stats.insert(field_name, stats);
 	}
 
 	/// Removes aggregation statistics for a specific field
@@ -390,7 +392,7 @@ impl Record {
 	///
 	/// The removed field statistics, if they existed
 	pub(crate) fn remove_field_stats(&mut self, field_name: &str) -> Option<FieldStats> {
-		self.metadata.as_mut()?.stats.as_mut()?.remove(field_name)
+		self.metadata.as_mut()?.stats.remove(field_name)
 	}
 
 	/// Checks if any count field has become zero (indicating the record should be deleted)
@@ -400,22 +402,20 @@ impl Record {
 	/// `true` if any field has a count of 0, indicating the record should be purged
 	pub(crate) fn has_zero_count(&self) -> bool {
 		if let Some(metadata) = &self.metadata {
-			if let Some(stats_map) = &metadata.stats {
-				for stats in stats_map.values() {
-					match stats {
-						FieldStats::Count(count) if *count == 0 => return true,
-						FieldStats::Sum {
-							count,
-						} if *count == 0 => return true,
-						FieldStats::Mean {
-							count,
-							..
-						} if *count == 0 => return true,
-						FieldStats::MinMax {
-							count,
-						} if *count == 0 => return true,
-						_ => {}
-					}
+			for stats in metadata.stats.values() {
+				match stats {
+					FieldStats::Count(count) if *count == 0 => return true,
+					FieldStats::Sum {
+						count,
+					} if *count == 0 => return true,
+					FieldStats::Mean {
+						count,
+						..
+					} if *count == 0 => return true,
+					FieldStats::MinMax {
+						count,
+					} if *count == 0 => return true,
+					_ => {}
 				}
 			}
 		}
