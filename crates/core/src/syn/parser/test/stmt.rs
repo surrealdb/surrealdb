@@ -9,7 +9,7 @@ use crate::sql::access_type::{
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::data::Assignment;
 use crate::sql::filter::Filter;
-use crate::sql::index::{Distance, HnswParams, MTreeParams, SearchParams, VectorType};
+use crate::sql::index::{Distance, FullTextParams, HnswParams, MTreeParams, VectorType};
 use crate::sql::language::Language;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::lookup::{LookupKind, LookupSubject};
@@ -1652,10 +1652,11 @@ fn parse_define_field() {
 				]),
 				what: Ident::from_strand(strand!("bar").to_owned()),
 				flex: true,
-				field_kind: Some(Kind::Option(Box::new(Kind::Either(vec![
+				field_kind: Some(Kind::Either(vec![
+					Kind::None,
 					Kind::Number,
 					Kind::Array(Box::new(Kind::Record(vec!["foo".to_owned()])), Some(10))
-				])))),
+				])),
 				readonly: false,
 				value: Some(Expr::Literal(Literal::Null)),
 				assert: Some(Expr::Literal(Literal::Bool(true))),
@@ -1712,17 +1713,7 @@ fn parse_define_field() {
 #[test]
 fn parse_define_index() {
 	let res = syn::parse_with(
-		r#"DEFINE INDEX index ON TABLE table FIELDS a,b[*] SEARCH ANALYZER ana BM25 (0.1,0.2)
-		DOC_IDS_ORDER 1
-		DOC_LENGTHS_ORDER 2
-		POSTINGS_ORDER 3
-		TERMS_ORDER 4
-		DOC_IDS_CACHE 5
-		DOC_LENGTHS_CACHE 6
-		POSTINGS_CACHE 7
-		TERMS_CACHE 8
-		HIGHLIGHTS
-		"#
+		"DEFINE INDEX index ON TABLE table FIELDS a,b[*] FULLTEXT ANALYZER ana BM25 (0.1,0.2) HIGHLIGHTS"
 		.as_bytes(),
 		async |parser, stk| parser.parse_expr_inherit(stk).await,
 	)
@@ -1737,21 +1728,13 @@ fn parse_define_index() {
 				Idiom(vec![Part::Field(Ident::from_strand(strand!("a").to_owned()))]),
 				Idiom(vec![Part::Field(Ident::from_strand(strand!("b").to_owned())), Part::All])
 			],
-			index: Index::Search(SearchParams {
+			index: Index::FullText(FullTextParams {
 				az: Ident::from_strand(strand!("ana").to_owned()),
 				hl: true,
 				sc: Scoring::Bm {
 					k1: 0.1,
 					b: 0.2
 				},
-				doc_ids_order: 1,
-				doc_lengths_order: 2,
-				postings_order: 3,
-				terms_order: 4,
-				doc_ids_cache: 5,
-				doc_lengths_cache: 6,
-				postings_cache: 7,
-				terms_cache: 8,
 			}),
 			comment: None,
 			concurrently: false

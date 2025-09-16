@@ -10,7 +10,7 @@ use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range,
-	RecordId, Regex, Uuid, Value,
+	RecordId, Regex, SqlNone, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]
@@ -104,6 +104,22 @@ impl Coerce for Value {
 
 	fn coerce(v: Value) -> Result<Self, CoerceError> {
 		Ok(v)
+	}
+}
+
+impl Coerce for SqlNone {
+	fn can_coerce(v: &Value) -> bool {
+		matches!(v, Value::None)
+	}
+
+	fn coerce(v: Value) -> Result<Self, CoerceError> {
+		match v {
+			Value::None => Ok(SqlNone),
+			x => Err(CoerceError::InvalidKind {
+				from: x,
+				into: "none".to_string(),
+			}),
+		}
 	}
 }
 
@@ -428,6 +444,7 @@ impl Value {
 	pub fn can_coerce_to_kind(&self, kind: &Kind) -> bool {
 		match kind {
 			Kind::Any => true,
+			Kind::None => self.can_coerce_to::<SqlNone>(),
 			Kind::Null => self.can_coerce_to::<Null>(),
 			Kind::Bool => self.can_coerce_to::<bool>(),
 			Kind::Int => self.can_coerce_to::<i64>(),
@@ -465,10 +482,6 @@ impl Value {
 					self.can_coerce_to_geometry(t)
 				}
 			}
-			Kind::Option(k) => match self {
-				Self::None => true,
-				v => v.can_coerce_to_kind(k),
-			},
 			Kind::Either(k) => k.iter().any(|x| self.can_coerce_to_kind(x)),
 			Kind::Literal(lit) => self.can_coerce_to_literal(lit),
 			Kind::File(buckets) => {
@@ -532,6 +545,7 @@ impl Value {
 		// Attempt to convert to the desired type
 		match kind {
 			Kind::Any => Ok(self),
+			Kind::None => self.coerce_to::<SqlNone>().map(|_| Value::None),
 			Kind::Null => self.coerce_to::<Null>().map(Value::from),
 			Kind::Bool => self.coerce_to::<bool>().map(Value::from),
 			Kind::Int => self.coerce_to::<i64>().map(Value::from),
@@ -569,10 +583,6 @@ impl Value {
 					self.coerce_to_geometry_kind(t).map(Value::from)
 				}
 			}
-			Kind::Option(k) => match self {
-				Self::None => Ok(Self::None),
-				v => v.coerce_to_kind(k),
-			},
 			Kind::Either(k) => {
 				// Check first for valid kind, then convert to not consume the value
 				let Some(k) = k.iter().find(|x| self.can_coerce_to_kind(x)) else {

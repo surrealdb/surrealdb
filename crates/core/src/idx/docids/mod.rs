@@ -16,11 +16,4 @@ impl Resolved {
 			Resolved::Existing(doc_id) => *doc_id,
 		}
 	}
-
-	pub(in crate::idx) fn was_existing(&self) -> bool {
-		match self {
-			Resolved::New(_) => false,
-			Resolved::Existing(_) => true,
-		}
-	}
 }

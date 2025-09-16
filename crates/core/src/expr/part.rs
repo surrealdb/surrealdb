@@ -150,7 +150,7 @@ impl Part {
 impl fmt::Display for Part {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Part::All => f.write_str("[*]"),
+			Part::All => f.write_str(".*"),
 			Part::Last => f.write_str("[$]"),
 			Part::First => f.write_str("[0]"),
 			Part::Start(v) => write!(f, "{v}"),
@@ -362,21 +362,6 @@ impl<'a> Next<'a> for &'a [Part] {
 		match self.len() {
 			0 => &[],
 			_ => &self[1..],
-		}
-	}
-}
-
-// ------------------------------
-
-pub trait Skip<'a> {
-	fn skip(&'a self, amount: usize) -> &'a [Part];
-}
-
-impl<'a> Skip<'a> for &'a [Part] {
-	fn skip(&'a self, amount: usize) -> &'a [Part] {
-		match self.len() {
-			0 => &[],
-			_ => &self[amount..],
 		}
 	}
 }

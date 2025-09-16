@@ -3062,16 +3062,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8355be11b20d696c8f18f6cc018c4e372165b1fa8126cef092399c9951984ffa"
 
 [[package]]
-name = "libmimalloc-sys"
-version = "0.1.40"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07d0e07885d6a754b9c7993f2625187ad694ee985d60f23355ff0e7077261502"
-dependencies = [
- "cc",
- "libc",
-]
-
-[[package]]
 name = "libredox"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3294,15 +3284,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd3f7eed9d3848f8b98834af67102b720745c4ec028fcd0aa0239277e7de374f"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "mimalloc"
-version = "0.1.44"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99585191385958383e13f6b822e6b6d8d9cf928e7d286ceb092da92b43c87bc1"
-dependencies = [
- "libmimalloc-sys",
 ]
 
 [[package]]
@@ -5557,14 +5538,23 @@ checksum = "d7beae5182595e9a8b683fa98c4317f956c9a2dec3b9716990d20023cc60c766"
 
 [[package]]
 name = "storekey"
-version = "0.5.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43c42833834a5d23b344f71d87114e0cc9994766a5c42938f4b50e7b2aef85b2"
+checksum = "f66e6afe371dcd16739ae7f7ba020f7ca429ee650698e9a909ec728d6e08920e"
 dependencies = [
- "byteorder",
- "memchr",
- "serde",
- "thiserror 1.0.69",
+ "storekey-derive",
+ "uuid",
+]
+
+[[package]]
+name = "storekey-derive"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4d11b8e63d4d628a76a6435837d356287e5d999ebab0ab6e8e8c1173a3ff197"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.100",
 ]
 
 [[package]]
@@ -5812,6 +5802,7 @@ dependencies = [
  "geo",
  "geo-types",
  "getrandom 0.3.2",
+ "hashbrown 0.14.5",
  "hex",
  "http 1.3.1",
  "indxdb",
@@ -5820,7 +5811,6 @@ dependencies = [
  "lexicmp",
  "linfa-linalg",
  "md-5",
- "mimalloc",
  "nanoid",
  "ndarray 0.15.6",
  "ndarray-stats",

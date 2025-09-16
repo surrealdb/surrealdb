@@ -82,13 +82,21 @@ impl Parser<'_> {
 	pub async fn parse_block(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Block> {
 		let mut statements = Vec::new();
 		loop {
+			// Eat empty statements.
 			while self.eat(t!(";")) {}
+
 			if self.eat(t!("}")) {
 				break;
 			}
 
+			let before = self.recent_span();
 			let stmt = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+			let span = before.covers(self.last_span());
+
+			Self::reject_letless_let(&stmt, span)?;
+
 			statements.push(stmt);
+
 			if !self.eat(t!(";")) {
 				self.expect_closing_delimiter(t!("}"), start)?;
 				break;

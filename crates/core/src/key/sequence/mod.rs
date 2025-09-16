@@ -2,15 +2,16 @@
 pub mod ba;
 pub mod st;
 
+use std::borrow::Cow;
 use std::ops::Range;
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Prefix<'a> {
 	__: u8,
 	_a: u8,
@@ -20,15 +21,13 @@ pub(crate) struct Prefix<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub sq: &'a str,
+	pub sq: Cow<'a, str>,
 	_f: u8,
 	_g: u8,
 	_h: u8,
 }
 
-impl KVKey for Prefix<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(Prefix<'_> => Vec<u8>);
 
 impl<'a> Prefix<'a> {
 	fn new(ns: NamespaceId, db: DatabaseId, sq: &'a str, g: u8, h: u8) -> Self {
@@ -41,7 +40,7 @@ impl<'a> Prefix<'a> {
 			_c: b'!',
 			_d: b's',
 			_e: b'q',
-			sq,
+			sq: Cow::Borrowed(sq),
 			_f: b'!',
 			_g: g,
 			_h: h,

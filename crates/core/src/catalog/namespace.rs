@@ -2,6 +2,7 @@ use std::fmt::{Display, Formatter};
 
 use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
@@ -9,7 +10,20 @@ use crate::sql::ToSql;
 use crate::sql::statements::DefineNamespaceStatement;
 use crate::val::Value;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+	Debug,
+	Clone,
+	Copy,
+	PartialEq,
+	Eq,
+	PartialOrd,
+	Ord,
+	Hash,
+	Serialize,
+	Deserialize,
+	Encode,
+	BorrowDecode,
+)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[repr(transparent)]
 pub struct NamespaceId(pub u32);

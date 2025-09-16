@@ -22,9 +22,7 @@ pub use providers::CatalogProvider;
 pub(crate) use schema::*;
 // TODO: These can be private if we move the bench tests from the sdk to the core.
 pub use schema::{ApiDefinition, ApiMethod};
-pub use schema::{
-	Distance, FullTextParams, HnswParams, MTreeParams, Scoring, SearchParams, VectorType,
-};
+pub use schema::{Distance, FullTextParams, HnswParams, MTreeParams, Scoring, VectorType};
 pub(crate) use subscription::*;
 pub(crate) use table::*;
 pub(crate) use view::*;
@@ -214,12 +212,13 @@ mod test {
         returns: Some(Kind::Any),
     }, 34)]
 	#[case::index(IndexDefinition {
+        index_id: IndexId(123),
         name: "test".to_string(),
-        what: "what".to_string(),
+        table_name: "what".to_string(),
         cols: vec![Idiom::from_str("field[0]").unwrap()],
         index: Index::Idx,
         comment: Some("comment".to_string()),
-    }, 32)]
+    }, 33)]
 	#[case::model(MlModelDefinition {
         name: "model".to_string(),
         hash: "hash".to_string(),

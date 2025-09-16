@@ -5,16 +5,19 @@ use std::ops::Bound;
 use nanoid::nanoid;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 use ulid::Ulid;
 
 use crate::cnf::ID_CHARS;
 use crate::expr::escape::EscapeRid;
 use crate::expr::{self};
 use crate::kvs::impl_kv_value_revisioned;
-use crate::val::{Array, Number, Object, Range, Uuid, Value};
+use crate::val::{Array, IndexFormat, Number, Object, Range, Uuid, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, Encode, BorrowDecode)]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub struct RecordIdKeyRange {
 	pub start: Bound<RecordIdKey>,
 	pub end: Bound<RecordIdKey>,
@@ -146,8 +149,12 @@ impl PartialEq<Range> for RecordIdKeyRange {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(
+	Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash, Encode, BorrowDecode,
+)]
 #[serde(rename = "$surrealdb::private::sql::Id")]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub enum RecordIdKey {
 	Number(i64),
 	//TODO: This should definitely be strand, not string as null bytes here can cause a lot of
@@ -327,8 +334,12 @@ impl fmt::Display for RecordIdKey {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(
+	Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash, Encode, BorrowDecode,
+)]
 #[serde(rename = "$surrealdb::private::RecordId")]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub struct RecordId {
 	pub table: String,
 	pub key: RecordIdKey,

@@ -1,11 +1,13 @@
 //! Stores the key prefix for all keys under an index
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
-use crate::catalog::{DatabaseId, NamespaceId};
+use storekey::{BorrowDecode, Encode};
+
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct AllIndexRoot<'a> {
 	__: u8,
 	_a: u8,
@@ -13,16 +15,14 @@ pub(crate) struct AllIndexRoot<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: IndexId,
 }
 
-impl KVKey for AllIndexRoot<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(AllIndexRoot<'_> => Vec<u8>);
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> AllIndexRoot<'a> {
+pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> AllIndexRoot<'a> {
 	AllIndexRoot::new(ns, db, tb, ix)
 }
 
@@ -33,7 +33,7 @@ impl Categorise for AllIndexRoot<'_> {
 }
 
 impl<'a> AllIndexRoot<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -41,7 +41,7 @@ impl<'a> AllIndexRoot<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 		}
@@ -52,12 +52,13 @@ impl<'a> AllIndexRoot<'a> {
 mod tests {
 
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn root() {
-		let val = AllIndexRoot::new(NamespaceId(1), DatabaseId(2), "testtb", "testix");
+		let val = AllIndexRoot::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3));
 		let enc = AllIndexRoot::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03");
 	}
 
 	#[test]
@@ -67,9 +68,9 @@ mod tests {
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
-			"testix",
+			IndexId(3),
 		);
 		let enc = AllIndexRoot::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03");
 	}
 }

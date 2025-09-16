@@ -480,10 +480,7 @@ impl<'a> TreeBuilder<'a> {
 			let op = match &ixr.index {
 				Index::Idx => self.eval_index_operator(ixr, op, n, p, *col),
 				Index::Uniq => self.eval_index_operator(ixr, op, n, p, *col),
-				Index::Search {
-					..
-				}
-				| Index::FullText {
+				Index::FullText {
 					..
 				} if *col == 0 => Self::eval_matches_operator(op, n),
 				Index::MTree(_) if *col == 0 => self.eval_mtree_knn(e, op, n)?,

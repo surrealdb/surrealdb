@@ -1,12 +1,14 @@
 //! Stores a DEFINE DATABASE config definition
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct DatabaseKey<'key> {
 	__: u8,
 	_a: u8,
@@ -14,12 +16,10 @@ pub(crate) struct DatabaseKey<'key> {
 	_b: u8,
 	_c: u8,
 	_d: u8,
-	pub db: &'key str,
+	pub db: Cow<'key, str>,
 }
 
-impl KVKey for DatabaseKey<'_> {
-	type ValueType = DatabaseDefinition;
-}
+impl_kv_key_storekey!(DatabaseKey<'_> => DatabaseDefinition);
 
 pub fn new(ns: NamespaceId, db: &str) -> DatabaseKey {
 	DatabaseKey::new(ns, db)
@@ -52,7 +52,7 @@ impl<'key> DatabaseKey<'key> {
 			_b: b'!',
 			_c: b'd',
 			_d: b'b',
-			db,
+			db: Cow::Borrowed(db),
 		}
 	}
 }

@@ -130,12 +130,12 @@ pub async fn delete(
 #[cfg(all(not(target_family = "wasm"), feature = "http"))]
 pub mod resolver {
 	use std::error::Error;
-	use std::net::ToSocketAddrs;
 	use std::str::FromStr;
 	use std::sync::Arc;
 
 	use ipnet::IpNet;
 	use reqwest::dns::{Addrs, Name, Resolve, Resolving};
+	use tokio::net::lookup_host;
 
 	use crate::dbs::Capabilities;
 	use crate::dbs::capabilities::NetTarget;
@@ -155,28 +155,23 @@ pub mod resolver {
 	impl Resolve for FilteringResolver {
 		fn resolve(&self, name: Name) -> Resolving {
 			let cap = self.cap.clone();
-
-			let blocking = tokio::task::spawn_blocking(
-				move || -> Result<Addrs, Box<dyn Error + Send + Sync>> {
-					// Check the domain name (if any) matches the allowlist
-					let name_target = NetTarget::from_str(name.as_str())
-						.map_err(|x| Box::new(x) as Box<dyn Error + Send + Sync>)?;
-					let name_is_allowed = cap.matches_any_allow_net(&name_target)
-						&& !cap.matches_any_deny_net(&name_target);
-					// Resolve the addresses
-					let addrs = (name.as_str(), 0)
-						.to_socket_addrs()
-						.map_err(|x| Box::new(x) as Box<dyn Error + Send + Sync>)?;
-					// Build an iterator checking the addresses
-					let iterator = Box::new(addrs.filter(move |addr| {
-						let target = IpNet::new_assert(addr.ip(), 0);
-						name_is_allowed && !cap.matches_any_deny_net(&NetTarget::IPNet(target))
-					}));
-					Ok(iterator as Addrs)
-				},
-			);
-			Box::pin(async {
-				blocking.await.map_err(|x| Box::new(x) as Box<dyn Error + Send + Sync>)?
+			let name_str = name.as_str().to_string();
+			Box::pin(async move {
+				// Check the domain name (if any) matches the allowlist
+				let name_target = NetTarget::from_str(&name_str)
+					.map_err(|x| Box::new(x) as Box<dyn Error + Send + Sync>)?;
+				let name_is_allowed = cap.matches_any_allow_net(&name_target)
+					&& !cap.matches_any_deny_net(&name_target);
+				// Resolve the addresses
+				let addrs = lookup_host((name_str, 0_u16))
+					.await
+					.map_err(|x| Box::new(x) as Box<dyn Error + Send + Sync>)?;
+				// Build an iterator checking the addresses
+				let iterator = Box::new(addrs.filter(move |addr| {
+					let target = IpNet::new_assert(addr.ip(), 0);
+					name_is_allowed && !cap.matches_any_deny_net(&NetTarget::IPNet(target))
+				}));
+				Ok(iterator as Addrs)
 			}) as Resolving
 		}
 	}

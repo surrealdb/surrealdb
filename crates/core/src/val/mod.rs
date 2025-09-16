@@ -11,6 +11,7 @@ use geo::Point;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
 use crate::expr::fmt::Pretty;
@@ -51,6 +52,10 @@ pub use self::table::Table;
 pub use self::uuid::Uuid;
 pub use self::value::{CastError, CoerceError};
 
+/// Marker type for a different serialization format for value which does not encode type
+/// information which is not required for indexing.
+pub enum IndexFormat {}
+
 /// Marker type for value conversions from Value::None
 #[derive(Clone, Copy, Eq, PartialEq, PartialOrd)]
 pub struct SqlNone;
@@ -60,8 +65,12 @@ pub struct SqlNone;
 pub struct Null;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(
+	Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Encode, BorrowDecode,
+)]
 #[serde(rename = "$surrealdb::private::Value")]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub enum Value {
 	#[default]
 	None,

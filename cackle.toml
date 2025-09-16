@@ -1380,6 +1380,13 @@ allow_unsafe = true
 [pkg.take_mut]
 allow_unsafe = true
 
+[pkg.tikv-jemallocator]
+allow_unsafe = true
+
+[pkg.tikv-jemalloc-sys]
+allow_unsafe = true
+allow_apis = ["fs", "process"]
+
 [pkg.surrealdb-tikv-client]
 allow_unsafe = true
 allow_apis = ["fs", "net"]
@@ -1396,3 +1403,9 @@ allow_apis = ["fs", "net"]
 
 [pkg.console-api]
 allow_apis = ["net"]
+
+[pkg.storekey-derive]
+allow_proc_macro = true
+
+[pkg.storekey]
+allow_unsafe = true

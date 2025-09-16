@@ -6,22 +6,32 @@ use anyhow::{Context, Result};
 use roaring::{RoaringBitmap, RoaringTreemap};
 
 /// KVKey is a trait that defines a key for the key-value store.
-pub(crate) trait KVKey: serde::Serialize + Debug + Sized {
+pub(crate) trait KVKey: Debug + Sized {
 	/// The associated value type for this key.
 	type ValueType: KVValue;
 
 	/// Encodes the key into a byte vector.
-	#[inline]
-	fn encode_key(&self) -> anyhow::Result<Vec<u8>> {
-		Ok(storekey::serialize(self)?)
-	}
+	fn encode_key(&self) -> Result<Vec<u8>>;
 }
+
+macro_rules! impl_kv_key_storekey {
+	($(<$($tt:tt)*>)? $t:ty => $v:ty) => {
+		impl$(<$($tt)*>)? crate::kvs::KVKey for $t {
+			type ValueType = $v;
+
+			fn encode_key(&self) -> ::anyhow::Result<Vec<u8>>{
+				Ok(::storekey::encode_vec(self).map_err(|_| crate::err::Error::Unencodable)?)
+			}
+		}
+	};
+}
+pub(crate) use impl_kv_key_storekey;
 
 impl KVKey for Vec<u8> {
 	type ValueType = Vec<u8>;
 
 	#[inline]
-	fn encode_key(&self) -> anyhow::Result<Vec<u8>> {
+	fn encode_key(&self) -> Result<Vec<u8>> {
 		Ok(self.clone())
 	}
 }
@@ -30,7 +40,7 @@ impl KVKey for String {
 	type ValueType = Vec<u8>;
 
 	#[inline]
-	fn encode_key(&self) -> anyhow::Result<Vec<u8>> {
+	fn encode_key(&self) -> Result<Vec<u8>> {
 		Ok(self.as_bytes().to_vec())
 	}
 }
@@ -39,7 +49,7 @@ impl KVKey for &str {
 	type ValueType = Vec<u8>;
 
 	#[inline]
-	fn encode_key(&self) -> anyhow::Result<Vec<u8>> {
+	fn encode_key(&self) -> Result<Vec<u8>> {
 		Ok(self.as_bytes().to_vec())
 	}
 }

@@ -164,9 +164,15 @@ impl Document {
 			let (action, mut result) = if stm.is_delete() {
 				// Prepare a DELETE notification
 				if opt.id()? == live_subscription.node {
-					// Ensure futures are run
-					// Output the full document before any changes were applied
-					let result = doc.doc.as_ref().clone();
+					// An error ignore here is about livequery not the query which invoked the
+					// livequery trigger. So we should catch the ignore and skip this entry in this
+					// case.
+					let result =
+						match self.lq_pluck(stk, &lqctx, &lqopt, live_subscription, &doc).await {
+							Err(IgnoreError::Ignore) => continue,
+							Err(IgnoreError::Error(e)) => return Err(e),
+							Ok(x) => x,
+						};
 					(Action::Delete, result)
 				} else {
 					// TODO: Send to message broker

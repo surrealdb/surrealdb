@@ -921,7 +921,7 @@ mod tests {
 	fn idiom_nested_array_all() {
 		let sql = "test.temp[*]";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("test.temp[*]", format!("{}", out));
+		assert_eq!("test.temp.*", format!("{}", out));
 		assert_eq!(out, sql::Expr::Idiom(Idiom(vec![f("test"), f("temp"), Part::All])));
 	}
 
@@ -937,7 +937,7 @@ mod tests {
 	fn idiom_nested_array_value() {
 		let sql = "test.temp[*].text";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("test.temp[*].text", format!("{}", out));
+		assert_eq!("test.temp.*.text", format!("{}", out));
 		assert_eq!(out, sql::Expr::Idiom(Idiom(vec![f("test"), f("temp"), Part::All, f("text")])));
 	}
 
@@ -1029,7 +1029,7 @@ mod tests {
 	fn part_all() {
 		let sql = "{}[*]";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("{  }[*]", format!("{}", out));
+		assert_eq!("{  }.*", format!("{}", out));
 		assert_eq!(
 			out,
 			Expr::Idiom(Idiom(vec![

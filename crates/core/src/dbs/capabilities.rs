@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::fmt;
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 #[cfg(all(target_family = "wasm", feature = "http"))]
 use std::net::ToSocketAddrs;
@@ -17,7 +17,7 @@ pub trait Target<Item: ?Sized = Self> {
 	fn matches(&self, elem: &Item) -> bool;
 }
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct FuncTarget(pub String, pub Option<String>);
 
 impl fmt::Display for FuncTarget {
@@ -112,7 +112,7 @@ impl std::str::FromStr for FuncTarget {
 	}
 }
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum ExperimentalTarget {
 	RecordReferences,
 	GraphQL,
@@ -182,7 +182,7 @@ impl std::str::FromStr for ExperimentalTarget {
 	}
 }
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum NetTarget {
 	Host(url::Host<String>, Option<u16>),
 	IPNet(IpNet),
@@ -327,7 +327,7 @@ impl std::str::FromStr for NetTarget {
 	}
 }
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct MethodTarget {
 	pub method: Method,
 }
@@ -368,7 +368,7 @@ impl std::str::FromStr for MethodTarget {
 	}
 }
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum RouteTarget {
 	Health,
 	Export,
@@ -445,7 +445,7 @@ impl std::str::FromStr for RouteTarget {
 	}
 }
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum ArbitraryQueryTarget {
 	Guest,
 	Record,
@@ -526,13 +526,13 @@ impl std::str::FromStr for ArbitraryQueryTarget {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub enum Targets<T: Hash + Eq + PartialEq> {
+pub enum Targets<T: Hash + Eq + PartialEq + Ord> {
 	None,
 	Some(HashSet<T>),
 	All,
 }
 
-impl<T: Target + Hash + Eq + PartialEq> From<T> for Targets<T> {
+impl<T: Target + Hash + Eq + PartialEq + Ord> From<T> for Targets<T> {
 	fn from(t: T) -> Self {
 		let mut set = HashSet::new();
 		set.insert(t);
@@ -540,7 +540,7 @@ impl<T: Target + Hash + Eq + PartialEq> From<T> for Targets<T> {
 	}
 }
 
-impl<T: Hash + Eq + PartialEq + fmt::Debug + fmt::Display> Targets<T> {
+impl<T: Hash + Eq + PartialEq + Ord + fmt::Debug + fmt::Display> Targets<T> {
 	pub(crate) fn matches<S>(&self, elem: &S) -> bool
 	where
 		S: ?Sized,
@@ -554,7 +554,7 @@ impl<T: Hash + Eq + PartialEq + fmt::Debug + fmt::Display> Targets<T> {
 	}
 }
 
-impl<T: Target + Hash + Eq + PartialEq + fmt::Display> fmt::Display for Targets<T> {
+impl<T: Target + Hash + Eq + PartialEq + Ord + fmt::Display> fmt::Display for Targets<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::None => write!(f, "none"),
@@ -568,7 +568,21 @@ impl<T: Target + Hash + Eq + PartialEq + fmt::Display> fmt::Display for Targets<
 	}
 }
 
-#[derive(Debug, Clone)]
+impl<T: Hash + Eq + PartialEq + Ord> Hash for Targets<T> {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		match self {
+			Self::None => state.write_u8(0),
+			Self::All => state.write_u8(1),
+			Self::Some(targets) => {
+				let mut sorted = targets.iter().collect::<Vec<&T>>();
+				sorted.sort();
+				sorted.hash(state);
+			}
+		}
+	}
+}
+
+#[derive(Debug, Clone, Hash)]
 pub struct Capabilities {
 	scripting: bool,
 	guest_access: bool,
