@@ -164,13 +164,13 @@ mod test {
 
 	#[test]
 	fn function_arguments() {
-		let sql = "string::is::numeric(null)";
+		let sql = "string::is_numeric(null)";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("string::is::numeric(NULL)", format!("{}", out));
+		assert_eq!("string::is_numeric(NULL)", format!("{}", out));
 		let Expr::FunctionCall(f) = out else {
 			panic!()
 		};
-		assert_eq!(f.receiver, Function::Normal(String::from("string::is::numeric")));
+		assert_eq!(f.receiver, Function::Normal(String::from("string::is_numeric")));
 		assert_eq!(f.arguments, vec![sql::Expr::Literal(sql::Literal::Null)]);
 	}
 

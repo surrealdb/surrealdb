@@ -134,6 +134,74 @@ impl Array {
 		}
 		f.write_char(']')
 	}
+
+	/// Stacks arrays on top of each other. This can serve as 2d array
+	/// transposition.
+	///
+	/// The input array can contain regular values which are treated as arrays
+	/// with a single element.
+	///
+	/// It's best to think of the function as creating a layered structure of
+	/// the arrays rather than transposing them when the input is not a 2d
+	/// array. See the examples for what happense when the input arrays are not
+	/// all the same size.
+	///
+	/// Here's a diagram:
+	/// [0, 1, 2, 3], [4, 5, 6]
+	/// ->
+	/// [0    | 1    | 2   |  3]
+	/// [4    | 5    | 6   ]
+	///  ^      ^      ^      ^
+	/// [0, 4] [1, 5] [2, 6] [3]
+	///
+	/// # Examples
+	///
+	/// ```ignore
+	/// fn array(sql: &str) -> Array {
+	///     unimplemented!();
+	/// }
+	///
+	/// // Example of `transpose` doing what it says on the tin.
+	/// assert_eq!(array("[[0, 1], [2, 3]]").transpose(), array("[[0, 2], [1, 3]]"));
+	/// // `transpose` can be thought of layering arrays on top of each other so when
+	/// // one array runs out, it stops appearing in the output.
+	/// assert_eq!(array("[[0, 1], [2]]").transpose(), array("[[0, 2], [1]]"));
+	/// assert_eq!(array("[0, 1, 2]").transpose(), array("[[0, 1, 2]]"));
+	/// ```
+	pub(crate) fn transpose(self) -> Array {
+		if self.is_empty() {
+			return self;
+		}
+
+		let height = self
+			.iter()
+			.map(|x| {
+				if let Some(x) = x.as_array() {
+					x.len()
+				} else {
+					1
+				}
+			})
+			.max()
+			.unwrap_or(0);
+
+		let mut transposed_vec = vec![vec![Value::None; self.len()]; height];
+
+		for (idx, i) in self.into_iter().enumerate() {
+			match i {
+				Value::Array(j) => {
+					for (jdx, j) in j.into_iter().enumerate() {
+						transposed_vec[jdx][idx] = j;
+					}
+				}
+				x => {
+					transposed_vec[0][idx] = x;
+				}
+			}
+		}
+
+		transposed_vec.into()
+	}
 }
 
 impl Display for Array {
@@ -308,81 +376,6 @@ pub(crate) trait Matches<T> {
 impl Matches<Array> for Array {
 	fn matches(self, compare_val: Value) -> Array {
 		self.iter().map(|arr_val| (arr_val == &compare_val).into()).collect::<Vec<Value>>().into()
-	}
-}
-
-// ------------------------------
-
-// Documented with the assumption that it is just for arrays.
-pub(crate) trait Transpose<T> {
-	/// Stacks arrays on top of each other. This can serve as 2d array
-	/// transposition.
-	///
-	/// The input array can contain regular values which are treated as arrays
-	/// with a single element.
-	///
-	/// It's best to think of the function as creating a layered structure of
-	/// the arrays rather than transposing them when the input is not a 2d
-	/// array. See the examples for what happense when the input arrays are not
-	/// all the same size.
-	///
-	/// Here's a diagram:
-	/// [0, 1, 2, 3], [4, 5, 6]
-	/// ->
-	/// [0    | 1    | 2   |  3]
-	/// [4    | 5    | 6   ]
-	///  ^      ^      ^      ^
-	/// [0, 4] [1, 5] [2, 6] [3]
-	///
-	/// # Examples
-	///
-	/// ```ignore
-	/// fn array(sql: &str) -> Array {
-	///     unimplemented!();
-	/// }
-	///
-	/// // Example of `transpose` doing what it says on the tin.
-	/// assert_eq!(array("[[0, 1], [2, 3]]").transpose(), array("[[0, 2], [1, 3]]"));
-	/// // `transpose` can be thought of layering arrays on top of each other so when
-	/// // one array runs out, it stops appearing in the output.
-	/// assert_eq!(array("[[0, 1], [2]]").transpose(), array("[[0, 2], [1]]"));
-	/// assert_eq!(array("[0, 1, 2]").transpose(), array("[[0, 1, 2]]"));
-	/// ```
-	fn transpose(self) -> T;
-}
-
-impl Transpose<Array> for Array {
-	fn transpose(self) -> Array {
-		if self.is_empty() {
-			return self;
-		}
-		// I'm sure there's a way more efficient way to do this that I don't know about.
-		// The new array will be at *least* this large so we can start there;
-		let mut transposed_vec = Vec::<Value>::with_capacity(self.len());
-		let mut iters = self
-			.iter()
-			.map(|v| {
-				if let Value::Array(arr) = v {
-					Box::new(arr.iter().cloned()) as Box<dyn ExactSizeIterator<Item = Value>>
-				} else {
-					Box::new(std::iter::once(v).cloned())
-						as Box<dyn ExactSizeIterator<Item = Value>>
-				}
-			})
-			.collect::<Vec<_>>();
-		// We know there is at least one element in the array therefore iters is not
-		// empty. This is safe.
-		let longest_length = iters.iter().map(|i| i.len()).max().unwrap();
-		for _ in 0..longest_length {
-			transposed_vec.push(
-				iters
-					.iter_mut()
-					.map(|i| i.next().unwrap_or(Value::None))
-					.collect::<Vec<_>>()
-					.into(),
-			);
-		}
-		transposed_vec.into()
 	}
 }
 
