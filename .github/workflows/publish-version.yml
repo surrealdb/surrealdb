@@ -297,7 +297,18 @@ jobs:
           extra_args=""
 
           if [[ "${{ inputs.publish }}" == "false" || "${{ inputs.nightly-release }}" == "true" ]]; then
+            # Create a temporary branch in case the git ref is not a branch
+            git checkout -b crate
+          
+            # Dry run publishing to test publishing
             extra_args="${extra_args} --dry-run"
+
+            # Update crate version to make sure we test publishing
+            # Without this, already published versions will be skipped
+            release-plz update
+
+            # Allow testing publishing with a dirty workspace
+            echo "allow_dirty = true" >> /tmp/release-plz.toml
           fi
 
           release-plz release --config /tmp/release-plz.toml ${extra_args}
