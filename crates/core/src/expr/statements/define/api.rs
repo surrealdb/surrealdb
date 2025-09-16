@@ -39,7 +39,7 @@ impl DefineApiStatement {
 		let txn = ctx.tx();
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
-		if txn.get_db_api(ns, db, &self.path.to_string()).await.is_ok() {
+		if txn.get_db_api(ns, db, &self.path.to_string()).await?.is_some() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {

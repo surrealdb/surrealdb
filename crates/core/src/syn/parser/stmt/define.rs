@@ -361,7 +361,7 @@ impl Parser<'_> {
 					match peek.kind {
 						t!("JWT") => {
 							self.pop_peek();
-							res.access_type = AccessType::Jwt(self.parse_jwt()?);
+							res.access_type = AccessType::Jwt(self.parse_jwt(stk).await?);
 						}
 						t!("RECORD") => {
 							let token = self.pop_peek();
@@ -391,7 +391,7 @@ impl Parser<'_> {
 								match token.kind {
 									t!("JWT") => {
 										self.pop_peek();
-										let jwt = self.parse_jwt()?;
+										let jwt = self.parse_jwt(stk).await?;
 										ac.jwt = jwt.clone();
 										// Use same issuer for refreshed tokens.
 										if let Some(mut bearer) = ac.bearer {
@@ -466,7 +466,7 @@ impl Parser<'_> {
 							}
 							if self.eat(t!("WITH")) {
 								expected!(self, t!("JWT"));
-								ac.jwt = self.parse_jwt()?;
+								ac.jwt = self.parse_jwt(stk).await?;
 							}
 							res.access_type = AccessType::Bearer(ac);
 						}
@@ -1296,14 +1296,14 @@ impl Parser<'_> {
 		};
 		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		let batch = if self.eat(t!("BATCH")) {
-			self.next_token_value()?
+			stk.run(|ctx| self.parse_expr_field(ctx)).await?
 		} else {
-			1000
+			Expr::Literal(Literal::Integer(1000))
 		};
 		let start = if self.eat(t!("START")) {
-			self.next_token_value()?
+			stk.run(|ctx| self.parse_expr_field(ctx)).await?
 		} else {
-			0
+			Expr::Literal(Literal::Integer(0))
 		};
 		let timeout = self.try_parse_timeout(stk).await?;
 		Ok(DefineSequenceStatement {
@@ -1520,7 +1520,7 @@ impl Parser<'_> {
 		Ok(Kind::Record(names))
 	}
 
-	pub fn parse_jwt(&mut self) -> ParseResult<access_type::JwtAccess> {
+	pub async fn parse_jwt(&mut self, stk: &mut Stk) -> ParseResult<access_type::JwtAccess> {
 		let mut res = access_type::JwtAccess {
 			// By default, a JWT access method is only used to verify.
 			issue: None,
@@ -1539,7 +1539,7 @@ impl Parser<'_> {
 						let next = self.next();
 						match next.kind {
 							t!("KEY") => {
-								let key = self.next_token_value::<Strand>()?.into_string();
+								let key = stk.run(|stk| self.parse_expr_field(stk)).await?;
 								res.verify = access_type::JwtAccessVerify::Key(
 									access_type::JwtAccessVerifyKey {
 										alg,
@@ -1569,7 +1569,7 @@ impl Parser<'_> {
 			}
 			t!("URL") => {
 				self.pop_peek();
-				let url = self.next_token_value::<Strand>()?.into_string();
+				let url = stk.run(|stk| self.parse_expr_field(stk)).await?;
 				res.verify = access_type::JwtAccessVerify::Jwks(access_type::JwtAccessVerifyJwks {
 					url,
 				});
@@ -1605,7 +1605,7 @@ impl Parser<'_> {
 					}
 					t!("KEY") => {
 						self.pop_peek();
-						let key = self.next_token_value::<Strand>()?.into_string();
+						let key = stk.run(|stk| self.parse_expr_field(stk)).await?;
 						// If the algorithm is symmetric and a key is already defined, a different
 						// key is not expected.
 						if let JwtAccessVerify::Key(ref ver) = res.verify {

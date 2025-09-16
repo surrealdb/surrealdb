@@ -20,8 +20,8 @@ use crate::key::sequence::Prefix;
 pub struct DefineSequenceStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
-	pub batch: u32,
-	pub start: i64,
+	pub batch: Expr,
+	pub start: Expr,
 	pub timeout: Option<Timeout>,
 }
 
@@ -30,8 +30,8 @@ impl Default for DefineSequenceStatement {
 		Self {
 			kind: DefineKind::Default,
 			name: Expr::Literal(Literal::None),
-			batch: 0,
-			start: 0,
+			batch: Expr::Literal(Literal::Integer(0)),
+			start: Expr::Literal(Literal::Integer(0)),
 			timeout: None,
 		}
 	}
@@ -81,8 +81,10 @@ impl DefineSequenceStatement {
 		let key = Sq::new(db.namespace_id, db.database_id, &name);
 		let sq = SequenceDefinition {
 			name: name.clone(),
-			batch: self.batch,
-			start: self.start,
+			batch: compute_to!(stk, ctx, opt, doc, self.batch => i64)
+				.try_into()
+				.map_err(|_| anyhow::anyhow!("batch must be a u32"))?,
+			start: compute_to!(stk, ctx, opt, doc, self.start => i64),
 			timeout,
 		};
 		// Set the definition

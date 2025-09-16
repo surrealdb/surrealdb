@@ -485,7 +485,9 @@ fn parse_define_access_jwt_key() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::EdDSA,
-						key: "foo".to_string(),
+						key: Expr::Literal(Literal::Strand(
+							Strand::new("foo".to_string()).unwrap()
+						)),
 					}),
 					issue: None,
 				}),
@@ -514,11 +516,15 @@ fn parse_define_access_jwt_key() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::EdDSA,
-						key: "foo".to_string(),
+						key: Expr::Literal(Literal::Strand(
+							Strand::new("foo".to_string()).unwrap()
+						)),
 					}),
 					issue: Some(JwtAccessIssue {
 						alg: Algorithm::EdDSA,
-						key: "bar".to_string(),
+						key: Expr::Literal(Literal::Strand(
+							Strand::new("bar".to_string()).unwrap()
+						)),
 					}),
 				}),
 				authenticate: None,
@@ -544,11 +550,15 @@ fn parse_define_access_jwt_key() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::EdDSA,
-						key: "foo".to_string(),
+						key: Expr::Literal(Literal::Strand(
+							Strand::new("foo".to_string()).unwrap()
+						)),
 					}),
 					issue: Some(JwtAccessIssue {
 						alg: Algorithm::EdDSA,
-						key: "bar".to_string(),
+						key: Expr::Literal(Literal::Strand(
+							Strand::new("bar".to_string()).unwrap()
+						)),
 					}),
 				}),
 				authenticate: Some(Expr::Literal(Literal::Bool(true))),
@@ -578,11 +588,15 @@ fn parse_define_access_jwt_key() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::Hs256,
-						key: "foo".to_string(),
+						key: Expr::Literal(Literal::Strand(
+							Strand::new("foo".to_string()).unwrap()
+						)),
 					}),
 					issue: Some(JwtAccessIssue {
 						alg: Algorithm::Hs256,
-						key: "foo".to_string(),
+						key: Expr::Literal(Literal::Strand(
+							Strand::new("foo".to_string()).unwrap()
+						)),
 					}),
 				}),
 				authenticate: None,
@@ -608,11 +622,15 @@ fn parse_define_access_jwt_key() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::Hs256,
-						key: "foo".to_string(),
+						key: Expr::Literal(Literal::Strand(
+							Strand::new("foo".to_string()).unwrap()
+						)),
 					}),
 					issue: Some(JwtAccessIssue {
 						alg: Algorithm::Hs256,
-						key: "foo".to_string(),
+						key: Expr::Literal(Literal::Strand(
+							Strand::new("foo".to_string()).unwrap()
+						)),
 					}),
 				}),
 				authenticate: None,
@@ -637,11 +655,15 @@ fn parse_define_access_jwt_key() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::Hs256,
-						key: "foo".to_string(),
+						key: Expr::Literal(Literal::Strand(
+							Strand::new("foo".to_string()).unwrap()
+						)),
 					}),
 					issue: Some(JwtAccessIssue {
 						alg: Algorithm::Hs256,
-						key: "foo".to_string(),
+						key: Expr::Literal(Literal::Strand(
+							Strand::new("foo".to_string()).unwrap()
+						)),
 					}),
 				}),
 				authenticate: None,
@@ -692,7 +714,9 @@ fn parse_define_access_jwt_key() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::EdDSA,
-						key: "foo".to_string(),
+						key: Expr::Literal(Literal::Strand(
+							Strand::new("foo".to_string()).unwrap()
+						)),
 					}),
 					issue: None,
 				}),
@@ -726,7 +750,9 @@ fn parse_define_access_jwt_key() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::EdDSA,
-						key: "foo".to_string(),
+						key: Expr::Literal(Literal::Strand(
+							Strand::new("foo".to_string()).unwrap()
+						)),
 					}),
 					issue: None,
 				}),
@@ -758,7 +784,10 @@ fn parse_define_access_jwt_jwks() {
 				base: Base::Db,
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
-						url: "http://example.com/.well-known/jwks.json".to_string(),
+						url: Expr::Literal(Literal::Strand(
+							Strand::new("http://example.com/.well-known/jwks.json".to_string())
+								.unwrap()
+						)),
 					}),
 					issue: None,
 				}),
@@ -786,11 +815,16 @@ fn parse_define_access_jwt_jwks() {
 				base: Base::Db,
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
-						url: "http://example.com/.well-known/jwks.json".to_string(),
+						url: Expr::Literal(Literal::Strand(
+							Strand::new("http://example.com/.well-known/jwks.json".to_string())
+								.unwrap()
+						)),
 					}),
 					issue: Some(JwtAccessIssue {
 						alg: Algorithm::Hs384,
-						key: "foo".to_string(),
+						key: Expr::Literal(Literal::Strand(
+							Strand::new("foo".to_string()).unwrap()
+						)),
 					}),
 				}),
 				authenticate: None,
@@ -815,11 +849,16 @@ fn parse_define_access_jwt_jwks() {
 				base: Base::Db,
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
-						url: "http://example.com/.well-known/jwks.json".to_string(),
+						url: Expr::Literal(Literal::Strand(
+							Strand::new("http://example.com/.well-known/jwks.json".to_string())
+								.unwrap()
+						)),
 					}),
 					issue: Some(JwtAccessIssue {
 						alg: Algorithm::Hs384,
-						key: "foo".to_string(),
+						key: Expr::Literal(Literal::Strand(
+							Strand::new("foo".to_string()).unwrap()
+						)),
 					}),
 				}),
 				authenticate: None,
@@ -843,11 +882,16 @@ fn parse_define_access_jwt_jwks() {
 				base: Base::Db,
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
-						url: "http://example.com/.well-known/jwks.json".to_string(),
+						url: Expr::Literal(Literal::Strand(
+							Strand::new("http://example.com/.well-known/jwks.json".to_string())
+								.unwrap()
+						)),
 					}),
 					issue: Some(JwtAccessIssue {
 						alg: Algorithm::Ps256,
-						key: "foo".to_string(),
+						key: Expr::Literal(Literal::Strand(
+							Strand::new("foo".to_string()).unwrap()
+						)),
 					}),
 				}),
 				authenticate: None,
@@ -872,11 +916,16 @@ fn parse_define_access_jwt_jwks() {
 				base: Base::Db,
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
-						url: "http://example.com/.well-known/jwks.json".to_string(),
+						url: Expr::Literal(Literal::Strand(
+							Strand::new("http://example.com/.well-known/jwks.json".to_string())
+								.unwrap()
+						)),
 					}),
 					issue: Some(JwtAccessIssue {
 						alg: Algorithm::Ps256,
-						key: "foo".to_string(),
+						key: Expr::Literal(Literal::Strand(
+							Strand::new("foo".to_string()).unwrap()
+						)),
 					}),
 				}),
 				authenticate: None,
@@ -1097,13 +1146,17 @@ fn parse_define_access_record() {
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Hs384,
-							key: "foo".to_string(),
+							key: Expr::Literal(Literal::Strand(
+								Strand::new("foo".to_string()).unwrap()
+							)),
 						}),
 						issue: Some(JwtAccessIssue {
 							alg: Algorithm::Hs384,
 							// Issuer key matches verification key by default in symmetric
 							// algorithms.
-							key: "foo".to_string(),
+							key: Expr::Literal(Literal::Strand(
+								Strand::new("foo".to_string()).unwrap()
+							)),
 						}),
 					},
 					bearer: None,
@@ -1136,11 +1189,15 @@ fn parse_define_access_record() {
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Ps512,
-							key: "foo".to_string(),
+							key: Expr::Literal(Literal::Strand(
+								Strand::new("foo".to_string()).unwrap()
+							)),
 						}),
 						issue: Some(JwtAccessIssue {
 							alg: Algorithm::Ps512,
-							key: "bar".to_string(),
+							key: Expr::Literal(Literal::Strand(
+								Strand::new("bar".to_string()).unwrap()
+							)),
 						}),
 					},
 					bearer: None,
@@ -1181,11 +1238,15 @@ fn parse_define_access_record() {
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Ps512,
-							key: "foo".to_string(),
+							key: Expr::Literal(Literal::Strand(
+								Strand::new("foo".to_string()).unwrap()
+							)),
 						}),
 						issue: Some(JwtAccessIssue {
 							alg: Algorithm::Ps512,
-							key: "bar".to_string(),
+							key: Expr::Literal(Literal::Strand(
+								Strand::new("bar".to_string()).unwrap()
+							)),
 						}),
 					},
 					bearer: Some(BearerAccess {
@@ -1194,11 +1255,15 @@ fn parse_define_access_record() {
 						jwt: JwtAccess {
 							verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 								alg: Algorithm::Ps512,
-								key: "foo".to_string(),
+								key: Expr::Literal(Literal::Strand(
+									Strand::new("foo".to_string()).unwrap()
+								)),
 							}),
 							issue: Some(JwtAccessIssue {
 								alg: Algorithm::Ps512,
-								key: "bar".to_string(),
+								key: Expr::Literal(Literal::Strand(
+									Strand::new("bar".to_string()).unwrap()
+								)),
 							}),
 						},
 					}),
@@ -1238,11 +1303,15 @@ fn parse_define_access_record() {
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Ps512,
-							key: "foo".to_string(),
+							key: Expr::Literal(Literal::Strand(
+								Strand::new("foo".to_string()).unwrap()
+							)),
 						}),
 						issue: Some(JwtAccessIssue {
 							alg: Algorithm::Ps512,
-							key: "bar".to_string(),
+							key: Expr::Literal(Literal::Strand(
+								Strand::new("bar".to_string()).unwrap()
+							)),
 						}),
 					},
 					bearer: Some(BearerAccess {
@@ -1251,11 +1320,15 @@ fn parse_define_access_record() {
 						jwt: JwtAccess {
 							verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 								alg: Algorithm::Ps512,
-								key: "foo".to_string(),
+								key: Expr::Literal(Literal::Strand(
+									Strand::new("foo".to_string()).unwrap()
+								)),
 							}),
 							issue: Some(JwtAccessIssue {
 								alg: Algorithm::Ps512,
-								key: "bar".to_string(),
+								key: Expr::Literal(Literal::Strand(
+									Strand::new("bar".to_string()).unwrap()
+								)),
 							}),
 						},
 					}),
@@ -1288,11 +1361,15 @@ fn parse_define_access_record() {
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Rs256,
-							key: "foo".to_string(),
+							key: Expr::Literal(Literal::Strand(
+								Strand::new("foo".to_string()).unwrap()
+							)),
 						}),
 						issue: Some(JwtAccessIssue {
 							alg: Algorithm::Rs256,
-							key: "bar".to_string(),
+							key: Expr::Literal(Literal::Strand(
+								Strand::new("bar".to_string()).unwrap()
+							)),
 						}),
 					},
 					bearer: None,
@@ -1575,13 +1652,17 @@ fn parse_define_access_bearer() {
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Hs384,
-							key: "foo".to_string(),
+							key: Expr::Literal(Literal::Strand(
+								Strand::new("foo".to_string()).unwrap()
+							)),
 						}),
 						issue: Some(JwtAccessIssue {
 							alg: Algorithm::Hs384,
 							// Issuer key matches verification key by default in symmetric
 							// algorithms.
-							key: "foo".to_string(),
+							key: Expr::Literal(Literal::Strand(
+								Strand::new("foo".to_string()).unwrap()
+							)),
 						}),
 					},
 				}),
@@ -1617,13 +1698,17 @@ fn parse_define_access_bearer() {
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Hs384,
-							key: "foo".to_string(),
+							key: Expr::Literal(Literal::Strand(
+								Strand::new("foo".to_string()).unwrap()
+							)),
 						}),
 						issue: Some(JwtAccessIssue {
 							alg: Algorithm::Hs384,
 							// Issuer key matches verification key by default in symmetric
 							// algorithms.
-							key: "foo".to_string(),
+							key: Expr::Literal(Literal::Strand(
+								Strand::new("foo".to_string()).unwrap()
+							)),
 						}),
 					},
 				}),

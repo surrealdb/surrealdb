@@ -235,7 +235,9 @@ fn statements() -> Vec<TopLevelExpr> {
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::EdDSA,
-							key: "foo".to_string(),
+							key: Expr::Literal(Literal::Strand(
+								Strand::new("foo".to_string()).unwrap(),
+							)),
 						}),
 						issue: None,
 					},

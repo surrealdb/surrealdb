@@ -8,8 +8,8 @@ use crate::sql::{Expr, Literal, Timeout};
 pub struct DefineSequenceStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
-	pub batch: u32,
-	pub start: i64,
+	pub batch: Expr,
+	pub start: Expr,
 	pub timeout: Option<Timeout>,
 }
 
@@ -18,8 +18,8 @@ impl Default for DefineSequenceStatement {
 		Self {
 			kind: DefineKind::Default,
 			name: Expr::Literal(Literal::None),
-			batch: 0,
-			start: 0,
+			batch: Expr::Literal(Literal::Integer(0)),
+			start: Expr::Literal(Literal::Integer(0)),
 			timeout: None,
 		}
 	}
@@ -46,8 +46,8 @@ impl From<DefineSequenceStatement> for crate::expr::statements::define::DefineSe
 		Self {
 			kind: v.kind.into(),
 			name: v.name.into(),
-			batch: v.batch,
-			start: v.start,
+			batch: v.batch.into(),
+			start: v.start.into(),
 			timeout: v.timeout.map(Into::into),
 		}
 	}
@@ -58,8 +58,8 @@ impl From<crate::expr::statements::define::DefineSequenceStatement> for DefineSe
 		DefineSequenceStatement {
 			kind: v.kind.into(),
 			name: v.name.into(),
-			batch: v.batch,
-			start: v.start,
+			batch: v.batch.into(),
+			start: v.start.into(),
 			timeout: v.timeout.map(Into::into),
 		}
 	}

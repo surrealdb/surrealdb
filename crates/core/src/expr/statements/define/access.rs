@@ -81,17 +81,19 @@ impl DefineAccessStatement {
 				verify: match &access.verify {
 					catalog::JwtAccessVerify::Key(k) => JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: convert_algorithm(&k.alg),
-						key: k.key.clone(),
+						key: Expr::Literal(Literal::Strand(Strand::new(k.key.clone()).unwrap())),
 					}),
 					catalog::JwtAccessVerify::Jwks(j) => {
 						JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
-							url: j.url.clone(),
+							url: Expr::Literal(Literal::Strand(
+								Strand::new(j.url.clone()).unwrap(),
+							)),
 						})
 					}
 				},
 				issue: access.issue.as_ref().map(|x| JwtAccessIssue {
 					alg: convert_algorithm(&x.alg),
-					key: x.key.clone(),
+					key: Expr::Literal(Literal::Strand(Strand::new(x.key.clone()).unwrap())),
 				}),
 			}
 		}
@@ -191,30 +193,42 @@ impl DefineAccessStatement {
 			}
 		}
 
-		fn convert_jwt_access(access: &JwtAccess) -> catalog::JwtAccess {
-			catalog::JwtAccess {
+		async fn convert_jwt_access(
+			stk: &mut Stk,
+			ctx: &Context,
+			opt: &Options,
+			doc: Option<&CursorDoc>,
+			access: &JwtAccess,
+		) -> Result<catalog::JwtAccess> {
+			Ok(catalog::JwtAccess {
 				verify: match &access.verify {
 					JwtAccessVerify::Key(k) => {
 						catalog::JwtAccessVerify::Key(catalog::JwtAccessVerifyKey {
 							alg: convert_algorithm(&k.alg),
-							key: k.key.clone(),
+							key: compute_to!(stk, ctx, opt, doc, k.key => String),
 						})
 					}
 					JwtAccessVerify::Jwks(j) => {
 						catalog::JwtAccessVerify::Jwks(catalog::JwtAccessVerifyJwks {
-							url: j.url.clone(),
+							url: compute_to!(stk, ctx, opt, doc, j.url => String),
 						})
 					}
 				},
-				issue: access.issue.as_ref().map(|x| catalog::JwtAccessIssue {
+				issue: map_opt!(x as &access.issue => catalog::JwtAccessIssue {
 					alg: convert_algorithm(&x.alg),
-					key: x.key.clone(),
+					key: compute_to!(stk, ctx, opt, doc, x.key => String),
 				}),
-			}
+			})
 		}
 
-		fn convert_bearer_access(access: &BearerAccess) -> catalog::BearerAccess {
-			catalog::BearerAccess {
+		async fn convert_bearer_access(
+			stk: &mut Stk,
+			ctx: &Context,
+			opt: &Options,
+			doc: Option<&CursorDoc>,
+			access: &BearerAccess,
+		) -> Result<catalog::BearerAccess> {
+			Ok(catalog::BearerAccess {
 				kind: match access.kind {
 					BearerAccessType::Bearer => catalog::BearerAccessType::Bearer,
 					BearerAccessType::Refresh => catalog::BearerAccessType::Refresh,
@@ -223,8 +237,8 @@ impl DefineAccessStatement {
 					BearerAccessSubject::Record => catalog::BearerAccessSubject::Record,
 					BearerAccessSubject::User => catalog::BearerAccessSubject::User,
 				},
-				jwt: convert_jwt_access(&access.jwt),
-			}
+				jwt: convert_jwt_access(stk, ctx, opt, doc, &access.jwt).await?,
+			})
 		}
 
 		Ok(AccessDefinition {
@@ -241,16 +255,16 @@ impl DefineAccessStatement {
 					catalog::AccessType::Record(catalog::RecordAccess {
 						signup: record_access.signup.clone(),
 						signin: record_access.signin.clone(),
-						jwt: convert_jwt_access(&record_access.jwt),
-						bearer: record_access.bearer.as_ref().map(convert_bearer_access),
+						jwt: convert_jwt_access(stk, ctx, opt, doc, &record_access.jwt).await?,
+						bearer: map_opt!(x as &record_access.bearer => convert_bearer_access(stk, ctx, opt, doc, x).await?),
 					})
 				}
-				AccessType::Jwt(jwt_access) => {
-					catalog::AccessType::Jwt(convert_jwt_access(jwt_access))
-				}
-				AccessType::Bearer(bearer_access) => {
-					catalog::AccessType::Bearer(convert_bearer_access(bearer_access))
-				}
+				AccessType::Jwt(jwt_access) => catalog::AccessType::Jwt(
+					convert_jwt_access(stk, ctx, opt, doc, jwt_access).await?,
+				),
+				AccessType::Bearer(bearer_access) => catalog::AccessType::Bearer(
+					convert_bearer_access(stk, ctx, opt, doc, bearer_access).await?,
+				),
 			},
 		})
 	}
@@ -360,11 +374,14 @@ impl DefineAccessStatement {
 		fn redact_jwt_access(acc: &mut JwtAccess) {
 			if let JwtAccessVerify::Key(ref mut v) = acc.verify {
 				if v.alg.is_symmetric() {
-					v.key = "[REDACTED]".to_string();
+					v.key = Expr::Literal(Literal::Strand(
+						Strand::new("[REDACTED]".to_string()).unwrap(),
+					));
 				}
 			}
 			if let Some(ref mut s) = acc.issue {
-				s.key = "[REDACTED]".to_string();
+				s.key =
+					Expr::Literal(Literal::Strand(Strand::new("[REDACTED]".to_string()).unwrap()));
 			}
 		}
 

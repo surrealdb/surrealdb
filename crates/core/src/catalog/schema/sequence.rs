@@ -26,8 +26,8 @@ impl SequenceDefinition {
 			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(
 				crate::sql::Ident::new(self.name.clone()).unwrap(),
 			)),
-			batch: self.batch,
-			start: self.start,
+			batch: crate::sql::Expr::Literal(crate::sql::Literal::Integer(self.batch as i64)),
+			start: crate::sql::Expr::Literal(crate::sql::Literal::Integer(self.start)),
 			timeout: self.timeout.map(|t| t.into()),
 		}
 	}

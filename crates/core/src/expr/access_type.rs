@@ -4,12 +4,10 @@ use std::str::FromStr;
 
 use anyhow::Result;
 
-use super::Value;
 use crate::err::Error;
-use crate::expr::escape::QuoteStr;
 use crate::expr::statements::DefineAccessStatement;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Algorithm, Expr};
+use crate::expr::{Algorithm, Expr, Literal};
+use crate::val::Strand;
 
 /// The type of access methods available
 
@@ -61,32 +59,6 @@ impl Display for AccessType {
 	}
 }
 
-impl InfoStructure for AccessType {
-	fn structure(self) -> Value {
-		match self {
-			AccessType::Jwt(v) => Value::from(map! {
-				"kind".to_string() => "JWT".into(),
-				"jwt".to_string() => v.structure(),
-			}),
-			AccessType::Record(v) => Value::from(map! {
-				"kind".to_string() => "RECORD".into(),
-				"jwt".to_string() => v.jwt.structure(),
-				"signup".to_string(), if let Some(v) = v.signup => v.structure(),
-				"signin".to_string(), if let Some(v) = v.signin => v.structure(),
-				"refresh".to_string(), if v.bearer.is_some() => true.into(),
-			}),
-			AccessType::Bearer(ac) => Value::from(map! {
-					"kind".to_string() => "BEARER".into(),
-					"subject".to_string() => match ac.subject {
-							BearerAccessSubject::Record => "RECORD",
-							BearerAccessSubject::User => "USER",
-			}.into(),
-					"jwt".to_string() => ac.jwt.structure(),
-				}),
-		}
-	}
-}
-
 impl AccessType {
 	/// Returns whether or not the access method can issue non-token grants
 	/// In this context, token refers exclusively to JWT
@@ -129,11 +101,11 @@ impl Default for JwtAccess {
 		Self {
 			verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 				alg,
-				key: key.clone(),
+				key: Expr::Literal(Literal::Strand(Strand::new(key.clone()).unwrap())),
 			}),
 			issue: Some(JwtAccessIssue {
 				alg,
-				key,
+				key: Expr::Literal(Literal::Strand(Strand::new(key).unwrap())),
 			}),
 		}
 	}
@@ -143,36 +115,16 @@ impl Display for JwtAccess {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match &self.verify {
 			JwtAccessVerify::Key(v) => {
-				write!(f, "ALGORITHM {} KEY {}", v.alg, QuoteStr(&v.key))?;
+				write!(f, "ALGORITHM {} KEY {}", v.alg, v.key)?;
 			}
 			JwtAccessVerify::Jwks(v) => {
-				write!(f, "URL {}", QuoteStr(&v.url),)?;
+				write!(f, "URL {}", v.url,)?;
 			}
 		}
 		if let Some(ref s) = self.issue {
-			write!(f, " WITH ISSUER KEY {}", QuoteStr(&s.key))?;
+			write!(f, " WITH ISSUER KEY {}", s.key)?;
 		}
 		Ok(())
-	}
-}
-
-impl InfoStructure for JwtAccess {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"verify".to_string() => match self.verify {
-				JwtAccessVerify::Jwks(v) => Value::from(map!{
-					"url".to_string() => v.url.into(),
-				}),
-				JwtAccessVerify::Key(v) => Value::from(map!{
-					"alg".to_string() => v.alg.structure(),
-					"key".to_string() => v.key.into(),
-				}),
-			},
-			"issuer".to_string(), if let Some(v) = self.issue => Value::from(map!{
-				"alg".to_string() => v.alg.structure(),
-				"key".to_string() => v.key.into(),
-			}),
-		})
 	}
 }
 
@@ -184,7 +136,9 @@ impl JwtAccess {
 			JwtAccessVerify::Key(mut key) => {
 				// If algorithm is symmetric, the verification key is a secret
 				if key.alg.is_symmetric() {
-					key.key = "[REDACTED]".to_string();
+					key.key = Expr::Literal(Literal::Strand(
+						Strand::new("[REDACTED]".to_string()).unwrap(),
+					));
 				}
 				JwtAccessVerify::Key(key)
 			}
@@ -193,7 +147,8 @@ impl JwtAccess {
 		};
 		jwt.issue = match jwt.issue {
 			Some(mut issue) => {
-				issue.key = "[REDACTED]".to_string();
+				issue.key =
+					Expr::Literal(Literal::Strand(Strand::new("[REDACTED]".to_string()).unwrap()));
 				Some(issue)
 			}
 			None => None,
@@ -205,7 +160,7 @@ impl JwtAccess {
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct JwtAccessIssue {
 	pub alg: Algorithm,
-	pub key: String,
+	pub key: Expr,
 }
 
 impl Default for JwtAccessIssue {
@@ -214,7 +169,9 @@ impl Default for JwtAccessIssue {
 			// Defaults to HS512
 			alg: Algorithm::Hs512,
 			// Avoid defaulting to empty key
-			key: DefineAccessStatement::random_key(),
+			key: Expr::Literal(Literal::Strand(
+				Strand::new(DefineAccessStatement::random_key()).unwrap(),
+			)),
 		}
 	}
 }
@@ -232,25 +189,10 @@ impl Default for JwtAccessVerify {
 		})
 	}
 }
-
-impl InfoStructure for JwtAccessVerify {
-	fn structure(self) -> Value {
-		match self {
-			JwtAccessVerify::Jwks(v) => Value::from(map! {
-				"url".to_string() => v.url.into(),
-			}),
-			JwtAccessVerify::Key(v) => Value::from(map! {
-				"alg".to_string() => v.alg.structure(),
-				"key".to_string() => v.key.into(),
-			}),
-		}
-	}
-}
-
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct JwtAccessVerifyKey {
 	pub alg: Algorithm,
-	pub key: String,
+	pub key: Expr,
 }
 
 impl Default for JwtAccessVerifyKey {
@@ -259,14 +201,16 @@ impl Default for JwtAccessVerifyKey {
 			// Defaults to HS512
 			alg: Algorithm::Hs512,
 			// Avoid defaulting to empty key
-			key: DefineAccessStatement::random_key(),
+			key: Expr::Literal(Literal::Strand(
+				Strand::new(DefineAccessStatement::random_key()).unwrap(),
+			)),
 		}
 	}
 }
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct JwtAccessVerifyJwks {
-	pub url: String,
+	pub url: Expr,
 }
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]

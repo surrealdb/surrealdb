@@ -41,7 +41,7 @@ impl Display for DefineApiStatement {
 		write!(f, " {}", self.path)?;
 		let indent = pretty_indent();
 
-		write!(f, "FOR any")?;
+		write!(f, " FOR any")?;
 		{
 			let indent = pretty_indent();
 
@@ -55,7 +55,7 @@ impl Display for DefineApiStatement {
 		}
 
 		for action in &self.actions {
-			write!(f, "{}", action)?;
+			write!(f, " {}", action)?;
 		}
 
 		if let Some(ref comment) = self.comment {

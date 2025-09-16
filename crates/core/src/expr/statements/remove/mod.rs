@@ -1,5 +1,6 @@
 mod access;
 mod analyzer;
+mod api;
 mod bucket;
 mod database;
 mod event;
@@ -18,6 +19,7 @@ use std::fmt::{self, Display, Formatter};
 pub use access::RemoveAccessStatement;
 pub use analyzer::RemoveAnalyzerStatement;
 use anyhow::Result;
+pub use api::RemoveApiStatement;
 pub use bucket::RemoveBucketStatement;
 pub use database::RemoveDatabaseStatement;
 pub use event::RemoveEventStatement;
@@ -51,6 +53,7 @@ pub enum RemoveStatement {
 	Index(RemoveIndexStatement),
 	User(RemoveUserStatement),
 	Model(RemoveModelStatement),
+	Api(RemoveApiStatement),
 	Bucket(RemoveBucketStatement),
 	Sequence(RemoveSequenceStatement),
 }
@@ -77,6 +80,7 @@ impl RemoveStatement {
 			Self::Analyzer(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::User(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Model(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Api(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Bucket(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
 		}
@@ -98,6 +102,7 @@ impl Display for RemoveStatement {
 			Self::Analyzer(v) => Display::fmt(v, f),
 			Self::User(v) => Display::fmt(v, f),
 			Self::Model(v) => Display::fmt(v, f),
+			Self::Api(v) => Display::fmt(v, f),
 			Self::Bucket(v) => Display::fmt(v, f),
 			Self::Sequence(v) => Display::fmt(v, f),
 		}
