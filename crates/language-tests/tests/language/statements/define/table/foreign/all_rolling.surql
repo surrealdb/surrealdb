@@ -1,7 +1,5 @@
 /**
 [test]
-wip = true
-
 
  [[test.results]]
  value = "NONE"
