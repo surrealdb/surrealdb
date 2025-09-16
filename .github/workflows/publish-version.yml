@@ -118,12 +118,12 @@ jobs:
       upload: true
     secrets: inherit
 
-  publish:
-    name: Publish crate and artifacts binaries
+  publish-crate:
+    name: Publish crates
     permissions:
       contents: write
-    needs: [ prepare-vars, build ]
-    runs-on: [ runner-amd64-2xlarge ]
+    needs: [ prepare-vars ]
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -159,6 +159,13 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: release-plz release --config /tmp/release-plz.toml
 
+  publish-binaries:
+    name: Publish binaries
+    permissions:
+      contents: write
+    needs: [ prepare-vars, build ]
+    runs-on: [ runner-amd64-2xlarge ]
+    steps:
       - name: Download artifacts
         if: ${{ inputs.publish }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
@@ -210,7 +217,7 @@ jobs:
 
   docker:
     name: Docker images
-    needs: [ prepare-vars, publish ]
+    needs: [ prepare-vars, publish-binaries ]
     if: ${{ inputs.publish }}
     uses: ./.github/workflows/docker.yml
     with:
@@ -224,7 +231,7 @@ jobs:
 
   package-macos:
     name: Package and publish macOS universal binary
-    needs: [ prepare-vars, publish ]
+    needs: [ prepare-vars, publish-binaries ]
     runs-on: macos-latest
     env:
       FILE: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-universal
@@ -265,7 +272,7 @@ jobs:
     name: Propagate binaries to all regions
     if: ${{ inputs.publish }}
     environment: ${{ needs.prepare-vars.outputs.release-name }}
-    needs: [ publish, package-macos, prepare-vars ]
+    needs: [ publish-binaries, publish-crate, package-macos, prepare-vars ]
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS
