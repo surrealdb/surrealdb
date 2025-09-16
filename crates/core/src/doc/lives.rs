@@ -1,6 +1,12 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
+use anyhow::Result;
+use async_channel::Sender;
+use async_graphql::futures_util::future::try_join_all;
+use reblessive::TreeStack;
+use reblessive::tree::Stk;
+
 use super::IgnoreError;
 use crate::catalog::{Permission, SubscriptionDefinition};
 use crate::ctx::{Context, MutableContext};
@@ -11,11 +17,6 @@ use crate::expr::FlowResultExt as _;
 use crate::expr::paths::{AC, RD, TK};
 use crate::kvs::Transaction;
 use crate::val::Value;
-use anyhow::Result;
-use async_channel::Sender;
-use async_graphql::futures_util::future::try_join_all;
-use reblessive::TreeStack;
-use reblessive::tree::Stk;
 
 impl Document {
 	/// Processes any LIVE SELECT statements which

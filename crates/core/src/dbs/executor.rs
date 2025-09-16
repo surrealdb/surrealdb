@@ -17,7 +17,7 @@ use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
 use crate::ctx::Context;
 use crate::ctx::reason::Reason;
 use crate::dbs::response::Response;
-use crate::dbs::{Force, Options, QueryType, Notification};
+use crate::dbs::{Force, Notification, Options, QueryType};
 use crate::doc::DefaultBroker;
 use crate::err::Error;
 use crate::expr::paths::{DB, NS};
