@@ -48,7 +48,7 @@ impl Closure {
 		let mut ctx = MutableContext::new_isolated(ctx);
 		for (i, (name, kind)) in self.args.iter().enumerate() {
 			match (kind, args.get(i)) {
-				(Kind::Option(_), None) => continue,
+				(kind, None) if kind.can_be_none() => continue,
 				(_, None) => {
 					bail!(Error::InvalidArguments {
 						name: "ANONYMOUS".to_string(),

@@ -485,7 +485,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	<T> Option<T> as Kind::Option(Box::new(T::kind_of())),
+	<T> Option<T> as Kind::Either(vec![Kind::None, T::kind_of()]),
 	is_option<T>(value) => matches!(value, Value::None) || T::is_value(value),
 	from_option<T>(self) => self.map(T::into_value).unwrap_or(Value::None),
 	into_option<T>(value) => match value{
