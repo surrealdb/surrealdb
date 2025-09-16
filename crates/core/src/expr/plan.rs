@@ -3,8 +3,7 @@ use std::fmt::{self, Display, Formatter};
 use crate::expr::Expr;
 use crate::expr::fmt::Fmt;
 use crate::expr::statements::{
-	AccessStatement, AnalyzeStatement, KillStatement, LiveStatement, OptionStatement,
-	ShowStatement, UseStatement,
+	AccessStatement, KillStatement, LiveStatement, OptionStatement, ShowStatement, UseStatement,
 };
 
 #[derive(Clone, Debug)]
@@ -41,7 +40,6 @@ pub enum TopLevelExpr {
 	Option(OptionStatement),
 	Use(UseStatement),
 	Show(ShowStatement),
-	Analyze(AnalyzeStatement),
 	Expr(Expr),
 }
 
@@ -52,8 +50,7 @@ impl TopLevelExpr {
 			TopLevelExpr::Begin
 			| TopLevelExpr::Cancel
 			| TopLevelExpr::Commit
-			| TopLevelExpr::Show(_)
-			| TopLevelExpr::Analyze(_) => true,
+			| TopLevelExpr::Show(_) => true,
 			TopLevelExpr::Kill(_)
 			| TopLevelExpr::Live(_)
 			| TopLevelExpr::Option(_)
@@ -76,7 +73,6 @@ impl Display for TopLevelExpr {
 			TopLevelExpr::Option(s) => s.fmt(f),
 			TopLevelExpr::Use(s) => s.fmt(f),
 			TopLevelExpr::Show(s) => s.fmt(f),
-			TopLevelExpr::Analyze(s) => s.fmt(f),
 			TopLevelExpr::Expr(e) => e.fmt(f),
 		}
 	}

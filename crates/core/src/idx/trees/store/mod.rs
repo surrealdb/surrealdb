@@ -58,6 +58,7 @@ where
 		}
 	}
 
+	#[cfg(test)]
 	pub(in crate::idx) async fn get_node(
 		&self,
 		tx: &Transaction,
@@ -122,7 +123,6 @@ where
 
 #[derive(Clone)]
 pub enum TreeNodeProvider {
-	DocIds(IndexKeyBase),
 	Vector(IndexKeyBase),
 	Debug,
 }
@@ -130,7 +130,6 @@ pub enum TreeNodeProvider {
 impl TreeNodeProvider {
 	pub fn get_key(&self, node_id: NodeId) -> Result<Key> {
 		match self {
-			TreeNodeProvider::DocIds(ikb) => ikb.new_bd_key(node_id).encode_key(),
 			TreeNodeProvider::Vector(ikb) => ikb.new_vm_key(node_id).encode_key(),
 			TreeNodeProvider::Debug => Ok(node_id.to_be_bytes().to_vec()),
 		}
