@@ -11,7 +11,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''{ "/test": "DEFINE API '/test' FOR any API PERMISSIONS FULL COMMENT 'test comment'" }'''
+value = '''{ "/test": "DEFINE API '/test' FOR any PERMISSIONS FULL COMMENT 'test comment'" }'''
 
 [[test.results]]
 value = "NONE"
