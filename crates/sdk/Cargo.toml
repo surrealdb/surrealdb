@@ -63,6 +63,7 @@ targets = []
 [dependencies]
 # workspace internal dependencies
 surrealdb-core = { workspace = true, default-features = false }
+surrealdb-types.workspace = true
 
 # External surreal crates
 dmp.workspace = true

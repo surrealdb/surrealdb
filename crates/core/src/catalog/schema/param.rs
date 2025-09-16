@@ -19,13 +19,14 @@ impl_kv_value_revisioned!(ParamDefinition);
 
 impl ParamDefinition {
 	pub fn to_sql_definition(&self) -> DefineParamStatement {
-		DefineParamStatement {
-			kind: DefineKind::Default,
-			name: unsafe { crate::sql::Ident::new_unchecked(self.name.clone()) },
-			value: crate::sql::Expr::from_value(self.value.clone()),
-			comment: self.comment.clone().map(Into::into),
-			permissions: self.permissions.clone().into(),
-		}
+		todo!("STU: Convert value to PublicValue");
+		// DefineParamStatement {
+		// 	kind: DefineKind::Default,
+		// 	name: unsafe { crate::sql::Ident::new_unchecked(self.name.clone()) },
+		// 	value: crate::sql::Expr::from_value(self.value.clone()),
+		// 	comment: self.comment.clone().map(Into::into),
+		// 	permissions: self.permissions.clone().into(),
+		// }
 	}
 }
 

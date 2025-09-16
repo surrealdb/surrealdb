@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
 use std::hash;
+use std::str::FromStr;
 
+use revision::Revisioned;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
@@ -19,6 +21,16 @@ pub enum Number {
 	Float(f64),
 	/// A decimal number with arbitrary precision
 	Decimal(Decimal),
+}
+
+impl Number {
+	pub(crate) fn to_int(&self) -> i64 {
+		match self {
+			Number::Int(v) => *v,
+			Number::Float(v) => *v as i64,
+			Number::Decimal(v) => v.to_i64().unwrap_or_default(),
+		}
+	}
 }
 
 macro_rules! impl_number {
@@ -265,9 +277,38 @@ impl PartialEq for Number {
 	}
 }
 
-impl PartialOrd for Number {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.cmp(other))
+	impl PartialOrd for Number {
+		fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+			Some(self.cmp(other))
+		}
+	}
+
+impl Revisioned for Number {
+	fn revision() -> u16 {
+		1
+	}
+
+	fn serialize_revisioned<W: std::io::Write>(&self, writer: &mut W) -> Result<(), revision::Error> {
+		match self {
+			Number::Int(i) => (0u8, *i).serialize_revisioned(writer),
+			Number::Float(f) => (1u8, *f).serialize_revisioned(writer),
+			Number::Decimal(d) => (2u8, d.to_string()).serialize_revisioned(writer),
+		}
+	}
+
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		let (tag, data): (u8, String) = Revisioned::deserialize_revisioned(reader)?;
+		match tag {
+			0 => data.parse().map(Number::Int).map_err(|err| revision::Error::Conversion(format!("invalid int: {err:?}"))),
+			1 => data.parse().map(Number::Float).map_err(|err| revision::Error::Conversion(format!("invalid float: {err:?}"))),
+			2 => {
+				let s: String = data;
+				Decimal::from_str(&s)
+					.map_err(|err| revision::Error::Conversion(format!("invalid decimal: {err:?}")))
+					.map(Number::Decimal)
+			},
+			_ => Err(revision::Error::Conversion("invalid number tag".to_string())),
+		}
 	}
 }
 

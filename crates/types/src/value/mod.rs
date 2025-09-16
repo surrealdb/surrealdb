@@ -25,7 +25,9 @@ pub mod uuid;
 
 use std::cmp::Ordering;
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use revision::revisioned;
 
 pub use self::array::Array;
 pub use self::bytes::Bytes;
@@ -40,6 +42,7 @@ pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::regex::Regex;
 pub use self::uuid::Uuid;
 use crate::{Kind, SurrealValue};
+pub use rust_decimal::Decimal;
 
 /// Marker type for value conversions from Value::None
 ///
@@ -63,6 +66,7 @@ pub struct SurrealNull;
 ///
 /// This enum contains all possible value types that can be stored in SurrealDB.
 /// Each variant corresponds to a different data type supported by the database.
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Value {
 	/// Represents the absence of a value
@@ -136,6 +140,31 @@ impl Value {
 			Value::File(_) => Kind::File(Vec::new()),
 			Value::Range(_) => Kind::Range,
 			Value::Regex(_) => Kind::Regex,
+		}
+	}
+
+	/// Returns the first value in the array.
+	///
+	/// Returns `None` if the value is not an array or the array is empty.
+	pub fn first(&self) -> Option<Value> {
+		match self {
+			Value::Array(arr) => arr.first().cloned(),
+			_ => None,
+		}
+	}
+
+	/// Check if this Value is NONE or NULL
+	pub fn is_nullish(&self) -> bool {
+		matches!(self, Value::None | Value::Null)
+	}
+
+	/// Converts this value to a string.
+	///
+	/// Returns `Ok(String)` if the value is a string variant, `Err(anyhow::Error)` otherwise.
+	pub fn as_string(&self) -> Result<String> {
+		match self {
+			Value::String(s) => Ok(s.clone()),
+			value => Err(anyhow::anyhow!("Expected a String, found {value:?}")),
 		}
 	}
 

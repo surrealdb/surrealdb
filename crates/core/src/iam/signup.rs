@@ -22,6 +22,7 @@ use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::val::{Object, Value};
+use crate::types::{PublicObject, PublicValue, PublicVariables};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -44,7 +45,7 @@ impl From<SignupData> for Value {
 	}
 }
 
-pub async fn signup(kvs: &Datastore, session: &mut Session, vars: Object) -> Result<SignupData> {
+pub async fn signup(kvs: &Datastore, session: &mut Session, vars: PublicVariables) -> Result<SignupData> {
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
@@ -53,9 +54,9 @@ pub async fn signup(kvs: &Datastore, session: &mut Session, vars: Object) -> Res
 	match (ns, db, ac) {
 		(Some(ns), Some(db), Some(ac)) => {
 			// Process the provided values
-			let ns = ns.to_raw_string();
-			let db = db.to_raw_string();
-			let ac = ac.to_raw_string();
+			let ns = ns.as_string()?;
+			let db = db.as_string()?;
+			let ac = ac.as_string()?;
 			// Attempt to signup using specified access method
 			// Currently, signup is only supported at the database level
 			super::signup::db_access(kvs, session, ns, db, ac, vars).await
@@ -70,7 +71,7 @@ pub async fn db_access(
 	ns: String,
 	db: String,
 	ac: String,
-	vars: Object,
+	vars: PublicVariables,
 ) -> Result<SignupData> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
@@ -108,13 +109,12 @@ pub async fn db_access(
 		bail!(Error::AccessRecordNoSignup);
 	};
 	// Setup the query params
-	let vars = Some(Variables::from(vars));
 	// Setup the system session for finding the signup record
 	let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 	sess.ip.clone_from(&session.ip);
 	sess.or.clone_from(&session.or);
 	// Compute the value with the params
-	match kvs.evaluate(val, &sess, vars).await {
+	match kvs.evaluate(val, &sess, Some(vars)).await {
 		// The signup value succeeded
 		Ok(val) => {
 			// There is a record returned

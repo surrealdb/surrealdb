@@ -1,6 +1,7 @@
 use std::ops::Deref;
 
 use chrono::{DateTime, Utc};
+use revision::Revisioned;
 use serde::{Deserialize, Serialize};
 
 /// Represents a datetime value in SurrealDB
@@ -9,6 +10,23 @@ use serde::{Deserialize, Serialize};
 /// This type wraps the `chrono::DateTime<Utc>` type.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Datetime(pub(crate) DateTime<Utc>);
+
+impl Revisioned for Datetime {
+	fn revision() -> u16 {
+		1
+	}
+
+	fn serialize_revisioned<W: std::io::Write>(&self, writer: &mut W) -> Result<(), revision::Error> {
+		self.0.to_rfc3339().serialize_revisioned(writer)
+	}
+
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		let s: String = Revisioned::deserialize_revisioned(reader)?;
+		DateTime::parse_from_rfc3339(&s)
+			.map_err(|err| revision::Error::Conversion(format!("invalid datetime format: {err:?}")))
+			.map(|dt| Datetime(dt.to_utc()))
+	}
+}
 
 impl Default for Datetime {
 	fn default() -> Self {
@@ -37,6 +55,18 @@ impl From<DateTime<Utc>> for Datetime {
 impl From<Datetime> for DateTime<Utc> {
 	fn from(x: Datetime) -> Self {
 		x.0
+	}
+}
+
+impl Datetime {
+	/// Create a new datetime from chrono DateTime<Utc>
+	pub fn new(dt: DateTime<Utc>) -> Self {
+		Self(dt)
+	}
+	
+	/// Get the inner DateTime<Utc>
+	pub fn inner(&self) -> DateTime<Utc> {
+		self.0
 	}
 }
 

@@ -15,6 +15,7 @@ use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, Regex,
 	Strand, Uuid, Value,
 };
+use crate::types::PublicValue;
 
 /// A literal value, should be computed to get an actual value.
 ///

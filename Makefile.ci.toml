@@ -35,9 +35,11 @@ args = [
     "check",
     "--locked",
     "--workspace",
-    "--all-targets",
+    # "--all-targets",
+    "--lib",
     "--features",
     "${ALL_FEATURES}",
+    "${@}",
 ]
 
 [tasks.ci-check-release]

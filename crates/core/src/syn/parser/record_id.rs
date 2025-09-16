@@ -240,9 +240,7 @@ impl Parser<'_> {
 					Ok(RecordIdKeyLit::Number(number))
 				} else {
 					// Safety: Parser guarentees no null bytes present in string.
-					Ok(RecordIdKeyLit::String(unsafe {
-						Strand::new_unchecked(digits_str.to_owned())
-					}))
+					Ok(RecordIdKeyLit::String(digits_str.to_owned()))
 				}
 			}
 			t!("-") => {
@@ -255,15 +253,13 @@ impl Parser<'_> {
 						Ordering::Less => Ok(RecordIdKeyLit::Number(-(number.value as i64))),
 						Ordering::Equal => Ok(RecordIdKeyLit::Number(i64::MIN)),
 						// Safety: Parser guarentees no null bytes present in string.
-						Ordering::Greater => Ok(RecordIdKeyLit::String(unsafe {
-							Strand::new_unchecked(format!("-{}", self.lexer.span_str(number.span)))
-						})),
+						Ordering::Greater => Ok(RecordIdKeyLit::String(
+							format!("-{}", self.lexer.span_str(number.span))
+						)),
 					}
 				} else {
 					// Safety: Parser guarentees no null bytes present in string.
-					let strand = unsafe {
-						Strand::new_unchecked(format!("-{}", self.lexer.span_str(token.span)))
-					};
+					let strand = format!("-{}", self.lexer.span_str(token.span));
 					Ok(RecordIdKeyLit::String(strand))
 				}
 			}
@@ -272,7 +268,7 @@ impl Parser<'_> {
 					let next = self.peek_whitespace1();
 					if Self::kind_is_identifier(next.kind) {
 						let ident = self.parse_flexible_ident()?;
-						return Ok(RecordIdKeyLit::String(ident.into_strand()));
+						return Ok(RecordIdKeyLit::String(ident.into_string()));
 					}
 				}
 
@@ -283,9 +279,7 @@ impl Parser<'_> {
 					Ok(RecordIdKeyLit::Number(number))
 				} else {
 					// Safety: Parser guarentees no null bytes present in string.
-					Ok(RecordIdKeyLit::String(unsafe {
-						Strand::new_unchecked(digits_str.to_owned())
-					}))
+					Ok(RecordIdKeyLit::String(digits_str.to_owned()))
 				}
 			}
 			TokenKind::Glued(Glued::Duration) if self.settings.flexible_record_id => {
@@ -295,8 +289,6 @@ impl Parser<'_> {
 				}
 				// Should be valid utf-8 as it was already parsed by the lexer
 				let text = String::from_utf8(slice.to_vec()).unwrap();
-				// Safety: Parser guarentees no null bytes present in string.
-				let text = unsafe { Strand::new_unchecked(text) };
 				Ok(RecordIdKeyLit::String(text))
 			}
 			TokenKind::Glued(_) => {
@@ -315,9 +307,7 @@ impl Parser<'_> {
 					Ok(RecordIdKeyLit::Generate(RecordIdKeyGen::Ulid))
 				} else {
 					let slice = self.lexer.span_str(token.span);
-					// Safety: Parser guarentees no null bytes present in string.
-					let text = unsafe { Strand::new_unchecked(slice.to_owned()) };
-					Ok(RecordIdKeyLit::String(text))
+					Ok(RecordIdKeyLit::String(slice.to_owned()))
 				}
 			}
 			t!("UUID") => {
@@ -327,9 +317,7 @@ impl Parser<'_> {
 					Ok(RecordIdKeyLit::Generate(RecordIdKeyGen::Uuid))
 				} else {
 					let slice = self.lexer.span_str(token.span);
-					// Safety: Parser guarentees no null bytes present in string.
-					let text = unsafe { Strand::new_unchecked(slice.to_owned()) };
-					Ok(RecordIdKeyLit::String(text))
+					Ok(RecordIdKeyLit::String(slice.to_owned()))
 				}
 			}
 			t!("RAND") => {
@@ -339,9 +327,7 @@ impl Parser<'_> {
 					Ok(RecordIdKeyLit::Generate(RecordIdKeyGen::Rand))
 				} else {
 					let slice = self.lexer.span_str(token.span);
-					// Safety: Parser guarentees no null bytes present in string.
-					let text = unsafe { Strand::new_unchecked(slice.to_owned()) };
-					Ok(RecordIdKeyLit::String(text))
+					Ok(RecordIdKeyLit::String(slice.to_owned()))
 				}
 			}
 			_ => {
@@ -350,7 +336,7 @@ impl Parser<'_> {
 				} else {
 					self.next_token_value::<Ident>()?
 				};
-				Ok(RecordIdKeyLit::String(ident.into_strand()))
+				Ok(RecordIdKeyLit::String(ident.into_string()))
 			}
 		}
 	}

@@ -72,49 +72,6 @@ macro_rules! transparent_wrapper{
 	};
 }
 
-macro_rules! impl_serialize_wrapper {
-	($ty:ty) => {
-		impl ::revision::Revisioned for $ty {
-			fn revision() -> u16 {
-				crate::core::val::Value::revision()
-			}
-
-			fn serialize_revisioned<W: std::io::Write>(
-				&self,
-				w: &mut W,
-			) -> std::result::Result<(), revision::Error> {
-				self.0.serialize_revisioned(w)
-			}
-
-			fn deserialize_revisioned<R: std::io::Read>(
-				r: &mut R,
-			) -> std::result::Result<Self, revision::Error>
-			where
-				Self: Sized,
-			{
-				::revision::Revisioned::deserialize_revisioned(r).map(Self::from_inner)
-			}
-		}
-
-		impl ::serde::Serialize for $ty {
-			fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-			where
-				S: ::serde::ser::Serializer,
-			{
-				self.0.serialize(serializer)
-			}
-		}
-
-		impl<'de> ::serde::de::Deserialize<'de> for $ty {
-			fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-			where
-				D: ::serde::de::Deserializer<'de>,
-			{
-				Ok(Self::from_inner(::serde::de::Deserialize::deserialize(deserializer)?))
-			}
-		}
-	};
-}
 
 pub mod engine;
 pub mod err;
@@ -122,7 +79,6 @@ pub mod err;
 pub mod headers;
 pub mod method;
 pub mod opt;
-pub mod value;
 
 mod conn;
 

@@ -5,7 +5,7 @@
 //! operations. This module also gives a `context` to the transaction.
 
 mod distinct;
-mod executor;
+pub mod executor;
 mod group;
 mod iterator;
 mod notification;

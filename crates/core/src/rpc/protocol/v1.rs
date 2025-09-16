@@ -9,6 +9,7 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::capabilities::MethodTarget;
 use crate::dbs::{QueryType, Response, Variables};
 use crate::err::Error;
+use crate::expr::Literal;
 use crate::kvs::{LockType, TransactionType};
 use crate::rpc::args::extract_args;
 use crate::rpc::{Data, Method, RpcContext, RpcError};
@@ -18,12 +19,13 @@ use crate::sql::{
 	SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
 use crate::val::{Array, Object, RecordIdKey, Strand, Value};
+use crate::types::{PublicValue, PublicArray, PublicObject, PublicRecordIdKey, PublicVariables};
 
-/// utility function converting a `Value::Strand` into a `Expr::Table`
-fn value_to_table(value: Value) -> Expr {
+/// utility function converting a `Value::String` into a `Expr::Table`
+fn value_to_table(value: PublicValue) -> Expr {
 	match value {
-		Value::Strand(s) => Expr::Table(Ident::from_strand(s)),
-		x => x.into_literal().into(),
+		PublicValue::String(s) => Expr::Table(Ident::new(s).unwrap()),
+		x => Expr::from_public_value(x).into(),
 	}
 }
 
@@ -31,10 +33,10 @@ fn value_to_table(value: Value) -> Expr {
 ///
 /// As this rpc is some what convuluted the singular conditions is not the same
 /// for all cases.
-fn singular(value: &Value) -> bool {
+fn singular(value: &PublicValue) -> bool {
 	match value {
-		Value::Object(_) => true,
-		Value::RecordId(t) => !matches!(t.key, RecordIdKey::Range(_)),
+		PublicValue::Object(_) => true,
+		PublicValue::RecordId(t) => !matches!(t.key, PublicRecordIdKey::Range(_)),
 		_ => false,
 	}
 }
@@ -46,7 +48,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// ------------------------------
 
 	/// Executes a method on this RPC implementation
-	async fn execute(&self, method: Method, params: Array) -> Result<Data, RpcError> {
+	async fn execute(&self, method: Method, params: PublicArray) -> Result<Data, RpcError> {
 		// Check if capabilities allow executing the requested RPC method
 		if !self.kvs().allows_rpc_method(&MethodTarget {
 			method,
@@ -56,7 +58,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		// Execute the desired method
 		match method {
-			Method::Ping => Ok(Data::Other(Value::None)),
+			Method::Ping => Ok(Data::Other(PublicValue::None)),
 			Method::Info => self.info().await,
 			Method::Use => self.yuse(params).await,
 			Method::Signup => self.signup(params).await,
@@ -90,7 +92,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for authentication
 	// ------------------------------
 
-	async fn yuse(&self, params: Array) -> Result<Data, RpcError> {
+	async fn yuse(&self, params: PublicArray) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -99,7 +101,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// We need to be able to adjust either ns or db without affecting the other
 		// To be able to select a namespace, and then list resources in that namespace,
 		// as an example
-		let (ns, db) = extract_args::<(Value, Value)>(params.0.clone())
+		let (ns, db) = extract_args::<(PublicValue, PublicValue)>(params.into_vec())
 			.ok_or(RpcError::InvalidParams("Expected (ns, db)".to_string()))?;
 		// Get the context lock
 		let mutex = self.lock().clone();
@@ -109,15 +111,15 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut session = self.session().as_ref().clone();
 		// Update the selected namespace
 		match ns {
-			Value::None => (),
-			Value::Null => session.ns = None,
-			Value::Strand(ns) => {
+			PublicValue::None => (),
+			PublicValue::Null => session.ns = None,
+			PublicValue::String(ns) => {
 				let tx =
 					self.kvs().transaction(TransactionType::Write, LockType::Optimistic).await?;
 				tx.get_or_add_ns(&ns, self.kvs().is_strict_mode()).await?;
 				tx.commit().await?;
 
-				session.ns = Some(ns.into_string())
+				session.ns = Some(ns)
 			}
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
@@ -127,15 +129,15 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		// Update the selected database
 		match db {
-			Value::None => (),
-			Value::Null => session.db = None,
-			Value::Strand(db) => {
+			PublicValue::None => (),
+			PublicValue::Null => session.db = None,
+			PublicValue::String(db) => {
 				let ns = session.ns.clone().unwrap();
 				let tx =
 					self.kvs().transaction(TransactionType::Write, LockType::Optimistic).await?;
 				tx.ensure_ns_db(&ns, &db, self.kvs().is_strict_mode()).await?;
 				tx.commit().await?;
-				session.db = Some(db.into_string())
+				session.db = Some(db)
 			}
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
@@ -152,15 +154,15 @@ pub trait RpcProtocolV1: RpcContext {
 		// Drop the mutex guard
 		mem::drop(guard);
 		// Return nothing
-		Ok(Data::Other(Value::None))
+		Ok(Data::Other(PublicValue::None))
 	}
 
 	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of
 	// a string. This will allow returning refresh tokens as well as any additional
 	// credential resulting from signing up.
-	async fn signup(&self, params: Array) -> Result<Data, RpcError> {
+	async fn signup(&self, params: PublicArray) -> Result<Data, RpcError> {
 		// Process the method arguments
-		let Some(Value::Object(params)) = extract_args(params.0) else {
+		let Some(PublicValue::Object(params)) = extract_args(params.into_vec()) else {
 			return Err(RpcError::InvalidParams("Expected (params:object)".to_string()));
 		};
 		// Get the context lock
@@ -170,14 +172,14 @@ pub trait RpcProtocolV1: RpcContext {
 		// Clone the current session
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signup, mutating the session
-		let out: Result<Value> = crate::iam::signup::signup(self.kvs(), &mut session, params)
+		let out: Result<PublicValue> = crate::iam::signup::signup(self.kvs(), &mut session, params.into())
 			.await
 			// TODO: Null byte validity
 			.map(|v| {
 				v.token
 					.clone()
-					.map(|x| Value::Strand(Strand::new(x).unwrap()))
-					.unwrap_or(Value::None)
+					.map(|x| PublicValue::String(x))
+					.unwrap_or(PublicValue::None)
 			});
 
 		// Store the updated session
@@ -191,9 +193,9 @@ pub trait RpcProtocolV1: RpcContext {
 	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of
 	// a string. This will allow returning refresh tokens as well as any additional
 	// credential resulting from signing in.
-	async fn signin(&self, params: Array) -> Result<Data, RpcError> {
+	async fn signin(&self, params: PublicArray) -> Result<Data, RpcError> {
 		// Process the method arguments
-		let Some(Value::Object(params)) = extract_args(params.0) else {
+		let Some(PublicValue::Object(params)) = extract_args(params.into_vec()) else {
 			return Err(RpcError::InvalidParams("Expected (params:object)".to_string()));
 		};
 		// Get the context lock
@@ -203,10 +205,10 @@ pub trait RpcProtocolV1: RpcContext {
 		// Clone the current session
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signin, mutating the session
-		let out: Result<Value> = crate::iam::signin::signin(self.kvs(), &mut session, params)
+		let out: Result<PublicValue> = crate::iam::signin::signin(self.kvs(), &mut session, params.into())
 			.await
 			// TODO: Null byte validity
-			.map(|v| Strand::new(v.token.clone()).unwrap().into());
+			.map(|v| PublicValue::String(v.token.clone()));
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -215,10 +217,10 @@ pub trait RpcProtocolV1: RpcContext {
 		out.map(Data::Other).map_err(From::from)
 	}
 
-	async fn authenticate(&self, params: Array) -> Result<Data, RpcError> {
+	async fn authenticate(&self, params: PublicArray) -> Result<Data, RpcError> {
 		tracing::debug!("authenticate");
 		// Process the method arguments
-		let Some(Value::Strand(token)) = extract_args(params.0) else {
+		let Some(PublicValue::String(token)) = extract_args(params.into_vec()) else {
 			return Err(RpcError::InvalidParams("Expected (token:string)".to_string()));
 		};
 		// Get the context lock
@@ -228,10 +230,10 @@ pub trait RpcProtocolV1: RpcContext {
 		// Clone the current session
 		let mut session = self.session().as_ref().clone();
 		// Attempt authentication, mutating the session
-		let out: Result<Value> =
+		let out: Result<PublicValue> =
 			crate::iam::verify::token(self.kvs(), &mut session, token.as_str())
 				.await
-				.map(|_| Value::None);
+				.map(|_| PublicValue::None);
 
 		tracing::debug!("authenticate out: {out:?}");
 		// Store the updated session
@@ -256,7 +258,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Drop the mutex guard
 		mem::drop(guard);
 		// Return nothing on success
-		Ok(Data::Other(Value::None))
+		Ok(Data::Other(PublicValue::None))
 	}
 
 	async fn reset(&self) -> Result<Data, RpcError> {
@@ -275,7 +277,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Cleanup live queries
 		self.cleanup_lqs().await;
 		// Return nothing on success
-		Ok(Data::Other(Value::None))
+		Ok(Data::Other(PublicValue::None))
 	}
 
 	// ------------------------------
@@ -312,20 +314,20 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut res = self.kvs().process(ast, &self.session(), None).await?;
 		// Extract the first value from the result
 		// TODO: Move first here into the actual expression.
-		Ok(Data::Other(res.remove(0).result?.first()))
+		Ok(Data::Other(res.remove(0).result?.first().unwrap()))
 	}
 
 	// ------------------------------
 	// Methods for setting variables
 	// ------------------------------
 
-	async fn set(&self, params: Array) -> Result<Data, RpcError> {
+	async fn set(&self, params: PublicArray) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Some((Value::Strand(key), val)) = extract_args::<(Value, Option<Value>)>(params.0)
+		let Some((PublicValue::String(key), val)) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
 		else {
 			return Err(RpcError::InvalidParams("Expected (key:string, value:Value)".to_string()));
 		};
@@ -342,10 +344,12 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 
 		match val {
-			None | Some(Value::None) => session.variables.remove(key.as_str()),
+			None | Some(PublicValue::None) => session.variables.remove(key.as_str()),
 			Some(val) => {
 				crate::rpc::check_protected_param(&key)?;
-				session.variables.insert(key.into_string(), val)
+
+				todo!("STU");
+				// session.variables.insert(key, val)
 			}
 		}
 		self.set_session(Arc::new(session));
@@ -353,16 +357,16 @@ pub trait RpcProtocolV1: RpcContext {
 		mem::drop(guard);
 
 		// Return nothing
-		Ok(Data::Other(Value::Null))
+		Ok(Data::Other(PublicValue::Null))
 	}
 
-	async fn unset(&self, params: Array) -> Result<Data, RpcError> {
+	async fn unset(&self, params: PublicArray) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Some(Value::Strand(key)) = extract_args(params.0) else {
+		let Some(PublicValue::String(key)) = extract_args(params.into_vec()) else {
 			return Err(RpcError::InvalidParams("Expected (key)".to_string()));
 		};
 
@@ -374,53 +378,54 @@ pub trait RpcProtocolV1: RpcContext {
 		self.set_session(Arc::new(session));
 		mem::drop(guard);
 
-		Ok(Data::Other(Value::Null))
+		Ok(Data::Other(PublicValue::Null))
 	}
 
 	// ------------------------------
 	// Methods for live queries
 	// ------------------------------
 
-	async fn kill(&self, params: Array) -> Result<Data, RpcError> {
+	async fn kill(&self, params: PublicArray) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (id,) = extract_args::<(Value,)>(params.0)
+		let (id,) = extract_args::<(PublicValue,)>(params.into_vec())
 			.ok_or(RpcError::InvalidParams("Expected (id)".to_string()))?;
+
 		// Specify the SQL query string
 		let ast = Ast {
 			expressions: vec![TopLevelExpr::Kill(KillStatement {
-				id: id.into_literal().into(),
+				id: Expr::from_public_value(id).into(),
 			})],
 		};
 		// Specify the query parameters
-		let var = Some(self.session().variables.clone());
+		let vars = Some(self.session().variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, QueryForm::Parsed(ast), var).await?;
+		let mut res = run_query(self, QueryForm::Parsed(ast), vars).await?;
 		// Extract the first query result
 		Ok(Data::Other(res.remove(0).result?))
 	}
 
-	async fn live(&self, params: Array) -> Result<Data, RpcError> {
+	async fn live(&self, params: PublicArray) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, diff) = extract_args::<(Value, Option<Value>)>(params.0)
+		let (what, diff) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
 			.ok_or(RpcError::InvalidParams("Expected (what, diff)".to_string()))?;
 
 		// If value is a strand, handle it as if it was a table.
 		let what = match what {
-			Value::Strand(x) => Expr::Table(Ident::from_strand(x)),
-			x => x.into_literal().into(),
+			PublicValue::String(x) => Expr::Table(Ident::new(x).unwrap()),
+			x => Expr::from_public_value(x).into(),
 		};
 
 		// Specify the SQL query string
 		let sql = LiveStatement {
-			fields: if diff.unwrap_or(Value::None).is_true() {
+			fields: if diff.unwrap_or(PublicValue::None).is_true() {
 				Fields::none()
 			} else {
 				Fields::all()
@@ -445,26 +450,26 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for selecting
 	// ------------------------------
 
-	async fn select(&self, params: Array) -> Result<Data, RpcError> {
+	async fn select(&self, params: PublicArray) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what,) = extract_args::<(Value,)>(params.0)
+		let (what,) = extract_args::<(PublicValue,)>(params.into_vec())
 			.ok_or(RpcError::InvalidParams("Expected (what:Value)".to_string()))?;
 
 		// If the what is a single record with a non range value, make it return only a
 		// single result.
 		let only = match what {
-			Value::RecordId(ref x) => !x.key.is_range(),
+			PublicValue::RecordId(ref x) => !x.key.is_range(),
 			_ => false,
 		};
 
-		// If value is a strand, handle it as if it was a table.
+		// If value is a string, handle it as if it was a table.
 		let what = match what {
-			Value::Strand(x) => Expr::Table(Ident::from_strand(x)),
-			x => x.into_literal().into(),
+			PublicValue::String(x) => Expr::Table(Ident::new(x).unwrap()),
+			x => Expr::from_public_value(x).into(),
 		};
 
 		// Specify the SQL query string
@@ -495,7 +500,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
 		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
-			Some(Error::SingleOnlyOutput) => Ok(Value::None),
+			Some(Error::SingleOnlyOutput) => Ok(PublicValue::None),
 			_ => Err(e),
 		})?;
 		Ok(Data::Other(res))
@@ -505,22 +510,22 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for inserting
 	// ------------------------------
 
-	async fn insert(&self, params: Array) -> Result<Data, RpcError> {
+	async fn insert(&self, params: PublicArray) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, data) = extract_args::<(Value, Value)>(params.0)
+		let (what, data) = extract_args::<(PublicValue, PublicValue)>(params.into_vec())
 			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
 
 		let into = match what {
-			Value::Strand(x) => Some(Expr::Table(Ident::from_strand(x))),
+			PublicValue::String(x) => Some(Expr::Table(Ident::new(x).unwrap())),
 			x => {
 				if x.is_nullish() {
 					None
 				} else {
-					Some(x.into_literal().into())
+					Some(Expr::from_public_value(x).into())
 				}
 			}
 		};
@@ -528,7 +533,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Specify the SQL query string
 		let sql = InsertStatement {
 			into,
-			data: SqlData::SingleExpression(data.into_literal().into()),
+			data: SqlData::SingleExpression(Expr::from_public_value(data).into()),
 			output: Some(Output::After),
 			..Default::default()
 		};
@@ -539,28 +544,28 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
 		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
-			Some(Error::SingleOnlyOutput) => Ok(Value::None),
+			Some(Error::SingleOnlyOutput) => Ok(PublicValue::None),
 			_ => Err(e),
 		})?;
 		Ok(Data::Other(res))
 	}
 
-	async fn insert_relation(&self, params: Array) -> Result<Data, RpcError> {
+	async fn insert_relation(&self, params: PublicArray) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, data) = extract_args::<(Value, Value)>(params.0.clone())
+		let (what, data) = extract_args::<(PublicValue, PublicValue)>(params.to_vec())
 			.ok_or(RpcError::InvalidParams("Expected (what, data)".to_string()))?;
 
 		let what = match what {
-			Value::Null | Value::None => None,
-			Value::Strand(x) => Some(Expr::Table(Ident::from_strand(x))),
-			x => Some(x.into_literal().into()),
+			PublicValue::Null | PublicValue::None => None,
+			PublicValue::String(x) => Some(Expr::Table(Ident::new(x).unwrap())),
+			x => Some(Expr::from_public_value(x).into()),
 		};
 
-		let data = SqlData::SingleExpression(data.into_literal().into());
+		let data = SqlData::SingleExpression(Expr::from_public_value(data).into());
 
 		// Specify the SQL query string
 		let sql = InsertStatement {
@@ -581,7 +586,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
 		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
-			Some(Error::SingleOnlyOutput) => Ok(Value::None),
+			Some(Error::SingleOnlyOutput) => Ok(PublicValue::None),
 			_ => Err(e),
 		})?;
 		Ok(Data::Other(res))
@@ -591,18 +596,18 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for creating
 	// ------------------------------
 
-	async fn create(&self, params: Array) -> Result<Data, RpcError> {
+	async fn create(&self, params: PublicArray) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, data) = extract_args::<(Value, Option<Value>)>(params.0)
+		let (what, data) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
 			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
 
 		let only = match what {
-			Value::Strand(_) | Value::Table(_) => true,
-			Value::RecordId(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
+			PublicValue::String(_) => true,
+			PublicValue::RecordId(ref x) => !matches!(x.key, PublicRecordIdKey::Range(_)),
 			_ => false,
 		};
 
@@ -614,7 +619,7 @@ pub trait RpcProtocolV1: RpcContext {
 					Some(x)
 				}
 			})
-			.map(|x| SqlData::ContentExpression(x.into_literal().into()));
+			.map(|x| SqlData::ContentExpression(Expr::from_public_value(x).into()));
 
 		// Specify the SQL query string
 		let sql = CreateStatement {
@@ -631,7 +636,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut res = self.kvs().process(ast, &self.session(), None).await?;
 		// Extract the first query result
 		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
-			Some(Error::SingleOnlyOutput) => Ok(Value::None),
+			Some(Error::SingleOnlyOutput) => Ok(PublicValue::None),
 			_ => Err(e),
 		})?;
 		Ok(Data::Other(res))
@@ -641,17 +646,17 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for upserting
 	// ------------------------------
 
-	async fn upsert(&self, params: Array) -> Result<Data, RpcError> {
+	async fn upsert(&self, params: PublicArray) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, data) = extract_args::<(Value, Option<Value>)>(params.0)
+		let (what, data) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
 			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
 
 		let only = match what {
-			Value::RecordId(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
+			PublicValue::RecordId(ref x) => !matches!(x.key, PublicRecordIdKey::Range(_)),
 			_ => false,
 		};
 
@@ -663,7 +668,7 @@ pub trait RpcProtocolV1: RpcContext {
 					Some(x)
 				}
 			})
-			.map(|x| SqlData::ContentExpression(x.into_literal().into()));
+			.map(|x| SqlData::ContentExpression(Expr::from_public_value(x).into()));
 
 		// Specify the SQL query string
 		let sql = UpsertStatement {
@@ -684,7 +689,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
 		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
-			Some(Error::SingleOnlyOutput) => Ok(Value::None),
+			Some(Error::SingleOnlyOutput) => Ok(PublicValue::None),
 			_ => Err(e),
 		})?;
 		Ok(Data::Other(res))
@@ -694,17 +699,17 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for updating
 	// ------------------------------
 
-	async fn update(&self, params: Array) -> Result<Data, RpcError> {
+	async fn update(&self, params: PublicArray) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, data) = extract_args::<(Value, Option<Value>)>(params.0.clone())
+		let (what, data) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
 			.ok_or(RpcError::InvalidParams("Expected (what, data)".to_string()))?;
 
 		let only = match what {
-			Value::RecordId(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
+			PublicValue::RecordId(ref x) => !matches!(x.key, PublicRecordIdKey::Range(_)),
 			_ => false,
 		};
 
@@ -716,7 +721,7 @@ pub trait RpcProtocolV1: RpcContext {
 					Some(x)
 				}
 			})
-			.map(|x| SqlData::ContentExpression(x.into_literal().into()));
+			.map(|x| SqlData::ContentExpression(Expr::from_public_value(x).into()));
 		// Specify the SQL query string
 		let sql = UpdateStatement {
 			only,
@@ -736,7 +741,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
 		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
-			Some(Error::SingleOnlyOutput) => Ok(Value::None),
+			Some(Error::SingleOnlyOutput) => Ok(PublicValue::None),
 			_ => Err(e),
 		})?;
 		Ok(Data::Other(res))
@@ -746,17 +751,17 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for merging
 	// ------------------------------
 
-	async fn merge(&self, params: Array) -> Result<Data, RpcError> {
+	async fn merge(&self, params: PublicArray) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, data) = extract_args::<(Value, Option<Value>)>(params.0)
+		let (what, data) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
 			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
 
 		let only = match what {
-			Value::RecordId(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
+			PublicValue::RecordId(ref x) => !matches!(x.key, PublicRecordIdKey::Range(_)),
 			_ => false,
 		};
 
@@ -768,7 +773,7 @@ pub trait RpcProtocolV1: RpcContext {
 					Some(x)
 				}
 			})
-			.map(|x| SqlData::MergeExpression(x.into_literal().into()));
+			.map(|x| SqlData::MergeExpression(Expr::from_public_value(x).into()));
 		// Specify the SQL query string
 		let sql = UpdateStatement {
 			only,
@@ -784,7 +789,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
 		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
-			Some(Error::SingleOnlyOutput) => Ok(Value::None),
+			Some(Error::SingleOnlyOutput) => Ok(PublicValue::None),
 			_ => Err(e),
 		})?;
 		Ok(Data::Other(res))
@@ -794,20 +799,20 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for patching
 	// ------------------------------
 
-	async fn patch(&self, params: Array) -> Result<Data, RpcError> {
+	async fn patch(&self, params: PublicArray) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, data, diff) = extract_args::<(Value, Option<Value>, Option<Value>)>(params.0)
+		let (what, data, diff) = extract_args::<(PublicValue, Option<PublicValue>, Option<PublicValue>)>(params.into_vec())
 			.ok_or(RpcError::InvalidParams(
 				"Expected (what:Value, data:Value, diff:Value)".to_string(),
 			))?;
 
 		// Process the method arguments
 		let only = match what {
-			Value::RecordId(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
+			PublicValue::RecordId(ref x) => !matches!(x.key, PublicRecordIdKey::Range(_)),
 			_ => false,
 		};
 
@@ -819,9 +824,9 @@ pub trait RpcProtocolV1: RpcContext {
 					Some(x)
 				}
 			})
-			.map(|x| SqlData::PatchExpression(x.into_literal().into()));
+			.map(|x| SqlData::PatchExpression(Expr::from_public_value(x).into()));
 
-		let diff = matches!(diff, Some(Value::Bool(true)));
+		let diff = matches!(diff, Some(PublicValue::Bool(true)));
 
 		// Specify the SQL query string
 		let expr = Expr::Update(Box::new(UpdateStatement {
@@ -845,7 +850,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut res = self.kvs().process(Ast::single_expr(expr), &self.session(), var).await?;
 		// Extract the first query result
 		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
-			Some(Error::SingleOnlyOutput) => Ok(Value::None),
+			Some(Error::SingleOnlyOutput) => Ok(PublicValue::None),
 			_ => Err(e),
 		})?;
 		Ok(Data::Other(res))
@@ -855,14 +860,14 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for relating
 	// ------------------------------
 
-	async fn relate(&self, params: Array) -> Result<Data, RpcError> {
+	async fn relate(&self, params: PublicArray) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (from, kind, with, data) = extract_args::<(Value, Value, Value, Option<Value>)>(
-			params.0,
+		let (from, kind, with, data) = extract_args::<(PublicValue, PublicValue, PublicValue, Option<PublicValue>)>(
+			params.to_vec(),
 		)
 		.ok_or(RpcError::InvalidParams(
 			"Expected (from:Value, kind:Value, with:Value, data:Value)".to_string(),
@@ -879,14 +884,14 @@ pub trait RpcProtocolV1: RpcContext {
 					Some(x)
 				}
 			})
-			.map(|x| SqlData::ContentExpression(x.into_literal().into()));
+			.map(|x| SqlData::ContentExpression(Expr::from_public_value(x).into()));
 
 		// Specify the SQL query string
 		let expr = Expr::Relate(Box::new(RelateStatement {
 			only,
-			from: from.into_literal().into(),
+			from: Expr::from_public_value(from).into(),
 			through: value_to_table(kind),
-			to: with.into_literal().into(),
+			to: Expr::from_public_value(with).into(),
 			data,
 			output: Some(Output::After),
 			uniq: false,
@@ -899,7 +904,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut res = self.kvs().process(Ast::single_expr(expr), &self.session(), var).await?;
 		// Extract the first query result
 		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
-			Some(Error::SingleOnlyOutput) => Ok(Value::None),
+			Some(Error::SingleOnlyOutput) => Ok(PublicValue::None),
 			_ => Err(e),
 		})?;
 		Ok(Data::Other(res))
@@ -909,13 +914,13 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for deleting
 	// ------------------------------
 
-	async fn delete(&self, params: Array) -> Result<Data, RpcError> {
+	async fn delete(&self, params: PublicArray) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what,) = extract_args::<(Value,)>(params.0)
+		let (what,) = extract_args::<(PublicValue,)>(params.into_vec())
 			.ok_or(RpcError::InvalidParams("Expected (what:Value)".to_string()))?;
 		// Specify the SQL query string
 		let sql = Expr::Delete(Box::new(DeleteStatement {
@@ -935,7 +940,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
 		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
-			Some(Error::SingleOnlyOutput) => Ok(Value::None),
+			Some(Error::SingleOnlyOutput) => Ok(PublicValue::None),
 			_ => Err(e),
 		})?;
 		Ok(Data::Other(res))
@@ -945,7 +950,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for getting info
 	// ------------------------------
 
-	async fn version(&self, params: Array) -> Result<Data, RpcError> {
+	async fn version(&self, params: PublicArray) -> Result<Data, RpcError> {
 		match params.len() {
 			0 => Ok(self.version_data()),
 			_ => Err(RpcError::InvalidParams("Expected 0 arguments".to_string())),
@@ -956,26 +961,27 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for querying
 	// ------------------------------
 
-	async fn query(&self, params: Array) -> Result<Data, RpcError> {
+	async fn query(&self, params: PublicArray) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (query, vars) = extract_args::<(Value, Option<Value>)>(params.0)
+		let (query, vars) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
 			.ok_or(RpcError::InvalidParams("Expected (query:string, vars:object)".to_string()))?;
 
-		let Value::Strand(query) = query else {
+		let PublicValue::String(query) = query else {
 			return Err(RpcError::InvalidParams("Expected query to be string".to_string()));
 		};
 
 		// Specify the query variables
 		let vars = match vars {
-			Some(Value::Object(v)) => {
-				let v: Object = v;
-				Some(self.session().variables.merged(v))
+			Some(PublicValue::Object(v)) => {
+				todo!("STU")	
+				// let v: PublicVariables = v.into();
+				// Some(self.session().variables.merged(v))
 			}
-			None | Some(Value::None | Value::Null) => Some(self.session().variables.clone()),
+			None | Some(PublicValue::None | PublicValue::Null) => Some(self.session().variables.clone()),
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
 					"Expected vars to be object, got {unexpected:?}"
@@ -991,19 +997,19 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for running functions
 	// ------------------------------
 
-	async fn run(&self, params: Array) -> Result<Data, RpcError> {
+	async fn run(&self, params: PublicArray) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (name, version, args) = extract_args::<(Value, Option<Value>, Option<Value>)>(params.0)
+		let (name, version, args) = extract_args::<(PublicValue, Option<PublicValue>, Option<PublicValue>)>(params.into_vec())
 			.ok_or(RpcError::InvalidParams(
 				"Expected (name:string, version:string, args:array)".to_string(),
 			))?;
 		// Parse the function name argument
 		let name = match name {
-			Value::Strand(v) => v.into_string(),
+			PublicValue::String(v) => v,
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
 					"Expected name to be string, got {unexpected:?}"
@@ -1012,8 +1018,8 @@ pub trait RpcProtocolV1: RpcContext {
 		};
 		// Parse any function version argument
 		let version = match version {
-			Some(Value::Strand(v)) => Some(v.into_string()),
-			None | Some(Value::None | Value::Null) => None,
+			Some(PublicValue::String(v)) => Some(v),
+			None | Some(PublicValue::None | PublicValue::Null) => None,
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
 					"Expected version to be string, got {unexpected:?}"
@@ -1022,10 +1028,10 @@ pub trait RpcProtocolV1: RpcContext {
 		};
 		// Parse the function arguments if specified
 		let args = match args {
-			Some(Value::Array(Array(args))) => {
-				args.into_iter().map(|x| x.into_literal().into()).collect::<Vec<Expr>>()
+			Some(PublicValue::Array(args)) => {
+				args.into_iter().map(|x| Expr::from_public_value(x).into()).collect::<Vec<Expr>>()
 			}
-			None | Some(Value::None | Value::Null) => vec![],
+			None | Some(PublicValue::None | PublicValue::Null) => vec![],
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
 					"Expected args to be array, got {unexpected:?}"
@@ -1067,12 +1073,12 @@ pub trait RpcProtocolV1: RpcContext {
 	// ------------------------------
 
 	#[cfg(target_family = "wasm")]
-	async fn graphql(&self, _: Array) -> Result<Data, RpcError> {
+	async fn graphql(&self, _: PublicArray) -> Result<Data, RpcError> {
 		Err(RpcError::MethodNotFound)
 	}
 
 	#[cfg(not(target_family = "wasm"))]
-	async fn graphql(&self, _params: Array) -> Result<Data, RpcError> {
+	async fn graphql(&self, _params: PublicArray) -> Result<Data, RpcError> {
 		//use crate::gql;
 
 		// Check if the user is allowed to query
@@ -1092,7 +1098,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 
 		let Ok((query, options)) = params.needs_one_or_two() else {
-			return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.0)));
+			return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.into_vec())));
 		};
 
 		enum GraphQLFormat {
@@ -1110,23 +1116,23 @@ pub trait RpcProtocolV1: RpcContext {
 				for (k, v) in o {
 					match (k.as_str(), v) {
 						("pretty", SqlValue::Bool(b)) => pretty = b,
-						("format", SqlValue::Strand(s)) => match s.as_str() {
+						("format", SqlValue::String(s)) => match s.as_str() {
 							"json" => format = GraphQLFormat::Json,
-							_ => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.0))),
+							_ => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.into_vec()))),
 						},
-						_ => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.0))),
+						_ => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.into_vec()))),
 					}
 				}
 			}
 			// The config argument was not supplied
 			SqlValue::None => (),
 			// An invalid config argument was received
-			_ => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.0))),
+			_ => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.into_vec()))),
 		}
 		// Process the graphql query argument
 		let req = match query {
 			// It is a string, so parse the query
-			SqlValue::Strand(s) => match format {
+			SqlValue::String(s) => match format {
 				GraphQLFormat::Json => {
 					let tmp: BatchRequest =
 						serde_json::from_str(s.as_str()).map_err(|_| RpcError::ParseError)?;
@@ -1137,8 +1143,8 @@ pub trait RpcProtocolV1: RpcContext {
 			SqlValue::Object(mut o) => {
 				// We expect a `query` key with the graphql query
 				let mut tmp = match o.remove("query") {
-					Some(SqlValue::Strand(s)) => async_graphql::Request::new(s),
-					_ => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.0))),
+					Some(SqlValue::String(s)) => async_graphql::Request::new(s),
+					_ => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.into_vec()))),
 				};
 				// We can accept a `variables` key with graphql variables
 				match o.remove("variables").or(o.remove("vars")) {
@@ -1148,20 +1154,20 @@ pub trait RpcProtocolV1: RpcContext {
 
 						tmp = tmp.variables(async_graphql::Variables::from_value(gql_vars));
 					}
-					Some(_) => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.0))),
+					Some(_) => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.into_vec()))),
 					None => {}
 				}
 				// We can accept an `operation` key with a graphql operation name
 				match o.remove("operationName").or(o.remove("operation")) {
-					Some(SqlValue::Strand(s)) => tmp = tmp.operation_name(s),
-					Some(_) => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.0))),
+					Some(SqlValue::String(s)) => tmp = tmp.operation_name(s),
+					Some(_) => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.into_vec()))),
 					None => {}
 				}
 				// Return the graphql query object
 				tmp
 			}
 			// We received an invalid graphql query
-			_ => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.0))),
+			_ => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.into_vec()))),
 		};
 		// Process and cache the graphql schema
 		let schema = self
@@ -1182,7 +1188,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		.ok_or(RpcError::Thrown("Serialization Error".to_string()))?;
 		// Output the graphql response
-		Ok(Value::Strand(out.into()).into())
+		Ok(PublicValue::String(out.into()).into())
 			*/
 	}
 }
@@ -1213,12 +1219,12 @@ where
 		// handler
 		match &response.query_type {
 			QueryType::Live => {
-				if let Ok(Value::Uuid(lqid)) = &response.result {
+				if let Ok(PublicValue::Uuid(lqid)) = &response.result {
 					this.handle_live(&lqid.0).await;
 				}
 			}
 			QueryType::Kill => {
-				if let Ok(Value::Uuid(lqid)) = &response.result {
+				if let Ok(PublicValue::Uuid(lqid)) = &response.result {
 					this.handle_kill(&lqid.0).await;
 				}
 			}

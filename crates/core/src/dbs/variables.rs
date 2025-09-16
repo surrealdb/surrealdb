@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::val::{Object, Value};
+use crate::val::{Value, Object};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[repr(transparent)]
@@ -98,30 +98,3 @@ impl From<BTreeMap<String, Value>> for Variables {
 		Self(map)
 	}
 }
-
-/*
-impl TryFrom<proto::Variables> for Variables {
-	type Error = anyhow::Error;
-
-	fn try_from(value: proto::Variables) -> Result<Self, Self::Error> {
-		let mut vars = Self::new();
-		for (k, v) in value.variables.into_iter() {
-			vars.insert(k, v.try_into()?);
-		}
-		Ok(vars)
-	}
-}
-
-impl TryFrom<Variables> for proto::Variables {
-	type Error = anyhow::Error;
-
-	fn try_from(value: Variables) -> Result<Self, Self::Error> {
-		let mut vars = Self {
-			variables: BTreeMap::new(),
-		};
-		for (k, v) in value.0.into_iter() {
-			vars.variables.insert(k, v.try_into()?);
-		}
-		Ok(vars)
-	}
-}*/

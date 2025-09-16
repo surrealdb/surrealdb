@@ -69,6 +69,7 @@ use crate::kvs::{LockType, TransactionType};
 use crate::sql::Ast;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use crate::val::{Strand, Value};
+use crate::types::PublicVariables;
 use crate::{cf, syn};
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
@@ -1224,7 +1225,7 @@ impl Datastore {
 		&self,
 		val: &Expr,
 		sess: &Session,
-		vars: Option<Variables>,
+		vars: Option<PublicVariables>,
 	) -> Result<Value> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
@@ -1244,12 +1245,7 @@ impl Datastore {
 		if let Some(channel) = &self.notification_channel {
 			ctx.add_notifications(Some(&channel.0));
 		}
-		// Start an execution context
-		ctx.attach_session(sess)?;
-		// Store the query variables
-		if let Some(vars) = vars {
-			ctx.attach_variables(vars)?;
-		}
+
 		let txn_type = if val.read_only() {
 			TransactionType::Read
 		} else {
@@ -1259,6 +1255,14 @@ impl Datastore {
 		let txn = self.transaction(txn_type, Optimistic).await?.enclose();
 		// Store the transaction
 		ctx.set_transaction(txn.clone());
+
+		// Start an execution context
+		ctx.attach_session(sess)?;
+		// Store the query variables
+		if let Some(vars) = vars {
+			ctx.attach_public_variables(vars)?;
+		}
+
 		// Freeze the context
 		let ctx = ctx.freeze();
 		// Compute the value

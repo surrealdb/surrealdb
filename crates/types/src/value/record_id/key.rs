@@ -1,11 +1,14 @@
 use serde::{Deserialize, Serialize};
+use std::fmt::{self, Debug};
 
+use revision::revisioned;
 use crate::{Array, Number, Object, Range, RecordIdKeyRange, Uuid, Value};
 
 /// Represents a key component of a record identifier in SurrealDB
 ///
 /// Record identifiers can have various types of keys including numbers, strings, UUIDs,
 /// arrays, objects, or ranges. This enum provides type-safe representation for all key types.
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum RecordIdKey {
 	/// A numeric key
@@ -23,6 +26,12 @@ pub enum RecordIdKey {
 }
 
 impl RecordIdKey {
+
+	/// Returns if this key is a range.
+	pub fn is_range(&self) -> bool {
+		matches!(self, RecordIdKey::Range(_))
+	}
+
 	/// Returns surrealql value of this key.
 	pub fn into_value(self) -> Value {
 		match self {
@@ -141,6 +150,19 @@ impl PartialEq<Value> for RecordIdKey {
 					false
 				}
 			}
+		}
+	}
+}
+
+impl fmt::Display for RecordIdKey {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			RecordIdKey::Number(n) => write!(f, "{n}"),
+			RecordIdKey::String(v) => write!(f, "{v}"),
+            RecordIdKey::Uuid(uuid) => std::fmt::Display::fmt(uuid, f),
+			RecordIdKey::Object(object) => object.fmt(f),
+			RecordIdKey::Array(array) => array.fmt(f),
+			RecordIdKey::Range(rid) => rid.fmt(f),
 		}
 	}
 }

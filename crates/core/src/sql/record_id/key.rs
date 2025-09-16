@@ -5,7 +5,7 @@ use crate::sql::escape::{EscapeKey, EscapeRid};
 use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{Expr, RecordIdKeyRangeLit};
-use crate::val::{RecordIdKey, Strand, Uuid};
+use crate::types::{PublicRecordIdKey, PublicUuid};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -39,8 +39,8 @@ impl From<crate::expr::RecordIdKeyGen> for RecordIdKeyGen {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum RecordIdKeyLit {
 	Number(i64),
-	String(Strand),
-	Uuid(Uuid),
+	String(String),
+	Uuid(PublicUuid),
 	Array(Vec<Expr>),
 	Object(Vec<ObjectEntry>),
 	Generate(RecordIdKeyGen),
@@ -48,23 +48,23 @@ pub enum RecordIdKeyLit {
 }
 
 impl RecordIdKeyLit {
-	pub fn from_record_id_key(key: RecordIdKey) -> Self {
+	pub fn from_record_id_key(key: PublicRecordIdKey) -> Self {
 		match key {
-			RecordIdKey::Number(x) => RecordIdKeyLit::Number(x),
-			RecordIdKey::String(x) => RecordIdKeyLit::String(Strand::new_lossy(x)),
-			RecordIdKey::Uuid(x) => RecordIdKeyLit::Uuid(x),
-			RecordIdKey::Array(x) => {
-				RecordIdKeyLit::Array(x.into_iter().map(Expr::from_value).collect())
+			PublicRecordIdKey::Number(x) => RecordIdKeyLit::Number(x),
+			PublicRecordIdKey::String(x) => RecordIdKeyLit::String(x),
+			PublicRecordIdKey::Uuid(x) => RecordIdKeyLit::Uuid(x),
+			PublicRecordIdKey::Array(x) => {
+				RecordIdKeyLit::Array(x.into_iter().map(Expr::from_public_value).collect())
 			}
-			RecordIdKey::Object(x) => RecordIdKeyLit::Object(
+			PublicRecordIdKey::Object(x) => RecordIdKeyLit::Object(
 				x.into_iter()
 					.map(|(k, v)| ObjectEntry {
 						key: k,
-						value: Expr::from_value(v),
+						value: Expr::from_public_value(v),
 					})
 					.collect(),
 			),
-			RecordIdKey::Range(x) => RecordIdKeyLit::Range(Box::new(RecordIdKeyRangeLit {
+			PublicRecordIdKey::Range(x) => RecordIdKeyLit::Range(Box::new(RecordIdKeyRangeLit {
 				start: match x.start {
 					Bound::Included(x) => Bound::Included(Self::from_record_id_key(x)),
 					Bound::Excluded(x) => Bound::Excluded(Self::from_record_id_key(x)),
@@ -84,8 +84,8 @@ impl From<RecordIdKeyLit> for crate::expr::RecordIdKeyLit {
 	fn from(value: RecordIdKeyLit) -> Self {
 		match value {
 			RecordIdKeyLit::Number(x) => crate::expr::RecordIdKeyLit::Number(x),
-			RecordIdKeyLit::String(x) => crate::expr::RecordIdKeyLit::String(x),
-			RecordIdKeyLit::Uuid(x) => crate::expr::RecordIdKeyLit::Uuid(x),
+            RecordIdKeyLit::String(x) => crate::expr::RecordIdKeyLit::String(crate::val::Strand::from(x.clone())),
+            RecordIdKeyLit::Uuid(x) => crate::expr::RecordIdKeyLit::Uuid(crate::val::Uuid(x.0)),
 			RecordIdKeyLit::Array(x) => {
 				crate::expr::RecordIdKeyLit::Array(x.into_iter().map(From::from).collect())
 			}
@@ -102,8 +102,8 @@ impl From<crate::expr::RecordIdKeyLit> for RecordIdKeyLit {
 	fn from(value: crate::expr::RecordIdKeyLit) -> Self {
 		match value {
 			crate::expr::RecordIdKeyLit::Number(x) => RecordIdKeyLit::Number(x),
-			crate::expr::RecordIdKeyLit::String(x) => RecordIdKeyLit::String(x),
-			crate::expr::RecordIdKeyLit::Uuid(uuid) => RecordIdKeyLit::Uuid(uuid),
+            crate::expr::RecordIdKeyLit::String(x) => RecordIdKeyLit::String(x.to_string()),
+            crate::expr::RecordIdKeyLit::Uuid(uuid) => RecordIdKeyLit::Uuid(surrealdb_types::Uuid(uuid.0)),
 			crate::expr::RecordIdKeyLit::Array(exprs) => {
 				RecordIdKeyLit::Array(exprs.into_iter().map(From::from).collect())
 			}

@@ -43,9 +43,11 @@ pub use crate::api::headers;
 pub use crate::api::{
 	Connect, Connection, Response, Surreal, engine, method, opt,
 	value::{
-		self, Action, Bytes, Datetime, Notification, Number, Object, RecordId, RecordIdKey, Value,
+		self, Action, Notification,
 	},
 };
+
+use surrealdb_types::{Object, Bytes, Datetime, Value, Number, RecordId, RecordIdKey};
 
 /// A specialized `Result` type
 pub type Result<T> = anyhow::Result<T>;

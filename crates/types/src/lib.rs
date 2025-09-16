@@ -6,6 +6,7 @@ mod kind;
 mod traits;
 pub(crate) mod utils;
 mod value;
+mod variables;
 
 pub use anyhow;
 pub use flatbuffers::*;
@@ -14,6 +15,7 @@ pub use kind::*;
 pub use surrealdb_types_derive::*;
 pub use traits::*;
 pub use value::*;
+pub use variables::*;
 
 /// Macro for creating a SurrealDB object.
 ///

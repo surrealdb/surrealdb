@@ -7,7 +7,7 @@ use crate::dbs::{Response, Session};
 use crate::kvs::clock::{FakeClock, SizedClock};
 use crate::kvs::tests::CreateDs;
 use crate::syn;
-use crate::val::Value;
+use surrealdb_types::Value as PublicValue;
 
 async fn test(new_ds: impl CreateDs, index: &str) -> Vec<Response> {
 	// Create a new datastore
@@ -43,16 +43,16 @@ fn check(r: &mut Vec<Response>, tmp: &str) {
 		Ok(v) => v,
 		Err(err) => panic!("{err}"),
 	};
-	assert_eq!(format!("{val:#}"), format!("{tmp:#}"));
+	assert_eq!(format!("{val:#?}"), format!("{tmp:#}"));
 }
 
 /// Extract the array from a value
-fn check_array_is_sorted(v: &Value, expected_len: usize) {
-	if let Value::Array(a) = v {
+fn check_array_is_sorted(v: &PublicValue, expected_len: usize) {
+	if let PublicValue::Array(a) = v {
 		assert_eq!(a.len(), expected_len);
 		assert!(a.windows(2).all(|w| w[0] > w[1]), "Values are not sorted: {a:?}");
 	} else {
-		panic!("Expected a Value::Array but get: {v}");
+		panic!("Expected a Value::Array but got: {v:?}");
 	}
 }
 

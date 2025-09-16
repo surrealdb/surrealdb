@@ -33,6 +33,7 @@ use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::val::{Datetime, Object, Value};
+use crate::types::{PublicObject, PublicVariables};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SigninData {
@@ -40,7 +41,7 @@ pub struct SigninData {
 	pub refresh: Option<String>,
 }
 
-pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Result<SigninData> {
+pub async fn signin(kvs: &Datastore, session: &mut Session, vars: PublicVariables) -> Result<SigninData> {
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
@@ -50,9 +51,9 @@ pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Res
 		// DB signin with access method
 		(Some(ns), Some(db), Some(ac)) => {
 			// Process the provided values
-			let ns = ns.to_raw_string();
-			let db = db.to_raw_string();
-			let ac = ac.to_raw_string();
+			let ns = ns.as_string()?;
+			let db = db.as_string()?;
+			let ac = ac.as_string()?;
 			// Attempt to signin using specified access method
 			super::signin::db_access(kvs, session, ns, db, ac, vars).await
 		}
@@ -66,10 +67,10 @@ pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Res
 				// There is a username and password
 				(Some(user), Some(pass)) => {
 					// Process the provided values
-					let ns = ns.to_raw_string();
-					let db = db.to_raw_string();
-					let user = user.to_raw_string();
-					let pass = pass.to_raw_string();
+					let ns = ns.as_string()?;
+					let db = db.as_string()?;
+					let user = user.as_string()?;
+					let pass = pass.as_string()?;
 					// Attempt to signin to database
 					super::signin::db_user(kvs, session, ns, db, user, pass).await
 				}
@@ -79,8 +80,8 @@ pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Res
 		// NS signin with access method
 		(Some(ns), None, Some(ac)) => {
 			// Process the provided values
-			let ns = ns.to_raw_string();
-			let ac = ac.to_raw_string();
+			let ns = ns.as_string()?;
+			let ac = ac.as_string()?;
 			// Attempt to signin using specified access method
 			super::signin::ns_access(kvs, session, ns, ac, vars).await
 		}
@@ -94,9 +95,9 @@ pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Res
 				// There is a username and password
 				(Some(user), Some(pass)) => {
 					// Process the provided values
-					let ns = ns.to_raw_string();
-					let user = user.to_raw_string();
-					let pass = pass.to_raw_string();
+					let ns = ns.as_string()?;
+					let user = user.as_string()?;
+					let pass = pass.as_string()?;
 					// Attempt to signin to namespace
 					super::signin::ns_user(kvs, session, ns, user, pass).await
 				}
@@ -113,8 +114,8 @@ pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Res
 				// There is a username and password
 				(Some(user), Some(pass)) => {
 					// Process the provided values
-					let user = user.to_raw_string();
-					let pass = pass.to_raw_string();
+					let user = user.as_string()?;
+					let pass = pass.as_string()?;
 					// Attempt to signin to root
 					super::signin::root_user(kvs, session, user, pass).await
 				}
@@ -131,7 +132,7 @@ pub async fn db_access(
 	ns: String,
 	db: String,
 	ac: String,
-	vars: Object,
+	vars: PublicVariables,
 ) -> Result<SigninData> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
@@ -170,7 +171,7 @@ pub async fn db_access(
 								Some(&db_def),
 								av,
 								bearer,
-								key.to_raw_string(),
+								key.as_string()?,
 							)
 							.await;
 						}
@@ -178,14 +179,12 @@ pub async fn db_access(
 					match &at.signin {
 						// This record access allows signin
 						Some(val) => {
-							// Setup the query params
-							let vars = Some(Variables::from(vars));
 							// Setup the system session for finding the signin record
 							let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 							sess.ip.clone_from(&session.ip);
 							sess.or.clone_from(&session.or);
 							// Compute the value with the params
-							match kvs.evaluate(val, &sess, vars).await {
+							match kvs.evaluate(val, &sess, Some(vars)).await {
 								// The signin value succeeded
 								Ok(val) => {
 									match val.record() {
@@ -322,7 +321,7 @@ pub async fn db_access(
 				catalog::AccessType::Bearer(at) => {
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
-						Some(key) => key.to_raw_string(),
+						Some(key) => key.as_string()?,
 						None => return Err(anyhow::Error::new(Error::AccessBearerMissingKey)),
 					};
 
@@ -409,7 +408,7 @@ pub async fn ns_access(
 	session: &mut Session,
 	ns: String,
 	ac: String,
-	vars: Object,
+	vars: PublicVariables,
 ) -> Result<SigninData> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
@@ -426,7 +425,7 @@ pub async fn ns_access(
 				catalog::AccessType::Bearer(at) => {
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
-						Some(key) => key.to_raw_string(),
+						Some(key) => key.as_string()?,
 						None => bail!(Error::AccessBearerMissingKey),
 					};
 
@@ -548,7 +547,7 @@ pub async fn root_access(
 	kvs: &Datastore,
 	session: &mut Session,
 	ac: String,
-	vars: Object,
+	vars: PublicObject,
 ) -> Result<SigninData> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
@@ -565,7 +564,7 @@ pub async fn root_access(
 				catalog::AccessType::Bearer(at) => {
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
-						Some(key) => key.to_raw_string(),
+						Some(key) => key.as_string()?,
 						None => return Err(anyhow::Error::new(Error::AccessBearerMissingKey)),
 					};
 
@@ -925,7 +924,7 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("user", "user".into());
 			vars.insert("pass", "pass".into());
 			let res = db_access(
@@ -934,7 +933,7 @@ mod tests {
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 

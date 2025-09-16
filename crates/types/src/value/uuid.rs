@@ -1,5 +1,7 @@
 use std::ops::{Deref, DerefMut};
+use std::fmt::{self, Display};
 
+use revision::Revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::Datetime;
@@ -12,6 +14,23 @@ use crate::Datetime;
 	Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
 )]
 pub struct Uuid(pub uuid::Uuid);
+
+impl Revisioned for Uuid {
+	fn revision() -> u16 {
+		1
+	}
+
+	fn serialize_revisioned<W: std::io::Write>(&self, writer: &mut W) -> Result<(), revision::Error> {
+		self.0.to_string().serialize_revisioned(writer)
+	}
+
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		let s: String = Revisioned::deserialize_revisioned(reader)?;
+		uuid::Uuid::parse_str(&s)
+			.map_err(|err| revision::Error::Conversion(format!("invalid UUID format: {err:?}")))
+			.map(Uuid)
+	}
+}
 
 impl Uuid {
 	/// Generate a new UUID
@@ -57,6 +76,14 @@ impl From<Uuid> for uuid::Uuid {
 	}
 }
 
+impl TryFrom<String> for Uuid {
+	type Error = uuid::Error;
+
+	fn try_from(v: String) -> Result<Self, Self::Error> {
+		Ok(Self(uuid::Uuid::parse_str(&v)?))
+	}
+}
+
 impl Deref for Uuid {
 	type Target = uuid::Uuid;
 	fn deref(&self) -> &Self::Target {
@@ -67,5 +94,11 @@ impl Deref for Uuid {
 impl DerefMut for Uuid {
 	fn deref_mut(&mut self) -> &mut Self::Target {
 		&mut self.0
+	}
+}
+
+impl Display for Uuid {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		self.0.fmt(f)
 	}
 }

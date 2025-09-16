@@ -3,10 +3,10 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
-use super::{Data, Method, RpcError, RpcProtocolV1, RpcProtocolV2};
+use super::{Data, Method, RpcError, RpcProtocolV1};
 use crate::dbs::Session;
 use crate::kvs::Datastore;
-use crate::val::Array;
+use crate::types::PublicArray;
 
 //#[cfg(not(target_family = "wasm"))]
 //use crate::gql::SchemaCache;
@@ -68,15 +68,15 @@ pub trait RpcContext {
 		version: Option<u8>,
 		txn: Option<Uuid>,
 		method: Method,
-		params: Array,
+		params: PublicArray,
 	) -> Result<Data, RpcError>
 	where
 		Self: RpcProtocolV1,
-		Self: RpcProtocolV2,
+		// Self: RpcProtocolV2,
 	{
 		match version {
 			Some(1) => RpcProtocolV1::execute(self, method, params).await,
-			Some(2) => RpcProtocolV2::execute(self, txn, method, params).await,
+			// Some(2) => RpcProtocolV2::execute(self, txn, method, params).await,
 			_ => RpcProtocolV1::execute(self, method, params).await,
 		}
 	}

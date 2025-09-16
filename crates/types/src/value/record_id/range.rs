@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::ops::Bound;
 
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::{Range, RecordIdKey};
@@ -9,6 +10,7 @@ use crate::{Range, RecordIdKey};
 ///
 /// This type is used for range queries on record identifiers,
 /// allowing queries like "find all records with IDs between X and Y".
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct RecordIdKeyRange {
 	/// The lower bound of the range

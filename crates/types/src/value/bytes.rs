@@ -1,11 +1,13 @@
 use std::ops::Deref;
 
+use revision::revisioned;
 use serde::de::{self, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 
 /// Represents binary data in SurrealDB
 ///
 /// Bytes stores raw binary data as a vector of unsigned 8-bit integers.
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Bytes(pub(crate) Vec<u8>);
 
@@ -30,6 +32,18 @@ impl From<Bytes> for bytes::Bytes {
 impl From<bytes::Bytes> for Bytes {
 	fn from(bytes: bytes::Bytes) -> Self {
 		Bytes(bytes.into())
+	}
+}
+
+impl Bytes {
+	/// Create new bytes from Vec<u8>
+	pub fn new(data: Vec<u8>) -> Self {
+		Self(data)
+	}
+	
+	/// Get the inner Vec<u8>
+	pub fn inner(&self) -> &Vec<u8> {
+		&self.0
 	}
 }
 

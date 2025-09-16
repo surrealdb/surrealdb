@@ -1,5 +1,6 @@
 use std::ops::{Deref, DerefMut};
 
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::{SurrealValue, Value};
@@ -8,6 +9,7 @@ use crate::{SurrealValue, Value};
 ///
 /// An array is an ordered collection of values that can contain elements of any type.
 /// The underlying storage is a `Vec<Value>`.
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Array(pub(crate) Vec<Value>);
 
@@ -27,6 +29,21 @@ impl Array {
 	/// Check if there array is empty
 	pub fn is_empty(&self) -> bool {
 		self.0.is_empty()
+	}
+
+	/// Convert the array into a vector of values.
+	pub fn into_vec(self) -> Vec<Value> {
+		self.0
+	}
+
+	/// Create array from existing Vec<Value>
+	pub fn from_values(values: Vec<Value>) -> Self {
+		Self(values)
+	}
+	
+	/// Get the inner Vec<Value>
+	pub fn inner(&self) -> &Vec<Value> {
+		&self.0
 	}
 }
 

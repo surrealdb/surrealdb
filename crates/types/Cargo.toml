@@ -14,6 +14,10 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+default = []
+js = ["dep:js"]
+
 [dependencies]
 anyhow.workspace = true
 bytes.workspace = true
@@ -21,6 +25,8 @@ chrono = { workspace = true, features = ["serde"] }
 flatbuffers.workspace = true
 geo = { workspace = true, features = ["use-serde"] }
 hex.workspace = true
+js = { workspace = true, optional = true }
+revision.workspace = true
 regex.workspace = true
 rstest.workspace = true
 rust_decimal.workspace = true

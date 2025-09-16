@@ -36,6 +36,7 @@ use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::sequences::Sequences;
 use crate::mem::ALLOC;
 use crate::val::Value;
+use crate::types::PublicVariables;
 
 pub type Context = Arc<MutableContext>;
 
@@ -564,6 +565,20 @@ impl MutableContext {
 				});
 			}
 			self.add_value(key, val.into());
+		}
+		Ok(())
+	}
+
+	pub(crate) fn attach_public_variables(&mut self, vars: PublicVariables) -> Result<(), Error> {
+		for (key, val) in vars {
+			if PROTECTED_PARAM_NAMES.contains(&key.as_str()) {
+				return Err(Error::InvalidParam {
+					name: key.clone(),
+				});
+			}
+
+			todo!("STU");
+			// self.add_value(key, val.into());
 		}
 		Ok(())
 	}

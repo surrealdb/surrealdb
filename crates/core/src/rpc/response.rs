@@ -2,8 +2,9 @@ use revision::revisioned;
 use serde::Serialize;
 
 use crate::dbs;
-use crate::dbs::Notification;
-use crate::val::{Object, Strand, Value};
+use crate::dbs::{Notification, executor::convert_value_to_public_value};
+use crate::map;
+use surrealdb_types::Value;
 
 /// The data returned by the database
 // The variants here should be in exactly the same order as `crate::engine::remote::ws::Data`
@@ -23,12 +24,15 @@ pub enum Data {
 impl Data {
 	pub fn into_value(self) -> Value {
 		match self {
-			Data::Query(v) => v.into_iter().map(|x| x.into_value()).collect(),
-			Data::Live(v) => Value::from(Object(map! {
-				"id".to_owned() => v.id.into(),
-				"action".to_owned() => Strand::new(v.action.to_string()).unwrap().into(),
-				"record".to_owned() => v.record,
-				"result".to_owned() => v.result,
+			Data::Query(v) => {
+				let converted: Vec<Value> = v.into_iter().map(|x| x.into_value()).collect();
+				Value::Array(surrealdb_types::Array::from_values(converted))
+			},
+			Data::Live(v) => Value::from(surrealdb_types::Object::from_map(map! {
+				"id".to_owned() => Value::Uuid(surrealdb_types::Uuid(v.id.0)),
+				"action".to_owned() => Value::String(v.action.to_string()),
+				"record".to_owned() => convert_value_to_public_value(v.record).unwrap_or(Value::Null),
+				"result".to_owned() => convert_value_to_public_value(v.result).unwrap_or(Value::Null),
 
 			})),
 			Data::Other(v) => v,

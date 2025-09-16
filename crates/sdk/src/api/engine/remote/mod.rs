@@ -183,7 +183,7 @@ pub(crate) struct Failure {
 #[revisioned(revision = 1)]
 #[derive(Debug, Deserialize)]
 pub(crate) enum Data {
-	Other(val::Value),
+	Other(surrealdb_types::Value),
 	Query(Vec<dbs::QueryMethodResponse>),
 	Live(dbs::Notification),
 }

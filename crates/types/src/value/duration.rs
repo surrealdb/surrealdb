@@ -1,5 +1,6 @@
-use std::ops::Deref;
+use std::{fmt::Debug, ops::Deref, str::FromStr};
 
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 pub(crate) static SECONDS_PER_YEAR: u64 = 365 * SECONDS_PER_DAY;
@@ -14,34 +15,26 @@ pub(crate) static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
 ///
 /// A duration represents a span of time, typically used for time-based calculations and
 /// comparisons. This type wraps the standard `std::time::Duration` type.
+#[revisioned(revision = 1)]
 #[derive(
 	Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
 )]
 pub struct Duration(pub(crate) std::time::Duration);
 
-impl From<std::time::Duration> for Duration {
-	fn from(v: std::time::Duration) -> Self {
-		Self(v)
-	}
-}
-
-impl From<Duration> for std::time::Duration {
-	fn from(v: Duration) -> Self {
-		v.0
-	}
-}
-
-impl Deref for Duration {
-	type Target = std::time::Duration;
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
-
 impl Duration {
 	/// Create a duration from both seconds and nanoseconds components
 	pub fn new(secs: u64, nanos: u32) -> Duration {
 		std::time::Duration::new(secs, nanos).into()
+	}
+
+	/// Create a duration from std::time::Duration
+	pub fn from_duration(d: std::time::Duration) -> Self {
+		Self(d)
+	}
+	
+	/// Get the inner std::time::Duration
+	pub fn inner(&self) -> std::time::Duration {
+		self.0
 	}
 
 	/// Get the total number of nanoseconds
@@ -173,5 +166,202 @@ impl Duration {
 			write!(f, "{nano}ns")?;
 		}
 		Ok(())
+	}
+}
+
+impl FromStr for Duration {
+	type Err = ();
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		let mut total_secs = 0u64;
+		let mut total_nanos = 0u32;
+		let mut remaining = s.trim();
+		
+		// Handle special case for zero duration
+		if remaining == "0ns" || remaining == "0" {
+			return Ok(Duration::new(0, 0));
+		}
+		
+		while !remaining.is_empty() {
+			// Find the end of the number part
+			let mut end = 0;
+			for (i, c) in remaining.char_indices() {
+				if !c.is_ascii_digit() {
+					end = i;
+					break;
+				}
+				end = i + c.len_utf8();
+			}
+			
+			if end == 0 {
+				return Err(());
+			}
+			
+			let value_str = &remaining[..end];
+			let value: u64 = value_str.parse().map_err(|_| ())?;
+			
+			remaining = &remaining[end..];
+			
+			// Parse the unit
+			let unit = if remaining.starts_with("y") {
+				remaining = &remaining[1..];
+				"y"
+			} else if remaining.starts_with("w") {
+				remaining = &remaining[1..];
+				"w"
+			} else if remaining.starts_with("d") {
+				remaining = &remaining[1..];
+				"d"
+			} else if remaining.starts_with("h") {
+				remaining = &remaining[1..];
+				"h"
+			} else if remaining.starts_with("m") {
+				remaining = &remaining[1..];
+				"m"
+			} else if remaining.starts_with("s") {
+				remaining = &remaining[1..];
+				"s"
+			} else if remaining.starts_with("ms") {
+				remaining = &remaining[2..];
+				"ms"
+			} else if remaining.starts_with("µs") {
+				remaining = &remaining[2..];
+				"µs"
+			} else if remaining.starts_with("us") {
+				remaining = &remaining[2..];
+				"us"
+			} else if remaining.starts_with("ns") {
+				remaining = &remaining[2..];
+				"ns"
+			} else {
+				return Err(());
+			};
+			
+			// Convert to seconds and nanoseconds based on unit
+			match unit {
+				"y" => {
+					total_secs = total_secs.saturating_add(value.saturating_mul(SECONDS_PER_YEAR));
+				}
+				"w" => {
+					total_secs = total_secs.saturating_add(value.saturating_mul(SECONDS_PER_WEEK));
+				}
+				"d" => {
+					total_secs = total_secs.saturating_add(value.saturating_mul(SECONDS_PER_DAY));
+				}
+				"h" => {
+					total_secs = total_secs.saturating_add(value.saturating_mul(SECONDS_PER_HOUR));
+				}
+				"m" => {
+					total_secs = total_secs.saturating_add(value.saturating_mul(SECONDS_PER_MINUTE));
+				}
+				"s" => {
+					total_secs = total_secs.saturating_add(value);
+				}
+				"ms" => {
+					let millis = value.saturating_mul(NANOSECONDS_PER_MILLISECOND as u64);
+					let (secs, nanos) = (millis / 1_000_000_000, (millis % 1_000_000_000) as u32);
+					total_secs = total_secs.saturating_add(secs);
+					total_nanos = total_nanos.saturating_add(nanos);
+				}
+				"µs" | "us" => {
+					let micros = value.saturating_mul(NANOSECONDS_PER_MICROSECOND as u64);
+					let (secs, nanos) = (micros / 1_000_000_000, (micros % 1_000_000_000) as u32);
+					total_secs = total_secs.saturating_add(secs);
+					total_nanos = total_nanos.saturating_add(nanos);
+				}
+				"ns" => {
+					let (secs, nanos) = (value / 1_000_000_000, (value % 1_000_000_000) as u32);
+					total_secs = total_secs.saturating_add(secs);
+					total_nanos = total_nanos.saturating_add(nanos);
+				}
+				_ => return Err(()),
+			}
+		}
+		
+		// Handle nanosecond overflow
+		if total_nanos >= 1_000_000_000 {
+			let additional_secs = total_nanos / 1_000_000_000;
+			total_secs = total_secs.saturating_add(additional_secs as u64);
+			total_nanos = total_nanos % 1_000_000_000;
+		}
+		
+		Ok(Duration::new(total_secs, total_nanos))
+	}
+}
+
+impl From<std::time::Duration> for Duration {
+	fn from(v: std::time::Duration) -> Self {
+		Self(v)
+	}
+}
+
+impl From<Duration> for std::time::Duration {
+	fn from(v: Duration) -> Self {
+		v.0
+	}
+}
+
+impl Deref for Duration {
+	type Target = std::time::Duration;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl std::fmt::Display for Duration {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		self.0.fmt(f)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_duration_from_str() {
+		// Test basic units
+		assert_eq!(Duration::from_str("1s").unwrap(), Duration::from_secs(1));
+		assert_eq!(Duration::from_str("1m").unwrap(), Duration::from_mins(1).unwrap());
+		assert_eq!(Duration::from_str("1h").unwrap(), Duration::from_hours(1).unwrap());
+		assert_eq!(Duration::from_str("1d").unwrap(), Duration::from_days(1).unwrap());
+		assert_eq!(Duration::from_str("1w").unwrap(), Duration::from_weeks(1).unwrap());
+		assert_eq!(Duration::from_str("1y").unwrap(), Duration::new(365 * 24 * 60 * 60, 0));
+		
+		// Test nanosecond units
+		assert_eq!(Duration::from_str("1000ns").unwrap(), Duration::from_nanos(1000));
+		assert_eq!(Duration::from_str("1000ms").unwrap(), Duration::from_millis(1000));
+		
+		// Test zero duration
+		assert_eq!(Duration::from_str("0ns").unwrap(), Duration::new(0, 0));
+		assert_eq!(Duration::from_str("0").unwrap(), Duration::new(0, 0));
+		
+		// Test combined units
+		let combined = Duration::from_str("1h30m15s500ms").unwrap();
+		let expected = Duration::from_hours(1).unwrap().0
+			+ Duration::from_mins(30).unwrap().0
+			+ Duration::from_secs(15).0
+			+ Duration::from_millis(500).0;
+		assert_eq!(combined.0, expected);
+		
+		// Test invalid input
+		assert!(Duration::from_str("invalid").is_err());
+		assert!(Duration::from_str("1x").is_err());
+		assert!(Duration::from_str("").is_err());
+	}
+
+	#[test]
+	fn test_duration_from_str_debug() {
+		// Debug test for microseconds
+		println!("Testing '1000us'");
+		match Duration::from_str("1000us") {
+			Ok(duration) => {
+				println!("Successfully parsed: {:?}", duration);
+				assert_eq!(duration, Duration::from_micros(1000));
+			}
+			Err(_) => {
+				println!("Failed to parse '1000us'");
+				panic!("Failed to parse microseconds");
+			}
+		}
 	}
 }

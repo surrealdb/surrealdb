@@ -5,6 +5,7 @@ use std::iter::once;
 use geo::{
 	Coord, LineString, LinesIter, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon,
 };
+use revision::Revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::{GeometryKind, Object, SurrealValue, Value, array, object};
@@ -481,5 +482,23 @@ impl hash::Hash for Geometry {
 				v.iter().for_each(|v| v.hash(state));
 			}
 		}
+	}
+}
+
+impl Revisioned for Geometry {
+	fn revision() -> u16 {
+		1
+	}
+
+	fn serialize_revisioned<W: std::io::Write>(&self, writer: &mut W) -> Result<(), revision::Error> {
+		// Serialize as an object with type and coordinates
+		let obj = self.as_object();
+		obj.serialize_revisioned(writer)
+	}
+
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		let obj: Object = Revisioned::deserialize_revisioned(reader)?;
+		Self::try_from_object(&obj)
+			.ok_or_else(|| revision::Error::Conversion("invalid geometry object".to_string()))
 	}
 }
