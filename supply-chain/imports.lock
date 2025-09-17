@@ -1,14 +1,6 @@
 
 # cargo-vet imports lock
 
-[[unpublished.surrealdb]]
-version = "3.0.0"
-audited_as = "2.3.8"
-
-[[unpublished.surrealdb-core]]
-version = "3.0.0"
-audited_as = "2.3.8"
-
 [[publisher.addr]]
 version = "0.15.6"
 when = "2022-08-31"
@@ -686,15 +678,15 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb]]
-version = "2.3.8"
-when = "2025-09-11"
+version = "3.0.0-alpha.8"
+when = "2025-09-16"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb-core]]
-version = "2.3.8"
-when = "2025-09-11"
+version = "3.0.0-alpha.8"
+when = "2025-09-16"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
