@@ -31,6 +31,12 @@ audit-as-crates-io = true
 [policy.surrealdb-core]
 audit-as-crates-io = true
 
+[policy.surrealdb-types]
+audit-as-crates-io = true
+
+[policy.surrealdb-types-derive]
+audit-as-crates-io = true
+
 [[exemptions.Inflector]]
 version = "0.11.4"
 criteria = "safe-to-deploy"
@@ -1197,6 +1203,14 @@ criteria = "safe-to-deploy"
 
 [[exemptions.string_cache_codegen]]
 version = "0.5.4"
+criteria = "safe-to-deploy"
+
+[[exemptions.surrealdb-types]]
+version = "3.0.0-alpha.8"
+criteria = "safe-to-deploy"
+
+[[exemptions.surrealdb-types-derive]]
+version = "3.0.0-alpha.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.symbolic-common]]

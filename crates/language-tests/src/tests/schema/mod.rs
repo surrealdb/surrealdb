@@ -317,9 +317,9 @@ pub struct TestDetails {
 	pub upgrade: bool,
 
 	#[serde(default)]
-	pub version: VersionReq,
+	pub version: Option<VersionReq>,
 	#[serde(default)]
-	pub importing_version: VersionReq,
+	pub importing_version: Option<VersionReq>,
 
 	pub results: Option<TestDetailsResults>,
 
