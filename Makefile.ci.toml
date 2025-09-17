@@ -108,6 +108,18 @@ args = [
     "wasm32-unknown-unknown",
 ]
 
+[tasks.ci-docs]
+category = "CI - CHECK"
+command = "cargo"
+args = [
+    "doc",
+    "--no-deps",
+    "--package",
+    "surrealdb",
+    "--features",
+    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-rocksdb,kv-tikv,http,scripting,jwks",
+]
+
 #
 # Integration Tests
 #
