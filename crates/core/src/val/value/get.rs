@@ -30,37 +30,6 @@ macro_rules! fallback_function {
 	};
 }
 
-// let res = match res {
-// 	Ok(_) => res,
-// 	Err(e) => {
-// 		if matches!(e.downcast_ref(), Some(Error::InvalidFunction { .. })) {
-// 			if let Some(v) = v.get(name) {
-// 				let fnc = Function::Anonymous(v.clone(), args, true);
-// 				match stk
-// 					.run(|stk| fnc.compute(stk, ctx, opt, doc))
-// 					.await
-// 					.catch_return()
-// 				{
-// 					Ok(v) => Ok(v),
-// 					Err(e) => {
-// 						if matches!(
-// 							e.downcast_ref(),
-// 							Some(Error::InvalidFunction { .. })
-// 						) {
-// 							Ok(Value::None)
-// 						} else {
-// 							Err(e)
-// 						}
-// 					}
-// 				}
-// 			} else {
-// 				Err(e)
-// 			}
-// 		} else {
-// 			Err(e)
-// 		}
-// 	}
-
 impl Value {
 	/// Asynchronous method for getting a local or remote field from a `Value`
 	///
