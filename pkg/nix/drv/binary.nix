@@ -12,8 +12,20 @@ let
     rustc = rustToolchain;
   });
 
+  markdownFilter = path: _type: builtins.match ".*md$" path != null;
+  markdownOrCargo = path: type:
+    (markdownFilter path type) || (craneLib.filterCargoSources path type);
   buildSpec = spec.buildSpec // {
-    src = craneLib.cleanCargoSource ../../../.;
+    unfilteredRoot = ../../../.; # The original, unfiltered source
+    src = lib.fileset.toSource {
+      root = unfilteredRoot;
+      fileset = lib.fileset.unions [
+        # Default files from crane (Rust and cargo files)
+        (craneLib.fileset.commonCargoSources unfilteredRoot)
+        # Also keep any markdown files
+        (lib.fileset.fileFilter (file: file.hasExt "md") unfilteredRoot)
+      ];
+    };
     doCheck = false;
     cargoExtraArgs = let flags = [ "--no-default-features" ] ++ featureFlags;
     in builtins.concatStringsSep " " flags;
