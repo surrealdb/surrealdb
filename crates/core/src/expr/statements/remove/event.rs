@@ -13,8 +13,8 @@ use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveEventStatement {
-	pub name: Ident,
-	pub table_name: Ident,
+	pub name: String,
+	pub table_name: String,
 	pub if_exists: bool,
 }
 

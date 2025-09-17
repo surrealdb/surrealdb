@@ -26,7 +26,7 @@ impl Data {
 			Data::Query(v) => v.into_iter().map(|x| x.into_value()).collect(),
 			Data::Live(v) => Value::from(Object(map! {
 				"id".to_owned() => v.id.into(),
-				"action".to_owned() => Strand::new(v.action.to_string()).unwrap().into(),
+				"action".to_owned() => v.action.to_string().into(),
 				"record".to_owned() => v.record,
 				"result".to_owned() => v.result,
 

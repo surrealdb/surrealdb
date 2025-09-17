@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Formatter, Write};
 
-use crate::sql::fmt::Fmt;
+use crate::fmt::Fmt;
 use crate::sql::order::Ordering;
 use crate::sql::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits, Start};
 
@@ -159,8 +159,8 @@ impl From<crate::expr::lookup::LookupKind> for LookupKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum LookupSubject {
-	Table(Ident),
-	Range(Ident, RecordIdKeyRangeLit),
+	Table(String),
+	Range(String, RecordIdKeyRangeLit),
 }
 
 impl Display for LookupSubject {

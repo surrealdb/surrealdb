@@ -17,7 +17,7 @@ use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum AnalyzeStatement {
-	Idx(Ident, Ident),
+	Idx(String, String),
 }
 
 impl AnalyzeStatement {

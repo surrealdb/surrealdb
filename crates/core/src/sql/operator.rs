@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::sql::fmt::Fmt;
+use crate::fmt::Fmt;
 use crate::sql::index::Distance;
 use crate::sql::{Expr, Kind};
 
@@ -64,7 +64,7 @@ impl fmt::Display for PrefixOperator {
 pub enum PostfixOperator {
 	Range,
 	RangeSkip,
-	MethodCall(Ident, Vec<Expr>),
+	MethodCall(String, Vec<Expr>),
 	Call(Vec<Expr>),
 }
 

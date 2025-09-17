@@ -98,7 +98,7 @@ impl Executor {
 
 					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
 					self.opt.set_ns(Some(ns.as_str().into()));
-					session.put(NS.as_ref(), ns.into_string().into());
+					session.put(NS.as_ref(), ns.into());
 					ctx.add_value("session", session.into());
 				}
 				if let Some(db) = stmt.db {
@@ -112,7 +112,7 @@ impl Executor {
 
 					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
 					self.opt.set_db(Some(db.as_str().into()));
-					session.put(DB.as_ref(), db.into_strand().into());
+					session.put(DB.as_ref(), db.into());
 					ctx.add_value("session", session.into());
 				}
 				Ok(Value::None)
@@ -156,7 +156,7 @@ impl Executor {
 
 				if stm.is_protected_set() {
 					return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidParam {
-						name: stm.name.clone().into_string(),
+						name: stm.name.clone(),
 					})));
 				}
 				// Set the parameter
@@ -165,7 +165,7 @@ impl Executor {
 						Error::unreachable("Tried to unfreeze a Context with multiple references")
 					})
 					.map_err(anyhow::Error::new)?
-					.add_value(stm.name.into_string(), result.into());
+					.add_value(stm.name.clone(), result.into());
 				// Finalise transaction, returning nothing unless it couldn't commit
 				Ok(Value::None)
 			}

@@ -48,7 +48,7 @@ impl From<AlterDefault> for crate::expr::statements::alter::AlterDefault {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AlterFieldStatement {
 	pub name: Idiom,
-	pub what: Ident,
+	pub what: String,
 	pub if_exists: bool,
 	pub flex: AlterKind<()>,
 	pub kind: AlterKind<Kind>,
@@ -57,7 +57,7 @@ pub struct AlterFieldStatement {
 	pub assert: AlterKind<Expr>,
 	pub default: AlterDefault,
 	pub permissions: Option<Permissions>,
-	pub comment: AlterKind<Strand>,
+	pub comment: AlterKind<String>,
 	pub reference: AlterKind<Reference>,
 }
 

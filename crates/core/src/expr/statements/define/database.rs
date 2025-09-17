@@ -63,14 +63,14 @@ impl DefineDatabaseStatement {
 			txn.lock().await.get_next_db_id(nsv.namespace_id).await?
 		};
 
-		let name: String = self.name.to_raw_string();
+		let name: String = self.name.clone();
 
 		// Set the database definition, keyed by namespace name and database name.
 		let db_def = DatabaseDefinition {
 			namespace_id: nsv.namespace_id,
 			database_id,
 			name: name.clone(),
-			comment: self.comment.clone().map(|s| s.into_string()),
+			comment: self.comment.clone(),
 			changefeed: self.changefeed,
 		};
 		txn.put_db(&nsv.name, db_def).await?;
@@ -109,7 +109,7 @@ impl Display for DefineDatabaseStatement {
 impl InfoStructure for DefineDatabaseStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.structure(),
+			"name".to_string() => self.name.into(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})
 	}

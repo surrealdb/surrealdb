@@ -123,17 +123,17 @@ impl Value {
 				// Current value at path is a geometry
 				Value::Geometry(v) => match p {
 					// If this is the 'type' field then continue
-					Part::Field(f) if f.is_type() => {
+					Part::Field(f) if f == "type" => {
 						let v = Value::from(v.as_type());
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
 					// If this is the 'coordinates' field then continue
-					Part::Field(f) if f.is_coordinates() && v.is_geometry() => {
+					Part::Field(f) if f == "coordinates" && v.is_geometry() => {
 						let v = v.as_coordinates();
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
 					// If this is the 'geometries' field then continue
-					Part::Field(f) if f.is_geometries() && v.is_collection() => {
+					Part::Field(f) if f == "geometries" && v.is_collection() => {
 						let v = v.as_coordinates();
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
@@ -207,7 +207,7 @@ impl Value {
 						for p in p.iter() {
 							let idiom = p.idiom();
 							obj.insert(
-								p.field().to_raw_string(),
+								p.field().to_owned(),
 								stk.run(|stk| idiom.compute(stk, ctx, opt, Some(&cur_doc))).await?,
 							);
 						}

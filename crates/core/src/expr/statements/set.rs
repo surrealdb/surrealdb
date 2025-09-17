@@ -11,7 +11,7 @@ use crate::expr::{ControlFlow, Expr, FlowResult, Kind, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SetStatement {
-	pub name: Ident,
+	pub name: String,
 	pub what: Expr,
 	pub kind: Option<Kind>,
 }
@@ -43,7 +43,7 @@ impl SetStatement {
 
 		if self.is_protected_set() {
 			return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidParam {
-				name: self.name.clone().into_string(),
+				name: self.name.clone(),
 			})));
 		}
 
@@ -60,7 +60,7 @@ impl SetStatement {
 		};
 
 		let mut c = MutableContext::unfreeze(ctx.take().unwrap())?;
-		c.add_value(self.name.clone().into_string(), result.into());
+		c.add_value(self.name.clone(), result.into());
 		*ctx = Some(c.freeze());
 		Ok(Value::None)
 	}

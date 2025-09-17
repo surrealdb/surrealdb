@@ -96,13 +96,13 @@ impl DefineAccessStatement {
 		DefineAccessStatement {
 			kind: DefineKind::Default,
 			base,
-			name: Ident::new(def.name.clone()).unwrap(),
+			name: def.name.clone(),
 			duration: AccessDuration {
 				grant: def.grant_duration.map(val::Duration),
 				token: def.token_duration.map(val::Duration),
 				session: def.session_duration.map(val::Duration),
 			},
-			comment: def.comment.clone().map(|x| Strand::new(x).unwrap()),
+			comment: def.comment.clone(),
 			authenticate: def.authenticate.clone(),
 			access_type: match &def.access_type {
 				catalog::AccessType::Record(record_access) => AccessType::Record(RecordAccess {
@@ -196,11 +196,11 @@ impl DefineAccessStatement {
 		}
 
 		AccessDefinition {
-			name: self.name.clone().to_raw_string(),
+			name: self.name.clone(),
 			grant_duration: self.duration.grant.map(|x| x.0),
 			token_duration: self.duration.token.map(|x| x.0),
 			session_duration: self.duration.session.map(|x| x.0),
-			comment: self.comment.clone().map(|x| x.into_string()),
+			comment: self.comment.clone(),
 			authenticate: self.authenticate.clone(),
 			access_type: match &self.access_type {
 				AccessType::Record(record_access) => {
@@ -405,7 +405,7 @@ impl Display for DefineAccessStatement {
 impl InfoStructure for DefineAccessStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.structure(),
+			"name".to_string() => self.name.into(),
 			"base".to_string() => self.base.structure(),
 			"authenticate".to_string(), if let Some(v) = self.authenticate => v.structure(),
 			"duration".to_string() => Value::from(map!{

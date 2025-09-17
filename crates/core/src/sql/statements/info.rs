@@ -10,9 +10,9 @@ pub enum InfoStatement {
 	Root(bool),
 	Ns(bool),
 	Db(bool, Option<Expr>),
-	Tb(Ident, bool, Option<Expr>),
-	User(Ident, Option<Base>, bool),
-	Index(Ident, Ident, bool),
+	Tb(String, bool, Option<Expr>),
+	User(String, Option<Base>, bool),
+	Index(String, String, bool),
 }
 
 impl fmt::Display for InfoStatement {

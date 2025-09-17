@@ -164,11 +164,7 @@ pub fn slug((string,): (String,)) -> Result<Value> {
 
 pub fn split((val, chr): (String, String)) -> Result<Value> {
 	// TODO: Null byte validity
-	Ok(val
-		.split(&chr)
-		.map(|x| Value::from(Strand::new(x.to_owned()).unwrap()))
-		.collect::<Vec<_>>()
-		.into())
+	Ok(val.split(&chr).map(|x| Value::from(x.to_owned())).collect::<Vec<_>>().into())
 }
 
 pub fn starts_with((val, chr): (String, String)) -> Result<Value> {
@@ -184,11 +180,7 @@ pub fn uppercase((string,): (String,)) -> Result<Value> {
 }
 
 pub fn words((string,): (String,)) -> Result<Value> {
-	Ok(string
-		.split_whitespace()
-		.map(|v| Value::from(Strand::new(v.to_owned()).unwrap()))
-		.collect::<Vec<_>>()
-		.into())
+	Ok(string.split_whitespace().map(|v| Value::from(v.to_owned())).collect::<Vec<_>>().into())
 }
 
 pub mod distance {
@@ -308,7 +300,7 @@ pub mod is {
 	pub fn datetime((arg, Optional(fmt)): (String, Optional<String>)) -> Result<Value> {
 		Ok(match fmt {
 			Some(fmt) => NaiveDateTime::parse_from_str(&arg, &fmt).is_ok().into(),
-			None => Datetime::try_from(arg.as_ref()).is_ok().into(),
+			None => arg.parse::<Datetime>().is_ok().into(),
 		})
 	}
 

@@ -6,10 +6,9 @@ use reblessive::tree::Stk;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::escape::{EscapeKey, EscapeRid};
-use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::literal::ObjectEntry;
 use crate::expr::{Expr, FlowResultExt as _, RecordIdKeyRangeLit};
+use crate::fmt::{EscapeKey, EscapeRid, Fmt, Pretty, is_pretty, pretty_indent};
 use crate::val::{Array, Object, RecordIdKey, Uuid};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -32,7 +31,7 @@ impl RecordIdKeyGen {
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RecordIdKeyLit {
 	Number(i64),
-	String(Strand),
+	String(String),
 	Uuid(Uuid),
 	Array(Vec<Expr>),
 	Object(Vec<ObjectEntry>),
@@ -120,7 +119,7 @@ impl RecordIdKeyLit {
 	) -> Result<RecordIdKey> {
 		match self {
 			RecordIdKeyLit::Number(v) => Ok(RecordIdKey::Number(*v)),
-			RecordIdKeyLit::String(v) => Ok(RecordIdKey::String(v.clone().into_string())),
+			RecordIdKeyLit::String(v) => Ok(RecordIdKey::String(v.clone())),
 			RecordIdKeyLit::Uuid(v) => Ok(RecordIdKey::Uuid(*v)),
 			RecordIdKeyLit::Array(v) => {
 				let mut res = Vec::new();

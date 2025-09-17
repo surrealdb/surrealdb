@@ -1,18 +1,18 @@
 use std::fmt::{self, Display, Write};
 
 use super::AlterKind;
-use crate::sql::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::sql::{ChangeFeed, Kind, Permissions, TableType};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AlterTableStatement {
-	pub name: Ident,
+	pub name: String,
 	pub if_exists: bool,
 	pub schemafull: AlterKind<()>,
 	pub permissions: Option<Permissions>,
 	pub changefeed: AlterKind<ChangeFeed>,
-	pub comment: AlterKind<Strand>,
+	pub comment: AlterKind<String>,
 	pub kind: Option<TableType>,
 }
 

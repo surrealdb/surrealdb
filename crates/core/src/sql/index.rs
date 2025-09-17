@@ -46,7 +46,7 @@ impl From<crate::catalog::Index> for Index {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct FullTextParams {
-	pub az: Ident,
+	pub az: String,
 	pub hl: bool,
 	pub sc: Scoring,
 }
@@ -54,7 +54,7 @@ pub struct FullTextParams {
 impl From<FullTextParams> for crate::catalog::FullTextParams {
 	fn from(v: FullTextParams) -> Self {
 		crate::catalog::FullTextParams {
-			analyzer: v.az.clone().into_string(),
+			analyzer: v.az.clone(),
 			highlight: v.hl,
 			scoring: v.sc.into(),
 		}
@@ -63,7 +63,7 @@ impl From<FullTextParams> for crate::catalog::FullTextParams {
 impl From<crate::catalog::FullTextParams> for FullTextParams {
 	fn from(v: crate::catalog::FullTextParams) -> Self {
 		Self {
-			az: unsafe { Ident::new_unchecked(v.analyzer) },
+			az: v.analyzer,
 			hl: v.highlight,
 			sc: v.scoring.into(),
 		}

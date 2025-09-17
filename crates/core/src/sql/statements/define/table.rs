@@ -1,8 +1,8 @@
 use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::sql::changefeed::ChangeFeed;
-use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::{Kind, Permissions, TableType, View};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -10,13 +10,13 @@ use crate::sql::{Kind, Permissions, TableType, View};
 pub struct DefineTableStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
-	pub name: Ident,
+	pub name: String,
 	pub drop: bool,
 	pub full: bool,
 	pub view: Option<View>,
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 	pub table_type: TableType,
 }
 

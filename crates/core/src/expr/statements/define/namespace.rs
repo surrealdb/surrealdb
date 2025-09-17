@@ -54,8 +54,8 @@ impl DefineNamespaceStatement {
 		// Process the statement
 		let ns_def = NamespaceDefinition {
 			namespace_id,
-			name: self.name.to_raw_string(),
-			comment: self.comment.clone().map(|c| c.into_string()),
+			name: self.name.clone(),
+			comment: self.comment.clone(),
 		};
 		txn.put_ns(ns_def).await?;
 		// Clear the cache

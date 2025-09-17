@@ -600,7 +600,7 @@ async fn compute_show(
 				Base::Root => match txn.get_root_access_grant(&stmt.ac, gr).await? {
 					Some(val) => val.clone(),
 					None => bail!(Error::AccessGrantRootNotFound {
-						ac: stmt.ac,
+						ac: stmt.ac.clone(),
 						gr: gr.clone(),
 					}),
 				},
@@ -609,7 +609,7 @@ async fn compute_show(
 					match txn.get_ns_access_grant(ns, &stmt.ac, gr).await? {
 						Some(val) => val.clone(),
 						None => bail!(Error::AccessGrantNsNotFound {
-							ac: stmt.ac,
+							ac: stmt.ac.clone(),
 							gr: gr.clone(),
 							ns: ns.to_string(),
 						}),
@@ -620,7 +620,7 @@ async fn compute_show(
 					match txn.get_db_access_grant(ns, db, &stmt.ac, gr).await? {
 						Some(val) => val.clone(),
 						None => bail!(Error::AccessGrantDbNotFound {
-							ac: stmt.ac,
+							ac: stmt.ac.clone(),
 							gr: gr.clone(),
 							ns: ns.to_string(),
 							db: db.to_string(),
@@ -722,7 +722,7 @@ pub async fn revoke_grant(
 				Base::Root => match txn.get_root_access_grant(&stmt.ac, gr).await? {
 					Some(val) => (*val).clone(),
 					None => bail!(Error::AccessGrantRootNotFound {
-						ac: stmt.ac,
+						ac: stmt.ac.clone(),
 						gr: gr.clone(),
 					}),
 				},
@@ -733,7 +733,7 @@ pub async fn revoke_grant(
 						None => {
 							let ns = opt.ns()?;
 							bail!(Error::AccessGrantNsNotFound {
-								ac: stmt.ac,
+								ac: stmt.ac.clone(),
 								gr: gr.clone(),
 								ns: ns.to_string(),
 							})
@@ -747,8 +747,8 @@ pub async fn revoke_grant(
 						None => {
 							let (ns, db) = opt.ns_db()?;
 							bail!(Error::AccessGrantDbNotFound {
-								ac: stmt.ac,
-								gr,
+								ac: stmt.ac.clone(),
+								gr: gr.to_owned(),
 								ns: ns.to_string(),
 								db: db.to_string(),
 							})

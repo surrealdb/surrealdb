@@ -257,7 +257,7 @@ impl Parser<'_> {
 				};
 				Part::Graph(lookup)
 			}
-			_ => Part::Field(self.next_token_value()?),
+			_ => Part::Field(self.parse_ident()?),
 		};
 		let start = vec![start];
 		self.parse_remaining_idiom(stk, start).await
@@ -279,7 +279,7 @@ impl Parser<'_> {
 				stk.run(|ctx| self.parse_curly_part(ctx)).await?
 			}
 			_ => {
-				let ident: Ident = self.next_token_value()?;
+				let ident = self.parse_ident()?;
 				if self.eat(t!("(")) {
 					self.parse_function_part(stk, ident).await?
 				} else {
@@ -292,10 +292,10 @@ impl Parser<'_> {
 	pub(super) async fn parse_function_part(
 		&mut self,
 		stk: &mut Stk,
-		name: Ident,
+		name: String,
 	) -> ParseResult<Part> {
 		let args = self.parse_function_args(stk).await?;
-		Ok(Part::Method(name.into_string(), args))
+		Ok(Part::Method(name, args))
 	}
 	/// Parse the part after the `.{` in an idiom
 	pub(super) async fn parse_curly_part(&mut self, stk: &mut Stk) -> ParseResult<Part> {
@@ -314,7 +314,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let field: Ident = self.next_token_value()?;
+			let field = self.parse_ident()?;
 			let part = match self.peek_kind() {
 				t!(":") => {
 					self.pop_peek();
@@ -384,12 +384,12 @@ impl Parser<'_> {
 		stk: &mut Stk,
 	) -> ParseResult<Option<RecurseInstruction>> {
 		let instruction = if self.eat(t!("+")) {
-			let kind = self.next_token_value::<Ident>()?;
+			let kind = self.parse_ident()?;
 			if kind.eq_ignore_ascii_case("path") {
 				let mut inclusive = false;
 				loop {
 					if self.eat(t!("+")) {
-						let kind = self.next_token_value::<Ident>()?;
+						let kind = self.parse_ident()?;
 						if kind.eq_ignore_ascii_case("inclusive") {
 							inclusive = true
 						} else {
@@ -406,7 +406,7 @@ impl Parser<'_> {
 				let mut inclusive = false;
 				loop {
 					if self.eat(t!("+")) {
-						let kind = self.next_token_value::<Ident>()?;
+						let kind = self.parse_ident()?;
 						if kind.eq_ignore_ascii_case("inclusive") {
 							inclusive = true
 						} else {
@@ -434,7 +434,7 @@ impl Parser<'_> {
 				let mut inclusive = false;
 				loop {
 					if self.eat(t!("+")) {
-						let kind = self.next_token_value::<Ident>()?;
+						let kind = self.parse_ident()?;
 						if kind.eq_ignore_ascii_case("inclusive") {
 							inclusive = true
 						} else {
@@ -512,7 +512,7 @@ impl Parser<'_> {
 	/// restrictive. Flatten, graphs, conditions and indexing by param is not
 	/// allowed.
 	pub(super) async fn parse_basic_idiom(&mut self, stk: &mut Stk) -> ParseResult<Idiom> {
-		let start = self.next_token_value::<Ident>()?;
+		let start = self.parse_ident()?;
 		let mut parts = vec![Part::Field(start)];
 		loop {
 			let token = self.peek();
@@ -568,7 +568,7 @@ impl Parser<'_> {
 	/// Only field, all and number indexing is allowed. Flatten is also allowed
 	/// but only at the end.
 	pub(super) async fn parse_local_idiom(&mut self, stk: &mut Stk) -> ParseResult<Idiom> {
-		let start = self.next_token_value()?;
+		let start = self.parse_ident()?;
 		let mut parts = vec![Part::Field(start)];
 		loop {
 			let token = self.peek();
@@ -869,7 +869,7 @@ mod tests {
 
 	/// creates a field part
 	fn f(s: &str) -> Part {
-		Part::Field(Ident::new(s.to_owned()).unwrap())
+		Part::Field(s.to_owned())
 	}
 
 	/// creates a field part
@@ -989,7 +989,7 @@ mod tests {
 		assert_eq!(
 			out,
 			sql::Expr::Idiom(Idiom(vec![
-				Part::Start(Expr::Param(Param::new("test".to_owned()).unwrap())),
+				Part::Start(Expr::Param(Param::new("test".to_owned()))),
 				f("temporary"),
 				Part::Value(Expr::Literal(sql::Literal::Integer(0))),
 				f("embedded"),
@@ -1013,12 +1013,12 @@ mod tests {
 				f("friend"),
 				Part::Graph(Lookup {
 					kind: LookupKind::Graph(Dir::Out),
-					what: vec![LookupSubject::Table(Ident::from_strand("like".to_owned()))],
+					what: vec![LookupSubject::Table("like".to_owned())],
 					..Default::default()
 				}),
 				Part::Graph(Lookup {
 					kind: LookupKind::Graph(Dir::Out),
-					what: vec![LookupSubject::Table(Ident::from_strand("person".to_owned()))],
+					what: vec![LookupSubject::Table("person".to_owned())],
 					..Default::default()
 				}),
 			]))
@@ -1062,7 +1062,7 @@ mod tests {
 			out,
 			Expr::Idiom(Idiom(vec![
 				Part::Start(Expr::Literal(Literal::Object(Vec::new()))),
-				Part::Value(Expr::Param(Param::from_strand("param".to_owned())))
+				Part::Value(Expr::Param(Param::new("param".to_owned())))
 			]))
 		);
 	}

@@ -590,7 +590,7 @@ impl Parser<'_> {
 				PostfixOperator::Call(args)
 			}
 			t!(".") => {
-				let name = self.next_token_value::<Ident>()?;
+				let name = self.parse_ident()?;
 				expected!(self, t!("("));
 
 				let mut args = Vec::new();

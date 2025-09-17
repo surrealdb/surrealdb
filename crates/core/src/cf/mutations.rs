@@ -206,22 +206,16 @@ mod tests {
 				"mytb".to_string(),
 				vec![
 					TableMutation::Set(
-						RecordId::new("mytb".to_string(), strand!("tobie").to_owned()),
+						RecordId::new("mytb".to_string(), "tobie".to_owned()),
 						Value::Object(Object::from(HashMap::from([
 							(
 								"id",
-								Value::from(RecordId::new(
-									"mytb".to_owned(),
-									strand!("tobie").to_owned(),
-								)),
+								Value::from(RecordId::new("mytb".to_owned(), "tobie".to_owned())),
 							),
 							("note", Value::from("surreal")),
 						]))),
 					),
-					TableMutation::Del(RecordId::new(
-						"mytb".to_owned(),
-						strand!("tobie").to_owned(),
-					)),
+					TableMutation::Del(RecordId::new("mytb".to_owned(), "tobie".to_owned())),
 					TableMutation::Def(TableDefinition::new(
 						NamespaceId(1),
 						DatabaseId(2),
@@ -247,14 +241,11 @@ mod tests {
 				"mytb".to_string(),
 				vec![
 					TableMutation::SetWithDiff(
-						RecordId::new("mytb".to_owned(), strand!("tobie").to_owned()),
+						RecordId::new("mytb".to_owned(), "tobie".to_owned()),
 						Value::Object(Object::from(HashMap::from([
 							(
 								"id",
-								Value::from(RecordId::new(
-									"mytb".to_owned(),
-									strand!("tobie").to_owned(),
-								)),
+								Value::from(RecordId::new("mytb".to_owned(), "tobie".to_owned())),
 							),
 							("note", Value::from("surreal")),
 						]))),
@@ -264,14 +255,11 @@ mod tests {
 						}],
 					),
 					TableMutation::SetWithDiff(
-						RecordId::new("mytb".to_owned(), strand!("tobie").to_owned()),
+						RecordId::new("mytb".to_owned(), "tobie".to_owned()),
 						Value::Object(Object::from(HashMap::from([
 							(
 								"id",
-								Value::from(RecordId::new(
-									"mytb".to_owned(),
-									strand!("tobie2").to_owned(),
-								)),
+								Value::from(RecordId::new("mytb".to_owned(), "tobie2".to_owned())),
 							),
 							("note", Value::from("surreal")),
 						]))),
@@ -279,14 +267,11 @@ mod tests {
 							path: vec!["temp".to_owned()],
 						}],
 					),
-					TableMutation::Del(RecordId::new(
-						"mytb".to_owned(),
-						strand!("tobie").to_owned(),
-					)),
+					TableMutation::Del(RecordId::new("mytb".to_owned(), "tobie".to_owned())),
 					TableMutation::DelWithOriginal(
-						RecordId::new("mytb".to_owned(), strand!("tobie").to_owned()),
+						RecordId::new("mytb".to_owned(), "tobie".to_owned()),
 						Value::Object(Object::from(map! {
-								"id" => Value::from(RecordId::new("mytb".to_owned(),strand!("tobie").to_owned())),
+								"id" => Value::from(RecordId::new("mytb".to_owned(),"tobie".to_owned())),
 								"note" => Value::from("surreal"),
 						})),
 					),

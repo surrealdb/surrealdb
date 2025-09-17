@@ -5,8 +5,9 @@ use surrealdb_protocol::fb::v1 as proto_fb;
 
 use crate::expr::Kind;
 use crate::expr::kind::{GeometryKind, KindLiteral};
+use crate::key::index::bi;
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
-use crate::val::{Duration, Table};
+use crate::val::Duration;
 
 impl ToFlatbuffers for Kind {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Kind<'bldr>>;
@@ -118,11 +119,9 @@ impl ToFlatbuffers for Kind {
 				),
 			},
 			Self::Record(tables) => {
-				let table_offsets: Vec<_> = tables
-					.iter()
-					.map(|t| t.clone().to_fb(builder))
-					.collect::<anyhow::Result<Vec<_>>>()?;
-				let tables = builder.create_vector(&table_offsets);
+				let tables = builder.create_vector(
+					&tables.iter().map(|x| builder.create_string(x)).collect::<Vec<_>>(),
+				);
 				proto_fb::KindArgs {
 					kind_type: proto_fb::KindType::Record,
 					kind: Some(
@@ -531,7 +530,7 @@ impl FromFlatbuffers for KindLiteral {
 				let Some(value) = string_val.value() else {
 					return Err(anyhow::anyhow!("Missing string content"));
 				};
-				Ok(KindLiteral::String(Strand::from(value)))
+				Ok(KindLiteral::String(value.to_string()))
 			}
 			LiteralType::Int64 => {
 				let Some(int_val) = input.literal_as_int_64() else {
@@ -655,7 +654,7 @@ mod tests {
 	// KindLiteral variants
 	#[case::literal_bool(Kind::Literal(KindLiteral::Bool(true)))]
 	#[case::literal_bool_false(Kind::Literal(KindLiteral::Bool(false)))]
-	#[case::literal_string(Kind::Literal(KindLiteral::String(Strand::new("test_string".to_string()).unwrap())))]
+	#[case::literal_string(Kind::Literal(KindLiteral::String("test_string".to_string())))]
 	#[case::literal_integer(Kind::Literal(KindLiteral::Integer(42)))]
 	#[case::literal_integer_min(Kind::Literal(KindLiteral::Integer(i64::MIN)))]
 	#[case::literal_integer_max(Kind::Literal(KindLiteral::Integer(i64::MAX)))]

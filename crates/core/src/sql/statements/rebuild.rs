@@ -34,8 +34,8 @@ impl From<crate::expr::statements::rebuild::RebuildStatement> for RebuildStateme
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RebuildIndexStatement {
-	pub name: Ident,
-	pub what: Ident,
+	pub name: String,
+	pub what: String,
 	pub if_exists: bool,
 }
 

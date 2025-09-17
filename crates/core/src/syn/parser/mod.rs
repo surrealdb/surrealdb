@@ -121,7 +121,7 @@ pub enum GluedValue {
 	Datetime(Datetime),
 	Uuid(Uuid),
 	Number(NumberKind),
-	Strand(Strand),
+	Strand(String),
 	#[default]
 	None,
 	Bytes(Bytes),

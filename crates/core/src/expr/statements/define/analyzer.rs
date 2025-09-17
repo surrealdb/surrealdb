@@ -29,22 +29,22 @@ pub struct DefineAnalyzerStatement {
 impl DefineAnalyzerStatement {
 	pub(crate) fn to_definition(&self) -> catalog::AnalyzerDefinition {
 		catalog::AnalyzerDefinition {
-			name: self.name.clone().into_string(),
+			name: self.name.clone(),
 			function: self.function.clone(),
 			tokenizers: self.tokenizers.clone(),
 			filters: self.filters.clone(),
-			comment: self.comment.as_ref().map(|x| x.clone().into_string()),
+			comment: self.comment.clone(),
 		}
 	}
 
 	pub fn from_definition(def: &catalog::AnalyzerDefinition) -> Self {
 		Self {
 			kind: DefineKind::Default,
-			name: Ident::new(def.name.clone()).unwrap(),
+			name: def.name.clone(),
 			function: def.function.clone(),
 			tokenizers: def.tokenizers.clone(),
 			filters: def.filters.clone(),
-			comment: def.comment.as_ref().map(|x| Strand::new(x.clone()).unwrap()),
+			comment: def.comment.clone(),
 		}
 	}
 
@@ -115,9 +115,8 @@ impl Display for DefineAnalyzerStatement {
 impl InfoStructure for DefineAnalyzerStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => Value::from(self.name.clone().into_strand()),
-			// TODO: Null byte validity
-			"function".to_string(), if let Some(v) = self.function => Value::from(Strand::new(v.clone()).unwrap()),
+			"name".to_string() => Value::from(self.name.clone()),
+			"function".to_string(), if let Some(v) = self.function => Value::from(v.clone()),
 			"tokenizers".to_string(), if let Some(v) = self.tokenizers =>
 				v.into_iter().map(|v| v.to_string().into()).collect::<Array>().into(),
 			"filters".to_string(), if let Some(v) = self.filters =>

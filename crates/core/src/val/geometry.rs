@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 
 use super::Object;
-use crate::expr::fmt::Fmt;
 use crate::expr::kind::GeometryKind;
+use crate::fmt::Fmt;
 use crate::val::{Array, Value};
 
 #[revisioned(revision = 1)]

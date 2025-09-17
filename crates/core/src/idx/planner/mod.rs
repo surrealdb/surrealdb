@@ -276,7 +276,7 @@ impl QueryPlanner {
 		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		ctx: &StatementContext<'_>,
-		t: Ident,
+		t: String,
 		gp: GrantedPermission,
 		it: &mut Iterator,
 	) -> Result<()> {
@@ -360,13 +360,13 @@ impl QueryPlanner {
 
 	fn add(
 		&mut self,
-		tb: Ident,
+		tb: String,
 		irf: Option<IteratorRef>,
 		exe: InnerQueryExecutor,
 		it: &mut Iterator,
 		rs: RecordStrategy,
 	) {
-		self.executors.insert(tb.clone().into_string(), exe.into());
+		self.executors.insert(tb.clone(), exe.into());
 		if let Some(irf) = irf {
 			it.ingest(Iterable::Index(tb, irf, rs));
 		}

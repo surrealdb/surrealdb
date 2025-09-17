@@ -6,7 +6,7 @@ use crate::sql::Idiom;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveFieldStatement {
 	pub name: Idiom,
-	pub what: Ident,
+	pub what: String,
 	pub if_exists: bool,
 }
 

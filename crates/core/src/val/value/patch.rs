@@ -25,10 +25,8 @@ impl Value {
 					// Split the last path part from the path
 					if let Some((last, left)) = path.split_last() {
 						if let Ok(x) = last.parse::<usize>() {
-							let path = left
-								.iter()
-								.map(|x| Part::Field(Ident::new(x.clone()).unwrap()))
-								.collect::<Vec<_>>();
+							let path =
+								left.iter().map(|x| Part::Field(x.clone())).collect::<Vec<_>>();
 
 							// TODO: Fix behavior on overload.
 							match this.pick(&path) {
@@ -47,10 +45,8 @@ impl Value {
 						}
 
 						if last == "-" {
-							let path = left
-								.iter()
-								.map(|x| Part::Field(Ident::new(x.clone()).unwrap()))
-								.collect::<Vec<_>>();
+							let path =
+								left.iter().map(|x| Part::Field(x.clone())).collect::<Vec<_>>();
 
 							// TODO: Fix behavior on overload.
 							match this.pick(&path) {
@@ -64,10 +60,7 @@ impl Value {
 						}
 					}
 
-					let path = path
-						.into_iter()
-						.map(|x| Part::Field(Ident::new(x).unwrap()))
-						.collect::<Vec<_>>();
+					let path = path.into_iter().map(|x| Part::Field(x)).collect::<Vec<_>>();
 					match this.pick(&path) {
 						Value::Array(_) => this.inc(&path, value),
 						_ => this.put(&path, value),
@@ -77,10 +70,7 @@ impl Value {
 				Operation::Remove {
 					path,
 				} => {
-					let path = path
-						.into_iter()
-						.map(|x| Part::Field(Ident::new(x).unwrap()))
-						.collect::<Vec<_>>();
+					let path = path.into_iter().map(|x| Part::Field(x)).collect::<Vec<_>>();
 					this.cut(&path);
 				}
 				// Replace a value at the specified path
@@ -88,10 +78,7 @@ impl Value {
 					path,
 					value,
 				} => {
-					let path = path
-						.into_iter()
-						.map(|x| Part::Field(Ident::new(x).unwrap()))
-						.collect::<Vec<_>>();
+					let path = path.into_iter().map(|x| Part::Field(x)).collect::<Vec<_>>();
 					this.put(&path, value)
 				}
 				// Modify a string at the specified path
@@ -99,10 +86,7 @@ impl Value {
 					path,
 					value,
 				} => {
-					let path = path
-						.into_iter()
-						.map(|x| Part::Field(Ident::new(x).unwrap()))
-						.collect::<Vec<_>>();
+					let path = path.into_iter().map(|x| Part::Field(x)).collect::<Vec<_>>();
 					if let Value::Strand(p) = value {
 						if let Value::Strand(v) = this.pick(&path) {
 							let dmp = dmp::new();
@@ -127,14 +111,8 @@ impl Value {
 					from,
 				} => {
 					// TODO: NUll byte validity
-					let from = from
-						.into_iter()
-						.map(|x| Part::Field(Ident::new(x).unwrap()))
-						.collect::<Vec<_>>();
-					let path = path
-						.into_iter()
-						.map(|x| Part::Field(Ident::new(x).unwrap()))
-						.collect::<Vec<_>>();
+					let from = from.into_iter().map(|x| Part::Field(x)).collect::<Vec<_>>();
+					let path = path.into_iter().map(|x| Part::Field(x)).collect::<Vec<_>>();
 
 					let val = this.pick(&from);
 					this.put(&path, val);
@@ -144,14 +122,8 @@ impl Value {
 					path,
 					from,
 				} => {
-					let from = from
-						.into_iter()
-						.map(|x| Part::Field(Ident::new(x).unwrap()))
-						.collect::<Vec<_>>();
-					let path = path
-						.into_iter()
-						.map(|x| Part::Field(Ident::new(x).unwrap()))
-						.collect::<Vec<_>>();
+					let from = from.into_iter().map(|x| Part::Field(x)).collect::<Vec<_>>();
+					let path = path.into_iter().map(|x| Part::Field(x)).collect::<Vec<_>>();
 
 					let val = this.pick(&from);
 					this.put(&path, val);
@@ -162,10 +134,7 @@ impl Value {
 					path,
 					value,
 				} => {
-					let path = path
-						.into_iter()
-						.map(|x| Part::Field(Ident::new(x).unwrap()))
-						.collect::<Vec<_>>();
+					let path = path.into_iter().map(|x| Part::Field(x)).collect::<Vec<_>>();
 					let val = this.pick(&path);
 					ensure!(
 						value == val,

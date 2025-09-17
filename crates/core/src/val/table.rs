@@ -5,7 +5,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 
-use crate::expr::escape::EscapeIdent;
+use crate::fmt::EscapeIdent;
 use crate::val::IndexFormat;
 
 /// A value type referencing a specific table.
@@ -49,12 +49,6 @@ impl Deref for Table {
 	type Target = str;
 	fn deref(&self) -> &Self::Target {
 		&self.0
-	}
-}
-
-impl From<Ident> for Table {
-	fn from(value: Ident) -> Self {
-		Table(value.into_string())
 	}
 }
 

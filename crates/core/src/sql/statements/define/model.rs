@@ -1,17 +1,17 @@
 use std::fmt::{self, Write};
 
 use super::DefineKind;
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::sql::Permission;
-use crate::sql::fmt::{is_pretty, pretty_indent};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineModelStatement {
 	pub kind: DefineKind,
 	pub hash: String,
-	pub name: Ident,
+	pub name: String,
 	pub version: String,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 	pub permissions: Permission,
 }
 

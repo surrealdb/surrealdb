@@ -44,8 +44,8 @@ impl Display for RebuildStatement {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RebuildIndexStatement {
-	pub name: Ident,
-	pub what: Ident,
+	pub name: String,
+	pub what: String,
 	pub if_exists: bool,
 }
 

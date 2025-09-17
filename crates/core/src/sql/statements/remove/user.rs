@@ -5,7 +5,7 @@ use crate::sql::Base;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveUserStatement {
-	pub name: Ident,
+	pub name: String,
 	pub base: Base,
 	pub if_exists: bool,
 }

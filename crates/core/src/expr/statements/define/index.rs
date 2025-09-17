@@ -20,9 +20,9 @@ use crate::expr::Output;
 #[cfg(target_family = "wasm")]
 use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
 use crate::expr::{Base, Idiom, Part};
+use crate::fmt::Fmt;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ToSql;
-use crate::sql::fmt::Fmt;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -101,7 +101,7 @@ impl DefineIndexStatement {
 
 				//
 				if txn
-					.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, &first.to_raw_string())
+					.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, first)
 					.await?
 					.is_none()
 				{
@@ -115,11 +115,11 @@ impl DefineIndexStatement {
 		// Process the statement
 		let index_def = IndexDefinition {
 			index_id,
-			name: self.name.to_raw_string(),
-			table_name: self.what.to_raw_string(),
+			name: self.name.clone(),
+			table_name: self.what.clone(),
 			cols: self.cols.clone(),
 			index: self.index.clone(),
-			comment: self.comment.clone().map(|x| x.to_raw_string()),
+			comment: self.comment.clone(),
 		};
 		txn.put_tb_index(tb.namespace_id, tb.database_id, &tb.name, &index_def).await?;
 

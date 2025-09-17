@@ -7,10 +7,10 @@ use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon}
 use revision::revisioned;
 use rust_decimal::Decimal;
 
-use super::escape::EscapeKey;
-use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Literal, Part, Value};
+use crate::fmt::EscapeKey;
+use crate::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
 	Regex, Uuid,
@@ -366,7 +366,6 @@ impl_basic_has_kind! {
 	Decimal => Decimal,
 
 	String => String,
-	Strand => String,
 	Bytes => Bytes,
 	Number => Number,
 	Datetime => Datetime,
@@ -469,7 +468,7 @@ impl InfoStructure for Kind {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug)]
 pub enum KindLiteral {
-	String(Strand),
+	String(String),
 	Integer(i64),
 	Float(f64),
 	Decimal(Decimal),

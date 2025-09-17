@@ -637,10 +637,10 @@ impl Datastore {
 			let stm = DefineUserStatement::new_with_password(
 				Base::Root,
 				// TODO: Null byte validity.
-				Strand::new(user.to_owned()).unwrap(),
+				user.to_owned(),
 				pass,
 				// TODO: Null byte validity, always correct here probably.
-				Ident::new(INITIAL_USER_ROLE.to_owned()).unwrap(),
+				INITIAL_USER_ROLE.to_owned(),
 			);
 			let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
 			let mut ctx = MutableContext::default();

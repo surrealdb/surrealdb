@@ -8,9 +8,9 @@ use super::FlowResult;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Value};
+use crate::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]

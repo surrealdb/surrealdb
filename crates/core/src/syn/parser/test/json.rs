@@ -27,7 +27,7 @@ fn not_record_id() {
 		parser.parse_json(stk).await
 	})
 	.unwrap();
-	assert_eq!(res, Value::Strand(strand!("foo:bar-baz").to_owned()))
+	assert_eq!(res, Value::Strand("foo:bar-baz".to_owned()))
 }
 
 #[test]
@@ -40,5 +40,5 @@ fn not_a_record_id_in_object() {
 
 	let object = res.coerce_to::<Object>().unwrap();
 	let data = object.get("data").unwrap();
-	assert_eq!(*data, Value::Strand(strand!("focus:outline-none").to_owned()))
+	assert_eq!(*data, Value::Strand("focus:outline-none".to_owned()))
 }

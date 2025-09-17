@@ -17,12 +17,12 @@ use crate::sql::{
 	InsertStatement, KillStatement, LiveStatement, Model, Output, Param, RelateStatement,
 	SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
-use crate::val::{Array, Object, RecordIdKey, Table, Value};
+use crate::val::{Array, Object, RecordIdKey, Value};
 
 /// utility function converting a `Value::Strand` into a `Expr::Table`
 fn value_to_table(value: Value) -> Expr {
 	match value {
-		Value::Strand(s) => Expr::Table(Table::new(s)),
+		Value::Strand(s) => Expr::Table(s),
 		x => x.into_literal().into(),
 	}
 }
@@ -278,7 +278,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// ------------------------------
 
 	async fn info(&self) -> Result<Data, RpcError> {
-		let what = vec![Expr::Param(Param::from_strand("auth".to_owned()))];
+		let what = vec![Expr::Param(Param::new("auth".to_owned()))];
 
 		// TODO: Check if this can be replaced by just evaluating the param or a
 		// `$auth.*` expression

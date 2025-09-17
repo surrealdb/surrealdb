@@ -3,8 +3,8 @@ use std::fmt;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct UseStatement {
-	pub ns: Option<Ident>,
-	pub db: Option<Ident>,
+	pub ns: Option<String>,
+	pub db: Option<String>,
 }
 
 impl fmt::Display for UseStatement {

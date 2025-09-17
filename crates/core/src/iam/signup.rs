@@ -159,7 +159,7 @@ pub async fn db_access(
 						Some(
 							create_refresh_token_record(
 								kvs,
-								Ident::new(av.name.clone()).unwrap(),
+								av.name.clone(),
 								&ns,
 								&db,
 								rid.clone(),

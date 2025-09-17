@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::sql::fmt::Pretty;
+use crate::fmt::Pretty;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::operator::BindingPower;
 use crate::sql::statements::{
@@ -71,15 +71,15 @@ impl Expr {
 	pub(crate) fn to_idiom(&self) -> Idiom {
 		match self {
 			Expr::Idiom(i) => i.simplify(),
-			Expr::Param(i) => Idiom::field(i.clone().ident()),
+			Expr::Param(i) => Idiom::field(i.clone().into_string()),
 			Expr::FunctionCall(x) => x.receiver.to_idiom(),
 			Expr::Literal(l) => match l {
-				Literal::Strand(s) => Idiom::field(Ident::from_strand(s.clone())),
+				Literal::Strand(s) => Idiom::field(s.clone()),
 				// TODO: Null byte validity
-				Literal::Datetime(d) => Idiom::field(Ident::new(d.into_raw_string()).unwrap()),
-				x => Idiom::field(Ident::new(x.to_string()).unwrap()),
+				Literal::Datetime(d) => Idiom::field(d.into_raw_string()),
+				x => Idiom::field(x.to_string()),
 			},
-			x => Idiom::field(Ident::new(x.to_string()).unwrap()),
+			x => Idiom::field(x.to_string()),
 		}
 	}
 
@@ -119,7 +119,7 @@ impl Expr {
 				returns: x.returns.map(|k| k.into()),
 				body: x.body.into(),
 			}))),
-			Value::Table(x) => Expr::Table(unsafe { Ident::new_unchecked(x.into_string()) }),
+			Value::Table(x) => Expr::Table(x.into_string()),
 			Value::Range(x) => x.into_literal().into(),
 		}
 	}

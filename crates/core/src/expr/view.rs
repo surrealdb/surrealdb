@@ -1,14 +1,14 @@
 use std::fmt;
 
 use crate::catalog::ViewDefinition;
-use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Fields, Groups, Value};
+use crate::fmt::Fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct View {
 	pub expr: Fields,
-	pub what: Vec<Ident>,
+	pub what: Vec<String>,
 	pub cond: Option<Cond>,
 	pub group: Option<Groups>,
 }
@@ -17,7 +17,7 @@ impl View {
 	pub(crate) fn to_definition(&self) -> ViewDefinition {
 		ViewDefinition {
 			fields: self.expr.clone(),
-			what: self.what.iter().map(|s| s.to_raw_string()).collect(),
+			what: self.what.iter().map(|s| s.clone()).collect(),
 			cond: self.cond.clone().map(|c| c.0),
 			groups: self.group.clone(),
 		}

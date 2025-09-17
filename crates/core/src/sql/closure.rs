@@ -1,11 +1,11 @@
 use std::fmt;
 
-use crate::sql::{Expr, Kind};
+use crate::sql::{Expr, Kind, Param};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Closure {
-	pub args: Vec<(Ident, Kind)>,
+	pub args: Vec<(Param, Kind)>,
 	pub returns: Option<Kind>,
 	pub body: Expr,
 }

@@ -10,7 +10,7 @@ pub fn entries((object,): (Object,)) -> Result<Value> {
 		object
 			.iter()
 			.map(|(k, v)| {
-				let k = Value::Strand(unsafe { Strand::new_unchecked(k.to_owned()) });
+				let k = Value::Strand(k.to_owned());
 				let v = v.clone();
 				Value::Array(Array(vec![k, v]))
 			})
@@ -80,7 +80,7 @@ pub fn keys((object,): (Object,)) -> Result<Value> {
 			.keys()
 			.map(|v| {
 				//TODO: Null bytes
-				let strand = unsafe { Strand::new_unchecked(v.clone()) };
+				let strand = v.clone();
 				Value::Strand(strand)
 			})
 			.collect(),

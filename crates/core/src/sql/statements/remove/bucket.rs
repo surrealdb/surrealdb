@@ -3,7 +3,7 @@ use std::fmt::{self, Display, Formatter};
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveBucketStatement {
-	pub name: Ident,
+	pub name: String,
 	pub if_exists: bool,
 }
 

@@ -1,8 +1,8 @@
 use std::fmt;
 
 use crate::catalog::Distance;
-use crate::expr::fmt::Fmt;
 use crate::expr::{Expr, Kind};
+use crate::fmt::Fmt;
 use crate::idx::ft::MatchRef;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -38,7 +38,7 @@ pub enum PostfixOperator {
 	Range,
 	RangeSkip,
 	/// Not used as of yet but will be once the idiom is properly restructured.
-	MethodCall(Ident, Vec<Expr>),
+	MethodCall(String, Vec<Expr>),
 	Call(Vec<Expr>),
 }
 

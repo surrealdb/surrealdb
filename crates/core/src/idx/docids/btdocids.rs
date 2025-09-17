@@ -260,10 +260,10 @@ mod tests {
 	async fn test_resolve_doc_id() {
 		let ds = Datastore::new("memory").await.unwrap();
 
-		let foo_thing = RecordId::new("Foo".to_owned(), strand!("").to_owned());
-		let bar_thing = RecordId::new("Bar".to_owned(), strand!("").to_owned());
-		let hello_thing = RecordId::new("Hello".to_owned(), strand!("").to_owned());
-		let world_thing = RecordId::new("World".to_owned(), strand!("").to_owned());
+		let foo_thing = RecordId::new("Foo".to_owned(), String::new());
+		let bar_thing = RecordId::new("Bar".to_owned(), String::new());
+		let hello_thing = RecordId::new("Hello".to_owned(), String::new());
+		let world_thing = RecordId::new("World".to_owned(), String::new());
 
 		// Resolve a first doc key
 		{
@@ -333,11 +333,11 @@ mod tests {
 	async fn test_remove_doc() {
 		let ds = Datastore::new("memory").await.unwrap();
 
-		let foo_thing = RecordId::new("Foo".to_owned(), strand!("").to_owned());
-		let bar_thing = RecordId::new("Bar".to_owned(), strand!("").to_owned());
-		let dummy_thing = RecordId::new("Dummy".to_owned(), strand!("").to_owned());
-		let hello_thing = RecordId::new("Hello".to_owned(), strand!("").to_owned());
-		let world_thing = RecordId::new("World".to_owned(), strand!("").to_owned());
+		let foo_thing = RecordId::new("Foo".to_owned(), String::new());
+		let bar_thing = RecordId::new("Bar".to_owned(), String::new());
+		let dummy_thing = RecordId::new("Dummy".to_owned(), String::new());
+		let hello_thing = RecordId::new("Hello".to_owned(), String::new());
+		let world_thing = RecordId::new("World".to_owned(), String::new());
 
 		// Create two docs
 		{

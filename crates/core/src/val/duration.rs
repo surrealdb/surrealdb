@@ -67,28 +67,7 @@ impl From<time::Duration> for Value {
 impl FromStr for Duration {
 	type Err = ();
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		Self::try_from(s)
-	}
-}
-
-impl TryFrom<String> for Duration {
-	type Error = ();
-	fn try_from(v: String) -> Result<Self, Self::Error> {
-		Self::try_from(v.as_str())
-	}
-}
-
-impl TryFrom<Strand> for Duration {
-	type Error = ();
-	fn try_from(v: Strand) -> Result<Self, Self::Error> {
-		Self::try_from(v.as_str())
-	}
-}
-
-impl TryFrom<&str> for Duration {
-	type Error = ();
-	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match syn::duration(v) {
+		match syn::duration(s) {
 			Ok(v) => Ok(v),
 			_ => Err(()),
 		}

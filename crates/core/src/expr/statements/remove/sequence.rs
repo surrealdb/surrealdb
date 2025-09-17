@@ -13,7 +13,7 @@ use crate::key::sequence::Prefix;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveSequenceStatement {
-	pub name: Ident,
+	pub name: String,
 	pub if_exists: bool,
 }
 

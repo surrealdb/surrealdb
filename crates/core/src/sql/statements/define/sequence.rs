@@ -7,7 +7,7 @@ use crate::sql::Timeout;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineSequenceStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub batch: u32,
 	pub start: i64,
 	pub timeout: Option<Timeout>,

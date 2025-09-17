@@ -8,11 +8,11 @@ use crate::sql::tokenizer::Tokenizer;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineAnalyzerStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub function: Option<String>,
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl Display for DefineAnalyzerStatement {

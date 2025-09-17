@@ -7,14 +7,14 @@ use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::{Base, Timeout, Value};
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AlterSequenceStatement {
-	pub name: Ident,
+	pub name: String,
 	pub if_exists: bool,
 	pub timeout: Option<Timeout>,
 }

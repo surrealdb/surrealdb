@@ -85,7 +85,7 @@ pub(super) enum Collected {
 		o: Option<Value>,
 	},
 	RecordId(RecordId),
-	Yield(Ident),
+	Yield(String),
 	Value(Value),
 	Defer(RecordId),
 	Mergeable(RecordId, Value),
@@ -294,7 +294,7 @@ impl Collected {
 		Ok(pro)
 	}
 
-	async fn process_yield(v: Ident) -> Result<Processed> {
+	async fn process_yield(v: String) -> Result<Processed> {
 		// Pass the value through
 		let pro = Processed {
 			rs: RecordStrategy::KeysAndValues,
@@ -492,9 +492,9 @@ pub(super) trait Collector {
 
 	fn iterator(&mut self) -> &mut Iterator;
 
-	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b Ident) -> Cow<'b, Context> {
+	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b str) -> Cow<'b, Context> {
 		if let Some(qp) = ctx.get_query_planner() {
-			if let Some(exe) = qp.get_query_executor(table.as_str()) {
+			if let Some(exe) = qp.get_query_executor(table) {
 				// Optimize executor lookup:
 				// - Attach the table-specific QueryExecutor to the Context once, so subsequent
 				//   per-record processing doesn’t need to search the QueryPlanner’s internal map on
@@ -637,7 +637,7 @@ pub(super) trait Collector {
 		&mut self,
 		ctx: &Context,
 		opt: &Options,
-		v: &Ident,
+		v: &str,
 		sc: ScanDirection,
 	) -> Result<()> {
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
@@ -645,7 +645,7 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		txn.check_tb(ns, db, v.as_str(), opt.strict).await?;
+		txn.check_tb(ns, db, &v, opt.strict).await?;
 
 		// Prepare the start and end keys
 		let beg = record::prefix(ns, db, v)?;
@@ -679,7 +679,7 @@ pub(super) trait Collector {
 		&mut self,
 		ctx: &Context,
 		opt: &Options,
-		v: &Ident,
+		v: &str,
 		sc: ScanDirection,
 	) -> Result<()> {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
@@ -687,7 +687,7 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		txn.check_tb(ns, db, v.as_str(), opt.strict).await?;
+		txn.check_tb(ns, db, v, opt.strict).await?;
 
 		// Prepare the start and end keys
 		let beg = record::prefix(ns, db, v)?;
@@ -719,13 +719,13 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
-	async fn collect_table_count(&mut self, ctx: &Context, opt: &Options, v: &Ident) -> Result<()> {
+	async fn collect_table_count(&mut self, ctx: &Context, opt: &Options, v: &str) -> Result<()> {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		txn.check_tb(ns, db, v.as_str(), opt.strict).await?;
+		txn.check_tb(ns, db, v, opt.strict).await?;
 
 		let beg = record::prefix(ns, db, v)?;
 		let end = record::suffix(ns, db, v)?;

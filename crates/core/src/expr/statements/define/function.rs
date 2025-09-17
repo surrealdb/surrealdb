@@ -9,8 +9,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::{Base, Block, Kind};
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -64,10 +64,10 @@ impl DefineFunctionStatement {
 			ns,
 			db,
 			&FunctionDefinition {
-				name: self.name.to_raw_string(),
-				args: self.args.clone().into_iter().map(|(n, k)| (n.to_raw_string(), k)).collect(),
+				name: self.name.clone(),
+				args: self.args.clone(),
 				block: self.block.clone(),
-				comment: self.comment.clone().map(|c| c.into_string()),
+				comment: self.comment.clone(),
 				permissions: self.permissions.clone(),
 				returns: self.returns.clone(),
 			},

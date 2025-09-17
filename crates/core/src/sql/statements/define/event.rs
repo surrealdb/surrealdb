@@ -1,18 +1,18 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
+use crate::fmt::Fmt;
 use crate::sql::Expr;
-use crate::sql::fmt::Fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineEventStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
-	pub target_table: Ident,
+	pub name: String,
+	pub target_table: String,
 	pub when: Expr,
 	pub then: Vec<Expr>,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl Display for DefineEventStatement {

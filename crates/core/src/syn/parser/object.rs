@@ -129,7 +129,7 @@ impl Parser<'_> {
 				Ok(str)
 			}
 			t!("\"") | t!("'") | TokenKind::Glued(Glued::Strand) => {
-				let str = self.next_token_value::<Strand>()?.into_string();
+				let str = self.parse_string_lit()?;
 				Ok(str)
 			}
 			TokenKind::Digits => {

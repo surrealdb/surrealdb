@@ -38,7 +38,7 @@ impl From<crate::expr::statements::access::AccessStatement> for AccessStatement 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementGrant {
-	pub ac: Ident,
+	pub ac: String,
 	pub base: Option<Base>,
 	pub subject: Subject,
 }
@@ -66,9 +66,9 @@ impl From<crate::expr::statements::access::AccessStatementGrant> for AccessState
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementShow {
-	pub ac: Ident,
+	pub ac: String,
 	pub base: Option<Base>,
-	pub gr: Option<Ident>,
+	pub gr: Option<String>,
 	pub cond: Option<Cond>,
 }
 
@@ -97,9 +97,9 @@ impl From<crate::expr::statements::access::AccessStatementShow> for AccessStatem
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementRevoke {
-	pub ac: Ident,
+	pub ac: String,
 	pub base: Option<Base>,
-	pub gr: Option<Ident>,
+	pub gr: Option<String>,
 	pub cond: Option<Cond>,
 }
 
@@ -128,7 +128,7 @@ impl From<crate::expr::statements::access::AccessStatementRevoke> for AccessStat
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementPurge {
-	pub ac: Ident,
+	pub ac: String,
 	pub base: Option<Base>,
 	// TODO: Merge these booleans into a enum as having them both be false is invalid state.
 	pub expired: bool,
@@ -163,8 +163,8 @@ impl From<crate::expr::statements::access::AccessStatementPurge> for AccessState
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessGrant {
-	pub id: Ident,                    // Unique grant identifier.
-	pub ac: Ident,                    // Access method used to create the grant.
+	pub id: String,                   // Unique grant identifier.
+	pub ac: String,                   // Access method used to create the grant.
 	pub creation: Datetime,           // Grant creation time.
 	pub expiration: Option<Datetime>, // Grant expiration time, if any.
 	pub revocation: Option<Datetime>, // Grant revocation time, if any.
@@ -176,7 +176,7 @@ pub struct AccessGrant {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Subject {
 	Record(RecordIdLit),
-	User(Ident),
+	User(String),
 }
 
 impl From<Subject> for crate::expr::statements::access::Subject {
@@ -220,7 +220,7 @@ impl Grant {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct GrantJwt {
 	pub jti: Uuid,             // JWT ID
-	pub token: Option<Strand>, // JWT. Will not be stored after being returned.
+	pub token: Option<String>, // JWT. Will not be stored after being returned.
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -228,17 +228,17 @@ pub struct GrantJwt {
 pub struct GrantRecord {
 	pub rid: Uuid,             // Record ID
 	pub jti: Uuid,             // JWT ID
-	pub token: Option<Strand>, // JWT. Will not be stored after being returned.
+	pub token: Option<String>, // JWT. Will not be stored after being returned.
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct GrantBearer {
-	pub id: Ident, // Key ID
+	pub id: String, // Key ID
 	// Key. Will not be stored and be returned as redacted.
 	// Immediately after generation, it will contain the plaintext key.
 	// Will be hashed before storage so that the plaintext key is not stored.
-	pub key: Strand,
+	pub key: String,
 }
 
 impl Display for AccessStatement {

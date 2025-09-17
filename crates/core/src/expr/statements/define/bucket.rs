@@ -83,11 +83,11 @@ impl DefineBucketStatement {
 		let key = crate::key::database::bu::new(ns, db, &name);
 		let ap = BucketDefinition {
 			id: None,
-			name: self.name.to_raw_string(),
+			name: self.name.clone(),
 			backend,
 			permissions: self.permissions.clone(),
 			readonly: self.readonly,
-			comment: self.comment.as_ref().map(|c| c.to_raw_string()),
+			comment: self.comment.clone(),
 		};
 		txn.set(&key, &ap, None).await?;
 		// Clear the cache

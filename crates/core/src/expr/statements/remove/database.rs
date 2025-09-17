@@ -11,7 +11,7 @@ use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveDatabaseStatement {
-	pub name: Ident,
+	pub name: String,
 	pub if_exists: bool,
 	pub expunge: bool,
 }

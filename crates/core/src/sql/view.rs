@@ -1,13 +1,13 @@
 use std::fmt;
 
-use crate::sql::fmt::Fmt;
+use crate::fmt::Fmt;
 use crate::sql::{Cond, Fields, Groups};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct View {
 	pub expr: Fields,
-	pub what: Vec<Ident>,
+	pub what: Vec<String>,
 	pub cond: Option<Cond>,
 	pub group: Option<Groups>,
 }

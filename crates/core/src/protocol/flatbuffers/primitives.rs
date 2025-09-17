@@ -306,21 +306,3 @@ impl FromFlatbuffers for Bytes {
 		Ok(Bytes(data.bytes().to_vec()))
 	}
 }
-
-impl ToFlatbuffers for Strand {
-	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::StringValue<'bldr>>;
-
-	#[inline]
-	fn to_fb<'bldr>(
-		&self,
-		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> anyhow::Result<Self::Output<'bldr>> {
-		let value = builder.create_string(self.as_str());
-		Ok(proto_fb::StringValue::create(
-			builder,
-			&proto_fb::StringValueArgs {
-				value: Some(value),
-			},
-		))
-	}
-}

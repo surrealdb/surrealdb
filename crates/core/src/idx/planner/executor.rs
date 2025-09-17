@@ -134,7 +134,7 @@ impl InnerQueryExecutor {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		table: &Ident,
+		table: &str,
 		ios: Vec<(Arc<Expr>, IndexOption)>,
 		kbtes: KnnBruteForceExpressions,
 		knn_condition: Option<Cond>,
@@ -316,7 +316,7 @@ impl InnerQueryExecutor {
 		}
 
 		Ok(Self {
-			table: table.clone().into_string(),
+			table: table.to_owned(),
 			ir_map,
 			mr_entries,
 			exp_entries,

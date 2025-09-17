@@ -7,9 +7,8 @@ use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 
 use super::DefineKind;
+use crate::fmt::{Fmt, QuoteStr};
 use crate::sql::Base;
-use crate::sql::escape::QuoteStr;
-use crate::sql::fmt::Fmt;
 use crate::val::Duration;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -25,14 +24,14 @@ pub enum PassType {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineUserStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub base: Base,
 	pub pass_type: PassType,
-	pub roles: Vec<Ident>,
+	pub roles: Vec<String>,
 	pub token_duration: Option<Duration>,
 	pub session_duration: Option<Duration>,
 
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl Display for DefineUserStatement {

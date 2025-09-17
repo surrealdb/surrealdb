@@ -15,10 +15,10 @@ impl Parser<'_> {
 		stk: &mut Stk,
 	) -> ParseResult<FunctionCall> {
 		expected!(self, t!("::"));
-		let mut name = self.next_token_value::<Ident>()?.into_string();
+		let mut name = self.parse_ident()?;
 		while self.eat(t!("::")) {
 			name.push_str("::");
-			name.push_str(&self.next_token_value::<Ident>()?)
+			name.push_str(&self.parse_ident()?)
 		}
 		expected!(self, t!("(")).span;
 		let args = self.parse_function_args(stk).await?;
@@ -53,10 +53,10 @@ impl Parser<'_> {
 	/// Expects `ml` to already be called.
 	pub(super) async fn parse_model(&mut self, stk: &mut Stk) -> ParseResult<FunctionCall> {
 		expected!(self, t!("::"));
-		let mut name = self.next_token_value::<Ident>()?.into_string();
+		let mut name = self.parse_ident()?;
 		while self.eat(t!("::")) {
 			name.push_str("::");
-			name.push_str(&self.next_token_value::<Ident>()?)
+			name.push_str(&self.parse_ident()?)
 		}
 		let start = expected!(self, t!("<")).span;
 

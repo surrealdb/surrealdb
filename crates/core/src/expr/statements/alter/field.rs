@@ -127,7 +127,7 @@ impl AlterFieldStatement {
 		}
 
 		match self.comment {
-			AlterKind::Set(ref k) => df.comment = Some(k.clone().into_string()),
+			AlterKind::Set(ref k) => df.comment = Some(k.clone()),
 			AlterKind::Drop => df.comment = None,
 			AlterKind::None => {}
 		}

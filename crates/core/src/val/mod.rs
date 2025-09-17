@@ -14,10 +14,10 @@ use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
-use crate::expr::fmt::Pretty;
 use crate::expr::kind::GeometryKind;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{self, Kind};
+use crate::fmt::Pretty;
 
 pub mod array;
 pub mod bytes;
@@ -609,7 +609,7 @@ impl Value {
 			Value::File(file) => expr::Expr::Literal(expr::Literal::File(file)),
 			Value::Closure(closure) => expr::Expr::Literal(expr::Literal::Closure(closure)),
 			Value::Range(range) => range.into_literal(),
-			Value::Table(t) => expr::Expr::Table(t.into()),
+			Value::Table(t) => expr::Expr::Table(t.into_string()),
 		}
 	}
 }
@@ -660,9 +660,9 @@ impl TryAdd for Value {
 	fn try_add(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_add(w)?),
-			(Self::Strand(v), Self::Strand(w)) => {
+			(Self::Strand(mut v), Self::Strand(w)) => {
 				v.push_str(&w);
-				Ok(Value::Strand(v))
+				Value::Strand(v)
 			}
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_add(v)?),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),

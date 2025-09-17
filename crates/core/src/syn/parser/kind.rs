@@ -96,10 +96,9 @@ impl Parser<'_> {
 			t!("RECORD") => {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {
-					let mut tables =
-						vec![self.next_token_value::<Ident>().map(|i| i.into_string())?];
+					let mut tables = vec![self.parse_ident()?];
 					while self.eat(t!("|")) {
-						tables.push(self.next_token_value::<Ident>().map(|i| i.into_string())?);
+						tables.push(self.parse_ident()?);
 					}
 					self.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::Record(tables))
@@ -145,10 +144,9 @@ impl Parser<'_> {
 			t!("FILE") => {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {
-					let mut buckets =
-						vec![self.next_token_value::<Ident>().map(|i| i.into_string())?];
+					let mut buckets = vec![self.parse_ident()?];
 					while self.eat(t!("|")) {
-						buckets.push(self.next_token_value::<Ident>().map(|i| i.into_string())?);
+						buckets.push(self.parse_ident()?);
 					}
 					self.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::File(buckets))
@@ -191,7 +189,7 @@ impl Parser<'_> {
 				Ok(KindLiteral::Bool(false))
 			}
 			t!("'") | t!("\"") | TokenKind::Glued(Glued::Strand) => {
-				let s = self.next_token_value::<Strand>()?;
+				let s = self.parse_string_lit()?;
 				Ok(KindLiteral::String(s))
 			}
 			t!("+") | t!("-") | TokenKind::Glued(Glued::Number) => {

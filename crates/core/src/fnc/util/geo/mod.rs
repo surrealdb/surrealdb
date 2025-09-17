@@ -56,7 +56,7 @@ pub fn decode(v: &str) -> Geometry {
 	let mut mid: f64;
 	let mut long: bool = true;
 
-	for c in v.as_str().chars() {
+	for c in v.chars() {
 		let ord = c as usize;
 
 		let val = if (48..=57).contains(&ord) {

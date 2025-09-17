@@ -4,8 +4,7 @@ use std::fmt::{self, Write as _};
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use rust_decimal::Decimal;
 
-use crate::sql::escape::EscapeKey;
-use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKey, Fmt, Pretty, is_pretty, pretty_indent};
 use crate::sql::{Closure, Expr, RecordIdLit};
 use crate::val::{Bytes, Datetime, Duration, File, Geometry, Regex, Uuid};
 

@@ -4,8 +4,7 @@ use std::hash;
 
 use rust_decimal::Decimal;
 
-use super::escape::EscapeKey;
-use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKey, Fmt, Pretty, is_pretty, pretty_indent};
 use crate::val::Duration;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -295,7 +294,7 @@ impl Display for Kind {
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum KindLiteral {
-	String(Strand),
+	String(String),
 	Integer(i64),
 	Float(f64),
 	Decimal(Decimal),

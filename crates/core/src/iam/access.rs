@@ -106,7 +106,7 @@ pub async fn authenticate_generic(
 // Create a bearer key to act as refresh token for a record user
 pub async fn create_refresh_token_record(
 	kvs: &Datastore,
-	ac: Ident,
+	ac: String,
 	ns: &str,
 	db: &str,
 	rid: RecordId,
@@ -136,8 +136,8 @@ pub async fn create_refresh_token_record(
 // Revoke a bearer key that acted as a refresh token for a record user
 pub async fn revoke_refresh_token_record(
 	kvs: &Datastore,
-	gr: Ident,
-	ac: Ident,
+	gr: String,
+	ac: String,
 	ns: &str,
 	db: &str,
 ) -> Result<()> {

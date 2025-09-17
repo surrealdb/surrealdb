@@ -7,8 +7,8 @@ use crate::catalog::{ApiConfigDefinition, MiddlewareDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::fmt::Fmt;
 use crate::expr::{Expr, FlowResultExt};
+use crate::fmt::Fmt;
 
 /// The api configuration as it is received from ast.
 

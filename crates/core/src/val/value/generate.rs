@@ -4,41 +4,41 @@ use crate::err::Error;
 use crate::val::{RecordId, RecordIdKey, Value};
 
 impl Value {
-	pub(crate) fn generate(self, tb: Strand, retable: bool) -> Result<RecordId> {
+	pub(crate) fn generate(self, tb: String, retable: bool) -> Result<RecordId> {
 		match self {
 			// There is a floating point number for the id field
 			Value::Number(id) if id.is_float() => Ok(RecordId {
-				table: tb.into_string(),
+				table: tb,
 				key: RecordIdKey::Number(id.as_int()),
 			}),
 			// There is an integer number for the id field
 			Value::Number(id) if id.is_int() => Ok(RecordId {
-				table: tb.into_string(),
+				table: tb,
 				key: RecordIdKey::Number(id.as_int()),
 			}),
 			// There is a string for the id field
 			Value::Strand(id) if !id.is_empty() => Ok(RecordId {
-				table: tb.into_string(),
+				table: tb,
 				key: id.into(),
 			}),
 			// There is an object for the id field
 			Value::Object(id) => Ok(RecordId {
-				table: tb.into_string(),
+				table: tb,
 				key: id.into(),
 			}),
 			// There is an array for the id field
 			Value::Array(id) => Ok(RecordId {
-				table: tb.into_string(),
+				table: tb,
 				key: id.into(),
 			}),
 			// There is a UUID for the id field
 			Value::Uuid(id) => Ok(RecordId {
-				table: tb.into_string(),
+				table: tb,
 				key: id.into(),
 			}),
 			// There is no record id field
 			Value::None => Ok(RecordId {
-				table: tb.into_string(),
+				table: tb,
 				key: RecordIdKey::rand(),
 			}),
 			// There is a record id defined
@@ -46,7 +46,7 @@ impl Value {
 				if retable {
 					// Let's re-table this record id
 					Ok(RecordId {
-						table: tb.into_string(),
+						table: tb,
 						key: id.key,
 					})
 				} else {
@@ -57,7 +57,7 @@ impl Value {
 					} else {
 						// The record id is from another table
 						Ok(RecordId {
-							table: tb.into_string(),
+							table: tb,
 							key: id.key,
 						})
 					}

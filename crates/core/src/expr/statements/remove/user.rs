@@ -10,7 +10,7 @@ use crate::expr::{Base, Value};
 use crate::iam::{Action, ResourceKind};
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveUserStatement {
-	pub name: Ident,
+	pub name: String,
 	pub base: Base,
 	pub if_exists: bool,
 }

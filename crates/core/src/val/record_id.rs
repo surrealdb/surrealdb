@@ -9,8 +9,8 @@ use storekey::{BorrowDecode, Encode};
 use ulid::Ulid;
 
 use crate::cnf::ID_CHARS;
-use crate::expr::escape::EscapeRid;
 use crate::expr::{self};
+use crate::fmt::EscapeRid;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, IndexFormat, Number, Object, Range, Uuid, Value};
 

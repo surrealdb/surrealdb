@@ -258,7 +258,7 @@ impl Value {
 				Part::Value(x) => {
 					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()?;
 					match v {
-						Value::Strand(x) => x.into_string(),
+						Value::Strand(x) => x,
 						Value::RecordId(x) => x.to_string(),
 						Value::Number(x) => x.to_string(),
 						Value::Range(x) => x.to_string(),

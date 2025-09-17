@@ -310,16 +310,13 @@ impl Parser<'_> {
 		let (ns, db) = match peek.kind {
 			t!("NAMESPACE") => {
 				self.pop_peek();
-				let ns = self.next_token_value::<Ident>()?;
-				let db = self
-					.eat(t!("DATABASE"))
-					.then(|| self.next_token_value::<Ident>())
-					.transpose()?;
+				let ns = self.parse_ident()?;
+				let db = self.eat(t!("DATABASE")).then(|| self.parse_ident()).transpose()?;
 				(Some(ns), db)
 			}
 			t!("DATABASE") => {
 				self.pop_peek();
-				let db = self.next_token_value::<Ident>()?;
+				let db = self.parse_ident()?;
 				(None, Some(db))
 			}
 			_ => unexpected!(self, peek, "either DATABASE or NAMESPACE"),
@@ -526,7 +523,7 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects `LET` to already be consumed.
 	pub(super) async fn parse_let_stmt(&mut self, stk: &mut Stk) -> ParseResult<SetStatement> {
-		let name = self.next_token_value::<Param>()?.ident();
+		let name = self.next_token_value::<Param>()?.into_string();
 		let kind = if self.eat(t!(":")) {
 			Some(self.parse_inner_kind(stk).await?)
 		} else {

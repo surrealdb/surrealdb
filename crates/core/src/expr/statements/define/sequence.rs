@@ -16,7 +16,7 @@ use crate::key::sequence::Prefix;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineSequenceStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub batch: u32,
 	pub start: i64,
 	pub timeout: Option<Timeout>,
@@ -54,7 +54,7 @@ impl DefineSequenceStatement {
 		// Process the statement
 		let key = Sq::new(db.namespace_id, db.database_id, &self.name);
 		let sq = SequenceDefinition {
-			name: self.name.to_raw_string(),
+			name: self.name.clone(),
 			batch: self.batch,
 			start: self.start,
 			timeout: self.timeout.as_ref().map(|t| *t.as_std_duration()),

@@ -1,17 +1,17 @@
 use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
-use crate::sql::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::sql::{Block, Kind, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineFunctionStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
-	pub args: Vec<(Ident, Kind)>,
+	pub name: String,
+	pub args: Vec<(String, Kind)>,
 	pub block: Block,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 	pub permissions: Permission,
 	pub returns: Option<Kind>,
 }

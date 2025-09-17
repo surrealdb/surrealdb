@@ -59,9 +59,9 @@ pub async fn delete(
 
 pub async fn copy(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
-	(file, target): (File, Strand),
+	(file, target): (File, String),
 ) -> Result<Value> {
-	let target = ObjectKey::new(target.into_string());
+	let target = ObjectKey::new(target);
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &file.bucket).await?;
 	controller.copy(&ObjectKey::new(file.key), target).await?;
 
@@ -70,9 +70,9 @@ pub async fn copy(
 
 pub async fn copy_if_not_exists(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
-	(file, target): (File, Strand),
+	(file, target): (File, String),
 ) -> Result<Value> {
-	let target = ObjectKey::new(target.into_string());
+	let target = ObjectKey::new(target);
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &file.bucket).await?;
 	controller.copy_if_not_exists(&ObjectKey::new(file.key), target).await?;
 
@@ -81,9 +81,9 @@ pub async fn copy_if_not_exists(
 
 pub async fn rename(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
-	(file, target): (File, Strand),
+	(file, target): (File, String),
 ) -> Result<Value> {
-	let target = ObjectKey::new(target.into_string());
+	let target = ObjectKey::new(target);
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &file.bucket).await?;
 	controller.rename(&ObjectKey::new(file.key), target).await?;
 
@@ -92,9 +92,9 @@ pub async fn rename(
 
 pub async fn rename_if_not_exists(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
-	(file, target): (File, Strand),
+	(file, target): (File, String),
 ) -> Result<Value> {
-	let target = ObjectKey::new(target.into_string());
+	let target = ObjectKey::new(target);
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &file.bucket).await?;
 	controller.rename_if_not_exists(&ObjectKey::new(file.key), target).await?;
 

@@ -3,8 +3,8 @@ use std::fmt::{self, Display};
 use super::DefineKind;
 use super::config::api::ApiConfig;
 use crate::catalog::ApiMethod;
+use crate::fmt::{Fmt, pretty_indent};
 use crate::sql::Expr;
-use crate::sql::fmt::{Fmt, pretty_indent};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -14,7 +14,7 @@ pub struct DefineApiStatement {
 	pub actions: Vec<ApiAction>,
 	pub fallback: Option<Expr>,
 	pub config: ApiConfig,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl Display for DefineApiStatement {

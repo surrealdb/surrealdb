@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::sql::fmt::Fmt;
+use crate::fmt::Fmt;
 use crate::sql::{Expr, Idiom, Model, Script};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -16,10 +16,10 @@ impl Function {
 	pub fn to_idiom(&self) -> Idiom {
 		match self {
 			// Safety: "function" does not contain null bytes"
-			Self::Script(_) => Idiom::field(unsafe { Ident::new_unchecked("function".to_owned()) }),
-			Self::Normal(f) => Idiom::field(unsafe { Ident::new_unchecked(f.to_owned()) }),
-			Self::Custom(f) => Idiom::field(unsafe { Ident::new_unchecked(format!("fn::{f}")) }),
-			Self::Model(m) => Idiom::field(unsafe { Ident::new_unchecked(m.to_string()) }),
+			Self::Script(_) => Idiom::field("function".to_owned()),
+			Self::Normal(f) => Idiom::field(f.to_owned()),
+			Self::Custom(f) => Idiom::field(format!("fn::{f}")),
+			Self::Model(m) => Idiom::field(m.to_string()),
 		}
 	}
 }

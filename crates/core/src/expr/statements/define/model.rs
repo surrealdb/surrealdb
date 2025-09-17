@@ -10,7 +10,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Base;
-use crate::expr::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -58,9 +58,9 @@ impl DefineModelStatement {
 			&key,
 			&MlModelDefinition {
 				hash: self.hash.clone(),
-				name: self.name.to_raw_string(),
+				name: self.name.clone(),
 				version: self.version.clone(),
-				comment: self.comment.clone().map(|x| x.to_raw_string()),
+				comment: self.comment.clone(),
 				permissions: self.permissions.clone(),
 			},
 			None,

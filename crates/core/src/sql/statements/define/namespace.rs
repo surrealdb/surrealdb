@@ -7,8 +7,8 @@ use super::DefineKind;
 pub struct DefineNamespaceStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
-	pub name: Ident,
-	pub comment: Option<Strand>,
+	pub name: String,
+	pub comment: Option<String>,
 }
 
 impl Display for DefineNamespaceStatement {

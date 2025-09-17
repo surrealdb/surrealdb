@@ -8,12 +8,12 @@ use crate::sql::{AccessType, Base, Expr};
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineAccessStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub base: Base,
 	pub access_type: AccessType,
 	pub authenticate: Option<Expr>,
 	pub duration: AccessDuration,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl Display for DefineAccessStatement {

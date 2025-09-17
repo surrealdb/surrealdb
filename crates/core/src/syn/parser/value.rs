@@ -84,7 +84,7 @@ impl Parser<'_> {
 				self.parse_value_array::<SurrealQL>(stk, token.span).await.map(Value::Array)?
 			}
 			t!("\"") | t!("'") => {
-				let strand: Strand = self.next_token_value()?;
+				let strand = self.parse_string_lit()?;
 				if self.settings.legacy_strands {
 					self.reparse_json_legacy_strand(stk, strand).await
 				} else {
@@ -273,7 +273,7 @@ impl Parser<'_> {
 				self.parse_value_array::<Json>(stk, token.span).await.map(Value::Array)
 			}
 			t!("\"") | t!("'") => {
-				let strand: Strand = self.next_token_value()?;
+				let strand = self.parse_ident()?;
 				if self.settings.legacy_strands {
 					Ok(self.reparse_json_legacy_strand(stk, strand).await)
 				} else {
@@ -302,7 +302,7 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn reparse_json_legacy_strand(&mut self, stk: &mut Stk, strand: Strand) -> Value {
+	async fn reparse_json_legacy_strand(&mut self, stk: &mut Stk, strand: String) -> Value {
 		if let Ok(x) = Parser::new(strand.as_bytes()).parse_value_record_id(stk).await {
 			return Value::RecordId(x);
 		}
@@ -366,7 +366,7 @@ impl Parser<'_> {
 	where
 		VP: ValueParseFunc,
 	{
-		let table = self.next_token_value::<Ident>()?;
+		let table = self.parse_ident()?;
 		expected!(self, t!(":"));
 		let peek = self.peek();
 		let key = match peek.kind {
@@ -432,7 +432,7 @@ impl Parser<'_> {
 					&& Self::kind_is_identifier(self.peek_whitespace1().kind)
 				{
 					let ident = self.parse_flexible_ident()?;
-					RecordIdKey::String(ident.into_string())
+					RecordIdKey::String(ident)
 				} else {
 					self.pop_peek();
 
@@ -457,14 +457,14 @@ impl Parser<'_> {
 				let ident = if self.settings.flexible_record_id {
 					self.parse_flexible_ident()?
 				} else {
-					self.next_token_value::<Ident>()?
+					self.parse_ident()?
 				};
-				RecordIdKey::String(ident.into_string())
+				RecordIdKey::String(ident)
 			}
 		};
 
 		Ok(RecordId {
-			table: table.into_string(),
+			table,
 			key,
 		})
 	}

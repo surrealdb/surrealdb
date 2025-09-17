@@ -21,7 +21,7 @@ impl ParamDefinition {
 	pub fn to_sql_definition(&self) -> DefineParamStatement {
 		DefineParamStatement {
 			kind: DefineKind::Default,
-			name: unsafe { crate::sql::Ident::new_unchecked(self.name.clone()) },
+			name: self.name.clone(),
 			value: crate::sql::Expr::from_value(self.value.clone()),
 			comment: self.comment.clone().map(Into::into),
 			permissions: self.permissions.clone().into(),

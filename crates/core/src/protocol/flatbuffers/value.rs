@@ -1,4 +1,4 @@
-use anyhow::{Context, anyhow};
+use anyhow::anyhow;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use surrealdb_protocol::fb::v1 as proto_fb;
@@ -134,7 +134,7 @@ impl FromFlatbuffers for Value {
 					.value()
 					.expect("String value is guaranteed to be present")
 					.to_string();
-				Ok(Value::Strand(Strand::new(value).context("Strand contained null byte")?))
+				Ok(Value::Strand(value))
 			}
 			proto_fb::ValueType::Bytes => {
 				let bytes_value = input.value_as_bytes().expect("Guaranteed to be Bytes");
@@ -234,12 +234,12 @@ mod tests {
 	#[case::duration(Value::Duration(Duration::new(1, 0)))]
 	#[case::datetime(Value::Datetime(Datetime(DateTime::<Utc>::from_timestamp(1_000_000_000, 0).unwrap())))]
 	#[case::uuid(Value::Uuid(Uuid::new_v4()))]
-	#[case::string(Value::Strand(Strand::new("Hello, World!".to_string()).unwrap()))]
+	#[case::string(Value::Strand("Hello, World!".to_string()))]
 	#[case::bytes(Value::Bytes(Bytes(vec![1, 2, 3, 4, 5])))]
 	#[case::thing(Value::RecordId(RecordId{ table: "test_table".to_string(), key: RecordIdKey::Number(42) }))] // Example Thing
 	// thing range
 	#[case::thing_range(Value::RecordId(RecordId{ table: "test_table".to_string(), key: RecordIdKey::Range(Box::new(RecordIdKeyRange { start: Bound::Included(RecordIdKey::String("a".to_string())), end: Bound::Unbounded })) }))]
-	#[case::object(Value::Object(Object(BTreeMap::from([("key".to_string(), Value::Strand(Strand::new("value".to_owned()).unwrap()))]))))]
+	#[case::object(Value::Object(Object(BTreeMap::from([("key".to_string(), Value::Strand("value".to_owned()))]))))]
 	#[case::array(Value::Array(Array(vec![Value::Number(Number::Int(1)), Value::Number(Number::Float(2.0))])))]
 	#[case::geometry::point(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))))]
 	#[case::geometry::line(Value::Geometry(Geometry::Line(geo::LineString(vec![geo::Coord { x: 1.0, y: 2.0 }, geo::Coord { x: 3.0, y: 4.0 }]))))]
@@ -254,9 +254,9 @@ mod tests {
 		vec![geo::LineString(vec![geo::Coord { x: 0.5, y: 0.5 }, geo::Coord { x: 0.75, y: 0.75 }])]
 	)]))))]
 	#[case::file(Value::File(File { bucket: "test_bucket".to_string(), key: "test_key".to_string() }))]
-	#[case::range(Value::Range(Box::new(Range { start: Bound::Included(Value::Strand(Strand::new("Hello, World!".to_string()).unwrap())), end: Bound::Excluded(Value::Strand(Strand::new("Hello, World!".to_string()).unwrap())) })))]
-	#[case::range(Value::Range(Box::new(Range { start: Bound::Unbounded, end: Bound::Excluded(Value::Strand(Strand::new("Hello, World!".to_string()).unwrap())) })))]
-	#[case::range(Value::Range(Box::new(Range { start: Bound::Included(Value::Strand(Strand::new("Hello, World!".to_string()).unwrap())), end: Bound::Unbounded })))]
+	#[case::range(Value::Range(Box::new(Range { start: Bound::Included(Value::Strand("Hello, World!".to_string())), end: Bound::Excluded(Value::Strand("Hello, World!".to_string())) })))]
+	#[case::range(Value::Range(Box::new(Range { start: Bound::Unbounded, end: Bound::Excluded(Value::Strand("Hello, World!".to_string())) })))]
+	#[case::range(Value::Range(Box::new(Range { start: Bound::Included(Value::Strand("Hello, World!".to_string())), end: Bound::Unbounded })))]
 	#[case::regex(Value::Regex(Regex::from_str("/^[a-z]+$/").unwrap()))]
 
 	fn test_flatbuffers_roundtrip_value(#[case] input: Value) {

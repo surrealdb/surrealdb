@@ -9,7 +9,7 @@ pub struct File {
 
 impl File {
 	/// Check if this File belongs to a certain bucket type
-	pub fn is_bucket_type(&self, types: &[Ident]) -> bool {
+	pub fn is_bucket_type(&self, types: &[String]) -> bool {
 		types.is_empty() || types.iter().any(|buc| **buc == self.bucket)
 	}
 }

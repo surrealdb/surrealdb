@@ -33,7 +33,7 @@ impl ShowSince {
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ShowStatement {
-	pub table: Option<Ident>,
+	pub table: Option<String>,
 	pub since: ShowSince,
 	pub limit: Option<u32>,
 }

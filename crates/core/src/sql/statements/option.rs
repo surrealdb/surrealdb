@@ -3,7 +3,7 @@ use std::fmt;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct OptionStatement {
-	pub name: Ident,
+	pub name: String,
 	pub what: bool,
 }
 

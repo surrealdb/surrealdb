@@ -14,7 +14,7 @@ use crate::iam::{Action, ResourceKind};
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveFieldStatement {
 	pub name: Idiom,
-	pub table_name: Ident,
+	pub table_name: String,
 	pub if_exists: bool,
 }
 

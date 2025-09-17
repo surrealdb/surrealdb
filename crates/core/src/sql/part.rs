@@ -1,8 +1,7 @@
 use std::fmt;
 use std::fmt::Write;
 
-use super::fmt::{is_pretty, pretty_indent};
-use crate::sql::fmt::Fmt;
+use crate::fmt::{Fmt, is_pretty, pretty_indent};
 use crate::sql::{Expr, Idiom, Lookup};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -139,14 +138,14 @@ impl fmt::Display for Part {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum DestructurePart {
-	All(Ident),
-	Field(Ident),
-	Aliased(Ident, Idiom),
-	Destructure(Ident, Vec<DestructurePart>),
+	All(String),
+	Field(String),
+	Aliased(String, Idiom),
+	Destructure(String, Vec<DestructurePart>),
 }
 
 impl DestructurePart {
-	pub fn field(&self) -> &Ident {
+	pub fn field(&self) -> &str {
 		match self {
 			DestructurePart::All(v) => v,
 			DestructurePart::Field(v) => v,

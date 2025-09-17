@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::expr::escape::EscapeIdent;
+use crate::fmt::EscapeIdent;
 use crate::val::{RecordId, RecordIdKey};
 
 pub struct IntoIter {

@@ -332,11 +332,11 @@ impl Cast for Number {
 	}
 }
 
-impl Cast for Strand {
+impl Cast for String {
 	fn can_cast(v: &Value) -> bool {
 		match v {
 			Value::None | Value::Null => false,
-			Value::Bytes(b) => !b.contains(&0) && std::str::from_utf8(b).is_ok(),
+			Value::Bytes(b) => std::str::from_utf8(b).is_ok(),
 			_ => true,
 		}
 	}
@@ -344,17 +344,7 @@ impl Cast for Strand {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Bytes(b) => match String::from_utf8(b.0) {
-				Ok(x) => {
-					if x.contains('\0') {
-						Err(CastError::InvalidKind {
-							from: Value::Bytes(Bytes(x.into_bytes())),
-							into: "string".to_owned(),
-						})
-					} else {
-						// Safety: Condition checked above.
-						Ok(unsafe { Strand::new_unchecked(x) })
-					}
-				}
+				Ok(x) => Ok(x),
 				Err(e) => Err(CastError::InvalidKind {
 					from: Value::Bytes(Bytes(e.into_bytes())),
 					into: "string".to_owned(),
@@ -369,16 +359,6 @@ impl Cast for Strand {
 			Value::Number(Number::Decimal(x)) => Ok(x.to_string()),
 			x => Ok(x.to_string()),
 		}
-	}
-}
-
-impl Cast for String {
-	fn can_cast(v: &Value) -> bool {
-		Strand::can_cast(v)
-	}
-
-	fn cast(v: Value) -> Result<Self, CastError> {
-		Strand::cast(v).map(|x| x.into_string())
 	}
 }
 
@@ -731,7 +711,7 @@ impl Value {
 			Kind::Float => self.can_cast_to::<f64>(),
 			Kind::Decimal => self.can_cast_to::<Decimal>(),
 			Kind::Number => self.can_cast_to::<Number>(),
-			Kind::String => self.can_cast_to::<Strand>(),
+			Kind::String => self.can_cast_to::<String>(),
 			Kind::Datetime => self.can_cast_to::<Datetime>(),
 			Kind::Duration => self.can_cast_to::<Duration>(),
 			Kind::Object => self.can_cast_to::<Object>(),
@@ -823,7 +803,7 @@ impl Value {
 			Kind::Float => self.cast_to::<f64>().map(Value::from),
 			Kind::Decimal => self.cast_to::<Decimal>().map(Value::from),
 			Kind::Number => self.cast_to::<Number>().map(Value::from),
-			Kind::String => self.cast_to::<Strand>().map(Value::from),
+			Kind::String => self.cast_to::<String>().map(Value::from),
 			Kind::Datetime => self.cast_to::<Datetime>().map(Value::from),
 			Kind::Duration => self.cast_to::<Duration>().map(Value::from),
 			Kind::Object => self.cast_to::<Object>().map(Value::from),

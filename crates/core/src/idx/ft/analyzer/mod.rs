@@ -95,13 +95,7 @@ impl Analyzer {
 		if let Some(function_name) = self.az.function.as_ref().map(|i| i.as_str().to_owned()) {
 			let val = Function::Custom(function_name.clone())
 				// TODO: Null byte check
-				.compute(
-					stk,
-					ctx,
-					opt,
-					None,
-					vec![Value::Strand(unsafe { Strand::new_unchecked(input) })],
-				)
+				.compute(stk, ctx, opt, None, vec![Value::Strand(input)])
 				.await
 				.catch_return()?;
 			if let Value::Strand(val) = val {

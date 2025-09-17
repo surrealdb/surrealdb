@@ -1,8 +1,8 @@
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
+use crate::fmt::{Fmt, fmt_separated_by};
 use crate::sql::Part;
-use crate::sql::fmt::{Fmt, fmt_separated_by};
 
 // TODO: Remove unnessacry newtype.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -57,7 +57,7 @@ impl Idiom {
 		)
 	}
 
-	pub fn field(name: Ident) -> Self {
+	pub fn field(name: String) -> Self {
 		Idiom(vec![Part::Field(name)])
 	}
 }

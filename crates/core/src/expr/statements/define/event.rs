@@ -11,8 +11,8 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Expr};
+use crate::fmt::Fmt;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::fmt::Fmt;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -66,11 +66,11 @@ impl DefineEventStatement {
 		txn.set(
 			&key,
 			&EventDefinition {
-				name: self.name.to_raw_string(),
-				target_table: self.target_table.to_raw_string(),
+				name: self.name.clone(),
+				target_table: self.target_table.clone(),
 				when: self.when.clone(),
 				then: self.then.clone(),
-				comment: self.comment.clone().map(|x| x.to_raw_string()),
+				comment: self.comment.clone(),
 			},
 			None,
 		)

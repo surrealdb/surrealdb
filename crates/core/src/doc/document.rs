@@ -22,7 +22,7 @@ pub(crate) struct Document {
 	/// The record id of this document
 	pub(super) id: Option<Arc<RecordId>>,
 	/// The table that we should generate a record id from
-	pub(super) r#gen: Option<Ident>,
+	pub(super) r#gen: Option<String>,
 	/// Whether this is the second iteration of the processing
 	pub(super) retry: bool,
 	pub(super) extras: Workable,
@@ -191,7 +191,7 @@ impl Document {
 	pub fn new(
 		id: Option<Arc<RecordId>>,
 		ir: Option<Arc<IteratorRecord>>,
-		r#gen: Option<Ident>,
+		r#gen: Option<String>,
 		val: Arc<Record>,
 		extras: Workable,
 		retry: bool,

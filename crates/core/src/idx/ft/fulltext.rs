@@ -1164,10 +1164,8 @@ mod tests {
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn concurrent_test() {
-		let doc1: Arc<RecordId> =
-			Arc::new(RecordId::new("t".to_owned(), strand!("doc1").to_owned()));
-		let doc2: Arc<RecordId> =
-			Arc::new(RecordId::new("t".to_owned(), strand!("doc2").to_owned()));
+		let doc1: Arc<RecordId> = Arc::new(RecordId::new("t".to_owned(), "doc1".to_owned()));
+		let doc2: Arc<RecordId> = Arc::new(RecordId::new("t".to_owned(), "doc2".to_owned()));
 
 		let test = TestContext::new().await;
 		// Ensure the documents are pre-existing

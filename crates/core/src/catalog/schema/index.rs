@@ -61,8 +61,8 @@ impl IndexDefinition {
 	pub fn to_sql_definition(&self) -> crate::sql::DefineIndexStatement {
 		crate::sql::DefineIndexStatement {
 			kind: DefineKind::Default,
-			name: unsafe { Ident::new_unchecked(self.name.clone()) },
-			what: unsafe { Ident::new_unchecked(self.table_name.clone()) },
+			name: self.name.clone(),
+			what: self.table_name.clone(),
 			cols: self.cols.iter().cloned().map(Into::into).collect(),
 			index: self.index.to_sql_definition(),
 			comment: self.comment.clone(),

@@ -5,7 +5,7 @@ use crate::sql::{Expr, Kind};
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct SetStatement {
-	pub name: Ident,
+	pub name: String,
 	pub what: Expr,
 	pub kind: Option<Kind>,
 }

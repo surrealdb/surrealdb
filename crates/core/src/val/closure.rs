@@ -10,13 +10,13 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Expr, FlowResultExt, Kind};
+use crate::expr::{Expr, FlowResultExt, Kind, Param};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Closure {
-	pub args: Vec<(Ident, Kind)>,
+	pub args: Vec<(Param, Kind)>,
 	pub returns: Option<Kind>,
 	pub body: Expr,
 }

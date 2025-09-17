@@ -3,7 +3,7 @@ use rust_decimal::Decimal;
 
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{
-	BinaryOperator, Constant, Expr,  Idiom, Literal, Part, RecordIdKeyLit, RecordIdLit,
+	BinaryOperator, Constant, Expr, Idiom, Literal, Part, RecordIdKeyLit, RecordIdLit,
 };
 use crate::syn;
 use crate::syn::parser::{Parser, ParserSettings};
@@ -18,7 +18,7 @@ fn parse_index_expression() {
 	let Expr::Idiom(x) = value else {
 		panic!("not the right value type");
 	};
-	assert_eq!(x.0[0], Part::Field(Ident::from_strand("a".to_owned()));
+	assert_eq!(x.0[0], Part::Field("a".to_owned()));
 	assert_eq!(
 		x.0[1],
 		Part::Value(Expr::Binary {
@@ -172,9 +172,7 @@ fn parse_record_string_2() {
 		res,
 		Expr::Literal(Literal::RecordId(RecordIdLit {
 			table: "a".to_owned(),
-			key: RecordIdKeyLit::Array(vec![Expr::Literal(Literal::Strand(
-				strand!("foo").to_owned()
-			))])
+			key: RecordIdKeyLit::Array(vec![Expr::Literal(Literal::Strand("foo".to_owned()))])
 		}))
 	)
 }

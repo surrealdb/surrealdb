@@ -300,9 +300,9 @@ pub mod is {
 		Ok(arg.is_range().into())
 	}
 
-	pub fn record((arg, Optional(table)): (Value, Optional<Strand>)) -> Result<Value> {
+	pub fn record((arg, Optional(table)): (Value, Optional<String>)) -> Result<Value> {
 		let res = match table {
-			Some(tb) => arg.is_record_type(&[tb.into_string()]).into(),
+			Some(tb) => arg.is_record_type(&[tb]).into(),
 			None => arg.is_thing().into(),
 		};
 		Ok(res)

@@ -3,6 +3,7 @@ use std::{fmt, str};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use revision::Revisioned;
 
 use super::FlowResultExt as _;
 use crate::catalog::Permission;
@@ -11,50 +12,59 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::escape::EscapeKwFreeIdent;
+use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::Action;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Param(String);
 
+impl Revisioned for Param {
+	fn revision() -> u16 {
+		String::revision()
+	}
+
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		w: &mut W,
+	) -> std::result::Result<(), revision::Error> {
+		String::serialize_revisioned(&self.0, w)
+	}
+
+	fn deserialize_revisioned<R: std::io::Read>(
+		r: &mut R,
+	) -> std::result::Result<Self, revision::Error>
+	where
+		Self: Sized,
+	{
+		String::deserialize_revisioned(r).map(Param)
+	}
+}
+
 impl Param {
 	/// Create a new identifier
 	///
 	/// This function checks if the string has a null byte, returns None if it
 	/// has.
-	pub fn new(str: String) -> Option<Self> {
-		if str.contains('\0') {
-			return None;
-		}
-		Some(Self(str))
+	pub fn new(str: String) -> Self {
+		Self(str)
 	}
 
-	/// Create a new identifier
-	///
-	/// # Safety
-	/// Caller should ensure that the string does not contain a null byte.
-	pub unsafe fn new_unchecked(str: String) -> Self {
-		Self(str)
+	// Convert into a string.
+	pub fn into_string(self) -> String {
+		self.0
 	}
 
 	/// returns the identifier section of the parameter,
 	/// i.e. `$foo` without the `$` so: `foo`
-	pub fn ident(self) -> Ident {
-		// Safety: Param guarentees no null bytes within it's internal string.
-		unsafe { Ident::new_unchecked(self.0) }
+	pub fn as_str(&self) -> &str {
+		&self.0
 	}
 }
 
-impl From<Ident> for Param {
-	fn from(v: Ident) -> Self {
-		Self(v.to_string())
-	}
-}
-
-impl From<Strand> for Param {
-	fn from(v: Strand) -> Self {
-		Self(v.into_string())
+impl From<String> for Param {
+	fn from(v: String) -> Self {
+		Self(v)
 	}
 }
 

@@ -1,16 +1,16 @@
 use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
-use crate::sql::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::sql::{Expr, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineParamStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub value: Expr,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 	pub permissions: Permission,
 }
 

@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveFunctionStatement {
-	pub name: Ident,
+	pub name: String,
 	pub if_exists: bool,
 }
 

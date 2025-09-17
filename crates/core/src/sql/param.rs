@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::sql::escape::EscapeKwFreeIdent;
+use crate::fmt::EscapeKwFreeIdent;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -11,27 +11,12 @@ impl Param {
 	///
 	/// This function checks if the string has a null byte, returns None if it
 	/// has.
-	pub fn new(str: String) -> Option<Self> {
-		if str.contains('\0') {
-			return None;
-		}
-		Some(Self(str))
-	}
-
-	/// Create a new identifier
-	///
-	/// # Safety
-	/// Caller should ensure that the string does not contain a null byte.
-	pub unsafe fn new_unchecked(str: String) -> Self {
+	pub fn new(str: String) -> Self {
 		Self(str)
 	}
 
-	pub fn from_strand(strand: Strand) -> Self {
-		Param(strand.into_string())
-	}
-
-	pub fn ident(self) -> Ident {
-		unsafe { Ident::new_unchecked(self.0) }
+	pub fn as_str(&self) -> &str {
+		&self.0
 	}
 
 	// Convert into a string.
@@ -49,13 +34,13 @@ impl fmt::Display for Param {
 impl From<Param> for crate::expr::Param {
 	fn from(v: Param) -> Self {
 		// Safety: Null byte guarenteed is upheld by param.
-		unsafe { Self::new_unchecked(v.0) }
+		Self::new(v.0)
 	}
 }
 
 impl From<crate::expr::Param> for Param {
 	fn from(v: crate::expr::Param) -> Self {
 		// Safety: Null byte guarenteed is upheld by param.
-		unsafe { Self::new_unchecked(v.ident().into_string()) }
+		Self::new(v.into_string())
 	}
 }

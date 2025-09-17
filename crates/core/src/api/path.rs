@@ -6,7 +6,7 @@ use revision::Revisioned;
 
 use crate::err::Error;
 use crate::expr::Kind;
-use crate::expr::fmt::{Fmt, fmt_separated_by};
+use crate::fmt::{Fmt, fmt_separated_by};
 use crate::syn;
 use crate::val::{Array, Object, Value};
 

@@ -20,12 +20,7 @@ impl ViewDefinition {
 			expr: self.fields.clone().into(),
 			// SAFETY: we know the names are valid because they were validated when the view was
 			// created.
-			what: self
-				.what
-				.clone()
-				.into_iter()
-				.map(|s| unsafe { Ident::new_unchecked(s) })
-				.collect(),
+			what: self.what.clone().into_iter().collect(),
 			cond: self.cond.clone().map(|e| crate::sql::Cond(e.into())),
 			group: self.groups.clone().map(Into::into),
 		}

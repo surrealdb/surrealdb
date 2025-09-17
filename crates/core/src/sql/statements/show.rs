@@ -45,7 +45,7 @@ impl From<crate::expr::statements::show::ShowSince> for ShowSince {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ShowStatement {
-	pub table: Option<Ident>,
+	pub table: Option<String>,
 	pub since: ShowSince,
 	pub limit: Option<u32>,
 }

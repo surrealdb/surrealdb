@@ -29,7 +29,7 @@ impl BucketDefinition {
 	pub fn to_sql_definition(&self) -> DefineBucketStatement {
 		DefineBucketStatement {
 			kind: DefineKind::Default,
-			name: unsafe { crate::sql::Ident::new(self.name.clone()) },
+			name: self.name.clone(),
 			backend: self
 				.backend
 				.clone()

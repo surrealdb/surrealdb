@@ -23,7 +23,7 @@ impl Record {
 					Value::Number(v) => v.to_int().into(),
 					Value::Uuid(v) => v.into(),
 					// TODO: Null byte validity
-					v => Strand::new(v.as_raw_string()).unwrap().into(),
+					v => v.as_raw_string().into(),
 				},
 			},
 		}

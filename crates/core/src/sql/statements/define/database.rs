@@ -8,8 +8,8 @@ use crate::sql::changefeed::ChangeFeed;
 pub struct DefineDatabaseStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
-	pub name: Ident,
-	pub comment: Option<Strand>,
+	pub name: String,
+	pub comment: Option<String>,
 	pub changefeed: Option<ChangeFeed>,
 }
 

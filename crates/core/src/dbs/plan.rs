@@ -110,7 +110,7 @@ impl ExplainItem {
 			},
 			Iterable::Yield(t) => Self {
 				name: "Iterate Yield".into(),
-				details: vec![("table", Value::from(t.clone().into_strand()))],
+				details: vec![("table", t.clone().into())],
 			},
 			Iterable::Thing(t) => Self {
 				name: "Iterate Thing".into(),
@@ -142,7 +142,7 @@ impl ExplainItem {
 				}
 				.into(),
 				details: vec![
-					("table", Value::from(t.clone().into_strand())),
+					("table", Value::from(t.clone())),
 					("direction", sc.to_string().into()),
 				],
 			},
@@ -182,7 +182,7 @@ impl ExplainItem {
 				],
 			},
 			Iterable::Index(t, ir, rs) => {
-				let mut details = vec![("table", Value::Strand(t.clone().into_strand()))];
+				let mut details = vec![("table", Value::Strand(t.clone()))];
 				if let Some(qp) = ctx.get_query_planner() {
 					if let Some(exe) = qp.get_query_executor(t.as_str()) {
 						details.push(("plan", exe.explain(*ir)));

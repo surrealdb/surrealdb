@@ -33,7 +33,7 @@ impl Value {
 				}
 				Number::Decimal(decimal) => JsonValue::String(decimal.to_string()),
 			},
-			Value::Strand(strand) => JsonValue::String(strand.into_string()),
+			Value::Strand(strand) => JsonValue::String(strand),
 			Value::Duration(duration) => JsonValue::String(duration.to_raw()),
 			Value::Datetime(datetime) => {
 				JsonValue::String(datetime.0.to_rfc3339_opts(SecondsFormat::AutoSi, true))

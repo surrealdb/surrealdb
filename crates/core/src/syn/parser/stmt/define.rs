@@ -143,7 +143,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let param = self.next_token_value::<Param>()?.ident();
+			let param = self.next_token_value::<Param>()?.into_string();
 			expected!(self, t!(":"));
 			let kind = stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
 
@@ -242,7 +242,7 @@ impl Parser<'_> {
 					let mut roles = Vec::new();
 					loop {
 						let token = self.peek();
-						let role = self.next_token_value::<Ident>()?;
+						let role = self.parse_ident()?;
 						// NOTE(gguillemas): This hardcoded list is a temporary fix in order
 						// to avoid making breaking changes to the DefineUserStatement structure
 						// while still providing parsing feedback to users referencing unexistent
@@ -524,7 +524,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value::<Param>()?.ident();
+		let name = self.next_token_value::<Param>()?.into_string();
 
 		let mut res = DefineParamStatement {
 			name,
@@ -912,7 +912,7 @@ impl Parser<'_> {
 				}
 				t!("FULLTEXT") => {
 					self.pop_peek();
-					let mut analyzer: Option<Ident> = None;
+					let mut analyzer: Option<String> = None;
 					let mut scoring = None;
 					let mut hl = false;
 
@@ -946,7 +946,7 @@ impl Parser<'_> {
 						}
 					}
 					res.index = Index::FullText(crate::sql::index::FullTextParams {
-						az: analyzer.unwrap_or_else(|| Ident::from("like".to_owned())),
+						az: analyzer.unwrap_or_else(|| "like".to_owned()),
 						sc: scoring.unwrap_or_else(Default::default),
 						hl,
 					});
@@ -1146,7 +1146,7 @@ impl Parser<'_> {
 								let open_span = expected!(self, t!("(")).span;
 								let path: String = self.next_token_value()?;
 								self.expect_closing_delimiter(t!(")"), open_span)?;
-								filters.push(Filter::Mapper(path.into_string()))
+								filters.push(Filter::Mapper(path))
 							}
 							_ => unexpected!(self, next, "a filter"),
 						}
@@ -1181,9 +1181,9 @@ impl Parser<'_> {
 					self.pop_peek();
 					expected!(self, t!("fn"));
 					expected!(self, t!("::"));
-					let mut ident = self.next_token_value::<Ident>()?.into_string();
+					let mut ident = self.parse_ident()?;
 					while self.eat(t!("::")) {
-						let value = self.next_token_value::<Ident>()?;
+						let value = self.parse_ident()?;
 						ident.push_str("::");
 						ident.push_str(&value);
 					}
@@ -1339,11 +1339,11 @@ impl Parser<'_> {
 							}
 						};
 
-						let part = self.next_token_value::<Ident>()?.into_string();
+						let part = self.parse_ident()?;
 						name.push_str(part.to_lowercase().as_str());
 
 						while self.eat(t!("::")) {
-							let part = self.next_token_value::<Ident>()?;
+							let part = self.parse_ident()?;
 							name.push_str("::");
 							name.push_str(part.to_lowercase().as_str());
 						}
@@ -1440,9 +1440,9 @@ impl Parser<'_> {
 		loop {
 			match self.peek_kind() {
 				x if Self::kind_is_identifier(x) => {
-					let name: Ident = self.next_token_value()?;
+					let name = self.parse_ident()?;
 					acc.push(TableConfig {
-						name: name.into_string(),
+						name,
 					});
 				}
 				_ => unexpected!(self, self.next(), "a table config"),
@@ -1482,9 +1482,9 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_tables(&mut self) -> ParseResult<Kind> {
-		let mut names = vec![self.next_token_value::<Ident>()?.into_string()];
+		let mut names = vec![self.parse_ident()?];
 		while self.eat(t!("|")) {
-			names.push(self.next_token_value::<Ident>()?.into_string());
+			names.push(self.parse_ident()?);
 		}
 		Ok(Kind::Record(names))
 	}
@@ -1508,7 +1508,7 @@ impl Parser<'_> {
 						let next = self.next();
 						match next.kind {
 							t!("KEY") => {
-								let key = self.next_token_value::<String>()?.into_string();
+								let key = self.parse_string_lit()?;
 								res.verify = access_type::JwtAccessVerify::Key(
 									access_type::JwtAccessVerifyKey {
 										alg,
@@ -1538,7 +1538,7 @@ impl Parser<'_> {
 			}
 			t!("URL") => {
 				self.pop_peek();
-				let url = self.next_token_value::<String>()?.into_string();
+				let url = self.parse_string_lit()?;
 				res.verify = access_type::JwtAccessVerify::Jwks(access_type::JwtAccessVerifyJwks {
 					url,
 				});
@@ -1574,7 +1574,7 @@ impl Parser<'_> {
 					}
 					t!("KEY") => {
 						self.pop_peek();
-						let key = self.next_token_value::<String>()?.into_string();
+						let key = self.parse_string_lit()?;
 						// If the algorithm is symmetric and a key is already defined, a different
 						// key is not expected.
 						if let JwtAccessVerify::Key(ref ver) = res.verify {

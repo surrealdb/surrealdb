@@ -10,8 +10,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::{Base, Expr, FlowResultExt as _};
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -68,8 +68,8 @@ impl DefineParamStatement {
 			db.database_id,
 			&ParamDefinition {
 				value,
-				name: self.name.to_raw_string(),
-				comment: self.comment.clone().map(|s| s.into_string()),
+				name: self.name.clone(),
+				comment: self.comment.clone(),
 				permissions: self.permissions.clone(),
 			},
 		)

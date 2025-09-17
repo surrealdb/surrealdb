@@ -10,7 +10,6 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::Pretty;
 use crate::expr::operator::BindingPower;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::statements::{
@@ -23,8 +22,9 @@ use crate::expr::{
 	BinaryOperator, Block, Constant, ControlFlow, FlowResult, FunctionCall, Idiom, Literal, Mock,
 	Param, PostfixOperator, PrefixOperator,
 };
+use crate::fmt::Pretty;
 use crate::fnc;
-use crate::val::{Array, Closure, Range, Value};
+use crate::val::{Array, Closure, Range, Table, Value};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Expr {
@@ -32,7 +32,7 @@ pub enum Expr {
 	Param(Param),
 	Idiom(Idiom),
 	// Maybe move into Literal?
-	Table(Ident),
+	Table(String),
 	// This type can probably be removed in favour of range expressions.
 	Mock(Mock),
 	Block(Box<Block>),
@@ -185,15 +185,15 @@ impl Expr {
 	pub(crate) fn to_idiom(&self) -> Idiom {
 		match self {
 			Expr::Idiom(i) => i.simplify(),
-			Expr::Param(i) => Idiom::field(i.clone().ident()),
+			Expr::Param(i) => Idiom::field(i.as_str().to_owned()),
 			Expr::FunctionCall(x) => x.receiver.to_idiom(),
 			Expr::Literal(l) => match l {
-				Literal::Strand(s) => Idiom::field(Ident::new(s.clone())),
+				Literal::Strand(s) => Idiom::field(s.clone()),
 				// TODO: Null byte validity
-				Literal::Datetime(d) => Idiom::field(Ident::new(d.into_raw_string())),
-				x => Idiom::field(Ident::new(x.to_string())),
+				Literal::Datetime(d) => Idiom::field(d.into_raw_string()),
+				x => Idiom::field(x.to_string()),
 			},
-			x => Idiom::field(Ident::new(x.to_string())),
+			x => Idiom::field(x.to_string()),
 		}
 	}
 
@@ -231,7 +231,7 @@ impl Expr {
 				param.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Idiom(idiom) => idiom.compute(stk, ctx, &opt, doc).await,
-			Expr::Table(ident) => Ok(Value::Table(ident.clone().into())),
+			Expr::Table(ident) => Ok(Value::Table(Table::new(ident.clone()))),
 			Expr::Mock(mock) => {
 				// NOTE(value pr): This is a breaking change but makes the most sense without
 				// having mock be part of the Value type.
@@ -622,7 +622,7 @@ impl Expr {
 	pub(crate) fn to_raw_string(&self) -> String {
 		match self {
 			Expr::Idiom(idiom) => idiom.to_raw_string(),
-			Expr::Table(ident) => ident.to_raw_string(),
+			Expr::Table(ident) => ident.clone(),
 			_ => self.to_string(),
 		}
 	}

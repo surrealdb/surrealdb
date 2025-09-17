@@ -37,7 +37,7 @@ impl Value {
 				Part::All => {
 					for (k, v) in v.iter() {
 						// TODO: Null byte validity
-						accum.push(Part::field(k.clone()).unwrap());
+						accum.push(Part::Field(k.clone()));
 						v._each(rest, accum, build);
 						accum.pop();
 					}

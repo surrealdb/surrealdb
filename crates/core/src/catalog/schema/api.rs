@@ -6,8 +6,8 @@ use revision::revisioned;
 use crate::api::path::Path;
 use crate::catalog::Permission;
 use crate::expr::Expr;
-use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
+use crate::fmt::Fmt;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::ToSql;
 use crate::val::{Array, Object, Value};
@@ -78,7 +78,7 @@ impl InfoStructure for ApiDefinition {
 	fn structure(self) -> Value {
 		Value::from(Object(map! {
 			// TODO: Null byte validity
-			"path".to_string() => self.path.to_string(),
+			"path".to_string() => self.path.to_string().into(),
 			"config".to_string() => self.config.structure(),
 			"fallback".to_string(), if let Some(fallback) = self.fallback => fallback.structure(),
 			"actions".to_string() => Value::from(self.actions.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
@@ -110,7 +110,7 @@ impl TryFrom<&Value> for ApiMethod {
 	type Error = anyhow::Error;
 	fn try_from(value: &Value) -> Result<Self, Self::Error> {
 		match value {
-			Value::String(s) => match s.to_ascii_lowercase().as_str() {
+			Value::Strand(s) => match s.to_ascii_lowercase().as_str() {
 				"delete" => Ok(Self::Delete),
 				"get" => Ok(Self::Get),
 				"patch" => Ok(Self::Patch),

@@ -11,7 +11,7 @@ pub struct DefineBucketStatement {
 	pub backend: Option<Expr>,
 	pub permissions: Permission,
 	pub readonly: bool,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl Display for DefineBucketStatement {

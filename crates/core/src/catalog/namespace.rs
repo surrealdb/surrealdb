@@ -75,7 +75,7 @@ impl NamespaceDefinition {
 		DefineNamespaceStatement {
 			// SAFETY: we know the name is valid because it was validated when the namespace was
 			// created.
-			name: unsafe { Ident::new_unchecked(self.name.clone()) },
+			name: self.name.clone(),
 			comment: self.comment.clone().map(|v| v.into()),
 			..Default::default()
 		}

@@ -60,7 +60,7 @@ impl Request {
 
 		// Fetch the 'method' argument
 		let method = match obj.remove(METHOD) {
-			Some(Value::Strand(v)) => v.into_string(),
+			Some(Value::Strand(v)) => v,
 			_ => return Err(RpcError::InvalidRequest),
 		};
 		// Fetch the 'params' argument

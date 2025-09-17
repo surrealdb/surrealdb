@@ -78,7 +78,7 @@ impl DatabaseDefinition {
 		DefineDatabaseStatement {
 			// SAFETY: we know the name is valid because it was validated when the database was
 			// created.
-			name: unsafe { Ident::new_unchecked(self.name.clone()) },
+			name: self.name.clone(),
 			comment: self.comment.clone().map(|v| v.into()),
 			changefeed: self.changefeed.map(|v| v.into()),
 			..Default::default()

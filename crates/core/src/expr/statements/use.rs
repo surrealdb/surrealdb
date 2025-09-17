@@ -1,11 +1,11 @@
 use std::fmt;
 
-use crate::expr::escape::EscapeIdent;
+use crate::fmt::EscapeIdent;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct UseStatement {
-	pub ns: Option<Ident>,
-	pub db: Option<Ident>,
+	pub ns: Option<String>,
+	pub db: Option<String>,
 }
 
 impl fmt::Display for UseStatement {

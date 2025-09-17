@@ -252,7 +252,7 @@ pub trait RpcProtocolV2: RpcContext {
 	// ------------------------------
 
 	async fn info(&self) -> Result<Data, RpcError> {
-		let what = vec![Expr::Param(Param::from_strand("auth".to_owned()))];
+		let what = vec![Expr::Param(Param::new("auth".to_owned()))];
 
 		// TODO: Check if this can be replaced by just evaluating the param or a
 		// `$auth.*` expression

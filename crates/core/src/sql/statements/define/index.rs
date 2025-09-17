@@ -1,18 +1,18 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::sql::fmt::Fmt;
+use crate::fmt::Fmt;
 use crate::sql::{Idiom, Index};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineIndexStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
-	pub what: Ident,
+	pub name: String,
+	pub what: String,
 	pub cols: Vec<Idiom>,
 	pub index: Index,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 	pub concurrently: bool,
 }
 

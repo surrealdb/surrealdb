@@ -4,8 +4,8 @@ use anyhow::Result;
 use revision::revisioned;
 
 use crate::catalog::ApiConfigDefinition;
-use crate::expr::fmt::{Fmt, Pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
+use crate::fmt::{Fmt, Pretty, pretty_indent};
 use crate::iam::ConfigKind;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::Value;

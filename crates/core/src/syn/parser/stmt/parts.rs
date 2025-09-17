@@ -558,17 +558,17 @@ impl Parser<'_> {
 		}
 	}
 
-	pub fn parse_custom_function_name(&mut self) -> ParseResult<Ident> {
+	pub fn parse_custom_function_name(&mut self) -> ParseResult<String> {
 		expected!(self, t!("fn"));
 		expected!(self, t!("::"));
-		let mut name = self.next_token_value::<Ident>()?.into_string();
+		let mut name = self.parse_ident()?;
 		while self.eat(t!("::")) {
-			let part = self.next_token_value::<Ident>()?.into_string();
+			let part = self.parse_ident()?;
 			name.push_str("::");
 			name.push_str(part.as_str());
 		}
 		// Safety: Parser guarentees no null bytes.
-		Ok(unsafe { Ident::new_unchecked(name) })
+		Ok(name)
 	}
 	pub(super) fn try_parse_explain(&mut self) -> ParseResult<Option<Explain>> {
 		Ok(self.eat(t!("EXPLAIN")).then(|| Explain(self.eat(t!("FULL")))))
@@ -586,9 +586,9 @@ impl Parser<'_> {
 				With::NoIndex
 			}
 			t!("INDEX") => {
-				let mut index = vec![self.next_token_value::<Ident>()?.into_string()];
+				let mut index = vec![self.parse_ident()?];
 				while self.eat(t!(",")) {
-					index.push(self.next_token_value::<Ident>()?.into_string());
+					index.push(self.parse_ident()?);
 				}
 				With::Index(index)
 			}

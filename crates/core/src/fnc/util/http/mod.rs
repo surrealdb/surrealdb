@@ -265,17 +265,17 @@ async fn request(
 	}
 }
 
-pub async fn head(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value> {
+pub async fn head(ctx: &Context, uri: String, opts: impl Into<Object>) -> Result<Value> {
 	request(ctx, Method::HEAD, uri, None, opts).await
 }
 
-pub async fn get(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value> {
+pub async fn get(ctx: &Context, uri: String, opts: impl Into<Object>) -> Result<Value> {
 	request(ctx, Method::GET, uri, None, opts).await
 }
 
 pub async fn put(
 	ctx: &Context,
-	uri: Strand,
+	uri: String,
 	body: Value,
 	opts: impl Into<Object>,
 ) -> Result<Value> {
@@ -284,7 +284,7 @@ pub async fn put(
 
 pub async fn post(
 	ctx: &Context,
-	uri: Strand,
+	uri: String,
 	body: Value,
 	opts: impl Into<Object>,
 ) -> Result<Value> {
@@ -293,13 +293,13 @@ pub async fn post(
 
 pub async fn patch(
 	ctx: &Context,
-	uri: Strand,
+	uri: String,
 	body: Value,
 	opts: impl Into<Object>,
 ) -> Result<Value> {
 	request(ctx, Method::PATCH, uri, Some(body), opts).await
 }
 
-pub async fn delete(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value> {
+pub async fn delete(ctx: &Context, uri: String, opts: impl Into<Object>) -> Result<Value> {
 	request(ctx, Method::DELETE, uri, None, opts).await
 }

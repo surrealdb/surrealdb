@@ -15,11 +15,11 @@ use crate::dbs::{Force, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
-use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::UpdateStatement;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Idiom, Kind, Output, View};
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::Value;
@@ -78,13 +78,13 @@ impl DefineTableStatement {
 			namespace_id: ns,
 			database_id: db,
 			table_id,
-			name: self.name.to_raw_string(),
+			name: self.name.clone(),
 			drop: self.drop,
 			schemafull: self.full,
 			table_type: self.table_type.clone(),
 			view: self.view.clone().map(|v| v.to_definition()),
 			permissions: self.permissions.clone(),
-			comment: self.comment.clone().map(|c| c.to_raw_string()),
+			comment: self.comment.clone(),
 			changefeed: self.changefeed,
 
 			cache_fields_ts: cache_ts,
@@ -147,7 +147,7 @@ impl DefineTableStatement {
 				txn.clear_cache();
 				// Process the view data
 				let stm = UpdateStatement {
-					what: vec![Expr::Table(ft.clone())],
+					what: vec![Expr::Table(ft.to_owned())],
 					output: Some(Output::None),
 					..UpdateStatement::default()
 				};
@@ -301,7 +301,7 @@ impl Display for DefineTableStatement {
 impl InfoStructure for DefineTableStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.structure(),
+			"name".to_string() => self.name.into(),
 			"drop".to_string() => self.drop.into(),
 			"full".to_string() => self.full.into(),
 			"kind".to_string() => self.table_type.structure(),

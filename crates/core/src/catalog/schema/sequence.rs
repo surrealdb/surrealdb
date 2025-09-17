@@ -23,7 +23,7 @@ impl SequenceDefinition {
 	fn to_sql_definition(&self) -> DefineSequenceStatement {
 		DefineSequenceStatement {
 			kind: DefineKind::Default,
-			name: unsafe { Ident::new_unchecked(self.name.clone()) },
+			name: self.name.clone(),
 			batch: self.batch,
 			start: self.start,
 			timeout: self.timeout.map(|t| t.into()),

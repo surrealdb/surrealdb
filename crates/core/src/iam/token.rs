@@ -89,15 +89,10 @@ impl Claims {
 		// Add aud field if set
 		if let Some(aud) = self.aud {
 			match aud {
-				Audience::Single(v) => {
-					out.insert("aud".to_string(), Value::Strand(Strand::new(v).unwrap()))
-				}
+				Audience::Single(v) => out.insert("aud".to_string(), Value::Strand(v)),
 				Audience::Multiple(v) => out.insert(
 					"aud".to_string(),
-					v.into_iter()
-						.map(|s| Value::Strand(Strand::new(s).unwrap()))
-						.collect::<Vec<_>>()
-						.into(),
+					v.into_iter().map(|s| Value::Strand(s)).collect::<Vec<_>>().into(),
 				),
 			};
 		}
@@ -137,10 +132,7 @@ impl Claims {
 		if let Some(role) = self.roles {
 			out.insert(
 				"RL".to_string(),
-				role.into_iter()
-					.map(|x| Value::from(Strand::new(x).unwrap()))
-					.collect::<Vec<_>>()
-					.into(),
+				role.into_iter().map(|x| Value::from(x)).collect::<Vec<_>>().into(),
 			);
 		}
 		// Add custom claims if set

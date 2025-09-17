@@ -108,7 +108,7 @@ impl TableDefinition {
 			id: Some(self.table_id.0),
 			// SAFETY: we know the name is valid because it was validated when the table was
 			// created.
-			name: unsafe { Ident::new_unchecked(self.name.clone()) },
+			name: self.name.clone(),
 			drop: self.drop,
 			full: self.schemafull,
 			view: self.view.clone().map(|v| v.to_sql_definition()),

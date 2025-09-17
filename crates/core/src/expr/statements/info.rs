@@ -30,11 +30,11 @@ pub enum InfoStatement {
 
 	Db(bool, Option<Expr>),
 
-	Tb(Ident, bool, Option<Expr>),
+	Tb(String, bool, Option<Expr>),
 
-	User(Ident, Option<Base>, bool),
+	User(String, Option<Base>, bool),
 
-	Index(Ident, Ident, bool),
+	Index(String, String, bool),
 }
 
 impl InfoStatement {

@@ -237,8 +237,7 @@ pub async fn db_access(
 														Some(
 															create_refresh_token_record(
 																kvs,
-																Ident::new(av.name.clone())
-																	.unwrap(),
+																av.name.clone(),
 																&ns,
 																&db,
 																rid.clone(),
@@ -713,8 +712,8 @@ pub async fn signin_bearer(
 						// Revoke the used refresh token.
 						revoke_refresh_token_record(
 							kvs,
-							Ident::new(gr.id.clone()).unwrap(),
-							Ident::new(gr.ac.clone()).unwrap(),
+							gr.id.clone(),
+							gr.ac.clone(),
 							&ns.name,
 							&db.name,
 						)
@@ -722,7 +721,7 @@ pub async fn signin_bearer(
 						// Create a new refresh token to replace it.
 						let refresh = create_refresh_token_record(
 							kvs,
-							Ident::new(gr.ac.clone()).unwrap(),
+							gr.ac.clone(),
 							&ns.name,
 							&db.name,
 							rid.clone(),
@@ -4216,13 +4215,13 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			let user = DefineUserStatement {
 				kind: DefineKind::Default,
 				base,
-				name: Ident::new("user".to_owned()).unwrap(),
+				name: "user".to_owned(),
 				// This is the Argon2id hash for "pass" with a random salt.
 				pass_type: PassType::Hash(
 					"$argon2id$v=19$m=16,t=2,p=1$VUlHTHVOYjc5d0I1dGE3OQ$sVtmRNH+Xtiijk0uXL2+4w"
 						.to_string(),
 				),
-				roles: vec![Ident::new("nonexistent".to_owned()).unwrap()],
+				roles: vec!["nonexistent".to_owned()],
 				session_duration: None,
 				token_duration: None,
 				comment: None,

@@ -39,13 +39,3 @@ impl FromStr for Role {
 		}
 	}
 }
-
-impl std::convert::From<Role> for Ident {
-	fn from(role: Role) -> Self {
-		match role {
-			Role::Viewer => unsafe { Ident::new_unchecked("Viewer".to_owned()) },
-			Role::Editor => unsafe { Ident::new_unchecked("Editor".to_owned()) },
-			Role::Owner => unsafe { Ident::new_unchecked("Owner".to_owned()) },
-		}
-	}
-}

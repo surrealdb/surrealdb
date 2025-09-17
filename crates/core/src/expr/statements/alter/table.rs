@@ -11,9 +11,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::{Base, ChangeFeed, Kind};
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -80,7 +80,7 @@ impl AlterTableStatement {
 		}
 
 		match self.comment {
-			AlterKind::Set(ref x) => dt.comment = Some(x.clone().into_string()),
+			AlterKind::Set(ref x) => dt.comment = Some(x.clone()),
 
 			AlterKind::Drop => dt.comment = None,
 			AlterKind::None => {}

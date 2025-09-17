@@ -11,7 +11,7 @@ use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveBucketStatement {
-	pub name: Ident,
+	pub name: String,
 	pub if_exists: bool,
 }
 
@@ -29,7 +29,7 @@ impl RemoveBucketStatement {
 				return Ok(Value::None);
 			} else {
 				return Err(Error::BuNotFound {
-					name: self.name.to_raw_string(),
+					name: self.name.clone(),
 				}
 				.into());
 			}

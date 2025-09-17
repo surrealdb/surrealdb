@@ -613,9 +613,9 @@ impl Document {
 		//
 		// TODO: Ideally we would check first if there is also a count/mean aggregate and reuse
 		// it's count.
-		let mut key_c = Idiom(vec![Part::field("__".to_owned()).unwrap()]);
-		key_c.0.push(Part::field(key.to_hash()).unwrap());
-		key_c.0.push(Part::field("c".to_owned()).unwrap());
+		let mut key_c = Idiom(vec![Part::Field("__".to_owned())]);
+		key_c.0.push(Part::Field(key.to_hash()));
+		key_c.0.push(Part::Field("c".to_owned()));
 
 		match act {
 			FieldAction::Add => {
@@ -668,9 +668,9 @@ impl Document {
 		val: Value,
 	) -> Result<()> {
 		// Key for the value count
-		let mut key_c = Idiom(vec![Part::field("__".to_owned()).unwrap()]);
-		key_c.0.push(Part::field(key.to_hash()).unwrap());
-		key_c.0.push(Part::field("c".to_owned()).unwrap());
+		let mut key_c = Idiom(vec![Part::Field("__".to_owned())]);
+		key_c.0.push(Part::Field(key.to_hash()));
+		key_c.0.push(Part::Field("c".to_owned()));
 
 		match fdc.act {
 			FieldAction::Add => {
@@ -745,9 +745,9 @@ impl Document {
 		val: Value,
 	) -> Result<()> {
 		// Key for the value count
-		let mut key_c = Idiom(vec![Part::field("__".to_owned()).unwrap()]);
-		key_c.0.push(Part::field(key.to_hash()).unwrap());
-		key_c.0.push(Part::field("c".to_owned()).unwrap());
+		let mut key_c = Idiom(vec![Part::Field("__".to_owned())]);
+		key_c.0.push(Part::Field(key.to_hash()));
+		key_c.0.push(Part::Field("c".to_owned()));
 		//
 		match fdc.act {
 			FieldAction::Add => {
@@ -824,9 +824,9 @@ impl Document {
 		// Key for the value count
 
 		let key_c = Idiom(vec![
-			Part::field("__".to_owned()).unwrap(),
-			Part::field(key.to_hash()).unwrap(),
-			Part::field("c".to_owned()).unwrap(),
+			Part::Field("__".to_owned()),
+			Part::Field(key.to_hash()),
+			Part::Field("c".to_owned()),
 		]);
 		//
 		set_ops.push(Assignment {
@@ -940,12 +940,7 @@ impl Document {
 		let group_select = Expr::Select(Box::new(SelectStatement {
 			expr: Fields::Select(vec![field.clone()]),
 			cond,
-			what: fdc
-				.view
-				.what
-				.iter()
-				.map(|x| Expr::Table(unsafe { Ident::new_unchecked(x.clone()) }))
-				.collect(),
+			what: fdc.view.what.iter().map(|x| Expr::Table(x.clone())).collect(),
 			group: Some(fdc.groups.clone()),
 			..SelectStatement::default()
 		}));
