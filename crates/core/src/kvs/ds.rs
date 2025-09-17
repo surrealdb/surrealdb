@@ -282,11 +282,8 @@ impl Datastore {
 		let (flavour, path) = match path.split_once("://").or_else(|| path.split_once(':')) {
 			None if path == "memory" => ("memory", ""),
 			Some((flavour, path)) => (flavour, path),
-			_ =>
 			// Validated already in the CLI, should never happen
-			{
-				bail!(Error::Unreachable("Provide a valid database path parameter".to_owned()))
-			}
+			_ => bail!(Error::Unreachable("Provide a valid database path parameter".to_owned())),
 		};
 
 		let path = if Path::new(path).is_absolute() {
