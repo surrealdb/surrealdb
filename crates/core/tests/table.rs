@@ -73,7 +73,7 @@ async fn define_foreign_table() -> Result<()> {
 		"[
 			{
 				age: 39,
-				average: 72,
+				average: 72dec,
 				count: 1,
 				id: person_by_age:[39],
 				max: 72,
@@ -83,7 +83,7 @@ async fn define_foreign_table() -> Result<()> {
 		]",
 	)
 	.unwrap();
-	assert_ne!(tmp, val); // Temporarily ignore checking metadata fields
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -113,7 +113,7 @@ async fn define_foreign_table() -> Result<()> {
 		]",
 	)
 	.unwrap();
-	assert_ne!(tmp, val); // Temporarily ignore checking metadata fields
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -143,7 +143,7 @@ async fn define_foreign_table() -> Result<()> {
 		]",
 	)
 	.unwrap();
-	assert_ne!(tmp, val); // Temporarily ignore checking metadata fields
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result.unwrap_err();
 	assert!(matches!(tmp.downcast_ref(), Some(Error::InvalidAggregation { .. })));
@@ -163,7 +163,7 @@ async fn define_foreign_table() -> Result<()> {
 		]",
 	)
 	.unwrap();
-	assert_ne!(tmp, val); // Temporarily ignore checking metadata fields
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }

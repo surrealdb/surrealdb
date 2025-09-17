@@ -231,7 +231,8 @@ impl InnerQueryExecutor {
 								);
 								let tx = ctx.tx();
 								let mti =
-									MTreeIndex::new(&tx, ikb, p, TransactionType::Read).await?;
+									MTreeIndex::new(&tx, ikb, p, TransactionType::Read, opt.id()?)
+										.await?;
 								drop(tx);
 								let entry = MtEntry::new(
 									db,
@@ -927,9 +928,9 @@ impl MtEntry {
 		cond: Option<Arc<Cond>>,
 	) -> Result<Self> {
 		let cond_checker = if let Some(cond) = cond {
-			MTreeConditionChecker::new_cond(ctx, opt, cond)
+			MTreeConditionChecker::new_cond(ctx, opt, cond, mt.get_ikb().clone())
 		} else {
-			MTreeConditionChecker::new(ctx)
+			MTreeConditionChecker::new(ctx, mt.get_ikb().clone())
 		};
 		let res = mt.knn_search(db, stk, ctx, o, k as usize, cond_checker).await?;
 		Ok(Self {

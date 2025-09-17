@@ -11,5 +11,5 @@ impl_module_def!(
 	"levenshtein" => run,
 	"normalized_damerau_levenshtein" => run,
 	"normalized_levenshtein" => run,
-	"osa_distance" => run
+	"osa" => run
 );

@@ -82,8 +82,6 @@ pub struct MTreeParams {
 	pub distance: Distance,
 	pub vector_type: VectorType,
 	pub capacity: u16,
-	pub doc_ids_order: u32,
-	pub doc_ids_cache: u32,
 	pub mtree_cache: u32,
 }
 
@@ -94,8 +92,6 @@ impl From<MTreeParams> for crate::catalog::MTreeParams {
 			distance: v.distance.into(),
 			vector_type: v.vector_type.into(),
 			capacity: v.capacity,
-			doc_ids_order: v.doc_ids_order,
-			doc_ids_cache: v.doc_ids_cache,
 			mtree_cache: v.mtree_cache,
 		}
 	}
@@ -108,8 +104,6 @@ impl From<crate::catalog::MTreeParams> for MTreeParams {
 			distance: v.distance.into(),
 			vector_type: v.vector_type.into(),
 			capacity: v.capacity,
-			doc_ids_order: v.doc_ids_order,
-			doc_ids_cache: v.doc_ids_cache,
 			mtree_cache: v.mtree_cache,
 		}
 	}
@@ -259,14 +253,8 @@ impl Display for Index {
 			Self::MTree(p) => {
 				write!(
 					f,
-					"MTREE DIMENSION {} DIST {} TYPE {} CAPACITY {} DOC_IDS_ORDER {} DOC_IDS_CACHE {} MTREE_CACHE {}",
-					p.dimension,
-					p.distance,
-					p.vector_type,
-					p.capacity,
-					p.doc_ids_order,
-					p.doc_ids_cache,
-					p.mtree_cache
+					"MTREE DIMENSION {} DIST {} TYPE {} CAPACITY {} MTREE_CACHE {}",
+					p.dimension, p.distance, p.vector_type, p.capacity, p.mtree_cache
 				)
 			}
 			Self::Hnsw(p) => {

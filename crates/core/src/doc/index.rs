@@ -465,14 +465,14 @@ impl<'a> IndexOperation<'a> {
 	async fn index_mtree(&mut self, stk: &mut Stk, ctx: &Context, p: &MTreeParams) -> Result<()> {
 		let txn = ctx.tx();
 		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id);
-		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write).await?;
+		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write, self.opt.id()?).await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			mt.remove_document(stk, &txn, self.rid, &o).await?;
 		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			mt.index_document(stk, &txn, self.rid, &n).await?;
+			mt.index_document(stk, ctx, &txn, self.rid, &n).await?;
 		}
 		mt.finish(&txn).await
 	}
