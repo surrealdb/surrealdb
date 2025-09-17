@@ -1,4 +1,4 @@
-{ pkgs, spec, util, rustToolchain, crane }:
+{ pkgs, lib, spec, util, rustToolchain, crane }:
 
 let
 
