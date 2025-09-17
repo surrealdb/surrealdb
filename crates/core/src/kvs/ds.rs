@@ -292,14 +292,13 @@ impl Datastore {
 		let path = if Path::new(path).is_absolute() {
 			// if absolute, remove all slashes except one
 			let normalised = format!("/{}", path.trim_start_matches("/"));
-			info!(target: TARGET, "Absolute path {flavour}:{normalised} received. Note: absolute paths may require elevated permissions.");
 			info!(target: TARGET, "Starting kvs store at {flavour}:{normalised}");
+			info!(target: TARGET, "Note: {flavour}:{normalised} is an absolute path that may require elevated permissions.");
 			normalised
 		} else if path.is_empty() {
 			info!(target: TARGET, "Starting kvs store in memory");
 			"".to_string()
 		} else {
-			info!(target: TARGET, "Relative path {flavour}://{} received", path.trim_start_matches("/"));
 			info!(target: TARGET, "Starting kvs store at {flavour}://{path}");
 			path.to_string()
 		};
@@ -334,7 +333,7 @@ impl Datastore {
 					let v =
 						super::rocksdb::Datastore::new(&path).await.map(DatastoreFlavor::RocksDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store");
+					info!(target: TARGET, "Successfully started {flavour} kvs store");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
@@ -351,7 +350,7 @@ impl Datastore {
 					let v =
 						super::rocksdb::Datastore::new(&path).await.map(DatastoreFlavor::RocksDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store");
+					info!(target: TARGET, "Successfully started {flavour} kvs store");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
@@ -368,7 +367,7 @@ impl Datastore {
 						.await
 						.map(DatastoreFlavor::SurrealKV);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store with versions enabled");
+					info!(target: TARGET, "Successfully started {flavour} kvs store with versions enabled");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
@@ -386,7 +385,7 @@ impl Datastore {
 						.await
 						.map(DatastoreFlavor::SurrealKV);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store with versions not enabled");
+					info!(target: TARGET, "Successfully started {flavour} kvs store with versions not enabled");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
@@ -398,7 +397,7 @@ impl Datastore {
 				{
 					let v = super::indxdb::Datastore::new(&path).await.map(DatastoreFlavor::IndxDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store");
+					info!(target: TARGET, "Successfully started {flavour} kvs store");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
@@ -410,7 +409,7 @@ impl Datastore {
 				{
 					let v = super::tikv::Datastore::new(&path).await.map(DatastoreFlavor::TiKV);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store");
+					info!(target: TARGET, "Successfully started {flavour} kvs store");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-tikv"))]
@@ -423,7 +422,7 @@ impl Datastore {
 					let v =
 						super::fdb::Datastore::new(&path).await.map(DatastoreFlavor::FoundationDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store");
+					info!(target: TARGET, "Successfully started {flavour} kvs store");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-fdb"))]
