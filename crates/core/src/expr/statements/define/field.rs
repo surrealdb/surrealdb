@@ -18,7 +18,7 @@ use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, KindLiteral, Part};
+use crate::expr::{Base, Expr, Ident, Idiom, Kind, KindLiteral, Part, RecordIdKeyLit};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::{Strand, Value};
@@ -104,6 +104,9 @@ impl DefineFieldStatement {
 
 		// Disallow mismatched types
 		self.disallow_mismatched_types(ctx, ns, db).await?;
+
+		// Validate id field restrictions
+		self.validate_id_restrictions()?;
 
 		// Fetch the transaction
 		let txn = ctx.tx();
@@ -402,6 +405,35 @@ impl DefineFieldStatement {
 						}
 					}
 				}
+			}
+		}
+
+		Ok(())
+	}
+
+	pub(crate) fn validate_id_restrictions(&self) -> Result<()> {
+		if self.name.is_id() {
+			// Ensure no `VALUE` clause is specified
+			ensure!(self.value.is_none(), Error::IdFieldKeywordConflict("VALUE".into()));
+
+			// Ensure no `REFERENCE` clause is specified
+			ensure!(self.reference.is_none(), Error::IdFieldKeywordConflict("REFERENCE".into()));
+
+			// Ensure no `COMPUTED` clause is specified
+			ensure!(self.computed.is_none(), Error::IdFieldKeywordConflict("COMPUTED".into()));
+
+			// Ensure no `DEFAULT` clause is specified
+			ensure!(
+				matches!(self.default, DefineDefault::None),
+				Error::IdFieldKeywordConflict("DEFAULT".into())
+			);
+
+			// Ensure the field is not a record type
+			if let Some(ref kind) = self.field_kind {
+				ensure!(
+					RecordIdKeyLit::kind_supported(kind),
+					Error::IdFieldUnsupportedKind(kind.to_string())
+				);
 			}
 		}
 
