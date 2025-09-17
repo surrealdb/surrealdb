@@ -315,7 +315,7 @@ impl Datastore {
 				#[cfg(not(feature = "kv-mem"))]
 				bail!(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
-			// Tnitiate a File (RocksDB) datastore
+			// Initiate a File (RocksDB) datastore
 			(flavour @ "file", path) => {
 				#[cfg(feature = "kv-rocksdb")]
 				{
