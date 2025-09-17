@@ -3,14 +3,18 @@ use std::fmt;
 use std::ops::Bound;
 
 use nanoid::nanoid;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 use ulid::Ulid;
 
 use crate::cnf::ID_CHARS;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::expr::escape::EscapeRid;
-use crate::expr::{self};
+use crate::expr::{self, Expr, Field, Fields, Literal, SelectStatement};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, IndexFormat, Number, Object, Range, Strand, Uuid, Value};
 
@@ -378,6 +382,26 @@ impl RecordId {
 
 	pub fn is_record_type(&self, val: &[String]) -> bool {
 		val.is_empty() || val.contains(&self.table)
+	}
+
+	pub(crate) async fn select_document(
+		self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> anyhow::Result<Option<Object>> {
+		// Fetch the record id's contents
+		let stm = SelectStatement {
+			expr: Fields::Select(vec![Field::All]),
+			what: vec![Expr::Literal(Literal::RecordId(self.into_literal()))],
+			..SelectStatement::default()
+		};
+		if let Value::Object(x) = stk.run(|stk| stm.compute(stk, ctx, opt, doc)).await?.first() {
+			Ok(Some(x))
+		} else {
+			Ok(None)
+		}
 	}
 }
 
