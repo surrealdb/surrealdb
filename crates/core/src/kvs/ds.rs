@@ -303,13 +303,13 @@ impl Datastore {
 		// Initiate the desired datastore
 		let (flavor, clock): (Result<DatastoreFlavor>, Arc<SizedClock>) = match (flavour, path) {
 			// Initiate an in-memory datastore
-			("memory", _) => {
+			(flavour @ "memory", _) => {
 				#[cfg(feature = "kv-mem")]
 				{
 					// Initialise the storage engine
 					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store in memory");
+					info!(target: TARGET, "Started kvs store in {flavour}");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-mem"))]
