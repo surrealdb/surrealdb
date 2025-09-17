@@ -303,7 +303,6 @@ impl Datastore {
 			info!(target: TARGET, "Starting kvs store at {flavour}://{path}");
 			path.to_string()
 		};
-		println!("Path is now {flavour}{path}");
 
 		// Initiate the desired datastore
 		let (flavor, clock): (Result<DatastoreFlavor>, Arc<SizedClock>) = match (flavour, path) {
