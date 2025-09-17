@@ -10,13 +10,56 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
-use crate::expr::field::{Field, Fields};
+use crate::expr::field::Fields;
 use crate::expr::idiom::recursion::{Recursion, compute_idiom_recursion};
 use crate::expr::part::{FindRecursionPlan, Next, NextMethod, Part, SplitByRepeatRecurse};
 use crate::expr::statements::select::SelectStatement;
 use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Idiom, Literal, Lookup};
 use crate::fnc::idiom;
 use crate::val::{RecordIdKey, Value};
+
+macro_rules! fallback_function {
+	(if $first:expr => InvalidFunction($e:ident) then $second:expr) => {
+		match $first {
+			Err(e) if matches!(e.downcast_ref(), Some(Error::InvalidFunction { .. })) => {
+				let $e = e;
+				$second
+			}
+			x => x,
+		}
+	};
+}
+
+// let res = match res {
+// 	Ok(_) => res,
+// 	Err(e) => {
+// 		if matches!(e.downcast_ref(), Some(Error::InvalidFunction { .. })) {
+// 			if let Some(v) = v.get(name) {
+// 				let fnc = Function::Anonymous(v.clone(), args, true);
+// 				match stk
+// 					.run(|stk| fnc.compute(stk, ctx, opt, doc))
+// 					.await
+// 					.catch_return()
+// 				{
+// 					Ok(v) => Ok(v),
+// 					Err(e) => {
+// 						if matches!(
+// 							e.downcast_ref(),
+// 							Some(Error::InvalidFunction { .. })
+// 						) {
+// 							Ok(Value::None)
+// 						} else {
+// 							Err(e)
+// 						}
+// 					}
+// 				}
+// 			} else {
+// 				Err(e)
+// 			}
+// 		} else {
+// 			Err(e)
+// 		}
+// 	}
 
 impl Value {
 	/// Asynchronous method for getting a local or remote field from a `Value`
@@ -225,15 +268,21 @@ impl Value {
 							})
 							.await?;
 
-						let res = if let Some(Value::Closure(x)) = v.get(name) {
-							let v = x.compute(stk, ctx, opt, doc, args).await?;
-							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await?
-						} else {
-							stk.run(|stk| {
+						let res = stk
+							.run(|stk| {
 								idiom(stk, ctx, opt, doc, v.clone().into(), name, args.clone())
 							})
-							.await?
-						};
+							.await;
+
+						let res = fallback_function! {
+							if res => InvalidFunction(e) then {
+								if let Some(Value::Closure(x)) = v.get(name) {
+									x.compute(stk, ctx, opt, doc, args).await
+								} else {
+									Err(e)
+								}
+							}
+						}?;
 
 						stk.run(|stk| res.get(stk, ctx, opt, doc, path.next())).await
 					}
@@ -422,10 +471,25 @@ impl Value {
 									)
 								})
 								.await?;
-							let v = stk
-								.run(|stk| idiom(stk, ctx, opt, doc, v.clone().into(), name, a))
-								.await?;
-							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+
+							let res = stk
+								.run(|stk| {
+									idiom(stk, ctx, opt, doc, v.clone().into(), name, a.clone())
+								})
+								.await;
+
+							let res = fallback_function! {
+								if res => InvalidFunction(e) then {
+									let v = val.select_document(stk, ctx, opt, doc).await?.unwrap_or_default();
+									if let Some(Value::Closure(x)) = v.get(name) {
+										x.compute(stk, ctx, opt, doc, a).await
+									} else {
+										Err(e)
+									}
+								}
+							}?;
+
+							stk.run(|stk| res.get(stk, ctx, opt, doc, path.next())).await
 						}
 						Part::Optional => {
 							stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await
@@ -468,12 +532,11 @@ impl Value {
 							};
 
 							// Fetch the record id's contents
-							let stm = SelectStatement {
-								expr: Fields::Select(vec![Field::All]),
-								what: vec![Expr::Literal(Literal::RecordId(val.into_literal()))],
-								..SelectStatement::default()
-							};
-							let v = stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.first();
+							let v = val
+								.select_document(stk, ctx, opt, doc)
+								.await?
+								.map(Value::Object)
+								.unwrap_or(Value::None);
 
 							// Continue processing the path on the now fetched record
 							stk.run(|stk| v.get(stk, ctx, opt, None, next)).await
