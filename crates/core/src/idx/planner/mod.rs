@@ -306,7 +306,7 @@ impl QueryPlanner {
 				if io.require_distinct() {
 					self.requires_distinct = true;
 				}
-				let is_order = exp.is_none();
+				let is_order = io.is_order();
 				let ir = exe.add_iterator(IteratorEntry::Single(exp, io));
 				self.add(t.clone(), Some(ir), exe, it, rs);
 				if is_order {
@@ -327,8 +327,11 @@ impl QueryPlanner {
 				self.requires_distinct = true;
 				self.add(t.clone(), None, exe, it, rs);
 			}
-			Plan::SingleIndexRange(ixn, rq, keys_only) => {
+			Plan::SingleIndexRange(ixn, rq, keys_only, is_order) => {
 				let ir = exe.add_iterator(IteratorEntry::Range(rq.exps, ixn, rq.from, rq.to));
+				if is_order {
+					self.orders.push(ir);
+				}
 				self.add(t.clone(), Some(ir), exe, it, keys_only);
 			}
 			Plan::TableIterator(reason, rs, sc) => {
