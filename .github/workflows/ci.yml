@@ -180,7 +180,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo +${{ env.msrv }} install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Check workspace on MSRV
         run: cargo +${{ env.msrv }} make ci-check
