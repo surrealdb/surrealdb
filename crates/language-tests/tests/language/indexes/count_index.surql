@@ -2,39 +2,30 @@
 [test]
 
 [[test.results]]
-value = "None"
+value = "NONE"
 
 [[test.results]]
-value = "{ events: {  }, fields: {  }, indexes: { i: 'DEFINE INDEX i ON b FIELDS t COUNT' }, lives: {  }, tables: {  } }"
+value = "{ events: {  }, fields: {  }, indexes: { idx: 'DEFINE INDEX idx ON tbl FIELDS fld COUNT' }, lives: {  }, tables: {  } }"
 
 [[test.results]]
-value = "None"
-
-[[test.results]]
-value = "None"
-
-[[test.results]]
-value = "None"
-
-[[test.results]]
-value = "None"
-
-[[test.results]]
-value = "[]"
+value = "'OK'"
 
 [[test.results]]
 value = "[{ count: 2 }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { index: 'i', operator: 'count' }, table: 'b' }, operation: 'Count Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+value = "[{ detail: { plan: { index: 'idx', operator: 'count' }, table: 'tbl' }, operation: 'Count Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 */
-DEFINE INDEX i ON b FIELDS t COUNT;
-INFO FOR TB b;
-CREATE b:1 SET t = 'Counted' RETURN NONE;
-CREATE b:2 SET t = 'Not counted' RETURN NONE;
-CREATE b:3 SET i = 'Not counted' RETURN NONE;
-CREATE b:4 SET t = 'Counted' RETURN NONE;
-DELETE b:2 RETURN NONE;
-SELECT count() FROM b GROUP ALL;
-SELECT count() FROM b GROUP ALL EXPLAIN;
+DEFINE INDEX idx ON tbl FIELDS fld COUNT;
+INFO FOR TB tbl;
+BEGIN;
+    CREATE tbl:1 SET fld = 'Counted';
+    CREATE tbl:2 SET fld = 'Not counted';
+    CREATE tbl:3 SET ign = 'Not counted';
+    CREATE tbl:4 SET fld = 'Counted';
+    DELETE tbl:2;
+    RETURN 'OK';
+COMMIT;
+SELECT count() FROM tbl GROUP ALL;
+SELECT count() FROM tbl GROUP ALL EXPLAIN;
