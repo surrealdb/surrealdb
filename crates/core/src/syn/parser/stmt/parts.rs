@@ -504,9 +504,9 @@ impl Parser<'_> {
 		let fields = self.parse_fields(stk).await?;
 		let fields_span = before_fields.covers(self.recent_span());
 		expected!(self, t!("FROM"));
-		let mut from = vec![self.next_token_value()?];
+		let mut from = vec![self.parse_ident()?];
 		while self.eat(t!(",")) {
-			from.push(self.next_token_value()?);
+			from.push(self.parse_ident()?);
 		}
 
 		let cond = self.try_parse_condition(stk).await?;

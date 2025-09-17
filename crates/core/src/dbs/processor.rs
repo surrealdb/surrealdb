@@ -645,7 +645,7 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		txn.check_tb(ns, db, &v, opt.strict).await?;
+		txn.check_tb(ns, db, v, opt.strict).await?;
 
 		// Prepare the start and end keys
 		let beg = record::prefix(ns, db, v)?;

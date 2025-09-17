@@ -11,7 +11,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Expr};
-use crate::fmt::Fmt;
+use crate::fmt::{EscapeIdent, Fmt, QuoteStr};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -106,13 +106,13 @@ impl Display for DefineEventStatement {
 		write!(
 			f,
 			" {} ON {} WHEN {} THEN {}",
-			self.name,
-			self.target_table,
+			EscapeIdent(&self.name),
+			EscapeIdent(&self.target_table),
 			self.when,
 			Fmt::comma_separated(self.then.iter())
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", QuoteStr(v))?
 		}
 		Ok(())
 	}

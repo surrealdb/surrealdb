@@ -6,6 +6,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Base, Value};
+use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Datetime;
 use crate::vs::VersionStamp;
@@ -65,7 +66,7 @@ impl fmt::Display for ShowStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SHOW CHANGES FOR")?;
 		match self.table {
-			Some(ref v) => write!(f, " TABLE {}", v)?,
+			Some(ref v) => write!(f, " TABLE {}", EscapeKwFreeIdent(v))?,
 			None => write!(f, " DATABASE")?,
 		}
 		match self.since {

@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
-use crate::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{EscapeIdent, QuoteStr, is_pretty, pretty_indent};
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::{Kind, Permissions, TableType, View};
 
@@ -28,7 +28,7 @@ impl Display for DefineTableStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		write!(f, " TYPE")?;
 		match &self.table_type {
 			TableType::Normal => {
@@ -72,7 +72,7 @@ impl Display for DefineTableStatement {
 			" SCHEMALESS"
 		})?;
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?
+			write!(f, " COMMENT {}", QuoteStr(comment))?
 		}
 		if let Some(ref v) = self.view {
 			write!(f, " {v}")?
@@ -96,7 +96,7 @@ impl From<DefineTableStatement> for crate::expr::statements::DefineTableStatemen
 		crate::expr::statements::DefineTableStatement {
 			kind: v.kind.into(),
 			id: v.id,
-			name: v.name.into(),
+			name: v.name,
 			drop: v.drop,
 			full: v.full,
 			view: v.view.map(Into::into),
@@ -113,7 +113,7 @@ impl From<crate::expr::statements::DefineTableStatement> for DefineTableStatemen
 		DefineTableStatement {
 			kind: v.kind.into(),
 			id: v.id,
-			name: v.name.into(),
+			name: v.name,
 			drop: v.drop,
 			full: v.full,
 			view: v.view.map(Into::into),

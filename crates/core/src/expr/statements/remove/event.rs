@@ -9,6 +9,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Value};
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -79,7 +80,7 @@ impl Display for RemoveEventStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.table_name)?;
+		write!(f, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.table_name))?;
 		Ok(())
 	}
 }

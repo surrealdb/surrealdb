@@ -35,7 +35,7 @@ impl FunctionDefinition {
 			block: self.block.clone().into(),
 			permissions: self.permissions.clone().into(),
 			returns: self.returns.clone().map(|k| k.into()),
-			comment: self.comment.clone().map(Into::into),
+			comment: self.comment.clone(),
 		}
 	}
 }

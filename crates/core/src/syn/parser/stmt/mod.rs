@@ -128,7 +128,7 @@ impl Parser<'_> {
 
 	/// Parsers an access statement.
 	async fn parse_access(&mut self, stk: &mut Stk) -> ParseResult<AccessStatement> {
-		let ac = self.next_token_value()?;
+		let ac = self.parse_ident()?;
 		let base = self.eat(t!("ON")).then(|| self.parse_base()).transpose()?;
 		let peek = self.peek();
 		match peek.kind {
@@ -138,7 +138,7 @@ impl Parser<'_> {
 				match self.peek_kind() {
 					t!("USER") => {
 						self.pop_peek();
-						let user = self.next_token_value()?;
+						let user = self.parse_ident()?;
 						Ok(AccessStatement::Grant(AccessStatementGrant {
 							ac,
 							base,
@@ -170,7 +170,7 @@ impl Parser<'_> {
 					}
 					t!("GRANT") => {
 						self.pop_peek();
-						let gr = Some(self.next_token_value()?);
+						let gr = Some(self.parse_ident()?);
 						Ok(AccessStatement::Show(AccessStatementShow {
 							ac,
 							base,
@@ -203,7 +203,7 @@ impl Parser<'_> {
 					}
 					t!("GRANT") => {
 						self.pop_peek();
-						let gr = Some(self.next_token_value()?);
+						let gr = Some(self.parse_ident()?);
 						Ok(AccessStatement::Revoke(AccessStatementRevoke {
 							ac,
 							base,
@@ -267,9 +267,9 @@ impl Parser<'_> {
 	fn parse_analyze(&mut self) -> ParseResult<AnalyzeStatement> {
 		expected!(self, t!("INDEX"));
 
-		let index = self.next_token_value()?;
+		let index = self.parse_ident()?;
 		expected!(self, t!("ON"));
-		let table = self.next_token_value()?;
+		let table = self.parse_ident()?;
 
 		Ok(AnalyzeStatement::Idx(table, index))
 	}
@@ -372,7 +372,7 @@ impl Parser<'_> {
 				InfoStatement::Db(structure, version)
 			}
 			t!("TABLE") => {
-				let ident = self.next_token_value()?;
+				let ident = self.parse_ident()?;
 				let version = if self.eat(t!("VERSION")) {
 					Some(stk.run(|stk| self.parse_expr_inherit(stk)).await?)
 				} else {
@@ -382,16 +382,16 @@ impl Parser<'_> {
 				InfoStatement::Tb(ident, structure, version)
 			}
 			t!("USER") => {
-				let ident = self.next_token_value()?;
+				let ident = self.parse_ident()?;
 				let base = self.eat(t!("ON")).then(|| self.parse_base()).transpose()?;
 				let structure = self.eat(t!("STRUCTURE"));
 				InfoStatement::User(ident, base, structure)
 			}
 			t!("INDEX") => {
-				let index = self.next_token_value()?;
+				let index = self.parse_ident()?;
 				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
-				let table = self.next_token_value()?;
+				let table = self.parse_ident()?;
 				let structure = self.eat(t!("STRUCTURE"));
 				InfoStatement::Index(index, table, structure)
 			}
@@ -454,7 +454,7 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects `OPTION` to already be consumed.
 	pub(super) fn parse_option_stmt(&mut self) -> ParseResult<OptionStatement> {
-		let name = self.next_token_value()?;
+		let name = self.parse_ident()?;
 		let what = if self.eat(t!("=")) {
 			let next = self.next();
 			match next.kind {
@@ -481,10 +481,10 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let name = self.next_token_value()?;
+				let name = self.parse_ident()?;
 				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
-				let what = self.next_token_value()?;
+				let what = self.parse_ident()?;
 
 				RebuildStatement::Index(RebuildIndexStatement {
 					what,
@@ -549,7 +549,7 @@ impl Parser<'_> {
 		let next = self.next();
 		let table = match next.kind {
 			t!("TABLE") => {
-				let table = self.next_token_value()?;
+				let table = self.parse_ident()?;
 				Some(table)
 			}
 			t!("DATABASE") => None,

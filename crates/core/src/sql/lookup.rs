@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Formatter, Write};
 
-use crate::fmt::Fmt;
+use crate::fmt::{EscapeIdent, Fmt};
 use crate::sql::order::Ordering;
 use crate::sql::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits, Start};
 
@@ -166,8 +166,8 @@ pub enum LookupSubject {
 impl Display for LookupSubject {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Self::Table(tb) => Display::fmt(&tb, f),
-			Self::Range(tb, rng) => write!(f, "{tb}:{rng}"),
+			Self::Table(tb) => Display::fmt(&EscapeIdent(tb), f),
+			Self::Range(tb, rng) => write!(f, "{}:{rng}", EscapeIdent(tb)),
 		}
 	}
 }
@@ -175,9 +175,9 @@ impl Display for LookupSubject {
 impl From<LookupSubject> for crate::expr::lookup::LookupSubject {
 	fn from(v: LookupSubject) -> Self {
 		match v {
-			LookupSubject::Table(tb) => Self::Table(tb.into()),
+			LookupSubject::Table(tb) => Self::Table(tb),
 			LookupSubject::Range(table, range) => Self::Range {
-				table: table.into(),
+				table,
 				range: range.into(),
 			},
 		}
@@ -187,11 +187,11 @@ impl From<LookupSubject> for crate::expr::lookup::LookupSubject {
 impl From<crate::expr::lookup::LookupSubject> for LookupSubject {
 	fn from(v: crate::expr::lookup::LookupSubject) -> Self {
 		match v {
-			crate::expr::lookup::LookupSubject::Table(tb) => Self::Table(tb.into()),
+			crate::expr::lookup::LookupSubject::Table(tb) => Self::Table(tb),
 			crate::expr::lookup::LookupSubject::Range {
 				table,
 				range,
-			} => Self::Range(table.into(), range.into()),
+			} => Self::Range(table, range.into()),
 		}
 	}
 }

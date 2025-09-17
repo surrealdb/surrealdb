@@ -11,7 +11,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Expr, FlowResultExt as _};
-use crate::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{EscapeKwFreeIdent, QuoteStr, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -89,9 +89,9 @@ impl Display for DefineParamStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " ${} VALUE {}", self.name, self.value)?;
+		write!(f, " ${} VALUE {}", EscapeKwFreeIdent(&self.name), self.value)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", QuoteStr(v))?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

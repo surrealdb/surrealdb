@@ -9,7 +9,7 @@ use rust_decimal::Decimal;
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Literal, Part, Value};
-use crate::fmt::EscapeKey;
+use crate::fmt::{EscapeIdent, EscapeKey, QuoteStr};
 use crate::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
@@ -425,7 +425,7 @@ impl Display for Kind {
 				if k.is_empty() {
 					f.write_str("record")
 				} else {
-					write!(f, "record<{}>", Fmt::verbar_separated(k))
+					write!(f, "record<{}>", Fmt::verbar_separated(k.iter().map(EscapeIdent)))
 				}
 			}
 			Kind::Geometry(k) => {
@@ -755,7 +755,7 @@ impl KindLiteral {
 impl Display for KindLiteral {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			KindLiteral::String(s) => write!(f, "{s}"),
+			KindLiteral::String(s) => write!(f, "{}", QuoteStr(s)),
 			KindLiteral::Integer(n) => write!(f, "{}", n),
 			KindLiteral::Float(n) => write!(f, "{}f", n),
 			KindLiteral::Decimal(n) => write!(f, "{}dec", n),

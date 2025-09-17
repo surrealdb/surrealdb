@@ -18,7 +18,7 @@ use crate::err::Error;
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Idiom, Kind, KindLiteral, Part};
-use crate::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{EscapeIdent, QuoteStr, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::Value;
@@ -417,7 +417,7 @@ impl Display for DefineFieldStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", self.name, EscapeIdent(&self.what))?;
 		if self.flex {
 			write!(f, " FLEXIBLE")?
 		}
@@ -445,7 +445,7 @@ impl Display for DefineFieldStatement {
 			write!(f, " REFERENCE {v}")?
 		}
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?
+			write!(f, " COMMENT {}", QuoteStr(comment))?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

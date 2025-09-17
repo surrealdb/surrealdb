@@ -1,6 +1,7 @@
 use std::fmt::{self, Display};
 
 use super::AlterKind;
+use crate::fmt::{EscapeIdent, QuoteStr};
 use crate::sql::reference::Reference;
 use crate::sql::{Expr, Idiom, Kind, Permissions};
 
@@ -67,7 +68,7 @@ impl Display for AlterFieldStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", self.name, EscapeIdent(&self.what))?;
 		match self.flex {
 			AlterKind::Set(_) => write!(f, " FLEXIBLE")?,
 			AlterKind::Drop => write!(f, " DROP FLEXIBLE")?,
@@ -106,7 +107,7 @@ impl Display for AlterFieldStatement {
 		}
 
 		match self.comment {
-			AlterKind::Set(ref x) => write!(f, " COMMENT {x}")?,
+			AlterKind::Set(ref x) => write!(f, " COMMENT {}", QuoteStr(x))?,
 			AlterKind::Drop => write!(f, " DROP COMMENT")?,
 			AlterKind::None => {}
 		}
@@ -123,7 +124,7 @@ impl From<AlterFieldStatement> for crate::expr::statements::alter::AlterFieldSta
 	fn from(v: AlterFieldStatement) -> Self {
 		crate::expr::statements::alter::AlterFieldStatement {
 			name: v.name.into(),
-			what: v.what.into(),
+			what: v.what,
 			if_exists: v.if_exists,
 			flex: v.flex.into(),
 			kind: v.kind.into(),
@@ -142,7 +143,7 @@ impl From<crate::expr::statements::alter::AlterFieldStatement> for AlterFieldSta
 	fn from(v: crate::expr::statements::alter::AlterFieldStatement) -> Self {
 		AlterFieldStatement {
 			name: v.name.into(),
-			what: v.what.into(),
+			what: v.what,
 			if_exists: v.if_exists,
 			flex: v.flex.into(),
 			kind: v.kind.into(),

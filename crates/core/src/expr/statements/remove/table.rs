@@ -9,6 +9,7 @@ use crate::ctx::Context;
 use crate::dbs::{self, Notification, Options};
 use crate::err::Error;
 use crate::expr::{Base, Value};
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -129,7 +130,7 @@ impl Display for RemoveTableStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		Ok(())
 	}
 }

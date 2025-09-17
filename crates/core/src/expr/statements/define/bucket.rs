@@ -11,6 +11,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Expr, FlowResultExt};
+use crate::fmt::{EscapeIdent, QuoteStr};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -105,7 +106,7 @@ impl Display for DefineBucketStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 
 		if self.readonly {
 			write!(f, " READONLY")?;
@@ -118,7 +119,7 @@ impl Display for DefineBucketStatement {
 		write!(f, " PERMISSIONS {}", self.permissions)?;
 
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?;
+			write!(f, " COMMENT {}", QuoteStr(comment))?;
 		}
 
 		Ok(())

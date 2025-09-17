@@ -11,6 +11,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::statements::define::run_indexing;
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -91,7 +92,7 @@ impl Display for RebuildIndexStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.what))?;
 		Ok(())
 	}
 }

@@ -133,7 +133,7 @@ impl Parser<'_> {
 				Expr::Literal(Literal::File(file))
 			}
 			t!("'") | t!("\"") | TokenKind::Glued(Glued::Strand) => {
-				let s = self.next_token_value()?;
+				let s = self.parse_ident()?;
 				if self.settings.legacy_strands {
 					Expr::Literal(self.reparse_legacy_strand(stk, s).await)
 				} else {

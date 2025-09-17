@@ -9,6 +9,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::Base;
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::mtree::MTreeIndex;
@@ -54,7 +55,9 @@ impl AnalyzeStatement {
 impl Display for AnalyzeStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Self::Idx(tb, idx) => write!(f, "ANALYZE INDEX {idx} ON {tb}"),
+			Self::Idx(tb, idx) => {
+				write!(f, "ANALYZE INDEX {} ON {}", EscapeIdent(idx), EscapeIdent(tb))
+			}
 		}
 	}
 }

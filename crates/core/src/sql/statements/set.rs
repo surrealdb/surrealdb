@@ -1,6 +1,9 @@
 use std::fmt;
 
-use crate::sql::{Expr, Kind};
+use crate::{
+	fmt::EscapeIdent,
+	sql::{Expr, Kind},
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -12,7 +15,7 @@ pub struct SetStatement {
 
 impl fmt::Display for SetStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "LET ${}", self.name)?;
+		write!(f, "LET ${}", EscapeIdent(&self.name))?;
 		if let Some(ref kind) = self.kind {
 			write!(f, ": {}", kind)?;
 		}
@@ -24,7 +27,7 @@ impl fmt::Display for SetStatement {
 impl From<SetStatement> for crate::expr::statements::SetStatement {
 	fn from(v: SetStatement) -> Self {
 		crate::expr::statements::SetStatement {
-			name: v.name.into(),
+			name: v.name,
 			what: v.what.into(),
 			kind: v.kind.map(Into::into),
 		}
@@ -34,7 +37,7 @@ impl From<SetStatement> for crate::expr::statements::SetStatement {
 impl From<crate::expr::statements::SetStatement> for SetStatement {
 	fn from(v: crate::expr::statements::SetStatement) -> Self {
 		SetStatement {
-			name: v.name.into(),
+			name: v.name,
 			what: v.what.into(),
 			kind: v.kind.map(Into::into),
 		}

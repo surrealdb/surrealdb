@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 use super::DefineKind;
 use super::config::api::ApiConfig;
 use crate::catalog::ApiMethod;
-use crate::fmt::{Fmt, pretty_indent};
+use crate::fmt::{Fmt, QuoteStr, pretty_indent};
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -46,7 +46,7 @@ impl Display for DefineApiStatement {
 		}
 
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?;
+			write!(f, " COMMENT {}", QuoteStr(comment))?;
 		}
 
 		drop(indent);

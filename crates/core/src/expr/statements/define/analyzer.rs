@@ -13,6 +13,7 @@ use crate::expr::filter::Filter;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::tokenizer::Tokenizer;
 use crate::expr::{Base, Value};
+use crate::fmt::{EscapeIdent, QuoteStr};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Array;
 
@@ -93,7 +94,7 @@ impl Display for DefineAnalyzerStatement {
 			DefineKind::Overwrite => write!(f, " IF NOT EXISTS")?,
 			DefineKind::IfNotExists => write!(f, " OVERWRITE")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		if let Some(ref i) = self.function {
 			write!(f, " FUNCTION fn::{i}")?
 		}
@@ -106,7 +107,7 @@ impl Display for DefineAnalyzerStatement {
 			write!(f, " FILTERS {}", tokens.join(","))?;
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", QuoteStr(v))?
 		}
 		Ok(())
 	}

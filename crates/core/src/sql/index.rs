@@ -1,6 +1,7 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
+use crate::fmt::EscapeIdent;
 use crate::sql::scoring::Scoring;
 use crate::val::Number;
 
@@ -244,7 +245,7 @@ impl Display for Index {
 			Self::Idx => Ok(()),
 			Self::Uniq => f.write_str("UNIQUE"),
 			Self::FullText(p) => {
-				write!(f, "FULLTEXT ANALYZER {} {}", p.az, p.sc,)?;
+				write!(f, "FULLTEXT ANALYZER {} {}", EscapeIdent(&p.az), p.sc,)?;
 				if p.hl {
 					f.write_str(" HIGHLIGHTS")?
 				}

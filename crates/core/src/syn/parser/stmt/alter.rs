@@ -240,7 +240,7 @@ impl Parser<'_> {
 		} else {
 			false
 		};
-		let name = self.next_token_value()?;
+		let name = self.parse_ident()?;
 		let mut res = AlterSequenceStatement {
 			name,
 			if_exists,

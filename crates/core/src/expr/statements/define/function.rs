@@ -10,7 +10,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Block, Kind};
-use crate::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{EscapeKwFreeIdent, QuoteStr, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -93,7 +93,7 @@ impl fmt::Display for DefineFunctionStatement {
 			if i > 0 {
 				f.write_str(", ")?;
 			}
-			write!(f, "${name}: {kind}")?;
+			write!(f, "${}: {kind}", EscapeKwFreeIdent(name))?;
 		}
 		f.write_str(") ")?;
 		if let Some(ref v) = self.returns {
@@ -101,7 +101,7 @@ impl fmt::Display for DefineFunctionStatement {
 		}
 		Display::fmt(&self.block, f)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", QuoteStr(v))?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

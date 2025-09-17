@@ -9,7 +9,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResult, RecordIdLit};
-use crate::fmt::EscapeKey;
+use crate::fmt::{EscapeKey, QuoteStr};
 use crate::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, Regex, Uuid,
@@ -201,7 +201,7 @@ impl fmt::Display for Literal {
 			}
 			Literal::Integer(x) => write!(f, "{x}"),
 			Literal::Decimal(d) => write!(f, "{d}dec"),
-			Literal::Strand(strand) => write!(f, "{strand}"),
+			Literal::Strand(strand) => write!(f, "{}", QuoteStr(strand)),
 			Literal::Bytes(bytes) => write!(f, "{bytes}"),
 			Literal::Regex(regex) => write!(f, "{regex}"),
 			Literal::RecordId(record_id_lit) => write!(f, "{record_id_lit}"),
@@ -256,6 +256,6 @@ pub struct ObjectEntry {
 
 impl fmt::Display for ObjectEntry {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}: {}", self.key, self.value)
+		write!(f, "{}: {}", EscapeKey(&self.key), self.value)
 	}
 }

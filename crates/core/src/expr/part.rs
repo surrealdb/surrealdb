@@ -14,7 +14,7 @@ use crate::expr::idiom::recursion::{
 	self, Recursion, clean_iteration, compute_idiom_recursion, is_final,
 };
 use crate::expr::{Expr, FlowResultExt as _, Idiom, Literal, Lookup, Value};
-use crate::fmt::{Fmt, is_pretty, pretty_indent};
+use crate::fmt::{EscapeIdent, EscapeKwFreeIdent, Fmt, is_pretty, pretty_indent};
 use crate::val::{Array, RecordId};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -148,7 +148,7 @@ impl fmt::Display for Part {
 			Part::Last => f.write_str("[$]"),
 			Part::First => f.write_str("[0]"),
 			Part::Start(v) => write!(f, "{v}"),
-			Part::Field(v) => write!(f, ".{v}"),
+			Part::Field(v) => write!(f, ".{}", EscapeKwFreeIdent(v)),
 			Part::Flatten => f.write_str("…"),
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
 			Part::Lookup(v) => write!(f, "{v}"),
@@ -423,11 +423,11 @@ impl DestructurePart {
 impl fmt::Display for DestructurePart {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			DestructurePart::All(fd) => write!(f, "{fd}.*"),
-			DestructurePart::Field(fd) => write!(f, "{fd}"),
-			DestructurePart::Aliased(fd, v) => write!(f, "{fd}: {v}"),
+			DestructurePart::All(fd) => write!(f, "{}.*", EscapeIdent(fd)),
+			DestructurePart::Field(fd) => write!(f, "{}", EscapeIdent(fd)),
+			DestructurePart::Aliased(fd, v) => write!(f, "{}: {v}", EscapeIdent(fd)),
 			DestructurePart::Destructure(fd, d) => {
-				write!(f, "{fd}{}", Part::Destructure(d.clone()))
+				write!(f, "{}{}", EscapeIdent(fd), Part::Destructure(d.clone()))
 			}
 		}
 	}

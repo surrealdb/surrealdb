@@ -12,7 +12,7 @@ use crate::doc::CursorDoc;
 use crate::expr::order::Ordering;
 use crate::expr::start::Start;
 use crate::expr::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits};
-use crate::fmt::Fmt;
+use crate::fmt::{Fmt, QuoteStr};
 use crate::kvs::KVKey;
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
 
@@ -309,11 +309,11 @@ impl ComputedLookupSubject {
 impl Display for LookupSubject {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Self::Table(tb) => Display::fmt(&tb, f),
+			Self::Table(tb) => Display::fmt(&QuoteStr(tb), f),
 			Self::Range {
 				table,
 				range,
-			} => write!(f, "{table}:{range}"),
+			} => write!(f, "{}:{range}", QuoteStr(table)),
 		}
 	}
 }

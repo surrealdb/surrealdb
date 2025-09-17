@@ -1,5 +1,7 @@
 use std::fmt::{Display, Formatter, Result};
 
+use crate::fmt::{EscapeIdent, Fmt};
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum With {
@@ -14,7 +16,7 @@ impl Display for With {
 			With::NoIndex => f.write_str(" NOINDEX"),
 			With::Index(i) => {
 				f.write_str(" INDEX ")?;
-				f.write_str(&i.join(","))
+				Fmt::comma_separated(i.iter().map(EscapeIdent)).fmt(f)
 			}
 		}
 	}

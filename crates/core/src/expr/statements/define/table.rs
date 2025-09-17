@@ -19,7 +19,7 @@ use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::UpdateStatement;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Idiom, Kind, Output, View};
-use crate::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{EscapeIdent, QuoteStr, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::Value;
@@ -236,7 +236,7 @@ impl Display for DefineTableStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		write!(f, " TYPE")?;
 		match &self.table_type {
 			TableType::Normal => {
@@ -250,7 +250,7 @@ impl Display for DefineTableStatement {
 						if idx != 0 {
 							write!(f, " | ")?;
 						}
-						k.fmt(f)?;
+						EscapeIdent(k).fmt(f)?;
 					}
 				}
 				if let Some(Kind::Record(kind)) = &rel.to {
@@ -259,7 +259,7 @@ impl Display for DefineTableStatement {
 						if idx != 0 {
 							write!(f, " | ")?;
 						}
-						k.fmt(f)?;
+						EscapeIdent(k).fmt(f)?;
 					}
 				}
 				if rel.enforced {
@@ -279,7 +279,7 @@ impl Display for DefineTableStatement {
 			" SCHEMALESS"
 		})?;
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?
+			write!(f, " COMMENT {}", QuoteStr(comment))?
 		}
 		if let Some(ref v) = self.view {
 			write!(f, " {v}")?

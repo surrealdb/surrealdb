@@ -17,7 +17,7 @@ use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::user::UserDuration;
-use crate::fmt::{Fmt, QuoteStr};
+use crate::fmt::{EscapeIdent, Fmt, QuoteStr};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Value};
 
@@ -59,7 +59,7 @@ impl DefineUserStatement {
 			name: self.name.clone(),
 			hash: self.hash.clone(),
 			code: self.code.clone(),
-			roles: self.roles.iter().cloned().collect(),
+			roles: self.roles.clone(),
 			token_duration: self.duration.token.map(|x| x.0),
 			session_duration: self.duration.session.map(|x| x.0),
 			comment: self.comment.clone(),
@@ -73,7 +73,7 @@ impl DefineUserStatement {
 			name: def.name.clone(),
 			hash: def.hash.clone(),
 			code: def.code.clone(),
-			roles: def.roles.iter().map(|x| x.clone()).collect(),
+			roles: def.roles.clone(),
 			duration: UserDuration {
 				token: def.token_duration.map(val::Duration),
 				session: def.session_duration.map(val::Duration),
@@ -197,11 +197,15 @@ impl Display for DefineUserStatement {
 		write!(
 			f,
 			" {} ON {} PASSHASH {} ROLES {}",
-			self.name,
+			EscapeIdent(&self.name),
 			self.base,
 			QuoteStr(&self.hash),
 			Fmt::comma_separated(
-				&self.roles.iter().map(|r| r.to_string().to_uppercase()).collect::<Vec<String>>()
+				&self
+					.roles
+					.iter()
+					.map(|r| EscapeIdent(r.to_string().to_uppercase()))
+					.collect::<Vec<_>>()
 			),
 		)?;
 		// Always print relevant durations so defaults can be changed in the future
@@ -225,7 +229,7 @@ impl Display for DefineUserStatement {
 			}
 		)?;
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?
+			write!(f, " COMMENT {}", QuoteStr(comment))?
 		}
 		Ok(())
 	}

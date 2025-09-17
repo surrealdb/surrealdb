@@ -36,7 +36,7 @@ impl BucketDefinition {
 				.map(|v| crate::sql::Expr::Literal(crate::sql::Literal::Strand(v))),
 			permissions: self.permissions.clone().into(),
 			readonly: self.readonly,
-			comment: self.comment.clone().map(Into::into),
+			comment: self.comment.clone(),
 		}
 	}
 }

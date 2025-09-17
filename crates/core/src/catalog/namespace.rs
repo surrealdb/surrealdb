@@ -76,7 +76,7 @@ impl NamespaceDefinition {
 			// SAFETY: we know the name is valid because it was validated when the namespace was
 			// created.
 			name: self.name.clone(),
-			comment: self.comment.clone().map(|v| v.into()),
+			comment: self.comment.clone(),
 			..Default::default()
 		}
 	}

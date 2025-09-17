@@ -74,7 +74,7 @@ impl From<PostfixOperator> for crate::expr::PostfixOperator {
 			PostfixOperator::Range => crate::expr::PostfixOperator::Range,
 			PostfixOperator::RangeSkip => crate::expr::PostfixOperator::RangeSkip,
 			PostfixOperator::MethodCall(name, x) => crate::expr::PostfixOperator::MethodCall(
-				name.into(),
+				name,
 				x.into_iter().map(From::from).collect(),
 			),
 			PostfixOperator::Call(x) => {
@@ -90,7 +90,7 @@ impl From<crate::expr::PostfixOperator> for PostfixOperator {
 			crate::expr::PostfixOperator::Range => PostfixOperator::Range,
 			crate::expr::PostfixOperator::RangeSkip => PostfixOperator::RangeSkip,
 			crate::expr::PostfixOperator::MethodCall(name, args) => {
-				PostfixOperator::MethodCall(name.into(), args.into_iter().map(From::from).collect())
+				PostfixOperator::MethodCall(name, args.into_iter().map(From::from).collect())
 			}
 			crate::expr::PostfixOperator::Call(args) => {
 				PostfixOperator::Call(args.into_iter().map(From::from).collect())

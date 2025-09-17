@@ -15,6 +15,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Cond, ControlFlow, FlowResult, FlowResultExt as _, RecordIdLit};
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Array, Datetime, Duration, Object, Uuid, Value};
 use crate::{catalog, val};
@@ -190,7 +191,7 @@ impl GrantBearer {
 		let mut hasher = Sha256::new();
 		hasher.update(self.key.as_str());
 		let hash = hasher.finalize();
-		let hash_hex = format!("{hash:x}").into();
+		let hash_hex = format!("{hash:x}");
 
 		Self {
 			key: hash_hex,
@@ -1025,25 +1026,25 @@ impl Display for AccessStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Grant(stmt) => {
-				write!(f, "ACCESS {}", stmt.ac)?;
+				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " GRANT")?;
 				match &stmt.subject {
-					Subject::User(x) => write!(f, " FOR USER {}", x.clone())?,
+					Subject::User(x) => write!(f, " FOR USER {}", EscapeIdent(x))?,
 					Subject::Record(x) => write!(f, " FOR RECORD {}", x)?,
 				}
 				Ok(())
 			}
 			Self::Show(stmt) => {
-				write!(f, "ACCESS {}", stmt.ac)?;
+				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " SHOW")?;
 				match &stmt.gr {
-					Some(v) => write!(f, " GRANT {v}")?,
+					Some(v) => write!(f, " GRANT {}", EscapeIdent(v))?,
 					None => match &stmt.cond {
 						Some(v) => write!(f, " {v}")?,
 						None => write!(f, " ALL")?,
@@ -1052,13 +1053,13 @@ impl Display for AccessStatement {
 				Ok(())
 			}
 			Self::Revoke(stmt) => {
-				write!(f, "ACCESS {}", stmt.ac)?;
+				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " REVOKE")?;
 				match &stmt.gr {
-					Some(v) => write!(f, " GRANT {v}")?,
+					Some(v) => write!(f, " GRANT {}", EscapeIdent(v))?,
 					None => match &stmt.cond {
 						Some(v) => write!(f, " {v}")?,
 						None => write!(f, " ALL")?,
@@ -1067,7 +1068,7 @@ impl Display for AccessStatement {
 				Ok(())
 			}
 			Self::Purge(stmt) => {
-				write!(f, "ACCESS {}", stmt.ac)?;
+				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}

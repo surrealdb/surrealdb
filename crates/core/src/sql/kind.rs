@@ -4,7 +4,7 @@ use std::hash;
 
 use rust_decimal::Decimal;
 
-use crate::fmt::{EscapeKey, Fmt, Pretty, is_pretty, pretty_indent};
+use crate::fmt::{EscapeIdent, EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::val::Duration;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -257,7 +257,7 @@ impl Display for Kind {
 				if k.is_empty() {
 					write!(f, "record")
 				} else {
-					write!(f, "record<{}>", Fmt::verbar_separated(k))
+					write!(f, "record<{}>", Fmt::verbar_separated(k.iter().map(EscapeIdent)))
 				}
 			}
 			Kind::Geometry(k) => {
@@ -387,7 +387,7 @@ impl Eq for KindLiteral {}
 impl Display for KindLiteral {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			KindLiteral::String(s) => write!(f, "{}", s),
+			KindLiteral::String(s) => write!(f, "{}", QuoteStr(s)),
 			KindLiteral::Integer(n) => write!(f, "{}", n),
 			KindLiteral::Float(n) => write!(f, "{}", n),
 			KindLiteral::Decimal(n) => write!(f, "{}", n),

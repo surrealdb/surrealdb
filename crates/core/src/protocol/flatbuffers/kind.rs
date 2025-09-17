@@ -5,7 +5,6 @@ use surrealdb_protocol::fb::v1 as proto_fb;
 
 use crate::expr::Kind;
 use crate::expr::kind::{GeometryKind, KindLiteral};
-use crate::key::index::bi;
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use crate::val::Duration;
 
@@ -119,9 +118,19 @@ impl ToFlatbuffers for Kind {
 				),
 			},
 			Self::Record(tables) => {
-				let tables = builder.create_vector(
-					&tables.iter().map(|x| builder.create_string(x)).collect::<Vec<_>>(),
-				);
+				let tables = tables
+					.iter()
+					.map(|x| {
+						let name = builder.create_string(x);
+						proto_fb::TableName::create(
+							builder,
+							&proto_fb::TableNameArgs {
+								name: Some(name),
+							},
+						)
+					})
+					.collect::<Vec<_>>();
+				let tables = builder.create_vector(&tables);
 				proto_fb::KindArgs {
 					kind_type: proto_fb::KindType::Record,
 					kind: Some(

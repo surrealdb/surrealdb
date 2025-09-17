@@ -110,7 +110,7 @@ impl From<Config> for Value {
 				TableConfig::All => true.into(),
 				TableConfig::None => false.into(),
 				// TODO: Null byte validity
-				TableConfig::Some(v) => v.into_iter().map(|x| Value::Strand(x)).collect::<Vec<_>>().into()
+				TableConfig::Some(v) => v.into_iter().map(Value::Strand).collect::<Vec<_>>().into()
 			},
 		);
 

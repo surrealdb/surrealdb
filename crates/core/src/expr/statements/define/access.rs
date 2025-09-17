@@ -18,6 +18,7 @@ use crate::expr::access_type::{
 };
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{AccessType, Algorithm, Base, Expr, JwtAccess, RecordAccess};
+use crate::fmt::{EscapeIdent, QuoteStr};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Value};
 
@@ -358,7 +359,7 @@ impl Display for DefineAccessStatement {
 			DefineKind::Default => {}
 		}
 		// The specific access method definition is displayed by AccessType
-		write!(f, " {} ON {} TYPE {}", self.name, self.base, self.access_type)?;
+		write!(f, " {} ON {} TYPE {}", EscapeIdent(&self.name), self.base, self.access_type)?;
 		// The additional authentication clause
 		if let Some(ref v) = self.authenticate {
 			write!(f, " AUTHENTICATE {v}")?
@@ -396,7 +397,7 @@ impl Display for DefineAccessStatement {
 			}
 		)?;
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?
+			write!(f, " COMMENT {}", QuoteStr(comment))?
 		}
 		Ok(())
 	}

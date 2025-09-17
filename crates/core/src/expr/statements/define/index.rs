@@ -20,7 +20,7 @@ use crate::expr::Output;
 #[cfg(target_family = "wasm")]
 use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
 use crate::expr::{Base, Idiom, Part};
-use crate::fmt::Fmt;
+use crate::fmt::{EscapeIdent, Fmt};
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ToSql;
 use crate::val::Value;
@@ -160,8 +160,8 @@ impl Display for DefineIndexStatement {
 		write!(
 			f,
 			" {} ON {} FIELDS {}",
-			self.name,
-			self.what,
+			EscapeIdent(&self.name),
+			EscapeIdent(&self.what),
 			Fmt::comma_separated(self.cols.iter())
 		)?;
 		if Index::Idx != self.index {

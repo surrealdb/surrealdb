@@ -1,7 +1,7 @@
 use std::fmt::{self, Write};
 
 use super::DefineKind;
-use crate::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{EscapeIdent, QuoteStr, is_pretty, pretty_indent};
 use crate::sql::Permission;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -23,9 +23,9 @@ impl fmt::Display for DefineModelStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " ml::{}<{}>", self.name, self.version)?;
+		write!(f, " ml::{}<{}>", EscapeIdent(&self.name), self.version)?;
 		if let Some(comment) = self.comment.as_ref() {
-			write!(f, " COMMENT {}", comment)?;
+			write!(f, " COMMENT {}", QuoteStr(comment))?;
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
@@ -43,7 +43,7 @@ impl From<DefineModelStatement> for crate::expr::statements::DefineModelStatemen
 		Self {
 			kind: v.kind.into(),
 			hash: v.hash,
-			name: v.name.into(),
+			name: v.name,
 			version: v.version,
 			comment: v.comment,
 			permissions: v.permissions.into(),
@@ -56,7 +56,7 @@ impl From<crate::expr::statements::DefineModelStatement> for DefineModelStatemen
 		Self {
 			kind: v.kind.into(),
 			hash: v.hash,
-			name: v.name.into(),
+			name: v.name,
 			version: v.version,
 			comment: v.comment,
 			permissions: v.permissions.into(),

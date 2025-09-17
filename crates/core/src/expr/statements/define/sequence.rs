@@ -9,6 +9,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Timeout, Value};
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
@@ -83,7 +84,7 @@ impl Display for DefineSequenceStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} BATCH {} START {}", self.name, self.batch, self.start)?;
+		write!(f, " {} BATCH {} START {}", EscapeIdent(&self.name), self.batch, self.start)?;
 		if let Some(ref v) = self.timeout {
 			write!(f, " {v}")?
 		}

@@ -1,5 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 
+use crate::fmt::EscapeIdent;
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveParamStatement {
@@ -13,7 +15,7 @@ impl Display for RemoveParamStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " ${}", self.name)?;
+		write!(f, " ${}", EscapeIdent(&self.name))?;
 		Ok(())
 	}
 }
@@ -21,7 +23,7 @@ impl Display for RemoveParamStatement {
 impl From<RemoveParamStatement> for crate::expr::statements::RemoveParamStatement {
 	fn from(v: RemoveParamStatement) -> Self {
 		crate::expr::statements::RemoveParamStatement {
-			name: v.name.into(),
+			name: v.name,
 			if_exists: v.if_exists,
 		}
 	}
@@ -30,7 +32,7 @@ impl From<RemoveParamStatement> for crate::expr::statements::RemoveParamStatemen
 impl From<crate::expr::statements::RemoveParamStatement> for RemoveParamStatement {
 	fn from(v: crate::expr::statements::RemoveParamStatement) -> Self {
 		RemoveParamStatement {
-			name: v.name.into(),
+			name: v.name,
 			if_exists: v.if_exists,
 		}
 	}

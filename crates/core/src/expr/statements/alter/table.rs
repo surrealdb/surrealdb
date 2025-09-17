@@ -13,7 +13,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::{Base, ChangeFeed, Kind};
-use crate::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -116,7 +116,7 @@ impl Display for AlterTableStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		if let Some(kind) = &self.kind {
 			write!(f, " TYPE")?;
 			match &kind {

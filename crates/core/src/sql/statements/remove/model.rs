@@ -23,7 +23,7 @@ impl Display for RemoveModelStatement {
 impl From<RemoveModelStatement> for crate::expr::statements::RemoveModelStatement {
 	fn from(v: RemoveModelStatement) -> Self {
 		crate::expr::statements::RemoveModelStatement {
-			name: v.name.into(),
+			name: v.name,
 			if_exists: v.if_exists,
 			version: v.version,
 		}
@@ -33,7 +33,7 @@ impl From<RemoveModelStatement> for crate::expr::statements::RemoveModelStatemen
 impl From<crate::expr::statements::RemoveModelStatement> for RemoveModelStatement {
 	fn from(v: crate::expr::statements::RemoveModelStatement) -> Self {
 		RemoveModelStatement {
-			name: v.name.into(),
+			name: v.name,
 			if_exists: v.if_exists,
 			version: v.version,
 		}

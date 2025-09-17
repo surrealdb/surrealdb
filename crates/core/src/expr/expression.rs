@@ -22,7 +22,7 @@ use crate::expr::{
 	BinaryOperator, Block, Constant, ControlFlow, FlowResult, FunctionCall, Idiom, Literal, Mock,
 	Param, PostfixOperator, PrefixOperator,
 };
-use crate::fmt::Pretty;
+use crate::fmt::{EscapeIdent, Pretty};
 use crate::fnc;
 use crate::val::{Array, Closure, Range, Table, Value};
 
@@ -636,7 +636,7 @@ impl fmt::Display for Expr {
 			Expr::Literal(literal) => write!(f, "{literal}"),
 			Expr::Param(param) => write!(f, "{param}"),
 			Expr::Idiom(idiom) => write!(f, "{idiom}"),
-			Expr::Table(ident) => write!(f, "{ident}"),
+			Expr::Table(ident) => write!(f, "{}", EscapeIdent(ident)),
 			Expr::Mock(mock) => write!(f, "{mock}"),
 			Expr::Block(block) => write!(f, "{block}"),
 			Expr::Constant(constant) => write!(f, "{constant}"),

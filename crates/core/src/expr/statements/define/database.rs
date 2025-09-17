@@ -12,6 +12,7 @@ use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::changefeed::ChangeFeed;
 use crate::expr::statements::info::InfoStructure;
+use crate::fmt::{EscapeIdent, QuoteStr};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -95,9 +96,9 @@ impl Display for DefineDatabaseStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", QuoteStr(v))?
 		}
 		if let Some(ref v) = self.changefeed {
 			write!(f, " {v}")?;

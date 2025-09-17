@@ -7,6 +7,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Value};
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
@@ -63,7 +64,7 @@ impl Display for RemoveSequenceStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		Ok(())
 	}
 }

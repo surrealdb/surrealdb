@@ -1,6 +1,7 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
+use crate::fmt::{EscapeIdent, QuoteStr};
 use crate::sql::access::AccessDuration;
 use crate::sql::{AccessType, Base, Expr};
 
@@ -29,7 +30,7 @@ impl Display for DefineAccessStatement {
 			}
 		}
 		// The specific access method definition is displayed by AccessType
-		write!(f, " {} ON {} TYPE {}", self.name, self.base, self.access_type)?;
+		write!(f, " {} ON {} TYPE {}", EscapeIdent(&self.name), self.base, self.access_type)?;
 		// The additional authentication clause
 		if let Some(ref v) = self.authenticate {
 			write!(f, " AUTHENTICATE {v}")?
@@ -67,7 +68,7 @@ impl Display for DefineAccessStatement {
 			}
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", QuoteStr(v))?
 		}
 		Ok(())
 	}
@@ -77,7 +78,7 @@ impl From<DefineAccessStatement> for crate::expr::statements::DefineAccessStatem
 	fn from(v: DefineAccessStatement) -> Self {
 		crate::expr::statements::DefineAccessStatement {
 			kind: v.kind.into(),
-			name: v.name.into(),
+			name: v.name,
 			base: v.base.into(),
 			access_type: v.access_type.into(),
 			authenticate: v.authenticate.map(Into::into),
@@ -91,7 +92,7 @@ impl From<crate::expr::statements::DefineAccessStatement> for DefineAccessStatem
 	fn from(v: crate::expr::statements::DefineAccessStatement) -> Self {
 		DefineAccessStatement {
 			kind: v.kind.into(),
-			name: v.name.into(),
+			name: v.name,
 			base: v.base.into(),
 			access_type: v.access_type.into(),
 			authenticate: v.authenticate.map(Into::into),

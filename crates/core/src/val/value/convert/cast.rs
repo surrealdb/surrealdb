@@ -354,8 +354,8 @@ impl Cast for String {
 			Value::Null => Ok("NULL".into()),
 			Value::None => Ok("NONE".into()),
 			Value::Strand(x) => Ok(x),
-			Value::Uuid(x) => Ok(x.to_raw().into()),
-			Value::Datetime(x) => Ok(x.into_raw_string().into()),
+			Value::Uuid(x) => Ok(x.to_raw()),
+			Value::Datetime(x) => Ok(x.into_raw_string()),
 			Value::Number(Number::Decimal(x)) => Ok(x.to_string()),
 			x => Ok(x.to_string()),
 		}

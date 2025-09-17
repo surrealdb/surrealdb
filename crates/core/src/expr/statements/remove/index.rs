@@ -9,6 +9,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Value};
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -81,7 +82,7 @@ impl Display for RemoveIndexStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.what))?;
 		Ok(())
 	}
 }

@@ -4,7 +4,7 @@ use std::fmt::{self, Write as _};
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use rust_decimal::Decimal;
 
-use crate::fmt::{EscapeKey, Fmt, Pretty, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::sql::{Closure, Expr, RecordIdLit};
 use crate::val::{Bytes, Datetime, Duration, File, Geometry, Regex, Uuid};
 
@@ -87,7 +87,7 @@ impl fmt::Display for Literal {
 			}
 			Literal::Integer(x) => write!(f, "{x}"),
 			Literal::Decimal(d) => write!(f, "{d}dec"),
-			Literal::Strand(strand) => write!(f, "{strand}"),
+			Literal::Strand(strand) => write!(f, "{}", QuoteStr(strand)),
 			Literal::Bytes(bytes) => write!(f, "{bytes}"),
 			Literal::Regex(regex) => write!(f, "{regex}"),
 			Literal::RecordId(record_id_lit) => write!(f, "{record_id_lit}"),
@@ -381,6 +381,6 @@ impl From<crate::expr::literal::ObjectEntry> for ObjectEntry {
 
 impl fmt::Display for ObjectEntry {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}: {}", self.key, self.value)
+		write!(f, "{}: {}", EscapeKey(&self.key), self.value)
 	}
 }

@@ -1,6 +1,8 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
+use crate::fmt::EscapeIdent;
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum RebuildStatement {
@@ -45,7 +47,7 @@ impl Display for RebuildIndexStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.what))?;
 		Ok(())
 	}
 }
@@ -53,8 +55,8 @@ impl Display for RebuildIndexStatement {
 impl From<RebuildIndexStatement> for crate::expr::statements::rebuild::RebuildIndexStatement {
 	fn from(v: RebuildIndexStatement) -> Self {
 		Self {
-			name: v.name.into(),
-			what: v.what.into(),
+			name: v.name,
+			what: v.what,
 			if_exists: v.if_exists,
 		}
 	}
@@ -63,8 +65,8 @@ impl From<RebuildIndexStatement> for crate::expr::statements::rebuild::RebuildIn
 impl From<crate::expr::statements::rebuild::RebuildIndexStatement> for RebuildIndexStatement {
 	fn from(v: crate::expr::statements::rebuild::RebuildIndexStatement) -> Self {
 		Self {
-			name: v.name.into(),
-			what: v.what.into(),
+			name: v.name,
+			what: v.what,
 			if_exists: v.if_exists,
 		}
 	}

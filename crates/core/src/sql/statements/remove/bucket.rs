@@ -1,5 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 
+use crate::fmt::EscapeIdent;
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveBucketStatement {
@@ -13,7 +15,7 @@ impl Display for RemoveBucketStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		Ok(())
 	}
 }
@@ -21,7 +23,7 @@ impl Display for RemoveBucketStatement {
 impl From<RemoveBucketStatement> for crate::expr::statements::remove::RemoveBucketStatement {
 	fn from(v: RemoveBucketStatement) -> Self {
 		crate::expr::statements::remove::RemoveBucketStatement {
-			name: v.name.into(),
+			name: v.name,
 			if_exists: v.if_exists,
 		}
 	}
@@ -30,7 +32,7 @@ impl From<RemoveBucketStatement> for crate::expr::statements::remove::RemoveBuck
 impl From<crate::expr::statements::remove::RemoveBucketStatement> for RemoveBucketStatement {
 	fn from(v: crate::expr::statements::remove::RemoveBucketStatement) -> Self {
 		RemoveBucketStatement {
-			name: v.name.into(),
+			name: v.name,
 			if_exists: v.if_exists,
 		}
 	}

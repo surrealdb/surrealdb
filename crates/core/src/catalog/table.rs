@@ -114,7 +114,7 @@ impl TableDefinition {
 			view: self.view.clone().map(|v| v.to_sql_definition()),
 			permissions: self.permissions.clone().into(),
 			changefeed: self.changefeed.map(|v| v.into()),
-			comment: self.comment.clone().map(|v| v.into()),
+			comment: self.comment.clone(),
 			table_type: self.table_type.clone().into(),
 			..Default::default()
 		}
@@ -187,9 +187,9 @@ impl InfoStructure for TableType {
 			Self::Relation(rel) => Value::from(map! {
 				"kind".to_string() => "RELATION".into(),
 				"in".to_string(), if let Some(Kind::Record(tables)) = rel.from =>
-					tables.into_iter().map(|t| Value::from(t)).collect::<Vec<_>>().into(),
+					tables.into_iter().map(Value::from).collect::<Vec<_>>().into(),
 				"out".to_string(), if let Some(Kind::Record(tables)) = rel.to =>
-					tables.into_iter().map(|t| Value::from(t)).collect::<Vec<_>>().into(),
+					tables.into_iter().map(Value::from).collect::<Vec<_>>().into(),
 				"enforced".to_string() => rel.enforced.into()
 			}),
 		}

@@ -14,6 +14,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::reference::Reference;
 use crate::expr::{Base, Expr, Idiom, Kind};
+use crate::fmt::{EscapeIdent, QuoteStr};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -175,7 +176,7 @@ impl Display for AlterFieldStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", self.name, EscapeIdent(&self.what))?;
 
 		match self.flex {
 			AlterKind::Set(_) => write!(f, " FLEXIBLE")?,
@@ -218,7 +219,7 @@ impl Display for AlterFieldStatement {
 		}
 
 		match self.comment {
-			AlterKind::Set(ref v) => write!(f, " COMMENT {v}")?,
+			AlterKind::Set(ref x) => write!(f, " COMMENT {}", QuoteStr(x))?,
 			AlterKind::Drop => write!(f, " DROP COMMENT")?,
 			AlterKind::None => {}
 		}

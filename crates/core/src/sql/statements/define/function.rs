@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
-use crate::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{EscapeIdent, QuoteStr, is_pretty, pretty_indent};
 use crate::sql::{Block, Kind, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -24,12 +24,12 @@ impl fmt::Display for DefineFunctionStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " fn::{}(", &*self.name)?;
+		write!(f, " fn::{}(", &self.name)?;
 		for (i, (name, kind)) in self.args.iter().enumerate() {
 			if i > 0 {
 				f.write_str(", ")?;
 			}
-			write!(f, "${name}: {kind}")?;
+			write!(f, "${}: {kind}", EscapeIdent(name))?;
 		}
 		f.write_str(") ")?;
 		if let Some(ref v) = self.returns {
@@ -37,7 +37,7 @@ impl fmt::Display for DefineFunctionStatement {
 		}
 		Display::fmt(&self.block, f)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", QuoteStr(v))?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
@@ -54,8 +54,8 @@ impl From<DefineFunctionStatement> for crate::expr::statements::DefineFunctionSt
 	fn from(v: DefineFunctionStatement) -> Self {
 		Self {
 			kind: v.kind.into(),
-			name: v.name.into(),
-			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
+			name: v.name,
+			args: v.args.into_iter().map(|(i, k)| (i, k.into())).collect(),
 			block: v.block.into(),
 			comment: v.comment,
 			permissions: v.permissions.into(),
@@ -68,8 +68,8 @@ impl From<crate::expr::statements::DefineFunctionStatement> for DefineFunctionSt
 	fn from(v: crate::expr::statements::DefineFunctionStatement) -> Self {
 		Self {
 			kind: v.kind.into(),
-			name: v.name.into(),
-			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
+			name: v.name,
+			args: v.args.into_iter().map(|(i, k)| (i, k.into())).collect(),
 			block: v.block.into(),
 			comment: v.comment,
 			permissions: v.permissions.into(),

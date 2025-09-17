@@ -4,6 +4,7 @@ use std::fmt::Display;
 use revision::revisioned;
 
 use crate::expr::language::Language;
+use crate::fmt::EscapeIdent;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -26,7 +27,7 @@ impl Display for Filter {
 			Self::Ngram(min, max) => write!(f, "NGRAM({min},{max})"),
 			Self::Snowball(lang) => write!(f, "SNOWBALL({lang})"),
 			Self::Uppercase => f.write_str("UPPERCASE"),
-			Self::Mapper(path) => write!(f, "MAPPER({path})"),
+			Self::Mapper(path) => write!(f, "MAPPER({})", EscapeIdent(path)),
 		}
 	}
 }

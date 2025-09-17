@@ -71,7 +71,7 @@ impl fmt::Display for ShowStatement {
 impl From<ShowStatement> for crate::expr::statements::ShowStatement {
 	fn from(v: ShowStatement) -> Self {
 		crate::expr::statements::ShowStatement {
-			table: v.table.map(Into::into),
+			table: v.table,
 			since: v.since.into(),
 			limit: v.limit,
 		}
@@ -81,7 +81,7 @@ impl From<ShowStatement> for crate::expr::statements::ShowStatement {
 impl From<crate::expr::statements::ShowStatement> for ShowStatement {
 	fn from(v: crate::expr::statements::ShowStatement) -> Self {
 		ShowStatement {
-			table: v.table.map(Into::into),
+			table: v.table,
 			since: v.since.into(),
 			limit: v.limit,
 		}

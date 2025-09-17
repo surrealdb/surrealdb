@@ -1,7 +1,7 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::fmt::Fmt;
+use crate::fmt::{EscapeIdent, Fmt, QuoteStr};
 use crate::sql::{Idiom, Index};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,15 +27,15 @@ impl Display for DefineIndexStatement {
 		write!(
 			f,
 			" {} ON {} FIELDS {}",
-			self.name,
-			self.what,
+			EscapeIdent(&self.name),
+			EscapeIdent(&self.what),
 			Fmt::comma_separated(self.cols.iter())
 		)?;
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index)?;
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", QuoteStr(v))?
 		}
 		if self.concurrently {
 			write!(f, " CONCURRENTLY")?
@@ -48,8 +48,8 @@ impl From<DefineIndexStatement> for crate::expr::statements::DefineIndexStatemen
 	fn from(v: DefineIndexStatement) -> Self {
 		Self {
 			kind: v.kind.into(),
-			name: v.name.into(),
-			what: v.what.into(),
+			name: v.name,
+			what: v.what,
 			cols: v.cols.into_iter().map(From::from).collect(),
 			index: v.index.into(),
 			comment: v.comment,
@@ -62,8 +62,8 @@ impl From<crate::expr::statements::DefineIndexStatement> for DefineIndexStatemen
 	fn from(v: crate::expr::statements::DefineIndexStatement) -> Self {
 		Self {
 			kind: v.kind.into(),
-			name: v.name.into(),
-			what: v.what.into(),
+			name: v.name,
+			what: v.what,
 			cols: v.cols.into_iter().map(From::from).collect(),
 			index: v.index.into(),
 			comment: v.comment,

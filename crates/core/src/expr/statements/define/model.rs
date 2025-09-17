@@ -10,7 +10,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Base;
-use crate::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{QuoteStr, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -83,7 +83,7 @@ impl fmt::Display for DefineModelStatement {
 		}
 		write!(f, " ml::{}<{}>", self.name, self.version)?;
 		if let Some(comment) = self.comment.as_ref() {
-			write!(f, " COMMENT {}", comment)?;
+			write!(f, " COMMENT {}", QuoteStr(comment))?;
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

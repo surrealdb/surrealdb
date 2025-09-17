@@ -142,7 +142,7 @@ impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
 		use crate::core::expr::{Data, Output, UpdateStatement, UpsertStatement};
-		use crate::core::val::{self, Strand};
+		use crate::core::val::{self};
 		use crate::engine::resource_to_exprs;
 
 		let res = match self {
@@ -151,12 +151,8 @@ impl Command {
 				database,
 			} => {
 				// TODO: Null byte validity
-				let namespace = namespace
-					.map(|n| unsafe { Strand::new_unchecked(n) }.into())
-					.unwrap_or(CoreValue::None);
-				let database = database
-					.map(|d| unsafe { Strand::new_unchecked(d) }.into())
-					.unwrap_or(CoreValue::None);
+				let namespace = namespace.map(From::from).unwrap_or(CoreValue::None);
+				let database = database.map(From::from).unwrap_or(CoreValue::None);
 				RouterRequest {
 					id,
 					method: "use",
@@ -256,7 +252,7 @@ impl Command {
 				let table = match what {
 					Some(w) => {
 						// TODO: Null byte validity
-						let table = unsafe { CoreTable::new_unchecked(w) };
+						let table = CoreTable::new(w);
 						CoreValue::from(table)
 					}
 					None => CoreValue::None,
@@ -278,8 +274,7 @@ impl Command {
 			} => {
 				let table = match what {
 					Some(w) => {
-						// TODO: Null byte validity
-						let table = unsafe { CoreTable::new_unchecked(w) };
+						let table = CoreTable::new(w);
 						CoreValue::from(table)
 					}
 					None => CoreValue::None,
@@ -327,8 +322,6 @@ impl Command {
 					};
 					expr.to_string()
 				};
-				//TODO: Null byte validity
-				let query = unsafe { Strand::new_unchecked(query) };
 
 				let variables = val::Object::default();
 				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
@@ -374,8 +367,6 @@ impl Command {
 					};
 					expr.to_string()
 				};
-				//TODO: Null byte validity
-				let query = unsafe { Strand::new_unchecked(query) };
 
 				let variables = val::Object::default();
 				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
@@ -412,9 +403,7 @@ impl Command {
 				query,
 				variables,
 			} => {
-				// TODO: Null byte validity
-				let query = unsafe { Strand::new_unchecked(query.to_string()) };
-				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
+				let params: Vec<CoreValue> = vec![query.to_string().into(), variables.into()];
 				RouterRequest {
 					id,
 					method: "query",
@@ -499,9 +488,7 @@ impl Command {
 				args,
 			} => {
 				// TODO: Null byte validity
-				let version = version
-					.map(|x| unsafe { Strand::new_unchecked(x) }.into())
-					.unwrap_or(CoreValue::None);
+				let version = version.map(From::from).unwrap_or(CoreValue::None);
 				RouterRequest {
 					id,
 					method: "run",

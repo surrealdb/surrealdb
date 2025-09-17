@@ -1,5 +1,7 @@
 use std::fmt::{self, Display};
 
+use crate::fmt::{EscapeIdent, QuoteStr};
+
 use super::DefineKind;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -19,9 +21,9 @@ impl Display for DefineNamespaceStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", QuoteStr(v))?
 		}
 		Ok(())
 	}
@@ -32,7 +34,7 @@ impl From<DefineNamespaceStatement> for crate::expr::statements::DefineNamespace
 		Self {
 			kind: v.kind.into(),
 			id: v.id,
-			name: v.name.into(),
+			name: v.name,
 			comment: v.comment,
 		}
 	}
@@ -43,7 +45,7 @@ impl From<crate::expr::statements::DefineNamespaceStatement> for DefineNamespace
 		Self {
 			kind: v.kind.into(),
 			id: v.id,
-			name: v.name.into(),
+			name: v.name,
 			comment: v.comment,
 		}
 	}

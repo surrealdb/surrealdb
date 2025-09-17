@@ -8,7 +8,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Timeout, Value};
-use crate::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 
@@ -62,7 +62,7 @@ impl Display for AlterSequenceStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		if let Some(ref timeout) = self.timeout {
 			write!(f, " TIMEOUT {timeout}")?;
 		}

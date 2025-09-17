@@ -101,7 +101,7 @@ async fn handler(
 						res.headers.entry(CONTENT_TYPE).or_insert("text/plain".parse().map_err(
 							|_| ApiError::Unreachable("Expected a valid format".into()),
 						)?);
-						v.into_string().into_bytes()
+						v.into_bytes()
 					}
 					Value::Bytes(v) => {
 						res.headers.entry(CONTENT_TYPE).or_insert(

@@ -27,7 +27,7 @@ impl MlModelDefinition {
 			name: self.name.clone(),
 			version: self.version.clone(),
 			permissions: self.permissions.clone().into(),
-			comment: self.comment.clone().map(Into::into),
+			comment: self.comment.clone(),
 		}
 	}
 }

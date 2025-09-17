@@ -9,6 +9,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Idiom, Value};
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -81,7 +82,7 @@ impl Display for RemoveFieldStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.table_name)?;
+		write!(f, " {} ON {}", self.name, EscapeIdent(&self.table_name))?;
 		Ok(())
 	}
 }

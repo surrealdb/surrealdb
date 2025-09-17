@@ -20,28 +20,6 @@ pub(crate) trait TokenValue: Sized {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self>;
 }
 
-impl TokenValue for String {
-	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
-		let token = parser.peek();
-		match token.kind {
-			TokenKind::Identifier => {
-				parser.pop_peek();
-				let str = parser.lexer.string.take().unwrap();
-				// Safety: lexer ensures no null bytes are present in the identifier.
-				Ok(str)
-			}
-			x if Parser::kind_is_keyword_like(x) => {
-				let s = parser.pop_peek().span;
-				// Safety: lexer ensures no null bytes are present in the identifier.
-				Ok(parser.lexer.span_str(s).to_owned())
-			}
-			_ => {
-				unexpected!(parser, token, "an identifier");
-			}
-		}
-	}
-}
-
 impl TokenValue for Language {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let peek = parser.peek();

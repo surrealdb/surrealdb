@@ -6,10 +6,10 @@ use anyhow::Result;
 use helpers::*;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::err::Error;
-use surrealdb_core::expr::{Ident, Part};
+use surrealdb_core::expr::Part;
 use surrealdb_core::iam::{Level, Role};
+use surrealdb_core::syn;
 use surrealdb_core::val::Value;
-use surrealdb_core::{strand, syn};
 use test_log::test;
 use tracing::info;
 
@@ -339,12 +339,8 @@ async fn define_statement_user_root() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let define_str = tmp
-		.pick(&[
-			Part::Field(Ident::from_strand(strand!("users").to_owned())),
-			Part::Field(Ident::from_strand(strand!("test").to_owned())),
-		])
-		.to_string();
+	let define_str =
+		tmp.pick(&[Part::Field("users".to_owned()), Part::Field("test".to_owned())]).to_string();
 
 	assert!(
 		define_str

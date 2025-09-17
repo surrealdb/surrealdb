@@ -72,11 +72,11 @@ mod test {
         schemafull: false,
         view: Some(ViewDefinition {
             fields: Fields::Select(vec![Field::All, Field::Single {
-                expr: Expr::Literal(Literal::Strand("expr".to_string().into())),
+                expr: Expr::Literal(Literal::Strand("expr".to_string())),
                 alias: Some(Idiom::from_str("field[0]").unwrap()),
             }]),
             what: vec!["what".to_string()],
-            cond: Some(Expr::Literal(Literal::Strand("cond".to_string().into()))),
+            cond: Some(Expr::Literal(Literal::Strand("cond".to_string()))),
             groups: Some(Groups::default()),
         }),
         permissions: Permissions::default(),
@@ -95,12 +95,12 @@ mod test {
         id: Uuid::default(),
         node: Uuid::default(),
         fields: Fields::Select(vec![Field::All, Field::Single {
-            expr: Expr::Literal(Literal::Strand("expr".to_string().into())),
+            expr: Expr::Literal(Literal::Strand("expr".to_string())),
             alias: Some(Idiom::from_str("field[0]").unwrap()),
         }]),
-        what: Expr::Literal(Literal::Strand("what".to_string().into())),
-        cond: Some(Expr::Literal(Literal::Strand("cond".to_string().into()))),
-        fetch: Some(Fetchs(vec![Fetch(Expr::Literal(Literal::Strand("fetch".to_string().into())))])),
+        what: Expr::Literal(Literal::Strand("what".to_string())),
+        cond: Some(Expr::Literal(Literal::Strand("cond".to_string()))),
+        fetch: Some(Fetchs(vec![Fetch(Expr::Literal(Literal::Strand("fetch".to_string())))])),
         auth: Some(Auth::default()),
         session: Some(Value::default()),
     }, 97)]
@@ -120,7 +120,7 @@ mod test {
                 }),
             },
          }),
-        authenticate: Some(Expr::Literal(Literal::Strand("expr".to_string().into()))),
+        authenticate: Some(Expr::Literal(Literal::Strand("expr".to_string()))),
         grant_duration: Some(Duration::from_secs(123)),
         token_duration: Some(Duration::from_secs(123)),
         session_duration: Some(Duration::from_secs(123)),
@@ -150,7 +150,7 @@ mod test {
         actions: vec![
             ApiActionDefinition {
                 methods: vec![ApiMethod::Get],
-                action: Expr::Literal(Literal::Strand("action".to_string().into())),
+                action: Expr::Literal(Literal::Strand("action".to_string())),
                 config: ApiConfigDefinition::default(),
             },
         ],
@@ -181,8 +181,8 @@ mod test {
 	#[case::event(EventDefinition {
         name: "test".to_string(),
         target_table: "test".to_string(),
-        when: Expr::Literal(Literal::Strand("when".to_string().into())),
-        then: vec![Expr::Literal(Literal::Strand("then".to_string().into()))],
+        when: Expr::Literal(Literal::Strand("when".to_string())),
+        then: vec![Expr::Literal(Literal::Strand("then".to_string()))],
         comment: Some("comment".to_string()),
     }, 35)]
 	#[case::field(FieldDefinition {
@@ -205,7 +205,7 @@ mod test {
         name: "function".to_string(),
         args: vec![],
         block: Block(vec![
-            Expr::Literal(Literal::Strand("expr".to_string().into())),
+            Expr::Literal(Literal::Strand("expr".to_string())),
         ]),
         comment: Some("comment".to_string()),
         permissions: Permission::Full,

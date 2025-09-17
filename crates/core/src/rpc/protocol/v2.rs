@@ -150,7 +150,7 @@ pub trait RpcProtocolV2: RpcContext {
 		let out: Result<Value> = crate::iam::signup::signup(self.kvs(), &mut session, params)
 			.await
 			// TODO: Null byte validity
-			.map(|v| v.token.clone().map(|x| Value::Strand(x)).unwrap_or(Value::None));
+			.map(|v| v.token.clone().map(Value::Strand).unwrap_or(Value::None));
 
 		// Store the updated session
 		self.set_session(Arc::new(session));

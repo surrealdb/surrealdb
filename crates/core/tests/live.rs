@@ -5,8 +5,8 @@ use anyhow::Result;
 use helpers::{new_ds, skip_ok};
 use surrealdb_core::dbs::{Action, Session, Variables};
 use surrealdb_core::expr::Kind;
+use surrealdb_core::syn;
 use surrealdb_core::val::RecordId;
-use surrealdb_core::{strand, syn};
 
 #[tokio::test]
 async fn live_permissions() -> Result<()> {
@@ -41,7 +41,7 @@ async fn live_permissions() -> Result<()> {
 		"test",
 		"test",
 		"test",
-		RecordId::new("user".to_owned(), strand!("test").to_owned()).into(),
+		RecordId::new("user".to_owned(), "test".to_owned()).into(),
 	)
 	.with_rt(true);
 	let sql = "
@@ -90,7 +90,7 @@ async fn live_document_reduction() -> Result<()> {
 		"test",
 		"test",
 		"test",
-		RecordId::new("user".to_owned(), strand!("test").to_owned()).into(),
+		RecordId::new("user".to_owned(), "test".to_owned()).into(),
 	)
 	.with_rt(true);
 
