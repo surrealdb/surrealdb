@@ -334,7 +334,7 @@ impl Datastore {
 					let v =
 						super::rocksdb::Datastore::new(&path).await.map(DatastoreFlavor::RocksDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store at {flavour}{path}");
+					info!(target: TARGET, "Started {flavour} kvs store");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
@@ -351,7 +351,7 @@ impl Datastore {
 					let v =
 						super::rocksdb::Datastore::new(&path).await.map(DatastoreFlavor::RocksDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store at {flavour}{path}");
+					info!(target: TARGET, "Started {flavour} kvs store");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
@@ -368,7 +368,7 @@ impl Datastore {
 						.await
 						.map(DatastoreFlavor::SurrealKV);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store at {flavour}{path} with versions enabled");
+					info!(target: TARGET, "Started {flavour} kvs store with versions enabled");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
@@ -386,7 +386,7 @@ impl Datastore {
 						.await
 						.map(DatastoreFlavor::SurrealKV);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store at {flavour}{path} with versions not enabled");
+					info!(target: TARGET, "Started {flavour} kvs store with versions not enabled");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
@@ -398,7 +398,7 @@ impl Datastore {
 				{
 					let v = super::indxdb::Datastore::new(&path).await.map(DatastoreFlavor::IndxDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store at {flavour}{path}");
+					info!(target: TARGET, "Started {flavour} kvs store");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
@@ -410,7 +410,7 @@ impl Datastore {
 				{
 					let v = super::tikv::Datastore::new(&path).await.map(DatastoreFlavor::TiKV);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store at {flavour}{path}");
+					info!(target: TARGET, "Started {flavour} kvs store");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-tikv"))]
@@ -423,7 +423,7 @@ impl Datastore {
 					let v =
 						super::fdb::Datastore::new(&path).await.map(DatastoreFlavor::FoundationDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store at {flavour}{path}");
+					info!(target: TARGET, "Started {flavour} kvs store");
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-fdb"))]
