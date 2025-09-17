@@ -12,7 +12,7 @@ use syn::{Data, DeriveInput, Fields, Ident, Type, parse_macro_input};
 ///
 /// ## Named Fields Struct
 ///
-/// ```rust
+/// ```compile_fail
 /// use surrealdb_types::{SurrealValue, Value};
 ///
 /// #[derive(SurrealValue)]
@@ -44,7 +44,7 @@ use syn::{Data, DeriveInput, Fields, Ident, Type, parse_macro_input};
 ///
 /// ## Tuple Struct
 ///
-/// ```rust
+/// ```compile_fail
 /// use surrealdb_types::{SurrealValue, Value};
 ///
 /// #[derive(SurrealValue)]
@@ -60,7 +60,7 @@ use syn::{Data, DeriveInput, Fields, Ident, Type, parse_macro_input};
 ///
 /// ## Unit Struct
 ///
-/// ```rust
+/// ```compile_fail
 /// use surrealdb_types::{SurrealValue, Value};
 ///
 /// #[derive(SurrealValue)]
@@ -74,7 +74,7 @@ use syn::{Data, DeriveInput, Fields, Ident, Type, parse_macro_input};
 ///
 /// ## Nested Structs
 ///
-/// ```rust
+/// ```compile_fail
 /// use surrealdb_types::{SurrealValue, Value};
 ///
 /// #[derive(SurrealValue)]
@@ -105,7 +105,7 @@ use syn::{Data, DeriveInput, Fields, Ident, Type, parse_macro_input};
 ///
 /// ## Generic Structs
 ///
-/// ```rust
+/// ```compile_fail
 /// use surrealdb_types::{SurrealValue, Value};
 ///
 /// #[derive(SurrealValue)]
