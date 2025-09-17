@@ -1,18 +1,10 @@
-use crate::sql::SqlValue;
-use crate::sql::fmt::is_pretty;
-use crate::sql::fmt::pretty_indent;
-use crate::sql::fmt::pretty_sequence_item;
+use std::fmt::{self, Display, Formatter, Write};
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::Write;
-use std::fmt::{self, Display, Formatter};
-use std::str;
+use crate::sql::Expr;
+use crate::sql::fmt::{is_pretty, pretty_indent, pretty_sequence_item};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Permissions {
 	pub select: Permission,
 	pub create: Permission,
@@ -40,17 +32,42 @@ impl Permissions {
 	}
 
 	pub fn is_none(&self) -> bool {
-		self.select == Permission::None
-			&& self.create == Permission::None
-			&& self.update == Permission::None
-			&& self.delete == Permission::None
+		matches!(self.select, Permission::None)
+			&& matches!(self.create, Permission::None)
+			&& matches!(self.update, Permission::None)
+			&& matches!(self.delete, Permission::None)
 	}
 
 	pub fn is_full(&self) -> bool {
-		self.select == Permission::Full
-			&& self.create == Permission::Full
-			&& self.update == Permission::Full
-			&& self.delete == Permission::Full
+		matches!(self.select, Permission::Full)
+			&& matches!(self.create, Permission::Full)
+			&& matches!(self.update, Permission::Full)
+			&& matches!(self.delete, Permission::Full)
+	}
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+pub enum PermissionKind {
+	Select,
+	Create,
+	Update,
+	Delete,
+}
+
+impl PermissionKind {
+	fn as_str(&self) -> &str {
+		match self {
+			PermissionKind::Select => "select",
+			PermissionKind::Create => "create",
+			PermissionKind::Update => "update",
+			PermissionKind::Delete => "delete",
+		}
+	}
+}
+
+impl Display for PermissionKind {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		f.write_str(self.as_str())
 	}
 }
 
@@ -121,9 +138,9 @@ impl Display for Permissions {
 	}
 }
 
-impl From<Permissions> for crate::expr::Permissions {
+impl From<Permissions> for crate::catalog::Permissions {
 	fn from(v: Permissions) -> Self {
-		crate::expr::Permissions {
+		Self {
 			select: v.select.into(),
 			create: v.create.into(),
 			update: v.update.into(),
@@ -132,9 +149,9 @@ impl From<Permissions> for crate::expr::Permissions {
 	}
 }
 
-impl From<crate::expr::Permissions> for Permissions {
-	fn from(v: crate::expr::Permissions) -> Self {
-		Permissions {
+impl From<crate::catalog::Permissions> for Permissions {
+	fn from(v: crate::catalog::Permissions) -> Self {
+		Self {
 			select: v.select.into(),
 			create: v.create.into(),
 			update: v.update.into(),
@@ -143,40 +160,13 @@ impl From<crate::expr::Permissions> for Permissions {
 	}
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Debug)]
-pub enum PermissionKind {
-	Select,
-	Create,
-	Update,
-	Delete,
-}
-
-impl PermissionKind {
-	fn as_str(&self) -> &str {
-		match self {
-			PermissionKind::Select => "select",
-			PermissionKind::Create => "create",
-			PermissionKind::Update => "update",
-			PermissionKind::Delete => "delete",
-		}
-	}
-}
-
-impl Display for PermissionKind {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		f.write_str(self.as_str())
-	}
-}
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Permission {
 	None,
 	#[default]
 	Full,
-	Specific(SqlValue),
+	Specific(Expr),
 }
 
 impl Permission {
@@ -203,22 +193,22 @@ impl Display for Permission {
 	}
 }
 
-impl From<Permission> for crate::expr::Permission {
+impl From<Permission> for crate::catalog::Permission {
 	fn from(v: Permission) -> Self {
 		match v {
-			Permission::None => crate::expr::Permission::None,
-			Permission::Full => crate::expr::Permission::Full,
-			Permission::Specific(v) => crate::expr::Permission::Specific(v.into()),
+			Permission::None => Self::None,
+			Permission::Full => Self::Full,
+			Permission::Specific(v) => Self::Specific(v.into()),
 		}
 	}
 }
 
-impl From<crate::expr::Permission> for Permission {
-	fn from(v: crate::expr::Permission) -> Self {
+impl From<crate::catalog::Permission> for Permission {
+	fn from(v: crate::catalog::Permission) -> Self {
 		match v {
-			crate::expr::Permission::None => Self::None,
-			crate::expr::Permission::Full => Self::Full,
-			crate::expr::Permission::Specific(v) => Self::Specific(v.into()),
+			crate::catalog::Permission::None => Self::None,
+			crate::catalog::Permission::Full => Self::Full,
+			crate::catalog::Permission::Specific(v) => Self::Specific(v.into()),
 		}
 	}
 }

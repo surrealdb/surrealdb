@@ -7,10 +7,13 @@
 	feature = "kv-surrealkv",
 ))]
 
+use std::future::Future;
+use std::sync::Arc;
+
+use uuid::Uuid;
+
 use super::Datastore;
 use crate::kvs::clock::SizedClock;
-use std::{future::Future, sync::Arc};
-use uuid::Uuid;
 
 macro_rules! include_tests {
 	($new_ds:ident => $($name:ident),* $(,)?) => {
@@ -44,7 +47,7 @@ pub(crate) enum Kvs {
 	SurrealKV,
 }
 
-// This type is unsused when no store is enabled.
+// This type is unused when no store is enabled.
 #[cfg_attr(not(test), expect(dead_code))]
 type ClockType = Arc<SizedClock>;
 
@@ -64,9 +67,10 @@ where
 
 #[cfg(feature = "kv-mem")]
 mod mem {
+	use uuid::Uuid;
+
 	use super::{ClockType, Kvs};
 	use crate::kvs::Datastore;
-	use uuid::Uuid;
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Use a memory datastore instance
@@ -82,11 +86,11 @@ mod mem {
 
 #[cfg(feature = "kv-rocksdb")]
 mod rocksdb {
-	use super::{ClockType, Kvs};
-	use crate::kvs::Datastore;
+	use temp_dir::TempDir;
 	use uuid::Uuid;
 
-	use temp_dir::TempDir;
+	use super::{ClockType, Kvs};
+	use crate::kvs::Datastore;
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the temporary data storage path
@@ -103,11 +107,11 @@ mod rocksdb {
 
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv {
-	use super::{ClockType, Kvs};
-	use crate::kvs::Datastore;
+	use temp_dir::TempDir;
 	use uuid::Uuid;
 
-	use temp_dir::TempDir;
+	use super::{ClockType, Kvs};
+	use crate::kvs::Datastore;
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the temporary data storage path
@@ -124,9 +128,10 @@ mod surrealkv {
 
 #[cfg(feature = "kv-tikv")]
 mod tikv {
+	use uuid::Uuid;
+
 	use super::{ClockType, Kvs};
 	use crate::kvs::{Datastore, LockType, TransactionType};
-	use uuid::Uuid;
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the cluster connection string
@@ -146,9 +151,10 @@ mod tikv {
 
 #[cfg(feature = "kv-fdb")]
 mod fdb {
+	use uuid::Uuid;
+
 	use super::{ClockType, Kvs};
 	use crate::kvs::{Datastore, LockType, TransactionType};
-	use uuid::Uuid;
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the cluster connection string
@@ -157,7 +163,7 @@ mod fdb {
 		let ds = Datastore::new_with_clock(path, Some(clock)).await.unwrap().with_node_id(id);
 		// Clear any previous test entries
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
-		tx.delp(vec![]).await.unwrap();
+		tx.delp(&vec![]).await.unwrap();
 		tx.commit().await.unwrap();
 		// Return the datastore
 		(ds, Kvs::Fdb)

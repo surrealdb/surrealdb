@@ -71,7 +71,7 @@ allow-experimental = ["record_references"]
 DEFINE TABLE tag;
 
 DEFINE TABLE person;
-DEFINE FIELD authored ON person TYPE references<post, author>;
+DEFINE FIELD authored ON person COMPUTED <~post;
 
 DEFINE TABLE post;
 DEFINE FIELD author ON post TYPE record<person>
@@ -86,7 +86,7 @@ CREATE post:whysurrealdb SET author = person:micha, tags = [tag:surrealdb, tag:m
 
 SELECT * FROM person;
 SELECT * FROM post;
-SELECT *, id.refs('post', 'tags') AS posts FROM tag;
+SELECT *, <~post AS posts FROM tag;
 
 DELETE tag:multimodel;
 SELECT * FROM post;

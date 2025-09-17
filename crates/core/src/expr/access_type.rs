@@ -1,26 +1,23 @@
-use super::Value;
-use crate::err::Error;
-use crate::expr::statements::DefineAccessStatement;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Algorithm, escape::QuoteStr};
-use anyhow::Result;
-use revision::Error as RevisionError;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
 
+use anyhow::Result;
+
+use super::Value;
+use crate::err::Error;
+use crate::expr::escape::QuoteStr;
+use crate::expr::statements::DefineAccessStatement;
+use crate::expr::statements::info::InfoStructure;
+use crate::expr::{Algorithm, Expr};
+
 /// The type of access methods available
-#[revisioned(revision = 2)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub enum AccessType {
 	Record(RecordAccess),
 	Jwt(JwtAccess),
 	// TODO(gguillemas): Document once bearer access is no longer experimental.
-	#[revision(start = 2)]
 	Bearer(BearerAccess),
 }
 
@@ -112,7 +109,8 @@ impl AccessType {
 		match self {
 			// The JWT access method cannot issue stateful grants.
 			AccessType::Jwt(_) => false,
-			// The record access method can be used to issue grants if defined with bearer AKA refresh.
+			// The record access method can be used to issue grants if defined with bearer AKA
+			// refresh.
 			AccessType::Record(ac) => ac.bearer.is_some(),
 			AccessType::Bearer(_) => true,
 		}
@@ -128,9 +126,7 @@ impl AccessType {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct JwtAccess {
 	// Verify is required
 	pub verify: JwtAccessVerify,
@@ -174,8 +170,8 @@ impl Display for JwtAccess {
 				write!(f, "URL {}", QuoteStr(&v.url),)?;
 			}
 		}
-		if let Some(iss) = &self.issue {
-			write!(f, " WITH ISSUER KEY {}", QuoteStr(&iss.key))?;
+		if let Some(ref s) = self.issue {
+			write!(f, " WITH ISSUER KEY {}", QuoteStr(&s.key))?;
 		}
 		Ok(())
 	}
@@ -227,9 +223,7 @@ impl JwtAccess {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct JwtAccessIssue {
 	pub alg: Algorithm,
 	pub key: String,
@@ -246,10 +240,7 @@ impl Default for JwtAccessIssue {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub enum JwtAccessVerify {
 	Key(JwtAccessVerifyKey),
 	Jwks(JwtAccessVerifyJwks),
@@ -277,9 +268,7 @@ impl InfoStructure for JwtAccessVerify {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct JwtAccessVerifyKey {
 	pub alg: Algorithm,
 	pub key: String,
@@ -296,36 +285,17 @@ impl Default for JwtAccessVerifyKey {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct JwtAccessVerifyJwks {
 	pub url: String,
 }
 
-#[revisioned(revision = 4)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct RecordAccess {
-	pub signup: Option<Value>,
-	pub signin: Option<Value>,
+	pub signup: Option<Expr>,
+	pub signin: Option<Expr>,
 	pub jwt: JwtAccess,
-	#[revision(start = 2, end = 3, convert_fn = "authenticate_revision")]
-	pub authenticate: Option<Value>,
-	#[revision(start = 4)]
 	pub bearer: Option<BearerAccess>,
-}
-
-impl RecordAccess {
-	fn authenticate_revision(
-		&self,
-		_revision: u16,
-		_value: Option<Value>,
-	) -> Result<(), RevisionError> {
-		Err(RevisionError::Conversion(
-			"The \"AUTHENTICATE\" clause has been moved to \"DEFINE ACCESS\"".to_string(),
-		))
-	}
 }
 
 impl Default for RecordAccess {
@@ -347,9 +317,7 @@ impl Jwt for RecordAccess {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct BearerAccess {
 	pub kind: BearerAccessType,
 	pub subject: BearerAccessSubject,
@@ -374,10 +342,7 @@ impl Jwt for BearerAccess {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub enum BearerAccessType {
 	Bearer,
 	Refresh,
@@ -403,10 +368,7 @@ impl FromStr for BearerAccessType {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub enum BearerAccessSubject {
 	Record,
 	User,

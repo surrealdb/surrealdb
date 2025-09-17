@@ -36,8 +36,8 @@ impl<I: IntoIterator<Item = T>, T: Display> Fmt<I, fn(I, &mut Formatter) -> fmt:
 		Self::new(into_iter, fmt_verbar_separated)
 	}
 
-	/// Formats values with a comma and a space separating them or, if pretty printing is in
-	/// effect, a comma, a newline, and indentation.
+	/// Formats values with a comma and a space separating them or, if pretty
+	/// printing is in effect, a comma, a newline, and indentation.
 	pub(crate) fn pretty_comma_separated(into_iter: I) -> Self {
 		Self::new(into_iter, fmt_pretty_comma_separated)
 	}
@@ -133,7 +133,8 @@ fn fmt_two_line_separated<T: Display, I: IntoIterator<Item = T>>(
 	Ok(())
 }
 
-/// Creates a formatting function that joins iterators with an arbitrary separator.
+/// Creates a formatting function that joins iterators with an arbitrary
+/// separator.
 pub fn fmt_separated_by<T: Display, I: IntoIterator<Item = T>>(
 	separator: impl Display,
 ) -> impl Fn(I, &mut Formatter) -> fmt::Result {
@@ -186,7 +187,8 @@ impl<W: std::fmt::Write> Pretty<W> {
 		}
 		Self {
 			inner,
-			// Don't want multiple active pretty printers, although they wouldn't necessarily misbehave.
+			// Don't want multiple active pretty printers, although they wouldn't necessarily
+			// misbehave.
 			active: pretty_started_here,
 		}
 	}
@@ -214,21 +216,22 @@ pub(crate) fn is_pretty() -> bool {
 	PRETTY.with(|pretty| pretty.load(Ordering::Relaxed))
 }
 
-/// If pretty printing is in effect, increments the indentation level (until the return value
-/// is dropped).
+/// If pretty printing is in effect, increments the indentation level (until the
+/// return value is dropped).
 #[must_use = "hold for the span of the indent, then drop"]
 pub(crate) fn pretty_indent() -> PrettyGuard {
 	PrettyGuard::new(1)
 }
 
-/// Marks the end of an item in the sequence, after which indentation will follow if pretty printing
-/// is in effect.
+/// Marks the end of an item in the sequence, after which indentation will
+/// follow if pretty printing is in effect.
 pub(crate) fn pretty_sequence_item() {
 	// List items need a new line, but no additional indentation.
 	NEW_LINE.with(|new_line| new_line.store(true, Ordering::Relaxed));
 }
 
-/// When dropped, applies the opposite increment to the current indentation level.
+/// When dropped, applies the opposite increment to the current indentation
+/// level.
 pub(crate) struct PrettyGuard {
 	increment: i8,
 }
@@ -243,8 +246,8 @@ impl PrettyGuard {
 
 	fn raw(increment: i8) {
 		INDENT.with(|indent| {
-			// Equivalent to `indent += increment` if signed numbers could be added to unsigned
-			// numbers in stable, atomic Rust.
+			// Equivalent to `indent += increment` if signed numbers could be added to
+			// unsigned numbers in stable, atomic Rust.
 			if increment >= 0 {
 				indent.fetch_add(increment as u32, Ordering::Relaxed);
 			} else {
@@ -278,12 +281,12 @@ impl<W: std::fmt::Write> std::fmt::Write for Pretty<W> {
 
 #[cfg(test)]
 mod tests {
-	use crate::syn::{parse, value};
+	use crate::syn::{expr, parse};
 
 	#[test]
 	fn pretty_query() {
 		let query = parse("SELECT * FROM {foo: [1, 2, 3]};").unwrap();
-		assert_eq!(format!("{}", query), "SELECT * FROM { foo: [1, 2, 3] };");
+		assert_eq!(format!("{query}"), "SELECT * FROM { foo: [1, 2, 3] };");
 		assert_eq!(
 			format!("{:#}", query),
 			"SELECT * FROM {\n\tfoo: [\n\t\t1,\n\t\t2,\n\t\t3\n\t]\n};"
@@ -305,14 +308,14 @@ mod tests {
 
 	#[test]
 	fn pretty_value() {
-		let value = value("{foo: [1, 2, 3]}").unwrap();
+		let value = expr("{foo: [1, 2, 3]}").unwrap();
 		assert_eq!(format!("{}", value), "{ foo: [1, 2, 3] }");
 		assert_eq!(format!("{:#}", value), "{\n\tfoo: [\n\t\t1,\n\t\t2,\n\t\t3\n\t]\n}");
 	}
 
 	#[test]
 	fn pretty_array() {
-		let array = value("[1, 2, 3]").unwrap();
+		let array = expr("[1, 2, 3]").unwrap();
 		assert_eq!(format!("{}", array), "[1, 2, 3]");
 		assert_eq!(format!("{:#}", array), "[\n\t1,\n\t2,\n\t3\n]");
 	}

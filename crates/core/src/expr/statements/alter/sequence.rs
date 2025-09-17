@@ -1,21 +1,18 @@
+use std::fmt::{self, Display, Write};
+use std::ops::Deref;
+
+use anyhow::Result;
+
+use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::{Base, Ident, Timeout, Value};
 use crate::iam::{Action, ResourceKind};
-use anyhow::Result;
-
 use crate::key::database::sq::Sq;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
-use std::ops::Deref;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AlterSequenceStatement {
 	pub name: Ident,
 	pub if_exists: bool,
@@ -27,7 +24,7 @@ impl AlterSequenceStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the sequence definition
@@ -46,14 +43,14 @@ impl AlterSequenceStatement {
 			if timeout.is_zero() {
 				sq.timeout = None;
 			} else {
-				sq.timeout = Some(timeout.clone());
+				sq.timeout = Some(*timeout.as_std_duration());
 			}
 		}
 		// Set the table definition
 		let key = Sq::new(ns, db, &self.name);
-		txn.set(key, revision::to_vec(&sq)?, None).await?;
+		txn.set(&key, &sq, None).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

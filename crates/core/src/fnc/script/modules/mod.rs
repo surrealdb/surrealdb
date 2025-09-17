@@ -24,7 +24,7 @@ macro_rules! impl_module_def {
 		{
 			// It is currently impossible to create closures which capture Ctx in a returned future.
 			// So instead we define a normal function for async.
-            async fn f(ctx: js::Ctx<'_>, v: js::function::Rest<crate::expr::value::Value>) -> js::Result<crate::expr::value::Value>{
+            async fn f(ctx: js::Ctx<'_>, v: js::function::Rest<crate::val::Value>) -> js::Result<crate::val::Value>{
                 $call(ctx,if $path == "" { $name } else { concat!($path, "::", $name) }, v.0).await
             }
 			let func = Async(f);
@@ -34,7 +34,7 @@ macro_rules! impl_module_def {
 	// Call a (possibly-async) function.
 	($ctx: expr_2021, $path: literal, $name: literal, $call: ident, ) => {
 		{
-			let func = |ctx: js::Ctx<'_>, v: js::function::Rest<crate::expr::value::Value>| $call(ctx,if $path == "" { $name } else { concat!($path, "::", $name) }, v.0);
+			let func = |ctx: js::Ctx<'_>, v: js::function::Rest<crate::val::Value>| $call(ctx,if $path == "" { $name } else { concat!($path, "::", $name) }, v.0);
 			js::Function::new($ctx.clone(),func)?.with_name(stringify!($name))?
 		}
 	};
@@ -44,7 +44,7 @@ macro_rules! impl_module_def {
 			$e
 		}
 	};
-	($pkg: ident, $path: literal, $($name: literal => $action: tt $($wrapper: ident)?),*) => {
+	($pkg: ident, $path: literal, $($name: literal => $action: tt $($wrapper: ident)?),* $(,)?) => {
 		impl js::module::ModuleDef for Package {
 			fn declare(decls: &js::module::Declarations) -> js::Result<()> {
 				decls.declare("default")?;

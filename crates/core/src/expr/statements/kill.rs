@@ -1,24 +1,20 @@
+use std::fmt;
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+
+use crate::ctx::Context;
 use crate::dbs::{Action, Notification, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::Value;
-use crate::kvs::Live;
-use crate::{ctx::Context, expr::FlowResultExt as _, expr::Uuid};
-use anyhow::{Result, bail};
+use crate::expr::{Expr, FlowResultExt as _};
+use crate::val::{Uuid, Value};
 
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct KillStatement {
 	// Uuid of Live Query
 	// or Param resolving to Uuid of Live Query
-	pub id: Value,
+	pub id: Expr,
 }
 
 impl KillStatement {
@@ -35,7 +31,11 @@ impl KillStatement {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Resolve live query id
-		let lid = match self.id.compute(stk, ctx, opt, None).await.catch_return()?.cast_to::<Uuid>()
+		let lid = match stk
+			.run(|stk| self.id.compute(stk, ctx, opt, None))
+			.await
+			.catch_return()?
+			.cast_to::<Uuid>()
 		{
 			Err(_) => {
 				bail!(Error::KillStatement {
@@ -53,22 +53,20 @@ impl KillStatement {
 		// Fetch the live query key
 		let key = crate::key::node::lq::new(nid, lid);
 		// Fetch the live query key if it exists
-		match txn.get(key, None).await? {
-			Some(val) => {
-				// Decode the data for this live query
-				let val: Live = revision::from_slice(&val)?;
+		match txn.get(&key, None).await? {
+			Some(live) => {
 				// Delete the node live query
 				let key = crate::key::node::lq::new(nid, lid);
-				txn.clr(key).await?;
+				txn.clr(&key).await?;
 				// Delete the table live query
-				let key = crate::key::table::lq::new(&val.ns, &val.db, &val.tb, lid);
-				txn.clr(key).await?;
+				let key = crate::key::table::lq::new(live.ns, live.db, &live.tb, lid);
+				txn.clr(&key).await?;
 				// Refresh the table cache for lives
 				if let Some(cache) = ctx.get_cache() {
-					cache.new_live_queries_version(&val.ns, &val.db, &val.tb);
+					cache.new_live_queries_version(live.ns, live.db, &live.tb);
 				}
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 			}
 			None => {
 				bail!(Error::KillStatement {

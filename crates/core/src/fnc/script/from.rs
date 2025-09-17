@@ -1,79 +1,16 @@
-use super::classes;
-use crate::expr::Bytes;
-use crate::expr::Geometry;
-use crate::expr::Id;
-use crate::expr::Strand;
-use crate::expr::array::Array;
-use crate::expr::datetime::Datetime;
-use crate::expr::object::Object;
-use crate::expr::value::Value;
 use chrono::{TimeZone, Utc};
-use js::Coerced;
-use js::Ctx;
-use js::Error;
-use js::Exception;
-use js::FromAtom;
-use js::FromJs;
 use js::prelude::This;
+use js::{Coerced, Ctx, Error, Exception, FromAtom, FromJs};
 use rust_decimal::Decimal;
+
+use super::classes;
+use crate::val::{Array, Bytes, Datetime, Geometry, Object, RecordIdKey, Value};
 
 fn check_nul(s: &str) -> Result<(), Error> {
 	if s.contains('\0') {
 		Err(Error::InvalidString(std::ffi::CString::new(s).unwrap_err()))
 	} else {
 		Ok(())
-	}
-}
-
-fn try_object_to_geom(object: &Object) -> Option<Geometry> {
-	if object.len() != 2 {
-		return None;
-	}
-
-	let Some(Value::Strand(Strand(key))) = object.get("type") else {
-		return None;
-	};
-
-	match key.as_str() {
-		"Point" => {
-			object.get("coordinates").and_then(Geometry::array_to_point).map(Geometry::Point)
-		}
-		"LineString" => {
-			object.get("coordinates").and_then(Geometry::array_to_line).map(Geometry::Line)
-		}
-		"Polygon" => {
-			object.get("coordinates").and_then(Geometry::array_to_polygon).map(Geometry::Polygon)
-		}
-		"MultiPoint" => object
-			.get("coordinates")
-			.and_then(Geometry::array_to_multipoint)
-			.map(Geometry::MultiPoint),
-		"MultiLineString" => object
-			.get("coordinates")
-			.and_then(Geometry::array_to_multiline)
-			.map(Geometry::MultiLine),
-		"MultiPolygon" => object
-			.get("coordinates")
-			.and_then(Geometry::array_to_multipolygon)
-			.map(Geometry::MultiPolygon),
-		"GeometryCollection" => {
-			let Some(Value::Array(x)) = object.get("geometries") else {
-				return None;
-			};
-
-			let mut res = Vec::with_capacity(x.len());
-
-			for x in x.iter() {
-				let Value::Geometry(x) = x else {
-					return None;
-				};
-				res.push(x.clone());
-			}
-
-			Some(Geometry::Collection(res))
-		}
-
-		_ => None,
 	}
 }
 
@@ -120,8 +57,8 @@ impl<'js> FromJs<'js> for Value {
 				if let Some(v) = v.as_class::<classes::record::Record>() {
 					let borrow = v.borrow();
 					let v: &classes::record::Record = &borrow;
-					check_nul(&v.value.tb)?;
-					if let Id::String(s) = &v.value.id {
+					check_nul(&v.value.table)?;
+					if let RecordIdKey::String(s) = &v.value.key {
 						check_nul(s)?;
 					}
 					return Ok(v.value.clone().into());
@@ -197,7 +134,7 @@ impl<'js> FromJs<'js> for Value {
 					x.insert(k, v);
 				}
 
-				if let Some(x) = try_object_to_geom(&x) {
+				if let Some(x) = Geometry::try_from_object(&x) {
 					return Ok(x.into());
 				}
 

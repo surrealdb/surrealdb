@@ -45,7 +45,7 @@ scripting = ["dep:js"]
 http = ["dep:reqwest"]
 ml = ["dep:surrealml"]
 jwks = ["dep:reqwest"]
-allocator = ["dep:jemallocator", "dep:mimalloc"]
+allocator = ["dep:jemallocator"]
 arbitrary = [
     "dep:arbitrary",
     "dep:regex-syntax",
@@ -66,7 +66,6 @@ features = ["kv-mem", "kv-rocksdb", "http", "scripting"]
 targets = []
 
 [dependencies]
-# workspace internal dependencies
 
 # External surreal crates
 surrealkv = { workspace = true, optional = true }
@@ -96,7 +95,6 @@ revision = { workspace = true, features = [
     "rust_decimal",
     "uuid",
 ] }
-serde-content.workspace = true
 storekey.workspace = true
 vart.workspace = true
 
@@ -122,11 +120,12 @@ bcrypt.workspace = true
 bincode.workspace = true
 blake3.workspace = true
 bytes.workspace = true
-castaway.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 ciborium.workspace = true
 dashmap.workspace = true
 deunicode.workspace = true
+fastnum.workspace = true
+flatbuffers.workspace = true
 fst.workspace = true
 futures.workspace = true
 fuzzy-matcher.workspace = true
@@ -159,7 +158,7 @@ rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
 rust-stemmers.workspace = true
 scrypt.workspace = true
 semver = { workspace = true, features = ["serde"] }
-serde = { workspace = true, features = ["derive","rc"] }
+serde = { workspace = true, features = ["derive", "rc"] }
 serde_json.workspace = true
 sha1.workspace = true
 sha2.workspace = true
@@ -185,24 +184,12 @@ reqwest = { workspace = true, default-features = false, features = [
 ], optional = true }
 tempfile = { workspace = true, optional = true }
 
-[dev-dependencies]
-criterion = { workspace = true, features = ["async_tokio"] }
-env_logger.workspace = true
-flate2.workspace = true
-pprof = { workspace = true, features = ["flamegraph", "criterion"] }
-rstest.workspace = true
-serial_test.workspace = true
-temp-dir.workspace = true
-test-log = { workspace = true, features = ["trace"] }
-time = { workspace = true, features = ["serde"] }
-tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
-tracing-subscriber = { workspace = true, features = ["env-filter"] }
-wiremock.workspace = true
-
+# WASM DEPENDENCY CONFIGURATION
 [target.'cfg(target_family = "wasm")'.dependencies]
 getrandom = { workspace = true, features = ["wasm_js"] }
 pharos.workspace = true
 ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
+surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers"] }
 tokio = { workspace = true, default-features = false, features = [
     "rt",
     "sync",
@@ -212,7 +199,11 @@ wasm-bindgen-futures.workspace = true
 wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
 ws_stream_wasm.workspace = true
 
+# NON-WASM DEPENDENCY CONFIGURATION
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+rust-s3 = { workspace = true, optional = true }
+surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers", "rpc"] }
+surrealdb-types = { workspace = true }
 tokio = { workspace = true, default-features = false, features = [
     "macros",
     "io-util",
@@ -225,14 +216,25 @@ tokio = { workspace = true, default-features = false, features = [
 tokio-tungstenite = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
-[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))'.dependencies]
-mimalloc = { workspace = true, optional = true, default-features = false }
-
-[target.'cfg(any(target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
+# OS-SPECIFIC ALLOCATOR DEPENDENCIES
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios", target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
 jemallocator = { workspace = true, optional = true }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-rust-s3 = { workspace = true, optional = true }
+# DEVELOPMENT DEPENDENCIES
+[dev-dependencies]
+criterion = { workspace = true, features = ["async_tokio"] }
+env_logger.workspace = true
+flate2.workspace = true
+hashbrown.workspace = true
+pprof = { workspace = true, features = ["flamegraph", "criterion"] }
+rstest.workspace = true
+serial_test.workspace = true
+temp-dir.workspace = true
+test-log = { workspace = true, features = ["trace"] }
+time = { workspace = true, features = ["serde"] }
+tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+wiremock.workspace = true
 
 [lints]
 workspace = true

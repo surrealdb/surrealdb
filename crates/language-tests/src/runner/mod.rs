@@ -1,6 +1,8 @@
-use std::{future::Future, sync::Arc};
+use std::future::Future;
+use std::sync::Arc;
 
-use tokio::{sync::Semaphore, task::JoinSet};
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 
 pub struct Schedular {
 	job_lock: Arc<Semaphore>,

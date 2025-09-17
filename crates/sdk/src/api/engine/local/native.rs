@@ -1,24 +1,26 @@
-use crate::{
-	api::{
-		ExtraFeatures, Result, Surreal,
-		conn::{self, Route, Router},
-		engine::local::Db,
-		method::BoxFuture,
-		opt::{Endpoint, EndpointKind},
-	},
-	engine::tasks,
-	opt::{WaitFor, auth::Root},
-};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
+use std::task::Poll;
+
 use async_channel::{Receiver, Sender};
-use futures::{StreamExt, stream::poll_fn};
-use std::{
-	collections::{BTreeMap, HashMap, HashSet},
-	sync::{Arc, atomic::AtomicI64},
-	task::Poll,
-};
-use surrealdb_core::{dbs::Session, iam::Level, kvs::Datastore, options::EngineOptions};
+use futures::StreamExt;
+use futures::stream::poll_fn;
 use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
+
+use crate::api::conn::{self, Route, Router};
+use crate::api::engine::local::Db;
+use crate::api::method::BoxFuture;
+use crate::api::opt::{Endpoint, EndpointKind};
+use crate::api::{ExtraFeatures, Result, Surreal};
+use crate::core::dbs::{Session, Variables};
+use crate::core::iam::Level;
+use crate::core::kvs::Datastore;
+use crate::core::options::EngineOptions;
+use crate::engine::tasks;
+use crate::opt::WaitFor;
+use crate::opt::auth::Root;
 
 impl crate::api::Connection for Db {}
 impl conn::Sealed for Db {
@@ -112,7 +114,7 @@ pub(crate) async fn run_router(
 	let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 
 	let kvs = Arc::new(kvs);
-	let vars = Arc::new(RwLock::new(BTreeMap::default()));
+	let vars = Arc::new(RwLock::new(Variables::default()));
 	let live_queries = Arc::new(RwLock::new(HashMap::new()));
 	let session = Arc::new(RwLock::new(Session::default().with_rt(true)));
 

@@ -21,9 +21,7 @@ DEFINE PARAM $type_array VALUE [
 	{},
 	(1,2),
 	a:b,
-	|a:1..2|,
 	/a/,
 	1..2,
-	|$a| {},
 ];
 $type_array == array::sort($type_array)

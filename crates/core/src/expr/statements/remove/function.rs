@@ -1,21 +1,17 @@
+use std::fmt::{self, Display};
+
+use anyhow::Result;
+
+use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
-use anyhow::Result;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
-
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveFunctionStatement {
 	pub name: Ident,
-	#[revision(start = 2)]
 	pub if_exists: bool,
 }
 
@@ -27,7 +23,7 @@ impl RemoveFunctionStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the definition
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let fc = match txn.get_db_function(ns, db, &self.name).await {
 			Ok(x) => x,
 			Err(e) => {
@@ -40,9 +36,9 @@ impl RemoveFunctionStatement {
 		};
 		// Delete the definition
 		let key = crate::key::database::fc::new(ns, db, &fc.name);
-		txn.del(key).await?;
+		txn.del(&key).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -55,7 +51,7 @@ impl Display for RemoveFunctionStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " fn::{}", self.name.0)?;
+		write!(f, " fn::{}", &*self.name)?;
 		Ok(())
 	}
 }

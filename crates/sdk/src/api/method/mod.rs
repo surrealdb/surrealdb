@@ -1,26 +1,18 @@
 //! Methods to use when interacting with a SurrealDB instance
-use crate::api::Connect;
-use crate::api::Connection;
-use crate::api::OnceLockExt;
-use crate::api::Surreal;
-use crate::api::opt;
-use crate::api::opt::IntoEndpoint;
-use crate::api::opt::auth;
-use crate::api::opt::auth::Credentials;
-use crate::api::opt::auth::Jwt;
-use crate::opt::IntoExportDestination;
-use crate::opt::WaitFor;
-use serde::Serialize;
 use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::Arc;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
-use surrealdb_core::expr::Value as CoreValue;
-use surrealdb_core::expr::to_value as to_core_value;
-use surrealdb_core::syn;
+
+use serde::Serialize;
+
+use crate::api::opt::auth::{Credentials, Jwt};
+use crate::api::opt::{IntoEndpoint, auth};
+use crate::api::{Connect, Connection, OnceLockExt, Surreal, opt};
+use crate::core::val;
+use crate::opt::{IntoExportDestination, WaitFor};
 
 pub(crate) mod live;
 pub(crate) mod query;
@@ -72,10 +64,8 @@ pub use invalidate::Invalidate;
 pub use live::Stream;
 pub use merge::Merge;
 pub use patch::Patch;
-pub use query::Query;
-pub use query::QueryStream;
-pub use run::IntoFn;
-pub use run::Run;
+pub use query::{Query, QueryStream};
+pub use run::{IntoFn, Run};
 pub use select::Select;
 use serde_content::Serializer;
 pub use set::Set;
@@ -90,10 +80,10 @@ pub use use_db::UseDb;
 pub use use_ns::UseNs;
 pub use version::Version;
 
-use super::opt::CreateResource;
-use super::opt::IntoResource;
+use super::opt::{CreateResource, IntoResource};
 
-/// A alias for an often used type of future returned by async methods in this library.
+/// A alias for an often used type of future returned by async methods in this
+/// library.
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
 
 /// Query statistics
@@ -126,10 +116,11 @@ where
 {
 	/// Initialises a new unconnected instance of the client
 	///
-	/// This makes it easy to create a static singleton of the client. The static singleton
-	/// pattern in the example below ensures that a single database instance is available
-	/// across very large or complicated applications. With the singleton, only one connection
-	/// to the database is instantiated, and the database connection does not have to be shared
+	/// This makes it easy to create a static singleton of the client. The
+	/// static singleton pattern in the example below ensures that a single
+	/// database instance is available across very large or complicated
+	/// applications. With the singleton, only one connection to the database
+	/// is instantiated, and the database connection does not have to be shared
 	/// across components or controllers.
 	///
 	/// # Examples
@@ -335,7 +326,7 @@ where
 		Set {
 			client: Cow::Borrowed(self),
 			key: key.into(),
-			value: to_core_value(value),
+			value: crate::api::value::to_core_value(value),
 		}
 	}
 
@@ -642,17 +633,10 @@ where
 	/// # }
 	/// ```
 	pub fn query(&self, query: impl opt::IntoQuery) -> Query<C> {
-		let result = match query.as_str() {
-			Some(surql) => self.inner.router.extract().and_then(|router| {
-				let capabilities = &router.config.capabilities;
-				syn::parse_with_capabilities(surql, capabilities)
-					.map(opt::into_query::Sealed::into_query)
-			}),
-			None => Ok(query.into_query()),
-		};
+		let result = query.into_query(self).0;
 		Query {
 			txn: None,
-			inner: result.map(|x| x.0),
+			inner: result,
 			client: Cow::Borrowed(self),
 		}
 	}
@@ -1296,7 +1280,6 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	///
 	pub fn run<R>(&self, function: impl IntoFn) -> Run<C, R> {
 		Run {
 			client: Cow::Borrowed(self),
@@ -1343,7 +1326,8 @@ where
 	///
 	/// # Support
 	///
-	/// Currently only supported by HTTP and the local engines. *Not* supported on WebAssembly.
+	/// Currently only supported by HTTP and the local engines. *Not* supported
+	/// on WebAssembly.
 	///
 	/// # Examples
 	///
@@ -1388,7 +1372,8 @@ where
 	///
 	/// # Support
 	///
-	/// Currently only supported by HTTP and the local engines. *Not* supported on WebAssembly.
+	/// Currently only supported by HTTP and the local engines. *Not* supported
+	/// on WebAssembly.
 	///
 	/// # Examples
 	///
@@ -1416,10 +1401,10 @@ where
 	}
 }
 
-fn validate_data(data: &CoreValue, error_message: &str) -> crate::Result<()> {
+fn validate_data(data: &val::Value, error_message: &str) -> crate::Result<()> {
 	match data {
-		CoreValue::Object(_) => Ok(()),
-		CoreValue::Array(v) if v.iter().all(CoreValue::is_object) => Ok(()),
+		val::Value::Object(_) => Ok(()),
+		val::Value::Array(v) if v.iter().all(val::Value::is_object) => Ok(()),
 		_ => Err(crate::api::err::Error::InvalidParams(error_message.to_owned()).into()),
 	}
 }

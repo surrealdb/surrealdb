@@ -18,6 +18,9 @@ SURREAL_PASS = { value = "root", condition = { env_not_set = ["SURREAL_PASS"] } 
 SURREAL_PATH = { value = "memory", condition = { env_not_set = ["SURREAL_PATH"] } }
 SURREAL_NAMESPACE = { value = "test", condition = { env_not_set = ["SURREAL_NAMESPACE"] } }
 SURREAL_DATABASE = { value = "test", condition = { env_not_set = ["SURREAL_DATABASE"] } }
+SURREAL_NIGHTLY_RUST_TOOLCHAIN = { script = ["cat ${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/rust-toolchain.nightly"], condition = { env_not_set = [
+    "SURREAL_NIGHTLY_RUST_TOOLCHAIN",
+] } }
 
 [tasks.empty]
 disabled = true

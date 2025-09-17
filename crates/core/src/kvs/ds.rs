@@ -1,46 +1,5 @@
-use super::export;
-use super::tr::Transactor;
-use super::tx::Transaction;
-use super::version::Version;
-use crate::buc::BucketConnections;
-use crate::cf;
-use crate::ctx::MutableContext;
-#[cfg(feature = "jwks")]
-use crate::dbs::capabilities::NetTarget;
-use crate::dbs::capabilities::{
-	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
-};
-use crate::dbs::node::Timestamp;
-use crate::dbs::{
-	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
-};
-use crate::err::Error;
-use crate::expr::LogicalPlan;
-use crate::expr::{Base, FlowResultExt as _, Value, statements::DefineUserStatement};
-#[cfg(feature = "jwks")]
-use crate::iam::jwks::JwksCache;
-use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
-use crate::idx::trees::store::IndexStores;
-use crate::kvs::cache::ds::DatastoreCache;
-use crate::kvs::clock::SizedClock;
-#[expect(unused_imports)]
-use crate::kvs::clock::SystemClock;
-#[cfg(not(target_family = "wasm"))]
-use crate::kvs::index::IndexBuilder;
-use crate::kvs::sequences::Sequences;
-use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
-use crate::sql::Query;
-use crate::syn;
-use crate::syn::parser::{ParserSettings, StatementStream};
-#[allow(unused_imports)]
-use anyhow::bail;
-use anyhow::{Result, ensure};
-use async_channel::{Receiver, Sender};
-use bytes::{Bytes, BytesMut};
-use dashmap::DashMap;
-use futures::{Future, Stream};
-use reblessive::TreeStack;
-use std::fmt;
+use std::collections::BTreeMap;
+use std::fmt::{self, Display};
 #[cfg(storage)]
 use std::path::PathBuf;
 use std::pin::pin;
@@ -49,24 +8,80 @@ use std::task::{Poll, ready};
 use std::time::Duration;
 #[cfg(not(target_family = "wasm"))]
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[allow(unused_imports)]
+use anyhow::bail;
+use anyhow::{Result, ensure};
+use async_channel::{Receiver, Sender};
+use bytes::{Bytes, BytesMut};
+use dashmap::DashMap;
+use futures::{Future, Stream};
+use http::HeaderMap;
+use reblessive::TreeStack;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
-use tracing::instrument;
-use tracing::trace;
+use tracing::{instrument, trace};
 use uuid::Uuid;
 #[cfg(target_family = "wasm")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
+use super::export;
+use super::tr::Transactor;
+use super::tx::Transaction;
+use super::version::MajorVersion;
+use crate::api::body::ApiBody;
+use crate::api::invocation::ApiInvocation;
+use crate::api::response::{ApiResponse, ResponseInstruction};
+use crate::buc::BucketConnections;
+use crate::catalog::providers::{
+	ApiProvider, CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider, UserProvider,
+};
+use crate::catalog::{ApiDefinition, ApiMethod, Index};
+use crate::ctx::MutableContext;
+#[cfg(feature = "jwks")]
+use crate::dbs::capabilities::NetTarget;
+use crate::dbs::capabilities::{
+	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
+};
+use crate::dbs::node::Timestamp;
+use crate::dbs::{Capabilities, Executor, Notification, Options, Response, Session, Variables};
+use crate::err::Error;
+use crate::expr::statements::DefineUserStatement;
+use crate::expr::{Base, Expr, FlowResultExt as _, Ident, LogicalPlan};
+#[cfg(feature = "jwks")]
+use crate::iam::jwks::JwksCache;
+use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
+use crate::idx::IndexKeyBase;
+use crate::idx::ft::fulltext::FullTextIndex;
+use crate::idx::trees::store::IndexStores;
+use crate::key::root::ic::IndexCompactionKey;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
+use crate::kvs::cache::ds::DatastoreCache;
+use crate::kvs::clock::SizedClock;
+#[expect(unused_imports)]
+use crate::kvs::clock::SystemClock;
+#[cfg(not(target_family = "wasm"))]
+use crate::kvs::index::IndexBuilder;
+use crate::kvs::sequences::Sequences;
+use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
+use crate::kvs::{LockType, TransactionType};
+use crate::sql::Ast;
+use crate::syn::parser::{ParserSettings, StatementStream};
+use crate::val::{Strand, Value};
+use crate::{cf, syn};
+
 const TARGET: &str = "surrealdb::core::kvs::ds";
 
-// If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
+// If there are an infinite number of heartbeats, then we want to go
+// batch-by-batch spread over several checks
 const LQ_CHANNEL_SIZE: usize = 15_000;
 
-// The role assigned to the initial user created when starting the server with credentials for the first time
+// The role assigned to the initial user created when starting the server with
+// credentials for the first time
 const INITIAL_USER_ROLE: &str = "owner";
 
 /// The underlying datastore instance which stores the dataset.
-#[non_exhaustive]
 pub struct Datastore {
 	transaction_factory: TransactionFactory,
 	/// The unique id of this datastore, used in notifications.
@@ -77,7 +92,10 @@ pub struct Datastore {
 	auth_enabled: bool,
 	/// The maximum duration timeout for running multiple statements in a query.
 	query_timeout: Option<Duration>,
-	/// The maximum duration timeout for running multiple statements in a transaction.
+	/// The duration threshold determining when a query should be logged
+	slow_log_threshold: Option<Duration>,
+	/// The maximum duration timeout for running multiple statements in a
+	/// transaction.
 	transaction_timeout: Option<Duration>,
 	/// The security and feature capabilities for this datastore.
 	capabilities: Arc<Capabilities>,
@@ -104,13 +122,20 @@ pub struct Datastore {
 
 #[derive(Clone)]
 pub(super) struct TransactionFactory {
-	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
+	// Clock for tracking time. It is read-only and accessible to all transactions.
 	clock: Arc<SizedClock>,
 	// The inner datastore type
 	flavor: Arc<DatastoreFlavor>,
 }
 
 impl TransactionFactory {
+	pub(super) fn new(clock: Arc<SizedClock>, flavor: DatastoreFlavor) -> Self {
+		Self {
+			clock,
+			flavor: flavor.into(),
+		}
+	}
+
 	#[allow(
 		unreachable_code,
 		unreachable_patterns,
@@ -380,16 +405,14 @@ impl Datastore {
 		}?;
 		// Set the properties on the datastore
 		flavor.map(|flavor| {
-			let tf = TransactionFactory {
-				clock,
-				flavor: Arc::new(flavor),
-			};
+			let tf = TransactionFactory::new(clock, flavor);
 			Self {
 				id: Uuid::new_v4(),
 				transaction_factory: tf.clone(),
 				strict: false,
 				auth_enabled: false,
 				query_timeout: None,
+				slow_log_threshold: None,
 				transaction_timeout: None,
 				notification_channel: None,
 				capabilities: Arc::new(Capabilities::default()),
@@ -407,14 +430,15 @@ impl Datastore {
 		})
 	}
 
-	/// Create a new datastore with the same persistent data (inner), with flushed cache.
-	/// Simulating a server restart
+	/// Create a new datastore with the same persistent data (inner), with
+	/// flushed cache. Simulating a server restart
 	pub fn restart(self) -> Self {
 		Self {
 			id: self.id,
 			strict: self.strict,
 			auth_enabled: self.auth_enabled,
 			query_timeout: self.query_timeout,
+			slow_log_threshold: self.slow_log_threshold,
 			transaction_timeout: self.transaction_timeout,
 			capabilities: self.capabilities,
 			notification_channel: self.notification_channel,
@@ -444,6 +468,10 @@ impl Datastore {
 		self
 	}
 
+	pub fn is_strict_mode(&self) -> bool {
+		self.strict
+	}
+
 	/// Specify whether this datastore should enable live query notifications
 	pub fn with_notifications(mut self) -> Self {
 		self.notification_channel = Some(async_channel::bounded(LQ_CHANNEL_SIZE));
@@ -453,6 +481,12 @@ impl Datastore {
 	/// Set a global query timeout for this Datastore
 	pub fn with_query_timeout(mut self, duration: Option<Duration>) -> Self {
 		self.query_timeout = duration;
+		self
+	}
+
+	/// Set a global slow log threshold
+	pub fn with_slow_log_threshold(mut self, duration: Option<Duration>) -> Self {
+		self.slow_log_threshold = duration;
 		self
 	}
 
@@ -537,7 +571,7 @@ impl Datastore {
 
 	// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn check_version(&self) -> Result<Version> {
+	pub async fn check_version(&self) -> Result<MajorVersion> {
 		let version = self.get_version().await?;
 		// Check we are running the latest version
 		if !version.is_latest() {
@@ -549,34 +583,19 @@ impl Datastore {
 
 	// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn get_version(&self) -> Result<Version> {
+	pub async fn get_version(&self) -> Result<MajorVersion> {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Pessimistic).await?.enclose();
 		// Create the key where the version is stored
 		let key = crate::key::version::new();
 		// Check if a version is already set in storage
-		let val = match catch!(txn, txn.get(key.clone(), None).await) {
+		let val = match catch!(txn, txn.get(&key, None).await) {
 			// There is a version set in the storage
-			Some(v) => {
-				// Attempt to decode the current stored version
-				let val = TryInto::<Version>::try_into(v);
-				// Check for errors, and cancel the transaction
-				match val {
-					// There was en error getting the version
-					Err(err) => {
-						// We didn't write anything, so just rollback
-						catch!(txn, txn.cancel().await);
-						// Return the error
-						bail!(err);
-					}
-					// We could decode the version correctly
-					Ok(val) => {
-						// We didn't write anything, so just rollback
-						catch!(txn, txn.cancel().await);
-						// Return the current version
-						val
-					}
-				}
+			Some(val) => {
+				// We didn't write anything, so just rollback
+				catch!(txn, txn.cancel().await);
+				// Return the current version
+				val
 			}
 			// There is no version set in the storage
 			None => {
@@ -584,21 +603,19 @@ impl Datastore {
 				let rng = crate::key::version::proceeding();
 				let keys = catch!(txn, txn.keys(rng, 1, None).await);
 				// Check the storage if there are any other keys set
-				let val = if keys.is_empty() {
+				let version = if keys.is_empty() {
 					// There are no keys set in storage, so this is a new database
-					Version::latest()
+					MajorVersion::latest()
 				} else {
 					// There were keys in storage, so this is an upgrade
-					Version::v1()
+					MajorVersion::v1()
 				};
-				// Convert the version to binary
-				let bytes: Vec<u8> = val.into();
 				// Attempt to set the current version in storage
-				catch!(txn, txn.replace(key, bytes).await);
+				catch!(txn, txn.replace(&key, &version).await);
 				// We set the version, so commit the transaction
 				catch!(txn, txn.commit().await);
 				// Return the current version
-				val
+				version
 			}
 		};
 		// Everything ok
@@ -617,7 +634,14 @@ impl Datastore {
 			// Display information in the logs
 			info!(target: TARGET, "Credentials were provided, and no root users were found. The root user '{user}' will be created");
 			// Create and new root user definition
-			let stm = DefineUserStatement::from((Base::Root, user, pass, INITIAL_USER_ROLE));
+			let stm = DefineUserStatement::new_with_password(
+				Base::Root,
+				// TODO: Null byte validity.
+				Strand::new(user.to_owned()).unwrap(),
+				pass,
+				// TODO: Null byte validity, always correct here probably.
+				Ident::new(INITIAL_USER_ROLE.to_owned()).unwrap(),
+			);
 			let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
 			let mut ctx = MutableContext::default();
 			ctx.set_transaction(txn.clone());
@@ -680,37 +704,183 @@ impl Datastore {
 		Ok(())
 	}
 
-	/// Run the background task to perform changefeed garbage collection
+	/// Performs changefeed garbage collection as a background task.
+	///
+	/// This method is responsible for cleaning up old changefeed data across
+	/// all databases. It uses a distributed task lease mechanism to ensure
+	/// that only one node in a cluster performs this maintenance operation at
+	/// a time, preventing duplicate work and potential conflicts.
+	///
+	/// The process involves:
+	/// 1. Acquiring a lease for the ChangeFeedCleanup task
+	/// 2. Calculating the current system time
+	/// 3. Saving timestamps for current versionstamps
+	/// 4. Cleaning up old changefeed data from all databases
+	///
+	/// # Parameters
+	/// * `delay` - Duration specifying how long the lease should be valid
+	///
+	/// # Returns
+	/// * `Ok(())` - If the operation completes successfully or if this node doesn't have the lease
+	/// * `Err` - If any step in the process fails
+	///
+	/// # Errors
+	/// * Returns an error if the system clock appears to have gone backwards
+	/// * Propagates any errors from the underlying database operations
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn changefeed_process(&self) -> Result<()> {
+	pub async fn changefeed_process(&self, gc_interval: &Duration) -> Result<()> {
+		let lh = LeaseHandler::new(
+			self.id,
+			self.transaction_factory.clone(),
+			TaskLeaseType::ChangeFeedCleanup,
+			*gc_interval * 2,
+		)?;
+		// Attempt to acquire a lease for the ChangeFeedCleanup task
+		// If we don't get the lease, another node is handling this task
+		if !lh.has_lease().await? {
+			return Ok(());
+		}
+		let lh = Some(lh);
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running changefeed garbage collection");
-		// Calculate the current system time
+		// Calculate the current system time in seconds since UNIX epoch
+		// This will be used as a reference point for cleanup operations
 		let ts = SystemTime::now()
 			.duration_since(UNIX_EPOCH)
 			.map_err(|e| {
 				Error::Internal(format!("Clock may have gone backwards: {:?}", e.duration()))
 			})?
 			.as_secs();
-		// Save timestamps for current versionstamps
-		self.changefeed_versionstamp(ts).await?;
-		// Garbage old changefeed data from all databases
-		self.changefeed_cleanup(ts).await?;
-		// Everything ok
+		// Save timestamps for current versionstamps to track cleanup progress
+		self.changefeed_versionstamp(lh.as_ref(), ts).await?;
+		// Remove old changefeed data from all databases based on retention policies
+		self.changefeed_cleanup(lh.as_ref(), ts).await?;
+		// Everything completed successfully
 		Ok(())
 	}
 
-	/// Run the background task to perform changefeed garbage collection
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn changefeed_process_at(&self, ts: u64) -> Result<()> {
+	/// Performs changefeed garbage collection using a specified timestamp.
+	///
+	/// This method is similar to `changefeed_process` but accepts an explicit
+	/// timestamp instead of calculating the current time. This allows for more
+	/// controlled testing and specific cleanup operations at predetermined
+	/// points in time.
+	///
+	/// Unlike `changefeed_process`, this method does not use the task lease
+	/// mechanism, making it suitable for direct invocation in controlled
+	/// environments or testing scenarios where lease coordination is not
+	/// required.
+	///
+	/// The process involves:
+	/// 1. Saving timestamps for current versionstamps using the provided timestamp
+	/// 2. Cleaning up old changefeed data from all databases
+	///
+	/// # Parameters
+	/// * `ts` - Explicit timestamp (in seconds since UNIX epoch) to use for cleanup operations
+	///
+	/// # Returns
+	/// * `Ok(())` - If the operation completes successfully
+	/// * `Err` - If any step in the process fails
+	///
+	/// # Errors
+	/// * Propagates any errors from the underlying database operations
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self, lh))]
+	pub async fn changefeed_process_at(&self, lh: Option<&LeaseHandler>, ts: u64) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running changefeed garbage collection");
-		// Save timestamps for current versionstamps
-		self.changefeed_versionstamp(ts).await?;
-		// Garbage old changefeed data from all databases
-		self.changefeed_cleanup(ts).await?;
-		// Everything ok
+		// Save timestamps for current versionstamps using the provided timestamp
+		self.changefeed_versionstamp(lh, ts).await?;
+		// Remove old changefeed data from all databases based on retention policies
+		// using the provided timestamp as the reference point
+		self.changefeed_cleanup(lh, ts).await?;
+		// Everything completed successfully
 		Ok(())
+	}
+
+	/// Processes the index compaction queue
+	///
+	/// This method is called periodically by the index compaction thread to
+	/// process indexes that have been marked for compaction. It acquires a
+	/// distributed lease to ensure only one node in a cluster performs the
+	/// compaction at a time.
+	///
+	/// The method scans the index compaction queue (stored as `Ic` keys) and
+	/// processes each index that needs compaction. Currently, only full-text
+	/// indexes support compaction, which helps optimize their performance by
+	/// consolidating changes and removing unnecessary data.
+	///
+	/// After processing an index, it is removed from the compaction queue.
+	///
+	/// # Arguments
+	///
+	/// * `interval` - The time interval between compaction runs, used to calculate the lease
+	///   duration
+	///
+	/// # Returns
+	///
+	/// * `Result<()>` - Ok if the compaction was successful or if another node is handling the
+	///   compaction, Error otherwise
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn index_compaction(&self, interval: Duration) -> Result<()> {
+		let lh = LeaseHandler::new(
+			self.id,
+			self.transaction_factory.clone(),
+			TaskLeaseType::IndexCompaction,
+			interval * 2,
+		)?;
+		// We continue without interruptions while there are keys and the lease
+		loop {
+			// Attempt to acquire a lease for the ChangeFeedCleanup task
+			// If we don't get the lease, another node is handling this task
+			if !lh.has_lease().await? {
+				return Ok(());
+			}
+			// Create a new transaction
+			let txn = self.transaction(Write, Optimistic).await?;
+			// Collect every item in the queue
+			let (beg, end) = IndexCompactionKey::range();
+			let range = beg..end;
+			let mut previous: Option<IndexCompactionKey<'static>> = None;
+			let mut count = 0;
+			// Returns an ordered list of indexes that require compaction
+			for (k, _) in txn.getr(range.clone(), None).await? {
+				count += 1;
+				lh.try_maintain_lease().await?;
+				let ic = IndexCompactionKey::decode_key(&k)?;
+				// If the index has already been compacted, we can ignore the task
+				if let Some(p) = &previous {
+					if p.index_matches(&ic) {
+						continue;
+					}
+				}
+				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
+					Some(ix) => {
+						if let Index::FullText(p) = &ix.index {
+							let ft = FullTextIndex::new(
+								self.id(),
+								&self.index_stores,
+								&txn,
+								IndexKeyBase::new(ic.ns, ic.db, &ix.table_name, ix.index_id),
+								p,
+							)
+							.await?;
+							ft.compaction(&txn).await?;
+						}
+					}
+					None => {
+						trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ic.ix);
+					}
+				}
+				previous = Some(ic.into_owned());
+			}
+			if count > 0 {
+				txn.delr(range).await?;
+				txn.commit().await?;
+			} else {
+				txn.cancel().await?;
+				return Ok(());
+			}
+		}
 	}
 
 	/// Performs a database import from SQL
@@ -724,7 +894,7 @@ impl Datastore {
 		self.execute(sql, sess, None).await
 	}
 
-	/// Run the datastore shutdown tasks, perfoming any necessary cleanup
+	/// Run the datastore shutdown tasks, performing any necessary cleanup
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn shutdown(&self) -> Result<()> {
 		// Output function invocation details to logs
@@ -768,6 +938,28 @@ impl Datastore {
 		self.transaction_factory.transaction(write, lock).await
 	}
 
+	pub async fn health_check(&self) -> Result<()> {
+		let tx = self.transaction(Read, Optimistic).await?;
+
+		// Cancel the transaction
+		trace!("Cancelling health check transaction");
+		// Attempt to fetch data
+		match tx.get(&vec![0x00], None).await {
+			Err(err) => {
+				// Ensure the transaction is cancelled
+				let _ = tx.cancel().await;
+				// Return an error for this endpoint
+				Err(err)
+			}
+			Ok(_) => {
+				// Ensure the transaction is cancelled
+				let _ = tx.cancel().await;
+				// Return success for this endpoint
+				Ok(())
+			}
+		}
+	}
+
 	/// Parse and execute an SQL query
 	///
 	/// ```rust,no_run
@@ -789,7 +981,7 @@ impl Datastore {
 		&self,
 		txt: &str,
 		sess: &Session,
-		vars: Variables,
+		vars: Option<Variables>,
 	) -> Result<Vec<Response>> {
 		// Parse the SQL query text
 		let ast = syn::parse_with_capabilities(txt, &self.capabilities)?;
@@ -801,7 +993,7 @@ impl Datastore {
 	pub async fn execute_import<S>(
 		&self,
 		sess: &Session,
-		vars: Variables,
+		vars: Option<Variables>,
 		query: S,
 	) -> Result<Vec<Response>>
 	where
@@ -826,9 +1018,11 @@ impl Datastore {
 		// Create a default context
 		let mut ctx = self.setup_ctx()?;
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
+		}
 		// Process all statements
 
 		let parser_settings = ParserSettings {
@@ -870,8 +1064,8 @@ impl Datastore {
 					filling = buffer.len() < parse_size
 				}
 
-				// if we finished streaming we can parse with complete so that the parser can be sure
-				// of it's results.
+				// if we finished streaming we can parse with complete so that the parser can be
+				// sure of it's results.
 				if complete {
 					return match statements_stream.parse_complete(&mut buffer) {
 						Err(e) => {
@@ -892,8 +1086,8 @@ impl Datastore {
 						// Couldn't parse a statement for sure.
 						if buffer.len() >= parse_size && parse_size < u32::MAX as usize {
 							// the buffer already contained more or equal to parse_size bytes
-							// this means we are trying to parse a statement of more then buffer size.
-							// so we need to increase the buffer size.
+							// this means we are trying to parse a statement of more then buffer
+							// size. so we need to increase the buffer size.
 							parse_size = (parse_size + 1).next_power_of_two();
 						}
 						// start filling the buffer again.
@@ -907,59 +1101,22 @@ impl Datastore {
 	}
 
 	/// Execute a pre-parsed SQL query
-	///
-	/// ```rust,no_run
-	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::dbs::Session;
-	/// use surrealdb_core::sql::parse;
-	/// use anyhow::Error;
-	///
-	/// #[tokio::main]
-	/// async fn main() -> Result<(),Error> {
-	///     let ds = Datastore::new("memory").await?;
-	///     let ses = Session::owner();
-	///     let ast = parse("USE NS test DB test; SELECT * FROM person;")?;
-	///     let res = ds.process(ast, &ses, None).await?;
-	///     Ok(())
-	/// }
-	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn process(
 		&self,
-		ast: Query,
+		ast: Ast,
 		sess: &Session,
-		vars: Variables,
+		vars: Option<Variables>,
 	) -> Result<Vec<Response>> {
-		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
-		// Check if anonymous actors can execute queries when auth is enabled
-		// TODO(sgirones): Check this as part of the authorisation layer
-		self.check_anon(sess).map_err(|_| {
-			Error::from(IamError::NotAllowed {
-				actor: "anonymous".to_string(),
-				action: "process".to_string(),
-				resource: "query".to_string(),
-			})
-		})?;
-
-		// Create a new query options
-		let opt = self.setup_options(sess);
-
-		// Create a default context
-		let mut ctx = self.setup_ctx()?;
-		// Start an execution context
-		sess.context(&mut ctx);
-		// Store the query variables
-		vars.attach(&mut ctx)?;
-		// Process all statements
-		Executor::execute(self, ctx.freeze(), opt, ast).await
+		//TODO: Insert planner here.
+		self.process_plan(ast.into(), sess, vars).await
 	}
 
 	pub async fn process_plan(
 		&self,
 		plan: LogicalPlan,
 		sess: &Session,
-		vars: Variables,
+		vars: Option<Variables>,
 	) -> Result<Vec<Response>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
@@ -979,34 +1136,24 @@ impl Datastore {
 		// Create a default context
 		let mut ctx = self.setup_ctx()?;
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
+		}
 
 		// Process all statements
 		Executor::execute_plan(self, ctx.freeze(), opt, plan).await
 	}
 
 	/// Ensure a SQL [`Value`] is fully computed
-	///
-	/// ```rust,no_run
-	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::dbs::Session;
-	/// use surrealdb_core::expr::Future;
-	/// use surrealdb_core::expr::Value;
-	/// use anyhow::Error;
-	///
-	/// #[tokio::main]
-	/// async fn main() -> Result<(),Error> {
-	///     let ds = Datastore::new("memory").await?;
-	///     let ses = Session::owner();
-	///     let val = Value::Future(Box::new(Future::from(Value::Bool(true))));
-	///     let res = ds.compute(val, &ses, None).await?;
-	///     Ok(())
-	/// }
-	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn compute(&self, val: Value, sess: &Session, vars: Variables) -> Result<Value> {
+	pub async fn compute(
+		&self,
+		val: Expr,
+		sess: &Session,
+		vars: Option<Variables>,
+	) -> Result<Value> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Check if anonymous actors can compute values when auth is enabled
@@ -1036,11 +1183,18 @@ impl Datastore {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
+		}
+		let txn_type = if val.read_only() {
+			TransactionType::Read
+		} else {
+			TransactionType::Write
+		};
 		// Start a new transaction
-		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
+		let txn = self.transaction(txn_type, Optimistic).await?.enclose();
 		// Store the transaction
 		ctx.set_transaction(txn.clone());
 		// Freeze the context
@@ -1049,11 +1203,12 @@ impl Datastore {
 		let res =
 			stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.catch_return();
 		// Store any data
-		match (res.is_ok(), val.writeable()) {
+		if res.is_ok() && matches!(txn_type, TransactionType::Read) {
 			// If the compute was successful, then commit if writeable
-			(true, true) => txn.commit().await?,
+			txn.commit().await?
+		} else {
 			// Cancel if the compute was an error, or if readonly
-			(_, _) => txn.cancel().await?,
+			txn.cancel().await?
 		};
 		// Return result
 		res
@@ -1064,25 +1219,13 @@ impl Datastore {
 	/// whether authentication is enabled, or guest access is disabled.
 	/// For example, this is used when processing a record access SIGNUP or
 	/// SIGNIN clause, which still needs to work without guest access.
-	///
-	/// ```rust,no_run
-	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::dbs::Session;
-	/// use surrealdb_core::expr::Future;
-	/// use surrealdb_core::expr::Value;
-	/// use anyhow::Error;
-	///
-	/// #[tokio::main]
-	/// async fn main() -> Result<(),Error> {
-	///     let ds = Datastore::new("memory").await?;
-	///     let ses = Session::owner();
-	///     let val = Value::Future(Box::new(Future::from(Value::Bool(true))));
-	///     let res = ds.evaluate(&val, &ses, None).await?;
-	///     Ok(())
-	/// }
-	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn evaluate(&self, val: &Value, sess: &Session, vars: Variables) -> Result<Value> {
+	pub async fn evaluate(
+		&self,
+		val: &Expr,
+		sess: &Session,
+		vars: Option<Variables>,
+	) -> Result<Value> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Create a new memory stack
@@ -1102,11 +1245,18 @@ impl Datastore {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
+		}
+		let txn_type = if val.read_only() {
+			TransactionType::Read
+		} else {
+			TransactionType::Write
+		};
 		// Start a new transaction
-		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
+		let txn = self.transaction(txn_type, Optimistic).await?.enclose();
 		// Store the transaction
 		ctx.set_transaction(txn.clone());
 		// Freeze the context
@@ -1115,11 +1265,12 @@ impl Datastore {
 		let res =
 			stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.catch_return();
 		// Store any data
-		match (res.is_ok(), val.writeable()) {
+		if res.is_ok() && txn_type == TransactionType::Write {
 			// If the compute was successful, then commit if writeable
-			(true, true) => txn.commit().await?,
+			txn.commit().await?;
+		} else {
 			// Cancel if the compute was an error, or if readonly
-			(_, _) => txn.cancel().await?,
+			txn.cancel().await?;
 		};
 		// Return result
 		res
@@ -1229,9 +1380,11 @@ impl Datastore {
 			.with_strict(self.strict)
 			.with_auth_enabled(self.auth_enabled)
 	}
+
 	pub fn setup_ctx(&self) -> Result<MutableContext> {
 		let mut ctx = MutableContext::from_ds(
 			self.query_timeout,
+			self.slow_log_threshold,
 			self.capabilities.clone(),
 			self.index_stores.clone(),
 			#[cfg(not(target_family = "wasm"))]
@@ -1261,32 +1414,215 @@ impl Datastore {
 			Ok(())
 		}
 	}
+
+	pub async fn process_use(
+		&self,
+		session: &mut Session,
+		namespace: Option<String>,
+		database: Option<String>,
+	) -> Result<()> {
+		match (namespace, database) {
+			(Some(ns), Some(db)) => {
+				let tx = self.transaction(TransactionType::Write, LockType::Optimistic).await?;
+				tx.ensure_ns_db(&ns, &db, self.strict).await?;
+				tx.commit().await?;
+				session.ns = Some(ns);
+				session.db = Some(db);
+			}
+			(Some(ns), None) => {
+				let tx = self.transaction(TransactionType::Write, LockType::Optimistic).await?;
+				tx.get_or_add_ns(&ns, self.strict).await?;
+				tx.commit().await?;
+				session.ns = Some(ns);
+			}
+			(None, Some(db)) => {
+				let Some(ns) = session.ns.clone() else {
+					return Err(anyhow::anyhow!("Cannot use database without namespace"));
+				};
+				let tx = self.transaction(TransactionType::Write, LockType::Optimistic).await?;
+				tx.ensure_ns_db(&ns, &db, self.strict).await?;
+				tx.commit().await?;
+				session.db = Some(db);
+			}
+			(None, None) => {
+				session.ns = None;
+				session.db = None;
+			}
+		}
+
+		Ok(())
+	}
+
+	/// Get a db model by name.
+	///
+	/// TODO: This should not be public, but it is used in `crates/sdk/src/api/engine/local/mod.rs`.
+	pub async fn get_db_model(
+		&self,
+		ns: &str,
+		db: &str,
+		model_name: &str,
+		model_version: &str,
+	) -> Result<Option<Arc<crate::catalog::MlModelDefinition>>> {
+		let tx = self.transaction(Read, Optimistic).await?;
+		let db = tx.expect_db_by_name(ns, db).await?;
+		let model =
+			tx.get_db_model(db.namespace_id, db.database_id, model_name, model_version).await?;
+		tx.cancel().await?;
+		Ok(model)
+	}
+
+	/// Get a table by name.
+	///
+	/// TODO: This should not be public, but it is used in `src/net/key.rs`.
+	pub async fn ensure_tb_exists(&self, ns: &str, db: &str, tb: &str) -> Result<()> {
+		let tx = self.transaction(TransactionType::Read, LockType::Optimistic).await?;
+
+		tx.expect_tb_by_name(ns, db, tb).await?;
+		tx.cancel().await?;
+
+		Ok(())
+	}
+
+	/// Invoke an API handler.
+	///
+	/// TODO: This should not need to be public, but it is used in `src/net/api.rs`.
+	#[expect(clippy::too_many_arguments)]
+	pub async fn invoke_api_handler<S>(
+		&self,
+		ns: &str,
+		db: &str,
+		path: &str,
+		session: &Session,
+		method: ApiMethod,
+		headers: HeaderMap,
+		query: BTreeMap<String, String>,
+		body: S,
+	) -> Result<Option<(ApiResponse, ResponseInstruction)>>
+	where
+		S: Stream<Item = std::result::Result<Bytes, Box<dyn Display + Send + Sync>>>
+			+ Send
+			+ Unpin
+			+ 'static,
+	{
+		let tx = Arc::new(self.transaction(TransactionType::Write, LockType::Optimistic).await?);
+
+		let db = tx.ensure_ns_db(ns, db, false).await?;
+
+		let apis = tx.all_db_apis(db.namespace_id, db.database_id).await?;
+		let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
+
+		let res = match ApiDefinition::find_definition(apis.as_ref(), segments, method) {
+			Some((api, params)) => {
+				let invocation = ApiInvocation {
+					params,
+					method,
+					headers,
+					query,
+				};
+
+				let opt = self.setup_options(session);
+
+				let mut ctx = self.setup_ctx()?;
+				ctx.set_transaction(Arc::clone(&tx));
+				ctx.attach_session(session)?;
+				let ctx = &ctx.freeze();
+
+				invocation.invoke_with_transaction(ctx, &opt, api, ApiBody::from_stream(body)).await
+			}
+			_ => {
+				return Err(anyhow::anyhow!(Error::ApNotFound {
+					value: path.to_owned(),
+				}));
+			}
+		};
+
+		// Handle committing or cancelling the transaction
+		if res.is_ok() {
+			tx.commit().await?;
+		} else {
+			tx.cancel().await?;
+		}
+
+		res
+	}
 }
 
 #[cfg(test)]
 mod test {
-	use crate::expr::FlowResultExt as _;
-
 	use super::*;
+	use crate::iam::verify::verify_root_creds;
+
+	#[tokio::test]
+	async fn test_setup_superuser() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let username = "root";
+		let password = "root";
+
+		// Setup the initial user if there are no root users
+		assert_eq!(
+			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
+			0
+		);
+		ds.initialise_credentials(username, password).await.unwrap();
+		assert_eq!(
+			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
+			1
+		);
+		verify_root_creds(&ds, username, password).await.unwrap();
+
+		// Do not setup the initial root user if there are root users:
+		// Test the scenario by making sure the custom password doesn't change.
+		let sql = "DEFINE USER root ON ROOT PASSWORD 'test' ROLES OWNER";
+		let sess = Session::owner();
+		ds.execute(sql, &sess, None).await.unwrap();
+		let pass_hash = ds
+			.transaction(Read, Optimistic)
+			.await
+			.unwrap()
+			.expect_root_user(username)
+			.await
+			.unwrap()
+			.hash
+			.clone();
+
+		ds.initialise_credentials(username, password).await.unwrap();
+		assert_eq!(
+			pass_hash,
+			ds.transaction(Read, Optimistic)
+				.await
+				.unwrap()
+				.expect_root_user(username)
+				.await
+				.unwrap()
+				.hash
+				.clone()
+		)
+	}
 
 	#[tokio::test]
 	pub async fn very_deep_query() -> Result<()> {
-		use crate::expr::{Expression, Future, Number, Operator, Value};
-		use crate::kvs::Datastore;
 		use reblessive::{Stack, Stk};
+
+		use crate::expr::{BinaryOperator, Expr, Literal};
+		use crate::kvs::Datastore;
+		use crate::val::{Number, Value};
 
 		// build query manually to bypass query limits.
 		let mut stack = Stack::new();
-		async fn build_query(stk: &mut Stk, depth: usize) -> Value {
+		async fn build_query(stk: &mut Stk, depth: usize) -> Expr {
 			if depth == 0 {
-				Value::Expression(Box::new(Expression::Binary {
-					l: Value::Number(Number::Int(1)),
-					o: Operator::Add,
-					r: Value::Number(Number::Int(1)),
-				}))
+				Expr::Binary {
+					left: Box::new(Expr::Literal(Literal::Integer(1))),
+					op: BinaryOperator::Add,
+					right: Box::new(Expr::Literal(Literal::Integer(1))),
+				}
 			} else {
 				let q = stk.run(|stk| build_query(stk, depth - 1)).await;
-				Value::Future(Box::new(Future::from(q)))
+				Expr::Binary {
+					left: Box::new(q),
+					op: BinaryOperator::Add,
+					right: Box::new(Expr::Literal(Literal::Integer(1))),
+				}
 			}
 		}
 		let val = stack.enter(|stk| build_query(stk, 1000)).finish();
@@ -1300,15 +1636,14 @@ mod test {
 			.with_live(false)
 			.with_strict(false)
 			.with_auth_enabled(false)
-			.with_max_computation_depth(u32::MAX)
-			.with_futures(true);
+			.with_max_computation_depth(u32::MAX);
 
 		// Create a default context
 		let mut ctx = MutableContext::default();
 		// Set context capabilities
 		ctx.add_capabilities(dbs.capabilities.clone());
 		// Start a new transaction
-		let txn = dbs.transaction(val.writeable().into(), Optimistic).await?;
+		let txn = dbs.transaction(TransactionType::Read, Optimistic).await?;
 		// Store the transaction
 		ctx.set_transaction(txn.enclose());
 		// Freeze the context
@@ -1321,7 +1656,95 @@ mod test {
 			.await
 			.catch_return()
 			.unwrap();
-		assert_eq!(res, Value::Number(Number::Int(2)));
+		assert_eq!(res, Value::Number(Number::Int(1002)));
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn cross_transaction_caching_uuids_updated() -> Result<()> {
+		let ds = Datastore::new("memory")
+			.await?
+			.with_capabilities(Capabilities::all())
+			.with_notifications();
+		let cache = ds.get_cache();
+		let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+
+		let txn = ds.transaction(TransactionType::Write, LockType::Pessimistic).await?;
+		let db = txn.ensure_ns_db("test", "test", false).await?;
+		drop(txn);
+
+		// Define the table, set the initial uuids
+		let sql = r"DEFINE TABLE test;".to_owned();
+		let res = &mut ds.execute(&sql, &ses, None).await?;
+		assert_eq!(res.len(), 1);
+		res.remove(0).result.unwrap();
+		// Obtain the initial uuids
+		let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+		let initial = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+		let initial_live_query_version =
+			cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
+		txn.cancel().await?;
+
+		// Define some resources to refresh the UUIDs
+		let sql = r"
+		DEFINE FIELD test ON test;
+		DEFINE EVENT test ON test WHEN {} THEN {};
+		DEFINE TABLE view AS SELECT * FROM test;
+		DEFINE INDEX test ON test FIELDS test;
+		LIVE SELECT * FROM test;
+	"
+		.to_owned();
+		let res = &mut ds.execute(&sql, &ses, None).await?;
+		assert_eq!(res.len(), 5);
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		let lqid = res.remove(0).result?;
+		assert!(matches!(lqid, Value::Uuid(_)));
+		// Obtain the uuids after definitions
+		let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+		let after_define = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+		let after_define_live_query_version =
+			cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
+		txn.cancel().await?;
+		// Compare uuids after definitions
+		assert_ne!(initial.cache_indexes_ts, after_define.cache_indexes_ts);
+		assert_ne!(initial.cache_tables_ts, after_define.cache_tables_ts);
+		assert_ne!(initial.cache_events_ts, after_define.cache_events_ts);
+		assert_ne!(initial.cache_fields_ts, after_define.cache_fields_ts);
+		assert_ne!(initial_live_query_version, after_define_live_query_version);
+
+		// Remove the defined resources to refresh the UUIDs
+		let sql = r"
+		REMOVE FIELD test ON test;
+		REMOVE EVENT test ON test;
+		REMOVE TABLE view;
+		REMOVE INDEX test ON test;
+		KILL $lqid;
+	"
+		.to_owned();
+		let vars = Variables::from(map! { "lqid".to_string() => lqid });
+		let res = &mut ds.execute(&sql, &ses, Some(vars)).await?;
+		assert_eq!(res.len(), 5);
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		res.remove(0).result.unwrap();
+		// Obtain the uuids after definitions
+		let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+		let after_remove = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+		let after_remove_live_query_version =
+			cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
+		drop(txn);
+		// Compare uuids after definitions
+		assert_ne!(after_define.cache_fields_ts, after_remove.cache_fields_ts);
+		assert_ne!(after_define.cache_events_ts, after_remove.cache_events_ts);
+		assert_ne!(after_define.cache_tables_ts, after_remove.cache_tables_ts);
+		assert_ne!(after_define.cache_indexes_ts, after_remove.cache_indexes_ts);
+		assert_ne!(after_define_live_query_version, after_remove_live_query_version);
+		//
 		Ok(())
 	}
 }

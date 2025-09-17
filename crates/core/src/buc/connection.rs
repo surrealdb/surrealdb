@@ -1,27 +1,28 @@
-use crate::{
-	cnf::{GLOBAL_BUCKET, GLOBAL_BUCKET_ENFORCED},
-	err::Error,
-};
-use dashmap::DashMap;
 use std::sync::Arc;
 
-use super::store::{ObjectKey, ObjectStore, prefixed::PrefixedStore};
+use dashmap::DashMap;
+
+use super::store::prefixed::PrefixedStore;
+use super::store::{ObjectKey, ObjectStore};
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::cnf::{GLOBAL_BUCKET, GLOBAL_BUCKET_ENFORCED};
+use crate::err::Error;
 
 // Helper type to represent how bucket connections are persisted
 pub(crate) type BucketConnections = DashMap<BucketConnectionKey, Arc<dyn ObjectStore>>;
 
 #[derive(Hash, PartialEq, Eq)]
 pub(crate) struct BucketConnectionKey {
-	ns: String,
-	db: String,
+	ns: NamespaceId,
+	db: DatabaseId,
 	bu: String,
 }
 
 impl BucketConnectionKey {
-	pub fn new(ns: impl Into<String>, db: impl Into<String>, bu: impl Into<String>) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, bu: &str) -> Self {
 		Self {
-			ns: ns.into(),
-			db: db.into(),
+			ns,
+			db,
 			bu: bu.into(),
 		}
 	}
@@ -31,8 +32,8 @@ impl BucketConnectionKey {
 /// If no global bucket is configured, the NoGlobalBucket error will be returned
 /// The key in the global bucket will be: `{ns}/{db}/{bu}`
 pub(crate) async fn connect_global(
-	ns: &str,
-	db: &str,
+	ns: NamespaceId,
+	db: DatabaseId,
 	bu: &str,
 ) -> Result<Arc<dyn ObjectStore>, Error> {
 	// Obtain the URL for the global bucket
@@ -44,7 +45,7 @@ pub(crate) async fn connect_global(
 	let global = connect(url, true, false).await?;
 
 	// Create a prefixstore for the specified bucket
-	let key = ObjectKey::from(format!("/{ns}/{db}/{bu}"));
+	let key = ObjectKey::new(format!("/{ns}/{db}/{bu}"));
 	Ok(Arc::new(PrefixedStore::new(global, key)))
 }
 

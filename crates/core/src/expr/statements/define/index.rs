@@ -1,41 +1,38 @@
+use std::fmt::{self, Display};
+#[cfg(target_family = "wasm")]
+use std::sync::Arc;
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+use uuid::Uuid;
+
+use super::DefineKind;
+use crate::catalog::providers::{CatalogProvider, TableProvider};
+use crate::catalog::{Index, IndexDefinition, TableDefinition};
 use crate::ctx::Context;
 #[cfg(target_family = "wasm")]
 use crate::dbs::Force;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::statements::DefineTableStatement;
-use crate::expr::statements::info::InfoStructure;
+#[cfg(target_family = "wasm")]
+use crate::expr::Output;
 #[cfg(target_family = "wasm")]
 use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
-use crate::expr::{Base, Ident, Idioms, Index, Part, Strand, Value};
-#[cfg(target_family = "wasm")]
-use crate::expr::{Output, Values};
+use crate::expr::{Base, Ident, Idiom, Part};
 use crate::iam::{Action, ResourceKind};
-use anyhow::{Result, bail};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
-#[cfg(target_family = "wasm")]
-use std::sync::Arc;
-use uuid::Uuid;
+use crate::sql::ToSql;
+use crate::sql::fmt::Fmt;
+use crate::val::{Strand, Value};
 
-#[revisioned(revision = 4)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineIndexStatement {
+	pub kind: DefineKind,
 	pub name: Ident,
 	pub what: Ident,
-	pub cols: Idioms,
+	pub cols: Vec<Idiom>,
 	pub index: Index,
 	pub comment: Option<Strand>,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub overwrite: bool,
-	#[revision(start = 4)]
 	pub concurrently: bool,
 }
 
@@ -50,156 +47,125 @@ impl DefineIndexStatement {
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
-		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
 		// Fetch the transaction
 		let txn = ctx.tx();
+
+		let (ns, db) = opt.ns_db()?;
+		let tb = txn.ensure_ns_db_tb(ns, db, &self.what, opt.strict).await?;
+
 		// Check if the definition exists
-		if txn.get_tb_index(ns, db, &self.what, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::IxAlreadyExists {
-					name: self.name.to_string(),
-				});
+		let index_id = if let Some(ix) =
+			txn.get_tb_index(tb.namespace_id, tb.database_id, &tb.name, &self.name).await?
+		{
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::IxAlreadyExists {
+							name: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 			// Clear the index store cache
 			#[cfg(not(target_family = "wasm"))]
 			ctx.get_index_stores()
-				.index_removed(ctx.get_index_builder(), &txn, ns, db, &self.what, &self.name)
+				.index_removed(
+					ctx.get_index_builder(),
+					&txn,
+					tb.namespace_id,
+					tb.database_id,
+					&tb.name,
+					&self.name,
+				)
 				.await?;
 			#[cfg(target_family = "wasm")]
-			ctx.get_index_stores().index_removed(&txn, ns, db, &self.what, &self.name).await?;
-		}
-		// Does the table exist?
-		match txn.get_tb(ns, db, &self.what).await {
-			Ok(tb) => {
-				// Are we SchemaFull?
-				if tb.full {
-					// Check that the fields exist
-					for idiom in self.cols.iter() {
-						let Some(Part::Field(first)) = idiom.0.first() else {
-							continue;
-						};
-						txn.get_tb_field(ns, db, &self.what, &first.to_string()).await?;
-					}
+			ctx.get_index_stores()
+				.index_removed(&txn, tb.namespace_id, tb.database_id, &tb.name, &self.name)
+				.await?;
+
+			ix.index_id
+		} else {
+			txn.lock().await.get_next_ix_id(tb.namespace_id, tb.database_id).await?
+		};
+
+		// If the table is schemafull, ensure that the fields exist.
+		if tb.schemafull {
+			// Check that the fields exist
+			for idiom in self.cols.iter() {
+				// TODO: Was this correct? Can users not index data on sub-fields?
+				let Some(Part::Field(first)) = idiom.0.first() else {
+					continue;
+				};
+
+				//
+				if txn
+					.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, &first.to_raw_string())
+					.await?
+					.is_none()
+				{
+					bail!(Error::FdNotFound {
+						name: idiom.to_raw_string(),
+					});
 				}
 			}
-			Err(e) => {
-				if !matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
-					return Err(e);
-				}
-			}
 		}
+
 		// Process the statement
-		let key = crate::key::table::ix::new(ns, db, &self.what, &self.name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-		txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?;
-		txn.set(
-			key,
-			revision::to_vec(&DefineIndexStatement {
-				// Don't persist the `IF NOT EXISTS`, `OVERWRITE` and `CONCURRENTLY` clause to schema
-				if_not_exists: false,
-				overwrite: false,
-				concurrently: false,
-				..self.clone()
-			})?,
-			None,
-		)
-		.await?;
+		let index_def = IndexDefinition {
+			index_id,
+			name: self.name.to_raw_string(),
+			table_name: self.what.to_raw_string(),
+			cols: self.cols.clone(),
+			index: self.index.clone(),
+			comment: self.comment.clone().map(|x| x.to_raw_string()),
+		};
+		txn.put_tb_index(tb.namespace_id, tb.database_id, &tb.name, &index_def).await?;
+
 		// Refresh the table cache
-		let key = crate::key::database::tb::new(ns, db, &self.what);
-		let tb = txn.get_tb(ns, db, &self.what).await?;
-		txn.set(
-			key,
-			revision::to_vec(&DefineTableStatement {
+
+		txn.put_tb(
+			ns,
+			db,
+			&TableDefinition {
 				cache_indexes_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
-			})?,
-			None,
+			},
 		)
 		.await?;
+
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &self.what);
+			cache.clear_tb(tb.namespace_id, tb.database_id, &tb.name);
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Process the index
-		#[cfg(not(target_family = "wasm"))]
-		self.async_index(stk, ctx, opt, doc, !self.concurrently).await?;
-		#[cfg(target_family = "wasm")]
-		self.sync_index(stk, ctx, opt, doc).await?;
+		run_indexing(stk, ctx, opt, doc, &index_def, !self.concurrently).await?;
+
 		// Ok all good
 		Ok(Value::None)
-	}
-
-	#[cfg(target_family = "wasm")]
-	async fn sync_index(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<()> {
-		{
-			// Create the remove statement
-			let stm = RemoveIndexStatement {
-				name: self.name.clone(),
-				what: self.what.clone(),
-				if_exists: false,
-			};
-			// Execute the delete statement
-			stm.compute(ctx, opt).await?;
-		}
-		{
-			// Force queries to run
-			let opt = &opt.new_with_force(Force::Index(Arc::new([self.clone()])));
-			// Update the index data
-			let stm = UpdateStatement {
-				what: Values(vec![Value::Table(self.what.clone().into())]),
-				output: Some(Output::None),
-				..UpdateStatement::default()
-			};
-			stm.compute(stk, ctx, opt, doc).await?;
-		}
-		Ok(())
-	}
-
-	#[cfg(not(target_family = "wasm"))]
-	async fn async_index(
-		&self,
-		_stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-		blocking: bool,
-	) -> Result<()> {
-		let rcv = ctx
-			.get_index_builder()
-			.ok_or_else(|| Error::unreachable("No Index Builder"))?
-			.build(ctx, opt.clone(), self.clone().into(), blocking)?;
-		if let Some(rcv) = rcv {
-			rcv.await.map_err(|_| Error::IndexingBuildingCancelled)?
-		} else {
-			Ok(())
-		}
 	}
 }
 
 impl Display for DefineIndexStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE INDEX")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
-		}
-		write!(f, " {} ON {} FIELDS {}", self.name, self.what, self.cols)?;
+		write!(
+			f,
+			" {} ON {} FIELDS {}",
+			self.name,
+			self.what,
+			Fmt::comma_separated(self.cols.iter())
+		)?;
 		if Index::Idx != self.index {
-			write!(f, " {}", self.index)?;
+			write!(f, " {}", self.index.to_sql())?;
 		}
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
@@ -211,14 +177,51 @@ impl Display for DefineIndexStatement {
 	}
 }
 
-impl InfoStructure for DefineIndexStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"what".to_string() => self.what.structure(),
-			"cols".to_string() => self.cols.structure(),
-			"index".to_string() => self.index.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
+pub(in crate::expr::statements) async fn run_indexing(
+	#[cfg_attr(not(target_family = "wasm"), expect(unused_variables))] stk: &mut Stk,
+	ctx: &Context,
+	opt: &Options,
+	#[cfg_attr(not(target_family = "wasm"), expect(unused_variables))] doc: Option<&CursorDoc>,
+	index: &IndexDefinition,
+	_blocking: bool,
+) -> Result<()> {
+	#[cfg(target_family = "wasm")]
+	{
+		{
+			// Create the remove statement
+			let stm = RemoveIndexStatement {
+				name: Ident::new(index.name.clone()).unwrap(),
+				what: Ident::new(index.table_name.clone()).unwrap(),
+				if_exists: false,
+			};
+			// Execute the delete statement
+			stm.compute(ctx, opt).await?;
+		}
+		{
+			// Force queries to run
+			let opt = &opt.new_with_force(Force::Index(Arc::new([index.clone()])));
+			// Update the index data
+			let stm = crate::expr::UpdateStatement {
+				what: vec![crate::expr::Expr::Table(Ident::new(index.table_name.clone()).unwrap())],
+				output: Some(Output::None),
+				..UpdateStatement::default()
+			};
+			stm.compute(stk, ctx, opt, doc).await?;
+			Ok(())
+		}
+	}
+
+	#[cfg(not(target_family = "wasm"))]
+	{
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+		let rcv = ctx
+			.get_index_builder()
+			.ok_or_else(|| Error::unreachable("No Index Builder"))?
+			.build(ctx, opt.clone(), ns, db, index.clone().into(), _blocking)?;
+		if let Some(rcv) = rcv {
+			rcv.await.map_err(|_| Error::IndexingBuildingCancelled)?
+		} else {
+			Ok(())
+		}
 	}
 }

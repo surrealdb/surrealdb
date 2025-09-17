@@ -82,6 +82,7 @@ arrayvec.workspace = true
 anyhow.workspace = true
 bincode.workspace = true
 async-channel.workspace = true
+castaway.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 futures.workspace = true
 geo = { workspace = true, features = ["use-serde"] }
@@ -150,6 +151,7 @@ radix_trie.workspace = true
 rand.workspace = true
 rayon.workspace = true
 regex.workspace = true
+rstest.workspace = true
 serial_test.workspace = true
 temp-dir.workspace = true
 test-log = { workspace = true, features = ["trace"] }
@@ -183,14 +185,6 @@ name = "hash_trie_btree"
 harness = false
 
 [[bench]]
-name = "index_btree"
-harness = false
-
-[[bench]]
-name = "index_mtree"
-harness = false
-
-[[bench]]
 name = "index_hnsw"
 harness = false
 
@@ -216,4 +210,20 @@ harness = false
 
 [[bench]]
 name = "allocator"
+harness = false
+
+[[bench]]
+name = "array_uniq"
+harness = false
+
+[[bench]]
+name = "array_complement"
+harness = false
+
+[[bench]]
+name = "array_difference"
+harness = false
+
+[[bench]]
+name = "array_intersect"
 harness = false

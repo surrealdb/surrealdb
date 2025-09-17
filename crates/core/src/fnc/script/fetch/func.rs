@@ -1,23 +1,22 @@
 //! Contains the actual fetch function.
 
-use crate::fnc::script::{
-	fetch::{
-		RequestError,
-		body::{Body, BodyData, BodyKind},
-		classes::{self, Request, RequestInit, Response, ResponseInit, ResponseType},
-	},
-	modules::surrealdb::query::QueryContext,
-};
-use futures::TryStreamExt;
-use js::{Class, Ctx, Exception, Result, Value, function::Opt};
-use reqwest::{
-	Body as ReqBody,
-	header::{CONTENT_TYPE, HeaderValue},
-	redirect,
-};
 use std::sync::Arc;
 
+use futures::TryStreamExt;
+use js::function::Opt;
+use js::{Class, Ctx, Exception, Result, Value};
+use reqwest::header::{CONTENT_TYPE, HeaderValue};
+use reqwest::{Body as ReqBody, redirect};
+use tokio::runtime::Handle;
+
 use super::classes::Headers;
+use crate::fnc::http::resolver::FilteringResolver;
+use crate::fnc::script::fetch::RequestError;
+use crate::fnc::script::fetch::body::{Body, BodyData, BodyKind};
+use crate::fnc::script::fetch::classes::{
+	self, Request, RequestInit, Response, ResponseInit, ResponseType,
+};
+use crate::fnc::script::modules::surrealdb::query::QueryContext;
 
 #[js::function]
 pub async fn fetch<'js>(
@@ -41,12 +40,14 @@ pub async fn fetch<'js>(
 
 	query_ctx
 		.check_allowed_net(&url)
+		.await
 		.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+	let capabilities = query_ctx.get_capabilities();
 
 	let req = reqwest::Request::new(js_req.init.method, url.clone());
 
-	// SurrealDB Implementation keeps all javascript parts inside the context::with scope so this
-	// unwrap should never panic.
+	// SurrealDB Implementation keeps all javascript parts inside the context::with
+	// scope so this unwrap should never panic.
 	let headers = js_req.init.headers;
 	let headers = headers.borrow();
 	let mut headers = headers.inner.clone();
@@ -56,7 +57,7 @@ pub async fn fetch<'js>(
 
 	// set the policy for redirecting requests.
 	let policy = redirect::Policy::custom(move |attempt| {
-		if let Err(e) = query_ctx.check_allowed_net(attempt.url()) {
+		if let Err(e) = Handle::current().block_on(query_ctx.check_allowed_net(attempt.url())) {
 			return attempt.error(e.to_string());
 		}
 		match redirect {
@@ -73,9 +74,13 @@ pub async fn fetch<'js>(
 		}
 	});
 
-	let client = reqwest::Client::builder().redirect(policy).build().map_err(|e| {
-		Exception::throw_internal(&ctx, &format!("Could not initialize http client: {e}"))
-	})?;
+	let client = reqwest::Client::builder()
+		.redirect(policy)
+		.dns_resolver(std::sync::Arc::new(FilteringResolver::from_capabilities(capabilities)))
+		.build()
+		.map_err(|e| {
+			Exception::throw_internal(&ctx, &format!("Could not initialize http client: {e}"))
+		})?;
 
 	// Set the body for the request.
 	let mut req_builder = reqwest::RequestBuilder::from_parts(client, req);

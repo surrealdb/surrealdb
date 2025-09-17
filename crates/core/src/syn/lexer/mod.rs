@@ -11,31 +11,30 @@ mod test;
 
 pub use reader::{BytesReader, CharError};
 
-use crate::syn::{
-	error::{SyntaxError, bail},
-	token::{Span, Token, TokenKind},
-};
+use crate::syn::error::{SyntaxError, bail};
+use crate::syn::token::{Span, Token, TokenKind};
 
 /// The SurrealQL lexer.
-/// Takes a slice of bytes and turns it into tokens. The lexer is designed with possible invalid utf-8
-/// in mind and will handle bytes which are invalid utf-8 with an error.
+/// Takes a slice of bytes and turns it into tokens. The lexer is designed with
+/// possible invalid utf-8 in mind and will handle bytes which are invalid utf-8
+/// with an error.
 ///
-/// The lexer generates tokens lazily. whenever [`Lexer::next_token`] is called on the lexer it will
-/// try to lex the next bytes in the give source as a token. The lexer always returns a token, even
-/// if the source contains invalid tokens or as at the end of the source. In both cases a specific
+/// The lexer generates tokens lazily. whenever [`Lexer::next_token`] is called
+/// on the lexer it will try to lex the next bytes in the give source as a
+/// token. The lexer always returns a token, even if the source contains invalid
+/// tokens or as at the end of the source. In both cases a specific
 /// type of token is returned.
 ///
-/// Note that SurrealQL syntax cannot be lexed in advance. For example, record strings and regexes,
-/// both cannot be parsed correctly without knowledge of previous tokens as they are both ambigious
-/// with other tokens.
-#[non_exhaustive]
+/// Note that SurrealQL syntax cannot be lexed in advance. For example, record
+/// strings and regexes, both cannot be parsed correctly without knowledge of
+/// previous tokens as they are both ambigious with other tokens.
 pub struct Lexer<'a> {
 	/// The reader for reading the source bytes.
 	pub(super) reader: BytesReader<'a>,
 	/// The one past the last character of the previous token.
 	last_offset: u32,
-	/// A buffer used to build the value of tokens which can't be read straight from the source.
-	/// like for example strings with escape characters.
+	/// A buffer used to build the value of tokens which can't be read straight
+	/// from the source. like for example strings with escape characters.
 	scratch: String,
 
 	// below are a collection of storage for values produced by tokens.
@@ -101,7 +100,8 @@ impl<'a> Lexer<'a> {
 
 	/// Returns the next token, driving the lexer forward.
 	///
-	/// If the lexer is at the end the source it will always return the Eof token.
+	/// If the lexer is at the end the source it will always return the Eof
+	/// token.
 	pub fn next_token(&mut self) -> Token {
 		let Some(byte) = self.reader.next() else {
 			return self.eof_token();
@@ -115,8 +115,8 @@ impl<'a> Lexer<'a> {
 
 	/// Creates the eof token.
 	///
-	/// An eof token has tokenkind Eof and an span which points to the last character of the
-	/// source.
+	/// An eof token has tokenkind Eof and an span which points to the last
+	/// character of the source.
 	fn eof_token(&mut self) -> Token {
 		Token {
 			kind: TokenKind::Eof,
@@ -135,7 +135,8 @@ impl<'a> Lexer<'a> {
 
 	// Returns the span for the current token being lexed.
 	pub(crate) fn current_span(&self) -> Span {
-		// We make sure that the source is no longer then u32::MAX so this can't overflow.
+		// We make sure that the source is no longer then u32::MAX so this can't
+		// overflow.
 		let new_offset = self.reader.offset() as u32;
 		let len = new_offset - self.last_offset;
 		Span {
@@ -172,8 +173,8 @@ impl<'a> Lexer<'a> {
 	/// Moves the lexer state back to before the give span.
 	///
 	/// # Warning
-	/// Moving the lexer into a state where the next byte is within a multibyte character will
-	/// result in spurious errors.
+	/// Moving the lexer into a state where the next byte is within a multibyte
+	/// character will result in spurious errors.
 	pub(crate) fn backup_before(&mut self, span: Span) {
 		self.reader.backup(span.offset as usize);
 		self.last_offset = span.offset;
@@ -182,16 +183,16 @@ impl<'a> Lexer<'a> {
 	/// Moves the lexer state to after the give span.
 	///
 	/// # Warning
-	/// Moving the lexer into a state where the next byte is within a multibyte character will
-	/// result in spurious errors.
+	/// Moving the lexer into a state where the next byte is within a multibyte
+	/// character will result in spurious errors.
 	pub(crate) fn backup_after(&mut self, span: Span) {
 		let offset = span.offset + span.len;
 		self.reader.backup(offset as usize);
 		self.last_offset = offset;
 	}
 
-	/// Checks if the next byte is the given byte, if it is it consumes the byte and returns true.
-	/// Otherwise returns false.
+	/// Checks if the next byte is the given byte, if it is it consumes the byte
+	/// and returns true. Otherwise returns false.
 	///
 	/// Also returns false if there is no next character.
 	fn eat(&mut self, byte: u8) -> bool {
@@ -203,8 +204,8 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
-	/// Checks if the closure returns true when given the next byte, if it is it consumes the byte
-	/// and returns true. Otherwise returns false.
+	/// Checks if the closure returns true when given the next byte, if it is it
+	/// consumes the byte and returns true. Otherwise returns false.
 	///
 	/// Also returns false if there is no next character.
 	fn eat_when<F: FnOnce(u8) -> bool>(&mut self, f: F) -> bool {
@@ -244,13 +245,15 @@ impl<'a> Lexer<'a> {
 	}
 
 	/// Returns the string for a given span of the source.
-	/// Will panic if the given span was not valid for the source, or invalid utf8
+	/// Will panic if the given span was not valid for the source, or invalid
+	/// utf8
 	pub fn span_str(&self, span: Span) -> &'a str {
 		std::str::from_utf8(self.span_bytes(span)).expect("invalid span segment for source")
 	}
 
 	/// Returns the string for a given span of the source.
-	/// Will panic if the given span was not valid for the source, or invalid utf8
+	/// Will panic if the given span was not valid for the source, or invalid
+	/// utf8
 	pub fn span_bytes(&self, span: Span) -> &'a [u8] {
 		self.reader.span(span)
 	}

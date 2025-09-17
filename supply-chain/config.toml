@@ -31,6 +31,12 @@ audit-as-crates-io = true
 [policy.surrealdb-core]
 audit-as-crates-io = true
 
+[policy.surrealdb-types]
+audit-as-crates-io = true
+
+[policy.surrealdb-types-derive]
+audit-as-crates-io = true
+
 [[exemptions.Inflector]]
 version = "0.11.4"
 criteria = "safe-to-deploy"
@@ -57,10 +63,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.alloc-stdlib]]
 version = "0.2.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.allocator-api2]]
-version = "0.2.21"
 criteria = "safe-to-deploy"
 
 [[exemptions.ammonia]]
@@ -97,10 +99,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.arc-swap]]
 version = "1.7.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.ascii-canvas]]
-version = "3.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.assert_fs]]
@@ -235,6 +233,10 @@ criteria = "safe-to-deploy"
 version = "0.9.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.bnum]]
+version = "0.12.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.borsh]]
 version = "1.5.6"
 criteria = "safe-to-deploy"
@@ -319,6 +321,14 @@ criteria = "safe-to-deploy"
 version = "2.5.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.console-api]]
+version = "0.8.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.console-subscriber]]
+version = "0.4.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.console_error_panic_hook]]
 version = "0.1.7"
 criteria = "safe-to-deploy"
@@ -369,6 +379,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.dashmap]]
 version = "5.5.3"
+criteria = "safe-to-run"
+
+[[exemptions.dashmap]]
+version = "6.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.data-encoding]]
@@ -383,10 +397,6 @@ criteria = "safe-to-run"
 version = "0.1.4"
 criteria = "safe-to-run"
 
-[[exemptions.deranged]]
-version = "0.4.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.derive_arbitrary]]
 version = "1.4.1"
 criteria = "safe-to-deploy"
@@ -395,16 +405,8 @@ criteria = "safe-to-deploy"
 version = "1.6.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.dirs-sys-next]]
-version = "0.1.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.earcutr]]
 version = "0.4.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.ena]]
-version = "0.14.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.endian-type]]
@@ -445,6 +447,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.fail]]
 version = "0.4.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.fastnum]]
+version = "0.3.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.findshlibs]]
@@ -539,20 +545,16 @@ criteria = "safe-to-deploy"
 version = "0.2.12"
 criteria = "safe-to-deploy"
 
-[[exemptions.getrandom]]
-version = "0.3.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.gimli]]
-version = "0.31.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.globwalk]]
 version = "0.9.1"
 criteria = "safe-to-run"
 
 [[exemptions.hash32]]
 version = "0.3.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.hdrhistogram]]
+version = "7.5.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.heapless]]
@@ -565,10 +567,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.hermit-abi]]
 version = "0.5.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.home]]
-version = "0.5.11"
 criteria = "safe-to-deploy"
 
 [[exemptions.html5ever]]
@@ -623,10 +621,6 @@ criteria = "safe-to-deploy"
 version = "0.11.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.itertools]]
-version = "0.13.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.jiff]]
 version = "0.2.4"
 criteria = "safe-to-run"
@@ -647,14 +641,6 @@ criteria = "safe-to-deploy"
 version = "9.3.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.lalrpop]]
-version = "0.20.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.lalrpop-util]]
-version = "0.20.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.lazycell]]
 version = "1.3.0"
 criteria = "safe-to-deploy"
@@ -665,10 +651,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.libm]]
 version = "0.2.11"
-criteria = "safe-to-deploy"
-
-[[exemptions.libmimalloc-sys]]
-version = "0.1.40"
 criteria = "safe-to-deploy"
 
 [[exemptions.libredox]]
@@ -715,6 +697,10 @@ criteria = "safe-to-deploy"
 version = "0.12.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.matchers]]
+version = "0.2.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.matchit]]
 version = "0.7.3"
 criteria = "safe-to-deploy"
@@ -725,18 +711,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.memmap2]]
 version = "0.9.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.miette]]
-version = "5.10.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.miette-derive]]
-version = "5.10.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.mimalloc]]
-version = "0.1.44"
 criteria = "safe-to-deploy"
 
 [[exemptions.mime_guess]]
@@ -789,6 +763,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.noisy_float]]
 version = "0.2.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.nu-ansi-term]]
+version = "0.50.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.num-bigint]]
@@ -891,10 +869,6 @@ criteria = "safe-to-deploy"
 version = "0.11.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.pico-args]]
-version = "0.5.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.pkg-config]]
 version = "0.3.31"
 criteria = "safe-to-deploy"
@@ -963,8 +937,8 @@ criteria = "safe-to-deploy"
 version = "0.12.6"
 criteria = "safe-to-deploy"
 
-[[exemptions.psm]]
-version = "0.1.25"
+[[exemptions.prost-types]]
+version = "0.13.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.ptr_meta]]
@@ -1015,16 +989,8 @@ criteria = "safe-to-deploy"
 version = "0.2.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.rand_chacha]]
-version = "0.9.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.rand_core]]
 version = "0.5.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.rand_core]]
-version = "0.9.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.rand_hc]]
@@ -1041,10 +1007,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.redox_syscall]]
 version = "0.5.10"
-criteria = "safe-to-deploy"
-
-[[exemptions.redox_users]]
-version = "0.4.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.rend]]
@@ -1105,14 +1067,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.rust-stemmers]]
 version = "1.2.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.rust_decimal]]
-version = "1.37.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.rustc_lexer]]
-version = "0.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustix]]
@@ -1203,14 +1157,6 @@ criteria = "safe-to-deploy"
 version = "0.7.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.serde_with]]
-version = "3.12.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.serde_with_macros]]
-version = "3.12.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.signal-hook-registry]]
 version = "1.4.2"
 criteria = "safe-to-deploy"
@@ -1227,10 +1173,6 @@ criteria = "safe-to-deploy"
 version = "1.0.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.smol_str]]
-version = "0.2.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.socket2]]
 version = "0.5.8"
 criteria = "safe-to-deploy"
@@ -1241,10 +1183,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.spin]]
 version = "0.9.8"
-criteria = "safe-to-deploy"
-
-[[exemptions.stacker]]
-version = "0.1.20"
 criteria = "safe-to-deploy"
 
 [[exemptions.static_assertions_next]]
@@ -1265,6 +1203,14 @@ criteria = "safe-to-deploy"
 
 [[exemptions.string_cache_codegen]]
 version = "0.5.4"
+criteria = "safe-to-deploy"
+
+[[exemptions.surrealdb-types]]
+version = "3.0.0-alpha.8"
+criteria = "safe-to-deploy"
+
+[[exemptions.surrealdb-types-derive]]
+version = "3.0.0-alpha.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.symbolic-common]]
@@ -1297,10 +1243,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tendril]]
 version = "0.4.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.term]]
-version = "0.7.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.terminal_size]]
@@ -1337,10 +1279,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.time]]
 version = "0.3.40"
-criteria = "safe-to-deploy"
-
-[[exemptions.time-core]]
-version = "0.1.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.time-macros]]
@@ -1407,20 +1345,8 @@ criteria = "safe-to-deploy"
 version = "0.3.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.tracing]]
-version = "0.1.41"
-criteria = "safe-to-deploy"
-
 [[exemptions.tracing-appender]]
 version = "0.2.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.tracing-attributes]]
-version = "0.1.28"
-criteria = "safe-to-deploy"
-
-[[exemptions.tracing-core]]
-version = "0.1.33"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing-log]]
@@ -1429,10 +1355,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tracing-opentelemetry]]
 version = "0.25.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.tracing-subscriber]]
-version = "0.3.19"
 criteria = "safe-to-deploy"
 
 [[exemptions.try_map]]
@@ -1455,10 +1377,6 @@ criteria = "safe-to-deploy"
 version = "1.2.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.unicode-script]]
-version = "0.5.7"
-criteria = "safe-to-deploy"
-
 [[exemptions.untrusted]]
 version = "0.9.0"
 criteria = "safe-to-deploy"
@@ -1473,18 +1391,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.utf-8]]
 version = "0.7.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.utf8parse]]
-version = "0.2.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.uuid]]
-version = "1.16.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.valuable]]
-version = "0.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.version_check]]

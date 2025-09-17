@@ -1,55 +1,18 @@
-use crate::sql::{Base, Ident, Version};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 5)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use crate::sql::{Base, Expr, Ident};
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum InfoStatement {
 	// revision discriminant override accounting for previous behavior when adding variants and
 	// removing not at the end of the enum definition.
-	#[revision(override(revision = 2, discriminant = 1), override(revision = 3, discriminant = 1))]
-	Root(#[revision(start = 2)] bool),
-
-	#[revision(override(revision = 2, discriminant = 3), override(revision = 3, discriminant = 3))]
-	Ns(#[revision(start = 2)] bool),
-
-	#[revision(override(revision = 2, discriminant = 5), override(revision = 3, discriminant = 5))]
-	Db(#[revision(start = 2)] bool, #[revision(start = 5)] Option<Version>),
-
-	#[revision(override(revision = 2, discriminant = 7), override(revision = 3, discriminant = 7))]
-	Tb(Ident, #[revision(start = 2)] bool, #[revision(start = 5)] Option<Version>),
-
-	#[revision(override(revision = 2, discriminant = 9), override(revision = 3, discriminant = 9))]
-	User(Ident, Option<Base>, #[revision(start = 2)] bool),
-
-	#[revision(start = 3)]
-	#[revision(override(revision = 3, discriminant = 10))]
+	Root(bool),
+	Ns(bool),
+	Db(bool, Option<Expr>),
+	Tb(Ident, bool, Option<Expr>),
+	User(Ident, Option<Base>, bool),
 	Index(Ident, Ident, bool),
-}
-
-impl InfoStatement {
-	pub(crate) fn structurize(self) -> Self {
-		match self {
-			InfoStatement::Root(_) => InfoStatement::Root(true),
-			InfoStatement::Ns(_) => InfoStatement::Ns(true),
-			InfoStatement::Db(_, v) => InfoStatement::Db(true, v),
-			InfoStatement::Tb(t, _, v) => InfoStatement::Tb(t, true, v),
-			InfoStatement::User(u, b, _) => InfoStatement::User(u, b, true),
-			InfoStatement::Index(i, t, _) => InfoStatement::Index(i, t, true),
-		}
-	}
-
-	pub(crate) fn versionize(self, v: Version) -> Self {
-		match self {
-			InfoStatement::Db(s, _) => InfoStatement::Db(s, Some(v)),
-			InfoStatement::Tb(t, s, _) => InfoStatement::Tb(t, s, Some(v)),
-			_ => self,
-		}
-	}
 }
 
 impl fmt::Display for InfoStatement {
@@ -95,8 +58,8 @@ impl From<InfoStatement> for crate::expr::statements::InfoStatement {
 		match v {
 			InfoStatement::Root(v) => Self::Root(v),
 			InfoStatement::Ns(v) => Self::Ns(v),
-			InfoStatement::Db(v, ver) => Self::Db(v, ver.map(Into::into)),
-			InfoStatement::Tb(t, v, ver) => Self::Tb(t.into(), v, ver.map(Into::into)),
+			InfoStatement::Db(v, ver) => Self::Db(v, ver.map(From::from)),
+			InfoStatement::Tb(t, v, ver) => Self::Tb(t.into(), v, ver.map(From::from)),
 			InfoStatement::User(u, b, v) => Self::User(u.into(), b.map(Into::into), v),
 			InfoStatement::Index(i, t, v) => Self::Index(i.into(), t.into(), v),
 		}
@@ -108,9 +71,9 @@ impl From<crate::expr::statements::InfoStatement> for InfoStatement {
 		match v {
 			crate::expr::statements::InfoStatement::Root(v) => Self::Root(v),
 			crate::expr::statements::InfoStatement::Ns(v) => Self::Ns(v),
-			crate::expr::statements::InfoStatement::Db(v, ver) => Self::Db(v, ver.map(Into::into)),
+			crate::expr::statements::InfoStatement::Db(v, ver) => Self::Db(v, ver.map(From::from)),
 			crate::expr::statements::InfoStatement::Tb(t, v, ver) => {
-				Self::Tb(t.into(), v, ver.map(Into::into))
+				Self::Tb(t.into(), v, ver.map(From::from))
 			}
 			crate::expr::statements::InfoStatement::User(u, b, v) => {
 				Self::User(u.into(), b.map(Into::into), v)

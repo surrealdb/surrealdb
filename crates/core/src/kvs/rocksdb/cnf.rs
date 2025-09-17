@@ -1,5 +1,6 @@
 use std::cmp::max;
 use std::sync::LazyLock;
+
 use sysinfo::System;
 
 /// Should we sync writes to disk before acknowledgement
@@ -13,15 +14,18 @@ pub(super) static ROCKSDB_BACKGROUND_FLUSH: LazyLock<bool> =
 pub(super) static ROCKSDB_BACKGROUND_FLUSH_INTERVAL: LazyLock<u64> =
 	lazy_env_parse!("SURREAL_ROCKSDB_BACKGROUND_FLUSH_INTERVAL", u64, 200);
 
-/// The number of threads to start for flushing and compaction (default: number of CPUs)
+/// The number of threads to start for flushing and compaction (default: number
+/// of CPUs)
 pub(super) static ROCKSDB_THREAD_COUNT: LazyLock<i32> =
 	lazy_env_parse!("SURREAL_ROCKSDB_THREAD_COUNT", i32, || num_cpus::get() as i32);
 
-/// The maximum number of threads to use for flushing and compaction (default: number of CPUs * 2)
+/// The maximum number of threads to use for flushing and compaction (default:
+/// number of CPUs * 2)
 pub(super) static ROCKSDB_JOBS_COUNT: LazyLock<i32> =
 	lazy_env_parse!("SURREAL_ROCKSDB_JOBS_COUNT", i32, || num_cpus::get() as i32 * 2);
 
-/// The maximum number of open files which can be opened by RocksDB (default: 1024)
+/// The maximum number of open files which can be opened by RocksDB (default:
+/// 1024)
 pub(super) static ROCKSDB_MAX_OPEN_FILES: LazyLock<i32> =
 	lazy_env_parse!("SURREAL_ROCKSDB_MAX_OPEN_FILES", i32, 1024);
 
@@ -33,7 +37,8 @@ pub(super) static ROCKSDB_BLOCK_SIZE: LazyLock<usize> =
 pub(super) static ROCKSDB_WAL_SIZE_LIMIT: LazyLock<u64> =
 	lazy_env_parse!("SURREAL_ROCKSDB_WAL_SIZE_LIMIT", u64, 0);
 
-/// The maximum number of write buffers which can be used (default: dynamic from 2 to 32)
+/// The maximum number of write buffers which can be used (default: dynamic from
+/// 2 to 32)
 pub(super) static ROCKSDB_MAX_WRITE_BUFFER_NUMBER: LazyLock<i32> =
 	lazy_env_parse!("SURREAL_ROCKSDB_MAX_WRITE_BUFFER_NUMBER", i32, || {
 		// Load the system attributes
@@ -57,7 +62,8 @@ pub(super) static ROCKSDB_MAX_WRITE_BUFFER_NUMBER: LazyLock<i32> =
 		}
 	});
 
-/// The amount of data each write buffer can build up in memory (default: dynamic from 32 MiB to 128 MiB)
+/// The amount of data each write buffer can build up in memory (default:
+/// dynamic from 32 MiB to 128 MiB)
 pub(super) static ROCKSDB_WRITE_BUFFER_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_WRITE_BUFFER_SIZE", usize, || {
 		// Load the system attributes
@@ -87,7 +93,8 @@ pub(super) static ROCKSDB_TARGET_FILE_SIZE_BASE: LazyLock<u64> =
 pub(super) static ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER: LazyLock<i32> =
 	lazy_env_parse!("SURREAL_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER", i32, 2);
 
-/// The minimum number of write buffers to merge before writing to disk (default: 2)
+/// The minimum number of write buffers to merge before writing to disk
+/// (default: 2)
 pub(super) static ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE: LazyLock<i32> =
 	lazy_env_parse!("SURREAL_ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE", i32, 2);
 
@@ -95,7 +102,8 @@ pub(super) static ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE: LazyLock<i32> =
 pub(super) static ROCKSDB_FILE_COMPACTION_TRIGGER: LazyLock<i32> =
 	lazy_env_parse!("SURREAL_ROCKSDB_FILE_COMPACTION_TRIGGER", i32, 4);
 
-/// The readahead buffer size used during compaction (default: dynamic from 4 MiB to 16 MiB)
+/// The readahead buffer size used during compaction (default: dynamic from 4
+/// MiB to 16 MiB)
 pub(super) static ROCKSDB_COMPACTION_READAHEAD_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_COMPACTION_READAHEAD_SIZE", usize, || {
 		// Load the system attributes
@@ -121,7 +129,8 @@ pub(super) static ROCKSDB_COMPACTION_READAHEAD_SIZE: LazyLock<usize> =
 pub(super) static ROCKSDB_MAX_CONCURRENT_SUBCOMPACTIONS: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_ROCKSDB_MAX_CONCURRENT_SUBCOMPACTIONS", u32, 4);
 
-/// Whether to use separate queues for WAL writes and memtable writes (default: true)
+/// Whether to use separate queues for WAL writes and memtable writes (default:
+/// true)
 pub(super) static ROCKSDB_ENABLE_PIPELINED_WRITES: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_ROCKSDB_ENABLE_PIPELINED_WRITES", bool, true);
 
@@ -129,7 +138,8 @@ pub(super) static ROCKSDB_ENABLE_PIPELINED_WRITES: LazyLock<bool> =
 pub(super) static ROCKSDB_ENABLE_BLOB_FILES: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_ROCKSDB_ENABLE_BLOB_FILES", bool, true);
 
-/// The minimum size of a value for it to be stored in blob files (default: 4 KiB)
+/// The minimum size of a value for it to be stored in blob files (default: 4
+/// KiB)
 pub(super) static ROCKSDB_MIN_BLOB_SIZE: LazyLock<u64> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_MIN_BLOB_SIZE", u64, 4 * 1024);
 

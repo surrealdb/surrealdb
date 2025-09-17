@@ -1,37 +1,41 @@
-use std::collections::BTreeMap;
-
 use reblessive::Stack;
 use rust_decimal::Decimal;
 
-use crate::{
-	sql::{
-		Array, Constant, Expression, Geometry, Id, Ident, Idiom, Number, Object, Operator, Part,
-		Query, SqlValue, Statement, Statements, Strand, Thing,
-	},
-	syn::parser::{Parser, ParserSettings, mac::test_parse},
+use crate::sql::literal::ObjectEntry;
+use crate::sql::{
+	BinaryOperator, Constant, Expr, Ident, Idiom, Literal, Part, RecordIdKeyLit, RecordIdLit,
 };
+use crate::syn;
+use crate::syn::parser::{Parser, ParserSettings};
+use crate::val::Geometry;
 
 #[test]
 fn parse_index_expression() {
-	let value = test_parse!(parse_value_field, "a[1 + 1]").unwrap();
-	let SqlValue::Idiom(x) = value else {
+	let value = syn::parse_with("a[1 + 1]".as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	let Expr::Idiom(x) = value else {
 		panic!("not the right value type");
 	};
-	assert_eq!(x.0[0], Part::Field(Ident("a".to_string())));
+	assert_eq!(x.0[0], Part::Field(Ident::from_strand(strand!("a").to_owned())));
 	assert_eq!(
 		x.0[1],
-		Part::Value(SqlValue::Expression(Box::new(Expression::Binary {
-			l: SqlValue::Number(Number::Int(1)),
-			o: Operator::Add,
-			r: SqlValue::Number(Number::Int(1)),
-		})))
+		Part::Value(Expr::Binary {
+			left: Box::new(Expr::Literal(Literal::Integer(1))),
+			op: BinaryOperator::Add,
+			right: Box::new(Expr::Literal(Literal::Integer(1))),
+		})
 	)
 }
 
 #[test]
 fn parse_coordinate() {
-	let coord = test_parse!(parse_value_field, "(1.88, -18.0)").unwrap();
-	let SqlValue::Geometry(Geometry::Point(x)) = coord else {
+	let coord = syn::parse_with("(1.88, -18.0)".as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	let Expr::Literal(Literal::Geometry(Geometry::Point(x))) = coord else {
 		panic!("not the right value");
 	};
 	assert_eq!(x.x(), 1.88);
@@ -40,22 +44,21 @@ fn parse_coordinate() {
 
 #[test]
 fn parse_numeric_object_key() {
-	let v = test_parse!(parse_value_table, "{ 00: 0 }").unwrap();
-	let SqlValue::Object(object) = v else {
+	let v = syn::parse_with("{ 00: 0 }".as_bytes(), async |parser, stk| {
+		parser.parse_expr_table(stk).await
+	})
+	.unwrap();
+	let Expr::Literal(Literal::Object(object)) = v else {
 		panic!("not an object");
 	};
 	assert!(object.len() == 1);
-	assert_eq!(object.get("00").cloned(), Some(SqlValue::Number(Number::Int(0))));
-}
-
-#[test]
-fn parse_like_operator() {
-	test_parse!(parse_value_field, "a ~ b").unwrap();
+	assert_eq!(object[0].value, Expr::Literal(Literal::Integer(0)));
 }
 
 #[test]
 fn parse_range_operator() {
-	test_parse!(parse_value_field, "1..2").unwrap();
+	syn::parse_with("1..2".as_bytes(), async |parser, stk| parser.parse_expr_field(stk).await)
+		.unwrap();
 }
 
 #[test]
@@ -81,14 +84,15 @@ fn parse_large_depth_object() {
 		},
 	);
 	let mut stack = Stack::new();
-	let query = stack.enter(|stk| parser.parse_query(stk)).finish().unwrap();
-	let Query(Statements(stmts)) = query;
-	let Statement::Value(SqlValue::Object(ref object)) = stmts[0] else {
+	let query = stack.enter(|stk| parser.parse_expr_inherit(stk)).finish().unwrap();
+	let Expr::Literal(Literal::Object(ref object)) = query else {
 		panic!()
 	};
 	let mut object = object;
 	for _ in 0..999 {
-		let Some(SqlValue::Object(new_object)) = object.get("foo") else {
+		let Some(Expr::Literal(Literal::Object(new_object))) =
+			object.iter().find(|x| x.key == "foo").map(|x| &x.value)
+		else {
 			panic!()
 		};
 		object = new_object
@@ -118,142 +122,206 @@ fn parse_large_depth_record_id() {
 		},
 	);
 	let mut stack = Stack::new();
-	let query = stack.enter(|stk| parser.parse_query(stk)).finish().unwrap();
-	let Query(Statements(stmts)) = query;
-	let Statement::Value(SqlValue::Thing(ref thing)) = stmts[0] else {
+	let query = stack.enter(|stk| parser.parse_expr_inherit(stk)).finish().unwrap();
+	let Expr::Literal(Literal::RecordId(ref rid)) = query else {
 		panic!()
 	};
-	let mut thing = thing;
+	let mut rid = rid;
 	for _ in 0..999 {
-		let Id::Array(ref x) = thing.id else {
+		let RecordIdKeyLit::Array(ref x) = rid.key else {
 			panic!()
 		};
-		let SqlValue::Thing(ref new_thing) = x[0] else {
+		let Expr::Literal(Literal::RecordId(ref new_rid)) = x[0] else {
 			panic!()
 		};
-		thing = new_thing
+		rid = new_rid
 	}
 }
 
 #[test]
 fn parse_recursive_record_string() {
-	let res = test_parse!(parse_value_field, r#" r"a:[r"b:{c: r"d:1"}"]" "#).unwrap();
+	let res = syn::parse_with(r#" r"a:[r"b:{c: r"d:1"}"]" "#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
 	assert_eq!(
 		res,
-		SqlValue::Thing(Thing {
-			tb: "a".to_owned(),
-			id: Id::from(Array(vec![SqlValue::Thing(Thing {
-				tb: "b".to_owned(),
-				id: Id::from(Object(BTreeMap::from([(
-					"c".to_owned(),
-					SqlValue::Thing(Thing {
-						tb: "d".to_owned(),
-						id: Id::from(1)
-					})
-				)])))
-			})]))
-		})
+		Expr::Literal(Literal::RecordId(RecordIdLit {
+			table: "a".to_owned(),
+			key: RecordIdKeyLit::Array(vec![Expr::Literal(Literal::RecordId(RecordIdLit {
+				table: "b".to_owned(),
+				key: RecordIdKeyLit::Object(vec![ObjectEntry {
+					key: "c".to_owned(),
+					value: Expr::Literal(Literal::RecordId(RecordIdLit {
+						table: "d".to_owned(),
+						key: RecordIdKeyLit::Number(1)
+					}))
+				}])
+			}))])
+		}))
 	)
 }
 
 #[test]
 fn parse_record_string_2() {
-	let res = test_parse!(parse_value_field, r#" r'a:["foo"]' "#).unwrap();
+	let res = syn::parse_with(r#" r'a:["foo"]' "#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
 	assert_eq!(
 		res,
-		SqlValue::Thing(Thing {
-			tb: "a".to_owned(),
-			id: Id::from(Array(vec![SqlValue::Strand(Strand("foo".to_owned()))]))
-		})
+		Expr::Literal(Literal::RecordId(RecordIdLit {
+			table: "a".to_owned(),
+			key: RecordIdKeyLit::Array(vec![Expr::Literal(Literal::Strand(
+				strand!("foo").to_owned()
+			))])
+		}))
 	)
 }
 
 #[test]
 fn parse_i64() {
-	let res = test_parse!(parse_value_field, r#" -9223372036854775808 "#).unwrap();
-	assert_eq!(res, SqlValue::Number(Number::Int(i64::MIN)));
+	let res = syn::parse_with(r#" -9223372036854775808 "#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	assert_eq!(res, Expr::Literal(Literal::Integer(i64::MIN)));
 
-	let res = test_parse!(parse_value_field, r#" 9223372036854775807 "#).unwrap();
-	assert_eq!(res, SqlValue::Number(Number::Int(i64::MAX)));
+	let res = syn::parse_with(r#" 9223372036854775807 "#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	assert_eq!(res, Expr::Literal(Literal::Integer(i64::MAX)));
 }
 
 #[test]
 fn parse_decimal() {
-	let res = test_parse!(parse_value_field, r#" 0dec "#).unwrap();
-	assert_eq!(res, SqlValue::Number(Number::Decimal(Decimal::ZERO)));
+	let res = syn::parse_with(r#" 0dec "#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	assert_eq!(res, Expr::Literal(Literal::Decimal(Decimal::ZERO)));
 }
 
 #[test]
 fn constant_lowercase() {
-	let out = test_parse!(parse_value_field, r#" math::pi "#).unwrap();
-	assert_eq!(out, SqlValue::Constant(Constant::MathPi));
+	let out = syn::parse_with(r#" math::pi "#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	assert_eq!(out, Expr::Constant(Constant::MathPi));
 
-	let out = test_parse!(parse_value_field, r#" math::inf "#).unwrap();
-	assert_eq!(out, SqlValue::Constant(Constant::MathInf));
+	let out = syn::parse_with(r#" math::inf "#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	assert_eq!(out, Expr::Constant(Constant::MathInf));
 
-	let out = test_parse!(parse_value_field, r#" math::neg_inf "#).unwrap();
-	assert_eq!(out, SqlValue::Constant(Constant::MathNegInf));
+	let out = syn::parse_with(r#" math::neg_inf "#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	assert_eq!(out, Expr::Constant(Constant::MathNegInf));
 
-	let out = test_parse!(parse_value_field, r#" time::epoch "#).unwrap();
-	assert_eq!(out, SqlValue::Constant(Constant::TimeEpoch));
+	let out = syn::parse_with(r#" time::epoch "#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	assert_eq!(out, Expr::Constant(Constant::TimeEpoch));
 }
 
 #[test]
 fn constant_uppercase() {
-	let out = test_parse!(parse_value_field, r#" MATH::PI "#).unwrap();
-	assert_eq!(out, SqlValue::Constant(Constant::MathPi));
+	let out = syn::parse_with(r#" MATH::PI "#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	assert_eq!(out, Expr::Constant(Constant::MathPi));
 
-	let out = test_parse!(parse_value_field, r#" MATH::INF "#).unwrap();
-	assert_eq!(out, SqlValue::Constant(Constant::MathInf));
+	let out = syn::parse_with(r#" MATH::INF "#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	assert_eq!(out, Expr::Constant(Constant::MathInf));
 
-	let out = test_parse!(parse_value_field, r#" MATH::NEG_INF "#).unwrap();
-	assert_eq!(out, SqlValue::Constant(Constant::MathNegInf));
+	let out = syn::parse_with(r#" MATH::NEG_INF "#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	assert_eq!(out, Expr::Constant(Constant::MathNegInf));
 
-	let out = test_parse!(parse_value_field, r#" TIME::EPOCH "#).unwrap();
-	assert_eq!(out, SqlValue::Constant(Constant::TimeEpoch));
+	let out = syn::parse_with(r#" TIME::EPOCH "#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	assert_eq!(out, Expr::Constant(Constant::TimeEpoch));
 }
 
 #[test]
 fn constant_mixedcase() {
-	let out = test_parse!(parse_value_field, r#" MaTh::Pi "#).unwrap();
-	assert_eq!(out, SqlValue::Constant(Constant::MathPi));
+	let out = syn::parse_with(r#" MaTh::Pi "#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	assert_eq!(out, Expr::Constant(Constant::MathPi));
 
-	let out = test_parse!(parse_value_field, r#" MaTh::Inf "#).unwrap();
-	assert_eq!(out, SqlValue::Constant(Constant::MathInf));
+	let out = syn::parse_with(r#" MaTh::Inf "#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	assert_eq!(out, Expr::Constant(Constant::MathInf));
 
-	let out = test_parse!(parse_value_field, r#" MaTh::Neg_Inf "#).unwrap();
-	assert_eq!(out, SqlValue::Constant(Constant::MathNegInf));
+	let out = syn::parse_with(r#" MaTh::Neg_Inf "#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	assert_eq!(out, Expr::Constant(Constant::MathNegInf));
 
-	let out = test_parse!(parse_value_field, r#" TiME::ePoCH "#).unwrap();
-	assert_eq!(out, SqlValue::Constant(Constant::TimeEpoch));
+	let out = syn::parse_with(r#" TiME::ePoCH "#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	assert_eq!(out, Expr::Constant(Constant::TimeEpoch));
 }
 
 #[test]
 fn scientific_decimal() {
-	let res = test_parse!(parse_value_field, r#" 9.7e-7dec "#).unwrap();
-	assert!(matches!(res, SqlValue::Number(Number::Decimal(_))));
+	let res = syn::parse_with(r#" 9.7e-7dec "#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	assert!(matches!(res, Expr::Literal(Literal::Decimal(_))));
 	assert_eq!(res.to_string(), "0.00000097dec")
 }
 
 #[test]
 fn scientific_number() {
-	let res = test_parse!(parse_value_field, r#" 9.7e-5"#).unwrap();
-	assert!(matches!(res, SqlValue::Number(Number::Float(_))));
+	let res = syn::parse_with(r#" 9.7e-5"#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	assert!(matches!(res, Expr::Literal(Literal::Float(_))));
 	assert_eq!(res.to_string(), "0.000097f")
 }
 
 #[test]
 fn number_method() {
-	let res = test_parse!(parse_value_field, r#" 9.7e-5.sin()"#).unwrap();
-	let expected = SqlValue::Idiom(Idiom(vec![
-		Part::Start(SqlValue::Number(Number::Float(9.7e-5))),
+	let res = syn::parse_with(r#" 9.7e-5.sin()"#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	let expected = Expr::Idiom(Idiom(vec![
+		Part::Start(Expr::Literal(Literal::Float(9.7e-5))),
 		Part::Method("sin".to_string(), vec![]),
 	]));
 	assert_eq!(res, expected);
 
-	let res = test_parse!(parse_value_field, r#" 1.sin()"#).unwrap();
-	let expected = SqlValue::Idiom(Idiom(vec![
-		Part::Start(SqlValue::Number(Number::Int(1))),
+	let res = syn::parse_with(r#" 1.sin()"#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap();
+	let expected = Expr::Idiom(Idiom(vec![
+		Part::Start(Expr::Literal(Literal::Integer(1))),
 		Part::Method("sin".to_string(), vec![]),
 	]));
 	assert_eq!(res, expected);
@@ -261,10 +329,14 @@ fn number_method() {
 
 #[test]
 fn datetime_error() {
-	test_parse!(parse_value_field, r#" d"2001-01-01T01:01:01.9999999999" "#).unwrap_err();
+	syn::parse_with(r#" d"2001-01-01T01:01:01.9999999999" "#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
+	.unwrap_err();
 }
 
 #[test]
 fn empty_string() {
-	test_parse!(parse_value_field, "").unwrap_err();
+	syn::parse_with("".as_bytes(), async |parser, stk| parser.parse_expr_field(stk).await)
+		.unwrap_err();
 }

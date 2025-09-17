@@ -1,13 +1,13 @@
 //! Embedded database instance
 //!
-//! `SurrealDB` itself can be embedded in this library, allowing you to query it using the same
-//! crate and API that you would use when connecting to it remotely via WebSockets or HTTP.
-//! All storage engines are supported but you have to activate their feature
-//! flags first.
+//! `SurrealDB` itself can be embedded in this library, allowing you to query it
+//! using the same crate and API that you would use when connecting to it
+//! remotely via WebSockets or HTTP. All storage engines are supported but you
+//! have to activate their feature flags first.
 //!
-//! **NB**: Some storage engines like `TiKV` and `RocksDB` depend on non-Rust libraries so you need
-//! to install those libraries before you can build this crate when you activate their feature
-//! flags. Please refer to [these instructions](https://github.com/surrealdb/surrealdb/blob/main/doc/BUILDING.md)
+//! **NB**: Some storage engines like `TiKV` and `RocksDB` depend on non-Rust
+//! libraries so you need to install those libraries before you can build this
+//! crate when you activate their feature flags. Please refer to [these instructions](https://github.com/surrealdb/surrealdb/blob/main/doc/BUILDING.md)
 //! for more details on how to install them. If you are on Linux and you use
 //! [the Nix package manager](https://github.com/surrealdb/surrealdb/tree/main/pkg/nix#installing-nix)
 //! you can just run
@@ -16,17 +16,20 @@
 //! nix develop github:surrealdb/surrealdb
 //! ```
 //!
-//! which will drop you into a shell with all the dependencies available. One tip you may find
-//! useful is to only enable the in-memory engine (`kv-mem`) during development. Besides letting you not
-//! worry about those dependencies on your dev machine, it allows you to keep compile times low
+//! which will drop you into a shell with all the dependencies available. One
+//! tip you may find useful is to only enable the in-memory engine (`kv-mem`)
+//! during development. Besides letting you not worry about those dependencies
+//! on your dev machine, it allows you to keep compile times low
 //! during development while allowing you to test your code fully.
 //!
-//! When running SurrealDB as an embedded database within Rust, using the correct release profile and
-//! memory allocator can greatly improve the performance of the database core engine. In addition using
-//! an optimised asynchronous runtime configuration can help speed up concurrent queries and increase
-//! database throughput.
+//! When running SurrealDB as an embedded database within Rust, using the
+//! correct release profile and memory allocator can greatly improve the
+//! performance of the database core engine. In addition using an optimised
+//! asynchronous runtime configuration can help speed up concurrent queries and
+//! increase database throughput.
 //!
-//! In your project’s Cargo.toml file, ensure that the release profile uses the following configuration:
+//! In your project’s Cargo.toml file, ensure that the release profile uses the
+//! following configuration:
 //!
 //! ```toml
 //! [profile.release]
@@ -37,16 +40,17 @@
 //! codegen-units = 1
 //! ```
 //!
-//! In your project’s Cargo.toml file, ensure that the allocator feature is among those enabled on the
-//! surrealdb dependency:
+//! In your project’s Cargo.toml file, ensure that the allocator feature is
+//! among those enabled on the surrealdb dependency:
 //!
 //! ```toml
 //! [dependencies]
 //! surrealdb = { version = "2", features = ["allocator", "storage-rocksdb"] }
 //! ```
 //!
-//! When running SurrealDB within your Rust code, ensure that the asynchronous runtime is configured
-//! correctly, making use of multiple threads, an increased stack size, and an optimised number of threads:
+//! When running SurrealDB within your Rust code, ensure that the asynchronous
+//! runtime is configured correctly, making use of multiple threads, an
+//! increased stack size, and an optimised number of threads:
 //!
 //! ```toml
 //! [dependencies]
@@ -66,7 +70,7 @@
 //!
 //! # Example
 //!
-//! ```no_run
+//! ```no_compile
 //! use std::borrow::Cow;
 //! use serde::{Serialize, Deserialize};
 //! use serde_json::json;
@@ -144,77 +148,65 @@
 //! }
 //! ```
 
-use crate::api::err::Error;
-use crate::{
-	Result,
-	api::{
-		Connect, Response as QueryResponse, Surreal,
-		conn::{Command, DbResponse, RequestData},
-	},
-	method::Stats,
-	opt::{IntoEndpoint, Table},
-};
+use std::collections::HashMap;
+use std::marker::PhantomData;
+use std::mem;
+#[cfg(not(target_family = "wasm"))]
+use std::pin::pin;
+use std::sync::Arc;
+#[cfg(not(target_family = "wasm"))]
+use std::task::{Poll, ready};
+#[cfg(not(target_family = "wasm"))]
+use std::{future::Future, path::PathBuf};
+
 #[cfg(not(target_family = "wasm"))]
 use anyhow::bail;
 use async_channel::Sender;
+#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
+use futures::StreamExt;
 #[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
 use indexmap::IndexMap;
-#[cfg(not(target_family = "wasm"))]
-use std::pin::pin;
-#[cfg(not(target_family = "wasm"))]
-use std::task::{Poll, ready};
-use std::{
-	collections::{BTreeMap, HashMap},
-	marker::PhantomData,
-	mem,
-	sync::Arc,
-};
-use surrealdb_core::expr::Function;
-use surrealdb_core::expr::LogicalPlan;
-use surrealdb_core::expr::statements::{
-	CreateStatement, DeleteStatement, InsertStatement, KillStatement, SelectStatement,
-	UpdateStatement, UpsertStatement,
-};
-#[cfg(not(target_family = "wasm"))]
-use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::{
-	dbs::{Notification, Response, Session},
-	expr::{Data, Field, Output, Value as CoreValue},
-	iam,
-	kvs::Datastore,
-};
-use tokio::sync::RwLock;
-#[cfg(not(target_family = "wasm"))]
-use tokio_util::bytes::BytesMut;
-use uuid::Uuid;
-
-#[cfg(not(target_family = "wasm"))]
-use std::{future::Future, path::PathBuf};
+use surrealdb_core::dbs::{Notification, Response, Session, Variables};
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::err::Error as CoreError;
+#[cfg(feature = "ml")]
+use surrealdb_core::expr::Model;
+use surrealdb_core::expr::statements::DeleteStatement;
+use surrealdb_core::expr::{
+	CreateStatement, Data, Expr, Fields, Function, Ident, InsertStatement, KillStatement, Literal,
+	LogicalPlan, Output, SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
+};
+use surrealdb_core::iam;
+use surrealdb_core::kvs::Datastore;
+#[cfg(not(target_family = "wasm"))]
+use surrealdb_core::kvs::export::Config as DbExportConfig;
+use surrealdb_core::val::{self, Strand};
+#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
+use surrealdb_core::{
+	expr::statements::{DefineModelStatement, DefineStatement},
+	iam::{Action, ResourceKind, check::check_ns_db},
+	ml::storage::surml_file::SurMlFile,
+};
+use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
 use tokio::{
 	fs::OpenOptions,
 	io::{self, AsyncReadExt, AsyncWriteExt},
 };
+#[cfg(not(target_family = "wasm"))]
+use tokio_util::bytes::BytesMut;
+use uuid::Uuid;
 
-#[cfg(feature = "ml")]
-use surrealdb_core::expr::Model;
-
+use super::resource_to_exprs;
+use crate::Result;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use crate::api::conn::MlExportConfig;
-#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-use futures::StreamExt;
-#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-use surrealdb_core::{
-	iam::{Action, ResourceKind, check::check_ns_db},
-	kvs::{LockType, TransactionType},
-	ml::storage::surml_file::SurMlFile,
-	sql::statements::{DefineModelStatement, DefineStatement},
-};
-
-use super::resource_to_values;
+use crate::api::conn::{Command, DbResponse, RequestData};
+use crate::api::err::Error;
+use crate::api::{Connect, Response as QueryResponse, Surreal};
+use crate::method::Stats;
+use crate::opt::IntoEndpoint;
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod native;
@@ -462,7 +454,8 @@ pub struct SurrealKv;
 pub struct Db(());
 
 impl Surreal<Db> {
-	/// Connects to a specific database endpoint, saving the connection on the static client
+	/// Connects to a specific database endpoint, saving the connection on the
+	/// static client
 	pub fn connect<P>(&self, address: impl IntoEndpoint<P, Client = Db>) -> Connect<Db, ()> {
 		Connect {
 			surreal: self.inner.clone().into(),
@@ -474,7 +467,7 @@ impl Surreal<Db> {
 }
 
 fn process(responses: Vec<Response>) -> QueryResponse {
-	let mut map = IndexMap::<usize, (Stats, Result<CoreValue>)>::with_capacity(responses.len());
+	let mut map = IndexMap::<usize, (Stats, Result<val::Value>)>::with_capacity(responses.len());
 	for (index, response) in responses.into_iter().enumerate() {
 		let stats = Stats {
 			execution_time: Some(response.time),
@@ -495,25 +488,25 @@ fn process(responses: Vec<Response>) -> QueryResponse {
 	}
 }
 
-async fn take(one: bool, responses: Vec<Response>) -> Result<CoreValue> {
+async fn take(one: bool, responses: Vec<Response>) -> Result<val::Value> {
 	if let Some((_stats, result)) = process(responses).results.swap_remove(&0) {
 		let value = result?;
 		match one {
 			true => match value {
-				CoreValue::Array(mut array) => {
+				val::Value::Array(mut array) => {
 					if let [ref mut value] = array[..] {
-						return Ok(mem::replace(value, CoreValue::None));
+						return Ok(mem::replace(value, val::Value::None));
 					}
 				}
-				CoreValue::None | CoreValue::Null => {}
+				val::Value::None | val::Value::Null => {}
 				value => return Ok(value),
 			},
 			false => return Ok(value),
 		}
 	}
 	match one {
-		true => Ok(CoreValue::None),
-		false => Ok(CoreValue::Array(Default::default())),
+		true => Ok(val::Value::None),
+		false => Ok(val::Value::Array(Default::default())),
 	}
 }
 
@@ -551,16 +544,17 @@ async fn export_ml(
 		version,
 	}: MlExportConfig,
 ) -> Result<()> {
-	// Ensure a NS and DB are set
 	let (nsv, dbv) = check_ns_db(sess)?;
 	// Check the permissions level
 	kvs.check(sess, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))?;
-	// Start a new readonly transaction
-	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
+
 	// Attempt to get the model definition
-	let info = tx.get_db_model(&nsv, &dbv, &name, &version).await?;
+	let Some(model) = kvs.get_db_model(&nsv, &dbv, &name, &version).await? else {
+		// Attempt to get the model definition
+		anyhow::bail!("Model not found".to_string());
+	};
 	// Export the file data in to the store
-	let mut data = crate::obs::stream(info.hash.clone()).await?;
+	let mut data = surrealdb_core::obs::stream(model.hash.clone()).await?;
 	// Process all stream values
 	while let Some(Ok(bytes)) = data.next().await {
 		if chn.send(bytes.to_vec()).await.is_err() {
@@ -590,11 +584,15 @@ async fn kill_live_query(
 	kvs: &Datastore,
 	id: Uuid,
 	session: &Session,
-	vars: BTreeMap<String, CoreValue>,
-) -> Result<CoreValue> {
-	let mut kill_plan = KillStatement::default();
-	kill_plan.id = id.into();
-	let plan = LogicalPlan::Kill(kill_plan);
+	vars: Variables,
+) -> Result<val::Value> {
+	let kill_plan = KillStatement {
+		id: Expr::Literal(Literal::Uuid(id.into())),
+	};
+	let plan = LogicalPlan {
+		expressions: vec![TopLevelExpr::Kill(kill_plan)],
+	};
+
 	let response = kvs.process_plan(plan, session, Some(vars)).await?;
 	take(true, response).await
 }
@@ -606,7 +604,7 @@ async fn router(
 	}: RequestData,
 	kvs: &Arc<Datastore>,
 	session: &Arc<RwLock<Session>>,
-	vars: &Arc<RwLock<BTreeMap<String, CoreValue>>>,
+	vars: &Arc<RwLock<Variables>>,
 	live_queries: &Arc<RwLock<LiveQueryMap>>,
 ) -> Result<DbResponse> {
 	match command {
@@ -614,20 +612,20 @@ async fn router(
 			namespace,
 			database,
 		} => {
-			if let Some(ns) = namespace {
-				session.write().await.ns = Some(ns);
-			}
-			if let Some(db) = database {
-				session.write().await.db = Some(db);
-			}
-			Ok(DbResponse::Other(CoreValue::None))
+			kvs.process_use(&mut *session.write().await, namespace, database).await?;
+			Ok(DbResponse::Other(val::Value::None))
 		}
 		Command::Signup {
 			credentials,
 		} => {
 			let response =
 				iam::signup::signup(kvs, &mut *session.write().await, credentials).await?.token;
-			Ok(DbResponse::Other(response.into()))
+			// TODO: Null byte validity
+			let response = response
+				.map(|x| unsafe { Strand::new_unchecked(x) })
+				.map(From::from)
+				.unwrap_or(val::Value::None);
+			Ok(DbResponse::Other(response))
 		}
 		Command::Signin {
 			credentials,
@@ -640,22 +638,29 @@ async fn router(
 			token,
 		} => {
 			iam::verify::token(kvs, &mut *session.write().await, &token).await?;
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(DbResponse::Other(val::Value::None))
 		}
 		Command::Invalidate => {
 			iam::clear::clear(&mut *session.write().await)?;
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(DbResponse::Other(val::Value::None))
 		}
 		Command::Create {
 			txn: _,
 			what,
 			data,
 		} => {
-			let mut create_plan = CreateStatement::default();
-			create_plan.what = resource_to_values(what);
-			create_plan.data = data.map(Data::ContentExpression);
-			create_plan.output = Some(Output::After);
-			let plan = LogicalPlan::Create(create_plan);
+			let create_plan = CreateStatement {
+				only: false,
+				what: resource_to_exprs(what),
+				data: data.map(|x| Data::ContentExpression(x.into_literal())),
+				output: Some(Output::After),
+				timeout: None,
+				parallel: false,
+				version: None,
+			};
+			let plan = LogicalPlan {
+				expressions: vec![TopLevelExpr::Expr(Expr::Create(Box::new(create_plan)))],
+			};
 
 			let response = kvs
 				.process_plan(plan, &*session.read().await, Some(vars.read().await.clone()))
@@ -669,14 +674,20 @@ async fn router(
 			data,
 		} => {
 			let one = what.is_single_recordid();
-			let upsert_plan = {
-				let mut stmt = UpsertStatement::default();
-				stmt.what = resource_to_values(what);
-				stmt.data = data.map(Data::ContentExpression);
-				stmt.output = Some(Output::After);
-				stmt
+			let upsert_plan = UpsertStatement {
+				only: false,
+				what: resource_to_exprs(what),
+				data: data.map(|x| Data::ContentExpression(x.into_literal())),
+				with: None,
+				cond: None,
+				output: Some(Output::After),
+				timeout: None,
+				parallel: false,
+				explain: None,
 			};
-			let plan = LogicalPlan::Upsert(upsert_plan);
+			let plan = LogicalPlan {
+				expressions: vec![TopLevelExpr::Expr(Expr::Upsert(Box::new(upsert_plan)))],
+			};
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
@@ -688,14 +699,20 @@ async fn router(
 			data,
 		} => {
 			let one = what.is_single_recordid();
-			let update_plan = {
-				let mut stmt = UpdateStatement::default();
-				stmt.what = resource_to_values(what);
-				stmt.data = data.map(Data::ContentExpression);
-				stmt.output = Some(Output::After);
-				stmt
+			let update_plan = UpdateStatement {
+				only: false,
+				what: resource_to_exprs(what),
+				data: data.map(|x| Data::ContentExpression(x.into_literal())),
+				with: None,
+				cond: None,
+				output: Some(Output::After),
+				timeout: None,
+				parallel: false,
+				explain: None,
 			};
-			let plan = LogicalPlan::Update(update_plan);
+			let plan = LogicalPlan {
+				expressions: vec![TopLevelExpr::Expr(Expr::Update(Box::new(update_plan)))],
+			};
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
@@ -707,14 +724,21 @@ async fn router(
 			data,
 		} => {
 			let one = !data.is_array();
-			let insert_plan = {
-				let mut stmt = InsertStatement::default();
-				stmt.into = what.map(|w| Table(w).into_core().into());
-				stmt.data = Data::SingleExpression(data);
-				stmt.output = Some(Output::After);
-				stmt
+
+			let insert_plan = InsertStatement {
+				into: what.map(|w| Expr::Table(unsafe { Ident::new_unchecked(w) })),
+				data: Data::SingleExpression(data.into_literal()),
+				ignore: false,
+				update: None,
+				output: Some(Output::After),
+				timeout: None,
+				parallel: false,
+				relation: false,
+				version: None,
 			};
-			let plan = LogicalPlan::Insert(insert_plan);
+			let plan = LogicalPlan {
+				expressions: vec![TopLevelExpr::Expr(Expr::Insert(Box::new(insert_plan)))],
+			};
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
@@ -726,15 +750,22 @@ async fn router(
 			data,
 		} => {
 			let one = !data.is_array();
-			let insert_plan = {
-				let mut stmt = InsertStatement::default();
-				stmt.into = what.map(|w| Table(w).into_core().into());
-				stmt.data = Data::SingleExpression(data);
-				stmt.output = Some(Output::After);
-				stmt.relation = true;
-				stmt
+
+			let insert_plan = InsertStatement {
+				into: what.map(|w| Expr::Table(unsafe { Ident::new_unchecked(w) })),
+				data: Data::SingleExpression(data.into_literal()),
+				output: Some(Output::After),
+				relation: true,
+				ignore: false,
+				update: None,
+				timeout: None,
+				parallel: false,
+				version: None,
 			};
-			let plan = LogicalPlan::Insert(insert_plan);
+			let plan = LogicalPlan {
+				expressions: vec![TopLevelExpr::Expr(Expr::Insert(Box::new(insert_plan)))],
+			};
+
 			let response = kvs
 				.process_plan(plan, &*session.read().await, Some(vars.read().await.clone()))
 				.await?;
@@ -748,17 +779,35 @@ async fn router(
 			upsert,
 		} => {
 			let plan = if upsert {
-				let mut stmt = UpsertStatement::default();
-				stmt.what = resource_to_values(what);
-				stmt.data = data.map(Data::PatchExpression);
-				stmt.output = Some(Output::After);
-				LogicalPlan::Upsert(stmt)
+				let upsert_plan = UpsertStatement {
+					only: false,
+					what: resource_to_exprs(what),
+					data: data.map(|x| Data::PatchExpression(x.into_literal())),
+					with: None,
+					cond: None,
+					output: Some(Output::After),
+					timeout: None,
+					parallel: false,
+					explain: None,
+				};
+				LogicalPlan {
+					expressions: vec![TopLevelExpr::Expr(Expr::Upsert(Box::new(upsert_plan)))],
+				}
 			} else {
-				let mut stmt = UpdateStatement::default();
-				stmt.what = resource_to_values(what);
-				stmt.data = data.map(Data::PatchExpression);
-				stmt.output = Some(Output::After);
-				LogicalPlan::Update(stmt)
+				let update_plan = UpdateStatement {
+					only: false,
+					what: resource_to_exprs(what),
+					data: data.map(|x| Data::PatchExpression(x.into_literal())),
+					with: None,
+					cond: None,
+					output: Some(Output::After),
+					timeout: None,
+					parallel: false,
+					explain: None,
+				};
+				LogicalPlan {
+					expressions: vec![TopLevelExpr::Expr(Expr::Update(Box::new(update_plan)))],
+				}
 			};
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
@@ -772,17 +821,35 @@ async fn router(
 			upsert,
 		} => {
 			let plan = if upsert {
-				let mut stmt = UpsertStatement::default();
-				stmt.what = resource_to_values(what);
-				stmt.data = data.map(Data::MergeExpression);
-				stmt.output = Some(Output::After);
-				LogicalPlan::Upsert(stmt)
+				let upsert_plan = UpsertStatement {
+					only: false,
+					what: resource_to_exprs(what),
+					data: data.map(|x| Data::MergeExpression(x.into_literal())),
+					with: None,
+					cond: None,
+					output: Some(Output::After),
+					timeout: None,
+					parallel: false,
+					explain: None,
+				};
+				LogicalPlan {
+					expressions: vec![TopLevelExpr::Expr(Expr::Upsert(Box::new(upsert_plan)))],
+				}
 			} else {
-				let mut stmt = UpdateStatement::default();
-				stmt.what = resource_to_values(what);
-				stmt.data = data.map(Data::MergeExpression);
-				stmt.output = Some(Output::After);
-				LogicalPlan::Update(stmt)
+				let update_plan = UpdateStatement {
+					only: false,
+					what: resource_to_exprs(what),
+					data: data.map(|x| Data::MergeExpression(x.into_literal())),
+					with: None,
+					cond: None,
+					output: Some(Output::After),
+					timeout: None,
+					parallel: false,
+					explain: None,
+				};
+				LogicalPlan {
+					expressions: vec![TopLevelExpr::Expr(Expr::Update(Box::new(update_plan)))],
+				}
 			};
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
@@ -794,13 +861,30 @@ async fn router(
 			what,
 		} => {
 			let one = what.is_single_recordid();
-			let select_plan = {
-				let mut stmt = SelectStatement::default();
-				stmt.what = resource_to_values(what);
-				stmt.expr.0 = vec![Field::All];
-				stmt
+
+			let select_plan = SelectStatement {
+				expr: Fields::all(),
+				what: resource_to_exprs(what),
+				omit: None,
+				only: false,
+				with: None,
+				cond: None,
+				split: None,
+				group: None,
+				order: None,
+				limit: None,
+				start: None,
+				fetch: None,
+				version: None,
+				timeout: None,
+				parallel: false,
+				explain: None,
+				tempfiles: false,
 			};
-			let plan = LogicalPlan::Select(select_plan);
+
+			let plan = LogicalPlan {
+				expressions: vec![TopLevelExpr::Expr(Expr::Select(Box::new(select_plan)))],
+			};
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
@@ -811,13 +895,19 @@ async fn router(
 			what,
 		} => {
 			let one = what.is_single_recordid();
-			let delete_plan = {
-				let mut stmt = DeleteStatement::default();
-				stmt.what = resource_to_values(what);
-				stmt.output = Some(Output::Before);
-				stmt
+			let delete_plan = DeleteStatement {
+				only: false,
+				what: resource_to_exprs(what),
+				with: None,
+				cond: None,
+				output: Some(Output::Before),
+				timeout: None,
+				parallel: false,
+				explain: None,
 			};
-			let plan = LogicalPlan::Delete(delete_plan);
+			let plan = LogicalPlan {
+				expressions: vec![TopLevelExpr::Expr(Expr::Delete(Box::new(delete_plan)))],
+			};
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
@@ -826,21 +916,22 @@ async fn router(
 		Command::Query {
 			txn: _,
 			query,
-			mut variables,
+			variables,
 		} => {
 			let mut vars = vars.read().await.clone();
-			vars.append(&mut variables.0);
-			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
+			vars.merge(variables);
+			let response =
+				kvs.execute(&query.to_string(), &*session.read().await, Some(vars)).await?;
 			let response = process(response);
 			Ok(DbResponse::Query(response))
 		}
 		Command::RawQuery {
 			txn: _,
 			query,
-			mut variables,
+			variables,
 		} => {
 			let mut vars = vars.read().await.clone();
-			vars.append(&mut variables.0);
+			vars.merge(variables);
 			let response = kvs.execute(query.as_ref(), &*session.read().await, Some(vars)).await?;
 			let response = process(response);
 			Ok(DbResponse::Query(response))
@@ -913,7 +1004,7 @@ async fn router(
 			let copy = copy(file, &mut reader, &mut output);
 
 			tokio::try_join!(export, bridge, copy)?;
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(DbResponse::Other(val::Value::None))
 		}
 
 		#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
@@ -961,7 +1052,7 @@ async fn router(
 			let copy = copy(path, &mut reader, &mut output);
 
 			tokio::try_join!(export, bridge, copy)?;
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(DbResponse::Other(val::Value::None))
 		}
 
 		#[cfg(not(target_family = "wasm"))]
@@ -991,7 +1082,7 @@ async fn router(
 				tokio::join!(export, bridge);
 			});
 
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(DbResponse::Other(val::Value::None))
 		}
 		#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 		Command::ExportBytesMl {
@@ -1020,13 +1111,13 @@ async fn router(
 				tokio::join!(export, bridge);
 			});
 
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(DbResponse::Other(val::Value::None))
 		}
 		#[cfg(not(target_family = "wasm"))]
 		Command::ImportFile {
 			path,
 		} => {
-			let mut file = match OpenOptions::new().read(true).open(&path).await {
+			let file = match OpenOptions::new().read(true).open(&path).await {
 				Ok(path) => path,
 				Err(error) => {
 					bail!(Error::FileOpen {
@@ -1041,8 +1132,8 @@ async fn router(
 
 			let stream = poll_fn(|ctx| {
 				// Doing it this way optimizes allocation.
-				// It is highly likely that the buffer we return from this stream will be dropped
-				// between calls to this function.
+				// It is highly likely that the buffer we return from this stream will be
+				// dropped between calls to this function.
 				// If this is the case than instead of allocating new memory the call to reserve
 				// will instead reclaim the existing used memory.
 				if buffer.capacity() == 0 {
@@ -1068,7 +1159,7 @@ async fn router(
 				response.result?;
 			}
 
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(DbResponse::Other(val::Value::None))
 		}
 		#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 		Command::ImportMl {
@@ -1116,57 +1207,62 @@ async fn router(
 			// Convert the file back in to raw bytes
 			let data = file.to_bytes();
 			// Calculate the hash of the model file
-			let hash = crate::obs::hash(&data);
+			let hash = surrealdb_core::obs::hash(&data);
 			// Insert the file data in to the store
-			crate::obs::put(&hash, data).await?;
+			surrealdb_core::obs::put(&hash, data).await?;
 			// Insert the model in to the database
-			let mut model = DefineModelStatement::default();
-			model.name = file.header.name.to_string().into();
-			model.version = file.header.version.to_string();
-			model.comment = Some(file.header.description.to_string().into());
-			model.hash = hash;
-			let query = DefineStatement::Model(model).into();
-			let responses =
-				kvs.process(query, &*session.read().await, Some(vars.read().await.clone())).await?;
+			let model = DefineModelStatement {
+				name: Ident::new(file.header.name.to_string()).unwrap(),
+				version: file.header.version.to_string(),
+				comment: Some(file.header.description.to_string().into()),
+				hash,
+				..Default::default()
+			};
+			// TODO: Null byte validity
+			let q = DefineStatement::Model(model);
+			let q = LogicalPlan {
+				expressions: vec![TopLevelExpr::Expr(Expr::Define(Box::new(q)))],
+			};
+			let responses = kvs
+				.process_plan(q, &*session.read().await, Some(vars.read().await.clone()))
+				.await?;
 
 			for response in responses {
 				response.result?;
 			}
 
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(DbResponse::Other(val::Value::None))
 		}
-		Command::Health => Ok(DbResponse::Other(CoreValue::None)),
+		Command::Health => Ok(DbResponse::Other(val::Value::None)),
 		Command::Version => {
-			Ok(DbResponse::Other(CoreValue::from(surrealdb_core::env::VERSION.to_string())))
+			Ok(DbResponse::Other(val::Value::from(surrealdb_core::env::VERSION.to_string())))
 		}
 		Command::Set {
 			key,
 			value,
 		} => {
-			let mut tmp_vars = vars.read().await.clone();
-			tmp_vars.insert(key.clone(), value.clone());
-
-			// Need to compute because certain keys might not be allowed to be set and those should
-			// be rejected by an error.
-			match kvs.compute(value, &*session.read().await, Some(tmp_vars)).await? {
-				CoreValue::None => vars.write().await.remove(&key),
+			surrealdb_core::rpc::check_protected_param(&key)?;
+			// Need to compute because certain keys might not be allowed to be set and those
+			// should be rejected by an error.
+			match value {
+				val::Value::None => vars.write().await.remove(&key),
 				v => vars.write().await.insert(key, v),
 			};
 
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(DbResponse::Other(val::Value::None))
 		}
 		Command::Unset {
 			key,
 		} => {
 			vars.write().await.remove(&key);
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(DbResponse::Other(val::Value::None))
 		}
 		Command::SubscribeLive {
 			uuid,
 			notification_sender,
 		} => {
 			live_queries.write().await.insert(uuid, notification_sender);
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(DbResponse::Other(val::Value::None))
 		}
 		Command::Kill {
 			uuid,
@@ -1183,18 +1279,15 @@ async fn router(
 			version: _version,
 			args,
 		} => {
-			let func: CoreValue = match name.strip_prefix("fn::") {
-				Some(name) => Function::Custom(name.to_owned(), args.0).into(),
+			let func = match name.strip_prefix("fn::") {
+				Some(name) => Function::Custom(name.to_owned()),
 				None => match name.strip_prefix("ml::") {
 					#[cfg(feature = "ml")]
-					Some(name) => {
-						let mut tmp = Model::default();
-						name.clone_into(&mut tmp.name);
-						tmp.args = args.0;
-						tmp.version = _version
-							.ok_or(Error::Query("ML functions must have a version".to_string()))?;
-						tmp.into()
-					}
+					Some(name) => Function::Model(Model {
+						name: name.to_owned(),
+						version: _version
+							.ok_or(Error::Query("ML functions must have a version".to_string()))?,
+					}),
 					#[cfg(not(feature = "ml"))]
 					Some(_) => {
 						return Err(Error::Query(format!(
@@ -1202,11 +1295,20 @@ async fn router(
 						))
 						.into());
 					}
-					None => Function::Normal(name, args.0).into(),
+					None => Function::Normal(name),
 				},
 			};
 
-			let plan = LogicalPlan::Value(func);
+			let args = args.into_iter().map(|x| x.into_literal()).collect();
+
+			let plan = Expr::FunctionCall(Box::new(surrealdb_core::expr::FunctionCall {
+				receiver: func,
+				arguments: args,
+			}));
+
+			let plan = LogicalPlan {
+				expressions: vec![TopLevelExpr::Expr(plan)],
+			};
 
 			let response = kvs
 				.process_plan(plan, &*session.read().await, Some(vars.read().await.clone()))

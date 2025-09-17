@@ -1,14 +1,11 @@
 //! Blob class implementation
 
 use bytes::{Bytes, BytesMut};
-use js::{
-	ArrayBuffer, Class, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value,
-	class::Trace,
-	prelude::{Coerced, Opt},
-};
+use js::class::Trace;
+use js::prelude::{Coerced, Opt};
+use js::{ArrayBuffer, Class, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value};
 
 #[derive(Clone, Copy)]
-#[non_exhaustive]
 pub enum EndingType {
 	Transparent,
 	Native,
@@ -79,7 +76,6 @@ fn normalize_type(mut ty: String) -> String {
 
 #[derive(Clone, Trace, JsLifetime)]
 #[js::class]
-#[non_exhaustive]
 pub struct Blob {
 	pub(crate) mime: String,
 	// TODO: make bytes?
@@ -198,8 +194,10 @@ impl Blob {
 
 #[cfg(test)]
 mod test {
+	use js::CatchResultExt;
+	use js::promise::Promise;
+
 	use crate::fnc::script::fetch::test::create_test_context;
-	use js::{CatchResultExt, promise::Promise};
 
 	#[tokio::test]
 	async fn basic_blob_use() {

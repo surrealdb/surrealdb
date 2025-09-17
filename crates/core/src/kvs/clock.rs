@@ -1,16 +1,15 @@
-use crate::dbs::node::Timestamp;
-use crate::expr;
-use expr::Duration;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(not(target_family = "wasm"))]
 use std::time::{SystemTime, UNIX_EPOCH};
+
 #[cfg(target_family = "wasm")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
+use crate::dbs::node::Timestamp;
+use crate::val::Duration;
+
 // Traits cannot have async and we need sized structs for Clone + Send + Sync
 #[derive(Clone)]
-#[non_exhaustive]
 pub enum SizedClock {
 	System(SystemClock),
 	#[cfg(test)]
@@ -38,7 +37,6 @@ impl SizedClock {
 
 /// FakeClock is a clock that is fully controlled externally.
 /// Use this clock for when you are testing timestamps.
-#[non_exhaustive]
 pub struct FakeClock {
 	// Locks necessary for Send
 	now: AtomicU64,
@@ -71,11 +69,11 @@ impl FakeClock {
 	}
 }
 
-/// IncFakeClock increments a local clock every time the clock is accessed, similar to a real clock.
-/// This is useful when you need unique and partially deterministic timestamps for tests.
-/// Partially deterministic, because you do not have direct control over how many times a clock
-/// is accessed, and due to the nature of async - you neither have order guarantee.
-#[non_exhaustive]
+/// IncFakeClock increments a local clock every time the clock is accessed,
+/// similar to a real clock. This is useful when you need unique and partially
+/// deterministic timestamps for tests. Partially deterministic, because you do
+/// not have direct control over how many times a clock is accessed, and due to
+/// the nature of async - you neither have order guarantee.
 pub struct IncFakeClock {
 	now: AtomicU64,
 	increment: Duration,
@@ -110,7 +108,6 @@ impl IncFakeClock {
 /// SystemClock is a clock that uses the system time.
 /// Use this when there are no other alternatives.
 #[derive(Clone, Copy)]
-#[non_exhaustive]
 pub struct SystemClock;
 
 impl SystemClock {

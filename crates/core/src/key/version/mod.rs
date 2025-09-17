@@ -1,18 +1,18 @@
 //! Stores a record document
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::impl_key;
-use serde::{Deserialize, Serialize};
 use std::ops::Range;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Version {
+use storekey::{BorrowDecode, Encode};
+
+use crate::key::category::{Categorise, Category};
+use crate::kvs::impl_kv_key_storekey;
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+pub(crate) struct Version {
 	__: u8,
 	_a: u8,
 }
 
-impl_key!(Version);
+impl_kv_key_storekey!(Version => crate::kvs::version::MajorVersion);
 
 pub fn new() -> Version {
 	Version::new()
@@ -45,17 +45,14 @@ impl Default for Version {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Version::new();
-		let enc = Version::encode(&val).unwrap();
+		let enc = Version::encode_key(&val).unwrap();
 		assert_eq!(enc, b"!v");
-
-		let dec = Version::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

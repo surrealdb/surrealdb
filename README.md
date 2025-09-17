@@ -264,9 +264,8 @@ UPDATE person SET
 Store dynamically computed fields which are calculated when retrieved.
 
 ```sql
-CREATE person SET
-    birthday = <datetime> "2007-06-22",
-    can_drive = <future> { time::now() > birthday + 18y }
+DEFINE FIELD can_drive ON TABLE person COMPUTED time::now() > birthday + 18y;
+CREATE person SET birthday = d"2007-06-22";
 ;
 ```
 
@@ -280,7 +279,7 @@ DEFINE TABLE user SCHEMAFULL;
 DEFINE FIELD name ON TABLE user TYPE object;
 DEFINE FIELD name.first ON TABLE user TYPE string;
 DEFINE FIELD name.last ON TABLE user TYPE string;
-DEFINE FIELD email ON TABLE user TYPE string ASSERT string::is::email($value);
+DEFINE FIELD email ON TABLE user TYPE string ASSERT string::is_email($value);
 
 -- Add a unique index on the email field preventing duplicate values
 DEFINE INDEX email ON TABLE user COLUMNS email UNIQUE;

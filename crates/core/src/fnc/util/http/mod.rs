@@ -1,26 +1,145 @@
-use crate::ctx::Context;
-use crate::err::Error;
-use crate::expr::{Bytes, Object, Strand, Value};
-use crate::syn;
+use std::sync::Arc;
+#[cfg(not(target_family = "wasm"))]
+use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
+use dashmap::DashMap;
 use reqwest::header::CONTENT_TYPE;
+#[cfg(not(target_family = "wasm"))]
+use reqwest::redirect::Attempt;
 #[cfg(not(target_family = "wasm"))]
 use reqwest::redirect::Policy;
 use reqwest::{Client, Method, RequestBuilder, Response};
 use url::Url;
 
+/// Global HTTP client manager for connection pooling and reuse.
+#[cfg(not(target_family = "wasm"))]
+static HTTP_CLIENT_MANAGER: tokio::sync::OnceCell<HttpClientManager> =
+	tokio::sync::OnceCell::const_new();
+
+/// A manager for HTTP clients that caches them based on the capabilities.
+#[cfg(not(target_family = "wasm"))]
+struct HttpClientManager {
+	/// Map from Capabilities hash -> Client
+	clients: DashMap<u64, Arc<Client>>,
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl HttpClientManager {
+	fn new() -> Self {
+		Self {
+			clients: DashMap::new(),
+		}
+	}
+
+	/// Get or create a client based on the capabilities.
+	async fn get_or_create_client(
+		&self,
+		capabilities: Arc<crate::dbs::Capabilities>,
+		redirect_checker: Option<
+			impl Fn(&Url) -> Result<(), crate::err::Error> + Send + Sync + 'static,
+		>,
+	) -> Result<Arc<Client>> {
+		let capabilities_hash = self.hash_capabilities(&capabilities);
+
+		// Try to get existing client.
+		if let Some(client) = self.clients.get(&capabilities_hash) {
+			return Ok(Arc::clone(client.value()));
+		}
+
+		// Client doesn't exist, create a new one.
+		match self.clients.entry(capabilities_hash) {
+			dashmap::mapref::entry::Entry::Occupied(entry) => {
+				// Another thread created it while we were working.
+				Ok(Arc::clone(entry.get()))
+			}
+			dashmap::mapref::entry::Entry::Vacant(entry) => {
+				// We need to create the client
+				let mut builder = Client::builder()
+					.pool_idle_timeout(Duration::from_secs(*crate::cnf::HTTP_IDLE_TIMEOUT_SECS))
+					.pool_max_idle_per_host(*crate::cnf::MAX_HTTP_IDLE_CONNECTIONS_PER_HOST)
+					.connect_timeout(Duration::from_secs(*crate::cnf::HTTP_CONNECT_TIMEOUT_SECS))
+					.tcp_keepalive(Some(Duration::from_secs(60)))
+					.http2_keep_alive_interval(Some(Duration::from_secs(30)))
+					.http2_keep_alive_timeout(Duration::from_secs(10));
+
+				if let Some(checker) = redirect_checker {
+					let count = *crate::cnf::MAX_HTTP_REDIRECTS;
+					let policy = Policy::custom(move |attempt: Attempt| {
+						// Use a more efficient approach instead of block_in_place
+						match checker(attempt.url()) {
+							Ok(()) => {
+								if attempt.previous().len() >= count {
+									attempt.stop()
+								} else {
+									attempt.follow()
+								}
+							}
+							Err(e) => attempt.error(e),
+						}
+					});
+					builder = builder.redirect(policy);
+				}
+
+				builder = builder.dns_resolver(Arc::new(
+					crate::fnc::http::resolver::FilteringResolver::from_capabilities(capabilities),
+				));
+
+				let client = Arc::new(builder.build()?);
+				entry.insert(Arc::clone(&client));
+				Ok(client)
+			}
+		}
+	}
+
+	/// Hash the capabilities for caching.
+	fn hash_capabilities(&self, capabilities: &crate::dbs::Capabilities) -> u64 {
+		use std::collections::hash_map::DefaultHasher;
+		use std::hash::{Hash, Hasher};
+
+		let mut hasher = DefaultHasher::new();
+		capabilities.hash(&mut hasher);
+		hasher.finish()
+	}
+}
+
+#[cfg(not(target_family = "wasm"))]
+async fn get_http_client(
+	capabilities: Arc<crate::dbs::Capabilities>,
+	redirect_checker: Option<
+		impl Fn(&Url) -> Result<(), crate::err::Error> + Send + Sync + 'static,
+	>,
+) -> Result<Arc<Client>> {
+	let manager = HTTP_CLIENT_MANAGER.get_or_init(|| async { HttpClientManager::new() }).await;
+
+	manager.get_or_create_client(capabilities, redirect_checker).await
+}
+
+use crate::cnf::SURREALDB_USER_AGENT;
+use crate::ctx::Context;
+use crate::err::Error;
+use crate::syn;
+use crate::val::{Bytes, Object, Strand, Value};
+
 pub(crate) fn uri_is_valid(uri: &str) -> bool {
 	reqwest::Url::parse(uri).is_ok()
 }
 
-fn encode_body(req: RequestBuilder, body: Value) -> RequestBuilder {
-	match body {
-		Value::Bytes(v) => req.body(v.0),
-		Value::Strand(v) => req.body(v.0),
-		_ if body.is_some() => req.json(&body.into_json()),
+fn encode_body(req: RequestBuilder, body: Value) -> Result<RequestBuilder> {
+	let res = match body {
+		Value::Bytes(v) => req.body(v.into_inner()),
+		Value::Strand(v) => req.body(v.into_string()),
+		//TODO: Improve the handling here. We should check if this value can be send as a json
+		//value.
+		_ if !body.is_nullish() => req.json(&body.into_json_value().ok_or_else(|| {
+			anyhow::Error::new(Error::Thrown(
+				"tried to send request with surealql value body which cannot be encoded into json"
+					.to_owned(),
+			))
+		})?),
 		_ => req,
-	}
+	};
+	Ok(res)
 }
 
 async fn decode_response(res: Response) -> Result<Value> {
@@ -32,7 +151,7 @@ async fn decode_response(res: Response) -> Result<Value> {
 					let val = syn::json(&txt)
 						.context("Failed to parse JSON response")
 						.map_err(|e| Error::Http(e.to_string()))?;
-					Ok(val.into())
+					Ok(val)
 				}
 				Ok(v) if v.starts_with("application/octet-stream") => {
 					let bytes = res.bytes().await.map_err(Error::from)?;
@@ -67,32 +186,48 @@ async fn request(
 ) -> Result<Value> {
 	// Check if the URI is valid and allowed
 	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.to_string()))?;
-	ctx.check_allowed_net(&url)?;
-	// Set a default client with no timeout
-	let builder = Client::builder();
+	ctx.check_allowed_net(&url).await?;
 
+	// Get or create a shared HTTP client for better connection reuse
 	#[cfg(not(target_family = "wasm"))]
-	let builder = {
-		let count = *crate::cnf::MAX_HTTP_REDIRECTS;
-		let ctx_clone = ctx.clone();
-		builder.redirect(Policy::custom(move |attempt| {
-			if let Err(e) = ctx_clone.check_allowed_net(attempt.url()) {
-				return attempt.error(e);
+	let cli = {
+		let capabilities = ctx.get_capabilities();
+		let capabilities_clone = Arc::clone(&capabilities);
+		let redirect_checker = move |url: &Url| -> Result<(), crate::err::Error> {
+			// This is a synchronous version for redirect checking
+			// We'll validate the URL against the same rules
+			use std::str::FromStr;
+
+			use crate::dbs::capabilities::NetTarget;
+
+			// Check domain name allowlist
+			let target = NetTarget::from_str(url.host_str().unwrap_or(""))
+				.map_err(|e| crate::err::Error::InvalidUrl(format!("Invalid host: {}", e)))?;
+
+			if !capabilities_clone.matches_any_allow_net(&target)
+				|| capabilities_clone.matches_any_deny_net(&target)
+			{
+				return Err(crate::err::Error::NetTargetNotAllowed(url.to_string()));
 			}
-			if attempt.previous().len() >= count {
-				return attempt.stop();
-			}
-			attempt.follow()
-		}))
+
+			Ok(())
+		};
+
+		get_http_client(capabilities, Some(redirect_checker)).await?
 	};
 
-	let cli = builder.build()?;
+	#[cfg(target_family = "wasm")]
+	let cli = {
+		let builder = Client::builder();
+		Arc::new(builder.build()?)
+	};
+
 	let is_head = matches!(method, Method::HEAD);
-	// Start a new HEAD request
+	// Start a new HTTP request using the shared client
 	let mut req = cli.request(method.clone(), url);
 	// Add the User-Agent header
 	if cfg!(not(target_family = "wasm")) {
-		req = req.header("User-Agent", "SurrealDB");
+		req = req.header(reqwest::header::USER_AGENT, &*SURREALDB_USER_AGENT);
 	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
@@ -101,7 +236,7 @@ async fn request(
 
 	if let Some(b) = body {
 		// Submit the request body
-		req = encode_body(req, b);
+		req = encode_body(req, b)?;
 	}
 
 	// Send the request and wait

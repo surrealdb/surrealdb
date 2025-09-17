@@ -1,22 +1,20 @@
-use super::transaction::WithTransaction;
-use crate::Surreal;
-use crate::Value;
-use crate::api::Connection;
-use crate::api::Result;
-use crate::api::conn::Command;
-use crate::api::method::BoxFuture;
-use crate::api::opt::Resource;
-use crate::method::OnceLockExt;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::{Value as CoreValue, to_value as to_core_value};
+
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
-use super::Content;
-use super::validate_data;
+use super::transaction::WithTransaction;
+use super::{Content, validate_data};
+use crate::api::conn::Command;
+use crate::api::method::BoxFuture;
+use crate::api::opt::Resource;
+use crate::api::{self, Connection, Result};
+use crate::core::val;
+use crate::method::OnceLockExt;
+use crate::{Surreal, Value};
 
 /// A record create future
 #[derive(Debug)]
@@ -41,7 +39,8 @@ impl<C, R> Create<'_, C, R>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Create<'static, C, R> {
 		Create {
 			client: Cow::Owned(self.client.into_owned()),
@@ -103,7 +102,7 @@ where
 		D: Serialize + 'static,
 	{
 		Content::from_closure(self.client, self.txn, || {
-			let content = to_core_value(data)?;
+			let content = api::value::to_core_value(data)?;
 
 			validate_data(
 				&content,
@@ -111,7 +110,7 @@ where
 			)?;
 
 			let data = match content {
-				CoreValue::None | CoreValue::Null => None,
+				val::Value::None | val::Value::Null => None,
 				content => Some(content),
 			};
 
@@ -134,7 +133,7 @@ where
 		D: Serialize + 'static,
 	{
 		Content::from_closure(self.client, self.txn, || {
-			let content = to_core_value(data)?;
+			let content = api::value::to_core_value(data)?;
 
 			validate_data(
 				&content,
@@ -142,7 +141,7 @@ where
 			)?;
 
 			let data = match content {
-				CoreValue::None | CoreValue::Null => None,
+				val::Value::None | val::Value::Null => None,
 				content => Some(content),
 			};
 

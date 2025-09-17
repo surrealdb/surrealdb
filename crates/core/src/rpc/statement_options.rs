@@ -1,40 +1,32 @@
-use std::collections::BTreeMap;
-
-use crate::{
-	dbs::{Capabilities, sql_variables_to_expr_variables},
-	expr::Value,
-	sql::{Cond, Data, Fetchs, Fields, Limit, Number, Output, SqlValue, Start, Timeout, Version},
-	syn::{
-		fetchs_with_capabilities, fields_with_capabilities, output_with_capabilities,
-		value_with_capabilities,
-	},
-};
-
 use super::RpcError;
+use crate::dbs::{Capabilities, Variables};
+use crate::sql::{Cond, Data, Expr, Fetchs, Fields, Limit, Literal, Output, Start, Timeout};
+use crate::syn;
+use crate::val::{Number, Object, Value};
 
 #[derive(Clone, Debug)]
 pub(crate) enum RpcData {
-	Patch(SqlValue),
-	Merge(SqlValue),
-	Replace(SqlValue),
-	Content(SqlValue),
-	Single(SqlValue),
+	Patch(Value),
+	Merge(Value),
+	Replace(Value),
+	Content(Value),
+	Single(Value),
 }
 
 impl From<RpcData> for Data {
 	fn from(data: RpcData) -> Self {
 		match data {
-			RpcData::Patch(v) => Data::PatchExpression(v),
-			RpcData::Merge(v) => Data::MergeExpression(v),
-			RpcData::Replace(v) => Data::ReplaceExpression(v),
-			RpcData::Content(v) => Data::ContentExpression(v),
-			RpcData::Single(v) => Data::SingleExpression(v),
+			RpcData::Patch(v) => Data::PatchExpression(v.into_literal().into()),
+			RpcData::Merge(v) => Data::MergeExpression(v.into_literal().into()),
+			RpcData::Replace(v) => Data::ReplaceExpression(v.into_literal().into()),
+			RpcData::Content(v) => Data::ContentExpression(v.into_literal().into()),
+			RpcData::Single(v) => Data::SingleExpression(v.into_literal().into()),
 		}
 	}
 }
 
 impl RpcData {
-	pub(crate) fn value(&self) -> &SqlValue {
+	pub(crate) fn value(&self) -> &Value {
 		match self {
 			RpcData::Patch(v) => v,
 			RpcData::Merge(v) => v,
@@ -44,19 +36,22 @@ impl RpcData {
 		}
 	}
 
-	pub(crate) fn from_string(str: String, v: SqlValue) -> Result<RpcData, RpcError> {
+	pub(crate) fn from_string(str: String, v: Value) -> Result<RpcData, RpcError> {
 		match str.to_lowercase().as_str() {
 			"patch" => Ok(RpcData::Patch(v)),
 			"merge" => Ok(RpcData::Merge(v)),
 			"replace" => Ok(RpcData::Replace(v)),
 			"content" => Ok(RpcData::Content(v)),
 			"single" => Ok(RpcData::Single(v)),
-			_ => Err(RpcError::InvalidParams),
+			unexpected => Err(RpcError::InvalidParams(format!(
+				"Expected 'patch', 'merge', 'replace', 'content', or 'single', got {unexpected}"
+			))),
 		}
 	}
 }
 
-/// Statement Options for the `select`, `insert`, `create`, `upsert`, `update`, `relate` and `delete` methods.
+/// Statement Options for the `select`, `insert`, `create`, `upsert`, `update`,
+/// `relate` and `delete` methods.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct StatementOptions {
 	/// - One of: `"content"`, `"replace"`, `"merge"`, `"patch"` or `"single"`.
@@ -90,13 +85,13 @@ pub(crate) struct StatementOptions {
 	///    - A datetime
 	///    - A string, containing an expression which computes into a datetime
 	/// - For the `select`, `insert` and `create` methods
-	pub version: Option<Version>,
+	pub version: Option<Expr>,
 	/// - A duration, stating how long execution can last
 	/// - For all (`select`, `insert`, `create`, `upsert`, `update`, `relate` and `delete`) methods
 	pub timeout: Option<Timeout>,
 	/// - An object, containing variables to define during execution of the method
 	/// - For all (`select`, `insert`, `create`, `upsert`, `update`, `relate` and `delete`) methods
-	pub vars: Option<BTreeMap<String, SqlValue>>,
+	pub vars: Option<Variables>,
 	/// - A boolean, stating wether the LQ notifications should contain diffs
 	/// - For the `live` method
 	pub diff: bool,
@@ -106,7 +101,26 @@ pub(crate) struct StatementOptions {
 }
 
 impl StatementOptions {
-	pub(crate) fn with_data_content(&mut self, v: SqlValue) -> &mut Self {
+	pub const fn new() -> Self {
+		StatementOptions {
+			data: None,
+			fields: None,
+			output: None,
+			limit: None,
+			start: None,
+			cond: None,
+			only: false,
+			relation: false,
+			unique: false,
+			version: None,
+			timeout: None,
+			vars: None,
+			diff: false,
+			fetch: None,
+		}
+	}
+
+	pub(crate) fn with_data_content(&mut self, v: Value) -> &mut Self {
 		self.data = Some(RpcData::Content(v));
 		self
 	}
@@ -116,167 +130,169 @@ impl StatementOptions {
 		self
 	}
 
-	pub(crate) fn process_options(
+	pub(crate) fn extract_options_rpc_object(
 		&mut self,
-		opts: SqlValue,
+		mut obj: Object,
 		capabilities: &Capabilities,
 	) -> Result<&mut Self, RpcError> {
-		if let SqlValue::Object(mut obj) = opts {
-			// Process "data_expr" option
-			if let Some(data) = &self.data {
-				if let Some(v) = obj.remove("data_expr") {
-					if let SqlValue::Strand(v) = v {
-						self.data =
-							Some(RpcData::from_string(v.to_string(), data.value().to_owned())?);
-					} else {
-						return Err(RpcError::InvalidParams);
-					}
-				}
-			}
-
-			// Process "fields" option
-			if let Some(v) = obj.remove("fields") {
-				if let SqlValue::Strand(v) = v {
-					self.fields = Some(fields_with_capabilities(v.as_str(), capabilities)?)
+		// Process "data_expr" option
+		if let Some(data) = &self.data {
+			if let Some(v) = obj.remove("data_expr") {
+				if let Value::Strand(v) = v {
+					self.data = Some(RpcData::from_string(v.to_string(), data.value().to_owned())?);
 				} else {
-					return Err(RpcError::InvalidParams);
+					return Err(RpcError::InvalidParams(
+						"Expected 'data_expr' to be string".to_string(),
+					));
 				}
 			}
-
-			// Process "return" option
-			if let Some(v) = obj.remove("return") {
-				if let SqlValue::Strand(v) = v {
-					self.output = Some(output_with_capabilities(v.as_str(), capabilities)?)
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
-
-			// Process "limit" option
-			if let Some(v) = obj.remove("limit") {
-				if let SqlValue::Number(Number::Int(_)) = v {
-					self.limit = Some(Limit(v))
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
-
-			// Process "start" option
-			if let Some(v) = obj.remove("start") {
-				if let SqlValue::Number(Number::Int(_)) = v {
-					self.start = Some(Start(v))
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
-
-			// Process "cond" option
-			if let Some(v) = obj.remove("cond") {
-				if let SqlValue::Strand(v) = v {
-					let v = value_with_capabilities(v.as_str(), capabilities)?;
-					self.cond = Some(Cond(v))
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
-
-			// Process "version" option
-			if let Some(v) = obj.remove("version") {
-				let v = match v {
-					v @ SqlValue::Datetime(_) => v,
-					SqlValue::Strand(v) => value_with_capabilities(v.as_str(), capabilities)?,
-					_ => {
-						return Err(RpcError::InvalidParams);
-					}
-				};
-
-				self.version = Some(Version(v))
-			}
-
-			// Process "timeout" option
-			if let Some(v) = obj.remove("timeout") {
-				if let SqlValue::Duration(v) = v {
-					self.timeout = Some(Timeout(v))
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
-
-			// Process "only" option
-			if let Some(v) = obj.remove("only") {
-				if let SqlValue::Bool(v) = v {
-					self.only = v;
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
-
-			// Process "relation" option
-			if let Some(v) = obj.remove("relation") {
-				if let SqlValue::Bool(v) = v {
-					self.relation = v;
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
-
-			// Process "unique" option
-			if let Some(v) = obj.remove("unique") {
-				if let SqlValue::Bool(v) = v {
-					self.unique = v;
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
-
-			// Process "vars" option
-			if let Some(v) = obj.remove("vars") {
-				if let SqlValue::Object(v) = v {
-					self.vars = Some(v.0)
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
-
-			// Process "diff" option
-			if let Some(v) = obj.remove("diff") {
-				if self.fields.is_some() {
-					// diff and fields cannot co-exist, as diff overwrites the fields
-					return Err(RpcError::InvalidParams);
-				}
-
-				if let SqlValue::Bool(v) = v {
-					self.diff = v;
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
-
-			// Process "fetch" option
-			if let Some(v) = obj.remove("fetch") {
-				if let SqlValue::Strand(v) = v {
-					self.fetch = Some(fetchs_with_capabilities(v.as_str(), capabilities)?)
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
-
-			Ok(self)
-		} else {
-			Err(RpcError::InvalidParams)
 		}
+
+		// Process "fields" option
+		if let Some(v) = obj.remove("fields") {
+			if let Value::Strand(v) = v {
+				self.fields = Some(syn::fields_with_capabilities(v.as_str(), capabilities)?)
+			} else {
+				return Err(RpcError::InvalidParams("Expected 'fields' to be string".to_string()));
+			}
+		}
+
+		// Process "return" option
+		if let Some(v) = obj.remove("return") {
+			if let Value::Strand(v) = v {
+				self.output = Some(syn::output_with_capabilities(v.as_str(), capabilities)?)
+			} else {
+				return Err(RpcError::InvalidParams("Expected 'return' to be string".to_string()));
+			}
+		}
+
+		// Process "limit" option
+		if let Some(v) = obj.remove("limit") {
+			if let Value::Number(Number::Int(i)) = v {
+				self.limit = Some(Limit(Expr::Literal(Literal::Integer(i))))
+			} else {
+				return Err(RpcError::InvalidParams("Expected 'limit' to be number".to_string()));
+			}
+		}
+
+		// Process "start" option
+		if let Some(v) = obj.remove("start") {
+			if let Value::Number(Number::Int(i)) = v {
+				self.start = Some(Start(Expr::Literal(Literal::Integer(i))))
+			} else {
+				return Err(RpcError::InvalidParams("Expected 'start' to be number".to_string()));
+			}
+		}
+
+		// Process "cond" option
+		if let Some(v) = obj.remove("cond") {
+			if let Value::Strand(v) = v {
+				let v = syn::expr_with_capabilities(v.as_str(), capabilities)?;
+				self.cond = Some(Cond(v))
+			} else {
+				return Err(RpcError::InvalidParams("Expected 'cond' to be string".to_string()));
+			}
+		}
+
+		// Process "version" option
+		if let Some(v) = obj.remove("version") {
+			let v = match v {
+				Value::Datetime(d) => Expr::Literal(Literal::Datetime(d)),
+				Value::Strand(v) => syn::expr_with_capabilities(v.as_str(), capabilities)?,
+				_ => {
+					return Err(RpcError::InvalidParams(
+						"Expected 'version' to be string or datetime".to_string(),
+					));
+				}
+			};
+
+			self.version = Some(v)
+		}
+
+		// Process "timeout" option
+		if let Some(v) = obj.remove("timeout") {
+			if let Value::Duration(v) = v {
+				self.timeout = Some(Timeout(v))
+			} else {
+				return Err(RpcError::InvalidParams(
+					"Expected 'timeout' to be duration".to_string(),
+				));
+			}
+		}
+
+		// Process "only" option
+		if let Some(v) = obj.remove("only") {
+			if let Value::Bool(v) = v {
+				self.only = v;
+			} else {
+				return Err(RpcError::InvalidParams("Expected 'only' to be boolean".to_string()));
+			}
+		}
+
+		// Process "relation" option
+		if let Some(v) = obj.remove("relation") {
+			if let Value::Bool(v) = v {
+				self.relation = v;
+			} else {
+				return Err(RpcError::InvalidParams(
+					"Expected 'relation' to be boolean".to_string(),
+				));
+			}
+		}
+
+		// Process "unique" option
+		if let Some(v) = obj.remove("unique") {
+			if let Value::Bool(v) = v {
+				self.unique = v;
+			} else {
+				return Err(RpcError::InvalidParams("Expected 'unique' to be boolean".to_string()));
+			}
+		}
+
+		// Process "vars" option
+		if let Some(v) = obj.remove("vars") {
+			if let Value::Object(v) = v {
+				self.vars = Some(v.into())
+			} else {
+				return Err(RpcError::InvalidParams("Expected 'vars' to be object".to_string()));
+			}
+		}
+
+		// Process "diff" option
+		if let Some(v) = obj.remove("diff") {
+			if self.fields.is_some() {
+				// diff and fields cannot co-exist, as diff overwrites the fields
+				return Err(RpcError::InvalidParams(
+					"'diff' and 'fields' cannot co-exist".to_string(),
+				));
+			}
+
+			if let Value::Bool(v) = v {
+				self.diff = v;
+			} else {
+				return Err(RpcError::InvalidParams("Expected 'diff' to be boolean".to_string()));
+			}
+		}
+
+		// Process "fetch" option
+		if let Some(v) = obj.remove("fetch") {
+			if let Value::Strand(v) = v {
+				self.fetch = Some(syn::fetchs_with_capabilities(v.as_str(), capabilities)?)
+			} else {
+				return Err(RpcError::InvalidParams("Expected 'fetch' to be string".to_string()));
+			}
+		}
+
+		Ok(self)
 	}
 
 	pub(crate) fn data_expr(&self) -> Option<Data> {
 		self.data.clone().map(|v| v.into())
 	}
 
-	pub(crate) fn merge_vars(&self, v: &BTreeMap<String, Value>) -> BTreeMap<String, Value> {
+	pub(crate) fn merge_vars(&self, v: &Variables) -> Variables {
 		match &self.vars {
-			Some(vars) => {
-				let mut vars = sql_variables_to_expr_variables(vars);
-				mrg! {vars, v}
-			}
+			Some(vars) => vars.merged(v.clone()),
 			None => v.clone(),
 		}
 	}

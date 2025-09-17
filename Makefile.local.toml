@@ -1,5 +1,5 @@
 [env]
-RUSTFLAGS = { value = "-D warnings", condition = { env_not_set = [
+RUSTFLAGS = { value = "-D warnings --cfg tokio_unstable", condition = { env_not_set = [
     "RUSTFLAGS",
 ] } }
 
@@ -41,8 +41,15 @@ args = ["test", "--profile", "make", "--workspace", "--no-fail-fast"]
 # Format
 [tasks.cargo-fmt]
 category = "LOCAL USAGE"
+toolchain = "${SURREAL_NIGHTLY_RUST_TOOLCHAIN}"
 command = "cargo"
 args = ["fmt", "--all", "--check"]
+
+[tasks.fmt]
+category = "LOCAL USAGE"
+toolchain = "${SURREAL_NIGHTLY_RUST_TOOLCHAIN}"
+command = "cargo"
+args = ["fmt", "--all"]
 
 # Check
 [tasks.cargo-check]

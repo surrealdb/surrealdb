@@ -1,7 +1,3 @@
-use crate::err::Error;
-use crate::iam::file::is_path_allowed;
-use crate::idx::ft::analyzer::filter::{FilterResult, Term};
-use anyhow::{Result, bail, ensure};
 #[cfg(target_family = "wasm")]
 use std::fs::File;
 #[cfg(target_family = "wasm")]
@@ -9,12 +5,18 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
+
+use anyhow::{Result, bail, ensure};
 #[cfg(not(target_family = "wasm"))]
 use tokio::fs::File;
 #[cfg(not(target_family = "wasm"))]
 use tokio::io::{AsyncBufReadExt, BufReader};
 use vart::VariableSizeKey;
 use vart::art::Tree;
+
+use crate::err::Error;
+use crate::iam::file::is_path_allowed;
+use crate::idx::ft::analyzer::filter::{FilterResult, Term};
 
 #[derive(Clone, Default)]
 pub(in crate::idx) struct Mapper {

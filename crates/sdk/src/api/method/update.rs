@@ -1,26 +1,21 @@
-use super::transaction::WithTransaction;
-use crate::Surreal;
-use crate::Value;
-use crate::api::Connection;
-use crate::api::Result;
-use crate::api::conn::Command;
-use crate::api::method::BoxFuture;
-use crate::api::method::Content;
-use crate::api::method::Merge;
-use crate::api::method::Patch;
-use crate::api::opt::PatchOp;
-use crate::api::opt::Resource;
-use crate::method::OnceLockExt;
-use crate::opt::KeyRange;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::{Value as CoreValue, to_value as to_core_value};
+
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
+use super::transaction::WithTransaction;
 use super::validate_data;
+use crate::api::conn::Command;
+use crate::api::method::{BoxFuture, Content, Merge, Patch};
+use crate::api::opt::{PatchOp, Resource};
+use crate::api::{self, Connection, Result};
+use crate::core::val;
+use crate::method::OnceLockExt;
+use crate::opt::KeyRange;
+use crate::{Surreal, Value};
 
 /// An update future
 #[derive(Debug)]
@@ -46,7 +41,8 @@ impl<C, R> Update<'_, C, R>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Update<'static, C, R> {
 		Update {
 			client: Cow::Owned(self.client.into_owned()),
@@ -143,7 +139,7 @@ where
 		D: Serialize + 'static,
 	{
 		Content::from_closure(self.client, self.txn, || {
-			let data = to_core_value(data)?;
+			let data = api::value::to_core_value(data)?;
 
 			validate_data(
 				&data,
@@ -153,7 +149,7 @@ where
 			let what = self.resource?;
 
 			let data = match data {
-				CoreValue::None => None,
+				val::Value::None => None,
 				content => Some(content),
 			};
 
@@ -180,7 +176,8 @@ where
 		}
 	}
 
-	/// Patches the current document / record data with the specified JSON Patch data
+	/// Patches the current document / record data with the specified JSON Patch
+	/// data
 	pub fn patch(self, patch: impl Into<PatchOp>) -> Patch<'r, C, R> {
 		let PatchOp(result) = patch.into();
 		let patches = match result {

@@ -17,4 +17,4 @@ value = "true"
 let $array = (<array> 0..1000).map(|$x| rand());
 array::min($array) >= 0;
 array::max($array) < 1;
-$array.all(|$x| type::is::float($x))
+$array.all(|$x| type::is_float($x))

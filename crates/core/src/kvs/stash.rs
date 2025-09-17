@@ -1,5 +1,6 @@
-use crate::idg::u32::U32;
 use std::collections::HashMap;
+
+use crate::idg::u32::U32;
 
 #[derive(Default)]
 pub(super) struct Stash(pub HashMap<Vec<u8>, U32>);
