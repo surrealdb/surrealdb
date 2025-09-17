@@ -12,11 +12,8 @@ let
     rustc = rustToolchain;
   });
 
-  markdownFilter = path: _type: builtins.match ".*md$" path != null;
-  markdownOrCargo = path: type:
-    (markdownFilter path type) || (craneLib.filterCargoSources path type);
+  unfilteredRoot = ../../../.; # The original, unfiltered source
   buildSpec = spec.buildSpec // {
-    unfilteredRoot = ../../../.; # The original, unfiltered source
     src = lib.fileset.toSource {
       root = unfilteredRoot;
       fileset = lib.fileset.unions [
