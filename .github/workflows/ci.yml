@@ -275,9 +275,14 @@ jobs:
 
       - name: Install cargo-make
         run: |
-          curl -L https://github.com/sagiegurari/cargo-make/releases/download/0.37.24/cargo-make-v0.37.24-x86_64-unknown-linux-gnu.zip | tar -xz -C /tmp
-          chmod +x /tmp/cargo-make*/cargo-make
-          sudo mv /tmp/cargo-make*/cargo-make /usr/bin/cargo-make
+          set -x
+
+          cd `mktemp -d`
+          curl -LJO https://github.com/sagiegurari/cargo-make/releases/download/0.37.24/cargo-make-v0.37.24-x86_64-unknown-linux-gnu.zip
+          unzip -q cargo-make-*.zip
+          chmod +x cargo-make*/cargo-make
+          sudo mv cargo-make*/cargo-make /usr/bin/cargo-make
+          cd -
 
       - name: Check docs
         run: cargo make ci-docs
