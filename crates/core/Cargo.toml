@@ -187,6 +187,7 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 ext-sort = { workspace = true, optional = true }
 regex-syntax = { workspace = true, optional = true }
 reqwest = { workspace = true, default-features = false, features = [
+    "http2",
     "json",
     "stream",
     "multipart",
