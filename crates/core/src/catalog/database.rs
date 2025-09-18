@@ -1,15 +1,15 @@
 use std::fmt::{Display, Formatter};
 
-use revision::{revisioned, Revisioned};
+use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::NamespaceId;
-use crate::expr::statements::info::InfoStructure;
 use crate::expr::ChangeFeed;
+use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::statements::define::DefineDatabaseStatement;
 use crate::sql::ToSql;
+use crate::sql::statements::define::DefineDatabaseStatement;
 use crate::val::Value;
 
 #[derive(
