@@ -2,8 +2,8 @@ mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::val::{Array, RecordId};
 use surrealdb_core::{strand, syn};
+use surrealdb_types::{Array, RecordId};
 
 use crate::helpers::Test;
 

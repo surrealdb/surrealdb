@@ -10,7 +10,8 @@ use futures::future::Either;
 use futures::stream::SelectAll;
 use indexmap::IndexMap;
 use serde::Serialize;
-use serde::de::DeserializeOwned;
+use surrealdb_core::rpc::{DbResultError, DbResultStats};
+use surrealdb_types::{self, Notification as CoreNotification, Object, SurrealValue, Variables};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -20,9 +21,8 @@ use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::{self, Connection, ExtraFeatures, Result, opt};
 use crate::core::expr::{LogicalPlan, TopLevelExpr};
-use crate::core::val;
-use crate::method::{OnceLockExt, Stats, WithStats};
-use crate::value::Notification;
+use crate::method::{OnceLockExt, WithStats};
+use crate::notification::Notification;
 use crate::{Surreal, Value};
 
 /// A query future
@@ -48,12 +48,12 @@ where
 pub(crate) enum ValidQuery {
 	Raw {
 		query: Cow<'static, str>,
-		bindings: val::Object,
+		bindings: Variables,
 	},
 	Normal {
 		query: Vec<TopLevelExpr>,
 		register_live_queries: bool,
-		bindings: val::Object,
+		bindings: Variables,
 	},
 }
 
@@ -64,7 +64,7 @@ where
 	pub(crate) fn normal(
 		client: Cow<'r, Surreal<C>>,
 		query: Vec<TopLevelExpr>,
-		bindings: val::Object,
+		bindings: Variables,
 		register_live_queries: bool,
 	) -> Self {
 		Query {
@@ -111,7 +111,7 @@ impl<'r, Client> IntoFuture for Query<'r, Client>
 where
 	Client: Connection,
 {
-	type Output = Result<Response>;
+	type Output = Result<IndexedResults>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
@@ -185,7 +185,7 @@ where
 						// creating another public error variant for this internal error.
 						let res = match result {
 							Ok(id) => {
-								let val::Value::Uuid(uuid) = id else {
+								let Value::Uuid(uuid) = id else {
 									bail!(Error::InternalError(
 										"successfull live query did not return a uuid".to_string(),
 									));
@@ -210,7 +210,7 @@ impl<'r, Client> IntoFuture for WithStats<Query<'r, Client>>
 where
 	Client: Connection,
 {
-	type Output = Result<WithStats<Response>>;
+	type Output = Result<WithStats<IndexedResults>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
@@ -303,7 +303,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn bind(self, bindings: impl Serialize + 'static) -> Self {
+	pub fn bind(self, bindings: impl SurrealValue) -> Self {
 		self.map_valid(move |mut valid| {
 			let current_bindings = match &mut valid {
 				ValidQuery::Raw {
@@ -315,28 +315,31 @@ where
 					..
 				} => bindings,
 			};
-			let bindings = api::value::to_core_value(bindings)?;
+
+			let bindings = bindings.into_value();
+
 			match bindings {
-				val::Value::Object(mut map) => current_bindings.append(&mut map.0),
-				val::Value::Array(array) => {
-					if array.len() != 2 || !matches!(array[0], val::Value::Strand(_)) {
-						let bindings = val::Value::Array(array);
-						let bindings = Value::from_inner(bindings);
+				Value::Object(mut map) => {
+					todo!("STU")
+					// current_bindings.extend(map.0)
+				}
+				Value::Array(array) => {
+					if array.len() != 2 || !matches!(array[0], surrealdb_types::Value::String(_)) {
+						let bindings = Value::Array(array);
 						return Err(Error::InvalidBindings(bindings).into());
 					}
 
 					let mut iter = array.into_iter();
-					let Some(val::Value::Strand(key)) = iter.next() else {
+					let Some(Value::String(key)) = iter.next() else {
 						unreachable!()
 					};
 					let Some(value) = iter.next() else {
 						unreachable!()
 					};
 
-					current_bindings.insert(key.into_string(), value);
+					current_bindings.insert(key, value);
 				}
 				_ => {
-					let bindings = Value::from_inner(bindings);
 					return Err(Error::InvalidBindings(bindings).into());
 				}
 			}
@@ -346,12 +349,12 @@ where
 	}
 }
 
-pub(crate) type QueryResult = Result<val::Value>;
+pub(crate) type QueryResult = std::result::Result<Value, DbResultError>;
 
 /// The response type of a `Surreal::query` request
 #[derive(Debug)]
-pub struct Response {
-	pub(crate) results: IndexMap<usize, (Stats, QueryResult)>,
+pub struct IndexedResults {
+	pub(crate) results: IndexMap<usize, (DbResultStats, QueryResult)>,
 	pub(crate) live_queries: IndexMap<usize, Result<Stream<Value>>>,
 }
 
@@ -370,7 +373,7 @@ impl futures::Stream for QueryStream<Value> {
 
 impl<R> futures::Stream for QueryStream<Notification<R>>
 where
-	R: DeserializeOwned + Unpin,
+	R: SurrealValue + Unpin,
 {
 	type Item = Result<Notification<R>>;
 
@@ -379,7 +382,7 @@ where
 	}
 }
 
-impl Response {
+impl IndexedResults {
 	pub(crate) fn new() -> Self {
 		Self {
 			results: Default::default(),
@@ -450,7 +453,7 @@ impl Response {
 	/// of the other indices, so you can take them in any order you see fit.
 	pub fn take<R>(&mut self, index: impl opt::QueryResult<R>) -> Result<R>
 	where
-		R: DeserializeOwned,
+		R: SurrealValue,
 	{
 		index.query_result(self)
 	}
@@ -521,7 +524,7 @@ impl Response {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn take_errors(&mut self) -> HashMap<usize, anyhow::Error> {
+	pub fn take_errors(&mut self) -> HashMap<usize, DbResultError> {
 		let mut keys = Vec::new();
 		for (key, result) in &self.results {
 			if result.1.is_err() {
@@ -552,7 +555,7 @@ impl Response {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn check(mut self) -> Result<Self> {
+	pub fn check(mut self) -> std::result::Result<Self, DbResultError> {
 		let mut first_error = None;
 		for (key, result) in &self.results {
 			if result.1.is_err() {
@@ -588,7 +591,7 @@ impl Response {
 	}
 }
 
-impl WithStats<Response> {
+impl WithStats<IndexedResults> {
 	/// Takes and returns records returned from the database
 	///
 	/// Similar to [Response::take] but this method returns `None` when
@@ -651,9 +654,9 @@ impl WithStats<Response> {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn take<R>(&mut self, index: impl opt::QueryResult<R>) -> Option<(Stats, Result<R>)>
+	pub fn take<R>(&mut self, index: impl opt::QueryResult<R>) -> Option<(DbResultStats, Result<R>)>
 	where
-		R: DeserializeOwned,
+		R: SurrealValue,
 	{
 		let stats = index.stats(&self.0)?;
 		let result = index.query_result(&mut self.0);
@@ -678,7 +681,7 @@ impl WithStats<Response> {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn take_errors(&mut self) -> HashMap<usize, (Stats, anyhow::Error)> {
+	pub fn take_errors(&mut self) -> HashMap<usize, (DbResultStats, DbResultError)> {
 		let mut keys = Vec::new();
 		for (key, result) in &self.0.results {
 			if result.1.is_err() {
@@ -734,7 +737,7 @@ impl WithStats<Response> {
 	}
 
 	/// Returns the unwrapped response
-	pub fn into_inner(self) -> Response {
+	pub fn into_inner(self) -> IndexedResults {
 		self.0
 	}
 }
@@ -744,14 +747,13 @@ mod tests {
 	use serde::Deserialize;
 
 	use super::*;
-	use crate::value::to_value;
 
-	#[derive(Debug, Clone, Serialize, Deserialize)]
+	#[derive(Debug, Clone, SurrealValue)]
 	struct Summary {
 		title: String,
 	}
 
-	#[derive(Debug, Clone, Serialize, Deserialize)]
+	#[derive(Debug, Clone, SurrealValue)]
 	struct Article {
 		title: String,
 		body: String,
@@ -771,47 +773,47 @@ mod tests {
 
 	#[test]
 	fn take_from_an_empty_response() {
-		let mut response = Response::new();
+		let mut response = IndexedResults::new();
 		let value: Value = response.take(0).unwrap();
-		assert!(value.into_inner().is_none());
+		assert!(value.is_none());
 
-		let mut response = Response::new();
+		let mut response = IndexedResults::new();
 		let option: Option<String> = response.take(0).unwrap();
 		assert!(option.is_none());
 
-		let mut response = Response::new();
+		let mut response = IndexedResults::new();
 		let vec: Vec<String> = response.take(0).unwrap();
 		assert!(vec.is_empty());
 	}
 
 	#[test]
 	fn take_from_an_errored_query() {
-		let mut response = Response {
+		let mut response = IndexedResults {
 			results: to_map(vec![Err(Error::ConnectionUninitialised.into())]),
-			..Response::new()
+			..IndexedResults::new()
 		};
 		response.take::<Option<()>>(0).unwrap_err();
 	}
 
 	#[test]
 	fn take_from_empty_records() {
-		let mut response = Response {
+		let mut response = IndexedResults {
 			results: to_map(vec![]),
-			..Response::new()
+			..IndexedResults::new()
 		};
 		let value: Value = response.take(0).unwrap();
 		assert_eq!(value, Default::default());
 
-		let mut response = Response {
+		let mut response = IndexedResults {
 			results: to_map(vec![]),
-			..Response::new()
+			..IndexedResults::new()
 		};
 		let option: Option<String> = response.take(0).unwrap();
 		assert!(option.is_none());
 
-		let mut response = Response {
+		let mut response = IndexedResults {
 			results: to_map(vec![]),
-			..Response::new()
+			..IndexedResults::new()
 		};
 		let vec: Vec<String> = response.take(0).unwrap();
 		assert!(vec.is_empty());
@@ -821,46 +823,46 @@ mod tests {
 	fn take_from_a_scalar_response() {
 		let scalar = 265;
 
-		let mut response = Response {
+		let mut response = IndexedResults {
 			results: to_map(vec![Ok(scalar.into())]),
-			..Response::new()
+			..IndexedResults::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value.into_inner(), val::Value::from(scalar));
+		assert_eq!(value, Value::from(scalar));
 
-		let mut response = Response {
+		let mut response = IndexedResults {
 			results: to_map(vec![Ok(scalar.into())]),
-			..Response::new()
+			..IndexedResults::new()
 		};
 		let option: Option<_> = response.take(0).unwrap();
 		assert_eq!(option, Some(scalar));
 
-		let mut response = Response {
+		let mut response = IndexedResults {
 			results: to_map(vec![Ok(scalar.into())]),
-			..Response::new()
+			..IndexedResults::new()
 		};
 		let vec: Vec<i64> = response.take(0).unwrap();
 		assert_eq!(vec, vec![scalar]);
 
 		let scalar = true;
 
-		let mut response = Response {
+		let mut response = IndexedResults {
 			results: to_map(vec![Ok(scalar.into())]),
-			..Response::new()
+			..IndexedResults::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value.into_inner(), val::Value::from(scalar));
+		assert_eq!(value, Value::from(scalar));
 
-		let mut response = Response {
+		let mut response = IndexedResults {
 			results: to_map(vec![Ok(scalar.into())]),
-			..Response::new()
+			..IndexedResults::new()
 		};
 		let option: Option<_> = response.take(0).unwrap();
 		assert_eq!(option, Some(scalar));
 
-		let mut response = Response {
+		let mut response = IndexedResults {
 			results: to_map(vec![Ok(scalar.into())]),
-			..Response::new()
+			..IndexedResults::new()
 		};
 		let vec: Vec<bool> = response.take(0).unwrap();
 		assert_eq!(vec, vec![scalar]);
@@ -868,7 +870,7 @@ mod tests {
 
 	#[test]
 	fn take_preserves_order() {
-		let mut response = Response {
+		let mut response = IndexedResults {
 			results: to_map(vec![
 				Ok(0.into()),
 				Ok(1.into()),
@@ -879,7 +881,7 @@ mod tests {
 				Ok(6.into()),
 				Ok(7.into()),
 			]),
-			..Response::new()
+			..IndexedResults::new()
 		};
 		let Some(four): Option<i32> = response.take(4).unwrap() else {
 			panic!("query not found");
@@ -894,7 +896,7 @@ mod tests {
 		};
 		assert_eq!(zero, 0);
 		let one: Value = response.take(1).unwrap();
-		assert_eq!(one.into_inner(), val::Value::from(1));
+		assert_eq!(one, Value::from(1));
 	}
 
 	#[test]
@@ -902,27 +904,27 @@ mod tests {
 		let summary = Summary {
 			title: "Lorem Ipsum".to_owned(),
 		};
-		let value = to_value(summary.clone()).unwrap();
+		let value = summary.clone().into_value();
 
-		let mut response = Response {
-			results: to_map(vec![Ok(value.clone().into_inner())]),
-			..Response::new()
+		let mut response = IndexedResults {
+			results: to_map(vec![Ok(value.clone())]),
+			..IndexedResults::new()
 		};
 		let title: Value = response.take("title").unwrap();
-		assert_eq!(title.into_inner(), val::Value::from(summary.title.as_str()));
+		assert_eq!(title, Value::String(summary.title.clone()));
 
-		let mut response = Response {
-			results: to_map(vec![Ok(value.clone().into_inner())]),
-			..Response::new()
+		let mut response = IndexedResults {
+			results: to_map(vec![Ok(value.clone())]),
+			..IndexedResults::new()
 		};
 		let Some(title): Option<String> = response.take("title").unwrap() else {
 			panic!("title not found");
 		};
 		assert_eq!(title, summary.title);
 
-		let mut response = Response {
-			results: to_map(vec![Ok(value.into_inner())]),
-			..Response::new()
+		let mut response = IndexedResults {
+			results: to_map(vec![Ok(value)]),
+			..IndexedResults::new()
 		};
 		let vec: Vec<String> = response.take("title").unwrap();
 		assert_eq!(vec, vec![summary.title]);
@@ -931,11 +933,11 @@ mod tests {
 			title: "Lorem Ipsum".to_owned(),
 			body: "Lorem Ipsum Lorem Ipsum".to_owned(),
 		};
-		let value = to_value(article.clone()).unwrap();
+		let value = article.clone().into_value();
 
-		let mut response = Response {
-			results: to_map(vec![Ok(value.clone().into_inner())]),
-			..Response::new()
+		let mut response = IndexedResults {
+			results: to_map(vec![Ok(value.clone())]),
+			..IndexedResults::new()
 		};
 		let Some(title): Option<String> = response.take("title").unwrap() else {
 			panic!("title not found");
@@ -946,19 +948,19 @@ mod tests {
 		};
 		assert_eq!(body, article.body);
 
-		let mut response = Response {
-			results: to_map(vec![Ok(value.clone().into_inner())]),
-			..Response::new()
+		let mut response = IndexedResults {
+			results: to_map(vec![Ok(value.clone())]),
+			..IndexedResults::new()
 		};
 		let vec: Vec<String> = response.take("title").unwrap();
 		assert_eq!(vec, vec![article.title.clone()]);
 
-		let mut response = Response {
-			results: to_map(vec![Ok(value.into_inner())]),
-			..Response::new()
+		let mut response = IndexedResults {
+			results: to_map(vec![Ok(value)]),
+			..IndexedResults::new()
 		};
 		let value: Value = response.take("title").unwrap();
-		assert_eq!(value.into_inner(), val::Value::from(article.title));
+		assert_eq!(value, Value::String(article.title));
 	}
 
 	#[test]
@@ -967,20 +969,20 @@ mod tests {
 			title: "Lorem Ipsum".to_owned(),
 			body: "Lorem Ipsum Lorem Ipsum".to_owned(),
 		};
-		let value = to_value(article.clone()).unwrap();
+		let value = article.clone().into_value();
 
-		let mut response = Response {
-			results: to_map(vec![Ok(value.clone().into_inner())]),
-			..Response::new()
+		let mut response = IndexedResults {
+			results: to_map(vec![Ok(value.clone())]),
+			..IndexedResults::new()
 		};
 		let title: Vec<String> = response.take("title").unwrap();
 		assert_eq!(title, vec![article.title.clone()]);
 		let body: Vec<String> = response.take("body").unwrap();
 		assert_eq!(body, vec![article.body]);
 
-		let mut response = Response {
-			results: to_map(vec![Ok(value.clone().into_inner())]),
-			..Response::new()
+		let mut response = IndexedResults {
+			results: to_map(vec![Ok(value.clone())]),
+			..IndexedResults::new()
 		};
 		let vec: Vec<String> = response.take("title").unwrap();
 		assert_eq!(vec, vec![article.title]);
@@ -988,32 +990,29 @@ mod tests {
 
 	#[test]
 	fn take_partial_records() {
-		let mut response = Response {
-			results: to_map(vec![Ok(vec![val::Value::from(true), val::Value::from(false)].into())]),
-			..Response::new()
+		let mut response = IndexedResults {
+			results: to_map(vec![Ok(vec![Value::from(true), Value::from(false)].into())]),
+			..IndexedResults::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(
-			value.into_inner(),
-			val::Value::from(vec![val::Value::from(true), val::Value::from(false)])
-		);
+		assert_eq!(value, Value::from(vec![Value::from(true), Value::from(false)]));
 
-		let mut response = Response {
-			results: to_map(vec![Ok(vec![val::Value::from(true), val::Value::from(false)].into())]),
-			..Response::new()
+		let mut response = IndexedResults {
+			results: to_map(vec![Ok(vec![Value::from(true), Value::from(false)].into())]),
+			..IndexedResults::new()
 		};
 		let vec: Vec<bool> = response.take(0).unwrap();
 		assert_eq!(vec, vec![true, false]);
 
-		let mut response = Response {
-			results: to_map(vec![Ok(vec![val::Value::from(true), val::Value::from(false)].into())]),
-			..Response::new()
+		let mut response = IndexedResults {
+			results: to_map(vec![Ok(vec![Value::from(true), Value::from(false)].into())]),
+			..IndexedResults::new()
 		};
 
 		let Err(e) = response.take::<Option<bool>>(0) else {
 			panic!("silently dropping records not allowed");
 		};
-		let Ok(Error::LossyTake(Response {
+		let Ok(Error::LossyTake(IndexedResults {
 			results: mut map,
 			..
 		})) = e.downcast()
@@ -1022,10 +1021,7 @@ mod tests {
 		};
 
 		let records = map.swap_remove(&0).unwrap().1.unwrap();
-		assert_eq!(
-			records,
-			val::Value::from(vec![val::Value::from(true), val::Value::from(false)])
-		);
+		assert_eq!(records, Value::from(vec![Value::from(true), Value::from(false)]));
 	}
 
 	#[test]
@@ -1043,9 +1039,9 @@ mod tests {
 			Ok(7.into()),
 			Err(Error::DuplicateRequestId(0).into()),
 		];
-		let response = Response {
+		let response = IndexedResults {
 			results: to_map(response),
-			..Response::new()
+			..IndexedResults::new()
 		};
 		let Some(Error::ConnectionUninitialised) = response.check().unwrap_err().downcast_ref()
 		else {
@@ -1068,9 +1064,9 @@ mod tests {
 			Ok(7.into()),
 			Err(Error::DuplicateRequestId(0).into()),
 		];
-		let mut response = Response {
+		let mut response = IndexedResults {
 			results: to_map(response),
-			..Response::new()
+			..IndexedResults::new()
 		};
 		let errors = response.take_errors();
 		assert_eq!(response.num_statements(), 8);
@@ -1089,6 +1085,6 @@ mod tests {
 		};
 		assert_eq!(value, 2);
 		let value: Value = response.take(4).unwrap();
-		assert_eq!(value.into_inner(), val::Value::from(3));
+		assert_eq!(value, Value::from(3));
 	}
 }

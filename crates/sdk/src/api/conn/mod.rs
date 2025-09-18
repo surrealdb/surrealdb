@@ -1,16 +1,19 @@
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::time::Duration;
 
 use async_channel::{Receiver, Sender};
-use serde::de::DeserializeOwned;
+use indexmap::IndexMap;
+use rust_decimal::Decimal;
+use surrealdb_core::rpc::{DbResult, DbResultError, DbResultStats};
+use surrealdb_types::{Array, SurrealValue, Value};
 
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
-use crate::api::method::query::Response;
+use crate::api::method::query::IndexedResults;
 use crate::api::opt::Endpoint;
 use crate::api::{ExtraFeatures, Result, Surreal};
-use crate::core::val::Value as CoreValue;
-use crate::{Value, api, value};
+use crate::method::query::QueryResult;
 
 mod cmd;
 pub(crate) use cmd::Command;
@@ -32,7 +35,7 @@ pub(crate) struct Route {
 	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
 	pub(crate) request: RequestData,
 	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
-	pub(crate) response: Sender<Result<DbResponse>>,
+	pub(crate) response: Sender<Result<IndexedDbResults>>,
 }
 
 /// Message router
@@ -53,7 +56,7 @@ impl Router {
 	pub(crate) fn send(
 		&self,
 		command: Command,
-	) -> BoxFuture<'_, Result<Receiver<Result<DbResponse>>>> {
+	) -> BoxFuture<'_, Result<Receiver<Result<DbResult>>>> {
 		Box::pin(async move {
 			let id = self.next_id();
 			let (sender, receiver) = async_channel::bounded(1);
@@ -72,13 +75,13 @@ impl Router {
 	/// Receive responses for all methods except `query`
 	pub(crate) fn recv(
 		&self,
-		receiver: Receiver<Result<DbResponse>>,
-	) -> BoxFuture<'_, Result<CoreValue>> {
+		receiver: Receiver<Result<DbResult>>,
+	) -> BoxFuture<'_, Result<Value>> {
 		Box::pin(async move {
 			let response = receiver.recv().await?;
 			match response? {
-				DbResponse::Other(value) => Ok(value),
-				DbResponse::Query(..) => unreachable!(),
+				DbResult::Other(value) => Ok(value),
+				DbResult::Query(..) => unreachable!(),
 			}
 		})
 	}
@@ -86,13 +89,13 @@ impl Router {
 	/// Receive the response of the `query` method
 	pub(crate) fn recv_query(
 		&self,
-		receiver: Receiver<Result<DbResponse>>,
-	) -> BoxFuture<'_, Result<Response>> {
+		receiver: Receiver<Result<DbResult>>,
+	) -> BoxFuture<'_, Result<IndexedResults>> {
 		Box::pin(async move {
 			let response = receiver.recv().await?;
 			match response? {
-				DbResponse::Query(results) => Ok(results),
-				DbResponse::Other(..) => unreachable!(),
+				DbResult::Query(results) => Ok(results),
+				DbResult::Other(..) => unreachable!(),
 			}
 		})
 	}
@@ -100,25 +103,24 @@ impl Router {
 	/// Execute all methods except `query`
 	pub(crate) fn execute<R>(&self, command: Command) -> BoxFuture<'_, Result<R>>
 	where
-		R: DeserializeOwned,
+		R: SurrealValue,
 	{
 		Box::pin(async move {
 			let rx = self.send(command).await?;
-			let value = self.recv(rx).await?;
-			value::from_core_value(value)
+			self.recv(rx).await
 		})
 	}
 
 	/// Execute methods that return an optional single response
 	pub(crate) fn execute_opt<R>(&self, command: Command) -> BoxFuture<'_, Result<Option<R>>>
 	where
-		R: DeserializeOwned,
+		R: SurrealValue,
 	{
 		Box::pin(async move {
 			let rx = self.send(command).await?;
 			match self.recv(rx).await? {
-				CoreValue::None | CoreValue::Null => Ok(None),
-				value => value::from_core_value(value),
+				Value::None | Value::Null => Ok(None),
+				value => value,
 			}
 		})
 	}
@@ -126,14 +128,14 @@ impl Router {
 	/// Execute methods that return multiple responses
 	pub(crate) fn execute_vec<R>(&self, command: Command) -> BoxFuture<'_, Result<Vec<R>>>
 	where
-		R: DeserializeOwned,
+		R: SurrealValue,
 	{
 		Box::pin(async move {
 			let rx = self.send(command).await?;
 			let value = match self.recv(rx).await? {
-				CoreValue::None | CoreValue::Null => return Ok(Vec::new()),
-				CoreValue::Array(array) => CoreValue::Array(array),
-				value => vec![value].into(),
+				Value::None | Value::Null => return Ok(Vec::new()),
+				Value::Array(array) => Value::Array(array),
+				value => Value::Array(Array::from(vec![value])),
 			};
 			value::from_core_value(value)
 		})
@@ -144,10 +146,10 @@ impl Router {
 		Box::pin(async move {
 			let rx = self.send(command).await?;
 			match self.recv(rx).await? {
-				CoreValue::None | CoreValue::Null => Ok(()),
-				CoreValue::Array(array) if array.is_empty() => Ok(()),
+				Value::None | Value::Null => Ok(()),
+				Value::Array(array) if array.is_empty() => Ok(()),
 				value => Err(Error::FromValue {
-					value: Value::from_inner(value),
+					value,
 					error: "expected the database to return nothing".to_owned(),
 				}
 				.into()),
@@ -159,12 +161,12 @@ impl Router {
 	pub(crate) fn execute_value(&self, command: Command) -> BoxFuture<'_, Result<Value>> {
 		Box::pin(async move {
 			let rx = self.send(command).await?;
-			Ok(Value::from_inner(self.recv(rx).await?))
+			Ok(self.recv(rx).await?)
 		})
 	}
 
 	/// Execute the `query` method
-	pub(crate) fn execute_query(&self, command: Command) -> BoxFuture<'_, Result<Response>> {
+	pub(crate) fn execute_query(&self, command: Command) -> BoxFuture<'_, Result<IndexedResults>> {
 		Box::pin(async move {
 			let rx = self.send(command).await?;
 			self.recv_query(rx).await
@@ -174,11 +176,74 @@ impl Router {
 
 /// The database response sent from the router to the caller
 #[derive(Debug)]
-pub enum DbResponse {
+pub enum IndexedDbResults {
 	/// The response sent for the `query` method
-	Query(Response),
+	Query(IndexedResults),
 	/// The response sent for any method except `query`
-	Other(CoreValue),
+	Other(Value),
+}
+
+impl IndexedDbResults {
+	pub fn from_server_result(result: DbResult) -> Result<Self> {
+		match result {
+			DbResult::Other(value) => Ok(Self::Other(value)),
+			DbResult::Query(responses) => {
+				let mut results =
+					IndexMap::<usize, (DbResultStats, QueryResult)>::with_capacity(responses.len());
+
+				for (index, response) in responses.into_iter().enumerate() {
+					let stats = DbResultStats::default().with_execution_time(response.time);
+
+					// match response.result {
+					// 	Ok(value) => {
+					// 		map.insert(index, (stats, Ok(response.result)));
+					// 	}
+					// 	Status::Err => {
+					// 		map.insert(
+					// 			index,
+					// 			(stats, Err(Error::Query(response.result.as_string()).into())),
+					// 		);
+					// 	}
+					// }
+					results.insert(index, response.result.map(|value| (stats, value))?);
+				}
+
+				Ok(Self::Query(IndexedResults {
+					results,
+					live_queries: IndexMap::default(),
+				}))
+			}
+			// Live notifications don't call this method
+			DbResult::Live(..) => unreachable!(),
+		}
+	}
+}
+
+// Converts a debug representation of `std::time::Duration` back
+fn duration_from_str(duration: &str) -> Option<Duration> {
+	const NANOS_PER_SEC: i64 = 1_000_000_000;
+	const NANOS_PER_MILLI: i64 = 1_000_000;
+	const NANOS_PER_MICRO: i64 = 1_000;
+
+	let nanos = if let Some(duration) = duration.strip_suffix("ns") {
+		duration.parse().ok()?
+	} else if let Some(duration) = duration.strip_suffix("µs") {
+		let micros = duration.parse::<Decimal>().ok()?;
+		let multiplier = Decimal::try_new(NANOS_PER_MICRO, 0).ok()?;
+		micros.checked_mul(multiplier)?.to_u128()?
+	} else if let Some(duration) = duration.strip_suffix("ms") {
+		let millis = duration.parse::<Decimal>().ok()?;
+		let multiplier = Decimal::try_new(NANOS_PER_MILLI, 0).ok()?;
+		millis.checked_mul(multiplier)?.to_u128()?
+	} else {
+		let duration = duration.strip_suffix('s')?;
+		let secs = duration.parse::<Decimal>().ok()?;
+		let multiplier = Decimal::try_new(NANOS_PER_SEC, 0).ok()?;
+		secs.checked_mul(multiplier)?.to_u128()?
+	};
+	let secs = nanos.checked_div(NANOS_PER_SEC as u128)?;
+	let nanos = nanos % (NANOS_PER_SEC as u128);
+	Some(Duration::new(secs.try_into().ok()?, nanos.try_into().ok()?))
 }
 
 #[derive(Debug, Clone)]
@@ -194,5 +259,33 @@ pub trait Sealed: Sized + Send + Sync + 'static {
 	/// Connect to the server
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>>
 	where
-		Self: api::Connection;
+		Self: crate::api::Connection;
+}
+
+#[cfg(test)]
+mod tests {
+	use std::time::Duration;
+
+	#[test]
+	fn duration_from_str() {
+		let durations = vec![
+			Duration::ZERO,
+			Duration::from_nanos(1),
+			Duration::from_nanos(u64::MAX),
+			Duration::from_micros(1),
+			Duration::from_micros(u64::MAX),
+			Duration::from_millis(1),
+			Duration::from_millis(u64::MAX),
+			Duration::from_secs(1),
+			Duration::from_secs(u64::MAX),
+			Duration::MAX,
+		];
+
+		for duration in durations {
+			let string = format!("{duration:?}");
+			let parsed = super::duration_from_str(&string)
+				.unwrap_or_else(|| panic!("Duration {string} failed to parse"));
+			assert_eq!(duration, parsed, "Duration {string} not parsed correctly");
+		}
+	}
 }

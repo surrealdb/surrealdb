@@ -10,12 +10,12 @@ use super::invocation::ApiInvocation;
 use crate::err::Error;
 use crate::expr::Bytesize;
 use crate::rpc::format::{cbor, json, revision};
+use crate::types::PublicValue;
 use crate::val;
-use crate::val::Value;
 
 pub enum ApiBody {
 	Stream(Box<dyn Stream<Item = Result<Bytes, Box<dyn Display + Send + Sync>>> + Send + Unpin>),
-	Native(Value),
+	Native(PublicValue),
 }
 
 impl ApiBody {
@@ -29,7 +29,7 @@ impl ApiBody {
 		Self::Stream(Box::new(mapped_stream))
 	}
 
-	pub fn from_value(value: Value) -> Self {
+	pub fn from_value(value: PublicValue) -> Self {
 		Self::Native(value)
 	}
 
@@ -70,7 +70,7 @@ impl ApiBody {
 		self,
 		ctx: &InvocationContext,
 		invocation: &ApiInvocation,
-	) -> Result<Value, Error> {
+	) -> Result<PublicValue, Error> {
 		if let ApiBody::Native(value) = self {
 			let max = ctx.request_body_max.unwrap_or(Bytesize::MAX);
 			let size = std::mem::size_of_val(&value);
@@ -80,7 +80,8 @@ impl ApiBody {
 			}
 
 			if ctx.request_body_raw {
-				Ok(value.coerce_to::<val::Bytes>()?.into())
+				// Ok(value.coerce_to::<val::Bytes>()?.into())
+				todo!("STU")
 			} else {
 				Ok(value)
 			}
@@ -88,7 +89,7 @@ impl ApiBody {
 			let bytes = self.stream(ctx.request_body_max).await?;
 
 			if ctx.request_body_raw {
-				Ok(Value::Bytes(val::Bytes(bytes)))
+				Ok(PublicValue::Bytes(surrealdb_types::Bytes::new(bytes)))
 			} else {
 				let content_type =
 					invocation.headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok());
@@ -97,7 +98,7 @@ impl ApiBody {
 					Some("application/json") => json::decode(&bytes),
 					Some("application/cbor") => cbor::decode(&bytes),
 					Some("application/surrealdb") => revision::decode(&bytes),
-					_ => return Ok(Value::Bytes(crate::val::Bytes(bytes))),
+					_ => return Ok(PublicValue::Bytes(surrealdb_types::Bytes::new(bytes))),
 				};
 
 				parsed.map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))

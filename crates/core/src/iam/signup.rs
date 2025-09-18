@@ -21,8 +21,8 @@ use crate::iam::{Actor, Auth, Level, algorithm_to_jwt_algorithm};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::val::{Object, Value};
 use crate::types::{PublicObject, PublicValue, PublicVariables};
+use crate::val::{Object, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -45,7 +45,11 @@ impl From<SignupData> for Value {
 	}
 }
 
-pub async fn signup(kvs: &Datastore, session: &mut Session, vars: PublicVariables) -> Result<SignupData> {
+pub async fn signup(
+	kvs: &Datastore,
+	session: &mut Session,
+	vars: PublicVariables,
+) -> Result<SignupData> {
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));

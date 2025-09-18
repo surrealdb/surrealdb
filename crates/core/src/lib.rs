@@ -65,21 +65,12 @@ pub(crate) mod types {
 	//! Re-export the types from the types crate for internal use.
 
 	pub use surrealdb_types::{
-		Object as PublicObject,
-		Value as PublicValue,
-		Number as PublicNumber,
-		Datetime as PublicDatetime,
-		Duration as PublicDuration,
-		Uuid as PublicUuid,
-		RecordId as PublicRecordId,
-		RecordIdKey as PublicRecordIdKey,
-		File as PublicFile,
-		Range as PublicRange,
-		Regex as PublicRegex,
-		Bytes as PublicBytes,
-		Geometry as PublicGeometry,
-		Array as PublicArray,
-		Variables as PublicVariables,
+		Action as PublicAction, Array as PublicArray, Bytes as PublicBytes,
+		Datetime as PublicDatetime, Duration as PublicDuration, File as PublicFile,
+		Geometry as PublicGeometry, Notification as PublicNotification, Number as PublicNumber,
+		Object as PublicObject, Range as PublicRange, RecordId as PublicRecordId,
+		RecordIdKey as PublicRecordIdKey, Regex as PublicRegex, Uuid as PublicUuid,
+		Value as PublicValue, Variables as PublicVariables,
 	};
 }
 

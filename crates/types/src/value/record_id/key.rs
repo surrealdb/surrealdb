@@ -1,7 +1,8 @@
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug};
 
 use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::{Array, Number, Object, Range, RecordIdKeyRange, Uuid, Value};
 
 /// Represents a key component of a record identifier in SurrealDB
@@ -26,7 +27,6 @@ pub enum RecordIdKey {
 }
 
 impl RecordIdKey {
-
 	/// Returns if this key is a range.
 	pub fn is_range(&self) -> bool {
 		matches!(self, RecordIdKey::Range(_))
@@ -159,7 +159,7 @@ impl fmt::Display for RecordIdKey {
 		match self {
 			RecordIdKey::Number(n) => write!(f, "{n}"),
 			RecordIdKey::String(v) => write!(f, "{v}"),
-            RecordIdKey::Uuid(uuid) => std::fmt::Display::fmt(uuid, f),
+			RecordIdKey::Uuid(uuid) => std::fmt::Display::fmt(uuid, f),
 			RecordIdKey::Object(object) => object.fmt(f),
 			RecordIdKey::Array(array) => array.fmt(f),
 			RecordIdKey::Range(rid) => rid.fmt(f),

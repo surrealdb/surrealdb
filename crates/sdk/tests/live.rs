@@ -5,8 +5,8 @@ use anyhow::Result;
 use helpers::{new_ds, skip_ok};
 use surrealdb_core::dbs::{Action, Session, Variables};
 use surrealdb_core::expr::Kind;
-use surrealdb_core::val::RecordId;
 use surrealdb_core::{strand, syn};
+use surrealdb_types::RecordId;
 
 #[tokio::test]
 async fn live_permissions() -> Result<()> {

@@ -72,7 +72,6 @@ macro_rules! transparent_wrapper{
 	};
 }
 
-
 pub mod engine;
 pub mod err;
 #[cfg(feature = "protocol-http")]
@@ -82,7 +81,7 @@ pub mod opt;
 
 mod conn;
 
-pub use method::query::Response;
+pub use method::query::IndexedResults;
 
 use self::conn::Router;
 use self::err::Error;

@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use serde::de::DeserializeOwned;
+use surrealdb_types::{RecordIdKeyRange, SurrealValue};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -84,7 +84,7 @@ where
 impl<'r, Client, R> IntoFuture for Select<'r, Client, Option<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -95,7 +95,7 @@ where
 impl<'r, Client, R> IntoFuture for Select<'r, Client, Vec<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -108,7 +108,7 @@ where
 	C: Connection,
 {
 	/// Restricts the records selected to those in the specified range
-	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
+	pub fn range(mut self, range: impl Into<RecordIdKeyRange>) -> Self {
 		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
 		self
 	}
@@ -119,7 +119,7 @@ where
 	C: Connection,
 {
 	/// Restricts the records selected to those in the specified range
-	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
+	pub fn range(mut self, range: impl Into<RecordIdKeyRange>) -> Self {
 		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
 		self
 	}
@@ -128,7 +128,7 @@ where
 impl<'r, C, R> Select<'r, C, R>
 where
 	C: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	/// Turns a normal select query into a live query
 	///

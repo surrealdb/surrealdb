@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, HashMap}};
+use std::collections::{BTreeMap, HashMap};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -173,7 +173,7 @@ impl Object {
 	pub fn from_map(map: BTreeMap<String, Value>) -> Self {
 		Self(map)
 	}
-	
+
 	/// Get the inner BTreeMap<String, Value>
 	pub fn inner(&self) -> &BTreeMap<String, Value> {
 		&self.0

@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 use crate::err;
+use crate::rpc::DbResultError;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -38,6 +39,12 @@ impl From<anyhow::Error> for RpcError {
 			Some(Error::RealtimeDisabled) => RpcError::LqNotSuported,
 			_ => RpcError::InternalError(e),
 		}
+	}
+}
+
+impl From<DbResultError> for RpcError {
+	fn from(e: DbResultError) -> Self {
+		RpcError::InternalError(anyhow::anyhow!(e.to_string()))
 	}
 }
 

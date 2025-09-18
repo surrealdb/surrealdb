@@ -3,7 +3,7 @@ use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use rand::Rng;
-use surrealdb_core::val::{Array, Number, Value};
+use surrealdb_types::{Array, Number, Value};
 
 // Current implementation as of https://github.com/surrealdb/surrealdb/pull/6047
 // crates/core/src/expr/array.rs

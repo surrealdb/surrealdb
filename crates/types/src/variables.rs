@@ -6,11 +6,22 @@ use crate::{Object, Value};
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Variables(BTreeMap<String, Value>);
 
-
 impl Variables {
 	/// Create a new empty variables map.
 	pub fn new() -> Self {
 		Self(BTreeMap::new())
+	}
+
+	pub fn is_empty(&self) -> bool {
+		self.0.is_empty()
+	}
+
+	pub fn len(&self) -> usize {
+		self.0.len()
+	}
+
+	pub fn iter(&self) -> std::collections::btree_map::Iter<String, Value> {
+		self.0.iter()
 	}
 
 	/// Get a variable from the map.
@@ -26,6 +37,10 @@ impl Variables {
 	/// Remove a variable from the map.
 	pub fn remove(&mut self, key: &str) {
 		self.0.remove(key);
+	}
+
+	pub fn extend(&mut self, other: Variables) {
+		self.0.extend(other.0);
 	}
 }
 

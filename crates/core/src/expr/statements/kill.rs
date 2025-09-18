@@ -4,10 +4,11 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use crate::ctx::Context;
-use crate::dbs::{Action, Notification, Options};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Expr, FlowResultExt as _};
+use crate::types::{PublicAction, PublicNotification, PublicValue};
 use crate::val::{Uuid, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -75,11 +76,11 @@ impl KillStatement {
 			}
 		}
 		if let Some(chn) = opt.sender.as_ref() {
-			chn.send(Notification {
+			chn.send(PublicNotification {
 				id: lid.into(),
-				action: Action::Killed,
-				record: Value::None,
-				result: Value::None,
+				action: PublicAction::Killed,
+				record: PublicValue::None,
+				result: PublicValue::None,
 			})
 			.await?;
 		}

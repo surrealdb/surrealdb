@@ -3,7 +3,7 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 
 use serde::Serialize;
-use serde::de::DeserializeOwned;
+use surrealdb_types::{SurrealValue, Value};
 use uuid::Uuid;
 
 use super::validate_data;
@@ -13,7 +13,6 @@ use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
 use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
-use surrealdb_types::Value;
 
 /// A merge future
 #[derive(Debug)]
@@ -52,10 +51,10 @@ macro_rules! into_future {
 				upsert,
 				..
 			} = self;
-			let content = crate::api::value::to_core_value(content);
+			let content = content.into_value();
 			Box::pin(async move {
-				let content = match content? {
-					crate::core::val::Value::None | surrealdb_core::val::Value::Null => None,
+				let content = match content {
+					surrealdb_types::Value::None | surrealdb_types::Value::Null => None,
 					data => {
 						validate_data(
 							&data,
@@ -81,7 +80,7 @@ macro_rules! into_future {
 impl<'r, Client, D> IntoFuture for Merge<'r, Client, D, Value>
 where
 	Client: Connection,
-	D: Serialize + 'static,
+	D: SurrealValue + 'static,
 {
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -92,8 +91,8 @@ where
 impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, Option<R>>
 where
 	Client: Connection,
-	D: Serialize + 'static,
-	R: DeserializeOwned,
+	D: SurrealValue + 'static,
+	R: SurrealValue,
 {
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -104,8 +103,8 @@ where
 impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, Vec<R>>
 where
 	Client: Connection,
-	D: Serialize + 'static,
-	R: DeserializeOwned,
+	D: SurrealValue + 'static,
+	R: SurrealValue,
 {
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;

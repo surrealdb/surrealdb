@@ -1,8 +1,7 @@
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
 use revision::revisioned;
-
+use serde::{Deserialize, Serialize};
 
 /// Represents a file reference in SurrealDB
 ///
@@ -46,7 +45,6 @@ impl File {
 		&self.key
 	}
 }
-
 
 impl fmt::Display for File {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

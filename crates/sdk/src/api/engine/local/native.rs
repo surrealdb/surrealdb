@@ -6,6 +6,7 @@ use std::task::Poll;
 use async_channel::{Receiver, Sender};
 use futures::StreamExt;
 use futures::stream::poll_fn;
+use surrealdb_types::Variables;
 use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
 
@@ -14,7 +15,7 @@ use crate::api::engine::local::Db;
 use crate::api::method::BoxFuture;
 use crate::api::opt::{Endpoint, EndpointKind};
 use crate::api::{ExtraFeatures, Result, Surreal};
-use crate::core::dbs::{Session, Variables};
+use crate::core::dbs::Session;
 use crate::core::iam::Level;
 use crate::core::kvs::Datastore;
 use crate::core::options::EngineOptions;

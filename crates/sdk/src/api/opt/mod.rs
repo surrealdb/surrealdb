@@ -2,6 +2,7 @@
 
 use std::borrow::Cow;
 
+use anyhow::Context;
 use serde::Serialize;
 
 pub mod auth;
@@ -19,14 +20,13 @@ pub use endpoint::*;
 pub use export::*;
 pub use query::*;
 pub use resource::*;
-use serde_content::{Serializer, Value as Content};
+use surrealdb_types::{Array, Kind, Object, SurrealValue, Value};
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 pub use tls::*;
 
 type UnitOp<'a> = InnerOp<'a, ()>;
 
-#[derive(Debug, Serialize)]
-#[serde(tag = "op", rename_all = "lowercase")]
+#[derive(Debug)]
 enum InnerOp<'a, T> {
 	Add {
 		path: &'a str,
@@ -45,6 +45,115 @@ enum InnerOp<'a, T> {
 	},
 }
 
+impl<'a, T> SurrealValue for InnerOp<'a, T>
+where
+	T: SurrealValue,
+{
+	fn kind_of() -> Kind {
+		Kind::Object
+	}
+
+	fn is_value(value: &Value) -> bool {
+		matches!(value, Value::Object(_))
+	}
+
+	fn into_value(self) -> Value {
+		match self {
+			InnerOp::Add {
+				path,
+				value,
+			} => {
+				// { "op": "add", "path": "/biscuits/1", "value": { "name": "Ginger Nut" } }
+				let mut obj = Object::new();
+				obj.insert("op".to_string(), "add".to_string());
+				obj.insert("path".to_string(), path.to_string());
+				obj.insert("value".to_string(), value.into_value());
+				Value::Object(obj)
+			}
+			InnerOp::Remove {
+				path,
+			} => {
+				// { "op": "remove", "path": "/biscuits/1" }
+				let mut obj = Object::new();
+				obj.insert("op".to_string(), "remove".to_string());
+				obj.insert("path".to_string(), path.to_string());
+				Value::Object(obj)
+			}
+			InnerOp::Replace {
+				path,
+				value,
+			} => {
+				// { "op": "replace", "path": "/biscuits/1", "value": { "name": "Ginger Nut" } }
+				let mut obj = Object::new();
+				obj.insert("op".to_string(), "replace".to_string());
+				obj.insert("path".to_string(), path.to_string());
+				obj.insert("value".to_string(), value.into_value());
+				Value::Object(obj)
+			}
+			InnerOp::Change {
+				path,
+				value,
+			} => {
+				// { "op": "change", "path": "/biscuits/1", "value": "name" }
+				let mut obj = Object::new();
+				obj.insert("op".to_string(), "change".to_string());
+				obj.insert("path".to_string(), path.to_string());
+				obj.insert("value".to_string(), value.to_string());
+				Value::Object(obj)
+			}
+		}
+	}
+
+	fn from_value(value: Value) -> anyhow::Result<Self> {
+		let Value::Object(obj) = value else {
+			return Err(anyhow::anyhow!("Expected Object, got {:?}", value.value_kind()));
+		};
+		let op = obj.get("op").context("Key 'op' missing")?;
+		let op = op.as_string()?;
+
+		match &op {
+			"add" => {
+				let path = obj.get("path").context("Key 'path' missing")?;
+				let path = path.as_string()?;
+				let value = obj.get("value").context("Key 'value' missing")?;
+				let value = T::from_value(value)?;
+				Ok(InnerOp::Add {
+					path,
+					value,
+				})
+			}
+			"remove" => {
+				let path = obj.get("path").context("Key 'path' missing")?;
+				let path = path.as_string()?;
+				Ok(InnerOp::Remove {
+					path,
+				})
+			}
+			"replace" => {
+				let path = obj.get("path").context("Key 'path' missing")?;
+				let path = path.as_string()?;
+				let value = obj.get("value").context("Key 'value' missing")?;
+				let value = T::from_value(value)?;
+				Ok(InnerOp::Replace {
+					path,
+					value,
+				})
+			}
+			"change" => {
+				let path = obj.get("path").context("Key 'path' missing")?;
+				let path = path.as_string()?;
+				let value = obj.get("value").context("Key 'value' missing")?;
+				let value = value.as_string()?;
+				Ok(InnerOp::Change {
+					path,
+					value,
+				})
+			}
+			_ => Err(anyhow::anyhow!("Invalid operation '{op}'")),
+		}
+	}
+}
+
 /// A [JSON Patch] operation
 ///
 /// From the official website:
@@ -56,7 +165,7 @@ enum InnerOp<'a, T> {
 /// [JSON Patch]: https://jsonpatch.com/
 #[derive(Debug)]
 #[must_use]
-pub struct PatchOp(pub(crate) serde_content::Result<Content<'static>>);
+pub struct PatchOp(pub(crate) Value);
 
 impl PatchOp {
 	/// Adds a value to an object or inserts it into an array.
@@ -75,12 +184,15 @@ impl PatchOp {
 	/// ```
 	pub fn add<T>(path: &str, value: T) -> Self
 	where
-		T: Serialize,
+		T: SurrealValue,
 	{
-		Self(Serializer::new().serialize(InnerOp::Add {
-			path,
-			value,
-		}))
+		Self(
+			InnerOp::Add {
+				path,
+				value,
+			}
+			.into_value(),
+		)
 	}
 
 	/// Removes a value from an object or array.
@@ -102,9 +214,12 @@ impl PatchOp {
 	/// # ;
 	/// ```
 	pub fn remove(path: &str) -> Self {
-		Self(Serializer::new().serialize(UnitOp::Remove {
-			path,
-		}))
+		Self(
+			InnerOp::Remove {
+				path,
+			}
+			.into_value(),
+		)
 	}
 
 	/// Replaces a value.
@@ -120,20 +235,26 @@ impl PatchOp {
 	/// ```
 	pub fn replace<T>(path: &str, value: T) -> Self
 	where
-		T: Serialize,
+		T: SurrealValue,
 	{
-		Self(Serializer::new().serialize(InnerOp::Replace {
-			path,
-			value,
-		}))
+		Self(
+			InnerOp::Replace {
+				path,
+				value,
+			}
+			.into_value(),
+		)
 	}
 
 	/// Changes a value
 	pub fn change(path: &str, diff: String) -> Self {
-		Self(Serializer::new().serialize(UnitOp::Change {
-			path,
-			value: diff,
-		}))
+		Self(
+			InnerOp::Change {
+				path,
+				value: diff,
+			}
+			.into_value(),
+		)
 	}
 }
 
@@ -144,9 +265,9 @@ pub struct PatchOps(Vec<PatchOp>);
 
 impl From<PatchOps> for PatchOp {
 	fn from(ops: PatchOps) -> Self {
-		let mut merged = PatchOp(Ok(Content::Seq(Vec::with_capacity(ops.0.len()))));
+		let mut merged = PatchOp(Value::Array(Array::with_capacity(ops.0.len())));
 		for PatchOp(result) in ops.0 {
-			if let Ok(Content::Seq(value)) = &mut merged.0 {
+			if let Value::Array(value) = &mut merged.0 {
 				match result {
 					Ok(op) => value.push(op),
 					Err(error) => {

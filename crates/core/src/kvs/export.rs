@@ -4,6 +4,7 @@ use anyhow::Result;
 use async_channel::Sender;
 use chrono::TimeZone;
 use chrono::prelude::Utc;
+use surrealdb_types::{Array, Kind, RecordId, SurrealValue, Value};
 
 use super::Transaction;
 use crate::catalog::providers::{
@@ -19,9 +20,8 @@ use crate::key::record;
 use crate::kvs::KVValue;
 use crate::sql::ToSql;
 use crate::val::record::Record;
-use crate::val::{RecordId, Strand, Value};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, SurrealValue)]
 pub struct Config {
 	pub users: bool,
 	pub accesses: bool,
@@ -95,29 +95,6 @@ impl Config {
 	}
 }
 
-impl From<Config> for Value {
-	fn from(config: Config) -> Value {
-		let obj = map!(
-			"users" => config.users.into(),
-			"accesses" => config.accesses.into(),
-			"params" => config.params.into(),
-			"functions" => config.functions.into(),
-			"analyzers" => config.analyzers.into(),
-			"versions" => config.versions.into(),
-			"records" => config.records.into(),
-			"sequences" => config.sequences.into(),
-			"tables" => match config.tables {
-				TableConfig::All => true.into(),
-				TableConfig::None => false.into(),
-				// TODO: Null byte validity
-				TableConfig::Some(v) => v.into_iter().map(|x| Value::Strand(Strand::new(x).unwrap())).collect::<Vec<_>>().into()
-			},
-		);
-
-		obj.into()
-	}
-}
-
 #[derive(Clone, Debug, Default)]
 pub enum TableConfig {
 	#[default]
@@ -163,7 +140,56 @@ impl TryFrom<&Value> for TableConfig {
 				.iter()
 				.cloned()
 				.map(|v| match v {
-					Value::Strand(str) => Ok(str.into_string()),
+					Value::String(str) => Ok(str),
+					v => Err(anyhow::Error::new(Error::InvalidExportConfig(
+						v.clone(),
+						"a string".into(),
+					))),
+				})
+				.collect::<Result<Vec<String>>>()
+				.map(TableConfig::Some),
+			v => Err(anyhow::Error::new(Error::InvalidExportConfig(
+				v.to_owned(),
+				"a bool, none, null or array<string>".into(),
+			))),
+		}
+	}
+}
+
+impl SurrealValue for TableConfig {
+	fn kind_of() -> Kind {
+		Kind::Object
+	}
+
+	fn is_value(value: &Value) -> bool {
+		matches!(value, Value::Bool(_) | Value::None | Value::Null | Value::Array(_))
+	}
+
+	fn into_value(self) -> Value {
+		match self {
+			TableConfig::All => Value::Bool(true),
+			TableConfig::None => Value::Bool(false),
+			TableConfig::Some(v) => Value::Array(Array::from_values(
+				v.into_iter().map(|x| Value::String(x)).collect::<Vec<_>>(),
+			)),
+		}
+	}
+
+	fn from_value(value: Value) -> anyhow::Result<Self> {
+		match value {
+			Value::Bool(b) => {
+				if b {
+					Ok(TableConfig::All)
+				} else {
+					Ok(TableConfig::None)
+				}
+			}
+			Value::None | Value::Null => Ok(TableConfig::None),
+			Value::Array(v) => v
+				.iter()
+				.cloned()
+				.map(|v| match v {
+					Value::String(str) => Ok(str),
 					v => Err(anyhow::Error::new(Error::InvalidExportConfig(
 						v.clone(),
 						"a string".into(),
@@ -473,51 +499,52 @@ impl Transaction {
 		is_tombstone: Option<bool>,
 		version: Option<u64>,
 	) -> String {
-		// Inject the id field into the document before processing.
-		let rid = RecordId {
-			table: k.tb.into_owned(),
-			key: k.id,
-		};
-		record.data.to_mut().def(&rid);
-		// Match on the value to determine if it is a graph edge record or a normal
-		// record.
-		match (record.is_edge(), record.data.as_ref().pick(&*IN), record.data.as_ref().pick(&*OUT))
-		{
-			// If the value is a graph edge record (indicated by EDGE, IN, and OUT fields):
-			(true, Value::RecordId(_), Value::RecordId(_)) => {
-				if let Some(version) = version {
-					// If a version exists, format the value as an INSERT RELATION VERSION command.
-					let ts = Utc.timestamp_nanos(version as i64);
-					let sql =
-						format!("INSERT RELATION {} VERSION d'{:?}';", record.data.as_ref(), ts);
-					records_relate.push(sql);
-					String::new()
-				} else {
-					// If no version exists, push the value to the records_relate vector.
-					records_relate.push(record.data.as_ref().to_string());
-					String::new()
-				}
-			}
-			// If the value is a normal record:
-			_ => {
-				if let Some(is_tombstone) = is_tombstone {
-					if is_tombstone {
-						// If the record is a tombstone, format it as a DELETE command.
-						format!("DELETE {}:{};", rid.table, rid.key)
-					} else {
-						// If the record is not a tombstone and a version exists, format it as an
-						// INSERT VERSION command.
-						let ts = Utc.timestamp_nanos(version.unwrap() as i64);
-						format!("INSERT {} VERSION d'{:?}';", record.data.as_ref(), ts)
-					}
-				} else {
-					// If no tombstone or version information is provided, push the value to the
-					// records_normal vector.
-					records_normal.push(record.data.as_ref().to_string());
-					String::new()
-				}
-			}
-		}
+		todo!("STU")
+		// // Inject the id field into the document before processing.
+		// let rid = RecordId {
+		// 	table: k.tb.into_owned(),
+		// 	key: k.id,
+		// };
+		// record.data.to_mut().def(&rid);
+		// // Match on the value to determine if it is a graph edge record or a normal
+		// // record.
+		// match (record.is_edge(), record.data.as_ref().pick(&*IN),
+		// record.data.as_ref().pick(&*OUT)) {
+		// 	// If the value is a graph edge record (indicated by EDGE, IN, and OUT fields):
+		// 	(true, Value::RecordId(_), Value::RecordId(_)) => {
+		// 		if let Some(version) = version {
+		// 			// If a version exists, format the value as an INSERT RELATION VERSION command.
+		// 			let ts = Utc.timestamp_nanos(version as i64);
+		// 			let sql =
+		// 				format!("INSERT RELATION {} VERSION d'{:?}';", record.data.as_ref(), ts);
+		// 			records_relate.push(sql);
+		// 			String::new()
+		// 		} else {
+		// 			// If no version exists, push the value to the records_relate vector.
+		// 			records_relate.push(record.data.as_ref().to_string());
+		// 			String::new()
+		// 		}
+		// 	}
+		// 	// If the value is a normal record:
+		// 	_ => {
+		// 		if let Some(is_tombstone) = is_tombstone {
+		// 			if is_tombstone {
+		// 				// If the record is a tombstone, format it as a DELETE command.
+		// 				format!("DELETE {}:{};", rid.table, rid.key)
+		// 			} else {
+		// 				// If the record is not a tombstone and a version exists, format it as an
+		// 				// INSERT VERSION command.
+		// 				let ts = Utc.timestamp_nanos(version.unwrap() as i64);
+		// 				format!("INSERT {} VERSION d'{:?}';", record.data.as_ref(), ts)
+		// 			}
+		// 		} else {
+		// 			// If no tombstone or version information is provided, push the value to the
+		// 			// records_normal vector.
+		// 			records_normal.push(record.data.as_ref().to_string());
+		// 			String::new()
+		// 		}
+		// 	}
+		// }
 	}
 
 	/// Exports versioned data to the provided channel.

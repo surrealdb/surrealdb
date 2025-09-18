@@ -8,8 +8,8 @@ use surrealdb_core::dbs::Session;
 use surrealdb_core::err::Error;
 use surrealdb_core::expr::{Ident, Part};
 use surrealdb_core::iam::{Level, Role};
-use surrealdb_core::val::Value;
 use surrealdb_core::{strand, syn};
+use surrealdb_types::Value;
 use test_log::test;
 use tracing::info;
 

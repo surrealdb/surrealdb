@@ -4,8 +4,8 @@ use surrealdb::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::err::Error;
 use surrealdb_core::sql::{Expr, FunctionCall};
-use surrealdb_core::val::{Array, Number, Table, Value};
 use surrealdb_core::{sql, strand, syn};
+use surrealdb_types::{Array, Number, Table, Value};
 
 use crate::helpers::Test;
 

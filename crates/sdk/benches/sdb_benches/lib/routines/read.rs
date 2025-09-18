@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::val::RecordIdKey;
+use surrealdb_types::RecordIdKey;
 use tokio::runtime::Runtime;
 use tokio::task::JoinSet;
 

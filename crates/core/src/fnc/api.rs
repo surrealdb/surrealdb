@@ -11,6 +11,7 @@ use crate::catalog::providers::ApiProvider;
 use crate::catalog::{ApiDefinition, ApiMethod};
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::types::{PublicObject, PublicValue};
 use crate::val::{Object, Value};
 
 pub async fn invoke(
@@ -58,11 +59,12 @@ pub async fn invoke(
 			headers,
 		};
 
-		match invocation.invoke_with_context(stk, ctx, opt, api, ApiBody::from_value(body)).await {
-			Ok(Some(v)) => Ok(v.0.into_response_value()?),
-			Err(e) => Err(e),
-			_ => Ok(Value::None),
-		}
+		todo!("STU")
+		// match invocation.invoke_with_context(stk, ctx, opt, api, ApiBody::from_value(body)).await
+		// { 	Ok(Some(v)) => Ok(v.0.into_response_value()?),
+		// 	Err(e) => Err(e),
+		// 	_ => Ok(Value::None),
+		// }
 	} else {
 		Ok(Value::None)
 	}

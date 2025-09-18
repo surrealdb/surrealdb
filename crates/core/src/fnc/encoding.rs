@@ -48,21 +48,23 @@ pub mod cbor {
 	use crate::val::{Bytes, Value};
 
 	pub fn encode((arg,): (Value,)) -> Result<Value> {
-		let val = cbor::encode(arg).map_err(|_| Error::InvalidArguments {
-			name: "encoding::cbor::encode".to_owned(),
-			message: "Value could not be encoded into CBOR".to_owned(),
-		})?;
+		todo!("STU")
+		// let val = cbor::encode(arg).map_err(|_| Error::InvalidArguments {
+		// 	name: "encoding::cbor::encode".to_owned(),
+		// 	message: "Value could not be encoded into CBOR".to_owned(),
+		// })?;
 
-		Ok(Value::Bytes(Bytes(val)))
+		// Ok(Value::Bytes(Bytes(val)))
 	}
 
 	pub fn decode((arg,): (Bytes,)) -> Result<Value> {
-		cbor::decode(arg.as_slice())
-			.map_err(|_| Error::InvalidArguments {
-				name: "encoding::cbor::decode".to_owned(),
-				message: "invalid cbor".to_owned(),
-			})
-			.map_err(anyhow::Error::new)
+		todo!("STU")
+		// cbor::decode(arg.as_slice())
+		// 	.map_err(|_| Error::InvalidArguments {
+		// 		name: "encoding::cbor::decode".to_owned(),
+		// 		message: "invalid cbor".to_owned(),
+		// 	})
+		// 	.map_err(anyhow::Error::new)
 	}
 }
 

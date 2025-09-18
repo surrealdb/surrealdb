@@ -40,7 +40,7 @@ impl Array {
 	pub fn from_values(values: Vec<Value>) -> Self {
 		Self(values)
 	}
-	
+
 	/// Get the inner Vec<Value>
 	pub fn inner(&self) -> &Vec<Value> {
 		&self.0

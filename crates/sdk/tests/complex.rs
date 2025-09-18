@@ -6,7 +6,7 @@ use surrealdb::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::err::Error;
 use surrealdb_core::syn;
-use surrealdb_core::val::Value;
+use surrealdb_types::Value;
 
 /* Removed because of <future> removal, not yet relevant for the initial COMPUTED implementation.
  * Once we start to analyze query dependencies up front we can error on cyclic dependencies again.

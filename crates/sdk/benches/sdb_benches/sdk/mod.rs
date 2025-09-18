@@ -5,7 +5,7 @@ use criterion::{Criterion, Throughput};
 use serde::{Deserialize, Serialize};
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
-use surrealdb_core::val::RecordIdKey;
+use surrealdb_types::RecordIdKey;
 
 mod routines;
 

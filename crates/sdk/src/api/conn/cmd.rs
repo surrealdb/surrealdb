@@ -7,17 +7,17 @@ use bincode::Options;
 use revision::Revisioned;
 use serde::Serialize;
 use serde::ser::SerializeMap as _;
+use surrealdb_core::expr::Expr;
+#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
+#[allow(unused_imports)]
+use surrealdb_types::{Array, Object, Value};
+use surrealdb_types::{Notification as CoreNotification, Variables};
 use uuid::Uuid;
 
 use super::MlExportConfig;
 use crate::Result;
-use crate::core::dbs::Notification;
 use crate::core::expr::LogicalPlan;
 use crate::core::kvs::export::Config as DbExportConfig;
-#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-use crate::core::val::Table as CoreTable;
-#[allow(unused_imports)]
-use crate::core::val::{Array as CoreArray, Object as CoreObject, Value as CoreValue};
 use crate::opt::Resource;
 
 #[derive(Debug, Clone)]
@@ -28,10 +28,10 @@ pub(crate) enum Command {
 		database: Option<String>,
 	},
 	Signup {
-		credentials: CoreObject,
+		credentials: Object,
 	},
 	Signin {
-		credentials: CoreObject,
+		credentials: Object,
 	},
 	Authenticate {
 		token: String,
@@ -40,39 +40,39 @@ pub(crate) enum Command {
 	Create {
 		txn: Option<Uuid>,
 		what: Resource,
-		data: Option<CoreValue>,
+		data: Option<Value>,
 	},
 	Upsert {
 		txn: Option<Uuid>,
 		what: Resource,
-		data: Option<CoreValue>,
+		data: Option<Value>,
 	},
 	Update {
 		txn: Option<Uuid>,
 		what: Resource,
-		data: Option<CoreValue>,
+		data: Option<Value>,
 	},
 	Insert {
 		txn: Option<Uuid>,
 		// inserts can only be on a table.
 		what: Option<String>,
-		data: CoreValue,
+		data: Value,
 	},
 	InsertRelation {
 		txn: Option<Uuid>,
 		what: Option<String>,
-		data: CoreValue,
+		data: Value,
 	},
 	Patch {
 		txn: Option<Uuid>,
 		what: Resource,
-		data: Option<CoreValue>,
+		data: Option<Value>,
 		upsert: bool,
 	},
 	Merge {
 		txn: Option<Uuid>,
 		what: Resource,
-		data: Option<CoreValue>,
+		data: Option<Value>,
 		upsert: bool,
 	},
 	Select {
@@ -86,12 +86,12 @@ pub(crate) enum Command {
 	Query {
 		txn: Option<Uuid>,
 		query: LogicalPlan,
-		variables: CoreObject,
+		variables: Variables,
 	},
 	RawQuery {
 		txn: Option<Uuid>,
 		query: Cow<'static, str>,
-		variables: CoreObject,
+		variables: Variables,
 	},
 	ExportFile {
 		path: PathBuf,
@@ -119,14 +119,14 @@ pub(crate) enum Command {
 	Version,
 	Set {
 		key: String,
-		value: CoreValue,
+		value: Value,
 	},
 	Unset {
 		key: String,
 	},
 	SubscribeLive {
 		uuid: Uuid,
-		notification_sender: Sender<Notification>,
+		notification_sender: Sender<CoreNotification>,
 	},
 	Kill {
 		uuid: Uuid,
@@ -134,15 +134,16 @@ pub(crate) enum Command {
 	Run {
 		name: String,
 		version: Option<String>,
-		args: CoreArray,
+		args: Array,
 	},
 }
 
 impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
+		use surrealdb_types::Uuid;
+
 		use crate::core::expr::{Data, Output, UpdateStatement, UpsertStatement};
-		use crate::core::val::{self, Strand};
 		use crate::engine::resource_to_exprs;
 
 		let res = match self {
@@ -151,12 +152,8 @@ impl Command {
 				database,
 			} => {
 				// TODO: Null byte validity
-				let namespace = namespace
-					.map(|n| unsafe { Strand::new_unchecked(n) }.into())
-					.unwrap_or(CoreValue::None);
-				let database = database
-					.map(|d| unsafe { Strand::new_unchecked(d) }.into())
-					.unwrap_or(CoreValue::None);
+				let namespace = namespace.map(|n| n.into()).unwrap_or(Value::None);
+				let database = database.map(|d| d.into()).unwrap_or(Value::None);
 				RouterRequest {
 					id,
 					method: "use",
@@ -169,7 +166,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "signup",
-				params: Some(vec![CoreValue::from(credentials)].into()),
+				params: Some(vec![Value::from(credentials)].into()),
 				transaction: None,
 			},
 			Command::Signin {
@@ -177,7 +174,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "signin",
-				params: Some(vec![CoreValue::from(credentials)].into()),
+				params: Some(vec![Value::from(credentials)].into()),
 				transaction: None,
 			},
 			Command::Authenticate {
@@ -185,7 +182,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "authenticate",
-				params: Some(vec![CoreValue::from(token)].into()),
+				params: Some(vec![Value::from(token)].into()),
 				transaction: None,
 			},
 			Command::Invalidate => RouterRequest {
@@ -254,12 +251,8 @@ impl Command {
 				data,
 			} => {
 				let table = match what {
-					Some(w) => {
-						// TODO: Null byte validity
-						let table = unsafe { CoreTable::new_unchecked(w) };
-						CoreValue::from(table)
-					}
-					None => CoreValue::None,
+					Some(table) => Value::String(table),
+					None => Value::None,
 				};
 
 				let params = vec![table, data];
@@ -277,12 +270,8 @@ impl Command {
 				data,
 			} => {
 				let table = match what {
-					Some(w) => {
-						// TODO: Null byte validity
-						let table = unsafe { CoreTable::new_unchecked(w) };
-						CoreValue::from(table)
-					}
-					None => CoreValue::None,
+					Some(table) => Value::String(table),
+					None => Value::None,
 				};
 				let params = vec![table, data];
 
@@ -305,7 +294,7 @@ impl Command {
 						only: false,
 						what: resource_to_exprs(what),
 						with: None,
-						data: data.map(|x| Data::PatchExpression(x.into_literal())),
+						data: data.map(|x| Data::PatchExpression(Expr::from_public_value(x))),
 						cond: None,
 						output: Some(Output::After),
 						timeout: None,
@@ -318,7 +307,7 @@ impl Command {
 						only: false,
 						what: resource_to_exprs(what),
 						with: None,
-						data: data.map(|x| Data::PatchExpression(x.into_literal())),
+						data: data.map(|x| Data::PatchExpression(Expr::from_public_value(x))),
 						cond: None,
 						output: Some(Output::After),
 						timeout: None,
@@ -327,11 +316,9 @@ impl Command {
 					};
 					expr.to_string()
 				};
-				//TODO: Null byte validity
-				let query = unsafe { Strand::new_unchecked(query) };
 
-				let variables = val::Object::default();
-				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
+				let variables = surrealdb_types::Object::default();
+				let params: Vec<Value> = vec![query.into(), variables.into()];
 
 				RouterRequest {
 					id,
@@ -352,7 +339,7 @@ impl Command {
 						only: false,
 						what: resource_to_exprs(what),
 						with: None,
-						data: data.map(|x| Data::MergeExpression(x.into_literal())),
+						data: data.map(|x| Data::MergeExpression(Expr::from_public_value(x))),
 						cond: None,
 						output: Some(Output::After),
 						timeout: None,
@@ -365,7 +352,7 @@ impl Command {
 						only: false,
 						what: resource_to_exprs(what),
 						with: None,
-						data: data.map(|x| Data::MergeExpression(x.into_literal())),
+						data: data.map(|x| Data::MergeExpression(Expr::from_public_value(x))),
 						cond: None,
 						output: Some(Output::After),
 						timeout: None,
@@ -374,16 +361,14 @@ impl Command {
 					};
 					expr.to_string()
 				};
-				//TODO: Null byte validity
-				let query = unsafe { Strand::new_unchecked(query) };
 
-				let variables = val::Object::default();
-				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
+				let variables = Object::default();
+				let params: Vec<Value> = vec![Value::String(query), Value::Object(variables)];
 
 				RouterRequest {
 					id,
 					method: "query",
-					params: Some(params.into()),
+					params: Some(Value::Array(params)),
 					transaction: txn,
 				}
 			}
@@ -394,7 +379,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "select",
-				params: Some(CoreValue::Array(vec![what.into_core_value()].into())),
+				params: Some(Value::Array(vec![what.into_core_value()].into())),
 				transaction: txn,
 			},
 			Command::Delete {
@@ -404,7 +389,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "delete",
-				params: Some(CoreValue::Array(vec![what.into_core_value()].into())),
+				params: Some(Value::Array(vec![what.into_core_value()].into())),
 				transaction: txn,
 			},
 			Command::Query {
@@ -413,12 +398,14 @@ impl Command {
 				variables,
 			} => {
 				// TODO: Null byte validity
-				let query = unsafe { Strand::new_unchecked(query.to_string()) };
-				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
+				// TODO: STU: LogicalPlan->to_string()??? - seems wrong.
+				let query = query.to_string();
+				let params: Vec<Value> =
+					vec![Value::String(query), Value::Object(variables.into())];
 				RouterRequest {
 					id,
 					method: "query",
-					params: Some(params.into()),
+					params: Some(Value::Array(params)),
 					transaction: txn,
 				}
 			}
@@ -427,11 +414,12 @@ impl Command {
 				query,
 				variables,
 			} => {
-				let params: Vec<CoreValue> = vec![query.into_owned().into(), variables.into()];
+				let params: Vec<Value> =
+					vec![Value::String(query.into_owned()), Value::Object(variables.into())];
 				RouterRequest {
 					id,
 					method: "query",
-					params: Some(params.into()),
+					params: Some(Value::Array(params)),
 					transaction: txn,
 				}
 			}
@@ -471,7 +459,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "let",
-				params: Some(CoreValue::from(vec![CoreValue::from(key), value])),
+				params: Some(Value::from(vec![Value::from(key), value])),
 				transaction: None,
 			},
 			Command::Unset {
@@ -479,7 +467,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "unset",
-				params: Some(CoreValue::from(vec![CoreValue::from(key)])),
+				params: Some(Value::from(vec![Value::from(key)])),
 				transaction: None,
 			},
 			Command::SubscribeLive {
@@ -490,7 +478,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "kill",
-				params: Some(CoreValue::from(vec![CoreValue::from(val::Uuid(uuid))])),
+				params: Some(Value::from(vec![Value::Uuid(Uuid(uuid))])),
 				transaction: None,
 			},
 			Command::Run {
@@ -499,15 +487,11 @@ impl Command {
 				args,
 			} => {
 				// TODO: Null byte validity
-				let version = version
-					.map(|x| unsafe { Strand::new_unchecked(x) }.into())
-					.unwrap_or(CoreValue::None);
+				let version = version.map(|x| Value::String(x)).unwrap_or(Value::None);
 				RouterRequest {
 					id,
 					method: "run",
-					params: Some(
-						vec![CoreValue::from(name), version, CoreValue::Array(args)].into(),
-					),
+					params: Some(vec![Value::String(name), version, Value::Array(args)]),
 					transaction: None,
 				}
 			}
@@ -559,7 +543,7 @@ impl Command {
 pub(crate) struct RouterRequest {
 	id: Option<i64>,
 	method: &'static str,
-	params: Option<CoreValue>,
+	params: Option<Value>,
 	#[allow(dead_code)]
 	transaction: Option<Uuid>,
 }
@@ -776,10 +760,10 @@ mod test {
 	use std::io::Cursor;
 
 	use revision::Revisioned;
+	use surrealdb_types::{Number, Value};
 	use uuid::Uuid;
 
 	use super::RouterRequest;
-	use crate::core::val::{Number, Value};
 
 	fn assert_converts<S, D, I>(req: &RouterRequest, s: S, d: D)
 	where
@@ -799,8 +783,8 @@ mod test {
 			}),
 			req.id
 		);
-		let Some(Value::Strand(x)) = obj.get("method") else {
-			panic!("invalid method field: {}", obj)
+		let Some(Value::String(x)) = obj.get("method") else {
+			panic!("invalid method field: {obj:?}")
 		};
 		assert_eq!(x.as_str(), req.method);
 
@@ -812,7 +796,10 @@ mod test {
 		let request = RouterRequest {
 			id: Some(1234),
 			method: "request",
-			params: Some(vec![Value::from(1234i64), Value::from("request")].into()),
+			params: Some(Value::Array(vec![
+				Value::Number(Number::Int(1234i64)),
+				Value::String("request"),
+			])),
 			transaction: Some(Uuid::new_v4()),
 		};
 

@@ -23,6 +23,7 @@ compile_error!("The `ml` feature is not supported on Wasm.");
 extern crate tracing;
 
 mod api;
+mod notification;
 
 #[doc(hidden)]
 /// Channels for receiving a SurrealQL database export
@@ -36,18 +37,13 @@ pub mod error {
 	pub use crate::core::err::Error as Db;
 }
 
+use surrealdb_types::{Bytes, Datetime, Number, Object, RecordId, RecordIdKey, Value};
+
 #[cfg(feature = "protocol-http")]
 #[doc(hidden)]
 pub use crate::api::headers;
 #[doc(inline)]
-pub use crate::api::{
-	Connect, Connection, Response, Surreal, engine, method, opt,
-	value::{
-		self, Action, Notification,
-	},
-};
-
-use surrealdb_types::{Object, Bytes, Datetime, Value, Number, RecordId, RecordIdKey};
+pub use crate::api::{Connect, Connection, IndexedResults, Surreal, engine, method, opt};
 
 /// A specialized `Result` type
 pub type Result<T> = anyhow::Result<T>;

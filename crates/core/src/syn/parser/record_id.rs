@@ -253,9 +253,10 @@ impl Parser<'_> {
 						Ordering::Less => Ok(RecordIdKeyLit::Number(-(number.value as i64))),
 						Ordering::Equal => Ok(RecordIdKeyLit::Number(i64::MIN)),
 						// Safety: Parser guarentees no null bytes present in string.
-						Ordering::Greater => Ok(RecordIdKeyLit::String(
-							format!("-{}", self.lexer.span_str(number.span))
-						)),
+						Ordering::Greater => Ok(RecordIdKeyLit::String(format!(
+							"-{}",
+							self.lexer.span_str(number.span)
+						))),
 					}
 				} else {
 					// Safety: Parser guarentees no null bytes present in string.

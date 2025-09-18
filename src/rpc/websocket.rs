@@ -26,7 +26,7 @@ use crate::core::dbs::Session;
 use crate::core::kvs::Datastore;
 use crate::core::mem::ALLOC;
 use crate::core::rpc::format::Format;
-use crate::core::rpc::{Data, Method, RpcContext, RpcProtocolV1, RpcProtocolV2};
+use crate::core::rpc::{DbResult, Method, RpcContext, RpcProtocolV1, RpcProtocolV2};
 use crate::core::val::{self, Array, Strand, Value};
 use crate::rpc::CONN_CLOSED_ERR;
 use crate::rpc::failure::Failure;
@@ -410,7 +410,7 @@ impl Websocket {
 		txn: Option<Uuid>,
 		method: Method,
 		params: Array,
-	) -> Result<Data, Failure> {
+	) -> Result<DbResult, Failure> {
 		debug!("Process RPC request");
 		// Check that the method is a valid method
 		if !method.is_valid() {
@@ -459,9 +459,9 @@ impl RpcContext for Websocket {
 		self.session.store(session);
 	}
 	/// The version information for this RPC context
-	fn version_data(&self) -> Data {
+	fn version_data(&self) -> DbResult {
 		let value = Value::from(Strand::new(format!("{PKG_NAME}-{}", *PKG_VERSION)).unwrap());
-		Data::Other(value)
+		DbResult::Other(value)
 	}
 
 	// ------------------------------

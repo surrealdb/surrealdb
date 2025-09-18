@@ -44,7 +44,7 @@ use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
 use crate::dbs::node::Timestamp;
-use crate::dbs::{Capabilities, Executor, Notification, Options, Response, Session, Variables};
+use crate::dbs::{Capabilities, Executor, Options, QueryResult, Session, Variables};
 use crate::err::Error;
 use crate::expr::statements::DefineUserStatement;
 use crate::expr::{Base, Expr, FlowResultExt as _, Ident, LogicalPlan};
@@ -68,8 +68,8 @@ use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 use crate::kvs::{LockType, TransactionType};
 use crate::sql::Ast;
 use crate::syn::parser::{ParserSettings, StatementStream};
+use crate::types::{PublicAction, PublicNotification, PublicVariables};
 use crate::val::{Strand, Value};
-use crate::types::PublicVariables;
 use crate::{cf, syn};
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
@@ -101,7 +101,7 @@ pub struct Datastore {
 	/// The security and feature capabilities for this datastore.
 	capabilities: Arc<Capabilities>,
 	// Whether this datastore enables live query notifications to subscribers.
-	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
+	notification_channel: Option<(Sender<PublicNotification>, Receiver<PublicNotification>)>,
 	// The index store cache
 	index_stores: IndexStores,
 	// The cross transaction cache
@@ -886,7 +886,7 @@ impl Datastore {
 
 	/// Performs a database import from SQL
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn startup(&self, sql: &str, sess: &Session) -> Result<Vec<Response>> {
+	pub async fn startup(&self, sql: &str, sess: &Session) -> Result<Vec<QueryResult>> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running datastore startup import script");
 		// Check if the session has expired
@@ -982,8 +982,8 @@ impl Datastore {
 		&self,
 		txt: &str,
 		sess: &Session,
-		vars: Option<Variables>,
-	) -> Result<Vec<Response>> {
+		vars: Option<PublicVariables>,
+	) -> Result<Vec<QueryResult>> {
 		// Parse the SQL query text
 		let ast = syn::parse_with_capabilities(txt, &self.capabilities)?;
 		// Process the AST
@@ -994,9 +994,9 @@ impl Datastore {
 	pub async fn execute_import<S>(
 		&self,
 		sess: &Session,
-		vars: Option<Variables>,
+		vars: Option<PublicVariables>,
 		query: S,
-	) -> Result<Vec<Response>>
+	) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<Bytes>>,
 	{
@@ -1022,7 +1022,7 @@ impl Datastore {
 		ctx.attach_session(sess)?;
 		// Store the query variables
 		if let Some(vars) = vars {
-			ctx.attach_variables(vars)?;
+			ctx.attach_variables(vars.into())?;
 		}
 		// Process all statements
 
@@ -1107,8 +1107,8 @@ impl Datastore {
 		&self,
 		ast: Ast,
 		sess: &Session,
-		vars: Option<Variables>,
-	) -> Result<Vec<Response>> {
+		vars: Option<PublicVariables>,
+	) -> Result<Vec<QueryResult>> {
 		//TODO: Insert planner here.
 		self.process_plan(ast.into(), sess, vars).await
 	}
@@ -1117,8 +1117,8 @@ impl Datastore {
 		&self,
 		plan: LogicalPlan,
 		sess: &Session,
-		vars: Option<Variables>,
-	) -> Result<Vec<Response>> {
+		vars: Option<PublicVariables>,
+	) -> Result<Vec<QueryResult>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Check if anonymous actors can execute queries when auth is enabled
@@ -1140,7 +1140,7 @@ impl Datastore {
 		ctx.attach_session(sess)?;
 		// Store the query variables
 		if let Some(vars) = vars {
-			ctx.attach_variables(vars)?;
+			ctx.attach_variables(vars.into())?;
 		}
 
 		// Process all statements
@@ -1153,7 +1153,7 @@ impl Datastore {
 		&self,
 		val: Expr,
 		sess: &Session,
-		vars: Option<Variables>,
+		vars: Option<PublicVariables>,
 	) -> Result<Value> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
@@ -1187,7 +1187,7 @@ impl Datastore {
 		ctx.attach_session(sess)?;
 		// Store the query variables
 		if let Some(vars) = vars {
-			ctx.attach_variables(vars)?;
+			ctx.attach_variables(vars.into())?;
 		}
 		let txn_type = if val.read_only() {
 			TransactionType::Read
@@ -1300,13 +1300,13 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub fn notifications(&self) -> Option<Receiver<Notification>> {
+	pub fn notifications(&self) -> Option<Receiver<PublicNotification>> {
 		self.notification_channel.as_ref().map(|v| v.1.clone())
 	}
 
 	/// Performs a database import from SQL
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>> {
+	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<QueryResult>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Execute the SQL import
@@ -1315,7 +1315,7 @@ impl Datastore {
 
 	/// Performs a database import from SQL
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn import_stream<S>(&self, sess: &Session, stream: S) -> Result<Vec<Response>>
+	pub async fn import_stream<S>(&self, sess: &Session, stream: S) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<Bytes>>,
 	{
@@ -1705,7 +1705,7 @@ mod test {
 		res.remove(0).result.unwrap();
 		res.remove(0).result.unwrap();
 		let lqid = res.remove(0).result?;
-		assert!(matches!(lqid, Value::Uuid(_)));
+		assert!(matches!(lqid, PublicValue::Uuid(_)));
 		// Obtain the uuids after definitions
 		let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 		let after_define = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
@@ -1728,7 +1728,7 @@ mod test {
 		KILL $lqid;
 	"
 		.to_owned();
-		let vars = Variables::from(map! { "lqid".to_string() => lqid });
+		let vars = PublicVariables::from(map! { "lqid".to_string() => lqid });
 		let res = &mut ds.execute(&sql, &ses, Some(vars)).await?;
 		assert_eq!(res.len(), 5);
 		res.remove(0).result.unwrap();

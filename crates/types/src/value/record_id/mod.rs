@@ -3,11 +3,12 @@ pub mod key;
 /// Record id range types
 pub mod range;
 
+use std::fmt;
+
 pub use key::*;
 pub use range::*;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
 /// Represents a record identifier in SurrealDB
 ///

@@ -163,12 +163,13 @@ mod tests {
 	use anyhow::Result;
 
 	use crate::catalog::providers::{CatalogProvider, TableProvider};
-	use crate::dbs::{Action, Capabilities, Notification, Session};
+	use crate::dbs::{Capabilities, Session};
 	use crate::expr::Value;
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
 	use crate::syn;
+	use crate::types::{PublicAction, PublicNotification};
 	use crate::val::{RecordId, RecordIdKey};
 
 	pub async fn new_ds() -> Result<Datastore> {

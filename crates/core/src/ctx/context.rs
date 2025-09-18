@@ -24,7 +24,7 @@ use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::{Capabilities, Notification, Options, Session, Variables};
+use crate::dbs::{Capabilities, Options, Session, Variables};
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
@@ -35,8 +35,8 @@ use crate::kvs::Transaction;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::sequences::Sequences;
 use crate::mem::ALLOC;
+use crate::types::{PublicAction, PublicNotification, PublicVariables};
 use crate::val::Value;
-use crate::types::PublicVariables;
 
 pub type Context = Arc<MutableContext>;
 
@@ -52,7 +52,7 @@ pub struct MutableContext {
 	// A collection of read only values stored in this context.
 	values: HashMap<Cow<'static, str>, Arc<Value>>,
 	// Stores the notification channel if available
-	notifications: Option<Sender<Notification>>,
+	notifications: Option<Sender<PublicNotification>>,
 	// An optional query planner
 	query_planner: Option<Arc<QueryPlanner>>,
 	// An optional query executor
@@ -373,7 +373,7 @@ impl MutableContext {
 
 	/// Add the LIVE query notification channel to the context, so that we
 	/// can send notifications to any subscribers.
-	pub(crate) fn add_notifications(&mut self, chn: Option<&Sender<Notification>>) {
+	pub(crate) fn add_notifications(&mut self, chn: Option<&Sender<PublicNotification>>) {
 		self.notifications = chn.cloned()
 	}
 
@@ -414,7 +414,7 @@ impl MutableContext {
 		self.slow_log_threshold
 	}
 
-	pub(crate) fn notifications(&self) -> Option<Sender<Notification>> {
+	pub(crate) fn notifications(&self) -> Option<Sender<PublicNotification>> {
 		self.notifications.clone()
 	}
 
@@ -551,7 +551,7 @@ impl MutableContext {
 	pub(crate) fn attach_session(&mut self, session: &Session) -> Result<(), Error> {
 		self.add_values(session.values());
 		if !session.variables.is_empty() {
-			self.attach_variables(session.variables.clone())?;
+			self.attach_variables(session.variables.clone().into())?;
 		}
 		Ok(())
 	}

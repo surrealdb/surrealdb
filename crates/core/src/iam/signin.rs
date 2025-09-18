@@ -32,8 +32,8 @@ use crate::iam::{self, Auth, algorithm_to_jwt_algorithm};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::val::{Datetime, Object, Value};
 use crate::types::{PublicObject, PublicVariables};
+use crate::val::{Datetime, Object, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SigninData {
@@ -41,7 +41,11 @@ pub struct SigninData {
 	pub refresh: Option<String>,
 }
 
-pub async fn signin(kvs: &Datastore, session: &mut Session, vars: PublicVariables) -> Result<SigninData> {
+pub async fn signin(
+	kvs: &Datastore,
+	session: &mut Session,
+	vars: PublicVariables,
+) -> Result<SigninData> {
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));

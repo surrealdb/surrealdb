@@ -490,7 +490,10 @@ impl Revisioned for Geometry {
 		1
 	}
 
-	fn serialize_revisioned<W: std::io::Write>(&self, writer: &mut W) -> Result<(), revision::Error> {
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
 		// Serialize as an object with type and coordinates
 		let obj = self.as_object();
 		obj.serialize_revisioned(writer)

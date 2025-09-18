@@ -7,7 +7,7 @@ use surrealdb_core::dbs::capabilities::ExperimentalTarget;
 use surrealdb_core::dbs::{Capabilities, Session};
 use surrealdb_core::iam::{Level, Role};
 use surrealdb_core::sql::Base;
-use surrealdb_core::val::Array;
+use surrealdb_types::Array;
 use tokio::time::Duration;
 
 struct TestLevel {

@@ -6,10 +6,10 @@ use uuid::Uuid;
 
 use crate::catalog;
 use crate::cnf::MAX_COMPUTATION_DEPTH;
-use crate::dbs::Notification;
 use crate::err::Error;
 use crate::expr::Base;
 use crate::iam::{Action, Auth, ResourceKind};
+use crate::types::PublicNotification;
 
 /// An Options is passed around when processing a set of query
 /// statements.
@@ -46,7 +46,7 @@ pub struct Options {
 	/// The data version as nanosecond timestamp
 	pub(crate) version: Option<u64>,
 	/// The channel over which we send notifications
-	pub(crate) sender: Option<Sender<Notification>>,
+	pub(crate) sender: Option<Sender<PublicNotification>>,
 }
 
 #[derive(Clone, Debug)]
@@ -249,7 +249,7 @@ impl Options {
 	}
 
 	/// Create a new Options object for a subquery
-	pub fn new_with_sender(&self, sender: Sender<Notification>) -> Self {
+	pub fn new_with_sender(&self, sender: Sender<PublicNotification>) -> Self {
 		Self {
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),

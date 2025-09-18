@@ -9,7 +9,7 @@ use serde_json::ser::PrettyFormatter;
 use surrealdb::engine::any::{self, connect};
 use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::Config;
-use surrealdb::{Notification, Response, Value};
+use surrealdb::{IndexedResults, Notification, Value};
 
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
 use crate::cli::abstraction::{
@@ -284,7 +284,7 @@ pub async fn init(
 fn process(
 	pretty: bool,
 	json: bool,
-	res: surrealdb::Result<WithStats<Response>>,
+	res: surrealdb::Result<WithStats<IndexedResults>>,
 ) -> Result<String> {
 	// Check query response for an error
 	let mut response = res?;

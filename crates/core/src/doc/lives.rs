@@ -6,11 +6,13 @@ use reblessive::tree::Stk;
 use super::IgnoreError;
 use crate::catalog::{Permission, SubscriptionDefinition};
 use crate::ctx::{Context, MutableContext};
-use crate::dbs::{Action, Notification, Options, Statement};
+use crate::dbs::executor::convert_value_to_public_value;
+use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::FlowResultExt as _;
 use crate::expr::paths::{AC, RD, TK};
+use crate::types::{PublicAction, PublicNotification, PublicValue};
 use crate::val::Value;
 
 impl Document {
@@ -167,7 +169,7 @@ impl Document {
 					// Ensure futures are run
 					// Output the full document before any changes were applied
 					let result = doc.doc.as_ref().clone();
-					(Action::Delete, result)
+					(PublicAction::Delete, result)
 				} else {
 					// TODO: Send to message broker
 					continue;
@@ -184,7 +186,7 @@ impl Document {
 							Err(IgnoreError::Error(e)) => return Err(e),
 							Ok(x) => x,
 						};
-					(Action::Create, result)
+					(PublicAction::Create, result)
 				} else {
 					// TODO: Send to message broker
 					continue;
@@ -201,7 +203,7 @@ impl Document {
 							Err(IgnoreError::Error(e)) => return Err(e),
 							Ok(x) => x,
 						};
-					(Action::Update, result)
+					(PublicAction::Update, result)
 				} else {
 					// TODO: Send to message broker
 					continue;
@@ -220,20 +222,25 @@ impl Document {
 			}
 
 			// Send the notification
-			let res = chn
-				.send(Notification {
-					id: live_subscription.id.into(),
-					action,
-					record: Value::RecordId(rid.as_ref().clone()),
-					result,
-				})
-				.await;
 
-			if res.is_err() {
-				// channel was closed, that means a transaction probably failed.
-				// just return as nothing can be send.
-				return Ok(());
-			}
+			let result = convert_value_to_public_value(result);
+			todo!("STU");
+			// let record = PublicValue::RecordId(rid.as_ref().clone().into());
+
+			// let res = chn
+			// 	.send(PublicNotification {
+			// 		id: live_subscription.id.into(),
+			// 		action,
+			// 		record,
+			// 		result,
+			// 	})
+			// 	.await;
+
+			// if res.is_err() {
+			// 	// channel was closed, that means a transaction probably failed.
+			// 	// just return as nothing can be send.
+			// 	return Ok(());
+			// }
 		}
 		// Carry on
 		Ok(())

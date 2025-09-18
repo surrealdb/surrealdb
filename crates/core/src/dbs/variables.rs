@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::val::{Value, Object};
+use crate::types::PublicVariables;
+use crate::val::{Object, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[repr(transparent)]
@@ -58,15 +59,15 @@ impl Variables {
 
 	/// Merge another variables map into the current one.
 	#[inline]
-	pub fn merge(&mut self, other: impl Into<Variables>) {
-		self.0.extend(other.into().0);
+	pub fn merge(&mut self, other: Variables) {
+		self.0.extend(other.0);
 	}
 
 	/// Merge another variables map into a new variables map.
 	#[inline]
-	pub fn merged(&self, other: impl Into<Variables>) -> Variables {
+	pub fn merged(&self, other: Variables) -> Variables {
 		let mut vars = self.clone();
-		vars.merge(other.into());
+		vars.merge(other);
 		vars
 	}
 }
@@ -95,6 +96,17 @@ impl From<Object> for Variables {
 
 impl From<BTreeMap<String, Value>> for Variables {
 	fn from(map: BTreeMap<String, Value>) -> Self {
+		Self(map)
+	}
+}
+
+impl From<PublicVariables> for Variables {
+	fn from(vars: PublicVariables) -> Self {
+		let mut map = BTreeMap::new();
+		for (key, val) in vars {
+			todo!("STU");
+			// map.insert(key, crate::val::Value::from(val));
+		}
 		Self(map)
 	}
 }

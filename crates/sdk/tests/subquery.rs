@@ -3,7 +3,7 @@ use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
-use surrealdb_core::val::{Array, Value};
+use surrealdb_types::{Array, Value};
 
 #[tokio::test]
 async fn subquery_select() -> Result<()> {

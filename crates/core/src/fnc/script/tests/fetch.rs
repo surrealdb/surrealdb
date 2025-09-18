@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use surrealdb_types::{Value, object};
 use wiremock::matchers::{body_string, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -7,7 +8,6 @@ use crate::dbs::capabilities::{NetTarget, Targets};
 use crate::dbs::{Capabilities, Session};
 use crate::kvs::Datastore;
 use crate::syn;
-use surrealdb_types::{object, Value};
 
 #[tokio::test]
 async fn test_fetch_get() {

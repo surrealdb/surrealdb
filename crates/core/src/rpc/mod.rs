@@ -16,7 +16,7 @@ pub use method::Method;
 pub use protocol::v1::RpcProtocolV1;
 // pub use protocol::v2::RpcProtocolV2;
 pub use request::Request;
-pub use response::Data;
+pub use response::{DbResponse, DbResult, DbResultError, DbResultStats};
 
 use crate::cnf::PROTECTED_PARAM_NAMES;
 

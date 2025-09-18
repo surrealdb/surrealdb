@@ -10,6 +10,7 @@ use futures::{FutureExt, SinkExt, StreamExt};
 use pharos::{Channel, Events, Observable, ObserveConfig};
 use revision::revisioned;
 use serde::Deserialize;
+use surrealdb_types::Value;
 use tokio::sync::watch;
 use trice::Instant;
 use wasm_bindgen_futures::spawn_local;
@@ -25,7 +26,6 @@ use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 use crate::api::{ExtraFeatures, Surreal};
-use crate::core::val::Value as CoreValue;
 use crate::engine::IntervalStream;
 use crate::engine::remote::Data;
 use crate::opt::WaitFor;
@@ -122,7 +122,7 @@ async fn router_handle_request(
 			ref notification_sender,
 		} => {
 			state.live_queries.insert(*uuid, notification_sender.clone());
-			if response.send(Ok(DbResponse::Other(CoreValue::None))).await.is_err() {
+			if response.send(Ok(DbResponse::Other(Value::None))).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			// There is nothing to send to the server here
@@ -211,7 +211,7 @@ async fn router_handle_response(
 									RequestEffect::Insert => {
 										// For insert, we need to flatten single responses in an
 										// array
-										if let Ok(Data::Other(CoreValue::Array(value))) =
+										if let Ok(Data::Other(Value::Array(value))) =
 											response.result
 										{
 											if value.len() == 1 {
@@ -227,7 +227,7 @@ async fn router_handle_response(
 												let _ = pending
 													.response_channel
 													.send(DbResponse::from_server_result(Ok(
-														Data::Other(CoreValue::Array(value)),
+														Data::Other(Value::Array(value)),
 													)))
 													.await;
 											}
@@ -296,7 +296,7 @@ async fn router_handle_response(
 			#[derive(Deserialize)]
 			#[revisioned(revision = 1)]
 			struct Response {
-				id: Option<CoreValue>,
+				id: Option<Value>,
 			}
 
 			// Let's try to find out the ID of the response that failed to deserialise
@@ -306,7 +306,7 @@ async fn router_handle_response(
 				}) = crate::core::rpc::format::revision::decode(&binary)
 				{
 					// Return an error if an ID was returned
-					if let Some(Ok(id)) = id.map(CoreValue::coerce_to) {
+					if let Some(Ok(id)) = id.map(Value::coerce_to) {
 						if let Some(req) = state.pending_requests.remove(&id) {
 							let _res = req.response_channel.send(Err(error)).await;
 						} else {
@@ -423,7 +423,7 @@ pub(crate) async fn run_router(
 	let ping = {
 		let mut request = BTreeMap::new();
 		request.insert("method".to_owned(), "ping".into());
-		let value = CoreValue::from(request);
+		let value = Value::from(request);
 		let value = crate::core::rpc::format::revision::encode(&value).unwrap();
 		Message::Binary(value)
 	};

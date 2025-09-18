@@ -6,10 +6,11 @@ use uuid::Uuid;
 use crate::catalog::TableDefinition;
 use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
-use crate::dbs::{self, Notification, Options};
+use crate::dbs::{self, Options};
 use crate::err::Error;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
+use crate::types::{PublicAction, PublicNotification, PublicValue};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveTableStatement {
@@ -102,11 +103,11 @@ impl RemoveTableStatement {
 		}
 		if let Some(chn) = opt.sender.as_ref() {
 			for lv in lvs.iter() {
-				chn.send(Notification {
+				chn.send(PublicNotification {
 					id: lv.id.into(),
-					action: dbs::Action::Killed,
-					record: Value::None,
-					result: Value::None,
+					action: PublicAction::Killed,
+					record: PublicValue::None,
+					result: PublicValue::None,
 				})
 				.await?;
 			}

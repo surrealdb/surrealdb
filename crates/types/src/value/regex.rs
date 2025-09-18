@@ -132,7 +132,10 @@ impl Revisioned for Regex {
 		1
 	}
 
-	fn serialize_revisioned<W: std::io::Write>(&self, writer: &mut W) -> Result<(), revision::Error> {
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
 		self.0.as_str().to_string().serialize_revisioned(writer)
 	}
 

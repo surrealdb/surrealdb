@@ -7,11 +7,11 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use serde::Serialize;
+use surrealdb_types::{self, Array, SurrealValue, Value};
 
 use crate::api::opt::auth::{Credentials, Jwt};
 use crate::api::opt::{IntoEndpoint, auth};
 use crate::api::{Connect, Connection, OnceLockExt, Surreal, opt};
-use crate::core::val;
 use crate::opt::{IntoExportDestination, WaitFor};
 
 pub(crate) mod live;
@@ -67,7 +67,6 @@ pub use patch::Patch;
 pub use query::{Query, QueryStream};
 pub use run::{IntoFn, Run};
 pub use select::Select;
-use serde_content::Serializer;
 pub use set::Set;
 pub use signin::Signin;
 pub use signup::Signup;
@@ -85,14 +84,6 @@ use super::opt::{CreateResource, IntoResource};
 /// A alias for an often used type of future returned by async methods in this
 /// library.
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
-
-/// Query statistics
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[non_exhaustive]
-pub struct Stats {
-	/// The time taken to execute the query
-	pub execution_time: Option<Duration>,
-}
 
 /// Machine learning model marker type for import and export types
 pub struct Model;
@@ -322,11 +313,11 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn set(&self, key: impl Into<String>, value: impl Serialize + 'static) -> Set<C> {
+	pub fn set(&self, key: impl Into<String>, value: impl SurrealValue) -> Set<C> {
 		Set {
 			client: Cow::Borrowed(self),
 			key: key.into(),
-			value: crate::api::value::to_core_value(value),
+			value: value.into_value(),
 		}
 	}
 
@@ -423,7 +414,7 @@ where
 	pub fn signup<R>(&self, credentials: impl Credentials<auth::Signup, R>) -> Signup<C, R> {
 		Signup {
 			client: Cow::Borrowed(self),
-			credentials: Serializer::new().serialize(credentials),
+			credentials: credentials.into_value(),
 			response_type: PhantomData,
 		}
 	}
@@ -540,7 +531,7 @@ where
 	pub fn signin<R>(&self, credentials: impl Credentials<auth::Signin, R>) -> Signin<C, R> {
 		Signin {
 			client: Cow::Borrowed(self),
-			credentials: Serializer::new().serialize(credentials),
+			credentials: credentials.into_value(),
 			response_type: PhantomData,
 		}
 	}
@@ -1284,7 +1275,7 @@ where
 		Run {
 			client: Cow::Borrowed(self),
 			function: function.into_fn(),
-			args: Ok(serde_content::Value::Tuple(vec![])),
+			args: Value::Array(Array::default()),
 			response_type: PhantomData,
 		}
 	}
@@ -1401,10 +1392,10 @@ where
 	}
 }
 
-fn validate_data(data: &val::Value, error_message: &str) -> crate::Result<()> {
+fn validate_data(data: &Value, error_message: &str) -> crate::Result<()> {
 	match data {
-		val::Value::Object(_) => Ok(()),
-		val::Value::Array(v) if v.iter().all(val::Value::is_object) => Ok(()),
+		Value::Object(_) => Ok(()),
+		Value::Array(v) if v.iter().all(Value::is_object) => Ok(()),
 		_ => Err(crate::api::err::Error::InvalidParams(error_message.to_owned()).into()),
 	}
 }

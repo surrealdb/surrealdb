@@ -7,19 +7,19 @@ use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
 #[cfg(not(target_family = "wasm"))]
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::capabilities::MethodTarget;
-use crate::dbs::{QueryType, Response, Variables};
+use crate::dbs::{QueryResult, QueryType, Variables};
 use crate::err::Error;
 use crate::expr::Literal;
 use crate::kvs::{LockType, TransactionType};
 use crate::rpc::args::extract_args;
-use crate::rpc::{Data, Method, RpcContext, RpcError};
+use crate::rpc::{DbResult, Method, RpcContext, RpcError};
 use crate::sql::{
 	Ast, CreateStatement, Data as SqlData, DeleteStatement, Expr, Fields, Function, FunctionCall,
 	Ident, InsertStatement, KillStatement, LiveStatement, Model, Output, Param, RelateStatement,
 	SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
+use crate::types::{PublicArray, PublicObject, PublicRecordIdKey, PublicValue, PublicVariables};
 use crate::val::{Array, Object, RecordIdKey, Strand, Value};
-use crate::types::{PublicValue, PublicArray, PublicObject, PublicRecordIdKey, PublicVariables};
 
 /// utility function converting a `Value::String` into a `Expr::Table`
 fn value_to_table(value: PublicValue) -> Expr {
@@ -48,7 +48,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// ------------------------------
 
 	/// Executes a method on this RPC implementation
-	async fn execute(&self, method: Method, params: PublicArray) -> Result<Data, RpcError> {
+	async fn execute(&self, method: Method, params: PublicArray) -> Result<DbResult, RpcError> {
 		// Check if capabilities allow executing the requested RPC method
 		if !self.kvs().allows_rpc_method(&MethodTarget {
 			method,
@@ -58,7 +58,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		// Execute the desired method
 		match method {
-			Method::Ping => Ok(Data::Other(PublicValue::None)),
+			Method::Ping => Ok(DbResult::Other(PublicValue::None)),
 			Method::Info => self.info().await,
 			Method::Use => self.yuse(params).await,
 			Method::Signup => self.signup(params).await,
@@ -92,7 +92,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for authentication
 	// ------------------------------
 
-	async fn yuse(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn yuse(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -154,13 +154,13 @@ pub trait RpcProtocolV1: RpcContext {
 		// Drop the mutex guard
 		mem::drop(guard);
 		// Return nothing
-		Ok(Data::Other(PublicValue::None))
+		Ok(DbResult::Other(PublicValue::None))
 	}
 
 	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of
 	// a string. This will allow returning refresh tokens as well as any additional
 	// credential resulting from signing up.
-	async fn signup(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn signup(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		// Process the method arguments
 		let Some(PublicValue::Object(params)) = extract_args(params.into_vec()) else {
 			return Err(RpcError::InvalidParams("Expected (params:object)".to_string()));
@@ -172,28 +172,26 @@ pub trait RpcProtocolV1: RpcContext {
 		// Clone the current session
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signup, mutating the session
-		let out: Result<PublicValue> = crate::iam::signup::signup(self.kvs(), &mut session, params.into())
-			.await
-			// TODO: Null byte validity
-			.map(|v| {
-				v.token
-					.clone()
-					.map(|x| PublicValue::String(x))
-					.unwrap_or(PublicValue::None)
-			});
+		let out: Result<PublicValue> =
+			crate::iam::signup::signup(self.kvs(), &mut session, params.into())
+				.await
+				// TODO: Null byte validity
+				.map(|v| {
+					v.token.clone().map(|x| PublicValue::String(x)).unwrap_or(PublicValue::None)
+				});
 
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
 		mem::drop(guard);
 		// Return the signup result
-		out.map(Data::Other).map_err(Into::into)
+		out.map(DbResult::Other).map_err(Into::into)
 	}
 
 	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of
 	// a string. This will allow returning refresh tokens as well as any additional
 	// credential resulting from signing in.
-	async fn signin(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn signin(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		// Process the method arguments
 		let Some(PublicValue::Object(params)) = extract_args(params.into_vec()) else {
 			return Err(RpcError::InvalidParams("Expected (params:object)".to_string()));
@@ -205,19 +203,20 @@ pub trait RpcProtocolV1: RpcContext {
 		// Clone the current session
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signin, mutating the session
-		let out: Result<PublicValue> = crate::iam::signin::signin(self.kvs(), &mut session, params.into())
-			.await
-			// TODO: Null byte validity
-			.map(|v| PublicValue::String(v.token.clone()));
+		let out: Result<PublicValue> =
+			crate::iam::signin::signin(self.kvs(), &mut session, params.into())
+				.await
+				// TODO: Null byte validity
+				.map(|v| PublicValue::String(v.token.clone()));
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
 		mem::drop(guard);
 		// Return the signin result
-		out.map(Data::Other).map_err(From::from)
+		out.map(DbResult::Other).map_err(From::from)
 	}
 
-	async fn authenticate(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn authenticate(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		tracing::debug!("authenticate");
 		// Process the method arguments
 		let Some(PublicValue::String(token)) = extract_args(params.into_vec()) else {
@@ -241,10 +240,10 @@ pub trait RpcProtocolV1: RpcContext {
 		// Drop the mutex guard
 		mem::drop(guard);
 		// Return nothing on success
-		out.map(Data::Other).map_err(From::from)
+		out.map(DbResult::Other).map_err(From::from)
 	}
 
-	async fn invalidate(&self) -> Result<Data, RpcError> {
+	async fn invalidate(&self) -> Result<DbResult, RpcError> {
 		// Get the context lock
 		let mutex = self.lock().clone();
 		// Lock the context for update
@@ -258,10 +257,10 @@ pub trait RpcProtocolV1: RpcContext {
 		// Drop the mutex guard
 		mem::drop(guard);
 		// Return nothing on success
-		Ok(Data::Other(PublicValue::None))
+		Ok(DbResult::Other(PublicValue::None))
 	}
 
-	async fn reset(&self) -> Result<Data, RpcError> {
+	async fn reset(&self) -> Result<DbResult, RpcError> {
 		// Get the context lock
 		let mutex = self.lock().clone();
 		// Lock the context for update
@@ -277,14 +276,14 @@ pub trait RpcProtocolV1: RpcContext {
 		// Cleanup live queries
 		self.cleanup_lqs().await;
 		// Return nothing on success
-		Ok(Data::Other(PublicValue::None))
+		Ok(DbResult::Other(PublicValue::None))
 	}
 
 	// ------------------------------
 	// Methods for identification
 	// ------------------------------
 
-	async fn info(&self) -> Result<Data, RpcError> {
+	async fn info(&self) -> Result<DbResult, RpcError> {
 		let what = vec![Expr::Param(Param::from_strand(strand!("auth").to_owned()))];
 
 		// TODO: Check if this can be replaced by just evaluating the param or a
@@ -314,20 +313,21 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut res = self.kvs().process(ast, &self.session(), None).await?;
 		// Extract the first value from the result
 		// TODO: Move first here into the actual expression.
-		Ok(Data::Other(res.remove(0).result?.first().unwrap()))
+		Ok(DbResult::Other(res.remove(0).result?.first().unwrap()))
 	}
 
 	// ------------------------------
 	// Methods for setting variables
 	// ------------------------------
 
-	async fn set(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn set(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Some((PublicValue::String(key), val)) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
+		let Some((PublicValue::String(key), val)) =
+			extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
 		else {
 			return Err(RpcError::InvalidParams("Expected (key:string, value:Value)".to_string()));
 		};
@@ -357,10 +357,10 @@ pub trait RpcProtocolV1: RpcContext {
 		mem::drop(guard);
 
 		// Return nothing
-		Ok(Data::Other(PublicValue::Null))
+		Ok(DbResult::Other(PublicValue::Null))
 	}
 
-	async fn unset(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn unset(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -378,14 +378,14 @@ pub trait RpcProtocolV1: RpcContext {
 		self.set_session(Arc::new(session));
 		mem::drop(guard);
 
-		Ok(Data::Other(PublicValue::Null))
+		Ok(DbResult::Other(PublicValue::Null))
 	}
 
 	// ------------------------------
 	// Methods for live queries
 	// ------------------------------
 
-	async fn kill(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn kill(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -405,10 +405,10 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = run_query(self, QueryForm::Parsed(ast), vars).await?;
 		// Extract the first query result
-		Ok(Data::Other(res.remove(0).result?))
+		Ok(DbResult::Other(res.remove(0).result?))
 	}
 
-	async fn live(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn live(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -443,14 +443,14 @@ pub trait RpcProtocolV1: RpcContext {
 		let res = run_query(self, QueryForm::Parsed(ast), vars).await?;
 
 		// Extract the first query result
-		Ok(Data::Other(res.into_iter().next().unwrap().result?))
+		Ok(DbResult::Other(res.into_iter().next().unwrap().result?))
 	}
 
 	// ------------------------------
 	// Methods for selecting
 	// ------------------------------
 
-	async fn select(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn select(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -495,22 +495,19 @@ pub trait RpcProtocolV1: RpcContext {
 		let ast = Ast::single_expr(Expr::Select(Box::new(sql)));
 
 		// Specify the query parameters
-		let var = Some(self.session().variables.clone());
+		let vars = Some(self.session().variables.clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(ast, &self.session(), var).await?;
+		let mut res = self.kvs().process(ast, &self.session(), vars).await?;
 		// Extract the first query result
-		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
-			Some(Error::SingleOnlyOutput) => Ok(PublicValue::None),
-			_ => Err(e),
-		})?;
-		Ok(Data::Other(res))
+		let res = res.remove(0).result?;
+		Ok(DbResult::Other(res))
 	}
 
 	// ------------------------------
 	// Methods for inserting
 	// ------------------------------
 
-	async fn insert(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn insert(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -543,14 +540,11 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
-			Some(Error::SingleOnlyOutput) => Ok(PublicValue::None),
-			_ => Err(e),
-		})?;
-		Ok(Data::Other(res))
+		let res = res.remove(0).result?;
+		Ok(DbResult::Other(res))
 	}
 
-	async fn insert_relation(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn insert_relation(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -585,18 +579,15 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
-			Some(Error::SingleOnlyOutput) => Ok(PublicValue::None),
-			_ => Err(e),
-		})?;
-		Ok(Data::Other(res))
+		let res = res.remove(0).result?;
+		Ok(DbResult::Other(res))
 	}
 
 	// ------------------------------
 	// Methods for creating
 	// ------------------------------
 
-	async fn create(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn create(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -635,18 +626,15 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = self.kvs().process(ast, &self.session(), None).await?;
 		// Extract the first query result
-		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
-			Some(Error::SingleOnlyOutput) => Ok(PublicValue::None),
-			_ => Err(e),
-		})?;
-		Ok(Data::Other(res))
+		let res = res.remove(0).result?;
+		Ok(DbResult::Other(res))
 	}
 
 	// ------------------------------
 	// Methods for upserting
 	// ------------------------------
 
-	async fn upsert(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn upsert(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -688,18 +676,15 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
-			Some(Error::SingleOnlyOutput) => Ok(PublicValue::None),
-			_ => Err(e),
-		})?;
-		Ok(Data::Other(res))
+		let res = res.remove(0).result?;
+		Ok(DbResult::Other(res))
 	}
 
 	// ------------------------------
 	// Methods for updating
 	// ------------------------------
 
-	async fn update(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn update(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -740,18 +725,15 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
-			Some(Error::SingleOnlyOutput) => Ok(PublicValue::None),
-			_ => Err(e),
-		})?;
-		Ok(Data::Other(res))
+		let res = res.remove(0).result?;
+		Ok(DbResult::Other(res))
 	}
 
 	// ------------------------------
 	// Methods for merging
 	// ------------------------------
 
-	async fn merge(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn merge(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -788,24 +770,24 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
-			Some(Error::SingleOnlyOutput) => Ok(PublicValue::None),
-			_ => Err(e),
-		})?;
-		Ok(Data::Other(res))
+		let res = res.remove(0).result?;
+		Ok(DbResult::Other(res))
 	}
 
 	// ------------------------------
 	// Methods for patching
 	// ------------------------------
 
-	async fn patch(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn patch(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, data, diff) = extract_args::<(PublicValue, Option<PublicValue>, Option<PublicValue>)>(params.into_vec())
+		let (what, data, diff) =
+			extract_args::<(PublicValue, Option<PublicValue>, Option<PublicValue>)>(
+				params.into_vec(),
+			)
 			.ok_or(RpcError::InvalidParams(
 				"Expected (what:Value, data:Value, diff:Value)".to_string(),
 			))?;
@@ -849,29 +831,27 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = self.kvs().process(Ast::single_expr(expr), &self.session(), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
-			Some(Error::SingleOnlyOutput) => Ok(PublicValue::None),
-			_ => Err(e),
-		})?;
-		Ok(Data::Other(res))
+		let res = res.remove(0).result?;
+		Ok(DbResult::Other(res))
 	}
 
 	// ------------------------------
 	// Methods for relating
 	// ------------------------------
 
-	async fn relate(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn relate(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (from, kind, with, data) = extract_args::<(PublicValue, PublicValue, PublicValue, Option<PublicValue>)>(
-			params.to_vec(),
-		)
-		.ok_or(RpcError::InvalidParams(
-			"Expected (from:Value, kind:Value, with:Value, data:Value)".to_string(),
-		))?;
+		let (from, kind, with, data) =
+			extract_args::<(PublicValue, PublicValue, PublicValue, Option<PublicValue>)>(
+				params.to_vec(),
+			)
+			.ok_or(RpcError::InvalidParams(
+				"Expected (from:Value, kind:Value, with:Value, data:Value)".to_string(),
+			))?;
 
 		// Returns if selecting on this value returns a single result.
 		let only = singular(&from) && singular(&with);
@@ -903,18 +883,15 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = self.kvs().process(Ast::single_expr(expr), &self.session(), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
-			Some(Error::SingleOnlyOutput) => Ok(PublicValue::None),
-			_ => Err(e),
-		})?;
-		Ok(Data::Other(res))
+		let res = res.remove(0).result?;
+		Ok(DbResult::Other(res))
 	}
 
 	// ------------------------------
 	// Methods for deleting
 	// ------------------------------
 
-	async fn delete(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn delete(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -939,18 +916,15 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the query on the database
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result.or_else(|e| match e.downcast_ref() {
-			Some(Error::SingleOnlyOutput) => Ok(PublicValue::None),
-			_ => Err(e),
-		})?;
-		Ok(Data::Other(res))
+		let res = res.remove(0).result?;
+		Ok(DbResult::Other(res))
 	}
 
 	// ------------------------------
 	// Methods for getting info
 	// ------------------------------
 
-	async fn version(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn version(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		match params.len() {
 			0 => Ok(self.version_data()),
 			_ => Err(RpcError::InvalidParams("Expected 0 arguments".to_string())),
@@ -961,14 +935,16 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for querying
 	// ------------------------------
 
-	async fn query(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn query(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
 		let (query, vars) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
-			.ok_or(RpcError::InvalidParams("Expected (query:string, vars:object)".to_string()))?;
+			.ok_or(RpcError::InvalidParams(
+			"Expected (query:string, vars:object)".to_string(),
+		))?;
 
 		let PublicValue::String(query) = query else {
 			return Err(RpcError::InvalidParams("Expected query to be string".to_string()));
@@ -977,11 +953,13 @@ pub trait RpcProtocolV1: RpcContext {
 		// Specify the query variables
 		let vars = match vars {
 			Some(PublicValue::Object(v)) => {
-				todo!("STU")	
+				todo!("STU")
 				// let v: PublicVariables = v.into();
 				// Some(self.session().variables.merged(v))
 			}
-			None | Some(PublicValue::None | PublicValue::Null) => Some(self.session().variables.clone()),
+			None | Some(PublicValue::None | PublicValue::Null) => {
+				Some(self.session().variables.clone())
+			}
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
 					"Expected vars to be object, got {unexpected:?}"
@@ -990,20 +968,23 @@ pub trait RpcProtocolV1: RpcContext {
 		};
 
 		let res = run_query(self, QueryForm::Text(&query), vars).await?;
-		Ok(Data::Query(res))
+		Ok(DbResult::Query(res))
 	}
 
 	// ------------------------------
 	// Methods for running functions
 	// ------------------------------
 
-	async fn run(&self, params: PublicArray) -> Result<Data, RpcError> {
+	async fn run(&self, params: PublicArray) -> Result<DbResult, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (name, version, args) = extract_args::<(PublicValue, Option<PublicValue>, Option<PublicValue>)>(params.into_vec())
+		let (name, version, args) =
+			extract_args::<(PublicValue, Option<PublicValue>, Option<PublicValue>)>(
+				params.into_vec(),
+			)
 			.ok_or(RpcError::InvalidParams(
 				"Expected (name:string, version:string, args:array)".to_string(),
 			))?;
@@ -1065,7 +1046,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
-		Ok(Data::Other(res))
+		Ok(DbResult::Other(res))
 	}
 
 	// ------------------------------
@@ -1073,12 +1054,12 @@ pub trait RpcProtocolV1: RpcContext {
 	// ------------------------------
 
 	#[cfg(target_family = "wasm")]
-	async fn graphql(&self, _: PublicArray) -> Result<Data, RpcError> {
+	async fn graphql(&self, _: PublicArray) -> Result<DbResult, RpcError> {
 		Err(RpcError::MethodNotFound)
 	}
 
 	#[cfg(not(target_family = "wasm"))]
-	async fn graphql(&self, _params: PublicArray) -> Result<Data, RpcError> {
+	async fn graphql(&self, _params: PublicArray) -> Result<DbResult, RpcError> {
 		//use crate::gql;
 
 		// Check if the user is allowed to query
@@ -1201,8 +1182,8 @@ enum QueryForm<'a> {
 async fn run_query<T>(
 	this: &T,
 	query: QueryForm<'_>,
-	vars: Option<Variables>,
-) -> Result<Vec<Response>>
+	vars: Option<PublicVariables>,
+) -> Result<Vec<QueryResult>>
 where
 	T: RpcContext + ?Sized,
 {

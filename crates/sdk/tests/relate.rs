@@ -4,7 +4,7 @@ use surrealdb::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::err::Error;
 use surrealdb_core::syn;
-use surrealdb_core::val::Value;
+use surrealdb_types::Value;
 
 use crate::helpers::Test;
 

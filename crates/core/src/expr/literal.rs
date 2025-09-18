@@ -11,11 +11,11 @@ use crate::doc::CursorDoc;
 use crate::expr::escape::EscapeKey;
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::{Expr, FlowResult, RecordIdLit};
+use crate::types::PublicValue;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, Regex,
 	Strand, Uuid, Value,
 };
-use crate::types::PublicValue;
 
 /// A literal value, should be computed to get an actual value.
 ///

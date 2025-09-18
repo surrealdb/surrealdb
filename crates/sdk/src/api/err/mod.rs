@@ -2,10 +2,10 @@ use std::io;
 use std::path::PathBuf;
 
 use serde::Serialize;
+use surrealdb_types::Value;
 use thiserror::Error;
 
-use crate::Value;
-use crate::api::Response;
+use crate::api::IndexedResults;
 use crate::core::dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError};
 
 /// An error originating from a remote SurrealDB database
@@ -38,7 +38,7 @@ pub enum Error {
 	AlreadyConnected,
 
 	/// `Query::bind` not called with an object nor a key/value tuple
-	#[error("Invalid bindings: {0}")]
+	#[error("Invalid bindings: {0:?}")]
 	InvalidBindings(Value),
 
 	/// Tried to use a range query on a record ID
@@ -103,7 +103,7 @@ pub enum Error {
 	InvalidUrl(String),
 
 	/// Failed to convert a `sql::Value` to `T`
-	#[error("Failed to convert `{value}` to `T`: {error}")]
+	#[error("Failed to convert `{value:?}` to `T`: {error}")]
 	FromValue {
 		value: Value,
 		error: String,
@@ -117,7 +117,7 @@ pub enum Error {
 	},
 
 	/// Failed to serialize `sql::Value` to JSON string
-	#[error("Failed to serialize `{value}` to JSON string: {error}")]
+	#[error("Failed to serialize `{value:?}` to JSON string: {error}")]
 	ToJsonString {
 		value: Value,
 		error: String,
@@ -155,7 +155,7 @@ pub enum Error {
 	/// Tried to take only a single result when the query returned multiple
 	/// records
 	#[error("Tried to take only a single result from a query that contains multiple")]
-	LossyTake(Response),
+	LossyTake(IndexedResults),
 
 	/// The protocol or storage engine being used does not support backups on
 	/// the architecture it's running on

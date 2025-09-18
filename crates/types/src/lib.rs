@@ -3,6 +3,7 @@
 
 mod flatbuffers;
 mod kind;
+mod notification;
 mod traits;
 pub(crate) mod utils;
 mod value;
@@ -11,6 +12,7 @@ mod variables;
 pub use anyhow;
 pub use flatbuffers::*;
 pub use kind::*;
+pub use notification::*;
 // Re-export the derive macro
 pub use surrealdb_types_derive::*;
 pub use traits::*;

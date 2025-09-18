@@ -277,18 +277,21 @@ impl PartialEq for Number {
 	}
 }
 
-	impl PartialOrd for Number {
-		fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-			Some(self.cmp(other))
-		}
+impl PartialOrd for Number {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
 	}
+}
 
 impl Revisioned for Number {
 	fn revision() -> u16 {
 		1
 	}
 
-	fn serialize_revisioned<W: std::io::Write>(&self, writer: &mut W) -> Result<(), revision::Error> {
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
 		match self {
 			Number::Int(i) => (0u8, *i).serialize_revisioned(writer),
 			Number::Float(f) => (1u8, *f).serialize_revisioned(writer),
@@ -299,14 +302,20 @@ impl Revisioned for Number {
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
 		let (tag, data): (u8, String) = Revisioned::deserialize_revisioned(reader)?;
 		match tag {
-			0 => data.parse().map(Number::Int).map_err(|err| revision::Error::Conversion(format!("invalid int: {err:?}"))),
-			1 => data.parse().map(Number::Float).map_err(|err| revision::Error::Conversion(format!("invalid float: {err:?}"))),
+			0 => data
+				.parse()
+				.map(Number::Int)
+				.map_err(|err| revision::Error::Conversion(format!("invalid int: {err:?}"))),
+			1 => data
+				.parse()
+				.map(Number::Float)
+				.map_err(|err| revision::Error::Conversion(format!("invalid float: {err:?}"))),
 			2 => {
 				let s: String = data;
 				Decimal::from_str(&s)
 					.map_err(|err| revision::Error::Conversion(format!("invalid decimal: {err:?}")))
 					.map(Number::Decimal)
-			},
+			}
 			_ => Err(revision::Error::Conversion("invalid number tag".to_string())),
 		}
 	}

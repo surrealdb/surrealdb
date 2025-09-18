@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use serde::de::DeserializeOwned;
+use surrealdb_types::SurrealValue;
 use uuid::Uuid;
 
 use crate::api::conn::Command;
@@ -79,7 +79,7 @@ where
 impl<'r, Client, R> IntoFuture for Content<'r, Client, Option<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -90,7 +90,7 @@ where
 impl<'r, Client, R> IntoFuture for Content<'r, Client, Vec<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;

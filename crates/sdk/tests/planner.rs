@@ -1,10 +1,10 @@
 mod helpers;
 use helpers::{new_ds, skip_ok};
 use surrealdb::Result;
-use surrealdb_core::dbs::{Response, Session};
+use surrealdb_core::dbs::{QueryResult, Session};
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn;
-use surrealdb_core::val::Value;
+use surrealdb_types::Value;
 
 use crate::helpers::Test;
 
@@ -144,14 +144,18 @@ async fn select_where_iterate_two_no_index() -> Result<()> {
 	Ok(())
 }
 
-async fn execute_test(dbs: &Datastore, sql: &str, expected_result: usize) -> Result<Vec<Response>> {
+async fn execute_test(
+	dbs: &Datastore,
+	sql: &str,
+	expected_result: usize,
+) -> Result<Vec<QueryResult>> {
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), expected_result);
 	Ok(res)
 }
 
-fn check_result(res: &mut Vec<Response>, expected: &str) -> Result<()> {
+fn check_result(res: &mut Vec<QueryResult>, expected: &str) -> Result<()> {
 	let tmp = res.remove(0).result?;
 	let val = syn::value(expected).unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));

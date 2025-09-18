@@ -108,35 +108,36 @@ impl ApiInvocation {
 		// Edit the context
 		let mut ctx = MutableContext::new_isolated(ctx);
 
+		todo!("STU")
 		// Set the request variable
-		let vars = self.vars(body)?;
-		ctx.add_value("request", vars.into());
+		// let vars = self.vars(body)?;
+		// ctx.add_value("request", vars.into());
 
-		// Possibly set the timeout
-		if let Some(timeout) = inv_ctx.timeout {
-			ctx.add_timeout(*timeout)?
-		}
+		// // Possibly set the timeout
+		// if let Some(timeout) = inv_ctx.timeout {
+		// 	ctx.add_timeout(*timeout)?
+		// }
 
-		// Freeze the context
-		let ctx = ctx.freeze();
+		// // Freeze the context
+		// let ctx = ctx.freeze();
 
-		// Compute the action
+		// // Compute the action
 
-		let Some(action) = method_action.map(|x| &x.action).or(api.fallback.as_ref()) else {
-			// condition already checked above.
-			// either method_action is some or api fallback is some.
-			unreachable!()
-		};
+		// let Some(action) = method_action.map(|x| &x.action).or(api.fallback.as_ref()) else {
+		// 	// condition already checked above.
+		// 	// either method_action is some or api fallback is some.
+		// 	unreachable!()
+		// };
 
-		let res = stk.run(|stk| action.compute(stk, &ctx, &opt, None)).await.catch_return()?;
+		// let res = stk.run(|stk| action.compute(stk, &ctx, &opt, None)).await.catch_return()?;
 
-		let mut res = ApiResponse::from_action_result(res)?;
-		if let Some(headers) = inv_ctx.response_headers {
-			let mut headers = headers;
-			headers.extend(res.headers);
-			res.headers = headers;
-		}
+		// let mut res = ApiResponse::from_action_result(res)?;
+		// if let Some(headers) = inv_ctx.response_headers {
+		// 	let mut headers = headers;
+		// 	headers.extend(res.headers);
+		// 	res.headers = headers;
+		// }
 
-		Ok(Some((res, res_instruction)))
+		// Ok(Some((res, res_instruction)))
 	}
 }

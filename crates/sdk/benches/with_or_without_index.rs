@@ -5,7 +5,7 @@ use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_mai
 use surrealdb_core::dbs::capabilities::{FuncTarget, Targets};
 use surrealdb_core::dbs::{Capabilities, Session};
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::val::{Array, Number, Object, Value};
+use surrealdb_types::{Array, Number, Object, Value};
 use tokio::runtime::Runtime;
 
 fn bench_with_or_without_index(c: &mut Criterion) {

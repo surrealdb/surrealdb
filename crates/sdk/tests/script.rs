@@ -8,7 +8,7 @@ use rust_decimal::Decimal;
 use surrealdb::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
-use surrealdb_core::val::{Geometry, Number, Value};
+use surrealdb_types::{Geometry, Number, Value};
 
 #[tokio::test]
 async fn script_function_error() -> Result<()> {

@@ -20,6 +20,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures::Stream;
+use surrealdb_types::{RecordId, RecordIdKey};
 #[cfg(not(target_family = "wasm"))]
 use tokio::time::Instant;
 #[cfg(not(target_family = "wasm"))]
@@ -35,23 +36,35 @@ use crate::core::expr;
 // used in http and all local engines.
 #[allow(dead_code)]
 pub(crate) fn resource_to_exprs(r: Resource) -> Vec<expr::Expr> {
-	match r {
-		Resource::Table(x) => {
-			// TODO: Null byte validity
-			vec![expr::Expr::Table(unsafe { expr::Ident::new_unchecked(x) })]
-		}
-		Resource::RecordId(x) => {
-			vec![expr::Expr::Literal(expr::Literal::RecordId(x.into_inner().into_literal()))]
-		}
-		Resource::Object(x) => {
-			vec![expr::Expr::Literal(expr::Literal::Object(x.into_inner().into_literal()))]
-		}
-		Resource::Array(x) => x.into_iter().map(|x| x.into_inner().into_literal()).collect(),
-		Resource::Range(x) => {
-			vec![expr::Expr::Literal(expr::Literal::RecordId(x.into_inner().into_literal()))]
-		}
-		Resource::Unspecified => vec![expr::Expr::Literal(expr::Literal::None)],
-	}
+	todo!("STU")
+	// match r {
+	// 	Resource::Table(x) => {
+	// 		// TODO: Null byte validity
+	// 		vec![expr::Expr::Table(unsafe { expr::Ident::new_unchecked(x) })]
+	// 	}
+	// 	Resource::RecordId(x) => {
+	// 		vec![record_id_to_expr(x)]
+	// 	}
+	// 	Resource::Object(x) => {
+	// 		vec![expr::Expr::Literal(expr::Literal::Object(x.into_literal()))]
+	// 	}
+	// 	Resource::Array(x) => x.into_iter().map(|x| x.into_inner().into_literal()).collect(),
+	// 	Resource::Range(x) => {
+	// 		vec![expr::Expr::Literal(expr::Literal::RecordId(x.into_inner().into_literal()))]
+	// 	}
+	// 	Resource::Unspecified => vec![expr::Expr::Literal(expr::Literal::None)],
+	// }
+}
+
+fn record_id_to_expr(x: RecordId) -> expr::Expr {
+	expr::Expr::Literal(expr::Literal::RecordId(expr::RecordIdLit {
+		table: x.table,
+		key: public_record_id_key_to_literal(x.key),
+	}))
+}
+
+fn public_record_id_key_to_literal(x: RecordIdKey) -> expr::RecordIdKeyLit {
+	todo!("STU")
 }
 
 struct IntervalStream {

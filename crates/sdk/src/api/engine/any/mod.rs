@@ -332,9 +332,10 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests {
 
+	use surrealdb_types::{self, Object};
+
 	use super::*;
 	use crate::Value;
-	use crate::core::val;
 	use crate::opt::auth::Root;
 	use crate::opt::capabilities::Capabilities;
 
@@ -362,8 +363,8 @@ mod tests {
 		let users: Value = res.take("users").unwrap();
 
 		assert_eq!(
-			users.into_inner(),
-			val::Value::from(val::Object::default()),
+			users,
+			Value::Object(Object::default()),
 			"there should be no users in the system"
 		);
 	}

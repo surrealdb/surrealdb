@@ -15,7 +15,7 @@ use surrealdb_core::idx::trees::mtree::MTreeIndex;
 use surrealdb_core::kvs::LockType::Optimistic;
 use surrealdb_core::kvs::TransactionType::{Read, Write};
 use surrealdb_core::kvs::{Datastore, Transaction, TransactionType};
-use surrealdb_core::val::{Number, RecordId, RecordIdKey, Value};
+use surrealdb_types::{Number, RecordId, RecordIdKey, Value};
 use tokio::runtime::{Builder, Runtime};
 use tokio::task;
 

@@ -1,5 +1,5 @@
-use std::ops::{Deref, DerefMut};
 use std::fmt::{self, Display};
+use std::ops::{Deref, DerefMut};
 
 use revision::Revisioned;
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,10 @@ impl Revisioned for Uuid {
 		1
 	}
 
-	fn serialize_revisioned<W: std::io::Write>(&self, writer: &mut W) -> Result<(), revision::Error> {
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
 		self.0.to_string().serialize_revisioned(writer)
 	}
 

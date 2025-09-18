@@ -4,6 +4,7 @@ use chrono::Utc;
 
 use crate::dbs::Variables;
 use crate::iam::{Auth, Level, Role};
+use crate::types::PublicVariables;
 use crate::val::{Strand, Value};
 
 /// Specifies the current session information when processing a query.
@@ -32,7 +33,7 @@ pub struct Session {
 	/// The current expiration time of the session
 	pub exp: Option<i64>,
 	/// The variables set
-	pub variables: Variables,
+	pub variables: PublicVariables,
 }
 
 impl Session {

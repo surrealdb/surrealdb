@@ -167,9 +167,7 @@ use futures::StreamExt;
 #[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
 use indexmap::IndexMap;
-use surrealdb_core::dbs::{Notification, Response, Session, Variables};
-#[cfg(not(target_family = "wasm"))]
-use surrealdb_core::err::Error as CoreError;
+use surrealdb_core::dbs::{QueryResult, Session};
 #[cfg(feature = "ml")]
 use surrealdb_core::expr::Model;
 use surrealdb_core::expr::statements::DeleteStatement;
@@ -181,13 +179,14 @@ use surrealdb_core::iam;
 use surrealdb_core::kvs::Datastore;
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::val::{self, Strand};
+use surrealdb_core::rpc::DbResultStats;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::{
 	expr::statements::{DefineModelStatement, DefineStatement},
 	iam::{Action, ResourceKind, check::check_ns_db},
 	ml::storage::surml_file::SurMlFile,
 };
+use surrealdb_types::{Notification as CoreNotification, Value, Variables};
 use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
 use tokio::{
@@ -202,10 +201,10 @@ use super::resource_to_exprs;
 use crate::Result;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use crate::api::conn::MlExportConfig;
-use crate::api::conn::{Command, DbResponse, RequestData};
+use crate::api::conn::{Command, IndexedDbResults, RequestData};
+// use surrealdb_core::rpc::DbResponse;
 use crate::api::err::Error;
-use crate::api::{Connect, Response as QueryResponse, Surreal};
-use crate::method::Stats;
+use crate::api::{Connect, IndexedResults as QueryResponse, Surreal};
 use crate::opt::IntoEndpoint;
 
 #[cfg(not(target_family = "wasm"))]
@@ -213,7 +212,7 @@ pub(crate) mod native;
 #[cfg(target_family = "wasm")]
 pub(crate) mod wasm;
 
-type LiveQueryMap = HashMap<Uuid, Sender<Notification>>;
+type LiveQueryMap = HashMap<Uuid, Sender<CoreNotification>>;
 
 /// In-memory database
 ///
@@ -466,47 +465,46 @@ impl Surreal<Db> {
 	}
 }
 
-fn process(responses: Vec<Response>) -> QueryResponse {
-	let mut map = IndexMap::<usize, (Stats, Result<val::Value>)>::with_capacity(responses.len());
+fn process(responses: Vec<QueryResult>) -> QueryResponse {
+	let mut results = IndexMap::with_capacity(responses.len());
 	for (index, response) in responses.into_iter().enumerate() {
-		let stats = Stats {
-			execution_time: Some(response.time),
-		};
-		match response.result {
-			Ok(value) => {
-				// Deserializing from a core value should always work.
-				map.insert(index, (stats, Ok(value)));
-			}
-			Err(error) => {
-				map.insert(index, (stats, Err(error)));
-			}
-		};
+		let stats = DbResultStats::default().with_execution_time(response.time);
+		results.insert(index, (stats, response.result));
+		// match response.result {
+		// 	Ok(value) => {
+		// 		// Deserializing from a core value should always work.
+		// 		map.insert(index, (stats, Ok(value)));
+		// 	}
+		// 	Err(error) => {
+		// 		map.insert(index, (stats, Err(error)));
+		// 	}
+		// };
 	}
 	QueryResponse {
-		results: map,
+		results,
 		..QueryResponse::new()
 	}
 }
 
-async fn take(one: bool, responses: Vec<Response>) -> Result<val::Value> {
+async fn take(one: bool, responses: Vec<QueryResult>) -> Result<Value> {
 	if let Some((_stats, result)) = process(responses).results.swap_remove(&0) {
 		let value = result?;
 		match one {
 			true => match value {
-				val::Value::Array(mut array) => {
+				Value::Array(mut array) => {
 					if let [ref mut value] = array[..] {
-						return Ok(mem::replace(value, val::Value::None));
+						return Ok(mem::replace(value, Value::None));
 					}
 				}
-				val::Value::None | val::Value::Null => {}
+				Value::None | Value::Null => {}
 				value => return Ok(value),
 			},
 			false => return Ok(value),
 		}
 	}
 	match one {
-		true => Ok(val::Value::None),
-		false => Ok(val::Value::Array(Default::default())),
+		true => Ok(Value::None),
+		false => Ok(Value::Array(Default::default())),
 	}
 }
 
@@ -585,7 +583,7 @@ async fn kill_live_query(
 	id: Uuid,
 	session: &Session,
 	vars: Variables,
-) -> Result<val::Value> {
+) -> Result<Value> {
 	let kill_plan = KillStatement {
 		id: Expr::Literal(Literal::Uuid(id.into())),
 	};
@@ -606,43 +604,43 @@ async fn router(
 	session: &Arc<RwLock<Session>>,
 	vars: &Arc<RwLock<Variables>>,
 	live_queries: &Arc<RwLock<LiveQueryMap>>,
-) -> Result<DbResponse> {
+) -> Result<IndexedDbResults> {
 	match command {
 		Command::Use {
 			namespace,
 			database,
 		} => {
 			kvs.process_use(&mut *session.write().await, namespace, database).await?;
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(IndexedDbResults::Other(Value::None))
 		}
 		Command::Signup {
 			credentials,
 		} => {
-			let response =
-				iam::signup::signup(kvs, &mut *session.write().await, credentials).await?.token;
+			let token = iam::signup::signup(kvs, &mut *session.write().await, credentials.into())
+				.await?
+				.token;
 			// TODO: Null byte validity
-			let response = response
-				.map(|x| unsafe { Strand::new_unchecked(x) })
-				.map(From::from)
-				.unwrap_or(val::Value::None);
-			Ok(DbResponse::Other(response))
+			let response = token.map(Value::String).unwrap_or(Value::None);
+			Ok(IndexedDbResults::Other(response))
 		}
 		Command::Signin {
 			credentials,
 		} => {
 			let response =
-				iam::signin::signin(kvs, &mut *session.write().await, credentials).await?.token;
-			Ok(DbResponse::Other(response.into()))
+				iam::signin::signin(kvs, &mut *session.write().await, credentials.into())
+					.await?
+					.token;
+			Ok(IndexedDbResults::Other(Value::String(response)))
 		}
 		Command::Authenticate {
 			token,
 		} => {
 			iam::verify::token(kvs, &mut *session.write().await, &token).await?;
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(IndexedDbResults::Other(Value::None))
 		}
 		Command::Invalidate => {
 			iam::clear::clear(&mut *session.write().await)?;
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(IndexedDbResults::Other(Value::None))
 		}
 		Command::Create {
 			txn: _,
@@ -652,7 +650,7 @@ async fn router(
 			let create_plan = CreateStatement {
 				only: false,
 				what: resource_to_exprs(what),
-				data: data.map(|x| Data::ContentExpression(x.into_literal())),
+				data: data.map(|x| Data::ContentExpression(Expr::from_public_value(x))),
 				output: Some(Output::After),
 				timeout: None,
 				parallel: false,
@@ -666,7 +664,7 @@ async fn router(
 				.process_plan(plan, &*session.read().await, Some(vars.read().await.clone()))
 				.await?;
 			let value = take(true, response).await?;
-			Ok(DbResponse::Other(value))
+			Ok(IndexedDbResults::Other(value))
 		}
 		Command::Upsert {
 			txn: _,
@@ -677,7 +675,7 @@ async fn router(
 			let upsert_plan = UpsertStatement {
 				only: false,
 				what: resource_to_exprs(what),
-				data: data.map(|x| Data::ContentExpression(x.into_literal())),
+				data: data.map(|x| Data::ContentExpression(Expr::from_public_value(x))),
 				with: None,
 				cond: None,
 				output: Some(Output::After),
@@ -691,7 +689,7 @@ async fn router(
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
-			Ok(DbResponse::Other(value))
+			Ok(IndexedDbResults::Other(value))
 		}
 		Command::Update {
 			txn: _,
@@ -702,7 +700,7 @@ async fn router(
 			let update_plan = UpdateStatement {
 				only: false,
 				what: resource_to_exprs(what),
-				data: data.map(|x| Data::ContentExpression(x.into_literal())),
+				data: data.map(|x| Data::ContentExpression(Expr::from_public_value(x))),
 				with: None,
 				cond: None,
 				output: Some(Output::After),
@@ -716,7 +714,7 @@ async fn router(
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
-			Ok(DbResponse::Other(value))
+			Ok(IndexedDbResults::Other(value))
 		}
 		Command::Insert {
 			txn: _,
@@ -727,7 +725,7 @@ async fn router(
 
 			let insert_plan = InsertStatement {
 				into: what.map(|w| Expr::Table(unsafe { Ident::new_unchecked(w) })),
-				data: Data::SingleExpression(data.into_literal()),
+				data: Data::SingleExpression(Expr::from_public_value(data)),
 				ignore: false,
 				update: None,
 				output: Some(Output::After),
@@ -742,7 +740,7 @@ async fn router(
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
-			Ok(DbResponse::Other(value))
+			Ok(IndexedDbResults::Other(value))
 		}
 		Command::InsertRelation {
 			txn: _,
@@ -753,7 +751,7 @@ async fn router(
 
 			let insert_plan = InsertStatement {
 				into: what.map(|w| Expr::Table(unsafe { Ident::new_unchecked(w) })),
-				data: Data::SingleExpression(data.into_literal()),
+				data: Data::SingleExpression(Expr::from_public_value(data)),
 				output: Some(Output::After),
 				relation: true,
 				ignore: false,
@@ -770,7 +768,7 @@ async fn router(
 				.process_plan(plan, &*session.read().await, Some(vars.read().await.clone()))
 				.await?;
 			let value = take(one, response).await?;
-			Ok(DbResponse::Other(value))
+			Ok(IndexedDbResults::Other(value))
 		}
 		Command::Patch {
 			txn: _,
@@ -782,7 +780,7 @@ async fn router(
 				let upsert_plan = UpsertStatement {
 					only: false,
 					what: resource_to_exprs(what),
-					data: data.map(|x| Data::PatchExpression(x.into_literal())),
+					data: data.map(|x| Data::PatchExpression(Expr::from_public_value(x))),
 					with: None,
 					cond: None,
 					output: Some(Output::After),
@@ -797,7 +795,7 @@ async fn router(
 				let update_plan = UpdateStatement {
 					only: false,
 					what: resource_to_exprs(what),
-					data: data.map(|x| Data::PatchExpression(x.into_literal())),
+					data: data.map(|x| Data::PatchExpression(Expr::from_public_value(x))),
 					with: None,
 					cond: None,
 					output: Some(Output::After),
@@ -812,7 +810,7 @@ async fn router(
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
 			let response = process(response);
-			Ok(DbResponse::Query(response))
+			Ok(IndexedDbResults::Query(response))
 		}
 		Command::Merge {
 			txn: _,
@@ -824,7 +822,7 @@ async fn router(
 				let upsert_plan = UpsertStatement {
 					only: false,
 					what: resource_to_exprs(what),
-					data: data.map(|x| Data::MergeExpression(x.into_literal())),
+					data: data.map(|x| Data::MergeExpression(Expr::from_public_value(x))),
 					with: None,
 					cond: None,
 					output: Some(Output::After),
@@ -839,7 +837,7 @@ async fn router(
 				let update_plan = UpdateStatement {
 					only: false,
 					what: resource_to_exprs(what),
-					data: data.map(|x| Data::MergeExpression(x.into_literal())),
+					data: data.map(|x| Data::MergeExpression(Expr::from_public_value(x))),
 					with: None,
 					cond: None,
 					output: Some(Output::After),
@@ -854,7 +852,7 @@ async fn router(
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
 			let response = process(response);
-			Ok(DbResponse::Query(response))
+			Ok(IndexedDbResults::Query(response))
 		}
 		Command::Select {
 			txn: _,
@@ -888,7 +886,7 @@ async fn router(
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
-			Ok(DbResponse::Other(value))
+			Ok(IndexedDbResults::Other(value))
 		}
 		Command::Delete {
 			txn: _,
@@ -911,7 +909,7 @@ async fn router(
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
-			Ok(DbResponse::Other(value))
+			Ok(IndexedDbResults::Other(value))
 		}
 		Command::Query {
 			txn: _,
@@ -919,11 +917,11 @@ async fn router(
 			variables,
 		} => {
 			let mut vars = vars.read().await.clone();
-			vars.merge(variables);
+			vars.extend(variables);
 			let response =
 				kvs.execute(&query.to_string(), &*session.read().await, Some(vars)).await?;
 			let response = process(response);
-			Ok(DbResponse::Query(response))
+			Ok(IndexedDbResults::Query(response))
 		}
 		Command::RawQuery {
 			txn: _,
@@ -931,10 +929,10 @@ async fn router(
 			variables,
 		} => {
 			let mut vars = vars.read().await.clone();
-			vars.merge(variables);
+			vars.extend(variables);
 			let response = kvs.execute(query.as_ref(), &*session.read().await, Some(vars)).await?;
 			let response = process(response);
-			Ok(DbResponse::Query(response))
+			Ok(IndexedDbResults::Query(response))
 		}
 
 		#[cfg(target_family = "wasm")]
@@ -1004,7 +1002,7 @@ async fn router(
 			let copy = copy(file, &mut reader, &mut output);
 
 			tokio::try_join!(export, bridge, copy)?;
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(IndexedDbResults::Other(Value::None))
 		}
 
 		#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
@@ -1052,7 +1050,7 @@ async fn router(
 			let copy = copy(path, &mut reader, &mut output);
 
 			tokio::try_join!(export, bridge, copy)?;
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(IndexedDbResults::Other(Value::None))
 		}
 
 		#[cfg(not(target_family = "wasm"))]
@@ -1082,7 +1080,7 @@ async fn router(
 				tokio::join!(export, bridge);
 			});
 
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(IndexedDbResults::Other(Value::None))
 		}
 		#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 		Command::ExportBytesMl {
@@ -1111,7 +1109,7 @@ async fn router(
 				tokio::join!(export, bridge);
 			});
 
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(IndexedDbResults::Other(Value::None))
 		}
 		#[cfg(not(target_family = "wasm"))]
 		Command::ImportFile {
@@ -1145,7 +1143,7 @@ async fn router(
 					Ok(0) => Poll::Ready(None),
 					Ok(_) => Poll::Ready(Some(Ok(buffer.split().freeze()))),
 					Err(e) => {
-						let error = anyhow::Error::new(CoreError::QueryStream(e.to_string()));
+						let error = anyhow::Error::new(e);
 						Poll::Ready(Some(Err(error)))
 					}
 				}
@@ -1159,7 +1157,7 @@ async fn router(
 				response.result?;
 			}
 
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(IndexedDbResults::Other(Value::None))
 		}
 		#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 		Command::ImportMl {
@@ -1231,11 +1229,11 @@ async fn router(
 				response.result?;
 			}
 
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(IndexedDbResults::Other(Value::None))
 		}
-		Command::Health => Ok(DbResponse::Other(val::Value::None)),
+		Command::Health => Ok(IndexedDbResults::Other(Value::None)),
 		Command::Version => {
-			Ok(DbResponse::Other(val::Value::from(surrealdb_core::env::VERSION.to_string())))
+			Ok(IndexedDbResults::Other(Value::from(surrealdb_core::env::VERSION.to_string())))
 		}
 		Command::Set {
 			key,
@@ -1245,24 +1243,24 @@ async fn router(
 			// Need to compute because certain keys might not be allowed to be set and those
 			// should be rejected by an error.
 			match value {
-				val::Value::None => vars.write().await.remove(&key),
+				Value::None => vars.write().await.remove(&key),
 				v => vars.write().await.insert(key, v),
 			};
 
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(IndexedDbResults::Other(Value::None))
 		}
 		Command::Unset {
 			key,
 		} => {
 			vars.write().await.remove(&key);
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(IndexedDbResults::Other(Value::None))
 		}
 		Command::SubscribeLive {
 			uuid,
 			notification_sender,
 		} => {
 			live_queries.write().await.insert(uuid, notification_sender);
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(IndexedDbResults::Other(Value::None))
 		}
 		Command::Kill {
 			uuid,
@@ -1271,7 +1269,7 @@ async fn router(
 			let value =
 				kill_live_query(kvs, uuid, &*session.read().await, vars.read().await.clone())
 					.await?;
-			Ok(DbResponse::Other(value))
+			Ok(IndexedDbResults::Other(value))
 		}
 
 		Command::Run {
@@ -1299,7 +1297,7 @@ async fn router(
 				},
 			};
 
-			let args = args.into_iter().map(|x| x.into_literal()).collect();
+			let args = args.into_iter().map(|x| Expr::from_public_value(x)).collect();
 
 			let plan = Expr::FunctionCall(Box::new(surrealdb_core::expr::FunctionCall {
 				receiver: func,
@@ -1315,7 +1313,7 @@ async fn router(
 				.await?;
 			let value = take(true, response).await?;
 
-			Ok(DbResponse::Other(value))
+			Ok(IndexedDbResults::Other(value))
 		}
 	}
 }

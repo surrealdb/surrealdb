@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
+use surrealdb_types::Value as PublicValue;
 use uuid::Uuid;
 
 use crate::dbs::node::Timestamp;
-use crate::dbs::{Response, Session};
+use crate::dbs::{QueryResult, Session};
 use crate::kvs::clock::{FakeClock, SizedClock};
 use crate::kvs::tests::CreateDs;
 use crate::syn;
-use surrealdb_types::Value as PublicValue;
 
-async fn test(new_ds: impl CreateDs, index: &str) -> Vec<Response> {
+async fn test(new_ds: impl CreateDs, index: &str) -> Vec<QueryResult> {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("056804f2-b379-4397-9ceb-af8ebd527beb").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
@@ -37,7 +37,7 @@ async fn test(new_ds: impl CreateDs, index: &str) -> Vec<Response> {
 	r
 }
 
-fn check(r: &mut Vec<Response>, tmp: &str) {
+fn check(r: &mut Vec<QueryResult>, tmp: &str) {
 	let tmp = syn::value(tmp).unwrap();
 	let val = match r.remove(0).result {
 		Ok(v) => v,

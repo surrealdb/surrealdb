@@ -143,7 +143,7 @@ impl TokenValue for surrealdb_types::Uuid {
 			TokenKind::Glued(token::Glued::Uuid) => {
 				let uuid: crate::val::Uuid = pop_glued!(parser, Uuid);
 				Ok(surrealdb_types::Uuid(uuid.0))
-			},
+			}
 			t!("u\"") | t!("u'") => {
 				parser.pop_peek();
 				let v = parser.lexer.lex_compound(token, compound::uuid)?.value;

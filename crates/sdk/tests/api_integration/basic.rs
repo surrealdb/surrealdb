@@ -9,7 +9,7 @@ use serde_json::json;
 use surrealdb::error::{Api as ApiError, Db as DbError};
 use surrealdb::opt::auth::{Database, Namespace, Record as RecordAccess};
 use surrealdb::opt::{PatchOp, PatchOps, Raw, Resource};
-use surrealdb::{RecordId, Response, Value};
+use surrealdb::{IndexedResults, RecordId, Value};
 use surrealdb_core::expr::TopLevelExpr;
 use surrealdb_core::{syn, val};
 use ulid::Ulid;
@@ -538,10 +538,7 @@ pub async fn create_record_with_id_with_content(new_db: impl CreateDb) {
 		})
 		.await
 		.unwrap();
-	assert_eq!(
-		value.into_inner().record(),
-		Some("user:jane".parse::<RecordId>().unwrap().into_inner())
-	);
+	assert_eq!(value.record(), Some("user:jane".parse::<RecordId>().unwrap()));
 }
 
 pub async fn create_record_with_id_in_content(new_db: impl CreateDb) {
@@ -746,7 +743,7 @@ pub async fn select_record_ranges(new_db: impl CreateDb) {
 		users
 			.into_iter()
 			.map(|user| {
-				let val::RecordIdKey::String(ref x) = user.id.into_inner().key else {
+				let RecordIdKey::String(ref x) = user.id.into_inner().key else {
 					panic!()
 				};
 				x.clone()
@@ -766,7 +763,7 @@ pub async fn select_record_ranges(new_db: impl CreateDb) {
 	let users: Vec<ApiRecordId> = db.select(table).range("jane"..="john").await.unwrap();
 	assert_eq!(convert(users), vec!["jane", "john"]);
 	let v: Value = db.select(Resource::from(table)).range("jane"..="john").await.unwrap();
-	let val::Value::Array(array) = v.into_inner() else {
+	let Value::Array(array) = v.into_inner() else {
 		panic!()
 	};
 	assert_eq!(array.len(), 2);
@@ -787,7 +784,7 @@ pub async fn select_records_order_by_start_limit(new_db: impl CreateDb) {
     ";
 	db.query(sql).await.unwrap().check().unwrap();
 
-	let check_start_limit = |mut response: Response, expected: Vec<&str>| {
+	let check_start_limit = |mut response: IndexedResults, expected: Vec<&str>| {
 		let users: Vec<RecordName> = response.take(0).unwrap();
 		let users: Vec<String> = users.into_iter().map(|user| user.name).collect();
 		assert_eq!(users, expected);
@@ -843,7 +840,7 @@ pub async fn select_records_fetch(new_db: impl CreateDb) {
     ";
 	db.query(sql).await.unwrap().check().unwrap();
 
-	let check_fetch = |mut response: Response, expected: &str| {
+	let check_fetch = |mut response: IndexedResults, expected: &str| {
 		let val: Value = response.take(0).unwrap();
 		let exp = expected.parse().unwrap();
 		assert_eq!(val, exp);
@@ -1371,7 +1368,7 @@ pub async fn delete_record_id(new_db: impl CreateDb) {
 	let jane: Option<ApiRecordId> = db.delete(("user", "jane")).await.unwrap();
 	assert!(jane.is_none());
 	let value: Value = db.delete(Resource::from(("user", "jane"))).await.unwrap();
-	assert_eq!(value.into_inner(), val::Value::None);
+	assert_eq!(value.into_inner(), Value::None);
 }
 
 pub async fn delete_record_range(new_db: impl CreateDb) {
@@ -1461,16 +1458,16 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	let mut response = db.query(sql).await.unwrap();
 	drop(permit);
 	let v: Value = response.take(0).unwrap();
-	let val::Value::Array(array) = v.into_inner() else {
+	let Value::Array(array) = v.into_inner() else {
 		panic!()
 	};
 	assert_eq!(array.len(), 5);
 	// DEFINE TABLE
 	let a = array.first().unwrap();
-	let val::Value::Object(a) = a.clone() else {
+	let Value::Object(a) = a.clone() else {
 		unreachable!()
 	};
-	let val::Value::Number(_versionstamp1) = a.get("versionstamp").unwrap() else {
+	let Value::Number(_versionstamp1) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
 	let changes = a.get("changes").unwrap().clone().clone();
@@ -1503,10 +1500,10 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	);
 	// UPDATE testuser:amos
 	let a = &array[1];
-	let val::Value::Object(a) = a.clone() else {
+	let Value::Object(a) = a.clone() else {
 		unreachable!()
 	};
-	let val::Value::Number(versionstamp1) = a.get("versionstamp").unwrap() else {
+	let Value::Number(versionstamp1) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
 	let changes = a.get("changes").unwrap().to_owned();
@@ -1525,10 +1522,10 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	);
 	// UPDATE testuser:jane
 	let a = &array[2];
-	let val::Value::Object(a) = a.clone() else {
+	let Value::Object(a) = a.clone() else {
 		unreachable!()
 	};
-	let val::Value::Number(versionstamp2) = a.get("versionstamp").unwrap().clone() else {
+	let Value::Number(versionstamp2) = a.get("versionstamp").unwrap().clone() else {
 		unreachable!()
 	};
 	assert!(*versionstamp1 < versionstamp2);
@@ -1548,10 +1545,10 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	);
 	// UPDATE testuser:amos
 	let a = &array[3];
-	let val::Value::Object(a) = a.clone() else {
+	let Value::Object(a) = a.clone() else {
 		unreachable!()
 	};
-	let val::Value::Number(versionstamp3) = a.get("versionstamp").unwrap() else {
+	let Value::Number(versionstamp3) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
 	assert!(versionstamp2 < *versionstamp3);
@@ -1571,10 +1568,10 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	);
 	// UPDATE table
 	let a = &array[4];
-	let val::Value::Object(a) = a.clone() else {
+	let Value::Object(a) = a.clone() else {
 		unreachable!()
 	};
-	let val::Value::Number(versionstamp4) = a.get("versionstamp").unwrap() else {
+	let Value::Number(versionstamp4) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
 	assert!(versionstamp3 < versionstamp4);
@@ -1638,7 +1635,7 @@ pub async fn return_bool(new_db: impl CreateDb) {
 	assert!(boolean);
 	let mut response = db.query("RETURN false").await.unwrap();
 	let value: Value = response.take(0).unwrap();
-	assert_eq!(value.into_inner(), val::Value::Bool(false));
+	assert_eq!(value.into_inner(), Value::Bool(false));
 }
 
 pub async fn run(new_db: impl CreateDb) {
@@ -1709,9 +1706,9 @@ pub async fn field_and_index_methods(new_db: impl CreateDb) {
 	let as_value: Value = response.take::<Value>(0).unwrap();
 	let inside = as_value.get(0).get("b1").get("total_peers");
 
-	assert_eq!(inside, &Value::from_inner(val::Value::Number(74.into())));
+	assert_eq!(inside, &Value::from_inner(Value::Number(74.into())));
 	assert!(!inside.is_none());
-	assert_eq!(inside.into_option(), Some(&Value::from_inner(val::Value::Number(74.into()))));
+	assert_eq!(inside.into_option(), Some(&Value::from_inner(Value::Number(74.into()))));
 
 	let mut response =
 		db.query("SELECT b1 FROM CREATE something SET b1.total_peers = 74").await.unwrap();
@@ -1719,7 +1716,7 @@ pub async fn field_and_index_methods(new_db: impl CreateDb) {
 	// Second .get() is a non-existent field
 	let inside = as_value.get(0).get("b1111111").get("total_peers");
 
-	assert_eq!(inside, &Value::from_inner(val::Value::None));
+	assert_eq!(inside, &Value::from_inner(Value::None));
 	assert!(inside.is_none());
 	assert_eq!(inside.into_option(), None);
 }

@@ -3,7 +3,7 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 
 use serde::Serialize;
-use serde::de::DeserializeOwned;
+use surrealdb_types::{self, SurrealValue};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -12,7 +12,6 @@ use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
 use crate::api::{self, Connection, Result};
-use crate::core::val;
 use crate::method::OnceLockExt;
 use crate::{Surreal, Value};
 
@@ -84,7 +83,7 @@ where
 impl<'r, Client, R> IntoFuture for Create<'r, Client, Option<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -99,10 +98,10 @@ where
 	/// Sets content of a record
 	pub fn content<D>(self, data: D) -> Content<'r, C, Value>
 	where
-		D: Serialize + 'static,
+		D: SurrealValue + 'static,
 	{
 		Content::from_closure(self.client, self.txn, || {
-			let content = api::value::to_core_value(data)?;
+			let content = data.into_value();
 
 			validate_data(
 				&content,
@@ -110,7 +109,7 @@ where
 			)?;
 
 			let data = match content {
-				val::Value::None | val::Value::Null => None,
+				Value::None | Value::Null => None,
 				content => Some(content),
 			};
 
@@ -130,10 +129,10 @@ where
 	/// Sets content of a record
 	pub fn content<D>(self, data: D) -> Content<'r, C, Option<R>>
 	where
-		D: Serialize + 'static,
+		D: SurrealValue + 'static,
 	{
 		Content::from_closure(self.client, self.txn, || {
-			let content = api::value::to_core_value(data)?;
+			let content = data.into_value();
 
 			validate_data(
 				&content,
@@ -141,7 +140,7 @@ where
 			)?;
 
 			let data = match content {
-				val::Value::None | val::Value::Null => None,
+				Value::None | Value::Null => None,
 				content => Some(content),
 			};
 

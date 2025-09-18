@@ -4,7 +4,7 @@ use surrealdb::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::{Level, Role};
 use surrealdb_core::syn;
-use surrealdb_core::val::{Array, Number, Value};
+use surrealdb_types::{Array, Number, Value};
 
 #[tokio::test]
 async fn select_field_value() -> Result<()> {

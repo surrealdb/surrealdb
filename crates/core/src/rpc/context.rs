@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
-use super::{Data, Method, RpcError, RpcProtocolV1};
+use super::{DbResult, Method, RpcError, RpcProtocolV1};
 use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::types::PublicArray;
@@ -22,7 +22,7 @@ pub trait RpcContext {
 	/// Mutable access to the current session for this RPC context
 	fn set_session(&self, session: Arc<Session>);
 	/// The version information for this RPC context
-	fn version_data(&self) -> Data;
+	fn version_data(&self) -> DbResult;
 
 	// ------------------------------
 	// Realtime
@@ -69,7 +69,7 @@ pub trait RpcContext {
 		txn: Option<Uuid>,
 		method: Method,
 		params: PublicArray,
-	) -> Result<Data, RpcError>
+	) -> Result<DbResult, RpcError>
 	where
 		Self: RpcProtocolV1,
 		// Self: RpcProtocolV2,

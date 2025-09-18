@@ -40,7 +40,7 @@ impl Bytes {
 	pub fn new(data: Vec<u8>) -> Self {
 		Self(data)
 	}
-	
+
 	/// Get the inner Vec<u8>
 	pub fn inner(&self) -> &Vec<u8> {
 		&self.0

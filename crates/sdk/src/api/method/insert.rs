@@ -3,20 +3,19 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 
 use serde::Serialize;
-use serde::de::DeserializeOwned;
+use surrealdb_types::{Object, SurrealValue, Value};
 use uuid::Uuid;
 
 use super::insert_relation::InsertRelation;
 use super::transaction::WithTransaction;
 use super::validate_data;
+use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::err::Error;
 use crate::api::method::{BoxFuture, Content};
 use crate::api::opt::Resource;
-use crate::api::{self, Connection, Result};
-use crate::core::val;
+use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
-use crate::{Surreal, Value};
 
 /// An insert future
 #[derive(Debug)]
@@ -63,12 +62,11 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async move {
 				let (table, data) = match resource? {
-					Resource::Table(table) => (table.into(), val::Object::default()),
+					Resource::Table(table) => (table.into(), Value::Object(Object::default())),
 					Resource::RecordId(record_id) => {
-						let record_id = record_id.into_inner();
-						let mut map = val::Object::default();
+						let mut map = Object::default();
 						map.insert("id".to_string(), record_id.key.into_value());
-						(record_id.table, map)
+						(record_id.table, Value::Object(map))
 					}
 					Resource::Object(_) => return Err(Error::InsertOnObject.into()),
 					Resource::Array(_) => return Err(Error::InsertOnArray.into()),
@@ -80,7 +78,7 @@ macro_rules! into_future {
 				let cmd = Command::Insert {
 					txn,
 					what: Some(table.to_string()),
-					data: data.into(),
+					data,
 				};
 
 				let router = client.inner.router.extract()?;
@@ -103,7 +101,7 @@ where
 impl<'r, Client, R> IntoFuture for Insert<'r, Client, Option<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -114,7 +112,7 @@ where
 impl<'r, Client, R> IntoFuture for Insert<'r, Client, Vec<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -125,15 +123,15 @@ where
 impl<'r, C, R> Insert<'r, C, R>
 where
 	C: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	/// Specifies the data to insert into the table
 	pub fn content<D>(self, data: D) -> Content<'r, C, R>
 	where
-		D: Serialize + 'static,
+		D: SurrealValue,
 	{
+		let mut data = data.into_value();
 		Content::from_closure(self.client, self.txn, || {
-			let mut data = api::value::to_core_value(data)?;
 			validate_data(
 				&data,
 				"Tried to insert non-object-like data as content, only structs and objects are supported",
@@ -151,8 +149,7 @@ where
 						)
 						.into())
 					} else {
-						let thing = thing.into_inner();
-						if let val::Value::Object(ref mut x) = data {
+						if let Value::Object(ref mut x) = data {
 							x.insert("id".to_string(), thing.key.into_value());
 						}
 
@@ -179,15 +176,15 @@ where
 impl<'r, C, R> Insert<'r, C, R>
 where
 	C: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	/// Specifies the data to insert into the table
 	pub fn relation<D>(self, data: D) -> InsertRelation<'r, C, R>
 	where
-		D: Serialize + 'static,
+		D: SurrealValue + 'static,
 	{
 		InsertRelation::from_closure(self.client, || {
-			let mut data = api::value::to_core_value(data)?;
+			let mut data = data.into_value();
 			validate_data(
 				&data,
 				"Tried to insert non-object-like data as relation data, only structs and objects are supported",
@@ -205,8 +202,7 @@ where
 						)
 						.into())
 					} else {
-						let thing = thing.into_inner();
-						if let val::Value::Object(ref mut x) = data {
+						if let Value::Object(ref mut x) = data {
 							x.insert("id".to_string(), thing.key.into_value());
 						}
 

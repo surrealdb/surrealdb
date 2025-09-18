@@ -24,6 +24,7 @@ use crate::expr::{
 	Mock, Param, PostfixOperator, PrefixOperator,
 };
 use crate::fnc;
+use crate::types::PublicValue;
 use crate::val::{Array, Closure, Range, Strand, Value};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -126,6 +127,10 @@ impl Expr {
 			| Expr::Upsert(_)
 			| Expr::Alter(_) => false,
 		}
+	}
+
+	pub fn from_public_value(value: PublicValue) -> Self {
+		todo!("STU")
 	}
 
 	/// Checks if a expression is 'pure' i.e. does not rely on the environment.

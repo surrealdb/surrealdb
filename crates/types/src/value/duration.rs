@@ -1,4 +1,6 @@
-use std::{fmt::Debug, ops::Deref, str::FromStr};
+use std::fmt::Debug;
+use std::ops::Deref;
+use std::str::FromStr;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -31,7 +33,7 @@ impl Duration {
 	pub fn from_duration(d: std::time::Duration) -> Self {
 		Self(d)
 	}
-	
+
 	/// Get the inner std::time::Duration
 	pub fn inner(&self) -> std::time::Duration {
 		self.0
@@ -175,12 +177,12 @@ impl FromStr for Duration {
 		let mut total_secs = 0u64;
 		let mut total_nanos = 0u32;
 		let mut remaining = s.trim();
-		
+
 		// Handle special case for zero duration
 		if remaining == "0ns" || remaining == "0" {
 			return Ok(Duration::new(0, 0));
 		}
-		
+
 		while !remaining.is_empty() {
 			// Find the end of the number part
 			let mut end = 0;
@@ -191,16 +193,16 @@ impl FromStr for Duration {
 				}
 				end = i + c.len_utf8();
 			}
-			
+
 			if end == 0 {
 				return Err(());
 			}
-			
+
 			let value_str = &remaining[..end];
 			let value: u64 = value_str.parse().map_err(|_| ())?;
-			
+
 			remaining = &remaining[end..];
-			
+
 			// Parse the unit
 			let unit = if remaining.starts_with("y") {
 				remaining = &remaining[1..];
@@ -235,7 +237,7 @@ impl FromStr for Duration {
 			} else {
 				return Err(());
 			};
-			
+
 			// Convert to seconds and nanoseconds based on unit
 			match unit {
 				"y" => {
@@ -251,7 +253,8 @@ impl FromStr for Duration {
 					total_secs = total_secs.saturating_add(value.saturating_mul(SECONDS_PER_HOUR));
 				}
 				"m" => {
-					total_secs = total_secs.saturating_add(value.saturating_mul(SECONDS_PER_MINUTE));
+					total_secs =
+						total_secs.saturating_add(value.saturating_mul(SECONDS_PER_MINUTE));
 				}
 				"s" => {
 					total_secs = total_secs.saturating_add(value);
@@ -276,14 +279,14 @@ impl FromStr for Duration {
 				_ => return Err(()),
 			}
 		}
-		
+
 		// Handle nanosecond overflow
 		if total_nanos >= 1_000_000_000 {
 			let additional_secs = total_nanos / 1_000_000_000;
 			total_secs = total_secs.saturating_add(additional_secs as u64);
 			total_nanos = total_nanos % 1_000_000_000;
 		}
-		
+
 		Ok(Duration::new(total_secs, total_nanos))
 	}
 }
@@ -326,15 +329,15 @@ mod tests {
 		assert_eq!(Duration::from_str("1d").unwrap(), Duration::from_days(1).unwrap());
 		assert_eq!(Duration::from_str("1w").unwrap(), Duration::from_weeks(1).unwrap());
 		assert_eq!(Duration::from_str("1y").unwrap(), Duration::new(365 * 24 * 60 * 60, 0));
-		
+
 		// Test nanosecond units
 		assert_eq!(Duration::from_str("1000ns").unwrap(), Duration::from_nanos(1000));
 		assert_eq!(Duration::from_str("1000ms").unwrap(), Duration::from_millis(1000));
-		
+
 		// Test zero duration
 		assert_eq!(Duration::from_str("0ns").unwrap(), Duration::new(0, 0));
 		assert_eq!(Duration::from_str("0").unwrap(), Duration::new(0, 0));
-		
+
 		// Test combined units
 		let combined = Duration::from_str("1h30m15s500ms").unwrap();
 		let expected = Duration::from_hours(1).unwrap().0
@@ -342,7 +345,7 @@ mod tests {
 			+ Duration::from_secs(15).0
 			+ Duration::from_millis(500).0;
 		assert_eq!(combined.0, expected);
-		
+
 		// Test invalid input
 		assert!(Duration::from_str("invalid").is_err());
 		assert!(Duration::from_str("1x").is_err());

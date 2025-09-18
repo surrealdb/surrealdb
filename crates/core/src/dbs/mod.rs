@@ -27,9 +27,8 @@ pub use variables::Variables;
 pub use self::capabilities::Capabilities;
 pub(crate) use self::executor::Executor;
 pub(crate) use self::iterator::{Iterable, Iterator, Operable, Processed, Workable};
-pub use self::notification::{Action, Notification};
 pub(crate) use self::options::{Force, Options};
-pub use self::response::{QueryMethodResponse, QueryType, Response, Status};
+pub use self::response::{QueryResult, QueryType, Status};
 pub use self::session::Session;
 pub(crate) use self::statement::Statement;
 

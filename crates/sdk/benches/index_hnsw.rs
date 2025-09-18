@@ -15,7 +15,7 @@ use surrealdb_core::kvs::LockType::Optimistic;
 use surrealdb_core::kvs::TransactionType::{Read, Write};
 use surrealdb_core::kvs::{Datastore, Transaction};
 use surrealdb_core::syn;
-use surrealdb_core::val::{Array, Number, RecordId, RecordIdKey, Value};
+use surrealdb_types::{Array, Number, RecordId, RecordIdKey, Value};
 use tokio::runtime::{Builder, Runtime};
 
 const EF_CONSTRUCTION: u16 = 150;

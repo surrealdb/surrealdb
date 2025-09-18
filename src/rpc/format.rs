@@ -9,7 +9,7 @@ use crate::core::rpc::request::Request;
 use crate::core::val;
 use crate::net::headers::{Accept, ContentType};
 use crate::rpc::failure::Failure;
-use crate::rpc::response::Response;
+use crate::rpc::response::DbResponse;
 
 impl From<&Accept> for Format {
 	fn from(value: &Accept) -> Self {
@@ -51,7 +51,7 @@ pub trait WsFormat {
 	/// Process a WebSocket RPC request
 	fn req_ws(&self, msg: Message) -> Result<Request, Failure>;
 	/// Process a WebSocket RPC response
-	fn res_ws(&self, res: Response) -> Result<(usize, Message), Failure>;
+	fn res_ws(&self, res: DbResponse) -> Result<(usize, Message), Failure>;
 }
 
 impl WsFormat for Format {
@@ -100,7 +100,7 @@ impl WsFormat for Format {
 	}
 
 	/// Process a WebSocket RPC response
-	fn res_ws(&self, res: Response) -> Result<(usize, Message), Failure> {
+	fn res_ws(&self, res: DbResponse) -> Result<(usize, Message), Failure> {
 		match self {
 			Format::Json => {
 				let val = crate::core::rpc::format::json::encode_str(res.into_value())
@@ -131,7 +131,7 @@ pub trait HttpFormat {
 	/// Process a HTTP RPC request
 	fn req_http(&self, body: Bytes) -> Result<Request, RpcError>;
 	/// Process a HTTP RPC response
-	fn res_http(&self, res: Response) -> Result<AxumResponse, RpcError>;
+	fn res_http(&self, res: DbResponse) -> Result<AxumResponse, RpcError>;
 }
 
 impl HttpFormat for Format {
@@ -178,7 +178,7 @@ impl HttpFormat for Format {
 		}
 	}
 	/// Process a HTTP RPC response
-	fn res_http(&self, res: Response) -> Result<AxumResponse, RpcError> {
+	fn res_http(&self, res: DbResponse) -> Result<AxumResponse, RpcError> {
 		match self {
 			Format::Json => {
 				let val = crate::core::rpc::format::json::encode_str(res.into_value())

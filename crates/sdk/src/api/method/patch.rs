@@ -2,8 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use serde::de::DeserializeOwned;
-use serde_content::Value as Content;
+use surrealdb_types::SurrealValue;
 use uuid::Uuid;
 
 use crate::api::conn::Command;
@@ -20,7 +19,7 @@ pub struct Patch<'r, C: Connection, R> {
 	pub(super) txn: Option<Uuid>,
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
-	pub(super) patches: Vec<serde_content::Result<Content<'static>>>,
+	pub(super) patches: Vec<Value>,
 	pub(super) upsert: bool,
 	pub(super) response_type: PhantomData<R>,
 }
@@ -52,13 +51,10 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async move {
 				let mut vec = Vec::with_capacity(patches.len());
-				for result in patches {
-					let content =
-						result.map_err(|x| crate::error::Api::DeSerializeValue(x.to_string()))?;
-					let value = crate::api::value::to_core_value(content)?;
-					vec.push(value);
+				for patch in patches {
+					vec.push(patch);
 				}
-				let patches = crate::core::val::Value::from(vec);
+				let patches = surrealdb_types::Value::Array(surrealdb_types::Array::from(vec));
 				let router = client.inner.router.extract()?;
 				let cmd = Command::Patch {
 					txn,
@@ -86,7 +82,7 @@ where
 impl<'r, Client, R> IntoFuture for Patch<'r, Client, Option<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -97,7 +93,7 @@ where
 impl<'r, Client, R> IntoFuture for Patch<'r, Client, Vec<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -114,13 +110,12 @@ where
 	pub fn patch(mut self, patch: impl Into<PatchOp>) -> Patch<'r, C, R> {
 		let PatchOp(patch) = patch.into();
 		match patch {
-			Ok(Content::Seq(values)) => {
+			Value::Array(values) => {
 				for value in values {
-					self.patches.push(Ok(value));
+					self.patches.push(value);
 				}
 			}
-			Ok(value) => self.patches.push(Ok(value)),
-			Err(error) => self.patches.push(Err(error)),
+			value => self.patches.push(value),
 		}
 		self
 	}

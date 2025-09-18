@@ -3,7 +3,7 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 
 use serde::Serialize;
-use serde::de::DeserializeOwned;
+use surrealdb_types::{self, RecordIdKeyRange, SurrealValue};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -12,7 +12,6 @@ use crate::api::conn::Command;
 use crate::api::method::{BoxFuture, Content, Merge, Patch};
 use crate::api::opt::{PatchOp, Resource};
 use crate::api::{self, Connection, Result};
-use crate::core::val;
 use crate::method::OnceLockExt;
 use crate::opt::KeyRange;
 use crate::{Surreal, Value};
@@ -87,7 +86,7 @@ where
 impl<'r, Client, R> IntoFuture for Upsert<'r, Client, Option<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -98,7 +97,7 @@ where
 impl<'r, Client, R> IntoFuture for Upsert<'r, Client, Vec<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -111,7 +110,7 @@ where
 	C: Connection,
 {
 	/// Restricts the records to upsert to those in the specified range
-	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
+	pub fn range(mut self, range: impl Into<RecordIdKeyRange>) -> Self {
 		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
 		self
 	}
@@ -122,7 +121,7 @@ where
 	C: Connection,
 {
 	/// Restricts the records to upsert to those in the specified range
-	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
+	pub fn range(mut self, range: impl Into<RecordIdKeyRange>) -> Self {
 		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
 		self
 	}
@@ -131,23 +130,23 @@ where
 impl<'r, C, R> Upsert<'r, C, R>
 where
 	C: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	/// Replaces the current document / record data with the specified data
 	pub fn content<D>(self, data: D) -> Content<'r, C, R>
 	where
-		D: Serialize + 'static,
+		D: SurrealValue,
 	{
-		Content::from_closure(self.client, self.txn, || {
-			let data = api::value::to_core_value(data)?;
+		let data = data.into_value();
 
+		Content::from_closure(self.client, self.txn, || {
 			validate_data(
 				&data,
 				"Tried to upsert non-object-like data as content, only structs and objects are supported",
 			)?;
 
 			let data = match data {
-				val::Value::None => None,
+				Value::None => None,
 				content => Some(content),
 			};
 
@@ -162,7 +161,7 @@ where
 	/// Merges the current document / record data with the specified data
 	pub fn merge<D>(self, data: D) -> Merge<'r, C, D, R>
 	where
-		D: Serialize,
+		D: SurrealValue,
 	{
 		Merge {
 			txn: self.txn,
@@ -179,9 +178,8 @@ where
 	pub fn patch(self, patch: impl Into<PatchOp>) -> Patch<'r, C, R> {
 		let PatchOp(result) = patch.into();
 		let patches = match result {
-			Ok(serde_content::Value::Seq(values)) => values.into_iter().map(Ok).collect(),
-			Ok(value) => vec![Ok(value)],
-			Err(error) => vec![Err(error)],
+			Value::Array(values) => values.into_vec(),
+			value => vec![value],
 		};
 		Patch {
 			patches,

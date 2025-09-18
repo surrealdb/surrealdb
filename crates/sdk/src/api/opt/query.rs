@@ -4,21 +4,21 @@ use std::mem;
 use anyhow::bail;
 use futures::future::Either;
 use futures::stream::select_all;
-use serde::de::DeserializeOwned;
+use surrealdb_core::rpc::DbResultStats;
+use surrealdb_types::{self, Notification as CoreNotification, SurrealValue};
 
 use super::Raw;
 use crate::api::err::Error;
-use crate::api::{OnceLockExt, Response as QueryResponse, Result};
+use crate::api::{IndexedResults as QueryResponse, OnceLockExt, Result};
 use crate::core::expr::{
 	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, Expr, IfelseStatement,
 	InfoStatement, InsertStatement, KillStatement, LiveStatement, OptionStatement, OutputStatement,
 	RelateStatement, RemoveStatement, SelectStatement, TopLevelExpr, UpdateStatement, UseStatement,
 };
 use crate::core::sql::Ast;
-use crate::core::val;
 use crate::method::query::ValidQuery;
-use crate::method::{self, Stats, Stream};
-use crate::value::Notification;
+use crate::method::{self, Stream};
+use crate::notification::Notification;
 use crate::{Connection, Surreal, Value, api};
 
 pub struct Query(pub(crate) Result<ValidQuery>);
@@ -312,20 +312,22 @@ impl into_query::Sealed for Raw {
 /// Represents a way to take a single query result from a list of responses
 pub trait QueryResult<Response>: query_result::Sealed<Response>
 where
-	Response: DeserializeOwned,
+	Response: SurrealValue,
 {
 }
 
 mod query_result {
+	use surrealdb_core::rpc::DbResultStats;
+
 	pub trait Sealed<Response>
 	where
-		Response: super::DeserializeOwned,
+		Response: super::SurrealValue,
 	{
 		/// Extracts and deserializes a query result from a query response
 		fn query_result(self, response: &mut super::QueryResponse) -> super::Result<Response>;
 
 		/// Extracts the statistics from a query response
-		fn stats(&self, response: &super::QueryResponse) -> Option<super::Stats> {
+		fn stats(&self, response: &super::QueryResponse) -> Option<DbResultStats> {
 			response.results.get(&0).map(|x| x.0)
 		}
 	}
@@ -335,20 +337,20 @@ impl QueryResult<Value> for usize {}
 impl query_result::Sealed<Value> for usize {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Value> {
 		match response.results.swap_remove(&self) {
-			Some((_, result)) => Ok(Value::from_inner(result?)),
-			None => Ok(Value::from_inner(val::Value::None)),
+			Some((_, result)) => Ok(result?),
+			None => Ok(Value::None),
 		}
 	}
 
-	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
+	fn stats(&self, response: &QueryResponse) -> Option<DbResultStats> {
 		response.results.get(self).map(|x| x.0)
 	}
 }
 
-impl<T> QueryResult<Option<T>> for usize where T: DeserializeOwned {}
+impl<T> QueryResult<Option<T>> for usize where T: SurrealValue {}
 impl<T> query_result::Sealed<Option<T>> for usize
 where
-	T: DeserializeOwned,
+	T: SurrealValue,
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Option<T>> {
 		let value = match response.results.get_mut(&self) {
@@ -365,28 +367,22 @@ where
 			}
 		};
 		let result = match value {
-			val::Value::Array(vec) => match &mut vec.0[..] {
+			Value::Array(vec) => match &mut vec[..] {
 				[] => Ok(None),
-				[value] => {
-					let value = mem::take(value);
-					api::value::from_core_value(value)
-				}
+				[value] => mem::take(value),
 				_ => Err(Error::LossyTake(QueryResponse {
 					results: mem::take(&mut response.results),
 					live_queries: mem::take(&mut response.live_queries),
 				})
 				.into()),
 			},
-			_ => {
-				let value = mem::take(value);
-				api::value::from_core_value(value)
-			}
+			_ => mem::take(value),
 		};
 		response.results.swap_remove(&self);
 		result
 	}
 
-	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
+	fn stats(&self, response: &QueryResponse) -> Option<DbResultStats> {
 		response.results.get(self).map(|x| x.0)
 	}
 }
@@ -405,31 +401,31 @@ impl query_result::Sealed<Value> for (usize, &str) {
 				}
 			},
 			None => {
-				return Ok(Value::from_inner(val::Value::None));
+				return Ok(Value::None);
 			}
 		};
 
 		let value = match value {
-			val::Value::Object(object) => object.remove(key).unwrap_or_default(),
-			_ => val::Value::None,
+			Value::Object(object) => object.remove(key).unwrap_or_default(),
+			_ => Value::None,
 		};
 
-		Ok(Value::from_inner(value))
+		Ok(value)
 	}
 
-	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
+	fn stats(&self, response: &QueryResponse) -> Option<DbResultStats> {
 		response.results.get(&self.0).map(|x| x.0)
 	}
 }
 
-impl<T> QueryResult<Option<T>> for (usize, &str) where T: DeserializeOwned {}
+impl<T> QueryResult<Option<T>> for (usize, &str) where T: SurrealValue {}
 impl<T> query_result::Sealed<Option<T>> for (usize, &str)
 where
-	T: DeserializeOwned,
+	T: SurrealValue,
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Option<T>> {
 		let (index, key) = self;
-		let value: &mut val::Value = match response.results.get_mut(&index) {
+		let value: &mut Value = match response.results.get_mut(&index) {
 			Some((_, result)) => match result {
 				Ok(val) => val,
 				Err(error) => {
@@ -443,7 +439,7 @@ where
 			}
 		};
 		let value = match value {
-			val::Value::Array(vec) => match &mut vec.0[..] {
+			Value::Array(vec) => match &mut vec[..] {
 				[] => {
 					response.results.swap_remove(&index);
 					return Ok(None);
@@ -460,11 +456,11 @@ where
 			value => value,
 		};
 		match value {
-			val::Value::None => {
+			Value::None => {
 				response.results.swap_remove(&index);
 				Ok(None)
 			}
-			val::Value::Object(object) => {
+			Value::Object(object) => {
 				if object.is_empty() {
 					response.results.swap_remove(&index);
 					return Ok(None);
@@ -472,65 +468,66 @@ where
 				let Some(value) = object.remove(key) else {
 					return Ok(None);
 				};
-				api::value::from_core_value(value)
+				Ok(value)
 			}
 			_ => Ok(None),
 		}
 	}
 
-	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
+	fn stats(&self, response: &QueryResponse) -> Option<DbResultStats> {
 		response.results.get(&self.0).map(|x| x.0)
 	}
 }
 
-impl<T> QueryResult<Vec<T>> for usize where T: DeserializeOwned {}
+impl<T> QueryResult<Vec<T>> for usize where T: SurrealValue {}
 impl<T> query_result::Sealed<Vec<T>> for usize
 where
-	T: DeserializeOwned,
+	T: SurrealValue,
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Vec<T>> {
 		let vec = match response.results.swap_remove(&self) {
 			Some((_, result)) => match result? {
-				val::Value::Array(vec) => vec.0,
+				Value::Array(arr) => arr.into_vec(),
 				vec => vec![vec],
 			},
 			None => {
 				return Ok(vec![]);
 			}
 		};
-		api::value::from_core_value(vec.into())
+
+		vec.into_iter().map(T::from_value).collect::<Result<Vec<T>>>()
 	}
 
-	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
+	fn stats(&self, response: &QueryResponse) -> Option<DbResultStats> {
 		response.results.get(self).map(|x| x.0)
 	}
 }
 
-impl<T> QueryResult<Vec<T>> for (usize, &str) where T: DeserializeOwned {}
+impl<T> QueryResult<Vec<T>> for (usize, &str) where T: SurrealValue {}
 impl<T> query_result::Sealed<Vec<T>> for (usize, &str)
 where
-	T: DeserializeOwned,
+	T: SurrealValue,
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Vec<T>> {
 		let (index, key) = self;
 		match response.results.get_mut(&index) {
 			Some((_, result)) => match result {
 				Ok(val) => match val {
-					val::Value::Array(vec) => {
+					Value::Array(vec) => {
 						let mut responses = Vec::with_capacity(vec.len());
 						for value in vec.iter_mut() {
-							if let val::Value::Object(object) = value {
+							if let Value::Object(object) = value {
 								if let Some(value) = object.remove(key) {
 									responses.push(value);
 								}
 							}
 						}
-						api::value::from_core_value(responses.into())
+						responses.into_iter().map(T::from_value).collect::<Result<Vec<T>>>()
 					}
 					val => {
-						if let val::Value::Object(object) = val {
+						if let Value::Object(object) = val {
 							if let Some(value) = object.remove(key) {
-								return api::value::from_core_value(vec![value].into());
+								return Ok(vec![T::from_value(value)?]);
 							}
 						}
 						Ok(vec![])
@@ -546,7 +543,7 @@ where
 		}
 	}
 
-	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
+	fn stats(&self, response: &QueryResponse) -> Option<DbResultStats> {
 		response.results.get(&self.0).map(|x| x.0)
 	}
 }
@@ -558,20 +555,20 @@ impl query_result::Sealed<Value> for &str {
 	}
 }
 
-impl<T> QueryResult<Option<T>> for &str where T: DeserializeOwned {}
+impl<T> QueryResult<Option<T>> for &str where T: SurrealValue {}
 impl<T> query_result::Sealed<Option<T>> for &str
 where
-	T: DeserializeOwned,
+	T: SurrealValue,
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Option<T>> {
 		(0, self).query_result(response)
 	}
 }
 
-impl<T> QueryResult<Vec<T>> for &str where T: DeserializeOwned {}
+impl<T> QueryResult<Vec<T>> for &str where T: SurrealValue {}
 impl<T> query_result::Sealed<Vec<T>> for &str
 where
-	T: DeserializeOwned,
+	T: SurrealValue,
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Vec<T>> {
 		(0, self).query_result(response)
@@ -649,10 +646,10 @@ impl query_stream::Sealed<Value> for () {
 	}
 }
 
-impl<R> QueryStream<Notification<R>> for usize where R: DeserializeOwned + Unpin {}
+impl<R> QueryStream<Notification<R>> for usize where R: SurrealValue + Unpin {}
 impl<R> query_stream::Sealed<Notification<R>> for usize
 where
-	R: DeserializeOwned + Unpin,
+	R: SurrealValue + Unpin,
 {
 	fn query_stream(
 		self,
@@ -684,10 +681,10 @@ where
 	}
 }
 
-impl<R> QueryStream<Notification<R>> for () where R: DeserializeOwned + Unpin {}
+impl<R> QueryStream<Notification<R>> for () where R: SurrealValue + Unpin {}
 impl<R> query_stream::Sealed<Notification<R>> for ()
 where
-	R: DeserializeOwned + Unpin,
+	R: SurrealValue + Unpin,
 {
 	fn query_stream(
 		self,

@@ -2,8 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use serde::de::DeserializeOwned;
-use serde_content::Value as Content;
+use surrealdb_types::{SurrealValue, Value};
 
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
@@ -17,7 +16,7 @@ use crate::{Surreal, api};
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Signin<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) credentials: serde_content::Result<Content<'static>>,
+	pub(super) credentials: Value,
 	pub(super) response_type: PhantomData<R>,
 }
 
@@ -38,7 +37,7 @@ where
 impl<'r, Client, R> IntoFuture for Signin<'r, Client, R>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<R>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -51,13 +50,9 @@ where
 		} = self;
 		Box::pin(async move {
 			let router = client.inner.router.extract()?;
-			let content =
-				credentials.map_err(|x| crate::error::Api::DeSerializeValue(x.to_string()))?;
 			router
 				.execute(Command::Signin {
-					credentials: api::value::to_core_value(content)?
-						.into_object()
-						.ok_or(Api::CrendentialsNotObject)?,
+					credentials: credentials.into_object()?,
 				})
 				.await
 		})

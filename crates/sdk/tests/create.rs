@@ -1,6 +1,6 @@
 use surrealdb_core::iam::Level;
-use surrealdb_core::val::{Array, RecordId};
 use surrealdb_core::{strand, syn};
+use surrealdb_types::{Array, RecordId};
 mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;

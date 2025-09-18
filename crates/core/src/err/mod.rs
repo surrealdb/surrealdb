@@ -25,6 +25,7 @@ use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
 use crate::syn::error::RenderedError as RenderedParserError;
+use crate::types::PublicValue;
 use crate::val::{CastError, CoerceError, RecordId, Value};
 use crate::vs::VersionStampError;
 
@@ -1273,8 +1274,8 @@ pub enum Error {
 	#[error("Error while ordering a result: {0}.")]
 	OrderingError(String),
 
-	#[error("Encountered an issue while processed export config: found {0}, but expected {1}.")]
-	InvalidExportConfig(Value, String),
+	#[error("Encountered an issue while processed export config: found {0:?}, but expected {1}.")]
+	InvalidExportConfig(PublicValue, String),
 
 	/// Found an unexpected value in a range
 	#[error("Found {found} for bound but expected {expected}.")]

@@ -16,7 +16,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::core::kvs::Datastore;
-use crate::core::rpc::Data;
+use crate::core::rpc::DbResult;
 use crate::rpc::websocket::Websocket;
 use crate::telemetry::metrics::ws::NotificationContext;
 
@@ -80,7 +80,7 @@ pub(crate) async fn notifications(
 						// Ensure the specified WebSocket exists
 						if let Some(rpc) = websocket {
 							// Serialize the message to send
-							let message = response::success(None, Data::Live(notification));
+							let message = response::success(None, DbResult::Live(notification));
 							// Add telemetry metrics
 							let cx = TelemetryContext::new();
 							let not_ctx = NotificationContext::default()

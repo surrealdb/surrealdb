@@ -2,14 +2,11 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-use serde_content::{Serializer, Value as Content};
+use surrealdb_types::{self, Array, SurrealValue, Value};
 
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Result};
-use crate::core::val;
 use crate::method::OnceLockExt;
 use crate::{Surreal, api};
 
@@ -19,7 +16,7 @@ use crate::{Surreal, api};
 pub struct Run<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) function: Result<(String, Option<String>)>,
-	pub(super) args: serde_content::Result<serde_content::Value<'static>>,
+	pub(super) args: Value,
 	pub(super) response_type: PhantomData<R>,
 }
 impl<C, R> Run<'_, C, R>
@@ -39,7 +36,7 @@ where
 impl<'r, Client, R> IntoFuture for Run<'r, Client, R>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<R>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -54,17 +51,12 @@ where
 		Box::pin(async move {
 			let router = client.inner.router.extract()?;
 			let (name, version) = function?;
-			let value =
-				match args.map_err(|x| crate::error::Api::DeSerializeValue(x.to_string()))? {
-					// Tuples are treated as multiple function arguments
-					Content::Tuple(tup) => tup,
-					// Everything else is treated as a single argument
-					content => vec![content],
-				};
-			let args = match api::value::to_core_value(value)? {
-				val::Value::Array(array) => array,
-				value => val::Array::from(vec![value]),
+
+			let args = match args.into_value() {
+				Value::Array(array) => array,
+				value => Array::from(vec![value]),
 			};
+
 			router
 				.execute(Command::Run {
 					name,
@@ -81,8 +73,8 @@ where
 	Client: Connection,
 {
 	/// Supply arguments to the function being run.
-	pub fn args(mut self, args: impl Serialize) -> Self {
-		self.args = Serializer::new().serialize(args);
+	pub fn args(mut self, args: impl SurrealValue) -> Self {
+		self.args = args.into_value();
 		self
 	}
 }

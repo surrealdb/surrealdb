@@ -10,11 +10,11 @@ use anyhow::ensure;
 use regex::Regex;
 use surrealdb::Result;
 use surrealdb_core::dbs::capabilities::Capabilities;
-use surrealdb_core::dbs::{Response, Session};
+use surrealdb_core::dbs::{QueryResult, Session};
 use surrealdb_core::iam::{Auth, Level, Role};
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn;
-use surrealdb_core::val::{Number, Value};
+use surrealdb_types::{Number, Value};
 
 pub async fn new_ds() -> Result<Datastore> {
 	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())
@@ -258,7 +258,7 @@ pub fn with_enough_stack(fut: impl Future<Output = Result<()>> + Send + 'static)
 
 #[track_caller]
 #[allow(dead_code)]
-fn skip_ok_pos(res: &mut Vec<Response>, pos: usize) -> Result<()> {
+fn skip_ok_pos(res: &mut Vec<QueryResult>, pos: usize) -> Result<()> {
 	assert!(!res.is_empty(), "At position {pos} - No more result!");
 	let r = res.remove(0).result;
 	let _ = r.is_err_and(|e| {
@@ -272,7 +272,7 @@ fn skip_ok_pos(res: &mut Vec<Response>, pos: usize) -> Result<()> {
 /// an error occurs.
 #[track_caller]
 #[allow(dead_code)]
-pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<()> {
+pub fn skip_ok(res: &mut Vec<QueryResult>, skip: usize) -> Result<()> {
 	for i in 0..skip {
 		skip_ok_pos(res, i)?;
 	}
@@ -290,7 +290,7 @@ pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<()> {
 pub struct Test {
 	pub ds: Datastore,
 	pub session: Session,
-	pub responses: Vec<Response>,
+	pub responses: Vec<QueryResult>,
 	pos: usize,
 }
 
@@ -354,7 +354,7 @@ impl Test {
 	#[track_caller]
 	#[allow(dead_code)]
 	#[allow(clippy::should_implement_trait)]
-	pub fn next(&mut self) -> Result<Response> {
+	pub fn next(&mut self) -> Result<QueryResult> {
 		assert!(!self.responses.is_empty(), "No response left - last position: {}", self.pos);
 		self.pos += 1;
 		Ok(self.responses.remove(0))

@@ -84,8 +84,10 @@ impl From<RecordIdKeyLit> for crate::expr::RecordIdKeyLit {
 	fn from(value: RecordIdKeyLit) -> Self {
 		match value {
 			RecordIdKeyLit::Number(x) => crate::expr::RecordIdKeyLit::Number(x),
-            RecordIdKeyLit::String(x) => crate::expr::RecordIdKeyLit::String(crate::val::Strand::from(x.clone())),
-            RecordIdKeyLit::Uuid(x) => crate::expr::RecordIdKeyLit::Uuid(crate::val::Uuid(x.0)),
+			RecordIdKeyLit::String(x) => {
+				crate::expr::RecordIdKeyLit::String(crate::val::Strand::from(x.clone()))
+			}
+			RecordIdKeyLit::Uuid(x) => crate::expr::RecordIdKeyLit::Uuid(crate::val::Uuid(x.0)),
 			RecordIdKeyLit::Array(x) => {
 				crate::expr::RecordIdKeyLit::Array(x.into_iter().map(From::from).collect())
 			}
@@ -102,8 +104,10 @@ impl From<crate::expr::RecordIdKeyLit> for RecordIdKeyLit {
 	fn from(value: crate::expr::RecordIdKeyLit) -> Self {
 		match value {
 			crate::expr::RecordIdKeyLit::Number(x) => RecordIdKeyLit::Number(x),
-            crate::expr::RecordIdKeyLit::String(x) => RecordIdKeyLit::String(x.to_string()),
-            crate::expr::RecordIdKeyLit::Uuid(uuid) => RecordIdKeyLit::Uuid(surrealdb_types::Uuid(uuid.0)),
+			crate::expr::RecordIdKeyLit::String(x) => RecordIdKeyLit::String(x.to_string()),
+			crate::expr::RecordIdKeyLit::Uuid(uuid) => {
+				RecordIdKeyLit::Uuid(surrealdb_types::Uuid(uuid.0))
+			}
 			crate::expr::RecordIdKeyLit::Array(exprs) => {
 				RecordIdKeyLit::Array(exprs.into_iter().map(From::from).collect())
 			}

@@ -2,8 +2,8 @@ mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::val::Value;
 use surrealdb_core::{strand, syn};
+use surrealdb_types::Value;
 
 #[tokio::test]
 async fn query_basic() -> Result<()> {

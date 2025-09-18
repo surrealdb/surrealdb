@@ -16,7 +16,10 @@ impl Revisioned for Datetime {
 		1
 	}
 
-	fn serialize_revisioned<W: std::io::Write>(&self, writer: &mut W) -> Result<(), revision::Error> {
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
 		self.0.to_rfc3339().serialize_revisioned(writer)
 	}
 
@@ -63,7 +66,7 @@ impl Datetime {
 	pub fn new(dt: DateTime<Utc>) -> Self {
 		Self(dt)
 	}
-	
+
 	/// Get the inner DateTime<Utc>
 	pub fn inner(&self) -> DateTime<Utc> {
 		self.0

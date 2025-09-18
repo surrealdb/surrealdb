@@ -26,8 +26,9 @@ pub mod uuid;
 use std::cmp::Ordering;
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use revision::revisioned;
+pub use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
 
 pub use self::array::Array;
 pub use self::bytes::Bytes;
@@ -42,7 +43,6 @@ pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::regex::Regex;
 pub use self::uuid::Uuid;
 use crate::{Kind, SurrealValue};
-pub use rust_decimal::Decimal;
 
 /// Marker type for value conversions from Value::None
 ///
