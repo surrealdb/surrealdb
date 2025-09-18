@@ -97,14 +97,16 @@ pub fn generate_tasks(
 				}
 
 				// Ensure that the test can run on the upgrading version.
-				if let Some(ver_req) = case.config.test.as_ref().map(|x| &x.version) {
+				if let Some(ver_req) = case.config.test.as_ref().and_then(|x| x.version.as_ref()) {
 					if !ver_req.matches(to_v) {
 						continue 'include_test;
 					}
 				}
 
 				// Ensure that the test can run on the importing version.
-				if let Some(ver_req) = case.config.test.as_ref().map(|x| &x.importing_version) {
+				if let Some(ver_req) =
+					case.config.test.as_ref().and_then(|x| x.importing_version.as_ref())
+				{
 					if !ver_req.matches(from_v) {
 						continue 'include_test;
 					}
@@ -113,7 +115,7 @@ pub fn generate_tasks(
 				// Ensure that the imports can run on importing version.
 				for import in case.imports.iter() {
 					if let Some(ver_req) =
-						subset[import.id].config.test.as_ref().map(|x| &x.version)
+						subset[import.id].config.test.as_ref().and_then(|x| x.version.as_ref())
 					{
 						if !ver_req.matches(from_v) {
 							continue 'include_test;

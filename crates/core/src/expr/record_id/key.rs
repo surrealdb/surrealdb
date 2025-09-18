@@ -9,7 +9,7 @@ use crate::doc::CursorDoc;
 use crate::expr::escape::{EscapeKey, EscapeRid};
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::literal::ObjectEntry;
-use crate::expr::{Expr, FlowResultExt as _, RecordIdKeyRangeLit};
+use crate::expr::{Expr, FlowResultExt as _, Kind, KindLiteral, RecordIdKeyRangeLit};
 use crate::val::{Array, Object, RecordIdKey, Strand, Uuid};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -38,6 +38,30 @@ pub enum RecordIdKeyLit {
 	Object(Vec<ObjectEntry>),
 	Generate(RecordIdKeyGen),
 	Range(Box<RecordIdKeyRangeLit>),
+}
+
+impl RecordIdKeyLit {
+	pub(crate) fn kind_supported(kind: &Kind) -> bool {
+		match kind {
+			Kind::Any => true,
+			Kind::Number => true,
+			Kind::Int => true,
+			Kind::String => true,
+			Kind::Uuid => true,
+			Kind::Array(k, _) => RecordIdKeyLit::kind_supported(k),
+			Kind::Set(k, _) => RecordIdKeyLit::kind_supported(k),
+			Kind::Object => true,
+			Kind::Literal(l) => match l {
+				KindLiteral::Integer(_) => true,
+				KindLiteral::String(_) => true,
+				KindLiteral::Array(x) => x.iter().all(RecordIdKeyLit::kind_supported),
+				KindLiteral::Object(x) => x.values().all(RecordIdKeyLit::kind_supported),
+				_ => false,
+			},
+			Kind::Either(x) => x.iter().all(RecordIdKeyLit::kind_supported),
+			_ => false,
+		}
+	}
 }
 
 impl From<RecordIdKeyRangeLit> for RecordIdKeyLit {

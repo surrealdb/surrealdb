@@ -1416,6 +1416,10 @@ pub enum Error {
 	/// Cannot use the `{0}` keyword on the `id` field
 	#[error("Cannot use the `{0}` keyword on the `id` field.")]
 	IdFieldKeywordConflict(String),
+
+	/// Cannot use the `{0}` keyword on the `id` field
+	#[error("Cannot use the `{0}` type on the `id` field, as that's not a valid record id key.")]
+	IdFieldUnsupportedKind(String),
 }
 
 impl Error {
