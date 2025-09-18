@@ -101,7 +101,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Check format
         run: cargo make ci-format
@@ -125,7 +125,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Run clippy
         run: cargo make ci-clippy
@@ -151,7 +151,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Check workspace
         run: cargo make ci-check
@@ -180,7 +180,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo +${{ env.msrv }} install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Check workspace on MSRV
         run: cargo +${{ env.msrv }} make ci-check
@@ -233,7 +233,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Check wasm
         run: cargo make ci-check-wasm
@@ -255,6 +255,29 @@ jobs:
 
       - name: Check revision.lock
         run: revision-lock --check
+
+  check-docs:
+    name: Check docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-make
+        run: make install-linux-deps
+
+      - name: Check docs
+        run: cargo make ci-docs
 
   check-binaries:
     name: Cross-compile binaries
@@ -291,7 +314,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Run CLI integration tests
         run: cargo make ci-cli-integration
@@ -314,7 +337,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Run HTTP integration tests
         run: cargo make ci-http-integration
@@ -337,7 +360,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Run WebSocket integration tests
         run: cargo make ci-ws-integration
@@ -360,7 +383,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Run ML integration tests
         run: cargo make ci-ml-integration
@@ -383,7 +406,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       #- name: Install cargo-make
-        #run: cargo install --debug --locked cargo-make
+        #run: make install-linux-deps
 
       #- name: Run GraphQL integration tests
         #run: cargo make ci-graphql-integration
@@ -416,7 +439,7 @@ jobs:
         uses: taiki-e/install-action@76081f88faadd9c23688b78b70c734925ea84cca # (Actions must be pinned by commit hash) cargo-llvm-cov
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Test workspace + coverage
         run: cargo make ci-workspace-coverage
@@ -477,7 +500,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Test Any engine
         run: cargo make ci-api-integration-any
@@ -508,7 +531,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Test WS engine
         run: cargo make ci-api-integration-ws
@@ -539,7 +562,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Test HTTP engine
         run: cargo make ci-api-integration-http
@@ -570,7 +593,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Test Memory engine
         run: cargo make ci-api-integration-mem
@@ -601,7 +624,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Test File engine
         run: cargo make ci-api-integration-file
@@ -632,7 +655,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Test RocksDB engine
         run: cargo make ci-api-integration-rocksdb
@@ -663,7 +686,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Test SurrealKV engine
         run: cargo make ci-api-integration-surrealkv
@@ -701,7 +724,7 @@ jobs:
           done
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Test TiKV engine
         run: cargo make ci-api-integration-tikv
@@ -732,7 +755,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Setup FoundationDB
         uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a # (Actions must be pinned by commit hash) v.2.2.0
@@ -768,7 +791,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Setup FoundationDB
         uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a # (Actions must be pinned by commit hash) v.2.2.0
@@ -808,7 +831,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Test Memory KVS
         run: cargo make ci-mem-kvs
@@ -831,7 +854,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Test RocksDB KVS
         run: cargo make ci-rocksdb-kvs
@@ -854,7 +877,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Test SurrealKV KVS
         run: cargo make ci-surrealkv-kvs
@@ -884,7 +907,7 @@ jobs:
           done
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Test TiKV KVS
         run: cargo make ci-tikv-kvs
@@ -907,7 +930,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Setup FoundationDB
         uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a # (Actions must be pinned by commit hash) v.2.2.0
@@ -935,7 +958,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
       - name: Setup FoundationDB
         uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a # (Actions must be pinned by commit hash) v.2.2.0
@@ -967,7 +990,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: make install-linux-deps
 
   # ----------------------------------------
   # SurrealQL language tests
