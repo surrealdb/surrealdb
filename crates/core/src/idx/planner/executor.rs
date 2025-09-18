@@ -441,7 +441,7 @@ impl QueryExecutor {
 			} => self.new_fulltext_index_iterator(irf, io.clone()).await,
 			Index::MTree(_) => Ok(self.new_mtree_index_knn_iterator(irf)),
 			Index::Hnsw(_) => Ok(self.new_hnsw_index_ann_iterator(irf)),
-			Index::Count => todo!(),
+			Index::Count(_) => todo!(),
 		}
 	}
 

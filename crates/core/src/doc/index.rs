@@ -25,6 +25,7 @@ use crate::ctx::Context;
 use crate::dbs::{Force, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
+use crate::expr::Cond;
 use crate::expr::{FlowResultExt as _, Part};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
@@ -120,7 +121,7 @@ impl Document {
 			Index::FullText(p) => ic.index_fulltext(stk, ctx, p).await?,
 			Index::MTree(p) => ic.index_mtree(stk, ctx, p).await?,
 			Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
-			Index::Count => ic.index_count(ctx, opt).await?,
+			Index::Count(c) => ic.index_count(ctx, opt, c.as_ref()).await?,
 		}
 		Ok(())
 	}
@@ -414,7 +415,12 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	async fn index_count(&mut self, ctx: &Context, opt: &Options) -> Result<()> {
+	async fn index_count(
+		&mut self,
+		ctx: &Context,
+		opt: &Options,
+		_cond: Option<&Cond>,
+	) -> Result<()> {
 		let (pos, count) = if self.o.is_some() {
 			if self.n.is_some() {
 				// That's an update, there is no count change
@@ -439,7 +445,7 @@ impl<'a> IndexOperation<'a> {
 			pos,
 			count,
 		);
-		ctx.tx().lock().await.set(&key, &vec![], None).await?;
+		ctx.tx().lock().await.put(&key, &vec![], None).await?;
 		Ok(())
 	}
 

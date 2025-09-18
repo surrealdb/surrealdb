@@ -28,7 +28,7 @@ use crate::catalog::{
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::Part;
+use crate::expr::{Cond, Part};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::trees::mtree::MTreeIndex;
@@ -85,7 +85,7 @@ impl<'a> IndexOperation<'a> {
 			Index::FullText(p) => self.index_fulltext(stk, p, require_compaction).await,
 			Index::MTree(p) => self.index_mtree(stk, p).await,
 			Index::Hnsw(p) => self.index_hnsw(p).await,
-			Index::Count => self.index_count().await,
+			Index::Count(c) => self.index_count(c.as_ref()).await,
 		}
 	}
 
@@ -181,8 +181,8 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	async fn index_count(&mut self) -> Result<()> {
-		bail!(Error::Unimplemented("Index count".to_string()))
+	async fn index_count(&mut self, c: Option<&Cond>) -> Result<()> {
+		bail!(Error::Unimplemented(format!("Index count {c:?}")))
 	}
 
 	/// Construct a consistent uniqueness violation error message.

@@ -1,11 +1,11 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
-
+use crate::sql::Cond;
 use crate::sql::ident::Ident;
 use crate::sql::scoring::Scoring;
 use crate::val::Number;
+use std::fmt;
+use std::fmt::{Display, Formatter};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Index {
 	/// (Basic) non unique
@@ -19,7 +19,7 @@ pub enum Index {
 	/// Index with Full-Text search capabilities - single writer
 	FullText(FullTextParams),
 	/// Count index
-	Count,
+	Count(Option<Cond>),
 }
 
 impl From<Index> for crate::catalog::Index {
@@ -30,7 +30,7 @@ impl From<Index> for crate::catalog::Index {
 			Index::MTree(p) => Self::MTree(p.into()),
 			Index::Hnsw(p) => Self::Hnsw(p.into()),
 			Index::FullText(p) => Self::FullText(p.into()),
-			Index::Count => Self::Count,
+			Index::Count(c) => Self::Count(c.map(Into::into)),
 		}
 	}
 }
@@ -43,7 +43,7 @@ impl From<crate::catalog::Index> for Index {
 			crate::catalog::Index::MTree(p) => Self::MTree(p.into()),
 			crate::catalog::Index::Hnsw(p) => Self::Hnsw(p.into()),
 			crate::catalog::Index::FullText(p) => Self::FullText(p.into()),
-			crate::catalog::Index::Count => Self::Count,
+			crate::catalog::Index::Count(c) => Self::Count(c.map(Into::into)),
 		}
 	}
 }
@@ -242,7 +242,13 @@ impl Display for Index {
 		match self {
 			Self::Idx => Ok(()),
 			Self::Uniq => f.write_str("UNIQUE"),
-			Self::Count => f.write_str("COUNT"),
+			Self::Count(c) => {
+				f.write_str("COUNT")?;
+				if let Some(v) = c {
+					write!(f, " {v}")?
+				}
+				Ok(())
+			}
 			Self::FullText(p) => {
 				write!(f, "FULLTEXT ANALYZER {} {}", p.az, p.sc,)?;
 				if p.hl {
