@@ -412,7 +412,7 @@ impl DefineFieldStatement {
 	}
 
 	pub(crate) fn validate_id_restrictions(&self) -> Result<()> {
-		if self.name == "id" {
+		if self.name.is_id() {
 			// Ensure no `VALUE` clause is specified
 			ensure!(self.value.is_none(), Error::IdFieldKeywordConflict("VALUE".into()));
 

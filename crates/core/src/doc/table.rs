@@ -1054,7 +1054,7 @@ impl Document {
 					if *count > 0 {
 						let mean_value = Value::from(*sum / rust_decimal::Decimal::from(*count));
 						// Convert field name to Parts array for put method
-						let parts = vec![Part::field(field_name.clone()).unwrap()];
+						let parts = vec![Part::Field(field_name.clone())];
 						record.data.to_mut().put(&parts, mean_value);
 					}
 				}
@@ -1070,7 +1070,7 @@ impl Document {
 						| FieldStatsDelta::MeanSub { .. }
 						| FieldStatsDelta::MeanUpdate { .. }
 				) {
-					let parts = vec![Part::field(field_name.clone()).unwrap()];
+					let parts = vec![Part::Field(field_name.clone())];
 					record.data.to_mut().put(&parts, Value::None);
 				}
 			}

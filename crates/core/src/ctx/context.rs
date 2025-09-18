@@ -524,7 +524,7 @@ impl MutableContext {
 	/// Get a value from the context. If no value is stored under the
 	/// provided key, then this will return None.
 	pub(crate) fn value(&self, key: &str) -> Option<&Value> {
-		match (&self.values).get(key) {
+		match self.values.get(key) {
 			Some(v) => Some(v.as_ref()),
 			None if PROTECTED_PARAM_NAMES.contains(&key) || !self.isolated => match &self.parent {
 				Some(p) => p.value(key),
