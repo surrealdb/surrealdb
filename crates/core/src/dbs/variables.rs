@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::sql::expression::convert_public_value_to_internal;
 use crate::types::PublicVariables;
 use crate::val::{Object, Value};
 
@@ -104,8 +105,8 @@ impl From<PublicVariables> for Variables {
 	fn from(vars: PublicVariables) -> Self {
 		let mut map = BTreeMap::new();
 		for (key, val) in vars {
-			todo!("STU");
-			// map.insert(key, crate::val::Value::from(val));
+			let internal_val = convert_public_value_to_internal(val);
+			map.insert(key, internal_val);
 		}
 		Self(map)
 	}

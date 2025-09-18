@@ -18,71 +18,71 @@ pub struct Signin;
 pub trait Credentials<Action, Response>: SurrealValue {}
 
 /// Credentials for the root user
-#[derive(Debug, Clone, Serialize, SurrealValue)]
-pub struct Root<'a> {
+#[derive(Debug, Clone, SurrealValue)]
+pub struct Root {
 	/// The username of the root user
-	#[serde(rename = "user")]
-	pub username: Cow<'a, str>,
+	#[surreal(rename = "user")]
+	pub username: String,
 	/// The password of the root user
-	#[serde(rename = "pass")]
-	pub password: Cow<'a, str>,
+	#[surreal(rename = "pass")]
+	pub password: String,
 }
 
-impl Credentials<Signin, Jwt> for Root<'_> {}
+impl Credentials<Signin, Jwt> for Root {}
 
 /// Credentials for the namespace user
-#[derive(Debug, Clone, Serialize, SurrealValue)]
-pub struct Namespace<'a> {
+#[derive(Debug, Clone, SurrealValue)]
+pub struct Namespace {
 	/// The namespace the user has access to
-	#[serde(rename = "ns")]
-	pub namespace: Cow<'a, str>,
+	#[surreal(rename = "ns")]
+	pub namespace: String,
 	/// The username of the namespace user
-	#[serde(rename = "user")]
-	pub username: Cow<'a, str>,
+	#[surreal(rename = "user")]
+	pub username: String,
 	/// The password of the namespace user
-	#[serde(rename = "pass")]
-	pub password: Cow<'a, str>,
+	#[surreal(rename = "pass")]
+	pub password: String,
 }
 
-impl Credentials<Signin, Jwt> for Namespace<'_> {}
+impl Credentials<Signin, Jwt> for Namespace {}
 
 /// Credentials for the database user
-#[derive(Debug, Clone, Serialize, SurrealValue)]
-pub struct Database<'a> {
+#[derive(Debug, Clone, SurrealValue)]
+pub struct Database {
 	/// The namespace the user has access to
-	#[serde(rename = "ns")]
-	pub namespace: Cow<'a, str>,
+	#[surreal(rename = "ns")]
+	pub namespace: String,
 	/// The database the user has access to
-	#[serde(rename = "db")]
-	pub database: Cow<'a, str>,
+	#[surreal(rename = "db")]
+	pub database: String,
 	/// The username of the database user
-	#[serde(rename = "user")]
-	pub username: Cow<'a, str>,
+	#[surreal(rename = "user")]
+	pub username: String,
 	/// The password of the database user
-	#[serde(rename = "pass")]
-	pub password: Cow<'a, str>,
+	#[surreal(rename = "pass")]
+	pub password: String,
 }
 
-impl Credentials<Signin, Jwt> for Database<'_> {}
+impl Credentials<Signin, Jwt> for Database {}
 
 /// Credentials for the record user
-#[derive(Debug, Serialize, SurrealValue)]
-pub struct Record<'a, P> {
+#[derive(Debug, SurrealValue)]
+pub struct Record<P: SurrealValue> {
 	/// The namespace the user has access to
-	#[serde(rename = "ns")]
-	pub namespace: Cow<'a, str>,
+	#[surreal(rename = "ns")]
+	pub namespace: String,
 	/// The database the user has access to
-	#[serde(rename = "db")]
-	pub database: Cow<'a, str>,
+	#[surreal(rename = "db")]
+	pub database: String,
 	/// The access method to use for signin and signup
-	#[serde(rename = "ac")]
-	pub access: Cow<'a, str>,
+	#[surreal(rename = "ac")]
+	pub access: String,
 	/// The additional params to use
-	#[serde(flatten)]
+	#[surreal(flatten)]
 	pub params: P,
 }
 
-impl<T, P> Credentials<T, Jwt> for Record<'_, P> where P: Serialize {}
+impl<T, P> Credentials<T, Jwt> for Record<P> where P: SurrealValue {}
 
 /// A JSON Web Token for authenticating with the server.
 ///

@@ -183,7 +183,7 @@ fn convert_public_range_to_literal(range: Box<surrealdb_types::Range>) -> Expr {
 	}
 }
 
-fn convert_public_value_to_internal(value: surrealdb_types::Value) -> crate::val::Value {
+pub(crate) fn convert_public_value_to_internal(value: surrealdb_types::Value) -> crate::val::Value {
 	match value {
 		surrealdb_types::Value::None => crate::val::Value::None,
 		surrealdb_types::Value::Null => crate::val::Value::Null,

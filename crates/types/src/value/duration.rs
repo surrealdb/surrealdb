@@ -178,6 +178,11 @@ impl FromStr for Duration {
 		let mut total_nanos = 0u32;
 		let mut remaining = s.trim();
 
+		// Handle empty string
+		if remaining.is_empty() {
+			return Err(());
+		}
+
 		// Handle special case for zero duration
 		if remaining == "0ns" || remaining == "0" {
 			return Ok(Duration::new(0, 0));
@@ -203,8 +208,20 @@ impl FromStr for Duration {
 
 			remaining = &remaining[end..];
 
-			// Parse the unit
-			let unit = if remaining.starts_with("y") {
+			// Parse the unit - check longer units first to avoid partial matches
+			let unit = if remaining.starts_with("ms") {
+				remaining = &remaining[2..];
+				"ms"
+			} else if remaining.starts_with("µs") {
+				remaining = &remaining[2..];
+				"µs"
+			} else if remaining.starts_with("us") {
+				remaining = &remaining[2..];
+				"us"
+			} else if remaining.starts_with("ns") {
+				remaining = &remaining[2..];
+				"ns"
+			} else if remaining.starts_with("y") {
 				remaining = &remaining[1..];
 				"y"
 			} else if remaining.starts_with("w") {
@@ -222,18 +239,6 @@ impl FromStr for Duration {
 			} else if remaining.starts_with("s") {
 				remaining = &remaining[1..];
 				"s"
-			} else if remaining.starts_with("ms") {
-				remaining = &remaining[2..];
-				"ms"
-			} else if remaining.starts_with("µs") {
-				remaining = &remaining[2..];
-				"µs"
-			} else if remaining.starts_with("us") {
-				remaining = &remaining[2..];
-				"us"
-			} else if remaining.starts_with("ns") {
-				remaining = &remaining[2..];
-				"ns"
 			} else {
 				return Err(());
 			};

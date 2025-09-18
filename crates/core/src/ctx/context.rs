@@ -35,6 +35,7 @@ use crate::kvs::Transaction;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::sequences::Sequences;
 use crate::mem::ALLOC;
+use crate::sql::expression::convert_public_value_to_internal;
 use crate::types::{PublicAction, PublicNotification, PublicVariables};
 use crate::val::Value;
 
@@ -577,8 +578,8 @@ impl MutableContext {
 				});
 			}
 
-			todo!("STU");
-			// self.add_value(key, val.into());
+			let internal_val = convert_public_value_to_internal(val);
+			self.add_value(key, Arc::new(internal_val));
 		}
 		Ok(())
 	}

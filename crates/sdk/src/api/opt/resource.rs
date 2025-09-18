@@ -44,7 +44,9 @@ impl Resource {
 	/// Add a range to the resource, this only works if the resource is a table.
 	pub fn with_range(self, range: RecordIdKeyRange) -> Result<Self> {
 		match self {
-			Resource::Table(table) => Ok(Resource::Range(QueryRange(RecordId::new(table, range)))),
+			Resource::Table(table) => {
+				Ok(Resource::Range(QueryRange(RecordId::new(table, Box::new(range)))))
+			}
 			Resource::RecordId(_) => Err(Error::RangeOnRecordId.into()),
 			Resource::Object(_) => Err(Error::RangeOnObject.into()),
 			Resource::Array(_) => Err(Error::RangeOnArray.into()),
@@ -59,8 +61,8 @@ impl Resource {
 			Resource::Table(x) => Value::String(x),
 			Resource::RecordId(x) => Value::RecordId(x),
 			Resource::Object(x) => Value::Object(x),
-			Resource::Array(x) => Value::Array(Array::new(x)),
-			Resource::Range(x) => Value::Range(x),
+			Resource::Array(x) => Value::Array(Array::from(x)),
+			Resource::Range(QueryRange(record_id)) => Value::RecordId(record_id),
 			Resource::Unspecified => Value::None,
 		}
 	}

@@ -5968,6 +5968,7 @@ dependencies = [
  "rstest",
  "rust_decimal",
  "serde",
+ "serde_json",
  "surrealdb-protocol",
  "surrealdb-types-derive",
  "uuid",

@@ -11,6 +11,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::Pretty;
+use crate::expr::literal::ObjectEntry;
 use crate::expr::operator::BindingPower;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::statements::{
@@ -21,7 +22,7 @@ use crate::expr::statements::{
 };
 use crate::expr::{
 	BinaryOperator, Block, Constant, ControlFlow, FlowResult, FunctionCall, Ident, Idiom, Literal,
-	Mock, Param, PostfixOperator, PrefixOperator,
+	Mock, Param, PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
 use crate::fnc;
 use crate::types::PublicValue;
@@ -130,7 +131,68 @@ impl Expr {
 	}
 
 	pub fn from_public_value(value: PublicValue) -> Self {
-		todo!("STU")
+		match value {
+			surrealdb_types::Value::None => Expr::Literal(Literal::None),
+			surrealdb_types::Value::Null => Expr::Literal(Literal::Null),
+			surrealdb_types::Value::Bool(b) => Expr::Literal(Literal::Bool(b)),
+			surrealdb_types::Value::Number(n) => match n {
+				surrealdb_types::Number::Int(i) => Expr::Literal(Literal::Integer(i)),
+				surrealdb_types::Number::Float(f) => Expr::Literal(Literal::Float(f)),
+				surrealdb_types::Number::Decimal(d) => Expr::Literal(Literal::Decimal(d)),
+			},
+			surrealdb_types::Value::String(s) => Expr::Literal(Literal::Strand(Strand::from(s))),
+			surrealdb_types::Value::Bytes(b) => {
+				Expr::Literal(Literal::Bytes(crate::val::Bytes(b.inner().clone())))
+			}
+			surrealdb_types::Value::Duration(d) => {
+				Expr::Literal(Literal::Duration(crate::val::Duration(d.inner())))
+			}
+			surrealdb_types::Value::Datetime(dt) => {
+				Expr::Literal(Literal::Datetime(crate::val::Datetime(dt.inner())))
+			}
+			surrealdb_types::Value::Uuid(u) => Expr::Literal(Literal::Uuid(crate::val::Uuid(u.0))),
+			surrealdb_types::Value::Array(a) => Expr::Literal(Literal::Array(
+				a.inner().iter().cloned().map(|v| Expr::from_public_value(v)).collect(),
+			)),
+			surrealdb_types::Value::Object(o) => Expr::Literal(Literal::Object(
+				o.inner()
+					.iter()
+					.map(|(k, v)| ObjectEntry {
+						key: k.clone(),
+						value: Expr::from_public_value(v.clone()),
+					})
+					.collect(),
+			)),
+			surrealdb_types::Value::RecordId(r) => {
+				let key_lit = match r.key {
+					surrealdb_types::RecordIdKey::Number(n) => RecordIdKeyLit::Number(n),
+					surrealdb_types::RecordIdKey::String(s) => {
+						RecordIdKeyLit::String(Strand::from(s))
+					}
+					surrealdb_types::RecordIdKey::Uuid(u) => {
+						RecordIdKeyLit::Uuid(crate::val::Uuid(u.0))
+					}
+					surrealdb_types::RecordIdKey::Array(a) => RecordIdKeyLit::Array(
+						a.inner().iter().cloned().map(|v| Expr::from_public_value(v)).collect(),
+					),
+					surrealdb_types::RecordIdKey::Object(o) => RecordIdKeyLit::Object(
+						o.inner()
+							.iter()
+							.map(|(k, v)| ObjectEntry {
+								key: k.clone(),
+								value: Expr::from_public_value(v.clone()),
+							})
+							.collect(),
+					),
+					_ => return Expr::Literal(Literal::None), // For unsupported key types
+				};
+				Expr::Literal(Literal::RecordId(RecordIdLit {
+					table: r.table.clone(),
+					key: key_lit,
+				}))
+			}
+			_ => todo!("Handle other PublicValue variants"),
+		}
 	}
 
 	/// Checks if a expression is 'pure' i.e. does not rely on the environment.

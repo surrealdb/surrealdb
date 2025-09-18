@@ -152,12 +152,12 @@ impl Command {
 				database,
 			} => {
 				// TODO: Null byte validity
-				let namespace = namespace.map(|n| n.into()).unwrap_or(Value::None);
-				let database = database.map(|d| d.into()).unwrap_or(Value::None);
+				let namespace = namespace.map(|n| Value::String(n)).unwrap_or(Value::None);
+				let database = database.map(|d| Value::String(d)).unwrap_or(Value::None);
 				RouterRequest {
 					id,
 					method: "use",
-					params: Some(vec![namespace, database].into()),
+					params: Some(Value::Array(Array::from(vec![namespace, database]))),
 					transaction: None,
 				}
 			}
@@ -166,7 +166,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "signup",
-				params: Some(vec![Value::from(credentials)].into()),
+				params: Some(Value::Array(Array::from(vec![Value::from(credentials)]))),
 				transaction: None,
 			},
 			Command::Signin {
@@ -174,7 +174,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "signin",
-				params: Some(vec![Value::from(credentials)].into()),
+				params: Some(Value::Array(Array::from(vec![Value::from(credentials)]))),
 				transaction: None,
 			},
 			Command::Authenticate {
@@ -182,7 +182,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "authenticate",
-				params: Some(vec![Value::from(token)].into()),
+				params: Some(Value::Array(Array::from(vec![Value::from(token)]))),
 				transaction: None,
 			},
 			Command::Invalidate => RouterRequest {
@@ -204,7 +204,7 @@ impl Command {
 				RouterRequest {
 					id,
 					method: "create",
-					params: Some(params.into()),
+					params: Some(Value::Array(Array::from(params))),
 					transaction: txn,
 				}
 			}
@@ -222,7 +222,7 @@ impl Command {
 				RouterRequest {
 					id,
 					method: "upsert",
-					params: Some(params.into()),
+					params: Some(Value::Array(Array::from(params))),
 					transaction: txn,
 				}
 			}
@@ -241,7 +241,7 @@ impl Command {
 				RouterRequest {
 					id,
 					method: "update",
-					params: Some(params.into()),
+					params: Some(Value::Array(Array::from(params))),
 					transaction: txn,
 				}
 			}
@@ -260,7 +260,7 @@ impl Command {
 				RouterRequest {
 					id,
 					method: "insert",
-					params: Some(params.into()),
+					params: Some(Value::Array(Array::from(params))),
 					transaction: txn,
 				}
 			}
@@ -278,7 +278,7 @@ impl Command {
 				RouterRequest {
 					id,
 					method: "insert_relation",
-					params: Some(params.into()),
+					params: Some(Value::Array(Array::from(params))),
 					transaction: txn,
 				}
 			}
@@ -318,12 +318,12 @@ impl Command {
 				};
 
 				let variables = surrealdb_types::Object::default();
-				let params: Vec<Value> = vec![query.into(), variables.into()];
+				let params: Vec<Value> = vec![Value::String(query), Value::Object(variables)];
 
 				RouterRequest {
 					id,
 					method: "query",
-					params: Some(params.into()),
+					params: Some(Value::Array(Array::from(params))),
 					transaction: txn,
 				}
 			}
@@ -368,7 +368,7 @@ impl Command {
 				RouterRequest {
 					id,
 					method: "query",
-					params: Some(Value::Array(params)),
+					params: Some(Value::Array(Array::from(params))),
 					transaction: txn,
 				}
 			}
@@ -405,7 +405,7 @@ impl Command {
 				RouterRequest {
 					id,
 					method: "query",
-					params: Some(Value::Array(params)),
+					params: Some(Value::Array(Array::from(params))),
 					transaction: txn,
 				}
 			}
@@ -419,7 +419,7 @@ impl Command {
 				RouterRequest {
 					id,
 					method: "query",
-					params: Some(Value::Array(params)),
+					params: Some(Value::Array(Array::from(params))),
 					transaction: txn,
 				}
 			}
@@ -491,7 +491,11 @@ impl Command {
 				RouterRequest {
 					id,
 					method: "run",
-					params: Some(vec![Value::String(name), version, Value::Array(args)]),
+					params: Some(Value::Array(Array::from(vec![
+						Value::String(name),
+						version,
+						Value::Array(args),
+					]))),
 					transaction: None,
 				}
 			}

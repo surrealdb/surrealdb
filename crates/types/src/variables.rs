@@ -70,3 +70,9 @@ impl From<Object> for Variables {
 		Self(obj.0)
 	}
 }
+
+impl From<Variables> for Object {
+	fn from(vars: Variables) -> Self {
+		Object(vars.0)
+	}
+}

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::{Kind, KindLiteral, SurrealValue, Uuid, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Action {
 	Create,

@@ -24,31 +24,26 @@ use surrealdb_types::{Array, Kind, Object, SurrealValue, Value};
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 pub use tls::*;
 
-type UnitOp<'a> = InnerOp<'a, ()>;
-
 #[derive(Debug)]
-enum InnerOp<'a, T> {
+enum InnerOp {
 	Add {
-		path: &'a str,
-		value: T,
+		path: String,
+		value: Value,
 	},
 	Remove {
-		path: &'a str,
+		path: String,
 	},
 	Replace {
-		path: &'a str,
-		value: T,
+		path: String,
+		value: Value,
 	},
 	Change {
-		path: &'a str,
+		path: String,
 		value: String,
 	},
 }
 
-impl<'a, T> SurrealValue for InnerOp<'a, T>
-where
-	T: SurrealValue,
-{
+impl SurrealValue for InnerOp {
 	fn kind_of() -> Kind {
 		Kind::Object
 	}
@@ -65,9 +60,9 @@ where
 			} => {
 				// { "op": "add", "path": "/biscuits/1", "value": { "name": "Ginger Nut" } }
 				let mut obj = Object::new();
-				obj.insert("op".to_string(), "add".to_string());
-				obj.insert("path".to_string(), path.to_string());
-				obj.insert("value".to_string(), value.into_value());
+				obj.insert("op".to_string(), Value::String("add".to_string()));
+				obj.insert("path".to_string(), Value::String(path.to_string()));
+				obj.insert("value".to_string(), value);
 				Value::Object(obj)
 			}
 			InnerOp::Remove {
@@ -75,8 +70,8 @@ where
 			} => {
 				// { "op": "remove", "path": "/biscuits/1" }
 				let mut obj = Object::new();
-				obj.insert("op".to_string(), "remove".to_string());
-				obj.insert("path".to_string(), path.to_string());
+				obj.insert("op".to_string(), Value::String("remove".to_string()));
+				obj.insert("path".to_string(), Value::String(path.to_string()));
 				Value::Object(obj)
 			}
 			InnerOp::Replace {
@@ -85,9 +80,9 @@ where
 			} => {
 				// { "op": "replace", "path": "/biscuits/1", "value": { "name": "Ginger Nut" } }
 				let mut obj = Object::new();
-				obj.insert("op".to_string(), "replace".to_string());
-				obj.insert("path".to_string(), path.to_string());
-				obj.insert("value".to_string(), value.into_value());
+				obj.insert("op".to_string(), Value::String("replace".to_string()));
+				obj.insert("path".to_string(), Value::String(path.to_string()));
+				obj.insert("value".to_string(), value);
 				Value::Object(obj)
 			}
 			InnerOp::Change {
@@ -96,53 +91,51 @@ where
 			} => {
 				// { "op": "change", "path": "/biscuits/1", "value": "name" }
 				let mut obj = Object::new();
-				obj.insert("op".to_string(), "change".to_string());
-				obj.insert("path".to_string(), path.to_string());
-				obj.insert("value".to_string(), value.to_string());
+				obj.insert("op".to_string(), Value::String("change".to_string()));
+				obj.insert("path".to_string(), Value::String(path.to_string()));
+				obj.insert("value".to_string(), Value::String(value.to_string()));
 				Value::Object(obj)
 			}
 		}
 	}
 
 	fn from_value(value: Value) -> anyhow::Result<Self> {
-		let Value::Object(obj) = value else {
+		let Value::Object(mut obj) = value else {
 			return Err(anyhow::anyhow!("Expected Object, got {:?}", value.value_kind()));
 		};
-		let op = obj.get("op").context("Key 'op' missing")?;
+		let op = obj.remove("op").context("Key 'op' missing")?;
 		let op = op.as_string()?;
 
-		match &op {
+		match op.as_str() {
 			"add" => {
 				let path = obj.get("path").context("Key 'path' missing")?;
 				let path = path.as_string()?;
-				let value = obj.get("value").context("Key 'value' missing")?;
-				let value = T::from_value(value)?;
+				let value = obj.remove("value").context("Key 'value' missing")?;
 				Ok(InnerOp::Add {
 					path,
 					value,
 				})
 			}
 			"remove" => {
-				let path = obj.get("path").context("Key 'path' missing")?;
+				let path = obj.remove("path").context("Key 'path' missing")?;
 				let path = path.as_string()?;
 				Ok(InnerOp::Remove {
 					path,
 				})
 			}
 			"replace" => {
-				let path = obj.get("path").context("Key 'path' missing")?;
+				let path = obj.remove("path").context("Key 'path' missing")?;
 				let path = path.as_string()?;
-				let value = obj.get("value").context("Key 'value' missing")?;
-				let value = T::from_value(value)?;
+				let value = obj.remove("value").context("Key 'value' missing")?;
 				Ok(InnerOp::Replace {
 					path,
 					value,
 				})
 			}
 			"change" => {
-				let path = obj.get("path").context("Key 'path' missing")?;
+				let path = obj.remove("path").context("Key 'path' missing")?;
 				let path = path.as_string()?;
-				let value = obj.get("value").context("Key 'value' missing")?;
+				let value = obj.remove("value").context("Key 'value' missing")?;
 				let value = value.as_string()?;
 				Ok(InnerOp::Change {
 					path,
@@ -182,14 +175,11 @@ impl PatchOp {
 	/// PatchOp::add("/biscuits/1", json!({ "name": "Ginger Nut" }))
 	/// # ;
 	/// ```
-	pub fn add<T>(path: &str, value: T) -> Self
-	where
-		T: SurrealValue,
-	{
+	pub fn add(path: impl Into<String>, value: impl SurrealValue) -> Self {
 		Self(
 			InnerOp::Add {
-				path,
-				value,
+				path: path.into(),
+				value: value.into_value(),
 			}
 			.into_value(),
 		)
@@ -213,10 +203,10 @@ impl PatchOp {
 	/// PatchOp::remove("/biscuits/0")
 	/// # ;
 	/// ```
-	pub fn remove(path: &str) -> Self {
+	pub fn remove(path: impl Into<String>) -> Self {
 		Self(
 			InnerOp::Remove {
-				path,
+				path: path.into(),
 			}
 			.into_value(),
 		)
@@ -233,24 +223,21 @@ impl PatchOp {
 	/// PatchOp::replace("/biscuits/0/name", "Chocolate Digestive")
 	/// # ;
 	/// ```
-	pub fn replace<T>(path: &str, value: T) -> Self
-	where
-		T: SurrealValue,
-	{
+	pub fn replace(path: impl Into<String>, value: impl SurrealValue) -> Self {
 		Self(
 			InnerOp::Replace {
-				path,
-				value,
+				path: path.into(),
+				value: value.into_value(),
 			}
 			.into_value(),
 		)
 	}
 
 	/// Changes a value
-	pub fn change(path: &str, diff: String) -> Self {
+	pub fn change(path: impl Into<String>, diff: String) -> Self {
 		Self(
 			InnerOp::Change {
-				path,
+				path: path.into(),
 				value: diff,
 			}
 			.into_value(),
@@ -268,14 +255,7 @@ impl From<PatchOps> for PatchOp {
 		let mut merged = PatchOp(Value::Array(Array::with_capacity(ops.0.len())));
 		for PatchOp(result) in ops.0 {
 			if let Value::Array(value) = &mut merged.0 {
-				match result {
-					Ok(op) => value.push(op),
-					Err(error) => {
-						merged.0 = Err(error);
-						// This operation produced an error, no need to continue
-						break;
-					}
-				}
+				value.push(result);
 			}
 		}
 		merged
@@ -304,7 +284,7 @@ impl PatchOps {
 	/// ```
 	pub fn add<T>(mut self, path: &str, value: T) -> Self
 	where
-		T: Serialize,
+		T: SurrealValue,
 	{
 		self.0.push(PatchOp::add(path, value));
 		self
@@ -346,7 +326,7 @@ impl PatchOps {
 	/// ```
 	pub fn replace<T>(mut self, path: &str, value: T) -> Self
 	where
-		T: Serialize,
+		T: SurrealValue,
 	{
 		self.0.push(PatchOp::replace(path, value));
 		self

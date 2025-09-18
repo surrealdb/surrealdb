@@ -63,8 +63,8 @@ pub(crate) async fn run_router(
 ) {
 	let configured_root = match address.config.auth {
 		Level::Root => Some(Root {
-			username: &address.config.username,
-			password: &address.config.password,
+			username: address.config.username,
+			password: address.config.password,
 		}),
 		_ => None,
 	};
@@ -85,8 +85,9 @@ pub(crate) async fn run_router(
 				return;
 			}
 			// If a root user is specified, setup the initial datastore credentials
-			if let Some(root) = configured_root {
-				if let Err(error) = kvs.initialise_credentials(root.username, root.password).await {
+			if let Some(root) = &configured_root {
+				if let Err(error) = kvs.initialise_credentials(&root.username, &root.password).await
+				{
 					conn_tx.send(Err(error)).await.ok();
 					return;
 				}

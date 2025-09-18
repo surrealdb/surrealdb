@@ -42,5 +42,8 @@ uuid = { workspace = true, features = ["serde", "v4", "v7", "js"] }
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
+[dev-dependencies]
+serde_json = { workspace = true }
+
 [lints]
 workspace = true

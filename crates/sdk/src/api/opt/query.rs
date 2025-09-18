@@ -356,10 +356,9 @@ where
 		let value = match response.results.get_mut(&self) {
 			Some((_, result)) => match result {
 				Ok(val) => val,
-				Err(error) => {
-					let error = mem::replace(error, Error::ConnectionUninitialised.into());
+				Err(_) => {
 					response.results.swap_remove(&self);
-					return Err(error);
+					return Err(Error::ConnectionUninitialised.into());
 				}
 			},
 			None => {
@@ -369,14 +368,14 @@ where
 		let result = match value {
 			Value::Array(vec) => match &mut vec[..] {
 				[] => Ok(None),
-				[value] => mem::take(value),
+				[value] => T::from_value(mem::take(value)).map(Some),
 				_ => Err(Error::LossyTake(QueryResponse {
 					results: mem::take(&mut response.results),
 					live_queries: mem::take(&mut response.live_queries),
 				})
 				.into()),
 			},
-			_ => mem::take(value),
+			_ => T::from_value(mem::take(value)).map(Some),
 		};
 		response.results.swap_remove(&self);
 		result
@@ -394,10 +393,9 @@ impl query_result::Sealed<Value> for (usize, &str) {
 		let value = match response.results.get_mut(&index) {
 			Some((_, result)) => match result {
 				Ok(val) => val,
-				Err(error) => {
-					let error = mem::replace(error, Error::ConnectionUninitialised.into());
+				Err(_) => {
 					response.results.swap_remove(&index);
-					return Err(error);
+					return Err(Error::ConnectionUninitialised.into());
 				}
 			},
 			None => {
@@ -428,10 +426,9 @@ where
 		let value: &mut Value = match response.results.get_mut(&index) {
 			Some((_, result)) => match result {
 				Ok(val) => val,
-				Err(error) => {
-					let error = mem::replace(error, Error::ConnectionUninitialised.into());
+				Err(_) => {
 					response.results.swap_remove(&index);
-					return Err(error);
+					return Err(Error::ConnectionUninitialised.into());
 				}
 			},
 			None => {
@@ -468,7 +465,7 @@ where
 				let Some(value) = object.remove(key) else {
 					return Ok(None);
 				};
-				Ok(value)
+				T::from_value(value).map(Some)
 			}
 			_ => Ok(None),
 		}
@@ -533,10 +530,9 @@ where
 						Ok(vec![])
 					}
 				},
-				Err(error) => {
-					let error = mem::replace(error, Error::ConnectionUninitialised.into());
+				Err(_) => {
 					response.results.swap_remove(&index);
-					Err(error)
+					Err(Error::ConnectionUninitialised.into())
 				}
 			},
 			None => Ok(vec![]),
@@ -597,7 +593,8 @@ impl query_stream::Sealed<Value> for usize {
 			.and_then(|result| match result {
 				Err(e) => {
 					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
-						response.results.swap_remove(&self).and_then(|x| x.1.err().map(Err))
+						response.results.swap_remove(&self);
+						None
 					} else {
 						Some(Err(e))
 					}
@@ -622,12 +619,8 @@ impl query_stream::Sealed<Value> for () {
 				Err(e) => {
 					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
 						match response.results.swap_remove(&index) {
-							Some((stats, Err(error))) => {
-								response.results.insert(
-									index,
-									(stats, Err(Error::ResponseAlreadyTaken.into())),
-								);
-								return Err(error);
+							Some((_, Err(_))) => {
+								return Err(Error::ConnectionUninitialised.into());
 							}
 							Some((_, Ok(..))) => unreachable!(
 								"the internal error variant indicates that an error occurred in the `LIVE SELECT` query"
@@ -661,7 +654,8 @@ where
 			.and_then(|result| match result {
 				Err(e) => {
 					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
-						response.results.swap_remove(&self).and_then(|x| x.1.err().map(Err))
+						response.results.swap_remove(&self);
+						None
 					} else {
 						Some(Err(e))
 					}
@@ -697,12 +691,8 @@ where
 				Err(e) => {
 					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
 						match response.results.swap_remove(&index) {
-							Some((stats, Err(error))) => {
-								response.results.insert(
-									index,
-									(stats, Err(Error::ResponseAlreadyTaken.into())),
-								);
-								return Err(error);
+							Some((_, Err(_))) => {
+								return Err(Error::ConnectionUninitialised.into());
 							}
 							Some((_, Ok(..))) => unreachable!(
 								"the internal error variant indicates that an error occurred in the `LIVE SELECT` query"

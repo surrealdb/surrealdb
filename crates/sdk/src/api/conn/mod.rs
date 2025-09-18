@@ -5,6 +5,7 @@ use std::time::Duration;
 use async_channel::{Receiver, Sender};
 use indexmap::IndexMap;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use surrealdb_core::rpc::{DbResult, DbResultError, DbResultStats};
 use surrealdb_types::{Array, SurrealValue, Value};
 
@@ -56,7 +57,7 @@ impl Router {
 	pub(crate) fn send(
 		&self,
 		command: Command,
-	) -> BoxFuture<'_, Result<Receiver<Result<DbResult>>>> {
+	) -> BoxFuture<'_, Result<Receiver<Result<IndexedDbResults>>>> {
 		Box::pin(async move {
 			let id = self.next_id();
 			let (sender, receiver) = async_channel::bounded(1);
@@ -75,13 +76,13 @@ impl Router {
 	/// Receive responses for all methods except `query`
 	pub(crate) fn recv(
 		&self,
-		receiver: Receiver<Result<DbResult>>,
+		receiver: Receiver<Result<IndexedDbResults>>,
 	) -> BoxFuture<'_, Result<Value>> {
 		Box::pin(async move {
 			let response = receiver.recv().await?;
 			match response? {
-				DbResult::Other(value) => Ok(value),
-				DbResult::Query(..) => unreachable!(),
+				IndexedDbResults::Other(value) => Ok(value),
+				IndexedDbResults::Query(..) => unreachable!(),
 			}
 		})
 	}
@@ -89,13 +90,13 @@ impl Router {
 	/// Receive the response of the `query` method
 	pub(crate) fn recv_query(
 		&self,
-		receiver: Receiver<Result<DbResult>>,
+		receiver: Receiver<Result<IndexedDbResults>>,
 	) -> BoxFuture<'_, Result<IndexedResults>> {
 		Box::pin(async move {
 			let response = receiver.recv().await?;
 			match response? {
-				DbResult::Query(results) => Ok(results),
-				DbResult::Other(..) => unreachable!(),
+				IndexedDbResults::Query(results) => Ok(results),
+				IndexedDbResults::Other(..) => unreachable!(),
 			}
 		})
 	}
@@ -107,7 +108,8 @@ impl Router {
 	{
 		Box::pin(async move {
 			let rx = self.send(command).await?;
-			self.recv(rx).await
+			let value = self.recv(rx).await?;
+			R::from_value(value)
 		})
 	}
 
@@ -120,7 +122,7 @@ impl Router {
 			let rx = self.send(command).await?;
 			match self.recv(rx).await? {
 				Value::None | Value::Null => Ok(None),
-				value => value,
+				value => Ok(Some(R::from_value(value)?)),
 			}
 		})
 	}
@@ -132,12 +134,13 @@ impl Router {
 	{
 		Box::pin(async move {
 			let rx = self.send(command).await?;
-			let value = match self.recv(rx).await? {
+			match self.recv(rx).await? {
 				Value::None | Value::Null => return Ok(Vec::new()),
-				Value::Array(array) => Value::Array(array),
-				value => Value::Array(Array::from(vec![value])),
-			};
-			value::from_core_value(value)
+				Value::Array(array) => {
+					array.into_iter().map(R::from_value).collect::<Result<Vec<R>>>()
+				}
+				value => Ok(vec![R::from_value(value)?]),
+			}
 		})
 	}
 
@@ -205,7 +208,7 @@ impl IndexedDbResults {
 					// 		);
 					// 	}
 					// }
-					results.insert(index, response.result.map(|value| (stats, value))?);
+					results.insert(index, (stats, response.result));
 				}
 
 				Ok(Self::Query(IndexedResults {
