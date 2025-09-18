@@ -101,15 +101,16 @@ impl RemoveTableStatement {
 				.await?;
 			}
 		}
-		if let Some(chn) = opt.sender.as_ref() {
+		if let Some(sender) = opt.broker.as_ref() {
 			for lv in lvs.iter() {
-				chn.send(Notification {
-					id: lv.id.into(),
-					action: dbs::Action::Killed,
-					record: Value::None,
-					result: Value::None,
-				})
-				.await?;
+				sender
+					.send(Notification {
+						id: lv.id.into(),
+						action: dbs::Action::Killed,
+						record: Value::None,
+						result: Value::None,
+					})
+					.await;
 			}
 		}
 		// Clear the cache

@@ -17,7 +17,8 @@ use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
 use crate::ctx::Context;
 use crate::ctx::reason::Reason;
 use crate::dbs::response::Response;
-use crate::dbs::{Force, Options, QueryType};
+use crate::dbs::{Force, Notification, Options, QueryType};
+use crate::doc::DefaultBroker;
 use crate::err::Error;
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
@@ -36,6 +37,21 @@ pub struct Executor {
 	results: Vec<Response>,
 	opt: Options,
 	ctx: Context,
+}
+
+impl Executor {
+	fn prepare_broker(&mut self) -> Option<async_channel::Receiver<Notification>> {
+		if !self.ctx.has_notifications() {
+			return None;
+		}
+		// If a broker is already provided by a higher layer, don't override it here.
+		if self.opt.broker.is_some() {
+			return None;
+		}
+		let (send, recv) = async_channel::unbounded();
+		self.opt.broker = Some(DefaultBroker::new(send));
+		Some(recv)
+	}
 }
 
 impl Executor {
@@ -225,17 +241,6 @@ impl Executor {
 					.set_transaction(txn);
 				s.compute(&self.ctx, &self.opt, None).await.map_err(ControlFlow::Err)
 			}
-			TopLevelExpr::Analyze(s) => {
-				Arc::get_mut(&mut self.ctx)
-					.ok_or_else(|| {
-						err::Error::unreachable(
-							"Tried to unfreeze a Context with multiple references",
-						)
-					})
-					.map_err(anyhow::Error::new)?
-					.set_transaction(txn);
-				s.compute(&self.ctx, &self.opt).await.map_err(ControlFlow::Err)
-			}
 			TopLevelExpr::Access(s) => {
 				Arc::get_mut(&mut self.ctx)
 					.ok_or_else(|| {
@@ -310,11 +315,7 @@ impl Executor {
 			TransactionType::Write
 		};
 		let txn = Arc::new(kvs.transaction(transaction_type, LockType::Optimistic).await?);
-		let receiver = self.ctx.has_notifications().then(|| {
-			let (send, recv) = async_channel::unbounded();
-			self.opt.sender = Some(send);
-			recv
-		});
+		let receiver = self.prepare_broker();
 
 		match self.execute_plan_in_transaction(txn.clone(), start, plan).await {
 			Ok(value) | Err(ControlFlow::Return(value)) => {
@@ -344,7 +345,7 @@ impl Executor {
 
 				// flush notifications.
 				if let Some(recv) = receiver {
-					self.opt.sender = None;
+					self.opt.broker = None;
 					if let Some(sink) = self.ctx.notifications() {
 						spawn(async move {
 							while let Ok(x) = recv.recv().await {
@@ -403,11 +404,7 @@ impl Executor {
 
 		// Create a sender for this transaction only if the context allows for
 		// notifications.
-		let receiver = self.ctx.has_notifications().then(|| {
-			let (send, recv) = async_channel::unbounded();
-			self.opt.sender = Some(send);
-			recv
-		});
+		let receiver = self.prepare_broker();
 
 		let txn = Arc::new(txn);
 		let start_results = self.results.len();
@@ -490,7 +487,7 @@ impl Executor {
 						query_type: QueryType::Other,
 					});
 
-					self.opt.sender = None;
+					self.opt.broker = None;
 
 					while let Some(stmt) = stream.next().await {
 						yield_now!();
@@ -518,7 +515,7 @@ impl Executor {
 						res.result = Err(anyhow!(Error::QueryCancelled));
 					}
 
-					self.opt.sender = None;
+					self.opt.broker = None;
 
 					return Ok(());
 				}
@@ -537,7 +534,7 @@ impl Executor {
 
 						// flush notifications.
 						if let Some(recv) = receiver {
-							self.opt.sender = None;
+							self.opt.broker = None;
 							if let Some(sink) = self.ctx.notifications() {
 								spawn(async move {
 									while let Ok(x) = recv.recv().await {
@@ -560,7 +557,7 @@ impl Executor {
 						}));
 					}
 
-					self.opt.sender = None;
+					self.opt.broker = None;
 
 					return Ok(());
 				}
@@ -604,7 +601,7 @@ impl Executor {
 
 							let _ = txn.cancel().await;
 
-							self.opt.sender = None;
+							self.opt.broker = None;
 
 							while let Some(stmt) = stream.next().await {
 								yield_now!();
@@ -654,7 +651,7 @@ impl Executor {
 			}));
 		}
 
-		self.opt.sender = None;
+		self.opt.broker = None;
 
 		Ok(())
 	}

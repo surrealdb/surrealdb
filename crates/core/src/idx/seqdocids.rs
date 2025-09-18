@@ -5,10 +5,26 @@ use uuid::Uuid;
 
 use crate::ctx::Context;
 use crate::idx::IndexKeyBase;
-use crate::idx::docids::{DocId, Resolved};
 use crate::kvs::Transaction;
 use crate::kvs::sequences::SequenceDomain;
 use crate::val::RecordIdKey;
+
+pub type DocId = u64;
+
+#[derive(Debug, PartialEq)]
+pub(super) enum Resolved {
+	New(DocId),
+	Existing(DocId),
+}
+
+impl Resolved {
+	pub(in crate::idx) fn doc_id(&self) -> DocId {
+		match self {
+			Resolved::New(doc_id) => *doc_id,
+			Resolved::Existing(doc_id) => *doc_id,
+		}
+	}
+}
 
 /// Sequence-based DocIds store for concurrent full-text search
 ///
@@ -163,9 +179,7 @@ mod tests {
 	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 	use crate::ctx::Context;
 	use crate::idx::IndexKeyBase;
-	use crate::idx::docids::seqdocids::SeqDocIds;
-	use crate::idx::docids::{DocId, Resolved};
-	use crate::key::index::bi::Bi;
+	use crate::idx::seqdocids::{DocId, Resolved, SeqDocIds};
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::{Read, Write};
 	use crate::kvs::{Datastore, TransactionType};
@@ -191,7 +205,7 @@ mod tests {
 
 	async fn check_get_doc_key_id(ctx: &Context, d: &SeqDocIds, doc_id: DocId, key: &str) {
 		let tx = ctx.tx();
-		let id = RecordIdKey::String(key.to_owned());
+		let id = RecordIdKey::String(key.into());
 		assert_eq!(SeqDocIds::get_id(&d.ikb, &tx, doc_id).await.unwrap(), Some(id.clone()));
 		assert_eq!(d.get_doc_id(&tx, &id).await.unwrap(), Some(doc_id));
 	}
@@ -390,13 +404,13 @@ mod tests {
 					TEST_DB_ID,
 					TEST_TB,
 					TEST_IX_ID,
-					RecordIdKey::String(id.to_owned()),
+					RecordIdKey::String(id.into()),
 				);
 				assert!(!tx.exists(&id, None).await.unwrap());
 			}
+			let ikb = IndexKeyBase::new(TEST_NS_ID, TEST_DB_ID, TEST_TB, TEST_IX_ID);
 			for doc_id in 0..=3 {
-				let bi = Bi::new(TEST_NS_ID, TEST_DB_ID, TEST_TB, TEST_IX_ID, doc_id);
-				assert!(!tx.exists(&bi, None).await.unwrap());
+				assert_eq!(SeqDocIds::get_id(&ikb, &tx, doc_id).await.unwrap(), None);
 			}
 		}
 	}

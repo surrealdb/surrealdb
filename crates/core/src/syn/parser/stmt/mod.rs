@@ -7,7 +7,6 @@ use crate::sql::statements::access::{
 	AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
 	AccessStatementShow, Subject,
 };
-use crate::sql::statements::analyze::AnalyzeStatement;
 use crate::sql::statements::rebuild::RebuildIndexStatement;
 use crate::sql::statements::show::ShowSince;
 use crate::sql::statements::{
@@ -108,10 +107,6 @@ impl Parser<'_> {
 			t!("ACCESS") => {
 				self.pop_peek();
 				self.parse_access(stk).await.map(|x| TopLevelExpr::Access(Box::new(x)))
-			}
-			t!("ANALYZE") => {
-				self.pop_peek();
-				self.parse_analyze().map(TopLevelExpr::Analyze)
 			}
 			t!("SHOW") => {
 				self.pop_peek();
@@ -261,17 +256,6 @@ impl Parser<'_> {
 			}
 			_ => unexpected!(self, peek, "one of GRANT, SHOW, REVOKE or PURGE"),
 		}
-	}
-
-	/// Parsers a analyze statement.
-	fn parse_analyze(&mut self) -> ParseResult<AnalyzeStatement> {
-		expected!(self, t!("INDEX"));
-
-		let index = self.parse_ident()?;
-		expected!(self, t!("ON"));
-		let table = self.parse_ident()?;
-
-		Ok(AnalyzeStatement::Idx(table, index))
 	}
 
 	/// Parsers a begin statement.

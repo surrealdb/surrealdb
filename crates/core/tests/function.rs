@@ -487,8 +487,8 @@ async fn function_string_html_sanitize() -> Result<()> {
 #[tokio::test]
 async fn function_string_is_alphanum() -> Result<()> {
 	let sql = r#"
-		RETURN string::is::alphanum("abcdefg123");
-		RETURN string::is::alphanum("this is a test!");
+		RETURN string::is_alphanum("abcdefg123");
+		RETURN string::is_alphanum("this is a test!");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -506,8 +506,8 @@ async fn function_string_is_alphanum() -> Result<()> {
 #[tokio::test]
 async fn function_string_is_alpha() -> Result<()> {
 	let sql = r#"
-		RETURN string::is::alpha("abcdefg");
-		RETURN string::is::alpha("this is a test!");
+		RETURN string::is_alpha("abcdefg");
+		RETURN string::is_alpha("this is a test!");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -525,8 +525,8 @@ async fn function_string_is_alpha() -> Result<()> {
 #[tokio::test]
 async fn function_string_is_ascii() -> Result<()> {
 	let sql = r#"
-		RETURN string::is::ascii("abcdefg123");
-		RETURN string::is::ascii("this is a test 😀");
+		RETURN string::is_ascii("abcdefg123");
+		RETURN string::is_ascii("this is a test 😀");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -544,8 +544,8 @@ async fn function_string_is_ascii() -> Result<()> {
 #[tokio::test]
 async fn function_string_is_datetime() -> Result<()> {
 	let sql = r#"
-		RETURN string::is::datetime("2015-09-05 23:56:04", "%Y-%m-%d %H:%M:%S");
-		RETURN string::is::datetime("2012-06-22 23:56:04", "%T");
+		RETURN string::is_datetime("2015-09-05 23:56:04", "%Y-%m-%d %H:%M:%S");
+		RETURN string::is_datetime("2012-06-22 23:56:04", "%T");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -563,8 +563,8 @@ async fn function_string_is_datetime() -> Result<()> {
 #[tokio::test]
 async fn function_string_is_domain() -> Result<()> {
 	let sql = r#"
-		RETURN string::is::domain("surrealdb.com");
-		RETURN string::is::domain("this is a test!");
+		RETURN string::is_domain("surrealdb.com");
+		RETURN string::is_domain("this is a test!");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -582,8 +582,8 @@ async fn function_string_is_domain() -> Result<()> {
 #[tokio::test]
 async fn function_string_is_email() -> Result<()> {
 	let sql = r#"
-		RETURN string::is::email("info@surrealdb.com");
-		RETURN string::is::email("this is a test!");
+		RETURN string::is_email("info@surrealdb.com");
+		RETURN string::is_email("this is a test!");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -601,8 +601,8 @@ async fn function_string_is_email() -> Result<()> {
 #[tokio::test]
 async fn function_string_is_hexadecimal() -> Result<()> {
 	let sql = r#"
-		RETURN string::is::hexadecimal("ff009e");
-		RETURN string::is::hexadecimal("this is a test!");
+		RETURN string::is_hexadecimal("ff009e");
+		RETURN string::is_hexadecimal("this is a test!");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -620,8 +620,8 @@ async fn function_string_is_hexadecimal() -> Result<()> {
 #[tokio::test]
 async fn function_string_is_ip() -> Result<()> {
 	let sql = r#"
-		RETURN string::is::ip("127.0.0.1");
-		RETURN string::is::ip("127.0.0");
+		RETURN string::is_ip("127.0.0.1");
+		RETURN string::is_ip("127.0.0");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -639,8 +639,8 @@ async fn function_string_is_ip() -> Result<()> {
 #[tokio::test]
 async fn function_string_is_ipv4() -> Result<()> {
 	let sql = r#"
-		RETURN string::is::ipv4("127.0.0.1");
-		RETURN string::is::ipv4("127.0.0");
+		RETURN string::is_ipv4("127.0.0.1");
+		RETURN string::is_ipv4("127.0.0");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -658,8 +658,8 @@ async fn function_string_is_ipv4() -> Result<()> {
 #[tokio::test]
 async fn function_string_is_ipv6() -> Result<()> {
 	let sql = r#"
-		RETURN string::is::ipv6("::1");
-		RETURN string::is::ipv6("200t:db8::");
+		RETURN string::is_ipv6("::1");
+		RETURN string::is_ipv6("200t:db8::");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -677,8 +677,8 @@ async fn function_string_is_ipv6() -> Result<()> {
 #[tokio::test]
 async fn function_string_is_latitude() -> Result<()> {
 	let sql = r#"
-		RETURN string::is::latitude("51.509865");
-		RETURN string::is::latitude("this is a test!");
+		RETURN string::is_latitude("51.509865");
+		RETURN string::is_latitude("this is a test!");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -696,8 +696,8 @@ async fn function_string_is_latitude() -> Result<()> {
 #[tokio::test]
 async fn function_string_is_longitude() -> Result<()> {
 	let sql = r#"
-		RETURN string::is::longitude("-90.136439");
-		RETURN string::is::longitude("this is a test!");
+		RETURN string::is_longitude("-90.136439");
+		RETURN string::is_longitude("this is a test!");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -715,8 +715,8 @@ async fn function_string_is_longitude() -> Result<()> {
 #[tokio::test]
 async fn function_string_is_numeric() -> Result<()> {
 	let sql = r#"
-		RETURN string::is::numeric("13136439");
-		RETURN string::is::numeric("this is a test!");
+		RETURN string::is_numeric("13136439");
+		RETURN string::is_numeric("this is a test!");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -734,8 +734,8 @@ async fn function_string_is_numeric() -> Result<()> {
 #[tokio::test]
 async fn function_string_is_semver() -> Result<()> {
 	let sql = r#"
-		RETURN string::is::semver("1.0.0-rc.1");
-		RETURN string::is::semver("this is a test!");
+		RETURN string::is_semver("1.0.0-rc.1");
+		RETURN string::is_semver("this is a test!");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -753,8 +753,8 @@ async fn function_string_is_semver() -> Result<()> {
 #[tokio::test]
 async fn function_string_is_url() -> Result<()> {
 	let sql = r#"
-		RETURN string::is::url("https://surrealdb.com/docs");
-		RETURN string::is::url("this is a test!");
+		RETURN string::is_url("https://surrealdb.com/docs");
+		RETURN string::is_url("this is a test!");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -772,8 +772,8 @@ async fn function_string_is_url() -> Result<()> {
 #[tokio::test]
 async fn function_string_is_ulid() -> Result<()> {
 	let sql = r#"
-		RETURN string::is::ulid("01J8G788MNX1VT3KE1TK40W350");
-		RETURN string::is::ulid("this is a test!");
+		RETURN string::is_ulid("01J8G788MNX1VT3KE1TK40W350");
+		RETURN string::is_ulid("this is a test!");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -791,8 +791,8 @@ async fn function_string_is_ulid() -> Result<()> {
 #[tokio::test]
 async fn function_string_is_uuid() -> Result<()> {
 	let sql = r#"
-		RETURN string::is::uuid("e72bee20-f49b-11ec-b939-0242ac120002");
-		RETURN string::is::uuid("this is a test!");
+		RETURN string::is_uuid("e72bee20-f49b-11ec-b939-0242ac120002");
+		RETURN string::is_uuid("this is a test!");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -810,8 +810,8 @@ async fn function_string_is_uuid() -> Result<()> {
 #[tokio::test]
 async fn function_string_is_record() -> Result<()> {
 	let sql = r#"
-		RETURN string::is::record("test:123");
-		RETURN string::is::record("invalid record id!");
+		RETURN string::is_record("test:123");
+		RETURN string::is_record("invalid record id!");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -1238,26 +1238,26 @@ async fn function_string_distance_normalized_levenshtein() -> Result<()> {
 #[tokio::test]
 async fn function_string_distance_osa_distance() -> Result<()> {
 	let sql = r#"
-        RETURN string::distance::osa_distance("", "");
-        RETURN string::distance::osa_distance("damerau", "damerau");
-        RETURN string::distance::osa_distance("", "damerau");
-        RETURN string::distance::osa_distance("damerau", "");
-        RETURN string::distance::osa_distance("ca", "abc");
-        RETURN string::distance::osa_distance("damerau", "aderua");
-        RETURN string::distance::osa_distance("aderua", "damerau");
-        RETURN string::distance::osa_distance("öঙ香", "abc");
-        RETURN string::distance::osa_distance("abc", "öঙ香");
-        RETURN string::distance::osa_distance("damerau", "aderuaxyz");
-        RETURN string::distance::osa_distance("aderuaxyz", "damerau");
-        RETURN string::distance::osa_distance("Stewart", "Colbert");
-        RETURN string::distance::osa_distance("abcdefghijkl", "bacedfgihjlk");
-        RETURN string::distance::osa_distance(
+        RETURN string::distance::osa("", "");
+        RETURN string::distance::osa("damerau", "damerau");
+        RETURN string::distance::osa("", "damerau");
+        RETURN string::distance::osa("damerau", "");
+        RETURN string::distance::osa("ca", "abc");
+        RETURN string::distance::osa("damerau", "aderua");
+        RETURN string::distance::osa("aderua", "damerau");
+        RETURN string::distance::osa("öঙ香", "abc");
+        RETURN string::distance::osa("abc", "öঙ香");
+        RETURN string::distance::osa("damerau", "aderuaxyz");
+        RETURN string::distance::osa("aderuaxyz", "damerau");
+        RETURN string::distance::osa("Stewart", "Colbert");
+        RETURN string::distance::osa("abcdefghijkl", "bacedfgihjlk");
+        RETURN string::distance::osa(
             "The quick brown fox jumped over the angry dog.",
             "Lehem ipsum dolor sit amet, dicta latine an eam."
         );
-        RETURN string::distance::osa_distance("foobar", "ofobar");
-        RETURN string::distance::osa_distance("specter", "spectre");
-        RETURN string::distance::osa_distance("a cat", "an abct");
+        RETURN string::distance::osa("foobar", "ofobar");
+        RETURN string::distance::osa("specter", "spectre");
+        RETURN string::distance::osa("a cat", "an abct");
     "#;
 	let mut test = Test::new(sql).await?;
 	// osa_distance_empty
@@ -1611,50 +1611,6 @@ async fn function_string_similarity_sorensen_dice() -> Result<()> {
 }
 
 #[tokio::test]
-async fn function_string_slice() -> Result<()> {
-	let sql = r#"
-		RETURN string::slice("the quick brown fox jumps over the lazy dog.");
-		RETURN string::slice("the quick brown fox jumps over the lazy dog.", 16);
-		RETURN string::slice("the quick brown fox jumps over the lazy dog.", 0, 60);
-		RETURN string::slice("the quick brown fox jumps over the lazy dog.", 0, -1);
-		RETURN string::slice("the quick brown fox jumps over the lazy dog.", 16, -1);
-		RETURN string::slice("the quick brown fox jumps over the lazy dog.", -9, -1);
-		RETURN string::slice("the quick brown fox jumps over the lazy dog.", -100, -100);
-	"#;
-	let mut test = Test::new(sql).await?;
-	//
-	let tmp = test.next()?.result?;
-	let val = syn::value("'the quick brown fox jumps over the lazy dog.'").unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = syn::value("'fox jumps over the lazy dog.'").unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = syn::value("'the quick brown fox jumps over the lazy dog.'").unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = syn::value("'the quick brown fox jumps over the lazy dog'").unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = syn::value("'fox jumps over the lazy dog'").unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = syn::value("'lazy dog'").unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = syn::value("''").unwrap();
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-#[tokio::test]
 async fn function_string_slug() -> Result<()> {
 	let sql = r#"
 		RETURN string::slug("");
@@ -1927,9 +1883,9 @@ async fn function_time_hour() -> Result<()> {
 #[tokio::test]
 async fn function_time_is_leap_year() -> Result<()> {
 	let sql = r#"
-		RETURN time::is::leap_year();
-		RETURN time::is::leap_year(d"1987-06-22T08:30:45Z");
-		RETURN time::is::leap_year(d"1988-06-22T08:30:45Z");
+		RETURN time::is_leap_year();
+		RETURN time::is_leap_year(d"1987-06-22T08:30:45Z");
+		RETURN time::is_leap_year(d"1988-06-22T08:30:45Z");
 		RETURN d'2024-09-03T02:33:15.349397Z'.is_leap_year();
 	"#;
 	let mut test = Test::new(sql).await?;
@@ -2213,8 +2169,8 @@ async fn function_time_year() -> Result<()> {
 #[tokio::test]
 async fn function_time_from_nanos() -> Result<()> {
 	let sql = r#"
-		RETURN time::from::nanos(384025770384840000);
-		RETURN time::from::nanos(2840257704384440000);
+		RETURN time::from_nanos(384025770384840000);
+		RETURN time::from_nanos(2840257704384440000);
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2232,8 +2188,8 @@ async fn function_time_from_nanos() -> Result<()> {
 #[tokio::test]
 async fn function_time_from_micros() -> Result<()> {
 	let sql = r#"
-		RETURN time::from::micros(384025770384840);
-		RETURN time::from::micros(2840257704384440);
+		RETURN time::from_micros(384025770384840);
+		RETURN time::from_micros(2840257704384440);
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2251,8 +2207,8 @@ async fn function_time_from_micros() -> Result<()> {
 #[tokio::test]
 async fn function_time_from_millis() -> Result<()> {
 	let sql = r#"
-		RETURN time::from::millis(384025773840);
-		RETURN time::from::millis(2840257704440);
+		RETURN time::from_millis(384025773840);
+		RETURN time::from_millis(2840257704440);
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2270,8 +2226,8 @@ async fn function_time_from_millis() -> Result<()> {
 #[tokio::test]
 async fn function_time_from_secs() -> Result<()> {
 	let sql = r#"
-		RETURN time::from::secs(384053840);
-		RETURN time::from::secs(2845704440);
+		RETURN time::from_secs(384053840);
+		RETURN time::from_secs(2845704440);
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2289,7 +2245,7 @@ async fn function_time_from_secs() -> Result<()> {
 #[tokio::test]
 async fn function_time_from_ulid() -> Result<()> {
 	let sql = r#"
-		RETURN time::from::ulid("01J8G788MNX1VT3KE1TK40W350");
+		RETURN time::from_ulid("01J8G788MNX1VT3KE1TK40W350");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2303,8 +2259,8 @@ async fn function_time_from_ulid() -> Result<()> {
 #[tokio::test]
 async fn function_time_from_unix() -> Result<()> {
 	let sql = r#"
-		RETURN time::from::unix(384053840);
-		RETURN time::from::unix(2845704440);
+		RETURN time::from_unix(384053840);
+		RETURN time::from_unix(2845704440);
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2323,8 +2279,8 @@ async fn function_time_from_unix() -> Result<()> {
 async fn function_time_from_unix_limit_and_beyond() -> Result<()> {
 	test_queries(
 		r#"
-		RETURN time::year(time::from::unix(-8334601228800));
-		RETURN time::year(time::from::unix(8210266876799));
+		RETURN time::year(time::from_unix(-8334601228800));
+		RETURN time::year(time::from_unix(8210266876799));
 		"#,
 		&["-262143", "262142"],
 	)
@@ -2332,12 +2288,12 @@ async fn function_time_from_unix_limit_and_beyond() -> Result<()> {
 
 	check_test_is_error(
 		r#"
-		RETURN time::from::unix(-8334601228801);
-		RETURN time::from::unix(8210266876800);
+		RETURN time::from_unix(-8334601228801);
+		RETURN time::from_unix(8210266876800);
 	"#,
 		&[
-			"Incorrect arguments for function time::from::unix(). The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
-			"Incorrect arguments for function time::from::unix(). The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."
+			"Incorrect arguments for function time::from_unix(). The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
+			"Incorrect arguments for function time::from_unix(). The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."
 		],
 	).await?;
 
@@ -2347,7 +2303,7 @@ async fn function_time_from_unix_limit_and_beyond() -> Result<()> {
 #[tokio::test]
 async fn function_time_from_uuid() -> Result<()> {
 	let sql = r#"
-		RETURN time::from::uuid(u'01922074-2295-7cf6-906f-bcd0810639b0');
+		RETURN time::from_uuid(u'01922074-2295-7cf6-906f-bcd0810639b0');
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2486,8 +2442,8 @@ async fn function_type_int() -> Result<()> {
 #[tokio::test]
 async fn function_type_is_array() -> Result<()> {
 	let sql = r#"
-		RETURN type::is::array([1, 2, 3]);
-		RETURN type::is::array("123");
+		RETURN type::is_array([1, 2, 3]);
+		RETURN type::is_array("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2505,8 +2461,8 @@ async fn function_type_is_array() -> Result<()> {
 #[tokio::test]
 async fn function_type_is_bool() -> Result<()> {
 	let sql = r#"
-		RETURN type::is::bool(true);
-		RETURN type::is::bool("123");
+		RETURN type::is_bool(true);
+		RETURN type::is_bool("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2524,8 +2480,8 @@ async fn function_type_is_bool() -> Result<()> {
 #[tokio::test]
 async fn function_type_is_bytes() -> Result<()> {
 	let sql = r#"
-		RETURN type::is::bytes(<bytes>"");
-		RETURN type::is::bytes("123");
+		RETURN type::is_bytes(<bytes>"");
+		RETURN type::is_bytes("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2547,8 +2503,8 @@ async fn function_type_is_collection() -> Result<()> {
 			type: 'GeometryCollection',
 			geometries: [{ type: 'MultiPoint', coordinates: [[10, 11.2], [10.5, 11.9]] }]
 		};
-		RETURN type::is::collection($collection);
-		RETURN type::is::collection("123");
+		RETURN type::is_collection($collection);
+		RETURN type::is_collection("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2570,8 +2526,8 @@ async fn function_type_is_collection() -> Result<()> {
 #[tokio::test]
 async fn function_type_is_datetime() -> Result<()> {
 	let sql = r#"
-		RETURN type::is::datetime(<datetime> d"2023-09-04T11:22:38.247Z");
-		RETURN type::is::datetime("123");
+		RETURN type::is_datetime(<datetime> d"2023-09-04T11:22:38.247Z");
+		RETURN type::is_datetime("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2589,8 +2545,8 @@ async fn function_type_is_datetime() -> Result<()> {
 #[tokio::test]
 async fn function_type_is_decimal() -> Result<()> {
 	let sql = r#"
-		RETURN type::is::decimal(1.0dec);
-		RETURN type::is::decimal("123");
+		RETURN type::is_decimal(1.0dec);
+		RETURN type::is_decimal("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2608,8 +2564,8 @@ async fn function_type_is_decimal() -> Result<()> {
 #[tokio::test]
 async fn function_type_is_duration() -> Result<()> {
 	let sql = r#"
-		RETURN type::is::duration(20s);
-		RETURN type::is::duration("123");
+		RETURN type::is_duration(20s);
+		RETURN type::is_duration("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2627,8 +2583,8 @@ async fn function_type_is_duration() -> Result<()> {
 #[tokio::test]
 async fn function_type_is_float() -> Result<()> {
 	let sql = r#"
-		RETURN type::is::float(1.0f);
-		RETURN type::is::float("123");
+		RETURN type::is_float(1.0f);
+		RETURN type::is_float("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2646,8 +2602,8 @@ async fn function_type_is_float() -> Result<()> {
 #[tokio::test]
 async fn function_type_is_geometry() -> Result<()> {
 	let sql = r#"
-		RETURN type::is::geometry((-0.118092, 51.509865));
-		RETURN type::is::geometry("123");
+		RETURN type::is_geometry((-0.118092, 51.509865));
+		RETURN type::is_geometry("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2665,8 +2621,8 @@ async fn function_type_is_geometry() -> Result<()> {
 #[tokio::test]
 async fn function_type_is_int() -> Result<()> {
 	let sql = r#"
-		RETURN type::is::int(123);
-		RETURN type::is::int("123");
+		RETURN type::is_int(123);
+		RETURN type::is_int("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2685,8 +2641,8 @@ async fn function_type_is_int() -> Result<()> {
 async fn function_type_is_line() -> Result<()> {
 	let sql = r#"
 		LET $line = <geometry<line>> { type: 'LineString', coordinates: [[10, 11.2], [10.5, 11.9]] };
-		RETURN type::is::line($line);
-		RETURN type::is::line("123");
+		RETURN type::is_line($line);
+		RETURN type::is_line("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2708,8 +2664,8 @@ async fn function_type_is_line() -> Result<()> {
 #[tokio::test]
 async fn function_type_is_none() -> Result<()> {
 	let sql = r#"
-		RETURN type::is::none(none);
-		RETURN type::is::none("123");
+		RETURN type::is_none(none);
+		RETURN type::is_none("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2727,8 +2683,8 @@ async fn function_type_is_none() -> Result<()> {
 #[tokio::test]
 async fn function_type_is_null() -> Result<()> {
 	let sql = r#"
-		RETURN type::is::null(null);
-		RETURN type::is::null("123");
+		RETURN type::is_null(null);
+		RETURN type::is_null("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2750,8 +2706,8 @@ async fn function_type_is_multiline() -> Result<()> {
 			type: 'MultiLineString',
 			coordinates: [[[10, 11.2], [10.5, 11.9]], [[11, 12.2], [11.5, 12.9], [12, 13]]]
 		};
-		RETURN type::is::multiline($multiline);
-		RETURN type::is::multiline("123");
+		RETURN type::is_multiline($multiline);
+		RETURN type::is_multiline("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2774,8 +2730,8 @@ async fn function_type_is_multiline() -> Result<()> {
 async fn function_type_is_multipoint() -> Result<()> {
 	let sql = r#"
 		LET $multipoint = <geometry<multipoint>> { type: 'MultiPoint', coordinates: [[10, 11.2], [10.5, 11.9]] };
-		RETURN type::is::multipoint($multipoint);
-		RETURN type::is::multipoint("123");
+		RETURN type::is_multipoint($multipoint);
+		RETURN type::is_multipoint("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2801,8 +2757,8 @@ async fn function_type_is_multipolygon() -> Result<()> {
 			type: 'MultiPolygon',
 			coordinates: [[[[10, 11.2], [10.5, 11.9], [10.8, 12], [10, 11.2]]], [[[9, 11.2], [10.5, 11.9], [10.3, 13], [9, 11.2]]]]
 		};
-		RETURN type::is::multipolygon($multipolygon);
-		RETURN type::is::multipolygon("123");
+		RETURN type::is_multipolygon($multipolygon);
+		RETURN type::is_multipolygon("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2824,10 +2780,10 @@ async fn function_type_is_multipolygon() -> Result<()> {
 #[tokio::test]
 async fn function_type_is_number() -> Result<()> {
 	let sql = r#"
-		RETURN type::is::number(123);
-		RETURN type::is::number(123.0f);
-		RETURN type::is::number(123.0dec);
-		RETURN type::is::number("123");
+		RETURN type::is_number(123);
+		RETURN type::is_number(123.0f);
+		RETURN type::is_number(123.0dec);
+		RETURN type::is_number("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2853,8 +2809,8 @@ async fn function_type_is_number() -> Result<()> {
 #[tokio::test]
 async fn function_type_is_object() -> Result<()> {
 	let sql = r#"
-		RETURN type::is::object({ test: 123 });
-		RETURN type::is::object("123");
+		RETURN type::is_object({ test: 123 });
+		RETURN type::is_object("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2873,8 +2829,8 @@ async fn function_type_is_object() -> Result<()> {
 async fn function_type_is_point() -> Result<()> {
 	let sql = r#"
 		LET $point = <geometry<point>> { type: "Point", coordinates: [-0.118092, 51.509865] };
-		RETURN type::is::point($point);
-		RETURN type::is::point("123");
+		RETURN type::is_point($point);
+		RETURN type::is_point("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2908,8 +2864,8 @@ async fn function_type_is_polygon() -> Result<()> {
 				]
 			]
 		};
-		RETURN type::is::polygon($polygon);
-		RETURN type::is::polygon("123");
+		RETURN type::is_polygon($polygon);
+		RETURN type::is_polygon("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2931,8 +2887,8 @@ async fn function_type_is_polygon() -> Result<()> {
 #[tokio::test]
 async fn function_type_is_range() -> Result<()> {
 	let sql = r#"
-		RETURN type::is::range(1..5);
-		RETURN type::is::range("123");
+		RETURN type::is_range(1..5);
+		RETURN type::is_range("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2950,10 +2906,10 @@ async fn function_type_is_range() -> Result<()> {
 #[tokio::test]
 async fn function_type_is_record() -> Result<()> {
 	let sql = r#"
-		RETURN type::is::record(person:john);
-		RETURN type::is::record("123");
-		RETURN type::is::record(person:john, 'person');
-		RETURN type::is::record(person:john, 'user');
+		RETURN type::is_record(person:john);
+		RETURN type::is_record("123");
+		RETURN type::is_record(person:john, 'person');
+		RETURN type::is_record(person:john, 'user');
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2979,8 +2935,8 @@ async fn function_type_is_record() -> Result<()> {
 #[tokio::test]
 async fn function_type_is_string() -> Result<()> {
 	let sql = r#"
-		RETURN type::is::string("testing!");
-		RETURN type::is::string(123);
+		RETURN type::is_string("testing!");
+		RETURN type::is_string(123);
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2998,8 +2954,8 @@ async fn function_type_is_string() -> Result<()> {
 #[tokio::test]
 async fn function_type_is_uuid() -> Result<()> {
 	let sql = r#"
-		RETURN type::is::uuid(<uuid> u"018a6065-a80a-765e-b640-9fcb330a2f4f");
-		RETURN type::is::uuid("123");
+		RETURN type::is_uuid(<uuid> u"018a6065-a80a-765e-b640-9fcb330a2f4f");
+		RETURN type::is_uuid("123");
 	"#;
 	let mut test = Test::new(sql).await?;
 	//

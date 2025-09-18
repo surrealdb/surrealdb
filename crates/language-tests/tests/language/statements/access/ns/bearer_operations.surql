@@ -21,7 +21,7 @@ match = '''
 	$result.ac == 'api'
 		&& 'creation' in $result
 		&& 'expiration' in $result
-		&& type::is::object($result.grant)
+		&& type::is_object($result.grant)
 		&& $result.revocation == NONE
 		&& $result.subject == { user: 'tobie'}
 		&& $result.type == 'bearer'
@@ -32,7 +32,7 @@ match = '''
 	$result.ac == 'api'
 		&& 'creation' in $result
 		&& 'expiration' in $result
-		&& type::is::object($result.grant)
+		&& type::is_object($result.grant)
 		&& $result.revocation == NONE
 		&& $result.subject == { user: 'tobie'}
 		&& $result.type == 'bearer'
@@ -43,7 +43,7 @@ match = '''
 	$result.ac == 'api'
 		&& 'creation' in $result
 		&& 'expiration' in $result
-		&& type::is::object($result.grant)
+		&& type::is_object($result.grant)
 		&& $result.revocation == NONE
 		&& $result.subject == { user: 'tobie'}
 		&& $result.type == 'bearer'
@@ -54,7 +54,7 @@ match = '''
 	$result.ac == 'api'
 		&& 'creation' in $result
 		&& 'expiration' in $result
-		&& type::is::object($result.grant)
+		&& type::is_object($result.grant)
 		&& $result.revocation == NONE
 		&& $result.subject == { user: 'tobie'}
 		&& $result.type == 'bearer'
@@ -65,22 +65,22 @@ match = '''
 	array::len($result) == 4
 
 		&& $result[0].ac == 'api'
-		&& type::is::object($result[0].grant)
+		&& type::is_object($result[0].grant)
 		&& $result[0].grant.key = '[REDACTED]'
 		&& 'id' in $result[0].grant
 
 		&& $result[1].ac == 'api'
-		&& type::is::object($result[1].grant)
+		&& type::is_object($result[1].grant)
 		&& $result[1].grant.key = '[REDACTED]'
 		&& 'id' in $result[1].grant
 
 		&& $result[2].ac == 'api'
-		&& type::is::object($result[2].grant)
+		&& type::is_object($result[2].grant)
 		&& $result[2].grant.key = '[REDACTED]'
 		&& 'id' in $result[2].grant
 
 		&& $result[3].ac == 'api'
-		&& type::is::object($result[3].grant)
+		&& type::is_object($result[3].grant)
 		&& $result[3].grant.key = '[REDACTED]'
 		&& 'id' in $result[3].grant
 
@@ -92,22 +92,22 @@ match = '''
 	array::len($result) == 4
 
 		&& $result[0].ac == 'api'
-		&& type::is::object($result[0].grant)
+		&& type::is_object($result[0].grant)
 		&& $result[0].grant.key = '[REDACTED]'
 		&& 'id' in $result[0].grant
 
 		&& $result[1].ac == 'api'
-		&& type::is::object($result[1].grant)
+		&& type::is_object($result[1].grant)
 		&& $result[1].grant.key = '[REDACTED]'
 		&& 'id' in $result[1].grant
 
 		&& $result[2].ac == 'api'
-		&& type::is::object($result[2].grant)
+		&& type::is_object($result[2].grant)
 		&& $result[2].grant.key = '[REDACTED]'
 		&& 'id' in $result[2].grant
 
 		&& $result[3].ac == 'api'
-		&& type::is::object($result[3].grant)
+		&& type::is_object($result[3].grant)
 		&& $result[3].grant.key = '[REDACTED]'
 		&& 'id' in $result[3].grant
 

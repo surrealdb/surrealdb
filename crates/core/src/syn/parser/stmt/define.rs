@@ -958,8 +958,6 @@ impl Parser<'_> {
 					let mut distance = Distance::Euclidean;
 					let mut vector_type = VectorType::F64;
 					let mut capacity = 40;
-					let mut doc_ids_cache = 100;
-					let mut doc_ids_order = 100;
 					let mut mtree_cache = 100;
 					loop {
 						match self.peek_kind() {
@@ -975,14 +973,6 @@ impl Parser<'_> {
 								self.pop_peek();
 								capacity = self.next_token_value()?
 							}
-							t!("DOC_IDS_CACHE") => {
-								self.pop_peek();
-								doc_ids_cache = self.next_token_value()?
-							}
-							t!("DOC_IDS_ORDER") => {
-								self.pop_peek();
-								doc_ids_order = self.next_token_value()?
-							}
 							t!("MTREE_CACHE") => {
 								self.pop_peek();
 								mtree_cache = self.next_token_value()?
@@ -995,8 +985,6 @@ impl Parser<'_> {
 						distance,
 						vector_type,
 						capacity,
-						doc_ids_order,
-						doc_ids_cache,
 						mtree_cache,
 					})
 				}

@@ -92,18 +92,17 @@ pub use self::script::Script;
 pub use self::split::{Split, Splits};
 pub use self::start::Start;
 pub use self::statements::{
-	AccessGrant, AccessStatement, AlterStatement, AlterTableStatement, AnalyzeStatement,
-	CreateStatement, DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement,
-	DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
-	DefineIndexStatement, DefineModelStatement, DefineNamespaceStatement, DefineParamStatement,
-	DefineStatement, DefineTableStatement, DefineUserStatement, DeleteStatement, ForeachStatement,
-	IfelseStatement, InfoStatement, InsertStatement, KillStatement, LiveStatement, OptionStatement,
-	OutputStatement, RebuildStatement, RelateStatement, RemoveAccessStatement,
-	RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
-	RemoveFunctionStatement, RemoveIndexStatement, RemoveModelStatement, RemoveNamespaceStatement,
-	RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
-	SelectStatement, SetStatement, ShowStatement, SleepStatement, UpdateStatement, UpsertStatement,
-	UseStatement,
+	AccessGrant, AccessStatement, AlterStatement, AlterTableStatement, CreateStatement,
+	DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement,
+	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
+	DefineModelStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
+	DefineTableStatement, DefineUserStatement, DeleteStatement, ForeachStatement, IfelseStatement,
+	InfoStatement, InsertStatement, KillStatement, LiveStatement, OptionStatement, OutputStatement,
+	RebuildStatement, RelateStatement, RemoveAccessStatement, RemoveAnalyzerStatement,
+	RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement,
+	RemoveIndexStatement, RemoveModelStatement, RemoveNamespaceStatement, RemoveParamStatement,
+	RemoveStatement, RemoveTableStatement, RemoveUserStatement, SelectStatement, SetStatement,
+	ShowStatement, SleepStatement, UpdateStatement, UpsertStatement, UseStatement,
 };
 pub use self::timeout::Timeout;
 pub use self::tokenizer::Tokenizer;

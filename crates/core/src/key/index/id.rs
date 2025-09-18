@@ -42,7 +42,7 @@ use std::fmt::Debug;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
-use crate::idx::docids::DocId;
+use crate::idx::seqdocids::DocId;
 use crate::key::category::{Categorise, Category};
 use crate::val::{IndexFormat, RecordIdKey};
 

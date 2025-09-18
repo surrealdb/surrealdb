@@ -5,4 +5,4 @@
 value = "true"
 
 */
-type::is::uuid(rand::uuid::v4());
+type::is_uuid(rand::uuid::v4());

@@ -14,7 +14,7 @@ value = "292y24w3d23h47m16s854ms775µs807ns"
 value = "584y49w23h34m33s709ms551µs615ns"
 
 */
-duration::from::nanos(30);
-duration::from::nanos(5005000);
-duration::from::nanos(9_223_372_036_854_775_807);
-duration::from::nanos(-1);
+duration::from_nanos(30);
+duration::from_nanos(5005000);
+duration::from_nanos(9_223_372_036_854_775_807);
+duration::from_nanos(-1);
