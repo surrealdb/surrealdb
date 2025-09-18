@@ -1,15 +1,19 @@
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
-use revision::revisioned;
-
 use crate::expr::fmt::Fmt;
 use crate::expr::idiom::Idiom;
+use revision::revisioned;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Groups(pub Vec<Group>);
 
+impl Groups {
+	pub(crate) fn is_group_all_only(&self) -> bool {
+		self.0.is_empty()
+	}
+}
 impl Deref for Groups {
 	type Target = Vec<Group>;
 	fn deref(&self) -> &Self::Target {

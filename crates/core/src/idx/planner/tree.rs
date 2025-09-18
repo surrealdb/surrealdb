@@ -7,7 +7,7 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{self, DatabaseId, Index, IndexDefinition, NamespaceId};
+use crate::catalog::{self, DatabaseId, Index, IndexDefinition, IndexId, NamespaceId};
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
 use crate::expr::{
@@ -25,7 +25,8 @@ use crate::val::{Array, Number, Value};
 pub(super) struct Tree {
 	pub(super) root: Option<Node>,
 	pub(super) index_map: IndexesMap,
-	pub(super) with_indexes: Option<Vec<IndexReference>>,
+	pub(super) schema: Option<SchemaCache>,
+	pub(super) with_indexes: Option<Vec<IndexId>>,
 	pub(super) knn_expressions: KnnExpressions,
 	pub(super) knn_brute_force_expressions: KnnBruteForceExpressions,
 	pub(super) knn_condition: Option<Cond>,
@@ -53,6 +54,7 @@ impl Tree {
 		Ok(Self {
 			root: b.root,
 			index_map: b.index_map,
+			schema: b.schemas.remove(table),
 			with_indexes: b.with_indexes,
 			knn_expressions: b.knn_expressions,
 			knn_brute_force_expressions: b.knn_brute_force_expressions,
@@ -74,7 +76,7 @@ struct TreeBuilder<'a> {
 	resolved_expressions: HashMap<Arc<Expr>, ResolvedExpression>,
 	resolved_idioms: HashMap<Arc<Idiom>, Node>,
 	index_map: IndexesMap,
-	with_indexes: Option<Vec<IndexReference>>,
+	with_indexes: Option<Vec<IndexId>>,
 	knn_brute_force_expressions: HashMap<Arc<Expr>, KnnBruteForceExpression>,
 	knn_expressions: KnnExpressions,
 	idioms_record_options: HashMap<Arc<Idiom>, RecordOptions>,
@@ -144,10 +146,10 @@ impl<'a> TreeBuilder<'a> {
 	async fn eval_order(&mut self) -> Result<()> {
 		if let Some(o) = self.first_order {
 			if let Node::IndexedField(id, irf) = self.resolve_idiom(&o.value).await? {
-				for (ixr, id_col) in &irf {
+				for (index_reference, id_col) in &irf {
 					if *id_col == 0 {
 						self.index_map.order_limit = Some(IndexOption::new(
-							ixr.clone(),
+							index_reference.clone(),
 							Some(id),
 							IdiomPosition::None,
 							IndexOperator::Order(!o.direction),
@@ -336,13 +338,13 @@ impl<'a> TreeBuilder<'a> {
 		for (idx, ix) in schema.indexes.iter().enumerate() {
 			if let Some(idiom_index) = ix.cols.iter().position(|p| p.eq(i)) {
 				let ixr = schema.new_reference(idx);
-				// Check if the WITH clause allow the index to be used
+				// Check if the WITH clause allows the index to be used
 				if let Some(With::Index(ixs)) = &self.ctx.with {
 					if ixs.iter().any(|x| x == ix.name.as_str()) {
 						if let Some(wi) = &mut self.with_indexes {
-							wi.push(ixr.clone());
+							wi.push(ixr.index_id);
 						} else {
-							self.with_indexes = Some(vec![ixr.clone()]);
+							self.with_indexes = Some(vec![ixr.index_id]);
 						}
 					}
 				}
@@ -427,7 +429,7 @@ impl<'a> TreeBuilder<'a> {
 	fn check_leaf_node_with_index(&mut self, io: Option<&IndexOption>) {
 		if let Some(io) = io {
 			if let Some(wi) = &self.with_indexes {
-				if !wi.contains(io.ix_ref()) {
+				if !wi.contains(&io.index_reference().index_id) {
 					return;
 				}
 			}
@@ -455,9 +457,13 @@ impl<'a> TreeBuilder<'a> {
 					return Ok(None);
 				}
 			}
-			if let Some((irf, _)) = self.lookup_join_index_ref(local_irs) {
-				let io =
-					IndexOption::new(irf, Some(id.clone()), p, IndexOperator::Join(remote_ios));
+			if let Some((index_reference, _)) = self.lookup_join_index_ref(local_irs) {
+				let io = IndexOption::new(
+					index_reference,
+					Some(id.clone()),
+					p,
+					IndexOperator::Join(remote_ios),
+				);
 				return Ok(Some(io));
 			}
 			return Ok(None);
@@ -476,10 +482,10 @@ impl<'a> TreeBuilder<'a> {
 		p: IdiomPosition,
 	) -> Result<Option<IndexOption>> {
 		let mut res = None;
-		for (ixr, col) in irs.iter() {
-			let op = match &ixr.index {
-				Index::Idx => self.eval_index_operator(ixr, op, n, p, *col),
-				Index::Uniq => self.eval_index_operator(ixr, op, n, p, *col),
+		for (index_reference, col) in irs.iter() {
+			let op = match &index_reference.index {
+				Index::Idx => self.eval_index_operator(index_reference, op, n, p, *col),
+				Index::Uniq => self.eval_index_operator(index_reference, op, n, p, *col),
 				Index::FullText {
 					..
 				} if *col == 0 => Self::eval_matches_operator(op, n),
@@ -489,7 +495,7 @@ impl<'a> TreeBuilder<'a> {
 			};
 			if res.is_none() {
 				if let Some(op) = op {
-					let io = IndexOption::new(ixr.clone(), Some(id.clone()), p, op);
+					let io = IndexOption::new(index_reference.clone(), Some(id.clone()), p, op);
 					self.index_map.options.push((e.clone(), io.clone()));
 					res = Some(io);
 				}
@@ -499,9 +505,9 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	fn lookup_join_index_ref(&self, irs: &LocalIndexRefs) -> Option<(IndexReference, IdiomCol)> {
-		for (ixr, id_col) in irs.iter().filter(|(_, id_col)| 0.eq(id_col)) {
-			match &ixr.index {
-				Index::Idx | Index::Uniq => return Some((ixr.clone(), *id_col)),
+		for (index_reference, id_col) in irs.iter().filter(|(_, id_col)| 0.eq(id_col)) {
+			match index_reference.index {
+				Index::Idx | Index::Uniq => return Some((index_reference.clone(), *id_col)),
 				_ => {}
 			};
 		}
@@ -716,8 +722,8 @@ impl Deref for IndexReference {
 }
 
 #[derive(Clone)]
-struct SchemaCache {
-	indexes: Arc<[IndexDefinition]>,
+pub(super) struct SchemaCache {
+	pub(super) indexes: Arc<[IndexDefinition]>,
 	fields: Arc<[catalog::FieldDefinition]>,
 }
 
@@ -731,7 +737,7 @@ impl SchemaCache {
 		})
 	}
 
-	fn new_reference(&self, idx: usize) -> IndexReference {
+	pub(super) fn new_reference(&self, idx: usize) -> IndexReference {
 		IndexReference::new(self.indexes.clone(), idx)
 	}
 }

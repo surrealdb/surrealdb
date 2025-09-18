@@ -1,18 +1,18 @@
-use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::hash::Hash;
-use std::sync::Arc;
-
-use anyhow::Result;
-
+use crate::catalog::{Index, IndexId};
 use crate::expr::operator::{MatchesOperator, NearestNeighbor};
 use crate::expr::with::With;
 use crate::expr::{BinaryOperator, Expr, Idiom};
 use crate::idx::planner::tree::{
-	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node,
+	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node, SchemaCache,
 };
 use crate::idx::planner::{GrantedPermission, RecordStrategy, ScanDirection, StatementContext};
+use crate::sql::ToSql;
 use crate::val::{Array, Number, Object, Value};
+use anyhow::Result;
+use std::collections::hash_map::Entry;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::hash::Hash;
+use std::sync::Arc;
 
 /// The `PlanBuilder` struct represents a builder for constructing query plans.
 pub(super) struct PlanBuilder {
@@ -21,8 +21,8 @@ pub(super) struct PlanBuilder {
 	/// List of expressions that are not ranges, backed by an index
 	non_range_indexes: Vec<(Arc<Expr>, IndexOption)>,
 	/// List of indexes allowed in this plan
-	with_indexes: Option<Vec<IndexReference>>,
-	/// Group each possible optimisations local to a SubQuery
+	with_indexes: Option<Vec<IndexId>>,
+	/// Group each possible optimisation local to a SubQuery
 	groups: BTreeMap<GroupRef, Group>, /* The order matters because we want the plan to be
 	                                    * consistent across repeated queries. */
 }
@@ -30,9 +30,10 @@ pub(super) struct PlanBuilder {
 pub(super) struct PlanBuilderParameters {
 	pub(super) root: Option<Node>,
 	pub(super) gp: GrantedPermission,
+	pub(super) schema: Option<SchemaCache>,
 	pub(super) compound_indexes: CompoundIndexes,
 	pub(super) order_limit: Option<IndexOption>,
-	pub(super) with_indexes: Option<Vec<IndexReference>>,
+	pub(super) with_indexes: Option<Vec<IndexId>>,
 	pub(super) all_and: bool,
 	pub(super) all_expressions_with_index: bool,
 	pub(super) all_and_groups: HashMap<GroupRef, bool>,
@@ -72,8 +73,14 @@ impl PlanBuilder {
 			return Self::table_iterator(ctx, Some("WITH NOINDEX"), p.gp).await;
 		}
 
-		// Analyze the query AST to discover indexable conditions and collect
-		// optimization opportunities
+		if let Some(schema) = p.schema {
+			if let Some(io) = b.eval_count(ctx, schema) {
+				return Ok(Plan::SingleIndex(None, io, RecordStrategy::Count));
+			}
+		}
+
+		//Analyse the query AST to discover indexable conditions and collect
+		//optimisation opportunities
 		if let Some(root) = &p.root {
 			if let Err(e) = b.eval_node(root) {
 				// Fall back to table scan if analysis fails
@@ -81,16 +88,16 @@ impl PlanBuilder {
 			}
 		}
 
-		// Optimization path 1: All conditions connected by AND operators
-		// This enables single-index optimizations and compound index usage
+		//Optimisation path 1: All conditions connected by AND operators
+		// This enables single-index optimisations and compound index usage
 		if p.all_and {
-			// Priority 1: Find the best compound index that covers multiple query
+			// Priority 1: Find the best compound index that covers multiple queries
 			// conditions Compound indexes are highly efficient as they can satisfy
 			// multiple WHERE clauses in a single index scan, significantly reducing I/O
 			// operations
 			let mut compound_index = None;
 			for (ixr, vals) in p.compound_indexes {
-				if let Some((cols, io)) = b.check_compound_index_all_and(ixr, vals) {
+				if let Some((cols, io)) = b.check_compound_index_all_and(&ixr, vals) {
 					// Prefer indexes that cover more columns (higher selectivity)
 					if let Some((c, _)) = &compound_index {
 						if cols <= *c {
@@ -114,19 +121,19 @@ impl PlanBuilder {
 
 			// Select the first available range query (deterministic group order)
 			if let Some((_, group)) = b.groups.into_iter().next() {
-				if let Some((ir, rq)) = group.take_first_range() {
+				if let Some((index_reference, rq)) = group.take_first_range() {
 					// Evaluate the record strategy
 					let record_strategy =
 						ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
 					let (is_order, sc) = if let Some(io) = p.order_limit {
 						#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
 						{
-							(io.ixr == ir, ScanDirection::Forward)
+							(io.index_reference == index_reference, ScanDirection::Forward)
 						}
 						#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 						{
 							(
-								io.ixr == ir,
+								io.index_reference == index_reference,
 								Self::check_range_scan_direction(p.reverse_scan, io.op()),
 							)
 						}
@@ -134,7 +141,13 @@ impl PlanBuilder {
 						(false, ScanDirection::Forward)
 					};
 					// Return the plan
-					return Ok(Plan::SingleIndexRange(ir, rq, record_strategy, sc, is_order));
+					return Ok(Plan::SingleIndexRange(
+						index_reference,
+						rq,
+						record_strategy,
+						sc,
+						is_order,
+					));
 				}
 			}
 
@@ -177,6 +190,43 @@ impl PlanBuilder {
 		Self::table_iterator(ctx, None, p.gp).await
 	}
 
+	fn eval_count(&self, ctx: &StatementContext<'_>, schema: SchemaCache) -> Option<IndexOption> {
+		if let Some(f) = ctx.fields {
+			if f.is_count_all_only() {
+				if let Some(g) = ctx.group {
+					if g.is_group_all_only() {
+						for (pos, ix) in schema.indexes.iter().enumerate() {
+							println!("INDEX: {}", ix.name);
+							if let Index::Count(cond) = &ix.index {
+								let cond_match = match (ctx.cond, cond) {
+									(None, None) => true,
+									(Some(c), Some(c2)) => c.eq(c2),
+									_ => false,
+								};
+								println!(
+									"COND {cond_match} {:?}",
+									cond.as_ref().map(|c| c.to_sql())
+								);
+								if cond_match {
+									if self.allowed_index(&ix.index_id) {
+										let index_reference = schema.new_reference(pos);
+										return Some(IndexOption::new(
+											index_reference,
+											None,
+											IdiomPosition::None,
+											IndexOperator::Count,
+										));
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		None
+	}
+
 	async fn table_iterator(
 		ctx: &StatementContext<'_>,
 		reason: Option<&str>,
@@ -194,7 +244,7 @@ impl PlanBuilder {
 	/// Check if we have an explicit list of indices that we should use
 	fn filter_index_option(&self, io: Option<&IndexOption>) -> Option<IndexOption> {
 		if let Some(io) = io {
-			if !self.allowed_index(io.ix_ref()) {
+			if !self.allowed_index(&io.index_reference().index_id) {
 				return None;
 			}
 		}
@@ -202,9 +252,9 @@ impl PlanBuilder {
 	}
 
 	/// Check if an index is allowed to be used
-	fn allowed_index(&self, ixr: &IndexReference) -> bool {
+	fn allowed_index(&self, index_id: &IndexId) -> bool {
 		if let Some(wi) = &self.with_indexes {
-			if !wi.contains(ixr) {
+			if !wi.contains(index_id) {
 				return false;
 			}
 		}
@@ -229,11 +279,11 @@ impl PlanBuilder {
 	/// Returns the number of columns involved, and the index option
 	fn check_compound_index_all_and(
 		&self,
-		ixr: IndexReference,
+		index_reference: &IndexReference,
 		columns: Vec<Vec<IndexOperator>>,
 	) -> Option<(IdiomCol, IndexOption)> {
 		// Check the index can be used
-		if !self.allowed_index(&ixr) {
+		if !self.allowed_index(&index_reference.index_id) {
 			return None;
 		}
 		// Count contiguous values (from the left) that will be part of an equal search
@@ -274,7 +324,7 @@ impl PlanBuilder {
 				return Some((
 					continues_equals_values + 1,
 					IndexOption::new(
-						ixr,
+						index_reference.clone(),
 						None,
 						IdiomPosition::None,
 						IndexOperator::Range(vec![], range_parts),
@@ -292,7 +342,7 @@ impl PlanBuilder {
 				return Some((
 					continues_equals_values + 1,
 					IndexOption::new(
-						ixr,
+						index_reference.clone(),
 						None,
 						IdiomPosition::None,
 						IndexOperator::Range(equals, range_parts),
@@ -302,7 +352,7 @@ impl PlanBuilder {
 			return Some((
 				continues_equals_values,
 				IndexOption::new(
-					ixr,
+					index_reference.clone(),
 					None,
 					IdiomPosition::None,
 					IndexOperator::Equality(Arc::new(Value::Array(Array(equals)))),
@@ -319,7 +369,7 @@ impl PlanBuilder {
 		Some((
 			continues_equals_values,
 			IndexOption::new(
-				ixr,
+				index_reference.clone(),
 				None,
 				IdiomPosition::None,
 				IndexOperator::Union(Arc::new(Value::Array(Array(vals)))),
@@ -373,7 +423,7 @@ impl PlanBuilder {
 	fn add_index_option(&mut self, group_ref: GroupRef, exp: Arc<Expr>, io: IndexOption) {
 		if let IndexOperator::RangePart(_, _) = io.op() {
 			let level = self.groups.entry(group_ref).or_default();
-			match level.ranges.entry(io.ixr.clone()) {
+			match level.ranges.entry(io.index_reference.clone()) {
 				Entry::Occupied(mut e) => {
 					e.get_mut().push((exp, io));
 				}
@@ -407,7 +457,7 @@ pub(super) enum Plan {
 		RecordStrategy,
 	),
 	/// Index scan for records matching a given range
-	/// 1. The index reference
+	/// 1. The index id
 	/// 2. The index range
 	/// 3. A record strategy
 	/// 4. The scan direction
@@ -418,13 +468,13 @@ pub(super) enum Plan {
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub(super) struct IndexOption {
 	/// A reference to the index definition
-	ixr: IndexReference,
+	index_reference: IndexReference,
 	/// The idiom matched by this index
-	id: Option<Arc<Idiom>>,
+	idiom: Option<Arc<Idiom>>,
 	/// The position of the idiom in the expression (Left or Right)
-	id_pos: IdiomPosition,
+	idiom_position: IdiomPosition,
 	/// The index operator
-	op: Arc<IndexOperator>,
+	index_operator: Arc<IndexOperator>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -439,45 +489,46 @@ pub(super) enum IndexOperator {
 	Ann(Arc<Vec<Number>>, u32, u32),
 	/// false = ascending, true = descending
 	Order(bool),
+	Count,
 }
 
 impl IndexOption {
 	pub(super) fn new(
-		ixr: IndexReference,
-		id: Option<Arc<Idiom>>,
-		id_pos: IdiomPosition,
-		op: IndexOperator,
+		index_reference: IndexReference,
+		idiom: Option<Arc<Idiom>>,
+		idiom_position: IdiomPosition,
+		index_operator: IndexOperator,
 	) -> Self {
 		Self {
-			ixr,
-			id,
-			id_pos,
-			op: Arc::new(op),
+			index_reference,
+			idiom,
+			idiom_position,
+			index_operator: Arc::new(index_operator),
 		}
 	}
 
 	pub(super) fn require_distinct(&self) -> bool {
-		matches!(self.op.as_ref(), IndexOperator::Union(_))
+		matches!(self.index_operator.as_ref(), IndexOperator::Union(_))
 	}
 
 	pub(super) fn is_order(&self) -> bool {
-		matches!(self.op.as_ref(), IndexOperator::Order(_))
+		matches!(self.index_operator.as_ref(), IndexOperator::Order(_))
 	}
 
-	pub(super) fn ix_ref(&self) -> &IndexReference {
-		&self.ixr
+	pub(super) fn index_reference(&self) -> &IndexReference {
+		&self.index_reference
 	}
 
 	pub(super) fn op(&self) -> &IndexOperator {
-		self.op.as_ref()
+		self.index_operator.as_ref()
 	}
 
-	pub(super) fn id_ref(&self) -> Option<&Idiom> {
-		self.id.as_ref().map(|id| id.as_ref())
+	pub(super) fn idiom_ref(&self) -> Option<&Idiom> {
+		self.idiom.as_ref().map(|id| id.as_ref())
 	}
 
-	pub(super) fn id_pos(&self) -> IdiomPosition {
-		self.id_pos
+	pub(super) fn idiom_position(&self) -> IdiomPosition {
+		self.idiom_position
 	}
 
 	fn reduce_array(value: &Value) -> Value {
@@ -491,7 +542,7 @@ impl IndexOption {
 
 	pub(crate) fn explain(&self) -> Value {
 		let mut e = HashMap::new();
-		e.insert("index", Value::from(self.ix_ref().name.clone()));
+		e.insert("index", Value::from(self.index_reference().name.clone()));
 		match self.op() {
 			IndexOperator::Equality(v) => {
 				e.insert("operator", Value::from(BinaryOperator::Equal.to_string()));
@@ -555,6 +606,12 @@ impl IndexOption {
 						"Order"
 					}),
 				);
+			}
+			IndexOperator::Count => {
+				e.insert("operator", Value::from("Count"));
+				if let Index::Count(Some(c)) = &self.index_reference.index {
+					e.insert("where", Value::from(c.to_sql()));
+				}
 			}
 		};
 		Value::from(e)
@@ -655,18 +712,18 @@ impl Group {
 	}
 
 	fn take_union_ranges(self, r: &mut Vec<(IndexReference, UnionRangeQueryBuilder)>) {
-		for (ir, ri) in self.ranges {
+		for (index_id, ri) in self.ranges {
 			if let Some(rb) = UnionRangeQueryBuilder::new_aggregate(ri) {
-				r.push((ir, rb));
+				r.push((index_id, rb));
 			}
 		}
 	}
 
 	fn take_intersect_ranges(self, r: &mut Vec<(IndexReference, UnionRangeQueryBuilder)>) {
-		for (ir, ri) in self.ranges {
+		for (index_reference, ri) in self.ranges {
 			for (exp, io) in ri {
 				if let Some(rb) = UnionRangeQueryBuilder::new(exp, io) {
-					r.push((ir.clone(), rb));
+					r.push((index_reference.clone(), rb));
 				}
 			}
 		}

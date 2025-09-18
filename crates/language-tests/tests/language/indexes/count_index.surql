@@ -14,10 +14,10 @@ value = "{ events: {  }, fields: {  }, indexes: { idx: 'DEFINE INDEX idx ON t CO
 value = "'OK'"
 
 [[test.results]]
-value = "[{ detail: { direction: 'forward', table: 't' }, operation: 'Index Count' }, { detail: { idioms: { count: ['count'] }, type: 'Group' }, operation: 'Collector' }]"
+value = "[{ detail: { plan: { index: 'idx', operator: 'Count' }, table: 't' }, operation: 'Iterate Index Count' }, { detail: { idioms: { count: ['count'] }, type: 'Group' }, operation: 'Collector' }]"
 
 [[test.results]]
-value = "[{ detail: { direction: 'forward', table: 't' }, operation: 'Index Count' }, { detail: { idioms: { count: ['count'] }, type: 'Group' }, operation: 'Collector' }]"
+value = "[{ detail: { plan: { index: 'idxw', operator: 'Count', where: 'WHERE b = true' }, table: 't' }, operation: 'Iterate Index Count' }, { detail: { idioms: { count: ['count'] }, type: 'Group' }, operation: 'Collector' }]"
 
 [[test.results]]
 value = "[{ count: 4 }]"
