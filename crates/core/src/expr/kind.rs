@@ -9,8 +9,7 @@ use rust_decimal::Decimal;
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Literal, Part, Value};
-use crate::fmt::{EscapeIdent, EscapeKey, QuoteStr};
-use crate::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
+use crate::fmt::{EscapeIdent, EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
 	Regex, Uuid,

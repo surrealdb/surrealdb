@@ -1,8 +1,7 @@
 use std::fmt::{self, Display};
 
-use crate::fmt::{EscapeIdent, QuoteStr};
-
 use super::DefineKind;
+use crate::fmt::{EscapeIdent, QuoteStr};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

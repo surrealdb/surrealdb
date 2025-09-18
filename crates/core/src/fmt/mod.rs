@@ -1,11 +1,11 @@
 //! SurrealQL formatting utilities.
 
 mod escape;
-pub use escape::{EscapeIdent, EscapeKey, EscapeKwFreeIdent, EscapeRid, QuoteStr};
-
 use std::cell::Cell;
 use std::fmt::{self, Display, Formatter, Write};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
+pub use escape::{EscapeIdent, EscapeKey, EscapeKwFreeIdent, EscapeRid, QuoteStr};
 
 /// Implements fmt::Display by calling formatter on contents.
 pub(crate) struct Fmt<T, F> {
