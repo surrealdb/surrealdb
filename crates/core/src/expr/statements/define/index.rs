@@ -190,8 +190,8 @@ pub(in crate::expr::statements) async fn run_indexing(
 		{
 			// Create the remove statement
 			let stm = RemoveIndexStatement {
-				name: Ident::new(index.name.clone()).unwrap(),
-				what: Ident::new(index.table_name.clone()).unwrap(),
+				name: index.name.clone(),
+				what: index.table_name.clone(),
 				if_exists: false,
 			};
 			// Execute the delete statement
@@ -202,7 +202,7 @@ pub(in crate::expr::statements) async fn run_indexing(
 			let opt = &opt.new_with_force(Force::Index(Arc::new([index.clone()])));
 			// Update the index data
 			let stm = crate::expr::UpdateStatement {
-				what: vec![crate::expr::Expr::Table(Ident::new(index.table_name.clone()).unwrap())],
+				what: vec![crate::expr::Expr::Table(index.table_name.clone())],
 				output: Some(Output::None),
 				..UpdateStatement::default()
 			};

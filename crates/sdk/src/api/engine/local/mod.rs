@@ -1209,7 +1209,7 @@ async fn router(
 			surrealdb_core::obs::put(&hash, data).await?;
 			// Insert the model in to the database
 			let model = DefineModelStatement {
-				name: Ident::new(file.header.name.to_string()).unwrap(),
+				name: file.header.name.to_string(),
 				version: file.header.version.to_string(),
 				comment: Some(file.header.description.to_string().into()),
 				hash,
