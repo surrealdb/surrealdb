@@ -128,7 +128,7 @@ pub(crate) fn uri_is_valid(uri: &str) -> bool {
 fn encode_body(req: RequestBuilder, body: Value) -> Result<RequestBuilder> {
 	let res = match body {
 		Value::Bytes(v) => req.body(v.into_inner()),
-		Value::Strand(v) => req.body(v),
+		Value::String(v) => req.body(v),
 		//TODO: Improve the handling here. We should check if this value can be send as a json
 		//value.
 		_ if !body.is_nullish() => req.json(&body.into_json_value().ok_or_else(|| {

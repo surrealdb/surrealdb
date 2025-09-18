@@ -1,15 +1,15 @@
 use std::fmt::{Display, Formatter};
 
-use revision::{Revisioned, revisioned};
+use revision::{revisioned, Revisioned};
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::NamespaceId;
-use crate::expr::ChangeFeed;
 use crate::expr::statements::info::InfoStructure;
+use crate::expr::ChangeFeed;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::sql::statements::define::DefineDatabaseStatement;
+use crate::sql::ToSql;
 use crate::val::Value;
 
 #[derive(
@@ -76,8 +76,6 @@ impl_kv_value_revisioned!(DatabaseDefinition);
 impl DatabaseDefinition {
 	pub fn to_sql_definition(&self) -> DefineDatabaseStatement {
 		DefineDatabaseStatement {
-			// SAFETY: we know the name is valid because it was validated when the database was
-			// created.
 			name: self.name.clone(),
 			comment: self.comment.clone(),
 			changefeed: self.changefeed.map(|x| x.into()),

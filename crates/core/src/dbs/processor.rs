@@ -310,7 +310,7 @@ impl Collected {
 		// Try to extract the id field if present and parse as Thing
 		let rid = match &v {
 			Value::Object(obj) => match obj.get("id") {
-				Some(Value::Strand(strand)) => syn::record_id(strand.as_str()).ok().map(Arc::new),
+				Some(Value::String(strand)) => syn::record_id(strand.as_str()).ok().map(Arc::new),
 				Some(Value::RecordId(thing)) => Some(Arc::new(thing.clone())),
 				_ => None,
 			},

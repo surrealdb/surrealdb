@@ -128,7 +128,7 @@ impl Parser<'_> {
 				let str = self.lexer.string.take().unwrap();
 				Ok(str)
 			}
-			t!("\"") | t!("'") | TokenKind::Glued(Glued::Strand) => {
+			t!("\"") | t!("'") | TokenKind::Glued(Glued::String) => {
 				let str = self.parse_string_lit()?;
 				Ok(str)
 			}

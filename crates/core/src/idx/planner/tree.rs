@@ -234,7 +234,7 @@ impl<'a> TreeBuilder<'a> {
 			Expr::Literal(
 				Literal::Integer(_)
 				| Literal::Bool(_)
-				| Literal::Strand(_)
+				| Literal::String(_)
 				| Literal::RecordId(_)
 				| Literal::Duration(_)
 				| Literal::Uuid(_)

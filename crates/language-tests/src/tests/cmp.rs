@@ -246,7 +246,7 @@ impl_roughly_eq_enum!(
 		Null,
 		Bool(b),
 		Number(n),
-		Strand(s),
+		String(s),
 		Duration(d),
 		Datetime(d),
 		Uuid(u),

@@ -22,7 +22,6 @@ impl Record {
 					Value::Object(v) => v.into(),
 					Value::Number(v) => v.to_int().into(),
 					Value::Uuid(v) => v.into(),
-					// TODO: Null byte validity
 					v => v.as_raw_string().into(),
 				},
 			},

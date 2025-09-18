@@ -420,7 +420,7 @@ impl_direct! {
 	Object => Object,
 	Array => Array,
 	RecordId => RecordId,
-	Strand => String,
+	String => String,
 	Geometry => Geometry,
 	Regex => Regex,
 }

@@ -20,10 +20,10 @@ use crate::sql::{
 };
 use crate::val::{Array, Object, Value};
 
-/// utility function converting a `Value::Strand` into a `Expr::Table`
+/// utility function converting a `Value::String` into a `Expr::Table`
 fn value_to_table(value: Value) -> Expr {
 	match value {
-		Value::Strand(s) => Expr::Table(s),
+		Value::String(s) => Expr::Table(s),
 		x => x.into_literal().into(),
 	}
 }
@@ -102,7 +102,7 @@ pub trait RpcProtocolV2: RpcContext {
 		match ns {
 			Value::None => (),
 			Value::Null => session.ns = None,
-			Value::Strand(ns) => session.ns = Some(ns),
+			Value::String(ns) => session.ns = Some(ns),
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
 					"Expected ns to be string, got {unexpected:?}"
@@ -113,7 +113,7 @@ pub trait RpcProtocolV2: RpcContext {
 		match db {
 			Value::None => (),
 			Value::Null => session.db = None,
-			Value::Strand(db) => session.db = Some(db),
+			Value::String(db) => session.db = Some(db),
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
 					"Expected db to be string, got {unexpected:?}"
@@ -149,8 +149,7 @@ pub trait RpcProtocolV2: RpcContext {
 		// Attempt signup, mutating the session
 		let out: Result<Value> = crate::iam::signup::signup(self.kvs(), &mut session, params)
 			.await
-			// TODO: Null byte validity
-			.map(|v| v.token.clone().map(Value::Strand).unwrap_or(Value::None));
+			.map(|v| v.token.clone().map(Value::String).unwrap_or(Value::None));
 
 		// Store the updated session
 		self.set_session(Arc::new(session));
@@ -177,7 +176,6 @@ pub trait RpcProtocolV2: RpcContext {
 		// Attempt signin, mutating the session
 		let out: Result<Value> = crate::iam::signin::signin(self.kvs(), &mut session, params)
 			.await
-			// TODO: Null byte validity
 			.map(|v| v.token.clone().into());
 		// Store the updated session
 		self.set_session(Arc::new(session));
@@ -189,7 +187,7 @@ pub trait RpcProtocolV2: RpcContext {
 
 	async fn authenticate(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
-		let Some(Value::Strand(token)) = extract_args(params.0) else {
+		let Some(Value::String(token)) = extract_args(params.0) else {
 			return Err(RpcError::InvalidParams("Expected (token:string)".to_string()));
 		};
 		// Get the context lock
@@ -294,7 +292,7 @@ pub trait RpcProtocolV2: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Some((Value::Strand(key), val)) = extract_args::<(Value, Option<Value>)>(params.0)
+		let Some((Value::String(key), val)) = extract_args::<(Value, Option<Value>)>(params.0)
 		else {
 			return Err(RpcError::InvalidParams("Expected (what:string, value:Value)".to_string()));
 		};
@@ -326,7 +324,7 @@ pub trait RpcProtocolV2: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Some(Value::Strand(key)) = extract_args(params.0) else {
+		let Some(Value::String(key)) = extract_args(params.0) else {
 			return Err(RpcError::InvalidParams("Expected (key:string)".to_string()));
 		};
 
@@ -510,7 +508,7 @@ pub trait RpcProtocolV2: RpcContext {
 		}
 
 		let into = match what {
-			Value::Strand(x) => Some(Expr::Table(x)),
+			Value::String(x) => Some(Expr::Table(x)),
 			x => {
 				if x.is_nullish() {
 					None
@@ -870,7 +868,7 @@ pub trait RpcProtocolV2: RpcContext {
 		let (query, vars) = extract_args::<(Value, Option<Value>)>(params.0)
 			.ok_or(RpcError::InvalidParams("Expected (query:string, vars:object)".to_string()))?;
 
-		let Value::Strand(query) = query else {
+		let Value::String(query) = query else {
 			return Err(RpcError::InvalidParams("Expected query to be string".to_string()));
 		};
 
@@ -908,7 +906,7 @@ pub trait RpcProtocolV2: RpcContext {
 			))?;
 		// Parse the function name argument
 		let name = match name {
-			Value::Strand(v) => v,
+			Value::String(v) => v,
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
 					"Expected name to be string, got {unexpected:?}"
@@ -917,7 +915,7 @@ pub trait RpcProtocolV2: RpcContext {
 		};
 		// Parse any function version argument
 		let version = match version {
-			Some(Value::Strand(v)) => Some(v),
+			Some(Value::String(v)) => Some(v),
 			None | Some(Value::None | Value::Null) => None,
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
@@ -1015,7 +1013,7 @@ pub trait RpcProtocolV2: RpcContext {
 				for (k, v) in o {
 					match (k.as_str(), v) {
 						("pretty", SqlValue::Bool(b)) => pretty = b,
-						("format", SqlValue::Strand(s)) => match s.as_str() {
+						("format", SqlValue::String(s)) => match s.as_str() {
 							"json" => format = GraphQLFormat::Json,
 							_ => return Err(RpcError::InvalidParams),
 						},
@@ -1031,7 +1029,7 @@ pub trait RpcProtocolV2: RpcContext {
 		// Process the graphql query argument
 		let req = match query {
 			// It is a string, so parse the query
-			SqlValue::Strand(s) => match format {
+			SqlValue::String(s) => match format {
 				GraphQLFormat::Json => {
 					let tmp: BatchRequest =
 						serde_json::from_str(s.as_str()).map_err(|_| RpcError::ParseError)?;
@@ -1042,7 +1040,7 @@ pub trait RpcProtocolV2: RpcContext {
 			SqlValue::Object(mut o) => {
 				// We expect a `query` key with the graphql query
 				let mut tmp = match o.remove("query") {
-					Some(SqlValue::Strand(s)) => async_graphql::Request::new(s),
+					Some(SqlValue::String(s)) => async_graphql::Request::new(s),
 					_ => return Err(RpcError::InvalidParams),
 				};
 				// We can accept a `variables` key with graphql variables
@@ -1058,7 +1056,7 @@ pub trait RpcProtocolV2: RpcContext {
 				}
 				// We can accept an `operation` key with a graphql operation name
 				match o.remove("operationName").or(o.remove("operation")) {
-					Some(SqlValue::Strand(s)) => tmp = tmp.operation_name(s),
+					Some(SqlValue::String(s)) => tmp = tmp.operation_name(s),
 					Some(_) => return Err(RpcError::InvalidParams),
 					None => {}
 				}
@@ -1087,7 +1085,7 @@ pub trait RpcProtocolV2: RpcContext {
 		}
 		.ok_or(RpcError::Thrown("Serialization Error".to_string()))?;
 		// Output the graphql response
-		Ok(Value::Strand(out.into()).into())
+		Ok(Value::String(out.into()).into())
 			*/
 	}
 

@@ -230,7 +230,7 @@ impl Parser<'_> {
 	pub(crate) fn parse_string_lit(&mut self) -> ParseResult<String> {
 		let token = self.peek();
 		match token.kind {
-			TokenKind::Glued(token::Glued::Strand) => Ok(pop_glued!(self, Strand)),
+			TokenKind::Glued(token::Glued::String) => Ok(pop_glued!(self, String)),
 			t!("\"") | t!("'") => {
 				self.pop_peek();
 				let v = self.lexer.lex_compound(token, compound::strand)?.value;

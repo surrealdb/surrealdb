@@ -132,12 +132,12 @@ impl Parser<'_> {
 				let file = self.next_token_value()?;
 				Expr::Literal(Literal::File(file))
 			}
-			t!("'") | t!("\"") | TokenKind::Glued(Glued::Strand) => {
+			t!("'") | t!("\"") | TokenKind::Glued(Glued::String) => {
 				let s = self.parse_string_lit()?;
 				if self.settings.legacy_strands {
 					Expr::Literal(self.reparse_legacy_strand(stk, s).await)
 				} else {
-					Expr::Literal(Literal::Strand(s))
+					Expr::Literal(Literal::String(s))
 				}
 			}
 			t!("+")
@@ -505,7 +505,7 @@ impl Parser<'_> {
 		if let Ok(x) = Parser::new(text.as_bytes()).next_token_value() {
 			return Literal::Uuid(x);
 		}
-		Literal::Strand(text)
+		Literal::String(text)
 	}
 
 	async fn parse_script(&mut self, stk: &mut Stk) -> ParseResult<FunctionCall> {

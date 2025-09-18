@@ -103,7 +103,7 @@ pub fn range((val,): (Value,)) -> Result<Value> {
 
 pub fn record((rid, Optional(tb)): (Value, Optional<Value>)) -> Result<Value> {
 	match tb {
-		Some(Value::Strand(tb)) => {
+		Some(Value::String(tb)) => {
 			if tb.is_empty() {
 				Err(anyhow::Error::new(Error::TbInvalid {
 					value: tb,
@@ -157,7 +157,7 @@ pub fn table((val,): (Value,)) -> Result<Value> {
 pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> {
 	match (arg1, arg2) {
 		// Empty table name
-		(Value::Strand(arg1), _) if arg1.is_empty() => bail!(Error::TbInvalid {
+		(Value::String(arg1), _) if arg1.is_empty() => bail!(Error::TbInvalid {
 			value: arg1,
 		}),
 
@@ -326,8 +326,8 @@ mod tests {
 	#[test]
 	fn is_array() {
 		let value = super::is::array((vec![
-			Value::Strand("hello".to_owned()),
-			Value::Strand("world".to_owned()),
+			Value::String("hello".to_owned()),
+			Value::String("world".to_owned()),
 		]
 		.into(),))
 		.unwrap();

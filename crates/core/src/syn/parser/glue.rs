@@ -95,12 +95,10 @@ impl Parser<'_> {
 			t!("\"") | t!("'") => {
 				self.pop_peek();
 				let value = self.lexer.lex_compound(token, compound::strand)?;
-				// SAFETY: Lexer ensures that no null bytes are present in the string in
-				// value.value
-				self.glued_value = GluedValue::Strand(value.value);
+				self.glued_value = GluedValue::String(value.value);
 				self.prepend_token(Token {
 					span: value.span,
-					kind: TokenKind::Glued(Glued::Strand),
+					kind: TokenKind::Glued(Glued::String),
 				});
 				return Ok(self.peek1());
 			}

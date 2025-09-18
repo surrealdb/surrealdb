@@ -155,7 +155,7 @@ impl ExplainItem {
 				.into(),
 				details: vec![
 					//TODO: Properly handle possible null byte.
-					("table", Value::Strand(tb.clone())),
+					("table", Value::String(tb.clone())),
 					("range", Value::Range(Box::new(r.clone().into_value_range()))),
 					("direction", sc.to_string().into()),
 				],
@@ -182,7 +182,7 @@ impl ExplainItem {
 				],
 			},
 			Iterable::Index(t, ir, rs) => {
-				let mut details = vec![("table", Value::Strand(t.clone()))];
+				let mut details = vec![("table", Value::String(t.clone()))];
 				if let Some(qp) = ctx.get_query_planner() {
 					if let Some(exe) = qp.get_query_executor(t.as_str()) {
 						details.push(("plan", exe.explain(*ir)));

@@ -172,7 +172,7 @@ fn parse_record_string_2() {
 		res,
 		Expr::Literal(Literal::RecordId(RecordIdLit {
 			table: "a".to_owned(),
-			key: RecordIdKeyLit::Array(vec![Expr::Literal(Literal::Strand("foo".to_owned()))])
+			key: RecordIdKeyLit::Array(vec![Expr::Literal(Literal::String("foo".to_owned()))])
 		}))
 	)
 }

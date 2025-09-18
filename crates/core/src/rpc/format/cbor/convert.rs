@@ -165,7 +165,7 @@ pub fn to_value(val: CborValue) -> Result<Value, &'static str> {
 						}
 
 						let table = match to_value(table) {
-							Ok(val::Value::Strand(tb)) => tb,
+							Ok(val::Value::String(tb)) => tb,
 							Ok(val::Value::Table(tb)) => tb.into_string(),
 							_ => {
 								return Err(
@@ -185,7 +185,6 @@ pub fn to_value(val: CborValue) -> Result<Value, &'static str> {
 				},
 				// A literal table
 				TAG_TABLE => match *v {
-					// TODO: Null byte validitY
 					CborValue::Text(v) => Ok(val::Value::Table(Table::new(v))),
 					_ => Err("Expected a CBOR text data type"),
 				},
@@ -355,7 +354,7 @@ pub fn from_value(val: Value) -> Result<CborValue, &'static str> {
 				Ok(CborValue::Tag(TAG_STRING_DECIMAL, Box::new(CborValue::Text(v.to_string()))))
 			}
 		},
-		Value::Strand(v) => Ok(CborValue::Text(v)),
+		Value::String(v) => Ok(CborValue::Text(v)),
 		Value::Duration(v) => {
 			let seconds = v.secs();
 			let nanos = v.subsec_nanos();

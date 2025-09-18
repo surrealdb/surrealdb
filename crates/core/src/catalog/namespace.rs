@@ -73,8 +73,6 @@ impl_kv_value_revisioned!(NamespaceDefinition);
 impl NamespaceDefinition {
 	fn to_sql_definition(&self) -> DefineNamespaceStatement {
 		DefineNamespaceStatement {
-			// SAFETY: we know the name is valid because it was validated when the namespace was
-			// created.
 			name: self.name.clone(),
 			comment: self.comment.clone(),
 			..Default::default()

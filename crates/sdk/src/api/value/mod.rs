@@ -120,7 +120,6 @@ impl TryFrom<RecordIdKey> for Object {
 	}
 }
 
-//TODO: Null byte validity
 impl From<String> for RecordIdKey {
 	fn from(value: String) -> Self {
 		Self(val::RecordIdKey::String(value))
@@ -248,7 +247,7 @@ impl TryFrom<Value> for RecordIdKey {
 
 	fn try_from(key: Value) -> std::result::Result<Self, Self::Error> {
 		match key.0 {
-			val::Value::Strand(x) => Ok(RecordIdKey::from_inner(val::RecordIdKey::String(x))),
+			val::Value::String(x) => Ok(RecordIdKey::from_inner(val::RecordIdKey::String(x))),
 			val::Value::Number(val::Number::Int(x)) => {
 				Ok(RecordIdKey::from_inner(val::RecordIdKey::Number(x)))
 			}

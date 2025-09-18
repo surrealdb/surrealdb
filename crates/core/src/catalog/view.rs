@@ -18,9 +18,7 @@ impl ViewDefinition {
 	pub(crate) fn to_sql_definition(&self) -> View {
 		View {
 			expr: self.fields.clone().into(),
-			// SAFETY: we know the names are valid because they were validated when the view was
-			// created.
-			what: self.what.clone().into_iter().collect(),
+			what: self.what.clone(),
 			cond: self.cond.clone().map(|e| crate::sql::Cond(e.into())),
 			group: self.groups.clone().map(Into::into),
 		}

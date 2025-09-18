@@ -85,7 +85,6 @@ impl Session {
 	}
 
 	pub(crate) fn values(&self) -> Vec<(&'static str, Value)> {
-		// TODO: Null byte validity.
 		let access = self.ac.clone().map(|x| x.into()).unwrap_or(Value::None);
 		let auth = self.rd.clone().unwrap_or(Value::None);
 		let token = self.tk.clone().unwrap_or(Value::None);

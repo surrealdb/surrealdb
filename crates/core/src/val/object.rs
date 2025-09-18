@@ -14,7 +14,6 @@ use crate::fmt::{EscapeKey, Fmt, Pretty, is_pretty, pretty_indent};
 use crate::val::{IndexFormat, RecordId, Value};
 
 /// Invariant: Keys never contain NUL bytes.
-/// TODO: Null byte validity
 #[revisioned(revision = 1)]
 #[derive(
 	Clone,

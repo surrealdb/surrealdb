@@ -106,8 +106,6 @@ impl TableDefinition {
 	fn to_sql_definition(&self) -> DefineTableStatement {
 		DefineTableStatement {
 			id: Some(self.table_id.0),
-			// SAFETY: we know the name is valid because it was validated when the table was
-			// created.
 			name: self.name.clone(),
 			drop: self.drop,
 			full: self.schemafull,

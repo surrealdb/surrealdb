@@ -17,7 +17,7 @@ impl Value {
 				key: RecordIdKey::Number(id.as_int()),
 			}),
 			// There is a string for the id field
-			Value::Strand(id) if !id.is_empty() => Ok(RecordId {
+			Value::String(id) if !id.is_empty() => Ok(RecordId {
 				table: tb,
 				key: id.into(),
 			}),

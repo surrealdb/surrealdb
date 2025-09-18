@@ -109,8 +109,7 @@ impl From<Config> for Value {
 			"tables" => match config.tables {
 				TableConfig::All => true.into(),
 				TableConfig::None => false.into(),
-				// TODO: Null byte validity
-				TableConfig::Some(v) => v.into_iter().map(Value::Strand).collect::<Vec<_>>().into()
+				TableConfig::Some(v) => v.into_iter().map(Value::String).collect::<Vec<_>>().into()
 			},
 		);
 
@@ -163,7 +162,7 @@ impl TryFrom<&Value> for TableConfig {
 				.iter()
 				.cloned()
 				.map(|v| match v {
-					Value::Strand(str) => Ok(str),
+					Value::String(str) => Ok(str),
 					v => Err(anyhow::Error::new(Error::InvalidExportConfig(
 						v.clone(),
 						"a string".into(),

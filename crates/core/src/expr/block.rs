@@ -99,6 +99,6 @@ impl Display for Block {
 
 impl InfoStructure for Block {
 	fn structure(self) -> Value {
-		Value::Strand(self.to_string())
+		Value::String(self.to_string())
 	}
 }

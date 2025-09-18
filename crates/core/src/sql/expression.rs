@@ -74,8 +74,7 @@ impl Expr {
 			Expr::Param(i) => Idiom::field(i.clone().into_string()),
 			Expr::FunctionCall(x) => x.receiver.to_idiom(),
 			Expr::Literal(l) => match l {
-				Literal::Strand(s) => Idiom::field(s.clone()),
-				// TODO: Null byte validity
+				Literal::String(s) => Idiom::field(s.clone()),
 				Literal::Datetime(d) => Idiom::field(d.into_raw_string()),
 				x => Idiom::field(x.to_string()),
 			},
@@ -91,7 +90,7 @@ impl Expr {
 			Value::Number(Number::Float(x)) => Expr::Literal(Literal::Float(x)),
 			Value::Number(Number::Int(x)) => Expr::Literal(Literal::Integer(x)),
 			Value::Number(Number::Decimal(x)) => Expr::Literal(Literal::Decimal(x)),
-			Value::Strand(x) => Expr::Literal(Literal::Strand(x)),
+			Value::String(x) => Expr::Literal(Literal::String(x)),
 			Value::Bytes(x) => Expr::Literal(Literal::Bytes(x)),
 			Value::Regex(x) => Expr::Literal(Literal::Regex(x)),
 			Value::RecordId(x) => Expr::Literal(Literal::RecordId(RecordIdLit {

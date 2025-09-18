@@ -59,7 +59,7 @@ impl ApiDefinition {
 	fn to_sql_definition(&self) -> crate::sql::statements::DefineApiStatement {
 		crate::sql::statements::DefineApiStatement {
 			kind: crate::sql::statements::define::DefineKind::Default,
-			path: crate::sql::Expr::Literal(crate::sql::Literal::Strand(self.path.to_string())),
+			path: crate::sql::Expr::Literal(crate::sql::Literal::String(self.path.to_string())),
 			actions: self.actions.iter().map(|x| x.to_sql_action()).collect(),
 			fallback: self.fallback.clone().map(|x| x.into()),
 			config: self.config.to_sql_config(),
@@ -77,7 +77,6 @@ impl ToSql for ApiDefinition {
 impl InfoStructure for ApiDefinition {
 	fn structure(self) -> Value {
 		Value::from(Object(map! {
-			// TODO: Null byte validity
 			"path".to_string() => self.path.to_string().into(),
 			"config".to_string() => self.config.structure(),
 			"fallback".to_string(), if let Some(fallback) = self.fallback => fallback.structure(),
@@ -110,7 +109,7 @@ impl TryFrom<&Value> for ApiMethod {
 	type Error = anyhow::Error;
 	fn try_from(value: &Value) -> Result<Self, Self::Error> {
 		match value {
-			Value::Strand(s) => match s.to_ascii_lowercase().as_str() {
+			Value::String(s) => match s.to_ascii_lowercase().as_str() {
 				"delete" => Ok(Self::Delete),
 				"get" => Ok(Self::Get),
 				"patch" => Ok(Self::Patch),
@@ -204,7 +203,7 @@ impl InfoStructure for ApiConfigDefinition {
 						.map(|m| {
 							let value = m.args
 								.iter()
-								.map(|x| Value::Strand(x.to_string()))
+								.map(|x| Value::String(x.to_string()))
 								.collect();
 
 							(m.name.clone(), Value::Array(Array(value)))

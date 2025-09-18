@@ -35,7 +35,7 @@ pub enum Literal {
 	Integer(i64),
 	//TODO: Possibly remove wrapper.
 	Decimal(Decimal),
-	Strand(String),
+	String(String),
 	Bytes(Bytes),
 	//TODO: Possibly remove wrapper.
 	Regex(Regex),
@@ -60,7 +60,7 @@ impl Literal {
 			| Literal::Float(_)
 			| Literal::Integer(_)
 			| Literal::Decimal(_)
-			| Literal::Strand(_)
+			| Literal::String(_)
 			| Literal::Bytes(_)
 			| Literal::Regex(_)
 			| Literal::Duration(_)
@@ -91,7 +91,7 @@ impl Literal {
 			Literal::Float(x) => Value::Number(Number::Float(*x)),
 			Literal::Integer(i) => Value::Number(Number::Int(*i)),
 			Literal::Decimal(d) => Value::Number(Number::Decimal(*d)),
-			Literal::Strand(strand) => Value::Strand(strand.clone()),
+			Literal::String(strand) => Value::String(strand.clone()),
 			Literal::Bytes(bytes) => Value::Bytes(bytes.clone()),
 			Literal::Regex(regex) => Value::Regex(regex.clone()),
 			Literal::RecordId(record_id_lit) => {
@@ -132,7 +132,7 @@ impl PartialEq for Literal {
 			(Literal::Float(a), Literal::Float(b)) => a.to_bits() == b.to_bits(),
 			(Literal::Integer(a), Literal::Integer(b)) => a == b,
 			(Literal::Decimal(a), Literal::Decimal(b)) => a == b,
-			(Literal::Strand(a), Literal::Strand(b)) => a == b,
+			(Literal::String(a), Literal::String(b)) => a == b,
 			(Literal::Bytes(a), Literal::Bytes(b)) => a == b,
 			(Literal::Regex(a), Literal::Regex(b)) => a == b,
 			(Literal::RecordId(a), Literal::RecordId(b)) => a == b,
@@ -161,7 +161,7 @@ impl Hash for Literal {
 			Literal::Float(x) => x.to_bits().hash(state),
 			Literal::Integer(x) => x.hash(state),
 			Literal::Decimal(x) => x.hash(state),
-			Literal::Strand(x) => x.hash(state),
+			Literal::String(x) => x.hash(state),
 			Literal::Bytes(x) => x.hash(state),
 			Literal::Regex(x) => x.hash(state),
 			Literal::RecordId(x) => x.hash(state),
@@ -200,7 +200,7 @@ impl fmt::Display for Literal {
 			}
 			Literal::Integer(x) => write!(f, "{x}"),
 			Literal::Decimal(d) => write!(f, "{d}dec"),
-			Literal::Strand(strand) => write!(f, "{}", QuoteStr(strand)),
+			Literal::String(strand) => write!(f, "{}", QuoteStr(strand)),
 			Literal::Bytes(bytes) => write!(f, "{bytes}"),
 			Literal::Regex(regex) => write!(f, "{regex}"),
 			Literal::RecordId(record_id_lit) => write!(f, "{record_id_lit}"),

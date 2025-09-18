@@ -17,7 +17,7 @@ pub(crate) fn headermap_to_object(headers: HeaderMap) -> Result<Object> {
 	// This is handled by returning the key name first and then return multiple
 	// values with key name = None.
 	for (k, v) in headers.into_iter() {
-		let v = Value::Strand(v.to_str().map_err(Error::from)?.to_owned());
+		let v = Value::String(v.to_str().map_err(Error::from)?.to_owned());
 
 		if let Some(k) = k {
 			let k = k.as_str().to_owned();

@@ -77,7 +77,6 @@ impl Claims {
 	pub fn into_claims_object(self) -> Object {
 		// Set default value
 		let mut out = Object::default();
-		// TODO: Null byte validity
 		// Add iss field if set
 		if let Some(iss) = self.iss {
 			out.insert("iss".to_string(), iss.into());
@@ -89,10 +88,10 @@ impl Claims {
 		// Add aud field if set
 		if let Some(aud) = self.aud {
 			match aud {
-				Audience::Single(v) => out.insert("aud".to_string(), Value::Strand(v)),
+				Audience::Single(v) => out.insert("aud".to_string(), Value::String(v)),
 				Audience::Multiple(v) => out.insert(
 					"aud".to_string(),
-					v.into_iter().map(Value::Strand).collect::<Vec<_>>().into(),
+					v.into_iter().map(Value::String).collect::<Vec<_>>().into(),
 				),
 			};
 		}

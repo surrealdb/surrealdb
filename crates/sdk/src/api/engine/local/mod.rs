@@ -620,7 +620,6 @@ async fn router(
 		} => {
 			let response =
 				iam::signup::signup(kvs, &mut *session.write().await, credentials).await?.token;
-			// TODO: Null byte validity
 			let response = response.map(From::from).unwrap_or(val::Value::None);
 			Ok(DbResponse::Other(response))
 		}
@@ -1215,7 +1214,6 @@ async fn router(
 				hash,
 				..Default::default()
 			};
-			// TODO: Null byte validity
 			let q = DefineStatement::Model(model);
 			let q = LogicalPlan {
 				expressions: vec![TopLevelExpr::Expr(Expr::Define(Box::new(q)))],

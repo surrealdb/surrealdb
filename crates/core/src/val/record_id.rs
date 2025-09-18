@@ -193,10 +193,7 @@ impl RecordIdKey {
 	pub fn into_value(self) -> Value {
 		match self {
 			RecordIdKey::Number(n) => Value::Number(Number::Int(n)),
-			RecordIdKey::String(s) => {
-				//TODO: Null byte validity
-				Value::Strand(s)
-			}
+			RecordIdKey::String(s) => Value::String(s),
 			RecordIdKey::Uuid(u) => Value::Uuid(u),
 			RecordIdKey::Object(object) => Value::Object(object),
 			RecordIdKey::Array(array) => Value::Array(array),
@@ -218,7 +215,7 @@ impl RecordIdKey {
 		// rejected.
 		match value {
 			Value::Number(Number::Int(i)) => Some(RecordIdKey::Number(i)),
-			Value::Strand(strand) => Some(RecordIdKey::String(strand)),
+			Value::String(strand) => Some(RecordIdKey::String(strand)),
 			// NOTE: This was previously (before expr inversion pr) also rejected in this
 			// conversion, a bug I assume.
 			Value::Uuid(uuid) => Some(RecordIdKey::Uuid(uuid)),
@@ -284,7 +281,7 @@ impl PartialEq<Value> for RecordIdKey {
 		match self {
 			RecordIdKey::Number(a) => Value::Number(Number::Int(*a)) == *other,
 			RecordIdKey::String(a) => {
-				if let Value::Strand(b) = other {
+				if let Value::String(b) = other {
 					a.as_str() == b.as_str()
 				} else {
 					false

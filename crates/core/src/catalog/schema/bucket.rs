@@ -33,7 +33,7 @@ impl BucketDefinition {
 			backend: self
 				.backend
 				.clone()
-				.map(|v| crate::sql::Expr::Literal(crate::sql::Literal::Strand(v))),
+				.map(|v| crate::sql::Expr::Literal(crate::sql::Literal::String(v))),
 			permissions: self.permissions.clone().into(),
 			readonly: self.readonly,
 			comment: self.comment.clone(),
@@ -46,8 +46,7 @@ impl InfoStructure for BucketDefinition {
 		Value::from(map! {
 			"name".to_string() => self.name.into(),
 			"permissions".to_string() => self.permissions.structure(),
-			// TODO: Null byte validity
-			"backend".to_string(), if let Some(backend) = self.backend => Value::Strand(backend.to_string()),
+			"backend".to_string(), if let Some(backend) = self.backend => Value::String(backend.to_string()),
 			"readonly".to_string() => self.readonly.into(),
 			"comment".to_string(), if let Some(comment) = self.comment => comment.into(),
 		})

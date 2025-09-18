@@ -636,10 +636,8 @@ impl Datastore {
 			// Create and new root user definition
 			let stm = DefineUserStatement::new_with_password(
 				Base::Root,
-				// TODO: Null byte validity.
 				user.to_owned(),
 				pass,
-				// TODO: Null byte validity, always correct here probably.
 				INITIAL_USER_ROLE.to_owned(),
 			);
 			let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));

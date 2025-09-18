@@ -681,7 +681,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			receiver: Function::Script(Script(" ((1 + 1)) ".to_owned())),
 			arguments: Vec::new(),
 		}))),
-		TopLevelExpr::Expr(Expr::Literal(Literal::Strand("a b c d e f g h".to_owned()))),
+		TopLevelExpr::Expr(Expr::Literal(Literal::String("a b c d e f g h".to_owned()))),
 		TopLevelExpr::Expr(Expr::Literal(Literal::Uuid(Uuid(uuid::Uuid::from_u128(
 			0xffffffff_ffff_ffff_ffff_ffffffffffff,
 		))))),

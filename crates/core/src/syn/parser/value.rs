@@ -88,7 +88,7 @@ impl Parser<'_> {
 				if self.settings.legacy_strands {
 					self.reparse_json_legacy_strand(stk, strand).await
 				} else {
-					Value::Strand(strand)
+					Value::String(strand)
 				}
 			}
 			t!("d\"") | t!("d'") => {
@@ -277,7 +277,7 @@ impl Parser<'_> {
 				if self.settings.legacy_strands {
 					Ok(self.reparse_json_legacy_strand(stk, strand).await)
 				} else {
-					Ok(Value::Strand(strand))
+					Ok(Value::String(strand))
 				}
 			}
 			t!("-") | t!("+") | TokenKind::Digits => {
@@ -290,9 +290,9 @@ impl Parser<'_> {
 					Numeric::Decimal(x) => Ok(Value::Number(Number::Decimal(x))),
 				}
 			}
-			TokenKind::Glued(Glued::Strand) => {
-				let glued = pop_glued!(self, Strand);
-				Ok(Value::Strand(glued))
+			TokenKind::Glued(Glued::String) => {
+				let glued = pop_glued!(self, String);
+				Ok(Value::String(glued))
 			}
 			TokenKind::Glued(Glued::Duration) => {
 				let glued = pop_glued!(self, Duration);
@@ -315,7 +315,7 @@ impl Parser<'_> {
 		}
 
 		//TODO: Fix record id and others
-		Value::Strand(strand)
+		Value::String(strand)
 	}
 
 	async fn parse_value_object<VP>(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Object>

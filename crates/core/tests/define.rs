@@ -140,7 +140,7 @@ async fn define_statement_index_concurrently_building_status(
 		let tmp = r.remove(0).result?;
 		if let Value::Object(o) = &tmp {
 			if let Some(Value::Object(o)) = o.get("building") {
-				if let Some(Value::Strand(s)) = o.get("status") {
+				if let Some(Value::String(s)) = o.get("status") {
 					let new_initial = o.get("initial").cloned();
 					let new_pending = o.get("pending").cloned();
 					let new_updated = o.get("updated").cloned();

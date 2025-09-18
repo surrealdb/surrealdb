@@ -44,7 +44,7 @@ impl InfoStructure for RequestMiddleware {
 			self.0
 				.into_iter()
 				.map(|(k, v)| {
-					let value = v.iter().map(|x| Value::Strand(x.to_string())).collect();
+					let value = v.iter().map(|x| Value::String(x.to_string())).collect();
 
 					(k, Value::Array(Array(value)))
 				})

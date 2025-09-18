@@ -87,8 +87,8 @@ impl Value {
 					value,
 				} => {
 					let path = path.into_iter().map(Part::Field).collect::<Vec<_>>();
-					if let Value::Strand(p) = value {
-						if let Value::Strand(v) = this.pick(&path) {
+					if let Value::String(p) = value {
+						if let Value::String(v) = this.pick(&path) {
 							let dmp = dmp::new();
 							let pch = dmp.patch_from_text(p).map_err(|e| {
 								Error::InvalidPatch(PatchError {

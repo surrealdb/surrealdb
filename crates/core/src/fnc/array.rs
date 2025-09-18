@@ -828,8 +828,8 @@ pub fn slice(
 
 fn sort_as_asc(order: &Option<Value>) -> bool {
 	match order {
-		Some(Value::Strand(s)) if s.as_str() == "asc" => true,
-		Some(Value::Strand(s)) if s.as_str() == "desc" => false,
+		Some(Value::String(s)) if s.as_str() == "asc" => true,
+		Some(Value::String(s)) if s.as_str() == "desc" => false,
 		Some(Value::Bool(true)) => true,
 		Some(Value::Bool(false)) => false,
 		_ => true,

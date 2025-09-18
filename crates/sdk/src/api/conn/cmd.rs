@@ -150,7 +150,6 @@ impl Command {
 				namespace,
 				database,
 			} => {
-				// TODO: Null byte validity
 				let namespace = namespace.map(From::from).unwrap_or(CoreValue::None);
 				let database = database.map(From::from).unwrap_or(CoreValue::None);
 				RouterRequest {
@@ -251,7 +250,6 @@ impl Command {
 			} => {
 				let table = match what {
 					Some(w) => {
-						// TODO: Null byte validity
 						let table = CoreTable::new(w);
 						CoreValue::from(table)
 					}
@@ -487,7 +485,6 @@ impl Command {
 				version,
 				args,
 			} => {
-				// TODO: Null byte validity
 				let version = version.map(From::from).unwrap_or(CoreValue::None);
 				RouterRequest {
 					id,
@@ -562,7 +559,6 @@ impl Serialize for RouterRequest {
 		struct InnerMethod(&'static str);
 		struct InnerTransaction<'a>(&'a Uuid);
 		struct InnerUuid<'a>(&'a Uuid);
-		struct InnerStrand(&'static str);
 		struct InnerObject<'a>(&'a RouterRequest);
 
 		impl Serialize for InnerNumberVariant {
@@ -588,7 +584,7 @@ impl Serialize for RouterRequest {
 			where
 				S: serde::Serializer,
 			{
-				serializer.serialize_newtype_variant("Value", 4, "Strand", &InnerStrand(self.0))
+				serializer.serialize_newtype_variant("Value", 4, "String", &self.0)
 			}
 		}
 
@@ -607,14 +603,6 @@ impl Serialize for RouterRequest {
 				S: serde::Serializer,
 			{
 				serializer.serialize_newtype_struct("$surrealdb::private::sql::Uuid", self.0)
-			}
-		}
-		impl Serialize for InnerStrand {
-			fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-			where
-				S: serde::Serializer,
-			{
-				serializer.serialize_newtype_struct("$surrealdb::private::sql::Strand", self.0)
 			}
 		}
 
@@ -712,7 +700,7 @@ impl Revisioned for RouterRequest {
 		// the Value version
 		1u16.serialize_revisioned(w)?;
 
-		// the Value::Strand variant
+		// the Value::String variant
 		4u16.serialize_revisioned(w)?;
 
 		serializer
@@ -783,7 +771,7 @@ mod test {
 			}),
 			req.id
 		);
-		let Some(Value::Strand(x)) = obj.get("method") else {
+		let Some(Value::String(x)) = obj.get("method") else {
 			panic!("invalid method field: {}", obj)
 		};
 		assert_eq!(x.as_str(), req.method);

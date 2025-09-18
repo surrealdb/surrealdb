@@ -22,7 +22,7 @@ pub enum Literal {
 	Decimal(Decimal),
 	Duration(Duration),
 
-	Strand(String),
+	String(String),
 	RecordId(RecordIdLit),
 	Datetime(Datetime),
 	Uuid(Uuid),
@@ -46,7 +46,7 @@ impl PartialEq for Literal {
 			(Literal::Float(a), Literal::Float(b)) => a.to_bits() == b.to_bits(),
 			(Literal::Integer(a), Literal::Integer(b)) => a == b,
 			(Literal::Decimal(a), Literal::Decimal(b)) => a == b,
-			(Literal::Strand(a), Literal::Strand(b)) => a == b,
+			(Literal::String(a), Literal::String(b)) => a == b,
 			(Literal::Bytes(a), Literal::Bytes(b)) => a == b,
 			(Literal::Regex(a), Literal::Regex(b)) => a == b,
 			(Literal::RecordId(a), Literal::RecordId(b)) => a == b,
@@ -87,7 +87,7 @@ impl fmt::Display for Literal {
 			}
 			Literal::Integer(x) => write!(f, "{x}"),
 			Literal::Decimal(d) => write!(f, "{d}dec"),
-			Literal::Strand(strand) => write!(f, "{}", QuoteStr(strand)),
+			Literal::String(strand) => write!(f, "{}", QuoteStr(strand)),
 			Literal::Bytes(bytes) => write!(f, "{bytes}"),
 			Literal::Regex(regex) => write!(f, "{regex}"),
 			Literal::RecordId(record_id_lit) => write!(f, "{record_id_lit}"),
@@ -145,7 +145,7 @@ impl From<Literal> for crate::expr::Literal {
 			Literal::Integer(x) => crate::expr::Literal::Integer(x),
 			Literal::Decimal(decimal) => crate::expr::Literal::Decimal(decimal),
 			Literal::Duration(duration) => crate::expr::Literal::Duration(duration),
-			Literal::Strand(strand) => crate::expr::Literal::Strand(strand),
+			Literal::String(strand) => crate::expr::Literal::String(strand),
 			Literal::RecordId(record_id_lit) => {
 				crate::expr::Literal::RecordId(record_id_lit.into())
 			}
@@ -175,7 +175,7 @@ impl From<crate::expr::Literal> for Literal {
 			crate::expr::Literal::Integer(x) => Literal::Integer(x),
 			crate::expr::Literal::Decimal(decimal) => Literal::Decimal(decimal),
 			crate::expr::Literal::Duration(duration) => Literal::Duration(duration),
-			crate::expr::Literal::Strand(strand) => Literal::Strand(strand),
+			crate::expr::Literal::String(strand) => Literal::String(strand),
 			crate::expr::Literal::RecordId(record_id_lit) => {
 				Literal::RecordId(record_id_lit.into())
 			}
@@ -219,7 +219,7 @@ fn collect_geometry(map: &[ObjectEntry]) -> Option<Geometry> {
 
 	let other = 1 ^ ty_idx;
 
-	let Expr::Literal(Literal::Strand(ty)) = &map[ty_idx].value else {
+	let Expr::Literal(Literal::String(ty)) = &map[ty_idx].value else {
 		return None;
 	};
 

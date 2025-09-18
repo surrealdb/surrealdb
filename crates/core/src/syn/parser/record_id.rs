@@ -523,7 +523,7 @@ mod tests {
 				key: RecordIdKeyLit::Object(vec![
 					sql::literal::ObjectEntry {
 						key: "location".to_string(),
-						value: sql::Expr::Literal(sql::Literal::Strand("GBR".to_owned()))
+						value: sql::Expr::Literal(sql::Literal::String("GBR".to_owned()))
 					},
 					sql::literal::ObjectEntry {
 						key: "year".to_string(),
@@ -545,7 +545,7 @@ mod tests {
 			RecordIdLit {
 				table: String::from("test"),
 				key: RecordIdKeyLit::Array(vec![
-					sql::Expr::Literal(sql::Literal::Strand("GBR".to_owned())),
+					sql::Expr::Literal(sql::Literal::String("GBR".to_owned())),
 					sql::Expr::Literal(sql::Literal::Integer(2022)),
 				])
 			}

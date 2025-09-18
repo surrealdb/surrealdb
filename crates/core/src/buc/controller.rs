@@ -68,7 +68,7 @@ impl<'a> BucketController<'a> {
 	}
 
 	/// Attempt to put a file
-	/// `Bytes` and `Strand` values are supported, and will be converted into
+	/// `Bytes` and `String` values are supported, and will be converted into
 	/// `Bytes` Create or update permissions will be used, based on if the
 	/// remote file already exists
 	pub(crate) async fn put(&mut self, key: &ObjectKey, value: Value) -> Result<()> {
@@ -85,7 +85,7 @@ impl<'a> BucketController<'a> {
 	}
 
 	/// Attempt to put a file
-	/// `Bytes` and `Strand` values are supported, and will be converted into
+	/// `Bytes` and `String` values are supported, and will be converted into
 	/// `Bytes` Create or update permissions will be used, based on if the
 	/// remote file already exists
 	pub(crate) async fn put_if_not_exists(&mut self, key: &ObjectKey, value: Value) -> Result<()> {

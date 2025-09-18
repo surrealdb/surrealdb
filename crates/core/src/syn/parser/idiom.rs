@@ -1172,7 +1172,7 @@ mod tests {
 					table: "test".to_owned(),
 					key: RecordIdKeyLit::Number(1),
 				}))),
-				Part::Value(Expr::Literal(Literal::Strand("foo".to_owned()))),
+				Part::Value(Expr::Literal(Literal::String("foo".to_owned()))),
 			]))
 		);
 	}

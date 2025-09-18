@@ -598,7 +598,7 @@ impl KindLiteral {
 	pub fn validate_value(&self, value: &Value) -> bool {
 		match self {
 			Self::String(v) => match value {
-				Value::Strand(s) => s == v,
+				Value::String(s) => s == v,
 				_ => false,
 			},
 			Self::Integer(v) => match value {

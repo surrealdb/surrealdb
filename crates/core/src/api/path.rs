@@ -268,11 +268,10 @@ impl Segment {
 					val.map(|val| Some((x.to_owned(), val)))
 				}
 				Self::Rest(x) => {
-					// TODO: Null byte validity
 					let values = segments
 						.iter()
 						.copied()
-						.map(|x| Value::Strand(x.to_owned()))
+						.map(|x| Value::String(x.to_owned()))
 						.collect::<Vec<_>>();
 
 					Some(Some((x.to_owned(), Value::Array(Array(values)))))

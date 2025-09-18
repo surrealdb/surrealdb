@@ -28,7 +28,6 @@ impl Value {
 			Value::Object(v) => match first {
 				Part::Field(f) => {
 					if let Some(v) = v.get(&**f) {
-						// TODO: Null byte validity
 						accum.push(Part::Field(f.clone()));
 						v._each(rest, accum, build);
 						accum.pop();
@@ -36,7 +35,6 @@ impl Value {
 				}
 				Part::All => {
 					for (k, v) in v.iter() {
-						// TODO: Null byte validity
 						accum.push(Part::Field(k.clone()));
 						v._each(rest, accum, build);
 						accum.pop();

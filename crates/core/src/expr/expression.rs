@@ -187,8 +187,7 @@ impl Expr {
 			Expr::Param(i) => Idiom::field(i.as_str().to_owned()),
 			Expr::FunctionCall(x) => x.receiver.to_idiom(),
 			Expr::Literal(l) => match l {
-				Literal::Strand(s) => Idiom::field(s.clone()),
-				// TODO: Null byte validity
+				Literal::String(s) => Idiom::field(s.clone()),
 				Literal::Datetime(d) => Idiom::field(d.into_raw_string()),
 				x => Idiom::field(x.to_string()),
 			},

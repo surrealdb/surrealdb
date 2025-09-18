@@ -1488,7 +1488,7 @@ mod tests {
 				_ => panic!("Session token is not an object"),
 			};
 			let string_claim = tk.get("string_claim").unwrap();
-			assert_eq!(*string_claim, Value::Strand("test".into()));
+			assert_eq!(*string_claim, Value::String("test".into()));
 			let bool_claim = tk.get("bool_claim").unwrap();
 			assert_eq!(*bool_claim, Value::Bool(true));
 			let int_claim = tk.get("int_claim").unwrap();
@@ -1499,10 +1499,10 @@ mod tests {
 			assert_eq!(*array_claim, Value::Array(vec!["test_1", "test_2"].into()));
 			let object_claim = tk.get("object_claim").unwrap();
 			let mut test_object: HashMap<String, Value> = HashMap::new();
-			test_object.insert("test_1".to_string(), Value::Strand("value_1".into()));
+			test_object.insert("test_1".to_string(), Value::String("value_1".into()));
 			let mut test_object_child = HashMap::new();
-			test_object_child.insert("test_2_1".to_string(), Value::Strand("value_2_1".into()));
-			test_object_child.insert("test_2_2".to_string(), Value::Strand("value_2_2".into()));
+			test_object_child.insert("test_2_1".to_string(), Value::String("value_2_1".into()));
+			test_object_child.insert("test_2_2".to_string(), Value::String("value_2_2".into()));
 			test_object.insert("test_2".to_string(), Value::Object(test_object_child.into()));
 			assert_eq!(*object_claim, Value::Object(test_object.into()));
 		}

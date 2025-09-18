@@ -195,7 +195,7 @@ impl Geometry {
 			return None;
 		}
 
-		let Some(Value::Strand(key)) = object.get("type") else {
+		let Some(Value::String(key)) = object.get("type") else {
 			return None;
 		};
 

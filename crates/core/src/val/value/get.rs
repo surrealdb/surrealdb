@@ -202,7 +202,7 @@ impl Value {
 									.await
 							}
 						},
-						Value::Strand(f) => match v.get(f.as_str()) {
+						Value::String(f) => match v.get(f.as_str()) {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},

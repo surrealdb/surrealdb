@@ -1,5 +1,5 @@
 /// Manual implementations of the oldest revision of surrealdb structs for backwards
-/// compatibility. Only the variants that are needed to controll surrealdb are implemented.
+/// compatibility. Only the variants that are needed to control surrealdb are implemented.
 use std::collections::BTreeMap;
 
 use revision::revisioned;
@@ -24,10 +24,6 @@ impl std::ops::Deref for ProxyObject {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Hash)]
-pub struct ProxyStrand(pub String);
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Hash)]
 pub struct ProxyArray(pub Vec<ProxyValue>);
 
 #[revisioned(revision = 1)]
@@ -42,7 +38,7 @@ pub enum ProxyValue {
 	#[revision(override(revision = 1, discriminant = 3))]
 	Number(ProxyNumber),
 	#[revision(override(revision = 1, discriminant = 4))]
-	Strand(ProxyStrand),
+	Strand(String),
 	#[revision(override(revision = 1, discriminant = 8))]
 	Array(ProxyArray),
 	#[revision(override(revision = 1, discriminant = 9))]
@@ -51,7 +47,7 @@ pub enum ProxyValue {
 
 impl From<&str> for ProxyValue {
 	fn from(value: &str) -> Self {
-		ProxyValue::Strand(ProxyStrand(value.to_owned()))
+		ProxyValue::Strand(value.to_owned())
 	}
 }
 
