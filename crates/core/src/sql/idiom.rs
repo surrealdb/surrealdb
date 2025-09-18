@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
-use crate::fmt::{Fmt, fmt_separated_by};
+use crate::fmt::{EscapeIdent, Fmt, fmt_separated_by};
 use crate::sql::Part;
 
 // TODO: Remove unnessacry newtype.
@@ -80,7 +80,7 @@ impl Display for Idiom {
 			&Fmt::new(
 				self.0.iter().enumerate().map(|args| {
 					Fmt::new(args, |(i, p), f| match (i, p) {
-						(0, Part::Field(v)) => Display::fmt(v, f),
+						(0, Part::Field(v)) => EscapeIdent(v).fmt(f),
 						_ => Display::fmt(p, f),
 					})
 				}),

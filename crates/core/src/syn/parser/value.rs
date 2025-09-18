@@ -273,7 +273,7 @@ impl Parser<'_> {
 				self.parse_value_array::<Json>(stk, token.span).await.map(Value::Array)
 			}
 			t!("\"") | t!("'") => {
-				let strand = self.parse_ident()?;
+				let strand = self.parse_string_lit()?;
 				if self.settings.legacy_strands {
 					Ok(self.reparse_json_legacy_strand(stk, strand).await)
 				} else {

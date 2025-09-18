@@ -57,12 +57,12 @@ impl Closure {
 				}
 				(kind, Some(val)) => {
 					if let Ok(val) = val.clone().coerce_to_kind(kind) {
-						ctx.add_value(name.to_string(), val.into());
+						ctx.add_value(name.clone().into_string(), val.into());
 					} else {
 						bail!(Error::InvalidArguments {
 							name: "ANONYMOUS".to_string(),
 							message: format!(
-								"Expected a value of type '{kind}' for argument ${name}"
+								"Expected a value of type '{kind}' for argument {name}"
 							),
 						});
 					}
@@ -93,7 +93,7 @@ impl fmt::Display for Closure {
 			if i > 0 {
 				f.write_str(", ")?;
 			}
-			write!(f, "${name}: ")?;
+			write!(f, "{name}: ")?;
 			match kind {
 				k @ Kind::Either(_) => write!(f, "<{k}>")?,
 				k => write!(f, "{k}")?,

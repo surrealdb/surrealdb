@@ -333,6 +333,16 @@ async fn run_test_with_dbs(
 
 	let mut session = util::session_from_test_config(config);
 
+	if let Some(ref x) = session.ns {
+		let db = session.db.take();
+		dbs.execute(&format!("DEFINE NAMESPACE `{x}`"), &session, None).await?;
+		session.db = db;
+	}
+
+	if let Some(ref x) = session.db {
+		dbs.execute(&format!("DEFINE DATABASE `{x}`"), &session, None).await?;
+	}
+
 	let timeout_duration = config
 		.env
 		.as_ref()

@@ -1144,7 +1144,7 @@ impl Parser<'_> {
 							}
 							t!("MAPPER") => {
 								let open_span = expected!(self, t!("(")).span;
-								let path: String = self.parse_ident()?;
+								let path: String = self.parse_string_lit()?;
 								self.expect_closing_delimiter(t!(")"), open_span)?;
 								filters.push(Filter::Mapper(path))
 							}

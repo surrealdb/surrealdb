@@ -17,7 +17,7 @@ use crate::err::Error;
 use crate::expr::kind::GeometryKind;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{self, Kind};
-use crate::fmt::Pretty;
+use crate::fmt::{Pretty, QuoteStr};
 
 pub mod array;
 pub mod bytes;
@@ -630,7 +630,7 @@ impl fmt::Display for Value {
 			Value::Object(v) => write!(f, "{v}"),
 			Value::Range(v) => write!(f, "{v}"),
 			Value::Regex(v) => write!(f, "{v}"),
-			Value::Strand(v) => write!(f, "{v}"),
+			Value::Strand(v) => write!(f, "{}", QuoteStr(v)),
 			Value::RecordId(v) => write!(f, "{v}"),
 			Value::Uuid(v) => write!(f, "{v}"),
 			Value::Closure(v) => write!(f, "{v}"),
@@ -1111,9 +1111,9 @@ mod tests {
 		let enc: Vec<u8> = revision::to_vec(&Value::Bool(false)).unwrap();
 		assert_eq!(3, enc.len());
 		let enc: Vec<u8> = revision::to_vec(&Value::from("test")).unwrap();
-		assert_eq!(8, enc.len());
+		assert_eq!(7, enc.len());
 		let enc: Vec<u8> = revision::to_vec(&syn::value("{ hello: 'world' }").unwrap()).unwrap();
-		assert_eq!(19, enc.len());
+		assert_eq!(18, enc.len());
 		let enc: Vec<u8> =
 			revision::to_vec(&syn::value("{ compact: true, schema: 0 }").unwrap()).unwrap();
 		assert_eq!(27, enc.len());

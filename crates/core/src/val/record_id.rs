@@ -157,8 +157,6 @@ impl PartialEq<Range> for RecordIdKeyRange {
 #[storekey(format = "IndexFormat")]
 pub enum RecordIdKey {
 	Number(i64),
-	//TODO: This should definitely be strand, not string as null bytes here can cause a lot of
-	//issues.
 	String(String),
 	Uuid(Uuid),
 	Array(Array),

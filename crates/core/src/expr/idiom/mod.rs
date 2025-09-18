@@ -15,7 +15,7 @@ use crate::expr::part::{Next, NextMethod};
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{FlowResult, Part, Value};
-use crate::fmt::Fmt;
+use crate::fmt::{EscapeIdent, Fmt};
 
 pub mod recursion;
 
@@ -180,9 +180,8 @@ impl Idiom {
 impl Display for Idiom {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let mut iter = self.0.iter();
-		// TODO: Look at why the first Part::Field is formatted differently.
 		match iter.next() {
-			Some(Part::Field(v)) => v.fmt(f)?,
+			Some(Part::Field(v)) => EscapeIdent(v).fmt(f)?,
 			Some(x) => x.fmt(f)?,
 			None => {}
 		};
@@ -323,7 +322,7 @@ mod tests {
 	#[rstest]
 	#[case(Idiom::from(vec![Part::Field("name".to_string())]), "name")]
 	#[case(Idiom::from(vec![Part::Field("nested".to_string()), Part::Field("nested".to_string()), Part::Field("name".to_string())]), "nested.nested.name")]
-	#[case(Idiom::from(vec![Part::Field("nested".to_string()), Part::Field("nested".to_string()), Part::Field("value".to_string())]), "nested.nested.`value`")]
+	#[case(Idiom::from(vec![Part::Field("nested".to_string()), Part::Field("nested".to_string()), Part::Field("value".to_string())]), "nested.nested.value")]
 	#[case(Idiom::from(vec![Part::Field("value".to_string())]), "`value`")]
 	fn test_idiom_to_string(#[case] idiom: Idiom, #[case] expected: &'static str) {
 		assert_eq!(idiom.to_string(), expected.to_string());

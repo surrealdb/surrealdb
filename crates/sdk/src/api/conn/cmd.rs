@@ -715,9 +715,6 @@ impl Revisioned for RouterRequest {
 		// the Value::Strand variant
 		4u16.serialize_revisioned(w)?;
 
-		// the Strand version
-		1u16.serialize_revisioned(w)?;
-
 		serializer
 			.serialize_into(&mut *w, self.method)
 			.map_err(|e| revision::Error::Serialize(format!("{:?}", e)))?;

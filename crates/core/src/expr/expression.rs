@@ -1,7 +1,6 @@
 use std::fmt;
 use std::ops::Bound;
 
-use reblessive::Stack;
 use reblessive::tree::Stk;
 use revision::Revisioned;
 
@@ -751,12 +750,18 @@ impl Revisioned for Expr {
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
 		let query: String = Revisioned::deserialize_revisioned(reader)?;
 
-		let mut stack = Stack::new();
-		let mut parser = crate::syn::parser::Parser::new_with_experimental(query.as_bytes(), true);
-		let expr = stack
-			.enter(|stk| parser.parse_expr(stk))
-			.finish()
-			.map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
+		let expr = crate::syn::parse_with_settings(
+			query.as_bytes(),
+			crate::syn::parser::ParserSettings {
+				references_enabled: true,
+				bearer_access_enabled: true,
+				define_api_enabled: true,
+				files_enabled: true,
+				..Default::default()
+			},
+			async |p, stk| p.parse_expr(stk).await,
+		)
+		.map_err(|err| revision::Error::Conversion(err.to_string()))?;
 		Ok(expr.into())
 	}
 }

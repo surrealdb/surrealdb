@@ -1,7 +1,7 @@
 use std::fmt;
 use std::fmt::Display;
 
-use crate::fmt::EscapeIdent;
+use crate::fmt::QuoteStr;
 use crate::sql::language::Language;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -25,7 +25,7 @@ impl Display for Filter {
 			Self::Ngram(min, max) => write!(f, "NGRAM({min},{max})"),
 			Self::Snowball(lang) => write!(f, "SNOWBALL({lang})"),
 			Self::Uppercase => f.write_str("UPPERCASE"),
-			Self::Mapper(path) => write!(f, "MAPPER({})", EscapeIdent(path)),
+			Self::Mapper(path) => write!(f, "MAPPER({})", QuoteStr(path)),
 		}
 	}
 }
