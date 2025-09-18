@@ -52,7 +52,7 @@ impl Closure {
 			if let Some(x) = self.args[args.len()..].iter().find(|x| !x.1.can_be_none()) {
 				bail!(Error::InvalidArguments {
 					name: "ANONYMOUS".to_string(),
-					message: format!("Expected a value for ${}", x.0),
+					message: format!("Expected a value for {}", x.0),
 				})
 			}
 		}
@@ -63,7 +63,7 @@ impl Closure {
 			} else {
 				bail!(Error::InvalidArguments {
 					name: "ANONYMOUS".to_string(),
-					message: format!("Expected a value of type '{kind}' for argument ${name}"),
+					message: format!("Expected a value of type '{kind}' for argument {name}"),
 				});
 			}
 		}

@@ -300,7 +300,7 @@ impl InfoStatement {
 						"fields".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_fields(ns, db, tb, version).await?.iter() {
-								out.insert(v.name.to_string(), v.to_sql().into());
+								out.insert(v.name.to_raw_string(), v.to_sql().into());
 							}
 							out.into()
 						},
