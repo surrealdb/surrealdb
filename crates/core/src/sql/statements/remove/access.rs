@@ -1,13 +1,23 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::sql::{Base, Ident};
+use crate::sql::{Base, Expr, Literal};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveAccessStatement {
-	pub name: Ident,
+	pub name: Expr,
 	pub base: Base,
 	pub if_exists: bool,
+}
+
+impl Default for RemoveAccessStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			base: Base::default(),
+			if_exists: false,
+		}
+	}
 }
 
 impl Display for RemoveAccessStatement {

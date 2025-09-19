@@ -42,7 +42,7 @@ impl UpsertStatement {
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Check if there is a timeout
-		let ctx = stm.setup_timeout(ctx)?;
+		let ctx = stm.setup_timeout(stk, ctx, opt, doc).await?;
 
 		// Get a query planner
 		let mut planner = QueryPlanner::new();

@@ -1,18 +1,29 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::sql::Ident;
 use crate::sql::changefeed::ChangeFeed;
-use crate::val::Strand;
+use crate::sql::{Expr, Literal};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineDatabaseStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
-	pub name: Ident,
-	pub comment: Option<Strand>,
+	pub name: Expr,
+	pub comment: Option<Expr>,
 	pub changefeed: Option<ChangeFeed>,
+}
+
+impl Default for DefineDatabaseStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			id: None,
+			name: Expr::Literal(Literal::None),
+			comment: None,
+			changefeed: None,
+		}
+	}
 }
 
 impl Display for DefineDatabaseStatement {
@@ -25,7 +36,7 @@ impl Display for DefineDatabaseStatement {
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?;
 		}
 		if let Some(ref v) = self.changefeed {
 			write!(f, " {v}")?;
@@ -40,19 +51,20 @@ impl From<DefineDatabaseStatement> for crate::expr::statements::DefineDatabaseSt
 			kind: v.kind.into(),
 			id: v.id,
 			name: v.name.into(),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 			changefeed: v.changefeed.map(Into::into),
 		}
 	}
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<crate::expr::statements::DefineDatabaseStatement> for DefineDatabaseStatement {
 	fn from(v: crate::expr::statements::DefineDatabaseStatement) -> Self {
 		DefineDatabaseStatement {
 			kind: v.kind.into(),
 			id: v.id,
 			name: v.name.into(),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 			changefeed: v.changefeed.map(Into::into),
 		}
 	}

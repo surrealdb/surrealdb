@@ -1,13 +1,23 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::sql::Ident;
+use crate::sql::{Expr, Literal};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveNamespaceStatement {
-	pub name: Ident,
+	pub name: Expr,
 	pub if_exists: bool,
 	pub expunge: bool,
+}
+
+impl Default for RemoveNamespaceStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			if_exists: false,
+			expunge: false,
+		}
+	}
 }
 
 impl Display for RemoveNamespaceStatement {

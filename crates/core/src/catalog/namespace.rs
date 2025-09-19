@@ -7,8 +7,8 @@ use storekey::{BorrowDecode, Encode};
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::DefineNamespaceStatement;
-use crate::sql::{Ident, ToSql};
-use crate::val::Value;
+use crate::sql::{Expr, Literal, ToSql};
+use crate::val::{Strand, Value};
 
 #[derive(
 	Debug,
@@ -75,8 +75,13 @@ impl NamespaceDefinition {
 		DefineNamespaceStatement {
 			// SAFETY: we know the name is valid because it was validated when the namespace was
 			// created.
-			name: unsafe { Ident::new_unchecked(self.name.clone()) },
-			comment: self.comment.clone().map(|v| v.into()),
+			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(
+				crate::sql::Ident::new(self.name.clone()).unwrap(),
+			)),
+			comment: self
+				.comment
+				.clone()
+				.map(|v| Expr::Literal(Literal::Strand(Strand::new(v).unwrap()))),
 			..Default::default()
 		}
 	}

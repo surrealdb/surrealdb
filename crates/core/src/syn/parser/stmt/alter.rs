@@ -15,7 +15,7 @@ impl Parser<'_> {
 		match next.kind {
 			t!("TABLE") => self.parse_alter_table(stk).await.map(AlterStatement::Table),
 			t!("FIELD") => self.parse_alter_field(stk).await.map(AlterStatement::Field),
-			t!("SEQUENCE") => self.parse_alter_sequence().await.map(AlterStatement::Sequence),
+			t!("SEQUENCE") => self.parse_alter_sequence(stk).await.map(AlterStatement::Sequence),
 			_ => unexpected!(self, next, "a alter statement keyword"),
 		}
 	}
@@ -233,7 +233,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub(crate) async fn parse_alter_sequence(&mut self) -> ParseResult<AlterSequenceStatement> {
+	pub(crate) async fn parse_alter_sequence(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<AlterSequenceStatement> {
 		let if_exists = if self.eat(t!("IF")) {
 			expected!(self, t!("EXISTS"));
 			true
@@ -247,7 +250,7 @@ impl Parser<'_> {
 			..Default::default()
 		};
 
-		if let Some(to) = self.try_parse_timeout()? {
+		if let Some(to) = self.try_parse_timeout(stk).await? {
 			res.timeout = Some(to);
 		}
 

@@ -36,7 +36,9 @@ impl Document {
 		doc.generate_record_id(stk, ctx, opt, stm).await?;
 		// Process the statement
 		let res = match stm {
-			Statement::Select(_) => doc.select(stk, ctx, opt, stm).await?,
+			Statement::Select {
+				..
+			} => doc.select(stk, ctx, opt, stm).await?,
 			Statement::Create(_) => doc.create(stk, ctx, opt, stm).await?,
 			Statement::Upsert(_) => doc.upsert(stk, ctx, opt, stm).await?,
 			Statement::Update(_) => doc.update(stk, ctx, opt, stm).await?,

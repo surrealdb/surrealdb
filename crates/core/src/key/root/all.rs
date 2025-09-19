@@ -4,6 +4,7 @@ use storekey::{BorrowDecode, Encode};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 
+#[allow(unused)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Kv {
 	__: u8,

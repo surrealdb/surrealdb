@@ -102,11 +102,11 @@ impl Parser<'_> {
 	}
 
 	/// Parses a statement timeout if the next token is `TIMEOUT`.
-	pub fn try_parse_timeout(&mut self) -> ParseResult<Option<Timeout>> {
+	pub async fn try_parse_timeout(&mut self, stk: &mut Stk) -> ParseResult<Option<Timeout>> {
 		if !self.eat(t!("TIMEOUT")) {
 			return Ok(None);
 		}
-		let duration = self.next_token_value()?;
+		let duration = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		Ok(Some(Timeout(duration)))
 	}
 

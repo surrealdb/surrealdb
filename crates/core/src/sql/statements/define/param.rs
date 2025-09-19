@@ -3,7 +3,6 @@ use std::fmt::{self, Display, Write};
 use super::DefineKind;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::{Expr, Ident, Permission};
-use crate::val::Strand;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -11,7 +10,7 @@ pub struct DefineParamStatement {
 	pub kind: DefineKind,
 	pub name: Ident,
 	pub value: Expr,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 	pub permissions: Permission,
 }
 
@@ -44,7 +43,7 @@ impl From<DefineParamStatement> for crate::expr::statements::DefineParamStatemen
 			kind: v.kind.into(),
 			name: v.name.into(),
 			value: v.value.into(),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 			permissions: v.permissions.into(),
 		}
 	}
@@ -56,7 +55,7 @@ impl From<crate::expr::statements::DefineParamStatement> for DefineParamStatemen
 			kind: v.kind.into(),
 			name: v.name.into(),
 			value: v.value.into(),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 			permissions: v.permissions.into(),
 		}
 	}

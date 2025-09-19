@@ -94,7 +94,10 @@ impl Document {
 				Statement::Live(_) => Err(IgnoreError::Error(anyhow::anyhow!(
 					".lives() uses .lq_pluck(), not .pluck()"
 				))),
-				Statement::Select(s) => {
+				Statement::Select {
+					stmt,
+					..
+				} => {
 					// Process the permitted documents
 					let current = if self.reduced(stk, ctx, opt, Current).await? {
 						self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced).await?;
@@ -104,8 +107,8 @@ impl Document {
 						&self.current
 					};
 					// Process the SELECT statement fields
-					s.expr
-						.compute(stk, ctx, opt, Some(current), s.group.is_some())
+					stmt.expr
+						.compute(stk, ctx, opt, Some(current), stmt.group.is_some())
 						.await
 						.map_err(IgnoreError::from)
 				}
@@ -163,9 +166,9 @@ impl Document {
 			}
 		}
 		// Remove any omitted fields from output
-		if let Some(v) = stm.omit() {
-			for v in v.iter() {
-				out.del(stk, ctx, opt, v).await?;
+		if let Some(fields) = stm.omit() {
+			for field in fields {
+				out.del(stk, ctx, opt, field).await?;
 			}
 		}
 		// Output result

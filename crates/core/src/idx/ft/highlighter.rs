@@ -1,8 +1,6 @@
 use std::collections::btree_map::Entry as BEntry;
 use std::collections::hash_map::Entry as HEntry;
 use std::collections::{BTreeMap, HashMap};
-use std::convert::Infallible;
-use std::result;
 
 use anyhow::{Result, ensure};
 
@@ -162,12 +160,10 @@ impl Offseter {
 	}
 }
 
-impl TryFrom<Offseter> for Value {
-	type Error = Infallible;
-
-	fn try_from(or: Offseter) -> result::Result<Self, Infallible> {
+impl From<Offseter> for Value {
+	fn from(or: Offseter) -> Self {
 		if or.offsets.is_empty() {
-			return Ok(Self::None);
+			return Self::None;
 		}
 		let mut res = BTreeMap::default();
 		for (idx, offsets) in or.offsets {
@@ -179,9 +175,9 @@ impl TryFrom<Offseter> for Value {
 			res.insert(idx.to_string(), Value::Array(Array::from(r)));
 		}
 		if res.is_empty() {
-			Ok(Value::None)
+			Value::None
 		} else {
-			Ok(Value::from(Object::from(res)))
+			Value::from(Object::from(res))
 		}
 	}
 }

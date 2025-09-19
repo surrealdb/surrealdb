@@ -212,7 +212,7 @@ impl StatementOptions {
 		// Process "timeout" option
 		if let Some(v) = obj.remove("timeout") {
 			if let Value::Duration(v) = v {
-				self.timeout = Some(Timeout(v))
+				self.timeout = Some(Timeout(Expr::Literal(Literal::Duration(v))))
 			} else {
 				return Err(RpcError::InvalidParams(
 					"Expected 'timeout' to be duration".to_string(),

@@ -865,7 +865,7 @@ async fn router(
 			let select_plan = SelectStatement {
 				expr: Fields::all(),
 				what: resource_to_exprs(what),
-				omit: None,
+				omit: vec![],
 				only: false,
 				with: None,
 				cond: None,
@@ -1212,9 +1212,13 @@ async fn router(
 			surrealdb_core::obs::put(&hash, data).await?;
 			// Insert the model in to the database
 			let model = DefineModelStatement {
-				name: Ident::new(file.header.name.to_string()).unwrap(),
+				name: Expr::Idiom(surrealdb_core::expr::Idiom::field(
+					Ident::new(file.header.name.to_string()).unwrap(),
+				)),
 				version: file.header.version.to_string(),
-				comment: Some(file.header.description.to_string().into()),
+				comment: Some(Expr::Literal(surrealdb_core::expr::Literal::Strand(
+					Strand::new(file.header.description.to_string()).unwrap(),
+				))),
 				hash,
 				..Default::default()
 			};

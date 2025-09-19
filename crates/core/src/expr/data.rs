@@ -96,7 +96,7 @@ impl Data {
 					_ => Ok(Value::None),
 				}
 			}
-			Self::SetExpression(v) => match v.iter().find(|f| f.place.is_field(path)) {
+			Self::SetExpression(v) => match v.iter().find(|f| f.place.is_field(Some(path))) {
 				Some(ass) => {
 					stk.run(|stk| ass.value.compute(stk, ctx, opt, None)).await.catch_return()
 				}

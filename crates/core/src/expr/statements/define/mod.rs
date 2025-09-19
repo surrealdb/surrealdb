@@ -80,22 +80,22 @@ impl DefineStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		match self {
-			Self::Namespace(v) => v.compute(ctx, opt, doc).await,
-			Self::Database(v) => v.compute(ctx, opt, doc).await,
-			Self::Function(v) => v.compute(ctx, opt, doc).await,
+			Self::Namespace(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Database(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Function(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Param(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Table(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Event(v) => v.compute(ctx, opt, doc).await,
-			Self::Field(v) => v.compute(ctx, opt, doc).await,
+			Self::Event(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Field(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Index(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Analyzer(v) => v.compute(ctx, opt, doc).await,
-			Self::User(v) => v.compute(ctx, opt, doc).await,
-			Self::Model(v) => v.compute(ctx, opt, doc).await,
-			Self::Access(v) => v.compute(ctx, opt, doc).await,
+			Self::Analyzer(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::User(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Model(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Access(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Config(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Api(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Bucket(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Sequence(v) => v.compute(ctx, opt).await,
+			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
 		}
 	}
 }

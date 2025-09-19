@@ -48,7 +48,7 @@ enum DurationSuffix {
 	Year,
 }
 
-fn prepare_number_str(str: &str) -> Cow<str> {
+fn prepare_number_str(str: &str) -> Cow<'_, str> {
 	if str.contains('_') {
 		Cow::Owned(str.chars().filter(|x| *x != '_').collect())
 	} else {

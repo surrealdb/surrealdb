@@ -92,9 +92,13 @@ mod implementation {
 		crate::core::obs::put(&path, data).await.map_err(ResponseError)?;
 		// Insert the model in to the database
 		let model = DefineModelStatement {
-			name: Ident::new(file.header.name.to_string()).unwrap(),
+			name: Expr::Idiom(crate::core::expr::Idiom::field(
+				Ident::new(file.header.name.to_string()).unwrap(),
+			)),
 			version: file.header.version.to_string(),
-			comment: Some(file.header.description.to_string().into()),
+			comment: Some(Expr::Literal(crate::core::expr::Literal::Strand(
+				surrealdb_core::val::Strand::new(file.header.description.to_string()).unwrap(),
+			))),
 			hash,
 			..Default::default()
 		};

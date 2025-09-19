@@ -3,7 +3,7 @@ use std::fmt;
 use crate::sql::fmt::Fmt;
 use crate::sql::order::Ordering;
 use crate::sql::{
-	Cond, Explain, Expr, Fetchs, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, With,
+	Cond, Explain, Expr, Fetchs, Fields, Groups, Limit, Splits, Start, Timeout, With,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -11,7 +11,7 @@ use crate::sql::{
 pub struct SelectStatement {
 	/// The foo,bar part in SELECT foo,bar FROM baz.
 	pub expr: Fields,
-	pub omit: Option<Idioms>,
+	pub omit: Vec<Expr>,
 	pub only: bool,
 	/// The baz part in SELECT foo,bar FROM baz.
 	pub what: Vec<Expr>,
@@ -33,8 +33,8 @@ pub struct SelectStatement {
 impl fmt::Display for SelectStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SELECT {}", self.expr)?;
-		if let Some(ref v) = self.omit {
-			write!(f, " OMIT {v}")?
+		if !self.omit.is_empty() {
+			write!(f, " OMIT {}", Fmt::comma_separated(self.omit.iter()))?
 		}
 		write!(f, " FROM")?;
 		if self.only {
@@ -85,7 +85,7 @@ impl From<SelectStatement> for crate::expr::statements::SelectStatement {
 	fn from(v: SelectStatement) -> Self {
 		Self {
 			expr: v.expr.into(),
-			omit: v.omit.map(Into::into),
+			omit: v.omit.into_iter().map(Into::into).collect(),
 			only: v.only,
 			what: v.what.into_iter().map(From::from).collect(),
 			with: v.with.map(Into::into),
@@ -109,7 +109,7 @@ impl From<crate::expr::statements::SelectStatement> for SelectStatement {
 	fn from(v: crate::expr::statements::SelectStatement) -> Self {
 		Self {
 			expr: v.expr.into(),
-			omit: v.omit.map(Into::into),
+			omit: v.omit.into_iter().map(Into::into).collect(),
 			only: v.only,
 			what: v.what.into_iter().map(From::from).collect(),
 			with: v.with.map(Into::into),

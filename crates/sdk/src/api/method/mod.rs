@@ -263,7 +263,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn use_ns(&self, ns: impl Into<String>) -> UseNs<C> {
+	pub fn use_ns(&'_ self, ns: impl Into<String>) -> UseNs<'_, C> {
 		UseNs {
 			client: Cow::Borrowed(self),
 			ns: ns.into(),
@@ -282,7 +282,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn use_db(&self, db: impl Into<String>) -> UseDb<C> {
+	pub fn use_db(&'_ self, db: impl Into<String>) -> UseDb<'_, C> {
 		UseDb {
 			client: Cow::Borrowed(self),
 			ns: None,
@@ -322,7 +322,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn set(&self, key: impl Into<String>, value: impl Serialize + 'static) -> Set<C> {
+	pub fn set(&'_ self, key: impl Into<String>, value: impl Serialize + 'static) -> Set<'_, C> {
 		Set {
 			client: Cow::Borrowed(self),
 			key: key.into(),
@@ -362,7 +362,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn unset(&self, key: impl Into<String>) -> Unset<C> {
+	pub fn unset(&'_ self, key: impl Into<String>) -> Unset<'_, C> {
 		Unset {
 			client: Cow::Borrowed(self),
 			key: key.into(),
@@ -420,7 +420,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signup<R>(&self, credentials: impl Credentials<auth::Signup, R>) -> Signup<C, R> {
+	pub fn signup<R>(&'_ self, credentials: impl Credentials<auth::Signup, R>) -> Signup<'_, C, R> {
 		Signup {
 			client: Cow::Borrowed(self),
 			credentials: Serializer::new().serialize(credentials),
@@ -537,7 +537,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signin<R>(&self, credentials: impl Credentials<auth::Signin, R>) -> Signin<C, R> {
+	pub fn signin<R>(&'_ self, credentials: impl Credentials<auth::Signin, R>) -> Signin<'_, C, R> {
 		Signin {
 			client: Cow::Borrowed(self),
 			credentials: Serializer::new().serialize(credentials),
@@ -557,7 +557,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn invalidate(&self) -> Invalidate<C> {
+	pub fn invalidate(&'_ self) -> Invalidate<'_, C> {
 		Invalidate {
 			client: Cow::Borrowed(self),
 		}
@@ -576,7 +576,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn authenticate(&self, token: impl Into<Jwt>) -> Authenticate<C> {
+	pub fn authenticate(&'_ self, token: impl Into<Jwt>) -> Authenticate<'_, C> {
 		Authenticate {
 			client: Cow::Borrowed(self),
 			token: token.into(),
@@ -632,7 +632,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn query(&self, query: impl opt::IntoQuery) -> Query<C> {
+	pub fn query(&'_ self, query: impl opt::IntoQuery) -> Query<'_, C> {
 		let result = query.into_query(self).0;
 		Query {
 			txn: None,
@@ -680,7 +680,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn select<O>(&self, resource: impl IntoResource<O>) -> Select<C, O> {
+	pub fn select<O>(&'_ self, resource: impl IntoResource<O>) -> Select<'_, C, O> {
 		Select {
 			txn: None,
 			client: Cow::Borrowed(self),
@@ -736,7 +736,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn create<R>(&self, resource: impl CreateResource<R>) -> Create<C, R> {
+	pub fn create<R>(&'_ self, resource: impl CreateResource<R>) -> Create<'_, C, R> {
 		Create {
 			txn: None,
 			client: Cow::Borrowed(self),
@@ -882,7 +882,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn insert<O>(&self, resource: impl IntoResource<O>) -> Insert<C, O> {
+	pub fn insert<O>(&self, resource: impl IntoResource<O>) -> Insert<'_, C, O> {
 		Insert {
 			txn: None,
 			client: Cow::Borrowed(self),
@@ -1041,7 +1041,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn upsert<O>(&self, resource: impl IntoResource<O>) -> Upsert<C, O> {
+	pub fn upsert<O>(&'_ self, resource: impl IntoResource<O>) -> Upsert<'_, C, O> {
 		Upsert {
 			txn: None,
 			client: Cow::Borrowed(self),
@@ -1200,7 +1200,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn update<O>(&self, resource: impl IntoResource<O>) -> Update<C, O> {
+	pub fn update<O>(&'_ self, resource: impl IntoResource<O>) -> Update<'_, C, O> {
 		Update {
 			txn: None,
 			client: Cow::Borrowed(self),
@@ -1233,7 +1233,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn delete<O>(&self, resource: impl IntoResource<O>) -> Delete<C, O> {
+	pub fn delete<O>(&'_ self, resource: impl IntoResource<O>) -> Delete<'_, C, O> {
 		Delete {
 			txn: None,
 			client: Cow::Borrowed(self),
@@ -1254,7 +1254,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn version(&self) -> Version<C> {
+	pub fn version(&'_ self) -> Version<'_, C> {
 		Version {
 			client: Cow::Borrowed(self),
 		}
@@ -1280,7 +1280,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn run<R>(&self, function: impl IntoFn) -> Run<C, R> {
+	pub fn run<R>(&'_ self, function: impl IntoFn) -> Run<'_, C, R> {
 		Run {
 			client: Cow::Borrowed(self),
 			function: function.into_fn(),
@@ -1301,14 +1301,14 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn health(&self) -> Health<C> {
+	pub fn health(&'_ self) -> Health<'_, C> {
 		Health {
 			client: Cow::Borrowed(self),
 		}
 	}
 
 	/// Wait for the selected event to happen before proceeding
-	pub async fn wait_for(&self, event: WaitFor) {
+	pub async fn wait_for(&'_ self, event: WaitFor) {
 		let mut rx = self.inner.waiter.0.subscribe();
 		rx.wait_for(|current| match current {
 			// The connection hasn't been initialised yet.
@@ -1357,7 +1357,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn export<R>(&self, target: impl IntoExportDestination<R>) -> Export<C, R> {
+	pub fn export<R>(&'_ self, target: impl IntoExportDestination<R>) -> Export<'_, C, R> {
 		Export {
 			client: Cow::Borrowed(self),
 			target: target.into_export_destination(),
@@ -1388,7 +1388,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn import<P>(&self, file: P) -> Import<C>
+	pub fn import<P>(&'_ self, file: P) -> Import<'_, C>
 	where
 		P: AsRef<Path>,
 	{

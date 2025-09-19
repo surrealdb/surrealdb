@@ -1,16 +1,28 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::sql::{Ident, Timeout};
+use crate::sql::{Expr, Literal, Timeout};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineSequenceStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
-	pub batch: u32,
-	pub start: i64,
+	pub name: Expr,
+	pub batch: Expr,
+	pub start: Expr,
 	pub timeout: Option<Timeout>,
+}
+
+impl Default for DefineSequenceStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::None),
+			batch: Expr::Literal(Literal::Integer(0)),
+			start: Expr::Literal(Literal::Integer(0)),
+			timeout: None,
+		}
+	}
 }
 
 impl Display for DefineSequenceStatement {
@@ -34,8 +46,8 @@ impl From<DefineSequenceStatement> for crate::expr::statements::define::DefineSe
 		Self {
 			kind: v.kind.into(),
 			name: v.name.into(),
-			batch: v.batch,
-			start: v.start,
+			batch: v.batch.into(),
+			start: v.start.into(),
 			timeout: v.timeout.map(Into::into),
 		}
 	}
@@ -46,8 +58,8 @@ impl From<crate::expr::statements::define::DefineSequenceStatement> for DefineSe
 		DefineSequenceStatement {
 			kind: v.kind.into(),
 			name: v.name.into(),
-			batch: v.batch,
-			start: v.start,
+			batch: v.batch.into(),
+			start: v.start.into(),
 			timeout: v.timeout.map(Into::into),
 		}
 	}

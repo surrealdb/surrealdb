@@ -77,6 +77,25 @@ macro_rules! map {
     }};
 }
 
+/// Maps an optional value to a new value if the optional value is some, otherwise returns none.
+/// Useful when the computation is async
+macro_rules! map_opt {
+	($x:ident as $opt:expr => $exp:expr) => {
+		match $opt {
+			Some($x) => Some($exp),
+			None => None,
+		}
+	};
+}
+
+/// Computes a value and coerces it to a type
+macro_rules! compute_to {
+	($stk:ident, $ctx:ident, $opt:ident, $doc:ident, $x:expr => $t:ty) => {{
+		use crate::expr::FlowResultExt;
+		$stk.run(|stk| $x.compute(stk, $ctx, $opt, $doc)).await.catch_return()?.coerce_to::<$t>()?
+	}};
+}
+
 /// Extends a b-tree map of key-value pairs.
 ///
 /// This macro extends the supplied map, by cloning
@@ -197,7 +216,7 @@ mod test {
 		let Ok(Error::Unreachable(msg)) = fail_func().unwrap_err().downcast() else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:188: Reached unreachable code", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:207: Reached unreachable code", msg);
 	}
 
 	#[test]
@@ -205,7 +224,7 @@ mod test {
 		let Error::Unreachable(msg) = Error::unreachable("Reached unreachable code") else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:205: Reached unreachable code", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:224: Reached unreachable code", msg);
 	}
 
 	#[test]
@@ -213,6 +232,6 @@ mod test {
 		let Ok(Error::Unreachable(msg)) = fail_func_args().unwrap_err().downcast() else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:192: Found test but expected other", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:211: Found test but expected other", msg);
 	}
 }

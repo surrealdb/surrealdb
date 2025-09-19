@@ -31,37 +31,37 @@ where
 	}
 
 	/// See [Surreal::query]
-	pub fn query(&self, query: impl IntoQuery) -> Query<C> {
+	pub fn query(&'_ self, query: impl IntoQuery) -> Query<'_, C> {
 		self.client.query(query).with_transaction(self.id)
 	}
 
 	/// See [Surreal::select]
-	pub fn select<O>(&self, resource: impl IntoResource<O>) -> Select<C, O> {
+	pub fn select<O>(&'_ self, resource: impl IntoResource<O>) -> Select<'_, C, O> {
 		self.client.select(resource).with_transaction(self.id)
 	}
 
 	/// See [Surreal::create]
-	pub fn create<R>(&self, resource: impl CreateResource<R>) -> Create<C, R> {
+	pub fn create<R>(&'_ self, resource: impl CreateResource<R>) -> Create<'_, C, R> {
 		self.client.create(resource).with_transaction(self.id)
 	}
 
 	/// See [Surreal::insert]
-	pub fn insert<O>(&self, resource: impl IntoResource<O>) -> Insert<C, O> {
+	pub fn insert<O>(&'_ self, resource: impl IntoResource<O>) -> Insert<'_, C, O> {
 		self.client.insert(resource).with_transaction(self.id)
 	}
 
 	/// See [Surreal::upsert]
-	pub fn upsert<O>(&self, resource: impl IntoResource<O>) -> Upsert<C, O> {
+	pub fn upsert<O>(&'_ self, resource: impl IntoResource<O>) -> Upsert<'_, C, O> {
 		self.client.upsert(resource).with_transaction(self.id)
 	}
 
 	/// See [Surreal::update]
-	pub fn update<O>(&self, resource: impl IntoResource<O>) -> Update<C, O> {
+	pub fn update<O>(&'_ self, resource: impl IntoResource<O>) -> Update<'_, C, O> {
 		self.client.update(resource).with_transaction(self.id)
 	}
 
 	/// See [Surreal::delete]
-	pub fn delete<O>(&self, resource: impl IntoResource<O>) -> Delete<C, O> {
+	pub fn delete<O>(&'_ self, resource: impl IntoResource<O>) -> Delete<'_, C, O> {
 		self.client.delete(resource).with_transaction(self.id)
 	}
 }

@@ -89,7 +89,7 @@ impl AlterStatement {
 	) -> Result<Value> {
 		match self {
 			Self::Table(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Sequence(v) => v.compute(ctx, opt).await,
+			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Field(v) => v.compute(stk, ctx, opt, doc).await,
 		}
 	}

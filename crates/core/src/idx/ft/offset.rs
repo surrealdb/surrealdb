@@ -1,8 +1,11 @@
+#[cfg(test)]
 use anyhow::Result;
 use revision::revisioned;
 
+#[cfg(test)]
 use crate::err::Error;
 use crate::idx::ft::Position;
+#[cfg(test)]
 use crate::kvs::KVValue;
 
 #[revisioned(revision = 1)]
@@ -28,9 +31,11 @@ impl Offset {
 	}
 }
 
+#[cfg(test)]
 #[derive(Default, Clone, Debug, PartialEq)]
 pub(crate) struct OffsetRecords(pub(super) Vec<Offset>);
 
+#[cfg(test)]
 impl KVValue for OffsetRecords {
 	#[inline]
 	fn kv_encode_value(&self) -> Result<Vec<u8>> {
@@ -90,6 +95,8 @@ impl KVValue for OffsetRecords {
 
 #[cfg(test)]
 mod tests {
+	use bincode;
+
 	use crate::idx::ft::offset::{Offset, OffsetRecords};
 	use crate::kvs::{KVValue, Val};
 
