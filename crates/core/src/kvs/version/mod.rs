@@ -40,10 +40,10 @@ impl KVValue for MajorVersion {
 
 impl MajorVersion {
 	/// The latest version
-	pub const LATEST: u16 = 2;
+	pub const LATEST: u16 = 3;
 	/// The latest version
 	pub fn latest() -> Self {
-		Self(2)
+		Self(3)
 	}
 	/// SurrealDB version 1
 	pub fn v1() -> Self {
