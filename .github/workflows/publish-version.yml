@@ -294,12 +294,12 @@ jobs:
         run: |
           set -x
 
+          # Create a temporary branch in case the git ref is not a branch
+          git checkout -b crate
+
           extra_args=""
 
           if [[ "${{ inputs.publish }}" == "false" || "${{ inputs.nightly-release }}" == "true" ]]; then
-            # Create a temporary branch in case the git ref is not a branch
-            git checkout -b crate
-
             # Update crate version to make sure we test publishing
             # Without this, already published versions will be skipped
             sed -i "s#^version = \".*\"#version = \"0.0.0-alpha.1\"#" Cargo.toml
