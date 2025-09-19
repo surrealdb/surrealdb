@@ -43,7 +43,7 @@ impl MajorVersion {
 	pub const LATEST: u16 = 3;
 	/// The latest version
 	pub fn latest() -> Self {
-		Self(3)
+		Self(Self::LATEST)
 	}
 	/// SurrealDB version 1
 	pub fn v1() -> Self {
