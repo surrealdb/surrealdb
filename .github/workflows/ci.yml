@@ -226,6 +226,29 @@ jobs:
       - name: Check revision.lock
         run: revision-lock --check
 
+  check-docs:
+    name: Check docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: "1.86.0"
+
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Check docs
+        run: cargo make ci-docs
+
   # ----------------------------------------
   # Integration tests
   # ----------------------------------------
