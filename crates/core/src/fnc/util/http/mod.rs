@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
+#[cfg(not(target_family = "wasm"))]
 use dashmap::DashMap;
 use reqwest::header::CONTENT_TYPE;
 #[cfg(not(target_family = "wasm"))]

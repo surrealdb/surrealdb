@@ -81,7 +81,8 @@ pub async fn live_select_table(new_db: impl CreateDb) {
 		// Create a record
 		db.create(Resource::from(&table)).await.unwrap();
 		// Pull the notification
-		let notification = tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
+		let notification =
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// The returned record should be an object
 		assert!(notification.data.into_inner().is_object());
 		// It should be newly created
@@ -146,7 +147,7 @@ pub async fn live_select_record_id(new_db: impl CreateDb) {
 		db.create(Resource::from(record_id)).await.unwrap();
 		// Pull the notification
 		let notification: Notification<Value> =
-			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// The returned record should be an object
 		assert!(notification.data.into_inner().is_object());
 		// It should be newly created
@@ -215,7 +216,7 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 
 		// Pull the notification
 		let notification: Notification<Value> =
-			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// The returned record should be an object
 		assert!(notification.data.into_inner().is_object());
 		// It should be newly created
@@ -230,7 +231,7 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 
 		// Pull the notification
 		let notification: Notification<Value> =
-			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 
 		// It should be deleted
 		assert_eq!(notification.action, Action::Delete);
@@ -320,7 +321,8 @@ pub async fn live_select_query(new_db: impl CreateDb) {
 		// Create a record
 		db.create(Resource::from(&table)).await.unwrap();
 		// Pull the notification
-		let notification = tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
+		let notification =
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 
 		// The returned record should be an object
 		assert!(notification.data.into_inner().is_object());
@@ -385,7 +387,8 @@ pub async fn live_select_query(new_db: impl CreateDb) {
 		// Create a record
 		db.create(Resource::from(&table)).await.unwrap();
 		// Pull the notification
-		let notification = tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
+		let notification =
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// The returned record should be an object
 		assert!(notification.data.into_inner().is_object());
 		// It should be newly created
@@ -404,17 +407,20 @@ pub async fn live_query_delete_notifications(new_db: impl CreateDb) {
 		db.query("LIVE SELECT foo FROM bar").await.unwrap().stream::<Value>(0).unwrap();
 
 	db.query("CREATE bar CONTENT { foo: 'baz' }").await.unwrap().check().unwrap();
-	let notification = tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.unwrap().unwrap();
+	let notification =
+		tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.unwrap().unwrap().unwrap();
 	assert_eq!(notification.data, "{ foo: 'baz' }".parse().unwrap());
 	assert_eq!(notification.action, Action::Create);
 
 	db.query("UPDATE bar MERGE { data: 123 }").await.unwrap().check().unwrap();
-	let notification = tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.unwrap().unwrap();
+	let notification =
+		tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.unwrap().unwrap().unwrap();
 	assert_eq!(notification.data, "{ foo: 'baz' }".parse().unwrap());
 	assert_eq!(notification.action, Action::Update);
 
 	db.query("DELETE bar").await.unwrap().check().unwrap();
-	let notification = tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.unwrap().unwrap();
+	let notification =
+		tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.unwrap().unwrap().unwrap();
 	assert_eq!(notification.data, "{ foo: 'baz' }".parse().unwrap());
 	assert_eq!(notification.action, Action::Delete);
 
