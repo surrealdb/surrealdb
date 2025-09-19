@@ -1,8 +1,9 @@
 //! Unique index states
 
-use anyhow::Result;
 use std::borrow::Cow;
 use std::ops::Range;
+
+use anyhow::Result;
 use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 

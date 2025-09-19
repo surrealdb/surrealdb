@@ -2,6 +2,9 @@ use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::Arc;
 
+use anyhow::{Result, bail};
+use radix_trie::Trie;
+
 use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId};
 use crate::ctx::Context;
 use crate::err::Error;
@@ -15,8 +18,6 @@ use crate::key::index::iu::Iu;
 use crate::kvs::{KVKey, Key, Transaction, Val};
 use crate::val::record::Record;
 use crate::val::{Array, RecordId, Value};
-use anyhow::{Result, bail};
-use radix_trie::Trie;
 
 pub(crate) type IteratorRef = usize;
 

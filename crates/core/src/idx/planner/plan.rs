@@ -1,3 +1,10 @@
+use std::collections::hash_map::Entry;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::hash::Hash;
+use std::sync::Arc;
+
+use anyhow::Result;
+
 use crate::catalog::Index;
 use crate::expr::operator::{MatchesOperator, NearestNeighbor};
 use crate::expr::with::With;
@@ -8,11 +15,6 @@ use crate::idx::planner::tree::{
 use crate::idx::planner::{GrantedPermission, RecordStrategy, ScanDirection, StatementContext};
 use crate::sql::ToSql;
 use crate::val::{Array, Number, Object, Value};
-use anyhow::Result;
-use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::hash::Hash;
-use std::sync::Arc;
 
 /// The `PlanBuilder` struct represents a builder for constructing query plans.
 pub(super) struct PlanBuilder {

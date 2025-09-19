@@ -1,6 +1,8 @@
-use super::Expr;
-use revision::revisioned;
 use std::fmt;
+
+use revision::revisioned;
+
+use super::Expr;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
