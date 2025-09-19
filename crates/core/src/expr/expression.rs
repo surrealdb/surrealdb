@@ -1,7 +1,6 @@
 use std::fmt;
 use std::ops::Bound;
 
-use reblessive::Stack;
 use reblessive::tree::Stk;
 use revision::Revisioned;
 
@@ -10,7 +9,6 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::Pretty;
 use crate::expr::operator::BindingPower;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::statements::{
@@ -20,11 +18,12 @@ use crate::expr::statements::{
 	UpsertStatement,
 };
 use crate::expr::{
-	BinaryOperator, Block, Constant, ControlFlow, FlowResult, FunctionCall, Ident, Idiom, Literal,
-	Mock, Param, PostfixOperator, PrefixOperator,
+	BinaryOperator, Block, Constant, ControlFlow, FlowResult, FunctionCall, Idiom, Literal, Mock,
+	Param, PostfixOperator, PrefixOperator,
 };
+use crate::fmt::{EscapeIdent, Pretty};
 use crate::fnc;
-use crate::val::{Array, Closure, Range, Strand, Value};
+use crate::val::{Array, Closure, Range, Table, Value};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Expr {
@@ -32,7 +31,7 @@ pub enum Expr {
 	Param(Param),
 	Idiom(Idiom),
 	// Maybe move into Literal?
-	Table(Ident),
+	Table(String),
 	// This type can probably be removed in favour of range expressions.
 	Mock(Mock),
 	Block(Box<Block>),
@@ -185,15 +184,14 @@ impl Expr {
 	pub(crate) fn to_idiom(&self) -> Idiom {
 		match self {
 			Expr::Idiom(i) => i.simplify(),
-			Expr::Param(i) => Idiom::field(i.clone().ident()),
+			Expr::Param(i) => Idiom::field(i.as_str().to_owned()),
 			Expr::FunctionCall(x) => x.receiver.to_idiom(),
 			Expr::Literal(l) => match l {
-				Literal::Strand(s) => Idiom::field(Ident::from_strand(s.clone())),
-				// TODO: Null byte validity
-				Literal::Datetime(d) => Idiom::field(Ident::new(d.into_raw_string()).unwrap()),
-				x => Idiom::field(Ident::new(x.to_string()).unwrap()),
+				Literal::String(s) => Idiom::field(s.clone()),
+				Literal::Datetime(d) => Idiom::field(d.into_raw_string()),
+				x => Idiom::field(x.to_string()),
 			},
-			x => Idiom::field(Ident::new(x.to_string()).unwrap()),
+			x => Idiom::field(x.to_string()),
 		}
 	}
 
@@ -231,7 +229,7 @@ impl Expr {
 				param.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Idiom(idiom) => idiom.compute(stk, ctx, &opt, doc).await,
-			Expr::Table(ident) => Ok(Value::Table(ident.clone().into())),
+			Expr::Table(ident) => Ok(Value::Table(Table::new(ident.clone()))),
 			Expr::Mock(mock) => {
 				// NOTE(value pr): This is a breaking change but makes the most sense without
 				// having mock be part of the Value type.
@@ -622,7 +620,7 @@ impl Expr {
 	pub(crate) fn to_raw_string(&self) -> String {
 		match self {
 			Expr::Idiom(idiom) => idiom.to_raw_string(),
-			Expr::Table(ident) => ident.to_raw_string(),
+			Expr::Table(ident) => ident.clone(),
 			_ => self.to_string(),
 		}
 	}
@@ -636,7 +634,7 @@ impl fmt::Display for Expr {
 			Expr::Literal(literal) => write!(f, "{literal}"),
 			Expr::Param(param) => write!(f, "{param}"),
 			Expr::Idiom(idiom) => write!(f, "{idiom}"),
-			Expr::Table(ident) => write!(f, "{ident}"),
+			Expr::Table(ident) => write!(f, "{}", EscapeIdent(ident)),
 			Expr::Mock(mock) => write!(f, "{mock}"),
 			Expr::Block(block) => write!(f, "{block}"),
 			Expr::Constant(constant) => write!(f, "{constant}"),
@@ -731,8 +729,7 @@ impl fmt::Display for Expr {
 
 impl InfoStructure for Expr {
 	fn structure(self) -> Value {
-		// TODO: null byte validity
-		Strand::new(self.to_string()).unwrap().into()
+		self.to_string().into()
 	}
 }
 
@@ -752,12 +749,18 @@ impl Revisioned for Expr {
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
 		let query: String = Revisioned::deserialize_revisioned(reader)?;
 
-		let mut stack = Stack::new();
-		let mut parser = crate::syn::parser::Parser::new_with_experimental(query.as_bytes(), true);
-		let expr = stack
-			.enter(|stk| parser.parse_expr(stk))
-			.finish()
-			.map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
+		let expr = crate::syn::parse_with_settings(
+			query.as_bytes(),
+			crate::syn::parser::ParserSettings {
+				references_enabled: true,
+				bearer_access_enabled: true,
+				define_api_enabled: true,
+				files_enabled: true,
+				..Default::default()
+			},
+			async |p, stk| p.parse_expr(stk).await,
+		)
+		.map_err(|err| revision::Error::Conversion(err.to_string()))?;
 		Ok(expr.into())
 	}
 }

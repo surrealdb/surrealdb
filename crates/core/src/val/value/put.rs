@@ -20,7 +20,7 @@ impl Value {
 						}
 					}
 					Part::Field(f) => {
-						let entry = v.entry(f.to_raw_string()).or_insert_with(Value::empty_object);
+						let entry = v.entry(f.clone()).or_insert_with(Value::empty_object);
 						entry.put(path.next(), val);
 					}
 					Part::All => {

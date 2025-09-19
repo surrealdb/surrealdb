@@ -21,7 +21,7 @@ impl Parser<'_> {
 					Expr::Param(param)
 				}
 				_ => {
-					let table = self.next_token_value()?;
+					let table = self.parse_ident()?;
 					Expr::Table(table)
 				}
 			};

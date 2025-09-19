@@ -3,6 +3,12 @@ mod flatbuffers;
 
 pub use surrealdb_protocol::{TryFromValue, TryIntoValue};
 
+// NOTE: If performance is ever a problem, the implementation of this trait is a
+// good candidate for using a bump allocator.
+//
+// Most vectors are of a specific size and don't need to resize they are also all short lived
+// used only within the function.
+//
 /// Trait for converting a type to a flatbuffers builder type.
 pub trait ToFlatbuffers {
 	type Output<'bldr>;

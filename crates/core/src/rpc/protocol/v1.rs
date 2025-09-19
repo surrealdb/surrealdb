@@ -14,15 +14,15 @@ use crate::rpc::args::extract_args;
 use crate::rpc::{Data, Method, RpcContext, RpcError};
 use crate::sql::{
 	Ast, CreateStatement, Data as SqlData, DeleteStatement, Expr, Fields, Function, FunctionCall,
-	Ident, InsertStatement, KillStatement, LiveStatement, Model, Output, Param, RelateStatement,
+	InsertStatement, KillStatement, LiveStatement, Model, Output, Param, RelateStatement,
 	SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
-use crate::val::{Array, Object, RecordIdKey, Strand, Value};
+use crate::val::{Array, Object, RecordIdKey, Value};
 
-/// utility function converting a `Value::Strand` into a `Expr::Table`
+/// utility function converting a `Value::String` into a `Expr::Table`
 fn value_to_table(value: Value) -> Expr {
 	match value {
-		Value::Strand(s) => Expr::Table(Ident::from_strand(s)),
+		Value::String(s) => Expr::Table(s),
 		x => x.into_literal().into(),
 	}
 }
@@ -111,13 +111,13 @@ pub trait RpcProtocolV1: RpcContext {
 		match ns {
 			Value::None => (),
 			Value::Null => session.ns = None,
-			Value::Strand(ns) => {
+			Value::String(ns) => {
 				let tx =
 					self.kvs().transaction(TransactionType::Write, LockType::Optimistic).await?;
 				tx.get_or_add_ns(&ns, self.kvs().is_strict_mode()).await?;
 				tx.commit().await?;
 
-				session.ns = Some(ns.into_string())
+				session.ns = Some(ns)
 			}
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
@@ -129,13 +129,13 @@ pub trait RpcProtocolV1: RpcContext {
 		match db {
 			Value::None => (),
 			Value::Null => session.db = None,
-			Value::Strand(db) => {
+			Value::String(db) => {
 				let ns = session.ns.clone().unwrap();
 				let tx =
 					self.kvs().transaction(TransactionType::Write, LockType::Optimistic).await?;
 				tx.ensure_ns_db(&ns, &db, self.kvs().is_strict_mode()).await?;
 				tx.commit().await?;
-				session.db = Some(db.into_string())
+				session.db = Some(db)
 			}
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
@@ -172,13 +172,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Attempt signup, mutating the session
 		let out: Result<Value> = crate::iam::signup::signup(self.kvs(), &mut session, params)
 			.await
-			// TODO: Null byte validity
-			.map(|v| {
-				v.token
-					.clone()
-					.map(|x| Value::Strand(Strand::new(x).unwrap()))
-					.unwrap_or(Value::None)
-			});
+			.map(|v| v.token.clone().map(Value::String).unwrap_or(Value::None));
 
 		// Store the updated session
 		self.set_session(Arc::new(session));
@@ -205,8 +199,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Attempt signin, mutating the session
 		let out: Result<Value> = crate::iam::signin::signin(self.kvs(), &mut session, params)
 			.await
-			// TODO: Null byte validity
-			.map(|v| Strand::new(v.token.clone()).unwrap().into());
+			.map(|v| v.token.clone().into());
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -218,7 +211,7 @@ pub trait RpcProtocolV1: RpcContext {
 	async fn authenticate(&self, params: Array) -> Result<Data, RpcError> {
 		tracing::debug!("authenticate");
 		// Process the method arguments
-		let Some(Value::Strand(token)) = extract_args(params.0) else {
+		let Some(Value::String(token)) = extract_args(params.0) else {
 			return Err(RpcError::InvalidParams("Expected (token:string)".to_string()));
 		};
 		// Get the context lock
@@ -283,7 +276,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// ------------------------------
 
 	async fn info(&self) -> Result<Data, RpcError> {
-		let what = vec![Expr::Param(Param::from_strand(strand!("auth").to_owned()))];
+		let what = vec![Expr::Param(Param::new("auth".to_owned()))];
 
 		// TODO: Check if this can be replaced by just evaluating the param or a
 		// `$auth.*` expression
@@ -325,7 +318,7 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Some((Value::Strand(key), val)) = extract_args::<(Value, Option<Value>)>(params.0)
+		let Some((Value::String(key), val)) = extract_args::<(Value, Option<Value>)>(params.0)
 		else {
 			return Err(RpcError::InvalidParams("Expected (key:string, value:Value)".to_string()));
 		};
@@ -345,7 +338,7 @@ pub trait RpcProtocolV1: RpcContext {
 			None | Some(Value::None) => session.variables.remove(key.as_str()),
 			Some(val) => {
 				crate::rpc::check_protected_param(&key)?;
-				session.variables.insert(key.into_string(), val)
+				session.variables.insert(key, val)
 			}
 		}
 		self.set_session(Arc::new(session));
@@ -362,7 +355,7 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Some(Value::Strand(key)) = extract_args(params.0) else {
+		let Some(Value::String(key)) = extract_args(params.0) else {
 			return Err(RpcError::InvalidParams("Expected (key)".to_string()));
 		};
 
@@ -414,7 +407,7 @@ pub trait RpcProtocolV1: RpcContext {
 
 		// If value is a strand, handle it as if it was a table.
 		let what = match what {
-			Value::Strand(x) => Expr::Table(Ident::from_strand(x)),
+			Value::String(x) => Expr::Table(x),
 			x => x.into_literal().into(),
 		};
 
@@ -463,7 +456,7 @@ pub trait RpcProtocolV1: RpcContext {
 
 		// If value is a strand, handle it as if it was a table.
 		let what = match what {
-			Value::Strand(x) => Expr::Table(Ident::from_strand(x)),
+			Value::String(x) => Expr::Table(x),
 			x => x.into_literal().into(),
 		};
 
@@ -515,7 +508,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
 
 		let into = match what {
-			Value::Strand(x) => Some(Expr::Table(Ident::from_strand(x))),
+			Value::String(x) => Some(Expr::Table(x)),
 			x => {
 				if x.is_nullish() {
 					None
@@ -556,7 +549,7 @@ pub trait RpcProtocolV1: RpcContext {
 
 		let what = match what {
 			Value::Null | Value::None => None,
-			Value::Strand(x) => Some(Expr::Table(Ident::from_strand(x))),
+			Value::String(x) => Some(Expr::Table(x)),
 			x => Some(x.into_literal().into()),
 		};
 
@@ -601,7 +594,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
 
 		let only = match what {
-			Value::Strand(_) | Value::Table(_) => true,
+			Value::String(_) | Value::Table(_) => true,
 			Value::RecordId(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
 			_ => false,
 		};
@@ -965,7 +958,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let (query, vars) = extract_args::<(Value, Option<Value>)>(params.0)
 			.ok_or(RpcError::InvalidParams("Expected (query:string, vars:object)".to_string()))?;
 
-		let Value::Strand(query) = query else {
+		let Value::String(query) = query else {
 			return Err(RpcError::InvalidParams("Expected query to be string".to_string()));
 		};
 
@@ -1003,7 +996,7 @@ pub trait RpcProtocolV1: RpcContext {
 			))?;
 		// Parse the function name argument
 		let name = match name {
-			Value::Strand(v) => v.into_string(),
+			Value::String(v) => v,
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
 					"Expected name to be string, got {unexpected:?}"
@@ -1012,7 +1005,7 @@ pub trait RpcProtocolV1: RpcContext {
 		};
 		// Parse any function version argument
 		let version = match version {
-			Some(Value::Strand(v)) => Some(v.into_string()),
+			Some(Value::String(v)) => Some(v),
 			None | Some(Value::None | Value::Null) => None,
 			unexpected => {
 				return Err(RpcError::InvalidParams(format!(
@@ -1110,7 +1103,7 @@ pub trait RpcProtocolV1: RpcContext {
 				for (k, v) in o {
 					match (k.as_str(), v) {
 						("pretty", SqlValue::Bool(b)) => pretty = b,
-						("format", SqlValue::Strand(s)) => match s.as_str() {
+						("format", SqlValue::String(s)) => match s.as_str() {
 							"json" => format = GraphQLFormat::Json,
 							_ => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.0))),
 						},
@@ -1126,7 +1119,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Process the graphql query argument
 		let req = match query {
 			// It is a string, so parse the query
-			SqlValue::Strand(s) => match format {
+			SqlValue::String(s) => match format {
 				GraphQLFormat::Json => {
 					let tmp: BatchRequest =
 						serde_json::from_str(s.as_str()).map_err(|_| RpcError::ParseError)?;
@@ -1137,7 +1130,7 @@ pub trait RpcProtocolV1: RpcContext {
 			SqlValue::Object(mut o) => {
 				// We expect a `query` key with the graphql query
 				let mut tmp = match o.remove("query") {
-					Some(SqlValue::Strand(s)) => async_graphql::Request::new(s),
+					Some(SqlValue::String(s)) => async_graphql::Request::new(s),
 					_ => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.0))),
 				};
 				// We can accept a `variables` key with graphql variables
@@ -1153,7 +1146,7 @@ pub trait RpcProtocolV1: RpcContext {
 				}
 				// We can accept an `operation` key with a graphql operation name
 				match o.remove("operationName").or(o.remove("operation")) {
-					Some(SqlValue::Strand(s)) => tmp = tmp.operation_name(s),
+					Some(SqlValue::String(s)) => tmp = tmp.operation_name(s),
 					Some(_) => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.0))),
 					None => {}
 				}
@@ -1182,7 +1175,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		.ok_or(RpcError::Thrown("Serialization Error".to_string()))?;
 		// Output the graphql response
-		Ok(Value::Strand(out.into()).into())
+		Ok(Value::String(out.into()).into())
 			*/
 	}
 }

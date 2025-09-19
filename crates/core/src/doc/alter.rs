@@ -39,7 +39,7 @@ impl Document {
 				let existing_id = self.current.doc.as_ref().pick(&*ID);
 				if !existing_id.is_none() {
 					// The document already has an ID, use it
-					let id = existing_id.generate(tb.clone().into_strand(), false)?;
+					let id = existing_id.generate(tb.clone(), false)?;
 					self.id = Some(Arc::new(id));
 					return Ok(());
 				}
@@ -48,14 +48,14 @@ impl Document {
 				let id = match stm.data() {
 					// There is a data clause so fetch a record id
 					Some(data) => match data.rid(stk, ctx, opt).await? {
-						Value::None => RecordId::random_for_table(tb.clone().into_string()),
+						Value::None => RecordId::random_for_table(tb.clone()),
 						// Generate a new id from the id field
 						// TODO: Handle null byte
-						id => id.generate(tb.clone().into_strand(), false)?,
+						id => id.generate(tb.clone(), false)?,
 						// Generate a new random table id
 					},
 					// There is no data clause so create a record id
-					None => RecordId::random_for_table(tb.clone().into_string()),
+					None => RecordId::random_for_table(tb.clone()),
 				};
 				// The id field can not be a record range
 				ensure!(

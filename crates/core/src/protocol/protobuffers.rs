@@ -36,7 +36,7 @@ impl TryFrom<ValueProto> for Value {
 			ValueInner::Uint64(v) => Value::Number(v.into()),
 			ValueInner::Float64(v) => Value::Number(v.into()),
 			ValueInner::Decimal(v) => Value::Number(Number::Decimal(v.try_into()?)),
-			ValueInner::String(v) => Value::Strand(v.into()),
+			ValueInner::String(v) => Value::String(v.into()),
 			ValueInner::Duration(v) => Value::Duration(v.into()),
 			ValueInner::Datetime(v) => Value::Datetime(v.try_into()?),
 			ValueInner::Uuid(v) => Value::Uuid(v.try_into()?),
@@ -73,7 +73,7 @@ impl TryFrom<Value> for ValueProto {
 				Number::Float(float) => ValueInner::Float64(float),
 				Number::Decimal(decimal) => ValueInner::Decimal(decimal.try_into()?),
 			},
-			Value::Strand(strand) => ValueInner::String(strand.into()),
+			Value::String(strand) => ValueInner::String(strand.into()),
 			Value::Duration(duration) => ValueInner::Duration(DurationProto {
 				seconds: duration.0.as_secs() as i64,
 				nanos: duration.0.subsec_nanos() as i32,

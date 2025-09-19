@@ -8,7 +8,8 @@ use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Base, Ident, Timeout, Value};
+use crate::expr::{Base, Timeout, Value};
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
@@ -16,7 +17,7 @@ use crate::key::sequence::Prefix;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineSequenceStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub batch: u32,
 	pub start: i64,
 	pub timeout: Option<Timeout>,
@@ -54,7 +55,7 @@ impl DefineSequenceStatement {
 		// Process the statement
 		let key = Sq::new(db.namespace_id, db.database_id, &self.name);
 		let sq = SequenceDefinition {
-			name: self.name.to_raw_string(),
+			name: self.name.clone(),
 			batch: self.batch,
 			start: self.start,
 			timeout: self.timeout.as_ref().map(|t| *t.as_std_duration()),
@@ -83,7 +84,7 @@ impl Display for DefineSequenceStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} BATCH {} START {}", self.name, self.batch, self.start)?;
+		write!(f, " {} BATCH {} START {}", EscapeIdent(&self.name), self.batch, self.start)?;
 		if let Some(ref v) = self.timeout {
 			write!(f, " {v}")?
 		}

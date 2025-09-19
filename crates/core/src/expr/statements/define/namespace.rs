@@ -9,16 +9,17 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Ident};
+use crate::expr::Base;
+use crate::fmt::{EscapeIdent, QuoteStr};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineNamespaceStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
-	pub name: Ident,
-	pub comment: Option<Strand>,
+	pub name: String,
+	pub comment: Option<String>,
 }
 
 impl DefineNamespaceStatement {
@@ -54,8 +55,8 @@ impl DefineNamespaceStatement {
 		// Process the statement
 		let ns_def = NamespaceDefinition {
 			namespace_id,
-			name: self.name.to_raw_string(),
-			comment: self.comment.clone().map(|c| c.into_string()),
+			name: self.name.clone(),
+			comment: self.comment.clone(),
 		};
 		txn.put_ns(ns_def).await?;
 		// Clear the cache
@@ -73,9 +74,9 @@ impl Display for DefineNamespaceStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", QuoteStr(v))?
 		}
 		Ok(())
 	}

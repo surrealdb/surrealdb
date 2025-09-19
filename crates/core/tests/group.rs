@@ -2,8 +2,8 @@ mod helpers;
 use anyhow::Result;
 use helpers::{new_ds, skip_ok};
 use surrealdb_core::dbs::Session;
+use surrealdb_core::syn;
 use surrealdb_core::val::RecordId;
-use surrealdb_core::{strand, syn};
 
 use crate::helpers::Test;
 
@@ -373,7 +373,7 @@ async fn select_count_group_all_permissions(
 			"test",
 			"test",
 			"test",
-			RecordId::new("table".to_owned(), strand!("baz").to_owned()).into(),
+			RecordId::new("table".to_owned(), "baz".to_owned()).into(),
 		),
 		sql,
 	)
@@ -594,7 +594,7 @@ async fn select_count_range_keys_only_permissions(
 			"test",
 			"test",
 			"test",
-			RecordId::new("table".to_owned(), strand!("me").to_owned()).into(),
+			RecordId::new("table".to_owned(), "me".to_owned()).into(),
 		),
 		sql,
 	)

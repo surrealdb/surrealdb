@@ -20,7 +20,7 @@ use crate::expr::statements::ifelse::IfelseStatement;
 use crate::expr::statements::upsert::UpsertStatement;
 use crate::expr::{
 	AssignOperator, BinaryOperator, Cond, Data, Expr, Field, Fields, FlowResultExt as _, Function,
-	FunctionCall, Groups, Ident, Idiom, Literal, Part,
+	FunctionCall, Groups, Idiom, Literal, Part,
 };
 use crate::val::record::FieldStats;
 use crate::val::{Array, RecordId, RecordIdKey, TryAdd, TrySub, Value};
@@ -1054,7 +1054,7 @@ impl Document {
 					if *count > 0 {
 						let mean_value = Value::from(*sum / rust_decimal::Decimal::from(*count));
 						// Convert field name to Parts array for put method
-						let parts = vec![Part::field(field_name.clone()).unwrap()];
+						let parts = vec![Part::Field(field_name.clone())];
 						record.data.to_mut().put(&parts, mean_value);
 					}
 				}
@@ -1070,7 +1070,7 @@ impl Document {
 						| FieldStatsDelta::MeanSub { .. }
 						| FieldStatsDelta::MeanUpdate { .. }
 				) {
-					let parts = vec![Part::field(field_name.clone()).unwrap()];
+					let parts = vec![Part::Field(field_name.clone())];
 					record.data.to_mut().put(&parts, Value::None);
 				}
 			}
@@ -1724,12 +1724,7 @@ impl Document {
 		let group_select = Expr::Select(Box::new(SelectStatement {
 			expr: Fields::Select(vec![field.clone()]),
 			cond,
-			what: fdc
-				.view
-				.what
-				.iter()
-				.map(|x| Expr::Table(unsafe { Ident::new_unchecked(x.clone()) }))
-				.collect(),
+			what: fdc.view.what.iter().map(|x| Expr::Table(x.clone())).collect(),
 			group: Some(fdc.groups.clone()),
 			..SelectStatement::default()
 		}));
@@ -1793,12 +1788,7 @@ impl Document {
 		let group_select = Expr::Select(Box::new(SelectStatement {
 			expr: Fields::Select(vec![field.clone()]),
 			cond,
-			what: fdc
-				.view
-				.what
-				.iter()
-				.map(|x| Expr::Table(unsafe { Ident::new_unchecked(x.clone()) }))
-				.collect(),
+			what: fdc.view.what.iter().map(|x| Expr::Table(x.clone())).collect(),
 			group: Some(fdc.groups.clone()),
 			..SelectStatement::default()
 		}));
