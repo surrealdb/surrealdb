@@ -13,15 +13,6 @@ check-deps:
 		exit 1; \
 	}
 
-.PHONY: install-linux-deps
-install-linux-deps:
-	@cd `mktemp -d` \
-	&& curl -LJO https://github.com/sagiegurari/cargo-make/releases/download/0.37.24/cargo-make-v0.37.24-x86_64-unknown-linux-gnu.zip \
-	&& unzip -q cargo-make-*.zip \
-	&& chmod +x cargo-make-*/cargo-make \
-	&& sudo mv cargo-make-*/cargo-make /usr/bin/cargo-make \
-	&& cd -
-
 .PHONY: setup
 setup: check-deps
 	cargo make setup
