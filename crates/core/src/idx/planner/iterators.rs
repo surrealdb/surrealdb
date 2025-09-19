@@ -2,9 +2,6 @@ use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::Arc;
 
-use anyhow::{Result, bail};
-use radix_trie::Trie;
-
 use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId};
 use crate::ctx::Context;
 use crate::err::Error;
@@ -14,9 +11,12 @@ use crate::idx::planner::plan::RangeValue;
 use crate::idx::planner::tree::IndexReference;
 use crate::idx::seqdocids::DocId;
 use crate::key::index::Index;
+use crate::key::index::iu::Iu;
 use crate::kvs::{KVKey, Key, Transaction, Val};
 use crate::val::record::Record;
 use crate::val::{Array, RecordId, Value};
+use anyhow::{Result, bail};
+use radix_trie::Trie;
 
 pub(crate) type IteratorRef = usize;
 
@@ -121,6 +121,7 @@ pub(crate) enum ThingIterator {
 	IndexRangeReverse(IndexRangeReverseThingIterator),
 	IndexUnion(IndexUnionThingIterator),
 	IndexJoin(Box<IndexJoinThingIterator>),
+	IndexCount(IndexCountThingIterator),
 	UniqueEqual(UniqueEqualThingIterator),
 	UniqueRange(UniqueRangeThingIterator),
 	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
@@ -158,6 +159,9 @@ impl ThingIterator {
 			Self::Knn(i) => i.next_batch(ctx, size).await,
 			Self::IndexJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
+			Self::IndexCount(_) => bail!(Error::Unreachable(
+				"IndexCount should not be used with next_batch".to_string()
+			)),
 		}
 	}
 
@@ -186,6 +190,7 @@ impl ThingIterator {
 			Self::Knn(i) => i.next_count(ctx, size).await,
 			Self::IndexJoin(i) => Box::pin(i.next_count(ctx, txn, size)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_count(ctx, txn, size)).await,
+			Self::IndexCount(i) => i.next_count(ctx, txn, size).await,
 		}
 	}
 }
@@ -1661,5 +1666,30 @@ impl KnnIterator {
 			}
 		}
 		Ok(count)
+	}
+}
+
+pub(crate) struct IndexCountThingIterator(Option<Range<Vec<u8>>>);
+
+impl IndexCountThingIterator {
+	pub(super) fn new(ns: NamespaceId, db: DatabaseId, ix: &IndexDefinition) -> Result<Self> {
+		Ok(Self(Some(Iu::range(ns, db, &ix.table_name, ix.index_id)?)))
+	}
+	async fn next_count(&mut self, ctx: &Context, txn: &Transaction, _limit: u32) -> Result<usize> {
+		if let Some(range) = self.0.take() {
+			let mut count: i64 = 0;
+			for (i, key) in txn.keys(range, u32::MAX, None).await?.into_iter().enumerate() {
+				ctx.is_done(i % 1000 == 0).await?;
+				let iu = Iu::decode_key(&key)?;
+				if iu.pos {
+					count += iu.count as i64;
+				} else {
+					count -= iu.count as i64;
+				}
+			}
+			Ok(count as usize)
+		} else {
+			Ok(0)
+		}
 	}
 }

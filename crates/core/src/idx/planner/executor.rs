@@ -20,10 +20,10 @@ use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
 use crate::idx::ft::highlighter::HighlightParams;
 use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
-	IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
-	IndexUnionThingIterator, IteratorRecord, IteratorRef, KnnIterator, KnnIteratorResult,
-	MatchesThingIterator, ThingIterator, UniqueEqualThingIterator, UniqueJoinThingIterator,
-	UniqueRangeThingIterator, UniqueUnionThingIterator,
+	IndexCountThingIterator, IndexEqualThingIterator, IndexJoinThingIterator,
+	IndexRangeThingIterator, IndexUnionThingIterator, IteratorRecord, IteratorRef, KnnIterator,
+	KnnIteratorResult, MatchesThingIterator, ThingIterator, UniqueEqualThingIterator,
+	UniqueJoinThingIterator, UniqueRangeThingIterator, UniqueUnionThingIterator,
 };
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 use crate::idx::planner::iterators::{
@@ -550,6 +550,11 @@ impl QueryExecutor {
 					ranges,
 				)?))
 			}
+			IndexOperator::Count => Some(ThingIterator::IndexCount(IndexCountThingIterator::new(
+				ns,
+				db,
+				io.index_reference(),
+			)?)),
 			_ => None,
 		})
 	}

@@ -1,12 +1,14 @@
 //! Unique index states
 
+use anyhow::Result;
 use std::borrow::Cow;
+use std::ops::Range;
 use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_kv_key_storekey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Iu<'a> {
@@ -63,10 +65,27 @@ impl<'a> Iu<'a> {
 			count,
 		}
 	}
+
+	pub(crate) fn decode_key(k: &[u8]) -> Result<Iu<'_>> {
+		Ok(storekey::decode_borrow(k)?)
+	}
+
+	pub(crate) fn range(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a str,
+		ix: IndexId,
+	) -> Result<Range<Vec<u8>>> {
+		let mut beg = Prefix::new(ns, db, tb, ix).encode_key()?;
+		let mut end = beg.clone();
+		beg.push(0);
+		end.push(0xff);
+		Ok(beg..end)
+	}
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Encode, BorrowDecode)]
-struct _Prefix<'a> {
+struct Prefix<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -81,10 +100,10 @@ struct _Prefix<'a> {
 	_g: u8,
 }
 
-impl_kv_key_storekey!(_Prefix<'_> => Vec<u8>);
+impl_kv_key_storekey!(Prefix<'_> => Vec<u8>);
 
-impl<'a> _Prefix<'a> {
-	fn _new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
+impl<'a> Prefix<'a> {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -136,9 +155,12 @@ mod tests {
 	}
 
 	#[test]
-	fn prefix() {
-		let val = _Prefix::_new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3));
-		let enc = _Prefix::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\0\0\0\x03!iu", "prefix");
+	fn range() {
+		let r = Iu::range(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3)).unwrap();
+		assert_eq!(
+			r.start, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\0\0\0\x03!iu\0",
+			"start"
+		);
+		assert_eq!(r.end, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\0\0\0\x03!iu\xff", "end");
 	}
 }
