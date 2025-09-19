@@ -138,7 +138,6 @@ let map = object! {
 #### Requirements
 
 - All fields must implement the `SurrealValue` trait
-- You need to have `anyhow` in your dependencies, as the `SurrealValue` trait uses it for error handling.
 
 ```rust
 use surrealdb_types::SurrealValue;
