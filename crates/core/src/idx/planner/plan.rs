@@ -1,9 +1,9 @@
-use crate::catalog::{Index, IndexId};
+use crate::catalog::Index;
 use crate::expr::operator::{MatchesOperator, NearestNeighbor};
 use crate::expr::with::With;
 use crate::expr::{BinaryOperator, Expr, Idiom};
 use crate::idx::planner::tree::{
-	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node, SchemaCache,
+	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node, WithIndexes,
 };
 use crate::idx::planner::{GrantedPermission, RecordStrategy, ScanDirection, StatementContext};
 use crate::sql::ToSql;
@@ -21,7 +21,7 @@ pub(super) struct PlanBuilder {
 	/// List of expressions that are not ranges, backed by an index
 	non_range_indexes: Vec<(Arc<Expr>, IndexOption)>,
 	/// List of indexes allowed in this plan
-	with_indexes: Option<Vec<IndexId>>,
+	with_indexes: WithIndexes,
 	/// Group each possible optimisation local to a SubQuery
 	groups: BTreeMap<GroupRef, Group>, /* The order matters because we want the plan to be
 	                                    * consistent across repeated queries. */
@@ -30,10 +30,10 @@ pub(super) struct PlanBuilder {
 pub(super) struct PlanBuilderParameters {
 	pub(super) root: Option<Node>,
 	pub(super) gp: GrantedPermission,
-	pub(super) schema: Option<SchemaCache>,
 	pub(super) compound_indexes: CompoundIndexes,
 	pub(super) order_limit: Option<IndexOption>,
-	pub(super) with_indexes: Option<Vec<IndexId>>,
+	pub(super) index_count: Option<IndexOption>,
+	pub(super) with_indexes: WithIndexes,
 	pub(super) all_and: bool,
 	pub(super) all_expressions_with_index: bool,
 	pub(super) all_and_groups: HashMap<GroupRef, bool>,
@@ -73,10 +73,8 @@ impl PlanBuilder {
 			return Self::table_iterator(ctx, Some("WITH NOINDEX"), p.gp).await;
 		}
 
-		if let Some(schema) = p.schema {
-			if let Some(io) = b.eval_count(ctx, schema) {
-				return Ok(Plan::SingleIndex(None, io, RecordStrategy::Count));
-			}
+		if let Some(io) = p.index_count {
+			return Ok(Plan::SingleIndex(None, io, RecordStrategy::Count));
 		}
 
 		//Analyse the query AST to discover indexable conditions and collect
@@ -190,43 +188,6 @@ impl PlanBuilder {
 		Self::table_iterator(ctx, None, p.gp).await
 	}
 
-	fn eval_count(&self, ctx: &StatementContext<'_>, schema: SchemaCache) -> Option<IndexOption> {
-		if let Some(f) = ctx.fields {
-			if f.is_count_all_only() {
-				if let Some(g) = ctx.group {
-					if g.is_group_all_only() {
-						for (pos, ix) in schema.indexes.iter().enumerate() {
-							println!("INDEX: {}", ix.name);
-							if let Index::Count(cond) = &ix.index {
-								let cond_match = match (ctx.cond, cond) {
-									(None, None) => true,
-									(Some(c), Some(c2)) => c.eq(c2),
-									_ => false,
-								};
-								println!(
-									"COND {cond_match} {:?}",
-									cond.as_ref().map(|c| c.to_sql())
-								);
-								if cond_match {
-									if self.allowed_index(&ix.index_id) {
-										let index_reference = schema.new_reference(pos);
-										return Some(IndexOption::new(
-											index_reference,
-											None,
-											IdiomPosition::None,
-											IndexOperator::Count,
-										));
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-		None
-	}
-
 	async fn table_iterator(
 		ctx: &StatementContext<'_>,
 		reason: Option<&str>,
@@ -239,26 +200,6 @@ impl PlanBuilder {
 		// Collect the reason if any
 		let reason = reason.map(|s| s.to_string());
 		Ok(Plan::TableIterator(reason, rs, sc))
-	}
-
-	/// Check if we have an explicit list of indices that we should use
-	fn filter_index_option(&self, io: Option<&IndexOption>) -> Option<IndexOption> {
-		if let Some(io) = io {
-			if !self.allowed_index(&io.index_reference().index_id) {
-				return None;
-			}
-		}
-		io.cloned()
-	}
-
-	/// Check if an index is allowed to be used
-	fn allowed_index(&self, index_id: &IndexId) -> bool {
-		if let Some(wi) = &self.with_indexes {
-			if !wi.contains(index_id) {
-				return false;
-			}
-		}
-		true
 	}
 
 	/// Check if the ordering is compatible with the datastore transaction
@@ -283,7 +224,7 @@ impl PlanBuilder {
 		columns: Vec<Vec<IndexOperator>>,
 	) -> Option<(IdiomCol, IndexOption)> {
 		// Check the index can be used
-		if !self.allowed_index(&index_reference.index_id) {
+		if !self.with_indexes.allowed_index(index_reference.index_id) {
 			return None;
 		}
 		// Count contiguous values (from the left) that will be part of an equal search
@@ -408,8 +349,10 @@ impl PlanBuilder {
 				right,
 				exp,
 			} => {
-				if let Some(io) = self.filter_index_option(io.as_ref()) {
-					self.add_index_option(*group, exp.clone(), io);
+				if let Some(io) = io {
+					if self.with_indexes.allowed_index(io.index_reference.index_id) {
+						self.add_index_option(*group, exp.clone(), io.clone());
+					}
 				}
 				self.eval_node(left)?;
 				self.eval_node(right)?;
