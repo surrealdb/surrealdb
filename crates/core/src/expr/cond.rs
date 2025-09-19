@@ -1,7 +1,10 @@
 use std::fmt;
 
+use revision::revisioned;
+
 use super::Expr;
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Cond(pub Expr);
 

@@ -25,11 +25,12 @@ use crate::ctx::Context;
 use crate::dbs::{Force, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
-use crate::expr::{FlowResultExt as _, Part};
+use crate::expr::{Cond, FlowResultExt as _, Part};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
+use crate::key::index::iu::Iu;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::ConsumeResult;
 use crate::kvs::TransactionType;
@@ -119,6 +120,7 @@ impl Document {
 			Index::FullText(p) => ic.index_fulltext(stk, ctx, p).await?,
 			Index::MTree(p) => ic.index_mtree(stk, ctx, p).await?,
 			Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
+			Index::Count(c) => ic.index_count(ctx, opt, c.as_ref()).await?,
 		}
 		Ok(())
 	}
@@ -409,6 +411,40 @@ impl<'a> IndexOperation<'a> {
 				txn.set(&key, self.rid, None).await?;
 			}
 		}
+		Ok(())
+	}
+
+	async fn index_count(
+		&mut self,
+		ctx: &Context,
+		opt: &Options,
+		_cond: Option<&Cond>,
+	) -> Result<()> {
+		let (pos, count) = if self.o.is_some() {
+			if self.n.is_some() {
+				// That's an update, there is no count change
+				return Ok(());
+			}
+			// It is a deletion
+			(false, 1)
+		} else {
+			if self.n.is_none() {
+				// No create, no update, there's no count change
+				return Ok(());
+			}
+			// It is an insert
+			(true, 1)
+		};
+		let key = Iu::new(
+			self.ns,
+			self.db,
+			&self.ix.table_name,
+			self.ix.index_id,
+			Some((opt.id()?, uuid::Uuid::now_v7())),
+			pos,
+			count,
+		);
+		ctx.tx().lock().await.put(&key, &vec![], None).await?;
 		Ok(())
 	}
 

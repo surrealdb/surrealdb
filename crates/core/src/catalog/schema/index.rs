@@ -5,8 +5,8 @@ use anyhow::Result;
 use revision::{Revisioned, revisioned};
 use storekey::{BorrowDecode, Encode};
 
-use crate::expr::Idiom;
 use crate::expr::statements::info::InfoStructure;
+use crate::expr::{Cond, Idiom};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::define::DefineKind;
 use crate::sql::{Ident, ToSql};
@@ -103,6 +103,8 @@ pub enum Index {
 	Hnsw(HnswParams),
 	/// Index with Full-Text search capabilities
 	FullText(FullTextParams),
+	/// Count index
+	Count(Option<Cond>),
 }
 
 impl Index {
@@ -113,6 +115,7 @@ impl Index {
 			Self::MTree(params) => crate::sql::index::Index::MTree(params.clone().into()),
 			Self::Hnsw(params) => crate::sql::index::Index::Hnsw(params.clone().into()),
 			Self::FullText(params) => crate::sql::index::Index::FullText(params.clone().into()),
+			Self::Count(cond) => crate::sql::index::Index::Count(cond.clone().map(Into::into)),
 		}
 	}
 }

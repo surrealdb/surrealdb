@@ -3559,7 +3559,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "surrealdb-core"
-version = "3.0.0-alpha.8"
+version = "3.0.0-alpha.9"
 dependencies = [
  "addr",
  "affinitypool",
@@ -3677,7 +3677,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types"
-version = "3.0.0-alpha.8"
+version = "3.0.0-alpha.9"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3696,7 +3696,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types-derive"
-version = "3.0.0-alpha.8"
+version = "3.0.0-alpha.9"
 dependencies = [
  "proc-macro2",
  "quote",

@@ -29,6 +29,7 @@ pub mod ii;
 #[cfg(not(target_family = "wasm"))]
 pub mod ip;
 pub mod is;
+pub mod iu;
 pub mod td;
 pub mod tt;
 pub mod vm;
