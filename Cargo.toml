@@ -256,7 +256,7 @@ hyper = "1.4.1"
 opentelemetry = { version = "0.24" }
 opentelemetry-otlp = { version = "0.17.0", features = ["metrics"] }
 opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
-rustyline = { version = "12.0.0", features = ["derive"] }
+rustyline = { version = "17.0.1", features = ["derive"] }
 tower = { version = "0.4.13", features = ["limit", "load-shed"] }
 tower-http = { version = "0.5.2", features = [
     "trace",
