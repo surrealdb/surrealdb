@@ -101,7 +101,7 @@ impl Value {
 					match place {
 						Value::Object(obj) => {
 							let v = match v {
-								Value::Strand(x) => x.as_str().to_owned(),
+								Value::String(x) => x.as_str().to_owned(),
 								x => x.to_string(),
 							};
 
@@ -258,7 +258,7 @@ impl Value {
 				Part::Value(x) => {
 					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()?;
 					match v {
-						Value::Strand(x) => x.into_string(),
+						Value::String(x) => x,
 						Value::RecordId(x) => x.to_string(),
 						Value::Number(x) => x.to_string(),
 						Value::Range(x) => x.to_string(),

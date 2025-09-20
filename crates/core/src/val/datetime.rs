@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
-use crate::expr::escape::QuoteStr;
+use crate::fmt::QuoteStr;
 use crate::syn;
-use crate::val::{Duration, Strand, TrySub};
+use crate::val::{Duration, TrySub};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
@@ -46,28 +46,7 @@ impl From<Datetime> for DateTime<Utc> {
 impl FromStr for Datetime {
 	type Err = ();
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		Self::try_from(s)
-	}
-}
-
-impl TryFrom<String> for Datetime {
-	type Error = ();
-	fn try_from(v: String) -> Result<Self, Self::Error> {
-		Self::try_from(v.as_str())
-	}
-}
-
-impl TryFrom<Strand> for Datetime {
-	type Error = ();
-	fn try_from(v: Strand) -> Result<Self, Self::Error> {
-		Self::try_from(v.as_str())
-	}
-}
-
-impl TryFrom<&str> for Datetime {
-	type Error = ();
-	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match syn::datetime(v) {
+		match syn::datetime(s) {
 			Ok(v) => Ok(v),
 			_ => Err(()),
 		}

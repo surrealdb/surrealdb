@@ -86,6 +86,7 @@
             spec =
               import ./pkg/nix/spec/${target}.nix { inherit pkgs target util; };
           in import ./pkg/nix/drv/binary.nix {
+            inherit (pkgs) lib;
             inherit pkgs util spec crane;
             rustToolchain = mkRustToolchain { inherit target; };
           }) util.platforms);

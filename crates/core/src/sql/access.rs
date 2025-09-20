@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::sql::escape::EscapeIdent;
+use crate::fmt::EscapeIdent;
 use crate::val::Duration;
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]

@@ -5,12 +5,12 @@ use reblessive::Stk;
 use super::basic::NumberToken;
 use super::mac::unexpected;
 use super::{ParseResult, Parser};
+use crate::sql::Kind;
 use crate::sql::kind::{GeometryKind, KindLiteral};
-use crate::sql::{Ident, Kind};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::expected;
 use crate::syn::token::{Glued, Keyword, Span, TokenKind, t};
-use crate::val::{Duration, Strand};
+use crate::val::Duration;
 
 impl Parser<'_> {
 	/// Parse a kind production.
@@ -96,10 +96,9 @@ impl Parser<'_> {
 			t!("RECORD") => {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {
-					let mut tables =
-						vec![self.next_token_value::<Ident>().map(|i| i.into_string())?];
+					let mut tables = vec![self.parse_ident()?];
 					while self.eat(t!("|")) {
-						tables.push(self.next_token_value::<Ident>().map(|i| i.into_string())?);
+						tables.push(self.parse_ident()?);
 					}
 					self.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::Record(tables))
@@ -145,10 +144,9 @@ impl Parser<'_> {
 			t!("FILE") => {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {
-					let mut buckets =
-						vec![self.next_token_value::<Ident>().map(|i| i.into_string())?];
+					let mut buckets = vec![self.parse_ident()?];
 					while self.eat(t!("|")) {
-						buckets.push(self.next_token_value::<Ident>().map(|i| i.into_string())?);
+						buckets.push(self.parse_ident()?);
 					}
 					self.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::File(buckets))
@@ -190,8 +188,8 @@ impl Parser<'_> {
 				self.pop_peek();
 				Ok(KindLiteral::Bool(false))
 			}
-			t!("'") | t!("\"") | TokenKind::Glued(Glued::Strand) => {
-				let s = self.next_token_value::<Strand>()?;
+			t!("'") | t!("\"") | TokenKind::Glued(Glued::String) => {
+				let s = self.parse_string_lit()?;
 				Ok(KindLiteral::String(s))
 			}
 			t!("+") | t!("-") | TokenKind::Glued(Glued::Number) => {
@@ -248,7 +246,7 @@ impl Parser<'_> {
 				| t!("false")
 				| t!("'") | t!("\"")
 				| t!("+") | t!("-")
-				| TokenKind::Glued(Glued::Duration | Glued::Strand | Glued::Number)
+				| TokenKind::Glued(Glued::Duration | Glued::String | Glued::Number)
 				| TokenKind::Digits
 				| t!("{") | t!("[")
 		)

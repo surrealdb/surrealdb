@@ -69,7 +69,7 @@ use crate::syn::error::{SyntaxError, bail};
 use crate::syn::lexer::Lexer;
 use crate::syn::lexer::compound::NumberKind;
 use crate::syn::token::{Span, Token, TokenKind, t};
-use crate::val::{Bytes, Datetime, Duration, File, Strand, Uuid};
+use crate::val::{Bytes, Datetime, Duration, File, Uuid};
 
 mod basic;
 mod builtin;
@@ -121,7 +121,7 @@ pub enum GluedValue {
 	Datetime(Datetime),
 	Uuid(Uuid),
 	Number(NumberKind),
-	Strand(Strand),
+	String(String),
 	#[default]
 	None,
 	Bytes(Bytes),

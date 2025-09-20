@@ -1,8 +1,9 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use crate::sql::{Base, Cond, Ident, RecordIdLit};
-use crate::val::{Datetime, Duration, Strand, Uuid};
+use crate::fmt::EscapeIdent;
+use crate::sql::{Base, Cond, RecordIdLit};
+use crate::val::{Datetime, Duration, Uuid};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -38,7 +39,7 @@ impl From<crate::expr::statements::access::AccessStatement> for AccessStatement 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementGrant {
-	pub ac: Ident,
+	pub ac: String,
 	pub base: Option<Base>,
 	pub subject: Subject,
 }
@@ -46,7 +47,7 @@ pub struct AccessStatementGrant {
 impl From<AccessStatementGrant> for crate::expr::statements::access::AccessStatementGrant {
 	fn from(v: AccessStatementGrant) -> Self {
 		Self {
-			ac: v.ac.into(),
+			ac: v.ac,
 			base: v.base.map(Into::into),
 			subject: v.subject.into(),
 		}
@@ -56,7 +57,7 @@ impl From<AccessStatementGrant> for crate::expr::statements::access::AccessState
 impl From<crate::expr::statements::access::AccessStatementGrant> for AccessStatementGrant {
 	fn from(v: crate::expr::statements::access::AccessStatementGrant) -> Self {
 		Self {
-			ac: v.ac.into(),
+			ac: v.ac,
 			base: v.base.map(Into::into),
 			subject: v.subject.into(),
 		}
@@ -66,18 +67,18 @@ impl From<crate::expr::statements::access::AccessStatementGrant> for AccessState
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementShow {
-	pub ac: Ident,
+	pub ac: String,
 	pub base: Option<Base>,
-	pub gr: Option<Ident>,
+	pub gr: Option<String>,
 	pub cond: Option<Cond>,
 }
 
 impl From<AccessStatementShow> for crate::expr::statements::access::AccessStatementShow {
 	fn from(v: AccessStatementShow) -> Self {
 		Self {
-			ac: v.ac.into(),
+			ac: v.ac,
 			base: v.base.map(Into::into),
-			gr: v.gr.map(Into::into),
+			gr: v.gr,
 			cond: v.cond.map(Into::into),
 		}
 	}
@@ -86,9 +87,9 @@ impl From<AccessStatementShow> for crate::expr::statements::access::AccessStatem
 impl From<crate::expr::statements::access::AccessStatementShow> for AccessStatementShow {
 	fn from(v: crate::expr::statements::access::AccessStatementShow) -> Self {
 		Self {
-			ac: v.ac.into(),
+			ac: v.ac,
 			base: v.base.map(Into::into),
-			gr: v.gr.map(Into::into),
+			gr: v.gr,
 			cond: v.cond.map(Into::into),
 		}
 	}
@@ -97,18 +98,18 @@ impl From<crate::expr::statements::access::AccessStatementShow> for AccessStatem
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementRevoke {
-	pub ac: Ident,
+	pub ac: String,
 	pub base: Option<Base>,
-	pub gr: Option<Ident>,
+	pub gr: Option<String>,
 	pub cond: Option<Cond>,
 }
 
 impl From<AccessStatementRevoke> for crate::expr::statements::access::AccessStatementRevoke {
 	fn from(v: AccessStatementRevoke) -> Self {
 		Self {
-			ac: v.ac.into(),
+			ac: v.ac,
 			base: v.base.map(Into::into),
-			gr: v.gr.map(Into::into),
+			gr: v.gr,
 			cond: v.cond.map(Into::into),
 		}
 	}
@@ -117,9 +118,9 @@ impl From<AccessStatementRevoke> for crate::expr::statements::access::AccessStat
 impl From<crate::expr::statements::access::AccessStatementRevoke> for AccessStatementRevoke {
 	fn from(v: crate::expr::statements::access::AccessStatementRevoke) -> Self {
 		Self {
-			ac: v.ac.into(),
+			ac: v.ac,
 			base: v.base.map(Into::into),
-			gr: v.gr.map(Into::into),
+			gr: v.gr,
 			cond: v.cond.map(Into::into),
 		}
 	}
@@ -128,7 +129,7 @@ impl From<crate::expr::statements::access::AccessStatementRevoke> for AccessStat
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementPurge {
-	pub ac: Ident,
+	pub ac: String,
 	pub base: Option<Base>,
 	// TODO: Merge these booleans into a enum as having them both be false is invalid state.
 	pub expired: bool,
@@ -139,7 +140,7 @@ pub struct AccessStatementPurge {
 impl From<AccessStatementPurge> for crate::expr::statements::access::AccessStatementPurge {
 	fn from(v: AccessStatementPurge) -> Self {
 		Self {
-			ac: v.ac.into(),
+			ac: v.ac,
 			base: v.base.map(Into::into),
 			expired: v.expired,
 			revoked: v.revoked,
@@ -151,7 +152,7 @@ impl From<AccessStatementPurge> for crate::expr::statements::access::AccessState
 impl From<crate::expr::statements::access::AccessStatementPurge> for AccessStatementPurge {
 	fn from(v: crate::expr::statements::access::AccessStatementPurge) -> Self {
 		Self {
-			ac: v.ac.into(),
+			ac: v.ac,
 			base: v.base.map(Into::into),
 			expired: v.expired,
 			revoked: v.revoked,
@@ -163,8 +164,8 @@ impl From<crate::expr::statements::access::AccessStatementPurge> for AccessState
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessGrant {
-	pub id: Ident,                    // Unique grant identifier.
-	pub ac: Ident,                    // Access method used to create the grant.
+	pub id: String,                   // Unique grant identifier.
+	pub ac: String,                   // Access method used to create the grant.
 	pub creation: Datetime,           // Grant creation time.
 	pub expiration: Option<Datetime>, // Grant expiration time, if any.
 	pub revocation: Option<Datetime>, // Grant revocation time, if any.
@@ -176,14 +177,14 @@ pub struct AccessGrant {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Subject {
 	Record(RecordIdLit),
-	User(Ident),
+	User(String),
 }
 
 impl From<Subject> for crate::expr::statements::access::Subject {
 	fn from(v: Subject) -> Self {
 		match v {
 			Subject::Record(id) => Self::Record(id.into()),
-			Subject::User(name) => Self::User(name.into()),
+			Subject::User(name) => Self::User(name),
 		}
 	}
 }
@@ -192,7 +193,7 @@ impl From<crate::expr::statements::access::Subject> for Subject {
 	fn from(v: crate::expr::statements::access::Subject) -> Self {
 		match v {
 			crate::expr::statements::access::Subject::Record(id) => Self::Record(id.into()),
-			crate::expr::statements::access::Subject::User(name) => Self::User(name.into()),
+			crate::expr::statements::access::Subject::User(name) => Self::User(name),
 		}
 	}
 }
@@ -220,7 +221,7 @@ impl Grant {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct GrantJwt {
 	pub jti: Uuid,             // JWT ID
-	pub token: Option<Strand>, // JWT. Will not be stored after being returned.
+	pub token: Option<String>, // JWT. Will not be stored after being returned.
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -228,42 +229,42 @@ pub struct GrantJwt {
 pub struct GrantRecord {
 	pub rid: Uuid,             // Record ID
 	pub jti: Uuid,             // JWT ID
-	pub token: Option<Strand>, // JWT. Will not be stored after being returned.
+	pub token: Option<String>, // JWT. Will not be stored after being returned.
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct GrantBearer {
-	pub id: Ident, // Key ID
+	pub id: String, // Key ID
 	// Key. Will not be stored and be returned as redacted.
 	// Immediately after generation, it will contain the plaintext key.
 	// Will be hashed before storage so that the plaintext key is not stored.
-	pub key: Strand,
+	pub key: String,
 }
 
 impl Display for AccessStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Grant(stmt) => {
-				write!(f, "ACCESS {}", stmt.ac)?;
+				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " GRANT")?;
 				match &stmt.subject {
-					Subject::User(x) => write!(f, " FOR USER {}", x)?,
+					Subject::User(x) => write!(f, " FOR USER {}", EscapeIdent(&x))?,
 					Subject::Record(x) => write!(f, " FOR RECORD {}", x)?,
 				}
 				Ok(())
 			}
 			Self::Show(stmt) => {
-				write!(f, "ACCESS {}", stmt.ac)?;
+				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " SHOW")?;
 				match &stmt.gr {
-					Some(v) => write!(f, " GRANT {v}")?,
+					Some(v) => write!(f, " GRANT {}", EscapeIdent(&v))?,
 					None => match &stmt.cond {
 						Some(v) => write!(f, " {v}")?,
 						None => write!(f, " ALL")?,
@@ -272,13 +273,13 @@ impl Display for AccessStatement {
 				Ok(())
 			}
 			Self::Revoke(stmt) => {
-				write!(f, "ACCESS {}", stmt.ac)?;
+				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " REVOKE")?;
 				match &stmt.gr {
-					Some(v) => write!(f, " GRANT {v}")?,
+					Some(v) => write!(f, " GRANT {}", EscapeIdent(&v))?,
 					None => match &stmt.cond {
 						Some(v) => write!(f, " {v}")?,
 						None => write!(f, " ALL")?,
@@ -287,7 +288,7 @@ impl Display for AccessStatement {
 				Ok(())
 			}
 			Self::Purge(stmt) => {
-				write!(f, "ACCESS {}", stmt.ac)?;
+				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}

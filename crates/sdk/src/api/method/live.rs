@@ -18,7 +18,7 @@ use crate::api::method::BoxFuture;
 use crate::api::{self, Connection, ExtraFeatures, Result};
 use crate::core::dbs::{Action as CoreAction, Notification as CoreNotification};
 use crate::core::expr::{
-	BinaryOperator, Cond, Expr, Fields, Ident, Idiom, Literal, LiveStatement, TopLevelExpr,
+	BinaryOperator, Cond, Expr, Fields, Idiom, Literal, LiveStatement, TopLevelExpr,
 };
 use crate::core::val;
 use crate::engine::any::Any;
@@ -44,12 +44,12 @@ where
 		let mut stmt = LiveStatement::new(Fields::all());
 		match resource? {
 			Resource::Table(table) => {
-				stmt.what = Expr::Table(unsafe { Ident::new_unchecked(table) });
+				stmt.what = Expr::Table(table);
 			}
 			Resource::RecordId(record) => {
 				let record = record.into_inner();
-				stmt.what = Expr::Table(unsafe { Ident::new_unchecked(record.table.clone()) });
-				let ident = Ident::new("id".to_string()).unwrap();
+				stmt.what = Expr::Table(record.table.clone());
+				let ident = "id".to_string();
 				let cond = Expr::Binary {
 					left: Box::new(Expr::Idiom(Idiom::field(ident))),
 					op: BinaryOperator::Equal,
@@ -66,9 +66,9 @@ where
 					panic!("invalid resource?");
 				};
 
-				stmt.what = Expr::Table(unsafe { Ident::new_unchecked(record.table.clone()) });
+				stmt.what = Expr::Table(record.table.clone());
 
-				let id = Expr::Idiom(Idiom::field(Ident::new("id".to_string()).unwrap()));
+				let id = Expr::Idiom(Idiom::field("id".to_string()));
 
 				let left = match range.start {
 					std::ops::Bound::Included(x) => Some(Expr::Binary {

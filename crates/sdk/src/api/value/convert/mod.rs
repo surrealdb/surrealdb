@@ -20,7 +20,7 @@ fn into_content(this: val::Value) -> Result<Content<'static>> {
 			val::Number::Float(v) => Ok(Content::Number(Number::F64(v))),
 			val::Number::Decimal(v) => serializer.serialize(v).map_err(Into::into),
 		},
-		val::Value::Strand(v) => Ok(Content::String(Cow::Owned(v.into_string()))),
+		val::Value::String(v) => Ok(Content::String(Cow::Owned(v))),
 		val::Value::Duration(val::Duration(v)) => serializer.serialize(v).map_err(Into::into),
 		val::Value::Datetime(val::Datetime(v)) => serializer.serialize(v).map_err(Into::into),
 		val::Value::Uuid(val::Uuid(v)) => serializer.serialize(v).map_err(Into::into),

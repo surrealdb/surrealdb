@@ -10,7 +10,7 @@ use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range,
-	RecordId, Regex, SqlNone, Strand, Uuid, Value,
+	RecordId, Regex, SqlNone, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]
@@ -251,16 +251,6 @@ impl Coerce for Decimal {
 	}
 }
 
-impl Coerce for String {
-	fn can_coerce(v: &Value) -> bool {
-		Strand::can_coerce(v)
-	}
-
-	fn coerce(v: Value) -> Result<Self, CoerceError> {
-		Strand::coerce(v).map(|x| x.into_string())
-	}
-}
-
 impl Coerce for File {
 	fn can_coerce(v: &Value) -> bool {
 		matches!(v, Value::File(_))
@@ -430,7 +420,7 @@ impl_direct! {
 	Object => Object,
 	Array => Array,
 	RecordId => RecordId,
-	Strand => Strand,
+	String => String,
 	Geometry => Geometry,
 	Regex => Regex,
 }
@@ -451,7 +441,7 @@ impl Value {
 			Kind::Float => self.can_coerce_to::<f64>(),
 			Kind::Decimal => self.can_coerce_to::<Decimal>(),
 			Kind::Number => self.can_coerce_to::<Number>(),
-			Kind::String => self.can_coerce_to::<Strand>(),
+			Kind::String => self.can_coerce_to::<String>(),
 			Kind::Datetime => self.can_coerce_to::<Datetime>(),
 			Kind::Duration => self.can_coerce_to::<Duration>(),
 			Kind::Object => self.can_coerce_to::<Object>(),
@@ -552,7 +542,7 @@ impl Value {
 			Kind::Float => self.coerce_to::<f64>().map(Value::from),
 			Kind::Decimal => self.coerce_to::<Decimal>().map(Value::from),
 			Kind::Number => self.coerce_to::<Number>().map(Value::from),
-			Kind::String => self.coerce_to::<Strand>().map(Value::from),
+			Kind::String => self.coerce_to::<String>().map(Value::from),
 			Kind::Datetime => self.coerce_to::<Datetime>().map(Value::from),
 			Kind::Duration => self.coerce_to::<Duration>().map(Value::from),
 			Kind::Object => self.coerce_to::<Object>().map(Value::from),

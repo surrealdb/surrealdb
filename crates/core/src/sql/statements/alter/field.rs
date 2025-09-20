@@ -1,9 +1,9 @@
 use std::fmt::{self, Display};
 
 use super::AlterKind;
+use crate::fmt::{EscapeIdent, QuoteStr};
 use crate::sql::reference::Reference;
-use crate::sql::{Expr, Ident, Idiom, Kind, Permissions};
-use crate::val::Strand;
+use crate::sql::{Expr, Idiom, Kind, Permissions};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -49,7 +49,7 @@ impl From<AlterDefault> for crate::expr::statements::alter::AlterDefault {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AlterFieldStatement {
 	pub name: Idiom,
-	pub what: Ident,
+	pub what: String,
 	pub if_exists: bool,
 	pub flex: AlterKind<()>,
 	pub kind: AlterKind<Kind>,
@@ -58,7 +58,7 @@ pub struct AlterFieldStatement {
 	pub assert: AlterKind<Expr>,
 	pub default: AlterDefault,
 	pub permissions: Option<Permissions>,
-	pub comment: AlterKind<Strand>,
+	pub comment: AlterKind<String>,
 	pub reference: AlterKind<Reference>,
 }
 
@@ -68,7 +68,7 @@ impl Display for AlterFieldStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", self.name, EscapeIdent(&self.what))?;
 		match self.flex {
 			AlterKind::Set(_) => write!(f, " FLEXIBLE")?,
 			AlterKind::Drop => write!(f, " DROP FLEXIBLE")?,
@@ -107,7 +107,7 @@ impl Display for AlterFieldStatement {
 		}
 
 		match self.comment {
-			AlterKind::Set(ref x) => write!(f, " COMMENT {x}")?,
+			AlterKind::Set(ref x) => write!(f, " COMMENT {}", QuoteStr(x))?,
 			AlterKind::Drop => write!(f, " DROP COMMENT")?,
 			AlterKind::None => {}
 		}
@@ -124,7 +124,7 @@ impl From<AlterFieldStatement> for crate::expr::statements::alter::AlterFieldSta
 	fn from(v: AlterFieldStatement) -> Self {
 		crate::expr::statements::alter::AlterFieldStatement {
 			name: v.name.into(),
-			what: v.what.into(),
+			what: v.what,
 			if_exists: v.if_exists,
 			flex: v.flex.into(),
 			kind: v.kind.into(),
@@ -143,7 +143,7 @@ impl From<crate::expr::statements::alter::AlterFieldStatement> for AlterFieldSta
 	fn from(v: crate::expr::statements::alter::AlterFieldStatement) -> Self {
 		AlterFieldStatement {
 			name: v.name.into(),
-			what: v.what.into(),
+			what: v.what,
 			if_exists: v.if_exists,
 			flex: v.flex.into(),
 			kind: v.kind.into(),

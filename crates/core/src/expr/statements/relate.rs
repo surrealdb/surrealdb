@@ -150,7 +150,7 @@ impl RelateStatement {
 						Some(ref data) => {
 							let id = match data.rid(stk, &ctx, opt).await? {
 								Value::None => RecordId::random_for_table(tb.into_string()),
-								id => id.generate(tb.into_strand(), false)?,
+								id => id.generate(tb.as_str().to_owned(), false)?,
 							};
 							i.ingest(Iterable::Relatable(f.clone(), id, t.clone(), None))
 						}

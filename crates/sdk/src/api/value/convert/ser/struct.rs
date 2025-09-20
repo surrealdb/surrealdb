@@ -9,11 +9,6 @@ use crate::core::val::{self, Value};
 pub(super) fn to_value(content: Content) -> Result<Value> {
 	match content {
 		Content::Struct(v) => match v.name.as_ref() {
-			"$surrealdb::private::Strand" => {
-				val::Strand::deserialize(Content::Struct(v).into_deserializer())
-					.map(Into::into)
-					.map_err(Into::into)
-			}
 			"$surrealdb::private::Range" => {
 				val::Range::deserialize(Content::Struct(v).into_deserializer())
 					.map(Into::into)
@@ -101,7 +96,6 @@ mod test {
 	// These strings and the ones in the above implementation must be kept in sync.
 	#[test]
 	fn serde_struct_names_are_correct() {
-		assert_eq!("$surrealdb::private::Strand", val_to_serde_name(val::Strand::default()));
 		assert_eq!("$surrealdb::private::Range", val_to_serde_name(val::Range::unbounded()));
 		assert_eq!(
 			"$surrealdb::private::Regex",

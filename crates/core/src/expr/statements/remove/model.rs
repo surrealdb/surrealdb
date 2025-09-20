@@ -6,12 +6,12 @@ use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Base, Ident, Value};
+use crate::expr::{Base, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveModelStatement {
-	pub name: Ident,
+	pub name: String,
 	pub version: String,
 
 	pub if_exists: bool,
@@ -56,7 +56,7 @@ impl Display for RemoveModelStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " ml::{}<{}>", &*self.name, self.version)?;
+		write!(f, " ml::{}<{}>", self.name, self.version)?;
 		Ok(())
 	}
 }

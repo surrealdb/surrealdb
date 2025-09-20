@@ -7,13 +7,12 @@ use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon}
 use revision::revisioned;
 use rust_decimal::Decimal;
 
-use super::escape::EscapeKey;
-use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Literal, Part, Value};
+use crate::fmt::{EscapeIdent, EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
-	Regex, Strand, Uuid,
+	Regex, Uuid,
 };
 
 #[revisioned(revision = 1)]
@@ -366,7 +365,6 @@ impl_basic_has_kind! {
 	Decimal => Decimal,
 
 	String => String,
-	Strand => String,
 	Bytes => Bytes,
 	Number => Number,
 	Datetime => Datetime,
@@ -426,7 +424,7 @@ impl Display for Kind {
 				if k.is_empty() {
 					f.write_str("record")
 				} else {
-					write!(f, "record<{}>", Fmt::verbar_separated(k))
+					write!(f, "record<{}>", Fmt::verbar_separated(k.iter().map(EscapeIdent)))
 				}
 			}
 			Kind::Geometry(k) => {
@@ -469,7 +467,7 @@ impl InfoStructure for Kind {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug)]
 pub enum KindLiteral {
-	String(Strand),
+	String(String),
 	Integer(i64),
 	Float(f64),
 	Decimal(Decimal),
@@ -600,7 +598,7 @@ impl KindLiteral {
 	pub fn validate_value(&self, value: &Value) -> bool {
 		match self {
 			Self::String(v) => match value {
-				Value::Strand(s) => s == v,
+				Value::String(s) => s == v,
 				_ => false,
 			},
 			Self::Integer(v) => match value {
@@ -756,7 +754,7 @@ impl KindLiteral {
 impl Display for KindLiteral {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			KindLiteral::String(s) => write!(f, "{s}"),
+			KindLiteral::String(s) => write!(f, "{}", QuoteStr(s)),
 			KindLiteral::Integer(n) => write!(f, "{}", n),
 			KindLiteral::Float(n) => write!(f, "{}f", n),
 			KindLiteral::Decimal(n) => write!(f, "{}dec", n),

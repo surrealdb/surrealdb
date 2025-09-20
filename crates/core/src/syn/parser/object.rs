@@ -7,7 +7,6 @@ use crate::syn::lexer::compound;
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser, enter_object_recursion};
 use crate::syn::token::{Glued, Span, TokenKind, t};
-use crate::val::Strand;
 
 impl Parser<'_> {
 	/// Parse an production which starts with an `{`
@@ -129,8 +128,8 @@ impl Parser<'_> {
 				let str = self.lexer.string.take().unwrap();
 				Ok(str)
 			}
-			t!("\"") | t!("'") | TokenKind::Glued(Glued::Strand) => {
-				let str = self.next_token_value::<Strand>()?.into_string();
+			t!("\"") | t!("'") | TokenKind::Glued(Glued::String) => {
+				let str = self.parse_string_lit()?;
 				Ok(str)
 			}
 			TokenKind::Digits => {

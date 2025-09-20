@@ -6,7 +6,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Idiom, Kind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::{DefineFieldStatement, ToSql};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -49,7 +49,7 @@ impl FieldDefinition {
 		DefineFieldStatement {
 			kind: crate::sql::statements::define::DefineKind::Default,
 			name: self.name.clone().into(),
-			what: unsafe { crate::sql::Ident::new_unchecked(self.what.clone()) },
+			what: self.what.clone(),
 			flex: self.flexible,
 			field_kind: self.field_kind.clone().map(|x| x.into()),
 			readonly: self.readonly,
@@ -71,7 +71,7 @@ impl FieldDefinition {
 				update: self.update_permission.to_sql_definition(),
 				delete: crate::sql::Permission::Full,
 			},
-			comment: self.comment.clone().map(|x| unsafe { Strand::new_unchecked(x) }),
+			comment: self.comment.clone(),
 			reference: self.reference.clone().map(|x| x.into()),
 		}
 	}
