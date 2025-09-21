@@ -1,17 +1,16 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::sql::Ident;
+use crate::fmt::{EscapeIdent, QuoteStr};
 use crate::sql::changefeed::ChangeFeed;
-use crate::val::Strand;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineDatabaseStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
-	pub name: Ident,
-	pub comment: Option<Strand>,
+	pub name: String,
+	pub comment: Option<String>,
 	pub changefeed: Option<ChangeFeed>,
 }
 
@@ -23,9 +22,9 @@ impl Display for DefineDatabaseStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", QuoteStr(v))?
 		}
 		if let Some(ref v) = self.changefeed {
 			write!(f, " {v}")?;
@@ -39,7 +38,7 @@ impl From<DefineDatabaseStatement> for crate::expr::statements::DefineDatabaseSt
 		crate::expr::statements::DefineDatabaseStatement {
 			kind: v.kind.into(),
 			id: v.id,
-			name: v.name.into(),
+			name: v.name,
 			comment: v.comment,
 			changefeed: v.changefeed.map(Into::into),
 		}
@@ -51,7 +50,7 @@ impl From<crate::expr::statements::DefineDatabaseStatement> for DefineDatabaseSt
 		DefineDatabaseStatement {
 			kind: v.kind.into(),
 			id: v.id,
-			name: v.name.into(),
+			name: v.name,
 			comment: v.comment,
 			changefeed: v.changefeed.map(Into::into),
 		}

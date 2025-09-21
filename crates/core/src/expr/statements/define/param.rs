@@ -10,17 +10,17 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::{Base, Expr, FlowResultExt as _, Ident};
+use crate::expr::{Base, Expr, FlowResultExt as _};
+use crate::fmt::{EscapeKwFreeIdent, QuoteStr, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineParamStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub value: Expr,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 	pub permissions: Permission,
 }
 
@@ -68,8 +68,8 @@ impl DefineParamStatement {
 			db.database_id,
 			&ParamDefinition {
 				value,
-				name: self.name.to_raw_string(),
-				comment: self.comment.clone().map(|s| s.into_string()),
+				name: self.name.clone(),
+				comment: self.comment.clone(),
 				permissions: self.permissions.clone(),
 			},
 		)
@@ -89,9 +89,9 @@ impl Display for DefineParamStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " ${} VALUE {}", self.name, self.value)?;
+		write!(f, " ${} VALUE {}", EscapeKwFreeIdent(&self.name), self.value)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", QuoteStr(v))?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

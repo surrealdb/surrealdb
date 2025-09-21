@@ -5,7 +5,7 @@ use surrealdb_core::dbs::Session;
 use surrealdb_core::err::Error;
 use surrealdb_core::sql::{Expr, FunctionCall};
 use surrealdb_core::val::{Array, Number, Table, Value};
-use surrealdb_core::{sql, strand, syn};
+use surrealdb_core::{sql, syn};
 
 use crate::helpers::Test;
 
@@ -3074,11 +3074,11 @@ async fn function_type_table() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::Table(Table::from_strand(strand!("person").to_owned()));
+	let val = Value::Table(Table::new("person".to_owned()));
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::Table(Table::from_strand(strand!("animal").to_owned()));
+	let val = Value::Table(Table::new("animal".to_owned()));
 	assert_eq!(tmp, val);
 	//
 	Ok(())

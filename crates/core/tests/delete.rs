@@ -3,8 +3,8 @@ use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::{Action, Notification, Session};
 use surrealdb_core::iam::{Level, Role};
+use surrealdb_core::syn;
 use surrealdb_core::val::{Array, RecordId, Value};
-use surrealdb_core::{strand, syn};
 
 //
 // Permissions
@@ -495,7 +495,7 @@ async fn delete_filtered_live_notification() -> Result<()> {
 		Notification::new(
 			live_id,
 			Action::Delete,
-			Value::RecordId(RecordId::new("person".to_owned(), strand!("test_true").to_owned())),
+			Value::RecordId(RecordId::new("person".to_owned(), "test_true".to_owned())),
 			syn::value(
 				"{
 					id: person:test_true,

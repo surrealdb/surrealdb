@@ -324,7 +324,7 @@ impl QouteKind {
 pub enum Glued {
 	Number,
 	Duration,
-	Strand,
+	String,
 	Datetime,
 	Uuid,
 	Bytes,
@@ -335,7 +335,7 @@ impl Glued {
 	fn as_str(&self) -> &'static str {
 		match self {
 			Glued::Number => "a number",
-			Glued::Strand => "a strand",
+			Glued::String => "a strand",
 			Glued::Uuid => "a uuid",
 			Glued::Datetime => "a datetime",
 			Glued::Duration => "a duration",

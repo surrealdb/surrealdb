@@ -1,10 +1,9 @@
 use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
-use crate::sql::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{EscapeIdent, QuoteStr, is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
-use crate::sql::{Expr, Ident, Idiom, Kind, Permissions};
-use crate::val::Strand;
+use crate::sql::{Expr, Idiom, Kind, Permissions};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -48,7 +47,7 @@ impl From<crate::expr::statements::define::DefineDefault> for DefineDefault {
 pub struct DefineFieldStatement {
 	pub kind: DefineKind,
 	pub name: Idiom,
-	pub what: Ident,
+	pub what: String,
 	/// Whether the field is marked as flexible.
 	/// Flexible allows the field to be schemaless even if the table is marked
 	/// as schemafull.
@@ -60,7 +59,7 @@ pub struct DefineFieldStatement {
 	pub computed: Option<Expr>,
 	pub default: DefineDefault,
 	pub permissions: Permissions,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 	pub reference: Option<Reference>,
 }
 
@@ -72,7 +71,7 @@ impl Display for DefineFieldStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", self.name, EscapeIdent(&self.what))?;
 		if self.flex {
 			write!(f, " FLEXIBLE")?
 		}
@@ -106,7 +105,7 @@ impl Display for DefineFieldStatement {
 			write!(f, " REFERENCE {v}")?
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", QuoteStr(v))?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
@@ -128,7 +127,7 @@ impl From<DefineFieldStatement> for crate::expr::statements::DefineFieldStatemen
 		Self {
 			kind: v.kind.into(),
 			name: v.name.into(),
-			what: v.what.into(),
+			what: v.what,
 			flex: v.flex,
 			readonly: v.readonly,
 			field_kind: v.field_kind.map(Into::into),
@@ -148,7 +147,7 @@ impl From<crate::expr::statements::DefineFieldStatement> for DefineFieldStatemen
 		Self {
 			kind: v.kind.into(),
 			name: v.name.into(),
-			what: v.what.into(),
+			what: v.what,
 			flex: v.flex,
 			readonly: v.readonly,
 			field_kind: v.field_kind.map(Into::into),

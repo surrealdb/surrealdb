@@ -31,7 +31,7 @@ impl Request {
 				Value::Null
 				| Value::Uuid(_)
 				| Value::Number(_)
-				| Value::Strand(_)
+				| Value::String(_)
 				| Value::Datetime(_),
 			) => id,
 			_ => return Err(RpcError::InvalidRequest),
@@ -52,7 +52,7 @@ impl Request {
 		let txn = match obj.remove(TXN) {
 			None | Some(Value::None | Value::Null) => None,
 			Some(Value::Uuid(x)) => Some(x.0),
-			Some(Value::Strand(x)) => {
+			Some(Value::String(x)) => {
 				Some(Uuid::try_parse(x.as_str()).map_err(|_| RpcError::InvalidRequest)?)
 			}
 			_ => return Err(RpcError::InvalidRequest),
@@ -60,7 +60,7 @@ impl Request {
 
 		// Fetch the 'method' argument
 		let method = match obj.remove(METHOD) {
-			Some(Value::Strand(v)) => v.into_string(),
+			Some(Value::String(v)) => v,
 			_ => return Err(RpcError::InvalidRequest),
 		};
 		// Fetch the 'params' argument

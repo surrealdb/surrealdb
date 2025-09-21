@@ -1,11 +1,12 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::sql::{Base, Ident};
+use crate::fmt::EscapeIdent;
+use crate::sql::Base;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveUserStatement {
-	pub name: Ident,
+	pub name: String,
 	pub base: Base,
 	pub if_exists: bool,
 }
@@ -16,7 +17,7 @@ impl Display for RemoveUserStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.base)?;
+		write!(f, " {} ON {}", EscapeIdent(&self.name), self.base)?;
 		Ok(())
 	}
 }
@@ -24,7 +25,7 @@ impl Display for RemoveUserStatement {
 impl From<RemoveUserStatement> for crate::expr::statements::RemoveUserStatement {
 	fn from(v: RemoveUserStatement) -> Self {
 		crate::expr::statements::RemoveUserStatement {
-			name: v.name.into(),
+			name: v.name,
 			if_exists: v.if_exists,
 			base: v.base.into(),
 		}
@@ -34,7 +35,7 @@ impl From<RemoveUserStatement> for crate::expr::statements::RemoveUserStatement 
 impl From<crate::expr::statements::RemoveUserStatement> for RemoveUserStatement {
 	fn from(v: crate::expr::statements::RemoveUserStatement) -> Self {
 		RemoveUserStatement {
-			name: v.name.into(),
+			name: v.name,
 			if_exists: v.if_exists,
 			base: v.base.into(),
 		}

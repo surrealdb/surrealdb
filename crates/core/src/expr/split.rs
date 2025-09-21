@@ -1,8 +1,8 @@
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
-use crate::expr::fmt::Fmt;
 use crate::expr::idiom::Idiom;
+use crate::fmt::Fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Splits(pub Vec<Split>);

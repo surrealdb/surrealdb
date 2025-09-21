@@ -4,42 +4,20 @@ use rust_decimal::Decimal;
 
 use super::GluedValue;
 use super::mac::pop_glued;
+use crate::sql::Param;
 use crate::sql::language::Language;
-use crate::sql::{Ident, Param};
 use crate::syn::error::{bail, syntax_error};
 use crate::syn::lexer::compound::{self, NumberKind};
 use crate::syn::parser::mac::unexpected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{self, TokenKind, t};
-use crate::val::{Bytes, Datetime, DecimalExt as _, Duration, File, Number, Regex, Strand, Uuid};
+use crate::val::{Bytes, Datetime, DecimalExt as _, Duration, File, Number, Regex, Uuid};
 
 mod number;
 
 /// A trait for parsing single tokens with a specific value.
 pub(crate) trait TokenValue: Sized {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self>;
-}
-
-impl TokenValue for Ident {
-	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
-		let token = parser.peek();
-		match token.kind {
-			TokenKind::Identifier => {
-				parser.pop_peek();
-				let str = parser.lexer.string.take().unwrap();
-				// Safety: lexer ensures no null bytes are present in the identifier.
-				Ok(unsafe { Ident::new_unchecked(str) })
-			}
-			x if Parser::kind_is_keyword_like(x) => {
-				let s = parser.pop_peek().span;
-				// Safety: lexer ensures no null bytes are present in the identifier.
-				Ok(unsafe { Ident::new_unchecked(parser.lexer.span_str(s).to_owned()) })
-			}
-			_ => {
-				unexpected!(parser, token, "an identifier");
-			}
-		}
-	}
 }
 
 impl TokenValue for Language {
@@ -68,7 +46,7 @@ impl TokenValue for Param {
 				parser.pop_peek();
 				let param = parser.lexer.string.take().unwrap();
 				// Safety: Lexer guarentees no null bytes.
-				Ok(unsafe { Param::new_unchecked(param) })
+				Ok(Param::new(param))
 			}
 			_ => unexpected!(parser, peek, "a parameter"),
 		}
@@ -101,22 +79,6 @@ impl TokenValue for Datetime {
 				Ok(Datetime(v))
 			}
 			_ => unexpected!(parser, token, "a datetime"),
-		}
-	}
-}
-
-impl TokenValue for Strand {
-	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
-		let token = parser.peek();
-		match token.kind {
-			TokenKind::Glued(token::Glued::Strand) => Ok(pop_glued!(parser, Strand)),
-			t!("\"") | t!("'") => {
-				parser.pop_peek();
-				let v = parser.lexer.lex_compound(token, compound::strand)?.value;
-				// Safety: The lexer ensures that no null bytes can be present in the string.
-				Ok(unsafe { Strand::new_unchecked(v) })
-			}
-			_ => unexpected!(parser, token, "a strand"),
 		}
 	}
 }
@@ -265,7 +227,39 @@ impl Parser<'_> {
 		V::from_token(self)
 	}
 
-	pub(crate) fn parse_flexible_ident(&mut self) -> ParseResult<Ident> {
+	pub(crate) fn parse_string_lit(&mut self) -> ParseResult<String> {
+		let token = self.peek();
+		match token.kind {
+			TokenKind::Glued(token::Glued::String) => Ok(pop_glued!(self, String)),
+			t!("\"") | t!("'") => {
+				self.pop_peek();
+				let v = self.lexer.lex_compound(token, compound::strand)?.value;
+				// Safety: The lexer ensures that no null bytes can be present in the string.
+				Ok(v)
+			}
+			_ => unexpected!(self, token, "a strand"),
+		}
+	}
+
+	pub(crate) fn parse_ident(&mut self) -> ParseResult<String> {
+		let token = self.next();
+		match token.kind {
+			TokenKind::Identifier => {
+				let str = self.lexer.string.take().unwrap();
+				// Safety: Lexer guarentees no null bytes.
+				Ok(str)
+			}
+			x if Self::kind_is_keyword_like(x) => {
+				// Safety: Lexer guarentees no null bytes.
+				Ok(self.lexer.span_str(token.span).to_owned())
+			}
+			_ => {
+				unexpected!(self, token, "an identifier");
+			}
+		}
+	}
+
+	pub(crate) fn parse_flexible_ident(&mut self) -> ParseResult<String> {
 		let token = self.next();
 		match token.kind {
 			TokenKind::Digits => {
@@ -282,16 +276,16 @@ impl Parser<'_> {
 					_ => token.span,
 				};
 				// Safety: Lexer guarentees no null bytes.
-				Ok(unsafe { Ident::new_unchecked(self.lexer.span_str(span).to_owned()) })
+				Ok(self.lexer.span_str(span).to_owned())
 			}
 			TokenKind::Identifier => {
 				let str = self.lexer.string.take().unwrap();
 				// Safety: Lexer guarentees no null bytes.
-				Ok(unsafe { Ident::new_unchecked(str) })
+				Ok(str)
 			}
 			x if Self::kind_is_keyword_like(x) => {
 				// Safety: Lexer guarentees no null bytes.
-				Ok(unsafe { Ident::new_unchecked(self.lexer.span_str(token.span).to_owned()) })
+				Ok(self.lexer.span_str(token.span).to_owned())
 			}
 			_ => {
 				unexpected!(self, token, "an identifier");
@@ -302,7 +296,7 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod test {
-	use crate::sql::{Ident, Part};
+	use crate::sql::Part;
 
 	#[test]
 	fn identifiers() {
@@ -323,7 +317,7 @@ mod test {
 			assert_eq!(
 				r.expressions,
 				vec![sql::TopLevelExpr::Expr(sql::Expr::Idiom(sql::Idiom(vec![Part::Field(
-					Ident::new(ident.to_owned()).unwrap()
+					ident.to_owned()
 				)])))]
 			)
 		}

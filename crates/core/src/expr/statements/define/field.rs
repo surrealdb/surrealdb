@@ -15,13 +15,13 @@ use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, KindLiteral, Part, RecordIdKeyLit};
+use crate::expr::{Base, Expr, Idiom, Kind, KindLiteral, Part, RecordIdKeyLit};
+use crate::fmt::{EscapeIdent, QuoteStr, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum DefineDefault {
@@ -35,7 +35,7 @@ pub enum DefineDefault {
 pub struct DefineFieldStatement {
 	pub kind: DefineKind,
 	pub name: Idiom,
-	pub what: Ident,
+	pub what: String,
 	/// Whether the field is marked as flexible.
 	/// Flexible allows the field to be schemaless even if the table is marked as schemafull.
 	pub flex: bool,
@@ -46,7 +46,7 @@ pub struct DefineFieldStatement {
 	pub computed: Option<Expr>,
 	pub default: DefineDefault,
 	pub permissions: Permissions,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 	pub reference: Option<Reference>,
 }
 
@@ -62,7 +62,7 @@ impl DefineFieldStatement {
 
 		catalog::FieldDefinition {
 			name: self.name.clone(),
-			what: self.what.clone().to_raw_string(),
+			what: self.what.clone(),
 			flexible: self.flex,
 			field_kind: self.field_kind.clone(),
 			readonly: self.readonly,
@@ -77,7 +77,7 @@ impl DefineFieldStatement {
 			select_permission: convert_permission(&self.permissions.select),
 			create_permission: convert_permission(&self.permissions.create),
 			update_permission: convert_permission(&self.permissions.update),
-			comment: self.comment.clone().map(|x| x.into_string()),
+			comment: self.comment.clone(),
 			reference: self.reference.clone(),
 		}
 	}
@@ -266,7 +266,7 @@ impl DefineFieldStatement {
 				} else {
 					FieldDefinition {
 						name: name.clone(),
-						what: self.what.clone().into_string(),
+						what: self.what.clone(),
 						flexible: self.flex,
 						field_kind: Some(cur_kind),
 						reference: self.reference.clone(),
@@ -449,7 +449,7 @@ impl Display for DefineFieldStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", self.name, EscapeIdent(&self.what))?;
 		if self.flex {
 			write!(f, " FLEXIBLE")?
 		}
@@ -477,7 +477,7 @@ impl Display for DefineFieldStatement {
 			write!(f, " REFERENCE {v}")?
 		}
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?
+			write!(f, " COMMENT {}", QuoteStr(comment))?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
@@ -498,7 +498,7 @@ impl InfoStructure for DefineFieldStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
 			"name".to_string() => self.name.structure(),
-			"what".to_string() => self.what.structure(),
+			"what".to_string() => self.what.into(),
 			"flex".to_string() => self.flex.into(),
 			"kind".to_string(), if let Some(v) = self.field_kind => v.structure(),
 			"value".to_string(), if let Some(v) = self.value => v.structure(),

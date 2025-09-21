@@ -8,12 +8,13 @@ use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::{self, Notification, Options};
 use crate::err::Error;
-use crate::expr::{Base, Ident, Value};
+use crate::expr::{Base, Value};
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveTableStatement {
-	pub name: Ident,
+	pub name: String,
 	pub if_exists: bool,
 	pub expunge: bool,
 }
@@ -100,15 +101,16 @@ impl RemoveTableStatement {
 				.await?;
 			}
 		}
-		if let Some(chn) = opt.sender.as_ref() {
+		if let Some(sender) = opt.broker.as_ref() {
 			for lv in lvs.iter() {
-				chn.send(Notification {
-					id: lv.id.into(),
-					action: dbs::Action::Killed,
-					record: Value::None,
-					result: Value::None,
-				})
-				.await?;
+				sender
+					.send(Notification {
+						id: lv.id.into(),
+						action: dbs::Action::Killed,
+						record: Value::None,
+						result: Value::None,
+					})
+					.await;
 			}
 		}
 		// Clear the cache
@@ -129,7 +131,7 @@ impl Display for RemoveTableStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		Ok(())
 	}
 }

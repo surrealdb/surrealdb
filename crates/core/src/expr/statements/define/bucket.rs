@@ -10,18 +10,19 @@ use crate::catalog::{BucketDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Base, Expr, FlowResultExt, Ident};
+use crate::expr::{Base, Expr, FlowResultExt};
+use crate::fmt::{EscapeIdent, QuoteStr};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineBucketStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub backend: Option<Expr>,
 	pub permissions: Permission,
 	pub readonly: bool,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl DefineBucketStatement {
@@ -83,11 +84,11 @@ impl DefineBucketStatement {
 		let key = crate::key::database::bu::new(ns, db, &name);
 		let ap = BucketDefinition {
 			id: None,
-			name: self.name.to_raw_string(),
+			name: self.name.clone(),
 			backend,
 			permissions: self.permissions.clone(),
 			readonly: self.readonly,
-			comment: self.comment.as_ref().map(|c| c.to_raw_string()),
+			comment: self.comment.clone(),
 		};
 		txn.set(&key, &ap, None).await?;
 		// Clear the cache
@@ -105,7 +106,7 @@ impl Display for DefineBucketStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 
 		if self.readonly {
 			write!(f, " READONLY")?;
@@ -118,7 +119,7 @@ impl Display for DefineBucketStatement {
 		write!(f, " PERMISSIONS {}", self.permissions)?;
 
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?;
+			write!(f, " COMMENT {}", QuoteStr(comment))?;
 		}
 
 		Ok(())

@@ -8,8 +8,8 @@ use rand::distributions::Alphanumeric;
 
 use super::Expr;
 use crate::err::Error;
+use crate::fmt::QuoteStr;
 use crate::sql::Algorithm;
-use crate::sql::escape::QuoteStr;
 
 pub(crate) fn random_key() -> String {
 	rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()

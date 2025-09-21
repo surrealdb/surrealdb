@@ -1,13 +1,13 @@
 use geo::Point;
 
-use crate::val::{Geometry, Strand};
+use crate::val::Geometry;
 
 static BASE32: &[char] = &[
 	'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'j', 'k',
 	'm', 'n', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
 ];
 
-pub fn encode(v: Point<f64>, l: usize) -> Strand {
+pub fn encode(v: Point<f64>, l: usize) -> String {
 	let mut max_lat = 90f64;
 	let mut min_lat = -90f64;
 	let mut max_lon = 180f64;
@@ -44,10 +44,10 @@ pub fn encode(v: Point<f64>, l: usize) -> Strand {
 		hash = 0;
 	}
 
-	Strand::from(out)
+	out
 }
 
-pub fn decode(v: Strand) -> Geometry {
+pub fn decode(v: &str) -> Geometry {
 	let mut max_lat = 90f64;
 	let mut min_lat = -90f64;
 	let mut max_lon = 180f64;
@@ -56,7 +56,7 @@ pub fn decode(v: Strand) -> Geometry {
 	let mut mid: f64;
 	let mut long: bool = true;
 
-	for c in v.as_str().chars() {
+	for c in v.chars() {
 		let ord = c as usize;
 
 		let val = if (48..=57).contains(&ord) {

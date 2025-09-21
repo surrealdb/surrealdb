@@ -6,10 +6,10 @@ use anyhow::Result;
 
 use super::Value;
 use crate::err::Error;
-use crate::expr::escape::QuoteStr;
 use crate::expr::statements::DefineAccessStatement;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Algorithm, Expr};
+use crate::fmt::QuoteStr;
 
 /// The type of access methods available
 

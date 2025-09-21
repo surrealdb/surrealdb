@@ -5,7 +5,8 @@ use anyhow::Result;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Base, Ident, Value};
+use crate::expr::{Base, Value};
+use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Datetime;
 use crate::vs::VersionStamp;
@@ -33,7 +34,7 @@ impl ShowSince {
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ShowStatement {
-	pub table: Option<Ident>,
+	pub table: Option<String>,
 	pub since: ShowSince,
 	pub limit: Option<u32>,
 }
@@ -65,7 +66,7 @@ impl fmt::Display for ShowStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SHOW CHANGES FOR")?;
 		match self.table {
-			Some(ref v) => write!(f, " TABLE {}", v)?,
+			Some(ref v) => write!(f, " TABLE {}", EscapeKwFreeIdent(v))?,
 			None => write!(f, " DATABASE")?,
 		}
 		match self.since {

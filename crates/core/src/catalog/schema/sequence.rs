@@ -4,8 +4,8 @@ use revision::revisioned;
 
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::ToSql;
 use crate::sql::statements::define::{DefineKind, DefineSequenceStatement};
-use crate::sql::{Ident, ToSql};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
@@ -23,7 +23,7 @@ impl SequenceDefinition {
 	fn to_sql_definition(&self) -> DefineSequenceStatement {
 		DefineSequenceStatement {
 			kind: DefineKind::Default,
-			name: unsafe { Ident::new_unchecked(self.name.clone()) },
+			name: self.name.clone(),
 			batch: self.batch,
 			start: self.start,
 			timeout: self.timeout.map(|t| t.into()),

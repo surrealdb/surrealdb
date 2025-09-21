@@ -174,14 +174,14 @@ use surrealdb_core::err::Error as CoreError;
 use surrealdb_core::expr::Model;
 use surrealdb_core::expr::statements::DeleteStatement;
 use surrealdb_core::expr::{
-	CreateStatement, Data, Expr, Fields, Function, Ident, InsertStatement, KillStatement, Literal,
+	CreateStatement, Data, Expr, Fields, Function, InsertStatement, KillStatement, Literal,
 	LogicalPlan, Output, SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
 use surrealdb_core::iam;
 use surrealdb_core::kvs::Datastore;
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::val::{self, Strand};
+use surrealdb_core::val::{self};
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::{
 	expr::statements::{DefineModelStatement, DefineStatement},
@@ -620,11 +620,7 @@ async fn router(
 		} => {
 			let response =
 				iam::signup::signup(kvs, &mut *session.write().await, credentials).await?.token;
-			// TODO: Null byte validity
-			let response = response
-				.map(|x| unsafe { Strand::new_unchecked(x) })
-				.map(From::from)
-				.unwrap_or(val::Value::None);
+			let response = response.map(From::from).unwrap_or(val::Value::None);
 			Ok(DbResponse::Other(response))
 		}
 		Command::Signin {
@@ -726,7 +722,7 @@ async fn router(
 			let one = !data.is_array();
 
 			let insert_plan = InsertStatement {
-				into: what.map(|w| Expr::Table(unsafe { Ident::new_unchecked(w) })),
+				into: what.map(Expr::Table),
 				data: Data::SingleExpression(data.into_literal()),
 				ignore: false,
 				update: None,
@@ -752,7 +748,7 @@ async fn router(
 			let one = !data.is_array();
 
 			let insert_plan = InsertStatement {
-				into: what.map(|w| Expr::Table(unsafe { Ident::new_unchecked(w) })),
+				into: what.map(Expr::Table),
 				data: Data::SingleExpression(data.into_literal()),
 				output: Some(Output::After),
 				relation: true,
@@ -1212,13 +1208,12 @@ async fn router(
 			surrealdb_core::obs::put(&hash, data).await?;
 			// Insert the model in to the database
 			let model = DefineModelStatement {
-				name: Ident::new(file.header.name.to_string()).unwrap(),
+				name: file.header.name.to_string(),
 				version: file.header.version.to_string(),
-				comment: Some(file.header.description.to_string().into()),
+				comment: Some(file.header.description.to_string()),
 				hash,
 				..Default::default()
 			};
-			// TODO: Null byte validity
 			let q = DefineStatement::Model(model);
 			let q = LogicalPlan {
 				expressions: vec![TopLevelExpr::Expr(Expr::Define(Box::new(q)))],
