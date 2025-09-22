@@ -3,7 +3,7 @@ use http::{HeaderMap, HeaderName, HeaderValue};
 
 use crate::api::context::InvocationContext;
 use crate::fnc::args::Optional;
-use crate::val::{Object, Strand, Value};
+use crate::val::{Object, Value};
 
 pub fn raw_body(
 	context: &mut InvocationContext,
@@ -13,7 +13,7 @@ pub fn raw_body(
 	Ok(())
 }
 
-pub fn header(context: &mut InvocationContext, (name, value): (Strand, Value)) -> Result<()> {
+pub fn header(context: &mut InvocationContext, (name, value): (String, Value)) -> Result<()> {
 	let name: HeaderName = name.parse()?;
 	if let Value::None = value {
 		if let Some(v) = context.response_headers.as_mut() {

@@ -17,19 +17,20 @@ use crate::expr::access_type::{
 	JwtAccessVerifyJwks, JwtAccessVerifyKey,
 };
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{AccessType, Algorithm, Base, Expr, Ident, JwtAccess, RecordAccess};
+use crate::expr::{AccessType, Algorithm, Base, Expr, JwtAccess, RecordAccess};
+use crate::fmt::{EscapeIdent, QuoteStr};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{self, Strand, Value};
+use crate::val::{self, Value};
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash)]
 pub struct DefineAccessStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub base: Base,
 	pub access_type: AccessType,
 	pub authenticate: Option<Expr>,
 	pub duration: AccessDuration,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl DefineAccessStatement {
@@ -96,13 +97,13 @@ impl DefineAccessStatement {
 		DefineAccessStatement {
 			kind: DefineKind::Default,
 			base,
-			name: Ident::new(def.name.clone()).unwrap(),
+			name: def.name.clone(),
 			duration: AccessDuration {
 				grant: def.grant_duration.map(val::Duration),
 				token: def.token_duration.map(val::Duration),
 				session: def.session_duration.map(val::Duration),
 			},
-			comment: def.comment.clone().map(|x| Strand::new(x).unwrap()),
+			comment: def.comment.clone(),
 			authenticate: def.authenticate.clone(),
 			access_type: match &def.access_type {
 				catalog::AccessType::Record(record_access) => AccessType::Record(RecordAccess {
@@ -196,11 +197,11 @@ impl DefineAccessStatement {
 		}
 
 		AccessDefinition {
-			name: self.name.clone().to_raw_string(),
+			name: self.name.clone(),
 			grant_duration: self.duration.grant.map(|x| x.0),
 			token_duration: self.duration.token.map(|x| x.0),
 			session_duration: self.duration.session.map(|x| x.0),
-			comment: self.comment.clone().map(|x| x.into_string()),
+			comment: self.comment.clone(),
 			authenticate: self.authenticate.clone(),
 			access_type: match &self.access_type {
 				AccessType::Record(record_access) => {
@@ -358,7 +359,7 @@ impl Display for DefineAccessStatement {
 			DefineKind::Default => {}
 		}
 		// The specific access method definition is displayed by AccessType
-		write!(f, " {} ON {} TYPE {}", self.name, self.base, self.access_type)?;
+		write!(f, " {} ON {} TYPE {}", EscapeIdent(&self.name), self.base, self.access_type)?;
 		// The additional authentication clause
 		if let Some(ref v) = self.authenticate {
 			write!(f, " AUTHENTICATE {v}")?
@@ -396,7 +397,7 @@ impl Display for DefineAccessStatement {
 			}
 		)?;
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?
+			write!(f, " COMMENT {}", QuoteStr(comment))?
 		}
 		Ok(())
 	}
@@ -405,7 +406,7 @@ impl Display for DefineAccessStatement {
 impl InfoStructure for DefineAccessStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.structure(),
+			"name".to_string() => self.name.into(),
 			"base".to_string() => self.base.structure(),
 			"authenticate".to_string(), if let Some(v) = self.authenticate => v.structure(),
 			"duration".to_string() => Value::from(map!{

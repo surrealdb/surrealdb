@@ -10,11 +10,11 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
-use crate::expr::fmt::{Fmt, is_pretty, pretty_indent};
 use crate::expr::idiom::recursion::{
 	self, Recursion, clean_iteration, compute_idiom_recursion, is_final,
 };
-use crate::expr::{Expr, FlowResultExt as _, Ident, Idiom, Literal, Lookup, Value};
+use crate::expr::{Expr, FlowResultExt as _, Idiom, Literal, Lookup, Value};
+use crate::fmt::{EscapeIdent, EscapeKwFreeIdent, Fmt, is_pretty, pretty_indent};
 use crate::val::{Array, RecordId};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -23,7 +23,7 @@ pub enum Part {
 	Flatten,
 	Last,
 	First,
-	Field(Ident),
+	Field(String),
 	Where(Expr),
 	Lookup(Lookup),
 	Value(Expr),
@@ -38,12 +38,6 @@ pub enum Part {
 }
 
 impl Part {
-	/// Returns a part which is equivalent to `.bla` if called with string
-	/// `bla`.
-	pub fn field(field: String) -> Option<Self> {
-		Some(Part::Field(Ident::new(field)?))
-	}
-
 	/// Returns a part which is equivalent to `[1]` if called with integer `1`.
 	pub fn index_int(idx: i64) -> Self {
 		Part::Value(Expr::Literal(Literal::Integer(idx)))
@@ -141,7 +135,7 @@ impl Part {
 	pub(crate) fn to_raw_string(&self) -> String {
 		match self {
 			Part::Start(v) => v.to_raw_string(),
-			Part::Field(v) => format!(".{}", v.to_raw_string()),
+			Part::Field(v) => format!(".{}", v),
 			_ => self.to_string(),
 		}
 	}
@@ -154,7 +148,7 @@ impl fmt::Display for Part {
 			Part::Last => f.write_str("[$]"),
 			Part::First => f.write_str("[0]"),
 			Part::Start(v) => write!(f, "{v}"),
-			Part::Field(v) => write!(f, ".{v}"),
+			Part::Field(v) => write!(f, ".{}", EscapeKwFreeIdent(v)),
 			Part::Flatten => f.write_str("…"),
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
 			Part::Lookup(v) => write!(f, "{v}"),
@@ -205,7 +199,7 @@ pub enum RecursionPlan {
 		// The destructure parts
 		parts: Vec<DestructurePart>,
 		// Which field contains the repeat symbol
-		field: Ident,
+		field: String,
 		// Path before the repeat symbol
 		before: Vec<Part>,
 		// The recursion plan
@@ -281,7 +275,7 @@ impl<'a> RecursionPlan {
 					.catch_return()?
 				{
 					Value::Object(mut obj) => {
-						obj.insert(field.to_raw_string(), v);
+						obj.insert(field.clone(), v);
 						Ok(Value::Object(obj))
 					}
 					Value::None => Ok(Value::None),
@@ -394,14 +388,14 @@ impl<'a> NextMethod<'a> for &'a Idiom {
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum DestructurePart {
-	All(Ident),
-	Field(Ident),
-	Aliased(Ident, Idiom),
-	Destructure(Ident, Vec<DestructurePart>),
+	All(String),
+	Field(String),
+	Aliased(String, Idiom),
+	Destructure(String, Vec<DestructurePart>),
 }
 
 impl DestructurePart {
-	pub fn field(&self) -> &Ident {
+	pub fn field(&self) -> &str {
 		match self {
 			DestructurePart::All(v) => v,
 			DestructurePart::Field(v) => v,
@@ -429,11 +423,11 @@ impl DestructurePart {
 impl fmt::Display for DestructurePart {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			DestructurePart::All(fd) => write!(f, "{fd}.*"),
-			DestructurePart::Field(fd) => write!(f, "{fd}"),
-			DestructurePart::Aliased(fd, v) => write!(f, "{fd}: {v}"),
+			DestructurePart::All(fd) => write!(f, "{}.*", EscapeIdent(fd)),
+			DestructurePart::Field(fd) => write!(f, "{}", EscapeIdent(fd)),
+			DestructurePart::Aliased(fd, v) => write!(f, "{}: {v}", EscapeIdent(fd)),
 			DestructurePart::Destructure(fd, d) => {
-				write!(f, "{fd}{}", Part::Destructure(d.clone()))
+				write!(f, "{}{}", EscapeIdent(fd), Part::Destructure(d.clone()))
 			}
 		}
 	}

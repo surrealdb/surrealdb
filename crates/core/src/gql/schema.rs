@@ -39,15 +39,16 @@ pub async fn generate_schema(
 		None => return Err(GqlError::DbError(anyhow::anyhow!("Database not found: {ns} {db}"))),
 	};
 
-	let cg = tx.expect_db_config(db_def.namespace_id, db_def.database_id, "graphql").await.map_err(
-		|e| {
+	let cg = tx
+		.expect_db_config(db_def.namespace_id, db_def.database_id, "graphql")
+		.await
+		.map_err(|e| {
 			if matches!(e.downcast_ref(), Some(crate::err::Error::CgNotFound { .. })) {
 				GqlError::NotConfigured
 			} else {
 				GqlError::DbError(e)
 			}
-		},
-	)?;
+		})?;
 	let config = cg.inner.clone().try_into_graphql()?;
 
 	let tbs = tx.all_tb(db_def.namespace_id, db_def.database_id, None).await?;
@@ -210,7 +211,7 @@ pub fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> {
 			),
 			num @ SurNumber::Decimal(_) => GqlValue::String(num.to_string()),
 		},
-		SurValue::Strand(s) => GqlValue::String(s.0),
+		SurValue::String(s) => GqlValue::String(s.0),
 		d @ SurValue::Duration(_) => GqlValue::String(d.to_string()),
 		SurValue::Datetime(d) => GqlValue::String(d.to_rfc3339()),
 		SurValue::Uuid(uuid) => GqlValue::String(uuid.to_string()),

@@ -9,10 +9,10 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
-use crate::expr::fmt::Fmt;
 use crate::expr::order::Ordering;
 use crate::expr::start::Start;
-use crate::expr::{Cond, Dir, Fields, Groups, Ident, Idiom, Limit, RecordIdKeyRangeLit, Splits};
+use crate::expr::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits};
+use crate::fmt::{EscapeIdent, Fmt};
 use crate::kvs::KVKey;
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
 
@@ -112,9 +112,9 @@ impl Display for LookupKind {
 /// This enum instructs whether we scan all edges on a table or just a specific range
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum LookupSubject {
-	Table(Ident),
+	Table(String),
 	Range {
-		table: Ident,
+		table: String,
 		range: RecordIdKeyRangeLit,
 	},
 }
@@ -152,9 +152,9 @@ impl LookupSubject {
 /// This enum instructs whether we scan all edges on a table or just a specific range
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ComputedLookupSubject {
-	Table(Ident),
+	Table(String),
 	Range {
-		table: Ident,
+		table: String,
 		range: RecordIdKeyRange,
 	},
 }
@@ -242,7 +242,7 @@ impl ComputedLookupSubject {
 							id,
 							dir,
 							&RecordId {
-								table: table.clone().into_string(),
+								table: table.clone(),
 								key: v.clone(),
 							},
 						)
@@ -254,7 +254,7 @@ impl ComputedLookupSubject {
 							id,
 							dir,
 							&RecordId {
-								table: table.clone().into_string(),
+								table: table.clone(),
 								key: v.to_owned(),
 							},
 						)
@@ -276,7 +276,7 @@ impl ComputedLookupSubject {
 							id,
 							dir,
 							&RecordId {
-								table: table.clone().into_string(),
+								table: table.clone(),
 								key: v.to_owned(),
 							},
 						)
@@ -288,7 +288,7 @@ impl ComputedLookupSubject {
 							id,
 							dir,
 							&RecordId {
-								table: table.clone().into_string(),
+								table: table.clone(),
 								key: v.to_owned(),
 							},
 						)
@@ -309,11 +309,11 @@ impl ComputedLookupSubject {
 impl Display for LookupSubject {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Self::Table(tb) => Display::fmt(&tb, f),
+			Self::Table(tb) => EscapeIdent(tb).fmt(f),
 			Self::Range {
 				table,
 				range,
-			} => write!(f, "{table}:{range}"),
+			} => write!(f, "{}:{range}", EscapeIdent(table)),
 		}
 	}
 }

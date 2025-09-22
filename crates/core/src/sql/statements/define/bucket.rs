@@ -1,18 +1,18 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::sql::{Expr, Ident, Permission};
-use crate::val::Strand;
+use crate::fmt::{EscapeIdent, QuoteStr};
+use crate::sql::{Expr, Permission};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineBucketStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub backend: Option<Expr>,
 	pub permissions: Permission,
 	pub readonly: bool,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl Display for DefineBucketStatement {
@@ -23,7 +23,7 @@ impl Display for DefineBucketStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 
 		if self.readonly {
 			write!(f, " READONLY")?;
@@ -36,7 +36,7 @@ impl Display for DefineBucketStatement {
 		write!(f, " PERMISSIONS {}", self.permissions)?;
 
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?;
+			write!(f, " COMMENT {}", QuoteStr(comment))?;
 		}
 
 		Ok(())
@@ -47,7 +47,7 @@ impl From<DefineBucketStatement> for crate::expr::statements::define::DefineBuck
 	fn from(v: DefineBucketStatement) -> Self {
 		crate::expr::statements::define::DefineBucketStatement {
 			kind: v.kind.into(),
-			name: v.name.into(),
+			name: v.name,
 			backend: v.backend.map(Into::into),
 			permissions: v.permissions.into(),
 			readonly: v.readonly,
@@ -60,7 +60,7 @@ impl From<crate::expr::statements::define::DefineBucketStatement> for DefineBuck
 	fn from(v: crate::expr::statements::define::DefineBucketStatement) -> Self {
 		DefineBucketStatement {
 			kind: v.kind.into(),
-			name: v.name.into(),
+			name: v.name,
 			backend: v.backend.map(Into::into),
 			permissions: v.permissions.into(),
 			readonly: v.readonly,

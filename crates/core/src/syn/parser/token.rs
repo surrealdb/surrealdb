@@ -68,7 +68,7 @@ impl Parser<'_> {
 					| t!("+") | t!("-")
 					| t!("u'") | t!("u\"")
 					| t!("'") | t!("\"")
-					| TokenKind::Glued(Glued::Uuid | Glued::Strand)
+					| TokenKind::Glued(Glued::Uuid | Glued::String)
 			)
 	}
 

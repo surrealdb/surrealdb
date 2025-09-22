@@ -230,7 +230,6 @@ args = [
     "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
     "--workspace",
     "--no-fail-fast",
-    "--package", "surrealdb",
     "--",
     "--skip",
     "api_integration",

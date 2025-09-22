@@ -194,7 +194,7 @@ fn iterable(id: RecordId, v: Value, relation: bool) -> Result<Iterable> {
 
 fn gen_id(v: &Value, into: &Option<Table>) -> Result<RecordId> {
 	match into {
-		Some(into) => v.rid().generate(into.clone().into_strand(), true),
+		Some(into) => v.rid().generate(into.clone().into_string(), true),
 		None => match v.rid() {
 			Value::RecordId(v) => Ok(v),
 			v => Err(anyhow::Error::new(Error::InsertStatementId {

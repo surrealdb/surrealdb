@@ -5,9 +5,9 @@ use crate::catalog::{DatabaseId, NamespaceId, Permissions, ViewDefinition};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{ChangeFeed, Kind};
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::ToSql;
 use crate::sql::statements::DefineTableStatement;
-use crate::sql::{Ident, ToSql};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -106,15 +106,13 @@ impl TableDefinition {
 	fn to_sql_definition(&self) -> DefineTableStatement {
 		DefineTableStatement {
 			id: Some(self.table_id.0),
-			// SAFETY: we know the name is valid because it was validated when the table was
-			// created.
-			name: unsafe { Ident::new_unchecked(self.name.clone()) },
+			name: self.name.clone(),
 			drop: self.drop,
 			full: self.schemafull,
 			view: self.view.clone().map(|v| v.to_sql_definition()),
 			permissions: self.permissions.clone().into(),
 			changefeed: self.changefeed.map(|v| v.into()),
-			comment: self.comment.clone().map(|v| v.into()),
+			comment: self.comment.clone(),
 			table_type: self.table_type.clone().into(),
 			..Default::default()
 		}
@@ -187,9 +185,9 @@ impl InfoStructure for TableType {
 			Self::Relation(rel) => Value::from(map! {
 				"kind".to_string() => "RELATION".into(),
 				"in".to_string(), if let Some(Kind::Record(tables)) = rel.from =>
-					tables.into_iter().map(|t| Value::from(Strand::new_lossy(t))).collect::<Vec<_>>().into(),
+					tables.into_iter().map(Value::from).collect::<Vec<_>>().into(),
 				"out".to_string(), if let Some(Kind::Record(tables)) = rel.to =>
-					tables.into_iter().map(|t| Value::from(Strand::new_lossy(t))).collect::<Vec<_>>().into(),
+					tables.into_iter().map(Value::from).collect::<Vec<_>>().into(),
 				"enforced".to_string() => rel.enforced.into()
 			}),
 		}

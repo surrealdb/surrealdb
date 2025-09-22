@@ -1,11 +1,10 @@
 use std::fmt::{self, Display, Formatter, Write as _};
 use std::ops::Bound;
 
-use crate::sql::escape::{EscapeKey, EscapeRid};
-use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKey, EscapeRid, Fmt, Pretty, is_pretty, pretty_indent};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{Expr, RecordIdKeyRangeLit};
-use crate::val::{RecordIdKey, Strand, Uuid};
+use crate::val::{RecordIdKey, Uuid};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -39,7 +38,7 @@ impl From<crate::expr::RecordIdKeyGen> for RecordIdKeyGen {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum RecordIdKeyLit {
 	Number(i64),
-	String(Strand),
+	String(String),
 	Uuid(Uuid),
 	Array(Vec<Expr>),
 	Object(Vec<ObjectEntry>),
@@ -51,7 +50,7 @@ impl RecordIdKeyLit {
 	pub fn from_record_id_key(key: RecordIdKey) -> Self {
 		match key {
 			RecordIdKey::Number(x) => RecordIdKeyLit::Number(x),
-			RecordIdKey::String(x) => RecordIdKeyLit::String(Strand::new_lossy(x)),
+			RecordIdKey::String(x) => RecordIdKeyLit::String(x),
 			RecordIdKey::Uuid(x) => RecordIdKeyLit::Uuid(x),
 			RecordIdKey::Array(x) => {
 				RecordIdKeyLit::Array(x.into_iter().map(Expr::from_value).collect())

@@ -45,10 +45,10 @@ pub async fn delete(_: &Context, (_, _): (Value, Optional<Value>)) -> Result<Val
 }
 
 #[cfg(feature = "http")]
-fn try_as_uri(fn_name: &str, value: Value) -> Result<crate::val::Strand> {
+fn try_as_uri(fn_name: &str, value: Value) -> Result<String> {
 	match value {
 		// Pre-check URI.
-		Value::Strand(uri) if crate::fnc::util::http::uri_is_valid(&uri) => Ok(uri),
+		Value::String(uri) if crate::fnc::util::http::uri_is_valid(&uri) => Ok(uri),
 		_ => Err(anyhow::Error::new(Error::InvalidArguments {
 			name: fn_name.to_owned(),
 			// Assumption is that URI is first argument.

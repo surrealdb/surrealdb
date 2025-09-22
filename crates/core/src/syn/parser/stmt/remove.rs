@@ -32,7 +32,7 @@ impl Parser<'_> {
 					false
 				};
 
-				let name = self.next_token_value()?;
+				let name = self.parse_ident()?;
 
 				RemoveStatement::Namespace(RemoveNamespaceStatement {
 					name,
@@ -55,7 +55,7 @@ impl Parser<'_> {
 					false
 				};
 
-				let name = self.next_token_value()?;
+				let name = self.parse_ident()?;
 
 				RemoveStatement::Database(RemoveDatabaseStatement {
 					name,
@@ -88,7 +88,7 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let name = self.next_token_value()?;
+				let name = self.parse_ident()?;
 				expected!(self, t!("ON"));
 				let base = self.parse_base()?;
 
@@ -108,7 +108,7 @@ impl Parser<'_> {
 				let name = self.next_token_value::<Param>()?;
 
 				RemoveStatement::Param(RemoveParamStatement {
-					name: name.ident(),
+					name: name.into_string(),
 					if_exists,
 				})
 			}
@@ -127,7 +127,7 @@ impl Parser<'_> {
 					false
 				};
 
-				let name = self.next_token_value()?;
+				let name = self.parse_ident()?;
 
 				RemoveStatement::Table(crate::sql::statements::RemoveTableStatement {
 					name,
@@ -142,10 +142,10 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let name = self.next_token_value()?;
+				let name = self.parse_ident()?;
 				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
-				let table = self.next_token_value()?;
+				let table = self.parse_ident()?;
 
 				RemoveStatement::Event(RemoveEventStatement {
 					name,
@@ -163,7 +163,7 @@ impl Parser<'_> {
 				let idiom = self.parse_local_idiom(stk).await?;
 				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
-				let table = self.next_token_value()?;
+				let table = self.parse_ident()?;
 
 				RemoveStatement::Field(RemoveFieldStatement {
 					name: idiom,
@@ -178,10 +178,10 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let name = self.next_token_value()?;
+				let name = self.parse_ident()?;
 				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
-				let what = self.next_token_value()?;
+				let what = self.parse_ident()?;
 
 				RemoveStatement::Index(RemoveIndexStatement {
 					name,
@@ -196,7 +196,7 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let name = self.next_token_value()?;
+				let name = self.parse_ident()?;
 
 				RemoveStatement::Analyzer(RemoveAnalyzerStatement {
 					name,
@@ -210,7 +210,7 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let name = self.next_token_value()?;
+				let name = self.parse_ident()?;
 				RemoveStatement::Sequence(RemoveSequenceStatement {
 					name,
 					if_exists,
@@ -223,7 +223,7 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let name = self.next_token_value()?;
+				let name = self.parse_ident()?;
 				expected!(self, t!("ON"));
 				let base = self.parse_base()?;
 
@@ -240,7 +240,7 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let name = self.next_token_value()?;
+				let name = self.parse_ident()?;
 
 				RemoveStatement::Bucket(RemoveBucketStatement {
 					name,

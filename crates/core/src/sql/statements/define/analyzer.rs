@@ -1,20 +1,19 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::sql::Ident;
+use crate::fmt::{EscapeIdent, QuoteStr};
 use crate::sql::filter::Filter;
 use crate::sql::tokenizer::Tokenizer;
-use crate::val::Strand;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineAnalyzerStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub function: Option<String>,
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl Display for DefineAnalyzerStatement {
@@ -25,7 +24,7 @@ impl Display for DefineAnalyzerStatement {
 			DefineKind::Overwrite => write!(f, " IF NOT EXISTS")?,
 			DefineKind::IfNotExists => write!(f, " OVERWRITE")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		if let Some(ref i) = self.function {
 			write!(f, " FUNCTION fn::{i}")?
 		}
@@ -38,7 +37,7 @@ impl Display for DefineAnalyzerStatement {
 			write!(f, " FILTERS {}", tokens.join(","))?;
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", QuoteStr(v))?
 		}
 		Ok(())
 	}
@@ -48,7 +47,7 @@ impl From<DefineAnalyzerStatement> for crate::expr::statements::DefineAnalyzerSt
 	fn from(v: DefineAnalyzerStatement) -> Self {
 		crate::expr::statements::DefineAnalyzerStatement {
 			kind: v.kind.into(),
-			name: v.name.into(),
+			name: v.name,
 			function: v.function,
 			tokenizers: v.tokenizers.map(|v| v.into_iter().map(Into::into).collect()),
 			filters: v.filters.map(|v| v.into_iter().map(Into::into).collect()),
@@ -61,7 +60,7 @@ impl From<crate::expr::statements::DefineAnalyzerStatement> for DefineAnalyzerSt
 	fn from(v: crate::expr::statements::DefineAnalyzerStatement) -> Self {
 		DefineAnalyzerStatement {
 			kind: v.kind.into(),
-			name: v.name.into(),
+			name: v.name,
 			function: v.function,
 			tokenizers: v.tokenizers.map(|v| v.into_iter().map(Into::into).collect()),
 			filters: v.filters.map(|v| v.into_iter().map(Into::into).collect()),

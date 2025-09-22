@@ -1,19 +1,18 @@
 use std::fmt::{self, Display, Write};
 
 use super::AlterKind;
-use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::{ChangeFeed, Ident, Kind, Permissions, TableType};
-use crate::val::Strand;
+use crate::fmt::{EscapeIdent, QuoteStr, is_pretty, pretty_indent};
+use crate::sql::{ChangeFeed, Kind, Permissions, TableType};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AlterTableStatement {
-	pub name: Ident,
+	pub name: String,
 	pub if_exists: bool,
 	pub schemafull: AlterKind<()>,
 	pub permissions: Option<Permissions>,
 	pub changefeed: AlterKind<ChangeFeed>,
-	pub comment: AlterKind<Strand>,
+	pub comment: AlterKind<String>,
 	pub kind: Option<TableType>,
 }
 
@@ -23,7 +22,7 @@ impl Display for AlterTableStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		if let Some(kind) = &self.kind {
 			write!(f, " TYPE")?;
 			match &kind {
@@ -38,7 +37,7 @@ impl Display for AlterTableStatement {
 							if idx != 0 {
 								write!(f, " | ")?;
 							}
-							write!(f, "{}", k)?;
+							write!(f, "{}", EscapeIdent(k))?;
 						}
 					}
 					if let Some(Kind::Record(kind)) = &rel.to {
@@ -47,7 +46,7 @@ impl Display for AlterTableStatement {
 							if idx != 0 {
 								write!(f, " | ")?;
 							}
-							write!(f, "{}", k)?;
+							write!(f, "{}", EscapeIdent(k))?;
 						}
 					}
 				}
@@ -64,7 +63,7 @@ impl Display for AlterTableStatement {
 		}
 
 		match self.comment {
-			AlterKind::Set(ref comment) => write!(f, " COMMENT {}", comment)?,
+			AlterKind::Set(ref comment) => write!(f, " COMMENT {}", QuoteStr(comment))?,
 			AlterKind::Drop => write!(f, " DROP COMMENT")?,
 			AlterKind::None => {}
 		}
@@ -91,7 +90,7 @@ impl Display for AlterTableStatement {
 impl From<AlterTableStatement> for crate::expr::statements::alter::AlterTableStatement {
 	fn from(v: AlterTableStatement) -> Self {
 		crate::expr::statements::alter::AlterTableStatement {
-			name: v.name.into(),
+			name: v.name,
 			if_exists: v.if_exists,
 			schemafull: v.schemafull.into(),
 			permissions: v.permissions.map(Into::into),
@@ -105,7 +104,7 @@ impl From<AlterTableStatement> for crate::expr::statements::alter::AlterTableSta
 impl From<crate::expr::statements::alter::AlterTableStatement> for AlterTableStatement {
 	fn from(v: crate::expr::statements::alter::AlterTableStatement) -> Self {
 		AlterTableStatement {
-			name: v.name.into(),
+			name: v.name,
 			if_exists: v.if_exists,
 			schemafull: v.schemafull.into(),
 			permissions: v.permissions.map(Into::into),

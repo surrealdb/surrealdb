@@ -1,12 +1,12 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::sql::Ident;
+use crate::fmt::EscapeIdent;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveIndexStatement {
-	pub name: Ident,
-	pub what: Ident,
+	pub name: String,
+	pub what: String,
 	pub if_exists: bool,
 }
 
@@ -16,7 +16,7 @@ impl Display for RemoveIndexStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.what))?;
 		Ok(())
 	}
 }
@@ -24,9 +24,9 @@ impl Display for RemoveIndexStatement {
 impl From<RemoveIndexStatement> for crate::expr::statements::RemoveIndexStatement {
 	fn from(v: RemoveIndexStatement) -> Self {
 		crate::expr::statements::RemoveIndexStatement {
-			name: v.name.into(),
+			name: v.name,
 			if_exists: v.if_exists,
-			what: v.what.into(),
+			what: v.what,
 		}
 	}
 }
@@ -34,9 +34,9 @@ impl From<RemoveIndexStatement> for crate::expr::statements::RemoveIndexStatemen
 impl From<crate::expr::statements::RemoveIndexStatement> for RemoveIndexStatement {
 	fn from(v: crate::expr::statements::RemoveIndexStatement) -> Self {
 		RemoveIndexStatement {
-			name: v.name.into(),
+			name: v.name,
 			if_exists: v.if_exists,
-			what: v.what.into(),
+			what: v.what,
 		}
 	}
 }

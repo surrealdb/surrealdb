@@ -6,12 +6,13 @@ use crate::catalog::providers::BucketProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Base, Ident, Value};
+use crate::expr::{Base, Value};
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveBucketStatement {
-	pub name: Ident,
+	pub name: String,
 	pub if_exists: bool,
 }
 
@@ -29,7 +30,7 @@ impl RemoveBucketStatement {
 				return Ok(Value::None);
 			} else {
 				return Err(Error::BuNotFound {
-					name: self.name.to_raw_string(),
+					name: self.name.clone(),
 				}
 				.into());
 			}
@@ -51,7 +52,7 @@ impl Display for RemoveBucketStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		Ok(())
 	}
 }

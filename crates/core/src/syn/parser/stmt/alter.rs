@@ -30,7 +30,7 @@ impl Parser<'_> {
 		} else {
 			false
 		};
-		let name = self.next_token_value()?;
+		let name = self.parse_ident()?;
 		let mut res = AlterTableStatement {
 			name,
 			if_exists,
@@ -58,7 +58,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = AlterKind::Set(self.next_token_value()?);
+					res.comment = AlterKind::Set(self.parse_string_lit()?);
 				}
 				t!("TYPE") => {
 					self.pop_peek();
@@ -115,7 +115,7 @@ impl Parser<'_> {
 		let name = self.parse_local_idiom(stk).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = self.next_token_value()?;
+		let what = self.parse_ident()?;
 		let mut res = AlterFieldStatement {
 			name,
 			what,
@@ -213,7 +213,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = AlterKind::Set(self.next_token_value()?);
+					res.comment = AlterKind::Set(self.parse_string_lit()?);
 				}
 				t!("REFERENCE") => {
 					if !self.settings.references_enabled {
@@ -240,7 +240,7 @@ impl Parser<'_> {
 		} else {
 			false
 		};
-		let name = self.next_token_value()?;
+		let name = self.parse_ident()?;
 		let mut res = AlterSequenceStatement {
 			name,
 			if_exists,
