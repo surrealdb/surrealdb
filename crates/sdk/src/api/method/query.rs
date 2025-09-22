@@ -319,21 +319,21 @@ where
 			match bindings {
 				val::Value::Object(mut map) => current_bindings.append(&mut map.0),
 				val::Value::Array(array) => {
-					if array.len() != 2 || !matches!(array[0], val::Value::Strand(_)) {
+					if array.len() != 2 || !matches!(array[0], val::Value::String(_)) {
 						let bindings = val::Value::Array(array);
 						let bindings = Value::from_inner(bindings);
 						return Err(Error::InvalidBindings(bindings).into());
 					}
 
 					let mut iter = array.into_iter();
-					let Some(val::Value::Strand(key)) = iter.next() else {
+					let Some(val::Value::String(key)) = iter.next() else {
 						unreachable!()
 					};
 					let Some(value) = iter.next() else {
 						unreachable!()
 					};
 
-					current_bindings.insert(key.into_string(), value);
+					current_bindings.insert(key, value);
 				}
 				_ => {
 					let bindings = Value::from_inner(bindings);

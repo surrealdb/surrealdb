@@ -60,10 +60,10 @@ impl fmt::Display for QuoteStr<'_> {
 }
 
 /// Escapes identifiers which might be used in the same place as a keyword.
-pub struct EscapeIdent<'a>(pub &'a str);
-impl fmt::Display for EscapeIdent<'_> {
+pub struct EscapeIdent<T>(pub T);
+impl<T: AsRef<str>> fmt::Display for EscapeIdent<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let s = self.0;
+		let s = self.0.as_ref();
 		if crate::syn::could_be_reserved_keyword(s) {
 			return f.write_fmt(format_args!("`{}`", Escape::escape_str(s, '`')));
 		}

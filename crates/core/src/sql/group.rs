@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::sql::fmt::Fmt;
+use crate::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

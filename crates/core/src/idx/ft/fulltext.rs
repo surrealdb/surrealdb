@@ -27,8 +27,6 @@ use crate::dbs::Options;
 use crate::expr::Idiom;
 use crate::expr::operator::BooleanOperator;
 use crate::idx::IndexKeyBase;
-use crate::idx::docids::DocId;
-use crate::idx::docids::seqdocids::SeqDocIds;
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
@@ -36,6 +34,7 @@ use crate::idx::ft::highlighter::{HighlightParams, Highlighter, Offseter};
 use crate::idx::ft::offset::Offset;
 use crate::idx::ft::{DocLength, Score, TermFrequency};
 use crate::idx::planner::iterators::MatchesHitsIterator;
+use crate::idx::seqdocids::{DocId, SeqDocIds};
 use crate::idx::trees::store::IndexStores;
 use crate::key::index::tt::Tt;
 use crate::kvs::{Transaction, impl_kv_value_revisioned};
@@ -1164,10 +1163,8 @@ mod tests {
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn concurrent_test() {
-		let doc1: Arc<RecordId> =
-			Arc::new(RecordId::new("t".to_owned(), strand!("doc1").to_owned()));
-		let doc2: Arc<RecordId> =
-			Arc::new(RecordId::new("t".to_owned(), strand!("doc2").to_owned()));
+		let doc1: Arc<RecordId> = Arc::new(RecordId::new("t".to_owned(), "doc1".to_owned()));
+		let doc2: Arc<RecordId> = Arc::new(RecordId::new("t".to_owned(), "doc2".to_owned()));
 
 		let test = TestContext::new().await;
 		// Ensure the documents are pre-existing

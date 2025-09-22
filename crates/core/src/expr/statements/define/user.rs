@@ -14,32 +14,31 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::escape::QuoteStr;
-use crate::expr::fmt::Fmt;
+use crate::expr::Base;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::user::UserDuration;
-use crate::expr::{Base, Ident};
+use crate::fmt::{EscapeIdent, Fmt, QuoteStr};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{self, Strand, Value};
+use crate::val::{self, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineUserStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub base: Base,
 	pub hash: String,
 	pub code: String,
-	pub roles: Vec<Ident>,
+	pub roles: Vec<String>,
 	pub duration: UserDuration,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl DefineUserStatement {
-	pub fn new_with_password(base: Base, user: Strand, pass: &str, role: Ident) -> Self {
+	pub fn new_with_password(base: Base, user: String, pass: &str, role: String) -> Self {
 		DefineUserStatement {
 			kind: DefineKind::Default,
 			base,
-			name: Ident::from_strand(user),
+			name: user,
 			hash: Argon2::default()
 				.hash_password(pass.as_ref(), &SaltString::generate(&mut OsRng))
 				.unwrap()
@@ -57,13 +56,13 @@ impl DefineUserStatement {
 
 	pub fn into_definition(&self) -> catalog::UserDefinition {
 		UserDefinition {
-			name: self.name.clone().to_raw_string(),
+			name: self.name.clone(),
 			hash: self.hash.clone(),
 			code: self.code.clone(),
-			roles: self.roles.iter().map(|x| x.clone().to_raw_string()).collect(),
+			roles: self.roles.clone(),
 			token_duration: self.duration.token.map(|x| x.0),
 			session_duration: self.duration.session.map(|x| x.0),
-			comment: self.comment.as_ref().map(|x| x.clone().into_string()),
+			comment: self.comment.clone(),
 		}
 	}
 
@@ -71,15 +70,15 @@ impl DefineUserStatement {
 		Self {
 			kind: DefineKind::Default,
 			base,
-			name: Ident::new(def.name.clone()).unwrap(),
+			name: def.name.clone(),
 			hash: def.hash.clone(),
 			code: def.code.clone(),
-			roles: def.roles.iter().map(|x| Ident::new(x.clone()).unwrap()).collect(),
+			roles: def.roles.clone(),
 			duration: UserDuration {
 				token: def.token_duration.map(val::Duration),
 				session: def.session_duration.map(val::Duration),
 			},
-			comment: def.comment.as_ref().map(|x| Strand::new(x.clone()).unwrap()),
+			comment: def.comment.clone(),
 		}
 	}
 
@@ -198,11 +197,15 @@ impl Display for DefineUserStatement {
 		write!(
 			f,
 			" {} ON {} PASSHASH {} ROLES {}",
-			self.name,
+			EscapeIdent(&self.name),
 			self.base,
 			QuoteStr(&self.hash),
 			Fmt::comma_separated(
-				&self.roles.iter().map(|r| r.to_string().to_uppercase()).collect::<Vec<String>>()
+				&self
+					.roles
+					.iter()
+					.map(|r| EscapeIdent(r.to_string().to_uppercase()))
+					.collect::<Vec<_>>()
 			),
 		)?;
 		// Always print relevant durations so defaults can be changed in the future
@@ -226,7 +229,7 @@ impl Display for DefineUserStatement {
 			}
 		)?;
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?
+			write!(f, " COMMENT {}", QuoteStr(comment))?
 		}
 		Ok(())
 	}
@@ -235,10 +238,10 @@ impl Display for DefineUserStatement {
 impl InfoStructure for DefineUserStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.structure(),
+			"name".to_string() => self.name.into(),
 			"base".to_string() => self.base.structure(),
 			"hash".to_string() => self.hash.into(),
-			"roles".to_string() => self.roles.into_iter().map(Ident::structure).collect(),
+			"roles".to_string() => self.roles.into_iter().map(|x| Value::from(x.clone())).collect(),
 			"duration".to_string() => Value::from(map! {
 				"token".to_string() => self.duration.token.map(Value::from).unwrap_or(Value::None),
 				"session".to_string() => self.duration.session.map(Value::from).unwrap_or(Value::None),

@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::sql::fmt::Pretty;
+use crate::fmt::{EscapeIdent, Pretty};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::operator::BindingPower;
 use crate::sql::statements::{
@@ -10,7 +10,7 @@ use crate::sql::statements::{
 	UpdateStatement, UpsertStatement,
 };
 use crate::sql::{
-	BinaryOperator, Block, Closure, Constant, FunctionCall, Ident, Idiom, Literal, Mock, Param,
+	BinaryOperator, Block, Closure, Constant, FunctionCall, Idiom, Literal, Mock, Param,
 	PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
 use crate::val::{Number, Value};
@@ -22,7 +22,7 @@ pub enum Expr {
 
 	Param(Param),
 	Idiom(Idiom),
-	Table(Ident),
+	Table(String),
 	Mock(Mock),
 	// TODO(3.0) maybe unbox? check size.
 	Block(Box<Block>),
@@ -71,15 +71,14 @@ impl Expr {
 	pub(crate) fn to_idiom(&self) -> Idiom {
 		match self {
 			Expr::Idiom(i) => i.simplify(),
-			Expr::Param(i) => Idiom::field(i.clone().ident()),
+			Expr::Param(i) => Idiom::field(i.clone().into_string()),
 			Expr::FunctionCall(x) => x.receiver.to_idiom(),
 			Expr::Literal(l) => match l {
-				Literal::Strand(s) => Idiom::field(Ident::from_strand(s.clone())),
-				// TODO: Null byte validity
-				Literal::Datetime(d) => Idiom::field(Ident::new(d.into_raw_string()).unwrap()),
-				x => Idiom::field(Ident::new(x.to_string()).unwrap()),
+				Literal::String(s) => Idiom::field(s.clone()),
+				Literal::Datetime(d) => Idiom::field(d.into_raw_string()),
+				x => Idiom::field(x.to_string()),
 			},
-			x => Idiom::field(Ident::new(x.to_string()).unwrap()),
+			x => Idiom::field(x.to_string()),
 		}
 	}
 
@@ -91,7 +90,7 @@ impl Expr {
 			Value::Number(Number::Float(x)) => Expr::Literal(Literal::Float(x)),
 			Value::Number(Number::Int(x)) => Expr::Literal(Literal::Integer(x)),
 			Value::Number(Number::Decimal(x)) => Expr::Literal(Literal::Decimal(x)),
-			Value::Strand(x) => Expr::Literal(Literal::Strand(x)),
+			Value::String(x) => Expr::Literal(Literal::String(x)),
 			Value::Bytes(x) => Expr::Literal(Literal::Bytes(x)),
 			Value::Regex(x) => Expr::Literal(Literal::Regex(x)),
 			Value::RecordId(x) => Expr::Literal(Literal::RecordId(RecordIdLit {
@@ -119,7 +118,7 @@ impl Expr {
 				returns: x.returns.map(|k| k.into()),
 				body: x.body.into(),
 			}))),
-			Value::Table(x) => Expr::Table(unsafe { Ident::new_unchecked(x.into_string()) }),
+			Value::Table(x) => Expr::Table(x.into_string()),
 			Value::Range(x) => x.into_literal().into(),
 		}
 	}
@@ -133,7 +132,7 @@ impl fmt::Display for Expr {
 			Expr::Literal(literal) => write!(f, "{literal}"),
 			Expr::Param(param) => write!(f, "{param}"),
 			Expr::Idiom(idiom) => write!(f, "{idiom}"),
-			Expr::Table(ident) => write!(f, "{ident}"),
+			Expr::Table(ident) => write!(f, "{}", EscapeIdent(ident)),
 			Expr::Mock(mock) => write!(f, "{mock}"),
 			Expr::Block(block) => write!(f, "{block}"),
 			Expr::Constant(constant) => write!(f, "{constant}"),
@@ -232,7 +231,7 @@ impl From<Expr> for crate::expr::Expr {
 			Expr::Literal(l) => crate::expr::Expr::Literal(l.into()),
 			Expr::Param(p) => crate::expr::Expr::Param(p.into()),
 			Expr::Idiom(i) => crate::expr::Expr::Idiom(i.into()),
-			Expr::Table(t) => crate::expr::Expr::Table(t.into()),
+			Expr::Table(t) => crate::expr::Expr::Table(t),
 			Expr::Mock(m) => crate::expr::Expr::Mock(m.into()),
 			Expr::Block(b) => crate::expr::Expr::Block(Box::new((*b).into())),
 			Expr::Constant(c) => crate::expr::Expr::Constant(c.into()),
@@ -292,7 +291,7 @@ impl From<crate::expr::Expr> for Expr {
 			crate::expr::Expr::Literal(l) => Expr::Literal(l.into()),
 			crate::expr::Expr::Param(p) => Expr::Param(p.into()),
 			crate::expr::Expr::Idiom(i) => Expr::Idiom(i.into()),
-			crate::expr::Expr::Table(t) => Expr::Table(t.into()),
+			crate::expr::Expr::Table(t) => Expr::Table(t),
 			crate::expr::Expr::Mock(m) => Expr::Mock(m.into()),
 			crate::expr::Expr::Block(b) => Expr::Block(Box::new((*b).into())),
 			crate::expr::Expr::Constant(c) => Expr::Constant(c.into()),

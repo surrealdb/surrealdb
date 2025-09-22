@@ -74,14 +74,15 @@ impl KillStatement {
 				});
 			}
 		}
-		if let Some(chn) = opt.sender.as_ref() {
-			chn.send(Notification {
-				id: lid.into(),
-				action: Action::Killed,
-				record: Value::None,
-				result: Value::None,
-			})
-			.await?;
+		if let Some(sender) = opt.broker.as_ref() {
+			sender
+				.send(Notification {
+					id: lid.into(),
+					action: Action::Killed,
+					record: Value::None,
+					result: Value::None,
+				})
+				.await;
 		}
 		// Return the query id
 		Ok(Value::None)

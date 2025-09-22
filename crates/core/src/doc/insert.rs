@@ -31,10 +31,10 @@ impl Document {
 		// is this retryable?
 		// it is retryable when some data is present on the insert statement to update.
 		let retryable = stm.update.is_some();
-		if retryable {
-			// it is retryable so generate a save point we can roll back to.
-			ctx.tx().lock().await.new_save_point();
-		}
+		// it is retryable so generate a save point we can roll back to.
+		// always create a save point even if not retryable, as we have to rollback to original
+		// state.
+		ctx.tx().lock().await.new_save_point();
 
 		// First try to create the value and if that is not possible due to an existing
 		// value fall back to update instead.
@@ -55,9 +55,7 @@ impl Document {
 					// or if the statement contained a specific record id, we
 					// don't retry to
 					if !retryable || self.is_specific_record_id() {
-						if retryable {
-							ctx.tx().lock().await.rollback_to_save_point().await?;
-						}
+						ctx.tx().lock().await.rollback_to_save_point().await?;
 
 						// Ignore flag; disables error.
 						// Error::Ignore is never raised to the user.
@@ -86,6 +84,8 @@ impl Document {
 				}) => {
 					// if not retryable return the error.
 					if !retryable {
+						ctx.tx().lock().await.rollback_to_save_point().await?;
+
 						// Ignore flag; disables error.
 						// Error::Ignore is never raised to the user.
 						if stm.ignore {
@@ -104,28 +104,29 @@ impl Document {
 					thing
 				}
 				_ => {
-					// if retryable we need to do something with the savepoint.
-					if retryable {
-						ctx.tx().lock().await.rollback_to_save_point().await?;
-					}
+					// we have to rollback to the save point, even though retryable is false.
+					// this is because we have to guarantee atomicity of the insert.
+					ctx.tx().lock().await.rollback_to_save_point().await?;
+
 					return Err(IgnoreError::Error(e));
 				}
 			},
 			Err(IgnoreError::Ignore) => {
-				if retryable {
-					ctx.tx().lock().await.release_last_save_point()?;
-				}
+				// if the error is ignored, we can release the save point.
+				ctx.tx().lock().await.release_last_save_point()?;
 				return Err(IgnoreError::Ignore);
 			}
 			Ok(x) => {
-				if retryable {
-					ctx.tx().lock().await.release_last_save_point()?;
-				}
+				// if the transaction is successful, we can release the save point.
+				ctx.tx().lock().await.release_last_save_point()?;
 				return Ok(x);
 			}
 		};
 
 		// Insertion failed so instead do an update.
+		// Always rollback to save point here, regardless of retryable flag.
+		// This ensures we can properly handle ON DUPLICATE KEY UPDATE by
+		// rolling back to the state before the failed insert attempt.
 		ctx.tx().lock().await.rollback_to_save_point().await?;
 
 		if ctx.is_done(true).await? {

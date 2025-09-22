@@ -224,7 +224,7 @@ async fn strict_typing_none_null() -> Result<()> {
 		]",
 	)?;
 	t.expect_error(
-		"Couldn't coerce value for field `name` of `person:test`: Expected `string` but found `NULL`",
+		"Couldn't coerce value for field `name` of `person:test`: Expected `none | string` but found `NULL`",
 	)?;
 	t.expect_val(
 		"[
@@ -312,7 +312,7 @@ async fn literal_typing() -> Result<()> {
 		}",
 	)?;
 	t.expect_error(
-		"Couldn't coerce value for field `obj` of `test:3`: Expected `{ a: int, b: option<string> }` but found `{ a: 3, b: 'bar', c: 'forbidden' }`"
+		"Couldn't coerce value for field `obj` of `test:3`: Expected `{ a: int, b: none | string }` but found `{ a: 3, b: 'bar', c: 'forbidden' }`"
 	)?;
 	//
 	Ok(())

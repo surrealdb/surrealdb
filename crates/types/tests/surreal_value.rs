@@ -364,7 +364,7 @@ test_surreal_value!(
 	option_some<Option<i64>>(
 		Some(1) => (
 			Value::Number(_),
-			Kind::Option(_)
+			Kind::Either(_)
 		),
 		is(is_option<i64>),
 		into(into_option<i64>),
@@ -376,7 +376,7 @@ test_surreal_value!(
 	option_none<Option<i64>>(
 		Option::<i64>::None => (
 			Value::None,
-			Kind::Option(_)
+			Kind::Either(_)
 		),
 		is(is_option<i64>),
 		into(into_option<i64>),

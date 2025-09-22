@@ -3,7 +3,6 @@ use std::str::FromStr;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::expr::Ident;
 use crate::iam::Error;
 
 // In the future, we will allow for custom roles. For now, provide predefined
@@ -37,16 +36,6 @@ impl FromStr for Role {
 			"editor" => Ok(Self::Editor),
 			"owner" => Ok(Self::Owner),
 			_ => Err(Error::InvalidRole(s.to_string())),
-		}
-	}
-}
-
-impl std::convert::From<Role> for Ident {
-	fn from(role: Role) -> Self {
-		match role {
-			Role::Viewer => unsafe { Ident::new_unchecked("Viewer".to_owned()) },
-			Role::Editor => unsafe { Ident::new_unchecked("Editor".to_owned()) },
-			Role::Owner => unsafe { Ident::new_unchecked("Owner".to_owned()) },
 		}
 	}
 }

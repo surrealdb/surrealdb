@@ -66,7 +66,7 @@ impl Value {
 									_ => Ok(()),
 								},
 							},
-							Value::Strand(f) => match path.len() {
+							Value::String(f) => match path.len() {
 								1 => {
 									v.remove(f.as_str());
 									Ok(())

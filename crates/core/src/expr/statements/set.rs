@@ -7,11 +7,12 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{ControlFlow, Expr, FlowResult, Ident, Kind, Value};
+use crate::expr::{ControlFlow, Expr, FlowResult, Kind, Value};
+use crate::fmt::EscapeKwFreeIdent;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SetStatement {
-	pub name: Ident,
+	pub name: String,
 	pub what: Expr,
 	pub kind: Option<Kind>,
 }
@@ -43,7 +44,7 @@ impl SetStatement {
 
 		if self.is_protected_set() {
 			return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidParam {
-				name: self.name.clone().into_string(),
+				name: self.name.clone(),
 			})));
 		}
 
@@ -60,7 +61,7 @@ impl SetStatement {
 		};
 
 		let mut c = MutableContext::unfreeze(ctx.take().unwrap())?;
-		c.add_value(self.name.clone().into_string(), result.into());
+		c.add_value(self.name.clone(), result.into());
 		*ctx = Some(c.freeze());
 		Ok(Value::None)
 	}
@@ -68,7 +69,7 @@ impl SetStatement {
 
 impl fmt::Display for SetStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "LET ${}", self.name)?;
+		write!(f, "LET ${}", EscapeKwFreeIdent(&self.name))?;
 		if let Some(ref kind) = self.kind {
 			write!(f, ": {}", kind)?;
 		}

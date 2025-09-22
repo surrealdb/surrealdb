@@ -6,11 +6,10 @@ use reblessive::tree::Stk;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::escape::{EscapeKey, EscapeRid};
-use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::literal::ObjectEntry;
-use crate::expr::{Expr, FlowResultExt as _, RecordIdKeyRangeLit};
-use crate::val::{Array, Object, RecordIdKey, Strand, Uuid};
+use crate::expr::{Expr, FlowResultExt as _, Kind, KindLiteral, RecordIdKeyRangeLit};
+use crate::fmt::{EscapeKey, EscapeRid, Fmt, Pretty, is_pretty, pretty_indent};
+use crate::val::{Array, Object, RecordIdKey, Uuid};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RecordIdKeyGen {
@@ -32,12 +31,36 @@ impl RecordIdKeyGen {
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RecordIdKeyLit {
 	Number(i64),
-	String(Strand),
+	String(String),
 	Uuid(Uuid),
 	Array(Vec<Expr>),
 	Object(Vec<ObjectEntry>),
 	Generate(RecordIdKeyGen),
 	Range(Box<RecordIdKeyRangeLit>),
+}
+
+impl RecordIdKeyLit {
+	pub(crate) fn kind_supported(kind: &Kind) -> bool {
+		match kind {
+			Kind::Any => true,
+			Kind::Number => true,
+			Kind::Int => true,
+			Kind::String => true,
+			Kind::Uuid => true,
+			Kind::Array(k, _) => RecordIdKeyLit::kind_supported(k),
+			Kind::Set(k, _) => RecordIdKeyLit::kind_supported(k),
+			Kind::Object => true,
+			Kind::Literal(l) => match l {
+				KindLiteral::Integer(_) => true,
+				KindLiteral::String(_) => true,
+				KindLiteral::Array(x) => x.iter().all(RecordIdKeyLit::kind_supported),
+				KindLiteral::Object(x) => x.values().all(RecordIdKeyLit::kind_supported),
+				_ => false,
+			},
+			Kind::Either(x) => x.iter().all(RecordIdKeyLit::kind_supported),
+			_ => false,
+		}
+	}
 }
 
 impl From<RecordIdKeyRangeLit> for RecordIdKeyLit {
@@ -120,7 +143,7 @@ impl RecordIdKeyLit {
 	) -> Result<RecordIdKey> {
 		match self {
 			RecordIdKeyLit::Number(v) => Ok(RecordIdKey::Number(*v)),
-			RecordIdKeyLit::String(v) => Ok(RecordIdKey::String(v.clone().into_string())),
+			RecordIdKeyLit::String(v) => Ok(RecordIdKey::String(v.clone())),
 			RecordIdKeyLit::Uuid(v) => Ok(RecordIdKey::Uuid(*v)),
 			RecordIdKeyLit::Array(v) => {
 				let mut res = Vec::new();

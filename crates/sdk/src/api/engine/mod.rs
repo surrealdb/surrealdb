@@ -37,8 +37,7 @@ use crate::core::expr;
 pub(crate) fn resource_to_exprs(r: Resource) -> Vec<expr::Expr> {
 	match r {
 		Resource::Table(x) => {
-			// TODO: Null byte validity
-			vec![expr::Expr::Table(unsafe { expr::Ident::new_unchecked(x) })]
+			vec![expr::Expr::Table(x)]
 		}
 		Resource::RecordId(x) => {
 			vec![expr::Expr::Literal(expr::Literal::RecordId(x.into_inner().into_literal()))]

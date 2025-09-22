@@ -12,39 +12,40 @@ use crate::err::Error;
 use crate::expr::filter::Filter;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::tokenizer::Tokenizer;
-use crate::expr::{Base, Ident, Value};
+use crate::expr::{Base, Value};
+use crate::fmt::{EscapeIdent, QuoteStr};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Array, Strand};
+use crate::val::Array;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineAnalyzerStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub function: Option<String>,
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl DefineAnalyzerStatement {
 	pub(crate) fn to_definition(&self) -> catalog::AnalyzerDefinition {
 		catalog::AnalyzerDefinition {
-			name: self.name.clone().into_string(),
+			name: self.name.clone(),
 			function: self.function.clone(),
 			tokenizers: self.tokenizers.clone(),
 			filters: self.filters.clone(),
-			comment: self.comment.as_ref().map(|x| x.clone().into_string()),
+			comment: self.comment.clone(),
 		}
 	}
 
 	pub fn from_definition(def: &catalog::AnalyzerDefinition) -> Self {
 		Self {
 			kind: DefineKind::Default,
-			name: Ident::new(def.name.clone()).unwrap(),
+			name: def.name.clone(),
 			function: def.function.clone(),
 			tokenizers: def.tokenizers.clone(),
 			filters: def.filters.clone(),
-			comment: def.comment.as_ref().map(|x| Strand::new(x.clone()).unwrap()),
+			comment: def.comment.clone(),
 		}
 	}
 
@@ -93,7 +94,7 @@ impl Display for DefineAnalyzerStatement {
 			DefineKind::Overwrite => write!(f, " IF NOT EXISTS")?,
 			DefineKind::IfNotExists => write!(f, " OVERWRITE")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		if let Some(ref i) = self.function {
 			write!(f, " FUNCTION fn::{i}")?
 		}
@@ -106,7 +107,7 @@ impl Display for DefineAnalyzerStatement {
 			write!(f, " FILTERS {}", tokens.join(","))?;
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", QuoteStr(v))?
 		}
 		Ok(())
 	}
@@ -115,9 +116,8 @@ impl Display for DefineAnalyzerStatement {
 impl InfoStructure for DefineAnalyzerStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => Value::from(self.name.clone().into_strand()),
-			// TODO: Null byte validity
-			"function".to_string(), if let Some(v) = self.function => Value::from(Strand::new(v.clone()).unwrap()),
+			"name".to_string() => Value::from(self.name.clone()),
+			"function".to_string(), if let Some(v) = self.function => Value::from(v.clone()),
 			"tokenizers".to_string(), if let Some(v) = self.tokenizers =>
 				v.into_iter().map(|v| v.to_string().into()).collect::<Array>().into(),
 			"filters".to_string(), if let Some(v) = self.filters =>

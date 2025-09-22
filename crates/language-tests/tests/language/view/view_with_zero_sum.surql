@@ -8,13 +8,13 @@ value = "'OK'"
 value = "NONE"
 
 [[test.results]]
-value = "[{ __: { d1bf5928fa4c9af083d803e8dea3a5ee: { c: 2 }, d8a468327a09d98e5dab268e6471af2f: { c: 2 } }, avgSalary: 75350.5dec, department: 'Engineering', employeeCount: 2, id: department:['Engineering'], totalAwards: 0 }, { __: { d1bf5928fa4c9af083d803e8dea3a5ee: { c: 2 }, d8a468327a09d98e5dab268e6471af2f: { c: 2 } }, avgSalary: 75000dec, department: 'Marketing', employeeCount: 2, id: department:['Marketing'], totalAwards: 2 }]"
+value = "[{ avgSalary: 75350.5dec, department: 'Engineering', employeeCount: 2, id: department:['Engineering'], totalAwards: 0 }, { avgSalary: 75000dec, department: 'Marketing', employeeCount: 2, id: department:['Marketing'], totalAwards: 2 }]"
 
 [[test.results]]
 value = "[{ awards: 0, department: 'Engineering', id: employee:EMP001, salary: 80000f }]"
 
 [[test.results]]
-value = "[{ __: { d1bf5928fa4c9af083d803e8dea3a5ee: { c: 2 }, d8a468327a09d98e5dab268e6471af2f: { c: 2 } }, avgSalary: 77850.250dec, department: 'Engineering', employeeCount: 2, id: department:['Engineering'], totalAwards: 0 }, { __: { d1bf5928fa4c9af083d803e8dea3a5ee: { c: 2 }, d8a468327a09d98e5dab268e6471af2f: { c: 2 } }, avgSalary: 75000dec, department: 'Marketing', employeeCount: 2, id: department:['Marketing'], totalAwards: 2 }]"
+value = "[{ avgSalary: 77850.250dec, department: 'Engineering', employeeCount: 2, id: department:['Engineering'], totalAwards: 0 }, { avgSalary: 75000dec, department: 'Marketing', employeeCount: 2, id: department:['Marketing'], totalAwards: 2 }]"
 
 */
 

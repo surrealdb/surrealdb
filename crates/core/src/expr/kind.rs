@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Display, Formatter, Write};
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
@@ -7,13 +7,12 @@ use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon}
 use revision::revisioned;
 use rust_decimal::Decimal;
 
-use super::escape::EscapeKey;
-use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Literal, Part, Value};
+use crate::fmt::{EscapeIdent, EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
-	Regex, Strand, Uuid,
+	Regex, Uuid,
 };
 
 #[revisioned(revision = 1)]
@@ -65,6 +64,8 @@ impl FromStr for GeometryKind {
 pub enum Kind {
 	/// The most generic type, can be anything.
 	Any,
+	/// None type.
+	None,
 	/// Null type.
 	Null,
 	/// Boolean type.
@@ -98,8 +99,6 @@ pub enum Kind {
 	/// The vec contains the geometry types as strings, for example `"point"` or
 	/// `"polygon"`.
 	Geometry(Vec<GeometryKind>),
-	/// An optional type.
-	Option(Box<Kind>),
 	/// An either type.
 	/// Can be any of the kinds in the vec.
 	Either(Vec<Kind>),
@@ -149,24 +148,20 @@ impl Kind {
 
 	/// Returns true if this type is optional
 	pub(crate) fn can_be_none(&self) -> bool {
-		matches!(self, Kind::Option(_) | Kind::Any)
+		match self {
+			Kind::None | Kind::Any => true,
+			Kind::Either(x) => x.iter().any(|x| x.can_be_none()),
+			_ => false,
+		}
 	}
 
 	/// Returns true if this type is a literal, or contains a literal
 	pub(crate) fn contains_literal(&self) -> bool {
-		if matches!(self, Kind::Literal(_)) {
-			return true;
+		match self {
+			Kind::Literal(_) => true,
+			Kind::Either(x) => x.iter().any(|x| x.contains_literal()),
+			_ => false,
 		}
-
-		if let Kind::Option(x) = self {
-			return x.contains_literal();
-		}
-
-		if let Kind::Either(x) = self {
-			return x.iter().any(|x| x.contains_literal());
-		}
-
-		false
 	}
 
 	// Return the kind of the contained value.
@@ -174,41 +169,37 @@ impl Kind {
 	// For example: for `array<number>` or `set<number>` this returns `number`.
 	// For `array<number> | set<float>` this returns `number | float`.
 	pub(crate) fn inner_kind(&self) -> Option<Kind> {
-		let mut this = self;
-		loop {
-			match &this {
-				Kind::Any
-				| Kind::Null
-				| Kind::Bool
-				| Kind::Bytes
-				| Kind::Datetime
-				| Kind::Decimal
-				| Kind::Duration
-				| Kind::Float
-				| Kind::Int
-				| Kind::Number
-				| Kind::Object
-				| Kind::String
-				| Kind::Uuid
-				| Kind::Regex
-				| Kind::Record(_)
-				| Kind::Geometry(_)
-				| Kind::Function(_, _)
-				| Kind::Range
-				| Kind::Literal(_)
-				| Kind::File(_) => return None,
-				Kind::Option(x) => {
-					this = x;
-				}
-				Kind::Array(x, _) | Kind::Set(x, _) => return Some(x.as_ref().clone()),
-				Kind::Either(x) => {
-					// a either shouldn't be able to contain a either itself so recursing here
-					// should be fine.
-					let kinds: Vec<Kind> = x.iter().filter_map(Self::inner_kind).collect();
-					if kinds.is_empty() {
-						return None;
-					}
-					return Some(Kind::Either(kinds));
+		match self {
+			Kind::Any
+			| Kind::None
+			| Kind::Null
+			| Kind::Bool
+			| Kind::Bytes
+			| Kind::Datetime
+			| Kind::Decimal
+			| Kind::Duration
+			| Kind::Float
+			| Kind::Int
+			| Kind::Number
+			| Kind::Object
+			| Kind::String
+			| Kind::Uuid
+			| Kind::Regex
+			| Kind::Record(_)
+			| Kind::Geometry(_)
+			| Kind::Function(_, _)
+			| Kind::Range
+			| Kind::Literal(_)
+			| Kind::File(_) => None,
+			Kind::Array(x, _) | Kind::Set(x, _) => Some(x.as_ref().clone()),
+			Kind::Either(x) => {
+				// a either shouldn't be able to contain a either itself so recursing here
+				// should be fine.
+				let kinds: Vec<Kind> = x.iter().filter_map(Self::inner_kind).collect();
+				if kinds.is_empty() {
+					None
+				} else {
+					Some(Kind::Either(kinds))
 				}
 			}
 		}
@@ -224,7 +215,9 @@ impl Kind {
 			match self {
 				Kind::Object => return matches!(path.first(), Some(Part::Field(_) | Part::All)),
 				Kind::Either(kinds) => {
-					return kinds.iter().all(|k| k.allows_nested_kind(path, kind));
+					return kinds
+						.iter()
+						.all(|k| matches!(k, Kind::None) || k.allows_nested_kind(path, kind));
 				}
 				Kind::Array(inner, len) | Kind::Set(inner, len) => {
 					return match path.first() {
@@ -246,11 +239,41 @@ impl Kind {
 		}
 
 		match self {
+			// Check if the two kinds match when we reach the end of the path
+			_ if path.is_empty() && self == kind => true,
+			// Check if the literal matches the kind
 			Kind::Literal(lit) => lit.allows_nested_kind(path, kind),
-			Kind::Option(inner) => inner.allows_nested_kind(path, kind),
-			_ if path.is_empty() => self == kind,
+			// Check if any of the kinds in the either match the kind
+			Kind::Either(kinds) => {
+				kinds.iter().all(|k| matches!(k, Kind::None) || k.allows_nested_kind(path, kind))
+			}
 			_ => false,
 		}
+	}
+
+	pub(crate) fn flatten(self) -> Vec<Kind> {
+		match self {
+			Kind::Either(x) => x.into_iter().flat_map(|k| k.flatten()).collect(),
+			_ => vec![self],
+		}
+	}
+
+	pub(crate) fn either(kinds: Vec<Kind>) -> Kind {
+		let mut seen = HashSet::new();
+		let mut kinds = kinds
+			.into_iter()
+			.flat_map(|k| k.flatten())
+			.filter(|k| seen.insert(k.clone()))
+			.collect::<Vec<_>>();
+		match kinds.len() {
+			0 => Kind::None,
+			1 => kinds.remove(0),
+			_ => Kind::Either(kinds),
+		}
+	}
+
+	pub(crate) fn option(kind: Kind) -> Kind {
+		Kind::either(vec![Kind::None, kind])
 	}
 }
 
@@ -267,12 +290,7 @@ pub trait HasKind {
 
 impl<T: HasKind> HasKind for Option<T> {
 	fn kind() -> Kind {
-		let kind = T::kind();
-		if matches!(kind, Kind::Option(_)) {
-			kind
-		} else {
-			Kind::Option(Box::new(kind))
-		}
+		Kind::option(T::kind())
 	}
 }
 
@@ -347,7 +365,6 @@ impl_basic_has_kind! {
 	Decimal => Decimal,
 
 	String => String,
-	Strand => String,
 	Bytes => Bytes,
 	Number => Number,
 	Datetime => Datetime,
@@ -388,6 +405,7 @@ impl Display for Kind {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Kind::Any => f.write_str("any"),
+			Kind::None => f.write_str("none"),
 			Kind::Null => f.write_str("null"),
 			Kind::Bool => f.write_str("bool"),
 			Kind::Bytes => f.write_str("bytes"),
@@ -402,12 +420,11 @@ impl Display for Kind {
 			Kind::Uuid => f.write_str("uuid"),
 			Kind::Regex => f.write_str("regex"),
 			Kind::Function(_, _) => f.write_str("function"),
-			Kind::Option(k) => write!(f, "option<{}>", k),
 			Kind::Record(k) => {
 				if k.is_empty() {
 					f.write_str("record")
 				} else {
-					write!(f, "record<{}>", Fmt::verbar_separated(k))
+					write!(f, "record<{}>", Fmt::verbar_separated(k.iter().map(EscapeIdent)))
 				}
 			}
 			Kind::Geometry(k) => {
@@ -450,7 +467,7 @@ impl InfoStructure for Kind {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug)]
 pub enum KindLiteral {
-	String(Strand),
+	String(String),
 	Integer(i64),
 	Float(f64),
 	Decimal(Decimal),
@@ -581,7 +598,7 @@ impl KindLiteral {
 	pub fn validate_value(&self, value: &Value) -> bool {
 		match self {
 			Self::String(v) => match value {
-				Value::Strand(s) => s == v,
+				Value::String(s) => s == v,
 				_ => false,
 			},
 			Self::Integer(v) => match value {
@@ -737,7 +754,7 @@ impl KindLiteral {
 impl Display for KindLiteral {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			KindLiteral::String(s) => write!(f, "{s}"),
+			KindLiteral::String(s) => write!(f, "{}", QuoteStr(s)),
 			KindLiteral::Integer(n) => write!(f, "{}", n),
 			KindLiteral::Float(n) => write!(f, "{}f", n),
 			KindLiteral::Decimal(n) => write!(f, "{}dec", n),

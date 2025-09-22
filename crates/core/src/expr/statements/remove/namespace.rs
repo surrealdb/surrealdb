@@ -6,12 +6,13 @@ use crate::catalog::providers::NamespaceProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Base, Ident, Value};
+use crate::expr::{Base, Value};
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveNamespaceStatement {
-	pub name: Ident,
+	pub name: String,
 	pub if_exists: bool,
 	pub expunge: bool,
 }
@@ -32,7 +33,7 @@ impl RemoveNamespaceStatement {
 				}
 
 				return Err(Error::NsNotFound {
-					name: self.name.to_raw_string(),
+					name: self.name.clone(),
 				}
 				.into());
 			}
@@ -78,7 +79,7 @@ impl Display for RemoveNamespaceStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		Ok(())
 	}
 }

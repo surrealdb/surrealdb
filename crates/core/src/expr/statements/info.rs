@@ -14,8 +14,8 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{
 	Base, DefineAccessStatement, DefineAnalyzerStatement, DefineUserStatement, Expr, FlowResultExt,
-	Ident,
 };
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ToSql;
 use crate::sys::INFORMATION;
@@ -31,11 +31,11 @@ pub enum InfoStatement {
 
 	Db(bool, Option<Expr>),
 
-	Tb(Ident, bool, Option<Expr>),
+	Tb(String, bool, Option<Expr>),
 
-	User(Ident, Option<Base>, bool),
+	User(String, Option<Base>, bool),
 
-	Index(Ident, Ident, bool),
+	Index(String, String, bool),
 }
 
 impl InfoStatement {
@@ -69,7 +69,7 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_root_accesses().await?.iter() {
 								let def = DefineAccessStatement::from_definition(Base::Root, v).redact();
-								out.insert(def.name.to_raw_string(), def.to_string().into());
+								out.insert(def.name.clone(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -120,7 +120,7 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_ns_accesses(ns).await?.iter() {
 								let def = DefineAccessStatement::from_definition(Base::Ns, v).redact();
-								out.insert(def.name.to_raw_string(), def.to_string().into());
+								out.insert(def.name.clone(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -182,7 +182,7 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_db_accesses(ns, db).await?.iter() {
 								let def = DefineAccessStatement::from_definition(Base::Db, v).redact();
-								out.insert(def.name.to_raw_string(), def.to_string().into());
+								out.insert(def.name.clone(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -300,7 +300,7 @@ impl InfoStatement {
 						"fields".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_fields(ns, db, tb, version).await?.iter() {
-								out.insert(v.name.to_string(), v.to_sql().into());
+								out.insert(v.name.to_raw_string(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -421,24 +421,28 @@ impl fmt::Display for InfoStatement {
 				None => f.write_str("INFO FOR DATABASE STRUCTURE"),
 			},
 			Self::Tb(t, false, v) => match v {
-				Some(v) => write!(f, "INFO FOR TABLE {t} VERSION {v}"),
-				None => write!(f, "INFO FOR TABLE {t}"),
+				Some(v) => write!(f, "INFO FOR TABLE {} VERSION {v}", EscapeIdent(t)),
+				None => write!(f, "INFO FOR TABLE {}", EscapeIdent(t)),
 			},
 
 			Self::Tb(t, true, v) => match v {
-				Some(v) => write!(f, "INFO FOR TABLE {t} VERSION {v} STRUCTURE"),
-				None => write!(f, "INFO FOR TABLE {t} STRUCTURE"),
+				Some(v) => write!(f, "INFO FOR TABLE {} VERSION {v} STRUCTURE", EscapeIdent(t)),
+				None => write!(f, "INFO FOR TABLE {} STRUCTURE", EscapeIdent(t)),
 			},
 			Self::User(u, b, false) => match b {
-				Some(b) => write!(f, "INFO FOR USER {u} ON {b}"),
-				None => write!(f, "INFO FOR USER {u}"),
+				Some(b) => write!(f, "INFO FOR USER {} ON {b}", EscapeIdent(u)),
+				None => write!(f, "INFO FOR USER {}", EscapeIdent(u)),
 			},
 			Self::User(u, b, true) => match b {
-				Some(b) => write!(f, "INFO FOR USER {u} ON {b} STRUCTURE"),
-				None => write!(f, "INFO FOR USER {u} STRUCTURE"),
+				Some(b) => write!(f, "INFO FOR USER {} ON {b} STRUCTURE", EscapeIdent(u)),
+				None => write!(f, "INFO FOR USER {} STRUCTURE", EscapeIdent(u)),
 			},
-			Self::Index(i, t, false) => write!(f, "INFO FOR INDEX {i} ON {t}"),
-			Self::Index(i, t, true) => write!(f, "INFO FOR INDEX {i} ON {t} STRUCTURE"),
+			Self::Index(i, t, false) => {
+				write!(f, "INFO FOR INDEX {} ON {}", EscapeIdent(i), EscapeIdent(t))
+			}
+			Self::Index(i, t, true) => {
+				write!(f, "INFO FOR INDEX {} ON {} STRUCTURE", EscapeIdent(i), EscapeIdent(t))
+			}
 		}
 	}
 }

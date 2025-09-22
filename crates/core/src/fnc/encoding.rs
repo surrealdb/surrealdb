@@ -40,6 +40,7 @@ pub mod base64 {
 		})?)))
 	}
 }
+
 pub mod cbor {
 	use anyhow::Result;
 

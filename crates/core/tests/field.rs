@@ -2,8 +2,8 @@ mod helpers;
 use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
+use surrealdb_core::syn;
 use surrealdb_core::val::{Array, RecordId};
-use surrealdb_core::{strand, syn};
 
 use crate::helpers::Test;
 
@@ -178,7 +178,7 @@ async fn field_definition_edge_permissions() -> Result<()> {
 		"test",
 		"test",
 		"test",
-		RecordId::new("user".to_owned(), strand!("one").to_owned()).into(),
+		RecordId::new("user".to_owned(), "one".to_owned()).into(),
 	);
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -266,7 +266,7 @@ async fn field_definition_flexible_array_any() -> Result<()> {
 	let sql = "
 		DEFINE TABLE user SCHEMAFULL;
 		DEFINE FIELD custom ON user TYPE option<array>;
-		DEFINE FIELD custom.* ON user FLEXIBLE TYPE any;
+		DEFINE FIELD OVERWRITE custom.* ON user FLEXIBLE TYPE any;
 		CREATE user:one CONTENT { custom: ['sometext'] };
 		CREATE user:two CONTENT { custom: [ ['sometext'] ] };
 		CREATE user:three CONTENT { custom: [ { key: 'sometext' } ] };
