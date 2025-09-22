@@ -9,7 +9,8 @@ use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
-use crate::{Surreal, Value};
+use crate::Surreal;
+use surrealdb_types::Value;
 
 /// A content future
 ///

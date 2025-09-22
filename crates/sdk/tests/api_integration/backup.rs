@@ -12,7 +12,7 @@
 // Supported by the storage engines and the HTTP protocol
 
 use futures::StreamExt as _;
-use surrealdb::Value;
+use surrealdb::types::Value;
 use tokio::fs::remove_file;
 use ulid::Ulid;
 

@@ -8,7 +8,8 @@ use super::BoxFuture;
 use crate::api::conn::Command;
 use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
-use crate::{Surreal, Value};
+use crate::Surreal;
+use surrealdb_types::Value;
 
 /// An Insert Relation future
 #[derive(Debug)]

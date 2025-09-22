@@ -8,8 +8,6 @@ use revision::Revisioned;
 use serde::Serialize;
 use serde::ser::SerializeMap as _;
 use surrealdb_core::expr::Expr;
-#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-#[allow(unused_imports)]
 use surrealdb_types::{Array, Object, Value};
 use surrealdb_types::{Notification as CoreNotification, Variables};
 use uuid::Uuid;

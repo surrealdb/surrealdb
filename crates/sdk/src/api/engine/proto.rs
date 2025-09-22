@@ -1,7 +1,7 @@
 use revision::revisioned;
 use serde::Deserialize;
 
-use crate::Value;
+use surrealdb_types::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Deserialize)]

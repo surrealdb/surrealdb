@@ -37,7 +37,7 @@ pub mod error {
 	pub use crate::core::err::Error as Db;
 }
 
-use surrealdb_types::{Bytes, Datetime, Number, Object, RecordId, RecordIdKey, Value};
+pub use surrealdb_types as types;
 
 #[cfg(feature = "protocol-http")]
 #[doc(hidden)]

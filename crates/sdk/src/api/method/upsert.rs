@@ -14,7 +14,8 @@ use crate::api::opt::{PatchOp, Resource};
 use crate::api::{self, Connection, Result};
 use crate::method::OnceLockExt;
 use crate::opt::KeyRange;
-use crate::{Surreal, Value};
+use crate::Surreal;
+use surrealdb_types::Value;
 
 /// An upsert future
 #[derive(Debug)]

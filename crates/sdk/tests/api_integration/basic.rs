@@ -9,9 +9,11 @@ use serde_json::json;
 use surrealdb::error::{Api as ApiError, Db as DbError};
 use surrealdb::opt::auth::{Database, Namespace, Record as RecordAccess};
 use surrealdb::opt::{PatchOp, PatchOps, Raw, Resource};
-use surrealdb::{IndexedResults, RecordId, Value};
+use surrealdb::{IndexedResults};
+use surrealdb::types::{RecordId, Value};
 use surrealdb_core::expr::TopLevelExpr;
-use surrealdb_core::{syn, val};
+use surrealdb_core::syn;
+use surrealdb::types::RecordIdKey;
 use ulid::Ulid;
 
 use super::{AuthParams, CreateDb};
@@ -70,12 +72,12 @@ pub async fn signup_record(new_db: impl CreateDb) {
 	drop(permit);
 	response.check().unwrap();
 	db.signup(RecordAccess {
-		namespace: NS,
-		database: &database,
-		access: &access,
+		namespace: NS.to_string(),
+		database: database,
+		access: access,
 		params: AuthParams {
-			email: "john.doe@example.com",
-			pass: "password123",
+			email: "john.doe@example.com".to_string(),
+			pass: "password123".to_string(),
 		},
 	})
 	.await
@@ -86,14 +88,14 @@ pub async fn signin_ns(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let user = Ulid::new().to_string();
-	let pass = "password123";
+	let pass = "password123".to_string();
 	let sql = format!("DEFINE USER `{user}` ON NAMESPACE PASSWORD '{pass}'");
 	let response = db.query(sql).await.unwrap();
 	drop(permit);
 	response.check().unwrap();
 	db.signin(Namespace {
-		namespace: NS,
-		username: &user,
+		namespace: NS.to_string(),
+		username: user,
 		password: pass,
 	})
 	.await

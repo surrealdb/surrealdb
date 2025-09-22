@@ -19,7 +19,8 @@ use crate::core::sql::Ast;
 use crate::method::query::ValidQuery;
 use crate::method::{self, Stream};
 use crate::notification::Notification;
-use crate::{Connection, Surreal, Value, api};
+use crate::{Connection, Surreal, api};
+use surrealdb_types::Value;
 
 pub struct Query(pub(crate) Result<ValidQuery>);
 /// A trait for converting inputs into SQL statements

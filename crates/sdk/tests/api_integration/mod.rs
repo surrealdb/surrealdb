@@ -1,7 +1,9 @@
 use std::future::Future;
 
 use serde::{Deserialize, Serialize};
-use surrealdb::{Connection, RecordId, Surreal};
+use surrealdb::{Connection, Surreal};
+use surrealdb::types::RecordId;
+use surrealdb_types::SurrealValue;
 use tokio::sync::SemaphorePermit;
 
 /// Tests for this module are defined using this macro.
@@ -53,31 +55,31 @@ const ROOT_PASS: &str = "root";
 static TEMP_DIR: std::sync::LazyLock<std::path::PathBuf> =
 	std::sync::LazyLock::new(|| temp_dir::TempDir::new().unwrap().child("sdb-test"));
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, SurrealValue)]
 struct Record {
 	name: String,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, SurrealValue)]
 struct ApiRecordId {
 	id: RecordId,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, SurrealValue)]
 struct RecordName {
 	name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, SurrealValue)]
 struct RecordBuf {
 	id: RecordId,
 	name: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, SurrealValue)]
 struct AuthParams<'a> {
-	email: &'a str,
-	pass: &'a str,
+	email: String,
+	pass: String,
 }
 
 /// Trait for creating a database.
@@ -124,8 +126,8 @@ mod ws {
 		let permit = PERMITS.acquire().await.unwrap();
 		let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
 		db.signin(Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		})
 		.await
 		.unwrap();
@@ -231,7 +233,8 @@ mod mem {
 	use surrealdb::opt::auth::Root;
 	use surrealdb::opt::capabilities::{Capabilities, ExperimentalFeature};
 	use surrealdb::opt::{Config, Resource};
-	use surrealdb::{RecordIdKey, Surreal};
+	use surrealdb::Surreal;
+	use surrealdb::types::RecordIdKey;
 	use surrealdb_core::iam;
 	use tokio::sync::{Semaphore, SemaphorePermit};
 
@@ -243,8 +246,8 @@ mod mem {
 	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
 		let permit = PERMITS.acquire().await.unwrap();
 		let root = Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		};
 		let config = Config::new().user(root).capabilities(Capabilities::all());
 		let db = Surreal::new::<Mem>(config).await.unwrap();
@@ -270,7 +273,7 @@ mod mem {
 		let Some(record): Option<ApiRecordId> = db.create(("item", "foo")).await.unwrap() else {
 			panic!("record not found");
 		};
-		assert_eq!(*record.id.key(), RecordIdKey::from("foo".to_owned()));
+		assert_eq!(*record.id.key(), RecordIdKey::from("foo"));
 	}
 
 	#[test_log::test(tokio::test)]
@@ -278,8 +281,8 @@ mod mem {
 		let db = Surreal::new::<Mem>(()).await.unwrap();
 		let Some(DbError::InvalidAuth) = db
 			.signin(Root {
-				username: ROOT_USER,
-				password: ROOT_PASS,
+				username: ROOT_USER.to_string(),
+				password: ROOT_PASS.to_string(),
 			})
 			.await
 			.unwrap_err()
@@ -292,8 +295,8 @@ mod mem {
 	#[test_log::test(tokio::test)]
 	async fn credentials_activate_authentication() {
 		let config = Config::new().user(Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		});
 		let db = Surreal::new::<Mem>(config).await.unwrap();
 		db.use_ns("namespace").use_db("database").await.unwrap();

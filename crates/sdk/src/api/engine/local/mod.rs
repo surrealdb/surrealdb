@@ -723,7 +723,7 @@ async fn router(
 			let one = !data.is_array();
 
 			let insert_plan = InsertStatement {
-				into: what.map(|w| Expr::Table(unsafe { Ident::new_unchecked(w) })),
+				into: what.map(Expr::Table),
 				data: Data::SingleExpression(Expr::from_public_value(data)),
 				ignore: false,
 				update: None,

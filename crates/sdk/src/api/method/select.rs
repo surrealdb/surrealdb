@@ -12,7 +12,8 @@ use crate::api::opt::Resource;
 use crate::api::{Connection, Result};
 use crate::method::Live;
 use crate::opt::KeyRange;
-use crate::{Surreal, Value};
+use crate::Surreal;
+use surrealdb_types::Value;
 
 /// A select future
 #[derive(Debug)]

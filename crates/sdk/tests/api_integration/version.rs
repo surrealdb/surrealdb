@@ -1,6 +1,6 @@
 #![cfg(feature = "kv-surrealkv")]
 
-use surrealdb::Value;
+use surrealdb::types::Value;
 use ulid::Ulid;
 
 use super::CreateDb;

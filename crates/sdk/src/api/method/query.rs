@@ -23,7 +23,8 @@ use crate::api::{self, Connection, ExtraFeatures, Result, opt};
 use crate::core::expr::{LogicalPlan, TopLevelExpr};
 use crate::method::{OnceLockExt, WithStats};
 use crate::notification::Notification;
-use crate::{Surreal, Value};
+use crate::Surreal;
+use surrealdb_types::Value;
 
 /// A query future
 #[derive(Debug)]
