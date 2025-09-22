@@ -55,16 +55,8 @@ jobs:
           extra_args=""
 
           if [[ "${{ inputs.publish }}" == "false" || "${{ inputs.nightly-release }}" == "true" ]]; then
-            # Update crate version to make sure we test publishing
-            dummy_version="0.0.0-alpha.1"
-            sed -i "s#^version = \".*\"#version = \"${dummy_version}\"#" Cargo.toml
-            sed -i "s#version = \".*\", path = \"crates#version = \"=${dummy_version}\", path = \"crates#" Cargo.toml
-
-            # Remove local dependencies
-            sed -i "s#, path = \".*\"##" Cargo.toml
-
-            # Dry run publishing to test publishing
-            extra_args="${extra_args} --dry-run --allow-dirty"
+            # Dry run to test publishing
+            extra_args="${extra_args} --dry-run"
           fi
 
           cargo +${{ inputs.rust-version }} publish --workspace ${extra_args}
