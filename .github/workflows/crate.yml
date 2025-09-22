@@ -71,7 +71,7 @@ jobs:
 
             # Remove local dependencies
             sed -i "s#, path = \".*\"##" Cargo.toml
-          
+
             # Dry run publishing to test publishing
             extra_args="${extra_args} --dry-run --allow-dirty"
           fi
