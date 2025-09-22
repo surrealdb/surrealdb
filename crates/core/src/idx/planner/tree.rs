@@ -11,7 +11,7 @@ use crate::catalog::{self, DatabaseId, Index, IndexDefinition, IndexId, Namespac
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
 use crate::expr::{
-	BinaryOperator, Cond, Expr, FlowResultExt as _, Ident, Idiom, Kind, Literal, Order, Part, With,
+	BinaryOperator, Cond, Expr, FlowResultExt as _, Idiom, Kind, Literal, Order, Part, With,
 };
 use crate::idx::planner::StatementContext;
 use crate::idx::planner::executor::{
@@ -43,7 +43,7 @@ impl Tree {
 	pub(super) async fn build<'a>(
 		stk: &mut Stk,
 		stm_ctx: &'a StatementContext<'a>,
-		table: &'a Ident,
+		table: &'a str,
 	) -> Result<Self> {
 		let mut b = TreeBuilder::new(stm_ctx, table);
 		if let Some(cond) = stm_ctx.cond {
@@ -68,10 +68,10 @@ impl Tree {
 
 struct TreeBuilder<'a> {
 	ctx: &'a StatementContext<'a>,
-	table: &'a Ident,
+	table: &'a str,
 	first_order: Option<&'a Order>,
-	schemas: HashMap<Ident, SchemaCache>,
-	idioms_indexes: HashMap<Ident, HashMap<Arc<Idiom>, LocalIndexRefs>>,
+	schemas: HashMap<String, SchemaCache>,
+	idioms_indexes: HashMap<String, HashMap<Arc<Idiom>, LocalIndexRefs>>,
 	resolved_expressions: HashMap<Arc<Expr>, ResolvedExpression>,
 	resolved_idioms: HashMap<Arc<Idiom>, Node>,
 	index_map: IndexesMap,
@@ -98,7 +98,7 @@ pub(super) type LocalIndexRefs = Vec<(IndexReference, IdiomCol)>;
 pub(super) type RemoteIndexRefs = Arc<Vec<(Arc<Idiom>, LocalIndexRefs)>>;
 
 impl<'a> TreeBuilder<'a> {
-	fn new(ctx: &'a StatementContext<'a>, table: &'a Ident) -> Self {
+	fn new(ctx: &'a StatementContext<'a>, table: &'a str) -> Self {
 		let with_indexes = WithIndexes::with_capacity(ctx.with);
 		let first_order = if let Some(Ordering::Order(OrderList(o))) = ctx.order {
 			o.first()
@@ -131,14 +131,14 @@ impl<'a> TreeBuilder<'a> {
 	async fn lazy_load_schema_resolver(
 		&mut self,
 		tx: &Transaction,
-		table: &Ident,
+		table: &str,
 	) -> Result<SchemaCache> {
 		if let Some(sc) = self.schemas.get(table).cloned() {
 			return Ok(sc);
 		}
 		let (ns, db) = self.ctx.ctx.expect_ns_db_ids(self.ctx.opt).await?;
 		let sc = SchemaCache::new(ns, db, table, tx).await?;
-		self.schemas.insert(table.clone(), sc.clone());
+		self.schemas.insert(table.to_owned(), sc.clone());
 		Ok(sc)
 	}
 
@@ -171,7 +171,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(())
 	}
 
-	async fn eval_count(&mut self, table: &Ident) -> Result<()> {
+	async fn eval_count(&mut self, table: &str) -> Result<()> {
 		if let Some(f) = self.ctx.fields {
 			if f.is_count_all_only() {
 				if let Some(g) = self.ctx.group {
@@ -265,7 +265,7 @@ impl<'a> TreeBuilder<'a> {
 			Expr::Literal(
 				Literal::Integer(_)
 				| Literal::Bool(_)
-				| Literal::Strand(_)
+				| Literal::String(_)
 				| Literal::RecordId(_)
 				| Literal::Duration(_)
 				| Literal::Uuid(_)
@@ -354,7 +354,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(n)
 	}
 
-	fn resolve_indexes(&mut self, t: &Ident, i: &Idiom, schema: &SchemaCache) -> LocalIndexRefs {
+	fn resolve_indexes(&mut self, t: &str, i: &Idiom, schema: &SchemaCache) -> LocalIndexRefs {
 		// Did we already resolve this idiom?
 		if let Some(m) = self.idioms_indexes.get(t) {
 			if let Some(irs) = m.get(i).cloned() {
@@ -375,7 +375,7 @@ impl<'a> TreeBuilder<'a> {
 		if let Some(e) = self.idioms_indexes.get_mut(t) {
 			e.insert(i, irs.clone());
 		} else {
-			self.idioms_indexes.insert(t.clone(), HashMap::from([(i, irs.clone())]));
+			self.idioms_indexes.insert(t.to_owned(), HashMap::from([(i, irs.clone())]));
 		}
 		irs
 	}
@@ -420,9 +420,8 @@ impl<'a> TreeBuilder<'a> {
 					let remote_field = Arc::new(Idiom(remote_field.to_vec()));
 					let mut remotes = vec![];
 					for table in tables {
-						let table = Ident::try_new(table.clone())?;
-						let schema = self.lazy_load_schema_resolver(tx, &table).await?;
-						let remote_irs = self.resolve_indexes(&table, &remote_field, &schema);
+						let schema = self.lazy_load_schema_resolver(tx, table).await?;
+						let remote_irs = self.resolve_indexes(table, &remote_field, &schema);
 						remotes.push((remote_field.clone(), remote_irs));
 					}
 					let ro = RecordOptions {
@@ -792,7 +791,7 @@ struct SchemaCache {
 }
 
 impl SchemaCache {
-	async fn new(ns: NamespaceId, db: DatabaseId, table: &Ident, tx: &Transaction) -> Result<Self> {
+	async fn new(ns: NamespaceId, db: DatabaseId, table: &str, tx: &Transaction) -> Result<Self> {
 		let indexes = tx.all_tb_indexes(ns, db, table).await?;
 		let fields = tx.all_tb_fields(ns, db, table, None).await?;
 		Ok(Self {

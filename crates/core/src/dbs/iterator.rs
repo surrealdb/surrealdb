@@ -12,9 +12,7 @@ use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, Document, IgnoreError};
 use crate::err::Error;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
-use crate::expr::{
-	self, ControlFlow, Expr, Fields, FlowResultExt, Ident, Literal, Lookup, Mock, Part,
-};
+use crate::expr::{self, ControlFlow, Expr, Fields, FlowResultExt, Literal, Lookup, Mock, Part};
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
 	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
@@ -40,7 +38,7 @@ pub(crate) enum Iterable {
 	/// before processing. This is used in CREATE statements
 	/// when generating a new id, or generating an id based
 	/// on the id field which is specified within the data.
-	Yield(Ident),
+	Yield(String),
 	/// An iterable which needs to fetch the data of a
 	/// specific record before processing the document.
 	Thing(RecordId),
@@ -53,7 +51,7 @@ pub(crate) enum Iterable {
 	},
 	/// An iterable which needs to iterate over the records
 	/// in a table before processing each document.
-	Table(Ident, RecordStrategy, ScanDirection),
+	Table(String, RecordStrategy, ScanDirection),
 	/// An iterable which fetches a specific range of records
 	/// from storage, used in range and time-series scenarios.
 	Range(String, RecordIdKeyRange, RecordStrategy, ScanDirection),
@@ -76,7 +74,7 @@ pub(crate) enum Iterable {
 	/// table, which then fetches the corresponding records
 	/// which are matched within the index.
 	/// When the 3rd argument is true, we iterate over keys only.
-	Index(Ident, IteratorRef, RecordStrategy),
+	Index(String, IteratorRef, RecordStrategy),
 }
 
 #[derive(Debug)]
@@ -99,7 +97,7 @@ pub(crate) struct Processed {
 	/// Whether this document only fetched keys or just count
 	pub(crate) rs: RecordStrategy,
 	/// Whether this document needs to have an ID generated
-	pub(crate) generate: Option<Ident>,
+	pub(crate) generate: Option<String>,
 	/// The record id for this document that should be processed
 	pub(crate) rid: Option<Arc<RecordId>>,
 	/// The record data for this document that should be processed
@@ -238,7 +236,7 @@ impl Iterator {
 		stk: &mut Stk,
 		planner: &mut QueryPlanner,
 		stm_ctx: &StatementContext<'_>,
-		table: Ident,
+		table: String,
 	) -> Result<()> {
 		// We add the iterable only if we have a permission
 		let p = planner.check_table_permission(stm_ctx, &table).await?;
@@ -413,7 +411,7 @@ impl Iterator {
 				self.prepare_object(stm_ctx.stm, o)?;
 			}
 			Value::Table(v) => {
-				self.prepare_table(ctx, opt, stk, planner, stm_ctx, v.into()).await?
+				self.prepare_table(ctx, opt, stk, planner, stm_ctx, v.as_str().to_owned()).await?
 			}
 			Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
 			Value::Array(a) => a.into_iter().for_each(|x| self.ingest(Iterable::Value(x))),

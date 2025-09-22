@@ -625,7 +625,7 @@ impl TestReport {
 			Ok(ref x) => Variables::from_iter([("result".to_string(), x.clone())]),
 			Err(ref e) => Variables::from_iter([(
 				"error".to_string(),
-				SurValue::Strand(e.clone().into()).clone(),
+				SurValue::String(e.clone().into()).clone(),
 			)]),
 		};
 

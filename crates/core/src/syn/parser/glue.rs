@@ -2,7 +2,7 @@
 use super::{GluedValue, ParseResult, Parser};
 use crate::syn::lexer::compound;
 use crate::syn::token::{Glued, Token, TokenKind, t};
-use crate::val::{Datetime, Duration, Strand, Uuid};
+use crate::val::{Datetime, Duration, Uuid};
 
 impl Parser<'_> {
 	/// Glues the next token and returns the token after.
@@ -95,13 +95,10 @@ impl Parser<'_> {
 			t!("\"") | t!("'") => {
 				self.pop_peek();
 				let value = self.lexer.lex_compound(token, compound::strand)?;
-				// SAFETY: Lexer ensures that no null bytes are present in the string in
-				// value.value
-				self.glued_value =
-					GluedValue::Strand(unsafe { Strand::new_unchecked(value.value) });
+				self.glued_value = GluedValue::String(value.value);
 				self.prepend_token(Token {
 					span: value.span,
-					kind: TokenKind::Glued(Glued::Strand),
+					kind: TokenKind::Glued(Glued::String),
 				});
 				return Ok(self.peek1());
 			}

@@ -723,7 +723,7 @@ mod tests {
 	use std::collections::HashSet;
 	use std::sync::Arc;
 
-	use crate::expr::{Ident, Idiom};
+	use crate::expr::Idiom;
 	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 	use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 	use crate::val::{Array, Value};
@@ -734,14 +734,14 @@ mod tests {
 		let mut set = HashSet::new();
 		let io1 = IndexOption::new(
 			IndexReference::new(Arc::new([]), 1),
-			Some(Idiom::field(Ident::new("test".to_owned()).unwrap()).into()),
+			Some(Idiom::field("test".to_owned()).into()),
 			IdiomPosition::Right,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);
 
 		let io2 = IndexOption::new(
 			IndexReference::new(Arc::new([]), 1),
-			Some(Idiom::field(Ident::new("test".to_owned()).unwrap()).into()),
+			Some(Idiom::field("test".to_owned()).into()),
 			IdiomPosition::Right,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);

@@ -72,7 +72,7 @@ impl ForeachStatement {
 			// Duplicate context
 			let ctx = MutableContext::new(ctx).freeze();
 			// Set the current parameter
-			let key = self.param.clone().ident().into_string();
+			let key = self.param.as_str().to_owned();
 			let mut ctx = MutableContext::unfreeze(ctx)?;
 			ctx.add_value(key, v.into());
 			let mut ctx = Some(ctx.freeze());

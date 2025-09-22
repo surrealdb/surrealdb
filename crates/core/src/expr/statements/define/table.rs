@@ -15,26 +15,26 @@ use crate::dbs::{Force, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
-use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::UpdateStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, Output, View};
+use crate::expr::{Base, Expr, Idiom, Kind, Output, View};
+use crate::fmt::{EscapeIdent, QuoteStr, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineTableStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
-	pub name: Ident,
+	pub name: String,
 	pub drop: bool,
 	pub full: bool,
 	pub view: Option<View>,
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 	pub table_type: TableType,
 }
 
@@ -78,13 +78,13 @@ impl DefineTableStatement {
 			namespace_id: ns,
 			database_id: db,
 			table_id,
-			name: self.name.to_raw_string(),
+			name: self.name.clone(),
 			drop: self.drop,
 			schemafull: self.full,
 			table_type: self.table_type.clone(),
 			view: self.view.clone().map(|v| v.to_definition()),
 			permissions: self.permissions.clone(),
-			comment: self.comment.clone().map(|c| c.to_raw_string()),
+			comment: self.comment.clone(),
 			changefeed: self.changefeed,
 
 			cache_fields_ts: cache_ts,
@@ -147,7 +147,7 @@ impl DefineTableStatement {
 				txn.clear_cache();
 				// Process the view data
 				let stm = UpdateStatement {
-					what: vec![Expr::Table(ft.clone())],
+					what: vec![Expr::Table(ft.to_owned())],
 					output: Some(Output::None),
 					..UpdateStatement::default()
 				};
@@ -236,7 +236,7 @@ impl Display for DefineTableStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		write!(f, " TYPE")?;
 		match &self.table_type {
 			TableType::Normal => {
@@ -250,7 +250,7 @@ impl Display for DefineTableStatement {
 						if idx != 0 {
 							write!(f, " | ")?;
 						}
-						k.fmt(f)?;
+						EscapeIdent(k).fmt(f)?;
 					}
 				}
 				if let Some(Kind::Record(kind)) = &rel.to {
@@ -259,7 +259,7 @@ impl Display for DefineTableStatement {
 						if idx != 0 {
 							write!(f, " | ")?;
 						}
-						k.fmt(f)?;
+						EscapeIdent(k).fmt(f)?;
 					}
 				}
 				if rel.enforced {
@@ -279,7 +279,7 @@ impl Display for DefineTableStatement {
 			" SCHEMALESS"
 		})?;
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?
+			write!(f, " COMMENT {}", QuoteStr(comment))?
 		}
 		if let Some(ref v) = self.view {
 			write!(f, " {v}")?
@@ -301,7 +301,7 @@ impl Display for DefineTableStatement {
 impl InfoStructure for DefineTableStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.structure(),
+			"name".to_string() => self.name.into(),
 			"drop".to_string() => self.drop.into(),
 			"full".to_string() => self.full.into(),
 			"kind".to_string() => self.table_type.structure(),

@@ -13,7 +13,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::operator::{BooleanOperator, MatchesOperator};
-use crate::expr::{Cond, Expr, FlowResultExt as _, Ident, Idiom};
+use crate::expr::{Cond, Expr, FlowResultExt as _, Idiom};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::MatchRef;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
@@ -134,7 +134,7 @@ impl InnerQueryExecutor {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		table: &Ident,
+		table: &str,
 		ios: Vec<(Arc<Expr>, IndexOption)>,
 		kbtes: KnnBruteForceExpressions,
 		knn_condition: Option<Cond>,
@@ -324,7 +324,7 @@ impl InnerQueryExecutor {
 		}
 
 		Ok(Self {
-			table: table.clone().into_string(),
+			table: table.to_owned(),
 			ir_map,
 			mr_entries,
 			exp_entries,

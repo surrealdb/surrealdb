@@ -7,7 +7,7 @@ use crate::val::Value;
 
 /// Return the next value for a given sequence.
 pub async fn nextval((ctx, opt): (&Context, &Options), (seq,): (Value,)) -> Result<Value> {
-	if let Value::Strand(s) = seq {
+	if let Value::String(s) = seq {
 		let next = ctx.try_get_sequences()?.next_val_user(ctx, opt, &s).await?;
 		Ok(next.into())
 	} else {

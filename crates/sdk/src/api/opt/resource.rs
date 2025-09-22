@@ -20,8 +20,7 @@ where
 {
 	#[allow(dead_code)]
 	pub(crate) fn into_core(self) -> val::Table {
-		//  TODO: Null byte validity
-		unsafe { val::Table::new_unchecked(self.0.into()) }
+		val::Table::new(self.0.into())
 	}
 
 	/// Add a range of keys to the table.

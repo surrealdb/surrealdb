@@ -34,7 +34,7 @@ mod implementation {
 	use crate::core::dbs::Session;
 	use crate::core::dbs::capabilities::RouteTarget;
 	use crate::core::expr::statements::{DefineModelStatement, DefineStatement};
-	use crate::core::expr::{Expr, Ident, LogicalPlan, TopLevelExpr, get_model_path};
+	use crate::core::expr::{Expr, LogicalPlan, TopLevelExpr, get_model_path};
 	use crate::core::iam::check::check_ns_db;
 	use crate::core::iam::{Action, ResourceKind};
 	use crate::core::ml::storage::surml_file::SurMlFile;
@@ -92,9 +92,9 @@ mod implementation {
 		crate::core::obs::put(&path, data).await.map_err(ResponseError)?;
 		// Insert the model in to the database
 		let model = DefineModelStatement {
-			name: Ident::new(file.header.name.to_string()).unwrap(),
+			name: file.header.name.to_string(),
 			version: file.header.version.to_string(),
-			comment: Some(file.header.description.to_string().into()),
+			comment: Some(file.header.description.to_string()),
 			hash,
 			..Default::default()
 		};

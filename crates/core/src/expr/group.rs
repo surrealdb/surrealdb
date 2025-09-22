@@ -3,8 +3,8 @@ use std::ops::Deref;
 
 use revision::revisioned;
 
-use crate::expr::fmt::Fmt;
 use crate::expr::idiom::Idiom;
+use crate::fmt::Fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]

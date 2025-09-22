@@ -258,7 +258,7 @@ impl IndexBuilder {
 		ix: &str,
 	) -> Result<()> {
 		let key = IndexKey::new(ns, db, tb, ix);
-		if let Some((_, b)) = self.indexes.write().await.remove(&key) {
+		if let Some((b, _)) = self.indexes.write().await.remove(&key) {
 			b.abort();
 		}
 		Ok(())

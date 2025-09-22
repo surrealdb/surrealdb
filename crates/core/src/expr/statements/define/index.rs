@@ -19,20 +19,20 @@ use crate::err::Error;
 use crate::expr::Output;
 #[cfg(target_family = "wasm")]
 use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
-use crate::expr::{Base, Ident, Idiom, Part};
+use crate::expr::{Base, Idiom, Part};
+use crate::fmt::{EscapeIdent, Fmt};
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ToSql;
-use crate::sql::fmt::Fmt;
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineIndexStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
-	pub what: Ident,
+	pub name: String,
+	pub what: String,
 	pub cols: Vec<Idiom>,
 	pub index: Index,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 	pub concurrently: bool,
 }
 
@@ -101,7 +101,7 @@ impl DefineIndexStatement {
 
 				//
 				if txn
-					.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, &first.to_raw_string())
+					.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, first)
 					.await?
 					.is_none()
 				{
@@ -115,11 +115,11 @@ impl DefineIndexStatement {
 		// Process the statement
 		let index_def = IndexDefinition {
 			index_id,
-			name: self.name.to_raw_string(),
-			table_name: self.what.to_raw_string(),
+			name: self.name.clone(),
+			table_name: self.what.clone(),
 			cols: self.cols.clone(),
 			index: self.index.clone(),
-			comment: self.comment.clone().map(|x| x.to_raw_string()),
+			comment: self.comment.clone(),
 		};
 		txn.put_tb_index(tb.namespace_id, tb.database_id, &tb.name, &index_def).await?;
 
@@ -157,7 +157,7 @@ impl Display for DefineIndexStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.what))?;
 		if !self.cols.is_empty() {
 			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter()))?;
 		}
@@ -187,8 +187,8 @@ pub(in crate::expr::statements) async fn run_indexing(
 		{
 			// Create the remove statement
 			let stm = RemoveIndexStatement {
-				name: Ident::new(index.name.clone()).unwrap(),
-				what: Ident::new(index.table_name.clone()).unwrap(),
+				name: index.name.clone(),
+				what: index.table_name.clone(),
 				if_exists: false,
 			};
 			// Execute the delete statement
@@ -199,7 +199,7 @@ pub(in crate::expr::statements) async fn run_indexing(
 			let opt = &opt.new_with_force(Force::Index(Arc::new([index.clone()])));
 			// Update the index data
 			let stm = crate::expr::UpdateStatement {
-				what: vec![crate::expr::Expr::Table(Ident::new(index.table_name.clone()).unwrap())],
+				what: vec![crate::expr::Expr::Table(index.table_name.clone())],
 				output: Some(Output::None),
 				..UpdateStatement::default()
 			};

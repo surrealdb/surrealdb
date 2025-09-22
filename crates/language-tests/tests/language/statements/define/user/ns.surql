@@ -1,6 +1,7 @@
 /**
 [env]
 namespace = false
+database = false
 clean = true
 timeout = 10000
 
@@ -13,7 +14,10 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "The user 'test' does not exist in the database 'test'"
+match = """
+$result = /DEFINE USER test ON NAMESPACE PASSHASH '\\$argon2id\\$.*' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE/
+"""
+error = false
 
 [[test.results]]
 match = """

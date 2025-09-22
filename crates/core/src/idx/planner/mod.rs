@@ -19,7 +19,7 @@ use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
-use crate::expr::{Cond, Fields, Groups, Ident};
+use crate::expr::{Cond, Fields, Groups};
 use crate::idx::planner::executor::{InnerQueryExecutor, IteratorEntry, QueryExecutor};
 use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::knn::KnnBruteForceResults;
@@ -276,7 +276,7 @@ impl QueryPlanner {
 		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		ctx: &StatementContext<'_>,
-		t: Ident,
+		t: String,
 		gp: GrantedPermission,
 		it: &mut Iterator,
 	) -> Result<()> {
@@ -361,13 +361,13 @@ impl QueryPlanner {
 
 	fn add(
 		&mut self,
-		tb: Ident,
+		tb: String,
 		irf: Option<IteratorRef>,
 		exe: InnerQueryExecutor,
 		it: &mut Iterator,
 		rs: RecordStrategy,
 	) {
-		self.executors.insert(tb.clone().into_string(), exe.into());
+		self.executors.insert(tb.clone(), exe.into());
 		if let Some(irf) = irf {
 			it.ingest(Iterable::Index(tb, irf, rs));
 		}

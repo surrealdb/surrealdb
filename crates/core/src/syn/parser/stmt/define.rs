@@ -22,14 +22,14 @@ use crate::sql::statements::{
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	AccessType, Expr, Ident, Index, Kind, Literal, Param, Permission, Permissions, Scoring,
-	TableType, access_type, table_type,
+	AccessType, Expr, Index, Kind, Literal, Param, Permission, Permissions, Scoring, TableType,
+	access_type, table_type,
 };
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Token, TokenKind, t};
-use crate::val::{Duration, Strand};
+use crate::val::Duration;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_define_stmt(
@@ -73,7 +73,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value()?;
+		let name = self.parse_ident()?;
 		let mut res = DefineNamespaceStatement {
 			id: None,
 			name,
@@ -83,7 +83,7 @@ impl Parser<'_> {
 
 		while let t!("COMMENT") = self.peek_kind() {
 			self.pop_peek();
-			res.comment = Some(self.next_token_value()?);
+			res.comment = Some(self.parse_string_lit()?);
 		}
 
 		Ok(res)
@@ -99,7 +99,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value()?;
+		let name = self.parse_ident()?;
 		let mut res = DefineDatabaseStatement {
 			name,
 			kind,
@@ -109,7 +109,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(self.parse_string_lit()?);
 				}
 				t!("CHANGEFEED") => {
 					self.pop_peek();
@@ -143,7 +143,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let param = self.next_token_value::<Param>()?.ident();
+			let param = self.next_token_value::<Param>()?.into_string();
 			expected!(self, t!(":"));
 			let kind = stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
 
@@ -177,7 +177,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(self.parse_string_lit()?);
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
@@ -200,7 +200,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value()?;
+		let name = self.parse_ident()?;
 		expected!(self, t!("ON"));
 		let base = self.parse_base()?;
 
@@ -209,9 +209,9 @@ impl Parser<'_> {
 			name,
 			base,
 			// Safety: "Viewer" does not contain a null byte
-			roles: vec![unsafe { Ident::new_unchecked("Viewer".to_owned()) }], /* New users get
-			                                                                    * the viewer role
-			                                                                    * by default */
+			roles: vec!["Viewer".to_owned()], /* New users get
+			                                   * the viewer role
+			                                   * by default */
 			// TODO: Move out of the parser
 			token_duration: Some(Duration::from_secs(3600)), // defaults to 1 hour.
 			..DefineUserStatement::default()
@@ -221,30 +221,28 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(self.parse_string_lit()?);
 				}
 				t!("PASSWORD") => {
 					let token = self.pop_peek();
 					if let PassType::Hash(_) = res.pass_type {
 						bail!("Unexpected token `PASSWORD`", @token.span => "Can't set both a passhash and a password");
 					}
-					res.pass_type =
-						PassType::Password(self.next_token_value::<Strand>()?.into_string());
+					res.pass_type = PassType::Password(self.parse_string_lit()?);
 				}
 				t!("PASSHASH") => {
 					let token = self.pop_peek();
 					if let PassType::Password(_) = res.pass_type {
 						bail!("Unexpected token `PASSHASH`", @token.span => "Can't set both a passhash and a password");
 					}
-					res.pass_type =
-						PassType::Hash(self.next_token_value::<Strand>()?.into_string());
+					res.pass_type = PassType::Hash(self.parse_string_lit()?);
 				}
 				t!("ROLES") => {
 					self.pop_peek();
 					let mut roles = Vec::new();
 					loop {
 						let token = self.peek();
-						let role = self.next_token_value::<Ident>()?;
+						let role = self.parse_ident()?;
 						// NOTE(gguillemas): This hardcoded list is a temporary fix in order
 						// to avoid making breaking changes to the DefineUserStatement structure
 						// while still providing parsing feedback to users referencing unexistent
@@ -320,7 +318,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value()?;
+		let name = self.parse_ident()?;
 		expected!(self, t!("ON"));
 		// TODO: Parse base should no longer take an argument.
 		let base = self.parse_base()?;
@@ -339,7 +337,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(self.parse_string_lit()?);
 				}
 				t!("TYPE") => {
 					self.pop_peek();
@@ -526,7 +524,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value::<Param>()?.ident();
+		let name = self.next_token_value::<Param>()?.into_string();
 
 		let mut res = DefineParamStatement {
 			name,
@@ -544,7 +542,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(self.parse_string_lit()?);
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
@@ -566,7 +564,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value()?;
+		let name = self.parse_ident()?;
 		let mut res = DefineTableStatement {
 			name,
 			permissions: Permissions::none(),
@@ -579,7 +577,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(self.parse_string_lit()?);
 				}
 				t!("DROP") => {
 					self.pop_peek();
@@ -734,7 +732,7 @@ impl Parser<'_> {
 		}
 
 		if self.eat(t!("COMMENT")) {
-			res.comment = Some(self.next_token_value()?);
+			res.comment = Some(self.parse_string_lit()?);
 		}
 
 		Ok(res)
@@ -751,10 +749,10 @@ impl Parser<'_> {
 			DefineKind::Default
 		};
 
-		let name = self.next_token_value()?;
+		let name = self.parse_ident()?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = self.next_token_value()?;
+		let what = self.parse_ident()?;
 
 		let mut res = DefineEventStatement {
 			kind,
@@ -780,7 +778,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(self.parse_string_lit()?);
 				}
 				_ => break,
 			}
@@ -801,7 +799,7 @@ impl Parser<'_> {
 		let name = self.parse_local_idiom(stk).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = self.next_token_value()?;
+		let what = self.parse_ident()?;
 
 		let mut res = DefineFieldStatement {
 			name,
@@ -849,7 +847,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(self.parse_string_lit()?);
 				}
 				t!("REFERENCE") => {
 					if !self.settings.references_enabled {
@@ -883,10 +881,10 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value()?;
+		let name = self.parse_ident()?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = self.next_token_value()?;
+		let what = self.parse_ident()?;
 
 		let mut res = DefineIndexStatement {
 			name,
@@ -919,7 +917,7 @@ impl Parser<'_> {
 				}
 				t!("FULLTEXT") => {
 					self.pop_peek();
-					let mut analyzer: Option<Ident> = None;
+					let mut analyzer: Option<String> = None;
 					let mut scoring = None;
 					let mut hl = false;
 
@@ -927,7 +925,7 @@ impl Parser<'_> {
 						match self.peek_kind() {
 							t!("ANALYZER") => {
 								self.pop_peek();
-								analyzer = Some(self.next_token_value()).transpose()?;
+								analyzer = Some(self.parse_ident()).transpose()?;
 							}
 							t!("BM25") => {
 								self.pop_peek();
@@ -953,7 +951,7 @@ impl Parser<'_> {
 						}
 					}
 					res.index = Index::FullText(crate::sql::index::FullTextParams {
-						az: analyzer.unwrap_or_else(|| Ident::from(strand!("like").to_owned())),
+						az: analyzer.unwrap_or_else(|| "like".to_owned()),
 						sc: scoring.unwrap_or_else(Default::default),
 						hl,
 					});
@@ -1068,7 +1066,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(self.parse_string_lit()?);
 				}
 				_ => break,
 			}
@@ -1089,7 +1087,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value()?;
+		let name = self.parse_ident()?;
 		let mut res = DefineAnalyzerStatement {
 			name,
 
@@ -1141,9 +1139,9 @@ impl Parser<'_> {
 							}
 							t!("MAPPER") => {
 								let open_span = expected!(self, t!("(")).span;
-								let path: Strand = self.next_token_value()?;
+								let path: String = self.parse_string_lit()?;
 								self.expect_closing_delimiter(t!(")"), open_span)?;
-								filters.push(Filter::Mapper(path.into_string()))
+								filters.push(Filter::Mapper(path))
 							}
 							_ => unexpected!(self, next, "a filter"),
 						}
@@ -1178,9 +1176,9 @@ impl Parser<'_> {
 					self.pop_peek();
 					expected!(self, t!("fn"));
 					expected!(self, t!("::"));
-					let mut ident = self.next_token_value::<Ident>()?.into_string();
+					let mut ident = self.parse_ident()?;
 					while self.eat(t!("::")) {
-						let value = self.next_token_value::<Ident>()?;
+						let value = self.parse_ident()?;
 						ident.push_str("::");
 						ident.push_str(&value);
 					}
@@ -1188,7 +1186,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(self.parse_string_lit()?);
 				}
 				_ => break,
 			}
@@ -1215,7 +1213,7 @@ impl Parser<'_> {
 			DefineKind::Default
 		};
 
-		let name = self.next_token_value()?;
+		let name = self.parse_ident()?;
 
 		let mut res = DefineBucketStatement {
 			name,
@@ -1239,7 +1237,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(self.parse_string_lit()?);
 				}
 				_ => {
 					break;
@@ -1260,7 +1258,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value()?;
+		let name = self.parse_ident()?;
 		let batch = if self.eat(t!("BATCH")) {
 			self.next_token_value()?
 		} else {
@@ -1336,11 +1334,11 @@ impl Parser<'_> {
 							}
 						};
 
-						let part = self.next_token_value::<Ident>()?.into_string();
+						let part = self.parse_ident()?;
 						name.push_str(part.to_lowercase().as_str());
 
 						while self.eat(t!("::")) {
-							let part = self.next_token_value::<Ident>()?;
+							let part = self.parse_ident()?;
 							name.push_str("::");
 							name.push_str(part.to_lowercase().as_str());
 						}
@@ -1437,9 +1435,9 @@ impl Parser<'_> {
 		loop {
 			match self.peek_kind() {
 				x if Self::kind_is_identifier(x) => {
-					let name: Ident = self.next_token_value()?;
+					let name = self.parse_ident()?;
 					acc.push(TableConfig {
-						name: name.into_string(),
+						name,
 					});
 				}
 				_ => unexpected!(self, self.next(), "a table config"),
@@ -1479,9 +1477,9 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_tables(&mut self) -> ParseResult<Kind> {
-		let mut names = vec![self.next_token_value::<Ident>()?.into_string()];
+		let mut names = vec![self.parse_ident()?];
 		while self.eat(t!("|")) {
-			names.push(self.next_token_value::<Ident>()?.into_string());
+			names.push(self.parse_ident()?);
 		}
 		Ok(Kind::Record(names))
 	}
@@ -1505,7 +1503,7 @@ impl Parser<'_> {
 						let next = self.next();
 						match next.kind {
 							t!("KEY") => {
-								let key = self.next_token_value::<Strand>()?.into_string();
+								let key = self.parse_string_lit()?;
 								res.verify = access_type::JwtAccessVerify::Key(
 									access_type::JwtAccessVerifyKey {
 										alg,
@@ -1535,7 +1533,7 @@ impl Parser<'_> {
 			}
 			t!("URL") => {
 				self.pop_peek();
-				let url = self.next_token_value::<Strand>()?.into_string();
+				let url = self.parse_string_lit()?;
 				res.verify = access_type::JwtAccessVerify::Jwks(access_type::JwtAccessVerifyJwks {
 					url,
 				});
@@ -1571,7 +1569,7 @@ impl Parser<'_> {
 					}
 					t!("KEY") => {
 						self.pop_peek();
-						let key = self.next_token_value::<Strand>()?.into_string();
+						let key = self.parse_string_lit()?;
 						// If the algorithm is symmetric and a key is already defined, a different
 						// key is not expected.
 						if let JwtAccessVerify::Key(ref ver) = res.verify {

@@ -15,6 +15,11 @@
 //! Range scans and lookups benefit because a single probe/range can be used for
 //! numeric predicates without fanning out per numeric variant.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+
 use crate::catalog::{
 	DatabaseDefinition, DatabaseId, FullTextParams, HnswParams, Index, IndexDefinition,
 	MTreeParams, NamespaceId,
@@ -33,9 +38,6 @@ use crate::key::index::iu::Iu;
 use crate::kvs::ConsumeResult;
 use crate::kvs::TransactionType;
 use crate::val::{Array, RecordId, Value};
-use anyhow::{Result, bail};
-use reblessive::tree::Stk;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 impl Document {
 	pub(super) async fn store_index_data(

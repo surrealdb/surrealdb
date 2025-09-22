@@ -3,14 +3,14 @@ use std::collections::BTreeMap;
 use anyhow::{Result, bail};
 
 use crate::err::Error;
-use crate::val::{Array, Object, Strand, Value};
+use crate::val::{Array, Object, Value};
 
 pub fn entries((object,): (Object,)) -> Result<Value> {
 	Ok(Value::Array(Array(
 		object
 			.iter()
 			.map(|(k, v)| {
-				let k = Value::Strand(unsafe { Strand::new_unchecked(k.to_owned()) });
+				let k = Value::String(k.to_owned());
 				let v = v.clone();
 				Value::Array(Array(vec![k, v]))
 			})
@@ -26,7 +26,7 @@ pub fn from_entries((array,): (Array,)) -> Result<Value> {
 			Value::Array(Array(entry)) if entry.len() == 2 => {
 				let key = match entry.first() {
 					Some(v) => match v {
-						Value::Strand(v) => v.clone().into_string(),
+						Value::String(v) => v.clone(),
 						v => v.to_string(),
 					},
 					_ => {
@@ -79,9 +79,8 @@ pub fn keys((object,): (Object,)) -> Result<Value> {
 		object
 			.keys()
 			.map(|v| {
-				//TODO: Null bytes
-				let strand = unsafe { Strand::new_unchecked(v.clone()) };
-				Value::Strand(strand)
+				let strand = v.clone();
+				Value::String(strand)
 			})
 			.collect(),
 	)))
@@ -89,12 +88,12 @@ pub fn keys((object,): (Object,)) -> Result<Value> {
 
 pub fn remove((mut object, targets): (Object, Value)) -> Result<Value> {
 	match targets {
-		Value::Strand(target) => {
+		Value::String(target) => {
 			object.remove(target.as_str());
 		}
 		Value::Array(targets) => {
 			for target in targets {
-				let Value::Strand(s) = target else {
+				let Value::String(s) = target else {
 					bail!(Error::InvalidArguments {
 						name: "object::remove".to_string(),
 						message: format!(

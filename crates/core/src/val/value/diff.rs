@@ -68,7 +68,7 @@ impl Value {
 					})
 				}
 			}
-			(Value::Strand(a), Value::Strand(b)) if a != b => ops.push(Operation::Change {
+			(Value::String(a), Value::String(b)) if a != b => ops.push(Operation::Change {
 				path: path.clone(),
 				value: {
 					let dmp = dmp::new();

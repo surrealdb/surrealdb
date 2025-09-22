@@ -9,18 +9,18 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::{Base, Ident};
+use crate::expr::Base;
+use crate::fmt::{QuoteStr, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineModelStatement {
 	pub kind: DefineKind,
 	pub hash: String,
-	pub name: Ident,
+	pub name: String,
 	pub version: String,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 	pub permissions: Permission,
 }
 
@@ -58,9 +58,9 @@ impl DefineModelStatement {
 			&key,
 			&MlModelDefinition {
 				hash: self.hash.clone(),
-				name: self.name.to_raw_string(),
+				name: self.name.clone(),
 				version: self.version.clone(),
-				comment: self.comment.clone().map(|x| x.to_raw_string()),
+				comment: self.comment.clone(),
 				permissions: self.permissions.clone(),
 			},
 			None,
@@ -83,7 +83,7 @@ impl fmt::Display for DefineModelStatement {
 		}
 		write!(f, " ml::{}<{}>", self.name, self.version)?;
 		if let Some(comment) = self.comment.as_ref() {
-			write!(f, " COMMENT {}", comment)?;
+			write!(f, " COMMENT {}", QuoteStr(comment))?;
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

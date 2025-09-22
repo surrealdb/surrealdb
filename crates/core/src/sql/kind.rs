@@ -4,9 +4,8 @@ use std::hash;
 
 use rust_decimal::Decimal;
 
-use super::escape::EscapeKey;
-use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
-use crate::val::{Duration, Strand};
+use crate::fmt::{EscapeIdent, EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
+use crate::val::Duration;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -258,7 +257,7 @@ impl Display for Kind {
 				if k.is_empty() {
 					write!(f, "record")
 				} else {
-					write!(f, "record<{}>", Fmt::verbar_separated(k))
+					write!(f, "record<{}>", Fmt::verbar_separated(k.iter().map(EscapeIdent)))
 				}
 			}
 			Kind::Geometry(k) => {
@@ -295,7 +294,7 @@ impl Display for Kind {
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum KindLiteral {
-	String(Strand),
+	String(String),
 	Integer(i64),
 	Float(f64),
 	Decimal(Decimal),
@@ -388,7 +387,7 @@ impl Eq for KindLiteral {}
 impl Display for KindLiteral {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			KindLiteral::String(s) => write!(f, "{}", s),
+			KindLiteral::String(s) => write!(f, "{}", QuoteStr(s)),
 			KindLiteral::Integer(n) => write!(f, "{}", n),
 			KindLiteral::Float(n) => write!(f, "{}", n),
 			KindLiteral::Decimal(n) => write!(f, "{}", n),
