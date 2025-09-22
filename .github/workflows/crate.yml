@@ -15,6 +15,11 @@ on:
         type: boolean
         default: false
         description: "Whether to publish this release"
+      rust-version:
+        required: false
+        type: string
+        default: "1.90.0"
+        description: "The Rust version to use for building binaries"
 
 defaults:
   run:
@@ -36,7 +41,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable (Actions must be pinned by commit hash)
         with:
-          toolchain: stable
+          toolchain: ${{ inputs.rust-version }}
 
       - name: Publish the crate
         env:
@@ -62,4 +67,4 @@ jobs:
             extra_args="${extra_args} --dry-run --allow-dirty"
           fi
 
-          cargo publish --workspace ${extra_args}
+          cargo +${{ inputs.rust-version }} publish --workspace ${extra_args}
