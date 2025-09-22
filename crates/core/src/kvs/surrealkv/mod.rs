@@ -4,15 +4,13 @@ mod cnf;
 use std::ops::Range;
 
 use anyhow::{Result, bail, ensure};
-use surrealkv::{Durability, InternalKey, Mode, Transaction as Tx, Tree, TreeBuilder};
+use surrealkv::{Durability, Mode, Transaction as Tx, Tree, TreeBuilder};
 
 use super::Check;
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::SavePoints;
-use crate::kvs::{Key, Val};
-
-const TARGET: &str = "surrealdb::core::kvs::surrealkv";
+use crate::kvs::{Key, Val, Version};
 
 pub struct Datastore {
 	db: Tree,
@@ -26,7 +24,7 @@ pub struct Transaction {
 	/// Should we check unhandled transactions?
 	check: Check,
 	/// The underlying datastore transaction
-	inner: Option<Tx<InternalKey>>,
+	inner: Option<Tx>,
 }
 
 impl Drop for Transaction {
@@ -49,24 +47,26 @@ impl Drop for Transaction {
 
 impl Datastore {
 	/// Open a new database
-	pub(crate) async fn new(path: &str, _enable_versions: bool) -> Result<Datastore> {
+	pub(crate) async fn new(path: &str, enable_versions: bool) -> Result<Datastore> {
 		// Create new configuration options
-		let builder = TreeBuilder::new();
-		// // Configure versions
-		// opts.enable_versions = enable_versions;
+		// Initialize the TreeBuilder with default InternalKey type
+		let mut builder = TreeBuilder::new();
+
 		// // Ensure persistence is enabled
 		// opts.disk_persistence = true;
 		// Set the data storage directory
-		let builder = builder
+		builder = builder
 			.with_path(path.to_string().into())
 			// Set the maximum segment size
 			.with_vlog_max_file_size(*cnf::SURREALKV_MAX_SEGMENT_SIZE)
 			.with_enable_vlog(true)
 			.with_block_cache_capacity(*cnf::SURREALKV_MAX_VALUE_CACHE_SIZE)
 			.with_vlog_cache_capacity(*cnf::SURREALKV_MAX_VALUE_CACHE_SIZE);
-		info!(target: TARGET, "Setting maximum segment size: {}", *cnf::SURREALKV_MAX_SEGMENT_SIZE);
-		// Log if writes should be synced
-		info!(target: TARGET, "Wait for disk sync acknowledgement: {}", *cnf::SYNC_DATA);
+
+		if enable_versions {
+			builder = builder.with_versioning(true, 0);
+		}
+
 		// Create a new datastore
 		match builder.build() {
 			Ok(db) => Ok(Datastore {
@@ -196,7 +196,6 @@ impl super::api::Transaction for Transaction {
 	/// Checks if a key exists in the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn exists(&mut self, key: Key, version: Option<u64>) -> Result<bool> {
-		self.prepare(version)?;
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 
@@ -205,12 +204,11 @@ impl super::api::Transaction for Transaction {
 			self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
 
 		// Get the key
-		// let res = match version {
-		// 	Some(ts) => inner.get_at_version(&key, ts)?.is_some(),
-		// 	None => inner.get(&key)?.is_some(),
-		// };
+		let res = match version {
+			Some(ts) => inner.get_at_timestamp(&key, ts)?.is_some(),
+			None => inner.get(&key)?.is_some(),
+		};
 
-		let res = inner.get(&key)?.is_some();
 		// Return result
 		Ok(res)
 	}
@@ -218,7 +216,6 @@ impl super::api::Transaction for Transaction {
 	/// Fetch a key from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn get(&mut self, key: Key, version: Option<u64>) -> Result<Option<Val>> {
-		self.prepare(version)?;
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 
@@ -226,13 +223,11 @@ impl super::api::Transaction for Transaction {
 		let inner =
 			self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
 
-		// // Get the key
-		// let res = match version {
-		// 	Some(ts) => inner.get_at_version(&key, ts)?,
-		// 	None => inner.get(&key)?,
-		// };
-
-		let res = inner.get(&key)?.map(|v| v.to_vec());
+		// Get the key
+		let res = match version {
+			Some(ts) => inner.get_at_timestamp(&key, ts)?.map(|v| v.to_vec()),
+			None => inner.get(&key)?.map(|v| v.to_vec()),
+		};
 
 		// Return result
 		Ok(res)
@@ -241,8 +236,6 @@ impl super::api::Transaction for Transaction {
 	/// Insert or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn set(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
-		self.prepare(version)?;
-
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
@@ -252,44 +245,19 @@ impl super::api::Transaction for Transaction {
 		let inner =
 			self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
 
-		// // Set the key
-		// match version {
-		// 	Some(ts) => inner.set_at_ts(&key, &val, ts)?,
-		// 	None => inner.set(&key, &val)?,
-		// }
-
-		inner.set(&key, &val)?;
+		// Set the key
+		match version {
+			Some(ts) => inner.set_at_ts(&key, &val, ts)?,
+			None => inner.set(&key, &val)?,
+		}
 
 		// Return result
 		Ok(())
 	}
 
-	// /// Insert or replace a key in the database
-	// #[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key =
-	// key.sprint()))] async fn replace(&mut self, key: Key, val: Val) -> Result<()> {
-	// 	// Check to see if transaction is closed
-	// 	ensure!(!self.done, Error::TxFinished);
-	// 	// Check to see if transaction is writable
-	// 	ensure!(self.write, Error::TxReadonly);
-
-	// 	// Get the inner transaction
-	// 	let inner =
-	// 		self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
-
-	// 	// // Replace the key
-	// 	// inner.insert_or_replace(&key, &val)?;
-
-	// 	// Replace the key (just use set for memory backend)
-	// 	inner.set(&key, &val)?;
-
-	// 	// Return result
-	// 	Ok(())
-	// }
-
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn put(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
-		self.prepare(version)?;
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
@@ -299,20 +267,14 @@ impl super::api::Transaction for Transaction {
 		let inner =
 			self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
 
-		// // Set the key if empty
-		// if let Some(ts) = version {
-		//      inner.set_at_ts(&key, &val, ts)?;
-		// } else {
-		//      match inner.get(&key)? {
-		//              None => inner.set(&key, &val)?,
-		//              _ => bail!(Error::TxKeyAlreadyExists),
-		//      }
-		// }
-
 		// Set the key if empty
-		match inner.get(&key)? {
-			None => inner.set(&key, &val)?,
-			_ => bail!(Error::TxKeyAlreadyExists),
+		if let Some(ts) = version {
+			inner.set_at_ts(&key, &val, ts)?;
+		} else {
+			match inner.get(&key)? {
+				None => inner.set(&key, &val)?,
+				_ => bail!(Error::TxKeyAlreadyExists),
+			}
 		}
 
 		// Return result
@@ -429,7 +391,6 @@ impl super::api::Transaction for Transaction {
 		limit: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
-		self.prepare(version)?;
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Set the key range
@@ -440,34 +401,24 @@ impl super::api::Transaction for Transaction {
 		let inner =
 			self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
 
-		// // Execute on the blocking threadpool
-		// let res = affinitypool::spawn_local(|| -> Result<_> {
-		// 	// Retrieve the scan range
-		// 	let res = match version {
-		// 		Some(ts) => inner
-		// 			.keys_at_version(beg.as_slice()..end.as_slice(), ts, Some(limit as usize))
-		// 			.map(Key::from)
-		// 			.collect(),
-		// 		None => inner
-		// 			.keys(beg.as_slice(), end.as_slice(), Some(limit as usize))
-		// 			.map(Key::from)
-		// 			.collect(),
-		// 	};
-		// 	// Return result
-		// 	Ok(res)
-		// })
-		// .await?;
-
 		// Execute on the blocking threadpool
 		let res = affinitypool::spawn_local(|| -> Result<_> {
 			// Retrieve the scan range
-			let res = inner
-				.keys(beg, end, Some(limit as usize))?
-				.map(|r| r.map(|(k, _)| k.to_vec()))
-				.collect::<Result<Vec<_>, _>>()?
-				.into_iter()
-				.filter(|k| k.as_slice() < end) // Filter out keys equal to end bound
-				.collect();
+			let res = match version {
+				Some(ts) => inner
+					.keys_at_timestamp(beg, end, ts, Some(limit as usize))?
+					.into_iter()
+					.filter(|k| k.as_slice() < end) // Filter out keys equal to end bound
+					.collect(),
+				None => inner
+					.keys(beg, end, Some(limit as usize))?
+					.map(|r| r.map(|(k, _)| k.to_vec()))
+					.collect::<Result<Vec<_>, _>>()?
+					.into_iter()
+					.filter(|k| k.as_slice() < end) // Filter out keys equal to end bound
+					.collect(),
+			};
+
 			// Return result
 			Ok(res)
 		})
@@ -485,7 +436,6 @@ impl super::api::Transaction for Transaction {
 		limit: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
-		self.prepare(version)?;
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Set the key range
@@ -496,42 +446,26 @@ impl super::api::Transaction for Transaction {
 		let inner =
 			self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
 
-		// // Execute on the blocking threadpool
-		// let res = affinitypool::spawn_local(|| -> Result<_> {
-		// 	// Retrieve the scan range
-		// 	let res = match version {
-		// 		Some(ts) => inner
-		// 			.scan_at_version(beg.as_slice()..end.as_slice(), ts, Some(limit as usize))
-		// 			.map(|r| {
-		// 				r.map(|(k, v)| (k.to_vec(), v))
-		// 					.map_err(Error::from)
-		// 					.map_err(anyhow::Error::new)
-		// 			})
-		// 			.collect::<Result<_>>()?,
-		// 		None => inner
-		// 			.scan(beg.as_slice()..end.as_slice(), Some(limit as usize))
-		// 			.map(|r| {
-		// 				r.map(|(k, v, _)| (k.to_vec(), v))
-		// 					.map_err(Error::from)
-		// 					.map_err(anyhow::Error::new)
-		// 			})
-		// 			.collect::<Result<_>>()?,
-		// 	};
-		// 	// Return result
-		// 	Ok(res)
-		// })
-		// .await?;
-
 		// Execute on the blocking threadpool
 		let res = affinitypool::spawn_local(|| -> Result<_> {
 			// Retrieve the scan range
-			let res = inner
-				.range(beg, end, Some(limit as usize))?
-				.map(|r| r.map(|(k, v)| (k.to_vec(), v.map(|v| v.to_vec()).unwrap_or_default())))
-				.collect::<Result<Vec<_>, _>>()?
-				.into_iter()
-				.filter(|(k, _)| k.as_slice() < end) // Filter out keys equal to end bound
-				.collect();
+			let res = match version {
+				Some(ts) => inner
+					.scan_at_version(beg, end, ts, Some(limit as usize))?
+					.into_iter()
+					.map(|(k, v)| (k, v.to_vec()))
+					.filter(|(k, _)| k.as_slice() < end) // Filter out keys equal to end bound
+					.collect(),
+				None => inner
+					.range(beg, end, Some(limit as usize))?
+					.map(|r| {
+						r.map(|(k, v)| (k.to_vec(), v.map(|v| v.to_vec()).unwrap_or_default()))
+					})
+					.collect::<Result<Vec<_>, _>>()?
+					.into_iter()
+					.filter(|(k, _)| k.as_slice() < end) // Filter out keys equal to end bound
+					.collect(),
+			};
 			// Return result
 			Ok(res)
 		})
@@ -541,36 +475,39 @@ impl super::api::Transaction for Transaction {
 		Ok(res)
 	}
 
-	// /// Retrieve all the versions from a range of keys from the databases
-	// #[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng =
-	// rng.sprint()))] async fn scan_all_versions(
-	// 	&mut self,
-	// 	rng: Range<Key>,
-	// 	limit: u32,
-	// ) -> Result<Vec<(Key, Val, Version, bool)>> {
-	// 	ensure!(!self.done, Error::TxFinished);
-	// 	// Set the key range
-	// 	let beg = rng.start;
-	// 	let end = rng.end;
+	/// Retrieve all the versions from a range of keys from the databases
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng =
+	rng.sprint()))]
+	async fn scan_all_versions(
+		&mut self,
+		rng: Range<Key>,
+		limit: u32,
+	) -> Result<Vec<(Key, Val, Version, bool)>> {
+		ensure!(!self.done, Error::TxFinished);
+		// Set the key range
+		let beg = rng.start;
+		let end = rng.end;
 
-	// 	// Get the inner transaction
-	// 	let inner =
-	// 		self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
+		// Get the inner transaction
+		let inner =
+			self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;
 
-	// 	// Execute on the blocking threadpool
-	// 	let res = affinitypool::spawn_local(|| -> Result<_> {
-	// 		// Retrieve the scan range
-	// 		let res = inner
-	// 			.scan_all_versions(beg.as_slice()..end.as_slice(), Some(limit as usize))
-	// 			.map(|r| r.map(|(k, v, ts, del)| (k.to_vec(), v, ts, del)).map_err(Into::into))
-	// 			.collect::<Result<_>>()?;
-	// 		// Return result
-	// 		Ok(res)
-	// 	})
-	// 	.await?;
-	// 	// Return result
-	// 	Ok(res)
-	// }
+		// Execute on the blocking threadpool
+		let res = affinitypool::spawn_local(|| -> Result<_> {
+			// Retrieve the scan range
+			let res = inner
+				.scan_all_versions(beg.as_slice(), end.as_slice(), Some(limit as usize))?
+				.into_iter()
+				.map(|(k, v, ts, del)| (k, v.to_vec(), ts, del))
+				.collect();
+
+			// Return result
+			Ok(res)
+		})
+		.await?;
+		// Return result
+		Ok(res)
+	}
 
 	fn get_save_points(&mut self) -> &mut SavePoints {
 		unimplemented!("Get save points not implemented for the SurrealKV backend")
@@ -590,17 +527,6 @@ impl super::api::Transaction for Transaction {
 	}
 
 	fn release_last_save_point(&mut self) -> Result<()> {
-		Ok(())
-	}
-}
-
-impl Transaction {
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	fn prepare(&mut self, version: Option<u64>) -> Result<()> {
-		// Does not support versioned queries until support is added in upcoming releases
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
-		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
 		Ok(())
 	}
 }

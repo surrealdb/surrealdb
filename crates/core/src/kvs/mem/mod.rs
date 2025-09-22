@@ -3,7 +3,7 @@
 use std::ops::Range;
 
 use anyhow::{Result, bail, ensure};
-use surrealkv::{InternalKey, Transaction as Tx, Tree, TreeBuilder};
+use surrealkv::{Transaction as Tx, Tree, TreeBuilder};
 
 use super::Check;
 use crate::err::Error;
@@ -23,7 +23,7 @@ pub struct Transaction {
 	/// Should we check unhandled transactions?
 	check: Check,
 	/// The underlying datastore transaction
-	inner: Option<Tx<InternalKey>>,
+	inner: Option<Tx>,
 }
 
 impl Drop for Transaction {
