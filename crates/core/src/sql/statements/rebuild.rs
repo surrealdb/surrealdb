@@ -39,6 +39,7 @@ pub struct RebuildIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
 	pub if_exists: bool,
+	pub concurrently: bool,
 }
 
 impl Display for RebuildIndexStatement {
@@ -48,6 +49,9 @@ impl Display for RebuildIndexStatement {
 			write!(f, " IF EXISTS")?
 		}
 		write!(f, " {} ON {}", self.name, self.what)?;
+		if self.concurrently {
+			write!(f, " CONCURRENTLY")?
+		}
 		Ok(())
 	}
 }
@@ -58,6 +62,7 @@ impl From<RebuildIndexStatement> for crate::expr::statements::rebuild::RebuildIn
 			name: v.name.into(),
 			what: v.what.into(),
 			if_exists: v.if_exists,
+			concurrently: v.concurrently,
 		}
 	}
 }
@@ -68,6 +73,7 @@ impl From<crate::expr::statements::rebuild::RebuildIndexStatement> for RebuildIn
 			name: v.name.into(),
 			what: v.what.into(),
 			if_exists: v.if_exists,
+			concurrently: v.concurrently,
 		}
 	}
 }

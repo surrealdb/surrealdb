@@ -14,8 +14,6 @@
 //!
 //! Range scans and lookups benefit because a single probe/range can be used for
 //! numeric predicates without fanning out per numeric variant.
-use anyhow::{Result, bail};
-use reblessive::tree::Stk;
 
 use crate::catalog::{
 	DatabaseDefinition, DatabaseId, FullTextParams, HnswParams, Index, IndexDefinition,
@@ -35,6 +33,9 @@ use crate::key::index::iu::Iu;
 use crate::kvs::ConsumeResult;
 use crate::kvs::TransactionType;
 use crate::val::{Array, RecordId, Value};
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 impl Document {
 	pub(super) async fn store_index_data(
@@ -85,7 +86,7 @@ impl Document {
 		Ok(())
 	}
 
-	#[expect(clippy::too_many_arguments)]
+	#[allow(clippy::too_many_arguments)]
 	async fn one_index(
 		db: &DatabaseDefinition,
 		stk: &mut Stk,
@@ -110,17 +111,17 @@ impl Document {
 			(o, n)
 		};
 
-		// Store all the variable and parameters required by the index operation
+		// Store all the variables and parameters required by the index operation
 		let mut ic = IndexOperation::new(opt, db.namespace_id, db.database_id, ix, o, n, rid);
 
 		// Index operation dispatching
 		match &ix.index {
 			Index::Uniq => ic.index_unique(ctx).await?,
 			Index::Idx => ic.index_non_unique(ctx).await?,
-			Index::FullText(p) => ic.index_fulltext(stk, ctx, p).await?,
+			Index::FullText(p) => ic.index_fulltext(stk, ctx, p, None).await?,
 			Index::MTree(p) => ic.index_mtree(stk, ctx, p).await?,
 			Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
-			Index::Count(c) => ic.index_count(ctx, opt, c.as_ref()).await?,
+			Index::Count(c) => ic.index_count(stk, ctx, opt, c.as_ref()).await?,
 		}
 		Ok(())
 	}
@@ -416,40 +417,54 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_count(
 		&mut self,
+		_stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		_cond: Option<&Cond>,
 	) -> Result<()> {
-		let (pos, count) = if self.o.is_some() {
-			if self.n.is_some() {
-				// That's an update, there is no count change
-				return Ok(());
-			}
-			// It is a deletion
-			(false, 1)
-		} else {
-			if self.n.is_none() {
-				// No create, no update, there's no count change
-				return Ok(());
-			}
-			// It is an insert
-			(true, 1)
-		};
+		// Phase 2
+		// let is_truthy = async |stk: &mut Stk, c: &Cond, d: &CursorDoc| -> Result<bool> {
+		// 	Ok(stk.run(|stk| c.0.compute(stk, ctx, opt, Some(d))).await.catch_return()?.is_truthy())
+		// };
+		let mut relative_count: i8 = 0;
+		// Phase 2 - with condition
+		// if let Some(c) = cond {
+		// 	if self.o.is_some() {
+		// 		if is_truthy(stk, c, &self.doc.initial).await? {
+		// 			relative_count -= 1;
+		// 		}
+		// 	}
+		// 	if self.n.is_some() {
+		// 		if is_truthy(stk, c, &self.doc.current).await? {
+		// 			relative_count += 1;
+		// 		}
+		// 	}
+		// } else {
+		if self.o.is_some() {
+			relative_count -= 1;
+		}
+		if self.n.is_some() {
+			relative_count += 1;
+		}
+		// }
+		if relative_count == 0 {
+			return Ok(());
+		}
 		let key = Iu::new(
 			self.ns,
 			self.db,
 			&self.ix.table_name,
 			self.ix.index_id,
 			Some((opt.id()?, uuid::Uuid::now_v7())),
-			pos,
-			count,
+			relative_count > 0,
+			relative_count.unsigned_abs() as u32,
 		);
 		ctx.tx().lock().await.put(&key, &vec![], None).await?;
 		Ok(())
 	}
 
 	/// Construct a consistent uniqueness violation error message.
-	/// Formats the conflicting value as a single value or array depending on
+	/// Formats the conflicting value as a single value or an array depending on
 	/// the number of indexed fields.
 	fn err_index_exists(&self, rid: RecordId, mut n: Array) -> Result<()> {
 		bail!(Error::IndexExists {
@@ -467,27 +482,32 @@ impl<'a> IndexOperation<'a> {
 		stk: &mut Stk,
 		ctx: &Context,
 		p: &FullTextParams,
+		require_compaction: Option<&AtomicBool>,
 	) -> Result<()> {
 		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id);
 		let tx = ctx.tx();
+		let mut rc = false;
 		// Build a FullText instance
 		let fti =
 			FullTextIndex::new(self.opt.id()?, ctx.get_index_stores(), &tx, ikb.clone(), p).await?;
-		let mut require_compaction = false;
 		// Delete the old index data
 		let doc_id = if let Some(o) = self.o.take() {
-			fti.remove_content(stk, ctx, self.opt, self.rid, o, &mut require_compaction).await?
+			fti.remove_content(stk, ctx, self.opt, self.rid, o, &mut rc).await?
 		} else {
 			None
 		};
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			fti.index_content(stk, ctx, self.opt, self.rid, n, &mut require_compaction).await?;
+			fti.index_content(stk, ctx, self.opt, self.rid, n, &mut rc).await?;
 		} else if let Some(doc_id) = doc_id {
 			fti.remove_doc(ctx, doc_id).await?;
 		}
 		// Do we need to trigger the compaction?
-		if require_compaction {
+		if rc {
+			if let Some(rc) = require_compaction {
+				rc.store(true, Ordering::Relaxed);
+			}
+		} else {
 			FullTextIndex::trigger_compaction(&ikb, &tx, self.opt.id()?).await?;
 		}
 		Ok(())

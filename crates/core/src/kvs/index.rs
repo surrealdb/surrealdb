@@ -1,10 +1,10 @@
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Result, ensure};
-use dashmap::DashMap;
-use dashmap::mapref::entry::Entry;
 use futures::channel::oneshot::{Receiver, Sender, channel};
 use reblessive::TreeStack;
 use revision::revisioned;
@@ -147,7 +147,7 @@ impl IndexKey {
 #[derive(Clone)]
 pub(crate) struct IndexBuilder {
 	tf: TransactionFactory,
-	indexes: Arc<DashMap<IndexKey, IndexBuilding>>,
+	indexes: Arc<RwLock<HashMap<IndexKey, IndexBuilding>>>,
 }
 
 impl IndexBuilder {
@@ -183,7 +183,7 @@ impl IndexBuilder {
 		Ok((building, jh))
 	}
 
-	pub(crate) fn build(
+	pub(crate) async fn build(
 		&self,
 		ctx: &Context,
 		opt: Options,
@@ -199,9 +199,9 @@ impl IndexBuilder {
 		} else {
 			(None, None)
 		};
-		match self.indexes.entry(key) {
-			Entry::Occupied(e) => {
-				// If the building is currently running, we return error
+		match self.indexes.write().await.entry(key) {
+			Entry::Occupied(mut e) => {
+				// If the building is currently running, we return an error
 				ensure!(
 					e.get().1.is_finished(),
 					Error::IndexAlreadyBuilding {
@@ -209,7 +209,7 @@ impl IndexBuilder {
 					}
 				);
 				let ib = self.start_building(ctx, opt, ns, db, ix, sdr)?;
-				e.replace_entry(ib);
+				e.insert(ib);
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
@@ -230,8 +230,7 @@ impl IndexBuilder {
 		rid: &RecordId,
 	) -> Result<ConsumeResult> {
 		let key = IndexKey::new(db.namespace_id, db.database_id, &ix.table_name, &ix.name);
-		if let Some(r) = self.indexes.get(&key) {
-			let (b, _) = r.value();
+		if let Some((b, _)) = self.indexes.read().await.get(&key) {
 			return b.maybe_consume(ctx, old_values, new_values, rid).await;
 		}
 		Ok(ConsumeResult::Ignored(old_values, new_values))
@@ -244,14 +243,14 @@ impl IndexBuilder {
 		ix: &IndexDefinition,
 	) -> BuildingStatus {
 		let key = IndexKey::new(ns, db, &ix.table_name, &ix.name);
-		if let Some(a) = self.indexes.get(&key) {
-			a.value().0.status.read().await.clone()
+		if let Some(a) = self.indexes.read().await.get(&key) {
+			a.0.status.read().await.clone()
 		} else {
 			BuildingStatus::default()
 		}
 	}
 
-	pub(crate) fn remove_index(
+	pub(crate) async fn remove_index(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -259,8 +258,8 @@ impl IndexBuilder {
 		ix: &str,
 	) -> Result<()> {
 		let key = IndexKey::new(ns, db, tb, ix);
-		if let Some((_, b)) = self.indexes.remove(&key) {
-			b.0.abort();
+		if let Some((_, b)) = self.indexes.write().await.remove(&key) {
+			b.abort();
 		}
 		Ok(())
 	}

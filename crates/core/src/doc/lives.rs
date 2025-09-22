@@ -175,17 +175,10 @@ impl Document {
 			(false, false) => self.current.clone(),
 		};
 
-		if let Ok(rid) = self.id() {
+		if let Ok(rid) = self.id_ref() {
 			let fields = self.fd(&ctx, &opt).await?;
-			Document::computed_fields_inner(
-				stk,
-				&ctx,
-				&opt,
-				rid.as_ref(),
-				fields.as_ref(),
-				&mut doc,
-			)
-			.await?;
+			Document::computed_fields_inner(stk, &ctx, &opt, rid, fields.as_ref(), &mut doc)
+				.await?;
 		};
 
 		// First of all, let's check to see if the WHERE
@@ -295,7 +288,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
-	/// Check any PERRMISSIONS for a LIVE query
+	/// Check any PERMISSIONS for a LIVE query
 	async fn lq_allow(
 		&self,
 		stk: &mut Stk,

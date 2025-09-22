@@ -48,6 +48,7 @@ pub struct RebuildIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
 	pub if_exists: bool,
+	pub concurrently: bool,
 }
 
 impl RebuildIndexStatement {
@@ -80,7 +81,7 @@ impl RebuildIndexStatement {
 		let ix = ix.as_ref().clone();
 
 		// Rebuild the index
-		run_indexing(stk, ctx, opt, doc, &ix, false).await?;
+		run_indexing(stk, ctx, opt, doc, &ix, !self.concurrently).await?;
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -93,6 +94,9 @@ impl Display for RebuildIndexStatement {
 			write!(f, " IF EXISTS")?
 		}
 		write!(f, " {} ON {}", self.name, self.what)?;
+		if self.concurrently {
+			write!(f, " CONCURRENTLY")?
+		}
 		Ok(())
 	}
 }

@@ -214,7 +214,8 @@ pub(in crate::expr::statements) async fn run_indexing(
 		let rcv = ctx
 			.get_index_builder()
 			.ok_or_else(|| Error::unreachable("No Index Builder"))?
-			.build(ctx, opt.clone(), ns, db, index.clone().into(), _blocking)?;
+			.build(ctx, opt.clone(), ns, db, index.clone().into(), _blocking)
+			.await?;
 		if let Some(rcv) = rcv {
 			rcv.await.map_err(|_| Error::IndexingBuildingCancelled)?
 		} else {

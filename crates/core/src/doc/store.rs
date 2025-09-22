@@ -22,7 +22,7 @@ impl Document {
 			return Ok(());
 		}
 		// Get the record id
-		let rid = self.id()?;
+		let rid = self.id_ref()?;
 		// Get NS & DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 
@@ -64,7 +64,7 @@ impl Document {
 					Err(e) => {
 						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
 							Err(anyhow::Error::new(Error::RecordExists {
-								thing: rid.as_ref().to_owned(),
+								thing: rid.to_owned(),
 							}))
 						} else {
 							Err(e)
@@ -97,7 +97,7 @@ impl Document {
 					Err(e) => {
 						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
 							Err(anyhow::Error::new(Error::RecordExists {
-								thing: rid.as_ref().to_owned(),
+								thing: rid.to_owned(),
 							}))
 						} else {
 							Err(e)
@@ -130,7 +130,7 @@ impl Document {
 					Err(e) => {
 						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
 							Err(anyhow::Error::new(Error::RecordExists {
-								thing: rid.as_ref().to_owned(),
+								thing: rid.to_owned(),
 							}))
 						} else {
 							Err(e)
