@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::ops::Bound;
+use std::ops::{Bound, RangeFrom, RangeFull, RangeTo, RangeToInclusive};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -116,5 +116,60 @@ impl PartialEq<Range> for RecordIdKeyRange {
 			}
 			Bound::Unbounded => matches!(other.end, Bound::Unbounded),
 		})
+	}
+}
+
+impl From<RangeFull> for RecordIdKeyRange {
+	fn from(_: RangeFull) -> Self {
+		Self {
+			start: Bound::Unbounded,
+			end: Bound::Unbounded,
+		}
+	}
+}
+
+impl<T: Into<RecordIdKey>> From<std::ops::Range<T>> for RecordIdKeyRange {
+	fn from(range: std::ops::Range<T>) -> Self {
+		Self {
+			start: Bound::Included(range.start.into()),
+			end: Bound::Excluded(range.end.into()),
+		}
+	}
+}
+
+impl<T: Into<RecordIdKey>> From<std::ops::RangeInclusive<T>> for RecordIdKeyRange {
+	fn from(range: std::ops::RangeInclusive<T>) -> Self {
+		let (start, end) = range.into_inner();
+		Self {
+			start: Bound::Included(start.into()),
+			end: Bound::Included(end.into()),
+		}
+	}
+}
+
+impl<T: Into<RecordIdKey>> From<RangeTo<T>> for RecordIdKeyRange {
+	fn from(range: RangeTo<T>) -> Self {
+		Self {
+			start: Bound::Unbounded,
+			end: Bound::Excluded(range.end.into()),
+		}
+	}
+}
+
+impl<T: Into<RecordIdKey>> From<RangeToInclusive<T>> for RecordIdKeyRange {
+	fn from(range: RangeToInclusive<T>) -> Self {
+		Self {
+			start: Bound::Unbounded,
+			end: Bound::Included(range.end.into()),
+		}
+	}
+}
+
+impl<T: Into<RecordIdKey>> From<RangeFrom<T>> for RecordIdKeyRange {
+	fn from(range: RangeFrom<T>) -> Self {
+		Self {
+			start: Bound::Included(range.start.into()),
+			end: Bound::Unbounded,
+		}
 	}
 }

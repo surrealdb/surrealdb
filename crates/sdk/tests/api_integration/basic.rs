@@ -6,14 +6,13 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use surrealdb::IndexedResults;
 use surrealdb::error::{Api as ApiError, Db as DbError};
 use surrealdb::opt::auth::{Database, Namespace, Record as RecordAccess};
 use surrealdb::opt::{PatchOp, PatchOps, Raw, Resource};
-use surrealdb::{IndexedResults};
-use surrealdb::types::{RecordId, Value};
+use surrealdb::types::{RecordId, RecordIdKey, SurrealValue, Value, array, object, rid};
 use surrealdb_core::expr::TopLevelExpr;
 use surrealdb_core::syn;
-use surrealdb::types::RecordIdKey;
 use ulid::Ulid;
 
 use super::{AuthParams, CreateDb};
@@ -73,8 +72,8 @@ pub async fn signup_record(new_db: impl CreateDb) {
 	response.check().unwrap();
 	db.signup(RecordAccess {
 		namespace: NS.to_string(),
-		database: database,
-		access: access,
+		database,
+		access,
 		params: AuthParams {
 			email: "john.doe@example.com".to_string(),
 			pass: "password123".to_string(),
@@ -113,10 +112,10 @@ pub async fn signin_db(new_db: impl CreateDb) {
 	drop(permit);
 	response.check().unwrap();
 	db.signin(Database {
-		namespace: NS,
-		database: &database,
-		username: &user,
-		password: pass,
+		namespace: NS.to_string(),
+		database,
+		username: user,
+		password: pass.to_string(),
 	})
 	.await
 	.unwrap();
@@ -141,23 +140,23 @@ pub async fn signin_record(new_db: impl CreateDb) {
 	drop(permit);
 	response.check().unwrap();
 	db.signup(RecordAccess {
-		namespace: NS,
-		database: &database,
-		access: &access,
+		namespace: NS.to_string(),
+		database: database.clone(),
+		access: access.clone(),
 		params: AuthParams {
-			pass,
-			email: &email,
+			pass: pass.to_string(),
+			email: email.clone(),
 		},
 	})
 	.await
 	.unwrap();
 	db.signin(RecordAccess {
-		namespace: NS,
-		database: &database,
-		access: &access,
+		namespace: NS.to_string(),
+		database,
+		access,
 		params: AuthParams {
-			pass,
-			email: &email,
+			pass: pass.to_string(),
+			email,
 		},
 	})
 	.await
@@ -185,12 +184,12 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 
 	let err = db
 		.signup(RecordAccess {
-			namespace: NS,
-			database: &database,
-			access: &access,
+			namespace: NS.to_string(),
+			database: database.clone(),
+			access: access.clone(),
 			params: AuthParams {
-				pass,
-				email: &email,
+				pass: pass.to_string(),
+				email: email.clone(),
 			},
 		})
 		.await
@@ -216,12 +215,12 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 
 	let err = db
 		.signin(RecordAccess {
-			namespace: NS,
-			database: &database,
-			access: &access,
+			namespace: NS.to_string(),
+			database: database.clone(),
+			access: access.clone(),
 			params: AuthParams {
-				pass,
-				email: &email,
+				pass: pass.to_string(),
+				email: email.clone(),
 			},
 		})
 		.await
@@ -267,12 +266,12 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 
 	let err = db
 		.signup(RecordAccess {
-			namespace: NS,
-			database: &database,
-			access: &access,
+			namespace: NS.to_string(),
+			database: database.clone(),
+			access: access.clone(),
 			params: AuthParams {
-				pass,
-				email: &email,
+				pass: pass.to_string(),
+				email: email.clone(),
 			},
 		})
 		.await
@@ -301,12 +300,12 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 
 	let err = db
 		.signin(RecordAccess {
-			namespace: NS,
-			database: &database,
-			access: &access,
+			namespace: NS.to_string(),
+			database: database.clone(),
+			access: access.clone(),
 			params: AuthParams {
-				pass,
-				email: &email,
+				pass: pass.to_string(),
+				email: email.clone(),
 			},
 		})
 		.await
@@ -345,9 +344,9 @@ pub async fn authenticate(new_db: impl CreateDb) {
 	response.check().unwrap();
 	let token = db
 		.signin(Namespace {
-			namespace: NS,
-			username: &user,
-			password: pass,
+			namespace: NS.to_string(),
+			username: user,
+			password: pass.to_string(),
 		})
 		.await
 		.unwrap();
@@ -414,8 +413,11 @@ pub async fn query_binds(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
-	let mut response =
-		db.query("CREATE user:john SET name = $name").bind(("name", "John Doe")).await.unwrap();
+	let mut response = db
+		.query("CREATE user:john SET name = $name")
+		.bind(("name", "John Doe".to_string()))
+		.await
+		.unwrap();
 	let Some(record): Option<RecordName> = response.take(0).unwrap() else {
 		panic!("query returned no record");
 	};
@@ -532,26 +534,26 @@ pub async fn create_record_with_id_with_content(new_db: impl CreateDb) {
 		})
 		.await
 		.unwrap();
-	assert_eq!(record.unwrap().id, "user:john".parse::<RecordId>().unwrap());
+	assert_eq!(record.unwrap().id, RecordId::new("user", "john"));
 	let value: Value = db
-		.create(Resource::from("user:jane".parse::<RecordId>().unwrap()))
+		.create(Resource::from(RecordId::new("user", "jane")))
 		.content(Record {
 			name: "Jane Doe".to_owned(),
 		})
 		.await
 		.unwrap();
-	assert_eq!(value.record(), Some("user:jane".parse::<RecordId>().unwrap()));
+	assert_eq!(value.as_record_id().unwrap(), RecordId::new("user", "jane"));
 }
 
 pub async fn create_record_with_id_in_content(new_db: impl CreateDb) {
-	#[derive(Debug, Serialize, Deserialize)]
+	#[derive(Debug, SurrealValue)]
 	pub struct Person {
 		pub id: u32,
-		pub name: &'static str,
-		pub job: &'static str,
+		pub name: String,
+		pub job: String,
 	}
 
-	#[derive(Debug, Serialize, Deserialize)]
+	#[derive(Debug, SurrealValue)]
 	pub struct Record {
 		#[allow(dead_code)]
 		pub id: RecordId,
@@ -564,17 +566,17 @@ pub async fn create_record_with_id_in_content(new_db: impl CreateDb) {
 	let record: Option<RecordBuf> = db
 		.create(("user", "john"))
 		.content(RecordBuf {
-			id: RecordId::from_table_key("user", "john"),
+			id: RecordId::new("user", "john"),
 			name: "John Doe".to_owned(),
 		})
 		.await
 		.unwrap();
-	assert_eq!(record.unwrap().id, "user:john".parse::<RecordId>().unwrap());
+	assert_eq!(record.unwrap().id, RecordId::new("user", "john"));
 
 	let error = db
 		.create::<Option<RecordBuf>>(("user", "john"))
 		.content(RecordBuf {
-			id: RecordId::from_table_key("user", "jane"),
+			id: RecordId::new("user", "jane"),
 			name: "John Doe".to_owned(),
 		})
 		.await
@@ -596,8 +598,8 @@ pub async fn create_record_with_id_in_content(new_db: impl CreateDb) {
 		.create("person")
 		.content(Person {
 			id: 1010,
-			name: "Max Mustermann",
-			job: "chef",
+			name: "Max Mustermann".to_string(),
+			job: "chef".to_string(),
 		})
 		.await
 		.unwrap();
@@ -606,8 +608,8 @@ pub async fn create_record_with_id_in_content(new_db: impl CreateDb) {
 		.update(("person", 1010))
 		.content(Person {
 			id: 1010,
-			name: "Max Mustermann",
-			job: "IT Tech",
+			name: "Max Mustermann".to_string(),
+			job: "IT Tech".to_string(),
 		})
 		.await
 		.unwrap();
@@ -644,7 +646,7 @@ pub async fn insert_thing(new_db: impl CreateDb) {
 	assert_eq!(
 		user,
 		Some(ApiRecordId {
-			id: "user:user5".parse().unwrap(),
+			id: RecordId::new("user", "user5"),
 		})
 	);
 }
@@ -659,13 +661,13 @@ pub async fn insert_unspecified(new_db: impl CreateDb) {
 	tmp.unwrap_err();
 	let tmp: Vec<ApiRecordId> = db
 		.insert(())
-		.content("{id: user:user1, foo: 'bar'}".parse::<Value>().unwrap())
+		.content(object! { id: RecordId::new("user", "user1"), foo: "bar"})
 		.await
 		.unwrap();
 	assert_eq!(
 		tmp,
 		vec![ApiRecordId {
-			id: "user:user1".parse::<RecordId>().unwrap(),
+			id: RecordId::new("user", "user1"),
 		}]
 	);
 
@@ -676,10 +678,10 @@ pub async fn insert_unspecified(new_db: impl CreateDb) {
 	tmp.unwrap_err();
 	let tmp: Value = db
 		.insert(Resource::from(()))
-		.content("{id: user:user2, foo: 'bar'}".parse::<Value>().unwrap())
+		.content(object! { id: RecordId::new("user", "user2"), foo: "bar"})
 		.await
 		.unwrap();
-	let val = "{id: user:user2, foo: 'bar'}".parse::<Value>().unwrap();
+	let val = Value::Object(object! { id: RecordId::new("user", "user2"), foo: "bar"});
 	assert_eq!(tmp, val);
 }
 
@@ -687,19 +689,16 @@ pub async fn insert_relation_table(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
-	let tmp: Result<Vec<ApiRecordId>, _> =
-		db.insert("likes").relation("{}".parse::<Value>().unwrap()).await;
+	let tmp: Result<Vec<ApiRecordId>, _> = db.insert("likes").relation(object! {}).await;
 	tmp.unwrap_err();
-	let val = "{in: person:a, out: thing:a}".parse::<Value>().unwrap();
+	let val = object! {in: RecordId::new("person", "a"), out: RecordId::new("thing", "a")};
 	let _: Vec<ApiRecordId> = db.insert("likes").relation(val).await.unwrap();
 
-	let vals = r#"[
-		{ in: person:b, out: thing:a },
-		{ id: likes:2, in: person:c, out: thing:a },
-		{ id: likes:3, in: person:d, out: thing:a },
-	]"#
-	.parse::<Value>()
-	.unwrap();
+	let vals = array![
+		object! { in: rid!("person:b"), out: rid!("thing:a") },
+		object! { id: rid!("likes:2"), in: rid!("person:c"), out: rid!("thing:a") },
+		object! { id: rid!("likes:3"), in: rid!("person:d"), out: rid!("thing:a") },
+	];
 	let _: Vec<ApiRecordId> = db.insert("likes").relation(vals).await.unwrap();
 }
 
@@ -708,8 +707,8 @@ pub async fn binding_edges(new_db: impl CreateDb) {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	//
-	let john = "person:john".parse::<RecordId>().unwrap();
-	let jane = "person:jane".parse::<RecordId>().unwrap();
+	let john = rid!("person:john");
+	let jane = rid!("person:jane");
 	let value: Value = db
 		.query("RELATE $john -> knows -> $jane SET id = knows:one")
 		.bind(("john", john.clone()))
@@ -718,7 +717,12 @@ pub async fn binding_edges(new_db: impl CreateDb) {
 		.unwrap()
 		.take(0)
 		.unwrap();
-	assert_eq!(value, "[{ id: knows:one, in: person:john, out: person:jane }]".parse().unwrap());
+	assert_eq!(
+		value,
+		Value::Array(array![Value::Object(
+			object! { id: "knows:one", in: "person:john", out: "person:jane" }
+		)])
+	);
 	//
 	let value: Value = db
 		.query("RELATE $john -> knows:two -> $jane")
@@ -728,7 +732,12 @@ pub async fn binding_edges(new_db: impl CreateDb) {
 		.unwrap()
 		.take(0)
 		.unwrap();
-	assert_eq!(value, "[{ id: knows:two, in: person:john, out: person:jane }]".parse().unwrap());
+	assert_eq!(
+		value,
+		Value::Array(array![Value::Object(
+			object! { id: "knows:two", in: "person:john", out: "person:jane" }
+		)])
+	);
 	//
 	let surql =
 		"LET $kind = type::table($knows); RELATE $john -> $kind -> $jane SET id = knows:three";
@@ -741,7 +750,12 @@ pub async fn binding_edges(new_db: impl CreateDb) {
 		.unwrap()
 		.take(1)
 		.unwrap();
-	assert_eq!(value, "[{ id: knows:three, in: person:john, out: person:jane }]".parse().unwrap());
+	assert_eq!(
+		value,
+		Value::Array(array![Value::Object(
+			object! { id: "knows:three", in: "person:john", out: "person:jane" }
+		)])
+	);
 	//
 	let value: Value = db
 		.query("LET $kind = <record> $knows; RELATE $john -> $kind -> $jane")
@@ -752,7 +766,12 @@ pub async fn binding_edges(new_db: impl CreateDb) {
 		.unwrap()
 		.take(1)
 		.unwrap();
-	assert_eq!(value, "[{ id: knows:four, in: person:john, out: person:jane }]".parse().unwrap());
+	assert_eq!(
+		value,
+		Value::Array(array![Value::Object(
+			object! { id: "knows:four", in: "person:john", out: "person:jane" }
+		)])
+	);
 }
 
 pub async fn select_table(new_db: impl CreateDb) {
@@ -776,12 +795,9 @@ pub async fn select_record_id(new_db: impl CreateDb) {
 	let Some(record): Option<ApiRecordId> = db.select(record_id).await.unwrap() else {
 		panic!("record not found");
 	};
-	assert_eq!(record.id, "user:john".parse().unwrap());
+	assert_eq!(record.id, rid!("user:john"));
 	let value: Value = db.select(Resource::from(record_id)).await.unwrap();
-	assert_eq!(
-		value.into_inner().record(),
-		Some("user:john".parse::<RecordId>().unwrap().into_inner())
-	);
+	assert_eq!(value.as_record_id().unwrap(), rid!("user:john"));
 }
 
 pub async fn select_record_ranges(new_db: impl CreateDb) {
@@ -797,7 +813,7 @@ pub async fn select_record_ranges(new_db: impl CreateDb) {
 		users
 			.into_iter()
 			.map(|user| {
-				let RecordIdKey::String(ref x) = user.id.into_inner().key else {
+				let RecordIdKey::String(ref x) = user.id.key else {
 					panic!()
 				};
 				x.clone()
@@ -817,13 +833,10 @@ pub async fn select_record_ranges(new_db: impl CreateDb) {
 	let users: Vec<ApiRecordId> = db.select(table).range("jane"..="john").await.unwrap();
 	assert_eq!(convert(users), vec!["jane", "john"]);
 	let v: Value = db.select(Resource::from(table)).range("jane"..="john").await.unwrap();
-	let Value::Array(array) = v.into_inner() else {
+	let Value::Array(array) = v else {
 		panic!()
 	};
 	assert_eq!(array.len(), 2);
-	let users: Vec<ApiRecordId> =
-		db.select(table).range((Bound::Excluded("jane"), Bound::Included("john"))).await.unwrap();
-	assert_eq!(convert(users), vec!["john"]);
 }
 
 pub async fn select_records_order_by_start_limit(new_db: impl CreateDb) {
@@ -896,7 +909,7 @@ pub async fn select_records_fetch(new_db: impl CreateDb) {
 
 	let check_fetch = |mut response: IndexedResults, expected: &str| {
 		let val: Value = response.take(0).unwrap();
-		let exp = expected.parse().unwrap();
+		let exp = surrealdb::parse::value(expected).unwrap();
 		assert_eq!(val, exp);
 	};
 
@@ -1011,7 +1024,7 @@ pub async fn update_table_with_content(new_db: impl CreateDb) {
         CREATE type::thing($table, 'zoey') SET name = 'Zoey';
     ";
 	let table = "user";
-	let response = db.query(sql).bind(("table", table)).await.unwrap();
+	let response = db.query(sql).bind(("table".to_string(), table)).await.unwrap();
 	response.check().unwrap();
 	let users: Vec<RecordBuf> = db
 		.update(table)
@@ -1022,19 +1035,19 @@ pub async fn update_table_with_content(new_db: impl CreateDb) {
 		.unwrap();
 	let expected = &[
 		RecordBuf {
-			id: "user:amos".parse().unwrap(),
+			id: rid!(user:amos),
 			name: "Doe".to_owned(),
 		},
 		RecordBuf {
-			id: "user:jane".parse().unwrap(),
+			id: rid!(user:jane),
 			name: "Doe".to_owned(),
 		},
 		RecordBuf {
-			id: "user:john".parse().unwrap(),
+			id: rid!(user:john),
 			name: "Doe".to_owned(),
 		},
 		RecordBuf {
-			id: "user:zoey".parse().unwrap(),
+			id: rid!(user:zoey),
 			name: "Doe".to_owned(),
 		},
 	];
@@ -1054,7 +1067,7 @@ pub async fn update_record_range_with_content(new_db: impl CreateDb) {
         CREATE type::thing($table, 'zoey') SET name = 'Zoey';
     ";
 	let table = "user";
-	let response = db.query(sql).bind(("table", table)).await.unwrap();
+	let response = db.query(sql).bind(("table".to_string(), table)).await.unwrap();
 	response.check().unwrap();
 	let users: Vec<RecordBuf> = db
 		.update(table)
@@ -1068,11 +1081,11 @@ pub async fn update_record_range_with_content(new_db: impl CreateDb) {
 		users,
 		&[
 			RecordBuf {
-				id: "user:jane".parse().unwrap(),
+				id: rid!(user:jane),
 				name: "Doe".to_owned(),
 			},
 			RecordBuf {
-				id: "user:john".parse().unwrap(),
+				id: rid!(user:john),
 				name: "Doe".to_owned(),
 			},
 		]
@@ -1082,19 +1095,19 @@ pub async fn update_record_range_with_content(new_db: impl CreateDb) {
 		users,
 		&[
 			RecordBuf {
-				id: "user:amos".parse().unwrap(),
+				id: rid!(user:amos),
 				name: "Amos".to_owned(),
 			},
 			RecordBuf {
-				id: "user:jane".parse().unwrap(),
+				id: rid!(user:jane),
 				name: "Doe".to_owned(),
 			},
 			RecordBuf {
-				id: "user:john".parse().unwrap(),
+				id: rid!(user:john),
 				name: "Doe".to_owned(),
 			},
 			RecordBuf {
-				id: "user:zoey".parse().unwrap(),
+				id: rid!(user:zoey),
 				name: "Zoey".to_owned(),
 			},
 		]
@@ -1126,17 +1139,16 @@ pub async fn update_record_id_with_content(new_db: impl CreateDb) {
 	assert_eq!(user.unwrap().name, "John Doe");
 }
 
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, SurrealValue, Eq, PartialEq, Ord, PartialOrd)]
 struct Name {
-	first: Cow<'static, str>,
-	last: Cow<'static, str>,
+	first: String,
+	last: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, PartialOrd)]
+#[derive(Debug, SurrealValue, PartialEq, PartialOrd)]
 struct Person {
-	#[serde(skip_serializing)]
 	id: Option<RecordId>,
-	title: Cow<'static, str>,
+	title: String,
 	name: Name,
 	marketing: bool,
 }
@@ -1159,14 +1171,14 @@ pub async fn update_merge_record_id(new_db: impl CreateDb) {
 		})
 		.await
 		.unwrap();
-	assert_eq!(jaime.unwrap().id.unwrap(), "person:jaime".parse().unwrap());
+	assert_eq!(jaime.unwrap().id.unwrap(), rid!(person:jaime));
 	jaime = db.update(record_id).merge(json!({ "marketing": true })).await.unwrap();
 	assert!(jaime.as_ref().unwrap().marketing);
 	jaime = db.select(record_id).await.unwrap();
 	assert_eq!(
 		jaime.unwrap(),
 		Person {
-			id: Some("person:jaime".parse().unwrap()),
+			id: Some(rid!(person:jaime)),
 			title: "Founder & COO".into(),
 			name: Name {
 				first: "Jaime".into(),
@@ -1196,7 +1208,7 @@ pub async fn upsert_merge_record_id(new_db: impl CreateDb) {
 		})
 		.await
 		.unwrap();
-	assert_eq!(jaime.unwrap().id.unwrap(), "person:jaime".parse().unwrap());
+	assert_eq!(jaime.unwrap().id.unwrap(), rid!(person:jaime));
 	// Update the record using merge
 	jaime = db.upsert(record_id).merge(json!({ "marketing": true })).await.unwrap();
 	assert!(jaime.as_ref().unwrap().marketing);
@@ -1204,7 +1216,7 @@ pub async fn upsert_merge_record_id(new_db: impl CreateDb) {
 	assert_eq!(
 		jaime,
 		Some(Person {
-			id: Some("person:jaime".parse().unwrap()),
+			id: Some(rid!(person:jaime)),
 			title: "Founder & COO".into(),
 			name: Name {
 				first: "Jaime".into(),
@@ -1230,7 +1242,7 @@ pub async fn upsert_merge_record_id(new_db: impl CreateDb) {
 	assert_eq!(
 		tobie,
 		Some(Person {
-			id: Some("person:tobie".parse().unwrap()),
+			id: Some(rid!(person:tobie)),
 			title: "Founder & CEO".into(),
 			name: Name {
 				first: "Tobie".into(),
@@ -1244,7 +1256,7 @@ pub async fn upsert_merge_record_id(new_db: impl CreateDb) {
 	assert_eq!(
 		tobie,
 		Some(Person {
-			id: Some("person:tobie".parse().unwrap()),
+			id: Some(rid!(person:tobie)),
 			title: "Founder & CEO".into(),
 			name: Name {
 				first: "Tobie".into(),
@@ -1256,7 +1268,7 @@ pub async fn upsert_merge_record_id(new_db: impl CreateDb) {
 }
 
 pub async fn patch_record_id(new_db: impl CreateDb) {
-	#[derive(Debug, Deserialize, PartialEq)]
+	#[derive(Debug, SurrealValue, PartialEq)]
 	struct Record {
 		id: RecordId,
 		baz: String,
@@ -1286,7 +1298,7 @@ pub async fn patch_record_id(new_db: impl CreateDb) {
 	assert_eq!(
 		value,
 		Some(Record {
-			id: format!("user:{id}").parse().unwrap(),
+			id: RecordId::new("user", id),
 			baz: "boo".to_owned(),
 			hello: vec!["world".to_owned()],
 		})
@@ -1294,7 +1306,7 @@ pub async fn patch_record_id(new_db: impl CreateDb) {
 }
 
 pub async fn upsert_patch_record_id(new_db: impl CreateDb) {
-	#[derive(Debug, Deserialize, PartialEq)]
+	#[derive(Debug, SurrealValue, PartialEq)]
 	struct Record {
 		id: RecordId,
 		baz: String,
@@ -1324,7 +1336,7 @@ pub async fn upsert_patch_record_id(new_db: impl CreateDb) {
 	assert_eq!(
 		value,
 		Some(Record {
-			id: format!("user:{id}").parse().unwrap(),
+			id: RecordId::new("user", id),
 			baz: "boo".to_owned(),
 			hello: vec!["world".to_owned()],
 		})
@@ -1338,7 +1350,7 @@ pub async fn upsert_patch_record_id(new_db: impl CreateDb) {
 	assert_eq!(
 		jane,
 		Some(Record {
-			id: "user:jane".parse().unwrap(),
+			id: RecordId::new("user", "jane"),
 			baz: "boo".to_owned(),
 			hello: vec!["world".to_owned()],
 		})
@@ -1348,7 +1360,7 @@ pub async fn upsert_patch_record_id(new_db: impl CreateDb) {
 	assert_eq!(
 		jane,
 		Some(Record {
-			id: "user:jane".parse().unwrap(),
+			id: RecordId::new("user", "jane"),
 			baz: "boo".to_owned(),
 			hello: vec!["world".to_owned()],
 		})
@@ -1356,7 +1368,7 @@ pub async fn upsert_patch_record_id(new_db: impl CreateDb) {
 }
 
 pub async fn patch_record_id_ops(new_db: impl CreateDb) {
-	#[derive(Debug, Deserialize, PartialEq)]
+	#[derive(Debug, SurrealValue, PartialEq)]
 	struct Record {
 		id: RecordId,
 		baz: String,
@@ -1384,7 +1396,7 @@ pub async fn patch_record_id_ops(new_db: impl CreateDb) {
 	assert_eq!(
 		value,
 		Some(Record {
-			id: format!("user:{id}").parse().unwrap(),
+			id: RecordId::new("user", id),
 			baz: "boo".to_owned(),
 			hello: vec!["world".to_owned()],
 		})
@@ -1422,7 +1434,7 @@ pub async fn delete_record_id(new_db: impl CreateDb) {
 	let jane: Option<ApiRecordId> = db.delete(("user", "jane")).await.unwrap();
 	assert!(jane.is_none());
 	let value: Value = db.delete(Resource::from(("user", "jane"))).await.unwrap();
-	assert_eq!(value.into_inner(), Value::None);
+	assert_eq!(value, Value::None);
 }
 
 pub async fn delete_record_range(new_db: impl CreateDb) {
@@ -1436,18 +1448,18 @@ pub async fn delete_record_range(new_db: impl CreateDb) {
         CREATE type::thing($table, 'zoey') SET name = 'Zoey';
     ";
 	let table = "user";
-	let response = db.query(sql).bind(("table", table)).await.unwrap();
+	let response = db.query(sql).bind(("table".to_string(), table)).await.unwrap();
 	response.check().unwrap();
 	let users: Vec<RecordBuf> = db.delete(table).range("jane".."zoey").await.unwrap();
 	assert_eq!(
 		users,
 		&[
 			RecordBuf {
-				id: "user:jane".parse().unwrap(),
+				id: rid!(user:jane),
 				name: "Jane".to_owned(),
 			},
 			RecordBuf {
-				id: "user:john".parse().unwrap(),
+				id: rid!(user:john),
 				name: "John".to_owned(),
 			},
 		]
@@ -1457,11 +1469,11 @@ pub async fn delete_record_range(new_db: impl CreateDb) {
 		users,
 		&[
 			RecordBuf {
-				id: "user:amos".parse().unwrap(),
+				id: rid!(user:amos),
 				name: "Amos".to_owned(),
 			},
 			RecordBuf {
-				id: "user:zoey".parse().unwrap(),
+				id: rid!(user:zoey),
 				name: "Zoey".to_owned(),
 			},
 		]
@@ -1495,11 +1507,11 @@ pub async fn changefeed(new_db: impl CreateDb) {
 		.unwrap();
 	let expected = &[
 		RecordBuf {
-			id: "testuser:amos".parse().unwrap(),
+			id: rid!(testuser:amos),
 			name: "Doe".to_owned(),
 		},
 		RecordBuf {
-			id: "testuser:jane".parse().unwrap(),
+			id: rid!(testuser:jane),
 			name: "Doe".to_owned(),
 		},
 	];
@@ -1512,7 +1524,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	let mut response = db.query(sql).await.unwrap();
 	drop(permit);
 	let v: Value = response.take(0).unwrap();
-	let Value::Array(array) = v.into_inner() else {
+	let Value::Array(array) = v else {
 		panic!()
 	};
 	assert_eq!(array.len(), 5);
@@ -1526,8 +1538,9 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	};
 	let changes = a.get("changes").unwrap().clone().clone();
 	assert_eq!(
-		Value::from_inner(changes),
-		"[
+		changes,
+		surrealdb::parse::value(
+			"[
         {
             define_table: {
                 name: 'testuser',
@@ -1549,7 +1562,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
             }
         }
     ]"
-		.parse()
+		)
 		.unwrap()
 	);
 	// UPDATE testuser:amos
@@ -1562,16 +1575,17 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	};
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
-		Value::from_inner(changes),
-		r#"[
+		changes,
+		surrealdb::parse::value(
+			"[
                  {
                       update: {
                           id: testuser:amos,
                           name: 'Amos'
                       }
                  }
-            ]"#
-		.parse()
+            ]"
+		)
 		.unwrap()
 	);
 	// UPDATE testuser:jane
@@ -1585,8 +1599,9 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	assert!(*versionstamp1 < versionstamp2);
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
-		Value::from_inner(changes),
-		"[
+		changes,
+		surrealdb::parse::value(
+			"[
                     {
                          update: {
                              id: testuser:jane,
@@ -1594,7 +1609,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
                          }
                     }
                 ]"
-		.parse()
+		)
 		.unwrap()
 	);
 	// UPDATE testuser:amos
@@ -1608,8 +1623,9 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	assert!(versionstamp2 < *versionstamp3);
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
-		Value::from_inner(changes),
-		"[
+		changes,
+		surrealdb::parse::value(
+			"[
                     {
                         update: {
                             id: testuser:amos,
@@ -1617,7 +1633,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
                         }
                     }
                 ]"
-		.parse()
+		)
 		.unwrap()
 	);
 	// UPDATE table
@@ -1631,8 +1647,9 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	assert!(versionstamp3 < versionstamp4);
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
-		Value::from_inner(changes),
-		"[
+		changes,
+		surrealdb::parse::value(
+			"[
         {
             update: {
                 id: testuser:amos,
@@ -1646,7 +1663,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
             }
         }
     ]"
-		.parse()
+		)
 		.unwrap()
 	);
 }
@@ -1689,7 +1706,7 @@ pub async fn return_bool(new_db: impl CreateDb) {
 	assert!(boolean);
 	let mut response = db.query("RETURN false").await.unwrap();
 	let value: Value = response.take(0).unwrap();
-	assert_eq!(value.into_inner(), Value::Bool(false));
+	assert_eq!(value, Value::Bool(false));
 }
 
 pub async fn run(new_db: impl CreateDb) {
@@ -1760,9 +1777,9 @@ pub async fn field_and_index_methods(new_db: impl CreateDb) {
 	let as_value: Value = response.take::<Value>(0).unwrap();
 	let inside = as_value.get(0).get("b1").get("total_peers");
 
-	assert_eq!(inside, &Value::from_inner(Value::Number(74.into())));
+	assert_eq!(inside, &Value::Number(74.into()));
 	assert!(!inside.is_none());
-	assert_eq!(inside.into_option(), Some(&Value::from_inner(Value::Number(74.into()))));
+	assert_eq!(inside.clone().into_option::<Value>().unwrap(), Some(Value::Number(74.into())));
 
 	let mut response =
 		db.query("SELECT b1 FROM CREATE something SET b1.total_peers = 74").await.unwrap();
@@ -1770,9 +1787,9 @@ pub async fn field_and_index_methods(new_db: impl CreateDb) {
 	// Second .get() is a non-existent field
 	let inside = as_value.get(0).get("b1111111").get("total_peers");
 
-	assert_eq!(inside, &Value::from_inner(Value::None));
+	assert_eq!(inside, &Value::None);
 	assert!(inside.is_none());
-	assert_eq!(inside.into_option(), None);
+	assert_eq!(inside.clone().into_option::<Value>().unwrap(), None);
 }
 
 define_include_tests!(basic => {

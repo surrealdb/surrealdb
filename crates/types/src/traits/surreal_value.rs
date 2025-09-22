@@ -303,6 +303,24 @@ impl SurrealValue for Cow<'static, str> {
 	}
 }
 
+impl SurrealValue for &'static str {
+	fn kind_of() -> Kind {
+		Kind::String
+	}
+
+	fn is_value(value: &Value) -> bool {
+		matches!(value, Value::String(_))
+	}
+
+	fn into_value(self) -> Value {
+		Value::String(self.to_string())
+	}
+
+	fn from_value(value: Value) -> anyhow::Result<Self> {
+		Err(anyhow::anyhow!("Cannot deserialize &'static str"))
+	}
+}
+
 impl_surreal_value!(
 	Duration as Kind::Duration,
 	is_duration(value) => matches!(value, Value::Duration(_)),
@@ -694,3 +712,110 @@ impl_tuples! {
 fn conversion_error(expected: Kind, got: Value) -> anyhow::Error {
 	anyhow::anyhow!("Expected {}, got {:?}", expected, got.value_kind())
 }
+
+/// Non-standard numeric implementations, such as u8, u16, u32, u64, u128, i8, i16, i32, usize, f32,
+/// f64,
+macro_rules! impl_numeric {
+	($($k:ty => $variant:ident($type:ty)),+ $(,)?) => {
+		$(
+			impl SurrealValue for $k {
+				fn kind_of() -> Kind {
+					Kind::Number
+				}
+
+				fn is_value(value: &Value) -> bool {
+					matches!(value, Value::Number(_))
+				}
+
+				fn into_value(self) -> Value {
+					Value::Number(Number::$variant(self as $type))
+				}
+
+				fn from_value(value: Value) -> anyhow::Result<Self> {
+					let Value::Number(Number::$variant(n)) = value else {
+						return Err(conversion_error(Self::kind_of(), value));
+					};
+					Ok(n as $k)
+				}
+			}
+		)+
+	}
+}
+
+impl_numeric! {
+	i8 => Int(i64),
+	i16 => Int(i64),
+	i32 => Int(i64),
+	isize => Int(i64),
+	u16 => Int(i64),
+	u32 => Int(i64),
+	usize => Int(i64),
+	f32 => Float(f64),
+}
+
+impl SurrealValue for serde_json::Value {
+	fn kind_of() -> Kind {
+		Kind::Any
+	}
+
+	fn is_value(value: &Value) -> bool {
+		true
+	}
+
+	fn into_value(self) -> Value {
+		todo!("STU")
+		// match self {
+		// 	serde_json::Value::Null => Value::Null,
+		// 	serde_json::Value::Bool(b) => Value::Bool(b),
+		// 	serde_json::Value::Number(n) => Value::Number(n),
+		// 	serde_json::Value::String(s) => Value::String(s),
+		// 	serde_json::Value::Object(o) => Value::Object(Object(o)),
+		// 	serde_json::Value::Array(a) => Value::Array(Array(a)),
+		// }
+	}
+
+	fn from_value(value: Value) -> anyhow::Result<Self> {
+		// match value {
+		// 	Value::Null => Ok(serde_json::Value::Null),
+		// 	Value::Bool(b) => Ok(serde_json::Value::Bool(b)),
+		// 	Value::Number(n) => Ok(serde_json::Value::Number(n)),
+		// 	Value::String(s) => Ok(serde_json::Value::String(s)),
+		// 	Value::Object(o) => Ok(serde_json::Value::Object(o)),
+		// 	Value::Array(a) => Ok(serde_json::Value::Array(a)),
+		// }
+		todo!("STU")
+	}
+}
+
+macro_rules! impl_slice {
+	($($n:expr),+ $(,)?) => {
+		$(
+			impl<T: SurrealValue> SurrealValue for [T; $n] {
+				fn kind_of() -> Kind {
+					Kind::Array(Box::new(T::kind_of()), Some($n))
+				}
+
+				fn is_value(value: &Value) -> bool {
+					matches!(value, Value::Array(Array(a)))
+				}
+
+				fn into_value(self) -> Value {
+					Value::Array(Array(self.into_iter().map(T::into_value).collect()))
+				}
+
+				fn from_value(value: Value) -> anyhow::Result<Self> {
+					let Value::Array(Array(a)) = value else {
+						return Err(conversion_error(Self::kind_of(), value));
+					};
+					todo!("STU")
+					// Ok(a.into_iter().map(T::from_value).collect::<anyhow::Result<[T; $n]>>()?)
+				}
+			}
+		)+
+	}
+}
+
+impl_slice!(
+	1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+	27, 28, 29, 30, 31, 32
+);

@@ -37,6 +37,10 @@ pub mod error {
 	pub use crate::core::err::Error as Db;
 }
 
+pub mod parse {
+	pub use surrealdb_core::syn::value;
+}
+
 pub use surrealdb_types as types;
 
 #[cfg(feature = "protocol-http")]
@@ -44,6 +48,7 @@ pub use surrealdb_types as types;
 pub use crate::api::headers;
 #[doc(inline)]
 pub use crate::api::{Connect, Connection, IndexedResults, Surreal, engine, method, opt};
+pub use crate::notification::Notification;
 
 /// A specialized `Result` type
 pub type Result<T> = anyhow::Result<T>;

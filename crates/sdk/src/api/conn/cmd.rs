@@ -8,8 +8,7 @@ use revision::Revisioned;
 use serde::Serialize;
 use serde::ser::SerializeMap as _;
 use surrealdb_core::expr::Expr;
-use surrealdb_types::{Array, Object, Value};
-use surrealdb_types::{Notification as CoreNotification, Variables};
+use surrealdb_types::{Array, Notification as CoreNotification, Object, Value, Variables};
 use uuid::Uuid;
 
 use super::MlExportConfig;

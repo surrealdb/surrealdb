@@ -94,6 +94,22 @@ macro_rules! array {
     };
 }
 
+#[macro_export]
+macro_rules! rid {
+	// Handle identifier:identifier
+	($table:ident : $name:ident) => {
+		RecordId::new(stringify!($table), stringify!($name))
+	};
+	// Handle "string:string"
+	($input:literal) => {{
+		let parts = $input.split(':').collect::<Vec<&str>>();
+		if parts.len() != 2 {
+			panic!("Invalid rid! input: {}", $input);
+		}
+		RecordId::new(parts[0], parts[1])
+	}};
+}
+
 /// Example usage of the `object!` and `array!` macros:
 ///
 /// ```rust

@@ -26,6 +26,7 @@ pub mod regex;
 pub mod uuid;
 
 use std::cmp::Ordering;
+use std::ops::Index;
 
 use anyhow::Result;
 use revision::revisioned;
@@ -192,6 +193,19 @@ impl Value {
 		}
 	}
 
+	/// Accesses the value found at a certain field
+	/// if an object, and a certain index if an array.
+	/// Will not err if no value is found at this point,
+	/// instead returning a Value::None. If an Option<&Value>
+	/// is desired, the .into_option() method can be used
+	/// to perform the conversion.
+	pub fn get<Idx>(&self, index: Idx) -> &Value
+	where
+		Value: Index<Idx, Output = Value>,
+	{
+		self.index(index)
+	}
+
 	/// Checks if this value is of the specified type
 	///
 	/// Returns `true` if the value can be converted to the given type `T`.
@@ -211,5 +225,27 @@ impl Value {
 	/// Converts the given value of type `T` into a `Value`.
 	pub fn from<T: SurrealValue>(value: T) -> Value {
 		value.into_value()
+	}
+}
+
+impl Index<usize> for Value {
+	type Output = Self;
+
+	fn index(&self, index: usize) -> &Self::Output {
+		match &self {
+			Value::Array(map) => map.0.get(index).unwrap_or(&Value::None),
+			_ => &Value::None,
+		}
+	}
+}
+
+impl Index<&str> for Value {
+	type Output = Self;
+
+	fn index(&self, index: &str) -> &Self::Output {
+		match &self {
+			Value::Object(map) => map.0.get(index).unwrap_or(&Value::None),
+			_ => &Value::None,
+		}
 	}
 }

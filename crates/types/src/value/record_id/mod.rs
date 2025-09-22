@@ -25,18 +25,23 @@ pub struct RecordId {
 
 impl RecordId {
 	/// Creates a new record id from the given table and key
-	pub fn new<T: Into<String>, K>(table: T, key: K) -> Self
-	where
-		RecordIdKey: From<K>,
-	{
+	pub fn new(table: impl Into<String>, key: impl Into<RecordIdKey>) -> Self {
 		RecordId {
 			table: table.into(),
 			key: key.into(),
 		}
 	}
 
+	/// Checks if the record id is of the specified type.
 	pub fn is_record_type(&self, val: &[String]) -> bool {
 		val.is_empty() || val.contains(&self.table)
+	}
+
+	/// Parses a record id which must be in the format of `table:key`.
+	pub fn parse_simple(s: &str) -> anyhow::Result<Self> {
+		let (table, key) =
+			s.split_once(':').ok_or_else(|| anyhow::anyhow!("Invalid record id: {s}"))?;
+		Ok(Self::new(table, key))
 	}
 }
 

@@ -1,6 +1,5 @@
 use revision::revisioned;
 use serde::Deserialize;
-
 use surrealdb_types::Value;
 
 #[revisioned(revision = 1)]

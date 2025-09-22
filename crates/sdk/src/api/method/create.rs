@@ -3,18 +3,17 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 
 use serde::Serialize;
-use surrealdb_types::{self, SurrealValue};
+use surrealdb_types::{self, SurrealValue, Value};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
 use super::{Content, validate_data};
+use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
 use crate::api::{self, Connection, Result};
 use crate::method::OnceLockExt;
-use crate::Surreal;
-use surrealdb_types::Value;
 
 /// A record create future
 #[derive(Debug)]

@@ -2,18 +2,17 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{RecordIdKeyRange, SurrealValue};
+use surrealdb_types::{RecordIdKeyRange, SurrealValue, Value};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
+use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::method::{BoxFuture, OnceLockExt};
 use crate::api::opt::Resource;
 use crate::api::{Connection, Result};
 use crate::method::Live;
 use crate::opt::KeyRange;
-use crate::Surreal;
-use surrealdb_types::Value;
 
 /// A select future
 #[derive(Debug)]

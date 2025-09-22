@@ -1,9 +1,7 @@
 use std::future::Future;
 
-use serde::{Deserialize, Serialize};
+use surrealdb::types::{RecordId, SurrealValue};
 use surrealdb::{Connection, Surreal};
-use surrealdb::types::RecordId;
-use surrealdb_types::SurrealValue;
 use tokio::sync::SemaphorePermit;
 
 /// Tests for this module are defined using this macro.
@@ -77,7 +75,7 @@ struct RecordBuf {
 }
 
 #[derive(Debug, SurrealValue)]
-struct AuthParams<'a> {
+struct AuthParams {
 	email: String,
 	pass: String,
 }
@@ -228,12 +226,12 @@ mod http {
 
 #[cfg(feature = "kv-mem")]
 mod mem {
+	use surrealdb::Surreal;
 	use surrealdb::engine::local::{Db, Mem};
 	use surrealdb::error::Db as DbError;
 	use surrealdb::opt::auth::Root;
 	use surrealdb::opt::capabilities::{Capabilities, ExperimentalFeature};
 	use surrealdb::opt::{Config, Resource};
-	use surrealdb::Surreal;
 	use surrealdb::types::RecordIdKey;
 	use surrealdb_core::iam;
 	use tokio::sync::{Semaphore, SemaphorePermit};
@@ -249,7 +247,7 @@ mod mem {
 			username: ROOT_USER.to_string(),
 			password: ROOT_PASS.to_string(),
 		};
-		let config = Config::new().user(root).capabilities(Capabilities::all());
+		let config = Config::new().user(root.clone()).capabilities(Capabilities::all());
 		let db = Surreal::new::<Mem>(config).await.unwrap();
 		db.signin(root).await.unwrap();
 		(permit, db)
@@ -273,7 +271,7 @@ mod mem {
 		let Some(record): Option<ApiRecordId> = db.create(("item", "foo")).await.unwrap() else {
 			panic!("record not found");
 		};
-		assert_eq!(*record.id.key(), RecordIdKey::from("foo"));
+		assert_eq!(record.id.key, RecordIdKey::from("foo"));
 	}
 
 	#[test_log::test(tokio::test)]

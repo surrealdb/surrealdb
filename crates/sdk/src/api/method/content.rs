@@ -2,15 +2,14 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::SurrealValue;
+use surrealdb_types::{SurrealValue, Value};
 use uuid::Uuid;
 
+use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
-use crate::Surreal;
-use surrealdb_types::Value;
 
 /// A content future
 ///

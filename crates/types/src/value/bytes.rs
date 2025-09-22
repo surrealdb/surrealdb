@@ -1,6 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
+use hex;
 use revision::revisioned;
 use serde::de::{self, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};

@@ -3,19 +3,18 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 
 use serde::Serialize;
-use surrealdb_types::{self, RecordIdKeyRange, SurrealValue};
+use surrealdb_types::{self, RecordIdKeyRange, SurrealValue, Value};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
 use super::validate_data;
+use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::method::{BoxFuture, Content, Merge, Patch};
 use crate::api::opt::{PatchOp, Resource};
 use crate::api::{self, Connection, Result};
 use crate::method::OnceLockExt;
 use crate::opt::KeyRange;
-use crate::Surreal;
-use surrealdb_types::Value;
 
 /// An update future
 #[derive(Debug)]
