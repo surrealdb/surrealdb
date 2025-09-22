@@ -249,10 +249,17 @@ pub struct MiddlewareDefinition {
 
 impl MiddlewareDefinition {
 	fn to_sql_middleware(&self) -> crate::sql::statements::define::config::api::Middleware {
-		todo!("STU: Convert args to PublicValue");
-		// crate::sql::statements::define::config::api::Middleware {
-		// 	name: self.name.clone(),
-		// 	args: self.args.clone().into_iter().map(crate::sql::Expr::from_value).collect(),
-		// }
+		crate::sql::statements::define::config::api::Middleware {
+			name: self.name.clone(),
+			args: self
+				.args
+				.clone()
+				.into_iter()
+				.map(|v| {
+					let public_val: crate::types::PublicValue = v.try_into().unwrap();
+					crate::sql::Expr::from_public_value(public_val)
+				})
+				.collect(),
+		}
 	}
 }

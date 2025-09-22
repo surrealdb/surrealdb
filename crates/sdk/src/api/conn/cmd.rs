@@ -393,7 +393,6 @@ impl Command {
 				query,
 				variables,
 			} => {
-				// TODO: STU: LogicalPlan->to_string()??? - seems wrong.
 				let query = query.to_string();
 				let params: Vec<Value> =
 					vec![Value::String(query), Value::Object(variables.into())];

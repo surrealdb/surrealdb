@@ -7,6 +7,9 @@ struct Person {
 }
 
 #[derive(SurrealValue, Debug, PartialEq)]
+struct StringWrapper(String);
+
+#[derive(SurrealValue, Debug, PartialEq)]
 struct Point(i64, i64);
 
 #[derive(SurrealValue, Debug, PartialEq)]
@@ -65,6 +68,13 @@ fn test_derive_from_main_crate() {
 	assert!(matches!(person_kind, Kind::Literal(KindLiteral::Object(_))));
 
 	// Test unnamed struct
+	let string_wrapper = StringWrapper("Hello".to_string());
+	let value = string_wrapper.into_value();
+	assert!(matches!(value, Value::String(_)));
+
+	let converted = StringWrapper::from_value(value).unwrap();
+	assert_eq!(converted.0, "Hello");
+
 	let point = Point(10, 20);
 	let value = point.into_value();
 	assert!(matches!(value, Value::Array(_)));

@@ -50,16 +50,16 @@ where
 			Resource::RecordId(record) => {
 				stmt.what = Expr::Table(record.table.clone());
 				let ident = "id".to_string();
-				todo!("STU")
-				// let cond = Expr::Binary {
-				// 	left: Box::new(Expr::Idiom(Idiom::field(ident))),
-				// 	op: BinaryOperator::Equal,
-				// 	right: Box::new(Expr::Literal(Literal::RecordId(RecordIdLit {
-				// 		table: record.table,
-				// 		key: RecordIdKeyLit::from(record.key),
-				// 	}))),
-				// };
-				// stmt.cond = Some(Cond(cond));
+				let key_lit = record.key.into();
+				let cond = Expr::Binary {
+					left: Box::new(Expr::Idiom(Idiom::field(ident))),
+					op: BinaryOperator::Equal,
+					right: Box::new(Expr::Literal(Literal::RecordId(RecordIdLit {
+						table: record.table,
+						key: key_lit,
+					}))),
+				};
+				stmt.cond = Some(Cond(cond));
 			}
 			Resource::Object(_) => return Err(Error::LiveOnObject.into()),
 			Resource::Array(_) => return Err(Error::LiveOnArray.into()),

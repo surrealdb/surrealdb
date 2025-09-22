@@ -316,7 +316,7 @@ impl SurrealValue for &'static str {
 		Value::String(self.to_string())
 	}
 
-	fn from_value(value: Value) -> anyhow::Result<Self> {
+	fn from_value(_value: Value) -> anyhow::Result<Self> {
 		Err(anyhow::anyhow!("Cannot deserialize &'static str"))
 	}
 }
@@ -758,32 +758,70 @@ impl SurrealValue for serde_json::Value {
 		Kind::Any
 	}
 
-	fn is_value(value: &Value) -> bool {
+	fn is_value(_value: &Value) -> bool {
 		true
 	}
 
 	fn into_value(self) -> Value {
-		todo!("STU")
-		// match self {
-		// 	serde_json::Value::Null => Value::Null,
-		// 	serde_json::Value::Bool(b) => Value::Bool(b),
-		// 	serde_json::Value::Number(n) => Value::Number(n),
-		// 	serde_json::Value::String(s) => Value::String(s),
-		// 	serde_json::Value::Object(o) => Value::Object(Object(o)),
-		// 	serde_json::Value::Array(a) => Value::Array(Array(a)),
-		// }
+		match self {
+			serde_json::Value::Null => Value::Null,
+			serde_json::Value::Bool(b) => Value::Bool(b),
+			serde_json::Value::Number(n) => {
+				if let Some(i) = n.as_i64() {
+					Value::Number(Number::Int(i))
+				} else if let Some(f) = n.as_f64() {
+					Value::Number(Number::Float(f))
+				} else {
+					// If we can't extract as i64 or f64, try parsing as decimal
+					Value::String(n.to_string())
+				}
+			}
+			serde_json::Value::String(s) => Value::String(s),
+			serde_json::Value::Object(o) => {
+				let mut obj = Object::new();
+				for (k, v) in o {
+					obj.insert(k, serde_json::Value::into_value(v));
+				}
+				Value::Object(obj)
+			}
+			serde_json::Value::Array(a) => {
+				Value::Array(Array(a.into_iter().map(serde_json::Value::into_value).collect()))
+			}
+		}
 	}
 
 	fn from_value(value: Value) -> anyhow::Result<Self> {
-		// match value {
-		// 	Value::Null => Ok(serde_json::Value::Null),
-		// 	Value::Bool(b) => Ok(serde_json::Value::Bool(b)),
-		// 	Value::Number(n) => Ok(serde_json::Value::Number(n)),
-		// 	Value::String(s) => Ok(serde_json::Value::String(s)),
-		// 	Value::Object(o) => Ok(serde_json::Value::Object(o)),
-		// 	Value::Array(a) => Ok(serde_json::Value::Array(a)),
-		// }
-		todo!("STU")
+		match value {
+			Value::None | Value::Null => Ok(serde_json::Value::Null),
+			Value::Bool(b) => Ok(serde_json::Value::Bool(b)),
+			Value::Number(n) => match n {
+				Number::Int(i) => Ok(serde_json::Value::Number(serde_json::Number::from(i))),
+				Number::Float(f) => {
+					if let Some(num) = serde_json::Number::from_f64(f) {
+						Ok(serde_json::Value::Number(num))
+					} else {
+						Ok(serde_json::Value::Null)
+					}
+				}
+				Number::Decimal(d) => Ok(serde_json::Value::String(d.to_string())),
+			},
+			Value::String(s) => Ok(serde_json::Value::String(s)),
+			Value::Object(o) => {
+				let mut obj = serde_json::Map::new();
+				for (k, v) in o.0 {
+					obj.insert(k, serde_json::Value::from_value(v)?);
+				}
+				Ok(serde_json::Value::Object(obj))
+			}
+			Value::Array(a) => {
+				let mut arr = Vec::new();
+				for v in a.0 {
+					arr.push(serde_json::Value::from_value(v)?);
+				}
+				Ok(serde_json::Value::Array(arr))
+			}
+			_ => Err(conversion_error(Self::kind_of(), value)),
+		}
 	}
 }
 
@@ -795,8 +833,8 @@ macro_rules! impl_slice {
 					Kind::Array(Box::new(T::kind_of()), Some($n))
 				}
 
-				fn is_value(value: &Value) -> bool {
-					matches!(value, Value::Array(Array(a)))
+	fn is_value(value: &Value) -> bool {
+		matches!(value, Value::Array(_))
 				}
 
 				fn into_value(self) -> Value {
@@ -807,8 +845,15 @@ macro_rules! impl_slice {
 					let Value::Array(Array(a)) = value else {
 						return Err(conversion_error(Self::kind_of(), value));
 					};
-					todo!("STU")
-					// Ok(a.into_iter().map(T::from_value).collect::<anyhow::Result<[T; $n]>>()?)
+					if a.len() != $n {
+						return Err(anyhow::anyhow!("Expected array of length {}, got {}", $n, a.len()));
+					}
+					let mut result = Vec::with_capacity($n);
+					for v in a {
+						result.push(T::from_value(v)?);
+					}
+					result.try_into()
+						.map_err(|v: Vec<_>| anyhow::anyhow!("Failed to convert vec of length {} to array of size {}", v.len(), $n))
 				}
 			}
 		)+

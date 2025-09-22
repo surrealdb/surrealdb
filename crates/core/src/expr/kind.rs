@@ -466,13 +466,109 @@ impl InfoStructure for Kind {
 
 impl From<crate::types::PublicKind> for Kind {
 	fn from(v: crate::types::PublicKind) -> Self {
-		todo!("STU")
+		match v {
+			crate::types::PublicKind::Any => Kind::Any,
+			crate::types::PublicKind::None => Kind::None,
+			crate::types::PublicKind::Null => Kind::Null,
+			crate::types::PublicKind::Bool => Kind::Bool,
+			crate::types::PublicKind::Bytes => Kind::Bytes,
+			crate::types::PublicKind::Datetime => Kind::Datetime,
+			crate::types::PublicKind::Decimal => Kind::Decimal,
+			crate::types::PublicKind::Duration => Kind::Duration,
+			crate::types::PublicKind::Float => Kind::Float,
+			crate::types::PublicKind::Int => Kind::Int,
+			crate::types::PublicKind::Number => Kind::Number,
+			crate::types::PublicKind::Object => Kind::Object,
+			crate::types::PublicKind::String => Kind::String,
+			crate::types::PublicKind::Uuid => Kind::Uuid,
+			crate::types::PublicKind::Regex => Kind::Regex,
+			crate::types::PublicKind::Range => Kind::Range,
+			crate::types::PublicKind::Record(tables) => Kind::Record(tables),
+			crate::types::PublicKind::Geometry(kinds) => Kind::Geometry(
+				kinds
+					.into_iter()
+					.map(|k| match k {
+						crate::types::PublicGeometryKind::Point => GeometryKind::Point,
+						crate::types::PublicGeometryKind::Line => GeometryKind::Line,
+						crate::types::PublicGeometryKind::Polygon => GeometryKind::Polygon,
+						crate::types::PublicGeometryKind::MultiPoint => GeometryKind::MultiPoint,
+						crate::types::PublicGeometryKind::MultiLine => GeometryKind::MultiLine,
+						crate::types::PublicGeometryKind::MultiPolygon => {
+							GeometryKind::MultiPolygon
+						}
+						crate::types::PublicGeometryKind::Collection => GeometryKind::Collection,
+					})
+					.collect(),
+			),
+			crate::types::PublicKind::Either(kinds) => {
+				Kind::Either(kinds.into_iter().map(Kind::from).collect())
+			}
+			crate::types::PublicKind::Set(kind, size) => {
+				Kind::Set(Box::new(Kind::from(*kind)), size)
+			}
+			crate::types::PublicKind::Array(kind, size) => {
+				Kind::Array(Box::new(Kind::from(*kind)), size)
+			}
+			crate::types::PublicKind::Function(args, ret) => Kind::Function(
+				args.map(|a| a.into_iter().map(Kind::from).collect()),
+				ret.map(|r| Box::new(Kind::from(*r))),
+			),
+			crate::types::PublicKind::File(bucket) => Kind::File(bucket),
+			crate::types::PublicKind::Literal(lit) => Kind::Literal(lit.into()),
+		}
 	}
 }
 
 impl From<Kind> for crate::types::PublicKind {
 	fn from(v: Kind) -> Self {
-		todo!("STU")
+		match v {
+			Kind::Any => crate::types::PublicKind::Any,
+			Kind::None => crate::types::PublicKind::None,
+			Kind::Null => crate::types::PublicKind::Null,
+			Kind::Bool => crate::types::PublicKind::Bool,
+			Kind::Bytes => crate::types::PublicKind::Bytes,
+			Kind::Datetime => crate::types::PublicKind::Datetime,
+			Kind::Decimal => crate::types::PublicKind::Decimal,
+			Kind::Duration => crate::types::PublicKind::Duration,
+			Kind::Float => crate::types::PublicKind::Float,
+			Kind::Int => crate::types::PublicKind::Int,
+			Kind::Number => crate::types::PublicKind::Number,
+			Kind::Object => crate::types::PublicKind::Object,
+			Kind::String => crate::types::PublicKind::String,
+			Kind::Uuid => crate::types::PublicKind::Uuid,
+			Kind::Regex => crate::types::PublicKind::Regex,
+			Kind::Range => crate::types::PublicKind::Range,
+			Kind::Record(tables) => crate::types::PublicKind::Record(tables),
+			Kind::Geometry(kinds) => crate::types::PublicKind::Geometry(
+				kinds
+					.into_iter()
+					.map(|k| match k {
+						GeometryKind::Point => crate::types::PublicGeometryKind::Point,
+						GeometryKind::Line => crate::types::PublicGeometryKind::Line,
+						GeometryKind::Polygon => crate::types::PublicGeometryKind::Polygon,
+						GeometryKind::MultiPoint => crate::types::PublicGeometryKind::MultiPoint,
+						GeometryKind::MultiLine => crate::types::PublicGeometryKind::MultiLine,
+						GeometryKind::MultiPolygon => {
+							crate::types::PublicGeometryKind::MultiPolygon
+						}
+						GeometryKind::Collection => crate::types::PublicGeometryKind::Collection,
+					})
+					.collect(),
+			),
+			Kind::Either(kinds) => {
+				crate::types::PublicKind::Either(kinds.into_iter().map(Into::into).collect())
+			}
+			Kind::Set(kind, size) => crate::types::PublicKind::Set(Box::new((*kind).into()), size),
+			Kind::Array(kind, size) => {
+				crate::types::PublicKind::Array(Box::new((*kind).into()), size)
+			}
+			Kind::Function(args, ret) => crate::types::PublicKind::Function(
+				args.map(|a| a.into_iter().map(Into::into).collect()),
+				ret.map(|r| Box::new((*r).into())),
+			),
+			Kind::File(bucket) => crate::types::PublicKind::File(bucket),
+			Kind::Literal(lit) => crate::types::PublicKind::Literal(lit.into()),
+		}
 	}
 }
 
@@ -490,6 +586,48 @@ pub enum KindLiteral {
 	// Should probably be removed when we have a planner.
 	//DiscriminatedObject(String, Vec<BTreeMap<String, Kind>>),
 	Bool(bool),
+}
+
+impl From<crate::types::PublicKindLiteral> for KindLiteral {
+	fn from(v: crate::types::PublicKindLiteral) -> Self {
+		match v {
+			crate::types::PublicKindLiteral::String(s) => KindLiteral::String(s),
+			crate::types::PublicKindLiteral::Integer(i) => KindLiteral::Integer(i),
+			crate::types::PublicKindLiteral::Float(f) => KindLiteral::Float(f),
+			crate::types::PublicKindLiteral::Decimal(d) => KindLiteral::Decimal(d),
+			crate::types::PublicKindLiteral::Duration(d) => {
+				KindLiteral::Duration(crate::val::Duration(d.inner()))
+			}
+			crate::types::PublicKindLiteral::Array(kinds) => {
+				KindLiteral::Array(kinds.into_iter().map(Kind::from).collect())
+			}
+			crate::types::PublicKindLiteral::Object(obj) => {
+				KindLiteral::Object(obj.into_iter().map(|(k, v)| (k, Kind::from(v))).collect())
+			}
+			crate::types::PublicKindLiteral::Bool(b) => KindLiteral::Bool(b),
+		}
+	}
+}
+
+impl From<KindLiteral> for crate::types::PublicKindLiteral {
+	fn from(v: KindLiteral) -> Self {
+		match v {
+			KindLiteral::String(s) => crate::types::PublicKindLiteral::String(s),
+			KindLiteral::Integer(i) => crate::types::PublicKindLiteral::Integer(i),
+			KindLiteral::Float(f) => crate::types::PublicKindLiteral::Float(f),
+			KindLiteral::Decimal(d) => crate::types::PublicKindLiteral::Decimal(d),
+			KindLiteral::Duration(d) => {
+				crate::types::PublicKindLiteral::Duration(crate::types::PublicDuration::from(d.0))
+			}
+			KindLiteral::Array(kinds) => {
+				crate::types::PublicKindLiteral::Array(kinds.into_iter().map(Into::into).collect())
+			}
+			KindLiteral::Object(obj) => crate::types::PublicKindLiteral::Object(
+				obj.into_iter().map(|(k, v)| (k, v.into())).collect(),
+			),
+			KindLiteral::Bool(b) => crate::types::PublicKindLiteral::Bool(b),
+		}
+	}
 }
 
 impl PartialEq for KindLiteral {

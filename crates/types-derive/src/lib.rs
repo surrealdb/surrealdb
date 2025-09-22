@@ -397,6 +397,30 @@ fn generate_unnamed_fields_impl(
 	let field_types: Vec<&Type> = unnamed_fields.unnamed.iter().map(|f| &f.ty).collect();
 	let field_count = field_types.len();
 
+	// If there is only one field, treat it as a transparent wrapper around the inner type.
+	if field_count == 1 {
+		let field_type = &field_types[0];
+		return quote! {
+			impl #impl_generics surrealdb_types::SurrealValue for #name #ty_generics #where_clause {
+				fn kind_of() -> surrealdb_types::Kind {
+					<#field_type as surrealdb_types::SurrealValue>::kind_of()
+				}
+
+				fn is_value(value: &surrealdb_types::Value) -> bool {
+					<#field_type as surrealdb_types::SurrealValue>::is_value(value)
+				}
+
+				fn into_value(self) -> surrealdb_types::Value {
+					self.0.into_value()
+				}
+
+				fn from_value(value: surrealdb_types::Value) -> surrealdb_types::anyhow::Result<Self> {
+					<#field_type as surrealdb_types::SurrealValue>::from_value(value).map(Self)
+				}
+			}
+		};
+	}
+
 	let is_value_checks: Vec<_> = (0..field_count)
 		.map(|i| {
 			let field_type = &field_types[i];

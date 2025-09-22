@@ -144,18 +144,17 @@ impl Ord for Range {
 
 impl fmt::Display for Range {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		todo!("STU");
-		// match self.start {
-		// 	Bound::Unbounded => {}
-		// 	Bound::Included(ref x) => write!(f, "{x}")?,
-		// 	Bound::Excluded(ref x) => write!(f, "{x}>")?,
-		// }
-		// write!(f, "..")?;
-		// match self.end {
-		// 	Bound::Unbounded => {}
-		// 	Bound::Included(ref x) => write!(f, "={x}")?,
-		// 	Bound::Excluded(ref x) => write!(f, "{x}")?,
-		// }
+		match self.start {
+			Bound::Unbounded => {}
+			Bound::Included(ref x) => write!(f, "{x:?}")?,
+			Bound::Excluded(ref x) => write!(f, "{x:?}>")?,
+		}
+		write!(f, "..")?;
+		match self.end {
+			Bound::Unbounded => {}
+			Bound::Included(ref x) => write!(f, "={x:?}")?,
+			Bound::Excluded(ref x) => write!(f, "{x:?}")?,
+		}
 		Ok(())
 	}
 }

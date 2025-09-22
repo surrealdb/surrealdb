@@ -23,8 +23,8 @@ impl ParamDefinition {
 			kind: DefineKind::Default,
 			name: self.name.clone(),
 			value: {
-				todo!("STU")
-				// crate::sql::Expr::from_public_value(self.value.clone())
+				let public_val: crate::types::PublicValue = self.value.clone().try_into().unwrap();
+				crate::sql::Expr::from_public_value(public_val)
 			},
 			comment: self.comment.clone(),
 			permissions: self.permissions.clone().into(),

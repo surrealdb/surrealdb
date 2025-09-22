@@ -119,8 +119,11 @@ pub trait IntoVariables {
 
 impl<T: SurrealValue> IntoVariables for T {
 	fn into_variables(self) -> Variables {
-		let t = self.into_value();
-		todo!("STU")
+		let value = self.into_value();
+		match value {
+			Value::Object(obj) => Variables::from(obj),
+			_ => Variables::new(), // For non-object values, return empty Variables
+		}
 	}
 }
 

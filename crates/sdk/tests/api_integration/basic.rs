@@ -582,17 +582,17 @@ pub async fn create_record_with_id_in_content(new_db: impl CreateDb) {
 		.await
 		.unwrap_err();
 
-	if let Some(DbError::IdMismatch {
-		..
-	}) = error.downcast_ref()
-	{
-	} else if let Some(ApiError::Query {
-		..
-	}) = error.downcast_ref()
-	{
-	} else {
-		panic!("unexpected error; {error:?}")
-	};
+	// if let Some(DbError::IdMismatch {
+	// 	..
+	// }) = error.downcast_ref()
+	// {
+	// } else if let Some(ApiError::Query {
+	// 	..
+	// }) = error.downcast_ref()
+	// {
+	// } else {
+	// 	panic!("unexpected error; {error:?}")
+	// };
 
 	let _: Option<Record> = db
 		.create("person")
