@@ -306,13 +306,19 @@ fn process(
 				return;
 			}
 		};
-		while let Some(Notification {
-			query_id,
-			action,
-			data,
-			..
-		}) = stream.next().await
-		{
+		while let Some(result) = stream.next().await {
+			let Notification {
+				query_id,
+				action,
+				data,
+				..
+			} = match result {
+				Ok(notification) => notification,
+				Err(error) => {
+					print(Err(error));
+					continue;
+				}
+			};
 			let message = match (json, pretty) {
 				// Don't prettify the SurrealQL response
 				(false, false) => {
