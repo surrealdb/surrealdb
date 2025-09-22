@@ -169,7 +169,9 @@ mod tests {
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
 	use crate::syn;
-	use crate::types::{PublicAction, PublicNotification};
+	use crate::types::{
+		PublicAction, PublicNotification, PublicRecordId, PublicRecordIdKey, PublicValue,
+	};
 	use crate::val::{RecordId, RecordIdKey};
 
 	pub async fn new_ds() -> Result<Datastore> {
@@ -201,7 +203,7 @@ mod tests {
 
 		let live_id = live_query_response.remove(0).result.unwrap();
 		let live_id = match live_id {
-			Value::Uuid(id) => id,
+			PublicValue::Uuid(id) => id,
 			_ => panic!("expected uuid"),
 		};
 
@@ -216,7 +218,7 @@ mod tests {
 		let create_statement = format!("CREATE {tb}:test_true SET condition = true");
 		let create_response = &mut dbs.execute(&create_statement, &ses, None).await.unwrap();
 		assert_eq!(create_response.len(), 1);
-		let expected_record: Value = syn::value(&format!(
+		let expected_record: PublicValue = syn::value(&format!(
 			"[{{
 				id: {tb}:test_true,
 				condition: true,
@@ -239,12 +241,12 @@ mod tests {
 		let notification = notifications.recv().await.unwrap();
 		assert_eq!(
 			notification,
-			Notification::new(
+			PublicNotification::new(
 				live_id,
-				Action::Create,
-				Value::RecordId(RecordId {
+				PublicAction::Create,
+				PublicValue::RecordId(PublicRecordId {
 					table: tb.to_owned(),
-					key: RecordIdKey::String("test_true".to_owned())
+					key: PublicRecordIdKey::String("test_true".to_owned())
 				}),
 				syn::value(&format!(
 					"{{

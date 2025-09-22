@@ -267,65 +267,70 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 			match response.id {
 				// If `id` is set this is a normal response
 				Some(id) => {
-					todo!("STU")
-					// if let Ok(id) = id.coerce_to() {
-					// 	match state.pending_requests.remove(&id) {
-					// 		Some(pending) => {
-					// 			let resp = match DbResponse::from_server_result(response.result)
-					// 			{
-					// 				Ok(x) => x,
-					// 				Err(e) => {
-					// 					let _ = pending.response_channel.send(Err(e)).await;
-					// 					return HandleResult::Ok;
-					// 				}
-					// 			};
-					// 			// We can only route responses with IDs
-					// 			match pending.effect {
-					// 				RequestEffect::None => {}
-					// 				RequestEffect::Insert => {
-					// 					// For insert, we need to flatten single responses in an
-					// 					// array
-					// 					if let DbResponse::Other(Value::Array(array)) = resp
-					// 					{
-					// 						if array.len() == 1 {
-					// 							let _ = pending
-					// 								.response_channel
-					// 								.send(Ok(DbResponse::Other(
-					// 									array.into_iter().next().unwrap(),
-					// 								)))
-					// 								.await;
-					// 						} else {
-					// 							let _ = pending
-					// 								.response_channel
-					// 								.send(Ok(DbResponse::Other(
-					// 									Value::Array(array),
-					// 								)))
-					// 								.await;
-					// 						}
-					// 						return HandleResult::Ok;
-					// 					}
-					// 				}
-					// 				RequestEffect::Set {
-					// 					key,
-					// 					value,
-					// 				} => {
-					// 					state.vars.insert(key, value);
-					// 				}
-					// 				RequestEffect::Clear {
-					// 					key,
-					// 				} => {
-					// 					state.vars.shift_remove(&key);
-					// 				}
-					// 			}
-					// 			let _res = pending.response_channel.send(Ok(resp)).await;
-					// 		}
-					// 		_ => {
-					// 			warn!(
-					// 				"got response for request with id '{id}', which was not in pending
-					// requests" 			)
-					// 		}
-					// 	}
-					// }
+					// Try to extract i64 from Value
+					if let Value::Number(surrealdb_types::Number::Int(id_num)) = id {
+						match state.pending_requests.remove(&id_num) {
+							Some(pending) => {
+								let resp = match response.result {
+									Ok(db_result) => {
+										IndexedDbResults::from_server_result(db_result)
+									}
+									Err(e) => Err(Error::Query(e.to_string()).into()),
+								};
+
+								let resp = match resp {
+									Ok(x) => x,
+									Err(e) => {
+										let _ = pending.response_channel.send(Err(e)).await;
+										return HandleResult::Ok;
+									}
+								};
+								// We can only route responses with IDs
+								match pending.effect {
+									RequestEffect::None => {}
+									RequestEffect::Insert => {
+										// For insert, we need to flatten single responses in an
+										// array
+										if let IndexedDbResults::Other(Value::Array(array)) = resp {
+											if array.len() == 1 {
+												let _ = pending
+													.response_channel
+													.send(Ok(IndexedDbResults::Other(
+														array.into_iter().next().unwrap(),
+													)))
+													.await;
+											} else {
+												let _ = pending
+													.response_channel
+													.send(Ok(IndexedDbResults::Other(
+														Value::Array(array),
+													)))
+													.await;
+											}
+											return HandleResult::Ok;
+										}
+									}
+									RequestEffect::Set {
+										key,
+										value,
+									} => {
+										state.vars.insert(key, value);
+									}
+									RequestEffect::Clear {
+										key,
+									} => {
+										state.vars.shift_remove(&key);
+									}
+								}
+								let _res = pending.response_channel.send(Ok(resp)).await;
+							}
+							_ => {
+								warn!(
+									"got response for request with id '{id_num}', which was not in pending requests"
+								)
+							}
+						}
+					}
 				}
 				// If `id` is not set, this may be a live query notification
 				None => {
@@ -379,19 +384,20 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 						id,
 					}) => {
 						// Return an error if an ID was returned
-						todo!("STU");
-						// if let Some(Ok(id)) = id.map(Value::coerce_to) {
-						// 	match state.pending_requests.remove(&id) {
-						// 		Some(pending) => {
-						// 			let _res = pending.response_channel.send(Err(error)).await;
-						// 		}
-						// 		_ => {
-						// 			warn!(
-						// 				"got response for request with id '{id}', which was not in pending
-						// requests" 			)
-						// 		}
-						// 	}
-						// }
+						if let Some(id) = id {
+							if let Value::Number(surrealdb_types::Number::Int(id_num)) = id {
+								match state.pending_requests.remove(&id_num) {
+									Some(pending) => {
+										let _res = pending.response_channel.send(Err(error)).await;
+									}
+									_ => {
+										warn!(
+											"got response for request with id '{id_num}', which was not in pending requests"
+										)
+									}
+								}
+							}
+						}
 					}
 					_ => {
 						// Unfortunately, we don't know which response failed to deserialize

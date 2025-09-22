@@ -43,6 +43,7 @@ use crate::dbs::capabilities::NetTarget;
 use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
+use crate::dbs::executor::convert_value_to_public_value;
 use crate::dbs::node::Timestamp;
 use crate::dbs::{Capabilities, Executor, Options, QueryResult, Session, Variables};
 use crate::err::Error;
@@ -68,7 +69,7 @@ use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 use crate::kvs::{LockType, TransactionType};
 use crate::sql::Ast;
 use crate::syn::parser::{ParserSettings, StatementStream};
-use crate::types::{PublicAction, PublicNotification, PublicVariables};
+use crate::types::{PublicAction, PublicNotification, PublicValue, PublicVariables};
 use crate::val::{Strand, Value};
 use crate::{cf, syn};
 
@@ -1226,7 +1227,7 @@ impl Datastore {
 		val: &Expr,
 		sess: &Session,
 		vars: Option<PublicVariables>,
-	) -> Result<Value> {
+	) -> Result<PublicValue> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Create a new memory stack
@@ -1277,7 +1278,7 @@ impl Datastore {
 			txn.cancel().await?;
 		};
 		// Return result
-		res
+		convert_value_to_public_value(res?)
 	}
 
 	/// Subscribe to live notifications
@@ -1555,6 +1556,7 @@ impl Datastore {
 mod test {
 	use super::*;
 	use crate::iam::verify::verify_root_creds;
+	use crate::types::{PublicValue, PublicVariables};
 
 	#[tokio::test]
 	async fn test_setup_superuser() {

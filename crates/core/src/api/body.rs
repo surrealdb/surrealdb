@@ -80,8 +80,14 @@ impl ApiBody {
 			}
 
 			if ctx.request_body_raw {
-				// Ok(value.coerce_to::<val::Bytes>()?.into())
-				todo!("STU")
+				// Convert value to bytes if raw body is requested
+				match value {
+					PublicValue::Bytes(b) => Ok(PublicValue::Bytes(b)),
+					PublicValue::String(s) => {
+						Ok(PublicValue::Bytes(surrealdb_types::Bytes::new(s.into_bytes())))
+					}
+					_ => Err(Error::ApiError(ApiError::InvalidRequestBody)),
+				}
 			} else {
 				Ok(value)
 			}

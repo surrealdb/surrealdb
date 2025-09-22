@@ -191,9 +191,9 @@ pub async fn db_access(
 							match kvs.evaluate(val, &sess, Some(vars)).await {
 								// The signin value succeeded
 								Ok(val) => {
-									match val.record() {
+									match val.as_record_id() {
 										// There is a record returned
-										Some(mut rid) => {
+										Ok(mut rid) => {
 											// Create the authentication key
 											let key = iam::issue::config(iss.alg, &iss.key)?;
 											// Create the authentication claim
@@ -215,7 +215,7 @@ pub async fn db_access(
 												// record
 												let mut sess =
 													Session::editor().with_ns(&ns).with_db(&db);
-												sess.rd = Some(rid.clone().into());
+												sess.rd = Some(Value::RecordId(rid.clone().into()));
 												sess.tk = Some(
 													claims.clone().into_claims_object().into(),
 												);
@@ -244,7 +244,7 @@ pub async fn db_access(
 																	.unwrap(),
 																&ns,
 																&db,
-																rid.clone(),
+																rid.clone().into(),
 															)
 															.await?,
 														)
@@ -268,7 +268,7 @@ pub async fn db_access(
 											session.ns = Some(ns.clone());
 											session.db = Some(db.clone());
 											session.ac = Some(ac.clone());
-											session.rd = Some(Value::from(rid.clone()));
+											session.rd = Some(Value::RecordId(rid.clone().into()));
 											session.exp =
 												iam::issue::expiration(av.session_duration)?;
 											session.au = Arc::new(Auth::new(Actor::new(

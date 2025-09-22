@@ -1,11 +1,12 @@
-use std::borrow::Cow;
 use std::fmt::Display;
 use std::time::Duration;
 
+use anyhow::Context;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use surrealdb_types::{Kind, Object, SurrealValue, Value};
 
+use crate::dbs::QueryResult;
 use crate::dbs::executor::convert_value_to_public_value;
 use crate::types::PublicNotification;
 use crate::{dbs, map};
@@ -31,7 +32,7 @@ impl DbResultStats {
 /// The data returned by the database
 // The variants here should be in exactly the same order as `crate::engine::remote::ws::Data`
 // In future, they will possibly be merged to avoid having to keep them in sync.
-// #[revisioned(revision = 1)]
+#[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum DbResult {
 	/// Generally methods return a `expr::Value`
@@ -70,46 +71,101 @@ impl SurrealValue for DbResult {
 	}
 
 	fn from_value(value: Value) -> anyhow::Result<Self> {
-		todo!("STU")
+		match value {
+			Value::Array(arr) => {
+				let results = arr
+					.inner()
+					.iter()
+					.cloned()
+					.map(QueryResult::from_value)
+					.collect::<anyhow::Result<Vec<_>>>()?;
+				Ok(DbResult::Query(results))
+			}
+			Value::Object(obj) => {
+				// Check if this is a Live result
+				if obj.get("id").is_some() && obj.get("action").is_some() {
+					let mut obj = obj.inner().clone();
+					let id = obj.remove("id").context("Missing id")?;
+					let action = obj.remove("action").context("Missing action")?;
+					let record = obj.remove("record").unwrap_or(Value::None);
+					let result = obj.remove("result").unwrap_or(Value::None);
+
+					let Value::Uuid(uuid) = id else {
+						anyhow::bail!("Expected UUID for id field");
+					};
+					let Value::String(action_str) = action else {
+						anyhow::bail!("Expected string for action field");
+					};
+
+					// Parse action string to PublicAction
+					let action = match action_str.as_str() {
+						"CREATE" => crate::types::PublicAction::Create,
+						"UPDATE" => crate::types::PublicAction::Update,
+						"DELETE" => crate::types::PublicAction::Delete,
+						_ => anyhow::bail!("Invalid action: {}", action_str),
+					};
+
+					Ok(DbResult::Live(PublicNotification {
+						id: uuid,
+						action,
+						record,
+						result,
+					}))
+				} else {
+					Ok(DbResult::Other(Value::Object(obj)))
+				}
+			}
+			other => Ok(DbResult::Other(other)),
+		}
 	}
 }
 
-// #[revisioned(revision = 1)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, SurrealValue, Serialize, Deserialize)]
 pub struct DbResultError {
 	pub(crate) code: i64,
-	pub(crate) message: Cow<'static, str>,
+	pub(crate) message: String,
 }
 
 impl DbResultError {
-	pub const PARSE_ERROR: DbResultError = DbResultError {
-		code: -32700,
-		message: Cow::Borrowed("Parse error"),
-	};
+	pub fn parse_error() -> DbResultError {
+		DbResultError {
+			code: -32700,
+			message: "Parse error".to_string(),
+		}
+	}
 
-	pub const INVALID_REQUEST: DbResultError = DbResultError {
-		code: -32600,
-		message: Cow::Borrowed("Invalid Request"),
-	};
+	pub fn invalid_request() -> DbResultError {
+		DbResultError {
+			code: -32600,
+			message: "Invalid Request".to_string(),
+		}
+	}
 
-	pub const METHOD_NOT_FOUND: DbResultError = DbResultError {
-		code: -32601,
-		message: Cow::Borrowed("Method not found"),
-	};
+	pub fn method_not_found() -> DbResultError {
+		DbResultError {
+			code: -32601,
+			message: "Method not found".to_string(),
+		}
+	}
 
-	pub const INVALID_PARAMS: DbResultError = DbResultError {
-		code: -32602,
-		message: Cow::Borrowed("Invalid params"),
-	};
+	pub fn invalid_params() -> DbResultError {
+		DbResultError {
+			code: -32602,
+			message: "Invalid params".to_string(),
+		}
+	}
 
 	/*
-	pub const INTERNAL_ERROR: Failure = Failure {
-		code: -32603,
-		message: Cow::Borrowed("Internal error"),
-	};
+	pub fn internal_error() -> DbResultError {
+		DbResultError {
+			code: -32603,
+			message: "Internal error".to_string(),
+		}
+	}
 	*/
 
-	pub fn custom(message: impl Into<Cow<'static, str>>) -> DbResultError {
+	pub fn custom(message: impl Into<String>) -> DbResultError {
 		DbResultError {
 			code: -32000,
 			message: message.into(),
@@ -129,7 +185,7 @@ impl std::error::Error for DbResultError {
 	}
 }
 
-// #[revisioned(revision = 1)]
+#[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DbResponse {
 	pub id: Option<Value>,
@@ -138,8 +194,8 @@ pub struct DbResponse {
 
 impl DbResponse {
 	pub fn from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
-		// crate::rpc::format::revision::decode(bytes)
-		todo!("STU")
+		// Decode using revision format
+		crate::rpc::format::revision::decode(bytes)
 	}
 }
 
@@ -166,7 +222,24 @@ impl SurrealValue for DbResponse {
 	}
 
 	fn from_value(value: Value) -> anyhow::Result<Self> {
-		todo!("STU")
+		let Value::Object(mut obj) = value else {
+			anyhow::bail!("Expected object for DbResponse");
+		};
+
+		let id = obj.remove("id");
+
+		let result = if let Some(result) = obj.remove("result") {
+			Ok(DbResult::from_value(result)?)
+		} else if let Some(error) = obj.remove("error") {
+			Err(DbResultError::from_value(error)?)
+		} else {
+			anyhow::bail!("DbResponse must have either 'result' or 'error' field");
+		};
+
+		Ok(DbResponse {
+			id,
+			result,
+		})
 	}
 }
 

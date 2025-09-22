@@ -1,7 +1,8 @@
 use std::fmt;
+use std::str::FromStr;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use revision::{Revisioned, revisioned};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
@@ -47,6 +48,7 @@ impl QueryType {
 }
 
 /// The return value when running a query set on the database.
+#[revisioned(revision = 1)]
 #[derive(Debug)]
 pub struct QueryResult {
 	pub time: Duration,
@@ -96,7 +98,49 @@ impl SurrealValue for QueryResult {
 	}
 
 	fn from_value(value: Value) -> anyhow::Result<Self> {
-		todo!("STU")
+		let Value::Object(mut obj) = value else {
+			anyhow::bail!("Expected object for QueryResult");
+		};
+
+		let time_str = obj
+			.remove("time")
+			.and_then(|v| v.as_string().ok())
+			.unwrap_or_else(|| "0ns".to_string());
+		// Parse duration string (e.g. "1.234ms" -> Duration)
+		let time = surrealdb_types::Duration::from_str(&time_str)
+			.map(|d| std::time::Duration::from(d))
+			.unwrap_or_default();
+
+		let query_type = obj
+			.remove("type")
+			.and_then(|v| v.as_string().ok())
+			.and_then(|s| match s.as_str() {
+				"live" => Some(QueryType::Live),
+				"kill" => Some(QueryType::Kill),
+				_ => Some(QueryType::Other),
+			})
+			.unwrap_or(QueryType::Other);
+
+		let status = obj
+			.remove("status")
+			.and_then(|v| v.as_string().ok())
+			.unwrap_or_else(|| "OK".to_string());
+
+		let result = if status == "OK" {
+			Ok(obj.remove("result").unwrap_or(Value::None))
+		} else {
+			let error_msg = obj
+				.remove("result")
+				.and_then(|v| v.as_string().ok())
+				.unwrap_or_else(|| "Unknown error".to_string());
+			Err(DbResultError::custom(error_msg))
+		};
+
+		Ok(QueryResult {
+			time,
+			result,
+			query_type,
+		})
 	}
 }
 
@@ -147,6 +191,8 @@ impl<'de> Deserialize<'de> for QueryResult {
 	where
 		D: serde::Deserializer<'de>,
 	{
-		todo!("STU")
+		// Deserialize as a Value first, then convert
+		let value = Value::deserialize(deserializer)?;
+		QueryResult::from_value(value).map_err(serde::de::Error::custom)
 	}
 }

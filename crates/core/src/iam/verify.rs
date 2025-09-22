@@ -20,6 +20,7 @@ use crate::iam::{self, Actor, Auth, Level, Role};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
+use crate::types::PublicValue;
 use crate::val::Value;
 use crate::{catalog, syn};
 
@@ -235,7 +236,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			if let Some(au) = &de.authenticate {
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(ns).with_db(db);
-				sess.rd = Some(rid.clone().into());
+				sess.rd = Some(Value::RecordId(rid.clone().into()));
 				sess.tk = Some(token_data.claims.clone().into_claims_object().into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
@@ -248,7 +249,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.ac = Some(ac.to_owned());
-			session.rd = Some(Value::from(rid.clone()));
+			session.rd = Some(Value::RecordId(rid.clone().into()));
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_string(),
@@ -398,7 +399,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						session.ns = Some(ns.to_owned());
 						session.db = Some(db.to_owned());
 						session.ac = Some(ac.to_owned());
-						session.rd = Some(Value::from(rid.clone()));
+						session.rd = Some(Value::RecordId(rid.clone().into()));
 						session.exp = expiration(de.session_duration)?;
 						session.au = Arc::new(Auth::new(Actor::new(
 							rid.to_string(),

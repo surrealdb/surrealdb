@@ -61,6 +61,34 @@ impl From<crate::expr::kind::GeometryKind> for GeometryKind {
 	}
 }
 
+impl From<GeometryKind> for crate::types::PublicGeometryKind {
+	fn from(v: GeometryKind) -> Self {
+		match v {
+			GeometryKind::Point => crate::types::PublicGeometryKind::Point,
+			GeometryKind::Line => crate::types::PublicGeometryKind::Line,
+			GeometryKind::Polygon => crate::types::PublicGeometryKind::Polygon,
+			GeometryKind::MultiPoint => crate::types::PublicGeometryKind::MultiPoint,
+			GeometryKind::MultiLine => crate::types::PublicGeometryKind::MultiLine,
+			GeometryKind::MultiPolygon => crate::types::PublicGeometryKind::MultiPolygon,
+			GeometryKind::Collection => crate::types::PublicGeometryKind::Collection,
+		}
+	}
+}
+
+impl From<crate::types::PublicGeometryKind> for GeometryKind {
+	fn from(v: crate::types::PublicGeometryKind) -> Self {
+		match v {
+			crate::types::PublicGeometryKind::Point => GeometryKind::Point,
+			crate::types::PublicGeometryKind::Line => GeometryKind::Line,
+			crate::types::PublicGeometryKind::Polygon => GeometryKind::Polygon,
+			crate::types::PublicGeometryKind::MultiPoint => GeometryKind::MultiPoint,
+			crate::types::PublicGeometryKind::MultiLine => GeometryKind::MultiLine,
+			crate::types::PublicGeometryKind::MultiPolygon => GeometryKind::MultiPolygon,
+			crate::types::PublicGeometryKind::Collection => GeometryKind::Collection,
+		}
+	}
+}
+
 /// The kind, or data type, of a value or field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -207,6 +235,83 @@ impl From<crate::expr::Kind> for Kind {
 			crate::expr::Kind::Range => Self::Range,
 			crate::expr::Kind::Literal(l) => Self::Literal(l.into()),
 			crate::expr::Kind::File(k) => Kind::File(k),
+		}
+	}
+}
+
+impl From<Kind> for crate::types::PublicKind {
+	fn from(v: Kind) -> Self {
+		match v {
+			Kind::Any => crate::types::PublicKind::Any,
+			Kind::Null => crate::types::PublicKind::Null,
+			Kind::Bool => crate::types::PublicKind::Bool,
+			Kind::Bytes => crate::types::PublicKind::Bytes,
+			Kind::Datetime => crate::types::PublicKind::Datetime,
+			Kind::Decimal => crate::types::PublicKind::Decimal,
+			Kind::Duration => crate::types::PublicKind::Duration,
+			Kind::Float => crate::types::PublicKind::Float,
+			Kind::Int => crate::types::PublicKind::Int,
+			Kind::Number => crate::types::PublicKind::Number,
+			Kind::Object => crate::types::PublicKind::Object,
+			Kind::String => crate::types::PublicKind::String,
+			Kind::Uuid => crate::types::PublicKind::Uuid,
+			Kind::Regex => crate::types::PublicKind::Regex,
+			Kind::Record(k) => crate::types::PublicKind::Record(k),
+			Kind::Geometry(k) => {
+				crate::types::PublicKind::Geometry(k.into_iter().map(Into::into).collect())
+			}
+			Kind::Option(k) => crate::types::PublicKind::Option(Box::new((*k).into())),
+			Kind::Either(k) => {
+				crate::types::PublicKind::Either(k.into_iter().map(Into::into).collect())
+			}
+			Kind::Set(k, l) => crate::types::PublicKind::Set(Box::new((*k).into()), l),
+			Kind::Array(k, l) => crate::types::PublicKind::Array(Box::new((*k).into()), l),
+			Kind::Function(args, ret) => crate::types::PublicKind::Function(
+				args.map(|args| args.into_iter().map(Into::into).collect()),
+				ret.map(|ret| Box::new((*ret).into())),
+			),
+			Kind::Range => crate::types::PublicKind::Range,
+			Kind::Literal(l) => crate::types::PublicKind::Literal(l.into()),
+			Kind::File(k) => crate::types::PublicKind::File(k),
+		}
+	}
+}
+
+impl From<crate::types::PublicKind> for Kind {
+	fn from(v: crate::types::PublicKind) -> Self {
+		match v {
+			crate::types::PublicKind::None => Kind::Null,
+			crate::types::PublicKind::Null => Kind::Null,
+			crate::types::PublicKind::Any => Kind::Any,
+			crate::types::PublicKind::Bool => Kind::Bool,
+			crate::types::PublicKind::Bytes => Kind::Bytes,
+			crate::types::PublicKind::Datetime => Kind::Datetime,
+			crate::types::PublicKind::Decimal => Kind::Decimal,
+			crate::types::PublicKind::Duration => Kind::Duration,
+			crate::types::PublicKind::Float => Kind::Float,
+			crate::types::PublicKind::Int => Kind::Int,
+			crate::types::PublicKind::Number => Kind::Number,
+			crate::types::PublicKind::Object => Kind::Object,
+			crate::types::PublicKind::String => Kind::String,
+			crate::types::PublicKind::Uuid => Kind::Uuid,
+			crate::types::PublicKind::Regex => Kind::Regex,
+			crate::types::PublicKind::Record(k) => Kind::Record(k),
+			crate::types::PublicKind::Geometry(k) => {
+				Kind::Geometry(k.into_iter().map(Into::into).collect())
+			}
+			crate::types::PublicKind::Option(k) => Kind::Option(Box::new((*k).into())),
+			crate::types::PublicKind::Either(k) => {
+				Kind::Either(k.into_iter().map(Into::into).collect())
+			}
+			crate::types::PublicKind::Set(k, l) => Kind::Set(Box::new((*k).into()), l),
+			crate::types::PublicKind::Array(k, l) => Kind::Array(Box::new((*k).into()), l),
+			crate::types::PublicKind::Function(args, ret) => Kind::Function(
+				args.map(|args| args.into_iter().map(Into::into).collect()),
+				ret.map(|ret| Box::new((*ret).into())),
+			),
+			crate::types::PublicKind::Range => Kind::Range,
+			crate::types::PublicKind::Literal(l) => Kind::Literal(l.into()),
+			crate::types::PublicKind::File(k) => Kind::File(k),
 		}
 	}
 }
@@ -428,6 +533,30 @@ impl From<crate::expr::kind::KindLiteral> for KindLiteral {
 				Self::Object(o.into_iter().map(|(k, v)| (k, v.into())).collect())
 			}
 			crate::expr::kind::KindLiteral::Bool(b) => Self::Bool(b),
+		}
+	}
+}
+
+impl From<KindLiteral> for crate::types::PublicKindLiteral {
+	fn from(v: KindLiteral) -> Self {
+		match v {
+			KindLiteral::String(s) => crate::types::PublicKindLiteral::String(s.into_string()),
+			KindLiteral::Integer(i) => crate::types::PublicKindLiteral::Integer(i),
+			KindLiteral::Float(f) => crate::types::PublicKindLiteral::Float(f),
+			KindLiteral::Decimal(d) => crate::types::PublicKindLiteral::Decimal(d),
+			KindLiteral::Duration(d) => crate::types::PublicKindLiteral::Duration(d.into()),
+		}
+	}
+}
+
+impl From<crate::types::PublicKindLiteral> for KindLiteral {
+	fn from(v: crate::types::PublicKindLiteral) -> Self {
+		match v {
+			crate::types::PublicKindLiteral::String(s) => Self::String(s.into()),
+			crate::types::PublicKindLiteral::Integer(i) => Self::Integer(i),
+			crate::types::PublicKindLiteral::Float(f) => Self::Float(f),
+			crate::types::PublicKindLiteral::Decimal(d) => Self::Decimal(d),
+			crate::types::PublicKindLiteral::Duration(d) => Self::Duration(d.into()),
 		}
 	}
 }

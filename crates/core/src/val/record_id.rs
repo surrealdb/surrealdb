@@ -279,6 +279,32 @@ impl From<Box<RecordIdKeyRange>> for RecordIdKey {
 	}
 }
 
+impl From<crate::types::PublicRecordIdKey> for RecordIdKey {
+	fn from(value: crate::types::PublicRecordIdKey) -> Self {
+		match value {
+			crate::types::PublicRecordIdKey::Number(x) => Self::Number(x),
+			crate::types::PublicRecordIdKey::String(x) => Self::String(x),
+			crate::types::PublicRecordIdKey::Uuid(x) => Self::Uuid(x),
+			crate::types::PublicRecordIdKey::Array(x) => Self::Array(x),
+			crate::types::PublicRecordIdKey::Object(x) => Self::Object(x),
+			crate::types::PublicRecordIdKey::Range(x) => Self::Range(Box::new(x)),
+		}
+	}
+}
+
+impl From<RecordIdKey> for crate::types::PublicRecordIdKey {
+	fn from(value: RecordIdKey) -> Self {
+		match value {
+			RecordIdKey::Number(x) => Self::Number(x),
+			RecordIdKey::String(x) => Self::String(x),
+			RecordIdKey::Uuid(x) => Self::Uuid(x),
+			RecordIdKey::Array(x) => Self::Array(x),
+			RecordIdKey::Object(x) => Self::Object(x),
+			RecordIdKey::Range(x) => Self::Range(x),
+		}
+	}
+}
+
 impl PartialEq<Value> for RecordIdKey {
 	fn eq(&self, other: &Value) -> bool {
 		match self {
@@ -384,5 +410,23 @@ impl RecordId {
 impl fmt::Display for RecordId {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}:{}", EscapeRid(&self.table), self.key)
+	}
+}
+
+impl From<RecordId> for crate::types::PublicRecordId {
+	fn from(value: RecordId) -> Self {
+		crate::types::PublicRecordId {
+			table: value.table,
+			key: crate::types::PublicRecordIdKey::from(value.key),
+		}
+	}
+}
+
+impl From<crate::types::PublicRecordId> for RecordId {
+	fn from(value: crate::types::PublicRecordId) -> Self {
+		RecordId {
+			table: value.table,
+			key: RecordIdKey::from(value.key),
+		}
 	}
 }

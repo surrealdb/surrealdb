@@ -303,8 +303,10 @@ async fn router(
 			query,
 			mut variables,
 		} => {
-			// variables.extend(vars.clone().into());
-			todo!("STU");
+			// Extend variables with session vars
+			for (key, value) in vars.clone() {
+				variables.insert(key, value);
+			}
 			let req = Command::Query {
 				txn,
 				query,

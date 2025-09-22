@@ -4,6 +4,7 @@ use anyhow::Result;
 use http::HeaderMap;
 use reblessive::TreeStack;
 use reblessive::tree::Stk;
+use surrealdb_types::Value as PublicValue;
 
 use super::body::ApiBody;
 use super::context::InvocationContext;
@@ -26,10 +27,12 @@ pub struct ApiInvocation {
 }
 
 impl ApiInvocation {
-	pub fn vars(self, body: Value) -> Result<Value> {
+	pub fn vars(self, body: PublicValue) -> Result<Value> {
+		// Convert public body to internal value
+		let internal_body = crate::sql::expression::convert_public_value_to_internal(body);
 		let obj = map! {
 			"params" => Value::from(self.params),
-			"body" => body,
+			"body" => internal_body,
 			"method" => self.method.to_string().into(),
 			"query" => Value::Object(self.query.into()),
 			"headers" => Value::Object(convert::headermap_to_object(self.headers)?),
@@ -108,36 +111,35 @@ impl ApiInvocation {
 		// Edit the context
 		let mut ctx = MutableContext::new_isolated(ctx);
 
-		todo!("STU")
 		// Set the request variable
-		// let vars = self.vars(body)?;
-		// ctx.add_value("request", vars.into());
+		let vars = self.vars(body)?;
+		ctx.add_value("request", vars.into());
 
-		// // Possibly set the timeout
-		// if let Some(timeout) = inv_ctx.timeout {
-		// 	ctx.add_timeout(*timeout)?
-		// }
+		// Possibly set the timeout
+		if let Some(timeout) = inv_ctx.timeout {
+			ctx.add_timeout(*timeout)?
+		}
 
-		// // Freeze the context
-		// let ctx = ctx.freeze();
+		// Freeze the context
+		let ctx = ctx.freeze();
 
-		// // Compute the action
+		// Compute the action
 
-		// let Some(action) = method_action.map(|x| &x.action).or(api.fallback.as_ref()) else {
-		// 	// condition already checked above.
-		// 	// either method_action is some or api fallback is some.
-		// 	unreachable!()
-		// };
+		let Some(action) = method_action.map(|x| &x.action).or(api.fallback.as_ref()) else {
+			// condition already checked above.
+			// either method_action is some or api fallback is some.
+			unreachable!()
+		};
 
-		// let res = stk.run(|stk| action.compute(stk, &ctx, &opt, None)).await.catch_return()?;
+		let res = stk.run(|stk| action.compute(stk, &ctx, &opt, None)).await.catch_return()?;
 
-		// let mut res = ApiResponse::from_action_result(res)?;
-		// if let Some(headers) = inv_ctx.response_headers {
-		// 	let mut headers = headers;
-		// 	headers.extend(res.headers);
-		// 	res.headers = headers;
-		// }
+		let mut res = ApiResponse::from_action_result(res)?;
+		if let Some(headers) = inv_ctx.response_headers {
+			let mut headers = headers;
+			headers.extend(res.headers);
+			res.headers = headers;
+		}
 
-		// Ok(Some((res, res_instruction)))
+		Ok(Some((res, res_instruction)))
 	}
 }

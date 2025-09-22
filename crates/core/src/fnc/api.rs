@@ -59,12 +59,15 @@ pub async fn invoke(
 			headers,
 		};
 
-		todo!("STU")
-		// match invocation.invoke_with_context(stk, ctx, opt, api, ApiBody::from_value(body)).await
-		// { 	Ok(Some(v)) => Ok(v.0.into_response_value()?),
-		// 	Err(e) => Err(e),
-		// 	_ => Ok(Value::None),
-		// }
+		let public_body = crate::dbs::executor::convert_value_to_public_value(body)?;
+		match invocation
+			.invoke_with_context(stk, ctx, opt, api, ApiBody::from_value(public_body))
+			.await
+		{
+			Ok(Some(v)) => Ok(v.0.into_response_value()?),
+			Err(e) => Err(e),
+			_ => Ok(Value::None),
+		}
 	} else {
 		Ok(Value::None)
 	}

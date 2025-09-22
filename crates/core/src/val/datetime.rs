@@ -164,3 +164,12 @@ impl<'de, F> BorrowDecode<'de, F> for Datetime {
 			.map(|x| Datetime(x.to_utc()))
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use rstest::rstest;
+
+	use super::*;
+
+	// TODO: STU: Assert from_str match PublicDatetime::from_str
+}

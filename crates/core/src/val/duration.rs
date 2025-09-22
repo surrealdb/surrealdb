@@ -64,6 +64,18 @@ impl From<time::Duration> for Value {
 	}
 }
 
+impl From<Duration> for crate::types::PublicDuration {
+	fn from(value: Duration) -> Self {
+		Self::from(value.0)
+	}
+}
+
+impl From<crate::types::PublicDuration> for Duration {
+	fn from(value: crate::types::PublicDuration) -> Self {
+		Self(value.0)
+	}
+}
+
 impl FromStr for Duration {
 	type Err = ();
 	fn from_str(s: &str) -> Result<Self, Self::Err> {

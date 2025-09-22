@@ -11,6 +11,7 @@ use crate::syn::lexer::compound::{self, NumberKind};
 use crate::syn::parser::mac::unexpected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{self, TokenKind, t};
+use crate::types::PublicDuration;
 use crate::val::{Bytes, Datetime, DecimalExt as _, Duration, File, Number, Regex, Strand, Uuid};
 
 mod number;
@@ -75,7 +76,7 @@ impl TokenValue for Param {
 	}
 }
 
-impl TokenValue for Duration {
+impl TokenValue for PublicDuration {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.peek();
 		match token.kind {

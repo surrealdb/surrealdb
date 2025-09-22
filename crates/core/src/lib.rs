@@ -61,15 +61,20 @@ pub mod syn;
 mod val;
 pub mod vs;
 
+// Re-export types needed by SDK
+pub use val::{Strand, Uuid};
+
 pub(crate) mod types {
 	//! Re-export the types from the types crate for internal use.
 
 	pub use surrealdb_types::{
 		Action as PublicAction, Array as PublicArray, Bytes as PublicBytes,
 		Datetime as PublicDatetime, Duration as PublicDuration, File as PublicFile,
-		Geometry as PublicGeometry, Notification as PublicNotification, Number as PublicNumber,
-		Object as PublicObject, Range as PublicRange, RecordId as PublicRecordId,
-		RecordIdKey as PublicRecordIdKey, Regex as PublicRegex, Uuid as PublicUuid,
+		Geometry as PublicGeometry, GeometryKind as PublicGeometryKind, Kind as PublicKind,
+		KindLiteral as PublicKindLiteral, Notification as PublicNotification,
+		Number as PublicNumber, Object as PublicObject, Range as PublicRange,
+		RecordId as PublicRecordId, RecordIdKey as PublicRecordIdKey,
+		RecordIdKeyRange as PublicRecordIdKeyRange, Regex as PublicRegex, Uuid as PublicUuid,
 		Value as PublicValue, Variables as PublicVariables,
 	};
 }

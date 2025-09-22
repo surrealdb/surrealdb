@@ -49,13 +49,44 @@ where
 			Resource::RecordId(record) => {
 				stmt.what = Expr::Table(unsafe { Ident::new_unchecked(record.table.clone()) });
 				let ident = Ident::new("id".to_string()).unwrap();
-				todo!("STU")
-				// let cond = Expr::Binary {
-				// 	left: Box::new(Expr::Idiom(Idiom::field(ident))),
-				// 	op: BinaryOperator::Equal,
-				// 	right: Box::new(Expr::Literal(Literal::RecordId(record.into_literal()))),
-				// };
-				// stmt.cond = Some(Cond(cond));
+				// Convert public RecordIdKey to internal RecordIdKeyLit
+				use crate::core::expr::{RecordIdKeyLit, RecordIdLit};
+				let key_lit = match record.key {
+					RecordIdKey::Number(n) => RecordIdKeyLit::Number(n),
+					RecordIdKey::String(s) => {
+						RecordIdKeyLit::String(crate::core::Strand::new_lossy(s))
+					}
+					RecordIdKey::Uuid(u) => RecordIdKeyLit::Uuid(crate::core::Uuid::from(u.0)),
+					RecordIdKey::Array(a) => RecordIdKeyLit::Array(
+						a.inner().iter().cloned().map(|v| Expr::from_public_value(v)).collect(),
+					),
+					RecordIdKey::Object(o) => {
+						use crate::core::expr::ObjectEntry;
+						RecordIdKeyLit::Object(
+							o.inner()
+								.iter()
+								.map(|(k, v)| ObjectEntry {
+									key: k.clone(),
+									value: Expr::from_public_value(v.clone()),
+								})
+								.collect(),
+						)
+					}
+					RecordIdKey::Range(_range) => {
+						// Ranges within RecordIdKey are not yet fully supported in the SDK
+						// For now, default to a Number(0) key
+						RecordIdKeyLit::Number(0)
+					}
+				};
+				let cond = Expr::Binary {
+					left: Box::new(Expr::Idiom(Idiom::field(ident))),
+					op: BinaryOperator::Equal,
+					right: Box::new(Expr::Literal(Literal::RecordId(RecordIdLit {
+						table: record.table,
+						key: key_lit,
+					}))),
+				};
+				stmt.cond = Some(Cond(cond));
 			}
 			Resource::Object(_) => return Err(Error::LiveOnObject.into()),
 			Resource::Array(_) => return Err(Error::LiveOnArray.into()),
@@ -70,65 +101,80 @@ where
 
 				let id = Expr::Idiom(Idiom::field(Ident::new("id".to_string()).unwrap()));
 
-				todo!("STU")
-				// let left = match range.start {
-				// 	std::ops::Bound::Included(x) => Some(Expr::Binary {
-				// 		left: Box::new(id.clone()),
-				// 		op: BinaryOperator::MoreThanEqual,
-				// 		right: Box::new(Expr::Literal(Literal::RecordId(
-				// 			crate::core::expr::RecordIdLit {
-				// 				table: record.table.clone(),
-				// 				key: x.into_literal(),
-				// 			},
-				// 		))),
-				// 	}),
-				// 	std::ops::Bound::Excluded(x) => Some(Expr::Binary {
-				// 		left: Box::new(id.clone()),
-				// 		op: BinaryOperator::MoreThan,
-				// 		right: Box::new(Expr::Literal(Literal::RecordId(
-				// 			crate::core::expr::RecordIdLit {
-				// 				table: record.table.clone(),
-				// 				key: x.into_literal(),
-				// 			},
-				// 		))),
-				// 	}),
-				// 	std::ops::Bound::Unbounded => None,
-				// };
-				// let right = match range.end {
-				// 	std::ops::Bound::Included(x) => Some(Expr::Binary {
-				// 		left: Box::new(id),
-				// 		op: BinaryOperator::LessThanEqual,
-				// 		right: Box::new(Expr::Literal(Literal::RecordId(
-				// 			crate::core::expr::RecordIdLit {
-				// 				table: record.table,
-				// 				key: x.into_literal(),
-				// 			},
-				// 		))),
-				// 	}),
-				// 	std::ops::Bound::Excluded(x) => Some(Expr::Binary {
-				// 		left: Box::new(id),
-				// 		op: BinaryOperator::LessThan,
-				// 		right: Box::new(Expr::Literal(Literal::RecordId(
-				// 			crate::core::expr::RecordIdLit {
-				// 				table: record.table,
-				// 				key: x.into_literal(),
-				// 			},
-				// 		))),
-				// 	}),
-				// 	std::ops::Bound::Unbounded => None,
-				// };
+				// Convert RecordIdKey bounds to expressions
+				use crate::core::expr::{RecordIdKeyLit, RecordIdLit};
+				let convert_key = |key: RecordIdKey| -> Expr {
+					let key_lit = match key {
+						RecordIdKey::Number(n) => RecordIdKeyLit::Number(n),
+						RecordIdKey::String(s) => {
+							RecordIdKeyLit::String(crate::core::Strand::new_lossy(s))
+						}
+						RecordIdKey::Uuid(u) => RecordIdKeyLit::Uuid(crate::core::Uuid::from(u.0)),
+						RecordIdKey::Array(a) => RecordIdKeyLit::Array(
+							a.inner().iter().cloned().map(|v| Expr::from_public_value(v)).collect(),
+						),
+						RecordIdKey::Object(o) => {
+							use crate::core::expr::ObjectEntry;
+							RecordIdKeyLit::Object(
+								o.inner()
+									.iter()
+									.map(|(k, v)| ObjectEntry {
+										key: k.clone(),
+										value: Expr::from_public_value(v.clone()),
+									})
+									.collect(),
+							)
+						}
+						RecordIdKey::Range(_range) => {
+							// Ranges within RecordIdKey are not yet fully supported in the SDK
+							// For now, default to a Number(0) key
+							RecordIdKeyLit::Number(0)
+						}
+					};
+					Expr::Literal(Literal::RecordId(RecordIdLit {
+						table: record.table.clone(),
+						key: key_lit,
+					}))
+				};
 
-				// let cond = match (left, right) {
-				// 	(Some(l), Some(r)) => Some(Cond(Expr::Binary {
-				// 		left: Box::new(l),
-				// 		op: BinaryOperator::And,
-				// 		right: Box::new(r),
-				// 	})),
-				// 	(Some(x), None) | (None, Some(x)) => Some(Cond(x)),
-				// 	_ => None,
-				// };
+				let left = match range.start {
+					std::ops::Bound::Included(x) => Some(Expr::Binary {
+						left: Box::new(id.clone()),
+						op: BinaryOperator::MoreThanEqual,
+						right: Box::new(convert_key(x)),
+					}),
+					std::ops::Bound::Excluded(x) => Some(Expr::Binary {
+						left: Box::new(id.clone()),
+						op: BinaryOperator::MoreThan,
+						right: Box::new(convert_key(x)),
+					}),
+					std::ops::Bound::Unbounded => None,
+				};
+				let right = match range.end {
+					std::ops::Bound::Included(x) => Some(Expr::Binary {
+						left: Box::new(id),
+						op: BinaryOperator::LessThanEqual,
+						right: Box::new(convert_key(x)),
+					}),
+					std::ops::Bound::Excluded(x) => Some(Expr::Binary {
+						left: Box::new(id),
+						op: BinaryOperator::LessThan,
+						right: Box::new(convert_key(x)),
+					}),
+					std::ops::Bound::Unbounded => None,
+				};
 
-				// stmt.cond = cond
+				let cond = match (left, right) {
+					(Some(l), Some(r)) => Some(Cond(Expr::Binary {
+						left: Box::new(l),
+						op: BinaryOperator::And,
+						right: Box::new(r),
+					})),
+					(Some(x), None) | (None, Some(x)) => Some(Cond(x)),
+					_ => None,
+				};
+
+				stmt.cond = cond
 			}
 			Resource::Unspecified => return Err(Error::LiveOnUnspecified.into()),
 		}

@@ -80,7 +80,7 @@ pub use self::ident::Ident;
 pub use self::idiom::{Idiom, Idioms};
 pub use self::kind::{GeometryKind, Kind, KindLiteral};
 pub use self::limit::Limit;
-pub use self::literal::Literal;
+pub use self::literal::{Literal, ObjectEntry};
 pub use self::lookup::Lookup;
 pub use self::mock::Mock;
 pub use self::model::{Model, get_model_path};

@@ -348,8 +348,7 @@ pub trait RpcProtocolV1: RpcContext {
 			Some(val) => {
 				crate::rpc::check_protected_param(&key)?;
 
-				todo!("STU");
-				// session.variables.insert(key, val)
+				session.variables.insert(key, val)
 			}
 		}
 		self.set_session(Arc::new(session));
@@ -953,9 +952,9 @@ pub trait RpcProtocolV1: RpcContext {
 		// Specify the query variables
 		let vars = match vars {
 			Some(PublicValue::Object(v)) => {
-				todo!("STU")
-				// let v: PublicVariables = v.into();
-				// Some(self.session().variables.merged(v))
+				let mut merged = self.session().variables.clone();
+				merged.extend(v.into());
+				Some(merged)
 			}
 			None | Some(PublicValue::None | PublicValue::Null) => {
 				Some(self.session().variables.clone())

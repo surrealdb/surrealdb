@@ -223,24 +223,25 @@ impl Document {
 
 			// Send the notification
 
-			let result = convert_value_to_public_value(result);
-			todo!("STU");
-			// let record = PublicValue::RecordId(rid.as_ref().clone().into());
+			let result = convert_value_to_public_value(result)?;
+			// Convert internal RecordId to public RecordId
+			let record =
+				convert_value_to_public_value(crate::val::Value::RecordId(rid.as_ref().clone()))?;
 
-			// let res = chn
-			// 	.send(PublicNotification {
-			// 		id: live_subscription.id.into(),
-			// 		action,
-			// 		record,
-			// 		result,
-			// 	})
-			// 	.await;
+			let res = chn
+				.send(PublicNotification {
+					id: live_subscription.id.into(),
+					action,
+					record,
+					result,
+				})
+				.await;
 
-			// if res.is_err() {
-			// 	// channel was closed, that means a transaction probably failed.
-			// 	// just return as nothing can be send.
-			// 	return Ok(());
-			// }
+			if res.is_err() {
+				// channel was closed, that means a transaction probably failed.
+				// just return as nothing can be send.
+				return Ok(());
+			}
 		}
 		// Carry on
 		Ok(())

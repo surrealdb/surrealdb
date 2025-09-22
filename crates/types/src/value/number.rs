@@ -31,6 +31,14 @@ impl Number {
 			Number::Decimal(v) => v.to_i64().unwrap_or_default(),
 		}
 	}
+
+	pub fn to_f64(&self) -> f64 {
+		match self {
+			Number::Int(v) => *v as f64,
+			Number::Float(v) => *v,
+			Number::Decimal(v) => v.to_f64().unwrap_or_default(),
+		}
+	}
 }
 
 macro_rules! impl_number {

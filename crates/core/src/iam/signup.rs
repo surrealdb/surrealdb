@@ -122,7 +122,7 @@ pub async fn db_access(
 		// The signup value succeeded
 		Ok(val) => {
 			// There is a record returned
-			let Some(mut rid) = val.record() else {
+			let Ok(mut rid) = val.as_record_id() else {
 				bail!(Error::NoRecordFound)
 			};
 			// Create the authentication key
@@ -144,7 +144,7 @@ pub async fn db_access(
 			if let Some(au) = &av.authenticate {
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
-				sess.rd = Some(rid.clone().into());
+				sess.rd = Some(Value::RecordId(rid.clone().into()));
 				sess.tk = Some(claims.clone().into_claims_object().into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
@@ -167,7 +167,7 @@ pub async fn db_access(
 								Ident::new(av.name.clone()).unwrap(),
 								&ns,
 								&db,
-								rid.clone(),
+								rid.clone().into(),
 							)
 							.await?,
 						)
@@ -184,7 +184,7 @@ pub async fn db_access(
 			session.ns = Some(ns.clone());
 			session.db = Some(db.clone());
 			session.ac = Some(ac.clone());
-			session.rd = Some(Value::from(rid.clone()));
+			session.rd = Some(Value::RecordId(rid.clone().into()));
 			session.exp = expiration(av.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_string(),

@@ -1,6 +1,7 @@
 use std::ops::Deref;
 
-use chrono::{DateTime, Utc};
+use chrono::offset::LocalResult;
+use chrono::{DateTime, TimeZone, Utc};
 use revision::Revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -47,6 +48,16 @@ impl Datetime {
 	pub fn now() -> Self {
 		Self(Utc::now())
 	}
+
+	/// Create a new datetime from chrono DateTime<Utc>
+	pub fn new(dt: DateTime<Utc>) -> Self {
+		Self(dt)
+	}
+
+	/// Get the inner DateTime<Utc>
+	pub fn inner(&self) -> DateTime<Utc> {
+		self.0
+	}
 }
 
 impl From<DateTime<Utc>> for Datetime {
@@ -61,15 +72,20 @@ impl From<Datetime> for DateTime<Utc> {
 	}
 }
 
-impl Datetime {
-	/// Create a new datetime from chrono DateTime<Utc>
-	pub fn new(dt: DateTime<Utc>) -> Self {
-		Self(dt)
-	}
+impl TryFrom<(i64, u32)> for Datetime {
+	type Error = anyhow::Error;
 
-	/// Get the inner DateTime<Utc>
-	pub fn inner(&self) -> DateTime<Utc> {
-		self.0
+	fn try_from(v: (i64, u32)) -> Result<Self, Self::Error> {
+		match Utc.timestamp_opt(v.0, v.1) {
+			LocalResult::Single(v) => Ok(Self(v)),
+			err => match err {
+				LocalResult::Single(v) => Ok(Self(v)),
+				LocalResult::Ambiguous(_, _) => {
+					Err(anyhow::anyhow!("Ambiguous timestamp: {}, {}", v.0, v.1))
+				}
+				LocalResult::None => Err(anyhow::anyhow!("Invalid timestamp: {}, {}", v.0, v.1)),
+			},
+		}
 	}
 }
 

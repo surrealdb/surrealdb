@@ -6,6 +6,7 @@ use crate::dbs::Capabilities;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
 use crate::sql::{Ast, Block, Expr, Fetchs, Fields, Idiom, Kind, Output, RecordIdLit};
+use crate::types::{PublicDatetime, PublicDuration, PublicKind, PublicRecordId, PublicValue};
 use crate::val::{Datetime, Duration, RecordId, Value};
 
 pub mod error;
@@ -145,7 +146,7 @@ pub fn idiom(input: &str) -> Result<Idiom> {
 
 /// Parse a datetime without enclosing delimiters from a string.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn datetime(input: &str) -> Result<Datetime> {
+pub fn datetime(input: &str) -> Result<PublicDatetime> {
 	trace!(target: TARGET, "Parsing SurrealQL datetime");
 
 	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
@@ -155,7 +156,7 @@ pub fn datetime(input: &str) -> Result<Datetime> {
 	if let Err(e) = lexer.assert_finished() {
 		bail!(Error::InvalidQuery(e.render_on(input)));
 	}
-	res.map(Datetime)
+	res.map(PublicDatetime::new)
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
 		.map_err(anyhow::Error::new)
@@ -163,14 +164,14 @@ pub fn datetime(input: &str) -> Result<Datetime> {
 
 /// Parse a duration from a string.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn duration(input: &str) -> Result<Duration> {
+pub fn duration(input: &str) -> Result<PublicDuration> {
 	trace!(target: TARGET, "Parsing SurrealQL duration");
 
 	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new(input.as_bytes());
 	parser
-		.next_token_value::<Duration>()
+		.next_token_value::<PublicDuration>()
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
@@ -179,7 +180,7 @@ pub fn duration(input: &str) -> Result<Duration> {
 
 /// Parse a record id.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn record_id(input: &str) -> Result<RecordId> {
+pub fn record_id(input: &str) -> Result<PublicRecordId> {
 	trace!(target: TARGET, "Parsing SurrealQL record id");
 
 	parse_with(input.as_bytes(), async |parser, stk| parser.parse_value_record_id(stk).await)
@@ -270,7 +271,7 @@ pub fn expr_legacy_strand(input: &str) -> Result<Expr> {
 
 /// Parses a SurrealQL [`Value`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn value(input: &str) -> Result<Value> {
+pub fn value(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
 	let settings = ParserSettings {
@@ -286,7 +287,7 @@ pub fn value(input: &str) -> Result<Value> {
 
 /// Parses a SurrealQL [`Value`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn value_legacy_strand(input: &str) -> Result<Value> {
+pub fn value_legacy_strand(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
 	let settings = ParserSettings {
@@ -304,7 +305,7 @@ pub fn value_legacy_strand(input: &str) -> Result<Value> {
 /// Parses JSON into an inert SurrealQL [`Value`] and parses values within
 /// strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn json_legacy_strand(input: &str) -> Result<Value> {
+pub fn json_legacy_strand(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing inert JSON value, with legacy strings");
 
 	let settings = ParserSettings {
@@ -321,7 +322,7 @@ pub fn json_legacy_strand(input: &str) -> Result<Value> {
 
 /// Parse a kind from a string.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn kind(input: &str) -> Result<Kind> {
+pub fn kind(input: &str) -> Result<PublicKind> {
 	trace!(target: TARGET, "Parsing SurrealQL duration");
 
 	parse_with(input.as_bytes(), async |parser, stk| parser.parse_inner_kind(stk).await)

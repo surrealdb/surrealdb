@@ -8,6 +8,7 @@ use crate::err::Error;
 use crate::expr::Kind;
 use crate::expr::fmt::{Fmt, fmt_separated_by};
 use crate::syn;
+use crate::types::PublicKind;
 use crate::val::{Array, Object, Strand, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -91,7 +92,7 @@ impl FromStr for Path {
 			}
 
 			let mut scratch = String::new();
-			let mut kind: Option<Kind> = None;
+			let mut kind: Option<PublicKind> = None;
 
 			'segment: while let Some(c) = chars.peek() {
 				match c {
@@ -190,7 +191,7 @@ impl FromStr for Path {
 					"Expected a name or content for this segment".into(),
 				));
 			} else if let Some(name) = scratch.strip_prefix(':') {
-				let segment = Segment::Dynamic(name.to_string(), kind);
+				let segment = Segment::Dynamic(name.to_string(), kind.map(Into::into));
 				(segment, false)
 			} else if let Some(name) = scratch.strip_prefix('*') {
 				let segment = Segment::Rest(name.to_string());

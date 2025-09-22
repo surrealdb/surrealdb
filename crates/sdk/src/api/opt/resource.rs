@@ -9,7 +9,7 @@ use crate::{Object, RecordId, RecordIdKey, Value};
 transparent_wrapper!(
 	/// A table range.
 	#[derive(Clone, PartialEq)]
-	pub struct QueryRange(RecordId)
+	pub struct QueryRange(pub RecordId)
 );
 
 #[derive(Clone, Copy, Eq, PartialEq)]

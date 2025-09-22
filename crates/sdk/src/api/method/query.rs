@@ -319,10 +319,7 @@ where
 			let bindings = bindings.into_value();
 
 			match bindings {
-				Value::Object(mut map) => {
-					todo!("STU")
-					// current_bindings.extend(map.0)
-				}
+				Value::Object(map) => current_bindings.extend(Variables::from(map)),
 				Value::Array(array) => {
 					if array.len() != 2 || !matches!(array[0], surrealdb_types::Value::String(_)) {
 						let bindings = Value::Array(array);

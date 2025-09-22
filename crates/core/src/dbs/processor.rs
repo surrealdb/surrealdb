@@ -22,6 +22,7 @@ use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, record, r#ref};
 use crate::kvs::{KVKey, KVValue, Key, Transaction, Val};
 use crate::syn;
+use crate::types::PublicRecordId;
 use crate::val::record::Record;
 use crate::val::{RecordId, RecordIdKeyRange, Value};
 
@@ -311,8 +312,10 @@ impl Collected {
 		// Try to extract the id field if present and parse as Thing
 		let rid = match &v {
 			Value::Object(obj) => match obj.get("id") {
-				Some(Value::Strand(strand)) => syn::record_id(strand.as_str()).ok().map(Arc::new),
-				Some(Value::RecordId(thing)) => Some(Arc::new(thing.clone())),
+				Some(Value::Strand(strand)) => {
+					syn::record_id(strand.as_str()).ok().map(|v| Arc::new(RecordId::from(v)))
+				}
+				Some(Value::RecordId(record_id)) => Some(Arc::new(record_id.clone())),
 				_ => None,
 			},
 			Value::RecordId(thing) => Some(Arc::new(thing.clone())),

@@ -3650,6 +3650,8 @@ dependencies = [
  "geo",
  "hex",
  "regex",
+ "revision 0.11.0",
+ "rquickjs",
  "rstest",
  "rust_decimal",
  "serde",

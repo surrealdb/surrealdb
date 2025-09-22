@@ -447,6 +447,18 @@ impl InfoStructure for Kind {
 	}
 }
 
+impl From<crate::types::PublicKind> for Kind {
+	fn from(v: crate::types::PublicKind) -> Self {
+		todo!("STU")
+	}
+}
+
+impl From<Kind> for crate::types::PublicKind {
+	fn from(v: Kind) -> Self {
+		todo!("STU")
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug)]
 pub enum KindLiteral {
