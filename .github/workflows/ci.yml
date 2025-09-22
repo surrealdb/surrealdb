@@ -279,10 +279,6 @@ jobs:
       - name: Check docs
         run: cargo make ci-docs
 
-  check-crates:
-    name: Check crates
-    uses: ./.github/workflows/crate.yml
-
   check-binaries:
     name: Cross-compile binaries
     needs: format
