@@ -15,16 +15,16 @@ use crate::rpc::args::extract_args;
 use crate::rpc::{DbResult, Method, RpcContext, RpcError};
 use crate::sql::{
 	Ast, CreateStatement, Data as SqlData, DeleteStatement, Expr, Fields, Function, FunctionCall,
-	Ident, InsertStatement, KillStatement, LiveStatement, Model, Output, Param, RelateStatement,
+	InsertStatement, KillStatement, LiveStatement, Model, Output, Param, RelateStatement,
 	SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
 use crate::types::{PublicArray, PublicObject, PublicRecordIdKey, PublicValue, PublicVariables};
-use crate::val::{Array, Object, RecordIdKey, Strand, Value};
+use crate::val::{Array, Object, RecordIdKey, Value};
 
 /// utility function converting a `Value::String` into a `Expr::Table`
 fn value_to_table(value: PublicValue) -> Expr {
 	match value {
-		PublicValue::String(s) => Expr::Table(Ident::new(s).unwrap()),
+		PublicValue::String(s) => Expr::Table(s),
 		x => Expr::from_public_value(x).into(),
 	}
 }
@@ -173,12 +173,9 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signup, mutating the session
 		let out: Result<PublicValue> =
-			crate::iam::signup::signup(self.kvs(), &mut session, params.into())
-				.await
-				// TODO: Null byte validity
-				.map(|v| {
-					v.token.clone().map(|x| PublicValue::String(x)).unwrap_or(PublicValue::None)
-				});
+			crate::iam::signup::signup(self.kvs(), &mut session, params.into()).await.map(|v| {
+				v.token.clone().map(|x| PublicValue::String(x)).unwrap_or(PublicValue::None)
+			});
 
 		// Store the updated session
 		self.set_session(Arc::new(session));
@@ -206,7 +203,6 @@ pub trait RpcProtocolV1: RpcContext {
 		let out: Result<PublicValue> =
 			crate::iam::signin::signin(self.kvs(), &mut session, params.into())
 				.await
-				// TODO: Null byte validity
 				.map(|v| PublicValue::String(v.token.clone()));
 		// Store the updated session
 		self.set_session(Arc::new(session));
@@ -284,7 +280,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// ------------------------------
 
 	async fn info(&self) -> Result<DbResult, RpcError> {
-		let what = vec![Expr::Param(Param::from_strand(strand!("auth").to_owned()))];
+		let what = vec![Expr::Param(Param::new("auth".to_owned()))];
 
 		// TODO: Check if this can be replaced by just evaluating the param or a
 		// `$auth.*` expression
@@ -347,7 +343,6 @@ pub trait RpcProtocolV1: RpcContext {
 			None | Some(PublicValue::None) => session.variables.remove(key.as_str()),
 			Some(val) => {
 				crate::rpc::check_protected_param(&key)?;
-
 				session.variables.insert(key, val)
 			}
 		}
@@ -418,7 +413,7 @@ pub trait RpcProtocolV1: RpcContext {
 
 		// If value is a strand, handle it as if it was a table.
 		let what = match what {
-			PublicValue::String(x) => Expr::Table(Ident::new(x).unwrap()),
+			PublicValue::String(x) => Expr::Table(x),
 			x => Expr::from_public_value(x).into(),
 		};
 
@@ -467,7 +462,7 @@ pub trait RpcProtocolV1: RpcContext {
 
 		// If value is a string, handle it as if it was a table.
 		let what = match what {
-			PublicValue::String(x) => Expr::Table(Ident::new(x).unwrap()),
+			PublicValue::String(x) => Expr::Table(x),
 			x => Expr::from_public_value(x).into(),
 		};
 
@@ -516,7 +511,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
 
 		let into = match what {
-			PublicValue::String(x) => Some(Expr::Table(Ident::new(x).unwrap())),
+			PublicValue::String(x) => Some(Expr::Table(x)),
 			x => {
 				if x.is_nullish() {
 					None
@@ -554,7 +549,7 @@ pub trait RpcProtocolV1: RpcContext {
 
 		let what = match what {
 			PublicValue::Null | PublicValue::None => None,
-			PublicValue::String(x) => Some(Expr::Table(Ident::new(x).unwrap())),
+			PublicValue::String(x) => Some(Expr::Table(x)),
 			x => Some(Expr::from_public_value(x).into()),
 		};
 

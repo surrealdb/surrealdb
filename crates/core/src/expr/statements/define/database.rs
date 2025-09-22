@@ -9,18 +9,19 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::Base;
 use crate::expr::changefeed::ChangeFeed;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident};
+use crate::fmt::{EscapeIdent, QuoteStr};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineDatabaseStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
-	pub name: Ident,
-	pub comment: Option<Strand>,
+	pub name: String,
+	pub comment: Option<String>,
 	pub changefeed: Option<ChangeFeed>,
 }
 
@@ -63,14 +64,14 @@ impl DefineDatabaseStatement {
 			txn.lock().await.get_next_db_id(nsv.namespace_id).await?
 		};
 
-		let name: String = self.name.to_raw_string();
+		let name: String = self.name.clone();
 
 		// Set the database definition, keyed by namespace name and database name.
 		let db_def = DatabaseDefinition {
 			namespace_id: nsv.namespace_id,
 			database_id,
 			name: name.clone(),
-			comment: self.comment.clone().map(|s| s.into_string()),
+			comment: self.comment.clone(),
 			changefeed: self.changefeed,
 		};
 		txn.put_db(&nsv.name, db_def).await?;
@@ -95,9 +96,9 @@ impl Display for DefineDatabaseStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", QuoteStr(v))?
 		}
 		if let Some(ref v) = self.changefeed {
 			write!(f, " {v}")?;
@@ -109,7 +110,7 @@ impl Display for DefineDatabaseStatement {
 impl InfoStructure for DefineDatabaseStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.structure(),
+			"name".to_string() => self.name.into(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})
 	}

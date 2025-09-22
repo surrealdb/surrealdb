@@ -27,7 +27,7 @@ use crate::core::kvs::Datastore;
 use crate::core::mem::ALLOC;
 use crate::core::rpc::format::Format;
 use crate::core::rpc::{DbResult, Method, RpcContext, RpcProtocolV1, RpcProtocolV2};
-use crate::core::val::{self, Array, Strand, Value};
+use crate::core::val::{self, Array, Value};
 use crate::rpc::CONN_CLOSED_ERR;
 use crate::rpc::failure::Failure;
 use crate::rpc::format::WsFormat;
@@ -460,7 +460,7 @@ impl RpcContext for Websocket {
 	}
 	/// The version information for this RPC context
 	fn version_data(&self) -> DbResult {
-		let value = Value::from(Strand::new(format!("{PKG_NAME}-{}", *PKG_VERSION)).unwrap());
+		let value = Value::from(format!("{PKG_NAME}-{}", *PKG_VERSION));
 		DbResult::Other(value)
 	}
 

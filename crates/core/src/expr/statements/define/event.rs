@@ -10,19 +10,19 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Expr, Ident};
+use crate::expr::{Base, Expr};
+use crate::fmt::{EscapeIdent, Fmt, QuoteStr};
 use crate::iam::{Action, ResourceKind};
-use crate::sql::fmt::Fmt;
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineEventStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
-	pub target_table: Ident,
+	pub name: String,
+	pub target_table: String,
 	pub when: Expr,
 	pub then: Vec<Expr>,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl DefineEventStatement {
@@ -66,11 +66,11 @@ impl DefineEventStatement {
 		txn.set(
 			&key,
 			&EventDefinition {
-				name: self.name.to_raw_string(),
-				target_table: self.target_table.to_raw_string(),
+				name: self.name.clone(),
+				target_table: self.target_table.clone(),
 				when: self.when.clone(),
 				then: self.then.clone(),
-				comment: self.comment.clone().map(|x| x.to_raw_string()),
+				comment: self.comment.clone(),
 			},
 			None,
 		)
@@ -106,13 +106,13 @@ impl Display for DefineEventStatement {
 		write!(
 			f,
 			" {} ON {} WHEN {} THEN {}",
-			self.name,
-			self.target_table,
+			EscapeIdent(&self.name),
+			EscapeIdent(&self.target_table),
 			self.when,
 			Fmt::comma_separated(self.then.iter())
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", QuoteStr(v))?
 		}
 		Ok(())
 	}

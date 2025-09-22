@@ -8,13 +8,14 @@ use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Base, Ident, Value};
+use crate::expr::{Base, Value};
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveEventStatement {
-	pub name: Ident,
-	pub table_name: Ident,
+	pub name: String,
+	pub table_name: String,
 	pub if_exists: bool,
 }
 
@@ -79,7 +80,7 @@ impl Display for RemoveEventStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.table_name)?;
+		write!(f, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.table_name))?;
 		Ok(())
 	}
 }

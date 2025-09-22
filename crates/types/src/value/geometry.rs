@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::fmt::{self, Display, Formatter};
 use std::hash;
 use std::iter::once;
 
@@ -66,6 +67,106 @@ macro_rules! impl_geometry {
 					Self::$variant(v)
 				}
 			)+
+		}
+	}
+}
+
+impl Display for Geometry {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		match self {
+			Self::Point(v) => {
+				write!(f, "({}, {})", v.x(), v.y())
+			}
+			Self::Line(v) => {
+				write!(f, "{{ type: 'LineString', coordinates: [")?;
+				for (i, point) in v.points().enumerate() {
+					if i > 0 {
+						write!(f, ", ")?;
+					}
+					write!(f, "[{}, {}]", point.x(), point.y())?;
+				}
+				write!(f, "] }}")
+			}
+			Self::Polygon(v) => {
+				write!(f, "{{ type: 'Polygon', coordinates: [")?;
+				for (ring_idx, ring) in once(v.exterior()).chain(v.interiors()).enumerate() {
+					if ring_idx > 0 {
+						write!(f, ", ")?;
+					}
+					write!(f, "[")?;
+					for (i, point) in ring.points().enumerate() {
+						if i > 0 {
+							write!(f, ", ")?;
+						}
+						write!(f, "[{}, {}]", point.x(), point.y())?;
+					}
+					write!(f, "]")?;
+				}
+				write!(f, "] }}")
+			}
+			Self::MultiPoint(v) => {
+				write!(f, "{{ type: 'MultiPoint', coordinates: [")?;
+				for (i, point) in v.iter().enumerate() {
+					if i > 0 {
+						write!(f, ", ")?;
+					}
+					write!(f, "[{}, {}]", point.x(), point.y())?;
+				}
+				write!(f, "] }}")
+			}
+			Self::MultiLine(v) => {
+				write!(f, "{{ type: 'MultiLineString', coordinates: [")?;
+				for (line_idx, line) in v.iter().enumerate() {
+					if line_idx > 0 {
+						write!(f, ", ")?;
+					}
+					write!(f, "[")?;
+					for (i, point) in line.points().enumerate() {
+						if i > 0 {
+							write!(f, ", ")?;
+						}
+						write!(f, "[{}, {}]", point.x(), point.y())?;
+					}
+					write!(f, "]")?;
+				}
+				write!(f, "] }}")
+			}
+			Self::MultiPolygon(v) => {
+				write!(f, "{{ type: 'MultiPolygon', coordinates: [")?;
+				for (poly_idx, polygon) in v.iter().enumerate() {
+					if poly_idx > 0 {
+						write!(f, ", ")?;
+					}
+					write!(f, "[")?;
+					for (ring_idx, ring) in
+						once(polygon.exterior()).chain(polygon.interiors()).enumerate()
+					{
+						if ring_idx > 0 {
+							write!(f, ", ")?;
+						}
+						write!(f, "[")?;
+						for (i, point) in ring.points().enumerate() {
+							if i > 0 {
+								write!(f, ", ")?;
+							}
+							write!(f, "[{}, {}]", point.x(), point.y())?;
+						}
+						write!(f, "]")?;
+					}
+					write!(f, "]")?;
+				}
+				write!(f, "] }}")
+			}
+			Self::Collection(v) => {
+				write!(f, "{{ type: 'GeometryCollection', geometries: [")?;
+				for (i, geom) in v.iter().enumerate() {
+					if i > 0 {
+						write!(f, ", ")?;
+					}
+					write!(f, "{}", geom)?;
+				}
+				write!(f, "] }}")
+			}
 		}
 	}
 }

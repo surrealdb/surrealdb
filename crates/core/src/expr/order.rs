@@ -2,8 +2,8 @@ use std::ops::Deref;
 use std::{cmp, fmt};
 
 use crate::expr::Value;
-use crate::expr::fmt::Fmt;
 use crate::expr::idiom::Idiom;
+use crate::fmt::Fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Ordering {

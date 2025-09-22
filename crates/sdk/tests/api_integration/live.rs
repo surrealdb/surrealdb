@@ -395,6 +395,32 @@ pub async fn live_select_query(new_db: impl CreateDb) {
 	drop(permit);
 }
 
+pub async fn live_query_delete_notifications(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
+
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+
+	let mut stream =
+		db.query("LIVE SELECT foo FROM bar").await.unwrap().stream::<Value>(0).unwrap();
+
+	db.query("CREATE bar CONTENT { foo: 'baz' }").await.unwrap().check().unwrap();
+	let notification = tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.unwrap().unwrap();
+	assert_eq!(notification.data, "{ foo: 'baz' }".parse().unwrap());
+	assert_eq!(notification.action, Action::Create);
+
+	db.query("UPDATE bar MERGE { data: 123 }").await.unwrap().check().unwrap();
+	let notification = tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.unwrap().unwrap();
+	assert_eq!(notification.data, "{ foo: 'baz' }".parse().unwrap());
+	assert_eq!(notification.action, Action::Update);
+
+	db.query("DELETE bar").await.unwrap().check().unwrap();
+	let notification = tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.unwrap().unwrap();
+	assert_eq!(notification.data, "{ foo: 'baz' }".parse().unwrap());
+	assert_eq!(notification.action, Action::Delete);
+
+	drop(permit);
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq, PartialOrd)]
 struct ApiRecordIdWithFetchedLink {
 	id: RecordId,
@@ -522,4 +548,6 @@ define_include_tests!(live => {
 	live_select_query,
 	#[test_log::test(tokio::test)]
 	live_select_with_fetch,
+	#[test_log::test(tokio::test)]
+	live_query_delete_notifications,
 });

@@ -11,10 +11,9 @@ use crate::catalog::{ApiActionDefinition, ApiDefinition, ApiMethod};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::fmt::{Fmt, pretty_indent};
 use crate::expr::{Base, Expr, FlowResultExt as _, Value};
+use crate::fmt::{Fmt, QuoteStr, pretty_indent};
 use crate::iam::{Action, ResourceKind};
-use crate::val::Strand;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineApiStatement {
@@ -23,7 +22,7 @@ pub struct DefineApiStatement {
 	pub actions: Vec<ApiAction>,
 	pub fallback: Option<Expr>,
 	pub config: ApiConfig,
-	pub comment: Option<Strand>,
+	pub comment: Option<String>,
 }
 
 impl DefineApiStatement {
@@ -76,7 +75,7 @@ impl DefineApiStatement {
 			actions,
 			fallback: self.fallback.clone(),
 			config,
-			comment: self.comment.as_ref().map(|c| c.clone().into_string()),
+			comment: self.comment.clone(),
 		};
 		txn.put_db_api(ns, db, &ap).await?;
 		// Clear the cache
@@ -115,7 +114,7 @@ impl fmt::Display for DefineApiStatement {
 		}
 
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?;
+			write!(f, " COMMENT {}", QuoteStr(comment))?;
 		}
 
 		drop(indent);

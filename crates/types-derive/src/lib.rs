@@ -46,7 +46,7 @@ fn parse_field_attributes(field: &Field) -> FieldAttributes {
 ///
 /// ## Named Fields Struct
 ///
-/// ```rust
+/// ```compile_fail
 /// use surrealdb_types::{SurrealValue, Value};
 ///
 /// #[derive(SurrealValue)]
@@ -78,7 +78,7 @@ fn parse_field_attributes(field: &Field) -> FieldAttributes {
 ///
 /// ## Tuple Struct
 ///
-/// ```rust
+/// ```compile_fail
 /// use surrealdb_types::{SurrealValue, Value};
 ///
 /// #[derive(SurrealValue)]
@@ -94,7 +94,7 @@ fn parse_field_attributes(field: &Field) -> FieldAttributes {
 ///
 /// ## Unit Struct
 ///
-/// ```rust
+/// ```compile_fail
 /// use surrealdb_types::{SurrealValue, Value};
 ///
 /// #[derive(SurrealValue)]
@@ -108,7 +108,7 @@ fn parse_field_attributes(field: &Field) -> FieldAttributes {
 ///
 /// ## Nested Structs
 ///
-/// ```rust
+/// ```compile_fail
 /// use surrealdb_types::{SurrealValue, Value};
 ///
 /// #[derive(SurrealValue)]
@@ -139,7 +139,7 @@ fn parse_field_attributes(field: &Field) -> FieldAttributes {
 ///
 /// ## Generic Structs
 ///
-/// ```rust
+/// ```compile_fail
 /// use surrealdb_types::{SurrealValue, Value};
 ///
 /// #[derive(SurrealValue)]

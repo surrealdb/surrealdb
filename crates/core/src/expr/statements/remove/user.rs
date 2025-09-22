@@ -6,11 +6,12 @@ use crate::catalog::providers::UserProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Base, Ident, Value};
+use crate::expr::{Base, Value};
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveUserStatement {
-	pub name: Ident,
+	pub name: String,
 	pub base: Base,
 	pub if_exists: bool,
 }
@@ -113,7 +114,7 @@ impl Display for RemoveUserStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.base)?;
+		write!(f, " {} ON {}", EscapeIdent(&self.name), self.base)?;
 		Ok(())
 	}
 }

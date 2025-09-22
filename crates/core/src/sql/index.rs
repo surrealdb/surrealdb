@@ -1,7 +1,7 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use crate::sql::ident::Ident;
+use crate::fmt::EscapeIdent;
 use crate::sql::scoring::Scoring;
 use crate::val::Number;
 
@@ -47,7 +47,7 @@ impl From<crate::catalog::Index> for Index {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct FullTextParams {
-	pub az: Ident,
+	pub az: String,
 	pub hl: bool,
 	pub sc: Scoring,
 }
@@ -55,7 +55,7 @@ pub struct FullTextParams {
 impl From<FullTextParams> for crate::catalog::FullTextParams {
 	fn from(v: FullTextParams) -> Self {
 		crate::catalog::FullTextParams {
-			analyzer: v.az.clone().into_string(),
+			analyzer: v.az.clone(),
 			highlight: v.hl,
 			scoring: v.sc.into(),
 		}
@@ -64,7 +64,7 @@ impl From<FullTextParams> for crate::catalog::FullTextParams {
 impl From<crate::catalog::FullTextParams> for FullTextParams {
 	fn from(v: crate::catalog::FullTextParams) -> Self {
 		Self {
-			az: unsafe { Ident::new_unchecked(v.analyzer) },
+			az: v.analyzer,
 			hl: v.highlight,
 			sc: v.scoring.into(),
 		}
@@ -78,8 +78,6 @@ pub struct MTreeParams {
 	pub distance: Distance,
 	pub vector_type: VectorType,
 	pub capacity: u16,
-	pub doc_ids_order: u32,
-	pub doc_ids_cache: u32,
 	pub mtree_cache: u32,
 }
 
@@ -90,8 +88,6 @@ impl From<MTreeParams> for crate::catalog::MTreeParams {
 			distance: v.distance.into(),
 			vector_type: v.vector_type.into(),
 			capacity: v.capacity,
-			doc_ids_order: v.doc_ids_order,
-			doc_ids_cache: v.doc_ids_cache,
 			mtree_cache: v.mtree_cache,
 		}
 	}
@@ -104,8 +100,6 @@ impl From<crate::catalog::MTreeParams> for MTreeParams {
 			distance: v.distance.into(),
 			vector_type: v.vector_type.into(),
 			capacity: v.capacity,
-			doc_ids_order: v.doc_ids_order,
-			doc_ids_cache: v.doc_ids_cache,
 			mtree_cache: v.mtree_cache,
 		}
 	}
@@ -245,7 +239,7 @@ impl Display for Index {
 			Self::Idx => Ok(()),
 			Self::Uniq => f.write_str("UNIQUE"),
 			Self::FullText(p) => {
-				write!(f, "FULLTEXT ANALYZER {} {}", p.az, p.sc,)?;
+				write!(f, "FULLTEXT ANALYZER {} {}", EscapeIdent(&p.az), p.sc,)?;
 				if p.hl {
 					f.write_str(" HIGHLIGHTS")?
 				}
@@ -254,14 +248,8 @@ impl Display for Index {
 			Self::MTree(p) => {
 				write!(
 					f,
-					"MTREE DIMENSION {} DIST {} TYPE {} CAPACITY {} DOC_IDS_ORDER {} DOC_IDS_CACHE {} MTREE_CACHE {}",
-					p.dimension,
-					p.distance,
-					p.vector_type,
-					p.capacity,
-					p.doc_ids_order,
-					p.doc_ids_cache,
-					p.mtree_cache
+					"MTREE DIMENSION {} DIST {} TYPE {} CAPACITY {} MTREE_CACHE {}",
+					p.dimension, p.distance, p.vector_type, p.capacity, p.mtree_cache
 				)
 			}
 			Self::Hnsw(p) => {

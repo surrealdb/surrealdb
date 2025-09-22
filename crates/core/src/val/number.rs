@@ -36,7 +36,7 @@ use super::IndexFormat;
 use crate::err::Error;
 use crate::expr::decimal::DecimalLexEncoder;
 use crate::fnc::util::math::ToFloat;
-use crate::val::{Strand, TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
+use crate::val::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 
 #[derive(Encode, BorrowDecode)]
 pub(crate) enum NumberKind {
@@ -94,36 +94,35 @@ impl From<Decimal> for Number {
 	}
 }
 
+impl From<surrealdb_types::Number> for Number {
+	fn from(v: surrealdb_types::Number) -> Self {
+		match v {
+			surrealdb_types::Number::Int(i) => Self::Int(i),
+			surrealdb_types::Number::Float(f) => Self::Float(f),
+			surrealdb_types::Number::Decimal(d) => Self::Decimal(d),
+		}
+	}
+}
+
+impl From<Number> for surrealdb_types::Number {
+	fn from(v: Number) -> Self {
+		match v {
+			Number::Int(i) => Self::Int(i),
+			Number::Float(f) => Self::Float(f),
+			Number::Decimal(d) => Self::Decimal(d),
+		}
+	}
+}
+
 impl FromStr for Number {
 	type Err = ();
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		Self::try_from(s)
-	}
-}
-
-impl TryFrom<String> for Number {
-	type Error = ();
-	fn try_from(v: String) -> Result<Self, Self::Error> {
-		Self::try_from(v.as_str())
-	}
-}
-
-impl TryFrom<Strand> for Number {
-	type Error = ();
-	fn try_from(v: Strand) -> Result<Self, Self::Error> {
-		Self::try_from(v.as_str())
-	}
-}
-
-impl TryFrom<&str> for Number {
-	type Error = ();
-	fn try_from(v: &str) -> Result<Self, Self::Error> {
 		// Attempt to parse as i64
-		match v.parse::<i64>() {
+		match s.parse::<i64>() {
 			// Store it as an i64
 			Ok(v) => Ok(Self::Int(v)),
 			// It wasn't parsed as a i64 so parse as a float
-			_ => match f64::from_str(v) {
+			_ => match s.parse::<f64>() {
 				// Store it as a float
 				Ok(v) => Ok(Self::Float(v)),
 				// It wasn't parsed as a number
@@ -618,8 +617,10 @@ impl Number {
 
 	pub fn fixed(self, precision: usize) -> Number {
 		match self {
-			Number::Int(v) => format!("{v:.precision$}").try_into().unwrap_or_default(),
-			Number::Float(v) => format!("{v:.precision$}").try_into().unwrap_or_default(),
+			// FIXME: This is so cursed, there has to be a better way get a certain amount of
+			// precision then formatting to a string and then parsing it again.
+			Number::Int(v) => format!("{v:.precision$}").parse().unwrap_or_default(),
+			Number::Float(v) => format!("{v:.precision$}").parse().unwrap_or_default(),
 			Number::Decimal(v) => v.round_dp(precision as u32).into(),
 		}
 	}

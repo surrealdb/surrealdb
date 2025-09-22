@@ -1,9 +1,9 @@
 use crate::syn::error::{SyntaxError, bail};
 use crate::syn::lexer::Lexer;
 use crate::syn::token::{Token, t};
-use crate::val::Bytes;
+use crate::types::PublicBytes;
 
-pub fn bytes(lexer: &mut Lexer, start: Token) -> Result<Bytes, SyntaxError> {
+pub fn bytes(lexer: &mut Lexer, start: Token) -> Result<PublicBytes, SyntaxError> {
 	let close_char = match start.kind {
 		t!("b\"") => b'"',
 		t!("b'") => b'\'',
@@ -14,7 +14,7 @@ pub fn bytes(lexer: &mut Lexer, start: Token) -> Result<Bytes, SyntaxError> {
 
 	loop {
 		if lexer.eat(close_char) {
-			return Ok(Bytes(bytes));
+			return Ok(PublicBytes::from(bytes));
 		} else {
 			bytes.push(eat_hex_byte(lexer)?);
 		}

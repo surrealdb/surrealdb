@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 
 use super::Datetime;
-use crate::expr::escape::QuoteStr;
-use crate::val::{IndexFormat, Strand};
+use crate::fmt::QuoteStr;
+use crate::val::IndexFormat;
 
 #[revisioned(revision = 1)]
 #[derive(
@@ -45,34 +45,22 @@ impl From<Uuid> for uuid::Uuid {
 	}
 }
 
+impl From<surrealdb_types::Uuid> for Uuid {
+	fn from(v: surrealdb_types::Uuid) -> Self {
+		Uuid(v.0)
+	}
+}
+
+impl From<Uuid> for surrealdb_types::Uuid {
+	fn from(x: Uuid) -> Self {
+		surrealdb_types::Uuid::from(x.0)
+	}
+}
+
 impl FromStr for Uuid {
-	type Err = ();
+	type Err = uuid::Error;
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		Self::try_from(s)
-	}
-}
-
-impl TryFrom<String> for Uuid {
-	type Error = ();
-	fn try_from(v: String) -> Result<Self, Self::Error> {
-		Self::try_from(v.as_str())
-	}
-}
-
-impl TryFrom<Strand> for Uuid {
-	type Error = ();
-	fn try_from(v: Strand) -> Result<Self, Self::Error> {
-		Self::try_from(v.as_str())
-	}
-}
-
-impl TryFrom<&str> for Uuid {
-	type Error = ();
-	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match uuid::Uuid::try_parse(v) {
-			Ok(v) => Ok(Self(v)),
-			Err(_) => Err(()),
-		}
+		uuid::Uuid::try_parse(s).map(Uuid)
 	}
 }
 

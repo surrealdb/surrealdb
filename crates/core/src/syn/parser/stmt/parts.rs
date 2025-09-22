@@ -6,14 +6,14 @@ use crate::sql::changefeed::ChangeFeed;
 use crate::sql::index::{Distance, VectorType};
 use crate::sql::reference::{Reference, ReferenceDeleteStrategy};
 use crate::sql::{
-	Base, Cond, Data, Explain, Expr, Fetch, Fetchs, Field, Fields, Group, Groups, Ident, Idiom,
-	Output, Permission, Permissions, Timeout, View, With,
+	Base, Cond, Data, Explain, Expr, Fetch, Fetchs, Field, Fields, Group, Groups, Idiom, Output,
+	Permission, Permissions, Timeout, View, With,
 };
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{DistanceKind, Span, TokenKind, VectorTypeKind, t};
-use crate::val::Duration;
+use crate::types::PublicDuration;
 
 pub(crate) enum MissingKind {
 	Split,
@@ -450,7 +450,7 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects the parser to have already eating the `CHANGEFEED` keyword
 	pub fn parse_changefeed(&mut self) -> ParseResult<ChangeFeed> {
-		let expiry = self.next_token_value::<Duration>()?.0;
+		let expiry = self.next_token_value::<PublicDuration>()?;
 		let store_diff = if self.eat(t!("INCLUDE")) {
 			expected!(self, t!("ORIGINAL"));
 			true
@@ -504,9 +504,9 @@ impl Parser<'_> {
 		let fields = self.parse_fields(stk).await?;
 		let fields_span = before_fields.covers(self.recent_span());
 		expected!(self, t!("FROM"));
-		let mut from = vec![self.next_token_value()?];
+		let mut from = vec![self.parse_ident()?];
 		while self.eat(t!(",")) {
-			from.push(self.next_token_value()?);
+			from.push(self.parse_ident()?);
 		}
 
 		let cond = self.try_parse_condition(stk).await?;
@@ -533,8 +533,8 @@ impl Parser<'_> {
 					DistanceKind::Jaccard => Distance::Jaccard,
 
 					DistanceKind::Minkowski => {
-						let distance = self.next_token_value()?;
-						Distance::Minkowski(distance)
+						let distance: surrealdb_types::Number = self.next_token_value()?;
+						Distance::Minkowski(distance.into())
 					}
 					DistanceKind::Pearson => Distance::Pearson,
 				};
@@ -558,17 +558,17 @@ impl Parser<'_> {
 		}
 	}
 
-	pub fn parse_custom_function_name(&mut self) -> ParseResult<Ident> {
+	pub fn parse_custom_function_name(&mut self) -> ParseResult<String> {
 		expected!(self, t!("fn"));
 		expected!(self, t!("::"));
-		let mut name = self.next_token_value::<Ident>()?.into_string();
+		let mut name = self.parse_ident()?;
 		while self.eat(t!("::")) {
-			let part = self.next_token_value::<Ident>()?.into_string();
+			let part = self.parse_ident()?;
 			name.push_str("::");
 			name.push_str(part.as_str());
 		}
 		// Safety: Parser guarentees no null bytes.
-		Ok(unsafe { Ident::new_unchecked(name) })
+		Ok(name)
 	}
 	pub(super) fn try_parse_explain(&mut self) -> ParseResult<Option<Explain>> {
 		Ok(self.eat(t!("EXPLAIN")).then(|| Explain(self.eat(t!("FULL")))))
@@ -586,9 +586,9 @@ impl Parser<'_> {
 				With::NoIndex
 			}
 			t!("INDEX") => {
-				let mut index = vec![self.next_token_value::<Ident>()?.into_string()];
+				let mut index = vec![self.parse_ident()?];
 				while self.eat(t!(",")) {
-					index.push(self.next_token_value::<Ident>()?.into_string());
+					index.push(self.parse_ident()?);
 				}
 				With::Index(index)
 			}

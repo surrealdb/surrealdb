@@ -38,8 +38,7 @@ use crate::core::expr;
 pub(crate) fn resource_to_exprs(r: Resource) -> Vec<expr::Expr> {
 	match r {
 		Resource::Table(x) => {
-			// TODO: Null byte validity
-			vec![expr::Expr::Table(unsafe { expr::Ident::new_unchecked(x) })]
+			vec![expr::Expr::Table(x)]
 		}
 		Resource::RecordId(x) => {
 			vec![record_id_to_expr(x)]
@@ -78,7 +77,7 @@ fn record_id_to_expr(x: RecordId) -> expr::Expr {
 fn public_record_id_key_to_literal(x: RecordIdKey) -> expr::RecordIdKeyLit {
 	match x {
 		RecordIdKey::Number(n) => expr::RecordIdKeyLit::Number(n),
-		RecordIdKey::String(s) => expr::RecordIdKeyLit::String(crate::core::Strand::new_lossy(s)),
+		RecordIdKey::String(s) => expr::RecordIdKeyLit::String(s),
 		RecordIdKey::Uuid(u) => expr::RecordIdKeyLit::Uuid(crate::core::Uuid::from(u.0)),
 		RecordIdKey::Array(a) => expr::RecordIdKeyLit::Array(
 			a.inner().iter().cloned().map(|v| expr::Expr::from_public_value(v)).collect(),

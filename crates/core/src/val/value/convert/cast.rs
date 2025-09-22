@@ -12,7 +12,7 @@ use crate::syn;
 use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Null, Number, Object,
-	Range, RecordId, Regex, Strand, Uuid, Value,
+	Range, RecordId, Regex, SqlNone, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]
@@ -121,6 +121,22 @@ impl Cast for Value {
 	}
 }
 
+impl Cast for SqlNone {
+	fn can_cast(v: &Value) -> bool {
+		matches!(v, Value::None)
+	}
+
+	fn cast(v: Value) -> Result<Self, CastError> {
+		match v {
+			Value::None => Ok(SqlNone),
+			x => Err(CastError::InvalidKind {
+				from: x,
+				into: "none".to_string(),
+			}),
+		}
+	}
+}
+
 impl Cast for Null {
 	fn can_cast(v: &Value) -> bool {
 		matches!(v, Value::Null)
@@ -141,7 +157,7 @@ impl Cast for bool {
 	fn can_cast(v: &Value) -> bool {
 		match v {
 			Value::Bool(_) => true,
-			Value::Strand(x) => matches!(x.as_str(), "true" | "false"),
+			Value::String(x) => matches!(x.as_str(), "true" | "false"),
 			_ => false,
 		}
 	}
@@ -149,11 +165,11 @@ impl Cast for bool {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Bool(b) => Ok(b),
-			Value::Strand(x) => match x.as_str() {
+			Value::String(x) => match x.as_str() {
 				"true" => Ok(true),
 				"false" => Ok(false),
 				_ => Err(CastError::InvalidKind {
-					from: Value::Strand(x),
+					from: Value::String(x),
 					into: "bool".to_string(),
 				}),
 			},
@@ -171,7 +187,7 @@ impl Cast for i64 {
 			Value::Number(Number::Int(_)) => true,
 			Value::Number(Number::Float(v)) => v.fract() == 0.0,
 			Value::Number(Number::Decimal(v)) => v.is_integer() || i64::try_from(*v).is_ok(),
-			Value::Strand(v) => v.parse::<i64>().is_ok(),
+			Value::String(v) => v.parse::<i64>().is_ok(),
 			_ => false,
 		}
 	}
@@ -191,7 +207,7 @@ impl Cast for i64 {
 				}),
 			},
 			// Attempt to convert a string value
-			Value::Strand(ref s) => match s.parse::<i64>() {
+			Value::String(ref s) => match s.parse::<i64>() {
 				Ok(v) => Ok(v),
 				_ => Err(CastError::InvalidKind {
 					from: v,
@@ -211,7 +227,7 @@ impl Cast for f64 {
 		match v {
 			Value::Number(Number::Int(_) | Number::Float(_)) => true,
 			Value::Number(Number::Decimal(v)) => v.is_integer() || i64::try_from(*v).is_ok(),
-			Value::Strand(v) => v.parse::<f64>().is_ok(),
+			Value::String(v) => v.parse::<f64>().is_ok(),
 			_ => false,
 		}
 	}
@@ -230,7 +246,7 @@ impl Cast for f64 {
 				}),
 			},
 			// Attempt to convert a string value
-			Value::Strand(ref s) => match s.parse::<f64>() {
+			Value::String(ref s) => match s.parse::<f64>() {
 				// The string can be parsed as a Float
 				Ok(v) => Ok(v),
 				// This string is not a float
@@ -252,7 +268,7 @@ impl Cast for Decimal {
 	fn can_cast(v: &Value) -> bool {
 		match v {
 			Value::Number(_) => true,
-			Value::Strand(v) => v.parse::<f64>().is_ok(),
+			Value::String(v) => v.parse::<f64>().is_ok(),
 			_ => false,
 		}
 	}
@@ -273,7 +289,7 @@ impl Cast for Decimal {
 				}),
 			},
 			// Attempt to convert a string value
-			Value::Strand(ref s) => match Decimal::from_str_normalized(s) {
+			Value::String(ref s) => match Decimal::from_str_normalized(s) {
 				// The string can be parsed as a Decimal
 				Ok(v) => Ok(v),
 				// This string is not a Decimal
@@ -295,7 +311,7 @@ impl Cast for Number {
 	fn can_cast(v: &Value) -> bool {
 		match v {
 			Value::Number(_) => true,
-			Value::Strand(s) => Number::from_str(s).is_ok(),
+			Value::String(s) => Number::from_str(s).is_ok(),
 			_ => false,
 		}
 	}
@@ -303,7 +319,7 @@ impl Cast for Number {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Number(v) => Ok(v),
-			Value::Strand(ref s) => Number::from_str(s).map_err(|_| CastError::InvalidKind {
+			Value::String(ref s) => Number::from_str(s).map_err(|_| CastError::InvalidKind {
 				from: v,
 				into: "number".into(),
 			}),
@@ -316,11 +332,11 @@ impl Cast for Number {
 	}
 }
 
-impl Cast for Strand {
+impl Cast for String {
 	fn can_cast(v: &Value) -> bool {
 		match v {
 			Value::None | Value::Null => false,
-			Value::Bytes(b) => !b.contains(&0) && std::str::from_utf8(b).is_ok(),
+			Value::Bytes(b) => std::str::from_utf8(b).is_ok(),
 			_ => true,
 		}
 	}
@@ -328,44 +344,21 @@ impl Cast for Strand {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Bytes(b) => match String::from_utf8(b.0) {
-				Ok(x) => {
-					if x.contains('\0') {
-						Err(CastError::InvalidKind {
-							from: Value::Bytes(Bytes(x.into_bytes())),
-							into: "string".to_owned(),
-						})
-					} else {
-						// Safety: Condition checked above.
-						Ok(unsafe { Strand::new_unchecked(x) })
-					}
-				}
+				Ok(x) => Ok(x),
 				Err(e) => Err(CastError::InvalidKind {
 					from: Value::Bytes(Bytes(e.into_bytes())),
 					into: "string".to_owned(),
 				}),
 			},
 
-			Value::Null | Value::None => Err(CastError::InvalidKind {
-				from: v,
-				into: "string".into(),
-			}),
-
-			Value::Strand(x) => Ok(x),
-			Value::Uuid(x) => Ok(x.to_raw().into()),
-			Value::Datetime(x) => Ok(x.into_raw_string().into()),
-			// TODO: Handle null bytes
-			x => Ok(unsafe { Strand::new_unchecked(x.to_string()) }),
+			Value::Null => Ok("NULL".into()),
+			Value::None => Ok("NONE".into()),
+			Value::String(x) => Ok(x),
+			Value::Uuid(x) => Ok(x.to_raw()),
+			Value::Datetime(x) => Ok(x.into_raw_string()),
+			Value::Number(Number::Decimal(x)) => Ok(x.to_string()),
+			x => Ok(x.to_string()),
 		}
-	}
-}
-
-impl Cast for String {
-	fn can_cast(v: &Value) -> bool {
-		Strand::can_cast(v)
-	}
-
-	fn cast(v: Value) -> Result<Self, CastError> {
-		Strand::cast(v).map(|x| x.into_string())
 	}
 }
 
@@ -373,7 +366,7 @@ impl Cast for Uuid {
 	fn can_cast(v: &Value) -> bool {
 		match v {
 			Value::Uuid(_) => true,
-			Value::Strand(s) => Uuid::from_str(s).is_ok(),
+			Value::String(s) => Uuid::from_str(s).is_ok(),
 			_ => false,
 		}
 	}
@@ -381,7 +374,7 @@ impl Cast for Uuid {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Uuid(u) => Ok(u),
-			Value::Strand(ref s) => Uuid::from_str(s).map_err(|_| CastError::InvalidKind {
+			Value::String(ref s) => Uuid::from_str(s).map_err(|_| CastError::InvalidKind {
 				from: v,
 				into: "uuid".into(),
 			}),
@@ -397,7 +390,7 @@ impl Cast for Datetime {
 	fn can_cast(v: &Value) -> bool {
 		match v {
 			Value::Datetime(_) => true,
-			Value::Strand(s) => Datetime::from_str(s).is_ok(),
+			Value::String(s) => Datetime::from_str(s).is_ok(),
 			_ => false,
 		}
 	}
@@ -407,7 +400,7 @@ impl Cast for Datetime {
 			// Datetimes are allowed
 			Value::Datetime(v) => Ok(v),
 			// Attempt to parse a string
-			Value::Strand(ref s) => Datetime::from_str(s).map_err(|_| CastError::InvalidKind {
+			Value::String(ref s) => Datetime::from_str(s).map_err(|_| CastError::InvalidKind {
 				from: v,
 				into: "datetime".into(),
 			}),
@@ -424,7 +417,7 @@ impl Cast for Duration {
 	fn can_cast(v: &Value) -> bool {
 		match v {
 			Value::Duration(_) => true,
-			Value::Strand(s) => Duration::from_str(s).is_ok(),
+			Value::String(s) => Duration::from_str(s).is_ok(),
 			_ => false,
 		}
 	}
@@ -434,7 +427,7 @@ impl Cast for Duration {
 			// Datetimes are allowed
 			Value::Duration(v) => Ok(v),
 			// Attempt to parse a string
-			Value::Strand(ref s) => Duration::from_str(s).map_err(|_| CastError::InvalidKind {
+			Value::String(ref s) => Duration::from_str(s).map_err(|_| CastError::InvalidKind {
 				from: v,
 				into: "duration".into(),
 			}),
@@ -450,7 +443,7 @@ impl Cast for Duration {
 impl Cast for Bytes {
 	fn can_cast(v: &Value) -> bool {
 		match v {
-			Value::Bytes(_) | Value::Strand(_) => true,
+			Value::Bytes(_) | Value::String(_) => true,
 			Value::Array(x) => x.iter().all(|x| x.can_cast_to::<i64>()),
 			_ => false,
 		}
@@ -459,7 +452,7 @@ impl Cast for Bytes {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Bytes(b) => Ok(b),
-			Value::Strand(s) => Ok(Bytes(s.into_string().into_bytes())),
+			Value::String(s) => Ok(Bytes(s.into_bytes())),
 			Value::Array(x) => {
 				// Optimization to check first if the conversion can succeed to avoid possibly
 				// cloning large values.
@@ -532,7 +525,7 @@ impl Cast for Regex {
 	fn can_cast(v: &Value) -> bool {
 		match v {
 			Value::Regex(_) => true,
-			Value::Strand(x) => Regex::from_str(x).is_ok(),
+			Value::String(x) => Regex::from_str(x).is_ok(),
 			_ => false,
 		}
 	}
@@ -540,10 +533,10 @@ impl Cast for Regex {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Regex(x) => Ok(x),
-			Value::Strand(x) => match Regex::from_str(&x) {
+			Value::String(x) => match Regex::from_str(&x) {
 				Ok(x) => Ok(x),
 				Err(_) => Err(CastError::InvalidKind {
-					from: Value::Strand(x),
+					from: Value::String(x),
 					into: "regex".to_string(),
 				}),
 			},
@@ -641,7 +634,7 @@ impl Cast for RecordId {
 	fn can_cast(v: &Value) -> bool {
 		match v {
 			Value::RecordId(_) => true,
-			Value::Strand(x) => syn::record_id(x).is_ok(),
+			Value::String(x) => syn::record_id(x).is_ok(),
 			_ => false,
 		}
 	}
@@ -649,10 +642,10 @@ impl Cast for RecordId {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::RecordId(x) => Ok(x),
-			Value::Strand(x) => match syn::record_id(&x) {
-				Ok(x) => Ok(x),
+			Value::String(x) => match syn::record_id(&x) {
+				Ok(x) => Ok(x.into()),
 				Err(_) => Err(CastError::InvalidKind {
-					from: Value::Strand(x),
+					from: Value::String(x),
 					into: "record".to_string(),
 				}),
 			},
@@ -711,13 +704,14 @@ impl Value {
 	pub fn can_cast_to_kind(&self, kind: &Kind) -> bool {
 		match kind {
 			Kind::Any => true,
+			Kind::None => self.can_cast_to::<SqlNone>(),
 			Kind::Null => self.can_cast_to::<Null>(),
 			Kind::Bool => self.can_cast_to::<bool>(),
 			Kind::Int => self.can_cast_to::<i64>(),
 			Kind::Float => self.can_cast_to::<f64>(),
 			Kind::Decimal => self.can_cast_to::<Decimal>(),
 			Kind::Number => self.can_cast_to::<Number>(),
-			Kind::String => self.can_cast_to::<Strand>(),
+			Kind::String => self.can_cast_to::<String>(),
 			Kind::Datetime => self.can_cast_to::<Datetime>(),
 			Kind::Duration => self.can_cast_to::<Duration>(),
 			Kind::Object => self.can_cast_to::<Object>(),
@@ -748,10 +742,6 @@ impl Value {
 					self.can_cast_to_geometry(t)
 				}
 			}
-			Kind::Option(k) => match self {
-				Self::None => true,
-				v => v.can_cast_to_kind(k),
-			},
 			Kind::Either(k) => k.iter().any(|x| self.can_cast_to_kind(x)),
 			Kind::Literal(lit) => self.can_cast_to_literal(lit),
 			Kind::File(buckets) => {
@@ -806,13 +796,14 @@ impl Value {
 		// Attempt to convert to the desired type
 		match kind {
 			Kind::Any => Ok(self),
+			Kind::None => self.cast_to::<SqlNone>().map(|_| Value::None),
 			Kind::Null => self.cast_to::<Null>().map(|_| Value::Null),
 			Kind::Bool => self.cast_to::<bool>().map(Value::from),
 			Kind::Int => self.cast_to::<i64>().map(Value::from),
 			Kind::Float => self.cast_to::<f64>().map(Value::from),
 			Kind::Decimal => self.cast_to::<Decimal>().map(Value::from),
 			Kind::Number => self.cast_to::<Number>().map(Value::from),
-			Kind::String => self.cast_to::<Strand>().map(Value::from),
+			Kind::String => self.cast_to::<String>().map(Value::from),
 			Kind::Datetime => self.cast_to::<Datetime>().map(Value::from),
 			Kind::Duration => self.cast_to::<Duration>().map(Value::from),
 			Kind::Object => self.cast_to::<Object>().map(Value::from),
@@ -836,10 +827,6 @@ impl Value {
 			Kind::Geometry(t) => match t.is_empty() {
 				true => self.cast_to::<Geometry>().map(Value::from),
 				false => self.cast_to_geometry(t).map(Value::from),
-			},
-			Kind::Option(k) => match self {
-				Self::None => Ok(Self::None),
-				v => v.cast_to_kind(k),
 			},
 			Kind::Either(k) => {
 				let Some(k) = k.iter().find(|x| self.can_cast_to_kind(x)) else {
@@ -881,8 +868,8 @@ impl Value {
 	fn cast_to_record(self, val: &[String]) -> Result<RecordId, CastError> {
 		match self {
 			Value::RecordId(v) if v.is_record_type(val) => Ok(v),
-			Value::Strand(v) => match syn::record_id(v.as_str()) {
-				Ok(x) if x.is_record_type(val) => Ok(x),
+			Value::String(v) => match syn::record_id(v.as_str()) {
+				Ok(x) if x.is_record_type(val) => Ok(x.into()),
 				_ => {
 					let mut kind = "record<".to_string();
 					for (idx, t) in val.iter().enumerate() {
@@ -894,7 +881,7 @@ impl Value {
 					kind.push('>');
 
 					Err(CastError::InvalidKind {
-						from: Value::Strand(v),
+						from: Value::String(v),
 						into: kind,
 					})
 				}

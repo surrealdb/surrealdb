@@ -1,5 +1,6 @@
 use std::fmt::{self, Display};
 use std::ops::{Deref, DerefMut};
+use std::str::FromStr;
 
 use revision::Revisioned;
 use serde::{Deserialize, Serialize};
@@ -84,6 +85,14 @@ impl TryFrom<String> for Uuid {
 
 	fn try_from(v: String) -> Result<Self, Self::Error> {
 		Ok(Self(uuid::Uuid::parse_str(&v)?))
+	}
+}
+
+impl FromStr for Uuid {
+	type Err = uuid::Error;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		uuid::Uuid::try_parse(s).map(Uuid)
 	}
 }
 

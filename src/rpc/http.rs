@@ -6,7 +6,7 @@ use crate::cnf::{PKG_NAME, PKG_VERSION};
 use crate::core::dbs::Session;
 use crate::core::kvs::Datastore;
 use crate::core::rpc::{DbResult, RpcContext, RpcError, RpcProtocolV1, RpcProtocolV2};
-use crate::core::val::{Array, Strand, Value};
+use crate::core::val::{Array, Value};
 
 //use crate::core::gql::{Pessimistic, SchemaCache};
 
@@ -47,7 +47,7 @@ impl RpcContext for Http {
 	}
 	/// The version information for this RPC context
 	fn version_data(&self) -> DbResult {
-		let value = Value::from(Strand::new(format!("{PKG_NAME}-{}", *PKG_VERSION)).unwrap());
+		let value = Value::from(format!("{PKG_NAME}-{}", *PKG_VERSION));
 		DbResult::Other(value)
 	}
 

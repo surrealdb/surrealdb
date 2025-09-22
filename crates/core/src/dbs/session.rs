@@ -5,7 +5,7 @@ use chrono::Utc;
 use crate::dbs::Variables;
 use crate::iam::{Auth, Level, Role};
 use crate::types::PublicVariables;
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 /// Specifies the current session information when processing a query.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -86,18 +86,17 @@ impl Session {
 	}
 
 	pub(crate) fn values(&self) -> Vec<(&'static str, Value)> {
-		// TODO: Null byte validity.
-		let access = self.ac.clone().map(|x| Strand::new(x).unwrap().into()).unwrap_or(Value::None);
+		let access = self.ac.clone().map(|x| x.into()).unwrap_or(Value::None);
 		let auth = self.rd.clone().unwrap_or(Value::None);
 		let token = self.tk.clone().unwrap_or(Value::None);
 		let session = Value::from(map! {
 			"ac".to_string() => access.clone(),
 			"exp".to_string() => self.exp.map(Value::from).unwrap_or(Value::None),
-			"db".to_string() => self.db.clone().map(|x| Strand::new(x).unwrap().into()).unwrap_or(Value::None),
-			"id".to_string() => self.id.clone().map(|x| Strand::new(x).unwrap().into()).unwrap_or(Value::None),
-			"ip".to_string() => self.ip.clone().map(|x| Strand::new(x).unwrap().into()).unwrap_or(Value::None),
-			"ns".to_string() => self.ns.clone().map(|x| Strand::new(x).unwrap().into()).unwrap_or(Value::None),
-			"or".to_string() => self.or.clone().map(|x| Strand::new(x).unwrap().into()).unwrap_or(Value::None),
+			"db".to_string() => self.db.clone().map(|x| x.into()).unwrap_or(Value::None),
+			"id".to_string() => self.id.clone().map(|x| x.into()).unwrap_or(Value::None),
+			"ip".to_string() => self.ip.clone().map(|x| x.into()).unwrap_or(Value::None),
+			"ns".to_string() => self.ns.clone().map(|x| x.into()).unwrap_or(Value::None),
+			"or".to_string() => self.or.clone().map(|x| x.into()).unwrap_or(Value::None),
 			"rd".to_string() => auth.clone(),
 			"tk".to_string() => token.clone(),
 		});

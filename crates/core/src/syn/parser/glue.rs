@@ -2,7 +2,8 @@
 use super::{GluedValue, ParseResult, Parser};
 use crate::syn::lexer::compound;
 use crate::syn::token::{Glued, Token, TokenKind, t};
-use crate::val::{Datetime, Duration, Strand, Uuid};
+use crate::types::{PublicDatetime, PublicDuration, PublicUuid};
+use crate::val::{Datetime, Duration, Uuid};
 
 impl Parser<'_> {
 	/// Glues the next token and returns the token after.
@@ -50,7 +51,7 @@ impl Parser<'_> {
 						});
 					}
 					compound::NumericKind::Duration(x) => {
-						self.glued_value = GluedValue::Duration(Duration(x));
+						self.glued_value = GluedValue::Duration(PublicDuration::from(x));
 						self.prepend_token(Token {
 							span: value.span,
 							kind: TokenKind::Glued(Glued::Duration),
@@ -84,7 +85,7 @@ impl Parser<'_> {
 						});
 					}
 					compound::NumericKind::Duration(x) => {
-						self.glued_value = GluedValue::Duration(Duration(x));
+						self.glued_value = GluedValue::Duration(PublicDuration::from(x));
 						self.prepend_token(Token {
 							span: value.span,
 							kind: TokenKind::Glued(Glued::Duration),
@@ -95,20 +96,17 @@ impl Parser<'_> {
 			t!("\"") | t!("'") => {
 				self.pop_peek();
 				let value = self.lexer.lex_compound(token, compound::strand)?;
-				// SAFETY: Lexer ensures that no null bytes are present in the string in
-				// value.value
-				self.glued_value =
-					GluedValue::Strand(unsafe { Strand::new_unchecked(value.value) });
+				self.glued_value = GluedValue::String(value.value);
 				self.prepend_token(Token {
 					span: value.span,
-					kind: TokenKind::Glued(Glued::Strand),
+					kind: TokenKind::Glued(Glued::String),
 				});
 				return Ok(self.peek1());
 			}
 			t!("d\"") | t!("d'") => {
 				self.pop_peek();
 				let value = self.lexer.lex_compound(token, compound::datetime)?;
-				self.glued_value = GluedValue::Datetime(Datetime(value.value));
+				self.glued_value = GluedValue::Datetime(PublicDatetime::from(value.value));
 				self.prepend_token(Token {
 					span: value.span,
 					kind: TokenKind::Glued(Glued::Datetime),
@@ -117,7 +115,7 @@ impl Parser<'_> {
 			t!("u\"") | t!("u'") => {
 				self.pop_peek();
 				let value = self.lexer.lex_compound(token, compound::uuid)?;
-				self.glued_value = GluedValue::Uuid(Uuid(value.value));
+				self.glued_value = GluedValue::Uuid(PublicUuid::from(value.value));
 				self.prepend_token(Token {
 					span: value.span,
 					kind: TokenKind::Glued(Glued::Uuid),

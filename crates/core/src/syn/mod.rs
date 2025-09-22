@@ -130,7 +130,7 @@ pub fn expr_with_capabilities(input: &str, capabilities: &Capabilities) -> Resul
 
 /// Parses JSON into an inert SurrealQL [`Value`]
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn json(input: &str) -> Result<Value> {
+pub fn json(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing inert JSON value");
 
 	parse_with(input.as_bytes(), async |parser, stk| parser.parse_json(stk).await)
@@ -322,7 +322,7 @@ pub fn json_legacy_strand(input: &str) -> Result<PublicValue> {
 
 /// Parse a kind from a string.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn kind(input: &str) -> Result<PublicKind> {
+pub fn kind(input: &str) -> Result<Kind> {
 	trace!(target: TARGET, "Parsing SurrealQL duration");
 
 	parse_with(input.as_bytes(), async |parser, stk| parser.parse_inner_kind(stk).await)

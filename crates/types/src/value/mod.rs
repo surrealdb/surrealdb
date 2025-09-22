@@ -10,6 +10,8 @@ pub mod duration;
 pub mod file;
 /// Geometric value types for SurrealDB
 pub mod geometry;
+/// JSON value types for SurrealDB
+pub mod into_json;
 /// Numeric value types for SurrealDB
 pub mod number;
 /// Object value types for SurrealDB

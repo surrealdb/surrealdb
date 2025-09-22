@@ -47,6 +47,7 @@ pub mod env;
 pub mod err;
 pub mod expr;
 //pub mod gql;
+mod fmt;
 pub mod iam;
 pub mod idx;
 pub mod kvs;
@@ -62,7 +63,7 @@ mod val;
 pub mod vs;
 
 // Re-export types needed by SDK
-pub use val::{Strand, Uuid};
+pub use val::Uuid;
 
 pub(crate) mod types {
 	//! Re-export the types from the types crate for internal use.

@@ -15,8 +15,8 @@ use crate::types::{
 	PublicUuid, PublicValue,
 };
 use crate::val::{
-	self, Array, DecimalExt, Geometry, Number, Object, Range, RecordIdKey, RecordIdKeyRange, Table,
-	Uuid, Value,
+	self, Array, Datetime, DecimalExt, Geometry, Number, Object, Range, RecordIdKey,
+	RecordIdKeyRange, Table, Uuid, Value,
 };
 
 // Tags from the spec - https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
@@ -106,8 +106,8 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 				TAG_NONE => Ok(PublicValue::None),
 				// A literal uuid
 				TAG_STRING_UUID => match *v {
-					CborValue::Text(v) => match PublicUuid::try_from(v) {
-						Ok(v) => Ok(PublicValue::Uuid(v.into())),
+					CborValue::Text(v) => match v.parse::<PublicUuid>() {
+						Ok(v) => Ok(PublicValue::Uuid(v)),
 						_ => Err(anyhow!("Expected a valid UUID value")),
 					},
 					_ => Err(anyhow!("Expected a CBOR text data type")),
@@ -126,7 +126,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 				TAG_STRING_DURATION => match *v {
 					CborValue::Text(v) => match v.parse::<PublicDuration>() {
 						Ok(v) => Ok(PublicValue::Duration(v)),
-						_ => Err(anyhow!("Expected a valid val::Duration value")),
+						_ => Err(anyhow!("Expected a valid Duration value")),
 					},
 					_ => Err(anyhow!("Expected a CBOR text data type")),
 				},
@@ -166,10 +166,14 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 							"Expected a CBOR text data type, or a CBOR array with 2 elements"
 						);
 						let mut v = v.into_iter();
-						let table = v.next().ok_or(err)?;
-						let key = v.next().ok_or(err)?;
+						let table = v.next().context(
+							"Expected a CBOR text data type, or a CBOR array with 2 elements: got empty array",
+						)?;
+						let key = v.next().context("Expected a CBOR text data type, or a CBOR array with 2 elements: got array with only one element")?;
 						if v.next().is_some() {
-							return Err(err);
+							return Err(anyhow!(
+								"Expected a CBOR text data type, or a CBOR array with 2 elements: got array with more than two elements"
+							));
 						}
 
 						let table = to_value(table)?.as_string()?;
@@ -187,7 +191,6 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 				},
 				// A literal table
 				TAG_TABLE => match *v {
-					// TODO: Null byte validitY
 					CborValue::Text(v) => Ok(PublicValue::String(v)),
 					_ => Err(anyhow!("Expected a CBOR text data type")),
 				},
@@ -195,12 +198,12 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 				TAG_RANGE => Ok(PublicValue::Range(Box::new(to_range(*v)?))),
 				TAG_GEOMETRY_POINT => match *v {
 					CborValue::Array(v) => {
-						let err = anyhow!("Expected a CBOR array with 2 decimal values");
+						let err_msg = "Expected a CBOR array with 2 decimal values";
 						let mut iter = v.into_iter();
-						let x = iter.next().ok_or(err)?;
-						let y = iter.next().ok_or(err)?;
+						let x = iter.next().ok_or_else(|| anyhow!(err_msg))?;
+						let y = iter.next().ok_or_else(|| anyhow!(err_msg))?;
 						if iter.next().is_some() {
-							return Err(err);
+							return Err(anyhow!(err_msg));
 						};
 
 						let x = to_value(x)?;

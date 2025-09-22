@@ -14,7 +14,6 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement};
 use crate::err::Error;
-use crate::expr::Ident;
 use crate::expr::dir::Dir;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
@@ -87,7 +86,7 @@ pub(super) enum Collected {
 		o: Option<Value>,
 	},
 	RecordId(RecordId),
-	Yield(Ident),
+	Yield(String),
 	Value(Value),
 	Defer(RecordId),
 	Mergeable(RecordId, Value),
@@ -296,7 +295,7 @@ impl Collected {
 		Ok(pro)
 	}
 
-	async fn process_yield(v: Ident) -> Result<Processed> {
+	async fn process_yield(v: String) -> Result<Processed> {
 		// Pass the value through
 		let pro = Processed {
 			rs: RecordStrategy::KeysAndValues,
@@ -312,8 +311,8 @@ impl Collected {
 		// Try to extract the id field if present and parse as Thing
 		let rid = match &v {
 			Value::Object(obj) => match obj.get("id") {
-				Some(Value::Strand(strand)) => {
-					syn::record_id(strand.as_str()).ok().map(|v| Arc::new(RecordId::from(v)))
+				Some(Value::String(strand)) => {
+					syn::record_id(strand.as_str()).ok().map(|rid| Arc::new(rid.into()))
 				}
 				Some(Value::RecordId(record_id)) => Some(Arc::new(record_id.clone())),
 				_ => None,
@@ -496,9 +495,9 @@ pub(super) trait Collector {
 
 	fn iterator(&mut self) -> &mut Iterator;
 
-	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b Ident) -> Cow<'b, Context> {
+	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b str) -> Cow<'b, Context> {
 		if let Some(qp) = ctx.get_query_planner() {
-			if let Some(exe) = qp.get_query_executor(table.as_str()) {
+			if let Some(exe) = qp.get_query_executor(table) {
 				// Optimize executor lookup:
 				// - Attach the table-specific QueryExecutor to the Context once, so subsequent
 				//   per-record processing doesn’t need to search the QueryPlanner’s internal map on
@@ -641,7 +640,7 @@ pub(super) trait Collector {
 		&mut self,
 		ctx: &Context,
 		opt: &Options,
-		v: &Ident,
+		v: &str,
 		sc: ScanDirection,
 	) -> Result<()> {
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
@@ -649,7 +648,7 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		txn.check_tb(ns, db, v.as_str(), opt.strict).await?;
+		txn.check_tb(ns, db, v, opt.strict).await?;
 
 		// Prepare the start and end keys
 		let beg = record::prefix(ns, db, v)?;
@@ -683,7 +682,7 @@ pub(super) trait Collector {
 		&mut self,
 		ctx: &Context,
 		opt: &Options,
-		v: &Ident,
+		v: &str,
 		sc: ScanDirection,
 	) -> Result<()> {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
@@ -691,7 +690,7 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		txn.check_tb(ns, db, v.as_str(), opt.strict).await?;
+		txn.check_tb(ns, db, v, opt.strict).await?;
 
 		// Prepare the start and end keys
 		let beg = record::prefix(ns, db, v)?;
@@ -723,13 +722,13 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
-	async fn collect_table_count(&mut self, ctx: &Context, opt: &Options, v: &Ident) -> Result<()> {
+	async fn collect_table_count(&mut self, ctx: &Context, opt: &Options, v: &str) -> Result<()> {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		txn.check_tb(ns, db, v.as_str(), opt.strict).await?;
+		txn.check_tb(ns, db, v, opt.strict).await?;
 
 		let beg = record::prefix(ns, db, v)?;
 		let end = record::suffix(ns, db, v)?;

@@ -5,7 +5,7 @@
 value = "[true, false, false, false]"
 
 [[test.results]]
-value = "[1, 0, false, 0]"
+value = "[true, 0, false, 0]"
 
 [[test.results]]
 value = "[0, NULL]"

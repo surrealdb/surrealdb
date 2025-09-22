@@ -3,7 +3,6 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str::FromStr;
 
-use md5::{Digest, Md5};
 use reblessive::Stack;
 use reblessive::tree::Stk;
 use revision::Revisioned;
@@ -11,11 +10,11 @@ use revision::Revisioned;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::fmt::Fmt;
 use crate::expr::part::{Next, NextMethod};
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{FlowResult, Ident, Part, Value};
+use crate::expr::{FlowResult, Part, Value};
+use crate::fmt::{EscapeIdent, Fmt};
 
 pub mod recursion;
 
@@ -68,7 +67,7 @@ impl From<Vec<Part>> for Idiom {
 
 impl Idiom {
 	/// Returns an idiom for a field of the given name.
-	pub fn field(field_name: Ident) -> Self {
+	pub fn field(field_name: String) -> Self {
 		Idiom(vec![Part::Field(field_name)])
 	}
 
@@ -77,13 +76,6 @@ impl Idiom {
 		self.0.push(n);
 		self
 	}
-	/// Convert this Idiom to a unique hash
-	pub(crate) fn to_hash(&self) -> String {
-		let mut hasher = Md5::new();
-		hasher.update(self.to_string().as_str());
-		format!("{:x}", hasher.finalize())
-	}
-
 	/// Simplifies this Idiom for use in object keys
 	pub(crate) fn simplify(&self) -> Idiom {
 		self.0
@@ -120,7 +112,7 @@ impl Idiom {
 
 		let mut iter = self.0.iter();
 		match iter.next() {
-			Some(Part::Field(v)) => s.push_str(&v.to_raw_string()),
+			Some(Part::Field(v)) => s.push_str(&v.clone()),
 			Some(x) => s.push_str(&x.to_raw_string()),
 			None => {}
 		};
@@ -180,9 +172,8 @@ impl Idiom {
 impl Display for Idiom {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let mut iter = self.0.iter();
-		// TODO: Look at why the first Part::Field is formatted differently.
 		match iter.next() {
-			Some(Part::Field(v)) => v.fmt(f)?,
+			Some(Part::Field(v)) => EscapeIdent(v).fmt(f)?,
 			Some(x) => x.fmt(f)?,
 			None => {}
 		};
@@ -319,22 +310,21 @@ mod tests {
 	use rstest::rstest;
 
 	use super::*;
-	use crate::val::Strand;
 
 	#[rstest]
-	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("name".to_string())))]), "name")]
-	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("name".to_string())))]), "nested.nested.name")]
-	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("value".to_string())))]), "nested.nested.`value`")]
-	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("value".to_string())))]), "`value`")]
+	#[case(Idiom::from(vec![Part::Field("name".to_string())]), "name")]
+	#[case(Idiom::from(vec![Part::Field("nested".to_string()), Part::Field("nested".to_string()), Part::Field("name".to_string())]), "nested.nested.name")]
+	#[case(Idiom::from(vec![Part::Field("nested".to_string()), Part::Field("nested".to_string()), Part::Field("value".to_string())]), "nested.nested.value")]
+	#[case(Idiom::from(vec![Part::Field("value".to_string())]), "`value`")]
 	fn test_idiom_to_string(#[case] idiom: Idiom, #[case] expected: &'static str) {
 		assert_eq!(idiom.to_string(), expected.to_string());
 	}
 
 	#[rstest]
-	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("name".to_string())))]), "name")]
-	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("name".to_string())))]), "nested.nested.name")]
-	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("nested".to_string()))), Part::Field(Ident::from_strand(Strand::new_lossy("value".to_string())))]), "nested.nested.value")]
-	#[case(Idiom::from(vec![Part::Field(Ident::from_strand(Strand::new_lossy("value".to_string())))]), "value")]
+	#[case(Idiom::from(vec![Part::Field("name".to_string())]), "name")]
+	#[case(Idiom::from(vec![Part::Field("nested".to_string()), Part::Field("nested".to_string()), Part::Field("name".to_string())]), "nested.nested.name")]
+	#[case(Idiom::from(vec![Part::Field("nested".to_string()), Part::Field("nested".to_string()), Part::Field("value".to_string())]), "nested.nested.value")]
+	#[case(Idiom::from(vec![Part::Field("value".to_string())]), "value")]
 	fn test_idiom_to_raw_string(#[case] idiom: Idiom, #[case] expected: &'static str) {
 		assert_eq!(idiom.to_raw_string(), expected.to_string());
 	}

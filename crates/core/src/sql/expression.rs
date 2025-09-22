@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::sql::fmt::Pretty;
+use crate::fmt::{EscapeIdent, Pretty};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::operator::BindingPower;
 use crate::sql::statements::{
@@ -10,10 +10,13 @@ use crate::sql::statements::{
 	UpdateStatement, UpsertStatement,
 };
 use crate::sql::{
-	BinaryOperator, Block, Closure, Constant, FunctionCall, Ident, Idiom, Literal, Mock, Param,
+	BinaryOperator, Block, Closure, Constant, FunctionCall, Idiom, Literal, Mock, Param,
 	PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
-use crate::types::{PublicNumber, PublicValue};
+use crate::types::{
+	PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicNumber, PublicRegex, PublicUuid,
+	PublicValue,
+};
 use crate::val::{Number, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -23,7 +26,7 @@ pub enum Expr {
 
 	Param(Param),
 	Idiom(Idiom),
-	Table(Ident),
+	Table(String),
 	Mock(Mock),
 	// TODO(3.0) maybe unbox? check size.
 	Block(Box<Block>),
@@ -72,15 +75,14 @@ impl Expr {
 	pub(crate) fn to_idiom(&self) -> Idiom {
 		match self {
 			Expr::Idiom(i) => i.simplify(),
-			Expr::Param(i) => Idiom::field(i.clone().ident()),
+			Expr::Param(i) => Idiom::field(i.clone().into_string()),
 			Expr::FunctionCall(x) => x.receiver.to_idiom(),
 			Expr::Literal(l) => match l {
-				Literal::Strand(s) => Idiom::field(Ident::from_strand(s.clone())),
-				// TODO: Null byte validity
-				Literal::Datetime(d) => Idiom::field(Ident::new(d.into_raw_string()).unwrap()),
-				x => Idiom::field(Ident::new(x.to_string()).unwrap()),
+				Literal::String(s) => Idiom::field(s.clone()),
+				Literal::Datetime(d) => Idiom::field(d.to_string()),
+				x => Idiom::field(x.to_string()),
 			},
-			x => Idiom::field(Ident::new(x.to_string()).unwrap()),
+			x => Idiom::field(x.to_string()),
 		}
 	}
 
@@ -92,11 +94,11 @@ impl Expr {
 			PublicValue::Number(PublicNumber::Float(x)) => Expr::Literal(Literal::Float(x)),
 			PublicValue::Number(PublicNumber::Int(x)) => Expr::Literal(Literal::Integer(x)),
 			PublicValue::Number(PublicNumber::Decimal(x)) => Expr::Literal(Literal::Decimal(x)),
-			PublicValue::String(x) => Expr::Literal(Literal::Strand(crate::val::Strand::from(x))),
+			PublicValue::String(x) => Expr::Literal(Literal::String(x)),
 			PublicValue::Bytes(x) => {
-				Expr::Literal(Literal::Bytes(crate::val::Bytes(x.inner().clone())))
+				Expr::Literal(Literal::Bytes(PublicBytes::from(x.into_inner())))
 			}
-			PublicValue::Regex(x) => Expr::Literal(Literal::Regex(crate::val::Regex(x.0))),
+			PublicValue::Regex(x) => Expr::Literal(Literal::Regex(PublicRegex::from(x))),
 			PublicValue::RecordId(x) => Expr::Literal(Literal::RecordId(RecordIdLit {
 				table: x.table.clone(),
 				key: RecordIdKeyLit::from_record_id_key(x.key),
@@ -113,19 +115,17 @@ impl Expr {
 					.collect(),
 			)),
 			PublicValue::Duration(x) => {
-				Expr::Literal(Literal::Duration(crate::val::Duration(x.inner())))
+				Expr::Literal(Literal::Duration(PublicDuration::from(x.inner())))
 			}
 			PublicValue::Datetime(x) => {
-				Expr::Literal(Literal::Datetime(crate::val::Datetime(x.inner())))
+				Expr::Literal(Literal::Datetime(PublicDatetime::from(x.inner())))
 			}
-			PublicValue::Uuid(x) => Expr::Literal(Literal::Uuid(crate::val::Uuid(x.0))),
-			PublicValue::Geometry(x) => {
-				Expr::Literal(Literal::Geometry(convert_public_geometry_to_internal(x)))
-			}
-			PublicValue::File(x) => Expr::Literal(Literal::File(crate::val::File {
-				bucket: x.bucket().to_string(),
-				key: x.key().to_string(),
-			})),
+			PublicValue::Uuid(x) => Expr::Literal(Literal::Uuid(PublicUuid::from(x.0))),
+			PublicValue::Geometry(x) => Expr::Literal(Literal::Geometry(x)),
+			PublicValue::File(x) => Expr::Literal(Literal::File(PublicFile::new(
+				x.bucket().to_string(),
+				x.key().to_string(),
+			))),
 			// PublicValue::Closure(x) => Expr::Literal(Literal::Closure(Box::new(Closure {
 			// 	args: x.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
 			// 	returns: x.returns.map(|k| k.into()),
@@ -199,7 +199,7 @@ pub(crate) fn convert_public_value_to_internal(value: surrealdb_types::Value) ->
 				crate::val::Value::Number(crate::val::Number::Decimal(d))
 			}
 		},
-		surrealdb_types::Value::String(s) => crate::val::Value::Strand(crate::val::Strand::from(s)),
+		surrealdb_types::Value::String(s) => crate::val::Value::String(s),
 		surrealdb_types::Value::Duration(d) => {
 			crate::val::Value::Duration(crate::val::Duration(d.inner()))
 		}
@@ -320,7 +320,7 @@ impl fmt::Display for Expr {
 			Expr::Literal(literal) => write!(f, "{literal}"),
 			Expr::Param(param) => write!(f, "{param}"),
 			Expr::Idiom(idiom) => write!(f, "{idiom}"),
-			Expr::Table(ident) => write!(f, "{ident}"),
+			Expr::Table(ident) => write!(f, "{}", EscapeIdent(ident)),
 			Expr::Mock(mock) => write!(f, "{mock}"),
 			Expr::Block(block) => write!(f, "{block}"),
 			Expr::Constant(constant) => write!(f, "{constant}"),
@@ -419,7 +419,7 @@ impl From<Expr> for crate::expr::Expr {
 			Expr::Literal(l) => crate::expr::Expr::Literal(l.into()),
 			Expr::Param(p) => crate::expr::Expr::Param(p.into()),
 			Expr::Idiom(i) => crate::expr::Expr::Idiom(i.into()),
-			Expr::Table(t) => crate::expr::Expr::Table(t.into()),
+			Expr::Table(t) => crate::expr::Expr::Table(t),
 			Expr::Mock(m) => crate::expr::Expr::Mock(m.into()),
 			Expr::Block(b) => crate::expr::Expr::Block(Box::new((*b).into())),
 			Expr::Constant(c) => crate::expr::Expr::Constant(c.into()),
@@ -479,7 +479,7 @@ impl From<crate::expr::Expr> for Expr {
 			crate::expr::Expr::Literal(l) => Expr::Literal(l.into()),
 			crate::expr::Expr::Param(p) => Expr::Param(p.into()),
 			crate::expr::Expr::Idiom(i) => Expr::Idiom(i.into()),
-			crate::expr::Expr::Table(t) => Expr::Table(t.into()),
+			crate::expr::Expr::Table(t) => Expr::Table(t),
 			crate::expr::Expr::Mock(m) => Expr::Mock(m.into()),
 			crate::expr::Expr::Block(b) => Expr::Block(Box::new((*b).into())),
 			crate::expr::Expr::Constant(c) => Expr::Constant(c.into()),

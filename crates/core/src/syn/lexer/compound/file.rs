@@ -3,9 +3,9 @@ use std::mem;
 use crate::syn::error::{SyntaxError, bail};
 use crate::syn::lexer::Lexer;
 use crate::syn::token::{Token, t};
-use crate::val::File;
+use crate::types::PublicFile;
 
-pub fn file(lexer: &mut Lexer, start: Token) -> Result<File, SyntaxError> {
+pub fn file(lexer: &mut Lexer, start: Token) -> Result<PublicFile, SyntaxError> {
 	let close_char = match start.kind {
 		t!("f\"") => '"',
 		t!("f'") => '\'',
@@ -31,10 +31,7 @@ pub fn file(lexer: &mut Lexer, start: Token) -> Result<File, SyntaxError> {
 
 	lexer.expect(close_char)?;
 
-	Ok(File {
-		bucket,
-		key,
-	})
+	Ok(PublicFile::new(bucket, key))
 }
 
 fn eat_segment(lexer: &mut Lexer, eat_slash: bool) -> Result<Option<String>, SyntaxError> {

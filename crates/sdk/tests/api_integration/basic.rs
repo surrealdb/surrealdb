@@ -701,6 +701,58 @@ pub async fn insert_relation_table(new_db: impl CreateDb) {
 	let _: Vec<ApiRecordId> = db.insert("likes").relation(vals).await.unwrap();
 }
 
+pub async fn binding_edges(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	//
+	let john = "person:john".parse::<RecordId>().unwrap();
+	let jane = "person:jane".parse::<RecordId>().unwrap();
+	let value: Value = db
+		.query("RELATE $john -> knows -> $jane SET id = knows:one")
+		.bind(("john", john.clone()))
+		.bind(("jane", jane.clone()))
+		.await
+		.unwrap()
+		.take(0)
+		.unwrap();
+	assert_eq!(value, "[{ id: knows:one, in: person:john, out: person:jane }]".parse().unwrap());
+	//
+	let value: Value = db
+		.query("RELATE $john -> knows:two -> $jane")
+		.bind(("john", john.clone()))
+		.bind(("jane", jane.clone()))
+		.await
+		.unwrap()
+		.take(0)
+		.unwrap();
+	assert_eq!(value, "[{ id: knows:two, in: person:john, out: person:jane }]".parse().unwrap());
+	//
+	let surql =
+		"LET $kind = type::table($knows); RELATE $john -> $kind -> $jane SET id = knows:three";
+	let value: Value = db
+		.query(surql)
+		.bind(("john", john.clone()))
+		.bind(("jane", jane.clone()))
+		.bind(("knows", "knows"))
+		.await
+		.unwrap()
+		.take(1)
+		.unwrap();
+	assert_eq!(value, "[{ id: knows:three, in: person:john, out: person:jane }]".parse().unwrap());
+	//
+	let value: Value = db
+		.query("LET $kind = <record> $knows; RELATE $john -> $kind -> $jane")
+		.bind(("john", john))
+		.bind(("jane", jane))
+		.bind(("knows", "knows:four"))
+		.await
+		.unwrap()
+		.take(1)
+		.unwrap();
+	assert_eq!(value, "[{ id: knows:four, in: person:john, out: person:jane }]".parse().unwrap());
+}
+
 pub async fn select_table(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -1774,6 +1826,8 @@ define_include_tests!(basic => {
 	insert_unspecified,
 	#[test_log::test(tokio::test)]
 	insert_relation_table,
+	#[test_log::test(tokio::test)]
+	binding_edges,
 	#[test_log::test(tokio::test)]
 	select_table,
 	#[test_log::test(tokio::test)]

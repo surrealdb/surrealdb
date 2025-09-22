@@ -46,6 +46,18 @@ impl From<bytes::Bytes> for Bytes {
 	}
 }
 
+impl From<surrealdb_types::Bytes> for Bytes {
+	fn from(v: surrealdb_types::Bytes) -> Self {
+		Bytes(v.into())
+	}
+}
+
+impl From<Bytes> for surrealdb_types::Bytes {
+	fn from(v: Bytes) -> Self {
+		surrealdb_types::Bytes::new(v.0)
+	}
+}
+
 impl Deref for Bytes {
 	type Target = Vec<u8>;
 

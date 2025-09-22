@@ -6,14 +6,15 @@ use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Base, Ident, Value};
+use crate::expr::{Base, Value};
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveSequenceStatement {
-	pub name: Ident,
+	pub name: String,
 	pub if_exists: bool,
 }
 
@@ -40,7 +41,7 @@ impl RemoveSequenceStatement {
 		};
 		// Remove the sequence
 		if let Some(seq) = ctx.get_sequences() {
-			seq.sequence_removed(ns, db, &self.name);
+			seq.sequence_removed(ns, db, &self.name).await;
 		}
 		// Delete any sequence records
 		let ba_range = Prefix::new_ba_range(ns, db, &sq.name)?;
@@ -63,7 +64,7 @@ impl Display for RemoveSequenceStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		Ok(())
 	}
 }

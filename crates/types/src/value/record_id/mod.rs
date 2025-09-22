@@ -34,6 +34,10 @@ impl RecordId {
 			key: key.into(),
 		}
 	}
+
+	pub fn is_record_type(&self, val: &[String]) -> bool {
+		val.is_empty() || val.contains(&self.table)
+	}
 }
 
 impl fmt::Display for RecordId {

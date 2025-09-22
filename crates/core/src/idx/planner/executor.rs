@@ -13,7 +13,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::operator::{BooleanOperator, MatchesOperator};
-use crate::expr::{Cond, Expr, FlowResultExt as _, Ident, Idiom};
+use crate::expr::{Cond, Expr, FlowResultExt as _, Idiom};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::MatchRef;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
@@ -134,7 +134,7 @@ impl InnerQueryExecutor {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		table: &Ident,
+		table: &str,
 		ios: Vec<(Arc<Expr>, IndexOption)>,
 		kbtes: KnnBruteForceExpressions,
 		knn_condition: Option<Cond>,
@@ -231,7 +231,8 @@ impl InnerQueryExecutor {
 								);
 								let tx = ctx.tx();
 								let mti =
-									MTreeIndex::new(&tx, ikb, p, TransactionType::Read).await?;
+									MTreeIndex::new(&tx, ikb, p, TransactionType::Read, opt.id()?)
+										.await?;
 								drop(tx);
 								let entry = MtEntry::new(
 									db,
@@ -316,7 +317,7 @@ impl InnerQueryExecutor {
 		}
 
 		Ok(Self {
-			table: table.clone().into_string(),
+			table: table.to_owned(),
 			ir_map,
 			mr_entries,
 			exp_entries,
@@ -926,9 +927,9 @@ impl MtEntry {
 		cond: Option<Arc<Cond>>,
 	) -> Result<Self> {
 		let cond_checker = if let Some(cond) = cond {
-			MTreeConditionChecker::new_cond(ctx, opt, cond)
+			MTreeConditionChecker::new_cond(ctx, opt, cond, mt.get_ikb().clone())
 		} else {
-			MTreeConditionChecker::new(ctx)
+			MTreeConditionChecker::new(ctx, mt.get_ikb().clone())
 		};
 		let res = mt.knn_search(db, stk, ctx, o, k as usize, cond_checker).await?;
 		Ok(Self {

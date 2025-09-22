@@ -1,13 +1,12 @@
 use std::fmt;
 
-use crate::sql::Ident;
-use crate::val::Datetime;
+use crate::types::PublicDatetime;
 use crate::vs::VersionStamp;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum ShowSince {
-	Timestamp(Datetime),
+	Timestamp(PublicDatetime),
 	Versionstamp(u64),
 }
 
@@ -46,7 +45,7 @@ impl From<crate::expr::statements::show::ShowSince> for ShowSince {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ShowStatement {
-	pub table: Option<Ident>,
+	pub table: Option<String>,
 	pub since: ShowSince,
 	pub limit: Option<u32>,
 }
@@ -72,7 +71,7 @@ impl fmt::Display for ShowStatement {
 impl From<ShowStatement> for crate::expr::statements::ShowStatement {
 	fn from(v: ShowStatement) -> Self {
 		crate::expr::statements::ShowStatement {
-			table: v.table.map(Into::into),
+			table: v.table,
 			since: v.since.into(),
 			limit: v.limit,
 		}
@@ -82,7 +81,7 @@ impl From<ShowStatement> for crate::expr::statements::ShowStatement {
 impl From<crate::expr::statements::ShowStatement> for ShowStatement {
 	fn from(v: crate::expr::statements::ShowStatement) -> Self {
 		ShowStatement {
-			table: v.table.map(Into::into),
+			table: v.table,
 			since: v.since.into(),
 			limit: v.limit,
 		}

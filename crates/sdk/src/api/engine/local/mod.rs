@@ -172,7 +172,7 @@ use surrealdb_core::dbs::{QueryResult, Session};
 use surrealdb_core::expr::Model;
 use surrealdb_core::expr::statements::DeleteStatement;
 use surrealdb_core::expr::{
-	CreateStatement, Data, Expr, Fields, Function, Ident, InsertStatement, KillStatement, Literal,
+	CreateStatement, Data, Expr, Fields, Function, InsertStatement, KillStatement, Literal,
 	LogicalPlan, Output, SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
 use surrealdb_core::iam;
@@ -619,7 +619,6 @@ async fn router(
 			let token = iam::signup::signup(kvs, &mut *session.write().await, credentials.into())
 				.await?
 				.token;
-			// TODO: Null byte validity
 			let response = token.map(Value::String).unwrap_or(Value::None);
 			Ok(IndexedDbResults::Other(response))
 		}
@@ -750,7 +749,7 @@ async fn router(
 			let one = !data.is_array();
 
 			let insert_plan = InsertStatement {
-				into: what.map(|w| Expr::Table(unsafe { Ident::new_unchecked(w) })),
+				into: what.map(Expr::Table),
 				data: Data::SingleExpression(Expr::from_public_value(data)),
 				output: Some(Output::After),
 				relation: true,
@@ -1210,13 +1209,12 @@ async fn router(
 			surrealdb_core::obs::put(&hash, data).await?;
 			// Insert the model in to the database
 			let model = DefineModelStatement {
-				name: Ident::new(file.header.name.to_string()).unwrap(),
+				name: file.header.name.to_string(),
 				version: file.header.version.to_string(),
-				comment: Some(file.header.description.to_string().into()),
+				comment: Some(file.header.description.to_string()),
 				hash,
 				..Default::default()
 			};
-			// TODO: Null byte validity
 			let q = DefineStatement::Model(model);
 			let q = LogicalPlan {
 				expressions: vec![TopLevelExpr::Expr(Expr::Define(Box::new(q)))],

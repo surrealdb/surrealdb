@@ -110,6 +110,18 @@ args = [
     "wasm32-unknown-unknown",
 ]
 
+[tasks.ci-docs]
+category = "CI - CHECK"
+command = "cargo"
+args = [
+    "doc",
+    "--no-deps",
+    "--package",
+    "surrealdb",
+    "--features",
+    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-rocksdb,kv-tikv,http,scripting,jwks",
+]
+
 #
 # Integration Tests
 #
@@ -220,7 +232,6 @@ args = [
     "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
     "--workspace",
     "--no-fail-fast",
-    "--package", "surrealdb",
     "--",
     "--skip",
     "api_integration",
@@ -362,7 +373,6 @@ run_task = "ci-api-integration"
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "mem", _TEST_FEATURES = "kv-mem" }
 run_task = { name = [
-    "test-kvs",
     "test-api-integration",
 ], fork = true, parallel = true }
 
@@ -370,7 +380,6 @@ run_task = { name = [
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb" }
 run_task = { name = [
-    "test-kvs",
     "test-api-integration",
 ], fork = true, parallel = true }
 
@@ -378,7 +387,6 @@ run_task = { name = [
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "rocksdb", _TEST_FEATURES = "kv-rocksdb" }
 run_task = { name = [
-    "test-kvs",
     "test-api-integration",
 ], fork = true, parallel = true }
 
@@ -386,7 +394,6 @@ run_task = { name = [
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv" }
 run_task = { name = [
-    "test-kvs",
     "test-api-integration",
 ], fork = true, parallel = false }
 
@@ -394,9 +401,6 @@ run_task = { name = [
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv" }
 run_task = { name = [
-    "start-tikv",
-    "test-kvs",
-    "stop-tikv",
     "start-tikv",
     "test-api-integration",
     "stop-tikv",
@@ -406,8 +410,6 @@ run_task = { name = [
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb-7_1" }
 run_task = { name = [
-    "test-kvs",
-    "clear-fdb",
     "test-api-integration",
 ], fork = true, parallel = false }
 
@@ -415,8 +417,6 @@ run_task = { name = [
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb-7_3" }
 run_task = { name = [
-    "test-kvs",
-    "clear-fdb",
     "test-api-integration",
 ], fork = true, parallel = false }
 
@@ -434,6 +434,53 @@ dependencies = [
     "ci-api-integration-http",
     "ci-api-integration-ws",
 ]
+
+#
+# KVS tests
+#
+[tasks.ci-mem-kvs]
+category = "CI - INTEGRATION TESTS"
+env = { _TEST_API_ENGINE = "mem", _TEST_FEATURES = "kv-mem" }
+run_task = { name = [
+    "test-kvs",
+], fork = true, parallel = true }
+
+[tasks.ci-rocksdb-kvs]
+category = "CI - INTEGRATION TESTS"
+env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb" }
+run_task = { name = [
+    "test-kvs",
+], fork = true, parallel = true }
+
+[tasks.ci-surrealkv-kvs]
+category = "CI - INTEGRATION TESTS"
+env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv" }
+run_task = { name = [
+    "test-kvs",
+], fork = true, parallel = false }
+
+[tasks.ci-tikv-kvs]
+category = "CI - INTEGRATION TESTS"
+env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv" }
+run_task = { name = [
+    "start-tikv",
+    "test-kvs",
+    "stop-tikv",
+], fork = true, parallel = false }
+
+[tasks.ci-fdb-7_1-kvs]
+category = "CI - INTEGRATION TESTS"
+env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb-7_1" }
+run_task = { name = [
+    "test-kvs",
+], fork = true, parallel = false }
+
+[tasks.ci-fdb-7_3-kvs]
+category = "CI - INTEGRATION TESTS"
+env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb-7_3" }
+run_task = { name = [
+    "test-kvs",
+], fork = true, parallel = false }
 
 #
 # Services

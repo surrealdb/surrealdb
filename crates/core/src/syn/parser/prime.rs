@@ -5,15 +5,14 @@ use super::mac::pop_glued;
 use super::{ParseResult, Parser};
 use crate::sql::lookup::LookupKind;
 use crate::sql::{
-	Closure, Dir, Expr, Function, FunctionCall, Ident, Idiom, Kind, Literal, Mock, Param, Part,
-	Script,
+	Closure, Dir, Expr, Function, FunctionCall, Idiom, Kind, Literal, Mock, Param, Part, Script,
 };
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::{self, Numeric};
 use crate::syn::parser::enter_object_recursion;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::token::{Glued, Span, TokenKind, t};
-use crate::val::{Duration, Strand};
+use crate::types::{PublicDuration, PublicGeometry};
 
 impl Parser<'_> {
 	pub(super) fn parse_number_like_prime(&mut self) -> ParseResult<Expr> {
@@ -38,7 +37,9 @@ impl Parser<'_> {
 					compound::Numeric::Float(x) => Expr::Literal(Literal::Float(x)),
 					compound::Numeric::Integer(x) => Expr::Literal(Literal::Integer(x)),
 					compound::Numeric::Decimal(x) => Expr::Literal(Literal::Decimal(x)),
-					compound::Numeric::Duration(x) => Expr::Literal(Literal::Duration(Duration(x))),
+					compound::Numeric::Duration(x) => {
+						Expr::Literal(Literal::Duration(PublicDuration::from(x)))
+					}
 				};
 				Ok(v)
 			}
@@ -133,12 +134,12 @@ impl Parser<'_> {
 				let file = self.next_token_value()?;
 				Expr::Literal(Literal::File(file))
 			}
-			t!("'") | t!("\"") | TokenKind::Glued(Glued::Strand) => {
-				let s = self.next_token_value::<Strand>()?;
+			t!("'") | t!("\"") | TokenKind::Glued(Glued::String) => {
+				let s = self.parse_string_lit()?;
 				if self.settings.legacy_strands {
 					Expr::Literal(self.reparse_legacy_strand(stk, s).await)
 				} else {
-					Expr::Literal(Literal::Strand(s))
+					Expr::Literal(Literal::String(s))
 				}
 			}
 			t!("+")
@@ -299,16 +300,16 @@ impl Parser<'_> {
 						self.parse_builtin(stk, token.span).await?
 					}
 					t!(":") => {
-						let str = self.next_token_value::<Ident>()?;
+						let str = self.parse_ident()?;
 						self.parse_record_id_or_range(stk, str)
 							.await
 							.map(|x| Expr::Literal(Literal::RecordId(x)))?
 					}
 					_ => {
 						if self.table_as_field {
-							Expr::Idiom(Idiom(vec![Part::Field(self.next_token_value()?)]))
+							Expr::Idiom(Idiom(vec![Part::Field(self.parse_ident()?)]))
 						} else {
-							Expr::Table(self.next_token_value()?)
+							Expr::Table(self.parse_ident()?)
 						}
 					}
 				}
@@ -366,8 +367,9 @@ impl Parser<'_> {
 	/// Expects the starting `|` already be eaten and its span passed as an
 	/// argument.
 	pub(super) fn parse_mock(&mut self, start: Span) -> ParseResult<Mock> {
-		let name = self.next_token_value::<Ident>()?.into_string();
+		let name = self.parse_ident()?;
 		expected!(self, t!(":"));
+		// TODO: limit these to i64 range, it is weird that these can exceed normal number range.
 		let from = self.next_token_value()?;
 		let to = self.eat(t!("..")).then(|| self.next_token_value()).transpose()?;
 		self.expect_closing_delimiter(t!("|"), start)?;
@@ -396,7 +398,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let param = self.next_token_value::<Param>()?.ident();
+			let param = self.next_token_value::<Param>()?;
 			let kind = if self.eat(t!(":")) {
 				if self.eat(t!("<")) {
 					let delim = self.last_span();
@@ -422,7 +424,7 @@ impl Parser<'_> {
 	pub(super) async fn parse_closure_after_args(
 		&mut self,
 		stk: &mut Stk,
-		args: Vec<(Ident, Kind)>,
+		args: Vec<(Param, Kind)>,
 	) -> ParseResult<Expr> {
 		let (returns, body) = if self.eat(t!("->")) {
 			let returns = Some(stk.run(|ctx| self.parse_inner_kind(ctx)).await?);
@@ -470,7 +472,7 @@ impl Parser<'_> {
 
 					let y = self.next_token_value::<f64>()?;
 					self.expect_closing_delimiter(t!(")"), start)?;
-					return Ok(Expr::Literal(Literal::Geometry(crate::val::Geometry::Point(
+					return Ok(Expr::Literal(Literal::Geometry(PublicGeometry::Point(
 						geo::Point::new(x, y),
 					))));
 				} else {
@@ -495,7 +497,7 @@ impl Parser<'_> {
 
 	/// Parses a strand with legacy rules, parsing to a record id, datetime or
 	/// uuid if the string matches.
-	pub(super) async fn reparse_legacy_strand(&mut self, stk: &mut Stk, text: Strand) -> Literal {
+	pub(super) async fn reparse_legacy_strand(&mut self, stk: &mut Stk, text: String) -> Literal {
 		if let Ok(x) = Parser::new(text.as_bytes()).parse_record_id(stk).await {
 			return Literal::RecordId(x);
 		}
@@ -505,7 +507,7 @@ impl Parser<'_> {
 		if let Ok(x) = Parser::new(text.as_bytes()).next_token_value() {
 			return Literal::Uuid(x);
 		}
-		Literal::Strand(text)
+		Literal::String(text)
 	}
 
 	async fn parse_script(&mut self, stk: &mut Stk) -> ParseResult<FunctionCall> {

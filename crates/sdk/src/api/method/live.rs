@@ -5,6 +5,7 @@ use std::task::{Context, Poll};
 
 use async_channel::Receiver;
 use futures::StreamExt;
+use surrealdb_core::expr::{RecordIdKeyLit, RecordIdLit};
 use surrealdb_types::{
 	self, Action, Notification as CoreNotification, RecordIdKey, SurrealValue, Value,
 };
@@ -20,7 +21,7 @@ use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::{self, Connection, ExtraFeatures, Result};
 use crate::core::expr::{
-	BinaryOperator, Cond, Expr, Fields, Ident, Idiom, Literal, LiveStatement, TopLevelExpr,
+	BinaryOperator, Cond, Expr, Fields, Idiom, Literal, LiveStatement, TopLevelExpr,
 };
 use crate::engine::any::Any;
 use crate::method::{Live, OnceLockExt, Query, Select};
@@ -44,49 +45,21 @@ where
 		let mut stmt = LiveStatement::new(Fields::all());
 		match resource? {
 			Resource::Table(table) => {
-				stmt.what = Expr::Table(unsafe { Ident::new_unchecked(table) });
+				stmt.what = Expr::Table(table);
 			}
 			Resource::RecordId(record) => {
-				stmt.what = Expr::Table(unsafe { Ident::new_unchecked(record.table.clone()) });
-				let ident = Ident::new("id".to_string()).unwrap();
-				// Convert public RecordIdKey to internal RecordIdKeyLit
-				use crate::core::expr::{RecordIdKeyLit, RecordIdLit};
-				let key_lit = match record.key {
-					RecordIdKey::Number(n) => RecordIdKeyLit::Number(n),
-					RecordIdKey::String(s) => {
-						RecordIdKeyLit::String(crate::core::Strand::new_lossy(s))
-					}
-					RecordIdKey::Uuid(u) => RecordIdKeyLit::Uuid(crate::core::Uuid::from(u.0)),
-					RecordIdKey::Array(a) => RecordIdKeyLit::Array(
-						a.inner().iter().cloned().map(|v| Expr::from_public_value(v)).collect(),
-					),
-					RecordIdKey::Object(o) => {
-						use crate::core::expr::ObjectEntry;
-						RecordIdKeyLit::Object(
-							o.inner()
-								.iter()
-								.map(|(k, v)| ObjectEntry {
-									key: k.clone(),
-									value: Expr::from_public_value(v.clone()),
-								})
-								.collect(),
-						)
-					}
-					RecordIdKey::Range(_range) => {
-						// Ranges within RecordIdKey are not yet fully supported in the SDK
-						// For now, default to a Number(0) key
-						RecordIdKeyLit::Number(0)
-					}
-				};
-				let cond = Expr::Binary {
-					left: Box::new(Expr::Idiom(Idiom::field(ident))),
-					op: BinaryOperator::Equal,
-					right: Box::new(Expr::Literal(Literal::RecordId(RecordIdLit {
-						table: record.table,
-						key: key_lit,
-					}))),
-				};
-				stmt.cond = Some(Cond(cond));
+				stmt.what = Expr::Table(record.table.clone());
+				let ident = "id".to_string();
+				todo!("STU")
+				// let cond = Expr::Binary {
+				// 	left: Box::new(Expr::Idiom(Idiom::field(ident))),
+				// 	op: BinaryOperator::Equal,
+				// 	right: Box::new(Expr::Literal(Literal::RecordId(RecordIdLit {
+				// 		table: record.table,
+				// 		key: RecordIdKeyLit::from(record.key),
+				// 	}))),
+				// };
+				// stmt.cond = Some(Cond(cond));
 			}
 			Resource::Object(_) => return Err(Error::LiveOnObject.into()),
 			Resource::Array(_) => return Err(Error::LiveOnArray.into()),
@@ -97,18 +70,16 @@ where
 					panic!("invalid resource?");
 				};
 
-				stmt.what = Expr::Table(unsafe { Ident::new_unchecked(record.table.clone()) });
+				stmt.what = Expr::Table(record.table.clone());
 
-				let id = Expr::Idiom(Idiom::field(Ident::new("id".to_string()).unwrap()));
+				let id = Expr::Idiom(Idiom::field("id".to_string()));
 
 				// Convert RecordIdKey bounds to expressions
 				use crate::core::expr::{RecordIdKeyLit, RecordIdLit};
 				let convert_key = |key: RecordIdKey| -> Expr {
 					let key_lit = match key {
 						RecordIdKey::Number(n) => RecordIdKeyLit::Number(n),
-						RecordIdKey::String(s) => {
-							RecordIdKeyLit::String(crate::core::Strand::new_lossy(s))
-						}
+						RecordIdKey::String(s) => RecordIdKeyLit::String(s),
 						RecordIdKey::Uuid(u) => RecordIdKeyLit::Uuid(crate::core::Uuid::from(u.0)),
 						RecordIdKey::Array(a) => RecordIdKeyLit::Array(
 							a.inner().iter().cloned().map(|v| Expr::from_public_value(v)).collect(),

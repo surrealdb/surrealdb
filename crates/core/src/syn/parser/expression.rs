@@ -5,13 +5,13 @@ use reblessive::Stk;
 use super::enter_query_recursion;
 use super::mac::unexpected;
 use crate::sql::operator::{BindingPower, BooleanOperator, MatchesOperator, NearestNeighbor};
-use crate::sql::{BinaryOperator, Expr, Ident, Literal, Part, PostfixOperator, PrefixOperator};
+use crate::sql::{BinaryOperator, Expr, Literal, Part, PostfixOperator, PrefixOperator};
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::Numeric;
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{self, Glued, Span, Token, TokenKind, t};
-use crate::val;
+use crate::types::PublicDuration;
 
 impl Parser<'_> {
 	/// Parse a generic expression without triggering the query depth and
@@ -203,7 +203,9 @@ impl Parser<'_> {
 						Numeric::Decimal(d) => Expr::Literal(Literal::Decimal(d)),
 						Numeric::Duration(d) => Expr::Prefix {
 							op: PrefixOperator::Positive,
-							expr: Box::new(Expr::Literal(Literal::Duration(val::Duration(d)))),
+							expr: Box::new(Expr::Literal(Literal::Duration(PublicDuration::from(
+								d,
+							)))),
 						},
 					};
 					if self.peek_continues_idiom() {
@@ -239,7 +241,9 @@ impl Parser<'_> {
 						Numeric::Decimal(d) => Expr::Literal(Literal::Decimal(d)),
 						Numeric::Duration(d) => Expr::Prefix {
 							op: PrefixOperator::Negate,
-							expr: Box::new(Expr::Literal(Literal::Duration(val::Duration(d)))),
+							expr: Box::new(Expr::Literal(Literal::Duration(PublicDuration::from(
+								d,
+							)))),
 						},
 					};
 					if self.peek_continues_idiom() {
@@ -590,7 +594,7 @@ impl Parser<'_> {
 				PostfixOperator::Call(args)
 			}
 			t!(".") => {
-				let name = self.next_token_value::<Ident>()?;
+				let name = self.parse_ident()?;
 				expected!(self, t!("("));
 
 				let mut args = Vec::new();

@@ -1,8 +1,7 @@
 use std::fmt::{self, Display, Formatter, Write as _};
 use std::ops::Bound;
 
-use crate::sql::escape::{EscapeKey, EscapeRid};
-use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKey, EscapeRid, Fmt, Pretty, is_pretty, pretty_indent};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{Expr, RecordIdKeyRangeLit};
 use crate::types::{PublicRecordIdKey, PublicUuid};
@@ -84,9 +83,7 @@ impl From<RecordIdKeyLit> for crate::expr::RecordIdKeyLit {
 	fn from(value: RecordIdKeyLit) -> Self {
 		match value {
 			RecordIdKeyLit::Number(x) => crate::expr::RecordIdKeyLit::Number(x),
-			RecordIdKeyLit::String(x) => {
-				crate::expr::RecordIdKeyLit::String(crate::val::Strand::from(x.clone()))
-			}
+			RecordIdKeyLit::String(x) => crate::expr::RecordIdKeyLit::String(x.clone()),
 			RecordIdKeyLit::Uuid(x) => crate::expr::RecordIdKeyLit::Uuid(crate::val::Uuid(x.0)),
 			RecordIdKeyLit::Array(x) => {
 				crate::expr::RecordIdKeyLit::Array(x.into_iter().map(From::from).collect())

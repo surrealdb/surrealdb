@@ -1,3 +1,4 @@
+use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
 use chrono::offset::LocalResult;
@@ -69,6 +70,12 @@ impl From<DateTime<Utc>> for Datetime {
 impl From<Datetime> for DateTime<Utc> {
 	fn from(x: Datetime) -> Self {
 		x.0
+	}
+}
+
+impl Display for Datetime {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		write!(f, "{}Z", self.0.format("%Y-%m-%dT%H:%M:%S%.9f"))
 	}
 }
 

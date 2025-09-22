@@ -69,7 +69,7 @@ use crate::syn::error::{SyntaxError, bail};
 use crate::syn::lexer::Lexer;
 use crate::syn::lexer::compound::NumberKind;
 use crate::syn::token::{Span, Token, TokenKind, t};
-use crate::val::{Bytes, Datetime, Duration, File, Strand, Uuid};
+use crate::types::{PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicUuid};
 
 mod basic;
 mod builtin;
@@ -117,15 +117,15 @@ pub enum PartialResult<T> {
 
 #[derive(Default)]
 pub enum GluedValue {
-	Duration(Duration),
-	Datetime(Datetime),
-	Uuid(Uuid),
+	Duration(PublicDuration),
+	Datetime(PublicDatetime),
+	Uuid(PublicUuid),
 	Number(NumberKind),
-	Strand(Strand),
+	String(String),
 	#[default]
 	None,
-	Bytes(Bytes),
-	File(File),
+	Bytes(PublicBytes),
+	File(PublicFile),
 }
 
 #[derive(Clone, Debug)]
