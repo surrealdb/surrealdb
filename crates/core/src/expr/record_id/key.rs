@@ -47,16 +47,16 @@ impl RecordIdKeyLit {
 			Kind::Int => true,
 			Kind::String => true,
 			Kind::Uuid => true,
-			Kind::Array(k, _) => RecordIdKeyLit::kind_supported(k),
-			Kind::Set(k, _) => RecordIdKeyLit::kind_supported(k),
+			Kind::Array(_, _) => true,
+			Kind::Set(_, _) => true,
 			Kind::Object => true,
-			Kind::Literal(l) => match l {
-				KindLiteral::Integer(_) => true,
-				KindLiteral::String(_) => true,
-				KindLiteral::Array(x) => x.iter().all(RecordIdKeyLit::kind_supported),
-				KindLiteral::Object(x) => x.values().all(RecordIdKeyLit::kind_supported),
-				_ => false,
-			},
+			Kind::Literal(l) => matches!(
+				l,
+				KindLiteral::Integer(_)
+					| KindLiteral::String(_)
+					| KindLiteral::Array(_)
+					| KindLiteral::Object(_)
+			),
 			Kind::Either(x) => x.iter().all(RecordIdKeyLit::kind_supported),
 			_ => false,
 		}

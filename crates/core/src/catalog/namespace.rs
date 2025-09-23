@@ -6,8 +6,8 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::sql::statements::DefineNamespaceStatement;
+use crate::sql::{Expr, Literal, ToSql};
 use crate::val::Value;
 
 #[derive(
@@ -73,8 +73,8 @@ impl_kv_value_revisioned!(NamespaceDefinition);
 impl NamespaceDefinition {
 	fn to_sql_definition(&self) -> DefineNamespaceStatement {
 		DefineNamespaceStatement {
-			name: self.name.clone(),
-			comment: self.comment.clone(),
+			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
+			comment: self.comment.clone().map(|v| Expr::Literal(Literal::String(v))),
 			..Default::default()
 		}
 	}

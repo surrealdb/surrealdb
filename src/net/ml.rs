@@ -94,7 +94,9 @@ mod implementation {
 		let model = DefineModelStatement {
 			name: file.header.name.to_string(),
 			version: file.header.version.to_string(),
-			comment: Some(file.header.description.to_string()),
+			comment: Some(Expr::Literal(crate::core::expr::Literal::String(
+				file.header.description.to_string(),
+			))),
 			hash,
 			..Default::default()
 		};

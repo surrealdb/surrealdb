@@ -1,17 +1,28 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::fmt::EscapeIdent;
-use crate::sql::Timeout;
+use crate::sql::{Expr, Literal, Timeout};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineSequenceStatement {
 	pub kind: DefineKind,
-	pub name: String,
-	pub batch: u32,
-	pub start: i64,
+	pub name: Expr,
+	pub batch: Expr,
+	pub start: Expr,
 	pub timeout: Option<Timeout>,
+}
+
+impl Default for DefineSequenceStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::None),
+			batch: Expr::Literal(Literal::Integer(0)),
+			start: Expr::Literal(Literal::Integer(0)),
+			timeout: None,
+		}
+	}
 }
 
 impl Display for DefineSequenceStatement {
@@ -22,7 +33,7 @@ impl Display for DefineSequenceStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} BATCH {} START {}", EscapeIdent(&self.name), self.batch, self.start)?;
+		write!(f, " {} BATCH {} START {}", self.name, self.batch, self.start)?;
 		if let Some(ref v) = self.timeout {
 			write!(f, " {v}")?
 		}
@@ -34,9 +45,9 @@ impl From<DefineSequenceStatement> for crate::expr::statements::define::DefineSe
 	fn from(v: DefineSequenceStatement) -> Self {
 		Self {
 			kind: v.kind.into(),
-			name: v.name,
-			batch: v.batch,
-			start: v.start,
+			name: v.name.into(),
+			batch: v.batch.into(),
+			start: v.start.into(),
 			timeout: v.timeout.map(Into::into),
 		}
 	}
@@ -46,9 +57,9 @@ impl From<crate::expr::statements::define::DefineSequenceStatement> for DefineSe
 	fn from(v: crate::expr::statements::define::DefineSequenceStatement) -> Self {
 		DefineSequenceStatement {
 			kind: v.kind.into(),
-			name: v.name,
-			batch: v.batch,
-			start: v.start,
+			name: v.name.into(),
+			batch: v.batch.into(),
+			start: v.start.into(),
 			timeout: v.timeout.map(Into::into),
 		}
 	}

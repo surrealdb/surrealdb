@@ -256,62 +256,26 @@ jobs:
       upload: true
     secrets: inherit
 
+  publish-crates:
+    name: Publish crates
+    needs: [ test, format, check, check-wasm, clippy, build ]
+    uses: ./.github/workflows/crate.yml
+    with:
+      git-ref: ${{ inputs.git-ref }}
+      publish: ${{ inputs.publish }}
+      nightly-release: ${{ inputs.nightly-release }}
+
   publish:
-    name: Publish crate and artifacts binaries
+    name: Publish binaries
     permissions:
       contents: write
-    needs: [ prepare-vars, test, format, check, check-wasm, clippy, build ]
-    runs-on: [ runner-amd64-2xlarge ]
+    needs: [ prepare-vars, publish-crates ]
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ inputs.git-ref }}
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable (Actions must be pinned by commit hash)
-        with:
-          toolchain: stable
-
-      - name: Install release-plz
-        run: |
-          curl -L https://github.com/MarcoIeni/release-plz/releases/download/release-plz-v0.3.30/release-plz-x86_64-unknown-linux-gnu.tar.gz | sudo tar -xz -C /usr/bin
-          sudo chmod +x /usr/bin/release-plz
-
-      - name: Configure release-plz
-        run: |
-          cat << EOF > /tmp/release-plz.toml
-          [workspace]
-          changelog_update = false
-          git_release_enable = false
-          semver_check = false
-          git_tag_enable = false
-          EOF
-
-      - name: Publish the crate
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          set -x
-
-          # Create a temporary branch in case the git ref is not a branch
-          git checkout -b crate
-
-          extra_args=""
-
-          if [[ "${{ inputs.publish }}" == "false" || "${{ inputs.nightly-release }}" == "true" ]]; then
-            # Update crate version to make sure we test publishing
-            # Without this, already published versions will be skipped
-            sed -i "s#^version = \".*\"#version = \"0.0.0-alpha.1\"#" Cargo.toml
-
-            # Remove local dependencies
-            sed -i "s#, path = \".*\"##" Cargo.toml
-          
-            # Dry run publishing to test publishing
-            extra_args="${extra_args} --dry-run --allow-dirty"
-          fi
-
-          release-plz release --config /tmp/release-plz.toml ${extra_args}
 
       - name: Download artifacts
         if: ${{ inputs.publish }}

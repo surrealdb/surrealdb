@@ -21,7 +21,7 @@ pub(crate) struct DatabaseKey<'key> {
 
 impl_kv_key_storekey!(DatabaseKey<'_> => DatabaseDefinition);
 
-pub fn new(ns: NamespaceId, db: &str) -> DatabaseKey {
+pub fn new(ns: NamespaceId, db: &str) -> DatabaseKey<'_> {
 	DatabaseKey::new(ns, db)
 }
 
