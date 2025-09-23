@@ -334,7 +334,7 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 								if let Some(sender) = state.live_queries.get(&live_query_id) {
 									// Send the notification back to the caller or kill live query
 									// if the receiver is already dropped
-									if sender.send(notification).await.is_err() {
+									if sender.send(Ok(notification)).await.is_err() {
 										state.live_queries.remove(&live_query_id);
 										let kill = {
 											let request = Command::Kill {
@@ -485,8 +485,7 @@ pub(crate) async fn run_router(
 		// be recreated with each next.
 
 		state.last_activity = Instant::now();
-		state.live_queries.clear();
-		state.pending_requests.clear();
+		state.reset().await;
 
 		loop {
 			tokio::select! {
@@ -552,6 +551,7 @@ pub(crate) async fn run_router(
 							}
 						}
 						Err(error) => {
+							state.reset().await;
 							match error {
 								WsError::ConnectionClosed => {
 									trace!("Connection successfully closed on the server");
