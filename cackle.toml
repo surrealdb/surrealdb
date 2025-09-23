@@ -1409,3 +1409,10 @@ allow_proc_macro = true
 
 [pkg.storekey]
 allow_unsafe = true
+
+[pkg.cssparser-macros]
+allow_proc_macro = true
+
+[pkg.match_token]
+allow_proc_macro = true
+
