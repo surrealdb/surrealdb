@@ -1,22 +1,27 @@
 # Use this workflow to trigger stable releases, both minor releases and patches
 
-name: Stable release
+name: Release
 
-run-name: "Stable release '${{ inputs.branch }}' (publish: ${{ inputs.publish }}, latest: ${{ inputs.branch == 'releases/beta' || inputs.latest }})"
+run-name: "Release '${{ inputs.git-ref }}' (publish: ${{ inputs.publish }}, latest: ${{ inputs.latest }})"
 
 on:
   workflow_dispatch:
     inputs:
-      branch:
+      git-ref:
         required: true
         type: string
-        description: "The github branch of this release. Should be 'releases/beta' or 'patches/x.y'"
-        default: releases/beta
+        default: releases/2.3
+        description: "The git ref of this release"
       latest:
         required: false
         type: boolean
         default: false
-        description: "Consider this release as the latest one and update the Docker image tag and the binary pointer for the installers"
+        description: "Make this the latest release"
+      extra-features:
+        required: false
+        type: string
+        default: storage-tikv,http-compression,jwks,ml
+        description: "Extra features enabled in the binary"
       publish:
         required: false
         type: boolean
@@ -28,47 +33,20 @@ defaults:
     shell: bash
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
-  checks:
-    name: Pre-release checks
-    runs-on: ubuntu-latest
-    steps:
-      - name: Verify that the provided branch is either a release branch or a patch branch
-        run: |
-          set -x
-          if [[ "${{ inputs.branch }}" == "releases/beta" || "${{ inputs.branch }}" == "patches/"* ]]; then
-            exit 0
-          else
-            echo "Branch should either be 'releases/beta' or 'patches/x.y'"
-            exit 1
-          fi
-
   release:
     name: Prepare release
-    needs: [checks]
+    permissions:
+      contents: write
+      pull-requests: write
     uses: ./.github/workflows/publish-version.yml
     with:
-      environment: stable
-      git-ref: ${{ inputs.branch }}
-      latest: ${{ inputs.branch == 'releases/beta' || inputs.latest }}
+      git-ref: ${{ inputs.git-ref }}
+      latest: ${{ inputs.latest }}
+      release-type: release
       publish: ${{ inputs.publish }}
+      extra-features: ${{ inputs.extra-features }}
       create-release: ${{ inputs.publish }}
     secrets: inherit
-
-  delete-branches:
-    name: Bump main version
-    if: ${{ inputs.publish }}
-    needs: [release]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Delete the release branch
-        run: |
-          set -x
-          git push origin --delete ${{ inputs.branch }} || true
-          git push origin --delete releases/stable || true
