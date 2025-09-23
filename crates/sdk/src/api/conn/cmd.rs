@@ -126,7 +126,7 @@ pub(crate) enum Command {
 	},
 	SubscribeLive {
 		uuid: Uuid,
-		notification_sender: Sender<Notification>,
+		notification_sender: Sender<Result<Notification>>,
 	},
 	Kill {
 		uuid: Uuid,
