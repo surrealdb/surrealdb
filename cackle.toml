@@ -1369,3 +1369,6 @@ allow_unsafe = true
 [pkg.dtoa-short]
 allow_unsafe = true
 
+[pkg.cssparser]
+allow_unsafe = true
+
