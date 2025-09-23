@@ -16,13 +16,13 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 #[cfg(target_family = "wasm")]
+use crate::expr::Idiom;
+#[cfg(target_family = "wasm")]
 use crate::expr::Output;
 use crate::expr::parameterize::{expr_to_ident, exprs_to_fields};
 #[cfg(target_family = "wasm")]
 use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
 use crate::expr::{Base, Expr, Literal, Part};
-#[cfg(target_family = "wasm")]
-use crate::expr::Idiom;
 use crate::fmt::Fmt;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ToSql;
