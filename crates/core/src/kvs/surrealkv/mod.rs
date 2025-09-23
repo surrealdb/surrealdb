@@ -47,7 +47,7 @@ impl Drop for Transaction {
 
 impl Datastore {
 	/// Open a new database
-	pub(crate) async fn new(path: &str, enable_versions: bool) -> Result<Datastore> {
+	pub(crate) async fn new(path: &str, _enable_versions: bool) -> Result<Datastore> {
 		// Create new configuration options
 		// Initialize the TreeBuilder with default InternalKey type
 		let mut builder = TreeBuilder::new();
@@ -62,10 +62,6 @@ impl Datastore {
 			.with_enable_vlog(true)
 			.with_block_cache_capacity(*cnf::SURREALKV_MAX_VALUE_CACHE_SIZE)
 			.with_vlog_cache_capacity(*cnf::SURREALKV_MAX_VALUE_CACHE_SIZE);
-
-		if enable_versions {
-			builder = builder.with_versioning(true, 0);
-		}
 
 		// Create a new datastore
 		match builder.build() {
@@ -216,6 +212,9 @@ impl super::api::Transaction for Transaction {
 	/// Fetch a key from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn get(&mut self, key: Key, version: Option<u64>) -> Result<Option<Val>> {
+		// Check if versioned queries are supported
+		self.check_version(version)?;
+
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 
@@ -236,6 +235,9 @@ impl super::api::Transaction for Transaction {
 	/// Insert or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn set(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
+		// Check if versioned queries are supported
+		self.check_version(version)?;
+
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
@@ -258,6 +260,9 @@ impl super::api::Transaction for Transaction {
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn put(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
+		// Check if versioned queries are supported
+		self.check_version(version)?;
+
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
@@ -391,6 +396,9 @@ impl super::api::Transaction for Transaction {
 		limit: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
+		// Check if versioned queries are supported
+		self.check_version(version)?;
+
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Set the key range
@@ -436,6 +444,9 @@ impl super::api::Transaction for Transaction {
 		limit: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
+		// Check if versioned queries are supported
+		self.check_version(version)?;
+
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Set the key range
@@ -483,6 +494,9 @@ impl super::api::Transaction for Transaction {
 		rng: Range<Key>,
 		limit: u32,
 	) -> Result<Vec<(Key, Val, Version, bool)>> {
+		// Check if versioned queries are supported
+		self.check_version(Some(0))?;
+
 		ensure!(!self.done, Error::TxFinished);
 		// Set the key range
 		let beg = rng.start;
@@ -527,6 +541,18 @@ impl super::api::Transaction for Transaction {
 	}
 
 	fn release_last_save_point(&mut self) -> Result<()> {
+		Ok(())
+	}
+}
+
+impl Transaction {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
+	fn check_version(&mut self, version: Option<u64>) -> Result<()> {
+		// SurrealKV versioned queries are not enabled until next release
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		// Check to see if transaction is closed
+		ensure!(!self.done, Error::TxFinished);
+		// Return result
 		Ok(())
 	}
 }

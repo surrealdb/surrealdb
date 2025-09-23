@@ -419,16 +419,16 @@ pub async fn export_import_retrieve_specific_versions(new_db: impl CreateDb) {
 }
 
 define_include_tests!(backup_version => {
-	#[tokio::test]
-	export_import_versions_with_inserts_updates_deletes,
-	#[tokio::test]
-	export_import_different_data_types,
-	#[tokio::test]
-	export_import_multiple_tables,
-	#[tokio::test]
-	export_import_versioned_records,
-	#[tokio::test]
-	export_import_versioned_range_queries,
-	#[tokio::test]
-	export_import_retrieve_specific_versions,
+// #[tokio::test]
+// export_import_versions_with_inserts_updates_deletes,
+// #[tokio::test]
+// export_import_different_data_types,
+// #[tokio::test]
+// export_import_multiple_tables,
+// #[tokio::test]
+// export_import_versioned_records,
+// #[tokio::test]
+// export_import_versioned_range_queries,
+// #[tokio::test]
+// export_import_retrieve_specific_versions,
 });
