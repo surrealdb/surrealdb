@@ -1416,3 +1416,6 @@ allow_proc_macro = true
 [pkg.match_token]
 allow_proc_macro = true
 
+[pkg.web_atoms]
+allow_apis = ["fs"]
+
