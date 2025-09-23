@@ -7,6 +7,7 @@ use ulid::Ulid;
 
 use super::{CreateDb, NS, RecordName};
 
+#[allow(unused)]
 pub async fn export_import_versions_with_inserts_updates_deletes(new_db: impl CreateDb) {
 	let (_, db) = new_db.create_db().await;
 	let db_name = Ulid::new().to_string();
@@ -126,6 +127,7 @@ struct User {
 	active: bool,
 }
 
+#[allow(unused)]
 pub async fn export_import_different_data_types(new_db: impl CreateDb) {
 	let (_, db) = new_db.create_db().await;
 	let db_name = Ulid::new().to_string();
@@ -166,6 +168,7 @@ pub async fn export_import_different_data_types(new_db: impl CreateDb) {
 	remove_file(export_file).await.unwrap();
 }
 
+#[allow(unused)]
 pub async fn export_import_multiple_tables(new_db: impl CreateDb) {
 	let (_, db) = new_db.create_db().await;
 	let db_name = Ulid::new().to_string();
@@ -224,6 +227,7 @@ pub async fn export_import_multiple_tables(new_db: impl CreateDb) {
 	remove_file(export_file).await.unwrap();
 }
 
+#[allow(unused)]
 pub async fn export_import_versioned_records(new_db: impl CreateDb) {
 	let (_, db) = new_db.create_db().await;
 	let db_name = Ulid::new().to_string();
@@ -280,6 +284,7 @@ pub async fn export_import_versioned_records(new_db: impl CreateDb) {
 	remove_file(export_file).await.unwrap();
 }
 
+#[allow(unused)]
 pub async fn export_import_versioned_range_queries(new_db: impl CreateDb) {
 	let (_, db) = new_db.create_db().await;
 	let db_name = Ulid::new().to_string();
@@ -360,6 +365,7 @@ pub async fn export_import_versioned_range_queries(new_db: impl CreateDb) {
 	remove_file(export_file).await.unwrap();
 }
 
+#[allow(unused)]
 pub async fn export_import_retrieve_specific_versions(new_db: impl CreateDb) {
 	let (_, db) = new_db.create_db().await;
 	let db_name = Ulid::new().to_string();
