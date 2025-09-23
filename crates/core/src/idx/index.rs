@@ -1,7 +1,3 @@
-#![cfg(not(target_family = "wasm"))]
-
-//! Index operation implementation for non-WASM targets.
-//!
 //! This module applies index mutations for a single document across different
 //! index types (UNIQUE, regular, search, fulltext, MTree, Hnsw). Index keys are
 //! constructed via key::index and field values are encoded using
