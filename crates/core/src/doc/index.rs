@@ -15,8 +15,6 @@
 //! Range scans and lookups benefit because a single probe/range can be used for
 //! numeric predicates without fanning out per numeric variant.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use anyhow::Result;
 use reblessive::tree::Stk;
 
@@ -107,11 +105,11 @@ impl Document {
 		// Store all the variables and parameters required by the index operation
 		let mut ic = IndexOperation::new(ctx, opt, db.namespace_id, db.database_id, ix, o, n, rid);
 		// Keep track of compaction requests, we need to trigger them after the index operation
-		let require_compaction = AtomicBool::new(false);
+		let mut require_compaction = false;
 		// Execute the index operation
-		ic.compute(stk, &require_compaction).await?;
+		ic.compute(stk, &mut require_compaction).await?;
 		// Did any compaction request have to be triggered?
-		if require_compaction.load(Ordering::Relaxed) {
+		if require_compaction {
 			ic.trigger_compaction().await?;
 		}
 		Ok(())

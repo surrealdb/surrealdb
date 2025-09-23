@@ -13,8 +13,6 @@
 //! - Numeric predicates need a single probe/range in the index; per-variant fan-out is no longer
 //!   required.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
@@ -77,7 +75,7 @@ impl<'a> IndexOperation<'a> {
 	pub(crate) async fn compute(
 		&mut self,
 		stk: &mut Stk,
-		require_compaction: &AtomicBool,
+		require_compaction: &mut bool,
 	) -> Result<()> {
 		// Index operation dispatching
 		match &self.ix.index {
@@ -186,7 +184,7 @@ impl<'a> IndexOperation<'a> {
 		&mut self,
 		_stk: &mut Stk,       // Placeholder for phase 2 (Condition)
 		_cond: Option<&Cond>, // Placeholder for phase 2 (Condition)
-		require_compaction: &AtomicBool,
+		require_compaction: &mut bool,
 	) -> Result<()> {
 		// Phase 2 (Condition)
 		// let is_truthy = async |stk: &mut Stk, c: &Cond, d: &CursorDoc| -> Result<bool> {
@@ -226,7 +224,7 @@ impl<'a> IndexOperation<'a> {
 			relative_count.unsigned_abs() as u64,
 		);
 		self.ctx.tx().lock().await.put(&key, &(), None).await?;
-		require_compaction.store(true, Ordering::Relaxed);
+		*require_compaction = true;
 		Ok(())
 	}
 
@@ -255,7 +253,7 @@ impl<'a> IndexOperation<'a> {
 		&mut self,
 		stk: &mut Stk,
 		p: &FullTextParams,
-		require_compaction: &AtomicBool,
+		require_compaction: &mut bool,
 	) -> Result<()> {
 		let mut rc = false;
 		// Build a FullText instance
@@ -284,7 +282,7 @@ impl<'a> IndexOperation<'a> {
 		}
 		// Do we need to trigger the compaction?
 		if rc {
-			require_compaction.store(true, Ordering::Relaxed);
+			*require_compaction = true;
 		}
 		Ok(())
 	}

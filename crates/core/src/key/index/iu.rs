@@ -147,7 +147,7 @@ struct Prefix<'a> {
 	_g: u8,
 }
 
-impl_kv_key_storekey!(Prefix<'_> => Vec<u8>);
+impl_kv_key_storekey!(Prefix<'_> => ());
 
 impl<'a> Prefix<'a> {
 	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
@@ -188,7 +188,7 @@ mod tests {
 			65535,
 		);
 		let enc = IndexCountKey::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!iu\x03\0\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x0f\x0e\x0d\x0c\x0b\x0a\x09\x08\x07\x06\x05\x04\x03\x02\x01\0\x03\0\0\xff\xff", "key");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!iu\x03\0\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x0f\x0e\x0d\x0c\x0b\x0a\x09\x08\x07\x06\x05\x04\x03\x02\x01\0\x03\0\0\0\0\0\0\xff\xff", "key");
 	}
 
 	#[test]
@@ -204,7 +204,7 @@ mod tests {
 		);
 		let enc = IndexCountKey::encode_key(&val).unwrap();
 		assert_eq!(
-			enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!iu\x02\x03\0\0\xff\xff",
+			enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!iu\x02\x03\0\0\0\0\0\0\xff\xff",
 			"compacted key"
 		);
 	}

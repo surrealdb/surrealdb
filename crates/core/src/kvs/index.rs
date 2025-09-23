@@ -530,7 +530,7 @@ impl Building {
 		values: Vec<(Key, Val)>,
 		count: &mut usize,
 	) -> Result<()> {
-		let rc = AtomicBool::new(false);
+		let mut rc = false;
 		let mut stack = TreeStack::new();
 		// Index the records
 		for (k, v) in values.into_iter() {
@@ -580,7 +580,7 @@ impl Building {
 				opt_values.clone(),
 				&rid,
 			);
-			stack.enter(|stk| io.compute(stk, &rc)).finish().await?;
+			stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
 
 			// Increment the count and update the status
 			*count += 1;
@@ -592,7 +592,7 @@ impl Building {
 			.await;
 		}
 		// Check if we trigger the compaction
-		self.check_index_compaction(tx, &rc).await?;
+		self.check_index_compaction(tx, &mut rc).await?;
 		// We're done
 		Ok(())
 	}
@@ -605,7 +605,7 @@ impl Building {
 		initial: usize,
 		count: &mut usize,
 	) -> Result<()> {
-		let rc = AtomicBool::new(false);
+		let mut rc = false;
 		let mut stack = TreeStack::new();
 		for i in range {
 			if self.is_aborted().await {
@@ -629,7 +629,7 @@ impl Building {
 					a.new_values,
 					&rid,
 				);
-				stack.enter(|stk| io.compute(stk, &rc)).finish().await?;
+				stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
 
 				// We can delete the ip record if any
 				let ip = self.ikb.new_ip_key(rid.key);
@@ -645,17 +645,17 @@ impl Building {
 			}
 		}
 		// Check if we trigger the compaction
-		self.check_index_compaction(tx, &rc).await?;
+		self.check_index_compaction(tx, &mut rc).await?;
 		// We're done
 		Ok(())
 	}
 
-	async fn check_index_compaction(&self, tx: &Transaction, rc: &AtomicBool) -> Result<()> {
-		if !rc.load(Ordering::Relaxed) {
+	async fn check_index_compaction(&self, tx: &Transaction, rc: &mut bool) -> Result<()> {
+		if !*rc {
 			return Ok(());
 		}
 		FullTextIndex::trigger_compaction(&self.ikb, tx, self.opt.id()?).await?;
-		rc.store(false, Ordering::Relaxed);
+		*rc = false;
 		Ok(())
 	}
 	/// Abort the current indexing process.
