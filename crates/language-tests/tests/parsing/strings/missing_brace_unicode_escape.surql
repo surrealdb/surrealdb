@@ -3,11 +3,11 @@
 
 [test.results]
 parsing-error = '''
-Missing end brace `}` of unicode escape sequence
-  --> [14:1]
+Invalid escape sequence, expected `}` or hexadecimal character.
+  --> [14:2]
    |
 14 | "\u{00B0";
-   | ^^^^^^^^^ 
+   |  ^^^^^^^ Invalid escape sequence
 '''
 
 */

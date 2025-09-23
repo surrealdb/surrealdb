@@ -40,6 +40,36 @@ impl Lexer<'_> {
 		}
 	}
 
+	fn eat_string_like(&mut self, is_double: bool) -> Result<(), SyntaxError> {
+		let start_span = self.current_span();
+		loop {
+			let Some(byte) = self.reader.next() else {
+				bail!("Unexpected end of file, expected string to end.", @start_span => "String starting here.");
+			};
+			match byte {
+				b'"' if is_double => break,
+				b'\'' if !is_double => break,
+				b'\\' => {
+					// Don't bother interpreting the escape code, just skip it and continue
+					// lexing.
+					// Parser should validate escape codes.
+					let Some(x) = self.reader.next() else {
+						bail!("Unexpected end of file, expected string to end.", @start_span => "String starting here.");
+					};
+					if !x.is_ascii() && self.reader.complete_char(x).is_err() {
+						bail!("Source is not valid utf-8")
+					}
+				}
+				x => {
+					if !x.is_ascii() && self.reader.complete_char(x).is_err() {
+						bail!("Source is not valid utf-8")
+					}
+				}
+			}
+		}
+		Ok(())
+	}
+
 	/// Eats a multi line comment and returns an error if `*/` would be missing.
 	pub(super) fn eat_multi_line_comment(&mut self) -> Result<(), SyntaxError> {
 		let start_span = self.current_span();
@@ -312,15 +342,31 @@ impl Lexer<'_> {
 				TokenKind::WhiteSpace
 			}
 			b'`' => return self.lex_surrounded_ident(true),
-			b'"' => t!("\""),
-			b'\'' => t!("'"),
+			b'"' => {
+				if let Err(e) = self.eat_string_like(true) {
+					return self.invalid_token(e);
+				}
+				t!("\"")
+			}
+			b'\'' => {
+				if let Err(e) = self.eat_string_like(false) {
+					return self.invalid_token(e);
+				}
+				t!("'")
+			}
 			b'd' => match self.reader.peek() {
 				Some(b'"') => {
 					self.reader.next();
+					if let Err(e) = self.eat_string_like(true) {
+						return self.invalid_token(e);
+					}
 					t!("d\"")
 				}
 				Some(b'\'') => {
 					self.reader.next();
+					if let Err(e) = self.eat_string_like(false) {
+						return self.invalid_token(e);
+					}
 					t!("d'")
 				}
 				_ => {
@@ -330,10 +376,16 @@ impl Lexer<'_> {
 			b's' => match self.reader.peek() {
 				Some(b'"') => {
 					self.reader.next();
+					if let Err(e) = self.eat_string_like(true) {
+						return self.invalid_token(e);
+					}
 					t!("\"")
 				}
 				Some(b'\'') => {
 					self.reader.next();
+					if let Err(e) = self.eat_string_like(false) {
+						return self.invalid_token(e);
+					}
 					t!("'")
 				}
 				_ => {
@@ -343,10 +395,16 @@ impl Lexer<'_> {
 			b'u' => match self.reader.peek() {
 				Some(b'"') => {
 					self.reader.next();
+					if let Err(e) = self.eat_string_like(true) {
+						return self.invalid_token(e);
+					}
 					t!("u\"")
 				}
 				Some(b'\'') => {
 					self.reader.next();
+					if let Err(e) = self.eat_string_like(false) {
+						return self.invalid_token(e);
+					}
 					t!("u'")
 				}
 				_ => {
@@ -356,10 +414,16 @@ impl Lexer<'_> {
 			b'b' => match self.reader.peek() {
 				Some(b'"') => {
 					self.reader.next();
+					if let Err(e) = self.eat_string_like(true) {
+						return self.invalid_token(e);
+					}
 					t!("b\"")
 				}
 				Some(b'\'') => {
 					self.reader.next();
+					if let Err(e) = self.eat_string_like(false) {
+						return self.invalid_token(e);
+					}
 					t!("b'")
 				}
 				_ => {
@@ -369,10 +433,16 @@ impl Lexer<'_> {
 			b'f' => match self.reader.peek() {
 				Some(b'"') => {
 					self.reader.next();
+					if let Err(e) = self.eat_string_like(true) {
+						return self.invalid_token(e);
+					}
 					t!("f\"")
 				}
 				Some(b'\'') => {
 					self.reader.next();
+					if let Err(e) = self.eat_string_like(false) {
+						return self.invalid_token(e);
+					}
 					t!("f'")
 				}
 				_ => {
@@ -382,10 +452,16 @@ impl Lexer<'_> {
 			b'r' => match self.reader.peek() {
 				Some(b'"') => {
 					self.reader.next();
+					if let Err(e) = self.eat_string_like(true) {
+						return self.invalid_token(e);
+					}
 					t!("r\"")
 				}
 				Some(b'\'') => {
 					self.reader.next();
+					if let Err(e) = self.eat_string_like(false) {
+						return self.invalid_token(e);
+					}
 					t!("r'")
 				}
 				_ => {
@@ -396,7 +472,6 @@ impl Lexer<'_> {
 			b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
 				return self.lex_ident_from_next_byte(byte);
 			}
-			//b'0'..=b'9' => return self.lex_number(byte),
 			x => {
 				let err = syntax_error!("Invalid token `{}`", x as char, @self.current_span());
 				return self.invalid_token(err);

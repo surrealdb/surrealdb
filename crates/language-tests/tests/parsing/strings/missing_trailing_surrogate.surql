@@ -3,11 +3,11 @@
 
 [test.results]
 parsing-error = '''
-Unicode escape sequence encoding a leading surrogate needs to be followed by a trailing surrogate
-  --> [14:1]
+String contains invalid escape sequence, unicode escape character is not a valid unicode character.
+  --> [14:2]
    |
 14 | "\uD83D";
-   | ^^^^^^^^ 
+   |  ^^^^^^ Not a valid character code
 '''
 
 */

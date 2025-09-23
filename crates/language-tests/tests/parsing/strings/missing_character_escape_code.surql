@@ -3,11 +3,11 @@
 
 [test.results]
 parsing-error = '''
-Invalid character `"` in unicode escape sequence, must be a hex digit.
-  --> [14:1]
+String contains invalid escape sequence, expected a hexadecimal character.
+  --> [14:7]
    |
 14 | "\u00B";
-   | ^^^^^^^ 
+   |       ^ Unexpected character
 '''
 
 */
