@@ -1,6 +1,7 @@
 use std::fmt::{self, Write};
 
 use anyhow::{Result, bail};
+use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog::providers::DatabaseProvider;
@@ -9,8 +10,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::Base;
-use crate::fmt::{QuoteStr, is_pretty, pretty_indent};
+use crate::expr::{Base, Expr};
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -20,7 +21,7 @@ pub struct DefineModelStatement {
 	pub hash: String,
 	pub name: String,
 	pub version: String,
-	pub comment: Option<String>,
+	pub comment: Option<Expr>,
 	pub permissions: Permission,
 }
 
@@ -28,9 +29,10 @@ impl DefineModelStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
@@ -60,7 +62,7 @@ impl DefineModelStatement {
 				hash: self.hash.clone(),
 				name: self.name.clone(),
 				version: self.version.clone(),
-				comment: self.comment.clone(),
+				comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 				permissions: self.permissions.clone(),
 			},
 			None,
@@ -83,7 +85,7 @@ impl fmt::Display for DefineModelStatement {
 		}
 		write!(f, " ml::{}<{}>", self.name, self.version)?;
 		if let Some(comment) = self.comment.as_ref() {
-			write!(f, " COMMENT {}", QuoteStr(comment))?;
+			write!(f, " COMMENT {}", comment)?;
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

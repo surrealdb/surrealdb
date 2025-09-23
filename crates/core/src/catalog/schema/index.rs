@@ -61,11 +61,14 @@ impl IndexDefinition {
 	pub fn to_sql_definition(&self) -> crate::sql::DefineIndexStatement {
 		crate::sql::DefineIndexStatement {
 			kind: DefineKind::Default,
-			name: self.name.clone(),
-			what: self.table_name.clone(),
-			cols: self.cols.iter().cloned().map(Into::into).collect(),
+			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
+			what: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.table_name.clone())),
+			cols: self.cols.iter().cloned().map(|x| crate::sql::Expr::Idiom(x.into())).collect(),
 			index: self.index.to_sql_definition(),
-			comment: self.comment.clone(),
+			comment: self
+				.comment
+				.clone()
+				.map(|x| crate::sql::Expr::Literal(crate::sql::Literal::String(x))),
 			concurrently: false,
 		}
 	}

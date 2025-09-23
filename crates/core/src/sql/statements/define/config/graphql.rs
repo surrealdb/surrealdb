@@ -96,7 +96,7 @@ pub enum FunctionsConfig {
 
 impl Display for GraphQLConfig {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, " GRAPHQL")?;
+		write!(f, "GRAPHQL")?;
 
 		write!(f, " TABLES {}", self.tables)?;
 		write!(f, " FUNCTIONS {}", self.functions)?;

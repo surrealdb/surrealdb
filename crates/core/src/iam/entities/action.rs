@@ -29,7 +29,9 @@ impl From<&Statement<'_>> for Action {
 	fn from(stmt: &Statement) -> Self {
 		match stmt {
 			Statement::Live(_) => Action::View,
-			Statement::Select(_) => Action::View,
+			Statement::Select {
+				..
+			} => Action::View,
 			Statement::Show(_) => Action::View,
 			Statement::Create(_) => Action::Edit,
 			Statement::Upsert(_) => Action::Edit,

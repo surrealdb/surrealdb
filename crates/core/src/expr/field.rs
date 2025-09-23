@@ -76,7 +76,7 @@ impl Fields {
 	}
 
 	/// Get all fields which are not an `*` projection
-	pub fn iter_fields(&self) -> FieldsIter {
+	pub fn iter_fields(&self) -> FieldsIter<'_> {
 		match self {
 			Fields::Value(field) => FieldsIter::Single(Some(field)),
 			Fields::Select(fields) => FieldsIter::Multiple(fields.iter()),

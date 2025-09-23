@@ -3,7 +3,7 @@ use reblessive::Stk;
 use super::parts::MissingKind;
 use crate::sql::order::{OrderList, Ordering};
 use crate::sql::statements::SelectStatement;
-use crate::sql::{Fields, Idioms, Limit, Order, Split, Splits, Start};
+use crate::sql::{Fields, Limit, Order, Split, Splits, Start};
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Span, t};
@@ -19,9 +19,17 @@ impl Parser<'_> {
 		let fields_span = before.covers(self.last_span());
 
 		let omit = if self.eat(t!("OMIT")) {
-			Some(Idioms(self.parse_idiom_list(stk).await?))
+			let mut fields = Vec::new();
+			loop {
+				let expr = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+				fields.push(expr);
+				if !self.eat(t!(",")) {
+					break;
+				}
+			}
+			fields
 		} else {
-			None
+			vec![]
 		};
 
 		expected!(self, t!("FROM"));
@@ -53,7 +61,7 @@ impl Parser<'_> {
 		} else {
 			None
 		};
-		let timeout = self.try_parse_timeout()?;
+		let timeout = self.try_parse_timeout(stk).await?;
 		let parallel = self.eat(t!("PARALLEL"));
 		let tempfiles = self.eat(t!("TEMPFILES"));
 		let explain = self.try_parse_explain()?;

@@ -1,12 +1,21 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::fmt::EscapeIdent;
+use crate::sql::{Expr, Literal};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveSequenceStatement {
-	pub name: String,
+	pub name: Expr,
 	pub if_exists: bool,
+}
+
+impl Default for RemoveSequenceStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			if_exists: false,
+		}
+	}
 }
 
 impl Display for RemoveSequenceStatement {
@@ -15,7 +24,7 @@ impl Display for RemoveSequenceStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", EscapeIdent(&self.name))?;
+		write!(f, " {}", self.name)?;
 		Ok(())
 	}
 }
@@ -23,7 +32,7 @@ impl Display for RemoveSequenceStatement {
 impl From<RemoveSequenceStatement> for crate::expr::statements::remove::RemoveSequenceStatement {
 	fn from(v: RemoveSequenceStatement) -> Self {
 		crate::expr::statements::remove::RemoveSequenceStatement {
-			name: v.name,
+			name: v.name.into(),
 			if_exists: v.if_exists,
 		}
 	}
@@ -32,7 +41,7 @@ impl From<RemoveSequenceStatement> for crate::expr::statements::remove::RemoveSe
 impl From<crate::expr::statements::remove::RemoveSequenceStatement> for RemoveSequenceStatement {
 	fn from(v: crate::expr::statements::remove::RemoveSequenceStatement) -> Self {
 		RemoveSequenceStatement {
-			name: v.name,
+			name: v.name.into(),
 			if_exists: v.if_exists,
 		}
 	}
