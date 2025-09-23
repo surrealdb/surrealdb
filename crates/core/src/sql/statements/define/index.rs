@@ -169,10 +169,10 @@ impl Display for DefineIndexStatement {
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
 		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		write!(f, " {} ON {}", self.name, self.what)?;
+		if !self.cols.is_empty() {
+			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter()))?;
 		}
-		write!(f, " {} ON {} FIELDS {}", self.name, self.what, self.cols)?;
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index)?;
 		}

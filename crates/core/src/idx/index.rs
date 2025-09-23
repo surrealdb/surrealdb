@@ -7,7 +7,9 @@ use crate::idx::ft::FtIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::IndexKeyBase;
 use crate::key;
-use crate::kvs::TransactionType;
+use crate::key::index::iu::IndexCountKey;
+use crate::key::root::ic::IndexCompactionKey;
+use crate::kvs::{Transaction, TransactionType};
 use crate::sql::index::{HnswParams, MTreeParams, SearchParams};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Index, Part, Thing, Value};
@@ -17,6 +19,7 @@ pub(crate) struct IndexOperation<'a> {
 	ctx: &'a Context,
 	opt: &'a Options,
 	ix: &'a DefineIndexStatement,
+	ikb: IndexKeyBase,
 	/// The old values (if existing)
 	o: Option<Vec<Value>>,
 	/// The new values (if existing)
@@ -37,13 +40,18 @@ impl<'a> IndexOperation<'a> {
 			ctx,
 			opt,
 			ix,
+			ikb: IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id),
 			o,
 			n,
 			rid,
 		}
 	}
 
-	pub(crate) async fn compute(&mut self, stk: &mut Stk) -> Result<(), Error> {
+	pub(crate) async fn compute(
+		&mut self,
+		stk: &mut Stk,
+		require_compaction: &mut bool,
+	) -> Result<()> {
 		// Index operation dispatching
 		match &self.ix.index {
 			Index::Uniq => self.index_unique().await,
@@ -51,6 +59,7 @@ impl<'a> IndexOperation<'a> {
 			Index::Search(p) => self.index_full_text(stk, p).await,
 			Index::MTree(p) => self.index_mtree(stk, p).await,
 			Index::Hnsw(p) => self.index_hnsw(p).await,
+			Index::Count(c) => self.index_count(stk, c.as_ref(), require_compaction).await,
 		}
 	}
 
@@ -125,12 +134,70 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	fn err_index_exists(&self, rid: Thing, n: Array) -> Result<(), Error> {
-		Err(Error::IndexExists {
+	async fn index_count(
+		&mut self,
+		_stk: &mut Stk,       // Placeholder for phase 2 (Condition)
+		_cond: Option<&Cond>, // Placeholder for phase 2 (Condition)
+		require_compaction: &mut bool,
+	) -> Result<()> {
+		// Phase 2 (Condition)
+		// let is_truthy = async |stk: &mut Stk, c: &Cond, d: &CursorDoc| -> Result<bool> {
+		// 	Ok(stk.run(|stk| c.0.compute(stk, ctx, opt, Some(d))).await.catch_return()?.is_truthy())
+		// };
+		let mut relative_count: i8 = 0;
+		// Phase 2 - with condition
+		// if let Some(c) = cond {
+		// 	if self.o.is_some() {
+		// 		if is_truthy(stk, c, &self.doc.initial).await? {
+		// 			relative_count -= 1;
+		// 		}
+		// 	}
+		// 	if self.n.is_some() {
+		// 		if is_truthy(stk, c, &self.doc.current).await? {
+		// 			relative_count += 1;
+		// 		}
+		// 	}
+		// } else {
+		if self.o.is_some() {
+			relative_count -= 1;
+		}
+		if self.n.is_some() {
+			relative_count += 1;
+		}
+		// }
+		if relative_count == 0 {
+			return Ok(());
+		}
+		let key = IndexCountKey::new(
+			self.ns,
+			self.db,
+			&self.ix.table_name,
+			self.ix.index_id,
+			Some((self.opt.id()?, uuid::Uuid::now_v7())),
+			relative_count > 0,
+			relative_count.unsigned_abs() as u64,
+		);
+		self.ctx.tx().lock().await.put(&key, &(), None).await?;
+		*require_compaction = true;
+		Ok(())
+	}
+
+	pub(crate) async fn index_count_compaction(
+		ic: &IndexCompactionKey<'_>,
+		tx: &Transaction,
+	) -> Result<()> {
+		IndexCountThingIterator::new(ic.ns, ic.db, ic.tb.as_ref(), ic.ix)?.compaction(ic, tx).await
+	}
+
+	/// Construct a consistent uniqueness violation error message.
+	/// Formats the conflicting value as a single value or array depending on
+	/// the number of indexed fields.
+	fn err_index_exists(&self, rid: RecordId, mut n: Array) -> Result<()> {
+		bail!(Error::IndexExists {
 			thing: rid,
 			index: self.ix.name.to_string(),
-			value: match n.len() {
-				1 => n.first().unwrap().to_string(),
+			value: match n.0.len() {
+				1 => n.0.remove(0).to_string(),
 				_ => n.to_string(),
 			},
 		})
@@ -149,6 +216,10 @@ impl<'a> IndexOperation<'a> {
 			ft.remove_document(self.ctx, self.rid).await?;
 		}
 		ft.finish(self.ctx).await
+	}
+
+	pub(crate) async fn trigger_compaction(&self) -> Result<()> {
+		FullTextIndex::trigger_compaction(&self.ikb, &self.ctx.tx(), self.opt.id()?).await
 	}
 
 	async fn index_mtree(&mut self, stk: &mut Stk, p: &MTreeParams) -> Result<(), Error> {

@@ -253,7 +253,7 @@ impl IndexStores {
 	) -> Result<(), Error> {
 		#[cfg(not(target_family = "wasm"))]
 		if let Some(ib) = ib {
-			ib.remove_index(ns, db, tb, ix)?;
+			ib.remove_index(ns, db, tb, ix).await?;
 		}
 		self.remove_index(ns, db, tx.get_tb_index(ns, db, tb, ix).await?.as_ref()).await
 	}
@@ -300,7 +300,7 @@ impl IndexStores {
 		for ix in tx.all_tb_indexes(ns, db, tb).await?.iter() {
 			#[cfg(not(target_family = "wasm"))]
 			if let Some(ib) = ib {
-				ib.remove_index(ns, db, tb, &ix.name)?;
+				ib.remove_index(ns, db, tb, &ix.name).await?;
 			}
 			self.remove_index(ns, db, ix).await?;
 		}

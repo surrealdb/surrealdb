@@ -16,6 +16,8 @@ use crate::err::Error;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
+use crate::idx::IndexKeyBase;
+use crate::idx::index::IndexOperation;
 use crate::idx::trees::store::IndexStores;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SizedClock;
@@ -755,6 +757,98 @@ impl Datastore {
 		self.changefeed_cleanup(ts).await?;
 		// Everything ok
 		Ok(())
+	}
+
+	/// Processes the index compaction queue
+	///
+	/// This method is called periodically by the index compaction thread to
+	/// process indexes that have been marked for compaction. It acquires a
+	/// distributed lease to ensure only one node in a cluster performs the
+	/// compaction at a time.
+	///
+	/// The method scans the index compaction queue (stored as `Ic` keys) and
+	/// processes each index that needs compaction. Currently, only full-text
+	/// indexes support compaction, which helps optimize their performance by
+	/// consolidating changes and removing unnecessary data.
+	///
+	/// After processing an index, it is removed from the compaction queue.
+	///
+	/// # Arguments
+	///
+	/// * `interval` - The time interval between compaction runs, used to calculate the lease
+	///   duration
+	///
+	/// # Returns
+	///
+	/// * `Result<()>` - Ok if the compaction was successful or if another node is handling the
+	///   compaction, Error otherwise
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn index_compaction(&self, interval: Duration) -> Result<()> {
+		let lh = LeaseHandler::new(
+			self.id,
+			self.transaction_factory.clone(),
+			TaskLeaseType::IndexCompaction,
+			interval * 2,
+		)?;
+		// We continue without interruptions while there are keys and the lease
+		loop {
+			// Attempt to acquire a lease for the ChangeFeedCleanup task
+			// If we don't get the lease, another node is handling this task
+			if !lh.has_lease().await? {
+				return Ok(());
+			}
+			// Create a new transaction
+			let txn = self.transaction(Write, Optimistic).await?;
+			// Collect every item in the queue
+			let (beg, end) = IndexCompactionKey::range();
+			let range = beg..end;
+			let mut previous: Option<IndexCompactionKey<'static>> = None;
+			let mut count = 0;
+			// Returns an ordered list of indexes that require compaction
+			for (k, _) in txn.getr(range.clone(), None).await? {
+				count += 1;
+				lh.try_maintain_lease().await?;
+				let ic = IndexCompactionKey::decode_key(&k)?;
+				// If the index has already been compacted, we can ignore the task
+				if let Some(p) = &previous {
+					if p.index_matches(&ic) {
+						continue;
+					}
+				}
+				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
+					Some(ix) => match &ix.index {
+						Index::FullText(p) => {
+							let ft = FullTextIndex::new(
+								self.id(),
+								&self.index_stores,
+								&txn,
+								IndexKeyBase::new(ic.ns, ic.db, &ix.table_name, ix.index_id),
+								p,
+							)
+							.await?;
+							ft.compaction(&txn).await?;
+						}
+						Index::Count(_) => {
+							IndexOperation::index_count_compaction(&ic, &txn).await?;
+						}
+						_ => {
+							trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ic.ix);
+						}
+					},
+					None => {
+						trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ic.ix);
+					}
+				}
+				previous = Some(ic.into_owned());
+			}
+			if count > 0 {
+				txn.delr(range).await?;
+				txn.commit().await?;
+			} else {
+				txn.cancel().await?;
+				return Ok(());
+			}
+		}
 	}
 
 	/// Performs a database import from SQL

@@ -141,7 +141,7 @@ impl IndexKey {
 #[derive(Clone)]
 pub(crate) struct IndexBuilder {
 	tf: TransactionFactory,
-	indexes: Arc<DashMap<IndexKey, IndexBuilding>>,
+	indexes: Arc<RwLock<HashMap<IndexKey, IndexBuilding>>>,
 }
 
 impl IndexBuilder {
@@ -152,7 +152,7 @@ impl IndexBuilder {
 		}
 	}
 
-	pub(crate) fn build(
+	pub(crate) async fn build(
 		&self,
 		ctx: &Context,
 		opt: Options,
@@ -160,9 +160,9 @@ impl IndexBuilder {
 	) -> Result<(), Error> {
 		let (ns, db) = opt.ns_db()?;
 		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
-		match self.indexes.entry(key) {
-			Entry::Occupied(e) => {
-				// If the building is currently running, we return error
+		match self.indexes.write().await.entry(key) {
+			Entry::Occupied(mut e) => {
+				// If the building is currently running, we return an error
 				if !e.get().1.is_finished() {
 					return Err(Error::IndexAlreadyBuilding {
 						name: e.key().ix.clone(),
@@ -194,8 +194,7 @@ impl IndexBuilder {
 		rid: &Thing,
 	) -> Result<ConsumeResult, Error> {
 		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
-		if let Some(r) = self.indexes.get(&key) {
-			let (b, _) = r.value();
+		if let Some((b, _)) = self.indexes.read().await.get(&key) {
 			return b.maybe_consume(ctx, old_values, new_values, rid).await;
 		}
 		Ok(ConsumeResult::Ignored(old_values, new_values))
@@ -208,17 +207,17 @@ impl IndexBuilder {
 		ix: &DefineIndexStatement,
 	) -> BuildingStatus {
 		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
-		if let Some(a) = self.indexes.get(&key) {
-			a.value().0.status.read().await.clone()
+		if let Some(a) = self.indexes.read().await.get(&key) {
+			a.0.status.read().await.clone()
 		} else {
 			BuildingStatus::default()
 		}
 	}
 
-	pub(crate) fn remove_index(&self, ns: &str, db: &str, tb: &str, ix: &str) -> Result<(), Error> {
+	pub(crate) async fn remove_index(&self, ns: &str, db: &str, tb: &str, ix: &str) -> Result<(), Error> {
 		let key = IndexKey::new(ns, db, tb, ix);
-		if let Some((_, b)) = self.indexes.remove(&key) {
-			b.0.abort();
+		if let Some((b, _)) = self.indexes.write().await.remove(&key) {
+			b.abort();
 		}
 		Ok(())
 	}
@@ -523,6 +522,9 @@ impl Building {
 			})
 			.await;
 		}
+		// Check if we trigger the compaction
+		self.check_index_compaction(tx, &mut rc).await?;
+		// We're done
 		Ok(())
 	}
 
@@ -561,9 +563,20 @@ impl Building {
 				.await;
 			}
 		}
+		// Check if we trigger the compaction
+		self.check_index_compaction(tx, &mut rc).await?;
+		// We're done
 		Ok(())
 	}
 
+	async fn check_index_compaction(&self, tx: &Transaction, rc: &mut bool) -> Result<()> {
+		if !*rc {
+			return Ok(());
+		}
+		FullTextIndex::trigger_compaction(&self.ikb, tx, self.opt.id()?).await?;
+		*rc = false;
+		Ok(())
+	}
 	/// Abort the current indexing process.
 	fn abort(&self) {
 		// We use `Ordering::Relaxed` as the called does not require to be synchronized.

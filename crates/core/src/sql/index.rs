@@ -29,6 +29,8 @@ pub enum Index {
 	/// HNSW index for distance based metrics
 	#[revision(start = 2)]
 	Hnsw(HnswParams),
+    /// Count index
+    Count,
 }
 
 #[revisioned(revision = 2)]
@@ -241,6 +243,13 @@ impl Display for Index {
 		match self {
 			Self::Idx => Ok(()),
 			Self::Uniq => f.write_str("UNIQUE"),
+			Self::Count(c) => {
+				f.write_str("COUNT")?;
+				if let Some(v) = c {
+					write!(f, " {v}")?
+				}
+				Ok(())
+			}
 			Self::Search(p) => {
 				write!(
 					f,

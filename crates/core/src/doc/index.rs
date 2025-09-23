@@ -84,16 +84,15 @@ impl Document {
 			(o, n)
 		};
 
-		// Store all the variable and parameters required by the index operation
-		let mut ic = IndexOperation::new(opt, ix, o, n, rid);
-
-		// Index operation dispatching
-		match &ix.index {
-			Index::Uniq => ic.index_unique(ctx).await?,
-			Index::Idx => ic.index_non_unique(ctx).await?,
-			Index::Search(p) => ic.index_full_text(stk, ctx, p).await?,
-			Index::MTree(p) => ic.index_mtree(stk, ctx, p).await?,
-			Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
+		// Store all the variables and parameters required by the index operation
+		let mut ic = IndexOperation::new(ctx, opt, db.namespace_id, db.database_id, ix, o, n, rid);
+		// Keep track of compaction requests, we need to trigger them after the index operation
+		let mut require_compaction = false;
+		// Execute the index operation
+		ic.compute(stk, &mut require_compaction).await?;
+		// Did any compaction request have to be triggered?
+		if require_compaction {
+			ic.trigger_compaction().await?;
 		}
 		Ok(())
 	}
