@@ -317,6 +317,10 @@ criteria = "safe-to-deploy"
 version = "1.0.3"
 criteria = "safe-to-deploy"
 
+[[exemptions.compare]]
+version = "0.0.6"
+criteria = "safe-to-deploy"
+
 [[exemptions.concurrent-queue]]
 version = "2.5.0"
 criteria = "safe-to-deploy"
@@ -349,6 +353,10 @@ criteria = "safe-to-deploy"
 version = "0.5.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.crossbeam]]
+version = "0.8.4"
+criteria = "safe-to-deploy"
+
 [[exemptions.crossbeam-channel]]
 version = "0.5.4"
 criteria = "safe-to-deploy"
@@ -359,6 +367,14 @@ criteria = "safe-to-deploy"
 
 [[exemptions.crossbeam-epoch]]
 version = "0.9.18"
+criteria = "safe-to-deploy"
+
+[[exemptions.crossbeam-queue]]
+version = "0.3.12"
+criteria = "safe-to-deploy"
+
+[[exemptions.crossbeam-skiplist]]
+version = "0.1.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.crossbeam-utils]]
@@ -493,6 +509,10 @@ criteria = "safe-to-deploy"
 version = "3.1.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.fs2]]
+version = "0.4.3"
+criteria = "safe-to-deploy"
+
 [[exemptions.funty]]
 version = "2.0.0"
 criteria = "safe-to-deploy"
@@ -549,6 +569,10 @@ criteria = "safe-to-deploy"
 version = "0.9.1"
 criteria = "safe-to-run"
 
+[[exemptions.guardian]]
+version = "1.3.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.hash32]]
 version = "0.3.1"
 criteria = "safe-to-deploy"
@@ -599,6 +623,14 @@ criteria = "safe-to-deploy"
 
 [[exemptions.inferno]]
 version = "0.11.21"
+criteria = "safe-to-deploy"
+
+[[exemptions.integer-encoding]]
+version = "4.0.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.interval-heap]]
+version = "0.0.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.ipnet]]
@@ -679,10 +711,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.lock_api]]
 version = "0.4.12"
-criteria = "safe-to-deploy"
-
-[[exemptions.lru]]
-version = "0.12.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.lz4-sys]]
@@ -954,7 +982,7 @@ version = "0.26.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.quick_cache]]
-version = "0.6.12"
+version = "0.6.16"
 criteria = "safe-to-deploy"
 
 [[exemptions.quinn]]
@@ -979,10 +1007,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.rand]]
 version = "0.7.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.rand]]
-version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rand_chacha]]
@@ -1203,14 +1227,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.string_cache_codegen]]
 version = "0.5.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.surrealdb-types]]
-version = "3.0.0-alpha.8"
-criteria = "safe-to-deploy"
-
-[[exemptions.surrealdb-types-derive]]
-version = "3.0.0-alpha.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.symbolic-common]]
