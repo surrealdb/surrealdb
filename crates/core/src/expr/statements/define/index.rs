@@ -22,7 +22,7 @@ use crate::expr::parameterize::{expr_to_ident, exprs_to_fields};
 use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
 use crate::expr::{Base, Expr, Literal, Part};
 #[cfg(target_family = "wasm")]
-use crate::expr::{Ident, Idiom};
+use crate::expr::Idiom;
 use crate::fmt::Fmt;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ToSql;
@@ -214,8 +214,8 @@ pub(in crate::expr::statements) async fn run_indexing(
 		{
 			// Create the remove statement
 			let stm = RemoveIndexStatement {
-				name: Expr::Idiom(Idiom::field(Ident::new(index.name.clone()).unwrap())),
-				what: Expr::Idiom(Idiom::field(Ident::new(index.table_name.clone()).unwrap())),
+				name: Expr::Idiom(Idiom::field(index.name.clone())),
+				what: Expr::Idiom(Idiom::field(index.table_name.clone())),
 				if_exists: false,
 			};
 			// Execute the delete statement
