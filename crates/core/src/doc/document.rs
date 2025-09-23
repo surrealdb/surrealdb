@@ -413,13 +413,6 @@ impl Document {
 		}
 	}
 
-	pub(crate) fn id_ref(&self) -> Result<&RecordId> {
-		match &self.id {
-			Some(id) => Ok(id.as_ref()),
-			_ => fail!("Expected a document id to be present"),
-		}
-	}
-
 	/// Retrieve the record id for this document
 	pub fn inner_id(&self) -> Result<RecordId> {
 		match self.id.clone() {
