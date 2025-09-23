@@ -1205,10 +1205,6 @@ criteria = "safe-to-deploy"
 version = "0.5.4"
 criteria = "safe-to-deploy"
 
-[[exemptions.surrealdb-types]]
-version = "3.0.0-alpha.8"
-criteria = "safe-to-deploy"
-
 [[exemptions.symbolic-common]]
 version = "12.14.1"
 criteria = "safe-to-deploy"

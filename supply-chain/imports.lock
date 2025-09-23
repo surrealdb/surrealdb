@@ -705,6 +705,13 @@ user-id = 217605
 user-login = "mumoshu"
 user-name = "Yusuke Kuoka"
 
+[[publisher.surrealdb-types]]
+version = "3.0.0-alpha.9"
+when = "2025-09-19"
+user-id = 145457
+user-login = "tobiemh"
+user-name = "Tobie Morgan Hitchcock"
+
 [[publisher.surrealdb-types-derive]]
 version = "3.0.0-alpha.9"
 when = "2025-09-19"
