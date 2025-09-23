@@ -11,7 +11,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Expr, FlowResultExt as _};
-use crate::fmt::{EscapeKwFreeIdent, QuoteStr, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKwFreeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -20,7 +20,7 @@ pub struct DefineParamStatement {
 	pub kind: DefineKind,
 	pub name: String,
 	pub value: Expr,
-	pub comment: Option<String>,
+	pub comment: Option<Expr>,
 	pub permissions: Permission,
 }
 
@@ -69,7 +69,7 @@ impl DefineParamStatement {
 			&ParamDefinition {
 				value,
 				name: self.name.clone(),
-				comment: self.comment.clone(),
+				comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 				permissions: self.permissions.clone(),
 			},
 		)
@@ -91,7 +91,7 @@ impl Display for DefineParamStatement {
 		}
 		write!(f, " ${} VALUE {}", EscapeKwFreeIdent(&self.name), self.value)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", QuoteStr(v))?
+			write!(f, " COMMENT {}", v)?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

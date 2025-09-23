@@ -4215,7 +4215,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			let user = DefineUserStatement {
 				kind: DefineKind::Default,
 				base,
-				name: "user".to_owned(),
+				name: crate::sql::Expr::Idiom(crate::sql::Idiom::field("user".to_string())),
 				// This is the Argon2id hash for "pass" with a random salt.
 				pass_type: PassType::Hash(
 					"$argon2id$v=19$m=16,t=2,p=1$VUlHTHVOYjc5d0I1dGE3OQ$sVtmRNH+Xtiijk0uXL2+4w"

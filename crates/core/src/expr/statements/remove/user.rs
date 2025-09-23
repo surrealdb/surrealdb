@@ -1,33 +1,54 @@
 use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
+use reblessive::tree::Stk;
 
 use crate::catalog::providers::UserProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Value};
-use crate::fmt::EscapeIdent;
+use crate::expr::parameterize::expr_to_ident;
+use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RemoveUserStatement {
-	pub name: String,
+	pub name: Expr,
 	pub base: Base,
 	pub if_exists: bool,
 }
 
+impl Default for RemoveUserStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			base: Base::default(),
+			if_exists: false,
+		}
+	}
+}
+
 impl RemoveUserStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
+		// Compute the name
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "user name").await?;
 		// Check the statement type
 		match self.base {
 			Base::Root => {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Get the definition
-				let us = match txn.get_root_user(&self.name).await? {
+				let us = match txn.get_root_user(&name).await? {
 					Some(x) => x,
 					None => {
 						if self.if_exists {
@@ -35,7 +56,7 @@ impl RemoveUserStatement {
 						}
 
 						return Err(Error::UserRootNotFound {
-							name: self.name.to_string(),
+							name,
 						}
 						.into());
 					}
@@ -54,7 +75,7 @@ impl RemoveUserStatement {
 				let txn = ctx.tx();
 				// Get the definition
 				let ns = ctx.get_ns_id(opt).await?;
-				let us = match txn.get_ns_user(ns, &self.name).await? {
+				let us = match txn.get_ns_user(ns, &name).await? {
 					Some(x) => x,
 					None => {
 						if self.if_exists {
@@ -63,7 +84,7 @@ impl RemoveUserStatement {
 
 						return Err(Error::UserNsNotFound {
 							ns: opt.ns()?.to_string(),
-							name: self.name.to_string(),
+							name,
 						}
 						.into());
 					}
@@ -81,7 +102,7 @@ impl RemoveUserStatement {
 				let txn = ctx.tx();
 				// Get the definition
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-				let us = match txn.get_db_user(ns, db, &self.name).await? {
+				let us = match txn.get_db_user(ns, db, &name).await? {
 					Some(x) => x,
 					None => {
 						if self.if_exists {
@@ -91,7 +112,7 @@ impl RemoveUserStatement {
 						return Err(Error::UserDbNotFound {
 							ns: opt.ns()?.to_string(),
 							db: opt.db()?.to_string(),
-							name: self.name.to_string(),
+							name,
 						}
 						.into());
 					}
@@ -114,7 +135,7 @@ impl Display for RemoveUserStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", EscapeIdent(&self.name), self.base)?;
+		write!(f, " {} ON {}", self.name, self.base)?;
 		Ok(())
 	}
 }

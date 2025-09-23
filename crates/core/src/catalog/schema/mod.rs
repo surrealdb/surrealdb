@@ -84,14 +84,6 @@ impl Display for Permission {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Base {
-	Root,
-	Ns,
-	Db,
-}
-
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Permissions {
 	pub select: Permission,

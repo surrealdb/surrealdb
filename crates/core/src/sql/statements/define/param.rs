@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
-use crate::fmt::{EscapeIdent, QuoteStr, is_pretty, pretty_indent};
+use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
 use crate::sql::{Expr, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -10,7 +10,7 @@ pub struct DefineParamStatement {
 	pub kind: DefineKind,
 	pub name: String,
 	pub value: Expr,
-	pub comment: Option<String>,
+	pub comment: Option<Expr>,
 	pub permissions: Permission,
 }
 
@@ -24,7 +24,7 @@ impl Display for DefineParamStatement {
 		}
 		write!(f, " ${} VALUE {}", EscapeIdent(&self.name), self.value)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", QuoteStr(v))?
+			write!(f, " COMMENT {}", v)?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
@@ -43,7 +43,7 @@ impl From<DefineParamStatement> for crate::expr::statements::DefineParamStatemen
 			kind: v.kind.into(),
 			name: v.name,
 			value: v.value.into(),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 			permissions: v.permissions.into(),
 		}
 	}
@@ -55,7 +55,7 @@ impl From<crate::expr::statements::DefineParamStatement> for DefineParamStatemen
 			kind: v.kind.into(),
 			name: v.name,
 			value: v.value.into(),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 			permissions: v.permissions.into(),
 		}
 	}
