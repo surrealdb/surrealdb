@@ -30,7 +30,7 @@ use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::planner::iterators::IndexCountThingIterator;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
-use crate::key::index::iu::Iu;
+use crate::key::index::iu::IndexCountKey;
 use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::{Transaction, TransactionType};
 use crate::val::{Array, RecordId, Value};
@@ -216,16 +216,16 @@ impl<'a> IndexOperation<'a> {
 		if relative_count == 0 {
 			return Ok(());
 		}
-		let key = Iu::new(
+		let key = IndexCountKey::new(
 			self.ns,
 			self.db,
 			&self.ix.table_name,
 			self.ix.index_id,
 			Some((self.opt.id()?, uuid::Uuid::now_v7())),
 			relative_count > 0,
-			relative_count.unsigned_abs() as u32,
+			relative_count.unsigned_abs() as u64,
 		);
-		self.ctx.tx().lock().await.put(&key, &vec![], None).await?;
+		self.ctx.tx().lock().await.put(&key, &(), None).await?;
 		require_compaction.store(true, Ordering::Relaxed);
 		Ok(())
 	}

@@ -14,7 +14,7 @@ use crate::idx::planner::plan::RangeValue;
 use crate::idx::planner::tree::IndexReference;
 use crate::idx::seqdocids::DocId;
 use crate::key::index::Index;
-use crate::key::index::iu::Iu;
+use crate::key::index::iu::IndexCountKey;
 use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::{KVKey, Key, Transaction, Val};
 use crate::val::record::Record;
@@ -161,9 +161,9 @@ impl ThingIterator {
 			Self::Knn(i) => i.next_batch(ctx, size).await,
 			Self::IndexJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
-			Self::IndexCount(_) => bail!(Error::Unreachable(
-				"IndexCount should not be used with next_batch".to_string()
-			)),
+			Self::IndexCount(_) => {
+				bail!(Error::unreachable("IndexCount should not be used with next_batch"))
+			}
 		}
 	}
 
@@ -1680,14 +1680,14 @@ impl IndexCountThingIterator {
 		tb: &str,
 		ix: IndexId,
 	) -> Result<Self> {
-		Ok(Self(Some(Iu::range(ns, db, tb, ix)?)))
+		Ok(Self(Some(IndexCountKey::range(ns, db, tb, ix)?)))
 	}
 	async fn next_count(&mut self, ctx: &Context, txn: &Transaction, _limit: u32) -> Result<usize> {
 		if let Some(range) = self.0.take() {
 			let mut count: i64 = 0;
 			for (i, key) in txn.keys(range, u32::MAX, None).await?.into_iter().enumerate() {
 				ctx.is_done(i % 1000 == 0).await?;
-				let iu = Iu::decode_key(&key)?;
+				let iu = IndexCountKey::decode_key(&key)?;
 				if iu.pos {
 					count += iu.count as i64;
 				} else {
@@ -1713,7 +1713,7 @@ impl IndexCountThingIterator {
 			if i % 1000 == 0 {
 				yield_now!()
 			}
-			let iu = Iu::decode_key(&key)?;
+			let iu = IndexCountKey::decode_key(&key)?;
 			if iu.pos {
 				count += iu.count as i64;
 			} else {
@@ -1722,9 +1722,9 @@ impl IndexCountThingIterator {
 		}
 		txn.delr(range).await?;
 		let pos = count.is_positive();
-		let count = count.unsigned_abs() as u32;
-		let compact_key = Iu::new(ic.ns, ic.db, ic.tb.as_ref(), ic.ix, None, pos, count);
-		txn.put(&compact_key, &vec![], None).await?;
+		let count = count.unsigned_abs();
+		let compact_key = IndexCountKey::new(ic.ns, ic.db, ic.tb.as_ref(), ic.ix, None, pos, count);
+		txn.put(&compact_key, &(), None).await?;
 		Ok(())
 	}
 }
