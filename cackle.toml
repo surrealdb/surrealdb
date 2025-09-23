@@ -1145,6 +1145,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.html5ever]
+allow_unsafe = true
 build.allow_apis = ["fs"]
 
 [pkg.futf]
