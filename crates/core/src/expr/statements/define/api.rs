@@ -12,7 +12,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Expr, FlowResultExt as _, Value};
-use crate::fmt::{Fmt, QuoteStr, pretty_indent};
+use crate::fmt::{Fmt, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -22,7 +22,7 @@ pub struct DefineApiStatement {
 	pub actions: Vec<ApiAction>,
 	pub fallback: Option<Expr>,
 	pub config: ApiConfig,
-	pub comment: Option<String>,
+	pub comment: Option<Expr>,
 }
 
 impl DefineApiStatement {
@@ -39,7 +39,7 @@ impl DefineApiStatement {
 		let txn = ctx.tx();
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
-		if txn.get_db_api(ns, db, &self.path.to_string()).await.is_ok() {
+		if txn.get_db_api(ns, db, &self.path.to_string()).await?.is_some() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -75,7 +75,7 @@ impl DefineApiStatement {
 			actions,
 			fallback: self.fallback.clone(),
 			config,
-			comment: self.comment.clone(),
+			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 		};
 		txn.put_db_api(ns, db, &ap).await?;
 		// Clear the cache
@@ -96,25 +96,25 @@ impl fmt::Display for DefineApiStatement {
 		write!(f, " {}", self.path)?;
 		let indent = pretty_indent();
 
-		write!(f, "FOR any")?;
+		write!(f, " FOR any")?;
 		{
 			let indent = pretty_indent();
 
 			write!(f, "{}", self.config)?;
 
 			if let Some(fallback) = &self.fallback {
-				write!(f, "THEN {fallback}")?;
+				write!(f, " THEN {fallback}")?;
 			}
 
 			drop(indent);
 		}
 
 		for action in &self.actions {
-			write!(f, "{action}")?;
+			write!(f, " {action}")?;
 		}
 
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", QuoteStr(comment))?;
+			write!(f, " COMMENT {}", comment)?;
 		}
 
 		drop(indent);
@@ -134,7 +134,7 @@ impl fmt::Display for ApiAction {
 		write!(f, "FOR {}", Fmt::comma_separated(self.methods.iter()))?;
 		let indent = pretty_indent();
 		write!(f, "{}", &self.config)?;
-		write!(f, "THEN {}", self.action)?;
+		write!(f, " THEN {}", self.action)?;
 		drop(indent);
 		Ok(())
 	}

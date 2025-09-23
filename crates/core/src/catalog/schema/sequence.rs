@@ -23,9 +23,9 @@ impl SequenceDefinition {
 	fn to_sql_definition(&self) -> DefineSequenceStatement {
 		DefineSequenceStatement {
 			kind: DefineKind::Default,
-			name: self.name.clone(),
-			batch: self.batch,
-			start: self.start,
+			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
+			batch: crate::sql::Expr::Literal(crate::sql::Literal::Integer(self.batch as i64)),
+			start: crate::sql::Expr::Literal(crate::sql::Literal::Integer(self.start)),
 			timeout: self.timeout.map(|t| t.into()),
 		}
 	}

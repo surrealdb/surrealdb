@@ -2113,21 +2113,21 @@ impl ApiProvider for Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ap: &str,
-	) -> Result<Arc<ApiDefinition>> {
+	) -> Result<Option<Arc<ApiDefinition>>> {
 		let qey = cache::tx::Lookup::Ap(ns, db, ap);
 		match self.cache.get(&qey) {
-			Some(val) => val,
+			Some(val) => val.try_into_type().map(Some),
 			None => {
 				let key = crate::key::database::ap::new(ns, db, ap);
-				let val = self.get(&key, None).await?.ok_or_else(|| Error::ApNotFound {
-					value: ap.to_owned(),
-				})?;
-				let val = cache::tx::Entry::Any(Arc::new(val));
+				let Some(val) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
+				let api_def = Arc::new(val);
+				let val = cache::tx::Entry::Any(api_def.clone());
 				self.cache.insert(qey, val.clone());
-				val
+				Ok(Some(api_def))
 			}
 		}
-		.try_into_type()
 	}
 
 	async fn put_db_api(&self, ns: NamespaceId, db: DatabaseId, ap: &ApiDefinition) -> Result<()> {

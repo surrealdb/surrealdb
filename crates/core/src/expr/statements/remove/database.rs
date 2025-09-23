@@ -1,39 +1,59 @@
 use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
+use reblessive::tree::Stk;
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Value};
-use crate::fmt::EscapeIdent;
+use crate::expr::parameterize::expr_to_ident;
+use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RemoveDatabaseStatement {
-	pub name: String,
+	pub name: Expr,
 	pub if_exists: bool,
 	pub expunge: bool,
 }
 
+impl Default for RemoveDatabaseStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			if_exists: false,
+			expunge: false,
+		}
+	}
+}
+
 impl RemoveDatabaseStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
 		// Get the transaction
 		let txn = ctx.tx();
 
+		// Compute the name
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "database name").await?;
 		let ns = opt.ns()?;
-		let db = match txn.get_db_by_name(ns, &self.name).await? {
+		let db = match txn.get_db_by_name(ns, &name).await? {
 			Some(x) => x,
 			None => {
 				if self.if_exists {
 					return Ok(Value::None);
 				} else {
 					return Err(Error::DbNotFound {
-						name: self.name.to_string(),
+						name,
 					}
 					.into());
 				}
@@ -72,7 +92,7 @@ impl Display for RemoveDatabaseStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", EscapeIdent(&self.name))?;
+		write!(f, " {}", self.name)?;
 		Ok(())
 	}
 }

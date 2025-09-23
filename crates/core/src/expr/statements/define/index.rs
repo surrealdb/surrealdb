@@ -16,24 +16,41 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 #[cfg(target_family = "wasm")]
+use crate::expr::Idiom;
+#[cfg(target_family = "wasm")]
 use crate::expr::Output;
+use crate::expr::parameterize::{expr_to_ident, exprs_to_fields};
 #[cfg(target_family = "wasm")]
 use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
-use crate::expr::{Base, Idiom, Part};
-use crate::fmt::{EscapeIdent, Fmt};
+use crate::expr::{Base, Expr, Literal, Part};
+use crate::fmt::Fmt;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ToSql;
 use crate::val::Value;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineIndexStatement {
 	pub kind: DefineKind,
-	pub name: String,
-	pub what: String,
-	pub cols: Vec<Idiom>,
+	pub name: Expr,
+	pub what: Expr,
+	pub cols: Vec<Expr>,
 	pub index: Index,
-	pub comment: Option<String>,
+	pub comment: Option<Expr>,
 	pub concurrently: bool,
+}
+
+impl Default for DefineIndexStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::None),
+			what: Expr::Literal(Literal::None),
+			cols: Vec::new(),
+			index: Index::Idx,
+			comment: None,
+			concurrently: false,
+		}
+	}
 }
 
 impl DefineIndexStatement {
@@ -50,12 +67,16 @@ impl DefineIndexStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 
+		// Compute name and what
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "index name").await?;
+		let what = expr_to_ident(stk, ctx, opt, doc, &self.what, "index table").await?;
+
 		let (ns, db) = opt.ns_db()?;
-		let tb = txn.ensure_ns_db_tb(ns, db, &self.what, opt.strict).await?;
+		let tb = txn.ensure_ns_db_tb(ns, db, &what, opt.strict).await?;
 
 		// Check if the definition exists
 		let index_id = if let Some(ix) =
-			txn.get_tb_index(tb.namespace_id, tb.database_id, &tb.name, &self.name).await?
+			txn.get_tb_index(tb.namespace_id, tb.database_id, &tb.name, &name).await?
 		{
 			match self.kind {
 				DefineKind::Default => {
@@ -77,12 +98,12 @@ impl DefineIndexStatement {
 					tb.namespace_id,
 					tb.database_id,
 					&tb.name,
-					&self.name,
+					&name,
 				)
 				.await?;
 			#[cfg(target_family = "wasm")]
 			ctx.get_index_stores()
-				.index_removed(&txn, tb.namespace_id, tb.database_id, &tb.name, &self.name)
+				.index_removed(&txn, tb.namespace_id, tb.database_id, &tb.name, &name)
 				.await?;
 
 			ix.index_id
@@ -90,10 +111,13 @@ impl DefineIndexStatement {
 			txn.lock().await.get_next_ix_id(tb.namespace_id, tb.database_id).await?
 		};
 
+		// Compute columns
+		let cols = exprs_to_fields(stk, ctx, opt, doc, self.cols.as_slice()).await?;
+
 		// If the table is schemafull, ensure that the fields exist.
 		if tb.schemafull {
 			// Check that the fields exist
-			for idiom in self.cols.iter() {
+			for idiom in cols.iter() {
 				// TODO: Was this correct? Can users not index data on sub-fields?
 				let Some(Part::Field(first)) = idiom.0.first() else {
 					continue;
@@ -115,11 +139,11 @@ impl DefineIndexStatement {
 		// Process the statement
 		let index_def = IndexDefinition {
 			index_id,
-			name: self.name.clone(),
-			table_name: self.what.clone(),
-			cols: self.cols.clone(),
+			name,
+			table_name: what,
+			cols: cols.clone(),
 			index: self.index.clone(),
-			comment: self.comment.clone(),
+			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 		};
 		txn.put_tb_index(tb.namespace_id, tb.database_id, &tb.name, &index_def).await?;
 
@@ -157,7 +181,7 @@ impl Display for DefineIndexStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.what))?;
+		write!(f, " {} ON {}", self.name, self.what)?;
 		if !self.cols.is_empty() {
 			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter()))?;
 		}
@@ -187,12 +211,12 @@ pub(in crate::expr::statements) async fn run_indexing(
 		{
 			// Create the remove statement
 			let stm = RemoveIndexStatement {
-				name: index.name.clone(),
-				what: index.table_name.clone(),
+				name: Expr::Idiom(Idiom::field(index.name.clone())),
+				what: Expr::Idiom(Idiom::field(index.table_name.clone())),
 				if_exists: false,
 			};
 			// Execute the delete statement
-			stm.compute(ctx, opt).await?;
+			stm.compute(stk, ctx, opt, doc).await?;
 		}
 		{
 			// Force queries to run

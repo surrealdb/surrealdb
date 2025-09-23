@@ -1,14 +1,23 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::fmt::EscapeIdent;
-use crate::sql::Idiom;
+use crate::sql::{Expr, Literal};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveFieldStatement {
-	pub name: Idiom,
-	pub what: String,
+	pub name: Expr,
+	pub what: Expr,
 	pub if_exists: bool,
+}
+
+impl Default for RemoveFieldStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			what: Expr::Literal(Literal::None),
+			if_exists: false,
+		}
+	}
 }
 
 impl Display for RemoveFieldStatement {
@@ -17,7 +26,7 @@ impl Display for RemoveFieldStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, EscapeIdent(&self.what))?;
+		write!(f, " {} ON {}", self.name, self.what)?;
 		Ok(())
 	}
 }
@@ -27,7 +36,7 @@ impl From<RemoveFieldStatement> for crate::expr::statements::RemoveFieldStatemen
 		crate::expr::statements::RemoveFieldStatement {
 			name: v.name.into(),
 			if_exists: v.if_exists,
-			table_name: v.what,
+			table_name: v.what.into(),
 		}
 	}
 }
@@ -37,7 +46,7 @@ impl From<crate::expr::statements::RemoveFieldStatement> for RemoveFieldStatemen
 		RemoveFieldStatement {
 			name: v.name.into(),
 			if_exists: v.if_exists,
-			what: v.table_name,
+			what: v.table_name.into(),
 		}
 	}
 }

@@ -13,7 +13,6 @@ use crate::iam::{Action, ResourceKind};
 pub struct RemoveModelStatement {
 	pub name: String,
 	pub version: String,
-
 	pub if_exists: bool,
 }
 

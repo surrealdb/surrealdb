@@ -9,7 +9,7 @@ use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
 use crate::fmt::Fmt;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
+use crate::sql::{Literal, ToSql};
 use crate::val::{Array, Object, Value};
 
 /// The API definition.
@@ -63,7 +63,7 @@ impl ApiDefinition {
 			actions: self.actions.iter().map(|x| x.to_sql_action()).collect(),
 			fallback: self.fallback.clone().map(|x| x.into()),
 			config: self.config.to_sql_config(),
-			comment: self.comment.clone(),
+			comment: self.comment.clone().map(|x| crate::sql::Expr::Literal(Literal::String(x))),
 		}
 	}
 }
@@ -217,7 +217,7 @@ impl InfoStructure for ApiConfigDefinition {
 
 impl Display for ApiConfigDefinition {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, " API")?;
+		write!(f, "API")?;
 
 		if !self.middleware.is_empty() {
 			write!(f, " MIDDLEWARE ")?;

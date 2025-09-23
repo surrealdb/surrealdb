@@ -1,6 +1,7 @@
 use std::fmt::{self, Display, Write};
 
 use anyhow::{Result, bail};
+use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
@@ -9,8 +10,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Block, Kind};
-use crate::fmt::{EscapeKwFreeIdent, QuoteStr, is_pretty, pretty_indent};
+use crate::expr::{Base, Block, Expr, Kind};
+use crate::fmt::{EscapeKwFreeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -20,7 +21,7 @@ pub struct DefineFunctionStatement {
 	pub name: String,
 	pub args: Vec<(String, Kind)>,
 	pub block: Block,
-	pub comment: Option<String>,
+	pub comment: Option<Expr>,
 	pub permissions: Permission,
 	pub returns: Option<Kind>,
 }
@@ -29,9 +30,10 @@ impl DefineFunctionStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
@@ -67,7 +69,7 @@ impl DefineFunctionStatement {
 				name: self.name.clone(),
 				args: self.args.clone(),
 				block: self.block.clone(),
-				comment: self.comment.clone(),
+				comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 				permissions: self.permissions.clone(),
 				returns: self.returns.clone(),
 			},
@@ -101,7 +103,7 @@ impl fmt::Display for DefineFunctionStatement {
 		}
 		Display::fmt(&self.block, f)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", QuoteStr(v))?
+			write!(f, " COMMENT {}", v)?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

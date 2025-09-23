@@ -49,7 +49,7 @@ impl Display for DefineConfigStatement {
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 
-		write!(f, "{}", self.inner)?;
+		write!(f, " {}", self.inner)?;
 
 		Ok(())
 	}
@@ -59,7 +59,10 @@ impl Display for ConfigInner {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match &self {
 			ConfigInner::GraphQL(v) => Display::fmt(v, f),
-			ConfigInner::Api(v) => Display::fmt(v, f),
+			ConfigInner::Api(v) => {
+				write!(f, "API")?;
+				Display::fmt(v, f)
+			}
 		}
 	}
 }
