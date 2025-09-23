@@ -106,13 +106,16 @@ impl TableDefinition {
 	fn to_sql_definition(&self) -> DefineTableStatement {
 		DefineTableStatement {
 			id: Some(self.table_id.0),
-			name: self.name.clone(),
+			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
 			drop: self.drop,
 			full: self.schemafull,
 			view: self.view.clone().map(|v| v.to_sql_definition()),
 			permissions: self.permissions.clone().into(),
 			changefeed: self.changefeed.map(|v| v.into()),
-			comment: self.comment.clone(),
+			comment: self
+				.comment
+				.clone()
+				.map(|v| crate::sql::Expr::Literal(crate::sql::Literal::String(v))),
 			table_type: self.table_type.clone().into(),
 			..Default::default()
 		}

@@ -1,12 +1,21 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::fmt::EscapeIdent;
+use crate::sql::{Expr, Literal};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveAnalyzerStatement {
-	pub name: String,
+	pub name: Expr,
 	pub if_exists: bool,
+}
+
+impl Default for RemoveAnalyzerStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			if_exists: false,
+		}
+	}
 }
 
 impl Display for RemoveAnalyzerStatement {
@@ -15,7 +24,7 @@ impl Display for RemoveAnalyzerStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", EscapeIdent(&self.name))?;
+		write!(f, " {}", self.name)?;
 		Ok(())
 	}
 }
@@ -23,7 +32,7 @@ impl Display for RemoveAnalyzerStatement {
 impl From<RemoveAnalyzerStatement> for crate::expr::statements::RemoveAnalyzerStatement {
 	fn from(v: RemoveAnalyzerStatement) -> Self {
 		crate::expr::statements::RemoveAnalyzerStatement {
-			name: v.name,
+			name: v.name.into(),
 			if_exists: v.if_exists,
 		}
 	}
@@ -32,7 +41,7 @@ impl From<RemoveAnalyzerStatement> for crate::expr::statements::RemoveAnalyzerSt
 impl From<crate::expr::statements::RemoveAnalyzerStatement> for RemoveAnalyzerStatement {
 	fn from(v: crate::expr::statements::RemoveAnalyzerStatement) -> Self {
 		RemoveAnalyzerStatement {
-			name: v.name,
+			name: v.name.into(),
 			if_exists: v.if_exists,
 		}
 	}

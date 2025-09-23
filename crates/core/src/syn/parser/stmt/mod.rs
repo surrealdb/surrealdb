@@ -356,7 +356,7 @@ impl Parser<'_> {
 				InfoStatement::Db(structure, version)
 			}
 			t!("TABLE") => {
-				let ident = self.parse_ident()?;
+				let ident = stk.run(|stk| self.parse_expr_field(stk)).await?;
 				let version = if self.eat(t!("VERSION")) {
 					Some(stk.run(|stk| self.parse_expr_inherit(stk)).await?)
 				} else {
@@ -366,16 +366,16 @@ impl Parser<'_> {
 				InfoStatement::Tb(ident, structure, version)
 			}
 			t!("USER") => {
-				let ident = self.parse_ident()?;
+				let ident = stk.run(|stk| self.parse_expr_field(stk)).await?;
 				let base = self.eat(t!("ON")).then(|| self.parse_base()).transpose()?;
 				let structure = self.eat(t!("STRUCTURE"));
 				InfoStatement::User(ident, base, structure)
 			}
 			t!("INDEX") => {
-				let index = self.parse_ident()?;
+				let index = stk.run(|stk| self.parse_expr_field(stk)).await?;
 				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
-				let table = self.parse_ident()?;
+				let table = stk.run(|stk| self.parse_expr_field(stk)).await?;
 				let structure = self.eat(t!("STRUCTURE"));
 				InfoStatement::Index(index, table, structure)
 			}

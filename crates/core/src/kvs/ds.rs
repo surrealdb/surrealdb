@@ -644,7 +644,9 @@ impl Datastore {
 			let mut ctx = MutableContext::default();
 			ctx.set_transaction(txn.clone());
 			let ctx = ctx.freeze();
-			catch!(txn, stm.compute(&ctx, &opt, None).await);
+			let mut stack = reblessive::TreeStack::new();
+			let res = stack.enter(|stk| stm.compute(stk, &ctx, &opt, None)).finish().await;
+			catch!(txn, res);
 			// We added a user, so commit the transaction
 			txn.commit().await
 		} else {
