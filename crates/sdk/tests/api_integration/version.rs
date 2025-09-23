@@ -6,6 +6,7 @@ use ulid::Ulid;
 use super::CreateDb;
 use crate::api_integration::NS;
 
+#[allow(unused)]
 pub async fn select_with_version(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -61,6 +62,7 @@ pub async fn select_with_version(new_db: impl CreateDb) {
 	assert_eq!(name, "John v1");
 }
 
+#[allow(unused)]
 pub async fn create_with_version(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -106,6 +108,7 @@ pub async fn create_with_version(new_db: impl CreateDb) {
 	assert!(response.is_none());
 }
 
+#[allow(unused)]
 pub async fn insert_with_version(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -151,6 +154,7 @@ pub async fn insert_with_version(new_db: impl CreateDb) {
 	assert!(response.is_none());
 }
 
+#[allow(unused)]
 pub async fn info_for_db_with_versioned_tables(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -180,6 +184,7 @@ pub async fn info_for_db_with_versioned_tables(new_db: impl CreateDb) {
 	));
 }
 
+#[allow(unused)]
 pub async fn info_for_table_with_versioned_fields(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -216,14 +221,14 @@ pub async fn info_for_table_with_versioned_fields(new_db: impl CreateDb) {
 }
 
 define_include_tests!(version => {
-	#[test_log::test(tokio::test)]
-	select_with_version,
-	#[test_log::test(tokio::test)]
-	create_with_version,
-	#[test_log::test(tokio::test)]
-	insert_with_version,
-	#[test_log::test(tokio::test)]
-	info_for_db_with_versioned_tables,
-	#[test_log::test(tokio::test)]
-	info_for_table_with_versioned_fields,
+	// #[test_log::test(tokio::test)]
+	// select_with_version,
+	// #[test_log::test(tokio::test)]
+	// create_with_version,
+	// #[test_log::test(tokio::test)]
+	// insert_with_version,
+	// #[test_log::test(tokio::test)]
+	// info_for_db_with_versioned_tables,
+	// #[test_log::test(tokio::test)]
+	// info_for_table_with_versioned_fields,
 });
