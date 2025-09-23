@@ -1352,3 +1352,10 @@ allow_proc_macro = true
 
 [pkg.fs-err]
 allow_apis = ["fs"]
+
+[pkg.cssparser-macros]
+allow_proc_macro = true
+
+[pkg.match_token]
+allow_proc_macro = true
+
