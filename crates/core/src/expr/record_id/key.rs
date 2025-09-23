@@ -51,13 +51,13 @@ impl RecordIdKeyLit {
 			Kind::Array(_, _) => true,
 			Kind::Set(_, _) => true,
 			Kind::Object => true,
-			Kind::Literal(l) => match l {
-				KindLiteral::Integer(_) => true,
-				KindLiteral::String(_) => true,
-				KindLiteral::Array(_) => true,
-				KindLiteral::Object(_) => true,
-				_ => false,
-			},
+			Kind::Literal(l) => matches!(
+				l,
+				KindLiteral::Integer(_)
+					| KindLiteral::String(_)
+					| KindLiteral::Array(_)
+					| KindLiteral::Object(_)
+			),
 			Kind::Either(x) => x.iter().all(RecordIdKeyLit::kind_supported),
 			_ => false,
 		}
