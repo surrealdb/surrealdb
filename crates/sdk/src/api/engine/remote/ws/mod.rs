@@ -11,7 +11,6 @@ use std::time::Duration;
 
 use async_channel::Sender;
 use indexmap::IndexMap;
-use surrealdb_core::rpc::DbResult;
 use surrealdb_types::{Notification, Value};
 use trice::Instant;
 use uuid::Uuid;

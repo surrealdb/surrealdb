@@ -24,19 +24,25 @@ pub enum Number {
 }
 
 impl Number {
-	pub(crate) fn to_int(&self) -> i64 {
+	/// Converts this number into an i64.
+	///
+	/// Returns 0 if the number cannot be converted.
+	pub fn to_int(&self) -> Option<i64> {
 		match self {
-			Number::Int(v) => *v,
-			Number::Float(v) => *v as i64,
-			Number::Decimal(v) => v.to_i64().unwrap_or_default(),
+			Number::Int(v) => Some(*v),
+			Number::Float(v) => Some(*v as i64),
+			Number::Decimal(v) => v.to_i64(),
 		}
 	}
 
-	pub fn to_f64(&self) -> f64 {
+	/// Converts this number into an f64.
+	///
+	/// Returns 0.0 if the number cannot be converted.
+	pub fn to_f64(&self) -> Option<f64> {
 		match self {
-			Number::Int(v) => *v as f64,
-			Number::Float(v) => *v,
-			Number::Decimal(v) => v.to_f64().unwrap_or_default(),
+			Number::Int(v) => Some(*v as f64),
+			Number::Float(v) => Some(*v),
+			Number::Decimal(v) => v.to_f64(),
 		}
 	}
 }

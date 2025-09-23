@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::catalog::TableDefinition;
 use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
-use crate::dbs::{self, Options};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Value};
 use crate::fmt::EscapeIdent;

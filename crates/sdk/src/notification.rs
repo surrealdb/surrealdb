@@ -1,4 +1,4 @@
-use surrealdb_types::{Action, SurrealValue, Uuid};
+use surrealdb_types::{Action, Uuid};
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]

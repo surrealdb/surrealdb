@@ -289,7 +289,7 @@ impl FromStr for Duration {
 		if total_nanos >= 1_000_000_000 {
 			let additional_secs = total_nanos / 1_000_000_000;
 			total_secs = total_secs.saturating_add(additional_secs as u64);
-			total_nanos = total_nanos % 1_000_000_000;
+			total_nanos %= 1_000_000_000;
 		}
 
 		Ok(Duration::new(total_secs, total_nanos))

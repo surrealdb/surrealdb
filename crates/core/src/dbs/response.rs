@@ -2,7 +2,7 @@ use std::fmt;
 use std::str::FromStr;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use revision::{Revisioned, revisioned};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
@@ -104,7 +104,7 @@ impl SurrealValue for QueryResult {
 
 		let time_str = obj
 			.remove("time")
-			.and_then(|v| v.as_string().ok())
+			.and_then(|v| v.into_string().ok())
 			.unwrap_or_else(|| "0ns".to_string());
 		// Parse duration string (e.g. "1.234ms" -> Duration)
 		let time = surrealdb_types::Duration::from_str(&time_str)
@@ -113,7 +113,7 @@ impl SurrealValue for QueryResult {
 
 		let query_type = obj
 			.remove("type")
-			.and_then(|v| v.as_string().ok())
+			.and_then(|v| v.into_string().ok())
 			.and_then(|s| match s.as_str() {
 				"live" => Some(QueryType::Live),
 				"kill" => Some(QueryType::Kill),
@@ -123,7 +123,7 @@ impl SurrealValue for QueryResult {
 
 		let status = obj
 			.remove("status")
-			.and_then(|v| v.as_string().ok())
+			.and_then(|v| v.into_string().ok())
 			.unwrap_or_else(|| "OK".to_string());
 
 		let result = if status == "OK" {
@@ -131,7 +131,7 @@ impl SurrealValue for QueryResult {
 		} else {
 			let error_msg = obj
 				.remove("result")
-				.and_then(|v| v.as_string().ok())
+				.and_then(|v| v.into_string().ok())
 				.unwrap_or_else(|| "Unknown error".to_string());
 			Err(DbResultError::custom(error_msg))
 		};

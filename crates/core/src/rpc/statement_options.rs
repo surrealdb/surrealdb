@@ -1,8 +1,7 @@
 use super::RpcError;
-use crate::dbs::{Capabilities, Variables};
-use crate::sql::{Cond, Data, Expr, Fetchs, Fields, Limit, Literal, Output, Start, Timeout};
-use crate::syn;
-use crate::val::{Number, Object, Value};
+use crate::dbs::Variables;
+use crate::sql::{Cond, Data, Expr, Fetchs, Fields, Limit, Output, Start, Timeout};
+use crate::val::Value;
 
 #[derive(Clone, Debug)]
 pub(crate) enum RpcData {

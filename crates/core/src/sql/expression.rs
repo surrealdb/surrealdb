@@ -17,7 +17,6 @@ use crate::types::{
 	PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicNumber, PublicRegex, PublicUuid,
 	PublicValue,
 };
-use crate::val::{Number, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

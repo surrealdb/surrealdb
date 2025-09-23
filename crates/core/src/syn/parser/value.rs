@@ -14,9 +14,6 @@ use crate::types::{
 	PublicArray, PublicDuration, PublicFile, PublicGeometry, PublicNumber, PublicObject,
 	PublicRange, PublicRecordId, PublicRecordIdKey, PublicUuid, PublicValue,
 };
-use crate::val::{
-	self, Array, Duration, Geometry, Number, Object, Range, RecordId, RecordIdKey, Value,
-};
 
 trait ValueParseFunc {
 	async fn parse(parser: &mut Parser<'_>, stk: &mut Stk) -> ParseResult<PublicValue>;

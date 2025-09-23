@@ -1043,6 +1043,15 @@ mod tests {
 	use super::*;
 	use crate::syn;
 
+	use rstest::rstest;
+
+	use chrono::{DateTime, Utc};
+	use geo::{MultiLineString, MultiPoint, MultiPolygon, line_string, point, polygon};
+	use rust_decimal::Decimal;
+	use serde_json::{Value as Json, json};
+	use ::uuid::Uuid;
+	
+
 	#[test]
 	fn check_none() {
 		assert!(Value::None.is_none());
@@ -1148,5 +1157,274 @@ mod tests {
 		let enc: Vec<u8> = revision::to_vec(&val).unwrap();
 		let dec: Value = revision::from_slice(&enc).unwrap();
 		assert_eq!(res, dec);
+	}
+
+	#[rstest]
+	#[case::none(Value::None, json!(null), Value::Null)]
+	#[case::null(Value::Null, json!(null), Value::Null)]
+	#[case::bool(Value::Bool(true), json!(true), Value::Bool(true))]
+	#[case::bool(Value::Bool(false), json!(false), Value::Bool(false))]
+	#[case::number(
+		Value::Number(Number::Int(i64::MIN)),
+		json!(i64::MIN),
+		Value::Number(Number::Int(i64::MIN)),
+	)]
+	#[case::number(
+		Value::Number(Number::Int(i64::MAX)),
+		json!(i64::MAX),
+		Value::Number(Number::Int(i64::MAX)),
+	)]
+	#[case::number(
+		Value::Number(Number::Float(1.23)),
+		json!(1.23),
+		Value::Number(Number::Float(1.23)),
+	)]
+	#[case::number(
+		Value::Number(Number::Float(f64::NEG_INFINITY)),
+		json!(null),
+		Value::Null,
+	)]
+	#[case::number(
+		Value::Number(Number::Float(f64::MIN)),
+		json!(-1.7976931348623157e308),
+		Value::Number(Number::Float(f64::MIN)),
+	)]
+	#[case::number(
+		Value::Number(Number::Float(0.0)),
+		json!(0.0),
+		Value::Number(Number::Float(0.0)),
+	)]
+	#[case::number(
+		Value::Number(Number::Float(f64::MAX)),
+		json!(1.7976931348623157e308),
+		Value::Number(Number::Float(f64::MAX)),
+	)]
+	#[case::number(
+		Value::Number(Number::Float(f64::INFINITY)),
+		json!(null),
+		Value::Null,
+	)]
+	#[case::number(
+		Value::Number(Number::Float(f64::NAN)),
+		json!(null),
+		Value::Null,
+	)]
+	#[case::number(
+		Value::Number(Number::Decimal(Decimal::new(123, 2))),
+		json!("1.23"),
+		Value::String("1.23".into()),
+	)]
+	#[case::strand(
+		Value::String("".into()),
+		json!(""),
+		Value::String("".into()),
+	)]
+	#[case::strand(
+		Value::String("foo".into()),
+		json!("foo"),
+		Value::String("foo".into()),
+	)]
+	#[case::duration(
+		Value::Duration(Duration(Duration::ZERO)),
+		json!("0ns"),
+		Value::String("0ns".into()),
+	)]
+	#[case::duration(
+		Value::Duration(Duration(Duration::MAX)),
+		json!("584942417355y3w5d7h15s999ms999µs999ns"),
+		Value::String("584942417355y3w5d7h15s999ms999µs999ns".into()),
+	)]
+	#[case::datetime(
+		Value::Datetime(Datetime(DateTime::<Utc>::MIN_UTC)),
+		json!("-262143-01-01T00:00:00Z"),
+		Value::String("-262143-01-01T00:00:00Z".into()),
+	)]
+	#[case::datetime(
+		Value::Datetime(Datetime(DateTime::<Utc>::MAX_UTC)),
+		json!("+262142-12-31T23:59:59.999999999Z"),
+		Value::String("+262142-12-31T23:59:59.999999999Z".into()),
+	)]
+	#[case::uuid(
+		Value::Uuid(Uuid(Uuid::nil())),
+		json!("00000000-0000-0000-0000-000000000000"),
+		Value::String("00000000-0000-0000-0000-000000000000".into()),
+	)]
+	#[case::uuid(
+		Value::Uuid(Uuid(Uuid::max())),
+		json!("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+		Value::String("ffffffff-ffff-ffff-ffff-ffffffffffff".into()),
+	)]
+	#[case::bytes(
+		Value::Bytes(Bytes(vec![])),
+		json!([]),
+		Value::Array(Array(vec![])),
+	)]
+	#[case::bytes(
+		Value::Bytes(Bytes(b"foo".to_vec())),
+		json!([102, 111, 111]),
+		Value::Array(Array(vec![
+			Value::Number(Number::Int(102)),
+			Value::Number(Number::Int(111)),
+			Value::Number(Number::Int(111)),
+		])),
+	)]
+	#[case::thing(
+		Value::RecordId(RecordId{ table: "foo".to_string(), key: RecordIdKey::String("bar".into())}) ,
+		json!("foo:bar"),
+		Value::RecordId(RecordId{ table: "foo".to_string(), key: RecordIdKey::String("bar".into())}) ,
+	)]
+	#[case::array(
+		Value::Array(Array(vec![])),
+		json!([]),
+		Value::Array(Array(vec![])),
+	)]
+	#[case::array(
+		Value::Array(Array(vec![Value::Bool(true), Value::Bool(false)])),
+		json!([true, false]),
+		Value::Array(Array(vec![Value::Bool(true), Value::Bool(false)])),
+	)]
+	#[case::object(
+		Value::Object(Object(BTreeMap::new())),
+		json!({}),
+		Value::Object(Object(BTreeMap::new())),
+	)]
+	#[case::object(
+		Value::Object(Object(BTreeMap::from([("done".to_owned(), Value::Bool(true))]))),
+		json!({"done": true}),
+		Value::Object(Object(BTreeMap::from([("done".to_owned(), Value::Bool(true))]))),
+	)]
+	#[case::geometry_point(
+		Value::Geometry(Geometry::Point(point! { x: 10., y: 20. })),
+		json!({ "type": "Point", "coordinates": [10., 20.]}),
+		Value::Geometry(Geometry::Point(point! { x: 10., y: 20. })),
+	)]
+	#[case::geometry_line(
+		Value::Geometry(Geometry::Line(line_string![
+			( x: 0., y: 0. ),
+			( x: 10., y: 0. ),
+		])),
+		json!({ "type": "LineString", "coordinates": [[0., 0.], [10., 0.]]}),
+		Value::Geometry(Geometry::Line(line_string![
+			( x: 0., y: 0. ),
+			( x: 10., y: 0. ),
+		])),
+	)]
+	#[case::geometry_polygon(
+		Value::Geometry(Geometry::Polygon(polygon![
+			(x: -111., y: 45.),
+			(x: -111., y: 41.),
+			(x: -104., y: 41.),
+			(x: -104., y: 45.),
+		])),
+		json!({ "type": "Polygon", "coordinates": [[
+			[-111., 45.],
+			[-111., 41.],
+			[-104., 41.],
+			[-104., 45.],
+			[-111., 45.],
+		]]}),
+		Value::Geometry(Geometry::Polygon(polygon![
+			(x: -111., y: 45.),
+			(x: -111., y: 41.),
+			(x: -104., y: 41.),
+			(x: -104., y: 45.),
+		])),
+	)]
+	#[case::geometry_multi_point(
+		Value::Geometry(Geometry::MultiPoint(MultiPoint::new(vec![
+			point! { x: 0., y: 0. },
+			point! { x: 1., y: 2. },
+		]))),
+		json!({ "type": "MultiPoint", "coordinates": [[0., 0.], [1., 2.]]}),
+		Value::Geometry(Geometry::MultiPoint(MultiPoint::new(vec![
+			point! { x: 0., y: 0. },
+			point! { x: 1., y: 2. },
+		]))),
+	)]
+	#[case::geometry_multi_line(
+		Value::Geometry(
+			Geometry::MultiLine(
+				MultiLineString::new(vec![
+					line_string![( x: 0., y: 0. ), ( x: 1., y: 2. )],
+				])
+			)
+		),
+		json!({ "type": "MultiLineString", "coordinates": [[[0., 0.], [1., 2.]]]}),
+		Value::Geometry(
+			Geometry::MultiLine(
+				MultiLineString::new(vec![
+					line_string![( x: 0., y: 0. ), ( x: 1., y: 2. )],
+				])
+			)
+		),
+	)]
+	#[case::geometry_multi_polygon(
+		Value::Geometry(Geometry::MultiPolygon(MultiPolygon::new(vec![
+			polygon![
+				(x: -111., y: 45.),
+				(x: -111., y: 41.),
+				(x: -104., y: 41.),
+				(x: -104., y: 45.),
+			],
+		]))),
+		json!({ "type": "MultiPolygon", "coordinates": [[[
+			[-111., 45.],
+			[-111., 41.],
+			[-104., 41.],
+			[-104., 45.],
+			[-111., 45.],
+		]]]})
+	,	Value::Geometry(Geometry::MultiPolygon(MultiPolygon::new(vec![
+			polygon![
+				(x: -111., y: 45.),
+				(x: -111., y: 41.),
+				(x: -104., y: 41.),
+				(x: -104., y: 45.),
+			],
+		]))),
+	)]
+	#[case::geometry_collection(
+		Value::Geometry(Geometry::Collection(vec![])),
+		json!({
+			"type": "GeometryCollection",
+			"geometries": [],
+		}),
+		Value::Geometry(Geometry::Collection(vec![])),
+	)]
+	#[case::geometry_collection_with_point(
+		Value::Geometry(Geometry::Collection(vec![Geometry::Point(point! { x: 10., y: 20. })])),
+		json!({
+		"type": "GeometryCollection",
+		"geometries": [ { "type": "Point", "coordinates": [10., 20.] } ],
+	}),
+		Value::Geometry(Geometry::Collection(vec![Geometry::Point(point! { x: 10., y: 20. })])),
+	)]
+	#[case::geometry_collection_with_line(
+		Value::Geometry(Geometry::Collection(vec![Geometry::Line(line_string![
+			( x: 0., y: 0. ),
+			( x: 10., y: 0. ),
+		])])),
+		json!({
+			"type": "GeometryCollection",
+			"geometries": [ { "type": "LineString", "coordinates": [[0., 0.], [10., 0.]] } ],
+		}),
+		Value::Geometry(Geometry::Collection(vec![Geometry::Line(line_string![
+			( x: 0., y: 0. ),
+			( x: 10., y: 0. ),
+		])])),
+	)]
+
+	fn test_json(
+		#[case] value: Value,
+		#[case] expected: Json,
+		#[case] expected_deserialized: Value,
+	) {
+		let json_value = value.into_json_value().unwrap();
+		assert_eq!(json_value, expected);
+
+		let json_str = serde_json::to_string(&json_value).expect("Failed to serialize to JSON");
+		let deserialized_sql_value = crate::syn::value_legacy_strand(&json_str).unwrap();
+		let deserialized: Value = deserialized_sql_value;
+		assert_eq!(deserialized, expected_deserialized);
 	}
 }

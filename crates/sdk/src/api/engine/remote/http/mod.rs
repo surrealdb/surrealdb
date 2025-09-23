@@ -8,7 +8,7 @@ use indexmap::IndexMap;
 use reqwest::RequestBuilder;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
-use surrealdb_core::rpc::{DbResponse, DbResult};
+use surrealdb_core::rpc::DbResponse;
 use surrealdb_types::{SurrealValue, Value};
 #[cfg(not(target_family = "wasm"))]
 use tokio::fs::OpenOptions;
@@ -20,7 +20,6 @@ use url::Url;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local;
 
-use crate::api;
 use crate::api::conn::{Command, IndexedDbResults, RequestData, RouterRequest};
 use crate::api::err::Error;
 use crate::api::{Connect, Result, Surreal};
@@ -242,7 +241,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 				.map_err(crate::api::Error::InvalidResponse)?;
 		for res in response {
 			if let Status::Err = res.status {
-				return Err(Error::Query(res.result.as_string()?).into());
+				return Err(Error::Query(res.result.into_string()?).into());
 			}
 		}
 	}
@@ -370,7 +369,7 @@ async fn router(
 				}
 				Err(e) => {
 					*auth = Some(Auth::Bearer {
-						token: value.as_string()?,
+						token: value.into_string()?,
 					});
 				}
 			}

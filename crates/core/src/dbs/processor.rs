@@ -21,7 +21,6 @@ use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, record, r#ref};
 use crate::kvs::{KVKey, KVValue, Key, Transaction, Val};
 use crate::syn;
-use crate::types::PublicRecordId;
 use crate::val::record::Record;
 use crate::val::{RecordId, RecordIdKeyRange, Value};
 

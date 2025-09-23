@@ -11,7 +11,6 @@ use crate::err::Error;
 use crate::expr::Bytesize;
 use crate::rpc::format::{cbor, json, revision};
 use crate::types::PublicValue;
-use crate::val;
 
 pub enum ApiBody {
 	Stream(Box<dyn Stream<Item = Result<Bytes, Box<dyn Display + Send + Sync>>> + Send + Unpin>),

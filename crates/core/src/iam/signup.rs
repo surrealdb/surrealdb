@@ -12,7 +12,7 @@ use crate::catalog;
 use crate::catalog::providers::{AuthorisationProvider, DatabaseProvider};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::capabilities::ExperimentalTarget;
-use crate::dbs::{Session, Variables};
+use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::Claims;
@@ -20,7 +20,7 @@ use crate::iam::{Actor, Auth, Level, algorithm_to_jwt_algorithm};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::types::{PublicObject, PublicValue, PublicVariables};
+use crate::types::PublicVariables;
 use crate::val::{Object, Value};
 
 #[revisioned(revision = 1)]
@@ -50,16 +50,16 @@ pub async fn signup(
 	vars: PublicVariables,
 ) -> Result<SignupData> {
 	// Parse the specified variables
-	let ns = vars.get("NS").or_else(|| vars.get("ns"));
-	let db = vars.get("DB").or_else(|| vars.get("db"));
-	let ac = vars.get("AC").or_else(|| vars.get("ac"));
+	let ns = vars.get("NS").or_else(|| vars.get("ns")).cloned();
+	let db = vars.get("DB").or_else(|| vars.get("db")).cloned();
+	let ac = vars.get("AC").or_else(|| vars.get("ac")).cloned();
 	// Check if the parameters exist
 	match (ns, db, ac) {
 		(Some(ns), Some(db), Some(ac)) => {
 			// Process the provided values
-			let ns = ns.as_string()?;
-			let db = db.as_string()?;
-			let ac = ac.as_string()?;
+			let ns = ns.into_string()?;
+			let db = db.into_string()?;
+			let ac = ac.into_string()?;
 			// Attempt to signup using specified access method
 			// Currently, signup is only supported at the database level
 			super::signup::db_access(kvs, session, ns, db, ac, vars).await
@@ -121,7 +121,7 @@ pub async fn db_access(
 		// The signup value succeeded
 		Ok(val) => {
 			// There is a record returned
-			let Ok(mut rid) = val.as_record_id() else {
+			let Ok(mut rid) = val.into_record() else {
 				bail!(Error::NoRecordFound)
 			};
 			// Create the authentication key
@@ -224,8 +224,6 @@ pub async fn db_access(
 
 #[cfg(test)]
 mod tests {
-	use std::collections::HashMap;
-
 	use chrono::Duration;
 
 	use super::*;
@@ -265,16 +263,16 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("user", "user".into());
-			vars.insert("pass", "pass".into());
+			let mut vars = PublicVariables::new();
+			vars.insert("user", "user");
+			vars.insert("pass", "pass");
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -332,16 +330,16 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			// Password is missing
-			vars.insert("user", "user".into());
+			vars.insert("user", "user");
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -386,16 +384,16 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("user", "user".into());
-			vars.insert("pass", "pass".into());
+			let mut vars = PublicVariables::new();
+			vars.insert("user", "user");
+			vars.insert("pass", "pass");
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -442,16 +440,16 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("user", "user".into());
-			vars.insert("pass", "pass".into());
+			let mut vars = PublicVariables::new();
+			vars.insert("user", "user");
+			vars.insert("pass", "pass");
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -484,7 +482,7 @@ mod tests {
 				"Session expiration is expected to follow the defined duration"
 			);
 			// Signin with the refresh token
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("refresh", refresh.clone().into());
 			let res = signin::db_access(
 				&ds,
@@ -527,15 +525,15 @@ mod tests {
 				"Session expiration is expected to follow the defined duration"
 			);
 			// Attempt to sign in with the original refresh token
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("refresh", refresh.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("refresh", refresh);
 			let res = signin::db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 			let e = res.unwrap_err();
@@ -626,16 +624,16 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("user", "user".into());
-			vars.insert("pass", "pass".into());
+			let mut vars = PublicVariables::new();
+			vars.insert("user", "user");
+			vars.insert("pass", "pass");
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -738,7 +736,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("id", 1.into());
 			let res = db_access(
 				&ds,
@@ -746,7 +744,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -833,7 +831,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("email", "info@example.com".into());
 			vars.insert("pass", "company-password".into());
 			let res = db_access(
@@ -842,7 +840,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"owner".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -905,7 +903,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("id", 1.into());
 			let res = db_access(
 				&ds,
@@ -913,7 +911,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -950,7 +948,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("id", 1.into());
 			let res = db_access(
 				&ds,
@@ -958,7 +956,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -1014,7 +1012,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("user", "user".into());
 			vars.insert("pass", "pass".into());
 
@@ -1025,7 +1023,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"test".to_string(),
 					"test".to_string(),
 					"user".to_string(),
-					vars.clone().into(),
+					vars.clone(),
 				),
 				db_access(
 					&ds,
@@ -1033,7 +1031,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"test".to_string(),
 					"test".to_string(),
 					"user".to_string(),
-					vars.into(),
+					vars,
 				)
 			);
 
@@ -1095,7 +1093,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("id", 1.into());
 
 			let (res1, res2) = tokio::join!(

@@ -17,7 +17,7 @@ use crate::err::Error;
 use crate::expr::FlowResultExt as _;
 use crate::expr::paths::{AC, RD, TK};
 use crate::kvs::Transaction;
-use crate::types::{PublicAction, PublicNotification, PublicValue};
+use crate::types::{PublicAction, PublicNotification};
 use crate::val::Value;
 
 impl Document {

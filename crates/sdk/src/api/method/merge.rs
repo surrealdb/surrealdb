@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use serde::Serialize;
 use surrealdb_types::{SurrealValue, Value};
 use uuid::Uuid;
 

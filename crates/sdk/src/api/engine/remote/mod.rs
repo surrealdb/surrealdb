@@ -102,20 +102,9 @@ pub mod http;
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-ws")))]
 pub mod ws;
 
-use std::time::Duration;
 
-use indexmap::IndexMap;
-use revision::revisioned;
-use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
-use serde::Deserialize;
-use surrealdb_core::rpc::DbResult;
-use surrealdb_types::{self, Notification, Value};
+use surrealdb_types::{self};
 
-use crate::api::err::Error;
-use crate::api::method::query::QueryResult;
-use crate::api::{self, Result};
-use crate::core::dbs::{self, Status};
 
 // #[revisioned(revision = 1)]
 // #[derive(Clone, Debug, Deserialize)]
@@ -163,7 +152,7 @@ use crate::core::dbs::{self, Status};
 // 						Status::Err => {
 // 							map.insert(
 // 								index,
-// 								(stats, Err(Error::Query(response.result.as_string()).into())),
+// 								(stats, Err(Error::Query(response.result.into_string()).into())),
 // 							);
 // 						}
 // 					}

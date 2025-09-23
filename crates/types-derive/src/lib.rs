@@ -219,21 +219,21 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 
 	let surreal_impl = match fields {
 		Fields::Named(named_fields) => generate_named_fields_impl(
-			&name,
+			name,
 			&impl_generics,
 			&ty_generics,
 			&where_clause,
 			named_fields,
 		),
 		Fields::Unnamed(unnamed_fields) => generate_unnamed_fields_impl(
-			&name,
+			name,
 			&impl_generics,
 			&ty_generics,
 			&where_clause,
 			unnamed_fields,
 		),
 		Fields::Unit => {
-			generate_unit_struct_impl(&name, &impl_generics, &ty_generics, &where_clause)
+			generate_unit_struct_impl(name, &impl_generics, &ty_generics, &where_clause)
 		}
 	};
 
@@ -264,13 +264,13 @@ fn generate_named_fields_impl(
 	}
 
 	// Generate the field processing code
-	let (
+	let FieldsParsed {
 		is_value_checks,
 		into_value_fields,
 		from_value_fields,
 		field_kinds,
 		field_names_for_constructor,
-	) = generate_field_processing(&regular_fields, &flattened_fields);
+	 } = generate_field_processing(&regular_fields, &flattened_fields);
 
 	quote! {
 		impl #impl_generics surrealdb_types::SurrealValue for #name #ty_generics #where_clause {
@@ -309,17 +309,19 @@ fn generate_named_fields_impl(
 	}
 }
 
+struct FieldsParsed {
+	is_value_checks: Vec<proc_macro2::TokenStream>,
+	into_value_fields: Vec<proc_macro2::TokenStream>,
+	from_value_fields: Vec<proc_macro2::TokenStream>,
+	field_kinds: Vec<proc_macro2::TokenStream>,
+	field_names_for_constructor: Vec<proc_macro2::TokenStream>,
+}
+
 /// Generate field processing code for named fields
 fn generate_field_processing(
 	regular_fields: &[(&Ident, &Type, FieldAttributes)],
 	flattened_fields: &[(&Ident, &Type, FieldAttributes)],
-) -> (
-	Vec<proc_macro2::TokenStream>,
-	Vec<proc_macro2::TokenStream>,
-	Vec<proc_macro2::TokenStream>,
-	Vec<proc_macro2::TokenStream>,
-	Vec<proc_macro2::TokenStream>,
-) {
+) -> FieldsParsed {
 	let mut is_value_checks = Vec::new();
 	let mut into_value_fields = Vec::new();
 	let mut from_value_fields = Vec::new();
@@ -377,13 +379,13 @@ fn generate_field_processing(
 		field_names_for_constructor.push(quote! { #field_name });
 	}
 
-	(
+	FieldsParsed {
 		is_value_checks,
 		into_value_fields,
 		from_value_fields,
 		field_kinds,
 		field_names_for_constructor,
-	)
+	}
 }
 
 /// Generate implementation for structs with unnamed fields (tuple structs)

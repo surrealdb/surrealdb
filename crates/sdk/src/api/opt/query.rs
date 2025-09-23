@@ -5,7 +5,7 @@ use anyhow::bail;
 use futures::future::Either;
 use futures::stream::select_all;
 use surrealdb_core::rpc::DbResultStats;
-use surrealdb_types::{self, Notification as CoreNotification, SurrealValue, Value};
+use surrealdb_types::{self, SurrealValue, Value};
 
 use super::Raw;
 use crate::api::err::Error;
@@ -19,7 +19,7 @@ use crate::core::sql::Ast;
 use crate::method::query::ValidQuery;
 use crate::method::{self, Stream};
 use crate::notification::Notification;
-use crate::{Connection, Surreal, api};
+use crate::{Connection, Surreal};
 
 pub struct Query(pub(crate) Result<ValidQuery>);
 /// A trait for converting inputs into SQL statements

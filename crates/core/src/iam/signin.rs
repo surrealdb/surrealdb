@@ -22,7 +22,7 @@ use crate::catalog::providers::{
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::capabilities::ExperimentalTarget;
-use crate::dbs::{Session, Variables};
+use crate::dbs::Session;
 use crate::err::Error;
 use crate::expr::access_type;
 use crate::expr::statements::access;
@@ -33,7 +33,7 @@ use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::types::{PublicObject, PublicVariables};
-use crate::val::{Datetime, Object, Value};
+use crate::val::{Datetime, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SigninData {
@@ -47,34 +47,34 @@ pub async fn signin(
 	vars: PublicVariables,
 ) -> Result<SigninData> {
 	// Parse the specified variables
-	let ns = vars.get("NS").or_else(|| vars.get("ns"));
-	let db = vars.get("DB").or_else(|| vars.get("db"));
-	let ac = vars.get("AC").or_else(|| vars.get("ac"));
+	let ns = vars.get("NS").or_else(|| vars.get("ns")).cloned();
+	let db = vars.get("DB").or_else(|| vars.get("db")).cloned();
+	let ac = vars.get("AC").or_else(|| vars.get("ac")).cloned();
 	// Check if the parameters exist
 	match (ns, db, ac) {
 		// DB signin with access method
 		(Some(ns), Some(db), Some(ac)) => {
 			// Process the provided values
-			let ns = ns.as_string()?;
-			let db = db.as_string()?;
-			let ac = ac.as_string()?;
+			let ns = ns.into_string()?;
+			let db = db.into_string()?;
+			let ac = ac.into_string()?;
 			// Attempt to signin using specified access method
 			super::signin::db_access(kvs, session, ns, db, ac, vars).await
 		}
 		// DB signin with user credentials
 		(Some(ns), Some(db), None) => {
 			// Get the provided user and pass
-			let user = vars.get("user");
-			let pass = vars.get("pass");
+			let user = vars.get("user").cloned();
+			let pass = vars.get("pass").cloned();
 			// Validate the user and pass
 			match (user, pass) {
 				// There is a username and password
 				(Some(user), Some(pass)) => {
 					// Process the provided values
-					let ns = ns.as_string()?;
-					let db = db.as_string()?;
-					let user = user.as_string()?;
-					let pass = pass.as_string()?;
+					let ns = ns.into_string()?;
+					let db = db.into_string()?;
+					let user = user.into_string()?;
+					let pass = pass.into_string()?;
 					// Attempt to signin to database
 					super::signin::db_user(kvs, session, ns, db, user, pass).await
 				}
@@ -84,24 +84,24 @@ pub async fn signin(
 		// NS signin with access method
 		(Some(ns), None, Some(ac)) => {
 			// Process the provided values
-			let ns = ns.as_string()?;
-			let ac = ac.as_string()?;
+			let ns = ns.into_string()?;
+			let ac = ac.into_string()?;
 			// Attempt to signin using specified access method
 			super::signin::ns_access(kvs, session, ns, ac, vars).await
 		}
 		// NS signin with user credentials
 		(Some(ns), None, None) => {
 			// Get the provided user and pass
-			let user = vars.get("user");
-			let pass = vars.get("pass");
+			let user = vars.get("user").cloned();
+			let pass = vars.get("pass").cloned();
 			// Validate the user and pass
 			match (user, pass) {
 				// There is a username and password
 				(Some(user), Some(pass)) => {
 					// Process the provided values
-					let ns = ns.as_string()?;
-					let user = user.as_string()?;
-					let pass = pass.as_string()?;
+					let ns = ns.into_string()?;
+					let user = user.into_string()?;
+					let pass = pass.into_string()?;
 					// Attempt to signin to namespace
 					super::signin::ns_user(kvs, session, ns, user, pass).await
 				}
@@ -111,15 +111,15 @@ pub async fn signin(
 		// ROOT signin with user credentials
 		(None, None, None) => {
 			// Get the provided user and pass
-			let user = vars.get("user");
-			let pass = vars.get("pass");
+			let user = vars.get("user").cloned();
+			let pass = vars.get("pass").cloned();
 			// Validate the user and pass
 			match (user, pass) {
 				// There is a username and password
 				(Some(user), Some(pass)) => {
 					// Process the provided values
-					let user = user.as_string()?;
-					let pass = pass.as_string()?;
+					let user = user.into_string()?;
+					let pass = pass.into_string()?;
 					// Attempt to signin to root
 					super::signin::root_user(kvs, session, user, pass).await
 				}
@@ -175,7 +175,7 @@ pub async fn db_access(
 								Some(&db_def),
 								av,
 								bearer,
-								key.as_string()?,
+								key.clone().into_string()?,
 							)
 							.await;
 						}
@@ -191,7 +191,7 @@ pub async fn db_access(
 							match kvs.evaluate(val, &sess, Some(vars)).await {
 								// The signin value succeeded
 								Ok(val) => {
-									match val.as_record_id() {
+									match val.into_record() {
 										// There is a record returned
 										Ok(mut rid) => {
 											// Create the authentication key
@@ -324,7 +324,7 @@ pub async fn db_access(
 				catalog::AccessType::Bearer(at) => {
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
-						Some(key) => key.as_string()?,
+						Some(key) => key.clone().into_string()?,
 						None => return Err(anyhow::Error::new(Error::AccessBearerMissingKey)),
 					};
 
@@ -428,7 +428,7 @@ pub async fn ns_access(
 				catalog::AccessType::Bearer(at) => {
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
-						Some(key) => key.as_string()?,
+						Some(key) => key.clone().into_string()?,
 						None => bail!(Error::AccessBearerMissingKey),
 					};
 
@@ -567,7 +567,7 @@ pub async fn root_access(
 				catalog::AccessType::Bearer(at) => {
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
-						Some(key) => key.as_string()?,
+						Some(key) => key.clone().into_string()?,
 						None => return Err(anyhow::Error::new(Error::AccessBearerMissingKey)),
 					};
 
@@ -928,8 +928,8 @@ mod tests {
 				..Default::default()
 			};
 			let mut vars = PublicVariables::new();
-			vars.insert("user", "user".into());
-			vars.insert("pass", "pass".into());
+			vars.insert("user", "user");
+			vars.insert("pass", "pass");
 			let res = db_access(
 				&ds,
 				&mut sess,
@@ -999,7 +999,7 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("user", "user".into());
 			vars.insert("pass", "incorrect".into());
 			let res = db_access(
@@ -1008,7 +1008,7 @@ mod tests {
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -1048,7 +1048,7 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("user", "user".into());
 			vars.insert("pass", "pass".into());
 			let res = db_access(
@@ -1057,7 +1057,7 @@ mod tests {
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -1101,7 +1101,7 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("user", "user".into());
 			vars.insert("pass", "pass".into());
 			let res = db_access(
@@ -1110,7 +1110,7 @@ mod tests {
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -1143,7 +1143,7 @@ mod tests {
 				"Session expiration is expected to follow the defined duration"
 			);
 			// Signin with the refresh token
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("refresh", refresh.clone().into());
 			let res = db_access(
 				&ds,
@@ -1151,7 +1151,7 @@ mod tests {
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 			// Authentication should be identical as with user credentials
@@ -1186,7 +1186,7 @@ mod tests {
 				"Session expiration is expected to follow the defined duration"
 			);
 			// Attempt to sign in with the original refresh token
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("refresh", refresh.into());
 			let res = db_access(
 				&ds,
@@ -1194,7 +1194,7 @@ mod tests {
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -1237,7 +1237,7 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("user", "user".into());
 			vars.insert("pass", "pass".into());
 			let res = db_access(
@@ -1246,7 +1246,7 @@ mod tests {
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 			let refresh = match res {
@@ -1259,7 +1259,7 @@ mod tests {
 			// Wait for the refresh token to expire
 			std::thread::sleep(Duration::seconds(2).to_std().unwrap());
 			// Signin with the refresh token
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("refresh", refresh.clone().into());
 			let res = db_access(
 				&ds,
@@ -1267,7 +1267,7 @@ mod tests {
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 			// Should fail due to the refresh token being expired
@@ -1310,7 +1310,7 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("user", "user".into());
 			vars.insert("pass", "pass".into());
 			let res = db_access(
@@ -1319,7 +1319,7 @@ mod tests {
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -1437,7 +1437,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("user", "user".into());
 			vars.insert("pass", "pass".into());
 			let res = db_access(
@@ -1446,7 +1446,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
@@ -1761,7 +1761,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("id", 1.into());
 			let res = db_access(
 				&ds,
@@ -1769,7 +1769,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -1855,7 +1855,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("email", "info@example.com".into());
 			vars.insert("pass", "company-password".into());
 			let res = db_access(
@@ -1864,7 +1864,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"owner".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -1928,7 +1928,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("id", 1.into());
 			let res = db_access(
 				&ds,
@@ -1936,7 +1936,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -1975,7 +1975,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("id", 1.into());
 			let res = db_access(
 				&ds,
@@ -1983,7 +1983,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -2044,7 +2044,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("user", "user".into());
 			vars.insert("pass", "pass".into());
 
@@ -2063,7 +2063,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"test".to_string(),
 					"test".to_string(),
 					"user".to_string(),
-					vars.into(),
+					vars,
 				)
 			);
 
@@ -2127,7 +2127,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("id", 1.into());
 
 			let (res1, res2) = tokio::join!(
@@ -2145,7 +2145,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"test".to_string(),
 					"test".to_string(),
 					"user".to_string(),
-					vars.into(),
+					vars,
 				)
 			);
 
@@ -2229,12 +2229,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
 					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
+					.into_object()
 					.unwrap();
 				let key = grant.get("key").unwrap().clone().as_raw_string();
 
@@ -2244,7 +2240,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					db: level.db.map(String::from),
 					..Default::default()
 				};
-				let mut vars: HashMap<&str, Value> = HashMap::new();
+				let mut vars = PublicVariables::new();
 				vars.insert("key", key.into());
 				let res = match level.level {
 					"DB" => {
@@ -2254,7 +2250,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -2264,11 +2260,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -2346,12 +2342,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
 					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
+					.into_object()
 					.unwrap();
 				let key = grant.get("key").unwrap().clone().as_raw_string();
 
@@ -2361,7 +2353,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					db: level.db.map(String::from),
 					..Default::default()
 				};
-				let mut vars: HashMap<&str, Value> = HashMap::new();
+				let mut vars = PublicVariables::new();
 				vars.insert("key", key.into());
 				let res = match level.level {
 					"DB" => {
@@ -2371,7 +2363,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -2381,11 +2373,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -2463,14 +2455,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
 					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
+					.into_object()
 					.unwrap();
-				let key = grant.get("key").unwrap().clone().as_raw_string();
+				let key = grant.get("key").unwrap().clone().into_string();
 
 				// Sign in with the bearer key
 				let mut sess = Session {
@@ -2478,7 +2466,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					db: level.db.map(String::from),
 					..Default::default()
 				};
-				let mut vars: HashMap<&str, Value> = HashMap::new();
+				let mut vars = PublicVariables::new();
 				vars.insert("key", key.into());
 				let res = match level.level {
 					"DB" => {
@@ -2488,7 +2476,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -2498,11 +2486,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -2545,14 +2533,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
 					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
+					.into_object()
 					.unwrap();
-				let key = grant.get("key").unwrap().clone().as_raw_string();
+				let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 				// Wait for the grant to expire
 				std::thread::sleep(Duration::seconds(2).to_std().unwrap());
@@ -2563,7 +2547,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					db: level.db.map(String::from),
 					..Default::default()
 				};
-				let mut vars: HashMap<&str, Value> = HashMap::new();
+				let mut vars = PublicVariables::new();
 				vars.insert("key", key.into());
 				let res = match level.level {
 					"DB" => {
@@ -2573,7 +2557,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -2583,11 +2567,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -2630,12 +2614,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
 					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
+					.into_object()
 					.unwrap();
 				let key = grant.get("key").unwrap().clone().as_raw_string();
 
@@ -2657,7 +2637,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					db: level.db.map(String::from),
 					..Default::default()
 				};
-				let mut vars: HashMap<&str, Value> = HashMap::new();
+				let mut vars = PublicVariables::new();
 				vars.insert("key", key.into());
 				let res = match level.level {
 					"DB" => {
@@ -2667,7 +2647,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -2677,11 +2657,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -2724,12 +2704,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
 					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
+					.into_object()
 					.unwrap();
 				let key = grant.get("key").unwrap().clone().as_raw_string();
 
@@ -2744,7 +2720,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					db: level.db.map(String::from),
 					..Default::default()
 				};
-				let mut vars: HashMap<&str, Value> = HashMap::new();
+				let mut vars = PublicVariables::new();
 				vars.insert("key", key.into());
 				let res = match level.level {
 					"DB" => {
@@ -2754,7 +2730,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -2764,11 +2740,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -2811,12 +2787,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
 					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
+					.into_object()
 					.unwrap();
 				let _key = grant.get("key").unwrap().clone().as_raw_string();
 
@@ -2839,7 +2811,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -2849,11 +2821,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -2896,12 +2868,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
 					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
+					.into_object()
 					.unwrap();
 				let valid_key = grant.get("key").unwrap().clone().as_raw_string();
 
@@ -2916,7 +2884,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					db: level.db.map(String::from),
 					..Default::default()
 				};
-				let mut vars: HashMap<&str, Value> = HashMap::new();
+				let mut vars = PublicVariables::new();
 				vars.insert("key", key.into());
 				let res = match level.level {
 					"DB" => {
@@ -2926,7 +2894,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -2936,11 +2904,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -2983,12 +2951,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
 					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
+					.into_object()
 					.unwrap();
 				let valid_key = grant.get("key").unwrap().clone().as_raw_string();
 
@@ -3003,7 +2967,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					db: level.db.map(String::from),
 					..Default::default()
 				};
-				let mut vars: HashMap<&str, Value> = HashMap::new();
+				let mut vars = PublicVariables::new();
 				vars.insert("key", key.into());
 				let res = match level.level {
 					"DB" => {
@@ -3013,7 +2977,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -3023,11 +2987,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -3070,12 +3034,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
 					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
+					.into_object()
 					.unwrap();
 				let valid_key = grant.get("key").unwrap().clone().as_raw_string();
 
@@ -3090,7 +3050,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					db: level.db.map(String::from),
 					..Default::default()
 				};
-				let mut vars: HashMap<&str, Value> = HashMap::new();
+				let mut vars = PublicVariables::new();
 				vars.insert("key", key.into());
 				let res = match level.level {
 					"DB" => {
@@ -3100,7 +3060,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -3110,11 +3070,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -3157,12 +3117,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
 					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
+					.into_object()
 					.unwrap();
 				let valid_key = grant.get("key").unwrap().clone().as_raw_string();
 
@@ -3177,7 +3133,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					db: level.db.map(String::from),
 					..Default::default()
 				};
-				let mut vars: HashMap<&str, Value> = HashMap::new();
+				let mut vars = PublicVariables::new();
 				vars.insert("key", key.into());
 				let res = match level.level {
 					"DB" => {
@@ -3187,7 +3143,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -3197,11 +3153,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -3244,12 +3200,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
 					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
+					.into_object()
 					.unwrap();
 				let id = grant.get("id").unwrap().clone().as_raw_string();
 				let key = grant.get("key").unwrap().clone().as_raw_string();
@@ -3329,14 +3281,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
 				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
+				.into_object()
 				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_raw_string();
+			let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3344,7 +3292,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("key", key.into());
 			let res = db_access(
 				&ds,
@@ -3352,7 +3300,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 			assert!(res.is_ok(), "Failed to sign in with bearer key: {:?}", res);
@@ -3404,14 +3352,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
 				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
+				.into_object()
 				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_raw_string();
+			let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3419,7 +3363,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("key", key.into());
 			let res = db_access(
 				&ds,
@@ -3427,7 +3371,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -3483,14 +3427,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
 				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
+				.into_object()
 				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_raw_string();
+			let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3498,7 +3438,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("key", key.into());
 			let res = db_access(
 				&ds,
@@ -3506,7 +3446,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -3563,14 +3503,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
 				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
+				.into_object()
 				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_raw_string();
+			let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3578,7 +3514,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("key", key.into());
 			let res = db_access(
 				&ds,
@@ -3586,7 +3522,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -3624,14 +3560,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
 				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_raw_string();
+				.into_object();
+			let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Wait for the grant to expire
 			std::thread::sleep(Duration::seconds(2).to_std().unwrap());
@@ -3642,7 +3573,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("key", key.into());
 			let res = db_access(
 				&ds,
@@ -3650,7 +3581,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -3688,14 +3619,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
 				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
+				.into_object()
 				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_raw_string();
+			let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Get grant identifier from key
 			let kid = key.split("-").collect::<Vec<&str>>()[2];
@@ -3711,7 +3638,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("key", key.into());
 			let res = db_access(
 				&ds,
@@ -3719,7 +3646,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -3757,14 +3684,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
 				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
+				.into_object()
 				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_raw_string();
+			let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Remove bearer access method
 			ds.execute("REMOVE ACCESS api ON DATABASE", &sess, None).await.unwrap();
@@ -3775,7 +3698,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("key", key.into());
 			let res = db_access(
 				&ds,
@@ -3783,7 +3706,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -3821,14 +3744,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
 				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
+				.into_object()
 				.unwrap();
-			let _key = grant.get("key").unwrap().clone().as_raw_string();
+			let _key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3845,7 +3764,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -3883,14 +3802,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
 				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
+				.into_object()
 				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_raw_string();
+			let valid_key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Replace a character from the key prefix
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3903,7 +3818,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("key", key.into());
 			let res = db_access(
 				&ds,
@@ -3911,7 +3826,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -3949,14 +3864,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
 				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
-				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_raw_string();
+				.into_object().unwrap();
+			let valid_key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Remove a character from the bearer key
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3969,7 +3879,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("key", key.into());
 			let res = db_access(
 				&ds,
@@ -3977,7 +3887,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -4015,14 +3925,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
 				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
+				.into_object()
 				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_raw_string();
+			let valid_key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Replace a character from the key identifier
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -4035,7 +3941,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("key", key.into());
 			let res = db_access(
 				&ds,
@@ -4043,7 +3949,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -4081,14 +3987,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
 				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
+				.into_object()
 				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_raw_string();
+			let valid_key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Replace a character from the key value
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -4101,7 +4003,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			vars.insert("key", key.into());
 			let res = db_access(
 				&ds,
@@ -4109,7 +4011,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -4147,12 +4049,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
 				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
+				.into_object()
 				.unwrap();
 			let id = grant.get("id").unwrap().clone().as_raw_string();
 			let key = grant.get("key").unwrap().clone().as_raw_string();

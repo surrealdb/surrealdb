@@ -7,9 +7,8 @@ use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
 #[cfg(not(target_family = "wasm"))]
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::capabilities::MethodTarget;
-use crate::dbs::{QueryResult, QueryType, Variables};
+use crate::dbs::{QueryResult, QueryType};
 use crate::err::Error;
-use crate::expr::Literal;
 use crate::kvs::{LockType, TransactionType};
 use crate::rpc::args::extract_args;
 use crate::rpc::{DbResult, Method, RpcContext, RpcError};
@@ -18,8 +17,7 @@ use crate::sql::{
 	InsertStatement, KillStatement, LiveStatement, Model, Output, Param, RelateStatement,
 	SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
-use crate::types::{PublicArray, PublicObject, PublicRecordIdKey, PublicValue, PublicVariables};
-use crate::val::{Array, Object, RecordIdKey, Value};
+use crate::types::{PublicArray, PublicRecordIdKey, PublicValue, PublicVariables};
 
 /// utility function converting a `Value::String` into a `Expr::Table`
 fn value_to_table(value: PublicValue) -> Expr {

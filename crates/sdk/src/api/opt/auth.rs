@@ -1,6 +1,5 @@
 //! Authentication types
 
-use std::borrow::Cow;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};

@@ -94,6 +94,18 @@ macro_rules! array {
     };
 }
 
+/// Macro for creating a SurrealDB record ID.
+///
+/// This macro creates a SurrealDB record ID, which is a combination of a table and a name.
+///
+/// # Example
+///
+/// ```rust
+/// use surrealdb_types::rid;
+///
+/// let rid = rid!(user:john);
+/// let rid = rid!("user:123");
+/// ```
 #[macro_export]
 macro_rules! rid {
 	// Handle identifier:identifier

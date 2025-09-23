@@ -36,7 +36,7 @@ use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::sequences::Sequences;
 use crate::mem::ALLOC;
 use crate::sql::expression::convert_public_value_to_internal;
-use crate::types::{PublicAction, PublicNotification, PublicVariables};
+use crate::types::{PublicNotification, PublicVariables};
 use crate::val::Value;
 
 pub type Context = Arc<MutableContext>;

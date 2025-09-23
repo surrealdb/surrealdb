@@ -542,7 +542,7 @@ pub async fn create_record_with_id_with_content(new_db: impl CreateDb) {
 		})
 		.await
 		.unwrap();
-	assert_eq!(value.as_record_id().unwrap(), RecordId::new("user", "jane"));
+	assert_eq!(value.into_record().unwrap(), RecordId::new("user", "jane"));
 }
 
 pub async fn create_record_with_id_in_content(new_db: impl CreateDb) {
@@ -797,7 +797,7 @@ pub async fn select_record_id(new_db: impl CreateDb) {
 	};
 	assert_eq!(record.id, rid!("user:john"));
 	let value: Value = db.select(Resource::from(record_id)).await.unwrap();
-	assert_eq!(value.as_record_id().unwrap(), rid!("user:john"));
+	assert_eq!(value.into_record().unwrap(), rid!("user:john"));
 }
 
 pub async fn select_record_ranges(new_db: impl CreateDb) {

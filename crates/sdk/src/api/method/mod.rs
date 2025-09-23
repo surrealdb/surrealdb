@@ -4,9 +4,7 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
 
-use serde::Serialize;
 use surrealdb_types::{self, Array, SurrealValue, Value};
 
 use crate::api::opt::auth::{Credentials, Jwt};

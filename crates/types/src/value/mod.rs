@@ -28,7 +28,6 @@ pub mod uuid;
 use std::cmp::Ordering;
 use std::ops::Index;
 
-use anyhow::Result;
 use revision::revisioned;
 pub use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -159,38 +158,6 @@ impl Value {
 	/// Check if this Value is NONE or NULL
 	pub fn is_nullish(&self) -> bool {
 		matches!(self, Value::None | Value::Null)
-	}
-
-	/// Converts this value to a string.
-	///
-	/// Returns `Ok(String)` if the value is a string variant, `Err(anyhow::Error)` otherwise.
-	pub fn as_string(&self) -> Result<String> {
-		match self {
-			Value::String(s) => Ok(s.clone()),
-			value => Err(anyhow::anyhow!("Expected a String, found {value:?}")),
-		}
-	}
-
-	/// Converts this value to a record id.
-	///
-	/// Returns `Ok(RecordId)` if the value is a record id variant, `Err(anyhow::Error)` otherwise.
-	pub fn as_record_id(self) -> Result<RecordId> {
-		match self {
-			// This is a record id already
-			Value::RecordId(v) => Ok(v),
-			// This is an object so look for the id field
-			Value::Object(mut v) => match v.remove("id") {
-				Some(Value::RecordId(v)) => Ok(v),
-				unexpected => Err(anyhow::anyhow!("Expected a RecordId, found {unexpected:?}")),
-			},
-			// This is an array so take the first item
-			Value::Array(mut v) => match v.len() {
-				1 => v.remove(0).as_record_id(),
-				unexpected => Err(anyhow::anyhow!("Expected a RecordId, found {unexpected:?}")),
-			},
-			// There is no valid record id
-			unexpected => Err(anyhow::anyhow!("Expected a RecordId, found {unexpected:?}")),
-		}
 	}
 
 	/// Accesses the value found at a certain field

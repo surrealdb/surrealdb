@@ -12,7 +12,6 @@ use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
 use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
-use crate::opt::KeyRange;
 
 /// A record delete future
 #[derive(Debug)]

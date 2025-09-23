@@ -12,7 +12,7 @@ use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::types::{PublicRecordId, PublicValue};
-use crate::val::{RecordId, Value};
+use crate::val::RecordId;
 
 // Execute the AUTHENTICATE clause for a record access method
 pub async fn authenticate_record(
@@ -21,7 +21,7 @@ pub async fn authenticate_record(
 	authenticate: &Expr,
 ) -> Result<PublicRecordId> {
 	match kvs.evaluate(authenticate, session, None).await {
-		Ok(val) => match val.as_record_id() {
+		Ok(val) => match val.into_record() {
 			// If the AUTHENTICATE clause returns a record, authentication continues with that
 			// record
 			Ok(id) => Ok(id),

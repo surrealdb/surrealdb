@@ -11,7 +11,6 @@ use crate::catalog::providers::ApiProvider;
 use crate::catalog::{ApiDefinition, ApiMethod};
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::types::{PublicObject, PublicValue};
 use crate::val::{Object, Value};
 
 pub async fn invoke(

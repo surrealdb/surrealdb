@@ -59,6 +59,15 @@ impl Datetime {
 	pub fn inner(&self) -> DateTime<Utc> {
 		self.0
 	}
+
+	/// Create a new datetime from a timestamp.
+	pub fn from_timestamp(seconds: i64, nanos: u32) -> Option<Self> {
+		match Utc.timestamp_opt(seconds, nanos) {
+			LocalResult::Single(v) => Some(Self(v)),
+			LocalResult::Ambiguous(_, _) => None,
+			LocalResult::None => None,
+		}
+	}
 }
 
 impl From<DateTime<Utc>> for Datetime {

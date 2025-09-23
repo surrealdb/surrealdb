@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use surrealdb_types::{Kind, Object, SurrealValue, Value};
 
 use crate::dbs::QueryResult;
-use crate::dbs::executor::convert_value_to_public_value;
 use crate::types::PublicNotification;
 use crate::{dbs, map};
 

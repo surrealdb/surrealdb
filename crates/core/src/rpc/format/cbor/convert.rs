@@ -14,10 +14,7 @@ use crate::types::{
 	PublicObject, PublicRange, PublicRecordId, PublicRecordIdKey, PublicRecordIdKeyRange,
 	PublicUuid, PublicValue,
 };
-use crate::val::{
-	self, Array, Datetime, DecimalExt, Geometry, Number, Object, Range, RecordIdKey,
-	RecordIdKeyRange, Table, Uuid, Value,
-};
+use crate::val::DecimalExt;
 
 // Tags from the spec - https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
 const TAG_SPEC_DATETIME: u64 = 0;
@@ -176,7 +173,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 							));
 						}
 
-						let table = to_value(table)?.as_string()?;
+						let table = to_value(table)?.into_string()?;
 
 						let key = to_record_id_key(key)?;
 
@@ -212,7 +209,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 						match (x, y) {
 							(PublicValue::Number(x), PublicValue::Number(y)) => {
 								Ok(PublicValue::Geometry(PublicGeometry::Point(
-									(x.to_f64(), y.to_f64()).into(),
+									(x.to_f64().unwrap_or_default(), y.to_f64().unwrap_or_default()).into(),
 								)))
 							}
 							_ => Err(anyhow!("Expected a CBOR array with 2 decimal values")),

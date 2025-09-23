@@ -8,7 +8,7 @@ use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
-use crate::{Surreal, api};
+use crate::Surreal;
 
 /// A run future
 #[derive(Debug)]

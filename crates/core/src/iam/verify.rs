@@ -20,7 +20,6 @@ use crate::iam::{self, Actor, Auth, Level, Role};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::types::PublicValue;
 use crate::val::Value;
 use crate::{catalog, syn};
 

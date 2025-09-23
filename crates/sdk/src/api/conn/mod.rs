@@ -6,8 +6,8 @@ use async_channel::{Receiver, Sender};
 use indexmap::IndexMap;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
-use surrealdb_core::rpc::{DbResult, DbResultError, DbResultStats};
-use surrealdb_types::{Array, SurrealValue, Value};
+use surrealdb_core::rpc::{DbResult, DbResultStats};
+use surrealdb_types::{SurrealValue, Value};
 
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
@@ -204,7 +204,7 @@ impl IndexedDbResults {
 					// 	Status::Err => {
 					// 		map.insert(
 					// 			index,
-					// 			(stats, Err(Error::Query(response.result.as_string()).into())),
+					// 			(stats, Err(Error::Query(response.result.into_string()).into())),
 					// 		);
 					// 	}
 					// }

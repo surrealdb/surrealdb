@@ -161,6 +161,17 @@ mod tests {
 	use rstest::rstest;
 
 	use super::*;
+	use crate::types::PublicDatetime;
 
-	// TODO: STU: Assert from_str match PublicDatetime::from_str
+	#[rstest]
+	#[case("2021-01-01T00:00:00Z", Datetime(DateTime::<Utc>::from_timestamp(1_000_000_000, 0).unwrap()), PublicDatetime::from_timestamp(1_000_000_000, 0).unwrap())]
+	fn test_from_str(#[case] input: &str, #[case] expected: Datetime, #[case] expected_public: PublicDatetime) {
+		let internal_actual = Datetime::from_str(input).unwrap();
+		let public_actual = PublicDatetime::from(internal_actual);
+
+		assert_eq!(internal_actual, expected);
+		assert_eq!(public_actual, expected_public);
+
+		assert_eq!(internal_actual.to_string(), public_actual.to_string());
+	}
 }

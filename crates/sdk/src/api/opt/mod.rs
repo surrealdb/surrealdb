@@ -3,7 +3,6 @@
 use std::borrow::Cow;
 
 use anyhow::Context;
-use serde::Serialize;
 
 pub mod auth;
 pub mod capabilities;
@@ -104,12 +103,12 @@ impl SurrealValue for InnerOp {
 			return Err(anyhow::anyhow!("Expected Object, got {:?}", value.value_kind()));
 		};
 		let op = obj.remove("op").context("Key 'op' missing")?;
-		let op = op.as_string()?;
+		let op = op.into_string()?;
 
 		match op.as_str() {
 			"add" => {
 				let path = obj.get("path").context("Key 'path' missing")?;
-				let path = path.as_string()?;
+				let path = path.into_string()?;
 				let value = obj.remove("value").context("Key 'value' missing")?;
 				Ok(InnerOp::Add {
 					path,
@@ -118,14 +117,14 @@ impl SurrealValue for InnerOp {
 			}
 			"remove" => {
 				let path = obj.remove("path").context("Key 'path' missing")?;
-				let path = path.as_string()?;
+				let path = path.into_string()?;
 				Ok(InnerOp::Remove {
 					path,
 				})
 			}
 			"replace" => {
 				let path = obj.remove("path").context("Key 'path' missing")?;
-				let path = path.as_string()?;
+				let path = path.into_string()?;
 				let value = obj.remove("value").context("Key 'value' missing")?;
 				Ok(InnerOp::Replace {
 					path,
@@ -134,9 +133,9 @@ impl SurrealValue for InnerOp {
 			}
 			"change" => {
 				let path = obj.remove("path").context("Key 'path' missing")?;
-				let path = path.as_string()?;
+				let path = path.into_string()?;
 				let value = obj.remove("value").context("Key 'value' missing")?;
-				let value = value.as_string()?;
+				let value = value.into_string()?;
 				Ok(InnerOp::Change {
 					path,
 					value,

@@ -1,6 +1,7 @@
 use std::fmt;
 
 use anyhow::Result;
+use surrealdb_types::SurrealValue;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -57,7 +58,7 @@ impl ShowStatement {
 			crate::cf::read(&txn, ns, db, self.table.as_deref(), self.since.clone(), self.limit)
 				.await?;
 		// Return the changes
-		let a: Vec<Value> = r.iter().cloned().map(|x| x.into_value()).collect();
+		let a: Vec<Value> = r.iter().cloned().map(|x| Value::from(x.into_value())).collect();
 		Ok(a.into())
 	}
 }

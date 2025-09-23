@@ -1,7 +1,6 @@
 use std::mem;
 
 use rust_decimal::Decimal;
-use surrealdb_types::Duration;
 
 use super::GluedValue;
 use super::mac::pop_glued;
@@ -13,7 +12,7 @@ use crate::syn::parser::mac::unexpected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{self, TokenKind, t};
 use crate::types::PublicDatetime;
-use crate::val::{Bytes, Datetime, DecimalExt as _, File, Number, Regex, Uuid};
+use crate::val::DecimalExt as _;
 
 mod number;
 

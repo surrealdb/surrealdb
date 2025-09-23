@@ -12,7 +12,6 @@ use crate::api::method::{BoxFuture, OnceLockExt};
 use crate::api::opt::Resource;
 use crate::api::{Connection, Result};
 use crate::method::Live;
-use crate::opt::KeyRange;
 
 /// A select future
 #[derive(Debug)]

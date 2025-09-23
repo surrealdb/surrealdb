@@ -66,7 +66,7 @@ pub trait RpcContext {
 	async fn execute(
 		&self,
 		version: Option<u8>,
-		txn: Option<Uuid>,
+		_txn: Option<Uuid>,
 		method: Method,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError>
@@ -76,7 +76,6 @@ pub trait RpcContext {
 	{
 		match version {
 			Some(1) => RpcProtocolV1::execute(self, method, params).await,
-			// Some(2) => RpcProtocolV2::execute(self, txn, method, params).await,
 			_ => RpcProtocolV1::execute(self, method, params).await,
 		}
 	}

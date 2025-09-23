@@ -2,8 +2,6 @@ mod convert;
 
 use surrealdb_types::Value;
 
-use crate::dbs::executor::convert_value_to_public_value;
-use crate::sql::expression::convert_public_value_to_internal;
 
 pub fn encode(v: Value) -> anyhow::Result<Vec<u8>> {
 	// Convert public value to internal value for encoding

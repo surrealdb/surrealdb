@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 
 use js::class::Trace;
 use js::prelude::{Coerced, Opt};

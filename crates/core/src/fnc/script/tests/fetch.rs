@@ -7,7 +7,6 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use crate::dbs::capabilities::{NetTarget, Targets};
 use crate::dbs::{Capabilities, Session};
 use crate::kvs::Datastore;
-use crate::syn;
 
 #[tokio::test]
 async fn test_fetch_get() {

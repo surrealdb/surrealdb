@@ -4,7 +4,7 @@ use anyhow::Result;
 use async_channel::Sender;
 use chrono::TimeZone;
 use chrono::prelude::Utc;
-use surrealdb_types::{Array, Kind, RecordId, SurrealValue, Value};
+use surrealdb_types::{Array, Kind, SurrealValue, Value};
 
 use super::Transaction;
 use crate::catalog::providers::{

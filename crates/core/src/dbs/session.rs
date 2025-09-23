@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use chrono::Utc;
 
-use crate::dbs::Variables;
 use crate::iam::{Auth, Level, Role};
 use crate::types::PublicVariables;
 use crate::val::Value;

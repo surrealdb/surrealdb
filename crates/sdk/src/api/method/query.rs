@@ -12,7 +12,7 @@ use indexmap::IndexMap;
 use serde::Serialize;
 use surrealdb_core::rpc::{DbResultError, DbResultStats};
 use surrealdb_types::{
-	self, Notification as CoreNotification, Object, SurrealValue, Value, Variables,
+	self, SurrealValue, Value, Variables,
 };
 use uuid::Uuid;
 
@@ -22,7 +22,7 @@ use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
-use crate::api::{self, Connection, ExtraFeatures, Result, opt};
+use crate::api::{Connection, ExtraFeatures, Result, opt};
 use crate::core::expr::{LogicalPlan, TopLevelExpr};
 use crate::method::{OnceLockExt, WithStats};
 use crate::notification::Notification;
@@ -62,60 +62,6 @@ pub(crate) enum ValidQuery {
 pub trait IntoVariables {
 	fn into_variables(self) -> Variables;
 }
-
-// impl IntoVariables for Variables {
-// 	fn into_variables(self) -> Variables {
-// 		self
-// 	}
-// }
-
-// impl IntoVariables for (&'static str, &'static str) {
-// 	fn into_variables(self) -> Variables {
-// 		let mut vars = Variables::new();
-// 		vars.insert(self.0.to_string(), Value::String(self.1.to_string()));
-// 		vars
-// 	}
-// }
-
-// impl IntoVariables for (&'static str, String) {
-// 	fn into_variables(self) -> Variables {
-// 		let mut vars = Variables::new();
-// 		vars.insert(self.0.to_string(), Value::String(self.1));
-// 		vars
-// 	}
-// }
-
-// impl IntoVariables for (String, &'static str) {
-// 	fn into_variables(self) -> Variables {
-// 		let mut vars = Variables::new();
-// 		vars.insert(self.0.to_string(), Value::String(self.1.to_string()));
-// 		vars
-// 	}
-// }
-
-// impl IntoVariables for (String, String) {
-// 	fn into_variables(self) -> Variables {
-// 		let mut vars = Variables::new();
-// 		vars.insert(self.0, Value::String(self.1));
-// 		vars
-// 	}
-// }
-
-// impl IntoVariables for (String, Value) {
-// 	fn into_variables(self) -> Variables {
-// 		let mut vars = Variables::new();
-// 		vars.insert(self.0, self.1);
-// 		vars
-// 	}
-// }
-
-// impl<T: SurrealValue> IntoVariables for (&'static str, T) {
-// 	fn into_variables(self) -> Variables {
-// 		let mut vars = Variables::new();
-// 		vars.insert(self.0.to_string(), self.1.into_value());
-// 		vars
-// 	}
-// }
 
 impl<T: SurrealValue> IntoVariables for T {
 	fn into_variables(self) -> Variables {

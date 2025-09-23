@@ -2,7 +2,6 @@ use anyhow::Result;
 
 use super::args::Optional;
 use crate::ctx::Context;
-use crate::dbs::executor::convert_value_to_public_value;
 use crate::err::Error;
 use crate::val::Value;
 

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{Object, Value};
+use crate::{Object, SurrealValue, Value};
 
 /// Represents a set of variables that can be used in a query.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -12,14 +12,17 @@ impl Variables {
 		Self(BTreeMap::new())
 	}
 
+	/// Check if the variables map is empty.
 	pub fn is_empty(&self) -> bool {
 		self.0.is_empty()
 	}
 
+	/// Get the number of variables in the map.
 	pub fn len(&self) -> usize {
 		self.0.len()
 	}
 
+	/// Get an iterator over the variables in the map.
 	pub fn iter(&self) -> std::collections::btree_map::Iter<String, Value> {
 		self.0.iter()
 	}
@@ -30,8 +33,8 @@ impl Variables {
 	}
 
 	/// Insert a new variable into the map.
-	pub fn insert(&mut self, key: impl Into<String>, value: impl Into<Value>) {
-		self.0.insert(key.into(), value.into());
+	pub fn insert(&mut self, key: impl Into<String>, value: impl SurrealValue) {
+		self.0.insert(key.into(), value.into_value());
 	}
 
 	/// Remove a variable from the map.
@@ -39,6 +42,7 @@ impl Variables {
 		self.0.remove(key);
 	}
 
+	/// Extend the variables map with another variables map.
 	pub fn extend(&mut self, other: Variables) {
 		self.0.extend(other.0);
 	}

@@ -17,7 +17,7 @@ use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
 use crate::ctx::Context;
 use crate::ctx::reason::Reason;
 use crate::dbs::response::QueryResult;
-use crate::dbs::{Force, Options, QueryType, Status};
+use crate::dbs::{Force, Options, QueryType};
 use crate::doc::DefaultBroker;
 use crate::err::Error;
 use crate::expr::paths::{DB, NS};
@@ -28,7 +28,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 use crate::rpc::DbResultError;
 use crate::sql::{self, Ast};
-use crate::types::{PublicNotification, PublicValue};
+use crate::types::PublicNotification;
 use crate::val::Value;
 use crate::{err, expr};
 

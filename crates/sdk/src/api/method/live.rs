@@ -5,7 +5,7 @@ use std::task::{Context, Poll};
 
 use async_channel::Receiver;
 use futures::StreamExt;
-use surrealdb_core::expr::{RecordIdKeyLit, RecordIdLit};
+use surrealdb_core::expr::RecordIdLit;
 use surrealdb_types::{
 	self, Action, Notification as CoreNotification, RecordIdKey, SurrealValue, Value,
 };
@@ -19,7 +19,7 @@ use crate::Surreal;
 use crate::api::conn::{Command, Router};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
-use crate::api::{self, Connection, ExtraFeatures, Result};
+use crate::api::{Connection, ExtraFeatures, Result};
 use crate::core::expr::{
 	BinaryOperator, Cond, Expr, Fields, Idiom, Literal, LiveStatement, TopLevelExpr,
 };

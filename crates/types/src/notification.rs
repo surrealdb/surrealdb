@@ -6,14 +6,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Kind, KindLiteral, SurrealValue, Uuid, Value};
 
+/// The action that caused the notification
 #[revisioned(revision = 1)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Action {
+	/// Record was created.
 	Create,
+	/// Record was updated.
 	Update,
+	/// Record was deleted.
 	Delete,
-
+	/// The live query was killed.
 	Killed,
 }
 
@@ -36,7 +40,7 @@ impl SurrealValue for Action {
 	}
 
 	fn from_value(value: Value) -> anyhow::Result<Self> {
-		Self::from_str(&value.as_string()?)
+		Self::from_str(&value.into_string()?)
 	}
 }
 
@@ -65,6 +69,7 @@ impl FromStr for Action {
 	}
 }
 
+/// A live query notification.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Notification {

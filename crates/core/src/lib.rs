@@ -75,8 +75,8 @@ pub(crate) mod types {
 		KindLiteral as PublicKindLiteral, Notification as PublicNotification,
 		Number as PublicNumber, Object as PublicObject, Range as PublicRange,
 		RecordId as PublicRecordId, RecordIdKey as PublicRecordIdKey,
-		RecordIdKeyRange as PublicRecordIdKeyRange, Regex as PublicRegex, Uuid as PublicUuid,
-		Value as PublicValue, Variables as PublicVariables,
+		RecordIdKeyRange as PublicRecordIdKeyRange, Regex as PublicRegex, SurrealValue,
+		Uuid as PublicUuid, Value as PublicValue, Variables as PublicVariables,
 	};
 }
 

@@ -7,9 +7,8 @@ use surrealdb_types::{SurrealValue, Value};
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Result};
-use crate::error::Api;
 use crate::method::OnceLockExt;
-use crate::{Surreal, api};
+use crate::Surreal;
 
 /// A signin future
 #[derive(Debug)]

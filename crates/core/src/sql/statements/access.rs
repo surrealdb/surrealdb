@@ -4,7 +4,7 @@ use std::fmt::{Display, Formatter};
 use crate::fmt::EscapeIdent;
 use crate::sql::{Base, Cond, RecordIdLit};
 use crate::types::PublicDuration;
-use crate::val::{Datetime, Duration, Uuid};
+use crate::val::{Datetime, Uuid};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
