@@ -10,6 +10,11 @@ use crate::fmt::Fmt;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Groups(pub Vec<Group>);
 
+impl Groups {
+	pub(crate) fn is_group_all_only(&self) -> bool {
+		self.0.is_empty()
+	}
+}
 impl Deref for Groups {
 	type Target = Vec<Group>;
 	fn deref(&self) -> &Self::Target {

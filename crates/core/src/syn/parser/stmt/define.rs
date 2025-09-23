@@ -933,6 +933,11 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.index = Index::Uniq;
 				}
+				t!("COUNT") => {
+					self.pop_peek();
+					let cond = self.try_parse_condition(stk).await?;
+					res.index = Index::Count(cond);
+				}
 				t!("FULLTEXT") => {
 					self.pop_peek();
 					let mut analyzer: Option<String> = None;
@@ -1089,7 +1094,9 @@ impl Parser<'_> {
 				_ => break,
 			}
 		}
-
+		if matches!(res.index, Index::Count(_)) && !res.cols.is_empty() {
+			bail!("Cannot create a count index with fields");
+		}
 		Ok(res)
 	}
 

@@ -24,13 +24,10 @@ impl Display for DefineIndexStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(
-			f,
-			" {} ON {} FIELDS {}",
-			self.name,
-			self.what,
-			Fmt::comma_separated(self.cols.iter())
-		)?;
+		write!(f, " {} ON {}", self.name, self.what)?;
+		if !self.cols.is_empty() {
+			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter()))?;
+		}
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index)?;
 		}

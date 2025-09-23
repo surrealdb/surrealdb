@@ -181,13 +181,10 @@ impl Display for DefineIndexStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(
-			f,
-			" {} ON {} FIELDS {}",
-			self.name,
-			self.what,
-			Fmt::comma_separated(self.cols.iter())
-		)?;
+		write!(f, " {} ON {}", self.name, self.what)?;
+		if !self.cols.is_empty() {
+			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter()))?;
+		}
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index.to_sql())?;
 		}
@@ -241,7 +238,8 @@ pub(in crate::expr::statements) async fn run_indexing(
 		let rcv = ctx
 			.get_index_builder()
 			.ok_or_else(|| Error::unreachable("No Index Builder"))?
-			.build(ctx, opt.clone(), ns, db, index.clone().into(), _blocking)?;
+			.build(ctx, opt.clone(), ns, db, index.clone().into(), _blocking)
+			.await?;
 		if let Some(rcv) = rcv {
 			rcv.await.map_err(|_| Error::IndexingBuildingCancelled)?
 		} else {
