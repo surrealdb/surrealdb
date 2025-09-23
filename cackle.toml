@@ -1362,3 +1362,6 @@ allow_proc_macro = true
 [pkg.web_atoms]
 allow_apis = ["fs"]
 
+[pkg.dtoa]
+allow_unsafe = true
+
