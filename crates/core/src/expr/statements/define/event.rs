@@ -1,6 +1,7 @@
 use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
+use reblessive::tree::Stk;
 use uuid::Uuid;
 
 use super::DefineKind;
@@ -10,29 +11,36 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr};
-use crate::fmt::{EscapeIdent, Fmt, QuoteStr};
+use crate::fmt::Fmt;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineEventStatement {
 	pub kind: DefineKind,
-	pub name: String,
-	pub target_table: String,
+	pub name: Expr,
+	pub target_table: Expr,
 	pub when: Expr,
 	pub then: Vec<Expr>,
-	pub comment: Option<String>,
+	pub comment: Option<Expr>,
 }
 
 impl DefineEventStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
 	) -> Result<Value> {
+		let name = expr_to_ident(stk, ctx, opt, _doc, &self.name, "event name").await?;
+		let target_table =
+			expr_to_ident(stk, ctx, opt, _doc, &self.target_table, "target table").await?;
+		let comment = map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, _doc, x => String));
+
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
 		// Get the NS and DB
@@ -41,12 +49,12 @@ impl DefineEventStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
-		if txn.get_tb_event(ns, db, &self.target_table, &self.name).await.is_ok() {
+		if txn.get_tb_event(ns, db, &target_table, &name).await.is_ok() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::EvAlreadyExists {
-							name: self.name.to_string(),
+							name: name.clone(),
 						});
 					}
 				}
@@ -58,19 +66,19 @@ impl DefineEventStatement {
 		// Ensure the table exists
 		let tb = {
 			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_tb(ns, db, &self.target_table, opt.strict).await?
+			txn.get_or_add_tb(ns, db, &target_table, opt.strict).await?
 		};
 
 		// Process the statement
-		let key = crate::key::table::ev::new(ns, db, &self.target_table, &self.name);
+		let key = crate::key::table::ev::new(ns, db, &target_table, &name);
 		txn.set(
 			&key,
 			&EventDefinition {
-				name: self.name.clone(),
-				target_table: self.target_table.clone(),
+				name: name.clone(),
+				target_table: target_table.clone(),
 				when: self.when.clone(),
 				then: self.then.clone(),
-				comment: self.comment.clone(),
+				comment: comment.clone(),
 			},
 			None,
 		)
@@ -86,7 +94,7 @@ impl DefineEventStatement {
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &self.target_table);
+			cache.clear_tb(ns, db, &target_table);
 		}
 		// Clear the cache
 		txn.clear_cache();
@@ -106,13 +114,13 @@ impl Display for DefineEventStatement {
 		write!(
 			f,
 			" {} ON {} WHEN {} THEN {}",
-			EscapeIdent(&self.name),
-			EscapeIdent(&self.target_table),
+			self.name,
+			self.target_table,
 			self.when,
 			Fmt::comma_separated(self.then.iter())
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", QuoteStr(v))?
+			write!(f, " COMMENT {}", v)?
 		}
 		Ok(())
 	}

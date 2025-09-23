@@ -861,7 +861,7 @@ async fn router(
 			let select_plan = SelectStatement {
 				expr: Fields::all(),
 				what: resource_to_exprs(what),
-				omit: None,
+				omit: vec![],
 				only: false,
 				with: None,
 				cond: None,
@@ -1210,7 +1210,9 @@ async fn router(
 			let model = DefineModelStatement {
 				name: file.header.name.to_string(),
 				version: file.header.version.to_string(),
-				comment: Some(file.header.description.to_string()),
+				comment: Some(Expr::Literal(surrealdb_core::expr::Literal::String(
+					file.header.description.to_string(),
+				))),
 				hash,
 				..Default::default()
 			};

@@ -1,31 +1,50 @@
 use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
+use reblessive::tree::Stk;
 
 use crate::catalog::providers::NamespaceProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Value};
-use crate::fmt::EscapeIdent;
+use crate::expr::parameterize::expr_to_ident;
+use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RemoveNamespaceStatement {
-	pub name: String,
+	pub name: Expr,
 	pub if_exists: bool,
 	pub expunge: bool,
 }
 
+impl Default for RemoveNamespaceStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			if_exists: false,
+			expunge: false,
+		}
+	}
+}
+
 impl RemoveNamespaceStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;
 		// Get the transaction
 		let txn = ctx.tx();
-
-		let ns = match txn.get_ns_by_name(&self.name).await? {
+		// Compute the name
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "namespace name").await?;
+		let ns = match txn.get_ns_by_name(&name).await? {
 			Some(x) => x,
 			None => {
 				if self.if_exists {
@@ -33,7 +52,7 @@ impl RemoveNamespaceStatement {
 				}
 
 				return Err(Error::NsNotFound {
-					name: self.name.clone(),
+					name,
 				}
 				.into());
 			}
@@ -79,7 +98,7 @@ impl Display for RemoveNamespaceStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", EscapeIdent(&self.name))?;
+		write!(f, " {}", self.name)?;
 		Ok(())
 	}
 }

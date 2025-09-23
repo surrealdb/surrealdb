@@ -23,7 +23,10 @@ impl ParamDefinition {
 			kind: DefineKind::Default,
 			name: self.name.clone(),
 			value: crate::sql::Expr::from_value(self.value.clone()),
-			comment: self.comment.clone(),
+			comment: self
+				.comment
+				.clone()
+				.map(|x| crate::sql::Expr::Literal(crate::sql::Literal::String(x))),
 			permissions: self.permissions.clone().into(),
 		}
 	}

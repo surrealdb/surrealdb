@@ -1,13 +1,23 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::fmt::EscapeIdent;
+use crate::sql::{Expr, Literal};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveDatabaseStatement {
-	pub name: String,
+	pub name: Expr,
 	pub if_exists: bool,
 	pub expunge: bool,
+}
+
+impl Default for RemoveDatabaseStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			if_exists: false,
+			expunge: false,
+		}
+	}
 }
 
 impl Display for RemoveDatabaseStatement {
@@ -16,7 +26,7 @@ impl Display for RemoveDatabaseStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", EscapeIdent(&self.name))?;
+		write!(f, " {}", self.name)?;
 		Ok(())
 	}
 }
@@ -24,7 +34,7 @@ impl Display for RemoveDatabaseStatement {
 impl From<RemoveDatabaseStatement> for crate::expr::statements::RemoveDatabaseStatement {
 	fn from(v: RemoveDatabaseStatement) -> Self {
 		crate::expr::statements::RemoveDatabaseStatement {
-			name: v.name,
+			name: v.name.into(),
 			if_exists: v.if_exists,
 			expunge: v.expunge,
 		}
@@ -34,7 +44,7 @@ impl From<RemoveDatabaseStatement> for crate::expr::statements::RemoveDatabaseSt
 impl From<crate::expr::statements::RemoveDatabaseStatement> for RemoveDatabaseStatement {
 	fn from(v: crate::expr::statements::RemoveDatabaseStatement) -> Self {
 		RemoveDatabaseStatement {
-			name: v.name,
+			name: v.name.into(),
 			if_exists: v.if_exists,
 			expunge: v.expunge,
 		}
