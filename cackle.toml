@@ -946,6 +946,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.fd-lock]
+allow_apis = ["fs"]
 allow_unsafe = true
 
 [pkg.deunicode]
