@@ -1422,3 +1422,6 @@ allow_apis = ["fs"]
 [pkg.dtoa]
 allow_unsafe = true
 
+[pkg.dtoa-short]
+allow_unsafe = true
+
