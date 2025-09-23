@@ -58,8 +58,7 @@ impl DefineDatabaseStatement {
 		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
 
 		// Process the name
-		let name =
-			expr_to_ident(stk, ctx, opt, doc, &self.name, "database name").await?.to_raw_string();
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "database name").await?;
 
 		// Check if the definition exists
 		let database_id = if let Some(db) = txn.get_db_by_name(ns, &name).await? {
@@ -114,7 +113,7 @@ impl Display for DefineDatabaseStatement {
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?
 		}
 		if let Some(ref v) = self.changefeed {
 			write!(f, " {v}")?;

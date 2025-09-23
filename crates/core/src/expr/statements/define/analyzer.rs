@@ -13,9 +13,8 @@ use crate::err::Error;
 use crate::expr::filter::Filter;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::tokenizer::Tokenizer;
-use crate::expr::{Base, Expr, Ident, Idiom, Literal, Value};
+use crate::expr::{Base, Expr, Idiom, Literal, Value};
 use crate::iam::{Action, ResourceKind};
-use crate::val::Strand;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineAnalyzerStatement {
@@ -49,9 +48,7 @@ impl DefineAnalyzerStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<catalog::AnalyzerDefinition> {
 		Ok(catalog::AnalyzerDefinition {
-			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "analyzer name")
-				.await?
-				.to_raw_string(),
+			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "analyzer name").await?,
 			function: self.function.clone(),
 			tokenizers: self.tokenizers.clone(),
 			filters: self.filters.clone(),
@@ -62,14 +59,11 @@ impl DefineAnalyzerStatement {
 	pub fn from_definition(def: &catalog::AnalyzerDefinition) -> Self {
 		Self {
 			kind: DefineKind::Default,
-			name: Expr::Idiom(Idiom::field(Ident::new(def.name.clone()).unwrap())),
+			name: Expr::Idiom(Idiom::field(def.name.clone())),
 			function: def.function.clone(),
 			tokenizers: def.tokenizers.clone(),
 			filters: def.filters.clone(),
-			comment: def
-				.comment
-				.as_ref()
-				.map(|x| Expr::Literal(Literal::Strand(Strand::new(x.clone()).unwrap()))),
+			comment: def.comment.as_ref().map(|x| Expr::Literal(Literal::String(x.clone()))),
 		}
 	}
 
@@ -133,7 +127,7 @@ impl Display for DefineAnalyzerStatement {
 			write!(f, " FILTERS {}", tokens.join(","))?;
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?
 		}
 		Ok(())
 	}

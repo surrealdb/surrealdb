@@ -11,8 +11,8 @@ use crate::catalog::{ApiActionDefinition, ApiDefinition, ApiMethod};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::fmt::{Fmt, pretty_indent};
 use crate::expr::{Base, Expr, FlowResultExt as _, Value};
+use crate::fmt::{Fmt, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -114,7 +114,7 @@ impl fmt::Display for DefineApiStatement {
 		}
 
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?;
+			write!(f, " COMMENT {}", comment)?;
 		}
 
 		drop(indent);

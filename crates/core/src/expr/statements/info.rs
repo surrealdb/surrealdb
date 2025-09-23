@@ -69,7 +69,7 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_root_accesses().await?.iter() {
 								let def = DefineAccessStatement::from_definition(Base::Root, v).redact();
-								out.insert(def.name.to_raw_string(), def.to_string().into());
+								out.insert(v.name.clone(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -120,7 +120,7 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_ns_accesses(ns).await?.iter() {
 								let def = DefineAccessStatement::from_definition(Base::Ns, v).redact();
-								out.insert(def.name.to_raw_string(), def.to_string().into());
+								out.insert(v.name.clone(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -182,7 +182,7 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_db_accesses(ns, db).await?.iter() {
 								let def = DefineAccessStatement::from_definition(Base::Db, v).redact();
-								out.insert(def.name.to_raw_string(), def.to_string().into());
+								out.insert(v.name.clone(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -302,7 +302,7 @@ impl InfoStatement {
 						"fields".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_fields(ns, db, &tb, version).await?.iter() {
-								out.insert(v.name.to_string(), v.to_sql().into());
+								out.insert(v.name.to_raw_string(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -348,7 +348,7 @@ impl InfoStatement {
 							Some(user) => user,
 							None => {
 								return Err(Error::UserNsNotFound {
-									name: user.to_raw_string(),
+									name: user,
 									ns: ns.name.clone(),
 								}
 								.into());
@@ -359,7 +359,7 @@ impl InfoStatement {
 						let (ns, db) = opt.ns_db()?;
 						let Some(db_def) = txn.get_db_by_name(ns, db).await? else {
 							return Err(Error::UserDbNotFound {
-								name: user.to_raw_string(),
+								name: user,
 								ns: ns.to_string(),
 								db: db.to_string(),
 							}
@@ -368,7 +368,7 @@ impl InfoStatement {
 						txn.get_db_user(db_def.namespace_id, db_def.database_id, &user)
 							.await?
 							.ok_or_else(|| Error::UserDbNotFound {
-								name: user.to_raw_string(),
+								name: user,
 								ns: ns.to_string(),
 								db: db.to_string(),
 							})?
@@ -426,24 +426,28 @@ impl fmt::Display for InfoStatement {
 				None => f.write_str("INFO FOR DATABASE STRUCTURE"),
 			},
 			Self::Tb(t, false, v) => match v {
-				Some(v) => write!(f, "INFO FOR TABLE {t} VERSION {v}"),
-				None => write!(f, "INFO FOR TABLE {t}"),
+				Some(v) => write!(f, "INFO FOR TABLE {} VERSION {v}", t),
+				None => write!(f, "INFO FOR TABLE {}", t),
 			},
 
 			Self::Tb(t, true, v) => match v {
-				Some(v) => write!(f, "INFO FOR TABLE {t} VERSION {v} STRUCTURE"),
-				None => write!(f, "INFO FOR TABLE {t} STRUCTURE"),
+				Some(v) => write!(f, "INFO FOR TABLE {} VERSION {v} STRUCTURE", t),
+				None => write!(f, "INFO FOR TABLE {} STRUCTURE", t),
 			},
 			Self::User(u, b, false) => match b {
-				Some(b) => write!(f, "INFO FOR USER {u} ON {b}"),
-				None => write!(f, "INFO FOR USER {u}"),
+				Some(b) => write!(f, "INFO FOR USER {} ON {b}", u),
+				None => write!(f, "INFO FOR USER {}", u),
 			},
 			Self::User(u, b, true) => match b {
-				Some(b) => write!(f, "INFO FOR USER {u} ON {b} STRUCTURE"),
-				None => write!(f, "INFO FOR USER {u} STRUCTURE"),
+				Some(b) => write!(f, "INFO FOR USER {} ON {b} STRUCTURE", u),
+				None => write!(f, "INFO FOR USER {} STRUCTURE", u),
 			},
-			Self::Index(i, t, false) => write!(f, "INFO FOR INDEX {i} ON {t}"),
-			Self::Index(i, t, true) => write!(f, "INFO FOR INDEX {i} ON {t} STRUCTURE"),
+			Self::Index(i, t, false) => {
+				write!(f, "INFO FOR INDEX {} ON {}", i, t)
+			}
+			Self::Index(i, t, true) => {
+				write!(f, "INFO FOR INDEX {} ON {} STRUCTURE", i, t)
+			}
 		}
 	}
 }

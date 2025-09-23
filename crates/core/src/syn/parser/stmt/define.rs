@@ -22,14 +22,14 @@ use crate::sql::statements::{
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	AccessType, Expr, Ident, Index, Kind, Literal, Param, Permission, Permissions, Scoring,
-	TableType, access_type, table_type,
+	AccessType, Expr, Index, Kind, Literal, Param, Permission, Permissions, Scoring, TableType,
+	access_type, table_type,
 };
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Token, TokenKind, t};
-use crate::val::{Duration, Strand};
+use crate::val::Duration;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_define_stmt(
@@ -151,7 +151,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let param = self.next_token_value::<Param>()?.ident();
+			let param = self.next_token_value::<Param>()?.into_string();
 			expected!(self, t!(":"));
 			let kind = stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
 
@@ -217,9 +217,9 @@ impl Parser<'_> {
 			name,
 			base,
 			// Safety: "Viewer" does not contain a null byte
-			roles: vec![unsafe { Ident::new_unchecked("Viewer".to_owned()) }], /* New users get
-			                                                                    * the viewer role
-			                                                                    * by default */
+			roles: vec!["Viewer".to_owned()], /* New users get
+			                                   * the viewer role
+			                                   * by default */
 			// TODO: Move out of the parser
 			token_duration: Some(Expr::Literal(Literal::Duration(Duration::from_secs(3600)))), /* defaults to 1 hour. */
 			..DefineUserStatement::default()
@@ -236,23 +236,21 @@ impl Parser<'_> {
 					if let PassType::Hash(_) = res.pass_type {
 						bail!("Unexpected token `PASSWORD`", @token.span => "Can't set both a passhash and a password");
 					}
-					res.pass_type =
-						PassType::Password(self.next_token_value::<Strand>()?.into_string());
+					res.pass_type = PassType::Password(self.parse_string_lit()?);
 				}
 				t!("PASSHASH") => {
 					let token = self.pop_peek();
 					if let PassType::Password(_) = res.pass_type {
 						bail!("Unexpected token `PASSHASH`", @token.span => "Can't set both a passhash and a password");
 					}
-					res.pass_type =
-						PassType::Hash(self.next_token_value::<Strand>()?.into_string());
+					res.pass_type = PassType::Hash(self.parse_string_lit()?);
 				}
 				t!("ROLES") => {
 					self.pop_peek();
 					let mut roles = Vec::new();
 					loop {
 						let token = self.peek();
-						let role = self.next_token_value::<Ident>()?;
+						let role = self.parse_ident()?;
 						// NOTE(gguillemas): This hardcoded list is a temporary fix in order
 						// to avoid making breaking changes to the DefineUserStatement structure
 						// while still providing parsing feedback to users referencing unexistent
@@ -549,7 +547,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value::<Param>()?.ident();
+		let name = self.next_token_value::<Param>()?.into_string();
 
 		let mut res = DefineParamStatement {
 			name,
@@ -937,7 +935,7 @@ impl Parser<'_> {
 				}
 				t!("FULLTEXT") => {
 					self.pop_peek();
-					let mut analyzer: Option<Ident> = None;
+					let mut analyzer: Option<String> = None;
 					let mut scoring = None;
 					let mut hl = false;
 
@@ -945,7 +943,7 @@ impl Parser<'_> {
 						match self.peek_kind() {
 							t!("ANALYZER") => {
 								self.pop_peek();
-								analyzer = Some(self.next_token_value()).transpose()?;
+								analyzer = Some(self.parse_ident()).transpose()?;
 							}
 							t!("BM25") => {
 								self.pop_peek();
@@ -971,7 +969,7 @@ impl Parser<'_> {
 						}
 					}
 					res.index = Index::FullText(crate::sql::index::FullTextParams {
-						az: analyzer.unwrap_or_else(|| Ident::from(strand!("like").to_owned())),
+						az: analyzer.unwrap_or_else(|| "like".to_owned()),
 						sc: scoring.unwrap_or_else(Default::default),
 						hl,
 					});
@@ -1160,9 +1158,9 @@ impl Parser<'_> {
 							}
 							t!("MAPPER") => {
 								let open_span = expected!(self, t!("(")).span;
-								let path: Strand = self.next_token_value()?;
+								let path: String = self.parse_string_lit()?;
 								self.expect_closing_delimiter(t!(")"), open_span)?;
-								filters.push(Filter::Mapper(path.into_string()))
+								filters.push(Filter::Mapper(path))
 							}
 							_ => unexpected!(self, next, "a filter"),
 						}
@@ -1197,9 +1195,9 @@ impl Parser<'_> {
 					self.pop_peek();
 					expected!(self, t!("fn"));
 					expected!(self, t!("::"));
-					let mut ident = self.next_token_value::<Ident>()?.into_string();
+					let mut ident = self.parse_ident()?;
 					while self.eat(t!("::")) {
-						let value = self.next_token_value::<Ident>()?;
+						let value = self.parse_ident()?;
 						ident.push_str("::");
 						ident.push_str(&value);
 					}
@@ -1358,11 +1356,11 @@ impl Parser<'_> {
 							}
 						};
 
-						let part = self.next_token_value::<Ident>()?.into_string();
+						let part = self.parse_ident()?;
 						name.push_str(part.to_lowercase().as_str());
 
 						while self.eat(t!("::")) {
-							let part = self.next_token_value::<Ident>()?;
+							let part = self.parse_ident()?;
 							name.push_str("::");
 							name.push_str(part.to_lowercase().as_str());
 						}
@@ -1459,9 +1457,9 @@ impl Parser<'_> {
 		loop {
 			match self.peek_kind() {
 				x if Self::kind_is_identifier(x) => {
-					let name: Ident = self.next_token_value()?;
+					let name = self.parse_ident()?;
 					acc.push(TableConfig {
-						name: name.into_string(),
+						name,
 					});
 				}
 				_ => unexpected!(self, self.next(), "a table config"),
@@ -1501,9 +1499,9 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_tables(&mut self) -> ParseResult<Kind> {
-		let mut names = vec![self.next_token_value::<Ident>()?.into_string()];
+		let mut names = vec![self.parse_ident()?];
 		while self.eat(t!("|")) {
-			names.push(self.next_token_value::<Ident>()?.into_string());
+			names.push(self.parse_ident()?);
 		}
 		Ok(Kind::Record(names))
 	}

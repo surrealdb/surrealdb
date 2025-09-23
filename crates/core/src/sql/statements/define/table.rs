@@ -1,8 +1,8 @@
 use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::sql::changefeed::ChangeFeed;
-use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::{Expr, Kind, Literal, Permissions, TableType, View};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -89,7 +89,7 @@ impl Display for DefineTableStatement {
 			" SCHEMALESS"
 		})?;
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?
+			write!(f, " COMMENT {}", comment)?
 		}
 		if let Some(ref v) = self.view {
 			write!(f, " {v}")?

@@ -102,7 +102,7 @@ impl Parser<'_> {
 		if self.peek_whitespace1().kind == t!(":") {
 			self.parse_record_id(stk).await.map(|x| Expr::Literal(Literal::RecordId(x)))
 		} else {
-			self.next_token_value().map(Expr::Table)
+			self.parse_ident().map(Expr::Table)
 		}
 	}
 }

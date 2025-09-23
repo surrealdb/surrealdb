@@ -49,8 +49,7 @@ impl DefineBucketStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Bucket, &Base::Db)?;
 		// Process the name
-		let name =
-			expr_to_ident(stk, ctx, opt, doc, &self.name, "bucket name").await?.to_raw_string();
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "bucket name").await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
@@ -134,7 +133,7 @@ impl Display for DefineBucketStatement {
 		write!(f, " PERMISSIONS {}", self.permissions)?;
 
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?;
+			write!(f, " COMMENT {}", comment)?;
 		}
 
 		Ok(())

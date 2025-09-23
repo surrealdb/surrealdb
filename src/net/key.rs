@@ -20,7 +20,7 @@ use crate::core::dbs::capabilities::RouteTarget;
 use crate::core::dbs::{Session, Variables};
 use crate::core::iam::check::check_ns_db;
 use crate::core::kvs::Datastore;
-use crate::core::val::{Strand, Value};
+use crate::core::val::Value;
 use crate::core::{sql, syn};
 use crate::net::error::Error as NetError;
 use crate::net::input::bytes_to_utf8;
@@ -149,7 +149,7 @@ async fn select_all(
 		String::from("table") => Value::from(table),
 		String::from("start") => Value::from(query.start.unwrap_or(0)),
 		String::from("limit") => Value::from(query.limit.unwrap_or(100)),
-		String::from("fields") => query.fields.unwrap_or_default().into_iter().map(|x| unsafe{ Strand::new_unchecked(x) }).map(Value::from).collect(),
+		String::from("fields") => query.fields.unwrap_or_default().into_iter().map(Value::from).collect(),
 	});
 	execute_and_return(ds, sql, &session, vars, accept.as_deref(), None)
 		.await
@@ -316,7 +316,7 @@ async fn select_one(
 	let vars = Variables::from(map! {
 		String::from("table") => Value::from(table),
 		String::from("id") => rid,
-		String::from("fields") => query.fields.unwrap_or_default().into_iter().map(|x| unsafe{ Strand::new_unchecked(x) }).map(Value::from).collect::<Value>(),
+		String::from("fields") => query.fields.unwrap_or_default().into_iter().map(Value::from).collect::<Value>(),
 	});
 	// Execute the query and return the result
 	execute_and_return(db, sql, &session, vars, accept.as_deref(), None)

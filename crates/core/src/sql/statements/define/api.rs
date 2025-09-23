@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 use super::DefineKind;
 use super::config::api::ApiConfig;
 use crate::catalog::ApiMethod;
-use crate::sql::fmt::{Fmt, pretty_indent};
+use crate::fmt::{Fmt, pretty_indent};
 use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]

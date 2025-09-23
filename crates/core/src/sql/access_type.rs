@@ -9,7 +9,6 @@ use rand::distributions::Alphanumeric;
 use super::Expr;
 use crate::err::Error;
 use crate::sql::{Algorithm, Literal};
-use crate::val::Strand;
 
 pub(crate) fn random_key() -> String {
 	rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()
@@ -129,11 +128,11 @@ impl Default for JwtAccess {
 		Self {
 			verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 				alg,
-				key: Expr::Literal(Literal::Strand(Strand::new(key.clone()).unwrap())),
+				key: Expr::Literal(Literal::String(key.clone())),
 			}),
 			issue: Some(JwtAccessIssue {
 				alg,
-				key: Expr::Literal(Literal::Strand(Strand::new(key).unwrap())),
+				key: Expr::Literal(Literal::String(key)),
 			}),
 		}
 	}
@@ -188,7 +187,7 @@ impl Default for JwtAccessIssue {
 			// Defaults to HS512
 			alg: Algorithm::Hs512,
 			// Avoid defaulting to empty key
-			key: Expr::Literal(Literal::Strand(Strand::new(random_key()).unwrap())),
+			key: Expr::Literal(Literal::String(random_key())),
 		}
 	}
 }

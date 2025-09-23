@@ -13,8 +13,8 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr};
+use crate::fmt::Fmt;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::fmt::Fmt;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -36,11 +36,9 @@ impl DefineEventStatement {
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
 	) -> Result<Value> {
-		let name =
-			expr_to_ident(stk, ctx, opt, _doc, &self.name, "event name").await?.to_raw_string();
-		let target_table = expr_to_ident(stk, ctx, opt, _doc, &self.target_table, "target table")
-			.await?
-			.to_raw_string();
+		let name = expr_to_ident(stk, ctx, opt, _doc, &self.name, "event name").await?;
+		let target_table =
+			expr_to_ident(stk, ctx, opt, _doc, &self.target_table, "target table").await?;
 		let comment = map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, _doc, x => String));
 
 		// Allowed to run?
@@ -122,7 +120,7 @@ impl Display for DefineEventStatement {
 			Fmt::comma_separated(self.then.iter())
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?
 		}
 		Ok(())
 	}

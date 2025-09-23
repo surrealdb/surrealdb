@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::sql::escape::EscapeIdent;
+use crate::fmt::EscapeIdent;
 use crate::sql::{Expr, Literal};
 use crate::val::Duration;
 

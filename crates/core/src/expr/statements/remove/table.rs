@@ -43,8 +43,7 @@ impl RemoveTableStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Compute the name
-		let name =
-			expr_to_ident(stk, ctx, opt, doc, &self.name, "table name").await?.to_raw_string();
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "table name").await?;
 		// Get the NS and DB
 		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
@@ -120,15 +119,16 @@ impl RemoveTableStatement {
 				.await?;
 			}
 		}
-		if let Some(chn) = opt.sender.as_ref() {
+		if let Some(sender) = opt.broker.as_ref() {
 			for lv in lvs.iter() {
-				chn.send(Notification {
-					id: lv.id.into(),
-					action: dbs::Action::Killed,
-					record: Value::None,
-					result: Value::None,
-				})
-				.await?;
+				sender
+					.send(Notification {
+						id: lv.id.into(),
+						action: dbs::Action::Killed,
+						record: Value::None,
+						result: Value::None,
+					})
+					.await;
 			}
 		}
 		// Clear the cache

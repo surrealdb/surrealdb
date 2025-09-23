@@ -7,7 +7,6 @@ use anyhow::Result;
 use crate::err::Error;
 use crate::expr::statements::DefineAccessStatement;
 use crate::expr::{Algorithm, Expr, Literal};
-use crate::val::Strand;
 
 /// The type of access methods available
 
@@ -101,11 +100,11 @@ impl Default for JwtAccess {
 		Self {
 			verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 				alg,
-				key: Expr::Literal(Literal::Strand(Strand::new(key.clone()).unwrap())),
+				key: Expr::Literal(Literal::String(key.clone())),
 			}),
 			issue: Some(JwtAccessIssue {
 				alg,
-				key: Expr::Literal(Literal::Strand(Strand::new(key).unwrap())),
+				key: Expr::Literal(Literal::String(key)),
 			}),
 		}
 	}
@@ -136,9 +135,7 @@ impl JwtAccess {
 			JwtAccessVerify::Key(mut key) => {
 				// If algorithm is symmetric, the verification key is a secret
 				if key.alg.is_symmetric() {
-					key.key = Expr::Literal(Literal::Strand(
-						Strand::new("[REDACTED]".to_string()).unwrap(),
-					));
+					key.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
 				}
 				JwtAccessVerify::Key(key)
 			}
@@ -147,8 +144,7 @@ impl JwtAccess {
 		};
 		jwt.issue = match jwt.issue {
 			Some(mut issue) => {
-				issue.key =
-					Expr::Literal(Literal::Strand(Strand::new("[REDACTED]".to_string()).unwrap()));
+				issue.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
 				Some(issue)
 			}
 			None => None,
@@ -169,9 +165,7 @@ impl Default for JwtAccessIssue {
 			// Defaults to HS512
 			alg: Algorithm::Hs512,
 			// Avoid defaulting to empty key
-			key: Expr::Literal(Literal::Strand(
-				Strand::new(DefineAccessStatement::random_key()).unwrap(),
-			)),
+			key: Expr::Literal(Literal::String(DefineAccessStatement::random_key())),
 		}
 	}
 }
@@ -201,9 +195,7 @@ impl Default for JwtAccessVerifyKey {
 			// Defaults to HS512
 			alg: Algorithm::Hs512,
 			// Avoid defaulting to empty key
-			key: Expr::Literal(Literal::Strand(
-				Strand::new(DefineAccessStatement::random_key()).unwrap(),
-			)),
+			key: Expr::Literal(Literal::String(DefineAccessStatement::random_key())),
 		}
 	}
 }

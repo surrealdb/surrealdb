@@ -1,14 +1,14 @@
 use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
-use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::{Expr, Ident, Permission};
+use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
+use crate::sql::{Expr, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineParamStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub value: Expr,
 	pub comment: Option<Expr>,
 	pub permissions: Permission,
@@ -22,9 +22,9 @@ impl Display for DefineParamStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " ${} VALUE {}", self.name, self.value)?;
+		write!(f, " ${} VALUE {}", EscapeIdent(&self.name), self.value)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
@@ -41,7 +41,7 @@ impl From<DefineParamStatement> for crate::expr::statements::DefineParamStatemen
 	fn from(v: DefineParamStatement) -> Self {
 		Self {
 			kind: v.kind.into(),
-			name: v.name.into(),
+			name: v.name,
 			value: v.value.into(),
 			comment: v.comment.map(|x| x.into()),
 			permissions: v.permissions.into(),
@@ -53,7 +53,7 @@ impl From<crate::expr::statements::DefineParamStatement> for DefineParamStatemen
 	fn from(v: crate::expr::statements::DefineParamStatement) -> Self {
 		DefineParamStatement {
 			kind: v.kind.into(),
-			name: v.name.into(),
+			name: v.name,
 			value: v.value.into(),
 			comment: v.comment.map(|x| x.into()),
 			permissions: v.permissions.into(),

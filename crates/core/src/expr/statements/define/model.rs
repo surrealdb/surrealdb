@@ -10,33 +10,19 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::parameterize::expr_to_ident;
-use crate::expr::{Base, Expr, Literal};
+use crate::expr::{Base, Expr};
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineModelStatement {
 	pub kind: DefineKind,
 	pub hash: String,
-	pub name: Expr,
+	pub name: String,
 	pub version: String,
 	pub comment: Option<Expr>,
 	pub permissions: Permission,
-}
-
-impl Default for DefineModelStatement {
-	fn default() -> Self {
-		Self {
-			kind: DefineKind::Default,
-			hash: String::new(),
-			name: Expr::Literal(Literal::None),
-			version: String::new(),
-			comment: None,
-			permissions: Permission::default(),
-		}
-	}
 }
 
 impl DefineModelStatement {
@@ -52,12 +38,9 @@ impl DefineModelStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
-		// Compute name and version
-		let name =
-			expr_to_ident(stk, ctx, opt, doc, &self.name, "model name").await?.to_raw_string();
 		// Check if the definition exists
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-		if let Some(model) = txn.get_db_model(ns, db, &name, &self.version).await? {
+		if let Some(model) = txn.get_db_model(ns, db, &self.name, &self.version).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -72,12 +55,12 @@ impl DefineModelStatement {
 		}
 
 		// Process the statement
-		let key = crate::key::database::ml::new(ns, db, &name, &self.version);
+		let key = crate::key::database::ml::new(ns, db, &self.name, &self.version);
 		txn.set(
 			&key,
 			&MlModelDefinition {
 				hash: self.hash.clone(),
-				name: name.clone(),
+				name: self.name.clone(),
 				version: self.version.clone(),
 				comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 				permissions: self.permissions.clone(),

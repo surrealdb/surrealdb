@@ -10,16 +10,16 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::{Base, Block, Expr, Ident, Kind};
+use crate::expr::{Base, Block, Expr, Kind};
+use crate::fmt::{EscapeKwFreeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineFunctionStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
-	pub args: Vec<(Ident, Kind)>,
+	pub name: String,
+	pub args: Vec<(String, Kind)>,
 	pub block: Block,
 	pub comment: Option<Expr>,
 	pub permissions: Permission,
@@ -66,8 +66,8 @@ impl DefineFunctionStatement {
 			ns,
 			db,
 			&FunctionDefinition {
-				name: self.name.to_raw_string(),
-				args: self.args.clone().into_iter().map(|(n, k)| (n.to_raw_string(), k)).collect(),
+				name: self.name.clone(),
+				args: self.args.clone(),
 				block: self.block.clone(),
 				comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 				permissions: self.permissions.clone(),
@@ -95,7 +95,7 @@ impl fmt::Display for DefineFunctionStatement {
 			if i > 0 {
 				f.write_str(", ")?;
 			}
-			write!(f, "${name}: {kind}")?;
+			write!(f, "${}: {kind}", EscapeKwFreeIdent(name))?;
 		}
 		f.write_str(") ")?;
 		if let Some(ref v) = self.returns {
@@ -103,7 +103,7 @@ impl fmt::Display for DefineFunctionStatement {
 		}
 		Display::fmt(&self.block, f)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

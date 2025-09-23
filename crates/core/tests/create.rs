@@ -1,6 +1,6 @@
 use surrealdb_core::iam::Level;
+use surrealdb_core::syn;
 use surrealdb_core::val::{Array, RecordId};
-use surrealdb_core::{strand, syn};
 mod helpers;
 use anyhow::Result;
 use helpers::new_ds;
@@ -35,7 +35,7 @@ async fn create_or_insert_with_permissions() -> Result<()> {
 		"test",
 		"test",
 		"test",
-		RecordId::new("user".to_owned(), strand!("test").to_owned()).into(),
+		RecordId::new("user".to_owned(), "test".to_owned()).into(),
 	);
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);

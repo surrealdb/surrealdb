@@ -18,11 +18,9 @@ use crate::expr::access_type::{
 	JwtAccessVerifyJwks, JwtAccessVerifyKey,
 };
 use crate::expr::parameterize::expr_to_ident;
-use crate::expr::{
-	AccessType, Algorithm, Base, Expr, Ident, Idiom, JwtAccess, Literal, RecordAccess,
-};
+use crate::expr::{AccessType, Algorithm, Base, Expr, Idiom, JwtAccess, Literal, RecordAccess};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{self, Strand, Value};
+use crate::val::{self, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineAccessStatement {
@@ -81,19 +79,17 @@ impl DefineAccessStatement {
 				verify: match &access.verify {
 					catalog::JwtAccessVerify::Key(k) => JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: convert_algorithm(&k.alg),
-						key: Expr::Literal(Literal::Strand(Strand::new(k.key.clone()).unwrap())),
+						key: Expr::Literal(Literal::String(k.key.clone())),
 					}),
 					catalog::JwtAccessVerify::Jwks(j) => {
 						JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
-							url: Expr::Literal(Literal::Strand(
-								Strand::new(j.url.clone()).unwrap(),
-							)),
+							url: Expr::Literal(Literal::String(j.url.clone())),
 						})
 					}
 				},
 				issue: access.issue.as_ref().map(|x| JwtAccessIssue {
 					alg: convert_algorithm(&x.alg),
-					key: Expr::Literal(Literal::Strand(Strand::new(x.key.clone()).unwrap())),
+					key: Expr::Literal(Literal::String(x.key.clone())),
 				}),
 			}
 		}
@@ -115,7 +111,7 @@ impl DefineAccessStatement {
 		DefineAccessStatement {
 			kind: DefineKind::Default,
 			base,
-			name: Expr::Idiom(Idiom::field(Ident::new(def.name.clone()).unwrap())),
+			name: Expr::Idiom(Idiom::field(def.name.clone())),
 			duration: AccessDuration {
 				grant: def
 					.grant_duration
@@ -127,10 +123,7 @@ impl DefineAccessStatement {
 					.session_duration
 					.map(|v| Expr::Literal(Literal::Duration(val::Duration(v)))),
 			},
-			comment: def
-				.comment
-				.clone()
-				.map(|x| Expr::Literal(Literal::Strand(Strand::new(x).unwrap()))),
+			comment: def.comment.clone().map(|x| Expr::Literal(Literal::String(x))),
 			authenticate: def.authenticate.clone(),
 			access_type: match &def.access_type {
 				catalog::AccessType::Record(record_access) => AccessType::Record(RecordAccess {
@@ -242,9 +235,7 @@ impl DefineAccessStatement {
 		}
 
 		Ok(AccessDefinition {
-			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "access name")
-				.await?
-				.to_raw_string(),
+			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "access name").await?,
 			grant_duration: map_opt!(x as &self.duration.grant => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),
 			token_duration: map_opt!(x as &self.duration.token => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),
 			session_duration: map_opt!(x as &self.duration.session => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),
@@ -374,14 +365,11 @@ impl DefineAccessStatement {
 		fn redact_jwt_access(acc: &mut JwtAccess) {
 			if let JwtAccessVerify::Key(ref mut v) = acc.verify {
 				if v.alg.is_symmetric() {
-					v.key = Expr::Literal(Literal::Strand(
-						Strand::new("[REDACTED]".to_string()).unwrap(),
-					));
+					v.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
 				}
 			}
 			if let Some(ref mut s) = acc.issue {
-				s.key =
-					Expr::Literal(Literal::Strand(Strand::new("[REDACTED]".to_string()).unwrap()));
+				s.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
 			}
 		}
 
@@ -450,7 +438,7 @@ impl Display for DefineAccessStatement {
 			}
 		)?;
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?
+			write!(f, " COMMENT {}", comment)?
 		}
 		Ok(())
 	}

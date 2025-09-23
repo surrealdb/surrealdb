@@ -31,24 +31,28 @@ impl fmt::Display for InfoStatement {
 				None => f.write_str("INFO FOR DATABASE STRUCTURE"),
 			},
 			Self::Tb(t, false, v) => match v {
-				Some(v) => write!(f, "INFO FOR TABLE {t} VERSION {v}"),
-				None => write!(f, "INFO FOR TABLE {t}"),
+				Some(v) => write!(f, "INFO FOR TABLE {} VERSION {v}", t),
+				None => write!(f, "INFO FOR TABLE {}", t),
 			},
 
 			Self::Tb(t, true, v) => match v {
-				Some(v) => write!(f, "INFO FOR TABLE {t} VERSION {v} STRUCTURE"),
-				None => write!(f, "INFO FOR TABLE {t} STRUCTURE"),
+				Some(v) => write!(f, "INFO FOR TABLE {} VERSION {v} STRUCTURE", t),
+				None => write!(f, "INFO FOR TABLE {} STRUCTURE", t),
 			},
 			Self::User(u, b, false) => match b {
-				Some(b) => write!(f, "INFO FOR USER {u} ON {b}"),
-				None => write!(f, "INFO FOR USER {u}"),
+				Some(b) => write!(f, "INFO FOR USER {} ON {b}", u),
+				None => write!(f, "INFO FOR USER {}", u),
 			},
 			Self::User(u, b, true) => match b {
-				Some(b) => write!(f, "INFO FOR USER {u} ON {b} STRUCTURE"),
-				None => write!(f, "INFO FOR USER {u} STRUCTURE"),
+				Some(b) => write!(f, "INFO FOR USER {} ON {b} STRUCTURE", u),
+				None => write!(f, "INFO FOR USER {} STRUCTURE", u),
 			},
-			Self::Index(i, t, false) => write!(f, "INFO FOR INDEX {i} ON {t}"),
-			Self::Index(i, t, true) => write!(f, "INFO FOR INDEX {i} ON {t} STRUCTURE"),
+			Self::Index(i, t, false) => {
+				write!(f, "INFO FOR INDEX {} ON {}", i, t)
+			}
+			Self::Index(i, t, true) => {
+				write!(f, "INFO FOR INDEX {} ON {} STRUCTURE", i, t)
+			}
 		}
 	}
 }

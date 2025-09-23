@@ -19,7 +19,7 @@ use crate::key::record;
 use crate::kvs::KVValue;
 use crate::sql::ToSql;
 use crate::val::record::Record;
-use crate::val::{RecordId, Strand, Value};
+use crate::val::{RecordId, Value};
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -109,8 +109,7 @@ impl From<Config> for Value {
 			"tables" => match config.tables {
 				TableConfig::All => true.into(),
 				TableConfig::None => false.into(),
-				// TODO: Null byte validity
-				TableConfig::Some(v) => v.into_iter().map(|x| Value::Strand(Strand::new(x).unwrap())).collect::<Vec<_>>().into()
+				TableConfig::Some(v) => v.into_iter().map(Value::String).collect::<Vec<_>>().into()
 			},
 		);
 
@@ -163,7 +162,7 @@ impl TryFrom<&Value> for TableConfig {
 				.iter()
 				.cloned()
 				.map(|v| match v {
-					Value::Strand(str) => Ok(str.into_string()),
+					Value::String(str) => Ok(str),
 					v => Err(anyhow::Error::new(Error::InvalidExportConfig(
 						v.clone(),
 						"a string".into(),

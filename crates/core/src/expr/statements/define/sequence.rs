@@ -48,8 +48,7 @@ impl DefineSequenceStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
 		// Compute name
-		let name =
-			expr_to_ident(stk, ctx, opt, doc, &self.name, "sequence name").await?.to_raw_string();
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "sequence name").await?;
 		// Compute timeout
 		let timeout = map_opt!(x as &self.timeout => x.compute(stk, ctx, opt, doc).await?.0);
 		// Fetch the transaction
@@ -111,7 +110,7 @@ impl Display for DefineSequenceStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} BATCH {} START {}", self.name, self.batch, self.start)?;
+		write!(f, " {} BATCH {} START {}", &self.name, self.batch, self.start)?;
 		if let Some(ref v) = self.timeout {
 			write!(f, " {v}")?
 		}

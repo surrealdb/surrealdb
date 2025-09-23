@@ -13,7 +13,7 @@ use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineNamespaceStatement {
@@ -28,7 +28,7 @@ impl Default for DefineNamespaceStatement {
 		Self {
 			kind: DefineKind::Default,
 			id: None,
-			name: Expr::Literal(Literal::Strand(Strand::new(String::new()).unwrap())),
+			name: Expr::Literal(Literal::String(String::new())),
 			comment: None,
 		}
 	}
@@ -48,8 +48,7 @@ impl DefineNamespaceStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Process the name
-		let name =
-			expr_to_ident(stk, ctx, opt, doc, &self.name, "namespace name").await?.to_raw_string();
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "namespace name").await?;
 
 		// Check if the definition exists
 		let namespace_id = if let Some(ns) = txn.get_ns_by_name(&name).await? {
@@ -91,9 +90,9 @@ impl Display for DefineNamespaceStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", &self.name)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?
 		}
 		Ok(())
 	}

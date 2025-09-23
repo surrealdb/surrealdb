@@ -10,7 +10,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::ToSql;
 use crate::sql::statements::define::DefineKind;
-use crate::val::{Array, Number, Strand, Value};
+use crate::val::{Array, Number, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Encode, BorrowDecode)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -61,17 +61,14 @@ impl IndexDefinition {
 	pub fn to_sql_definition(&self) -> crate::sql::DefineIndexStatement {
 		crate::sql::DefineIndexStatement {
 			kind: DefineKind::Default,
-			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(
-				crate::sql::Ident::new(self.name.clone()).unwrap(),
-			)),
-			what: crate::sql::Expr::Idiom(crate::sql::Idiom::field(
-				crate::sql::Ident::new(self.table_name.clone()).unwrap(),
-			)),
+			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
+			what: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.table_name.clone())),
 			cols: self.cols.iter().cloned().map(|x| crate::sql::Expr::Idiom(x.into())).collect(),
 			index: self.index.to_sql_definition(),
-			comment: self.comment.clone().map(|x| {
-				crate::sql::Expr::Literal(crate::sql::Literal::Strand(Strand::new(x).unwrap()))
-			}),
+			comment: self
+				.comment
+				.clone()
+				.map(|x| crate::sql::Expr::Literal(crate::sql::Literal::String(x))),
 			concurrently: false,
 		}
 	}

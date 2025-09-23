@@ -6,7 +6,7 @@ use reblessive::tree::Stk;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Expr, FlowResultExt, Function, Ident, Idiom};
+use crate::expr::{Expr, FlowResultExt, Function, Idiom};
 
 pub async fn exprs_to_fields(
 	stk: &mut Stk,
@@ -80,7 +80,7 @@ pub async fn expr_to_ident(
 	doc: Option<&CursorDoc>,
 	expr: &Expr,
 	into: &str,
-) -> Result<Ident> {
+) -> Result<String> {
 	match expr {
 		crate::expr::Expr::Idiom(x) if x.is_field(None) => {
 			let Some(crate::expr::Part::Field(x)) = x.first() else {
@@ -89,25 +89,22 @@ pub async fn expr_to_ident(
 
 			Ok(x.clone())
 		}
-		x => {
-			let raw = match stk
-				.run(|stk| x.compute(stk, ctx, opt, doc))
-				.await
-				.catch_return()?
-				.coerce_to::<String>()
-			{
-				Err(crate::val::value::CoerceError::InvalidKind {
-					from,
-					..
-				}) => Err(crate::val::value::CoerceError::InvalidKind {
-					from,
-					into: into.to_string(),
-				}),
-				x => x,
-			}?;
-
-			Ident::new(raw).ok_or_else(|| anyhow::anyhow!("Failed to parse {} from string", into))
+		x => match stk
+			.run(|stk| x.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.coerce_to::<String>()
+		{
+			Err(crate::val::value::CoerceError::InvalidKind {
+				from,
+				..
+			}) => Err(crate::val::value::CoerceError::InvalidKind {
+				from,
+				into: into.to_string(),
+			}),
+			x => x,
 		}
+		.map_err(anyhow::Error::from),
 	}
 }
 

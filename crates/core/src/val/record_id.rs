@@ -13,10 +13,10 @@ use crate::cnf::ID_CHARS;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::escape::EscapeRid;
 use crate::expr::{self, Expr, Field, Fields, Literal, SelectStatement};
+use crate::fmt::EscapeRid;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::val::{Array, IndexFormat, Number, Object, Range, Strand, Uuid, Value};
+use crate::val::{Array, IndexFormat, Number, Object, Range, Uuid, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, Encode, BorrowDecode)]
@@ -161,8 +161,6 @@ impl PartialEq<Range> for RecordIdKeyRange {
 #[storekey(format = "IndexFormat")]
 pub enum RecordIdKey {
 	Number(i64),
-	//TODO: This should definitely be strand, not string as null bytes here can cause a lot of
-	//issues.
 	String(String),
 	Uuid(Uuid),
 	Array(Array),
@@ -195,11 +193,7 @@ impl RecordIdKey {
 	pub fn into_value(self) -> Value {
 		match self {
 			RecordIdKey::Number(n) => Value::Number(Number::Int(n)),
-			RecordIdKey::String(s) => {
-				//TODO: Null byte validity
-				let s = unsafe { Strand::new_unchecked(s) };
-				Value::Strand(s)
-			}
+			RecordIdKey::String(s) => Value::String(s),
 			RecordIdKey::Uuid(u) => Value::Uuid(u),
 			RecordIdKey::Object(object) => Value::Object(object),
 			RecordIdKey::Array(array) => Value::Array(array),
@@ -221,7 +215,7 @@ impl RecordIdKey {
 		// rejected.
 		match value {
 			Value::Number(Number::Int(i)) => Some(RecordIdKey::Number(i)),
-			Value::Strand(strand) => Some(RecordIdKey::String(strand.into_string())),
+			Value::String(strand) => Some(RecordIdKey::String(strand)),
 			// NOTE: This was previously (before expr inversion pr) also rejected in this
 			// conversion, a bug I assume.
 			Value::Uuid(uuid) => Some(RecordIdKey::Uuid(uuid)),
@@ -238,8 +232,7 @@ impl RecordIdKey {
 	pub fn into_literal(self) -> expr::RecordIdKeyLit {
 		match self {
 			RecordIdKey::Number(n) => expr::RecordIdKeyLit::Number(n),
-			// TODO: Null byte validity
-			RecordIdKey::String(s) => expr::RecordIdKeyLit::String(Strand::new(s).unwrap()),
+			RecordIdKey::String(s) => expr::RecordIdKeyLit::String(s),
 			RecordIdKey::Uuid(uuid) => expr::RecordIdKeyLit::Uuid(uuid),
 			RecordIdKey::Object(object) => expr::RecordIdKeyLit::Object(object.into_literal()),
 			RecordIdKey::Array(array) => expr::RecordIdKeyLit::Array(array.into_literal()),
@@ -256,9 +249,9 @@ impl From<i64> for RecordIdKey {
 	}
 }
 
-impl From<Strand> for RecordIdKey {
-	fn from(value: Strand) -> Self {
-		RecordIdKey::String(value.into_string())
+impl From<String> for RecordIdKey {
+	fn from(value: String) -> Self {
+		RecordIdKey::String(value)
 	}
 }
 
@@ -288,7 +281,7 @@ impl PartialEq<Value> for RecordIdKey {
 		match self {
 			RecordIdKey::Number(a) => Value::Number(Number::Int(*a)) == *other,
 			RecordIdKey::String(a) => {
-				if let Value::Strand(b) = other {
+				if let Value::String(b) = other {
 					a.as_str() == b.as_str()
 				} else {
 					false

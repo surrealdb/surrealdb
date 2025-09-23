@@ -4,8 +4,8 @@ use anyhow::Result;
 use revision::revisioned;
 
 use crate::catalog::ApiConfigDefinition;
-use crate::expr::fmt::{Fmt, Pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
+use crate::fmt::{Fmt, Pretty, pretty_indent};
 use crate::iam::ConfigKind;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::Value;
@@ -138,7 +138,7 @@ impl InfoStructure for TablesConfig {
 	fn structure(self) -> Value {
 		match self {
 			TablesConfig::None => Value::None,
-			TablesConfig::Auto => Value::Strand("AUTO".into()),
+			TablesConfig::Auto => Value::String("AUTO".into()),
 			TablesConfig::Include(ts) => Value::from(map!(
 				"include" => Value::Array(ts.into_iter().map(InfoStructure::structure).collect()),
 			)),
@@ -223,7 +223,7 @@ impl InfoStructure for FunctionsConfig {
 	fn structure(self) -> Value {
 		match self {
 			FunctionsConfig::None => Value::None,
-			FunctionsConfig::Auto => Value::Strand("AUTO".into()),
+			FunctionsConfig::Auto => Value::String("AUTO".into()),
 			FunctionsConfig::Include(fs) => Value::from(map!(
 				"include" => Value::Array(fs.into_iter().map(Value::from).collect()),
 			)),

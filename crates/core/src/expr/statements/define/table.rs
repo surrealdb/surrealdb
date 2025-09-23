@@ -15,15 +15,14 @@ use crate::dbs::{Force, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
-use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::UpdateStatement;
-use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Idiom, Kind, Literal, Output, View};
+use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineTableStatement {
@@ -44,7 +43,7 @@ impl Default for DefineTableStatement {
 		Self {
 			kind: DefineKind::Default,
 			id: None,
-			name: Expr::Literal(Literal::Strand(Strand::new(String::new()).unwrap())),
+			name: Expr::Literal(Literal::String(String::new())),
 			drop: false,
 			full: false,
 			view: None,
@@ -68,8 +67,7 @@ impl DefineTableStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 
 		// Process the name
-		let name =
-			expr_to_ident(stk, ctx, opt, doc, &self.name, "table name").await?.to_raw_string();
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "table name").await?;
 
 		// Get the NS and DB
 		let (ns_name, db_name) = opt.ns_db()?;
@@ -170,7 +168,7 @@ impl DefineTableStatement {
 				txn.clear_cache();
 				// Process the view data
 				let stm = UpdateStatement {
-					what: vec![Expr::Table(ft.clone())],
+					what: vec![Expr::Table(ft.to_owned())],
 					output: Some(Output::None),
 					..UpdateStatement::default()
 				};
@@ -273,7 +271,7 @@ impl Display for DefineTableStatement {
 						if idx != 0 {
 							write!(f, " | ")?;
 						}
-						k.fmt(f)?;
+						EscapeIdent(k).fmt(f)?;
 					}
 				}
 				if let Some(Kind::Record(kind)) = &rel.to {
@@ -282,7 +280,7 @@ impl Display for DefineTableStatement {
 						if idx != 0 {
 							write!(f, " | ")?;
 						}
-						k.fmt(f)?;
+						EscapeIdent(k).fmt(f)?;
 					}
 				}
 				if rel.enforced {
@@ -302,7 +300,7 @@ impl Display for DefineTableStatement {
 			" SCHEMALESS"
 		})?;
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?
+			write!(f, " COMMENT {}", comment)?
 		}
 		if let Some(ref v) = self.view {
 			write!(f, " {v}")?
@@ -318,20 +316,5 @@ impl Display for DefineTableStatement {
 		};
 		write!(f, "{}", self.permissions)?;
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineTableStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"drop".to_string() => self.drop.into(),
-			"full".to_string() => self.full.into(),
-			"kind".to_string() => self.table_type.structure(),
-			"view".to_string(), if let Some(v) = self.view => v.structure(),
-			"changefeed".to_string(), if let Some(v) = self.changefeed => v.structure(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.structure(),
-		})
 	}
 }

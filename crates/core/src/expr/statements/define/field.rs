@@ -16,11 +16,10 @@ use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
 use crate::expr::reference::Reference;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind, KindLiteral, Literal, Part, RecordIdKeyLit};
+use crate::expr::{Base, Expr, Kind, KindLiteral, Literal, Part, RecordIdKeyLit};
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::Value;
@@ -90,9 +89,7 @@ impl DefineFieldStatement {
 
 		Ok(catalog::FieldDefinition {
 			name: expr_to_idiom(stk, ctx, opt, doc, &self.name, "field name").await?,
-			what: expr_to_ident(stk, ctx, opt, doc, &self.what, "table name")
-				.await?
-				.to_raw_string(),
+			what: expr_to_ident(stk, ctx, opt, doc, &self.what, "table name").await?,
 			flexible: self.flex,
 			field_kind: self.field_kind.clone(),
 			readonly: self.readonly,
@@ -139,7 +136,7 @@ impl DefineFieldStatement {
 		self.disallow_mismatched_types(ctx, ns, db, &definition).await?;
 
 		// Validate id field restrictions
-		self.validate_id_restrictions()?;
+		self.validate_id_restrictions(&definition)?;
 
 		// Fetch the transaction
 		let txn = ctx.tx();
@@ -448,8 +445,11 @@ impl DefineFieldStatement {
 		Ok(())
 	}
 
-	pub(crate) fn validate_id_restrictions(&self) -> Result<()> {
-		if self.name.is_id() {
+	pub(crate) fn validate_id_restrictions(
+		&self,
+		definition: &catalog::FieldDefinition,
+	) -> Result<()> {
+		if definition.name.is_id() {
 			// Ensure no `VALUE` clause is specified
 			ensure!(self.value.is_none(), Error::IdFieldKeywordConflict("VALUE".into()));
 
@@ -514,7 +514,7 @@ impl Display for DefineFieldStatement {
 			write!(f, " REFERENCE {v}")?
 		}
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?
+			write!(f, " COMMENT {}", comment)?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
@@ -528,25 +528,5 @@ impl Display for DefineFieldStatement {
 		// Additionally, including the permission will cause a parsing error in 3.0.0
 		write!(f, "{:#}", self.permissions)?;
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineFieldStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"what".to_string() => self.what.structure(),
-			"flex".to_string() => self.flex.into(),
-			"kind".to_string(), if let Some(v) = self.field_kind => v.structure(),
-			"value".to_string(), if let Some(v) = self.value => v.structure(),
-			"assert".to_string(), if let Some(v) = self.assert => v.structure(),
-			"computed".to_string(), if let Some(v) = self.computed => v.structure(),
-			"default_always".to_string(), if matches!(&self.default, DefineDefault::Always(_) | DefineDefault::Set(_)) => Value::Bool(matches!(self.default,DefineDefault::Always(_))), // Only reported if DEFAULT is also enabled for this field
-			"default".to_string(), if let DefineDefault::Always(v) | DefineDefault::Set(v) = self.default => v.structure(),
-			"reference".to_string(), if let Some(v) = self.reference => v.structure(),
-			"readonly".to_string() => self.readonly.into(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.structure(),
-		})
 	}
 }

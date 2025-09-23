@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
+#[cfg(not(target_family = "wasm"))]
 use dashmap::DashMap;
 use reqwest::header::CONTENT_TYPE;
 #[cfg(not(target_family = "wasm"))]
@@ -119,7 +120,7 @@ use crate::cnf::SURREALDB_USER_AGENT;
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::syn;
-use crate::val::{Bytes, Object, Strand, Value};
+use crate::val::{Bytes, Object, Value};
 
 pub(crate) fn uri_is_valid(uri: &str) -> bool {
 	reqwest::Url::parse(uri).is_ok()
@@ -128,7 +129,7 @@ pub(crate) fn uri_is_valid(uri: &str) -> bool {
 fn encode_body(req: RequestBuilder, body: Value) -> Result<RequestBuilder> {
 	let res = match body {
 		Value::Bytes(v) => req.body(v.into_inner()),
-		Value::Strand(v) => req.body(v.into_string()),
+		Value::String(v) => req.body(v),
 		//TODO: Improve the handling here. We should check if this value can be send as a json
 		//value.
 		_ if !body.is_nullish() => req.json(&body.into_json_value().ok_or_else(|| {
@@ -180,7 +181,7 @@ async fn decode_response(res: Response) -> Result<Value> {
 async fn request(
 	ctx: &Context,
 	method: Method,
-	uri: Strand,
+	uri: String,
 	body: Option<Value>,
 	opts: impl Into<Object>,
 ) -> Result<Value> {
@@ -265,17 +266,17 @@ async fn request(
 	}
 }
 
-pub async fn head(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value> {
+pub async fn head(ctx: &Context, uri: String, opts: impl Into<Object>) -> Result<Value> {
 	request(ctx, Method::HEAD, uri, None, opts).await
 }
 
-pub async fn get(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value> {
+pub async fn get(ctx: &Context, uri: String, opts: impl Into<Object>) -> Result<Value> {
 	request(ctx, Method::GET, uri, None, opts).await
 }
 
 pub async fn put(
 	ctx: &Context,
-	uri: Strand,
+	uri: String,
 	body: Value,
 	opts: impl Into<Object>,
 ) -> Result<Value> {
@@ -284,7 +285,7 @@ pub async fn put(
 
 pub async fn post(
 	ctx: &Context,
-	uri: Strand,
+	uri: String,
 	body: Value,
 	opts: impl Into<Object>,
 ) -> Result<Value> {
@@ -293,13 +294,13 @@ pub async fn post(
 
 pub async fn patch(
 	ctx: &Context,
-	uri: Strand,
+	uri: String,
 	body: Value,
 	opts: impl Into<Object>,
 ) -> Result<Value> {
 	request(ctx, Method::PATCH, uri, Some(body), opts).await
 }
 
-pub async fn delete(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value> {
+pub async fn delete(ctx: &Context, uri: String, opts: impl Into<Object>) -> Result<Value> {
 	request(ctx, Method::DELETE, uri, None, opts).await
 }

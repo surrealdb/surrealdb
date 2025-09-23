@@ -41,8 +41,7 @@ impl RemoveUserStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
 		// Compute the name
-		let name =
-			expr_to_ident(stk, ctx, opt, doc, &self.name, "user name").await?.to_raw_string();
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "user name").await?;
 		// Check the statement type
 		match self.base {
 			Base::Root => {

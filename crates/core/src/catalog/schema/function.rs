@@ -6,7 +6,7 @@ use crate::expr::{Block, Kind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::define::DefineKind;
 use crate::sql::{DefineFunctionStatement, ToSql};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -25,21 +25,20 @@ impl FunctionDefinition {
 	fn to_sql_definition(&self) -> DefineFunctionStatement {
 		DefineFunctionStatement {
 			kind: DefineKind::Default,
-			name: unsafe { crate::sql::Ident::new_unchecked(self.name.clone()) },
+			name: self.name.clone(),
 			args: self
 				.args
 				.clone()
 				.into_iter()
-				.map(|(n, k)| {
-					(unsafe { crate::sql::Ident::new_unchecked(n) }, crate::sql::Kind::from(k))
-				})
+				.map(|(n, k)| (n, crate::sql::Kind::from(k)))
 				.collect(),
 			block: self.block.clone().into(),
 			permissions: self.permissions.clone().into(),
 			returns: self.returns.clone().map(|k| k.into()),
-			comment: self.comment.clone().map(|x| {
-				crate::sql::Expr::Literal(crate::sql::Literal::Strand(Strand::new(x).unwrap()))
-			}),
+			comment: self
+				.comment
+				.clone()
+				.map(|x| crate::sql::Expr::Literal(crate::sql::Literal::String(x))),
 		}
 	}
 }

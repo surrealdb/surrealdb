@@ -23,9 +23,9 @@ use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
 use crate::expr::{Base, Expr, Literal, Part};
 #[cfg(target_family = "wasm")]
 use crate::expr::{Ident, Idiom};
+use crate::fmt::Fmt;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ToSql;
-use crate::sql::fmt::Fmt;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -68,10 +68,8 @@ impl DefineIndexStatement {
 		let txn = ctx.tx();
 
 		// Compute name and what
-		let name =
-			expr_to_ident(stk, ctx, opt, doc, &self.name, "index name").await?.to_raw_string();
-		let what =
-			expr_to_ident(stk, ctx, opt, doc, &self.what, "index table").await?.to_raw_string();
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "index name").await?;
+		let what = expr_to_ident(stk, ctx, opt, doc, &self.what, "index table").await?;
 
 		let (ns, db) = opt.ns_db()?;
 		let tb = txn.ensure_ns_db_tb(ns, db, &what, opt.strict).await?;
@@ -127,7 +125,7 @@ impl DefineIndexStatement {
 
 				//
 				if txn
-					.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, &first.to_raw_string())
+					.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, first)
 					.await?
 					.is_none()
 				{
@@ -228,7 +226,7 @@ pub(in crate::expr::statements) async fn run_indexing(
 			let opt = &opt.new_with_force(Force::Index(Arc::new([index.clone()])));
 			// Update the index data
 			let stm = crate::expr::UpdateStatement {
-				what: vec![crate::expr::Expr::Table(Ident::new(index.table_name.clone()).unwrap())],
+				what: vec![crate::expr::Expr::Table(index.table_name.clone())],
 				output: Some(Output::None),
 				..UpdateStatement::default()
 			};

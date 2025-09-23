@@ -6,8 +6,8 @@ use reblessive::tree::Stk;
 use super::FlowResultExt as _;
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::expr::fmt::Fmt;
 use crate::expr::{AssignOperator, Expr, Idiom, Literal, Part, Value};
+use crate::fmt::Fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Data {
@@ -83,7 +83,7 @@ impl Data {
 							.catch_return()?
 							// Bad unwrap but this function should be removed anyway and it works
 							// with the current calls.
-							.pick(&[Part::field(path.to_owned()).unwrap()]))
+							.pick(&[Part::Field(path.to_owned())]))
 					}
 					Expr::Literal(Literal::Object(x)) => {
 						// Find the field manually, done to replicate previous behavior.

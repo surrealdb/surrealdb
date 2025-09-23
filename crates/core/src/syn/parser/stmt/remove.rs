@@ -108,7 +108,7 @@ impl Parser<'_> {
 				let name = self.next_token_value::<Param>()?;
 
 				RemoveStatement::Param(RemoveParamStatement {
-					name: name.ident(),
+					name: name.into_string(),
 					if_exists,
 				})
 			}

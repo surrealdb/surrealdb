@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
-use crate::sql::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
 use crate::sql::{Expr, Kind, Literal, Permissions};
 

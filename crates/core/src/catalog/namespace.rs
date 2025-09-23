@@ -8,7 +8,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::DefineNamespaceStatement;
 use crate::sql::{Expr, Literal, ToSql};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(
 	Debug,
@@ -73,15 +73,8 @@ impl_kv_value_revisioned!(NamespaceDefinition);
 impl NamespaceDefinition {
 	fn to_sql_definition(&self) -> DefineNamespaceStatement {
 		DefineNamespaceStatement {
-			// SAFETY: we know the name is valid because it was validated when the namespace was
-			// created.
-			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(
-				crate::sql::Ident::new(self.name.clone()).unwrap(),
-			)),
-			comment: self
-				.comment
-				.clone()
-				.map(|v| Expr::Literal(Literal::Strand(Strand::new(v).unwrap()))),
+			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
+			comment: self.comment.clone().map(|v| Expr::Literal(Literal::String(v))),
 			..Default::default()
 		}
 	}

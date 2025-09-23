@@ -1,7 +1,7 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::sql::fmt::Fmt;
+use crate::fmt::Fmt;
 use crate::sql::{Expr, Index};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -35,7 +35,7 @@ impl Display for DefineIndexStatement {
 			write!(f, " {}", self.index)?;
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?
 		}
 		if self.concurrently {
 			write!(f, " CONCURRENTLY")?

@@ -7,7 +7,7 @@ use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
 use crate::fnc::util::string;
 use crate::val::range::TypedRange;
-use crate::val::{Regex, Strand, Value};
+use crate::val::{Regex, Value};
 
 /// Returns `true` if a string of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<()> {
@@ -75,7 +75,7 @@ pub fn matches((val, Cast(regex)): (String, Cast<Regex>)) -> Result<Value> {
 
 pub fn replace((val, search, replace): (String, Value, String)) -> Result<Value> {
 	match search {
-		Value::Strand(search) => {
+		Value::String(search) => {
 			if replace.len() > search.len() {
 				let increase = replace.len() - search.len();
 				limit(
@@ -217,12 +217,7 @@ pub fn slug((string,): (String,)) -> Result<Value> {
 }
 
 pub fn split((val, chr): (String, String)) -> Result<Value> {
-	// TODO: Null byte validity
-	Ok(val
-		.split(&chr)
-		.map(|x| Value::from(Strand::new(x.to_owned()).unwrap()))
-		.collect::<Vec<_>>()
-		.into())
+	Ok(val.split(&chr).map(|x| Value::from(x.to_owned())).collect::<Vec<_>>().into())
 }
 
 pub fn starts_with((val, chr): (String, String)) -> Result<Value> {
@@ -238,11 +233,7 @@ pub fn uppercase((string,): (String,)) -> Result<Value> {
 }
 
 pub fn words((string,): (String,)) -> Result<Value> {
-	Ok(string
-		.split_whitespace()
-		.map(|v| Value::from(Strand::new(v.to_owned()).unwrap()))
-		.collect::<Vec<_>>()
-		.into())
+	Ok(string.split_whitespace().map(|v| Value::from(v.to_owned())).collect::<Vec<_>>().into())
 }
 
 pub mod distance {
@@ -362,7 +353,7 @@ pub mod is {
 	pub fn datetime((arg, Optional(fmt)): (String, Optional<String>)) -> Result<Value> {
 		Ok(match fmt {
 			Some(fmt) => NaiveDateTime::parse_from_str(&arg, &fmt).is_ok().into(),
-			None => Datetime::try_from(arg.as_ref()).is_ok().into(),
+			None => arg.parse::<Datetime>().is_ok().into(),
 		})
 	}
 
@@ -429,7 +420,7 @@ pub mod is {
 	pub fn record((arg, Optional(tb)): (String, Optional<Value>)) -> Result<Value> {
 		let res = match syn::record_id(&arg) {
 			Ok(t) => match tb {
-				Some(Value::Strand(tb)) => t.table.as_str() == tb.as_str(),
+				Some(Value::String(tb)) => t.table.as_str() == tb.as_str(),
 				Some(Value::Table(tb)) => t.table.as_str() == tb.as_str(),
 				Some(_) => {
 					bail!(Error::InvalidArguments {
@@ -687,19 +678,19 @@ mod tests {
 	#[test]
 	fn html_encode() {
 		let value = super::html::encode((String::from("<div>Hello world!</div>"),)).unwrap();
-		assert_eq!(value, Value::Strand("&lt;div&gt;Hello&#32;world!&lt;&#47;div&gt;".into()));
+		assert_eq!(value, Value::String("&lt;div&gt;Hello&#32;world!&lt;&#47;div&gt;".into()));
 
 		let value = super::html::encode((String::from("SurrealDB"),)).unwrap();
-		assert_eq!(value, Value::Strand("SurrealDB".into()));
+		assert_eq!(value, Value::String("SurrealDB".into()));
 	}
 
 	#[test]
 	fn html_sanitize() {
 		let value = super::html::sanitize((String::from("<div>Hello world!</div>"),)).unwrap();
-		assert_eq!(value, Value::Strand("<div>Hello world!</div>".into()));
+		assert_eq!(value, Value::String("<div>Hello world!</div>".into()));
 
 		let value = super::html::sanitize((String::from("XSS<script>attack</script>"),)).unwrap();
-		assert_eq!(value, Value::Strand("XSS".into()));
+		assert_eq!(value, Value::String("XSS".into()));
 	}
 
 	#[test]
