@@ -1145,6 +1145,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.html5ever]
+allow_unsafe = true
 build.allow_apis = ["fs"]
 
 [pkg.futf]
@@ -1352,3 +1353,22 @@ allow_proc_macro = true
 
 [pkg.fs-err]
 allow_apis = ["fs"]
+
+[pkg.cssparser-macros]
+allow_proc_macro = true
+
+[pkg.match_token]
+allow_proc_macro = true
+
+[pkg.web_atoms]
+allow_apis = ["fs"]
+
+[pkg.dtoa]
+allow_unsafe = true
+
+[pkg.dtoa-short]
+allow_unsafe = true
+
+[pkg.cssparser]
+allow_unsafe = true
+

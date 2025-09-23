@@ -63,6 +63,10 @@ criteria = "safe-to-deploy"
 version = "4.0.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.ammonia]]
+version = "4.1.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.anstream]]
 version = "0.6.18"
 criteria = "safe-to-deploy"
@@ -379,6 +383,10 @@ criteria = "safe-to-deploy"
 version = "0.8.21"
 criteria = "safe-to-deploy"
 
+[[exemptions.cssparser]]
+version = "0.35.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.darling]]
 version = "0.20.9"
 criteria = "safe-to-deploy"
@@ -421,6 +429,14 @@ criteria = "safe-to-deploy"
 
 [[exemptions.dirs-sys-next]]
 version = "0.1.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.dtoa]]
+version = "1.0.10"
+criteria = "safe-to-deploy"
+
+[[exemptions.dtoa-short]]
+version = "0.3.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.earcutr]]
@@ -591,6 +607,10 @@ criteria = "safe-to-deploy"
 version = "0.27.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.html5ever]]
+version = "0.35.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.http-body]]
 version = "0.4.6"
 criteria = "safe-to-deploy"
@@ -729,6 +749,14 @@ criteria = "safe-to-deploy"
 
 [[exemptions.markup5ever]]
 version = "0.12.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.markup5ever]]
+version = "0.35.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.match_token]]
+version = "0.35.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.matchers]]
@@ -1593,6 +1621,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.web-time]]
 version = "1.1.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.web_atoms]]
+version = "0.1.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.which]]
