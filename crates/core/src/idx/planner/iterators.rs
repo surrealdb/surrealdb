@@ -15,6 +15,7 @@ use crate::idx::planner::tree::IndexReference;
 use crate::idx::seqdocids::DocId;
 use crate::key::index::Index;
 use crate::key::index::iu::Iu;
+use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::{KVKey, Key, Transaction, Val};
 use crate::val::record::Record;
 use crate::val::{Array, RecordId, Value};
@@ -1670,11 +1671,16 @@ impl KnnIterator {
 	}
 }
 
-pub(crate) struct IndexCountThingIterator(Option<Range<Vec<u8>>>);
+pub(crate) struct IndexCountThingIterator(Option<Range<Key>>);
 
 impl IndexCountThingIterator {
-	pub(super) fn new(ns: NamespaceId, db: DatabaseId, ix: &IndexDefinition) -> Result<Self> {
-		Ok(Self(Some(Iu::range(ns, db, &ix.table_name, ix.index_id)?)))
+	pub(in crate::idx) fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		ix: IndexId,
+	) -> Result<Self> {
+		Ok(Self(Some(Iu::range(ns, db, tb, ix)?)))
 	}
 	async fn next_count(&mut self, ctx: &Context, txn: &Transaction, _limit: u32) -> Result<usize> {
 		if let Some(range) = self.0.take() {
@@ -1692,5 +1698,33 @@ impl IndexCountThingIterator {
 		} else {
 			Ok(0)
 		}
+	}
+
+	pub(in crate::idx) async fn compaction(
+		&mut self,
+		ic: &IndexCompactionKey<'_>,
+		txn: &Transaction,
+	) -> Result<()> {
+		let Some(range) = self.0.take() else {
+			return Ok(());
+		};
+		let mut count: i64 = 0;
+		for (i, key) in txn.keys(range.clone(), u32::MAX, None).await?.into_iter().enumerate() {
+			if i % 1000 == 0 {
+				yield_now!()
+			}
+			let iu = Iu::decode_key(&key)?;
+			if iu.pos {
+				count += iu.count as i64;
+			} else {
+				count -= iu.count as i64;
+			}
+		}
+		txn.delr(range).await?;
+		let pos = count.is_positive();
+		let count = count.unsigned_abs() as u32;
+		let compact_key = Iu::new(ic.ns, ic.db, ic.tb.as_ref(), ic.ix, None, pos, count);
+		txn.put(&compact_key, &vec![], None).await?;
+		Ok(())
 	}
 }

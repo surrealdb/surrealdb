@@ -53,6 +53,7 @@ use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
+use crate::idx::index::IndexOperation;
 use crate::idx::trees::store::IndexStores;
 use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::LockType::*;
@@ -852,8 +853,8 @@ impl Datastore {
 					}
 				}
 				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
-					Some(ix) => {
-						if let Index::FullText(p) = &ix.index {
+					Some(ix) => match &ix.index {
+						Index::FullText(p) => {
 							let ft = FullTextIndex::new(
 								self.id(),
 								&self.index_stores,
@@ -864,7 +865,13 @@ impl Datastore {
 							.await?;
 							ft.compaction(&txn).await?;
 						}
-					}
+						Index::Count(_) => {
+							IndexOperation::index_count_compaction(&ic, &txn).await?;
+						}
+						_ => {
+							trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ic.ix);
+						}
+					},
 					None => {
 						trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ic.ix);
 					}

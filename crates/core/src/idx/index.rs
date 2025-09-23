@@ -27,10 +27,12 @@ use crate::err::Error;
 use crate::expr::{Cond, Part};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
+use crate::idx::planner::iterators::IndexCountThingIterator;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
 use crate::key::index::iu::Iu;
-use crate::kvs::TransactionType;
+use crate::key::root::ic::IndexCompactionKey;
+use crate::kvs::{Transaction, TransactionType};
 use crate::val::{Array, RecordId, Value};
 
 pub(crate) struct IndexOperation<'a> {
@@ -84,7 +86,7 @@ impl<'a> IndexOperation<'a> {
 			Index::FullText(p) => self.index_fulltext(stk, p, require_compaction).await,
 			Index::MTree(p) => self.index_mtree(stk, p).await,
 			Index::Hnsw(p) => self.index_hnsw(p).await,
-			Index::Count(c) => self.index_count(stk, c.as_ref()).await,
+			Index::Count(c) => self.index_count(stk, c.as_ref(), require_compaction).await,
 		}
 	}
 
@@ -184,6 +186,7 @@ impl<'a> IndexOperation<'a> {
 		&mut self,
 		_stk: &mut Stk,       // Placeholder for phase 2 (Condition)
 		_cond: Option<&Cond>, // Placeholder for phase 2 (Condition)
+		require_compaction: &AtomicBool,
 	) -> Result<()> {
 		// Phase 2 (Condition)
 		// let is_truthy = async |stk: &mut Stk, c: &Cond, d: &CursorDoc| -> Result<bool> {
@@ -223,7 +226,15 @@ impl<'a> IndexOperation<'a> {
 			relative_count.unsigned_abs() as u32,
 		);
 		self.ctx.tx().lock().await.put(&key, &vec![], None).await?;
+		require_compaction.store(true, Ordering::Relaxed);
 		Ok(())
+	}
+
+	pub(crate) async fn index_count_compaction(
+		ic: &IndexCompactionKey<'_>,
+		tx: &Transaction,
+	) -> Result<()> {
+		IndexCountThingIterator::new(ic.ns, ic.db, ic.tb.as_ref(), ic.ix)?.compaction(ic, tx).await
 	}
 
 	/// Construct a consistent uniqueness violation error message.

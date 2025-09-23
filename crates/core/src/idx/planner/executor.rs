@@ -490,30 +490,20 @@ impl QueryExecutor {
 		ir: IteratorRef,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>> {
+		let ix = io.index_reference();
 		Ok(match io.op() {
 			IndexOperator::Equality(value) => {
 				let fd = Self::equality_to_fd(value);
-				Some(Self::new_index_equal_iterator(ir, ns, db, io.index_reference(), &fd)?)
+				Some(Self::new_index_equal_iterator(ir, ns, db, ix, &fd)?)
 			}
 			IndexOperator::Union(values) => {
 				let fds = Self::union_to_fds(values);
-				Some(ThingIterator::IndexUnion(IndexUnionThingIterator::new(
-					ir,
-					ns,
-					db,
-					io.index_reference(),
-					&fds,
-				)?))
+				Some(ThingIterator::IndexUnion(IndexUnionThingIterator::new(ir, ns, db, ix, &fds)?))
 			}
 			IndexOperator::Join(ios) => {
 				let iterators = self.build_iterators(ns, db, ir, ios).await?;
-				let index_join = Box::new(IndexJoinThingIterator::new(
-					ir,
-					ns,
-					db,
-					io.index_reference().clone(),
-					iterators,
-				)?);
+				let index_join =
+					Box::new(IndexJoinThingIterator::new(ir, ns, db, ix.clone(), iterators)?);
 				Some(ThingIterator::IndexJoin(index_join))
 			}
 			IndexOperator::Order(reverse) => {
@@ -521,39 +511,25 @@ impl QueryExecutor {
 					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 					{
 						Some(ThingIterator::IndexRangeReverse(
-							IndexRangeReverseThingIterator::full_range(
-								ir,
-								ns,
-								db,
-								io.index_reference(),
-							)?,
+							IndexRangeReverseThingIterator::full_range(ir, ns, db, ix)?,
 						))
 					}
 					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
 					None
 				} else {
 					Some(ThingIterator::IndexRange(IndexRangeThingIterator::full_range(
-						ir,
-						ns,
-						db,
-						io.index_reference(),
+						ir, ns, db, ix,
 					)?))
 				}
 			}
-			IndexOperator::Range(prefix, ranges) => {
-				Some(ThingIterator::IndexRange(IndexRangeThingIterator::compound_range(
-					ir,
-					ns,
-					db,
-					io.index_reference(),
-					prefix,
-					ranges,
-				)?))
-			}
+			IndexOperator::Range(prefix, ranges) => Some(ThingIterator::IndexRange(
+				IndexRangeThingIterator::compound_range(ir, ns, db, ix, prefix, ranges)?,
+			)),
 			IndexOperator::Count => Some(ThingIterator::IndexCount(IndexCountThingIterator::new(
 				ns,
 				db,
-				io.index_reference(),
+				&ix.table_name,
+				ix.index_id,
 			)?)),
 			_ => None,
 		})
