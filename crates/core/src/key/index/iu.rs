@@ -113,7 +113,7 @@ impl<'a> Prefix<'a> {
 			db,
 			_c: b'*',
 			tb: Cow::Borrowed(tb),
-			_d: b'*',
+			_d: b'+',
 			ix,
 			_e: b'!',
 			_f: b'i',

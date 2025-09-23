@@ -17,7 +17,7 @@
 //! - Numeric predicates need a single probe/range in the index; per-variant fan-out is no longer
 //!   required.
 
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
@@ -33,6 +33,7 @@ use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
+use crate::key::index::iu::Iu;
 use crate::kvs::TransactionType;
 use crate::val::{Array, RecordId, Value};
 
@@ -42,6 +43,7 @@ pub(crate) struct IndexOperation<'a> {
 	ns: NamespaceId,
 	db: DatabaseId,
 	ix: &'a IndexDefinition,
+	ikb: IndexKeyBase,
 	/// The old values (if existing)
 	o: Option<Vec<Value>>,
 	/// The new values (if existing)
@@ -67,6 +69,7 @@ impl<'a> IndexOperation<'a> {
 			ns,
 			db,
 			ix,
+			ikb: IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id),
 			o,
 			n,
 			rid,
@@ -85,7 +88,7 @@ impl<'a> IndexOperation<'a> {
 			Index::FullText(p) => self.index_fulltext(stk, p, require_compaction).await,
 			Index::MTree(p) => self.index_mtree(stk, p).await,
 			Index::Hnsw(p) => self.index_hnsw(p).await,
-			Index::Count(c) => self.index_count(c.as_ref()).await,
+			Index::Count(c) => self.index_count(stk, c.as_ref()).await,
 		}
 	}
 
@@ -181,22 +184,64 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	async fn index_count(&mut self, c: Option<&Cond>) -> Result<()> {
-		bail!(Error::Unimplemented(format!("Index count {c:?}")))
+	async fn index_count(
+		&mut self,
+		_stk: &mut Stk,       // Placeholder for phase 2 (Condition)
+		_cond: Option<&Cond>, // Placeholder for phase 2 (Condition)
+	) -> Result<()> {
+		// Phase 2 (Condition)
+		// let is_truthy = async |stk: &mut Stk, c: &Cond, d: &CursorDoc| -> Result<bool> {
+		// 	Ok(stk.run(|stk| c.0.compute(stk, ctx, opt, Some(d))).await.catch_return()?.is_truthy())
+		// };
+		let mut relative_count: i8 = 0;
+		// Phase 2 - with condition
+		// if let Some(c) = cond {
+		// 	if self.o.is_some() {
+		// 		if is_truthy(stk, c, &self.doc.initial).await? {
+		// 			relative_count -= 1;
+		// 		}
+		// 	}
+		// 	if self.n.is_some() {
+		// 		if is_truthy(stk, c, &self.doc.current).await? {
+		// 			relative_count += 1;
+		// 		}
+		// 	}
+		// } else {
+		if self.o.is_some() {
+			relative_count -= 1;
+		}
+		if self.n.is_some() {
+			relative_count += 1;
+		}
+		// }
+		if relative_count == 0 {
+			return Ok(());
+		}
+		let key = Iu::new(
+			self.ns,
+			self.db,
+			&self.ix.table_name,
+			self.ix.index_id,
+			Some((self.opt.id()?, uuid::Uuid::now_v7())),
+			relative_count > 0,
+			relative_count.unsigned_abs() as u32,
+		);
+		self.ctx.tx().lock().await.put(&key, &vec![], None).await?;
+		Ok(())
 	}
 
 	/// Construct a consistent uniqueness violation error message.
 	/// Formats the conflicting value as a single value or array depending on
 	/// the number of indexed fields.
-	fn err_index_exists(&self, rid: RecordId, n: Array) -> Result<()> {
-		Err(anyhow::Error::new(Error::IndexExists {
+	fn err_index_exists(&self, rid: RecordId, mut n: Array) -> Result<()> {
+		bail!(Error::IndexExists {
 			thing: rid,
 			index: self.ix.name.to_string(),
-			value: match n.len() {
-				1 => n.first().unwrap().to_string(),
+			value: match n.0.len() {
+				1 => n.0.remove(0).to_string(),
 				_ => n.to_string(),
 			},
-		}))
+		})
 	}
 
 	async fn index_fulltext(
@@ -205,31 +250,40 @@ impl<'a> IndexOperation<'a> {
 		p: &FullTextParams,
 		require_compaction: &AtomicBool,
 	) -> Result<()> {
-		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id);
 		let mut rc = false;
 		// Build a FullText instance
-		let s =
-			FullTextIndex::new(self.opt.id()?, self.ctx.get_index_stores(), &self.ctx.tx(), ikb, p)
-				.await?;
+		let fti = FullTextIndex::new(
+			self.opt.id()?,
+			self.ctx.get_index_stores(),
+			&self.ctx.tx(),
+			self.ikb.clone(),
+			p,
+		)
+		.await?;
 		// Delete the old index data
 		let doc_id = if let Some(o) = self.o.take() {
-			s.remove_content(stk, self.ctx, self.opt, self.rid, o, &mut rc).await?
+			fti.remove_content(stk, self.ctx, self.opt, self.rid, o, &mut rc).await?
 		} else {
 			None
 		};
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			s.index_content(stk, self.ctx, self.opt, self.rid, n, &mut rc).await?;
+			fti.index_content(stk, self.ctx, self.opt, self.rid, n, &mut rc).await?;
 		} else {
 			// It is a deletion, we can remove the doc
 			if let Some(doc_id) = doc_id {
-				s.remove_doc(self.ctx, doc_id).await?;
+				fti.remove_doc(self.ctx, doc_id).await?;
 			}
 		}
+		// Do we need to trigger the compaction?
 		if rc {
-			require_compaction.store(true, std::sync::atomic::Ordering::Relaxed);
+			require_compaction.store(true, Ordering::Relaxed);
 		}
 		Ok(())
+	}
+
+	pub(crate) async fn trigger_compaction(&self) -> Result<()> {
+		FullTextIndex::trigger_compaction(&self.ikb, &self.ctx.tx(), self.opt.id()?).await
 	}
 
 	async fn index_mtree(&mut self, stk: &mut Stk, p: &MTreeParams) -> Result<()> {

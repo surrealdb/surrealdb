@@ -56,7 +56,7 @@ value = "None"
 value = "None"
 
 [[test.results]]
-value = "{ building: { initial: 0, pending: 0, status: 'ready', updated: 4 } }"
+value = "{ building: { initial: 3, pending: 0, status: 'ready', updated: 0 } }"
 
 [[_test.results]]
 value = "{}"
