@@ -150,7 +150,7 @@ fn ok_graph_traversal_depth() -> Result<()> {
 		// Ensure a good stack size for tests
 		with_enough_stack(async move {
 			// Run the graph traversal queries
-			let mut res = run_queries(&graph_traversal(n)).await?;
+			let mut res = run_queries(&graph_traversal(n)).await;
 			// Remove the last result
 			let tmp = res.next_back().unwrap();
 			// Check all other queries
@@ -189,7 +189,7 @@ fn ok_cast_chain_depth() -> Result<()> {
 	// Ensure a good stack size for tests
 	with_enough_stack(async {
 		// Run a casting query which succeeds
-		let mut res = run_queries(&cast_chain(10)).await?;
+		let mut res = run_queries(&cast_chain(10)).await;
 		//
 		assert_eq!(res.len(), 1);
 		//
@@ -224,7 +224,11 @@ async fn run_queries(
 + 'static {
 	let dbs = new_ds().await.expect("Failed to create new datastore");
 	let ses = Session::owner().with_ns("test").with_db("test");
-	dbs.execute(sql, &ses, None).await.map(|v| v.into_iter().map(|res| res.result))
+	dbs.execute(sql, &ses, None)
+		.await
+		.expect("Failed to execute query")
+		.into_iter()
+		.map(|res| res.result)
 }
 
 fn cast_chain(n: usize) -> String {

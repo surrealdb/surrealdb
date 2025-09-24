@@ -3,10 +3,9 @@ use std::time::Duration;
 
 use anyhow::Result;
 use helpers::{new_ds, skip_ok};
-use surrealdb_core::dbs::{Session, Variables};
-use surrealdb_core::expr::Kind;
+use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
-use surrealdb_types::{Action, RecordId, Value};
+use surrealdb_types::{Action, Kind, RecordId, Value, vars};
 
 #[tokio::test]
 async fn live_permissions() -> Result<()> {
@@ -41,7 +40,7 @@ async fn live_permissions() -> Result<()> {
 		"test",
 		"test",
 		"test",
-		Value::RecordId(RecordId::new("user".to_owned(), "test".to_owned())),
+		Value::RecordId(RecordId::new("user".to_owned(), "test".to_owned())).into(),
 	)
 	.with_rt(true);
 	let sql = "
@@ -90,7 +89,7 @@ async fn live_document_reduction() -> Result<()> {
 		"test",
 		"test",
 		"test",
-		RecordId::new("user".to_owned(), "test".to_owned()).into(),
+		Value::RecordId(RecordId::new("user".to_owned(), "test".to_owned())).into(),
 	)
 	.with_rt(true);
 
@@ -111,7 +110,7 @@ async fn live_document_reduction() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses_record, None).await?;
 	assert_eq!(res.len(), 1);
 	let lqid = res.remove(0).result?;
-	assert_eq!(lqid.kind(), Some(Kind::Uuid));
+	assert_eq!(lqid.kind(), Kind::Uuid);
 
 	////////////////////////////////////////////////////////////
 
@@ -207,9 +206,7 @@ async fn live_document_reduction() -> Result<()> {
 
 	// Kill the live query
 	let sql = "KILL $uuid";
-	let res = &mut dbs
-		.execute(sql, &ses_owner, Some(Variables(map!("uuid".to_string() => lqid))))
-		.await?;
+	let res = &mut dbs.execute(sql, &ses_owner, Some(vars! { uuid: lqid })).await?;
 	assert_eq!(res.len(), 1);
 	skip_ok(res, 1)?;
 
@@ -222,7 +219,7 @@ async fn live_document_reduction() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses_record, None).await?;
 	assert_eq!(res.len(), 1);
 	let lqid = res.remove(0).result?;
-	assert_eq!(lqid.kind(), Some(Kind::Uuid));
+	assert_eq!(lqid.kind(), Kind::Uuid);
 
 	////////////////////////////////////////////////////////////
 

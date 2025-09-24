@@ -745,7 +745,7 @@ mod test {
 	use std::io::Cursor;
 
 	use revision::Revisioned;
-	use surrealdb_types::{Number, Value};
+	use surrealdb_types::{Array, Number, Value};
 	use uuid::Uuid;
 
 	use super::RouterRequest;
@@ -781,10 +781,10 @@ mod test {
 		let request = RouterRequest {
 			id: Some(1234),
 			method: "request",
-			params: Some(Value::Array(vec![
+			params: Some(Value::Array(Array::from(vec![
 				Value::Number(Number::Int(1234i64)),
-				Value::String("request"),
-			])),
+				Value::String("request".to_string()),
+			]))),
 			transaction: Some(Uuid::new_v4()),
 		};
 

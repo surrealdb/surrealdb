@@ -124,7 +124,7 @@ impl Value {
 	/// Returns the kind of this value
 	///
 	/// This method maps each value variant to its corresponding `Kind`.
-	pub fn value_kind(&self) -> Kind {
+	pub fn kind(&self) -> Kind {
 		match self {
 			Value::None => Kind::None,
 			Value::Null => Kind::Null,

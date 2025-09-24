@@ -341,7 +341,7 @@ where
 /// The response type of a `Surreal::query` request
 #[derive(Debug)]
 pub struct IndexedResults {
-	pub(crate) results: IndexMap<usize, (DbResultStats, DbResponseResul)>,
+	pub(crate) results: IndexMap<usize, (DbResultStats, std::result::Result<Value, DbResultError>)>,
 	pub(crate) live_queries: IndexMap<usize, Result<Stream<Value>>>,
 }
 
@@ -731,6 +731,8 @@ impl WithStats<IndexedResults> {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_core::rpc::DbResponseResult;
+
 	use super::*;
 
 	#[derive(Debug, Clone, SurrealValue)]
@@ -744,8 +746,22 @@ mod tests {
 		body: String,
 	}
 
-	fn to_map(vec: Vec<QueryResult>) -> IndexMap<usize, (DbResultStats, QueryResult)> {
-		vec.into_iter().map(|result| match result {}).enumerate().collect()
+	fn to_map(
+		vec: Vec<DbResponseResult>,
+	) -> IndexMap<usize, (DbResultStats, std::result::Result<Value, DbResultError>)> {
+		vec.into_iter()
+			.map(|result| match result {
+				Ok(result) => {
+					let stats = DbResultStats::default().with_execution_time(result.time);
+					(stats, Ok(result))
+				}
+				Err(error) => {
+					let stats = DbResultStats::default();
+					(stats, Err(error))
+				}
+			})
+			.enumerate()
+			.collect()
 	}
 
 	#[test]

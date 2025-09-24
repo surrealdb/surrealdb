@@ -63,6 +63,32 @@ macro_rules! object {
     };
 }
 
+/// Macro for creating a SurrealDB variables struct.
+///
+/// This macro creates a SurrealDB variables struct, which is a collection of key-value pairs.
+/// All values must implement the `SurrealValue` trait.
+///
+/// # Example
+///
+/// ```rust
+/// use surrealdb_types::vars;
+///
+/// let obj = vars! {
+///     name: "John".to_string(),
+///     "user-id": 12345,
+/// };
+/// ```
+///
+/// Uses the `object!` macro to create the variables struct.
+#[macro_export]
+macro_rules! vars {
+	($($key:tt: $value:expr),* $(,)?) => {
+		$crate::Variables::from($crate::object! {
+			$($key: $value),*
+		})
+	};
+}
+
 /// Macro for creating a SurrealDB array.
 ///
 /// This macro creates a SurrealDB array, which is a collection of values.

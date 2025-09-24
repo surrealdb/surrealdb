@@ -24,6 +24,9 @@ pub enum Number {
 }
 
 impl Number {
+	/// A NaN number
+	pub const NAN: Self = Self::Float(f64::NAN);
+
 	/// Checks if this number is NaN.
 	pub fn is_nan(&self) -> bool {
 		matches!(self, Number::Float(v) if v.is_nan())

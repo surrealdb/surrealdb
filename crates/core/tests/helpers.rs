@@ -547,14 +547,3 @@ impl Test {
 		self.expect_value_info(val, info)
 	}
 }
-
-/// Creates a new b-tree map of key-value pairs
-#[macro_export]
-macro_rules! map {
-    ($($k:expr_2021 $(, if let $grant:pat = $check:expr_2021)? $(, if $guard:expr_2021)? => $v:expr_2021),* $(,)? $( => $x:expr_2021 )?) => {{
-        let mut m = ::std::collections::BTreeMap::new();
-    	$(m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)?
-		$( $(if let $grant = $check)? $(if $guard)? { m.insert($k, $v); };)+
-        m
-    }};
-}

@@ -710,7 +710,7 @@ impl_tuples! {
 }
 
 fn conversion_error(expected: Kind, got: Value) -> anyhow::Error {
-	anyhow::anyhow!("Expected {}, got {:?}", expected, got.value_kind())
+	anyhow::anyhow!("Expected {}, got {:?}", expected, got.kind())
 }
 
 /// Non-standard numeric implementations, such as u8, u16, u32, u64, u128, i8, i16, i32, usize, f32,

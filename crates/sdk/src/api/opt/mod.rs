@@ -100,7 +100,7 @@ impl SurrealValue for InnerOp {
 
 	fn from_value(value: Value) -> anyhow::Result<Self> {
 		let Value::Object(mut obj) = value else {
-			return Err(anyhow::anyhow!("Expected Object, got {:?}", value.value_kind()));
+			return Err(anyhow::anyhow!("Expected Object, got {:?}", value.kind()));
 		};
 		let op = obj.remove("op").context("Key 'op' missing")?;
 		let op = op.into_string()?;

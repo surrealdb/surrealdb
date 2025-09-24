@@ -296,7 +296,7 @@ fn generate_named_fields_impl(
 
 			fn from_value(value: surrealdb_types::Value) -> surrealdb_types::anyhow::Result<Self> {
 				let surrealdb_types::Value::Object(obj) = value else {
-					return Err(surrealdb_types::anyhow::anyhow!("Failed to convert to {}: Expected Object, got {:?}", Self::kind_of(), value.value_kind()));
+					return Err(surrealdb_types::anyhow::anyhow!("Failed to convert to {}: Expected Object, got {:?}", Self::kind_of(), value.kind()));
 				};
 
 				#(#from_value_fields)*
@@ -497,7 +497,7 @@ fn generate_unnamed_fields_impl(
 
 			fn from_value(value: surrealdb_types::Value) -> surrealdb_types::anyhow::Result<Self> {
 				let surrealdb_types::Value::Array(values) = value else {
-					return Err(surrealdb_types::anyhow::anyhow!("Failed to convert to {}: Expected Array, got {:?}", Self::kind_of(), value.value_kind()));
+					return Err(surrealdb_types::anyhow::anyhow!("Failed to convert to {}: Expected Array, got {:?}", Self::kind_of(), value.kind()));
 				};
 
 				if values.len() != #field_count {
@@ -538,7 +538,7 @@ fn generate_unit_struct_impl(
 			fn from_value(value: surrealdb_types::Value) -> surrealdb_types::anyhow::Result<Self> {
 				match value {
 					surrealdb_types::Value::Object(obj) if obj.is_empty() => Ok(Self),
-					_ => Err(surrealdb_types::anyhow::anyhow!("Failed to convert to {}: Expected empty Object, got {:?}", Self::kind_of(), value.value_kind())),
+					_ => Err(surrealdb_types::anyhow::anyhow!("Failed to convert to {}: Expected empty Object, got {:?}", Self::kind_of(), value.kind())),
 				}
 			}
 		}

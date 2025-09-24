@@ -3,6 +3,7 @@ use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::err::Error;
+use surrealdb_core::rpc::DbResultError;
 use surrealdb_core::sql::{Expr, FunctionCall};
 use surrealdb_core::{sql, syn};
 use surrealdb_types::{Array, Number, Value};
@@ -49,7 +50,7 @@ async fn error_on_invalid_function() -> Result<()> {
 	let mut resp = dbs.process(query, &session, None).await.unwrap();
 	assert_eq!(resp.len(), 1);
 	let err = resp.pop().unwrap().result.unwrap_err();
-	if !matches!(*err, DbResultError::custom("STU")) {
+	if *err != DbResultError::custom("STU") {
 		panic!("returned wrong result {:#?}", err)
 	}
 	Ok(())
@@ -3888,10 +3889,7 @@ async fn function_outside_database() -> Result<()> {
 	let ses = Session::owner().with_ns("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 
-	match res.remove(0).result.unwrap_err().downcast() {
-		Ok(Error::DbEmpty) => (),
-		_ => panic!("Query should have failed with error: Specify a database to use"),
-	}
+	assert_eq!(res.remove(0).result.unwrap_err(), DbResultError::custom("STU"));
 
 	Ok(())
 }
