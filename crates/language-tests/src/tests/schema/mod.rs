@@ -280,30 +280,6 @@ impl<T> BoolOr<T> {
 	}
 }
 
-#[derive(Default, Clone, Debug)]
-pub struct Version(semver::VersionReq);
-
-impl<'de> Deserialize<'de> for Version {
-	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-	where
-		D: serde::Deserializer<'de>,
-	{
-		let str = String::deserialize(deserializer)?;
-		let version = semver::VersionReq::parse(&str).map_err(to_deser_error)?;
-		Ok(Version(version))
-	}
-}
-
-impl Serialize for Version {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		let str = self.0.to_string();
-		str.serialize(serializer)
-	}
-}
-
 #[derive(Default, Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct TestDetails {
