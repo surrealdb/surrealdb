@@ -1096,20 +1096,27 @@ impl Parser<'_> {
 				_ => break,
 			}
 		}
-		if let Some(field_span) = field_span {
-			match res.index {
-				Index::Count(_) => {
-					if !res.cols.is_empty() {
-						bail!("Cannot create a count index with fields", @field_span);
-					}
+		match (field_span, &res.index) {
+			(Some(field_span), Index::Count(_)) => {
+				if !res.cols.is_empty() {
+					bail!("Cannot create a count index with fields", @field_span);
 				}
-				Index::FullText(_) => {
-					if res.cols.len() != 1 {
-						bail!("Expected one column for fulltext index, found {}", res.cols.len(), @field_span);
-					}
-				}
-				_ => {}
 			}
+			(field_span, Index::FullText(_) | Index::Hnsw(_) | Index::MTree(_)) => {
+				if res.cols.len() != 1 {
+					if let Some(field_span) = field_span {
+						bail!("Expected one column, found {}", res.cols.len(), @field_span);
+					} else {
+						bail!("Expected one column, found none");
+					}
+				}
+			}
+			(None, Index::Uniq | Index::Idx) => {
+				if res.cols.is_empty() {
+					bail!("Expected at least one column - Use FIELDS to define columns");
+				}
+			}
+			(_, _) => {}
 		}
 		Ok(res)
 	}

@@ -6,9 +6,9 @@ parsing-error = """
 Expected one column, found 2
   --> [14:30]
    |
-14 | DEFINE INDEX i ON b FIELDS a,b FULLTEXT BM25 HIGHLIGHTS;
+14 | DEFINE INDEX i ON t FIELDS a,b MTREE DIMENSION 1;
    |                              ^ 
 """
 
 */
-DEFINE INDEX i ON b FIELDS a,b FULLTEXT BM25 HIGHLIGHTS;
+DEFINE INDEX i ON t FIELDS a,b MTREE DIMENSION 1;
