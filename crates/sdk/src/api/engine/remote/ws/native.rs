@@ -35,10 +35,6 @@ use crate::engine::IntervalStream;
 use crate::engine::remote::Data;
 use crate::opt::WaitFor;
 
-pub(crate) const MAX_MESSAGE_SIZE: usize = 64 << 20; // 64 MiB
-pub(crate) const MAX_FRAME_SIZE: usize = 16 << 20; // 16 MiB
-pub(crate) const WRITE_BUFFER_SIZE: usize = 128000; // tungstenite default
-pub(crate) const MAX_WRITE_BUFFER_SIZE: usize = WRITE_BUFFER_SIZE + MAX_MESSAGE_SIZE; // Recommended max according to tungstenite docs
 pub(crate) const NAGLE_ALG: bool = false;
 
 type MessageSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
@@ -98,9 +94,10 @@ impl conn::Sealed for Client {
 			let maybe_connector = None;
 
 			let ws_config = WebSocketConfig {
-				max_message_size: Some(MAX_MESSAGE_SIZE),
-				max_frame_size: Some(MAX_FRAME_SIZE),
-				max_write_buffer_size: MAX_WRITE_BUFFER_SIZE,
+				max_message_size: address.config.websocket.max_message_size,
+				max_frame_size: address.config.websocket.max_frame_size,
+				max_write_buffer_size: address.config.websocket.max_write_buffer_size,
+				write_buffer_size: address.config.websocket.write_buffer_size,
 				..Default::default()
 			};
 
@@ -142,6 +139,7 @@ async fn router_handle_route(
 		request,
 		response,
 	}: Route,
+	max_message_size: Option<usize>,
 	state: &mut RouterState,
 ) -> HandleResult {
 	let RequestData {
@@ -237,6 +235,15 @@ async fn router_handle_route(
 
 		Message::Binary(payload)
 	};
+
+	if let Some(max_message_size) = max_message_size {
+		if message.len() > max_message_size {
+			if response.send(Err(Error::MessageTooLong(message.len()).into())).await.is_err() {
+				trace!("Receiver dropped");
+			}
+			return HandleResult::Ok;
+		}
+	}
 
 	match state.sink.send(message).await {
 		Ok(_) => {
@@ -504,7 +511,7 @@ pub(crate) async fn run_router(
 						break 'router;
 					};
 
-					match router_handle_route(response, &mut state).await {
+					match router_handle_route(response, config.max_message_size, &mut state).await {
 						HandleResult::Ok => {},
 						HandleResult::Disconnected => {
 							router_reconnect(
