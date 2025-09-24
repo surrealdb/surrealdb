@@ -317,6 +317,10 @@ criteria = "safe-to-deploy"
 version = "4.5.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.clipboard-win]]
+version = "5.4.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.colorchoice]]
 version = "1.0.3"
 criteria = "safe-to-deploy"
@@ -449,6 +453,10 @@ criteria = "safe-to-deploy"
 version = "2.3.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.error-code]]
+version = "3.3.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.event-listener]]
 version = "5.4.0"
 criteria = "safe-to-deploy"
@@ -467,6 +475,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.fastnum]]
 version = "0.3.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.fd-lock]]
+version = "4.0.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.findshlibs]]
@@ -663,6 +675,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.lazycell]]
 version = "1.3.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.libc]]
+version = "0.2.175"
 criteria = "safe-to-deploy"
 
 [[exemptions.libloading]]
@@ -1137,8 +1153,16 @@ criteria = "safe-to-deploy"
 version = "12.0.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.rustyline]]
+version = "17.0.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.rustyline-derive]]
 version = "0.9.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.rustyline-derive]]
+version = "0.11.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.salsa20]]
@@ -1489,6 +1513,10 @@ criteria = "safe-to-deploy"
 version = "0.4.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.windows-link]]
+version = "0.1.3"
+criteria = "safe-to-deploy"
+
 [[exemptions.windows-sys]]
 version = "0.48.0"
 criteria = "safe-to-deploy"
@@ -1499,6 +1527,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.windows-sys]]
 version = "0.59.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.windows-sys]]
+version = "0.60.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.winnow]]
