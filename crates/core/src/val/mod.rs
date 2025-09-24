@@ -254,11 +254,11 @@ impl Value {
 	// -----------------------------------
 
 	/// Converts this Value into an unquoted String
-	pub fn as_raw_string(self) -> String {
+	pub fn into_raw_string(self) -> String {
 		match self {
 			Value::String(v) => v,
 			Value::Uuid(v) => v.to_raw(),
-			Value::Datetime(v) => v.into_raw_string(),
+			Value::Datetime(v) => v.to_raw_string(),
 			_ => self.to_string(),
 		}
 	}
@@ -268,7 +268,7 @@ impl Value {
 		match self {
 			Value::String(v) => v.clone(),
 			Value::Uuid(v) => v.to_raw(),
-			Value::Datetime(v) => v.into_raw_string(),
+			Value::Datetime(v) => v.to_raw_string(),
 			_ => self.to_string(),
 		}
 	}
@@ -869,13 +869,13 @@ macro_rules! subtypes {
 
 
 	(@from $name:ident(Box<$inner:ident>) => $is:ident,$as:ident,$into:ident) => {
-		impl From<$inner> for Value{
+		impl From<$inner> for Value {
 			fn from(v: $inner) -> Self{
 				Value::$name(Box::new(v))
 			}
 		}
 
-		impl From<Box<$inner>> for Value{
+		impl From<Box<$inner>> for Value {
 			fn from(v: Box<$inner>) -> Self{
 				Value::$name(v)
 			}
@@ -883,7 +883,7 @@ macro_rules! subtypes {
 	};
 
 	(@from $name:ident($t:ident) => $is:ident,$as:ident,$into:ident) => {
-		impl From<$t> for Value{
+		impl From<$t> for Value {
 			fn from(v: $t) -> Self{
 				Value::$name(v)
 			}
@@ -1038,19 +1038,25 @@ impl FromIterator<(String, Value)> for Value {
 
 #[cfg(test)]
 mod tests {
-	use chrono::TimeZone;
+	use chrono::{TimeZone, Utc};
+	use geo::{MultiLineString, MultiPoint, MultiPolygon, line_string, point, polygon};
+	use rstest::rstest;
+	use rust_decimal::Decimal;
+	use serde_json::{Value as Json, json};
 
 	use super::*;
 	use crate::syn;
+	use crate::types::{
+		PublicArray, PublicBytes, PublicDatetime, PublicDuration, PublicGeometry, PublicNumber,
+		PublicObject, PublicRecordId, PublicRecordIdKey, PublicUuid, PublicValue,
+	};
+	use crate::val::Uuid;
 
-	use rstest::rstest;
-
-	use chrono::{DateTime, Utc};
-	use geo::{MultiLineString, MultiPoint, MultiPolygon, line_string, point, polygon};
-	use rust_decimal::Decimal;
-	use serde_json::{Value as Json, json};
-	use ::uuid::Uuid;
-	
+	macro_rules! parse_val {
+		($input:expr) => {
+			crate::val::convert_public_value_to_internal(syn::value($input).unwrap())
+		};
+	}
 
 	#[test]
 	fn check_none() {
@@ -1099,25 +1105,25 @@ mod tests {
 		assert!(Value::from("false").is_truthy());
 		assert!(Value::from("falsey").is_truthy());
 		assert!(Value::from("something").is_truthy());
-		assert!(Value::from(Uuid::new()).is_truthy());
+		assert!(Value::from(Uuid::nil()).is_truthy());
 		assert!(Value::from(Utc.with_ymd_and_hms(1948, 12, 3, 0, 0, 0).unwrap()).is_truthy());
 	}
 
 	#[test]
 	fn convert_string() {
-		assert_eq!(String::from("NONE"), Value::None.as_raw_string());
-		assert_eq!(String::from("NULL"), Value::Null.as_raw_string());
-		assert_eq!(String::from("true"), Value::Bool(true).as_raw_string());
-		assert_eq!(String::from("false"), Value::Bool(false).as_raw_string());
-		assert_eq!(String::from("0"), Value::from(0).as_raw_string());
-		assert_eq!(String::from("1"), Value::from(1).as_raw_string());
-		assert_eq!(String::from("-1"), Value::from(-1).as_raw_string());
-		assert_eq!(String::from("1.1f"), Value::from(1.1).as_raw_string());
-		assert_eq!(String::from("-1.1f"), Value::from(-1.1).as_raw_string());
-		assert_eq!(String::from("3"), Value::from("3").as_raw_string());
-		assert_eq!(String::from("true"), Value::from("true").as_raw_string());
-		assert_eq!(String::from("false"), Value::from("false").as_raw_string());
-		assert_eq!(String::from("something"), Value::from("something").as_raw_string());
+		assert_eq!(String::from("NONE"), Value::None.into_raw_string());
+		assert_eq!(String::from("NULL"), Value::Null.into_raw_string());
+		assert_eq!(String::from("true"), Value::Bool(true).into_raw_string());
+		assert_eq!(String::from("false"), Value::Bool(false).into_raw_string());
+		assert_eq!(String::from("0"), Value::from(0).into_raw_string());
+		assert_eq!(String::from("1"), Value::from(1).into_raw_string());
+		assert_eq!(String::from("-1"), Value::from(-1).into_raw_string());
+		assert_eq!(String::from("1.1f"), Value::from(1.1).into_raw_string());
+		assert_eq!(String::from("-1.1f"), Value::from(-1.1).into_raw_string());
+		assert_eq!(String::from("3"), Value::from("3").into_raw_string());
+		assert_eq!(String::from("true"), Value::from("true").into_raw_string());
+		assert_eq!(String::from("false"), Value::from("false").into_raw_string());
+		assert_eq!(String::from("something"), Value::from("something").into_raw_string());
 	}
 
 	#[test]
@@ -1146,171 +1152,169 @@ mod tests {
 
 	#[test]
 	fn serialize_deserialize() {
-		let val = syn::value(
-			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: null }] } }",
-		)
-		.unwrap();
-		let res = syn::value(
-			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: null }] } }",
-		)
-		.unwrap();
+		let val = parse_val!(
+			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: null }] } }"
+		);
+		let res = parse_val!(
+			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: null }] } }"
+		);
 		let enc: Vec<u8> = revision::to_vec(&val).unwrap();
 		let dec: Value = revision::from_slice(&enc).unwrap();
 		assert_eq!(res, dec);
 	}
 
 	#[rstest]
-	#[case::none(Value::None, json!(null), Value::Null)]
-	#[case::null(Value::Null, json!(null), Value::Null)]
-	#[case::bool(Value::Bool(true), json!(true), Value::Bool(true))]
-	#[case::bool(Value::Bool(false), json!(false), Value::Bool(false))]
+	#[case::none(PublicValue::None, json!(null), PublicValue::Null)]
+	#[case::null(PublicValue::Null, json!(null), PublicValue::Null)]
+	#[case::bool(PublicValue::Bool(true), json!(true), PublicValue::Bool(true))]
+	#[case::bool(PublicValue::Bool(false), json!(false), PublicValue::Bool(false))]
 	#[case::number(
-		Value::Number(Number::Int(i64::MIN)),
+		PublicValue::Number(PublicNumber::Int(i64::MIN)),
 		json!(i64::MIN),
-		Value::Number(Number::Int(i64::MIN)),
+		PublicValue::Number(PublicNumber::Int(i64::MIN)),
 	)]
 	#[case::number(
-		Value::Number(Number::Int(i64::MAX)),
+		PublicValue::Number(PublicNumber::Int(i64::MAX)),
 		json!(i64::MAX),
-		Value::Number(Number::Int(i64::MAX)),
+		PublicValue::Number(PublicNumber::Int(i64::MAX)),
 	)]
 	#[case::number(
-		Value::Number(Number::Float(1.23)),
+		PublicValue::Number(PublicNumber::Float(1.23)),
 		json!(1.23),
-		Value::Number(Number::Float(1.23)),
+		PublicValue::Number(PublicNumber::Float(1.23)),
 	)]
 	#[case::number(
-		Value::Number(Number::Float(f64::NEG_INFINITY)),
+		PublicValue::Number(PublicNumber::Float(f64::NEG_INFINITY)),
 		json!(null),
-		Value::Null,
+		PublicValue::Null,
 	)]
 	#[case::number(
-		Value::Number(Number::Float(f64::MIN)),
+		PublicValue::Number(PublicNumber::Float(f64::MIN)),
 		json!(-1.7976931348623157e308),
-		Value::Number(Number::Float(f64::MIN)),
+		PublicValue::Number(PublicNumber::Float(f64::MIN)),
 	)]
 	#[case::number(
-		Value::Number(Number::Float(0.0)),
+		PublicValue::Number(PublicNumber::Float(0.0)),
 		json!(0.0),
-		Value::Number(Number::Float(0.0)),
+		PublicValue::Number(PublicNumber::Float(0.0)),
 	)]
 	#[case::number(
-		Value::Number(Number::Float(f64::MAX)),
+		PublicValue::Number(PublicNumber::Float(f64::MAX)),
 		json!(1.7976931348623157e308),
-		Value::Number(Number::Float(f64::MAX)),
+		PublicValue::Number(PublicNumber::Float(f64::MAX)),
 	)]
 	#[case::number(
-		Value::Number(Number::Float(f64::INFINITY)),
+		PublicValue::Number(PublicNumber::Float(f64::INFINITY)),
 		json!(null),
-		Value::Null,
+		PublicValue::Null,
 	)]
 	#[case::number(
-		Value::Number(Number::Float(f64::NAN)),
+		PublicValue::Number(PublicNumber::Float(f64::NAN)),
 		json!(null),
-		Value::Null,
+		PublicValue::Null,
 	)]
 	#[case::number(
-		Value::Number(Number::Decimal(Decimal::new(123, 2))),
+		PublicValue::Number(PublicNumber::Decimal(Decimal::new(123, 2))),
 		json!("1.23"),
-		Value::String("1.23".into()),
+		PublicValue::String("1.23".into()),
 	)]
 	#[case::strand(
-		Value::String("".into()),
+		PublicValue::String("".into()),
 		json!(""),
-		Value::String("".into()),
+		PublicValue::String("".into()),
 	)]
 	#[case::strand(
-		Value::String("foo".into()),
+		PublicValue::String("foo".into()),
 		json!("foo"),
-		Value::String("foo".into()),
+		PublicValue::String("foo".into()),
 	)]
 	#[case::duration(
-		Value::Duration(Duration(Duration::ZERO)),
+		PublicValue::Duration(PublicDuration::ZERO),
 		json!("0ns"),
-		Value::String("0ns".into()),
+		PublicValue::String("0ns".into()),
 	)]
 	#[case::duration(
-		Value::Duration(Duration(Duration::MAX)),
+		PublicValue::Duration(PublicDuration::MAX),
 		json!("584942417355y3w5d7h15s999ms999µs999ns"),
-		Value::String("584942417355y3w5d7h15s999ms999µs999ns".into()),
+		PublicValue::String("584942417355y3w5d7h15s999ms999µs999ns".into()),
 	)]
 	#[case::datetime(
-		Value::Datetime(Datetime(DateTime::<Utc>::MIN_UTC)),
+		PublicValue::Datetime(PublicDatetime::MIN_UTC),
 		json!("-262143-01-01T00:00:00Z"),
-		Value::String("-262143-01-01T00:00:00Z".into()),
+		PublicValue::String("-262143-01-01T00:00:00Z".into()),
 	)]
 	#[case::datetime(
-		Value::Datetime(Datetime(DateTime::<Utc>::MAX_UTC)),
+		PublicValue::Datetime(PublicDatetime::MAX_UTC),
 		json!("+262142-12-31T23:59:59.999999999Z"),
-		Value::String("+262142-12-31T23:59:59.999999999Z".into()),
+		PublicValue::String("+262142-12-31T23:59:59.999999999Z".into()),
 	)]
 	#[case::uuid(
-		Value::Uuid(Uuid(Uuid::nil())),
+		PublicValue::Uuid(PublicUuid::nil()),
 		json!("00000000-0000-0000-0000-000000000000"),
-		Value::String("00000000-0000-0000-0000-000000000000".into()),
+		PublicValue::String("00000000-0000-0000-0000-000000000000".into()),
 	)]
 	#[case::uuid(
-		Value::Uuid(Uuid(Uuid::max())),
+		PublicValue::Uuid(PublicUuid::max()),
 		json!("ffffffff-ffff-ffff-ffff-ffffffffffff"),
-		Value::String("ffffffff-ffff-ffff-ffff-ffffffffffff".into()),
+		PublicValue::String("ffffffff-ffff-ffff-ffff-ffffffffffff".into()),
 	)]
 	#[case::bytes(
-		Value::Bytes(Bytes(vec![])),
+		PublicValue::Bytes(PublicBytes::default()),
 		json!([]),
-		Value::Array(Array(vec![])),
+		PublicValue::Array(PublicArray::new()),
 	)]
 	#[case::bytes(
-		Value::Bytes(Bytes(b"foo".to_vec())),
+		PublicValue::Bytes(PublicBytes::from(b"foo".to_vec())),
 		json!([102, 111, 111]),
-		Value::Array(Array(vec![
-			Value::Number(Number::Int(102)),
-			Value::Number(Number::Int(111)),
-			Value::Number(Number::Int(111)),
+		PublicValue::Array(PublicArray::from(vec![
+			PublicValue::Number(PublicNumber::Int(102)),
+			PublicValue::Number(PublicNumber::Int(111)),
+			PublicValue::Number(PublicNumber::Int(111)),
 		])),
 	)]
 	#[case::thing(
-		Value::RecordId(RecordId{ table: "foo".to_string(), key: RecordIdKey::String("bar".into())}) ,
+		PublicValue::RecordId(PublicRecordId{ table: "foo".to_string(), key: PublicRecordIdKey::String("bar".into())}) ,
 		json!("foo:bar"),
-		Value::RecordId(RecordId{ table: "foo".to_string(), key: RecordIdKey::String("bar".into())}) ,
+		PublicValue::RecordId(PublicRecordId{ table: "foo".to_string(), key: PublicRecordIdKey::String("bar".into())}) ,
 	)]
 	#[case::array(
-		Value::Array(Array(vec![])),
+		PublicValue::Array(PublicArray::new()),
 		json!([]),
-		Value::Array(Array(vec![])),
+		PublicValue::Array(PublicArray::new()),
 	)]
 	#[case::array(
-		Value::Array(Array(vec![Value::Bool(true), Value::Bool(false)])),
+		PublicValue::Array(PublicArray::from(vec![PublicValue::Bool(true), PublicValue::Bool(false)])),
 		json!([true, false]),
-		Value::Array(Array(vec![Value::Bool(true), Value::Bool(false)])),
+		PublicValue::Array(PublicArray::from(vec![PublicValue::Bool(true), PublicValue::Bool(false)])),
 	)]
 	#[case::object(
-		Value::Object(Object(BTreeMap::new())),
+		PublicValue::Object(PublicObject::new()),
 		json!({}),
-		Value::Object(Object(BTreeMap::new())),
+		PublicValue::Object(PublicObject::new()),
 	)]
 	#[case::object(
-		Value::Object(Object(BTreeMap::from([("done".to_owned(), Value::Bool(true))]))),
+		PublicValue::Object(PublicObject::from_iter([("done".to_owned(), PublicValue::Bool(true))])),
 		json!({"done": true}),
-		Value::Object(Object(BTreeMap::from([("done".to_owned(), Value::Bool(true))]))),
+		PublicValue::Object(PublicObject::from_iter([("done".to_owned(), PublicValue::Bool(true))])),
 	)]
 	#[case::geometry_point(
-		Value::Geometry(Geometry::Point(point! { x: 10., y: 20. })),
+		PublicValue::Geometry(PublicGeometry::Point(point! { x: 10., y: 20. })),
 		json!({ "type": "Point", "coordinates": [10., 20.]}),
-		Value::Geometry(Geometry::Point(point! { x: 10., y: 20. })),
+		PublicValue::Geometry(PublicGeometry::Point(point! { x: 10., y: 20. })),
 	)]
 	#[case::geometry_line(
-		Value::Geometry(Geometry::Line(line_string![
+		PublicValue::Geometry(PublicGeometry::Line(line_string![
 			( x: 0., y: 0. ),
 			( x: 10., y: 0. ),
 		])),
 		json!({ "type": "LineString", "coordinates": [[0., 0.], [10., 0.]]}),
-		Value::Geometry(Geometry::Line(line_string![
+		PublicValue::Geometry(PublicGeometry::Line(line_string![
 			( x: 0., y: 0. ),
 			( x: 10., y: 0. ),
 		])),
 	)]
 	#[case::geometry_polygon(
-		Value::Geometry(Geometry::Polygon(polygon![
+		PublicValue::Geometry(PublicGeometry::Polygon(polygon![
 			(x: -111., y: 45.),
 			(x: -111., y: 41.),
 			(x: -104., y: 41.),
@@ -1323,7 +1327,7 @@ mod tests {
 			[-104., 45.],
 			[-111., 45.],
 		]]}),
-		Value::Geometry(Geometry::Polygon(polygon![
+		PublicValue::Geometry(PublicGeometry::Polygon(polygon![
 			(x: -111., y: 45.),
 			(x: -111., y: 41.),
 			(x: -104., y: 41.),
@@ -1331,27 +1335,27 @@ mod tests {
 		])),
 	)]
 	#[case::geometry_multi_point(
-		Value::Geometry(Geometry::MultiPoint(MultiPoint::new(vec![
+		PublicValue::Geometry(PublicGeometry::MultiPoint(MultiPoint::new(vec![
 			point! { x: 0., y: 0. },
 			point! { x: 1., y: 2. },
 		]))),
 		json!({ "type": "MultiPoint", "coordinates": [[0., 0.], [1., 2.]]}),
-		Value::Geometry(Geometry::MultiPoint(MultiPoint::new(vec![
+		PublicValue::Geometry(PublicGeometry::MultiPoint(MultiPoint::new(vec![
 			point! { x: 0., y: 0. },
 			point! { x: 1., y: 2. },
 		]))),
 	)]
 	#[case::geometry_multi_line(
-		Value::Geometry(
-			Geometry::MultiLine(
+		PublicValue::Geometry(
+			PublicGeometry::MultiLine(
 				MultiLineString::new(vec![
 					line_string![( x: 0., y: 0. ), ( x: 1., y: 2. )],
 				])
 			)
 		),
 		json!({ "type": "MultiLineString", "coordinates": [[[0., 0.], [1., 2.]]]}),
-		Value::Geometry(
-			Geometry::MultiLine(
+		PublicValue::Geometry(
+			PublicGeometry::MultiLine(
 				MultiLineString::new(vec![
 					line_string![( x: 0., y: 0. ), ( x: 1., y: 2. )],
 				])
@@ -1359,7 +1363,7 @@ mod tests {
 		),
 	)]
 	#[case::geometry_multi_polygon(
-		Value::Geometry(Geometry::MultiPolygon(MultiPolygon::new(vec![
+		PublicValue::Geometry(PublicGeometry::MultiPolygon(MultiPolygon::new(vec![
 			polygon![
 				(x: -111., y: 45.),
 				(x: -111., y: 41.),
@@ -1374,7 +1378,7 @@ mod tests {
 			[-104., 45.],
 			[-111., 45.],
 		]]]})
-	,	Value::Geometry(Geometry::MultiPolygon(MultiPolygon::new(vec![
+	,	PublicValue::Geometry(PublicGeometry::MultiPolygon(MultiPolygon::new(vec![
 			polygon![
 				(x: -111., y: 45.),
 				(x: -111., y: 41.),
@@ -1384,23 +1388,23 @@ mod tests {
 		]))),
 	)]
 	#[case::geometry_collection(
-		Value::Geometry(Geometry::Collection(vec![])),
+		PublicValue::Geometry(PublicGeometry::Collection(vec![])),
 		json!({
 			"type": "GeometryCollection",
 			"geometries": [],
 		}),
-		Value::Geometry(Geometry::Collection(vec![])),
+		PublicValue::Geometry(PublicGeometry::Collection(vec![])),
 	)]
 	#[case::geometry_collection_with_point(
-		Value::Geometry(Geometry::Collection(vec![Geometry::Point(point! { x: 10., y: 20. })])),
+		PublicValue::Geometry(PublicGeometry::Collection(vec![PublicGeometry::Point(point! { x: 10., y: 20. })])),
 		json!({
 		"type": "GeometryCollection",
 		"geometries": [ { "type": "Point", "coordinates": [10., 20.] } ],
 	}),
-		Value::Geometry(Geometry::Collection(vec![Geometry::Point(point! { x: 10., y: 20. })])),
+		PublicValue::Geometry(PublicGeometry::Collection(vec![PublicGeometry::Point(point! { x: 10., y: 20. })])),
 	)]
 	#[case::geometry_collection_with_line(
-		Value::Geometry(Geometry::Collection(vec![Geometry::Line(line_string![
+		PublicValue::Geometry(PublicGeometry::Collection(vec![PublicGeometry::Line(line_string![
 			( x: 0., y: 0. ),
 			( x: 10., y: 0. ),
 		])])),
@@ -1408,23 +1412,22 @@ mod tests {
 			"type": "GeometryCollection",
 			"geometries": [ { "type": "LineString", "coordinates": [[0., 0.], [10., 0.]] } ],
 		}),
-		Value::Geometry(Geometry::Collection(vec![Geometry::Line(line_string![
+		PublicValue::Geometry(PublicGeometry::Collection(vec![PublicGeometry::Line(line_string![
 			( x: 0., y: 0. ),
 			( x: 10., y: 0. ),
 		])])),
 	)]
 
 	fn test_json(
-		#[case] value: Value,
+		#[case] value: PublicValue,
 		#[case] expected: Json,
-		#[case] expected_deserialized: Value,
+		#[case] expected_deserialized: PublicValue,
 	) {
 		let json_value = value.into_json_value().unwrap();
 		assert_eq!(json_value, expected);
 
 		let json_str = serde_json::to_string(&json_value).expect("Failed to serialize to JSON");
 		let deserialized_sql_value = crate::syn::value_legacy_strand(&json_str).unwrap();
-		let deserialized: Value = deserialized_sql_value;
-		assert_eq!(deserialized, expected_deserialized);
+		assert_eq!(deserialized_sql_value, expected_deserialized);
 	}
 }

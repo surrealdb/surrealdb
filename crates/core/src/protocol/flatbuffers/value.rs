@@ -129,7 +129,7 @@ impl FromFlatbuffers for Value {
 				Ok(Value::Number(Number::Decimal(Decimal::from_fb(decimal_value)?)))
 			}
 			proto_fb::ValueType::String => {
-				let string_value = input.value_into_string().expect("Guaranteed to be a String");
+				let string_value = input.value_as_string().expect("Guaranteed to be a String");
 				let value = string_value
 					.value()
 					.expect("String value is guaranteed to be present")
@@ -142,7 +142,7 @@ impl FromFlatbuffers for Value {
 			}
 			proto_fb::ValueType::RecordId => {
 				let record_id_value =
-					input.value_into_record().expect("Guaranteed to be a RecordId");
+					input.value_as_record_id().expect("Guaranteed to be a RecordId");
 				let thing = RecordId::from_fb(record_id_value)?;
 				Ok(Value::RecordId(thing))
 			}

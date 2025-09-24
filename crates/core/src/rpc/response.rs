@@ -48,7 +48,7 @@ impl SurrealValue for DbResult {
 		Kind::Any
 	}
 
-	fn is_value(value: &Value) -> bool {
+	fn is_value(_value: &Value) -> bool {
 		true
 	}
 
@@ -104,12 +104,7 @@ impl SurrealValue for DbResult {
 						_ => anyhow::bail!("Invalid action: {}", action_str),
 					};
 
-					Ok(DbResult::Live(PublicNotification {
-						id: uuid,
-						action,
-						record,
-						result,
-					}))
+					Ok(DbResult::Live(PublicNotification::new(uuid, action, record, result)))
 				} else {
 					Ok(DbResult::Other(Value::Object(obj)))
 				}
@@ -245,38 +240,5 @@ impl SurrealValue for DbResponse {
 impl From<DbResponse> for Value {
 	fn from(value: DbResponse) -> Self {
 		value.into_value()
-	}
-}
-
-/// Create a JSON RPC result response
-pub fn success<T: Into<DbResult>>(id: Option<Value>, data: T) -> DbResponse {
-	DbResponse {
-		id,
-		result: Ok(data.into()),
-	}
-}
-
-/// Create a JSON RPC failure response
-pub fn failure(id: Option<Value>, err: DbResultError) -> DbResponse {
-	DbResponse {
-		id,
-		result: Err(err),
-	}
-}
-
-pub trait IntoRpcResponse {
-	fn into_response(self, id: Option<Value>) -> DbResponse;
-}
-
-impl<T, E> IntoRpcResponse for Result<T, E>
-where
-	T: Into<DbResult>,
-	E: Into<DbResultError>,
-{
-	fn into_response(self, id: Option<Value>) -> DbResponse {
-		match self {
-			Ok(v) => success(id, v.into()),
-			Err(err) => failure(id, err.into()),
-		}
 	}
 }

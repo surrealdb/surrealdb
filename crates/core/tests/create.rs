@@ -1,6 +1,6 @@
 use surrealdb_core::iam::Level;
 use surrealdb_core::syn;
-use surrealdb_types::{Array, RecordId};
+use surrealdb_types::{Array, RecordId, Value};
 mod helpers;
 use anyhow::Result;
 use helpers::new_ds;
@@ -205,10 +205,10 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 			if should_succeed {
 				assert!(res.is_ok(), "{}: {:?}", msg, res);
-				assert_ne!(res.unwrap(), Array::new().into(), "{}", msg);
+				assert_ne!(res.unwrap(), Value::Array(Array::new()), "{}", msg);
 			} else if res.is_ok() {
 				// Permissions clause doesn't allow to query the table
-				assert_eq!(res.unwrap(), Array::new().into(), "{}", msg);
+				assert_eq!(res.unwrap(), Value::Array(Array::new()), "{}", msg);
 			} else {
 				// Not allowed to create a table
 				let err = res.unwrap_err().to_string();
@@ -233,7 +233,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Array::new().into(),
+				res.is_ok() && res.unwrap() != Value::Array(Array::new()),
 				"unexpected error creating person record"
 			);
 
@@ -243,7 +243,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Array::new().into(),
+				res.is_ok() && res.unwrap() != Value::Array(Array::new()),
 				"unexpected error creating person record"
 			);
 
@@ -253,7 +253,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Array::new().into(),
+				res.is_ok() && res.unwrap() != Value::Array(Array::new()),
 				"unexpected error creating person record"
 			);
 
@@ -263,10 +263,10 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 			if should_succeed {
 				assert!(res.is_ok(), "{}: {:?}", msg, res);
-				assert_ne!(res.unwrap(), Array::new().into(), "{}", msg);
+				assert_ne!(res.unwrap(), Value::Array(Array::new()), "{}", msg);
 			} else if res.is_ok() {
 				// Permissions clause doesn't allow to query the table
-				assert_eq!(res.unwrap(), Array::new().into(), "{}", msg);
+				assert_eq!(res.unwrap(), Value::Array(Array::new()), "{}", msg);
 			} else {
 				// Not allowed to create a table
 				let err = res.unwrap_err().to_string();
@@ -333,7 +333,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() == Array::new().into(),
+			res.unwrap() == Value::Array(Array::new()),
 			"{}",
 			"anonymous user should not be able to create a new record if the table exists but has no permissions"
 		);
@@ -361,7 +361,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Array::new().into(),
+			res.unwrap() != Value::Array(Array::new()),
 			"{}",
 			"anonymous user should be able to create a new record if the table exists and grants full permissions"
 		);
@@ -391,7 +391,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Array::new().into(),
+			res.unwrap() != Value::Array(Array::new()),
 			"{}",
 			"anonymous user should be able to create the table"
 		);
@@ -419,7 +419,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Array::new().into(),
+			res.unwrap() != Value::Array(Array::new()),
 			"{}",
 			"anonymous user should not be able to create a new record if the table exists but has no permissions"
 		);
@@ -447,7 +447,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Array::new().into(),
+			res.unwrap() != Value::Array(Array::new()),
 			"{}",
 			"anonymous user should be able to create a new record if the table exists and grants full permissions"
 		);

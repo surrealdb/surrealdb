@@ -44,6 +44,7 @@ pub struct Duration(pub time::Duration);
 
 impl Duration {
 	pub const MAX: Duration = Duration(time::Duration::MAX);
+	pub const ZERO: Duration = Duration(time::Duration::ZERO);
 }
 
 impl From<time::Duration> for Duration {
@@ -99,7 +100,7 @@ impl Duration {
 		time::Duration::new(secs, nanos).into()
 	}
 	/// Convert the Duration to a raw String
-	pub fn to_raw(&self) -> String {
+	pub fn to_raw(self) -> String {
 		self.to_string()
 	}
 	/// Get the total number of nanoseconds

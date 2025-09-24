@@ -323,35 +323,35 @@ impl Number {
 	// Complex conversion of number
 	// -----------------------------------
 
-	pub fn to_usize(&self) -> usize {
+	pub fn to_usize(self) -> usize {
 		match self {
-			Number::Int(v) => *v as usize,
-			Number::Float(v) => *v as usize,
+			Number::Int(v) => v as usize,
+			Number::Float(v) => v as usize,
 			Number::Decimal(v) => v.to_usize().unwrap_or_default(),
 		}
 	}
 
-	pub fn to_int(&self) -> i64 {
+	pub fn to_int(self) -> i64 {
 		match self {
-			Number::Int(v) => *v,
-			Number::Float(v) => *v as i64,
+			Number::Int(v) => v,
+			Number::Float(v) => v as i64,
 			Number::Decimal(v) => v.to_i64().unwrap_or_default(),
 		}
 	}
 
-	pub fn to_float(&self) -> f64 {
+	pub fn to_float(self) -> f64 {
 		match self {
-			Number::Int(v) => *v as f64,
-			Number::Float(v) => *v,
-			&Number::Decimal(v) => v.try_into().unwrap_or_default(),
+			Number::Int(v) => v as f64,
+			Number::Float(v) => v,
+			Number::Decimal(v) => v.try_into().unwrap_or_default(),
 		}
 	}
 
-	pub fn to_decimal(&self) -> Decimal {
+	pub fn to_decimal(self) -> Decimal {
 		match self {
-			Number::Int(v) => Decimal::from(*v),
-			Number::Float(v) => Decimal::from_f64(*v).unwrap_or_default(),
-			Number::Decimal(v) => *v,
+			Number::Int(v) => Decimal::from(v),
+			Number::Float(v) => Decimal::from_f64(v).unwrap_or_default(),
+			Number::Decimal(v) => v,
 		}
 	}
 
@@ -1149,7 +1149,7 @@ impl Sort for Vec<Number> {
 
 impl ToFloat for Number {
 	fn to_float(&self) -> f64 {
-		self.to_float()
+		Number::to_float(*self)
 	}
 }
 
@@ -1212,27 +1212,12 @@ pub trait DecimalExt {
 	fn from_str_normalized(s: &str) -> Result<Self, rust_decimal::Error>
 	where
 		Self: Sized;
-
-	/// Converts a string to a Decimal, normalizing it in the process.
-	///
-	/// This method is a convenience wrapper around
-	/// `rust_decimal::Decimal::from_str_exact` which can parse a string into a
-	/// Decimal and normalize it. If the value has higher precision than the
-	/// Decimal type can handle an Underflow error will be returned.
-	fn from_str_exact_normalized(s: &str) -> Result<Self, rust_decimal::Error>
-	where
-		Self: Sized;
 }
 
 impl DecimalExt for Decimal {
 	fn from_str_normalized(s: &str) -> Result<Decimal, rust_decimal::Error> {
 		#[allow(clippy::disallowed_methods)]
 		Ok(Decimal::from_str(s)?.normalize())
-	}
-
-	fn from_str_exact_normalized(s: &str) -> Result<Decimal, rust_decimal::Error> {
-		#[allow(clippy::disallowed_methods)]
-		Ok(Decimal::from_str_exact(s)?.normalize())
 	}
 }
 
@@ -1269,25 +1254,6 @@ mod tests {
 	}
 
 	#[test]
-	fn test_decimal_ext_from_str_exact_normalized() {
-		let decimal = Decimal::from_str_exact_normalized("0.0").unwrap();
-		assert_eq!(decimal.to_string(), "0");
-		assert_eq!(decimal.to_i64(), Some(0));
-		assert_eq!(decimal.to_f64(), Some(0.0));
-
-		let decimal = Decimal::from_str_exact_normalized("123.456").unwrap();
-		assert_eq!(decimal.to_string(), "123.456");
-		assert_eq!(decimal.to_i64(), Some(123));
-		assert_eq!(decimal.to_f64(), Some(123.456));
-
-		let decimal =
-			Decimal::from_str_exact_normalized("13.5719384719384719385639856394139476937756394756");
-		assert!(decimal.is_err());
-		let err = decimal.unwrap_err();
-		assert_eq!(err.to_string(), "Number has a high precision that can not be represented.");
-	}
-
-	#[test]
 	fn test_try_float_div() {
 		let (sum_one, count_one) = (Number::Int(5), Number::Int(2));
 		assert_eq!(sum_one.try_float_div(count_one).unwrap(), Number::Float(2.5));
@@ -1306,12 +1272,12 @@ mod tests {
 		let b = Number::Float(-f64::INFINITY);
 		let c = Number::Float(1f64);
 		let d = Number::Decimal(
-			Decimal::from_str_exact_normalized("1.0000000000000000000000000002").unwrap(),
+			Decimal::from_str_normalized("1.0000000000000000000000000002").unwrap(),
 		);
-		let e = Number::Decimal(Decimal::from_str_exact_normalized("1.1").unwrap());
+		let e = Number::Decimal(Decimal::from_str_normalized("1.1").unwrap());
 		let f = Number::Float(1.1f64);
 		let g = Number::Float(1.5f64);
-		let h = Number::Decimal(Decimal::from_str_exact_normalized("1.5").unwrap());
+		let h = Number::Decimal(Decimal::from_str_normalized("1.5").unwrap());
 		let i = Number::Float(f64::INFINITY);
 		let j = Number::Float(f64::NAN);
 		let original = vec![a, b, c, d, e, f, g, h, i, j];

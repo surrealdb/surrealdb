@@ -105,12 +105,12 @@ impl RemoveTableStatement {
 		if let Some(sender) = opt.broker.as_ref() {
 			for lv in lvs.iter() {
 				sender
-					.send(PublicNotification {
-						id: lv.id.into(),
-						action: PublicAction::Killed,
-						record: PublicValue::None,
-						result: PublicValue::None,
-					})
+					.send(PublicNotification::new(
+						lv.id.into(),
+						PublicAction::Killed,
+						PublicValue::None,
+						PublicValue::None,
+					))
 					.await;
 			}
 		}

@@ -24,6 +24,11 @@ pub(crate) static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
 pub struct Duration(pub(crate) std::time::Duration);
 
 impl Duration {
+	/// The maximum duration
+	pub const MAX: Duration = Duration(std::time::Duration::MAX);
+	/// The zero duration
+	pub const ZERO: Duration = Duration(std::time::Duration::ZERO);
+
 	/// Create a duration from both seconds and nanoseconds components
 	pub fn new(secs: u64, nanos: u32) -> Duration {
 		std::time::Duration::new(secs, nanos).into()

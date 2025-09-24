@@ -452,7 +452,7 @@ async fn function_search_analyzer() -> Result<()> {
 	//
 	let tmp = test.next()?.result?;
 	let val: Value = syn::value("['This', 'is', 'a', 'sample', 'of', 'HTML']").unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -1740,7 +1740,7 @@ async fn function_string_words() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Array::new().into();
+	let val = Value::Array(Array::new());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;

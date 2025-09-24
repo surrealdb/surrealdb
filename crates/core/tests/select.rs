@@ -1053,7 +1053,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() == Array::new().into(),
+			res.unwrap() == Value::Array(Array::new()),
 			"{}",
 			"anonymous user should not be able to select if the table has no permissions"
 		);
@@ -1081,7 +1081,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Array::new().into(),
+			res.unwrap() != Value::Array(Array::new()),
 			"{}",
 			"anonymous user should be able to select if the table has full permissions"
 		);
@@ -1123,7 +1123,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Array::new().into(),
+			res.unwrap() != Value::Array(Array::new()),
 			"{}",
 			"anonymous user should be able to select if the table has no permissions"
 		);
@@ -1151,7 +1151,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Array::new().into(),
+			res.unwrap() != Value::Array(Array::new()),
 			"{}",
 			"anonymous user should be able to select if the table has full permissions"
 		);
@@ -1185,10 +1185,10 @@ async fn select_issue_3510() -> Result<()> {
 			]",
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -1421,7 +1421,7 @@ async fn select_field_value_permissions() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Array::new().into();
+	let val = Value::Array(Array::new());
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;

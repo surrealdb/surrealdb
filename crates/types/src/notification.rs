@@ -72,6 +72,7 @@ impl FromStr for Action {
 /// A live query notification.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Notification {
 	/// The id of the LIVE query to which this notification belongs
 	pub id: Uuid,
@@ -81,4 +82,16 @@ pub struct Notification {
 	pub record: Value,
 	/// The resulting notification content, usually the altered record content
 	pub result: Value,
+}
+
+impl Notification {
+	/// Construct a new notification.
+	pub fn new(id: Uuid, action: Action, record: Value, result: Value) -> Self {
+		Self {
+			id,
+			action,
+			record,
+			result,
+		}
+	}
 }

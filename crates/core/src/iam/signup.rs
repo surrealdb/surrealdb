@@ -11,8 +11,8 @@ use super::access::{authenticate_record, create_refresh_token_record};
 use crate::catalog;
 use crate::catalog::providers::{AuthorisationProvider, DatabaseProvider};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Session;
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::Claims;
@@ -483,14 +483,14 @@ mod tests {
 			);
 			// Signin with the refresh token
 			let mut vars = PublicVariables::new();
-			vars.insert("refresh", refresh.clone().into());
+			vars.insert("refresh", refresh.clone());
 			let res = signin::db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 			// Authentication should be identical as with user credentials
@@ -737,7 +737,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				..Default::default()
 			};
 			let mut vars = PublicVariables::new();
-			vars.insert("id", 1.into());
+			vars.insert("id", 1);
 			let res = db_access(
 				&ds,
 				&mut sess,
@@ -832,8 +832,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				..Default::default()
 			};
 			let mut vars = PublicVariables::new();
-			vars.insert("email", "info@example.com".into());
-			vars.insert("pass", "company-password".into());
+			vars.insert("email", "info@example.com");
+			vars.insert("pass", "company-password");
 			let res = db_access(
 				&ds,
 				&mut sess,
@@ -904,7 +904,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				..Default::default()
 			};
 			let mut vars = PublicVariables::new();
-			vars.insert("id", 1.into());
+			vars.insert("id", 1);
 			let res = db_access(
 				&ds,
 				&mut sess,
@@ -949,7 +949,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				..Default::default()
 			};
 			let mut vars = PublicVariables::new();
-			vars.insert("id", 1.into());
+			vars.insert("id", 1);
 			let res = db_access(
 				&ds,
 				&mut sess,
@@ -1013,8 +1013,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				..Default::default()
 			};
 			let mut vars = PublicVariables::new();
-			vars.insert("user", "user".into());
-			vars.insert("pass", "pass".into());
+			vars.insert("user", "user");
+			vars.insert("pass", "pass");
 
 			let (res1, res2) = tokio::join!(
 				db_access(
@@ -1094,7 +1094,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				..Default::default()
 			};
 			let mut vars = PublicVariables::new();
-			vars.insert("id", 1.into());
+			vars.insert("id", 1);
 
 			let (res1, res2) = tokio::join!(
 				db_access(
@@ -1103,7 +1103,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"test".to_string(),
 					"test".to_string(),
 					"user".to_string(),
-					vars.clone().into(),
+					vars.clone(),
 				),
 				db_access(
 					&ds,
@@ -1111,7 +1111,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"test".to_string(),
 					"test".to_string(),
 					"user".to_string(),
-					vars.into(),
+					vars,
 				)
 			);
 

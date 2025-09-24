@@ -93,7 +93,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 						};
 
 						match PublicDatetime::try_from((seconds, nanos)) {
-							Ok(v) => Ok(PublicValue::Datetime(v.into())),
+							Ok(v) => Ok(PublicValue::Datetime(v)),
 							_ => Err(anyhow!("Expected a valid Datetime value")),
 						}
 					}
@@ -148,20 +148,17 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 							_ => 0,
 						};
 
-						Ok(PublicValue::Duration(PublicDuration::new(seconds, nanos).into()))
+						Ok(PublicValue::Duration(PublicDuration::new(seconds, nanos)))
 					}
 					_ => Err(anyhow!("Expected a CBOR array with at most 2 elements")),
 				},
 				// A literal recordid
 				TAG_RECORDID => match *v {
 					CborValue::Text(v) => match syn::record_id(v.as_str()) {
-						Ok(v) => Ok(PublicValue::RecordId(v.into())),
+						Ok(v) => Ok(PublicValue::RecordId(v)),
 						_ => Err(anyhow!("Expected a valid RecordID value")),
 					},
 					CborValue::Array(v) => {
-						let err = anyhow!(
-							"Expected a CBOR text data type, or a CBOR array with 2 elements"
-						);
 						let mut v = v.into_iter();
 						let table = v.next().context(
 							"Expected a CBOR text data type, or a CBOR array with 2 elements: got empty array",
@@ -209,7 +206,11 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 						match (x, y) {
 							(PublicValue::Number(x), PublicValue::Number(y)) => {
 								Ok(PublicValue::Geometry(PublicGeometry::Point(
-									(x.to_f64().unwrap_or_default(), y.to_f64().unwrap_or_default()).into(),
+									(
+										x.to_f64().unwrap_or_default(),
+										y.to_f64().unwrap_or_default(),
+									)
+										.into(),
 								)))
 							}
 							_ => Err(anyhow!("Expected a CBOR array with 2 decimal values")),
@@ -479,8 +480,7 @@ fn from_geometry(v: PublicGeometry) -> Result<CborValue> {
 			Ok(CborValue::Tag(TAG_GEOMETRY_MULTIPOLYGON, Box::new(CborValue::Array(data))))
 		}
 		PublicGeometry::Collection(v) => {
-			let data =
-				v.into_iter().map(|v| from_geometry(v)).collect::<Result<Vec<CborValue>>>()?;
+			let data = v.into_iter().map(from_geometry).collect::<Result<Vec<CborValue>>>()?;
 
 			Ok(CborValue::Tag(TAG_GEOMETRY_COLLECTION, Box::new(CborValue::Array(data))))
 		}

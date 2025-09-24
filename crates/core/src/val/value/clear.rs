@@ -10,13 +10,16 @@ impl Value {
 mod tests {
 
 	use super::*;
+	use crate::sql::expression::convert_public_value_to_internal;
 	use crate::syn;
 
 	#[tokio::test]
 	async fn clear_value() {
-		let mut val = syn::value("{ test: { other: null, something: 123 } }").unwrap();
-		let res = Value::None;
+		let mut val = convert_public_value_to_internal(
+			syn::value("{ test: { other: null, something: 123 } }").unwrap(),
+		);
+
 		val.clear();
-		assert_eq!(res, val);
+		assert_eq!(val, Value::None);
 	}
 }

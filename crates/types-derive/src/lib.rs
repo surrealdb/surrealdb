@@ -270,7 +270,7 @@ fn generate_named_fields_impl(
 		from_value_fields,
 		field_kinds,
 		field_names_for_constructor,
-	 } = generate_field_processing(&regular_fields, &flattened_fields);
+	} = generate_field_processing(&regular_fields, &flattened_fields);
 
 	quote! {
 		impl #impl_generics surrealdb_types::SurrealValue for #name #ty_generics #where_clause {

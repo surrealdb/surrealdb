@@ -348,11 +348,12 @@ impl Iterator for IntegerRangeIter {
 #[cfg(test)]
 mod test {
 	use super::Range;
+	use crate::sql::expression::convert_public_value_to_internal;
 	use crate::syn;
 	use crate::val::Value;
 
 	fn r(r: &str) -> Range {
-		let Value::Range(r) = syn::value(r).unwrap() else {
+		let Value::Range(r) = convert_public_value_to_internal(syn::value(r).unwrap()) else {
 			panic!()
 		};
 		*r

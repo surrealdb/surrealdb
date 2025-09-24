@@ -197,6 +197,7 @@ mod tests {
 
 	use super::*;
 	use crate::catalog::{DatabaseId, NamespaceId, TableId};
+	use crate::dbs::executor::convert_value_to_public_value;
 
 	#[test]
 	fn serialization() {
@@ -225,7 +226,7 @@ mod tests {
 				],
 			)]),
 		);
-		let v = cs.into_value().into_json_value().unwrap();
+		let v = convert_value_to_public_value(cs.into_value()).unwrap().into_json_value().unwrap();
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,
@@ -284,7 +285,7 @@ mod tests {
 				],
 			)]),
 		);
-		let v = cs.into_value().into_json_value().unwrap();
+		let v = convert_value_to_public_value(cs.into_value()).unwrap().into_json_value().unwrap();
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,

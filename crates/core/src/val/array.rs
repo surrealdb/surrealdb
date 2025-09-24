@@ -230,30 +230,6 @@ impl Display for Array {
 
 // ------------------------------
 
-pub trait Abolish<T> {
-	fn abolish<F>(&mut self, f: F)
-	where
-		F: FnMut(usize) -> bool;
-}
-
-impl<T> Abolish<T> for Vec<T> {
-	fn abolish<F>(&mut self, mut f: F)
-	where
-		F: FnMut(usize) -> bool,
-	{
-		let mut i = 0;
-		// FIXME: use drain_filter once stabilized (https://github.com/rust-lang/rust/issues/43244)
-		// to avoid negation of the predicate return value.
-		self.retain(|_| {
-			let retain = !f(i);
-			i += 1;
-			retain
-		});
-	}
-}
-
-// ------------------------------
-
 pub(crate) trait Clump<T> {
 	fn clump(self, clump_size: usize) -> Result<T>;
 }

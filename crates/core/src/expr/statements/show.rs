@@ -1,7 +1,6 @@
 use std::fmt;
 
 use anyhow::Result;
-use surrealdb_types::SurrealValue;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -9,12 +8,12 @@ use crate::doc::CursorDoc;
 use crate::expr::{Base, Value};
 use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
-use crate::types::PublicDatetime;
+use crate::val::Datetime;
 use crate::vs::VersionStamp;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ShowSince {
-	Timestamp(PublicDatetime),
+	Timestamp(Datetime),
 	Versionstamp(u64),
 }
 
@@ -58,7 +57,7 @@ impl ShowStatement {
 			crate::cf::read(&txn, ns, db, self.table.as_deref(), self.since.clone(), self.limit)
 				.await?;
 		// Return the changes
-		let a: Vec<Value> = r.iter().cloned().map(|x| Value::from(x.into_value())).collect();
+		let a: Vec<Value> = r.iter().cloned().map(|x| x.into_value()).collect();
 		Ok(a.into())
 	}
 }

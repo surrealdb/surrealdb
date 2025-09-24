@@ -3,7 +3,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::Result;
-use revision::{Revisioned, revisioned};
+use revision::revisioned;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use surrealdb_types::{Kind, Object, SurrealValue, Value};
@@ -108,18 +108,18 @@ impl SurrealValue for QueryResult {
 			.unwrap_or_else(|| "0ns".to_string());
 		// Parse duration string (e.g. "1.234ms" -> Duration)
 		let time = surrealdb_types::Duration::from_str(&time_str)
-			.map(|d| std::time::Duration::from(d))
+			.map(std::time::Duration::from)
 			.unwrap_or_default();
 
 		let query_type = obj
 			.remove("type")
 			.and_then(|v| v.into_string().ok())
-			.and_then(|s| match s.as_str() {
-				"live" => Some(QueryType::Live),
-				"kill" => Some(QueryType::Kill),
-				_ => Some(QueryType::Other),
+			.map(|s| match s.as_str() {
+				"live" => QueryType::Live,
+				"kill" => QueryType::Kill,
+				_ => QueryType::Other,
 			})
-			.unwrap_or(QueryType::Other);
+			.unwrap_or_default();
 
 		let status = obj
 			.remove("status")
@@ -127,7 +127,7 @@ impl SurrealValue for QueryResult {
 			.unwrap_or_else(|| "OK".to_string());
 
 		let result = if status == "OK" {
-			Ok(obj.remove("result").unwrap_or(Value::None))
+			Ok(obj.remove("result").unwrap_or_default())
 		} else {
 			let error_msg = obj
 				.remove("result")

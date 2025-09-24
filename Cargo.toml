@@ -43,8 +43,6 @@ lexicmp = "0.2.0"
 ## Also maintained by @Delskayn
 reblessive = "0.4.3"
 revision = "0.11.0"
-## Maintained by @rushmorem
-serde-content = "0.1.0"
 storekey = { version = "0.8.0", features = ["uuid"] }
 trice = "0.4.0"
 vart = "0.8.1"

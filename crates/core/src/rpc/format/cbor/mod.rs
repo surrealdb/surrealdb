@@ -2,7 +2,6 @@ mod convert;
 
 use surrealdb_types::Value;
 
-
 pub fn encode(v: Value) -> anyhow::Result<Vec<u8>> {
 	// Convert public value to internal value for encoding
 	let encoding = convert::from_value(v).map_err(|e| anyhow::anyhow!(e))?;

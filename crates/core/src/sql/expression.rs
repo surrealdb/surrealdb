@@ -14,8 +14,7 @@ use crate::sql::{
 	PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
 use crate::types::{
-	PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicNumber, PublicRegex, PublicUuid,
-	PublicValue,
+	PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicNumber, PublicUuid, PublicValue,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -97,7 +96,7 @@ impl Expr {
 			PublicValue::Bytes(x) => {
 				Expr::Literal(Literal::Bytes(PublicBytes::from(x.into_inner())))
 			}
-			PublicValue::Regex(x) => Expr::Literal(Literal::Regex(PublicRegex::from(x))),
+			PublicValue::Regex(x) => Expr::Literal(Literal::Regex(x)),
 			PublicValue::RecordId(x) => Expr::Literal(Literal::RecordId(RecordIdLit {
 				table: x.table.clone(),
 				key: RecordIdKeyLit::from_record_id_key(x.key),
@@ -132,7 +131,7 @@ impl Expr {
 			// }))),
 			// PublicValue::Table(x) => Expr::Table(unsafe { Ident::new_unchecked(x.into_string())
 			// }),
-			PublicValue::Range(x) => convert_public_range_to_literal(x),
+			PublicValue::Range(x) => convert_public_range_to_literal(*x),
 		}
 	}
 }
@@ -151,7 +150,7 @@ fn convert_public_geometry_to_internal(geom: surrealdb_types::Geometry) -> crate
 	}
 }
 
-fn convert_public_range_to_literal(range: Box<surrealdb_types::Range>) -> Expr {
+fn convert_public_range_to_literal(range: surrealdb_types::Range) -> Expr {
 	use crate::sql::literal::Literal;
 	use crate::sql::operator::BinaryOperator;
 

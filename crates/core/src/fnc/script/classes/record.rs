@@ -22,7 +22,7 @@ impl Record {
 					Value::Object(v) => v.into(),
 					Value::Number(v) => v.to_int().into(),
 					Value::Uuid(v) => v.into(),
-					v => v.as_raw_string().into(),
+					v => v.into_raw_string().into(),
 				},
 			},
 		}

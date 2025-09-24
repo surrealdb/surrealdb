@@ -32,7 +32,8 @@ use crate::sql::{
 	Splits, Start, TableType, Timeout, TopLevelExpr, With,
 };
 use crate::syn::parser::StatementStream;
-use crate::val::{Datetime, Duration, Number, Regex, Uuid};
+use crate::types::{PublicDatetime, PublicDuration, PublicUuid};
+use crate::val::Number;
 
 fn ident_field(name: &str) -> Expr {
 	Expr::Idiom(Idiom(vec![Part::Field(name.to_string())]))
@@ -147,7 +148,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				expr: ident_field("foo"),
 				alias: Some(Idiom(vec![Part::Field("bar".to_owned())])),
 			})))),
-			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
+			timeout: Some(Timeout(PublicDuration::from_secs(1))),
 			parallel: true,
 			version: None,
 		}))),
@@ -174,7 +175,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				name: "a".to_owned(),
 				comment: Some("test".to_owned()),
 				changefeed: Some(ChangeFeed {
-					expiry: std::time::Duration::from_secs(60) * 10,
+					expiry: PublicDuration::from_secs(60 * 10),
 					store_diff: false,
 				}),
 			},
@@ -225,8 +226,8 @@ fn statements() -> Vec<TopLevelExpr> {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Duration::from_days(30).unwrap()),
-					token: Some(Duration::from_hours(1).unwrap()),
+					grant: Some(PublicDuration::from_days(30).unwrap()),
+					token: Some(PublicDuration::from_hours(1).unwrap()),
 					session: None,
 				},
 				comment: Some("bar".to_owned()),
@@ -274,7 +275,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				delete: Permission::None,
 			},
 			changefeed: Some(ChangeFeed {
-				expiry: std::time::Duration::from_secs(1),
+				expiry: PublicDuration::from_secs(1),
 				store_diff: false,
 			}),
 			comment: None,
@@ -384,7 +385,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Expr::Literal(Literal::Integer(2)))),
 			output: Some(Output::After),
-			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
+			timeout: Some(Timeout(PublicDuration::from_secs(1))),
 			parallel: true,
 			explain: Some(Explain(true)),
 		}))),
@@ -405,7 +406,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Expr::Literal(Literal::Null))),
 			output: Some(Output::Null),
-			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(60 * 60)))),
+			timeout: Some(Timeout(PublicDuration::from_secs(60 * 60))),
 			parallel: true,
 			explain: Some(Explain(true)),
 		}))),
@@ -506,7 +507,9 @@ fn statements() -> Vec<TopLevelExpr> {
 				value: Expr::Literal(Literal::Bool(true)),
 			}])))),
 			fetch: Some(Fetchs(vec![Fetch(ident_field("foo"))])),
-			version: Some(Expr::Literal(Literal::Datetime(Datetime(expected_datetime)))),
+			version: Some(Expr::Literal(Literal::Datetime(PublicDatetime::from(
+				expected_datetime,
+			)))),
 			timeout: None,
 			parallel: false,
 			tempfiles: false,
@@ -524,15 +527,15 @@ fn statements() -> Vec<TopLevelExpr> {
 		}),
 		TopLevelExpr::Show(ShowStatement {
 			table: None,
-			since: ShowSince::Timestamp(Datetime(expected_datetime)),
+			since: ShowSince::Timestamp(PublicDatetime::from(expected_datetime)),
 			limit: None,
 		}),
 		TopLevelExpr::Expr(Expr::Sleep(Box::new(SleepStatement {
-			duration: Duration(std::time::Duration::from_secs(1)),
+			duration: PublicDuration::from_secs(1),
 		}))),
-		TopLevelExpr::Expr(Expr::Throw(Box::new(Expr::Literal(Literal::Duration(Duration(
-			std::time::Duration::from_secs(1),
-		)))))),
+		TopLevelExpr::Expr(Expr::Throw(Box::new(Expr::Literal(Literal::Duration(
+			PublicDuration::from_secs(1),
+		))))),
 		TopLevelExpr::Expr(Expr::Insert(Box::new(InsertStatement {
 			into: Some(Expr::Param(Param::new("foo".to_owned()))),
 			data: Data::ValuesExpression(vec![
@@ -567,7 +570,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			relation: false,
 		}))),
 		TopLevelExpr::Kill(KillStatement {
-			id: Expr::Literal(Literal::Uuid(Uuid(uuid::uuid!(
+			id: Expr::Literal(Literal::Uuid(PublicUuid::from(uuid::uuid!(
 				"e72bee20-f49b-11ec-b939-0242ac120002"
 			)))),
 		}),
@@ -644,7 +647,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				Idiom(vec![Part::Field("c".to_owned()), Part::All]),
 			])),
 			output: Some(Output::Diff),
-			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
+			timeout: Some(Timeout(PublicDuration::from_secs(1))),
 			parallel: true,
 			explain: Some(Explain(true)),
 		}))),
@@ -673,7 +676,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				Idiom(vec![Part::Field("c".to_owned()), Part::All]),
 			])),
 			output: Some(Output::Diff),
-			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
+			timeout: Some(Timeout(PublicDuration::from_secs(1))),
 			parallel: true,
 			explain: Some(Explain(true)),
 		}))),
@@ -682,7 +685,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			arguments: Vec::new(),
 		}))),
 		TopLevelExpr::Expr(Expr::Literal(Literal::String("a b c d e f g h".to_owned()))),
-		TopLevelExpr::Expr(Expr::Literal(Literal::Uuid(Uuid(uuid::Uuid::from_u128(
+		TopLevelExpr::Expr(Expr::Literal(Literal::Uuid(PublicUuid::from(uuid::Uuid::from_u128(
 			0xffffffff_ffff_ffff_ffff_ffffffffffff,
 		))))),
 		TopLevelExpr::Expr(Expr::Literal(Literal::RecordId(RecordIdLit {
@@ -695,7 +698,7 @@ fn statements() -> Vec<TopLevelExpr> {
 					.collect(),
 			),
 		}))),
-		TopLevelExpr::Expr(Expr::Literal(Literal::Regex(Regex("a b c d e f".try_into().unwrap())))),
+		TopLevelExpr::Expr(Expr::Literal(Literal::Regex("a b c d e f".parse().unwrap()))),
 		TopLevelExpr::Expr(Expr::Literal(Literal::Float(-123.456e10))),
 	]
 }

@@ -77,12 +77,12 @@ impl KillStatement {
 		}
 		if let Some(sender) = opt.broker.as_ref() {
 			sender
-				.send(PublicNotification {
-					id: lid.into(),
-					action: PublicAction::Killed,
-					record: PublicValue::None,
-					result: PublicValue::None,
-				})
+				.send(PublicNotification::new(
+					lid.into(),
+					PublicAction::Killed,
+					PublicValue::None,
+					PublicValue::None,
+				))
 				.await;
 		}
 		// Return the query id

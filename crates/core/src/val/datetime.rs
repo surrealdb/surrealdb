@@ -84,7 +84,7 @@ impl Deref for Datetime {
 
 impl Datetime {
 	/// Convert the Datetime to a raw String
-	pub fn into_raw_string(&self) -> String {
+	pub fn to_raw_string(&self) -> String {
 		self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true)
 	}
 
@@ -110,7 +110,7 @@ impl Datetime {
 
 impl Display for Datetime {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "d{}", &QuoteStr(&self.into_raw_string()))
+		write!(f, "d{}", &QuoteStr(&self.to_raw_string()))
 	}
 }
 
@@ -165,9 +165,13 @@ mod tests {
 
 	#[rstest]
 	#[case("2021-01-01T00:00:00Z", Datetime(DateTime::<Utc>::from_timestamp(1_000_000_000, 0).unwrap()), PublicDatetime::from_timestamp(1_000_000_000, 0).unwrap())]
-	fn test_from_str(#[case] input: &str, #[case] expected: Datetime, #[case] expected_public: PublicDatetime) {
+	fn test_from_str(
+		#[case] input: &str,
+		#[case] expected: Datetime,
+		#[case] expected_public: PublicDatetime,
+	) {
 		let internal_actual = Datetime::from_str(input).unwrap();
-		let public_actual = PublicDatetime::from(internal_actual);
+		let public_actual = PublicDatetime::from(internal_actual.clone());
 
 		assert_eq!(internal_actual, expected);
 		assert_eq!(public_actual, expected_public);

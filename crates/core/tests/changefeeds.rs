@@ -108,14 +108,14 @@ async fn database_change_feeds() -> Result<()> {
 		Some(&tmp)
 			.filter(|x| *x == &val)
 			.map(|_v| ())
-			.ok_or_else(|| anyhow!("Expected UPDATE value:\nleft: {}\nright: {}", tmp, val))?;
+			.ok_or_else(|| anyhow!("Expected UPDATE value:\nleft: {tmp:?}\nright: {val:?}"))?;
 		// DELETE
 		let tmp = res.remove(0).result?;
-		let val = Array::new().into();
+		let val = Value::Array(Array::new());
 		Some(&tmp)
 			.filter(|x| **x == val)
 			.map(|_v| ())
-			.ok_or_else(|| anyhow!("Expected DELETE value:\nleft: {}\nright: {}", tmp, val))?;
+			.ok_or_else(|| anyhow!("Expected DELETE value:\nleft: {tmp:?}\nright: {val:?}"))?;
 		// SHOW CHANGES
 		let tmp = res.remove(0).result?;
 		cf_val_arr
@@ -129,7 +129,7 @@ async fn database_change_feeds() -> Result<()> {
 					tmp,
 					cf_val_arr
 						.iter()
-						.map(|vs| vs.to_string())
+						.map(|vs| vs.into_string().unwrap())
 						.reduce(|left, right| format!("{}\n{}", left, right))
 						.unwrap()
 				)
@@ -172,7 +172,7 @@ async fn database_change_feeds() -> Result<()> {
 	dbs.changefeed_process_at(None, current_time).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
-	let val: Value = Array::new().into();
+	let val: Value = Value::Array(Array::new());
 	assert_eq!(val, tmp);
 	//
 	Ok(())
@@ -269,7 +269,7 @@ async fn table_change_feeds() -> Result<()> {
 	assert_eq!(tmp, val);
 	// DELETE
 	let tmp = res.remove(0).result?;
-	let val = Array::new().into();
+	let val = Value::Array(Array::new());
 	assert_eq!(tmp, val);
 	// CREATE
 	let _tmp = res.remove(0).result?;
@@ -349,7 +349,7 @@ async fn table_change_feeds() -> Result<()> {
 	dbs.changefeed_process_at(None, end_ts + 3600).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
-	let val = Array::new().into();
+	let val = Value::Array(Array::new());
 	assert_eq!(tmp, val);
 	//
 	Ok(())

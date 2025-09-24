@@ -150,7 +150,7 @@ impl Expr {
 			}
 			surrealdb_types::Value::Uuid(u) => Expr::Literal(Literal::Uuid(crate::val::Uuid(u.0))),
 			surrealdb_types::Value::Array(a) => Expr::Literal(Literal::Array(
-				a.inner().iter().cloned().map(|v| Expr::from_public_value(v)).collect(),
+				a.inner().iter().cloned().map(Expr::from_public_value).collect(),
 			)),
 			surrealdb_types::Value::Object(o) => Expr::Literal(Literal::Object(
 				o.inner()
@@ -169,7 +169,7 @@ impl Expr {
 						RecordIdKeyLit::Uuid(crate::val::Uuid(u.0))
 					}
 					surrealdb_types::RecordIdKey::Array(a) => RecordIdKeyLit::Array(
-						a.inner().iter().cloned().map(|v| Expr::from_public_value(v)).collect(),
+						a.inner().iter().cloned().map(Expr::from_public_value).collect(),
 					),
 					surrealdb_types::RecordIdKey::Object(o) => RecordIdKeyLit::Object(
 						o.inner()
@@ -252,7 +252,7 @@ impl Expr {
 			Expr::FunctionCall(x) => x.receiver.to_idiom(),
 			Expr::Literal(l) => match l {
 				Literal::String(s) => Idiom::field(s.clone()),
-				Literal::Datetime(d) => Idiom::field(d.into_raw_string()),
+				Literal::Datetime(d) => Idiom::field(d.to_raw_string()),
 				x => Idiom::field(x.to_string()),
 			},
 			x => Idiom::field(x.to_string()),

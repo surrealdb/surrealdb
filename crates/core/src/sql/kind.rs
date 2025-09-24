@@ -582,7 +582,7 @@ impl From<KindLiteral> for crate::types::PublicKindLiteral {
 			KindLiteral::Float(f) => crate::types::PublicKindLiteral::Float(f),
 			KindLiteral::Decimal(d) => crate::types::PublicKindLiteral::Decimal(d),
 			KindLiteral::String(s) => crate::types::PublicKindLiteral::String(s),
-			KindLiteral::Duration(d) => crate::types::PublicKindLiteral::Duration(d.into()),
+			KindLiteral::Duration(d) => crate::types::PublicKindLiteral::Duration(d),
 			KindLiteral::Array(a) => {
 				crate::types::PublicKindLiteral::Array(a.into_iter().map(Into::into).collect())
 			}
@@ -600,8 +600,8 @@ impl From<crate::types::PublicKindLiteral> for KindLiteral {
 			crate::types::PublicKindLiteral::Integer(i) => Self::Integer(i),
 			crate::types::PublicKindLiteral::Float(f) => Self::Float(f),
 			crate::types::PublicKindLiteral::Decimal(d) => Self::Decimal(d),
-			crate::types::PublicKindLiteral::String(s) => Self::String(s.into()),
-			crate::types::PublicKindLiteral::Duration(d) => Self::Duration(d.into()),
+			crate::types::PublicKindLiteral::String(s) => Self::String(s),
+			crate::types::PublicKindLiteral::Duration(d) => Self::Duration(d),
 			crate::types::PublicKindLiteral::Array(a) => {
 				Self::Array(a.into_iter().map(Into::into).collect())
 			}

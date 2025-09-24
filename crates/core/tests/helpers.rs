@@ -6,7 +6,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::thread::Builder;
 
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use regex::Regex;
 use surrealdb_core::dbs::capabilities::Capabilities;
 use surrealdb_core::dbs::{QueryResult, Session};
@@ -84,7 +84,7 @@ pub async fn iam_run_case(
 		let expected = syn::value(check_expected_result)?;
 		ensure!(
 			tmp == expected,
-			"Check statement failed for test {test_index} ({test}): expected value \n'{expected:#}' \ndoesn't match \n'{tmp:#}'",
+			"Check statement failed for test {test_index} ({test}): expected value \n'{expected:#?}' \ndoesn't match \n'{tmp:#?}'",
 		)
 	}
 
@@ -365,7 +365,7 @@ impl Test {
 	/// the last position in the responses list before it was emptied.
 	#[track_caller]
 	pub fn next_value(&mut self) -> Result<Value> {
-		self.next()?.result
+		self.next()?.result.context("Failed to get next value")
 	}
 
 	/// Skips a specified number of elements from the beginning of the
@@ -390,13 +390,13 @@ impl Test {
 		// Then check they are indeed the same values
 		//
 		// If it is a constant we need to transform it as a number
-		if val.as_number().map(|x| x.is_nan()).unwrap_or(false) {
+		if val.into_number().map(|x| x.is_nan()).unwrap_or(false) {
 			assert!(
-				tmp.as_number().map(|x| x.is_nan()).unwrap_or(false),
-				"Expected NaN but got {info}: {tmp}"
+				tmp.into_number().map(|x| x.is_nan()).unwrap_or(false),
+				"Expected NaN but got {info}: {tmp:?}"
 			);
 		} else {
-			assert_eq!(tmp, val, "{info} {tmp:#}");
+			assert_eq!(tmp, val, "{info} {tmp:#?}");
 		}
 		//
 		Ok(self)
@@ -405,7 +405,7 @@ impl Test {
 	#[track_caller]
 	#[allow(dead_code)]
 	pub fn expect_regex(&mut self, regex: &str) -> Result<&mut Self> {
-		let tmp = self.next_value()?.to_string();
+		let tmp = self.next_value()?.into_string().unwrap();
 		let regex = Regex::new(regex)?;
 		assert!(regex.is_match(&tmp), "Output '{tmp}' doesn't match regex '{regex}'",);
 		Ok(self)
@@ -512,10 +512,10 @@ impl Test {
 			let diff = (n - val).abs();
 			assert!(
 				diff <= precision,
-				"{tmp} does not match expected: {val} - diff: {diff} - precision: {precision}"
+				"{tmp:?} does not match expected: {val} - diff: {diff} - precision: {precision}"
 			);
 		} else {
-			panic!("At position {}: Value {tmp} is not a number", self.pos);
+			panic!("At position {}: Value {tmp:?} is not a number", self.pos);
 		}
 		Ok(self)
 	}

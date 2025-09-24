@@ -1145,10 +1145,6 @@ criteria = "safe-to-deploy"
 version = "0.6.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.serde-content]]
-version = "0.1.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.serde_html_form]]
 version = "0.2.7"
 criteria = "safe-to-deploy"

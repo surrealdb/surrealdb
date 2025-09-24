@@ -23,7 +23,7 @@ use crate::types::{PublicArray, PublicRecordIdKey, PublicValue, PublicVariables}
 fn value_to_table(value: PublicValue) -> Expr {
 	match value {
 		PublicValue::String(s) => Expr::Table(s),
-		x => Expr::from_public_value(x).into(),
+		x => Expr::from_public_value(x),
 	}
 }
 
@@ -171,9 +171,9 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signup, mutating the session
 		let out: Result<PublicValue> =
-			crate::iam::signup::signup(self.kvs(), &mut session, params.into()).await.map(|v| {
-				v.token.clone().map(|x| PublicValue::String(x)).unwrap_or(PublicValue::None)
-			});
+			crate::iam::signup::signup(self.kvs(), &mut session, params.into())
+				.await
+				.map(|v| v.token.clone().map(PublicValue::String).unwrap_or(PublicValue::None));
 
 		// Store the updated session
 		self.set_session(Arc::new(session));
@@ -389,7 +389,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Specify the SQL query string
 		let ast = Ast {
 			expressions: vec![TopLevelExpr::Kill(KillStatement {
-				id: Expr::from_public_value(id).into(),
+				id: Expr::from_public_value(id),
 			})],
 		};
 		// Specify the query parameters
@@ -412,7 +412,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// If value is a strand, handle it as if it was a table.
 		let what = match what {
 			PublicValue::String(x) => Expr::Table(x),
-			x => Expr::from_public_value(x).into(),
+			x => Expr::from_public_value(x),
 		};
 
 		// Specify the SQL query string
@@ -461,7 +461,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// If value is a string, handle it as if it was a table.
 		let what = match what {
 			PublicValue::String(x) => Expr::Table(x),
-			x => Expr::from_public_value(x).into(),
+			x => Expr::from_public_value(x),
 		};
 
 		// Specify the SQL query string
@@ -514,7 +514,7 @@ pub trait RpcProtocolV1: RpcContext {
 				if x.is_nullish() {
 					None
 				} else {
-					Some(Expr::from_public_value(x).into())
+					Some(Expr::from_public_value(x))
 				}
 			}
 		};
@@ -522,7 +522,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Specify the SQL query string
 		let sql = InsertStatement {
 			into,
-			data: SqlData::SingleExpression(Expr::from_public_value(data).into()),
+			data: SqlData::SingleExpression(Expr::from_public_value(data)),
 			output: Some(Output::After),
 			..Default::default()
 		};
@@ -548,10 +548,10 @@ pub trait RpcProtocolV1: RpcContext {
 		let what = match what {
 			PublicValue::Null | PublicValue::None => None,
 			PublicValue::String(x) => Some(Expr::Table(x)),
-			x => Some(Expr::from_public_value(x).into()),
+			x => Some(Expr::from_public_value(x)),
 		};
 
-		let data = SqlData::SingleExpression(Expr::from_public_value(data).into());
+		let data = SqlData::SingleExpression(Expr::from_public_value(data));
 
 		// Specify the SQL query string
 		let sql = InsertStatement {
@@ -602,7 +602,7 @@ pub trait RpcProtocolV1: RpcContext {
 					Some(x)
 				}
 			})
-			.map(|x| SqlData::ContentExpression(Expr::from_public_value(x).into()));
+			.map(|x| SqlData::ContentExpression(Expr::from_public_value(x)));
 
 		// Specify the SQL query string
 		let sql = CreateStatement {
@@ -648,7 +648,7 @@ pub trait RpcProtocolV1: RpcContext {
 					Some(x)
 				}
 			})
-			.map(|x| SqlData::ContentExpression(Expr::from_public_value(x).into()));
+			.map(|x| SqlData::ContentExpression(Expr::from_public_value(x)));
 
 		// Specify the SQL query string
 		let sql = UpsertStatement {
@@ -698,7 +698,7 @@ pub trait RpcProtocolV1: RpcContext {
 					Some(x)
 				}
 			})
-			.map(|x| SqlData::ContentExpression(Expr::from_public_value(x).into()));
+			.map(|x| SqlData::ContentExpression(Expr::from_public_value(x)));
 		// Specify the SQL query string
 		let sql = UpdateStatement {
 			only,
@@ -747,7 +747,7 @@ pub trait RpcProtocolV1: RpcContext {
 					Some(x)
 				}
 			})
-			.map(|x| SqlData::MergeExpression(Expr::from_public_value(x).into()));
+			.map(|x| SqlData::MergeExpression(Expr::from_public_value(x)));
 		// Specify the SQL query string
 		let sql = UpdateStatement {
 			only,
@@ -798,7 +798,7 @@ pub trait RpcProtocolV1: RpcContext {
 					Some(x)
 				}
 			})
-			.map(|x| SqlData::PatchExpression(Expr::from_public_value(x).into()));
+			.map(|x| SqlData::PatchExpression(Expr::from_public_value(x)));
 
 		let diff = matches!(diff, Some(PublicValue::Bool(true)));
 
@@ -856,14 +856,14 @@ pub trait RpcProtocolV1: RpcContext {
 					Some(x)
 				}
 			})
-			.map(|x| SqlData::ContentExpression(Expr::from_public_value(x).into()));
+			.map(|x| SqlData::ContentExpression(Expr::from_public_value(x)));
 
 		// Specify the SQL query string
 		let expr = Expr::Relate(Box::new(RelateStatement {
 			only,
-			from: Expr::from_public_value(from).into(),
+			from: Expr::from_public_value(from),
 			through: value_to_table(kind),
-			to: Expr::from_public_value(with).into(),
+			to: Expr::from_public_value(with),
 			data,
 			output: Some(Output::After),
 			uniq: false,
@@ -1002,7 +1002,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Parse the function arguments if specified
 		let args = match args {
 			Some(PublicValue::Array(args)) => {
-				args.into_iter().map(|x| Expr::from_public_value(x).into()).collect::<Vec<Expr>>()
+				args.into_iter().map(Expr::from_public_value).collect::<Vec<Expr>>()
 			}
 			None | Some(PublicValue::None | PublicValue::Null) => vec![],
 			unexpected => {

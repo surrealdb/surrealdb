@@ -164,7 +164,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 			]",
 	)
 	.unwrap();
-	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -203,7 +203,7 @@ async fn select_array_group_group_by() -> Result<()> {
         ]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -248,7 +248,7 @@ async fn select_array_count_subquery_group_by() -> Result<()> {
 			]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -259,7 +259,7 @@ async fn select_array_count_subquery_group_by() -> Result<()> {
 				]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -373,7 +373,7 @@ async fn select_count_group_all_permissions(
 			"test",
 			"test",
 			"test",
-			RecordId::new("table".to_owned(), "baz".to_owned()).into(),
+			Value::Record(RecordId::new("table".to_string(), "baz".to_string())),
 		),
 		sql,
 	)

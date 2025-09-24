@@ -389,7 +389,7 @@ impl<'js> Request<'js> {
 
 	#[qjs(constructor)]
 	pub fn new(ctx: Ctx<'js>, input: Value<'js>, init: Opt<RequestInit<'js>>) -> Result<Self> {
-		if let Some(url) = input.into_string() {
+		if let Some(url) = input.as_string() {
 			// url string
 			let url_str = url.to_string()?;
 			let url = Url::parse(&url_str)

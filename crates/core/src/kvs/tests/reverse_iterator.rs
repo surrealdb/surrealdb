@@ -43,7 +43,7 @@ fn check(r: &mut Vec<QueryResult>, tmp: &str) {
 		Ok(v) => v,
 		Err(err) => panic!("{err}"),
 	};
-	assert_eq!(format!("{val:#?}"), format!("{tmp:#}"));
+	assert_eq!(val, tmp);
 }
 
 /// Extract the array from a value

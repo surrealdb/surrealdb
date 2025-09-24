@@ -635,12 +635,12 @@ impl FromIterator<Geometry> for geo::Geometry<f64> {
 impl From<Geometry> for surrealdb_types::Geometry {
 	fn from(v: Geometry) -> Self {
 		match v {
-			Geometry::Point(v) => surrealdb_types::Geometry::Point(v.into()),
-			Geometry::Line(v) => surrealdb_types::Geometry::Line(v.into()),
-			Geometry::Polygon(v) => surrealdb_types::Geometry::Polygon(v.into()),
-			Geometry::MultiPoint(v) => surrealdb_types::Geometry::MultiPoint(v.into()),
-			Geometry::MultiLine(v) => surrealdb_types::Geometry::MultiLine(v.into()),
-			Geometry::MultiPolygon(v) => surrealdb_types::Geometry::MultiPolygon(v.into()),
+			Geometry::Point(v) => surrealdb_types::Geometry::Point(v),
+			Geometry::Line(v) => surrealdb_types::Geometry::Line(v),
+			Geometry::Polygon(v) => surrealdb_types::Geometry::Polygon(v),
+			Geometry::MultiPoint(v) => surrealdb_types::Geometry::MultiPoint(v),
+			Geometry::MultiLine(v) => surrealdb_types::Geometry::MultiLine(v),
+			Geometry::MultiPolygon(v) => surrealdb_types::Geometry::MultiPolygon(v),
 			Geometry::Collection(v) => {
 				surrealdb_types::Geometry::Collection(v.into_iter().map(Into::into).collect())
 			}
@@ -651,12 +651,12 @@ impl From<Geometry> for surrealdb_types::Geometry {
 impl From<surrealdb_types::Geometry> for Geometry {
 	fn from(v: surrealdb_types::Geometry) -> Self {
 		match v {
-			surrealdb_types::Geometry::Point(v) => Geometry::Point(v.into()),
-			surrealdb_types::Geometry::Line(v) => Geometry::Line(v.into()),
-			surrealdb_types::Geometry::Polygon(v) => Geometry::Polygon(v.into()),
-			surrealdb_types::Geometry::MultiPoint(v) => Geometry::MultiPoint(v.into()),
-			surrealdb_types::Geometry::MultiLine(v) => Geometry::MultiLine(v.into()),
-			surrealdb_types::Geometry::MultiPolygon(v) => Geometry::MultiPolygon(v.into()),
+			surrealdb_types::Geometry::Point(v) => Geometry::Point(v),
+			surrealdb_types::Geometry::Line(v) => Geometry::Line(v),
+			surrealdb_types::Geometry::Polygon(v) => Geometry::Polygon(v),
+			surrealdb_types::Geometry::MultiPoint(v) => Geometry::MultiPoint(v),
+			surrealdb_types::Geometry::MultiLine(v) => Geometry::MultiLine(v),
+			surrealdb_types::Geometry::MultiPolygon(v) => Geometry::MultiPolygon(v),
 			surrealdb_types::Geometry::Collection(v) => {
 				Geometry::Collection(v.into_iter().map(Into::into).collect())
 			}

@@ -533,7 +533,7 @@ impl FromFlatbuffers for KindLiteral {
 				Ok(KindLiteral::Bool(bool_val.value()))
 			}
 			LiteralType::String => {
-				let Some(string_val) = input.literal_into_string() else {
+				let Some(string_val) = input.literal_as_string() else {
 					return Err(anyhow::anyhow!("Missing string value"));
 				};
 				let Some(value) = string_val.value() else {

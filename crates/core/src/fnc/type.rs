@@ -149,7 +149,7 @@ pub fn table((val,): (Value,)) -> Result<Value> {
 		// TODO: null byte check.
 		Value::RecordId(t) => t.table,
 		// TODO: Handle null byte
-		v => v.as_raw_string(),
+		v => v.into_raw_string(),
 	};
 	Ok(Value::Table(Table::new(strand)))
 }
@@ -178,7 +178,7 @@ pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> 
 					let res =
 						RecordIdKeyRange::from_value_range((*v).clone()).ok_or_else(|| {
 							Error::IdInvalid {
-								value: Value::Range(v).as_raw_string(),
+								value: Value::Range(v).into_raw_string(),
 							}
 						})?;
 					RecordIdKey::Range(Box::new(res))
@@ -189,13 +189,13 @@ pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> 
 					ensure!(
 						!s.is_empty(),
 						Error::IdInvalid {
-							value: arg2.as_raw_string(),
+							value: arg2.into_raw_string(),
 						}
 					);
 					RecordIdKey::String(s)
 				}
 			},
-			table: arg1.as_raw_string(),
+			table: arg1.into_raw_string(),
 		})),
 
 		(arg1, None) => arg1

@@ -157,7 +157,7 @@ pub(crate) async fn compute_idiom_recursion(
 					// If we have a recurse instruction, and we have not yet
 					// reached the minimum amount of required iterations, we
 					// return an empty array.
-					Some(_) if i < rec.min => Array::new().into(),
+					Some(_) if i < rec.min => Value::Array(Array::new()),
 					// If we did reach minimum depth, the finished collection
 					// could have collected values. Let's return them.
 					Some(_) => Value::from(finished),

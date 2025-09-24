@@ -695,7 +695,7 @@ pub async fn insert_relation_table(new_db: impl CreateDb) {
 	let _: Vec<ApiRecordId> = db.insert("likes").relation(val).await.unwrap();
 
 	let vals = array![
-		object! { in: rid!("person:b"), out: rid!("thing:a") },
+		object! { in: rid!(person:b), out: rid!("thing:a") },
 		object! { id: rid!("likes:2"), in: rid!("person:c"), out: rid!("thing:a") },
 		object! { id: rid!("likes:3"), in: rid!("person:d"), out: rid!("thing:a") },
 	];

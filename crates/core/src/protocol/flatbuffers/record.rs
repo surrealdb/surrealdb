@@ -121,7 +121,7 @@ impl FromFlatbuffers for RecordIdKey {
 			}
 			proto_fb::RecordIdKeyType::String => {
 				let key_value =
-					input.id_into_string().ok_or_else(|| anyhow::anyhow!("Expected String Id"))?;
+					input.id_as_string().ok_or_else(|| anyhow::anyhow!("Expected String Id"))?;
 				Ok(RecordIdKey::String(
 					key_value
 						.value()

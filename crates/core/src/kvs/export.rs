@@ -170,7 +170,7 @@ impl SurrealValue for TableConfig {
 			TableConfig::All => Value::Bool(true),
 			TableConfig::None => Value::Bool(false),
 			TableConfig::Some(v) => Value::Array(Array::from_values(
-				v.into_iter().map(|x| Value::String(x)).collect::<Vec<_>>(),
+				v.into_iter().map(Value::String).collect::<Vec<_>>(),
 			)),
 		}
 	}
@@ -198,7 +198,7 @@ impl SurrealValue for TableConfig {
 				.collect::<Result<Vec<String>>>()
 				.map(TableConfig::Some),
 			v => Err(anyhow::Error::new(Error::InvalidExportConfig(
-				v.to_owned(),
+				v.clone(),
 				"a bool, none, null or array<string>".into(),
 			))),
 		}

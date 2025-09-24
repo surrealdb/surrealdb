@@ -11,9 +11,7 @@ use futures::stream::SelectAll;
 use indexmap::IndexMap;
 use serde::Serialize;
 use surrealdb_core::rpc::{DbResultError, DbResultStats};
-use surrealdb_types::{
-	self, SurrealValue, Value, Variables,
-};
+use surrealdb_types::{self, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;

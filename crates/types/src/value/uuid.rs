@@ -41,14 +41,17 @@ impl Uuid {
 	pub fn new() -> Self {
 		Self(uuid::Uuid::now_v7())
 	}
+
 	/// Generate a new V4 UUID
 	pub fn new_v4() -> Self {
 		Self(uuid::Uuid::new_v4())
 	}
+
 	/// Generate a new V7 UUID
 	pub fn new_v7() -> Self {
 		Self(uuid::Uuid::now_v7())
 	}
+
 	/// Generate a new V7 UUID
 	pub fn new_v7_from_datetime(timestamp: Datetime) -> Self {
 		let ts = uuid::Timestamp::from_unix(
@@ -58,10 +61,22 @@ impl Uuid {
 		);
 		Self(uuid::Uuid::new_v7(ts))
 	}
+
+	/// Generate a new nil UUID
+	pub const fn nil() -> Self {
+		Self(uuid::Uuid::nil())
+	}
+
+	/// Generate a new max UUID
+	pub const fn max() -> Self {
+		Self(uuid::Uuid::max())
+	}
+
 	/// Convert the Uuid to a raw String
 	pub fn to_raw(&self) -> String {
 		self.0.to_string()
 	}
+
 	/// Convert a slice to a UUID
 	pub fn from_slice(slice: &[u8]) -> Result<Self, uuid::Error> {
 		Ok(Self(uuid::Uuid::from_slice(slice)?))

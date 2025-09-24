@@ -26,7 +26,7 @@ impl ShowSince {
 impl From<ShowSince> for crate::expr::statements::show::ShowSince {
 	fn from(v: ShowSince) -> Self {
 		match v {
-			ShowSince::Timestamp(v) => Self::Timestamp(v),
+			ShowSince::Timestamp(v) => Self::Timestamp(v.into()),
 			ShowSince::Versionstamp(v) => Self::Versionstamp(v),
 		}
 	}
@@ -35,7 +35,9 @@ impl From<ShowSince> for crate::expr::statements::show::ShowSince {
 impl From<crate::expr::statements::show::ShowSince> for ShowSince {
 	fn from(v: crate::expr::statements::show::ShowSince) -> Self {
 		match v {
-			crate::expr::statements::show::ShowSince::Timestamp(v) => ShowSince::Timestamp(v),
+			crate::expr::statements::show::ShowSince::Timestamp(v) => {
+				ShowSince::Timestamp(v.into())
+			}
 			crate::expr::statements::show::ShowSince::Versionstamp(v) => ShowSince::Versionstamp(v),
 		}
 	}

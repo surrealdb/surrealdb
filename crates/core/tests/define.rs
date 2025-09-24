@@ -192,7 +192,7 @@ async fn define_statement_index_concurrently_building_status(
 				}
 			}
 		}
-		panic!("Invalid info: {tmp:#}");
+		panic!("Invalid info: {tmp:#?}");
 	}
 	info!("Appended: {appended_count}");
 	Ok(())

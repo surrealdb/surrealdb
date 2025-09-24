@@ -1,4 +1,3 @@
-
 use js::class::Trace;
 use js::prelude::{Coerced, Opt};
 use js::{Array, Ctx, Exception, FromJs, JsLifetime, Result, Value};

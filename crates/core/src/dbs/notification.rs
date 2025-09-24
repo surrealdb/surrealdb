@@ -1,6 +1,3 @@
-
-
-
 // #[revisioned(revision = 2)]
 // #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 // #[serde(rename_all = "UPPERCASE")]

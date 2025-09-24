@@ -259,12 +259,12 @@ impl Document {
 			}
 		}
 
-		let notification = PublicNotification {
-			id: live_subscription.id.into(),
+		let notification = PublicNotification::new(
+			live_subscription.id.into(),
 			action,
-			record: convert_value_to_public_value(Value::RecordId(rid.as_ref().clone()))?,
-			result: convert_value_to_public_value(result)?,
-		};
+			convert_value_to_public_value(Value::RecordId(rid.as_ref().clone()))?,
+			convert_value_to_public_value(result)?,
+		);
 
 		// Send the notification
 		sender.send(notification).await;

@@ -197,7 +197,7 @@ async fn field_definition_edge_permissions() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Array::new().into();
+	let val = Value::Array(Array::new());
 	assert_eq!(tmp, val);
 	//
 	Ok(())

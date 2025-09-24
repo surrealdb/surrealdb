@@ -7,7 +7,7 @@ use surrealdb_core::dbs::capabilities::ExperimentalTarget;
 use surrealdb_core::dbs::{Capabilities, Session};
 use surrealdb_core::iam::{Level, Role};
 use surrealdb_core::sql::Base;
-use surrealdb_types::Array;
+use surrealdb_types::{Array, Value};
 use tokio::time::Duration;
 
 struct TestLevel {
@@ -797,7 +797,7 @@ async fn permissions_access_grant() {
 
 				if should_succeed {
 					assert!(res.is_ok(), "{}: {:?}", msg, res);
-					assert_ne!(res.unwrap(), Array::new().into(), "{}", msg);
+					assert_ne!(res.unwrap(), Value::Array(Array::new()), "{}", msg);
 				} else {
 					let err = res.unwrap_err().to_string();
 					assert!(
