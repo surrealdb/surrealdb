@@ -3,10 +3,10 @@ use std::time::Duration;
 
 use anyhow::Result;
 use helpers::{new_ds, skip_ok};
-use surrealdb_core::dbs::{Action, Session, Variables};
+use surrealdb_core::dbs::{Session, Variables};
 use surrealdb_core::expr::Kind;
 use surrealdb_core::syn;
-use surrealdb_types::RecordId;
+use surrealdb_types::{Action, RecordId, Value};
 
 #[tokio::test]
 async fn live_permissions() -> Result<()> {
@@ -41,7 +41,7 @@ async fn live_permissions() -> Result<()> {
 		"test",
 		"test",
 		"test",
-		RecordId::new("user".to_owned(), "test".to_owned()).into(),
+		Value::RecordId(RecordId::new("user".to_owned(), "test".to_owned())),
 	)
 	.with_rt(true);
 	let sql = "

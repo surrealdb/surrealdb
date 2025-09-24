@@ -46,7 +46,7 @@ macro_rules! object {
         {
             let mut obj = $crate::Object::new();
             $(
-                $crate::object!(@insert obj, $key: $crate::Value::from($value));
+                $crate::object!(@insert obj, $key: $crate::SurrealValue::into_value($value));
             )*
             obj
         }
@@ -87,7 +87,7 @@ macro_rules! array {
         {
             let mut arr = $crate::Array::new();
             $(
-                arr.push($crate::Value::from($value));
+                arr.push($crate::Value::from_t($value));
             )*
             arr
         }

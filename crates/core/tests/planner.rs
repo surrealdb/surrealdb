@@ -1900,7 +1900,7 @@ async fn select_with_record_id_link_index() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	assert_eq!(tmp, expected);
 	//
 	Ok(())
 }
@@ -1967,7 +1967,7 @@ async fn select_with_record_id_link_unique_index() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	assert_eq!(tmp, expected);
 	//
 	Ok(())
 }
@@ -2036,7 +2036,7 @@ async fn select_with_record_id_link_unique_remote_index() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	assert_eq!(tmp, expected);
 	//
 	Ok(())
 }
@@ -2190,7 +2190,7 @@ async fn select_with_record_id_index() -> Result<()> {
 	//
 	for t in ["CONTAINS", "CONTAINSANY", "IN"] {
 		let tmp = res.remove(0).result?;
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", expected), "{t}");
+		assert_eq!(tmp, expected, "{t}");
 		//
 		let tmp = res.remove(0).result?;
 		let val = syn::value(
@@ -2217,7 +2217,7 @@ async fn select_with_record_id_index() -> Result<()> {
 	skip_ok(&mut res, 1)?;
 	// CONTAINS
 	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	assert_eq!(tmp, expected);
 	// CONTAINS EXPLAIN
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -2245,7 +2245,7 @@ async fn select_with_record_id_index() -> Result<()> {
 	assert_eq!(tmp, val);
 	// CONTAINSANY
 	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	assert_eq!(tmp, expected);
 	// CONTAINSANY EXPLAIN
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -2275,7 +2275,7 @@ async fn select_with_record_id_index() -> Result<()> {
 	assert_eq!(tmp, val);
 	// IN
 	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	assert_eq!(tmp, expected);
 	// IN EXPLAIN
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -2594,7 +2594,7 @@ async fn select_memory_ordered_collector() -> Result<()> {
 			assert_eq!(a.len(), 1500);
 			Ok(a.to_vec())
 		} else {
-			panic!("Expected a Value::Array but get: {v}");
+			panic!("Expected a Value::Array but get: {v:#?}");
 		}
 	};
 
@@ -2669,7 +2669,7 @@ async fn select_limit_start() -> Result<()> {
 		if let Value::Array(a) = r {
 			assert_eq!(a.len(), 10);
 		} else {
-			panic!("Unexpected value: {r:#}");
+			panic!("Unexpected value: {r:#?}");
 		}
 	}
 	Ok(())
@@ -2709,7 +2709,7 @@ async fn select_limit_start_order() -> Result<()> {
 		if let Value::Array(a) = r {
 			assert_eq!(a.len(), 10);
 		} else {
-			panic!("Unexpected value: {r:#}");
+			panic!("Unexpected value: {r:#?}");
 		}
 	}
 	Ok(())

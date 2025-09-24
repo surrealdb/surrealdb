@@ -367,9 +367,10 @@ async fn router(
 						db: credentials.db,
 					});
 				}
-				Err(e) => {
+				Err(err) => {
+					debug!("Error converting Value to Credentials: {err}");
 					*auth = Some(Auth::Bearer {
-						token: value.into_string()?,
+						token: value.clone().into_string()?,
 					});
 				}
 			}

@@ -338,12 +338,10 @@ where
 	}
 }
 
-pub(crate) type QueryResult = std::result::Result<Value, DbResultError>;
-
 /// The response type of a `Surreal::query` request
 #[derive(Debug)]
 pub struct IndexedResults {
-	pub(crate) results: IndexMap<usize, (DbResultStats, QueryResult)>,
+	pub(crate) results: IndexMap<usize, (DbResultStats, DbResponseResul)>,
 	pub(crate) live_queries: IndexMap<usize, Result<Stream<Value>>>,
 }
 
@@ -747,15 +745,7 @@ mod tests {
 	}
 
 	fn to_map(vec: Vec<QueryResult>) -> IndexMap<usize, (DbResultStats, QueryResult)> {
-		vec.into_iter()
-			.map(|result| {
-				let stats = DbResultStats {
-					execution_time: Default::default(),
-				};
-				(stats, result)
-			})
-			.enumerate()
-			.collect()
+		vec.into_iter().map(|result| match result {}).enumerate().collect()
 	}
 
 	#[test]
@@ -776,7 +766,7 @@ mod tests {
 	#[test]
 	fn take_from_an_errored_query() {
 		let mut response = IndexedResults {
-			results: to_map(vec![Err(Error::ConnectionUninitialised.into())]),
+			results: to_map(vec![Err(DbResultError::custom("STU"))]),
 			..IndexedResults::new()
 		};
 		response.take::<Option<()>>(0).unwrap_err();
@@ -789,7 +779,7 @@ mod tests {
 			..IndexedResults::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value, Default::default());
+		assert_eq!(value, Value::None);
 
 		let mut response = IndexedResults {
 			results: to_map(vec![]),
@@ -815,7 +805,7 @@ mod tests {
 			..IndexedResults::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value, Value::from(scalar));
+		assert_eq!(value, Value::from_t(scalar));
 
 		let mut response = IndexedResults {
 			results: to_map(vec![Ok(scalar.into())]),
@@ -838,7 +828,7 @@ mod tests {
 			..IndexedResults::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value, Value::from(scalar));
+		assert_eq!(value, Value::from_t(scalar));
 
 		let mut response = IndexedResults {
 			results: to_map(vec![Ok(scalar.into())]),
@@ -883,7 +873,7 @@ mod tests {
 		};
 		assert_eq!(zero, 0);
 		let one: Value = response.take(1).unwrap();
-		assert_eq!(one, Value::from(1));
+		assert_eq!(one, Value::from_t(1));
 	}
 
 	#[test]
@@ -978,21 +968,21 @@ mod tests {
 	#[test]
 	fn take_partial_records() {
 		let mut response = IndexedResults {
-			results: to_map(vec![Ok(vec![Value::from(true), Value::from(false)].into())]),
+			results: to_map(vec![Ok(vec![Value::from_t(true), Value::from_t(false)].into())]),
 			..IndexedResults::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value, Value::from(vec![Value::from(true), Value::from(false)]));
+		assert_eq!(value, Value::from_t(vec![Value::from_t(true), Value::from_t(false)]));
 
 		let mut response = IndexedResults {
-			results: to_map(vec![Ok(vec![Value::from(true), Value::from(false)].into())]),
+			results: to_map(vec![Ok(vec![Value::from_t(true), Value::from_t(false)].into())]),
 			..IndexedResults::new()
 		};
 		let vec: Vec<bool> = response.take(0).unwrap();
 		assert_eq!(vec, vec![true, false]);
 
 		let mut response = IndexedResults {
-			results: to_map(vec![Ok(vec![Value::from(true), Value::from(false)].into())]),
+			results: to_map(vec![Ok(vec![Value::from_t(true), Value::from_t(false)].into())]),
 			..IndexedResults::new()
 		};
 
@@ -1008,7 +998,7 @@ mod tests {
 		};
 
 		let records = map.swap_remove(&0).unwrap().1.unwrap();
-		assert_eq!(records, Value::from(vec![Value::from(true), Value::from(false)]));
+		assert_eq!(records, Value::from_t(vec![Value::from_t(true), Value::from_t(false)]));
 	}
 
 	#[test]
@@ -1072,6 +1062,6 @@ mod tests {
 		};
 		assert_eq!(value, 2);
 		let value: Value = response.take(4).unwrap();
-		assert_eq!(value, Value::from(3));
+		assert_eq!(value, Value::from_t(3));
 	}
 }

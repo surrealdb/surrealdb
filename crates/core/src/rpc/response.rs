@@ -58,7 +58,7 @@ impl SurrealValue for DbResult {
 				let converted: Vec<Value> = v.into_iter().map(|x| x.into_value()).collect();
 				Value::Array(surrealdb_types::Array::from_values(converted))
 			}
-			DbResult::Live(v) => Value::from(surrealdb_types::Object::from_map(map! {
+			DbResult::Live(v) => Value::from_t(surrealdb_types::Object::from_map(map! {
 				"id".to_owned() => Value::Uuid(surrealdb_types::Uuid(v.id.0)),
 				"action".to_owned() => Value::String(v.action.to_string()),
 				"record".to_owned() => v.record,
@@ -115,7 +115,7 @@ impl SurrealValue for DbResult {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, SurrealValue, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, SurrealValue, Serialize, Deserialize)]
 pub struct DbResultError {
 	pub(crate) code: i64,
 	pub(crate) message: String,
@@ -179,11 +179,13 @@ impl std::error::Error for DbResultError {
 	}
 }
 
+pub type DbResponseResult = Result<DbResult, DbResultError>;
+
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DbResponse {
 	pub id: Option<Value>,
-	pub result: Result<DbResult, DbResultError>,
+	pub result: DbResponseResult,
 }
 
 impl DbResponse {

@@ -373,8 +373,8 @@ mod tests {
 	async fn local_engine_with_auth() {
 		// Instantiate an in-memory instance with root credentials
 		let creds = Root {
-			username: "root",
-			password: "root",
+			username: "root".to_string(),
+			password: "root".to_string(),
 		};
 		let db = connect(("memory", Config::new().user(creds).capabilities(Capabilities::all())))
 			.await

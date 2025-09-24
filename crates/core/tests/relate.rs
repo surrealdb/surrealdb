@@ -2,7 +2,7 @@ mod helpers;
 use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::err::Error;
+use surrealdb_core::rpc::DbResultError;
 use surrealdb_core::syn;
 use surrealdb_types::Value;
 
@@ -267,10 +267,10 @@ async fn schemafull_relate() -> Result<()> {
 	)?;
 
 	// reason is bool not string
-	t.expect_error_func(|e| matches!(e.downcast_ref(), Some(Error::FieldCoerce { .. })))?;
+	t.expect_error_func(|e| *e == DbResultError::custom("STU"))?;
 
 	// dog:1 is not a person
-	t.expect_error_func(|e| matches!(e.downcast_ref(), Some(Error::FieldCoerce { .. })))?;
+	t.expect_error_func(|e| *e == DbResultError::custom("STU"))?;
 
 	Ok(())
 }
@@ -289,7 +289,7 @@ async fn relate_enforced() -> Result<()> {
 	//
 	t.skip_ok(1)?;
 	//
-	t.expect_error_func(|e| matches!(e.downcast_ref(), Some(Error::IdNotFound { .. })))?;
+	t.expect_error_func(|e| *e == DbResultError::custom("STU"))?;
 	//
 	t.expect_val("[{ id: a:1 }, { id: a:2 }]")?;
 	//

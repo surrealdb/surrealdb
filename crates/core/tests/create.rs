@@ -35,7 +35,7 @@ async fn create_or_insert_with_permissions() -> Result<()> {
 		"test",
 		"test",
 		"test",
-		RecordId::new("user".to_owned(), "test".to_owned()).into(),
+		Value::RecordId(RecordId::new("user", "test".to_string())).into(),
 	);
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);

@@ -1231,7 +1231,7 @@ async fn router(
 		}
 		Command::Health => Ok(IndexedDbResults::Other(Value::None)),
 		Command::Version => {
-			Ok(IndexedDbResults::Other(Value::from(surrealdb_core::env::VERSION.to_string())))
+			Ok(IndexedDbResults::Other(Value::from_t(surrealdb_core::env::VERSION.to_string())))
 		}
 		Command::Set {
 			key,

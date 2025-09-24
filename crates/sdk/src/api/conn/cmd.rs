@@ -162,7 +162,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "signup",
-				params: Some(Value::Array(Array::from(vec![Value::from(credentials)]))),
+				params: Some(Value::Array(Array::from(vec![Value::from_t(credentials)]))),
 				transaction: None,
 			},
 			Command::Signin {
@@ -170,7 +170,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "signin",
-				params: Some(Value::Array(Array::from(vec![Value::from(credentials)]))),
+				params: Some(Value::Array(Array::from(vec![Value::from_t(credentials)]))),
 				transaction: None,
 			},
 			Command::Authenticate {
@@ -178,7 +178,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "authenticate",
-				params: Some(Value::Array(Array::from(vec![Value::from(token)]))),
+				params: Some(Value::Array(Array::from(vec![Value::from_t(token)]))),
 				transaction: None,
 			},
 			Command::Invalidate => RouterRequest {
@@ -453,7 +453,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "let",
-				params: Some(Value::from(vec![Value::from(key), value])),
+				params: Some(Value::from_t(vec![Value::from_t(key), value])),
 				transaction: None,
 			},
 			Command::Unset {
@@ -461,7 +461,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "unset",
-				params: Some(Value::from(vec![Value::from(key)])),
+				params: Some(Value::from_t(vec![Value::from_t(key)])),
 				transaction: None,
 			},
 			Command::SubscribeLive {
@@ -472,7 +472,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "kill",
-				params: Some(Value::from(vec![Value::Uuid(Uuid(uuid))])),
+				params: Some(Value::from_t(vec![Value::Uuid(Uuid(uuid))])),
 				transaction: None,
 			},
 			Command::Run {

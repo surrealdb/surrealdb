@@ -106,7 +106,7 @@ async fn database_change_feeds() -> Result<()> {
 		)
 		.unwrap();
 		Some(&tmp)
-			.filter(|x| *x == &val)
+			.filter(|x| *x == val)
 			.map(|_v| ())
 			.ok_or_else(|| anyhow!("Expected UPDATE value:\nleft: {tmp:?}\nright: {val:?}"))?;
 		// DELETE
@@ -120,16 +120,16 @@ async fn database_change_feeds() -> Result<()> {
 		let tmp = res.remove(0).result?;
 		cf_val_arr
 			.iter()
-			.find(|x| *x == &tmp)
+			.find(|x| *x == tmp)
 			// We actually dont want to capture if its found
 			.map(|_v| ())
 			.ok_or_else(|| {
 				anyhow!(
-					"Expected SHOW CHANGES value not found:\n{}\nin:\n{}",
+					"Expected SHOW CHANGES value not found:\n{:?}\nin:\n{:?}",
 					tmp,
 					cf_val_arr
 						.iter()
-						.map(|vs| vs.into_string().unwrap())
+						.map(|vs| vs.clone().into_string().unwrap())
 						.reduce(|left, right| format!("{}\n{}", left, right))
 						.unwrap()
 				)
@@ -324,7 +324,7 @@ async fn table_change_feeds() -> Result<()> {
 		tmp,
 		allowed_values
 			.iter()
-			.map(|v| v.into_string().unwrap())
+			.map(|v| v.clone().into_string().unwrap())
 			.reduce(|a, b| format!("{}\n{}", a, b))
 			.unwrap()
 	);
@@ -341,7 +341,7 @@ async fn table_change_feeds() -> Result<()> {
 		tmp,
 		allowed_values
 			.iter()
-			.map(|v| v.into_string().unwrap())
+			.map(|v| v.clone().into_string().unwrap())
 			.reduce(|a, b| format!("{}\n{}", a, b))
 			.unwrap()
 	);

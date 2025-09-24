@@ -6,7 +6,6 @@ use anyhow::Result;
 use helpers::*;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::err::Error;
-use surrealdb_core::expr::Part;
 use surrealdb_core::iam::{Level, Role};
 use surrealdb_core::syn;
 use surrealdb_types::Value;
@@ -177,9 +176,9 @@ async fn define_statement_index_concurrently_building_status(
 							continue;
 						}
 						"ready" => {
-							let initial = new_initial.unwrap().coerce_to::<i64>()? as usize;
-							let pending = new_pending.unwrap().coerce_to::<i64>()?;
-							let updated = new_updated.unwrap().coerce_to::<i64>()? as usize;
+							let initial = new_initial.unwrap().into_int()? as usize;
+							let pending = new_pending.unwrap().into_int()?;
+							let updated = new_updated.unwrap().into_int()? as usize;
 							assert!(initial > 0, "{initial} > 0");
 							assert!(initial <= initial_size, "{initial} <= {initial_size}");
 							assert_eq!(pending, 0);
@@ -299,8 +298,7 @@ async fn define_statement_user_root() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let define_str =
-		tmp.pick(&[Part::Field("users".to_owned()), Part::Field("test".to_owned())]).to_string();
+	let define_str = tmp.get("users").get("test").clone().into_string().unwrap();
 
 	assert!(
 		define_str
@@ -338,7 +336,9 @@ async fn define_statement_user_ns() -> Result<()> {
 			.result
 			.as_ref()
 			.unwrap()
-			.to_string()
+			.clone()
+			.into_string()
+			.unwrap()
 			.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
 	);
 	assert!(
@@ -347,7 +347,9 @@ async fn define_statement_user_ns() -> Result<()> {
 			.result
 			.as_ref()
 			.unwrap()
-			.to_string()
+			.clone()
+			.into_string()
+			.unwrap()
 			.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
 	);
 	assert!(
@@ -356,7 +358,9 @@ async fn define_statement_user_ns() -> Result<()> {
 			.result
 			.as_ref()
 			.unwrap()
-			.to_string()
+			.clone()
+			.into_string()
+			.unwrap()
 			.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
 	);
 
@@ -408,7 +412,9 @@ async fn define_statement_user_db() -> Result<()> {
 			.result
 			.as_ref()
 			.unwrap()
-			.to_string()
+			.clone()
+			.into_string()
+			.unwrap()
 			.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$")
 	);
 	assert!(
@@ -416,7 +422,9 @@ async fn define_statement_user_db() -> Result<()> {
 			.result
 			.as_ref()
 			.unwrap()
-			.to_string()
+			.clone()
+			.into_string()
+			.unwrap()
 			.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$")
 	);
 	assert!(
@@ -424,7 +432,9 @@ async fn define_statement_user_db() -> Result<()> {
 			.result
 			.as_ref()
 			.unwrap()
-			.to_string()
+			.clone()
+			.into_string()
+			.unwrap()
 			.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$")
 	);
 

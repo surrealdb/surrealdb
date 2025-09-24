@@ -4,7 +4,7 @@ mod helpers;
 use anyhow::Result;
 use helpers::{new_ds, with_enough_stack};
 use surrealdb_core::dbs::Session;
-use surrealdb_core::err::Error;
+use surrealdb_core::rpc::DbResultError;
 use surrealdb_core::syn;
 use surrealdb_types::Value;
 
@@ -171,11 +171,7 @@ fn ok_graph_traversal_depth() -> Result<()> {
 					assert_eq!(res, val);
 				}
 				Err(res) => {
-					assert!(
-						matches!(res.downcast_ref(), Some(Error::ComputationDepthExceeded)),
-						"found {:?}",
-						res
-					);
+					assert_eq!(res, DbResultError::custom("STU"));
 					assert!(n > 10, "Max traversals: {}", n - 1);
 				}
 			}
@@ -198,7 +194,7 @@ fn ok_cast_chain_depth() -> Result<()> {
 		assert_eq!(res.len(), 1);
 		//
 		let tmp = res.next().unwrap()?;
-		let val = Value::from(vec![Value::from(5)]);
+		let val = Value::from_t(vec![Value::from_t(5)]);
 		assert_eq!(tmp, val);
 		//
 		Ok(())
@@ -210,26 +206,12 @@ fn excessive_cast_chain_depth() -> Result<()> {
 	// Ensure a good stack size for tests
 	with_enough_stack(async {
 		// Run a casting query which will fail (either while parsing or executing)
-		match run_queries(&cast_chain(125)).await {
-			Ok(mut res) => {
-				assert_eq!(res.len(), 1);
-				//
-				let tmp = res.next().unwrap();
-				let err = tmp.unwrap_err();
-				assert!(
-					matches!(err.downcast_ref(), Some(Error::ComputationDepthExceeded)),
-					"found {:?}",
-					err
-				);
-			}
-			Err(e) => {
-				assert!(
-					matches!(e.downcast_ref(), Some(Error::ComputationDepthExceeded)),
-					"found {:?}",
-					e
-				);
-			}
-		}
+		let mut res = run_queries(&cast_chain(125)).await;
+		assert_eq!(res.len(), 1);
+		//
+		let tmp = res.next().unwrap();
+		let err = tmp.unwrap_err();
+		assert_eq!(err, DbResultError::custom("STU"));
 		//
 		Ok(())
 	})
@@ -237,8 +219,10 @@ fn excessive_cast_chain_depth() -> Result<()> {
 
 async fn run_queries(
 	sql: &str,
-) -> Result<impl ExactSizeIterator<Item = Result<Value>> + DoubleEndedIterator + 'static> {
-	let dbs = new_ds().await?;
+) -> impl ExactSizeIterator<Item = std::result::Result<Value, DbResultError>>
++ DoubleEndedIterator
++ 'static {
+	let dbs = new_ds().await.expect("Failed to create new datastore");
 	let ses = Session::owner().with_ns("test").with_db("test");
 	dbs.execute(sql, &ses, None).await.map(|v| v.into_iter().map(|res| res.result))
 }

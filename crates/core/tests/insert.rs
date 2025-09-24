@@ -249,16 +249,16 @@ async fn insert_statement_duplicate_key_update() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp.first().unwrap().get("name"), Value::from("SurrealDB".to_owned()));
-	assert_eq!(tmp.first().unwrap().get("founded"), Value::from("2021-09-10".to_owned()));
+	assert_eq!(tmp.first().unwrap().get("name"), Value::from_t("SurrealDB".to_owned()));
+	assert_eq!(tmp.first().unwrap().get("founded"), Value::from_t("2021-09-10".to_owned()));
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp.first().unwrap().get("name"), Value::from("SurrealDB".to_owned()));
-	assert_eq!(tmp.first().unwrap().get("founded"), Value::from("2021-09-11".to_owned()));
+	assert_eq!(tmp.first().unwrap().get("name"), Value::from_t("SurrealDB".to_owned()));
+	assert_eq!(tmp.first().unwrap().get("founded"), Value::from_t("2021-09-11".to_owned()));
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp.first().unwrap().get("name"), Value::from("SurrealDB".to_owned()));
-	assert_eq!(tmp.first().unwrap().get("founded"), Value::from("2021-09-12".to_owned()));
+	assert_eq!(tmp.first().unwrap().get("name"), Value::from_t("SurrealDB".to_owned()));
+	assert_eq!(tmp.first().unwrap().get("founded"), Value::from_t("2021-09-12".to_owned()));
 	//
 	Ok(())
 }

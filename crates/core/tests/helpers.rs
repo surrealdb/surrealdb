@@ -391,9 +391,9 @@ impl Test {
 		// Then check they are indeed the same values
 		//
 		// If it is a constant we need to transform it as a number
-		if val.into_number().map(|x| x.is_nan()).unwrap_or(false) {
+		if val.clone().into_number().map(|x| x.is_nan()).unwrap_or(false) {
 			assert!(
-				tmp.into_number().map(|x| x.is_nan()).unwrap_or(false),
+				tmp.clone().into_number().map(|x| x.is_nan()).unwrap_or(false),
 				"Expected NaN but got {info}: {tmp:?}"
 			);
 		} else {

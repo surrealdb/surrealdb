@@ -1393,7 +1393,7 @@ async fn select_field_value_permissions() -> Result<()> {
 		SELECT public FROM data WHERE private = "private";
 		SELECT VALUE private FROM data WHERE id = data:1;
 	"#;
-	let ses = Session::for_record("test", "test", "user", syn::value("user:1").unwrap());
+	let ses = Session::for_record("test", "test", "user", syn::value("user:1").unwrap().into());
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//

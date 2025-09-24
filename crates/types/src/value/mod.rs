@@ -168,9 +168,19 @@ impl Value {
 	/// to perform the conversion.
 	pub fn get<Idx>(&self, index: Idx) -> &Value
 	where
-		Value: Index<Idx, Output = Value>,
+		Value: Indexable<Idx>,
 	{
-		self.index(index)
+		Indexable::get(self, index)
+	}
+
+	/// Removes the value at the given index.
+	///
+	/// Returns `Some(Value)` if the value was removed, `None` if the value was not found.
+	pub fn remove<Idx>(&mut self, index: Idx) -> Value
+	where
+		Value: Indexable<Idx>,
+	{
+		Indexable::remove(self, index)
 	}
 
 	/// Checks if this value is of the specified type
@@ -183,14 +193,14 @@ impl Value {
 	/// Converts this value to the specified type
 	///
 	/// Returns `Ok(T)` if the conversion is successful, `Err(anyhow::Error)` otherwise.
-	pub fn into<T: SurrealValue>(self) -> anyhow::Result<T> {
+	pub fn into_t<T: SurrealValue>(self) -> anyhow::Result<T> {
 		T::from_value(self)
 	}
 
 	/// Creates a value from the specified type
 	///
 	/// Converts the given value of type `T` into a `Value`.
-	pub fn from<T: SurrealValue>(value: T) -> Value {
+	pub fn from_t<T: SurrealValue>(value: T) -> Value {
 		value.into_value()
 	}
 }
@@ -213,6 +223,63 @@ impl Index<&str> for Value {
 		match &self {
 			Value::Object(map) => map.0.get(index).unwrap_or(&Value::None),
 			_ => &Value::None,
+		}
+	}
+}
+
+impl PartialEq<&Value> for Value {
+	fn eq(&self, other: &&Value) -> bool {
+		self == *other
+	}
+}
+
+impl PartialEq<Value> for &Value {
+	fn eq(&self, other: &Value) -> bool {
+		**self == *other
+	}
+}
+
+/// Trait for values that can be indexed
+pub trait Indexable<Idx> {
+	/// Get the value at the given index.
+	fn get(&self, index: Idx) -> &Value;
+	/// Remove the value at the given index.
+	fn remove(&mut self, index: Idx) -> Value;
+}
+
+impl Indexable<usize> for Value {
+	fn get(&self, index: usize) -> &Value {
+		match self {
+			Value::Array(arr) => arr.index(index),
+			_ => &Value::None,
+		}
+	}
+	fn remove(&mut self, index: usize) -> Value {
+		match self {
+			Value::Array(arr) => arr.remove(index),
+			_ => Value::None,
+		}
+	}
+}
+
+impl Indexable<&str> for Value {
+	fn get(&self, index: &str) -> &Value {
+		match self {
+			Value::Object(obj) => match obj.get(index) {
+				Some(v) => v,
+				None => &Value::None,
+			},
+			_ => &Value::None,
+		}
+	}
+
+	fn remove(&mut self, index: &str) -> Value {
+		match self {
+			Value::Object(obj) => match obj.remove(index) {
+				Some(v) => v,
+				None => Value::None,
+			},
+			_ => Value::None,
 		}
 	}
 }

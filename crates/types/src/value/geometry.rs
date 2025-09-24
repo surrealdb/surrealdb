@@ -282,7 +282,7 @@ impl Geometry {
 	/// Convert this geometry into an object
 	pub fn as_object(&self) -> Object {
 		object! {
-			type: self.as_type().to_string(),
+			type: Value::String(self.as_type().to_string()),
 			coordinates: self.as_coordinates(),
 		}
 	}

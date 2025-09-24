@@ -962,7 +962,7 @@ async fn update_field_permissions() -> Result<()> {
 	let sql = r#"
 		UPDATE data:1 SET public = private;
 	"#;
-	let ses = Session::for_record("test", "test", "user", syn::value("user:1").unwrap());
+	let ses = Session::for_record("test", "test", "user", syn::value("user:1").unwrap().into());
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//

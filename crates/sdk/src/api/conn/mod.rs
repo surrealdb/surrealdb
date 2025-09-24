@@ -14,7 +14,6 @@ use crate::api::method::BoxFuture;
 use crate::api::method::query::IndexedResults;
 use crate::api::opt::Endpoint;
 use crate::api::{ExtraFeatures, Result, Surreal};
-use crate::method::query::QueryResult;
 
 mod cmd;
 pub(crate) use cmd::Command;
@@ -192,7 +191,9 @@ impl IndexedDbResults {
 			DbResult::Other(value) => Ok(Self::Other(value)),
 			DbResult::Query(responses) => {
 				let mut results =
-					IndexMap::<usize, (DbResultStats, QueryResult)>::with_capacity(responses.len());
+					IndexMap::<usize, (DbResultStats, DbResponseResult)>::with_capacity(
+						responses.len(),
+					);
 
 				for (index, response) in responses.into_iter().enumerate() {
 					let stats = DbResultStats::default().with_execution_time(response.time);

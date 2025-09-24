@@ -8,7 +8,6 @@ use futures::{SinkExt, StreamExt};
 use revision::revisioned;
 use serde::Deserialize;
 use surrealdb_core::rpc::{DbResponse, DbResult};
-use surrealdb_types::Value;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 use tokio::time;
@@ -33,7 +32,7 @@ use crate::api::opt::Tls;
 use crate::api::{ExtraFeatures, Result, Surreal};
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
-use crate::types::{Array, Value};
+use crate::types::Value;
 
 pub(crate) const MAX_MESSAGE_SIZE: usize = 64 << 20; // 64 MiB
 pub(crate) const MAX_FRAME_SIZE: usize = 16 << 20; // 16 MiB
@@ -639,6 +638,7 @@ mod tests {
 	use rand::{Rng, thread_rng};
 
 	use crate::core::rpc;
+	use crate::types::{Array, Value};
 
 	#[test_log::test]
 	fn large_vector_serialisation_bench() {

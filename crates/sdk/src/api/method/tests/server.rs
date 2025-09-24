@@ -1,9 +1,9 @@
 use async_channel::Receiver;
-use surrealdb_core::rpc::DbResponse;
+use surrealdb_core::rpc::{DbResponse, DbResult};
 
 use super::types::User;
-use crate::api::conn::{Command, Route};
-use crate::api::{self, IndexedResults as QueryResponse};
+use crate::api::IndexedResults as QueryResponse;
+use crate::api::conn::{Command, IndexedDbResults, Route};
 use crate::opt::Resource;
 use crate::types::{SurrealValue, Value};
 
@@ -19,7 +19,7 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 			eprintln!("cmd: {cmd:?}");
 
 			let result = match cmd {
-				Command::Invalidate | Command::Health => Ok(DbResponse::Other(Value::None)),
+				Command::Invalidate | Command::Health => DbResult::Other(Value::None),
 				Command::Authenticate {
 					..
 				}
@@ -28,23 +28,23 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				}
 				| Command::Unset {
 					..
-				} => Ok(DbResponse::Other(Value::None)),
+				} => DbResult::Other(Value::None),
 				Command::SubscribeLive {
 					..
-				} => Ok(DbResponse::Other("c6c0e36c-e2cf-42cb-b2d5-75415249b261".to_owned().into())),
+				} => DbResult::Other("c6c0e36c-e2cf-42cb-b2d5-75415249b261".to_owned().into()),
 				Command::Version => Ok(DbResponse::Other("1.0.0".into())),
 				Command::Use {
 					..
-				} => Ok(DbResponse::Other(Value::None)),
+				} => DbResult::Other(Value::None),
 				Command::Signup {
 					..
 				}
 				| Command::Signin {
 					..
-				} => Ok(DbResponse::Other("jwt".to_owned().into())),
+				} => DbResult::Other("jwt".to_owned().into()),
 				Command::Set {
 					..
-				} => Ok(DbResponse::Other(Value::None)),
+				} => DbResult::Other(Value::None),
 				Command::Query {
 					..
 				}
@@ -56,13 +56,13 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				}
 				| Command::Merge {
 					..
-				} => Ok(DbResponse::Query(QueryResponse::new())),
+				} => DbResult::Query(QueryResponse::new()),
 				Command::Create {
 					data,
 					..
 				} => match data {
-					None => Ok(DbResponse::Other(User::default().into_value())),
-					Some(user) => Ok(DbResponse::Other(user.clone())),
+					None => DbResult::Other(User::default().into_value()),
+					Some(user) => DbResult::Other(user.clone()),
 				},
 				Command::Select {
 					what,
@@ -73,9 +73,9 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					..
 				} => match what {
 					Resource::Table(..) | Resource::Array(..) | Resource::Range(_) => {
-						Ok(DbResponse::Other(Value::Array(Default::default())))
+						DbResult::Other(Value::Array(Default::default()))
 					}
-					Resource::RecordId(..) => Ok(DbResponse::Other(User::default().into_value())),
+					Resource::RecordId(..) => DbResult::Other(User::default().into_value()),
 					_ => unreachable!(),
 				},
 				Command::Upsert {
@@ -87,28 +87,28 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					..
 				} => match what {
 					Resource::Table(..) | Resource::Array(..) | Resource::Range(..) => {
-						Ok(DbResponse::Other(Value::Array(Default::default())))
+						DbResult::Other(Value::Array(Default::default()))
 					}
-					Resource::RecordId(..) => Ok(DbResponse::Other(User::default().into_value())),
+					Resource::RecordId(..) => DbResult::Other(User::default().into_value()),
 					_ => unreachable!(),
 				},
 				Command::Insert {
 					data,
 					..
 				} => match data {
-					Value::Array(..) => Ok(DbResponse::Other(Value::Array(Default::default()))),
-					_ => Ok(DbResponse::Other(User::default().into_value())),
+					Value::Array(..) => DbResult::Other(Value::Array(Default::default())),
+					_ => DbResult::Other(User::default().into_value()),
 				},
 				Command::InsertRelation {
 					data,
 					..
 				} => match data {
-					Value::Array(..) => Ok(DbResponse::Other(Value::Array(Default::default()))),
-					_ => Ok(DbResponse::Other(User::default().into_value())),
+					Value::Array(..) => DbResult::Other(Value::Array(Default::default())),
+					_ => DbResult::Other(User::default().into_value()),
 				},
 				Command::Run {
 					..
-				} => Ok(DbResponse::Other(Value::None)),
+				} => DbResult::Other(Value::None),
 				Command::ExportMl {
 					..
 				}
@@ -126,8 +126,10 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				}
 				| Command::ImportFile {
 					..
-				} => Ok(DbResponse::Other(Value::None)),
+				} => DbResult::Other(Value::None),
 			};
+
+			let result = IndexedDbResults::from_server_result(result).unwrap();
 
 			if let Err(message) = response.send(result).await {
 				panic!("message dropped; {message:?}");

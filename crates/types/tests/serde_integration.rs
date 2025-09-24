@@ -186,7 +186,7 @@ fn test_surreal_to_json_value_compatibility() {
 	// Create a SurrealDB Object manually
 	let mut obj = Object::new();
 	obj.insert("full_name".to_string(), Value::String("Eve".to_string()));
-	obj.insert("age".to_string(), Value::from(45i64));
+	obj.insert("age".to_string(), Value::from_t(45i64));
 	obj.insert("street".to_string(), Value::String("321 Elm St".to_string()));
 	obj.insert("city".to_string(), Value::String("Metropolis".to_string()));
 	let surreal_value = Value::Object(obj);

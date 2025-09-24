@@ -74,7 +74,7 @@ async fn run(i: &Input, q: &str, expected: usize) {
 		let expected = Value::Array(Array::from(vec![Value::Object(Object::from(
 			BTreeMap::from([("count", Value::Number(Number::Int(expected as i64)))]),
 		))]));
-		assert_eq!(format!("{val:#}"), format!("{expected:#}"));
+		assert_eq!(val, expected);
 	}
 	black_box(r);
 }
