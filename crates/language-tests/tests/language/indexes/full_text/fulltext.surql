@@ -44,7 +44,6 @@ value = "[]"
 value = "[]"
 
 */
-
 CREATE b:1 SET t = 'Hello World!';
 CREATE b:2 SET t = 'Yet Another World!';
 CREATE b:3 SET t = 'again hello';

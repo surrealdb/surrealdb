@@ -919,6 +919,8 @@ impl Parser<'_> {
 			concurrently: false,
 		};
 
+		let mut field_span = None;
+
 		loop {
 			match self.peek_kind() {
 				// COLUMNS and FIELDS are the same tokenkind
@@ -928,6 +930,7 @@ impl Parser<'_> {
 					while self.eat(t!(",")) {
 						res.cols.push(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 					}
+					field_span = Some(self.last_span);
 				}
 				t!("UNIQUE") => {
 					self.pop_peek();
@@ -943,7 +946,6 @@ impl Parser<'_> {
 					let mut analyzer: Option<String> = None;
 					let mut scoring = None;
 					let mut hl = false;
-
 					loop {
 						match self.peek_kind() {
 							t!("ANALYZER") => {
@@ -1094,8 +1096,20 @@ impl Parser<'_> {
 				_ => break,
 			}
 		}
-		if matches!(res.index, Index::Count(_)) && !res.cols.is_empty() {
-			bail!("Cannot create a count index with fields");
+		if let Some(field_span) = field_span {
+			match res.index {
+				Index::Count(_) => {
+					if !res.cols.is_empty() {
+						bail!("Cannot create a count index with fields", @field_span);
+					}
+				}
+				Index::FullText(_) => {
+					if res.cols.len() != 1 {
+						bail!("Expected one column for fulltext index, found {}", res.cols.len(), @field_span);
+					}
+				}
+				_ => {}
+			}
 		}
 		Ok(res)
 	}
