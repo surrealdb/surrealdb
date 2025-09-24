@@ -24,6 +24,11 @@ pub enum Number {
 }
 
 impl Number {
+	/// Checks if this number is NaN.
+	pub fn is_nan(&self) -> bool {
+		matches!(self, Number::Float(v) if v.is_nan())
+	}
+
 	/// Converts this number into an i64.
 	///
 	/// Returns 0 if the number cannot be converted.

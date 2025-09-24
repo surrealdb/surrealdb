@@ -1,12 +1,10 @@
 mod helpers;
 use anyhow::Result;
 use helpers::new_ds;
-use surrealdb::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::{Level, Role};
 use surrealdb_core::syn;
-use surrealdb_core::types::{PublicAction, PublicNotification};
-use surrealdb_types::{Array, RecordId, Value};
+use surrealdb_types::{Action, Array, Notification, RecordId, Value};
 
 //
 // Permissions

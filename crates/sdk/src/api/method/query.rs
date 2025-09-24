@@ -9,7 +9,6 @@ use futures::StreamExt;
 use futures::future::Either;
 use futures::stream::SelectAll;
 use indexmap::IndexMap;
-use serde::Serialize;
 use surrealdb_core::rpc::{DbResultError, DbResultStats};
 use surrealdb_types::{self, SurrealValue, Value, Variables};
 use uuid::Uuid;
@@ -734,8 +733,6 @@ impl WithStats<IndexedResults> {
 
 #[cfg(test)]
 mod tests {
-	use serde::Deserialize;
-
 	use super::*;
 
 	#[derive(Debug, Clone, SurrealValue)]
@@ -749,10 +746,10 @@ mod tests {
 		body: String,
 	}
 
-	fn to_map(vec: Vec<QueryResult>) -> IndexMap<usize, (Stats, QueryResult)> {
+	fn to_map(vec: Vec<QueryResult>) -> IndexMap<usize, (DbResultStats, QueryResult)> {
 		vec.into_iter()
 			.map(|result| {
-				let stats = Stats {
+				let stats = DbResultStats {
 					execution_time: Default::default(),
 				};
 				(stats, result)

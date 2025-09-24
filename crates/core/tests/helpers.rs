@@ -12,6 +12,7 @@ use surrealdb_core::dbs::capabilities::Capabilities;
 use surrealdb_core::dbs::{QueryResult, Session};
 use surrealdb_core::iam::{Auth, Level, Role};
 use surrealdb_core::kvs::Datastore;
+use surrealdb_core::rpc::DbResultError;
 use surrealdb_core::syn;
 use surrealdb_types::{Number, Value};
 
@@ -460,17 +461,17 @@ impl Test {
 	/// error or if the error message does not pass the check.
 	#[track_caller]
 	#[allow(dead_code)]
-	pub fn expect_error_func<F: Fn(&anyhow::Error) -> bool>(
+	pub fn expect_error_func<F: Fn(&DbResultError) -> bool>(
 		&mut self,
 		check: F,
 	) -> Result<&mut Self> {
 		let tmp = self.next()?.result;
 		match &tmp {
 			Ok(val) => {
-				panic!("At position {} - Expect error, but got OK: {val}", self.pos);
+				panic!("At position {} - Expect error, but got OK: {val:?}", self.pos);
 			}
 			Err(e) => {
-				assert!(check(e), "At position {} - Err didn't match: {e}", self.pos)
+				assert!(check(e), "At position {} - Err didn't match: {e:?}", self.pos)
 			}
 		}
 		Ok(self)

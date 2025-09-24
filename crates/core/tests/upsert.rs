@@ -794,7 +794,7 @@ async fn check_permissions_auth_enabled() {
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
-		let res = res.unwrap().to_string();
+		let res = res.unwrap().into_string().unwrap();
 		assert!(
 			!res.contains("Name"),
 			"{}: {:?}",
@@ -846,7 +846,7 @@ async fn check_permissions_auth_enabled() {
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
-		let res = res.unwrap().to_string();
+		let res = res.unwrap().into_string().unwrap();
 		assert!(
 			res.contains("Name"),
 			"{}: {:?}",
@@ -931,7 +931,7 @@ async fn check_permissions_auth_disabled() {
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
-		let res = res.unwrap().to_string();
+		let res = res.unwrap().into_string().unwrap();
 		assert!(
 			res.contains("Name"),
 			"{}: {:?}",
@@ -983,7 +983,7 @@ async fn check_permissions_auth_disabled() {
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
-		let res = res.unwrap().to_string();
+		let res = res.unwrap().into_string().unwrap();
 		assert!(
 			res.contains("Name"),
 			"{}: {:?}",

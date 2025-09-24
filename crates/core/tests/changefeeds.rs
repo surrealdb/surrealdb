@@ -320,11 +320,11 @@ async fn table_change_feeds() -> Result<()> {
 			.collect();
 	assert!(
 		allowed_values.contains(&tmp),
-		"tmp:\n{}\nchecked:\n{}",
+		"tmp:\n{:?}\nchecked:\n{:?}",
 		tmp,
 		allowed_values
 			.iter()
-			.map(|v| v.to_string())
+			.map(|v| v.into_string().unwrap())
 			.reduce(|a, b| format!("{}\n{}", a, b))
 			.unwrap()
 	);
@@ -337,11 +337,11 @@ async fn table_change_feeds() -> Result<()> {
 	let tmp = res.remove(0).result?;
 	assert!(
 		allowed_values.contains(&tmp),
-		"tmp:\n{}\nchecked:\n{}",
+		"tmp:\n{:?}\nchecked:\n{:?}",
 		tmp,
 		allowed_values
 			.iter()
-			.map(|v| v.to_string())
+			.map(|v| v.into_string().unwrap())
 			.reduce(|a, b| format!("{}\n{}", a, b))
 			.unwrap()
 	);

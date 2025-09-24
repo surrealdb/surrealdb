@@ -3,7 +3,7 @@ use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
-use surrealdb_types::{Array, RecordId};
+use surrealdb_types::{Array, RecordId, Value};
 
 use crate::helpers::Test;
 

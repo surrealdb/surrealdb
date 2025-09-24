@@ -33,6 +33,7 @@ use crate::api::opt::Tls;
 use crate::api::{ExtraFeatures, Result, Surreal};
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
+use crate::types::{Array, Value};
 
 pub(crate) const MAX_MESSAGE_SIZE: usize = 64 << 20; // 64 MiB
 pub(crate) const MAX_FRAME_SIZE: usize = 16 << 20; // 16 MiB
@@ -637,7 +638,7 @@ mod tests {
 	use flate2::write::GzEncoder;
 	use rand::{Rng, thread_rng};
 
-	use crate::core::{rpc, val};
+	use crate::core::rpc;
 
 	#[test_log::test]
 	fn large_vector_serialisation_bench() {

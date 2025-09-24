@@ -1,10 +1,11 @@
 use async_channel::Receiver;
-use surrealdb_types::SurrealValue;
+use surrealdb_core::rpc::DbResponse;
 
 use super::types::User;
-use crate::api::conn::{Command, DbResponse, Route};
+use crate::api::conn::{Command, Route};
 use crate::api::{self, IndexedResults as QueryResponse};
 use crate::opt::Resource;
+use crate::types::{SurrealValue, Value};
 
 pub(super) fn mock(route_rx: Receiver<Route>) {
 	tokio::spawn(async move {
