@@ -14,7 +14,7 @@ fn array_intersect(first: Array, other: Array) -> Array {
 		(_, other_len) => other_len,
 	};
 	let mut out = Array::with_capacity(len);
-	let mut other = VecDeque::from(other.0);
+	let mut other = VecDeque::from(other.into_vec());
 	for v in first.into_iter() {
 		if let Some(pos) = other.iter().position(|w| v == *w) {
 			other.remove(pos);
@@ -30,12 +30,12 @@ fn criterion_benchmark(c: &mut Criterion) {
 	let mut rng = rand::thread_rng();
 	for _ in 0..5000 {
 		first.push(Value::Number(Number::Int(rng.gen_range(0..=5000))));
-		first.push(char::from_u32(rng.gen_range(0..=5000)).unwrap().to_string().into());
+		first.push(Value::String(char::from_u32(rng.gen_range(0..=5000)).unwrap().to_string()));
 	}
 	let mut second = Array::new();
 	for _ in 0..5000 {
 		second.push(Value::Number(Number::Int(rng.gen_range(0..=5000))));
-		second.push(char::from_u32(rng.gen_range(0..=5000)).unwrap().to_string().into());
+		second.push(Value::String(char::from_u32(rng.gen_range(0..=5000)).unwrap().to_string()));
 	}
 	c.bench_function("array_intersect", |b| {
 		b.iter(|| array_intersect(black_box(first.clone()), black_box(second.clone())))

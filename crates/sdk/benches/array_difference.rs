@@ -10,7 +10,7 @@ use surrealdb_types::{Array, Number, Value};
 #[allow(clippy::mutable_key_type)]
 fn array_difference(first: Array, other: Array) -> Array {
 	let mut out = Array::with_capacity(first.len() + other.len());
-	let mut other = VecDeque::from(other.0);
+	let mut other = VecDeque::from(other.into_vec());
 	for v in first.into_iter() {
 		if let Some(pos) = other.iter().position(|w| v == *w) {
 			other.remove(pos);

@@ -7,9 +7,10 @@ use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
 use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
 use surrealdb::engine::any::{self, connect};
-use surrealdb::method::{Stats, WithStats};
+use surrealdb::method::WithStats;
 use surrealdb::opt::Config;
-use surrealdb::{IndexedResults, Notification, Value};
+use surrealdb::types::Value;
+use surrealdb::{IndexedResults, Notification};
 
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
 use crate::cli::abstraction::{
@@ -18,7 +19,6 @@ use crate::cli::abstraction::{
 use crate::cnf::PKG_VERSION;
 use crate::core::dbs::Capabilities as CoreCapabilities;
 use crate::core::sql::{Expr, Param, TopLevelExpr};
-use crate::core::val;
 use crate::dbs::DbsCapabilities;
 
 #[derive(Args, Debug)]
@@ -294,7 +294,7 @@ fn process(
 		let (stats, result) = response.take(index).ok_or_else(|| {
 			anyhow!("Expected some result for a query with index {index}, but found none")
 		})?;
-		let output = result.unwrap_or_else(|e| Value::from_inner(val::Value::from(e.to_string())));
+		let output = result.unwrap_or_else(|e| Value::String(e.to_string()));
 		vec.push((stats, output));
 	}
 

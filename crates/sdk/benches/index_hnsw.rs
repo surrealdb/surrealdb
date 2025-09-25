@@ -225,8 +225,8 @@ async fn insert_objects(samples: &[(RecordId, Vec<Value>)]) -> (Datastore, HnswI
 	let ds = Datastore::new("memory").await.unwrap();
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	let mut h = hnsw(&tx).await;
-	for (thg, content) in samples {
-		h.index_document(&tx, &thg.key, content).await.unwrap();
+	for (rid, content) in samples {
+		h.index_document(&tx, &rid.key, content).await.unwrap();
 	}
 	tx.commit().await.unwrap();
 	(ds, h)

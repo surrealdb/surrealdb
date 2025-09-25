@@ -58,7 +58,7 @@ impl SurrealValue for DbResult {
 				let converted: Vec<Value> = v.into_iter().map(|x| x.into_value()).collect();
 				Value::Array(surrealdb_types::Array::from_values(converted))
 			}
-			DbResult::Live(v) => Value::from_t(surrealdb_types::Object::from_map(map! {
+			DbResult::Live(v) => Value::Object(surrealdb_types::Object::from_map(map! {
 				"id".to_owned() => Value::Uuid(surrealdb_types::Uuid(v.id.0)),
 				"action".to_owned() => Value::String(v.action.to_string()),
 				"record".to_owned() => v.record,

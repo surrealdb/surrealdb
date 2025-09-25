@@ -2,7 +2,6 @@ mod helpers;
 use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::err::Error;
 use surrealdb_core::rpc::DbResultError;
 use surrealdb_core::sql::{Expr, FunctionCall};
 use surrealdb_core::{sql, syn};
@@ -50,7 +49,7 @@ async fn error_on_invalid_function() -> Result<()> {
 	let mut resp = dbs.process(query, &session, None).await.unwrap();
 	assert_eq!(resp.len(), 1);
 	let err = resp.pop().unwrap().result.unwrap_err();
-	if *err != DbResultError::custom("STU") {
+	if err != DbResultError::custom("STU") {
 		panic!("returned wrong result {:#?}", err)
 	}
 	Ok(())
@@ -258,14 +257,14 @@ async fn function_record_exists() -> Result<()> {
 	tmp.unwrap();
 	// RETURN record::exists(r"person:tobie");
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	// CREATE ONLY person:tobie;
 	let tmp = test.next()?.result?;
 	assert!(tmp.is_object());
 	// RETURN record::exists(r"person:tobie");
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -279,7 +278,7 @@ async fn function_record_id() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("tobie");
+	let val = Value::String("tobie".to_string());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -293,7 +292,7 @@ async fn function_record_table() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("person");
+	let val = Value::String("person".to_string());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -313,15 +312,15 @@ async fn function_string_concat() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("");
+	let val = Value::String("".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("test");
+	let val = Value::String("test".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("this is a test");
+	let val = Value::String("this is a test".to_string());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -465,7 +464,7 @@ async fn function_string_html_encode() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("&lt;div&gt;Hello&#32;world!&lt;&#47;div&gt;");
+	let val = Value::String("&lt;div&gt;Hello&#32;world!&lt;&#47;div&gt;".to_string());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -479,7 +478,7 @@ async fn function_string_html_sanitize() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("XSS");
+	let val = Value::String("XSS".to_string());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -837,15 +836,15 @@ async fn function_string_join() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("");
+	let val = Value::String("".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("");
+	let val = Value::String("".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("this is a test");
+	let val = Value::String("this is a test".to_string());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -861,15 +860,15 @@ async fn function_string_len() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(0);
+	let val = Value::from_int(0);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(4);
+	let val = Value::from_int(4);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(16);
+	let val = Value::from_int(16);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -885,15 +884,15 @@ async fn function_string_lowercase() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("");
+	let val = Value::String("".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("test");
+	let val = Value::String("test".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("this is a test");
+	let val = Value::String("this is a test".to_string());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -910,11 +909,11 @@ async fn function_string_replace_with_regex() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("This is a sample string with HTML tags.");
+	let val = Value::String("This is a sample string with HTML tags.".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("This one is already compiled!");
+	let val = Value::String("This one is already compiled!".to_string());
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -928,11 +927,11 @@ async fn function_string_matches() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -947,15 +946,15 @@ async fn function_string_repeat() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("");
+	let val = Value::String("".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("testtesttest");
+	let val = Value::String("testtesttest".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("test thistest thistest this");
+	let val = Value::String("test thistest thistest this".to_string());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -971,15 +970,15 @@ async fn function_string_replace() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("");
+	let val = Value::String("".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("this is awesome");
+	let val = Value::String("this is awesome".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("this is an awesome 👍 emoji test");
+	let val = Value::String("this is an awesome 👍 emoji test".to_string());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -995,15 +994,15 @@ async fn function_string_reverse() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("");
+	let val = Value::String("".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("tset");
+	let val = Value::String("tset".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("gnirts siht tset");
+	let val = Value::String("gnirts siht tset".to_string());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1022,19 +1021,19 @@ async fn function_string_distance_hamming() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	// hamming_empty
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(0));
+	assert_eq!(tmp, Value::from_int(0));
 	// hamming_same
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(0));
+	assert_eq!(tmp, Value::from_int(0));
 	// hamming_diff
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(3));
+	assert_eq!(tmp, Value::from_int(3));
 	// hamming_diff_multibyte
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(2));
+	assert_eq!(tmp, Value::from_int(2));
 	// hamming_names
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(14));
+	assert_eq!(tmp, Value::from_int(14));
 
 	check_test_is_error(
 		r#"RETURN string::distance::hamming("ham", "hamming");"#,
@@ -1074,54 +1073,54 @@ async fn function_string_distance_damerau() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	// damerau_levenshtein_empty
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(0));
+	assert_eq!(tmp, Value::from_int(0));
 	// damerau_levenshtein_same
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(0));
+	assert_eq!(tmp, Value::from_int(0));
 	// damerau_levenshtein_first_empty
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(7));
+	assert_eq!(tmp, Value::from_int(7));
 	// damerau_levenshtein_second_empty
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(7));
+	assert_eq!(tmp, Value::from_int(7));
 	// damerau_levenshtein_diff
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(2));
+	assert_eq!(tmp, Value::from_int(2));
 	// damerau_levenshtein_diff_short
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(3));
+	assert_eq!(tmp, Value::from_int(3));
 	// damerau_levenshtein_diff_reversed
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(3));
+	assert_eq!(tmp, Value::from_int(3));
 	// damerau_levenshtein_diff_multibyte
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(3));
+	assert_eq!(tmp, Value::from_int(3));
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(3));
+	assert_eq!(tmp, Value::from_int(3));
 	// damerau_levenshtein_diff_unequal_length
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(6));
+	assert_eq!(tmp, Value::from_int(6));
 	// damerau_levenshtein_diff_unequal_length_reversed
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(6));
+	assert_eq!(tmp, Value::from_int(6));
 	// damerau_levenshtein_diff_comedians
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(5));
+	assert_eq!(tmp, Value::from_int(5));
 	// damerau_levenshtein_many_transpositions
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(4));
+	assert_eq!(tmp, Value::from_int(4));
 	// damerau_levenshtein_diff_longer
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(36));
+	assert_eq!(tmp, Value::from_int(36));
 	// damerau_levenshtein_beginning_transposition
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(1));
+	assert_eq!(tmp, Value::from_int(1));
 	// damerau_levenshtein_end_transposition
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(1));
+	assert_eq!(tmp, Value::from_int(1));
 	// damerau_levenshtein_unrestricted_edit
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(3));
+	assert_eq!(tmp, Value::from_int(3));
 	//
 	Ok(())
 }
@@ -1176,30 +1175,30 @@ async fn function_string_distance_levenshtein() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	// levenshtein_empty
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(0));
+	assert_eq!(tmp, Value::from_int(0));
 	// levenshtein_same
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(0));
+	assert_eq!(tmp, Value::from_int(0));
 	// levenshtein_diff_short
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(3));
+	assert_eq!(tmp, Value::from_int(3));
 	// levenshtein_diff_with_space
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(5));
+	assert_eq!(tmp, Value::from_int(5));
 	// levenshtein_diff_multibyte
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(3));
+	assert_eq!(tmp, Value::from_int(3));
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(3));
+	assert_eq!(tmp, Value::from_int(3));
 	// levenshtein_diff_longer
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(37));
+	assert_eq!(tmp, Value::from_int(37));
 	// levenshtein_first_empty
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(7));
+	assert_eq!(tmp, Value::from_int(7));
 	// levenshtein_second_empty
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(6));
+	assert_eq!(tmp, Value::from_int(6));
 	//
 	Ok(())
 }
@@ -1263,54 +1262,54 @@ async fn function_string_distance_osa_distance() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	// osa_distance_empty
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(0));
+	assert_eq!(tmp, Value::from_int(0));
 	// osa_distance_same
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(0));
+	assert_eq!(tmp, Value::from_int(0));
 	// osa_distance_first_empty
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(7));
+	assert_eq!(tmp, Value::from_int(7));
 	// osa_distance_second_empty
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(7));
+	assert_eq!(tmp, Value::from_int(7));
 	// osa_distance_diff
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(3));
+	assert_eq!(tmp, Value::from_int(3));
 	// osa_distance_diff_short
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(3));
+	assert_eq!(tmp, Value::from_int(3));
 	// osa_distance_diff_reversed
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(3));
+	assert_eq!(tmp, Value::from_int(3));
 	// osa_distance_diff_multibyte
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(3));
+	assert_eq!(tmp, Value::from_int(3));
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(3));
+	assert_eq!(tmp, Value::from_int(3));
 	// osa_distance_diff_unequal_length
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(6));
+	assert_eq!(tmp, Value::from_int(6));
 	// osa_distance_diff_unequal_length_reversed
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(6));
+	assert_eq!(tmp, Value::from_int(6));
 	// osa_distance_diff_comedians
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(5));
+	assert_eq!(tmp, Value::from_int(5));
 	// osa_distance_many_transpositions
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(4));
+	assert_eq!(tmp, Value::from_int(4));
 	// osa_distance_diff_longer
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(36));
+	assert_eq!(tmp, Value::from_int(36));
 	// osa_distance_beginning_transposition
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(1));
+	assert_eq!(tmp, Value::from_int(1));
 	// osa_distance_end_transposition
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(1));
+	assert_eq!(tmp, Value::from_int(1));
 	// osa_distance_restricted_edit
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(4));
+	assert_eq!(tmp, Value::from_int(4));
 	//
 	Ok(())
 }
@@ -1327,19 +1326,19 @@ async fn function_string_similarity_fuzzy() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(0));
+	assert_eq!(tmp, Value::from_int(0));
 	//
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(0));
+	assert_eq!(tmp, Value::from_int(0));
 	//
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(83));
+	assert_eq!(tmp, Value::from_int(83));
 	//
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(91));
+	assert_eq!(tmp, Value::from_int(91));
 	//
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(174));
+	assert_eq!(tmp, Value::from_int(174));
 	//
 	Ok(())
 }
@@ -1356,19 +1355,19 @@ async fn function_string_similarity_smithwaterman() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(0));
+	assert_eq!(tmp, Value::from_int(0));
 	//
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(0));
+	assert_eq!(tmp, Value::from_int(0));
 	//
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(83));
+	assert_eq!(tmp, Value::from_int(83));
 	//
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(91));
+	assert_eq!(tmp, Value::from_int(91));
 	//
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::from_t(174));
+	assert_eq!(tmp, Value::from_int(174));
 	//
 	Ok(())
 }
@@ -1621,15 +1620,15 @@ async fn function_string_slug() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("");
+	let val = Value::String("".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("this-is-a-test");
+	let val = Value::String("this-is-a-test".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("blog-this-is-a-test-with-grinning-emojis");
+	let val = Value::String("blog-this-is-a-test-with-grinning-emojis".to_string());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1693,15 +1692,15 @@ async fn function_string_trim() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("");
+	let val = Value::String("".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("test");
+	let val = Value::String("test".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("this is a test with text");
+	let val = Value::String("this is a test with text".to_string());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1717,15 +1716,15 @@ async fn function_string_uppercase() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("");
+	let val = Value::String("".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("TEST");
+	let val = Value::String("TEST".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("THIS IS A TEST");
+	let val = Value::String("THIS IS A TEST".to_string());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1795,7 +1794,7 @@ async fn function_time_day() -> Result<()> {
 	assert!(tmp.is_number());
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(22);
+	let val = Value::from_int(22);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1875,7 +1874,7 @@ async fn function_time_hour() -> Result<()> {
 	assert!(tmp.is_number());
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(8);
+	let val = Value::from_int(8);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1895,15 +1894,15 @@ async fn function_time_is_leap_year() -> Result<()> {
 	assert!(tmp.is_bool());
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1949,7 +1948,7 @@ async fn function_time_minute() -> Result<()> {
 	assert!(tmp.is_number());
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(30);
+	let val = Value::from_int(30);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1967,7 +1966,7 @@ async fn function_time_month() -> Result<()> {
 	assert!(tmp.is_number());
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(6);
+	let val = Value::from_int(6);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2071,7 +2070,7 @@ async fn function_time_second() -> Result<()> {
 	assert!(tmp.is_number());
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(45);
+	let val = Value::from_int(45);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2089,7 +2088,7 @@ async fn function_time_unix() -> Result<()> {
 	assert!(tmp.is_number());
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(551349045);
+	let val = Value::from_int(551349045);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2107,7 +2106,7 @@ async fn function_time_wday() -> Result<()> {
 	assert!(tmp.is_number());
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(1);
+	let val = Value::from_int(1);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2125,7 +2124,7 @@ async fn function_time_week() -> Result<()> {
 	assert!(tmp.is_number());
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(26);
+	let val = Value::from_int(26);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2143,7 +2142,7 @@ async fn function_time_yday() -> Result<()> {
 	assert!(tmp.is_number());
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(173);
+	let val = Value::from_int(173);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2161,7 +2160,7 @@ async fn function_time_year() -> Result<()> {
 	assert!(tmp.is_number());
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(1987);
+	let val = Value::from_int(1987);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2449,11 +2448,11 @@ async fn function_type_is_array() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2468,11 +2467,11 @@ async fn function_type_is_bool() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2487,11 +2486,11 @@ async fn function_type_is_bytes() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2514,11 +2513,11 @@ async fn function_type_is_collection() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2533,11 +2532,11 @@ async fn function_type_is_datetime() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2552,11 +2551,11 @@ async fn function_type_is_decimal() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2571,11 +2570,11 @@ async fn function_type_is_duration() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2590,11 +2589,11 @@ async fn function_type_is_float() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2609,11 +2608,11 @@ async fn function_type_is_geometry() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2628,11 +2627,11 @@ async fn function_type_is_int() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2652,11 +2651,11 @@ async fn function_type_is_line() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2671,11 +2670,11 @@ async fn function_type_is_none() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2690,11 +2689,11 @@ async fn function_type_is_null() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2717,11 +2716,11 @@ async fn function_type_is_multiline() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2741,11 +2740,11 @@ async fn function_type_is_multipoint() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2768,11 +2767,11 @@ async fn function_type_is_multipolygon() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2789,19 +2788,19 @@ async fn function_type_is_number() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2816,11 +2815,11 @@ async fn function_type_is_object() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2840,11 +2839,11 @@ async fn function_type_is_point() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2875,11 +2874,11 @@ async fn function_type_is_polygon() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2894,11 +2893,11 @@ async fn function_type_is_range() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2915,19 +2914,19 @@ async fn function_type_is_record() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2942,11 +2941,11 @@ async fn function_type_is_string() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2961,11 +2960,11 @@ async fn function_type_is_uuid() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(true);
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t(false);
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -3036,11 +3035,11 @@ async fn function_type_string() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("30s");
+	let val = Value::String("30s".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("13");
+	let val = Value::String("13".to_string());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -3056,11 +3055,11 @@ async fn function_type_string_lossy() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("Sur�rea�lDB");
+	let val = Value::String("Sur�rea�lDB".to_string());
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from_t("SurrealDB");
+	let val = Value::String("SurrealDB".to_string());
 	assert_eq!(tmp, val);
 	//
 	Ok(())

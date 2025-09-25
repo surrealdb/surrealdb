@@ -22,11 +22,11 @@ fn criterion_benchmark(c: &mut Criterion) {
 	let mut array = Array::new();
 	for i in 0..100000 {
 		array.push(Value::Number(Number::Int(i)));
-		array.push(i.to_string().into());
+		array.push(Value::String(i.to_string()));
 	}
 	for i in (0..100000).rev() {
 		array.push(Value::Number(Number::Int(i)));
-		array.push(i.to_string().into());
+		array.push(Value::String(i.to_string()));
 	}
 	c.bench_function("array_uniq", |b| b.iter(|| array_uniq(black_box(array.clone()))));
 }

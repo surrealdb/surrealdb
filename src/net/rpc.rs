@@ -30,7 +30,6 @@ use crate::net::error::Error as NetError;
 use crate::rpc::RpcState;
 use crate::rpc::format::HttpFormat;
 use crate::rpc::http::Http;
-use crate::rpc::response::IntoRpcResponse;
 use crate::rpc::websocket::Websocket;
 
 pub(super) fn router() -> Router<Arc<RpcState>> {

@@ -194,7 +194,7 @@ fn ok_cast_chain_depth() -> Result<()> {
 		assert_eq!(res.len(), 1);
 		//
 		let tmp = res.next().unwrap()?;
-		let val = Value::from_t(vec![Value::from_t(5)]);
+		let val = Value::from_vec(vec![Value::from_int(5)]);
 		assert_eq!(tmp, val);
 		//
 		Ok(())

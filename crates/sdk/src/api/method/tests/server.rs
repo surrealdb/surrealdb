@@ -1,8 +1,7 @@
 use async_channel::Receiver;
-use surrealdb_core::rpc::{DbResponse, DbResult};
+use surrealdb_core::rpc::DbResult;
 
 use super::types::User;
-use crate::api::IndexedResults as QueryResponse;
 use crate::api::conn::{Command, IndexedDbResults, Route};
 use crate::opt::Resource;
 use crate::types::{SurrealValue, Value};
@@ -31,8 +30,10 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				} => DbResult::Other(Value::None),
 				Command::SubscribeLive {
 					..
-				} => DbResult::Other("c6c0e36c-e2cf-42cb-b2d5-75415249b261".to_owned().into()),
-				Command::Version => Ok(DbResponse::Other("1.0.0".into())),
+				} => DbResult::Other(Value::String(
+					"c6c0e36c-e2cf-42cb-b2d5-75415249b261".to_string(),
+				)),
+				Command::Version => DbResult::Other(Value::String("1.0.0".to_string())),
 				Command::Use {
 					..
 				} => DbResult::Other(Value::None),
@@ -41,7 +42,7 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				}
 				| Command::Signin {
 					..
-				} => DbResult::Other("jwt".to_owned().into()),
+				} => DbResult::Other(Value::String("jwt".to_string())),
 				Command::Set {
 					..
 				} => DbResult::Other(Value::None),
@@ -56,7 +57,7 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				}
 				| Command::Merge {
 					..
-				} => DbResult::Query(QueryResponse::new()),
+				} => DbResult::Query(Vec::new()),
 				Command::Create {
 					data,
 					..
@@ -131,7 +132,7 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 
 			let result = IndexedDbResults::from_server_result(result).unwrap();
 
-			if let Err(message) = response.send(result).await {
+			if let Err(message) = response.send(Ok(result)).await {
 				panic!("message dropped; {message:?}");
 			}
 		}

@@ -10,9 +10,9 @@ use std::sync::LazyLock;
 
 use protocol::{Client, Test};
 use semver::Version;
+use surrealdb_types::Variables;
 use types::{USER, User};
 
-use crate::api::method::tests::types::AuthParams;
 use crate::api::opt::PatchOp;
 use crate::api::opt::auth::{Database, Jwt, Namespace, Record, Root};
 use crate::api::{IndexedResults as QueryResponse, Surreal};
@@ -37,10 +37,10 @@ async fn api() {
 	// signup
 	let _: Jwt = DB
 		.signup(Record {
-			namespace: "test-ns",
-			database: "test-db",
-			access: "access",
-			params: AuthParams {},
+			namespace: "test-ns".to_string(),
+			database: "test-db".to_string(),
+			access: "access".to_string(),
+			params: Variables::default(),
 		})
 		.await
 		.unwrap();
@@ -48,34 +48,34 @@ async fn api() {
 	// signin
 	let _: Jwt = DB
 		.signin(Root {
-			username: "root",
-			password: "root",
+			username: "root".to_string(),
+			password: "root".to_string(),
 		})
 		.await
 		.unwrap();
 	let _: Jwt = DB
 		.signin(Namespace {
-			namespace: "test-ns",
-			username: "user",
-			password: "pass",
+			namespace: "test-ns".to_string(),
+			username: "user".to_string(),
+			password: "pass".to_string(),
 		})
 		.await
 		.unwrap();
 	let _: Jwt = DB
 		.signin(Database {
-			namespace: "test-ns",
-			database: "test-db",
-			username: "user",
-			password: "pass",
+			namespace: "test-ns".to_string(),
+			database: "test-db".to_string(),
+			username: "user".to_string(),
+			password: "pass".to_string(),
 		})
 		.await
 		.unwrap();
 	let _: Jwt = DB
 		.signin(Record {
-			namespace: "test-ns",
-			database: "test-db",
-			access: "access",
-			params: AuthParams {},
+			namespace: "test-ns".to_string(),
+			database: "test-db".to_string(),
+			access: "access".to_string(),
+			params: Variables::default(),
 		})
 		.await
 		.unwrap();
@@ -174,8 +174,8 @@ fn futures_are_send_sync() {
 	assert_send_sync(async {
 		let db = Surreal::new::<Test>(()).await.unwrap();
 		db.signin(Root {
-			username: "root",
-			password: "root",
+			username: "root".to_string(),
+			password: "root".to_string(),
 		})
 		.await
 		.unwrap();

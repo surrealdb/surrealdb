@@ -107,7 +107,7 @@ impl SurrealValue for InnerOp {
 
 		match op.as_str() {
 			"add" => {
-				let path = obj.get("path").context("Key 'path' missing")?;
+				let path = obj.remove("path").context("Key 'path' missing")?;
 				let path = path.into_string()?;
 				let value = obj.remove("value").context("Key 'value' missing")?;
 				Ok(InnerOp::Add {

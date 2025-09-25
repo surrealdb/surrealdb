@@ -15,7 +15,7 @@ use surrealdb_core::expr::TopLevelExpr;
 use surrealdb_core::syn;
 use ulid::Ulid;
 
-use super::{AuthParams, CreateDb};
+use super::CreateDb;
 use crate::api_integration::{ApiRecordId, NS, Record, RecordBuf, RecordName};
 
 pub async fn connect(new_db: impl CreateDb) {

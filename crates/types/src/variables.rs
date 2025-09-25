@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
+use crate as surrealdb_types;
 use crate::{Object, SurrealValue, Value};
 
 /// Represents a set of variables that can be used in a query.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, SurrealValue)]
 pub struct Variables(BTreeMap<String, Value>);
 
 impl Variables {

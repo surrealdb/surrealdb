@@ -82,7 +82,7 @@ where
 						RecordIdKey::String(s) => RecordIdKeyLit::String(s),
 						RecordIdKey::Uuid(u) => RecordIdKeyLit::Uuid(crate::core::Uuid::from(u.0)),
 						RecordIdKey::Array(a) => RecordIdKeyLit::Array(
-							a.inner().iter().cloned().map(|v| Expr::from_public_value(v)).collect(),
+							a.inner().iter().cloned().map(Expr::from_public_value).collect(),
 						),
 						RecordIdKey::Object(o) => {
 							use crate::core::expr::ObjectEntry;

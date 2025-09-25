@@ -1,12 +1,8 @@
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::time::Duration;
 
 use async_channel::{Receiver, Sender};
-use indexmap::IndexMap;
-use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
-use surrealdb_core::rpc::{DbResponseResult, DbResult, DbResultStats};
+use surrealdb_core::rpc::DbResult;
 use surrealdb_types::{SurrealValue, Value};
 
 use crate::api::err::Error;
@@ -134,7 +130,7 @@ impl Router {
 		Box::pin(async move {
 			let rx = self.send(command).await?;
 			match self.recv(rx).await? {
-				Value::None | Value::Null => return Ok(Vec::new()),
+				Value::None | Value::Null => Ok(Vec::new()),
 				Value::Array(array) => {
 					array.into_iter().map(R::from_value).collect::<Result<Vec<R>>>()
 				}
@@ -163,7 +159,7 @@ impl Router {
 	pub(crate) fn execute_value(&self, command: Command) -> BoxFuture<'_, Result<Value>> {
 		Box::pin(async move {
 			let rx = self.send(command).await?;
-			Ok(self.recv(rx).await?)
+			self.recv(rx).await
 		})
 	}
 
@@ -189,65 +185,39 @@ impl IndexedDbResults {
 	pub fn from_server_result(result: DbResult) -> Result<Self> {
 		match result {
 			DbResult::Other(value) => Ok(Self::Other(value)),
-			DbResult::Query(responses) => {
-				let mut results =
-					IndexMap::<usize, (DbResultStats, DbResponseResult)>::with_capacity(
-						responses.len(),
-					);
+			DbResult::Query(_responses) => {
+				// let mut results =
+				// 	IndexMap::<usize, (DbResultStats, std::result::Result<Value,
+				// DbResultError>)>::with_capacity( 		responses.len(),
+				// 	);
 
-				for (index, response) in responses.into_iter().enumerate() {
-					let stats = DbResultStats::default().with_execution_time(response.time);
+				// for (index, response) in responses.into_iter().enumerate() {
+				// 	let stats = DbResultStats::default().with_execution_time(response.time);
 
-					// match response.result {
-					// 	Ok(value) => {
-					// 		map.insert(index, (stats, Ok(response.result)));
-					// 	}
-					// 	Status::Err => {
-					// 		map.insert(
-					// 			index,
-					// 			(stats, Err(Error::Query(response.result.into_string()).into())),
-					// 		);
-					// 	}
-					// }
-					results.insert(index, (stats, response.result));
-				}
+				// 	// match response.result {
+				// 	// 	Ok(value) => {
+				// 	// 		map.insert(index, (stats, Ok(response.result)));
+				// 	// 	}
+				// 	// 	Status::Err => {
+				// 	// 		map.insert(
+				// 	// 			index,
+				// 	// 			(stats, Err(Error::Query(response.result.into_string()).into())),
+				// 	// 		);
+				// 	// 	}
+				// 	// }
+				// 	// results.insert(index, (stats, response.result));
+				// }
+				todo!("STU")
 
-				Ok(Self::Query(IndexedResults {
-					results,
-					live_queries: IndexMap::default(),
-				}))
+				// Ok(Self::Query(IndexedResults {
+				// 	results,
+				// 	live_queries: IndexMap::default(),
+				// }))
 			}
 			// Live notifications don't call this method
 			DbResult::Live(..) => unreachable!(),
 		}
 	}
-}
-
-// Converts a debug representation of `std::time::Duration` back
-fn duration_from_str(duration: &str) -> Option<Duration> {
-	const NANOS_PER_SEC: i64 = 1_000_000_000;
-	const NANOS_PER_MILLI: i64 = 1_000_000;
-	const NANOS_PER_MICRO: i64 = 1_000;
-
-	let nanos = if let Some(duration) = duration.strip_suffix("ns") {
-		duration.parse().ok()?
-	} else if let Some(duration) = duration.strip_suffix("µs") {
-		let micros = duration.parse::<Decimal>().ok()?;
-		let multiplier = Decimal::try_new(NANOS_PER_MICRO, 0).ok()?;
-		micros.checked_mul(multiplier)?.to_u128()?
-	} else if let Some(duration) = duration.strip_suffix("ms") {
-		let millis = duration.parse::<Decimal>().ok()?;
-		let multiplier = Decimal::try_new(NANOS_PER_MILLI, 0).ok()?;
-		millis.checked_mul(multiplier)?.to_u128()?
-	} else {
-		let duration = duration.strip_suffix('s')?;
-		let secs = duration.parse::<Decimal>().ok()?;
-		let multiplier = Decimal::try_new(NANOS_PER_SEC, 0).ok()?;
-		secs.checked_mul(multiplier)?.to_u128()?
-	};
-	let secs = nanos.checked_div(NANOS_PER_SEC as u128)?;
-	let nanos = nanos % (NANOS_PER_SEC as u128);
-	Some(Duration::new(secs.try_into().ok()?, nanos.try_into().ok()?))
 }
 
 #[derive(Debug, Clone)]
@@ -264,32 +234,4 @@ pub trait Sealed: Sized + Send + Sync + 'static {
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>>
 	where
 		Self: crate::api::Connection;
-}
-
-#[cfg(test)]
-mod tests {
-	use std::time::Duration;
-
-	#[test]
-	fn duration_from_str() {
-		let durations = vec![
-			Duration::ZERO,
-			Duration::from_nanos(1),
-			Duration::from_nanos(u64::MAX),
-			Duration::from_micros(1),
-			Duration::from_micros(u64::MAX),
-			Duration::from_millis(1),
-			Duration::from_millis(u64::MAX),
-			Duration::from_secs(1),
-			Duration::from_secs(u64::MAX),
-			Duration::MAX,
-		];
-
-		for duration in durations {
-			let string = format!("{duration:?}");
-			let parsed = super::duration_from_str(&string)
-				.unwrap_or_else(|| panic!("Duration {string} failed to parse"));
-			assert_eq!(duration, parsed, "Duration {string} not parsed correctly");
-		}
-	}
 }

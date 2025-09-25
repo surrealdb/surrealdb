@@ -731,8 +731,6 @@ impl WithStats<IndexedResults> {
 
 #[cfg(test)]
 mod tests {
-	use surrealdb_core::rpc::DbResponseResult;
-
 	use super::*;
 
 	#[derive(Debug, Clone, SurrealValue)]
@@ -747,12 +745,12 @@ mod tests {
 	}
 
 	fn to_map(
-		vec: Vec<DbResponseResult>,
+		vec: Vec<std::result::Result<Value, DbResultError>>,
 	) -> IndexMap<usize, (DbResultStats, std::result::Result<Value, DbResultError>)> {
 		vec.into_iter()
 			.map(|result| match result {
 				Ok(result) => {
-					let stats = DbResultStats::default().with_execution_time(result.time);
+					let stats = DbResultStats::default();
 					(stats, Ok(result))
 				}
 				Err(error) => {
@@ -817,21 +815,21 @@ mod tests {
 		let scalar = 265;
 
 		let mut response = IndexedResults {
-			results: to_map(vec![Ok(scalar.into())]),
+			results: to_map(vec![Ok(Value::from_int(scalar))]),
 			..IndexedResults::new()
 		};
 		let value: Value = response.take(0).unwrap();
 		assert_eq!(value, Value::from_t(scalar));
 
 		let mut response = IndexedResults {
-			results: to_map(vec![Ok(scalar.into())]),
+			results: to_map(vec![Ok(Value::from_int(scalar))]),
 			..IndexedResults::new()
 		};
 		let option: Option<_> = response.take(0).unwrap();
 		assert_eq!(option, Some(scalar));
 
 		let mut response = IndexedResults {
-			results: to_map(vec![Ok(scalar.into())]),
+			results: to_map(vec![Ok(Value::from_int(scalar))]),
 			..IndexedResults::new()
 		};
 		let vec: Vec<i64> = response.take(0).unwrap();
@@ -840,21 +838,21 @@ mod tests {
 		let scalar = true;
 
 		let mut response = IndexedResults {
-			results: to_map(vec![Ok(scalar.into())]),
+			results: to_map(vec![Ok(Value::from_bool(scalar))]),
 			..IndexedResults::new()
 		};
 		let value: Value = response.take(0).unwrap();
 		assert_eq!(value, Value::from_t(scalar));
 
 		let mut response = IndexedResults {
-			results: to_map(vec![Ok(scalar.into())]),
+			results: to_map(vec![Ok(Value::from_bool(scalar))]),
 			..IndexedResults::new()
 		};
 		let option: Option<_> = response.take(0).unwrap();
 		assert_eq!(option, Some(scalar));
 
 		let mut response = IndexedResults {
-			results: to_map(vec![Ok(scalar.into())]),
+			results: to_map(vec![Ok(Value::from_bool(scalar))]),
 			..IndexedResults::new()
 		};
 		let vec: Vec<bool> = response.take(0).unwrap();
@@ -865,14 +863,14 @@ mod tests {
 	fn take_preserves_order() {
 		let mut response = IndexedResults {
 			results: to_map(vec![
-				Ok(0.into()),
-				Ok(1.into()),
-				Ok(2.into()),
-				Ok(3.into()),
-				Ok(4.into()),
-				Ok(5.into()),
-				Ok(6.into()),
-				Ok(7.into()),
+				Ok(Value::from_int(0)),
+				Ok(Value::from_int(1)),
+				Ok(Value::from_int(2)),
+				Ok(Value::from_int(3)),
+				Ok(Value::from_int(4)),
+				Ok(Value::from_int(5)),
+				Ok(Value::from_int(6)),
+				Ok(Value::from_int(7)),
 			]),
 			..IndexedResults::new()
 		};
@@ -889,7 +887,7 @@ mod tests {
 		};
 		assert_eq!(zero, 0);
 		let one: Value = response.take(1).unwrap();
-		assert_eq!(one, Value::from_t(1));
+		assert_eq!(one, Value::from_int(1));
 	}
 
 	#[test]
@@ -984,21 +982,30 @@ mod tests {
 	#[test]
 	fn take_partial_records() {
 		let mut response = IndexedResults {
-			results: to_map(vec![Ok(vec![Value::from_t(true), Value::from_t(false)].into())]),
+			results: to_map(vec![Ok(Value::from_vec(vec![
+				Value::from_bool(true),
+				Value::from_bool(false),
+			]))]),
 			..IndexedResults::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value, Value::from_t(vec![Value::from_t(true), Value::from_t(false)]));
+		assert_eq!(value, Value::from_vec(vec![Value::from_bool(true), Value::from_bool(false)]));
 
 		let mut response = IndexedResults {
-			results: to_map(vec![Ok(vec![Value::from_t(true), Value::from_t(false)].into())]),
+			results: to_map(vec![Ok(Value::from_vec(vec![
+				Value::from_bool(true),
+				Value::from_bool(false),
+			]))]),
 			..IndexedResults::new()
 		};
 		let vec: Vec<bool> = response.take(0).unwrap();
 		assert_eq!(vec, vec![true, false]);
 
 		let mut response = IndexedResults {
-			results: to_map(vec![Ok(vec![Value::from_t(true), Value::from_t(false)].into())]),
+			results: to_map(vec![Ok(Value::from_vec(vec![
+				Value::from_bool(true),
+				Value::from_bool(false),
+			]))]),
 			..IndexedResults::new()
 		};
 
@@ -1014,48 +1021,47 @@ mod tests {
 		};
 
 		let records = map.swap_remove(&0).unwrap().1.unwrap();
-		assert_eq!(records, Value::from_t(vec![Value::from_t(true), Value::from_t(false)]));
+		assert_eq!(records, Value::from_vec(vec![Value::from_bool(true), Value::from_bool(false)]));
 	}
 
 	#[test]
 	fn check_returns_the_first_error() {
 		let response = vec![
-			Ok(0.into()),
-			Ok(1.into()),
-			Ok(2.into()),
-			Err(Error::ConnectionUninitialised.into()),
-			Ok(3.into()),
-			Ok(4.into()),
-			Ok(5.into()),
-			Err(Error::BackupsNotSupported.into()),
-			Ok(6.into()),
-			Ok(7.into()),
-			Err(Error::DuplicateRequestId(0).into()),
+			Ok(Value::from_int(0)),
+			Ok(Value::from_int(1)),
+			Ok(Value::from_int(2)),
+			Err(DbResultError::custom("test")),
+			Ok(Value::from_int(3)),
+			Ok(Value::from_int(4)),
+			Ok(Value::from_int(5)),
+			Err(DbResultError::custom("test")),
+			Ok(Value::from_int(6)),
+			Ok(Value::from_int(7)),
+			Err(DbResultError::custom("test")),
 		];
 		let response = IndexedResults {
 			results: to_map(response),
 			..IndexedResults::new()
 		};
-		let Some(Error::ConnectionUninitialised) = response.check().unwrap_err().downcast_ref()
-		else {
-			panic!("check did not return the first error");
-		};
+		let err = response.check().unwrap_err();
+
+		assert_eq!(err, DbResultError::custom("test"));
 	}
 
 	#[test]
 	fn take_errors() {
 		let response = vec![
-			Ok(0.into()),
-			Ok(1.into()),
-			Ok(2.into()),
-			Err(Error::ConnectionUninitialised.into()),
-			Ok(3.into()),
-			Ok(4.into()),
-			Ok(5.into()),
-			Err(Error::BackupsNotSupported.into()),
-			Ok(6.into()),
-			Ok(7.into()),
-			Err(Error::DuplicateRequestId(0).into()),
+			Ok(Value::from_int(0)),
+			Ok(Value::from_int(1)),
+			Ok(Value::from_int(2)),
+			Err(DbResultError::custom("test")),
+			Ok(Value::from_int(3)),
+			Ok(Value::from_int(4)),
+			Ok(Value::from_int(5)),
+			Err(DbResultError::custom("test")),
+			Ok(Value::from_int(6)),
+			Ok(Value::from_int(7)),
+			Err(DbResultError::custom("test")),
 		];
 		let mut response = IndexedResults {
 			results: to_map(response),
@@ -1064,20 +1070,14 @@ mod tests {
 		let errors = response.take_errors();
 		assert_eq!(response.num_statements(), 8);
 		assert_eq!(errors.len(), 3);
-		let Some(Error::DuplicateRequestId(0)) = errors[&10].downcast_ref() else {
-			panic!("index `10` is not `DuplicateRequestId`");
-		};
-		let Some(Error::BackupsNotSupported) = errors[&7].downcast_ref() else {
-			panic!("index `7` is not `BackupsNotSupported`");
-		};
-		let Some(Error::ConnectionUninitialised) = errors[&3].downcast_ref() else {
-			panic!("index `3` is not `ConnectionUninitialised`");
-		};
+		assert_eq!(errors[&10], DbResultError::custom("test"));
+		assert_eq!(errors[&7], DbResultError::custom("test"));
+		assert_eq!(errors[&3], DbResultError::custom("test"));
 		let Some(value): Option<i32> = response.take(2).unwrap() else {
 			panic!("statement not found");
 		};
 		assert_eq!(value, 2);
 		let value: Value = response.take(4).unwrap();
-		assert_eq!(value, Value::from_t(3));
+		assert_eq!(value, Value::from_int(3));
 	}
 }

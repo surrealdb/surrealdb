@@ -179,7 +179,7 @@ impl Serialize for QueryResult {
 			}
 			Err(e) => {
 				val.serialize_field("status", &Status::Err)?;
-				val.serialize_field("result", &Value::from_t(e.to_string()))?;
+				val.serialize_field("result", &Value::from_string(e.to_string()))?;
 			}
 		}
 		val.end()

@@ -55,7 +55,7 @@ pub(crate) fn resource_to_exprs(r: Resource) -> Vec<expr::Expr> {
 					.collect(),
 			))]
 		}
-		Resource::Array(x) => x.into_iter().map(|v| expr::Expr::from_public_value(v)).collect(),
+		Resource::Array(x) => x.into_iter().map(expr::Expr::from_public_value).collect(),
 		Resource::Range(x) => {
 			let QueryRange(record_id) = x;
 			vec![expr::Expr::Literal(expr::Literal::RecordId(expr::RecordIdLit {
@@ -80,7 +80,7 @@ fn public_record_id_key_to_literal(x: RecordIdKey) -> expr::RecordIdKeyLit {
 		RecordIdKey::String(s) => expr::RecordIdKeyLit::String(s),
 		RecordIdKey::Uuid(u) => expr::RecordIdKeyLit::Uuid(crate::core::Uuid::from(u.0)),
 		RecordIdKey::Array(a) => expr::RecordIdKeyLit::Array(
-			a.inner().iter().cloned().map(|v| expr::Expr::from_public_value(v)).collect(),
+			a.inner().iter().cloned().map(expr::Expr::from_public_value).collect(),
 		),
 		RecordIdKey::Object(o) => {
 			use crate::core::expr::ObjectEntry;

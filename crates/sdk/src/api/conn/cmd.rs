@@ -148,8 +148,8 @@ impl Command {
 				namespace,
 				database,
 			} => {
-				let namespace = namespace.map(|n| Value::String(n)).unwrap_or(Value::None);
-				let database = database.map(|d| Value::String(d)).unwrap_or(Value::None);
+				let namespace = namespace.map(Value::String).unwrap_or(Value::None);
+				let database = database.map(Value::String).unwrap_or(Value::None);
 				RouterRequest {
 					id,
 					method: "use",
@@ -480,7 +480,7 @@ impl Command {
 				version,
 				args,
 			} => {
-				let version = version.map(|x| Value::String(x)).unwrap_or(Value::None);
+				let version = version.map(Value::String).unwrap_or(Value::None);
 				RouterRequest {
 					id,
 					method: "run",

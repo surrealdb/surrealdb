@@ -59,11 +59,11 @@ async fn query_basic_with_modification() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from_t(45062);
+	let val = Value::from_int(45062);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from_t(45062);
+	let val = Value::from_int(45062);
 	assert_eq!(tmp, val);
 	//
 	Ok(())

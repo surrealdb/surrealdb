@@ -1295,7 +1295,7 @@ async fn router(
 				},
 			};
 
-			let args = args.into_iter().map(|x| Expr::from_public_value(x)).collect();
+			let args = args.into_iter().map(Expr::from_public_value).collect();
 
 			let plan = Expr::FunctionCall(Box::new(surrealdb_core::expr::FunctionCall {
 				receiver: func,

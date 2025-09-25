@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use serde::Serialize;
 use surrealdb_types::{self, RecordIdKeyRange, SurrealValue, Value};
 use uuid::Uuid;
 
@@ -162,7 +161,7 @@ where
 	/// Merges the current document / record data with the specified data
 	pub fn merge<D>(self, data: D) -> Merge<'r, C, D, R>
 	where
-		D: Serialize,
+		D: SurrealValue,
 	{
 		Merge {
 			txn: self.txn,

@@ -4,15 +4,16 @@ use axum::extract::ws::Message;
 use opentelemetry::Context as TelemetryContext;
 use revision::revisioned;
 use serde::Serialize;
+use surrealdb_core::rpc::DbResponse;
 use tokio::sync::mpsc::Sender;
 use tracing::Span;
 
 use crate::core::rpc::DbResult;
 use crate::core::rpc::format::Format;
-use crate::core::val::Value;
 use crate::rpc::failure::Failure;
 use crate::rpc::format::WsFormat;
 use crate::telemetry::metrics::ws::record_rpc;
+use crate::types::Value;
 
 /// Send the response to the WebSocket channel
 pub async fn send(

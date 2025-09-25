@@ -173,3 +173,20 @@ impl<T: Into<RecordIdKey>> From<RangeFrom<T>> for RecordIdKeyRange {
 		}
 	}
 }
+
+impl<T: Into<RecordIdKey>> From<(Bound<T>, Bound<T>)> for RecordIdKeyRange {
+	fn from((start, end): (Bound<T>, Bound<T>)) -> Self {
+		Self {
+			start: match start {
+				Bound::Included(x) => Bound::Included(x.into()),
+				Bound::Excluded(x) => Bound::Excluded(x.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+			end: match end {
+				Bound::Included(x) => Bound::Included(x.into()),
+				Bound::Excluded(x) => Bound::Excluded(x.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+		}
+	}
+}

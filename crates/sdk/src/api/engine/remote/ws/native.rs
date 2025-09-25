@@ -384,17 +384,15 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 						id,
 					}) => {
 						// Return an error if an ID was returned
-						if let Some(id) = id {
-							if let Value::Number(surrealdb_types::Number::Int(id_num)) = id {
-								match state.pending_requests.remove(&id_num) {
-									Some(pending) => {
-										let _res = pending.response_channel.send(Err(error)).await;
-									}
-									_ => {
-										warn!(
-											"got response for request with id '{id_num}', which was not in pending requests"
-										)
-									}
+						if let Some(Value::Number(surrealdb_types::Number::Int(id_num))) = id {
+							match state.pending_requests.remove(&id_num) {
+								Some(pending) => {
+									let _res = pending.response_channel.send(Err(error)).await;
+								}
+								_ => {
+									warn!(
+										"got response for request with id '{id_num}', which was not in pending requests"
+									)
 								}
 							}
 						}
