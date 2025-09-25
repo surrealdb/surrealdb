@@ -10,6 +10,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::expression::VisitExpression;
 use crate::expr::{Expr, FlowResultExt, Kind, Param};
 use crate::val::Value;
 
@@ -81,6 +82,15 @@ impl Closure {
 		} else {
 			Ok(result)
 		}
+	}
+}
+
+impl VisitExpression for Closure {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.body.visit(visitor)
 	}
 }
 

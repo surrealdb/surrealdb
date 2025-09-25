@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::pin::{Pin, pin};
 use std::sync::Arc;
@@ -20,6 +21,7 @@ use crate::dbs::response::Response;
 use crate::dbs::{Force, Notification, Options, QueryType};
 use crate::doc::DefaultBroker;
 use crate::err::Error;
+use crate::expr::expression::VisitExpression;
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
 use crate::expr::statements::OptionStatement;
@@ -82,14 +84,29 @@ impl Executor {
 		Ok(())
 	}
 
-	fn check_slow_log(&self, start: &Instant, stm: &impl Display) {
+	fn check_slow_log<S: VisitExpression + Display>(&self, start: &Instant, stm: &S) {
 		if let Some(threshold) = self.ctx.slow_log_threshold() {
 			let elapsed = start.elapsed();
 			if elapsed > threshold {
 				let query = format!("{stm}");
+				// Extract params
+				let mut params = BTreeMap::new();
+				stm.visit(&mut |e| {
+					if let Expr::Param(p) = e {
+						if let Some(value) = self.ctx.value(p.as_str()) {
+							if !value.is_nullish() {
+								params.insert(p.to_string(), value);
+							}
+						}
+					}
+				});
 				// Ensure the query is logged on a single line by collapsing whitespace
 				let one_line = query.split_whitespace().collect::<Vec<_>>().join(" ");
-				warn!("Slow query detected - time: {elapsed:#?} - query: {one_line}")
+				let params =
+					format!("{:#?}", params).split_whitespace().collect::<Vec<_>>().join(" ");
+				warn!(
+					"Slow query detected - time: {elapsed:#?} - query: {one_line} - params: {params}"
+				);
 			}
 		}
 	}
@@ -158,9 +175,6 @@ impl Executor {
 					.finish()
 					.await;
 
-				// Check if we dump the slow log
-				self.check_slow_log(start, &stm);
-
 				let res = res?;
 				let result = match &stm.kind {
 					Some(kind) => res
@@ -185,6 +199,9 @@ impl Executor {
 					})
 					.map_err(anyhow::Error::new)?
 					.add_value(stm.name.clone(), result.into());
+
+				// Check if we dump the slow log
+				self.check_slow_log(start, stm.as_ref());
 				// Finalise transaction, returning nothing unless it couldn't commit
 				Ok(Value::None)
 			}

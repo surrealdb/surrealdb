@@ -1,8 +1,7 @@
-use std::fmt;
-use std::ops::Bound;
-
 use reblessive::tree::Stk;
 use revision::Revisioned;
+use std::fmt;
+use std::ops::Bound;
 
 use super::SleepStatement;
 use crate::ctx::{Context, MutableContext};
@@ -622,6 +621,93 @@ impl Expr {
 			Expr::Idiom(idiom) => idiom.to_raw_string(),
 			Expr::Table(ident) => ident.clone(),
 			_ => self.to_string(),
+		}
+	}
+}
+
+pub(crate) trait VisitExpression {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr);
+}
+
+impl VisitExpression for Expr {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		visitor(self);
+		match self {
+			Expr::Literal(_) => {}
+			Expr::Param(_) => {}
+			Expr::Idiom(_) => {}
+			Expr::Table(_) => {}
+			Expr::Mock(_) => {}
+			Expr::Block(block) => {
+				block.visit(visitor);
+			}
+			Expr::Constant(_) => {}
+			Expr::Prefix {
+				expr,
+				..
+			} => {
+				expr.visit(visitor);
+			}
+			Expr::Postfix {
+				expr,
+				..
+			} => expr.visit(visitor),
+			Expr::Binary {
+				..
+			} => {}
+			Expr::FunctionCall(function) => function.visit(visitor),
+			Expr::Closure(closure) => {
+				closure.visit(visitor);
+			}
+			Expr::Break => {}
+			Expr::Continue => {}
+			Expr::Return(output) => {
+				output.visit(visitor);
+			}
+			Expr::Throw(expr) => expr.visit(visitor),
+			Expr::IfElse(_) => {}
+			Expr::Select(select) => {
+				select.visit(visitor);
+			}
+			Expr::Create(create) => {
+				create.visit(visitor);
+			}
+			Expr::Update(update) => {
+				update.visit(visitor);
+			}
+			Expr::Upsert(upsert) => {
+				upsert.visit(visitor);
+			}
+			Expr::Delete(delete) => {
+				delete.visit(visitor);
+			}
+			Expr::Relate(relate) => relate.visit(visitor),
+			Expr::Insert(insert) => {
+				insert.visit(visitor);
+			}
+			Expr::Define(define) => {
+				define.visit(visitor);
+			}
+			Expr::Remove(remove) => {
+				remove.visit(visitor);
+			}
+			Expr::Rebuild(_) => {}
+			Expr::Alter(alter) => {
+				alter.visit(visitor);
+			}
+			Expr::Info(info) => {
+				info.visit(visitor);
+			}
+			Expr::Foreach(foreach) => foreach.visit(visitor),
+			Expr::Let(set) => {
+				set.visit(visitor);
+			}
+			Expr::Sleep(_) => {}
 		}
 	}
 }

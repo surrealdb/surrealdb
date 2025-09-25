@@ -13,6 +13,8 @@ mod field;
 mod sequence;
 mod table;
 
+use crate::expr::Expr;
+use crate::expr::expression::VisitExpression;
 pub use field::{AlterDefault, AlterFieldStatement};
 pub use sequence::AlterSequenceStatement;
 pub use table::AlterTableStatement;
@@ -91,6 +93,21 @@ impl AlterStatement {
 			Self::Table(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Field(v) => v.compute(stk, ctx, opt, doc).await,
+		}
+	}
+}
+
+impl VisitExpression for AlterStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		if let AlterStatement::Field(AlterFieldStatement {
+			name,
+			..
+		}) = self
+		{
+			name.visit(visitor);
 		}
 	}
 }

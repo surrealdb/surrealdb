@@ -1,14 +1,25 @@
+use crate::expr::expression::VisitExpression;
+use crate::expr::idiom::Idiom;
+use crate::expr::{Expr, Value};
+use crate::fmt::Fmt;
 use std::ops::Deref;
 use std::{cmp, fmt};
-
-use crate::expr::Value;
-use crate::expr::idiom::Idiom;
-use crate::fmt::Fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Ordering {
 	Random,
 	Order(OrderList),
+}
+
+impl VisitExpression for Ordering {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		if let Self::Order(orderlist) = self {
+			orderlist.visit(visitor);
+		}
+	}
 }
 
 impl fmt::Display for Ordering {
@@ -57,6 +68,15 @@ impl OrderList {
 	}
 }
 
+impl VisitExpression for OrderList {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.0.iter().for_each(|order| order.visit(visitor));
+	}
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Order {
 	/// The value to order by
@@ -65,6 +85,15 @@ pub struct Order {
 	pub numeric: bool,
 	/// true if the direction is ascending
 	pub direction: bool,
+}
+
+impl VisitExpression for Order {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.value.visit(visitor)
+	}
 }
 
 impl fmt::Display for Order {
