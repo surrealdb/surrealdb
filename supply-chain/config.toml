@@ -653,6 +653,10 @@ criteria = "safe-to-deploy"
 version = "0.11.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.itertools]]
+version = "0.13.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.jiff]]
 version = "0.2.4"
 criteria = "safe-to-run"
@@ -703,6 +707,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.linfa-linalg]]
 version = "0.1.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.linfa-linalg]]
+version = "0.2.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.linux-raw-sys]]
@@ -787,6 +795,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.ndarray-stats]]
 version = "0.5.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.ndarray-stats]]
+version = "0.6.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.new_debug_unreachable]]
