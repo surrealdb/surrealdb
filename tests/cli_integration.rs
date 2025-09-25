@@ -1942,8 +1942,8 @@ mod cli_integration {
 			throwaway = Ulid::new()
 		);
 
-		// Start a slow query
-		let query = "SLEEP 1200ms;\n";
+		// Start a slow query containing a line feed
+		let query = "SLEEP\n1200ms;\n";
 		let _ = common::run(&cmd).input(query).output().unwrap();
 
 		// Extract the stderr

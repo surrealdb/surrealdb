@@ -86,7 +86,10 @@ impl Executor {
 		if let Some(threshold) = self.ctx.slow_log_threshold() {
 			let elapsed = start.elapsed();
 			if elapsed > threshold {
-				warn!("Slow query detected - time: {elapsed:#?} - query: {stm}")
+				let query = format!("{stm}");
+				// Ensure the query is logged on a single line by collapsing whitespace
+				let one_line = query.split_whitespace().collect::<Vec<_>>().join(" ");
+				warn!("Slow query detected - time: {elapsed:#?} - query: {one_line}")
 			}
 		}
 	}
