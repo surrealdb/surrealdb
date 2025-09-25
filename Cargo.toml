@@ -47,7 +47,7 @@ revision = "0.11.0"
 serde-content = "0.1.0"
 storekey = { version = "0.8.0", features = ["uuid"] }
 trice = "0.4.0"
-vart = "0.8.1"
+vart = "0.9.3"
 
 # External Kv stores
 foundationdb = { version = "0.9.0", default-features = false, features = [
