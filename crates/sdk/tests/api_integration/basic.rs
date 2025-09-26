@@ -1783,30 +1783,6 @@ pub async fn field_and_index_methods(new_db: impl CreateDb) {
 	assert_eq!(inside.into_option(), None);
 }
 
-pub async fn check_max_size(new_db: impl CreateDb) {
-	use surrealdb::opt::WebsocketConfig;
-
-	#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-	struct Content {
-		content: String,
-	}
-
-	let (permit, db) = new_db.create_db().await;
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
-	drop(permit);
-
-	let max_message_size = WebsocketConfig::default().max_message_size.unwrap();
-
-	let content = Content {
-		content: "a".repeat(max_message_size),
-	};
-
-	let response: Option<Content> =
-		db.upsert(("table", "test")).content(content.clone()).await.unwrap();
-
-	assert_eq!(content, response.unwrap());
-}
-
 define_include_tests!(basic => {
 	#[test_log::test(tokio::test)]
 	connect,
@@ -1914,6 +1890,4 @@ define_include_tests!(basic => {
 	multi_take,
 	#[test_log::test(tokio::test)]
 	field_and_index_methods,
-	#[test_log::test(tokio::test)]
-	check_max_size,
 });

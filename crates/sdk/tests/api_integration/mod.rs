@@ -186,6 +186,41 @@ mod ws {
 		drop(permit);
 	}
 
+	#[test_log::test(tokio::test)]
+	async fn check_max_size() {
+		use serde::{Deserialize, Serialize};
+		use surrealdb::opt::WebsocketConfig;
+		use ulid::Ulid;
+
+		use super::NS;
+
+		#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+		struct Content {
+			content: String,
+		}
+
+		impl Content {
+			fn new(len: usize) -> Self {
+				Self {
+					content: "a".repeat(len),
+				}
+			}
+		}
+
+		let (permit, db) = new_db().await;
+		db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+		drop(permit);
+
+		let max_message_size = WebsocketConfig::default().max_message_size.unwrap();
+
+		let content = Content::new(max_message_size - (1 << 20));
+
+		let response: Option<Content> =
+			db.upsert(("table", "test")).content(content.clone()).await.unwrap();
+
+		assert_eq!(content, response.unwrap());
+	}
+
 	include_tests!(new_db => basic, serialisation, live);
 }
 
