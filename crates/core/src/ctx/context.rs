@@ -45,7 +45,9 @@ pub struct MutableContext {
 	parent: Option<Context>,
 	// An optional deadline.
 	deadline: Option<Instant>,
-	// An optional slow log configuration
+	// An optional slow log configuration used by the executor to log statements
+	// that exceed a given duration threshold. This configuration is propagated
+	// from the datastore into the context for the lifetime of a request.
 	slow_log: Option<SlowLog>,
 	// Whether or not this context is cancelled.
 	cancelled: Arc<AtomicBool>,
@@ -410,6 +412,8 @@ impl MutableContext {
 		self.deadline.map(|v| v.saturating_duration_since(Instant::now()))
 	}
 
+	/// Returns the slow log configuration, if any, attached to this context.
+	/// The executor consults this to decide whether to emit slow-query log lines.
 	pub(crate) fn slow_log(&self) -> Option<&SlowLog> {
 		self.slow_log.as_ref()
 	}

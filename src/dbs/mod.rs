@@ -45,6 +45,13 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_IMPORT_FILE", long = "import-file")]
 	#[arg(value_parser = super::cli::validator::file_exists)]
 	import_file: Option<PathBuf>,
+	// Slow query logging configuration. When `slow_log_threshold` is set, any
+	// statement taking longer than the threshold will be logged along with a
+	// normalized, single-line SQL rendering. You can control which `$param`
+	// values appear in the log with the following lists:
+	// - `slow_log_param_deny` takes precedence and excludes matches.
+	// - If `slow_log_param_allow` is non-empty, only listed parameter names are included;
+	//   otherwise all parameters are allowed by default (subject to deny).
 	#[arg(help = "The minimum execution time in milliseconds to trigger slow query logging")]
 	#[arg(env = "SURREAL_SLOW_QUERY_LOG_THRESHOLD", long = "slow-log-threshold")]
 	#[arg(value_parser = super::cli::validator::duration)]

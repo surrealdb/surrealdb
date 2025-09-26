@@ -1,3 +1,20 @@
+//! Slow query logging support.
+//!
+//! This module provides a lightweight slow-query logger that can be configured
+//! with a duration threshold and optional parameter allow/deny lists. When a
+//! query exceeds the configured threshold, we log a single-line message that
+//! includes the normalized SQL statement and any selected bound parameters.
+//!
+//! Key behaviors:
+//! - Parameters are extracted by traversing the AST using `VisitExpression` and looking for
+//!   `Expr::Param` nodes. For each parameter, we lookup its value in the current `Context`.
+//! - Optional filters can be applied to control which parameters are logged:
+//!   - `param_deny` takes precedence and excludes any matching parameter names.
+//!   - If `param_allow` is non-empty, only those parameter names are included.
+//! - For readability, both the SQL statement and parameter values are rendered to SQL and
+//!   whitespace is collapsed so the entire log fits on one line.
+//!
+//! Note: Values considered "nullish" are not logged.
 use std::fmt::Display;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,6 +27,16 @@ use crate::expr::expression::VisitExpression;
 use crate::sql::ToSql;
 
 #[derive(Clone)]
+/// Configuration and logic for slow query logging.
+///
+/// A `SlowLog` is constructed with:
+/// - a `duration` threshold; queries taking less than this are ignored,
+/// - an optional allow-list of parameter names to include in logs,
+/// - an optional deny-list of parameter names to exclude from logs.
+///
+/// Deny rules take precedence over allow rules. When the allow-list is empty,
+/// all parameters are allowed by default (subject to the deny-list). When not
+/// empty, only parameters present in the allow-list will be logged.
 pub(crate) struct SlowLog(Arc<Inner>);
 
 struct Inner {
@@ -19,6 +46,15 @@ struct Inner {
 }
 
 impl SlowLog {
+	/// Create a new slow log configuration.
+	///
+	/// Parameters:
+	/// - `duration`: Minimum elapsed time a statement must take before it is considered "slow" and
+	///   logged.
+	/// - `param_allow`: If non-empty, only parameters with names in this list are included in the
+	///   log output.
+	/// - `param_deny`: Parameter names that should never be logged. This list always takes
+	///   precedence over `param_allow`.
 	pub(super) fn new(
 		duration: Duration,
 		param_allow: Vec<String>,
@@ -31,6 +67,16 @@ impl SlowLog {
 		}))
 	}
 
+	/// Check whether the supplied statement should be slow-logged and emit a
+	/// log line if the threshold is exceeded.
+	///
+	/// This function:
+	/// - Computes elapsed time since `start` and returns early if under the threshold.
+	/// - Traverses the statement AST to collect `$param` names via `VisitExpression`.
+	/// - Applies deny-list then allow-list filtering to parameter names, and looks up their current
+	///   values from the `Context`.
+	/// - Renders the SQL and parameter values, collapsing whitespace so the output is a single line
+	///   suitable for log processing.
 	pub(crate) fn check_log<S: VisitExpression + Display>(
 		&self,
 		ctx: &Context,

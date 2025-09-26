@@ -487,6 +487,14 @@ impl Datastore {
 	}
 
 	/// Set a global slow log configuration
+	///
+	/// Parameters:
+	/// - `duration`: Minimum execution time for a statement to be considered "slow". When `None`,
+	///   slow logging is disabled.
+	/// - `param_allow`: If non-empty, only parameters with names present in this list will be
+	///   logged when a query is slow.
+	/// - `param_deny`: Parameter names that should never be logged. This list always takes
+	///   precedence over `param_allow`.
 	pub fn with_slow_log(
 		mut self,
 		duration: Option<Duration>,
