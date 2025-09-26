@@ -6,6 +6,7 @@ pub mod keywords;
 mod reader;
 mod unicode;
 
+mod strings;
 #[cfg(test)]
 mod test;
 
@@ -33,9 +34,6 @@ pub struct Lexer<'a> {
 	pub(super) reader: BytesReader<'a>,
 	/// The one past the last character of the previous token.
 	last_offset: u32,
-	/// A buffer used to build the value of tokens which can't be read straight
-	/// from the source. like for example strings with escape characters.
-	scratch: String,
 
 	// below are a collection of storage for values produced by tokens.
 	// For performance reasons we wan't to keep the tokens as small as possible.
@@ -50,7 +48,6 @@ pub struct Lexer<'a> {
 	// The parser can, depending on position in syntax, decide to parse a number in a variety of
 	// different precisions or formats. The only way to support all is to delay parsing the
 	// actual number value to when the parser can decide on a format.
-	pub(super) string: Option<String>,
 	pub(super) error: Option<SyntaxError>,
 }
 
@@ -59,13 +56,11 @@ impl<'a> Lexer<'a> {
 	/// # Panic
 	/// This function will panic if the source is longer then u32::MAX.
 	pub fn new(source: &'a [u8]) -> Lexer<'a> {
+		assert!(source.len() <= u32::MAX as usize, "source code exceeded maximum size");
 		let reader = BytesReader::new(source);
-		assert!(reader.len() <= u32::MAX as usize, "source code exceeded maximum size");
 		Lexer {
 			reader,
 			last_offset: 0,
-			scratch: String::new(),
-			string: None,
 			error: None,
 		}
 	}
@@ -75,8 +70,6 @@ impl<'a> Lexer<'a> {
 	/// Doesn't change the state of the reader.
 	pub fn reset(&mut self) {
 		self.last_offset = 0;
-		self.scratch.clear();
-		self.string = None;
 		self.error = None;
 	}
 
@@ -87,13 +80,11 @@ impl<'a> Lexer<'a> {
 	/// # Panic
 	/// This function will panic if the source is longer then u32::MAX.
 	pub fn change_source<'b>(self, source: &'b [u8]) -> Lexer<'b> {
+		assert!(source.len() <= u32::MAX as usize, "source code exceeded maximum size");
 		let reader = BytesReader::<'b>::new(source);
-		assert!(reader.len() <= u32::MAX as usize, "source code exceeded maximum size");
 		Lexer {
 			reader,
 			last_offset: 0,
-			scratch: self.scratch,
-			string: self.string,
 			error: self.error,
 		}
 	}
@@ -137,7 +128,7 @@ impl<'a> Lexer<'a> {
 	pub(crate) fn current_span(&self) -> Span {
 		// We make sure that the source is no longer then u32::MAX so this can't
 		// overflow.
-		let new_offset = self.reader.offset() as u32;
+		let new_offset = self.reader.offset();
 		let len = new_offset - self.last_offset;
 		Span {
 			offset: self.last_offset,
@@ -145,18 +136,18 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
-	pub(crate) fn span_since(&self, offset: usize) -> Span {
-		let new_offset = self.reader.offset() as u32;
-		let len = new_offset - offset as u32;
+	pub(crate) fn span_since(&self, offset: u32) -> Span {
+		let new_offset = self.reader.offset();
+		let len = new_offset - offset;
 		Span {
-			offset: offset as u32,
+			offset,
 			len,
 		}
 	}
 
 	fn advance_span(&mut self) -> Span {
 		let span = self.current_span();
-		self.last_offset = self.reader.offset() as u32;
+		self.last_offset = self.reader.offset();
 		span
 	}
 
@@ -176,7 +167,7 @@ impl<'a> Lexer<'a> {
 	/// Moving the lexer into a state where the next byte is within a multibyte
 	/// character will result in spurious errors.
 	pub(crate) fn backup_before(&mut self, span: Span) {
-		self.reader.backup(span.offset as usize);
+		self.reader.backup(span.offset);
 		self.last_offset = span.offset;
 	}
 
@@ -187,7 +178,7 @@ impl<'a> Lexer<'a> {
 	/// character will result in spurious errors.
 	pub(crate) fn backup_after(&mut self, span: Span) {
 		let offset = span.offset + span.len;
-		self.reader.backup(offset as usize);
+		self.reader.backup(offset);
 		self.last_offset = offset;
 	}
 
@@ -223,13 +214,13 @@ impl<'a> Lexer<'a> {
 	fn expect(&mut self, c: char) -> Result<(), SyntaxError> {
 		match self.reader.peek() {
 			Some(x) => {
-				let offset = self.reader.offset() as u32;
+				let offset = self.reader.offset();
 				self.reader.next();
 				let char = self.reader.convert_to_char(x)?;
 				if char == c {
 					return Ok(());
 				}
-				let len = self.reader.offset() as u32 - offset;
+				let len = self.reader.offset() - offset;
 				bail!(
 					"Unexpected character `{char}` expected `{c}`",
 					@Span {
@@ -261,7 +252,7 @@ impl<'a> Lexer<'a> {
 	/// Returns an error if not all bytes were consumed.
 	pub fn assert_finished(&self) -> Result<(), SyntaxError> {
 		if !self.reader.is_empty() {
-			let offset = self.reader.offset() as u32;
+			let offset = self.reader.offset();
 			let len = self.reader.remaining().len() as u32;
 			let span = Span {
 				offset,

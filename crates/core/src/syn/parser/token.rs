@@ -1,5 +1,5 @@
 use super::Parser;
-use crate::syn::token::{Glued, TokenKind, t};
+use crate::syn::token::{TokenKind, t};
 
 impl Parser<'_> {
 	/// Returns true if the next token can start a statement.
@@ -68,7 +68,6 @@ impl Parser<'_> {
 					| t!("+") | t!("-")
 					| t!("u'") | t!("u\"")
 					| t!("'") | t!("\"")
-					| TokenKind::Glued(Glued::Uuid | Glued::String)
 			)
 	}
 

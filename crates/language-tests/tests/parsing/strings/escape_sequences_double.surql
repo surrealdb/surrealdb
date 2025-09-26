@@ -27,6 +27,15 @@ value = '''"'"'''
 [[test.results]]
 value = "'\\\\'"
 
+[[test.results]]
+value = "'\u0000'"
+
+[[test.results]]
+value = "'S'"
+
+[[test.results]]
+value = "'S'"
+
 */
 "\n";
 "\r";
@@ -34,5 +43,8 @@ value = "'\\\\'"
 "\f";
 "\b";
 "\"";
-'\'';
-'\\';
+"\'";
+"\\";
+"\0";
+"\u0053";
+"\u{53}";

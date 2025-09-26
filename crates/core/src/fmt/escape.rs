@@ -94,7 +94,8 @@ impl fmt::Display for EscapeKey<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let s = self.0;
 		// Any non 'normal' characters or does the key start with a digit?
-		if s.starts_with(|x: char| x.is_ascii_digit())
+		if s.is_empty()
+			|| s.starts_with(|x: char| x.is_ascii_digit())
 			|| s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
 		{
 			return f.write_fmt(format_args!("\"{}\"", Escape::escape_str(s, '\"')));

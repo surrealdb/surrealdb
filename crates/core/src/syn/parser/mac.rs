@@ -16,7 +16,7 @@ macro_rules! unexpected {
 			}
 			$crate::syn::token::TokenKind::Eof => {
 				let error = $crate::syn::error::syntax_error!("Unexpected end of file, expected {}",$expected, @__found.span $( $($t)* )?);
-				return Err(error.with_data_pending())
+				return Err(error)
 			}
 			$crate::syn::token::TokenKind::WhiteSpace => {
 				$crate::syn::error::bail!("Unexpected whitespace, expected token {} to continue",$expected,  @__found.span$( $($t)* )?)

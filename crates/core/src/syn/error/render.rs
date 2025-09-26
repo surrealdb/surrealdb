@@ -118,7 +118,7 @@ impl Snippet {
 		let line = source.split('\n').nth(location.start.line - 1).unwrap();
 		let (line, truncation, offset) = Self::truncate_line(line, location.start.column - 1);
 		let length = if location.start.line == location.end.line {
-			location.end.column - location.start.column
+			(location.end.column - location.start.column).max(1)
 		} else {
 			1
 		};
@@ -231,9 +231,8 @@ impl fmt::Display for Snippet {
 		for _ in 0..self.length {
 			write!(f, "^")?;
 		}
-		write!(f, " ")?;
 		if let Some(ref explain) = self.label {
-			write!(f, "{explain}")?;
+			write!(f, " {explain}")?;
 		}
 		Ok(())
 	}

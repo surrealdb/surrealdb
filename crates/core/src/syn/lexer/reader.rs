@@ -11,25 +11,26 @@ pub enum CharError {
 	Unicode,
 }
 
+// Generally we want to attach a span to errors, but when dealing with utf-8 errors we cannot
+// correctly display the source so we cannot attach a meaningfull span.
 impl From<CharError> for SyntaxError {
-	fn from(value: CharError) -> Self {
-		let e = SyntaxError::new("Invalid, non valid UTF-8 bytes, in source");
-		if let CharError::Eof = value {
-			e.with_data_pending()
-		} else {
-			e
-		}
+	fn from(_: CharError) -> Self {
+		SyntaxError::new("Invalid, non valid UTF-8 bytes, in source")
 	}
 }
 
 #[derive(Clone, Debug)]
 pub struct BytesReader<'a> {
 	data: &'a [u8],
-	current: usize,
+	current: u32,
 }
 
 impl<'a> BytesReader<'a> {
 	pub fn new(slice: &'a [u8]) -> Self {
+		debug_assert!(
+			slice.len() < u32::MAX as usize,
+			"BytesReader got a string which was too large for lexing"
+		);
 		BytesReader {
 			data: slice,
 			current: 0,
@@ -38,21 +39,21 @@ impl<'a> BytesReader<'a> {
 
 	#[inline]
 	pub fn remaining(&self) -> &'a [u8] {
-		&self.data[self.current..]
+		&self.data[(self.current as usize)..]
 	}
 
 	#[inline]
-	pub fn len(&self) -> usize {
-		self.remaining().len()
+	pub fn len(&self) -> u32 {
+		self.remaining().len() as u32
 	}
 
 	#[inline]
-	pub fn offset(&self) -> usize {
+	pub fn offset(&self) -> u32 {
 		self.current
 	}
 
 	#[inline]
-	pub fn backup(&mut self, offset: usize) {
+	pub fn backup(&mut self, offset: u32) {
 		assert!(offset <= self.offset());
 		self.current = offset;
 	}
@@ -73,8 +74,27 @@ impl<'a> BytesReader<'a> {
 	}
 
 	#[inline]
+	pub fn eat(&mut self, c: u8) -> bool {
+		if self.peek() == Some(c) {
+			self.current += 1;
+			true
+		} else {
+			false
+		}
+	}
+
+	#[inline]
 	pub fn span(&self, span: Span) -> &'a [u8] {
 		&self.data[(span.offset as usize)..(span.offset as usize + span.len as usize)]
+	}
+
+	#[inline]
+	pub fn span_since(&self, offset: u32) -> Span {
+		assert!(offset <= self.offset(), "Tried to get a span from a offset read in the future");
+		Span {
+			offset,
+			len: self.offset() - offset,
+		}
 	}
 
 	#[inline]
@@ -90,6 +110,7 @@ impl<'a> BytesReader<'a> {
 		Ok(byte & CONTINUE_BYTE_MASK)
 	}
 
+	#[inline]
 	pub fn convert_to_char(&mut self, start: u8) -> Result<char, CharError> {
 		if start.is_ascii() {
 			return Ok(start as char);
@@ -97,7 +118,9 @@ impl<'a> BytesReader<'a> {
 		self.complete_char(start)
 	}
 
+	#[inline]
 	pub fn complete_char(&mut self, start: u8) -> Result<char, CharError> {
+		debug_assert!(!start.is_ascii(), "complete_char should not be handed ascii bytes");
 		match start & 0b1111_1000 {
 			0b1100_0000 | 0b1101_0000 | 0b1100_1000 | 0b1101_1000 => {
 				let mut val = (start & 0b0001_1111) as u32;
@@ -145,12 +168,12 @@ impl Iterator for BytesReader<'_> {
 	}
 	fn size_hint(&self) -> (usize, Option<usize>) {
 		let len = self.len();
-		(len, Some(len))
+		(len as usize, Some(len as usize))
 	}
 }
 
 impl ExactSizeIterator for BytesReader<'_> {
 	fn len(&self) -> usize {
-		self.len()
+		self.len() as usize
 	}
 }
