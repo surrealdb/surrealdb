@@ -18,7 +18,7 @@ impl Parser<'_> {
 		} else {
 			None
 		};
-		let timeout = self.try_parse_timeout()?;
+		let timeout = self.try_parse_timeout(stk).await?;
 		let parallel = self.eat(t!("PARALLEL"));
 
 		Ok(CreateStatement {

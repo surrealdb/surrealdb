@@ -324,6 +324,41 @@ docker run --pull --rm -v $PWD:/volume -t clux/muslrust:stable cargo build --rel
 
 </details>
 
+<!-- -------------------------------------------------- -->
+<!-- -------------------------------------------------- -->
+<!-- -------------------------------------------------- -->
+<!-- -------------------------------------------------- -->
+<!-- -------------------------------------------------- -->
+
+## Building on Debian 13 Trixie (amd64)
+
+<details><summary>Click to show details</summary>
+
+### ✅ Compile for `x86_64-unknown-linux-gnu` (Linux)
+```bash
+# Setup
+sudo apt-get -y update
+sudo apt-get -y install \
+	curl \
+	llvm \
+	cmake \
+	binutils \
+	clang \
+	qemu-user \
+	musl-tools \
+	libssl-dev \
+	pkg-config \
+	build-essential \
+	protobuf-compiler
+# Install rustlang and cargo
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+# Add extra targets for rust
+rustup target add x86_64-unknown-linux-gnu
+# Compile for x86_64-unknown-linux-gnu
+cargo build --release --locked --target x86_64-unknown-linux-gnu
+```
+</details>
 
 ## Building on Windows-amd64 (Windows OS)
 

@@ -706,7 +706,7 @@ pub trait ApiProvider {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ap: &str,
-	) -> Result<Arc<catalog::ApiDefinition>>;
+	) -> Result<Option<Arc<catalog::ApiDefinition>>>;
 
 	/// Put an api definition into a database.
 	async fn put_db_api(

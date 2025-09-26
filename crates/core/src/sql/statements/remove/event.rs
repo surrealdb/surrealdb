@@ -1,13 +1,23 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::fmt::EscapeIdent;
+use crate::sql::{Expr, Literal};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveEventStatement {
-	pub name: String,
-	pub what: String,
+	pub name: Expr,
+	pub what: Expr,
 	pub if_exists: bool,
+}
+
+impl Default for RemoveEventStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			what: Expr::Literal(Literal::None),
+			if_exists: false,
+		}
+	}
 }
 
 impl Display for RemoveEventStatement {
@@ -16,7 +26,7 @@ impl Display for RemoveEventStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", EscapeIdent(&self.name), self.what)?;
+		write!(f, " {} ON {}", self.name, self.what)?;
 		Ok(())
 	}
 }
@@ -24,8 +34,8 @@ impl Display for RemoveEventStatement {
 impl From<RemoveEventStatement> for crate::expr::statements::RemoveEventStatement {
 	fn from(v: RemoveEventStatement) -> Self {
 		crate::expr::statements::RemoveEventStatement {
-			name: v.name,
-			table_name: v.what,
+			name: v.name.into(),
+			table_name: v.what.into(),
 			if_exists: v.if_exists,
 		}
 	}
@@ -34,8 +44,8 @@ impl From<RemoveEventStatement> for crate::expr::statements::RemoveEventStatemen
 impl From<crate::expr::statements::RemoveEventStatement> for RemoveEventStatement {
 	fn from(v: crate::expr::statements::RemoveEventStatement) -> Self {
 		RemoveEventStatement {
-			name: v.name,
-			what: v.table_name,
+			name: v.name.into(),
+			what: v.table_name.into(),
 			if_exists: v.if_exists,
 		}
 	}

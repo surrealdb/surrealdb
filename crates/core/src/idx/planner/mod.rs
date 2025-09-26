@@ -153,7 +153,7 @@ impl<'a> StatementContext<'a> {
 		// and it is not GROUP ALL, then we
 		// need to process record values.
 		let is_group_all = if let Some(g) = self.group {
-			if !g.is_empty() {
+			if !g.is_group_all_only() {
 				return Ok(RecordStrategy::KeysAndValues);
 			}
 			true
@@ -301,6 +301,7 @@ impl QueryPlanner {
 			gp,
 			compound_indexes: tree.index_map.compound_indexes,
 			order_limit: tree.index_map.order_limit,
+			index_count: tree.index_map.index_count,
 			with_indexes: tree.with_indexes,
 			all_and: tree.all_and,
 			all_expressions_with_index: tree.all_expressions_with_index,
