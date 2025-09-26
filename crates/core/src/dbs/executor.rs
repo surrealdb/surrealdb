@@ -8,7 +8,7 @@ use futures::{Stream, StreamExt, stream};
 use reblessive::TreeStack;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
-use tracing::{instrument, warn};
+use tracing::instrument;
 use trice::Instant;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
@@ -20,6 +20,7 @@ use crate::dbs::response::Response;
 use crate::dbs::{Force, Notification, Options, QueryType};
 use crate::doc::DefaultBroker;
 use crate::err::Error;
+use crate::expr::expression::VisitExpression;
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
 use crate::expr::statements::OptionStatement;
@@ -82,12 +83,14 @@ impl Executor {
 		Ok(())
 	}
 
-	fn check_slow_log(&self, start: &Instant, stm: &impl Display) {
-		if let Some(threshold) = self.ctx.slow_log_threshold() {
-			let elapsed = start.elapsed();
-			if elapsed > threshold {
-				warn!("Slow query detected - time: {elapsed:#?} - query: {stm}")
-			}
+	/// If slow logging is configured in the current context, evaluate whether the
+	/// statement exceeded the slow threshold and emit a log entry if so.
+	///
+	/// Generic over `S` to accept both concrete statements and wrappers that
+	/// implement `Display` and `VisitExpression`.
+	fn check_slow_log<S: VisitExpression + Display>(&self, start: &Instant, stm: &S) {
+		if let Some(slow_log) = self.ctx.slow_log() {
+			slow_log.check_log(&self.ctx, start, stm);
 		}
 	}
 
@@ -155,9 +158,6 @@ impl Executor {
 					.finish()
 					.await;
 
-				// Check if we dump the slow log
-				self.check_slow_log(start, &stm);
-
 				let res = res?;
 				let result = match &stm.kind {
 					Some(kind) => res
@@ -182,6 +182,9 @@ impl Executor {
 					})
 					.map_err(anyhow::Error::new)?
 					.add_value(stm.name.clone(), result.into());
+
+				// Check if we dump the slow log
+				self.check_slow_log(start, stm.as_ref());
 				// Finalise transaction, returning nothing unless it couldn't commit
 				Ok(Value::None)
 			}

@@ -10,6 +10,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::expression::VisitExpression;
 use crate::expr::{Base, Expr, FlowResultExt as _};
 use crate::fmt::{EscapeKwFreeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
@@ -22,6 +23,15 @@ pub struct DefineParamStatement {
 	pub value: Expr,
 	pub comment: Option<Expr>,
 	pub permissions: Permission,
+}
+
+impl VisitExpression for DefineParamStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.comment.iter().for_each(|comment| comment.visit(visitor));
+	}
 }
 
 impl DefineParamStatement {

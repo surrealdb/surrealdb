@@ -5,6 +5,7 @@ use reblessive::tree::Stk;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::expr::expression::VisitExpression;
 use crate::expr::fetch::Fetchs;
 use crate::expr::{ControlFlow, Expr, FlowResult};
 use crate::val::Value;
@@ -20,6 +21,7 @@ impl OutputStatement {
 	pub(crate) fn read_only(&self) -> bool {
 		self.what.read_only()
 	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -42,6 +44,18 @@ impl OutputStatement {
 		}
 		//
 		Err(ControlFlow::Return(value))
+	}
+}
+
+impl VisitExpression for OutputStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.what.visit(visitor);
+		if let Some(fetchs) = &self.fetch {
+			fetchs.visit(visitor);
+		}
 	}
 }
 

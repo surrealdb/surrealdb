@@ -19,6 +19,7 @@ use crate::err::Error;
 use crate::expr::Idiom;
 #[cfg(target_family = "wasm")]
 use crate::expr::Output;
+use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::{expr_to_ident, exprs_to_fields};
 #[cfg(target_family = "wasm")]
 use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
@@ -37,6 +38,18 @@ pub struct DefineIndexStatement {
 	pub index: Index,
 	pub comment: Option<Expr>,
 	pub concurrently: bool,
+}
+
+impl VisitExpression for DefineIndexStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.name.visit(visitor);
+		self.what.visit(visitor);
+		self.cols.iter().for_each(|expr| expr.visit(visitor));
+		self.comment.iter().for_each(|expr| expr.visit(visitor));
+	}
 }
 
 impl Default for DefineIndexStatement {

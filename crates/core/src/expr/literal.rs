@@ -8,6 +8,7 @@ use rust_decimal::Decimal;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::expr::expression::VisitExpression;
 use crate::expr::{Expr, FlowResult, RecordIdLit};
 use crate::fmt::{EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::val::{
@@ -251,6 +252,15 @@ impl fmt::Display for Literal {
 pub struct ObjectEntry {
 	pub key: String,
 	pub value: Expr,
+}
+
+impl VisitExpression for ObjectEntry {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.value.visit(visitor);
+	}
 }
 
 impl fmt::Display for ObjectEntry {
