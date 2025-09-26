@@ -864,3 +864,111 @@ impl_slice!(
 	1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
 	27, 28, 29, 30, 31, 32
 );
+
+impl SurrealValue for http::HeaderMap {
+	fn kind_of() -> Kind {
+		Kind::Object
+	}
+
+	fn is_value(value: &Value) -> bool {
+		matches!(value, Value::Object(_))
+	}
+
+	fn into_value(self) -> Value {
+		let mut next_key = None;
+		let mut next_value = Value::None;
+		let mut first_value = true;
+		let mut res = BTreeMap::new();
+
+		// Header map can contain multiple values for each header.
+		// This is handled by returning the key name first and then return multiple
+		// values with key name = None.
+		for (k, v) in self.into_iter() {
+			let v = match v.to_str() {
+				Ok(v) => Value::String(v.to_owned()),
+				Err(_) => continue,
+			};
+
+			if let Some(k) = k {
+				let k = k.as_str().to_owned();
+				// new key, if we had accumulated a key insert it first and then update
+				// accumulated state.
+				if let Some(k) = next_key.take() {
+					let v = std::mem::replace(&mut next_value, Value::None);
+					res.insert(k, v);
+				}
+				next_key = Some(k);
+				next_value = v;
+				first_value = true;
+			} else if first_value {
+				// no new key, but this is directly after the first value, turn the header value
+				// into an array of values.
+				first_value = false;
+				next_value = Value::Array(vec![next_value, v].into())
+			} else {
+				// Since it is not a new key and a new value it must be atleast a third header
+				// value and `next_value` is already updated to an array.
+				if let Value::Array(ref mut array) = next_value {
+					array.push(v);
+				}
+			}
+		}
+
+		// Insert final key if there is one.
+		if let Some(x) = next_key {
+			let v = std::mem::replace(&mut next_value, Value::None);
+			res.insert(x, v);
+		}
+
+		Value::Object(Object::from(res))
+	}
+
+	fn from_value(value: Value) -> anyhow::Result<Self> {
+		// For each kv pair in the object:
+		//  - If the value is an array, insert each value into the header map.
+		//  - Otherwise, insert the value into the header map.
+		let Value::Object(Object(o)) = value else {
+			return Err(conversion_error(Self::kind_of(), value));
+		};
+		let mut res = http::HeaderMap::new();
+		for (k, v) in o.into_iter() {
+			let k = k.parse::<http::HeaderName>()?;
+			match v {
+				Value::Array(Array(a)) => {
+					for v in a {
+						let v = v.into_string()?.parse()?;
+						res.insert(k.clone(), v);
+					}
+				}
+				Value::String(v) => {
+					res.insert(k, v.parse()?);
+				}
+				unexpected => {
+					return Err(conversion_error(Self::kind_of(), unexpected));
+				}
+			}
+		}
+		Ok(res)
+	}
+}
+
+impl SurrealValue for http::StatusCode {
+	fn kind_of() -> Kind {
+		Kind::Number
+	}
+
+	fn is_value(value: &Value) -> bool {
+		matches!(value, Value::Number(_))
+	}
+
+	fn into_value(self) -> Value {
+		Value::Number(Number::Int(self.as_u16() as i64))
+	}
+
+	fn from_value(value: Value) -> anyhow::Result<Self> {
+		let Value::Number(Number::Int(n)) = value else {
+			return Err(conversion_error(Self::kind_of(), value));
+		};
+		Ok(http::StatusCode::from_u16(n as u16).unwrap())
+	}
+}

@@ -1,7 +1,7 @@
 use std::fmt::{self, Display};
 
-use anyhow::Result;
 use revision::revisioned;
+use surrealdb_types::{Kind, SurrealValue};
 
 use crate::api::path::Path;
 use crate::catalog::Permission;
@@ -10,6 +10,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::fmt::Fmt;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::ToSql;
+use crate::types::PublicValue;
 use crate::val::{Array, Object, Value};
 
 /// The API definition.
@@ -105,11 +106,22 @@ pub enum ApiMethod {
 	Trace,
 }
 
-impl TryFrom<&Value> for ApiMethod {
-	type Error = anyhow::Error;
-	fn try_from(value: &Value) -> Result<Self, Self::Error> {
+impl SurrealValue for ApiMethod {
+	fn kind_of() -> Kind {
+		Kind::String
+	}
+
+	fn is_value(value: &PublicValue) -> bool {
+		matches!(value, PublicValue::String(_))
+	}
+
+	fn into_value(self) -> PublicValue {
+		PublicValue::String(self.to_string())
+	}
+
+	fn from_value(value: PublicValue) -> anyhow::Result<Self> {
 		match value {
-			Value::String(s) => match s.to_ascii_lowercase().as_str() {
+			PublicValue::String(s) => match s.to_ascii_lowercase().as_str() {
 				"delete" => Ok(Self::Delete),
 				"get" => Ok(Self::Get),
 				"patch" => Ok(Self::Patch),
@@ -118,7 +130,7 @@ impl TryFrom<&Value> for ApiMethod {
 				"trace" => Ok(Self::Trace),
 				unexpected => Err(anyhow::anyhow!("method does not match: {unexpected}")),
 			},
-			_ => Err(anyhow::anyhow!("method does not match: {value}")),
+			_ => Err(anyhow::anyhow!("method does not match: {value:?}")),
 		}
 	}
 }

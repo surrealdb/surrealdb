@@ -4,11 +4,11 @@ use std::str::FromStr;
 
 use anyhow::Context as _;
 use serde::Deserialize;
+use surrealdb::types::{self as surrealdb_types, SurrealValue, Value};
 
 use super::error::ResponseError;
-use crate::core::val::Value;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, SurrealValue)]
 pub struct Param(pub String);
 
 impl Deref for Param {
@@ -27,13 +27,6 @@ impl FromStr for Param {
 			.context("Failed to url-decode query parameter")
 			.map_err(ResponseError)?;
 		Ok(Param(s.into_owned()))
-	}
-}
-
-impl From<Param> for Value {
-	#[inline]
-	fn from(v: Param) -> Self {
-		Value::from(v.0)
 	}
 }
 

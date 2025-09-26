@@ -160,6 +160,19 @@ impl Value {
 		matches!(self, Value::None | Value::Null)
 	}
 
+	/// Check if this Value is empty.
+	pub fn is_empty(&self) -> bool {
+		match self {
+			Value::None => true,
+			Value::Null => true,
+			Value::String(s) => s.is_empty(),
+			Value::Bytes(b) => b.is_empty(),
+			Value::Object(obj) => obj.is_empty(),
+			Value::Array(arr) => arr.is_empty(),
+			_ => false,
+		}
+	}
+
 	/// Accesses the value found at a certain field
 	/// if an object, and a certain index if an array.
 	/// Will not err if no value is found at this point,
@@ -281,5 +294,40 @@ impl Indexable<&str> for Value {
 			},
 			_ => Value::None,
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use rstest::rstest;
+
+	use super::*;
+
+	#[rstest]
+	#[case::none(Value::None, true)]
+	#[case::null(Value::Null, true)]
+	#[case::string(Value::String("".to_string()), true)]
+	#[case::string(Value::String("hello".to_string()), false)]
+	#[case::bytes(Value::Bytes(Bytes::default()), true)]
+	#[case::bytes(Value::Bytes(Bytes::new(vec![1, 2, 3])), false)]
+	#[case::object(Value::Object(Object::default()), true)]
+	#[case::object(Value::Object(Object::from_iter([("key".to_string(), Value::String("value".to_string()))])), false)]
+	#[case::array(Value::Array(Array::new()), true)]
+	#[case::array(Value::Array(Array::from_values(vec![Value::String("hello".to_string())])), false)]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))), false)]
+	#[case::record_id(Value::RecordId(RecordId::new("test", "key")), false)]
+	#[case::file(Value::File(File::default()), false)]
+	#[case::range(Value::Range(Box::new(Range::unbounded())), false)]
+	#[case::regex(Value::Regex("hello".parse().unwrap()), false)]
+	#[case::duration(Value::Duration(Duration::new(1, 0)), false)]
+	#[case::datetime(Value::Datetime(Datetime::from_timestamp(1, 0).unwrap()), false)]
+	#[case::uuid(Value::Uuid(Uuid::new_v4()), false)]
+	#[case::bool(Value::Bool(true), false)]
+	#[case::bool(Value::Bool(false), false)]
+	#[case::number(Value::Number(Number::Int(1)), false)]
+	#[case::number(Value::Number(Number::Float(1.0)), false)]
+	#[case::number(Value::Number(Number::Decimal(Decimal::new(1, 0))), false)]
+	fn test_is_empty(#[case] value: Value, #[case] expected: bool) {
+		assert_eq!(value.is_empty(), expected);
 	}
 }

@@ -72,7 +72,6 @@ pub trait RpcContext {
 	) -> Result<DbResult, RpcError>
 	where
 		Self: RpcProtocolV1,
-		// Self: RpcProtocolV2,
 	{
 		match version {
 			Some(1) => RpcProtocolV1::execute(self, method, params).await,

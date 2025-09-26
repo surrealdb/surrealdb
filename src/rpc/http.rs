@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
+use surrealdb::types::{Array, Value};
 use tokio::sync::Semaphore;
 
 use crate::cnf::{PKG_NAME, PKG_VERSION};
 use crate::core::dbs::Session;
 use crate::core::kvs::Datastore;
-use crate::core::rpc::{DbResult, RpcContext, RpcError, RpcProtocolV1, RpcProtocolV2};
-use crate::core::val::{Array, Value};
+use crate::core::rpc::{DbResult, RpcContext, RpcError, RpcProtocolV1};
 
 //use crate::core::gql::{Pessimistic, SchemaCache};
 
@@ -78,18 +78,6 @@ impl RpcContext for Http {
 }
 
 impl RpcProtocolV1 for Http {
-	/// Parameters can't be set or unset on HTTP RPC context
-	async fn set(&self, _params: Array) -> Result<DbResult, RpcError> {
-		Err(RpcError::MethodNotFound)
-	}
-
-	/// Parameters can't be set or unset on HTTP RPC context
-	async fn unset(&self, _params: Array) -> Result<DbResult, RpcError> {
-		Err(RpcError::MethodNotFound)
-	}
-}
-
-impl RpcProtocolV2 for Http {
 	/// Parameters can't be set or unset on HTTP RPC context
 	async fn set(&self, _params: Array) -> Result<DbResult, RpcError> {
 		Err(RpcError::MethodNotFound)

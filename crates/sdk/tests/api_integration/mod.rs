@@ -164,8 +164,8 @@ mod ws {
 		// At this point the connection has already been established but the database
 		// hasn't been selected yet.
 		db.signin(Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		})
 		.await
 		.unwrap();
@@ -206,8 +206,8 @@ mod http {
 		let permit = PERMITS.acquire().await.unwrap();
 		let db = Surreal::new::<Http>("127.0.0.1:8000").await.unwrap();
 		db.signin(Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		})
 		.await
 		.unwrap();
@@ -360,10 +360,10 @@ mod rocksdb {
 		let permit = PERMITS.acquire().await.unwrap();
 		let path = TEMP_DIR.join(Ulid::new().to_string());
 		let root = Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		};
-		let config = Config::new().user(root).capabilities(Capabilities::all());
+		let config = Config::new().user(root.clone()).capabilities(Capabilities::all());
 		let db = Surreal::new::<RocksDb>((path, config)).await.unwrap();
 		db.signin(root).await.unwrap();
 		(permit, db)
@@ -405,10 +405,10 @@ mod tikv {
 	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
 		let permit = PERMITS.acquire().await.unwrap();
 		let root = Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		};
-		let config = Config::new().user(root).capabilities(Capabilities::all());
+		let config = Config::new().user(root.clone()).capabilities(Capabilities::all());
 		let db = Surreal::new::<TiKv>(("127.0.0.1:2379", config)).await.unwrap();
 		db.signin(root).await.unwrap();
 		(permit, db)
@@ -440,10 +440,10 @@ mod fdb {
 	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
 		let permit = PERMITS.acquire().await.unwrap();
 		let root = Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		};
-		let config = Config::new().user(root).capabilities(Capabilities::all());
+		let config = Config::new().user(root.clone()).capabilities(Capabilities::all());
 		let path = "/etc/foundationdb/fdb.cluster";
 		surrealdb::engine::any::connect((format!("fdb://{path}"), config.clone())).await.unwrap();
 		let db = Surreal::new::<FDb>((path, config)).await.unwrap();
@@ -472,10 +472,10 @@ mod surrealkv {
 		let permit = PERMITS.acquire().await.unwrap();
 		let path = TEMP_DIR.join(Ulid::new().to_string());
 		let root = Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		};
-		let config = Config::new().user(root).capabilities(Capabilities::all());
+		let config = Config::new().user(root.clone()).capabilities(Capabilities::all());
 		let db = Surreal::new::<SurrealKv>((path, config)).await.unwrap();
 		db.signin(root).await.unwrap();
 		(permit, db)
@@ -521,10 +521,10 @@ mod surrealkv_versioned {
 		let permit = PERMITS.acquire().await.unwrap();
 		let path = TEMP_DIR.join(Ulid::new().to_string());
 		let root = Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		};
-		let config = Config::new().user(root).capabilities(Capabilities::all());
+		let config = Config::new().user(root.clone()).capabilities(Capabilities::all());
 		let db = Surreal::new::<SurrealKv>((path, config)).versioned().await.unwrap();
 		db.signin(root).await.unwrap();
 		(permit, db)
@@ -567,8 +567,8 @@ mod any {
 		let permit = PERMITS.acquire().await.unwrap();
 		let db = surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
 		db.signin(Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		})
 		.await
 		.unwrap();

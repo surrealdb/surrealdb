@@ -8,7 +8,6 @@ use crate::core::dbs::capabilities::{
 	Targets,
 };
 use crate::core::kvs::export::TableConfig;
-use crate::core::val;
 
 pub(crate) mod parser;
 
@@ -87,7 +86,7 @@ pub(crate) fn key_valid(v: &str) -> Result<String, String> {
 }
 
 pub(crate) fn duration(v: &str) -> Result<Duration, String> {
-	val::Duration::from_str(v).map(|d| d.0).map_err(|_| String::from("invalid duration"))
+	Duration::from_str(v).map(|d| d.0).map_err(|_| String::from("invalid duration"))
 }
 
 pub(crate) fn net_targets(value: &str) -> Result<Targets<NetTarget>, String> {

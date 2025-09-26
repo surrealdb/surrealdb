@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use http::HeaderMap;
 use reblessive::tree::Stk;
+use surrealdb_types::SurrealValue;
 
 use super::args::Optional;
 use crate::api::body::ApiBody;
@@ -11,6 +12,7 @@ use crate::catalog::providers::ApiProvider;
 use crate::catalog::{ApiDefinition, ApiMethod};
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::sql::expression::convert_public_value_to_internal;
 use crate::val::{Object, Value};
 
 pub async fn invoke(
@@ -24,7 +26,8 @@ pub async fn invoke(
 		};
 
 		let method = if let Some(v) = opts.get("method") {
-			ApiMethod::try_from(v)?
+			let public_val = crate::dbs::executor::convert_value_to_public_value(v.clone())?;
+			ApiMethod::from_value(public_val)?
 		} else {
 			ApiMethod::Get
 		};
@@ -58,12 +61,13 @@ pub async fn invoke(
 			headers,
 		};
 
+		// Convert body to public value for ApiBody
 		let public_body = crate::dbs::executor::convert_value_to_public_value(body)?;
 		match invocation
 			.invoke_with_context(stk, ctx, opt, api, ApiBody::from_value(public_body))
 			.await
 		{
-			Ok(Some(v)) => Ok(v.0.into_response_value()?),
+			Ok(Some(v)) => Ok(convert_public_value_to_internal(v.0.into_value())),
 			Err(e) => Err(e),
 			_ => Ok(Value::None),
 		}

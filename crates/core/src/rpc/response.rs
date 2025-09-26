@@ -4,10 +4,13 @@ use std::time::Duration;
 use anyhow::Context;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use surrealdb_types::{Kind, Object, SurrealValue, Value};
+use surrealdb_types::object;
 
 use crate::dbs::QueryResult;
-use crate::types::PublicNotification;
+use crate::rpc::RpcError;
+use crate::types::{
+	PublicArray, PublicKind, PublicNotification, PublicObject, PublicValue, SurrealValue,
+};
 use crate::{dbs, map};
 
 /// Query statistics
@@ -35,7 +38,7 @@ impl DbResultStats {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum DbResult {
 	/// Generally methods return a `expr::Value`
-	Other(Value),
+	Other(PublicValue),
 	/// The query methods, `query` and `query_with` return a `Vec` of responses
 	Query(Vec<dbs::QueryResult>),
 	/// Live queries return a notification
@@ -44,34 +47,33 @@ pub enum DbResult {
 }
 
 impl SurrealValue for DbResult {
-	fn kind_of() -> Kind {
-		Kind::Any
+	fn kind_of() -> PublicKind {
+		PublicKind::Any
 	}
 
-	fn is_value(_value: &Value) -> bool {
+	fn is_value(_value: &PublicValue) -> bool {
 		true
 	}
 
-	fn into_value(self) -> Value {
+	fn into_value(self) -> PublicValue {
 		match self {
 			DbResult::Query(v) => {
-				let converted: Vec<Value> = v.into_iter().map(|x| x.into_value()).collect();
-				Value::Array(surrealdb_types::Array::from_values(converted))
+				let converted: Vec<PublicValue> = v.into_iter().map(|x| x.into_value()).collect();
+				PublicValue::Array(PublicArray::from_values(converted))
 			}
-			DbResult::Live(v) => Value::Object(surrealdb_types::Object::from_map(map! {
-				"id".to_owned() => Value::Uuid(surrealdb_types::Uuid(v.id.0)),
-				"action".to_owned() => Value::String(v.action.to_string()),
-				"record".to_owned() => v.record,
-				"result".to_owned() => v.result,
-
-			})),
+			DbResult::Live(v) => PublicValue::Object(object! {
+				id: PublicValue::Uuid(v.id),
+				action: v.action.into_value(),
+				record: v.record,
+				result: v.result,
+			}),
 			DbResult::Other(v) => v,
 		}
 	}
 
-	fn from_value(value: Value) -> anyhow::Result<Self> {
+	fn from_value(value: PublicValue) -> anyhow::Result<Self> {
 		match value {
-			Value::Array(arr) => {
+			PublicValue::Array(arr) => {
 				let results = arr
 					.inner()
 					.iter()
@@ -80,19 +82,19 @@ impl SurrealValue for DbResult {
 					.collect::<anyhow::Result<Vec<_>>>()?;
 				Ok(DbResult::Query(results))
 			}
-			Value::Object(obj) => {
+			PublicValue::Object(obj) => {
 				// Check if this is a Live result
 				if obj.get("id").is_some() && obj.get("action").is_some() {
 					let mut obj = obj.inner().clone();
 					let id = obj.remove("id").context("Missing id")?;
 					let action = obj.remove("action").context("Missing action")?;
-					let record = obj.remove("record").unwrap_or(Value::None);
-					let result = obj.remove("result").unwrap_or(Value::None);
+					let record = obj.remove("record").unwrap_or(PublicValue::None);
+					let result = obj.remove("result").unwrap_or(PublicValue::None);
 
-					let Value::Uuid(uuid) = id else {
+					let PublicValue::Uuid(uuid) = id else {
 						anyhow::bail!("Expected UUID for id field");
 					};
-					let Value::String(action_str) = action else {
+					let PublicValue::String(action_str) = action else {
 						anyhow::bail!("Expected string for action field");
 					};
 
@@ -106,7 +108,7 @@ impl SurrealValue for DbResult {
 
 					Ok(DbResult::Live(PublicNotification::new(uuid, action, record, result)))
 				} else {
-					Ok(DbResult::Other(Value::Object(obj)))
+					Ok(DbResult::Other(PublicValue::Object(obj)))
 				}
 			}
 			other => Ok(DbResult::Other(other)),
@@ -117,8 +119,8 @@ impl SurrealValue for DbResult {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue, Serialize, Deserialize)]
 pub struct DbResultError {
-	pub(crate) code: i64,
-	pub(crate) message: String,
+	pub code: i64,
+	pub message: String,
 }
 
 impl DbResultError {
@@ -179,16 +181,43 @@ impl std::error::Error for DbResultError {
 	}
 }
 
+impl From<RpcError> for DbResultError {
+	fn from(error: RpcError) -> Self {
+		todo!("STU")
+	}
+}
+
 pub type DbResponseResult = Result<DbResult, DbResultError>;
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DbResponse {
-	pub id: Option<Value>,
+	pub id: Option<PublicValue>,
 	pub result: DbResponseResult,
 }
 
 impl DbResponse {
+	pub fn new(id: Option<PublicValue>, result: DbResponseResult) -> Self {
+		Self {
+			id,
+			result,
+		}
+	}
+
+	pub fn failure(id: Option<PublicValue>, error: DbResultError) -> Self {
+		Self {
+			id,
+			result: Err(error),
+		}
+	}
+
+	pub fn success(id: Option<PublicValue>, result: DbResult) -> Self {
+		Self {
+			id,
+			result: Ok(result),
+		}
+	}
+
 	pub fn from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
 		// Decode using revision format
 		crate::rpc::format::revision::decode(bytes)
@@ -196,15 +225,15 @@ impl DbResponse {
 }
 
 impl SurrealValue for DbResponse {
-	fn kind_of() -> Kind {
-		Kind::Object
+	fn kind_of() -> PublicKind {
+		PublicKind::Object
 	}
 
-	fn is_value(value: &Value) -> bool {
-		matches!(value, Value::Object(_))
+	fn is_value(value: &PublicValue) -> bool {
+		matches!(value, PublicValue::Object(_))
 	}
 
-	fn into_value(self) -> Value {
+	fn into_value(self) -> PublicValue {
 		let mut value = match self.result {
 			Ok(result) => map! { "result".to_string() => result.into_value() },
 			Err(err) => map! {
@@ -214,11 +243,11 @@ impl SurrealValue for DbResponse {
 		if let Some(id) = self.id {
 			value.insert("id".to_string(), id);
 		}
-		Value::Object(Object::from(value))
+		PublicValue::Object(PublicObject::from(value))
 	}
 
-	fn from_value(value: Value) -> anyhow::Result<Self> {
-		let Value::Object(mut obj) = value else {
+	fn from_value(value: PublicValue) -> anyhow::Result<Self> {
+		let PublicValue::Object(mut obj) = value else {
 			anyhow::bail!("Expected object for DbResponse");
 		};
 
@@ -236,11 +265,5 @@ impl SurrealValue for DbResponse {
 			id,
 			result,
 		})
-	}
-}
-
-impl From<DbResponse> for Value {
-	fn from(value: DbResponse) -> Self {
-		value.into_value()
 	}
 }

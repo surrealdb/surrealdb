@@ -4,6 +4,7 @@ use axum::routing::post;
 use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use futures::TryStreamExt;
+use surrealdb::types::{Array, SurrealValue, Value};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::AppState;
@@ -14,7 +15,6 @@ use crate::core::dbs::Session;
 use crate::core::dbs::capabilities::RouteTarget;
 use crate::core::iam::Action::Edit;
 use crate::core::iam::ResourceKind::Any;
-use crate::core::val::Value;
 use crate::net::error::Error as NetError;
 use crate::net::output::Output;
 
@@ -56,13 +56,17 @@ async fn handler(
 					// result in some values of the code being serialized wrong.
 					//
 					// this will serialize structs differently then they should.
-					let res = res.into_iter().map(|x| x.into_value()).collect::<Value>();
+					let res = Value::Array(Array::from(
+						res.into_iter().map(|x| x.into_value()).collect::<Vec<Value>>(),
+					));
 					Ok(Output::json_value(&res))
 				}
 				Some(Accept::ApplicationCbor) => {
 					// TODO(3.0): This code here is using the wrong serialization method which might
 					// result in some values of the code being serialized wrong.
-					let res = res.into_iter().map(|x| x.into_value()).collect::<Value>();
+					let res = Value::Array(Array::from(
+						res.into_iter().map(|x| x.into_value()).collect::<Vec<Value>>(),
+					));
 					Ok(Output::cbor(&res))
 				}
 				// Return nothing

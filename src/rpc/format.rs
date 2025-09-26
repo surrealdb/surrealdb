@@ -2,14 +2,13 @@ use axum::extract::ws::Message;
 use axum::response::Response as AxumResponse;
 use bytes::Bytes;
 use http::header::CONTENT_TYPE;
+use surrealdb::types::Value;
+use surrealdb_core::rpc::{DbResponse, DbResultError};
 
 use crate::core::rpc::RpcError;
 use crate::core::rpc::format::Format;
 use crate::core::rpc::request::Request;
-use crate::core::val;
 use crate::net::headers::{Accept, ContentType};
-use crate::rpc::failure::Failure;
-use crate::rpc::response::DbResponse;
 
 impl From<&Accept> for Format {
 	fn from(value: &Accept) -> Self {
@@ -49,58 +48,58 @@ impl From<&Format> for ContentType {
 
 pub trait WsFormat {
 	/// Process a WebSocket RPC request
-	fn req_ws(&self, msg: Message) -> Result<Request, Failure>;
+	fn req_ws(&self, msg: Message) -> Result<Request, DbResultError>;
 	/// Process a WebSocket RPC response
-	fn res_ws(&self, res: DbResponse) -> Result<(usize, Message), Failure>;
+	fn res_ws(&self, res: DbResponse) -> Result<(usize, Message), DbResultError>;
 }
 
 impl WsFormat for Format {
 	/// Process a WebSocket RPC request
-	fn req_ws(&self, msg: Message) -> Result<Request, Failure> {
+	fn req_ws(&self, msg: Message) -> Result<Request, DbResultError> {
 		let val = msg.into_data();
 		match self {
 			Format::Json => {
 				let val = crate::core::rpc::format::json::decode(&val)
 					.map_err(|_| RpcError::ParseError)?;
-				if let val::Value::Object(obj) = val {
+				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
 				} else {
-					Err(Failure::from(RpcError::ParseError))
+					Err(DbResultError::from(RpcError::ParseError))
 				}
 			}
 			Format::Cbor => {
 				let val = crate::core::rpc::format::cbor::decode(&val)
 					.map_err(|_| RpcError::ParseError)?;
-				if let val::Value::Object(obj) = val {
+				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
 				} else {
-					Err(Failure::from(RpcError::ParseError))
+					Err(DbResultError::from(RpcError::ParseError))
 				}
 			}
 			Format::Bincode => {
 				let val = crate::core::rpc::format::bincode::decode(&val)
 					.map_err(|_| RpcError::ParseError)?;
-				if let val::Value::Object(obj) = val {
+				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
 				} else {
-					Err(Failure::from(RpcError::ParseError))
+					Err(DbResultError::from(RpcError::ParseError))
 				}
 			}
 			Format::Revision => {
 				let val = crate::core::rpc::format::revision::decode(&val)
 					.map_err(|_| RpcError::ParseError)?;
-				if let val::Value::Object(obj) = val {
+				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
 				} else {
-					Err(Failure::from(RpcError::ParseError))
+					Err(DbResultError::from(RpcError::ParseError))
 				}
 			}
-			Format::Unsupported => Err(Failure::from(RpcError::InvalidRequest)),
+			Format::Unsupported => Err(DbResultError::from(RpcError::InvalidRequest)),
 		}
 	}
 
 	/// Process a WebSocket RPC response
-	fn res_ws(&self, res: DbResponse) -> Result<(usize, Message), Failure> {
+	fn res_ws(&self, res: DbResponse) -> Result<(usize, Message), DbResultError> {
 		match self {
 			Format::Json => {
 				let val = crate::core::rpc::format::json::encode_str(res.into_value())
@@ -122,7 +121,7 @@ impl WsFormat for Format {
 					.map_err(|_| RpcError::ParseError)?;
 				Ok((val.len(), Message::Binary(val)))
 			}
-			Format::Unsupported => Err(Failure::from(RpcError::InvalidRequest)),
+			Format::Unsupported => Err(DbResultError::from(RpcError::InvalidRequest)),
 		}
 	}
 }
@@ -141,7 +140,7 @@ impl HttpFormat for Format {
 			Format::Json => {
 				let val = crate::core::rpc::format::json::decode(&body)
 					.map_err(|_| RpcError::ParseError)?;
-				if let val::Value::Object(obj) = val {
+				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
 				} else {
 					Err(RpcError::ParseError)
@@ -150,7 +149,7 @@ impl HttpFormat for Format {
 			Format::Cbor => {
 				let val = crate::core::rpc::format::cbor::decode(&body)
 					.map_err(|_| RpcError::ParseError)?;
-				if let val::Value::Object(obj) = val {
+				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
 				} else {
 					Err(RpcError::ParseError)
@@ -159,7 +158,7 @@ impl HttpFormat for Format {
 			Format::Bincode => {
 				let val = crate::core::rpc::format::bincode::decode(&body)
 					.map_err(|_| RpcError::ParseError)?;
-				if let val::Value::Object(obj) = val {
+				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
 				} else {
 					Err(RpcError::ParseError)
@@ -168,7 +167,7 @@ impl HttpFormat for Format {
 			Format::Revision => {
 				let val = crate::core::rpc::format::revision::decode(&body)
 					.map_err(|_| RpcError::ParseError)?;
-				if let val::Value::Object(obj) = val {
+				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
 				} else {
 					Err(RpcError::ParseError)

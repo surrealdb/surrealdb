@@ -938,7 +938,7 @@ async fn compute_purge(
 		}
 	};
 	// Get all grants to purge.
-	let mut purged = Array::default();
+	let mut purged = Array::new();
 	let grs = match base {
 		Base::Root => txn.all_root_access_grants(&stmt.ac).await?,
 		Base::Ns => {

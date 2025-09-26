@@ -3,9 +3,9 @@ use bincode::Options;
 use http::StatusCode;
 use http::header::{CONTENT_TYPE, HeaderValue};
 use serde::Serialize;
+use surrealdb::types::Value;
 
 use super::headers::Accept;
-use crate::core::val;
 
 pub enum Output {
 	None,
@@ -23,7 +23,7 @@ impl Output {
 	// core. We need to force a single way to serialize values or end up with
 	// subtle bugs and format differences.
 	#[deprecated]
-	pub fn json_value(val: &val::Value) -> Output {
+	pub fn json_value(val: &Value) -> Output {
 		match crate::core::rpc::format::json::encode(val.clone()) {
 			Ok(v) => Output::Json(v),
 			Err(_) => Output::Fail,

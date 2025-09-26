@@ -4,7 +4,7 @@ use std::ops::{Bound, RangeFrom, RangeFull, RangeTo, RangeToInclusive};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::{Range, RecordIdKey};
+use crate::{Range, RecordIdKey, SurrealValue};
 
 /// Represents a range of record identifier keys in SurrealDB
 ///
@@ -29,7 +29,7 @@ impl RecordIdKeyRange {
 	}
 
 	/// Converts a `Range` value into a `RecordIdKeyRange`.
-	pub fn from_value_range(range: Range) -> Option<Self> {
+	pub fn from_value_range(range: Range) -> anyhow::Result<Self> {
 		let start = match range.start {
 			Bound::Included(x) => Bound::Included(RecordIdKey::from_value(x)?),
 			Bound::Excluded(x) => Bound::Excluded(RecordIdKey::from_value(x)?),
@@ -42,7 +42,7 @@ impl RecordIdKeyRange {
 			Bound::Unbounded => Bound::Unbounded,
 		};
 
-		Some(RecordIdKeyRange {
+		Ok(RecordIdKeyRange {
 			start,
 			end,
 		})

@@ -1,13 +1,9 @@
 // Tests common to all protocols and storage engines
 
-use std::borrow::Cow;
-use std::ops::Bound;
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
 use serde_json::json;
 use surrealdb::IndexedResults;
-use surrealdb::error::{Api as ApiError, Db as DbError};
 use surrealdb::opt::auth::{Database, Namespace, Record as RecordAccess};
 use surrealdb::opt::{PatchOp, PatchOps, Raw, Resource};
 use surrealdb::types::{RecordId, RecordIdKey, SurrealValue, Value, array, object, rid};
@@ -16,7 +12,7 @@ use surrealdb_core::syn;
 use ulid::Ulid;
 
 use super::CreateDb;
-use crate::api_integration::{ApiRecordId, NS, Record, RecordBuf, RecordName};
+use crate::api_integration::{ApiRecordId, AuthParams, NS, Record, RecordBuf, RecordName};
 
 pub async fn connect(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
@@ -582,17 +578,10 @@ pub async fn create_record_with_id_in_content(new_db: impl CreateDb) {
 		.await
 		.unwrap_err();
 
-	// if let Some(DbError::IdMismatch {
-	// 	..
-	// }) = error.downcast_ref()
-	// {
-	// } else if let Some(ApiError::Query {
-	// 	..
-	// }) = error.downcast_ref()
-	// {
-	// } else {
-	// 	panic!("unexpected error; {error:?}")
-	// };
+	assert_eq!(
+		error.to_string(),
+		"Found jane for the `id` field, but the value does not match the `id` record id"
+	);
 
 	let _: Option<Record> = db
 		.create("person")

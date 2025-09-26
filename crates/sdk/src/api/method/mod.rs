@@ -1273,7 +1273,7 @@ where
 		Run {
 			client: Cow::Borrowed(self),
 			function: function.into_fn(),
-			args: Value::Array(Array::default()),
+			args: Value::Array(Array::new()),
 			response_type: PhantomData,
 		}
 	}

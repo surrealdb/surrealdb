@@ -1,4 +1,3 @@
-pub mod failure;
 pub mod format;
 pub mod http;
 pub mod response;
@@ -10,6 +9,7 @@ use std::time::Duration;
 
 use futures::stream::FuturesUnordered;
 use opentelemetry::Context as TelemetryContext;
+use surrealdb_core::rpc::DbResponse;
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
@@ -80,7 +80,7 @@ pub(crate) async fn notifications(
 						// Ensure the specified WebSocket exists
 						if let Some(rpc) = websocket {
 							// Serialize the message to send
-							let message = response::success(None, DbResult::Live(notification));
+							let message = DbResponse::success(None, DbResult::Live(notification));
 							// Add telemetry metrics
 							let cx = TelemetryContext::new();
 							let not_ctx = NotificationContext::default()
@@ -91,7 +91,8 @@ pub(crate) async fn notifications(
 							// Get the WebSocket sending channel
 							let sender = rpc.channel.clone();
 							// Send the notification to the client
-							let future = message.send(cx, format, sender);
+							// let future = message.send(cx, format, sender);
+							let future = crate::rpc::response::send(message, cx, format, sender);
 							// Pus the future to the pipeline
 							futures.push(future);
 						}

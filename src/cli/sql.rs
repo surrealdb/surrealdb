@@ -11,6 +11,7 @@ use surrealdb::method::WithStats;
 use surrealdb::opt::Config;
 use surrealdb::types::Value;
 use surrealdb::{IndexedResults, Notification};
+use surrealdb_core::rpc::DbResultStats;
 
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
 use crate::cli::abstraction::{
@@ -81,10 +82,10 @@ pub async fn init(
 	let client = if username.is_some() && password.is_some() && !is_local {
 		debug!("Connecting to the database engine with authentication");
 		let creds = CredentialsBuilder::default()
-			.with_username(username.as_deref())
-			.with_password(password.as_deref())
-			.with_namespace(namespace.as_deref())
-			.with_database(database.as_deref());
+			.with_username(username.clone())
+			.with_password(password.clone())
+			.with_namespace(namespace.clone())
+			.with_database(database.clone());
 
 		let client = connect(endpoint).await?;
 
@@ -289,7 +290,7 @@ fn process(
 	// Get the number of statements the query contained
 	let num_statements = response.num_statements();
 	// Prepare a single value from the query response
-	let mut vec = Vec::<(Stats, Value)>::with_capacity(num_statements);
+	let mut vec = Vec::<(DbResultStats, Value)>::with_capacity(num_statements);
 	for index in 0..num_statements {
 		let (stats, result) = response.take(index).ok_or_else(|| {
 			anyhow!("Expected some result for a query with index {index}, but found none")
@@ -299,7 +300,7 @@ fn process(
 	}
 
 	tokio::spawn(async move {
-		let mut stream = match response.into_inner().stream::<Value>(()) {
+		let mut stream = match response.stream::<Value>(()) {
 			Ok(stream) => stream,
 			Err(error) => {
 				print(Err(error));
@@ -316,10 +317,10 @@ fn process(
 			let message = match (json, pretty) {
 				// Don't prettify the SurrealQL response
 				(false, false) => {
-					let value = val::Value::from(map! {
-						String::from("id") => val::Value::from(val::Uuid::from(query_id)),
+					let value = Value::from(map! {
+						String::from("id") => Value::Uuid(query_id),
 						String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
-						String::from("result") => data.into_inner(),
+						String::from("result") => data,
 					});
 					value.to_string()
 				}
@@ -329,10 +330,10 @@ fn process(
 				),
 				// Don't pretty print the JSON response
 				(true, false) => {
-					let value = val::Value::from(map! {
-						String::from("id") => val::Value::from(val::Uuid::from(query_id)),
+					let value = Value::from(map! {
+						String::from("id") => Value::Uuid(query_id),
 						String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
-						String::from("result") => data.into_inner(),
+						String::from("result") => data,
 					});
 					if let Some(x) = value.into_json_value() {
 						x.to_string()
@@ -347,7 +348,7 @@ fn process(
 						&mut buf,
 						PrettyFormatter::with_indent(b"\t"),
 					);
-					data.into_inner().into_json_value().serialize(&mut serializer).unwrap();
+					data.into_json_value().serialize(&mut serializer).unwrap();
 					let output = String::from_utf8(buf).unwrap();
 					format!(
 						"-- Notification (action: {action:?}, live query ID: {query_id})\n{output:#}"
@@ -361,9 +362,7 @@ fn process(
 	// Check if we should emit JSON and/or prettify
 	Ok(match (json, pretty) {
 		// Don't prettify the SurrealQL response
-		(false, false) => {
-			vec.into_iter().map(|(_, x)| x.into_inner()).collect::<val::Value>().to_string()
-		}
+		(false, false) => vec.into_iter().map(|(_, x)| x).collect::<Value>().to_string(),
 		// Yes prettify the SurrealQL response
 		(false, true) => vec
 			.into_iter()
@@ -377,8 +376,7 @@ fn process(
 			.join("\n"),
 		// Don't pretty print the JSON response
 		(true, false) => {
-			let value =
-				val::Value::from(vec.into_iter().map(|(_, x)| x.into_inner()).collect::<Vec<_>>());
+			let value = Value::from_vec(vec.into_iter().map(|(_, x)| x).collect::<Vec<_>>());
 			if let Some(x) = value.into_json_value() {
 				serde_json::to_string(&x).unwrap()
 			} else {
@@ -395,7 +393,7 @@ fn process(
 					&mut buf,
 					PrettyFormatter::with_indent(b"\t"),
 				);
-				let output = if let Some(x) = value.into_inner().into_json_value() {
+				let output = if let Some(x) = value.into_json_value() {
 					x.serialize(&mut serializer).unwrap();
 					String::from_utf8(buf).unwrap()
 				} else {

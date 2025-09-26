@@ -16,11 +16,10 @@ use std::time::Duration;
 
 use anyhow::Result;
 use futures::{Stream, StreamExt};
-use serde_json::json;
 use surrealdb::Notification;
 use surrealdb::method::QueryStream;
 use surrealdb::opt::Resource;
-use surrealdb::types::{Action, Object, RecordId, SurrealValue, Value, object};
+use surrealdb::types::{Action, RecordId, SurrealValue, Value, object};
 use tokio::sync::RwLock;
 use tracing::info;
 use ulid::Ulid;

@@ -8,6 +8,7 @@ use axum::routing::any;
 use axum::{Extension, Router};
 use futures::StreamExt;
 use http::header::CONTENT_TYPE;
+use surrealdb::types::Value;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::AppState;
@@ -21,7 +22,6 @@ use crate::core::dbs::Session;
 use crate::core::dbs::capabilities::{ExperimentalTarget, RouteTarget};
 use crate::core::rpc::RpcError;
 use crate::core::rpc::format::{Format, cbor, json, revision};
-use crate::core::val::Value;
 use crate::net::error::Error as NetError;
 
 pub(super) fn router<S>() -> Router<S>
@@ -114,7 +114,7 @@ async fn handler(
 					v => {
 						return Err(ApiError::InvalidApiResponse(format!(
 							"Expected bytes or string, found {}",
-							v.kind_of()
+							v.kind()
 						))
 						.into());
 					}
