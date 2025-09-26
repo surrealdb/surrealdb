@@ -56,13 +56,13 @@ impl Lexer<'_> {
 					let Some(x) = self.reader.next() else {
 						bail!("Unexpected end of file, expected string to end.", @start_span => "String starting here.");
 					};
-					if !x.is_ascii() && self.reader.complete_char(x).is_err() {
-						bail!("Source is not valid utf-8")
+					if !x.is_ascii() {
+						self.reader.complete_char(x)?;
 					}
 				}
 				x => {
-					if !x.is_ascii() && self.reader.complete_char(x).is_err() {
-						bail!("Source is not valid utf-8")
+					if !x.is_ascii() {
+						self.reader.complete_char(x)?;
 					}
 				}
 			}

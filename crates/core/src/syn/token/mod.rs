@@ -63,7 +63,6 @@ impl Span {
 
 	pub fn as_within(mut self, other: Span) -> Span {
 		self.offset += other.offset;
-		self.len = other.len;
 		self
 	}
 

@@ -103,38 +103,22 @@ impl Parser<'_> {
 					unexpected!(self, token, "expected either a `<-` or a future")
 				}
 			}
-			t!("r\"") => {
+			t!("r\"") | t!("r'") => {
 				self.pop_peek();
-				let str = self.lexer.span_str(token.span);
-				let str = Lexer::unescape_string_span(str, token.span, &mut self.unscape_buffer)?;
+				let source_str = self.lexer.span_str(token.span);
+				let str =
+					Lexer::unescape_string_span(source_str, token.span, &mut self.unscape_buffer)?;
 				let mut inner_parser = Parser::new(str.as_bytes());
 				let record_id = match stk.run(|stk| inner_parser.parse_record_id(stk)).await {
 					Ok(x) => x,
 					Err(e) => {
 						let e = e.update_spans(|span| {
-							let range = span.to_range();
-							let start = Lexer::escaped_string_offset(str, range.start);
-							let end = Lexer::escaped_string_offset(str, range.end);
-							*span = Span::from_range(start..end)
-						});
-						return Err(e);
-					}
-				};
-				Expr::Literal(Literal::RecordId(record_id))
-			}
-			t!("r'") => {
-				self.pop_peek();
-				let str = self.lexer.span_str(token.span);
-				let str = Lexer::unescape_string_span(str, token.span, &mut self.unscape_buffer)?;
-				let mut inner_parser = Parser::new(str.as_bytes());
-				let record_id = match stk.run(|stk| inner_parser.parse_record_id(stk)).await {
-					Ok(x) => x,
-					Err(e) => {
-						let e = e.update_spans(|span| {
-							let range = span.to_range();
-							let start = Lexer::escaped_string_offset(str, range.start);
-							let end = Lexer::escaped_string_offset(str, range.end);
-							*span = Span::from_range(start..end)
+							let range = dbg!(span.to_range());
+							let start = Lexer::escaped_string_offset(source_str, range.start);
+							let end = Lexer::escaped_string_offset(source_str, range.end);
+							*span = Span::from_range(
+								(token.span.offset + start)..(token.span.offset + end),
+							)
 						});
 						return Err(e);
 					}

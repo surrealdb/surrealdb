@@ -10,16 +10,13 @@ pub fn regex(lexer: &mut Lexer, start: Token) -> Result<Regex, SyntaxError> {
 		match lexer.reader.next() {
 			Some(b'\\') => {
 				if let Some(x) = lexer.reader.next() {
-					lexer.reader.complete_char(x)?;
+					lexer.reader.convert_to_char(x)?;
 				}
 			}
 			Some(b'/') => break,
 			Some(x) if x.is_ascii() => {}
 			Some(x) => {
-				if let Err(e) = lexer.reader.complete_char(x) {
-					let span = lexer.current_span();
-					bail!("Invalid token: {e}", @span);
-				}
+				lexer.reader.complete_char(x)?;
 			}
 			None => {
 				let span = lexer.current_span();

@@ -63,7 +63,7 @@ impl Lexer<'_> {
 		Self::expect_seperator(&mut reader, b'-')?;
 		let month = Self::parse_datetime_digits(&mut reader, 2..=2, 1..=12)?;
 		Self::expect_seperator(&mut reader, b'-')?;
-		let day = Self::parse_datetime_digits(&mut reader, 4..=6, 1..=31)?;
+		let day = Self::parse_datetime_digits(&mut reader, 2..=2, 1..=31)?;
 
 		let year = if neg {
 			-(year as i32)
@@ -79,7 +79,7 @@ impl Lexer<'_> {
 		match reader.next() {
 			Some(b't' | b'T' | b' ') => {}
 			Some(x) => {
-				let c = reader.complete_char(x)?;
+				let c = reader.convert_to_char(x)?;
 				let span = reader.span_since(before);
 				bail!("Unexpected character `{c}`, expected time seperator `T`", @span)
 			}
@@ -108,8 +108,8 @@ impl Lexer<'_> {
 		Self::expect_seperator(&mut reader, b':')?;
 		let second = Self::parse_datetime_digits(&mut reader, 2..=2, 0..=60)?;
 
-		let nanos_start = reader.offset();
 		let nanos = if reader.eat(b'.') {
+			let nanos_start = reader.offset();
 			let mut number = 0u32;
 			let mut count = 0;
 
@@ -123,6 +123,7 @@ impl Lexer<'_> {
 				}
 
 				if count == 9 {
+					reader.next();
 					bail!("Invalid datetime nanoseconds, expected no more then 9 digits", @reader.span_since(nanos_start))
 				}
 
@@ -168,7 +169,7 @@ impl Lexer<'_> {
 			}
 			Some(b'Z' | b'z') => Utc.fix(),
 			Some(x) => {
-				let c = reader.complete_char(x)?;
+				let c = reader.convert_to_char(x)?;
 				let span = reader.span_since(before);
 				bail!("Unexpected character `{c}`, expected `Z` or a timezone offset.",@span)
 			}
@@ -192,11 +193,14 @@ impl Lexer<'_> {
 
 	fn expect_seperator(reader: &mut BytesReader, sep: u8) -> Result<(), SyntaxError> {
 		match reader.peek() {
-			Some(x) if x == sep => Ok(()),
+			Some(x) if x == sep => {
+				reader.next();
+				Ok(())
+			}
 			Some(x) => {
 				let before = reader.offset();
 				reader.next();
-				let c = reader.complete_char(x)?;
+				let c = reader.convert_to_char(x)?;
 				let span = reader.span_since(before);
 				bail!(
 					"Unexpected character `{c}`, expected datetime seperator characters `{}`",

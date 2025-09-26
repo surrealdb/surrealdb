@@ -1,7 +1,7 @@
 use unicase::UniCase;
 
 use super::unicode::is_identifier_continue;
-use crate::syn::error::{SyntaxError, syntax_error};
+use crate::syn::error::{SyntaxError, bail, syntax_error};
 use crate::syn::lexer::keywords::KEYWORDS;
 use crate::syn::lexer::{BytesReader, Lexer};
 use crate::syn::token::{Span, Token, TokenKind};
@@ -63,7 +63,7 @@ impl Lexer<'_> {
 	) -> Result<&'a str, SyntaxError> {
 		assert_eq!(reader.complete_char(BRACKET_START_CHARACTER).unwrap(), '⟨');
 		loop {
-			// lexer ensures that backtick tokens end with `.
+			// lexer ensures that backtick tokens end with `
 			let before = reader.offset();
 			let x = reader.next().unwrap();
 			match x {
@@ -168,6 +168,7 @@ impl Lexer<'_> {
 		&mut self,
 		is_backtick: bool,
 	) -> Result<(), SyntaxError> {
+		let start_span = self.current_span();
 		loop {
 			let Some(x) = self.reader.next() else {
 				let end_char = if is_backtick {
@@ -178,43 +179,29 @@ impl Lexer<'_> {
 				let error = syntax_error!("Unexpected end of file, expected identifier to end with `{end_char}`", @self.current_span());
 				return Err(error);
 			};
-			if x.is_ascii() {
-				match x {
-					b'`' if is_backtick => {
+			match x {
+				b'`' if is_backtick => {
+					return Ok(());
+				}
+				b'\\' => {
+					// Don't bother parsing escape sequences, just skip the next byte
+					let Some(next) = self.reader.next() else {
+						bail!("Unexpected end of file, expected identifier to end.", @start_span => "Identifier starting here.");
+					};
+
+					if !next.is_ascii() {
+						self.reader.complete_char(next)?;
+					}
+				}
+				BRACKET_START_CHARACTER => {
+					if self.reader.complete_char(BRACKET_START_CHARACTER)? == '⟩' {
 						return Ok(());
 					}
-					b'\\' => {
-						// handle escape sequences.
-						let Some(next) = self.reader.next() else {
-							let end_char = if is_backtick {
-								'`'
-							} else {
-								'⟩'
-							};
-							let error = syntax_error!("Unexpected end of file, expected identifier to end with `{end_char}`", @self.current_span());
-							return Err(error);
-						};
-						match next {
-							b'\\' | b'`' | b'/' | b'b' | b'f' | b'n' | b'r' | b't' => {}
-							next => {
-								let char = self.reader.convert_to_char(next)?;
-								if is_backtick || char != '⟩' {
-									let error = if !is_backtick {
-										syntax_error!("Invalid escape character `{x}` for identifier, valid characters are `\\`, `⟩`, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span())
-									} else {
-										syntax_error!("Invalid escape character `{x}` for identifier, valid characters are `\\`, ```, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span())
-									};
-									return Err(error);
-								}
-							}
-						}
-					}
-					_ => {}
 				}
-			} else {
-				let c = self.reader.complete_char(x)?;
-				if !is_backtick && c == '⟩' {
-					return Ok(());
+				x => {
+					if !x.is_ascii() {
+						self.reader.complete_char(x)?;
+					}
 				}
 			}
 		}

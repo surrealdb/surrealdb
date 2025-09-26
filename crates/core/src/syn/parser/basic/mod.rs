@@ -87,13 +87,14 @@ impl TokenValue for Datetime {
 				)?;
 
 				// +2 to skip over the `d"`
-				let span_offset = token.span.offset + 2;
 				let file = Lexer::lex_datetime(str).map_err(|e| {
 					e.update_spans(|span| {
 						let range = span.to_range();
-						let start = Lexer::escaped_string_offset(str, range.start);
-						let end = Lexer::escaped_string_offset(str, range.end);
-						*span = Span::from_range((span_offset + start)..(span_offset + end));
+						let start = Lexer::escaped_string_offset(string_source, range.start);
+						let end = Lexer::escaped_string_offset(string_source, range.end);
+						*span = Span::from_range(
+							(token.span.offset + start)..(token.span.offset + end),
+						);
 					})
 				})?;
 
@@ -119,12 +120,12 @@ impl TokenValue for Uuid {
 
 				let file = Lexer::lex_uuid(str).map_err(|e| {
 					e.update_spans(|span| {
-						let begin = span.offset;
-						let end = begin + span.len;
-						let begin = Lexer::escaped_string_offset(str, begin);
-						let end = Lexer::escaped_string_offset(str, end);
-						span.offset = begin;
-						span.len = end - begin;
+						let range = span.to_range();
+						let start = Lexer::escaped_string_offset(string_source, range.start);
+						let end = Lexer::escaped_string_offset(string_source, range.end);
+						*span = Span::from_range(
+							(token.span.offset + start)..(token.span.offset + end),
+						);
 					})
 				})?;
 
@@ -154,12 +155,12 @@ impl TokenValue for File {
 
 				let file = Lexer::lex_file(str).map_err(|e| {
 					e.update_spans(|span| {
-						let begin = span.offset;
-						let end = begin + span.len;
-						let begin = Lexer::escaped_string_offset(str, begin);
-						let end = Lexer::escaped_string_offset(str, end);
-						span.offset = begin;
-						span.len = end - begin;
+						let range = span.to_range();
+						let start = Lexer::escaped_string_offset(string_source, range.start);
+						let end = Lexer::escaped_string_offset(string_source, range.end);
+						*span = Span::from_range(
+							(token.span.offset + start)..(token.span.offset + end),
+						);
 					})
 				})?;
 
@@ -185,12 +186,12 @@ impl TokenValue for Bytes {
 
 				let bytes = Lexer::lex_bytes(str).map_err(|e| {
 					e.update_spans(|span| {
-						let begin = span.offset;
-						let end = begin + span.len;
-						let begin = Lexer::escaped_string_offset(str, begin);
-						let end = Lexer::escaped_string_offset(str, end);
-						span.offset = begin;
-						span.len = end - begin;
+						let range = span.to_range();
+						let start = Lexer::escaped_string_offset(string_source, range.start);
+						let end = Lexer::escaped_string_offset(string_source, range.end);
+						*span = Span::from_range(
+							(token.span.offset + start)..(token.span.offset + end),
+						);
 					})
 				})?;
 

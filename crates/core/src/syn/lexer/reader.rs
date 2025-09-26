@@ -120,6 +120,7 @@ impl<'a> BytesReader<'a> {
 
 	#[inline]
 	pub fn complete_char(&mut self, start: u8) -> Result<char, CharError> {
+		debug_assert!(!start.is_ascii(), "complete_char should not be handed ascii bytes");
 		match start & 0b1111_1000 {
 			0b1100_0000 | 0b1101_0000 | 0b1100_1000 | 0b1101_1000 => {
 				let mut val = (start & 0b0001_1111) as u32;
