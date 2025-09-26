@@ -127,10 +127,10 @@ impl Lexer<'_> {
 						number += 1;
 					}
 					//skip all remaining fractional seconds
-					continue
+					continue;
 				} else if count >= 9 {
 					//skip all remaining fractional seconds
-					continue
+					continue;
 				}
 
 				number *= 10;

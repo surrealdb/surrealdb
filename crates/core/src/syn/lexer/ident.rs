@@ -71,7 +71,6 @@ impl Lexer<'_> {
 					// Lexer already ensures there is a valid character after the \
 					Self::lex_common_escape_sequence(&mut reader, span, before, buffer)?;
 				}
-				b'`' => break,
 				x if !x.is_ascii() => {
 					let c = reader.complete_char(x).unwrap();
 					if c == '⟩' {
@@ -193,7 +192,7 @@ impl Lexer<'_> {
 						self.reader.complete_char(next)?;
 					}
 				}
-				BRACKET_START_CHARACTER => {
+				BRACKET_START_CHARACTER if !is_backtick => {
 					if self.reader.complete_char(BRACKET_START_CHARACTER)? == '⟩' {
 						return Ok(());
 					}
