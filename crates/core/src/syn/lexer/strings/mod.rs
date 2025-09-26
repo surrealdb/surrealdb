@@ -1,15 +1,11 @@
 mod datetime;
 
-use crate::{
-	syn::{
-		error::{SyntaxError, bail, syntax_error},
-		lexer::Lexer,
-		token::Span,
-	},
-	val::{Bytes, File, Uuid},
-};
-
-use super::{BytesReader, unicode::byte};
+use super::BytesReader;
+use super::unicode::byte;
+use crate::syn::error::{SyntaxError, bail, syntax_error};
+use crate::syn::lexer::Lexer;
+use crate::syn::token::Span;
+use crate::val::{Bytes, File, Uuid};
 
 impl Lexer<'_> {
 	/// Unescapes a string slice.
@@ -55,9 +51,9 @@ impl Lexer<'_> {
 			}
 		}
 
-		// Safety: The string this was created from was a valid utf-8 string and the code ensures that
-		// only valid sequences are pushed into the buffer meaning that the final buffer is also a
-		// valid utf-8.
+		// Safety: The string this was created from was a valid utf-8 string and the code ensures
+		// that only valid sequences are pushed into the buffer meaning that the final buffer is
+		// also a valid utf-8.
 		Ok(unsafe { std::str::from_utf8_unchecked(buffer) })
 	}
 

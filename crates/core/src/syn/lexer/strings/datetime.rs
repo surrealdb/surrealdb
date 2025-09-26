@@ -2,13 +2,9 @@ use std::ops::RangeInclusive;
 
 use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset as _, TimeZone as _, Utc};
 
-use crate::{
-	syn::{
-		error::{SyntaxError, bail, syntax_error},
-		lexer::{BytesReader, Lexer},
-	},
-	val::Datetime,
-};
+use crate::syn::error::{SyntaxError, bail, syntax_error};
+use crate::syn::lexer::{BytesReader, Lexer};
+use crate::val::Datetime;
 
 impl Lexer<'_> {
 	/// Lex a datetime from a string.
@@ -36,8 +32,8 @@ impl Lexer<'_> {
 		//
 		// - quoted characters can be in any mixture of lower and upper cases.
 		//
-		// - it may accept any number of fractional digits for seconds.
-		//   for Chrono, this means that we should skip digits past first 9 digits.
+		// - it may accept any number of fractional digits for seconds. for Chrono, this means that
+		//   we should skip digits past first 9 digits.
 		//
 		// - unlike RFC 2822, the valid offset ranges from -23:59 to +23:59.
 		//
@@ -45,9 +41,10 @@ impl Lexer<'_> {
 		//
 		//
 		// Our implementation is actually slightly more flexible then the RFC 3339 demands.
-		// We support ommiting the time part of the datetime in which case the resulting datetime will
-		// be midnight. We also support the larger range of up to the year 99_9999 instead of 9999.
-		// This is to deal with chrono's range of years which is larger then the rfc allows for.
+		// We support ommiting the time part of the datetime in which case the resulting datetime
+		// will be midnight. We also support the larger range of up to the year 99_9999 instead of
+		// 9999. This is to deal with chrono's range of years which is larger then the rfc allows
+		// for.
 
 		let mut reader = BytesReader::new(str.as_bytes());
 
@@ -87,8 +84,8 @@ impl Lexer<'_> {
 				let time = NaiveTime::default();
 				let date_time = NaiveDateTime::new(date, time);
 
-				// Since there is no offset, as there is no time specified the `earliest` call cannot
-				// fail.
+				// Since there is no offset, as there is no time specified the `earliest` call
+				// cannot fail.
 				let datetime = Utc
 					.fix()
 					.from_local_datetime(&date_time)
