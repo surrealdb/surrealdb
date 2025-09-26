@@ -145,21 +145,40 @@ impl DbResultError {
 		}
 	}
 
-	pub fn invalid_params() -> DbResultError {
+	pub fn method_not_allowed() -> DbResultError {
 		DbResultError {
-			code: -32602,
-			message: "Invalid params".to_string(),
+			code: -32603,
+			message: "Method not allowed".to_string(),
 		}
 	}
 
-	/*
-	pub fn internal_error() -> DbResultError {
+	pub fn invalid_params(message: impl Into<String>) -> DbResultError {
 		DbResultError {
-			code: -32603,
-			message: "Internal error".to_string(),
+			code: -32602,
+			message: format!("Invalid params: {}", message.into()),
 		}
 	}
-	*/
+
+	pub fn lq_not_suported() -> DbResultError {
+		DbResultError {
+			code: -32604,
+			message: "Live Query not supported".to_string(),
+		}
+	}
+
+	pub fn bad_lq_config() -> DbResultError {
+		DbResultError {
+			code: -32605,
+			message: "Bad Live Query config".to_string(),
+		}
+	}
+
+	pub fn bad_gql_config() -> DbResultError {
+		DbResultError {
+			code: -32606,
+			message: "Bad GraphQL config".to_string(),
+		}
+	}
 
 	pub fn custom(message: impl Into<String>) -> DbResultError {
 		DbResultError {
@@ -183,7 +202,20 @@ impl std::error::Error for DbResultError {
 
 impl From<RpcError> for DbResultError {
 	fn from(error: RpcError) -> Self {
-		todo!("STU")
+		match error {
+			RpcError::ParseError => DbResultError::parse_error(),
+			RpcError::InvalidRequest => DbResultError::invalid_request(),
+			RpcError::MethodNotFound => DbResultError::method_not_found(),
+			RpcError::MethodNotAllowed => DbResultError::method_not_allowed(),
+			RpcError::InvalidParams(message) => DbResultError::invalid_params(message),
+			RpcError::InternalError(error) => DbResultError::custom(error.to_string()),
+			RpcError::LqNotSuported => DbResultError::lq_not_suported(),
+			RpcError::BadLQConfig => DbResultError::bad_lq_config(),
+			RpcError::BadGQLConfig => DbResultError::bad_gql_config(),
+			RpcError::Thrown(message) => DbResultError::custom(message),
+			RpcError::Serialize(message) => DbResultError::custom(message),
+			RpcError::Deserialize(message) => DbResultError::custom(message),
+		}
 	}
 }
 

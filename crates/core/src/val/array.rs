@@ -142,17 +142,6 @@ impl Array {
 		self
 	}
 
-	pub(crate) fn display<V: Display>(v: &[V], f: &mut Formatter) -> fmt::Result {
-		let mut f = Pretty::from(f);
-		f.write_char('[')?;
-		if !v.is_empty() {
-			let indent = pretty_indent();
-			write!(f, "{}", Fmt::pretty_comma_separated(v))?;
-			drop(indent);
-		}
-		f.write_char(']')
-	}
-
 	/// Stacks arrays on top of each other. This can serve as 2d array
 	/// transposition.
 	///
@@ -224,7 +213,14 @@ impl Array {
 
 impl Display for Array {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Array::display(&self.0, f)
+		let mut f = Pretty::from(f);
+		f.write_char('[')?;
+		if !self.0.is_empty() {
+			let indent = pretty_indent();
+			write!(f, "{}", Fmt::pretty_comma_separated(&self.0))?;
+			drop(indent);
+		}
+		f.write_char(']')
 	}
 }
 

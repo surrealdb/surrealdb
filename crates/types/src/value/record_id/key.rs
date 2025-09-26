@@ -189,8 +189,8 @@ impl fmt::Display for RecordIdKey {
 			RecordIdKey::Number(n) => write!(f, "{n}"),
 			RecordIdKey::String(v) => write!(f, "{v}"),
 			RecordIdKey::Uuid(uuid) => std::fmt::Display::fmt(uuid, f),
-			RecordIdKey::Object(object) => object.fmt(f),
-			RecordIdKey::Array(array) => array.fmt(f),
+			RecordIdKey::Object(object) => std::fmt::Display::fmt(object, f),
+			RecordIdKey::Array(array) => std::fmt::Display::fmt(array, f),
 			RecordIdKey::Range(rid) => rid.fmt(f),
 		}
 	}

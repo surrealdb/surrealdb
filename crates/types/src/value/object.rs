@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::fmt::{self, Display};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -72,6 +73,23 @@ impl Object {
 	/// Get the inner BTreeMap<String, Value>
 	pub fn inner(&self) -> &BTreeMap<String, Value> {
 		&self.0
+	}
+}
+
+impl Display for Object {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.write_str("{ ")?;
+
+		for (i, (k, v)) in self.0.iter().enumerate() {
+			k.fmt(f)?;
+			f.write_str(": ")?;
+			v.fmt(f)?;
+			if i < self.0.len() - 1 {
+				f.write_str(", ")?;
+			}
+		}
+
+		f.write_str(" }")
 	}
 }
 

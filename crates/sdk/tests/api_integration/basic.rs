@@ -1256,6 +1256,7 @@ pub async fn upsert_merge_record_id(new_db: impl CreateDb) {
 	);
 }
 
+#[allow(clippy::disallowed_names)]
 pub async fn patch_record_id(new_db: impl CreateDb) {
 	#[derive(Debug, SurrealValue, PartialEq)]
 	struct Record {
@@ -1294,6 +1295,7 @@ pub async fn patch_record_id(new_db: impl CreateDb) {
 	);
 }
 
+#[allow(clippy::disallowed_names)]
 pub async fn upsert_patch_record_id(new_db: impl CreateDb) {
 	#[derive(Debug, SurrealValue, PartialEq)]
 	struct Record {
@@ -1356,6 +1358,7 @@ pub async fn upsert_patch_record_id(new_db: impl CreateDb) {
 	);
 }
 
+#[allow(clippy::disallowed_names)]
 pub async fn patch_record_id_ops(new_db: impl CreateDb) {
 	#[derive(Debug, SurrealValue, PartialEq)]
 	struct Record {

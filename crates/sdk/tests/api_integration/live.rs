@@ -56,7 +56,7 @@ pub async fn live_select_table(new_db: impl CreateDb) {
 		let _: Option<ApiRecordId> = db
 			.update(&notification.data.id)
 			.content(UpdateContent {
-				foo: "bar".to_string(),
+				field: "bar".to_string(),
 			})
 			.await
 			.unwrap();
@@ -122,7 +122,7 @@ pub async fn live_select_record_id(new_db: impl CreateDb) {
 		let _: Option<ApiRecordId> = db
 			.update(&notification.data.id)
 			.content(UpdateContent {
-				foo: "bar".to_string(),
+				field: "bar".to_string(),
 			})
 			.await
 			.unwrap();
@@ -190,7 +190,7 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 		let _: Option<ApiRecordId> = db
 			.update(&notification.data.id)
 			.content(UpdateContent {
-				foo: "bar".to_string(),
+				field: "bar".to_string(),
 			})
 			.await
 			.unwrap();
@@ -294,7 +294,7 @@ pub async fn live_select_query(new_db: impl CreateDb) {
 		let _: Option<ApiRecordId> = db
 			.update(&notifications[0].data.id)
 			.content(UpdateContent {
-				foo: "bar".to_string(),
+				field: "bar".to_string(),
 			})
 			.await
 			.unwrap();
@@ -371,7 +371,7 @@ pub async fn live_select_query(new_db: impl CreateDb) {
 		let _: Option<ApiRecordId> = db
 			.update(&notification.data.id)
 			.content(UpdateContent {
-				foo: "bar".to_string(),
+				field: "bar".to_string(),
 			})
 			.await
 			.unwrap();
@@ -423,21 +423,21 @@ pub async fn live_query_delete_notifications(new_db: impl CreateDb) {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 
 	let mut stream =
-		db.query("LIVE SELECT foo FROM bar").await.unwrap().stream::<Value>(0).unwrap();
+		db.query("LIVE SELECT field FROM bar").await.unwrap().stream::<Value>(0).unwrap();
 
-	db.query("CREATE bar CONTENT { foo: 'baz' }").await.unwrap().check().unwrap();
+	db.query("CREATE bar CONTENT { field: 'baz' }").await.unwrap().check().unwrap();
 	let notification = tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.unwrap().unwrap();
-	assert_eq!(notification.data, Value::Object(object! { foo: "baz" }));
+	assert_eq!(notification.data, Value::Object(object! { field: "baz" }));
 	assert_eq!(notification.action, Action::Create);
 
 	db.query("UPDATE bar MERGE { data: 123 }").await.unwrap().check().unwrap();
 	let notification = tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.unwrap().unwrap();
-	assert_eq!(notification.data, Value::Object(object! { foo: "baz" }));
+	assert_eq!(notification.data, Value::Object(object! { field: "baz" }));
 	assert_eq!(notification.action, Action::Update);
 
 	db.query("DELETE bar").await.unwrap().check().unwrap();
 	let notification = tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.unwrap().unwrap();
-	assert_eq!(notification.data, Value::Object(object! { foo: "baz" }));
+	assert_eq!(notification.data, Value::Object(object! { field: "baz" }));
 	assert_eq!(notification.action, Action::Delete);
 
 	drop(permit);
@@ -462,7 +462,7 @@ struct LinkContent {
 
 #[derive(Debug, Clone, SurrealValue)]
 struct UpdateContent {
-	foo: String,
+	field: String,
 }
 
 pub async fn live_select_with_fetch(new_db: impl CreateDb) {

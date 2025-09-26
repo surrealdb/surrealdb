@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::fmt::{self, Display};
 use std::hash;
 use std::str::FromStr;
 
@@ -51,6 +52,24 @@ impl Number {
 			Number::Int(v) => Some(*v as f64),
 			Number::Float(v) => Some(*v),
 			Number::Decimal(v) => v.to_f64(),
+		}
+	}
+}
+
+impl Display for Number {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Number::Int(v) => Display::fmt(v, f),
+			Number::Float(v) => {
+				if v.is_finite() {
+					// Add suffix to distinguish between int and float
+					write!(f, "{v}f")
+				} else {
+					// Don't add suffix for NaN, inf, -inf
+					Display::fmt(v, f)
+				}
+			}
+			Number::Decimal(v) => write!(f, "{v}dec"),
 		}
 	}
 }

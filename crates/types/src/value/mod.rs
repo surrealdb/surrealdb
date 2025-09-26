@@ -306,7 +306,24 @@ impl FromIterator<Value> for Value {
 
 impl Display for Value {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		todo!("STU")
+		match self {
+			Value::None => write!(f, "NONE"),
+			Value::Null => write!(f, "NULL"),
+			Value::Array(v) => write!(f, "{v}"),
+			Value::Bool(v) => write!(f, "{v}"),
+			Value::Bytes(v) => write!(f, "{v}"),
+			Value::Datetime(v) => write!(f, "{v}"),
+			Value::Duration(v) => write!(f, "{v}"),
+			Value::Geometry(v) => write!(f, "{v}"),
+			Value::Number(v) => write!(f, "{v}"),
+			Value::Object(v) => write!(f, "{v}"),
+			Value::Range(v) => write!(f, "{v}"),
+			Value::Regex(v) => write!(f, "{v}"),
+			Value::String(v) => write!(f, "{v}"),
+			Value::RecordId(v) => write!(f, "{v}"),
+			Value::Uuid(v) => write!(f, "{v}"),
+			Value::File(v) => write!(f, "{v}"),
+		}
 	}
 }
 

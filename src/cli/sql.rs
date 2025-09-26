@@ -9,7 +9,7 @@ use serde_json::ser::PrettyFormatter;
 use surrealdb::engine::any::{self, connect};
 use surrealdb::method::WithStats;
 use surrealdb::opt::Config;
-use surrealdb::types::{object, SurrealValue, Value};
+use surrealdb::types::{SurrealValue, Value, object};
 use surrealdb::{IndexedResults, Notification};
 use surrealdb_core::rpc::DbResultStats;
 
@@ -362,9 +362,7 @@ fn process(
 	// Check if we should emit JSON and/or prettify
 	Ok(match (json, pretty) {
 		// Don't prettify the SurrealQL response
-		(false, false) => {
-			vec.into_iter().map(|(_, x)| x).collect::<Value>().to_string()
-		},
+		(false, false) => vec.into_iter().map(|(_, x)| x).collect::<Value>().to_string(),
 		// Yes prettify the SurrealQL response
 		(false, true) => vec
 			.into_iter()
