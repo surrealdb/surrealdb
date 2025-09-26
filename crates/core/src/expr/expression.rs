@@ -1,7 +1,8 @@
-use reblessive::tree::Stk;
-use revision::Revisioned;
 use std::fmt;
 use std::ops::Bound;
+
+use reblessive::tree::Stk;
+use revision::Revisioned;
 
 use super::SleepStatement;
 use crate::ctx::{Context, MutableContext};

@@ -1,9 +1,10 @@
+use std::fmt::{self, Display, Formatter};
+use std::ops::Deref;
+
 use crate::expr::Expr;
 use crate::expr::expression::VisitExpression;
 use crate::expr::idiom::Idiom;
 use crate::fmt::Fmt;
-use std::fmt::{self, Display, Formatter};
-use std::ops::Deref;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Splits(pub Vec<Split>);

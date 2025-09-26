@@ -1,9 +1,10 @@
+use std::ops::Deref;
+use std::{cmp, fmt};
+
 use crate::expr::expression::VisitExpression;
 use crate::expr::idiom::Idiom;
 use crate::expr::{Expr, Value};
 use crate::fmt::Fmt;
-use std::ops::Deref;
-use std::{cmp, fmt};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Ordering {

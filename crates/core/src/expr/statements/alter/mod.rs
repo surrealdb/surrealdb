@@ -13,11 +13,12 @@ mod field;
 mod sequence;
 mod table;
 
-use crate::expr::Expr;
-use crate::expr::expression::VisitExpression;
 pub use field::{AlterDefault, AlterFieldStatement};
 pub use sequence::AlterSequenceStatement;
 pub use table::AlterTableStatement;
+
+use crate::expr::Expr;
+use crate::expr::expression::VisitExpression;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum AlterKind<T> {

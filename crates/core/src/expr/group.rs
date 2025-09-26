@@ -1,11 +1,12 @@
 use std::fmt::{self, Debug, Display, Formatter};
 use std::ops::Deref;
 
+use revision::revisioned;
+
 use crate::expr::Expr;
 use crate::expr::expression::VisitExpression;
 use crate::expr::idiom::Idiom;
 use crate::fmt::Fmt;
-use revision::revisioned;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]

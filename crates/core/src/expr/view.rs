@@ -1,10 +1,11 @@
+use std::fmt;
+use std::fmt::Debug;
+
 use crate::catalog::ViewDefinition;
 use crate::expr::expression::VisitExpression;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Expr, Fields, Groups, Value};
 use crate::fmt::{EscapeIdent, Fmt};
-use std::fmt;
-use std::fmt::Debug;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct View {

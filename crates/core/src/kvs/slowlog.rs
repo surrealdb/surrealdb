@@ -1,11 +1,13 @@
+use std::fmt::Display;
+use std::sync::Arc;
+use std::time::Duration;
+
+use trice::Instant;
+
 use crate::ctx::Context;
 use crate::expr::Expr;
 use crate::expr::expression::VisitExpression;
 use crate::sql::ToSql;
-use std::fmt::Display;
-use std::sync::Arc;
-use std::time::Duration;
-use trice::Instant;
 
 #[derive(Clone)]
 pub(crate) struct SlowLog(Arc<Inner>);

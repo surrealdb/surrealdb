@@ -1,6 +1,7 @@
+use std::fmt::{self, Display};
+
 use crate::expr::Expr;
 use crate::expr::field::Fields;
-use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Output {
