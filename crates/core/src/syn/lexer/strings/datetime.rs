@@ -32,8 +32,8 @@ impl Lexer<'_> {
 		//
 		// - quoted characters can be in any mixture of lower and upper cases.
 		//
-		// - it may accept any number of fractional digits for seconds. for Chrono, this means that
-		//   we should skip digits past first 9 digits.
+		// - it may accept any number of fractional digits for seconds. Chrono only supports up to
+		//   nanoseconds this means that we should skip digits past first 9 digits.
 		//
 		// - unlike RFC 2822, the valid offset ranges from -23:59 to +23:59.
 		//
@@ -119,12 +119,20 @@ impl Lexer<'_> {
 					break;
 				}
 
+				reader.next();
+
 				if count == 9 {
-					reader.next();
-					bail!("Invalid datetime nanoseconds, expected no more then 9 digits", @reader.span_since(nanos_start))
+					if d - b'0' >= 5 {
+						//round up.
+						number += 1;
+					}
+					//skip all remaining fractional seconds
+					continue
+				} else if count >= 9 {
+					//skip all remaining fractional seconds
+					continue
 				}
 
-				reader.next();
 				number *= 10;
 				number += (d - b'0') as u32;
 				count += 1;
