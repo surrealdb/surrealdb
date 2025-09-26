@@ -3559,7 +3559,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "surrealdb-core"
-version = "3.0.0-alpha.8"
+version = "3.0.0-alpha.9"
 dependencies = [
  "addr",
  "affinitypool",
@@ -3677,7 +3677,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types"
-version = "3.0.0-alpha.8"
+version = "3.0.0-alpha.9"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3685,20 +3685,24 @@ dependencies = [
  "flatbuffers",
  "geo",
  "hex",
+ "http",
+ "nanoid",
  "regex",
  "revision 0.11.0",
  "rquickjs",
  "rstest",
  "rust_decimal",
  "serde",
+ "serde_json",
  "surrealdb-protocol",
  "surrealdb-types-derive",
+ "ulid",
  "uuid",
 ]
 
 [[package]]
 name = "surrealdb-types-derive"
-version = "3.0.0-alpha.8"
+version = "3.0.0-alpha.9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3741,6 +3745,7 @@ dependencies = [
  "serde_json",
  "similar",
  "surrealdb-core",
+ "surrealdb-types",
  "tokio",
  "tokio-tungstenite",
  "toml",

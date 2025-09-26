@@ -322,7 +322,7 @@ impl Deref for Duration {
 
 impl std::fmt::Display for Duration {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		self.0.fmt(f)
+		self.fmt_internal(f)
 	}
 }
 

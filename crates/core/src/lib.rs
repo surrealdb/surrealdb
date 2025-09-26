@@ -62,11 +62,8 @@ pub mod syn;
 mod val;
 pub mod vs;
 
-// Re-export types needed by SDK
-pub use val::Uuid;
-
 pub(crate) mod types {
-	//! Re-export the types from the types crate for internal use.
+	//! Re-export the types from the types crate for internal use prefixed with Public.
 
 	pub use surrealdb_types::{
 		Action as PublicAction, Array as PublicArray, Bytes as PublicBytes,

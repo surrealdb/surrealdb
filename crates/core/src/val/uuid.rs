@@ -70,7 +70,7 @@ impl Uuid {
 	}
 
 	/// Convert the Uuid to a raw String
-	pub fn to_raw(&self) -> String {
+	pub fn to_raw(self) -> String {
 		self.0.to_string()
 	}
 

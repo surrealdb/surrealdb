@@ -20,7 +20,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures::Stream;
-use surrealdb_types::{RecordId, RecordIdKey};
+use surrealdb_types::{RecordIdKey, Value};
 #[cfg(not(target_family = "wasm"))]
 use tokio::time::Instant;
 #[cfg(not(target_family = "wasm"))]
@@ -41,19 +41,10 @@ pub(crate) fn resource_to_exprs(r: Resource) -> Vec<expr::Expr> {
 			vec![expr::Expr::Table(x)]
 		}
 		Resource::RecordId(x) => {
-			vec![record_id_to_expr(x)]
+			vec![expr::Expr::from_public_value(Value::RecordId(x))]
 		}
 		Resource::Object(x) => {
-			use crate::core::expr::ObjectEntry;
-			vec![expr::Expr::Literal(expr::Literal::Object(
-				x.inner()
-					.iter()
-					.map(|(k, v)| ObjectEntry {
-						key: k.clone(),
-						value: expr::Expr::from_public_value(v.clone()),
-					})
-					.collect(),
-			))]
+			vec![expr::Expr::from_public_value(Value::Object(x))]
 		}
 		Resource::Array(x) => x.into_iter().map(expr::Expr::from_public_value).collect(),
 		Resource::Range(x) => {
@@ -67,18 +58,11 @@ pub(crate) fn resource_to_exprs(r: Resource) -> Vec<expr::Expr> {
 	}
 }
 
-fn record_id_to_expr(x: RecordId) -> expr::Expr {
-	expr::Expr::Literal(expr::Literal::RecordId(expr::RecordIdLit {
-		table: x.table,
-		key: public_record_id_key_to_literal(x.key),
-	}))
-}
-
 fn public_record_id_key_to_literal(x: RecordIdKey) -> expr::RecordIdKeyLit {
 	match x {
 		RecordIdKey::Number(n) => expr::RecordIdKeyLit::Number(n),
 		RecordIdKey::String(s) => expr::RecordIdKeyLit::String(s),
-		RecordIdKey::Uuid(u) => expr::RecordIdKeyLit::Uuid(crate::core::Uuid::from(u.0)),
+		RecordIdKey::Uuid(u) => expr::RecordIdKeyLit::Uuid(u.into()),
 		RecordIdKey::Array(a) => expr::RecordIdKeyLit::Array(
 			a.inner().iter().cloned().map(expr::Expr::from_public_value).collect(),
 		),

@@ -1345,7 +1345,7 @@ mod tests {
 			for id in &case.ids {
 				// Prepare the claims object
 				let mut claims = claims.clone();
-				claims.id = Some((*id).to_string());
+				claims.id = Some(syn::record_id(id).unwrap().to_string());
 				claims.roles =
 					case.roles.clone().map(|roles| roles.into_iter().map(String::from).collect());
 

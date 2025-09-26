@@ -1,10 +1,11 @@
 use std::any::Any;
 
-use surrealdb_core::dbs::{Session, Variables};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::sql::{Ast, Expr, TopLevelExpr};
 use surrealdb_core::syn::error::RenderedError;
-use surrealdb_core::val::Value as SurValue;
+use surrealdb_types::Variables;
+use surrealdb_types::Value as SurValue;
 
 use super::cmp::{RoughlyEq, RoughlyEqConfig};
 use crate::tests::TestSet;

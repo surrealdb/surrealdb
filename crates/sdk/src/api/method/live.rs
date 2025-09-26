@@ -5,7 +5,7 @@ use std::task::{Context, Poll};
 
 use async_channel::Receiver;
 use futures::StreamExt;
-use surrealdb_core::expr::RecordIdLit;
+use surrealdb_core::expr::{RecordIdKeyLit, RecordIdLit};
 use surrealdb_types::{
 	self, Action, Notification as CoreNotification, RecordIdKey, SurrealValue, Value,
 };
@@ -75,12 +75,11 @@ where
 				let id = Expr::Idiom(Idiom::field("id".to_string()));
 
 				// Convert RecordIdKey bounds to expressions
-				use crate::core::expr::{RecordIdKeyLit, RecordIdLit};
 				let convert_key = |key: RecordIdKey| -> Expr {
 					let key_lit = match key {
 						RecordIdKey::Number(n) => RecordIdKeyLit::Number(n),
 						RecordIdKey::String(s) => RecordIdKeyLit::String(s),
-						RecordIdKey::Uuid(u) => RecordIdKeyLit::Uuid(crate::core::Uuid::from(u.0)),
+						RecordIdKey::Uuid(u) => RecordIdKeyLit::Uuid(u.into()),
 						RecordIdKey::Array(a) => RecordIdKeyLit::Array(
 							a.inner().iter().cloned().map(Expr::from_public_value).collect(),
 						),

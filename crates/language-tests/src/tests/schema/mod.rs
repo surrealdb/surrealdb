@@ -14,7 +14,7 @@ use surrealdb_core::dbs::capabilities::{
 use surrealdb_core::sql::Expr;
 use surrealdb_core::syn::parser::ParserSettings;
 use surrealdb_core::syn::{self};
-use surrealdb_core::val::{Object as CoreObject, RecordId, Value as CoreValue};
+use surrealdb_types::{Object, RecordId, Value};
 
 /// Root test config struct.
 #[derive(Default, Clone, Debug, Deserialize, Serialize)]
@@ -432,8 +432,9 @@ pub struct SignupErrorResult {
 	_unused_keys: BTreeMap<String, toml::Value>,
 }
 
+/// A wrapper around the `Value` type for SurrealDB in order to support parsing from toml.
 #[derive(Clone, Debug)]
-pub struct SurrealValue(pub CoreValue);
+pub struct SurrealValue(pub Value);
 
 impl Serialize for SurrealValue {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -544,7 +545,7 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 			parser.parse_value(stk).await
 		})
 		.map_err(<D::Error as serde::de::Error>::custom)?;
-		if let CoreValue::RecordId(x) = v {
+		if let Value::RecordId(x) = v {
 			Ok(SurrealRecordId(x))
 		} else {
 			Err(<D::Error as serde::de::Error>::custom(format_args!(
@@ -555,7 +556,7 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 }
 
 #[derive(Clone, Debug)]
-pub struct SurrealObject(pub CoreObject);
+pub struct SurrealObject(pub Object);
 
 impl Serialize for SurrealObject {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -589,10 +590,10 @@ impl<'de> Deserialize<'de> for SurrealObject {
 		})
 		.map_err(<D::Error as serde::de::Error>::custom)?;
 
-		v.into_object().map(SurrealObject).ok_or_else(|| {
-			<D::Error as serde::de::Error>::custom(format_args!(
-				"Expected a object, found '{source}'"
-			))
+		v.into_object().map(SurrealObject).or_else(|err| {
+			Err(<D::Error as serde::de::Error>::custom(format_args!(
+				"Expected a object, found '{source}': {err}"
+			)))
 		})
 	}
 }

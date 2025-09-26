@@ -8,7 +8,7 @@ use anyhow::{Context, Result, bail};
 use futures::{SinkExt, StreamExt};
 use revision::revisioned;
 use surrealdb_core::dbs::{self, Status};
-use surrealdb_core::val::Value;
+use surrealdb_types::Value;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
