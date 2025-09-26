@@ -67,6 +67,22 @@ impl SlowLog {
 		}))
 	}
 
+	/// Returns true if the parameter with the given name should be logged according
+	/// to the current allow/deny configuration.
+	#[inline]
+	pub(crate) fn is_param_allowed(&self, name: &str) -> bool {
+		// Deny takes precedence
+		if !self.0.param_deny.is_empty() && self.0.param_deny.iter().any(|s| s == name) {
+			return false;
+		}
+		// If allow list is empty, everything is allowed by default
+		if self.0.param_allow.is_empty() {
+			return true;
+		}
+		// Otherwise only names in the allow list are allowed
+		self.0.param_allow.iter().any(|s| s == name)
+	}
+
 	/// Check whether the supplied statement should be slow-logged and emit a
 	/// log line if the threshold is exceeded.
 	///
@@ -92,12 +108,7 @@ impl SlowLog {
 		stm.visit(&mut |e| {
 			if let Expr::Param(p) = e {
 				let name = p.as_str();
-				// Apply deny filter first
-				if !self.0.param_deny.is_empty() && self.0.param_deny.iter().any(|s| s == name) {
-					return;
-				}
-				// Apply allow filter if present
-				if !self.0.param_allow.is_empty() && !self.0.param_allow.iter().any(|s| s == name) {
+				if !self.is_param_allowed(name) {
 					return;
 				}
 				if let Some(value) = ctx.value(name) {
@@ -112,5 +123,57 @@ impl SlowLog {
 		let stm = stm.to_sql().split_whitespace().collect::<Vec<_>>().join(" ");
 		let params = params.join(", ");
 		warn!("Slow query detected - time: {elapsed:#?} - query: {stm} - params: [ {params} ]");
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::time::Duration;
+
+	use super::*;
+
+	fn slowlog(allow: &[&str], deny: &[&str]) -> SlowLog {
+		SlowLog::new(
+			Duration::from_millis(1),
+			allow.iter().map(|s| (*s).to_string()).collect(),
+			deny.iter().map(|s| (*s).to_string()).collect(),
+		)
+	}
+
+	#[test]
+	fn defaults_allow_all() {
+		let s = slowlog(&[], &[]);
+		assert!(s.is_param_allowed("a"));
+		assert!(s.is_param_allowed("any"));
+	}
+
+	#[test]
+	fn allow_list_filters() {
+		let s = slowlog(&["a", "b"], &[]);
+		assert!(s.is_param_allowed("a"));
+		assert!(s.is_param_allowed("b"));
+		assert!(!s.is_param_allowed("c"));
+	}
+
+	#[test]
+	fn deny_list_only_excludes() {
+		let s = slowlog(&[], &["secret", "token"]);
+		assert!(!s.is_param_allowed("secret"));
+		assert!(!s.is_param_allowed("token"));
+		assert!(s.is_param_allowed("other"));
+	}
+
+	#[test]
+	fn deny_precedence_over_allow() {
+		let s = slowlog(&["foo", "bar"], &["bar"]);
+		assert!(!s.is_param_allowed("bar"));
+		assert!(s.is_param_allowed("foo"));
+	}
+
+	#[test]
+	fn allow_list_empty_means_all_except_denied() {
+		let s = slowlog(&[], &["nope"]);
+		assert!(s.is_param_allowed("ok"));
+		assert!(!s.is_param_allowed("nope"));
 	}
 }
