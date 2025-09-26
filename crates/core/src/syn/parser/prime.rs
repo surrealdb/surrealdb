@@ -113,7 +113,7 @@ impl Parser<'_> {
 					Ok(x) => x,
 					Err(e) => {
 						let e = e.update_spans(|span| {
-							let range = dbg!(span.to_range());
+							let range = span.to_range();
 							let start = Lexer::escaped_string_offset(source_str, range.start);
 							let end = Lexer::escaped_string_offset(source_str, range.end);
 							*span = Span::from_range(
