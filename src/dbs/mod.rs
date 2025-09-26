@@ -49,6 +49,14 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_SLOW_QUERY_LOG_THRESHOLD", long = "slow-log-threshold")]
 	#[arg(value_parser = super::cli::validator::duration)]
 	slow_log_threshold: Option<Duration>,
+	#[arg(help = "A comma-separated list of parameter names to include in slow query logs")]
+	#[arg(env = "SURREAL_SLOW_QUERY_LOG_PARAM_ALLOW", long = "slow-log-param-allow")]
+	#[arg(value_delimiter = ',', num_args = 1..)]
+	slow_log_param_allow: Vec<String>,
+	#[arg(help = "A comma-separated list of parameter names to omit from slow query logs")]
+	#[arg(env = "SURREAL_SLOW_QUERY_LOG_PARAM_DENY", long = "slow-log-param-deny")]
+	#[arg(value_delimiter = ',', num_args = 1..)]
+	slow_log_param_deny: Vec<String>,
 }
 
 #[derive(Args, Debug)]
@@ -557,6 +565,8 @@ pub async fn init(
 		temporary_directory,
 		import_file,
 		slow_log_threshold,
+		slow_log_param_allow,
+		slow_log_param_deny,
 	}: StartCommandDbsOptions,
 ) -> Result<Datastore> {
 	// Get local copy of options
@@ -586,6 +596,12 @@ pub async fn init(
 	if let Some(v) = slow_log_threshold {
 		debug!("Slow log threshold is {v:?}");
 	}
+	if !slow_log_param_allow.is_empty() {
+		debug!("Slow log param allow is {:?}", slow_log_param_allow);
+	}
+	if !slow_log_param_deny.is_empty() {
+		debug!("Slow log param deny is {:?}", slow_log_param_deny);
+	}
 	// Convert the capabilities
 	let capabilities = capabilities.into();
 	// Log the specified server capabilities
@@ -600,7 +616,7 @@ pub async fn init(
 		.with_auth_enabled(!unauthenticated)
 		.with_temporary_directory(temporary_directory)
 		.with_capabilities(capabilities)
-		.with_slow_log_threshold(slow_log_threshold);
+		.with_slow_log(slow_log_threshold, slow_log_param_allow, slow_log_param_deny);
 	// Ensure the storage version is up to date to prevent corruption
 	dbs.check_version().await?;
 	// Import file at start, if provided

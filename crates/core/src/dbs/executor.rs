@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::pin::{Pin, pin};
 use std::sync::Arc;
@@ -9,7 +8,7 @@ use futures::{Stream, StreamExt, stream};
 use reblessive::TreeStack;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
-use tracing::{instrument, warn};
+use tracing::instrument;
 use trice::Instant;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
@@ -85,29 +84,8 @@ impl Executor {
 	}
 
 	fn check_slow_log<S: VisitExpression + Display>(&self, start: &Instant, stm: &S) {
-		if let Some(threshold) = self.ctx.slow_log_threshold() {
-			let elapsed = start.elapsed();
-			if elapsed > threshold {
-				let query = format!("{stm}");
-				// Extract params
-				let mut params = BTreeMap::new();
-				stm.visit(&mut |e| {
-					if let Expr::Param(p) = e {
-						if let Some(value) = self.ctx.value(p.as_str()) {
-							if !value.is_nullish() {
-								params.insert(p.to_string(), value);
-							}
-						}
-					}
-				});
-				// Ensure the query is logged on a single line by collapsing whitespace
-				let one_line = query.split_whitespace().collect::<Vec<_>>().join(" ");
-				let params =
-					format!("{:#?}", params).split_whitespace().collect::<Vec<_>>().join(" ");
-				warn!(
-					"Slow query detected - time: {elapsed:#?} - query: {one_line} - params: {params}"
-				);
-			}
+		if let Some(slow_log) = self.ctx.slow_log() {
+			slow_log.check_log(&self.ctx, start, stm);
 		}
 	}
 

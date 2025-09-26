@@ -141,6 +141,16 @@ pub struct ApiAction {
 	pub config: ApiConfig,
 }
 
+impl VisitExpression for ApiAction {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.action.visit(visitor);
+		self.config.visit(visitor);
+	}
+}
+
 impl fmt::Display for ApiAction {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "FOR {}", Fmt::comma_separated(self.methods.iter()))?;

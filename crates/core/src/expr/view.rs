@@ -1,9 +1,10 @@
-use std::fmt;
-
 use crate::catalog::ViewDefinition;
+use crate::expr::expression::VisitExpression;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Cond, Fields, Groups, Value};
+use crate::expr::{Cond, Expr, Fields, Groups, Value};
 use crate::fmt::{EscapeIdent, Fmt};
+use std::fmt;
+use std::fmt::Debug;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct View {
@@ -11,6 +12,17 @@ pub struct View {
 	pub what: Vec<String>,
 	pub cond: Option<Cond>,
 	pub group: Option<Groups>,
+}
+
+impl VisitExpression for View {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.expr.visit(visitor);
+		self.cond.iter().for_each(|cond| cond.0.visit(visitor));
+		self.group.iter().for_each(|groups| groups.visit(visitor));
+	}
 }
 
 impl View {

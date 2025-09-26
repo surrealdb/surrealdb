@@ -96,19 +96,19 @@ impl VisitExpression for RemoveStatement {
 		match self {
 			RemoveStatement::Namespace(namespace) => namespace.visit(visitor),
 			RemoveStatement::Database(database) => database.visit(visitor),
-			RemoveStatement::Function(function) => function.visit(visitor),
 			RemoveStatement::Analyzer(analyzer) => analyzer.visit(visitor),
 			RemoveStatement::Access(access) => access.visit(visitor),
-			RemoveStatement::Param(param) => param.visit(visitor),
 			RemoveStatement::Table(table) => table.visit(visitor),
 			RemoveStatement::Event(event) => event.visit(visitor),
 			RemoveStatement::Field(field) => field.visit(visitor),
 			RemoveStatement::Index(index) => index.visit(visitor),
 			RemoveStatement::User(user) => user.visit(visitor),
-			RemoveStatement::Model(_) => {}
 			RemoveStatement::Api(api) => api.visit(visitor),
 			RemoveStatement::Bucket(bucket) => bucket.visit(visitor),
 			RemoveStatement::Sequence(sequence) => sequence.visit(visitor),
+			RemoveStatement::Model(_)
+			| RemoveStatement::Function(_)
+			| RemoveStatement::Param(_) => {}
 		}
 	}
 }
