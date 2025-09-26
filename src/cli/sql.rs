@@ -9,7 +9,7 @@ use serde_json::ser::PrettyFormatter;
 use surrealdb::engine::any::{self, connect};
 use surrealdb::method::WithStats;
 use surrealdb::opt::Config;
-use surrealdb::types::Value;
+use surrealdb::types::{object, SurrealValue, Value};
 use surrealdb::{IndexedResults, Notification};
 use surrealdb_core::rpc::DbResultStats;
 
@@ -300,7 +300,7 @@ fn process(
 	}
 
 	tokio::spawn(async move {
-		let mut stream = match response.stream::<Value>(()) {
+		let mut stream = match response.into_inner().stream::<Value>(()) {
 			Ok(stream) => stream,
 			Err(error) => {
 				print(Err(error));
@@ -317,10 +317,10 @@ fn process(
 			let message = match (json, pretty) {
 				// Don't prettify the SurrealQL response
 				(false, false) => {
-					let value = Value::from(map! {
-						String::from("id") => Value::Uuid(query_id),
-						String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
-						String::from("result") => data,
+					let value = Value::Object(object! {
+						"id": Value::Uuid(query_id),
+						"action": action.into_value(),
+						"result": data,
 					});
 					value.to_string()
 				}
@@ -330,10 +330,10 @@ fn process(
 				),
 				// Don't pretty print the JSON response
 				(true, false) => {
-					let value = Value::from(map! {
-						String::from("id") => Value::Uuid(query_id),
-						String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
-						String::from("result") => data,
+					let value = Value::Object(object! {
+						"id": Value::Uuid(query_id),
+						"action": action.into_value(),
+						"result": data,
 					});
 					if let Some(x) = value.into_json_value() {
 						x.to_string()
@@ -362,7 +362,9 @@ fn process(
 	// Check if we should emit JSON and/or prettify
 	Ok(match (json, pretty) {
 		// Don't prettify the SurrealQL response
-		(false, false) => vec.into_iter().map(|(_, x)| x).collect::<Value>().to_string(),
+		(false, false) => {
+			vec.into_iter().map(|(_, x)| x).collect::<Value>().to_string()
+		},
 		// Yes prettify the SurrealQL response
 		(false, true) => vec
 			.into_iter()
@@ -370,7 +372,7 @@ fn process(
 			.map(|(index, (stats, value))| {
 				let query_num = index + 1;
 				let execution_time = stats.execution_time.unwrap_or_default();
-				format!("-- Query {query_num} (execution time: {execution_time:?})\n{value:#}",)
+				format!("-- Query {query_num} (execution time: {execution_time:?})\n{value:#?}",)
 			})
 			.collect::<Vec<String>>()
 			.join("\n"),

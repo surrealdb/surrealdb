@@ -26,6 +26,7 @@ pub mod regex;
 pub mod uuid;
 
 use std::cmp::Ordering;
+use std::fmt::{self, Display};
 use std::ops::Index;
 
 use revision::revisioned;
@@ -294,6 +295,18 @@ impl Indexable<&str> for Value {
 			},
 			_ => Value::None,
 		}
+	}
+}
+
+impl FromIterator<Value> for Value {
+	fn from_iter<I: IntoIterator<Item = Value>>(iter: I) -> Self {
+		Value::Array(Array::from_iter(iter))
+	}
+}
+
+impl Display for Value {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		todo!("STU")
 	}
 }
 

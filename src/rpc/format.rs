@@ -2,7 +2,7 @@ use axum::extract::ws::Message;
 use axum::response::Response as AxumResponse;
 use bytes::Bytes;
 use http::header::CONTENT_TYPE;
-use surrealdb::types::Value;
+use surrealdb::types::{SurrealValue, Value};
 use surrealdb_core::rpc::{DbResponse, DbResultError};
 
 use crate::core::rpc::RpcError;

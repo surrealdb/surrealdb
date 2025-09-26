@@ -477,7 +477,7 @@ impl RpcContext for Websocket {
 	}
 	/// The version information for this RPC context
 	fn version_data(&self) -> DbResult {
-		let value = Value::from(format!("{PKG_NAME}-{}", *PKG_VERSION));
+		let value = Value::String(format!("{PKG_NAME}-{}", *PKG_VERSION));
 		DbResult::Other(value)
 	}
 

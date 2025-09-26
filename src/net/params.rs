@@ -48,7 +48,7 @@ impl From<Params> for BTreeMap<String, Value> {
 			.into_iter()
 			.map(|(k, v)| {
 				let value =
-					crate::core::syn::json_legacy_strand(&v).unwrap_or_else(|_| Value::from(v));
+					crate::core::syn::json_legacy_strand(&v).unwrap_or_else(|_| Value::String(v));
 				(k, value)
 			})
 			.collect::<BTreeMap<_, _>>()
