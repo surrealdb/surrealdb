@@ -423,7 +423,7 @@ mod tikv {
 	include_tests!(new_db => basic, serialisation, live, backup);
 }
 
-#[cfg(any(feature = "kv-fdb-7_1", feature = "kv-fdb-7_3"))]
+#[cfg(feature = "kv-fdb")]
 mod fdb {
 	use surrealdb::Surreal;
 	use surrealdb::engine::local::{Db, FDb};
