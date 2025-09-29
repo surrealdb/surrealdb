@@ -13,7 +13,7 @@ use crate::doc::CursorDoc;
 use crate::expr::part::{Next, NextMethod};
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{FlowResult, Part, Value};
+use crate::expr::{Expr, FlowResult, Part, Value};
 use crate::fmt::{EscapeIdent, Fmt};
 
 pub mod recursion;
@@ -178,6 +178,16 @@ impl Display for Idiom {
 		let mut iter = self.0.iter();
 		match iter.next() {
 			Some(Part::Field(v)) => EscapeIdent(v).fmt(f)?,
+			Some(Part::Start(x)) => match x {
+				Expr::Block(_)
+				| Expr::Literal(_)
+				| Expr::Table(_)
+				| Expr::Mock(_)
+				| Expr::Constant(_) => x.fmt(f)?,
+				_ => {
+					write!(f, "({x})")?;
+				}
+			},
 			Some(x) => x.fmt(f)?,
 			None => {}
 		};
