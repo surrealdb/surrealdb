@@ -93,13 +93,11 @@ impl conn::Sealed for Client {
 			#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 			let maybe_connector = None;
 
-			let ws_config = WebSocketConfig {
-				max_message_size: address.config.websocket.max_message_size,
-				max_frame_size: address.config.websocket.max_frame_size,
-				max_write_buffer_size: address.config.websocket.max_write_buffer_size,
-				write_buffer_size: address.config.websocket.write_buffer_size,
-				..Default::default()
-			};
+			let ws_config = WebSocketConfig::default()
+				.max_message_size(address.config.websocket.max_message_size)
+				.max_frame_size(address.config.websocket.max_frame_size)
+				.max_write_buffer_size(address.config.websocket.max_write_buffer_size)
+				.write_buffer_size(address.config.websocket.write_buffer_size);
 
 			let socket = connect(&address, Some(ws_config), maybe_connector.clone()).await?;
 
@@ -233,7 +231,7 @@ async fn router_handle_route(
 		// Unwrap because a router request cannot fail to serialize.
 		let payload = crate::core::rpc::format::revision::encode(&request).unwrap();
 
-		Message::Binary(payload)
+		Message::Binary(payload.into())
 	};
 
 	if let Some(max_message_size) = max_message_size {
@@ -354,7 +352,7 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 												&request,
 											)
 											.unwrap();
-											Message::Binary(value)
+											Message::Binary(value.into())
 										};
 										if let Err(error) = state.sink.send(kill).await {
 											trace!(
@@ -431,7 +429,7 @@ async fn router_reconnect(
 
 					let message = crate::core::rpc::format::revision::encode(&request).unwrap();
 
-					if let Err(error) = state.sink.send(Message::Binary(message)).await {
+					if let Err(error) = state.sink.send(Message::Binary(message.into())).await {
 						trace!("{error}");
 						time::sleep(time::Duration::from_secs(1)).await;
 						continue;
@@ -447,7 +445,7 @@ async fn router_reconnect(
 					trace!("Request {:?}", request);
 					let payload = crate::core::rpc::format::revision::encode(&request).unwrap();
 
-					if let Err(error) = state.sink.send(Message::Binary(payload)).await {
+					if let Err(error) = state.sink.send(Message::Binary(payload.into())).await {
 						trace!("{error}");
 						time::sleep(time::Duration::from_secs(1)).await;
 						continue;
@@ -475,7 +473,7 @@ pub(crate) async fn run_router(
 	let ping = {
 		let request = Command::Health.into_router_request(None).unwrap();
 		let value = crate::core::rpc::format::revision::encode(&request).unwrap();
-		Message::Binary(value)
+		Message::Binary(value.into())
 	};
 
 	let (socket_sink, socket_stream) = socket.split();

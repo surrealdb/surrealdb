@@ -5,6 +5,7 @@ use std::time::Duration;
 use arc_swap::ArcSwap;
 use axum::extract::ws::close_code::AGAIN;
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
+use bytes::Bytes;
 use futures::stream::FuturesUnordered;
 use futures::{Sink, SinkExt, StreamExt};
 use opentelemetry::Context as TelemetryContext;
@@ -76,7 +77,7 @@ impl Websocket {
 		state: Arc<RpcState>,
 	) {
 		// Log the succesful WebSocket connection
-		trace!("WebSocket {id} connected");
+		debug!("WebSocket {id} connected");
 		// Create a channel for sending messages
 		let (sender, receiver) = channel(*WEBSOCKET_RESPONSE_CHANNEL_SIZE);
 		// Create and store the RPC connection
@@ -130,7 +131,7 @@ impl Websocket {
 		// Close the internal response channel
 		std::mem::drop(sender);
 		// Log the WebSocket disconnection
-		trace!("WebSocket {id} disconnected");
+		debug!("WebSocket {id} disconnected");
 		// Cleanup the live queries for this WebSocket
 		rpc.cleanup_lqs().await;
 		// Remove this WebSocket from the list
@@ -157,12 +158,12 @@ impl Websocket {
 				// Send a regular ping message
 				_ = interval.tick() => {
 					// Create a new ping message
-					let msg = Message::Ping(vec![]);
+					let msg = Message::Ping(Bytes::from_static(b""));
 					// Close the connection if the message fails
 					if let Err(err) = internal_sender.send(msg).await {
 						// Output any errors if not a close error
 						if err.to_string() != CONN_CLOSED_ERR {
-							trace!("WebSocket error: {err}");
+							debug!("WebSocket error: {err}");
 						}
 						// Cancel the WebSocket tasks
 						canceller.cancel();
@@ -208,7 +209,7 @@ impl Websocket {
 					if let Err(err) = res {
 						// Output any errors if not a close error
 						if err.to_string() != CONN_CLOSED_ERR {
-							trace!("WebSocket error: {err}");
+							debug!("WebSocket error: {err}");
 						}
 						// Cancel the WebSocket tasks
 						canceller.cancel();
@@ -222,7 +223,7 @@ impl Websocket {
 					if let Err(err) = socket.flush().await {
 						// Output any errors if not a close error
 						if err.to_string() != CONN_CLOSED_ERR {
-							trace!("WebSocket error: {err}");
+							debug!("WebSocket error: {err}");
 						}
 						// Cancel the WebSocket tasks
 						canceller.cancel();
@@ -277,7 +278,7 @@ impl Websocket {
 						Message::Close(_) => {
 							// Respond with a close message
 							if let Err(err) = internal_sender.send(Message::Close(None)).await {
-								trace!("WebSocket error when replying to the close message: {err}");
+								debug!("WebSocket error when replying to the close message: {err}");
 							};
 							// Cancel the WebSocket tasks
 							canceller.cancel();
@@ -293,7 +294,7 @@ impl Websocket {
 					},
 					Err(err) => {
 						// There was an error with the WebSocket
-						trace!("WebSocket error: {err}");
+						debug!("WebSocket error: {err}");
 						// Cancel the WebSocket tasks
 						canceller.cancel();
 						// Exit out of the loop
@@ -474,13 +475,13 @@ impl RpcContext for Websocket {
 	/// Handles the execution of a LIVE statement
 	async fn handle_live(&self, lqid: &Uuid) {
 		self.state.live_queries.write().await.insert(*lqid, self.id);
-		trace!("Registered live query {lqid} on websocket {}", self.id);
+		debug!("Registered live query {lqid} on websocket {}", self.id);
 	}
 
 	/// Handles the execution of a KILL statement
 	async fn handle_kill(&self, lqid: &Uuid) {
 		if let Some(id) = self.state.live_queries.write().await.remove(lqid) {
-			trace!("Unregistered live query {lqid} on websocket {id}");
+			debug!("Unregistered live query {lqid} on websocket {id}");
 		}
 	}
 
@@ -490,7 +491,7 @@ impl RpcContext for Websocket {
 		// Find all live queries for to this connection
 		self.state.live_queries.write().await.retain(|key, value| {
 			if value == &self.id {
-				trace!("Removing live query: {key}");
+				debug!("Removing live query: {key}");
 				gc.push(*key);
 				return false;
 			}

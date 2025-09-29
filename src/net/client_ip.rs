@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use axum::extract::{ConnectInfo, FromRef, FromRequestParts, Request};
 use axum::middleware::Next;
 use axum::response::Response;
-use axum::{Extension, RequestPartsExt, async_trait};
+use axum::{Extension, RequestPartsExt};
 use clap::ValueEnum;
 use http::StatusCode;
 use http::request::Parts;
@@ -68,7 +68,6 @@ impl ClientIp {
 #[derive(Clone)]
 pub(super) struct ExtractClientIP(pub Option<String>);
 
-#[async_trait]
 impl<S> FromRequestParts<S> for ExtractClientIP
 where
 	AppState: FromRef<S>,

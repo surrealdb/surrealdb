@@ -180,13 +180,11 @@ impl conn::Sealed for Any {
 						#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 						let maybe_connector = None;
 
-						let config = WebSocketConfig {
-							max_message_size,
-							max_frame_size,
-							max_write_buffer_size,
-							write_buffer_size,
-							..Default::default()
-						};
+						let config = WebSocketConfig::default()
+							.max_message_size(max_message_size)
+							.max_frame_size(max_frame_size)
+							.max_write_buffer_size(max_write_buffer_size)
+							.write_buffer_size(write_buffer_size);
 						let socket = engine::remote::ws::native::connect(
 							&endpoint,
 							Some(config),

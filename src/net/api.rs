@@ -29,7 +29,7 @@ where
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new()
-		.route("/api/:ns/:db/*path", any(handler))
+		.route("/api/{ns}/{db}/{*path}", any(handler))
 		.route_layer(DefaultBodyLimit::disable())
 		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_API_BODY_SIZE))
 }
