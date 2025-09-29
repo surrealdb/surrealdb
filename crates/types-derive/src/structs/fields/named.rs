@@ -60,7 +60,7 @@ impl NamedFields {
 				quote! {
 					if valid {
 						if let Some(v) = map.get(#obj_key) {
-							if !#ty::is_value(v) {
+							if !<#ty as SurrealValue>::is_value(v) {
 								valid = false;
 							}
 						} else {
@@ -81,7 +81,7 @@ impl NamedFields {
 				let obj_key = field.rename.as_ref().unwrap_or(&struct_name);
 
 				quote! {
-					map.insert(#obj_key.to_string(), #ty::kind_of());
+					map.insert(#obj_key.to_string(), <#ty as SurrealValue>::kind_of());
 				}
 			})
 			.collect()

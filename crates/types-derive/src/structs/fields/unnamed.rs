@@ -58,7 +58,7 @@ impl UnnamedFields {
 				quote! {
 					if valid {
 						if let Some(v) = arr.get(#i) {
-							if !#ty::is_value(v) {
+							if !<#ty as SurrealValue>::is_value(v) {
 								valid = false;
 							}
 						} else {

@@ -2,8 +2,8 @@ mod enum_mixed_with_value;
 mod enum_tagged_tag;
 mod enum_tagged_tag_content;
 mod enum_tagged_variant;
+mod enum_unit_value;
 mod enum_untagged;
-
 
 use surrealdb_types::{Array, Object, SurrealValue, Value};
 
