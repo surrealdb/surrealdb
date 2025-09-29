@@ -1,3 +1,4 @@
+use core::f64;
 use std::borrow::Cow;
 use std::num::{ParseFloatError, ParseIntError};
 use std::str::FromStr;
@@ -121,9 +122,13 @@ pub fn number_kind(lexer: &mut Lexer, start: Token) -> Result<NumberKind, Syntax
 	let offset = start.span.offset;
 	match start.kind {
 		t!("-") | t!("+") => {
+			if eat_infinity(lexer, offset)? {
+				return Ok(NumberKind::Float);
+			}
 			eat_digits1(lexer, offset)?;
 		}
 		TokenKind::Digits => {}
+		TokenKind::Infinity => return Ok(NumberKind::Float),
 		x => bail!("Unexpected start token for integer: {x}",@start.span),
 	}
 
@@ -169,10 +174,23 @@ pub fn number(lexer: &mut Lexer, start: Token) -> Result<Numeric, SyntaxError> {
 	let span = lexer.current_span();
 	let number_str = prepare_number_str(lexer.span_str(span));
 	match kind {
-		NumberKind::Integer => number_str
-			.parse()
-			.map(Numeric::Integer)
-			.map_err(|e| syntax_error!("Failed to parse number: {e}", @lexer.current_span())),
+		NumberKind::Integer => {
+			// Number strings cannot be empty so checking the first byte is always valid.
+			if number_str.as_bytes()[0] == b'-' && number_str.as_bytes()[1] == b'I' {
+				// No need to check the whole string, if it starts with '-I' it  has to be negative
+				// infinity
+				Ok(Numeric::Float(f64::NEG_INFINITY))
+			} else if number_str.as_bytes()[0] == b'+' && number_str.as_bytes()[1] == b'I'
+				|| number_str.as_bytes()[0] == b'I'
+			{
+				// No need to check the whole string, if it starts with '+I' or 'I' it  has to be infinity
+				Ok(Numeric::Float(f64::INFINITY))
+			} else {
+				number_str.parse().map(Numeric::Integer).map_err(
+					|e| syntax_error!("Failed to parse number: {e}", @lexer.current_span()),
+				)
+			}
+		}
 		NumberKind::Float => {
 			let number_str = number_str.trim_end_matches('f');
 			number_str
@@ -428,4 +446,23 @@ fn eat_digits1(lexer: &mut Lexer, start: u32) -> Result<(), SyntaxError> {
 
 fn eat_digits(lexer: &mut Lexer) {
 	while lexer.eat_when(|x| x.is_ascii_digit() || x == b'_') {}
+}
+
+fn eat_infinity(lexer: &mut Lexer, start: u32) -> Result<bool, SyntaxError> {
+	if !lexer.reader.eat(b'I') {
+		return Ok(false);
+	}
+
+	for b in b"nfinity" {
+		match lexer.reader.next() {
+			Some(x) if x == *b => {}
+			Some(x) => {
+				bail!("Invalid number token, expected `{}` found: {x}",*b as char, @lexer.span_since(start))
+			}
+			None => {
+				bail!("Unexpected end of file, expected a number token digit", @lexer.span_since(start));
+			}
+		}
+	}
+	Ok(true)
 }
