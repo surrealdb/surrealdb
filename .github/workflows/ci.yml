@@ -933,7 +933,7 @@ jobs:
   # ----------------------------------------
 
   lang-tests:
-    name: Run SurrealQL language tests
+    name: SurrealQL language tests
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -961,7 +961,7 @@ jobs:
           ./target/debug/surrealql-test --color always run --no-wip -j 3
 
   upgrade-tests:
-    name: Run SurrealQL upgrade tests
+    name: SurrealQL upgrade tests
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -996,7 +996,7 @@ jobs:
   # ----------------------------------------
 
   sdk-javascript:
-    name: JavaScript SDK tests (${{ matrix.version }})
+    name: SDK - JavaScript (${{ matrix.version }})
     continue-on-error: true
     runs-on: ubuntu-latest
     needs: build
@@ -1043,7 +1043,7 @@ jobs:
           SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
 
   sdk-golang:
-    name: Golang SDK tests (${{ matrix.version }})
+    name: SDK - Golang (${{ matrix.version }})
     continue-on-error: true
     runs-on: ubuntu-latest
     needs: build
@@ -1106,7 +1106,7 @@ jobs:
           SURREALDB_URL: ws://localhost:8000/rpc
 
   sdk-python:
-    name: Python SDK tests (${{ matrix.version }})
+    name: SDK - Python (${{ matrix.version }})
     continue-on-error: true
     runs-on: ubuntu-latest
     needs: build
@@ -1182,7 +1182,7 @@ jobs:
           PYTHONWARNINGS: ignore::ResourceWarning,ignore::UserWarning
 
   sdk-php:
-    name: PHP SDK tests (${{ matrix.version }})
+    name: SDK - PHP (${{ matrix.version }})
     continue-on-error: true
     runs-on: ubuntu-latest
     needs: build
@@ -1241,7 +1241,7 @@ jobs:
         run: composer test-coverage-v2
 
   sdk-dotnet:
-    name: .NET SDK tests (${{ matrix.version }})
+    name: SDK - .NET (${{ matrix.version }})
     continue-on-error: true
     runs-on: ubuntu-latest
     needs: build
