@@ -35,7 +35,8 @@ macro_rules! impl_surreal_value {
         <$($generic:ident),*> $type:ty as $kind:expr,
         $($is_fnc:ident<$($is_generic:ident),*>)? ($value_is:ident) => $is:expr,
         $($from_fnc:ident<$($from_generic:ident),*>)? ($self:ident) => $into:expr,
-        $($into_fnc:ident<$($into_generic:ident),*>)? ($value_into:ident) => $from:expr
+        $($into_fnc:ident<$($into_generic:ident),*>)? ($value_into:ident) => $from:expr $(,)?
+		$(,$is_and_fnc:ident<$($is_and_generic:ident),*> ($self_is_and:ident, $is_and_callback:ident) => $is_and:expr)?
     ) => {
         impl<$($generic: SurrealValue),*> SurrealValue for $type {
             fn kind_of() -> Kind {
@@ -85,6 +86,17 @@ macro_rules! impl_surreal_value {
                 }
             }
         )?
+
+		$(
+			impl Value {
+				/// Checks if this value can be converted to the given type
+				///
+				/// Returns `true` if the value can be converted to the type, `false` otherwise.
+				pub fn $is_and_fnc<$($is_and_generic: SurrealValue),*>(&$self_is_and, $is_and_callback: impl FnOnce(&$type) -> bool) -> bool {
+					$is_and
+				}
+			}
+		)?
     };
 
 	// Concrete types
@@ -92,7 +104,8 @@ macro_rules! impl_surreal_value {
         $type:ty as $kind:expr,
         $($is_fnc:ident)? ($value_is:ident) => $is:expr,
         $($from_fnc:ident)? ($self:ident) => $into:expr,
-        $($into_fnc:ident)? ($value_into:ident) => $from:expr
+        $($into_fnc:ident)? ($value_into:ident) => $from:expr $(,)?
+		$(,$is_and_fnc:ident($self_is_and:ident, $is_and_callback:ident) => $is_and:expr)?
     ) => {
         impl SurrealValue for $type {
             fn kind_of() -> Kind {
@@ -142,6 +155,17 @@ macro_rules! impl_surreal_value {
                 }
             }
         )?
+
+		$(
+			impl Value {
+				/// Checks if this value can be converted to the given type
+				///
+				/// Returns `true` if the value can be converted to the type, `false` otherwise.
+				pub fn $is_and_fnc(&$self_is_and, $is_and_callback: impl FnOnce(&$type) -> bool) -> bool {
+					$is_and
+				}
+			}
+		)?
     };
 }
 
@@ -231,6 +255,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(n)
+	},
+	is_number_and(self, callback) => {
+		if let Value::Number(n) = self {
+			callback(n)
+		} else {
+			false
+		}
 	}
 );
 
@@ -243,6 +274,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(n)
+	},
+	is_int_and(self, callback) => {
+		if let Value::Number(Number::Int(n)) = self {
+			callback(n)
+		} else {
+			false
+		}
 	}
 );
 
@@ -255,6 +293,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(n)
+	},
+	is_float_and(self, callback) => {
+		if let Value::Number(Number::Float(n)) = self {
+			callback(n)
+		} else {
+			false
+		}
 	}
 );
 
@@ -267,6 +312,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(n)
+	},
+	is_decimal_and(self, callback) => {
+		if let Value::Number(Number::Decimal(n)) = self {
+			callback(n)
+		} else {
+			false
+		}
 	}
 );
 
@@ -279,6 +331,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(s)
+	},
+	is_string_and(self, callback) => {
+		if let Value::String(s) = self {
+			callback(s)
+		} else {
+			false
+		}
 	}
 );
 
@@ -330,6 +389,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(d)
+	},
+	is_duration_and(self, callback) => {
+		if let Value::Duration(d) = self {
+			callback(d)
+		} else {
+			false
+		}
 	}
 );
 
@@ -354,6 +420,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(d)
+	},
+	is_datetime_and(self, callback) => {
+		if let Value::Datetime(d) = self {
+			callback(d)
+		} else {
+			false
+		}
 	}
 );
 
@@ -378,6 +451,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(u)
+	},
+	is_uuid_and(self, callback) => {
+		if let Value::Uuid(u) = self {
+			callback(u)
+		} else {
+			false
+		}
 	}
 );
 
@@ -402,6 +482,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(a)
+	},
+	is_array_and(self, callback) => {
+		if let Value::Array(a) = self {
+			callback(a)
+		} else {
+			false
+		}
 	}
 );
 
@@ -414,6 +501,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(o)
+	},
+	is_object_and(self, callback) => {
+		if let Value::Object(o) = self {
+			callback(o)
+		} else {
+			false
+		}
 	}
 );
 
@@ -426,6 +520,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(g)
+	},
+	is_geometry_and(self, callback) => {
+		if let Value::Geometry(g) = self {
+			callback(g)
+		} else {
+			false
+		}
 	}
 );
 
@@ -438,6 +539,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(b)
+	},
+	is_bytes_and(self, callback) => {
+		if let Value::Bytes(b) = self {
+			callback(b)
+		} else {
+			false
+		}
 	}
 );
 
@@ -474,6 +582,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(r)
+	},
+	is_record_and(self, callback) => {
+		if let Value::RecordId(r) = self {
+			callback(r)
+		} else {
+			false
+		}
 	}
 );
 
@@ -486,6 +601,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(f)
+	},
+	is_file_and(self, callback) => {
+		if let Value::File(f) = self {
+			callback(f)
+		} else {
+			false
+		}
 	}
 );
 
@@ -498,6 +620,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(*r)
+	},
+	is_range_and(self, callback) => {
+		if let Value::Range(r) = self {
+			callback(r)
+		} else {
+			false
+		}
 	}
 );
 
@@ -588,6 +717,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(p)
+	},
+	is_point_and(self, callback) => {
+		if let Value::Geometry(Geometry::Point(p)) = self {
+			callback(p)
+		} else {
+			false
+		}
 	}
 );
 
@@ -600,6 +736,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(l)
+	},
+	is_line_and(self, callback) => {
+		if let Value::Geometry(Geometry::Line(l)) = self {
+			callback(l)
+		} else {
+			false
+		}
 	}
 );
 
@@ -612,6 +755,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(p)
+	},
+	is_polygon_and(self, callback) => {
+		if let Value::Geometry(Geometry::Polygon(p)) = self {
+			callback(p)
+		} else {
+			false
+		}
 	}
 );
 
@@ -624,6 +774,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(m)
+	},
+	is_multipoint_and(self, callback) => {
+		if let Value::Geometry(Geometry::MultiPoint(m)) = self {
+			callback(m)
+		} else {
+			false
+		}
 	}
 );
 
@@ -636,6 +793,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(m)
+	},
+	is_multiline_and(self, callback) => {
+		if let Value::Geometry(Geometry::MultiLine(m)) = self {
+			callback(m)
+		} else {
+			false
+		}
 	}
 );
 
@@ -648,6 +812,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(m)
+	},
+	is_multipolygon_and(self, callback) => {
+		if let Value::Geometry(Geometry::MultiPolygon(m)) = self {
+			callback(m)
+		} else {
+			false
+		}
 	}
 );
 
