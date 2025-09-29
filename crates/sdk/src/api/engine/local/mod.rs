@@ -186,7 +186,7 @@ use surrealdb_core::{
 	iam::{Action, ResourceKind, check::check_ns_db},
 	ml::storage::surml_file::SurMlFile,
 };
-use surrealdb_types::{Notification as CoreNotification, Value, Variables};
+use surrealdb_types::{Notification, Value, Variables};
 use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
 use tokio::{
@@ -212,7 +212,7 @@ pub(crate) mod native;
 #[cfg(target_family = "wasm")]
 pub(crate) mod wasm;
 
-type LiveQueryMap = HashMap<Uuid, Sender<CoreNotification>>;
+type LiveQueryMap = HashMap<Uuid, Sender<Result<Notification>>>;
 
 /// In-memory database
 ///
@@ -862,7 +862,7 @@ async fn router(
 			let select_plan = SelectStatement {
 				expr: Fields::all(),
 				what: resource_to_exprs(what),
-				omit: None,
+				omit: vec![],
 				only: false,
 				with: None,
 				cond: None,
@@ -1211,7 +1211,9 @@ async fn router(
 			let model = DefineModelStatement {
 				name: file.header.name.to_string(),
 				version: file.header.version.to_string(),
-				comment: Some(file.header.description.to_string()),
+				comment: Some(Expr::Literal(surrealdb_core::expr::Literal::String(
+					file.header.description.to_string(),
+				))),
 				hash,
 				..Default::default()
 			};

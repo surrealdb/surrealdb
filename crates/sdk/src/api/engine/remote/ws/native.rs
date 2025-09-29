@@ -336,16 +336,16 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 				None => {
 					match response.result {
 						Ok(DbResult::Live(notification)) => {
-							let live_query_id = notification.id;
+							let live_query_id = notification.id.0;
 							// Check if this live query is registered
 							if let Some(sender) = state.live_queries.get(&live_query_id) {
 								// Send the notification back to the caller or kill live query
 								// if the receiver is already dropped
-								if sender.send(notification).await.is_err() {
+								if sender.send(Ok(notification)).await.is_err() {
 									state.live_queries.remove(&live_query_id);
 									let kill = {
 										let request = Command::Kill {
-											uuid: live_query_id.0,
+											uuid: live_query_id,
 										}
 										.into_router_request(None)
 										.unwrap();
@@ -364,8 +364,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 								}
 							}
 						}
-						Ok(..) => { /* Ignored responses like pings */ }
-						Err(error) => error!("{error:?}"),
+						_ => {}
 					}
 				}
 			}
@@ -516,8 +515,7 @@ pub(crate) async fn run_router(
 		// be recreated with each next.
 
 		state.last_activity = Instant::now();
-		state.live_queries.clear();
-		state.pending_requests.clear();
+		state.reset().await;
 
 		loop {
 			tokio::select! {
@@ -583,6 +581,7 @@ pub(crate) async fn run_router(
 							}
 						}
 						Err(error) => {
+							state.reset().await;
 							match error {
 								WsError::ConnectionClosed => {
 									trace!("Connection successfully closed on the server");

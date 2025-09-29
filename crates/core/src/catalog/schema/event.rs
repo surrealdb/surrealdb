@@ -23,11 +23,16 @@ impl EventDefinition {
 	pub fn to_sql_definition(&self) -> crate::sql::DefineEventStatement {
 		crate::sql::DefineEventStatement {
 			kind: DefineKind::Default,
-			name: self.name.clone(),
-			target_table: self.target_table.clone(),
+			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
+			target_table: crate::sql::Expr::Idiom(crate::sql::Idiom::field(
+				self.target_table.clone(),
+			)),
 			when: self.when.clone().into(),
 			then: self.then.iter().cloned().map(Into::into).collect(),
-			comment: self.comment.clone(),
+			comment: self
+				.comment
+				.clone()
+				.map(|v| crate::sql::Expr::Literal(crate::sql::Literal::String(v))),
 		}
 	}
 }

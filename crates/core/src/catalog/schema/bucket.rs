@@ -29,14 +29,17 @@ impl BucketDefinition {
 	pub fn to_sql_definition(&self) -> DefineBucketStatement {
 		DefineBucketStatement {
 			kind: DefineKind::Default,
-			name: self.name.clone(),
+			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
 			backend: self
 				.backend
 				.clone()
 				.map(|v| crate::sql::Expr::Literal(crate::sql::Literal::String(v))),
 			permissions: self.permissions.clone().into(),
 			readonly: self.readonly,
-			comment: self.comment.clone(),
+			comment: self
+				.comment
+				.clone()
+				.map(|v| crate::sql::Expr::Literal(crate::sql::Literal::String(v))),
 		}
 	}
 }

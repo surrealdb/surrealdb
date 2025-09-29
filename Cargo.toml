@@ -6,7 +6,7 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 edition = "2024"
 license-file = "LICENSE"
 publish = false
-version = "3.0.0-alpha.9"
+version = "3.0.0-alpha.10"
 rust-version = "1.87.0"
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
 repository = "https://github.com/surrealdb/surrealdb"
@@ -22,11 +22,11 @@ categories = ["database-implementations", "data-structures", "embedded"]
 
 [workspace.dependencies]
 # workspace internal dependencies
-surrealdb = { version = "=3.0.0-alpha.9", path = "crates/sdk" }
-surrealdb-core = { version = "=3.0.0-alpha.9", path = "crates/core", default-features = false }
-surrealdb-macros = { version = "=3.0.0-alpha.9", path = "crates/macros" }
-surrealdb-types = { version = "=3.0.0-alpha.9", path = "crates/types" }
-surrealdb-types-derive = { version = "=3.0.0-alpha.9", path = "crates/types-derive" }
+surrealdb = { version = "=3.0.0-alpha.10", path = "crates/sdk" }
+surrealdb-core = { version = "=3.0.0-alpha.10", path = "crates/core", default-features = false }
+surrealdb-macros = { version = "=3.0.0-alpha.10", path = "crates/macros" }
+surrealdb-types = { version = "=3.0.0-alpha.10", path = "crates/types" }
+surrealdb-types-derive = { version = "=3.0.0-alpha.10", path = "crates/types-derive" }
 
 # External surreal crates
 affinitypool = { version = "0.3.1" }
@@ -45,7 +45,7 @@ reblessive = "0.4.3"
 revision = "0.11.0"
 storekey = { version = "0.8.0", features = ["uuid"] }
 trice = "0.4.0"
-vart = "0.8.1"
+vart = "0.9.3"
 
 # External Kv stores
 foundationdb = { version = "0.9.0", default-features = false, features = [
@@ -94,12 +94,12 @@ humantime = "2.3.0"
 indexmap = "2.1.0"
 jemallocator = { version = "0.6.0", package = "tikv-jemallocator" }
 jsonwebtoken = "9.3.0"
-linfa-linalg = "=0.1.0"
+linfa-linalg = "=0.2.1"
 md-5 = "0.10.6"
 nanoid = "0.4.0"
 native-tls = "0.2.11"
-ndarray = "=0.15.6"
-ndarray-stats = "=0.5.1"
+ndarray = "=0.16.1"
+ndarray-stats = "=0.6.0"
 num-traits = "0.2.18"
 num_cpus = "1.16.0"
 object_store = "0.12.0"
@@ -255,7 +255,7 @@ hyper = "1.4.1"
 opentelemetry = { version = "0.24" }
 opentelemetry-otlp = { version = "0.17.0", features = ["metrics"] }
 opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
-rustyline = { version = "12.0.0", features = ["derive"] }
+rustyline = { version = "17.0.1", features = ["derive"] }
 tower = { version = "0.4.13", features = ["limit", "load-shed"] }
 tower-http = { version = "0.5.2", features = [
     "trace",

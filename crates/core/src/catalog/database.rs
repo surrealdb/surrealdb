@@ -8,8 +8,8 @@ use crate::catalog::NamespaceId;
 use crate::expr::ChangeFeed;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::sql::statements::define::DefineDatabaseStatement;
+use crate::sql::{Expr, Idiom, Literal, ToSql};
 use crate::val::Value;
 
 #[derive(
@@ -76,10 +76,9 @@ impl_kv_value_revisioned!(DatabaseDefinition);
 impl DatabaseDefinition {
 	pub fn to_sql_definition(&self) -> DefineDatabaseStatement {
 		DefineDatabaseStatement {
-			name: self.name.clone(),
-			comment: self.comment.clone(),
-			changefeed: self.changefeed.map(|x| x.into()),
-
+			name: Expr::Idiom(Idiom::field(self.name.clone())),
+			comment: self.comment.clone().map(|v| Expr::Literal(Literal::String(v))),
+			changefeed: self.changefeed.map(|v| v.into()),
 			..Default::default()
 		}
 	}

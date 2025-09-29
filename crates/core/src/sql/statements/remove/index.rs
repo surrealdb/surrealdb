@@ -1,13 +1,23 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::fmt::EscapeIdent;
+use crate::sql::{Expr, Literal};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveIndexStatement {
-	pub name: String,
-	pub what: String,
+	pub name: Expr,
+	pub what: Expr,
 	pub if_exists: bool,
+}
+
+impl Default for RemoveIndexStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			what: Expr::Literal(Literal::None),
+			if_exists: false,
+		}
+	}
 }
 
 impl Display for RemoveIndexStatement {
@@ -16,7 +26,7 @@ impl Display for RemoveIndexStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.what))?;
+		write!(f, " {} ON {}", self.name, self.what)?;
 		Ok(())
 	}
 }
@@ -24,9 +34,9 @@ impl Display for RemoveIndexStatement {
 impl From<RemoveIndexStatement> for crate::expr::statements::RemoveIndexStatement {
 	fn from(v: RemoveIndexStatement) -> Self {
 		crate::expr::statements::RemoveIndexStatement {
-			name: v.name,
+			name: v.name.into(),
 			if_exists: v.if_exists,
-			what: v.what,
+			what: v.what.into(),
 		}
 	}
 }
@@ -34,9 +44,9 @@ impl From<RemoveIndexStatement> for crate::expr::statements::RemoveIndexStatemen
 impl From<crate::expr::statements::RemoveIndexStatement> for RemoveIndexStatement {
 	fn from(v: crate::expr::statements::RemoveIndexStatement) -> Self {
 		RemoveIndexStatement {
-			name: v.name,
+			name: v.name.into(),
 			if_exists: v.if_exists,
-			what: v.what,
+			what: v.what.into(),
 		}
 	}
 }

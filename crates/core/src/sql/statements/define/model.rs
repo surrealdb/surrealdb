@@ -1,18 +1,31 @@
 use std::fmt::{self, Write};
 
 use super::DefineKind;
-use crate::fmt::{EscapeIdent, QuoteStr, is_pretty, pretty_indent};
-use crate::sql::Permission;
+use crate::fmt::{is_pretty, pretty_indent};
+use crate::sql::{Expr, Permission};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineModelStatement {
 	pub kind: DefineKind,
 	pub hash: String,
 	pub name: String,
 	pub version: String,
-	pub comment: Option<String>,
+	pub comment: Option<Expr>,
 	pub permissions: Permission,
+}
+
+impl Default for DefineModelStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			hash: String::new(),
+			name: String::new(),
+			version: String::new(),
+			comment: None,
+			permissions: Permission::default(),
+		}
+	}
 }
 
 impl fmt::Display for DefineModelStatement {
@@ -23,9 +36,9 @@ impl fmt::Display for DefineModelStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " ml::{}<{}>", EscapeIdent(&self.name), self.version)?;
+		write!(f, " ml::{}<{}>", self.name, self.version)?;
 		if let Some(comment) = self.comment.as_ref() {
-			write!(f, " COMMENT {}", QuoteStr(comment))?;
+			write!(f, " COMMENT {}", comment)?;
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
@@ -45,7 +58,7 @@ impl From<DefineModelStatement> for crate::expr::statements::DefineModelStatemen
 			hash: v.hash,
 			name: v.name,
 			version: v.version,
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 			permissions: v.permissions.into(),
 		}
 	}
@@ -58,7 +71,7 @@ impl From<crate::expr::statements::DefineModelStatement> for DefineModelStatemen
 			hash: v.hash,
 			name: v.name,
 			version: v.version,
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 			permissions: v.permissions.into(),
 		}
 	}

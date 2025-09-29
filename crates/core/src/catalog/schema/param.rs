@@ -26,7 +26,10 @@ impl ParamDefinition {
 				let public_val: crate::types::PublicValue = self.value.clone().try_into().unwrap();
 				crate::sql::Expr::from_public_value(public_val)
 			},
-			comment: self.comment.clone(),
+			comment: self
+				.comment
+				.clone()
+				.map(|x| crate::sql::Expr::Literal(crate::sql::Literal::String(x))),
 			permissions: self.permissions.clone().into(),
 		}
 	}

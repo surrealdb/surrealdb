@@ -48,8 +48,8 @@ impl FieldDefinition {
 	pub fn to_sql_definition(&self) -> DefineFieldStatement {
 		DefineFieldStatement {
 			kind: crate::sql::statements::define::DefineKind::Default,
-			name: self.name.clone().into(),
-			what: self.what.clone(),
+			name: Expr::Idiom(self.name.clone()).into(),
+			what: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.what.clone())),
 			flex: self.flexible,
 			field_kind: self.field_kind.clone().map(|x| x.into()),
 			readonly: self.readonly,
@@ -71,7 +71,10 @@ impl FieldDefinition {
 				update: self.update_permission.to_sql_definition(),
 				delete: crate::sql::Permission::Full,
 			},
-			comment: self.comment.clone(),
+			comment: self
+				.comment
+				.clone()
+				.map(|x| crate::sql::Expr::Literal(crate::sql::Literal::String(x))),
 			reference: self.reference.clone().map(|x| x.into()),
 		}
 	}

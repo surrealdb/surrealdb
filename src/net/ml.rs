@@ -33,7 +33,7 @@ mod implementation {
 	use surrealdb_core::dbs::Session;
 	use surrealdb_core::dbs::capabilities::RouteTarget;
 	use surrealdb_core::expr::statements::{DefineModelStatement, DefineStatement};
-	use surrealdb_core::expr::{Expr, LogicalPlan, TopLevelExpr, get_model_path};
+	use surrealdb_core::expr::{Expr, Literal, LogicalPlan, TopLevelExpr, get_model_path};
 	use surrealdb_core::iam::check::check_ns_db;
 	use surrealdb_core::iam::{Action, ResourceKind};
 	use surrealdb_core::ml::storage::surml_file::SurMlFile;
@@ -94,7 +94,7 @@ mod implementation {
 		let model = DefineModelStatement {
 			name: file.header.name.to_string(),
 			version: file.header.version.to_string(),
-			comment: Some(file.header.description.to_string()),
+			comment: Some(Expr::Literal(Literal::String(file.header.description.to_string()))),
 			hash,
 			..Default::default()
 		};

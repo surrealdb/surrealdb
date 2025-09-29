@@ -64,7 +64,10 @@ impl ApiDefinition {
 			actions: self.actions.iter().map(|x| x.to_sql_action()).collect(),
 			fallback: self.fallback.clone().map(|x| x.into()),
 			config: self.config.to_sql_config(),
-			comment: self.comment.clone(),
+			comment: self
+				.comment
+				.clone()
+				.map(|x| crate::sql::Expr::Literal(crate::sql::Literal::String(x))),
 		}
 	}
 }
@@ -229,7 +232,7 @@ impl InfoStructure for ApiConfigDefinition {
 
 impl Display for ApiConfigDefinition {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, " API")?;
+		write!(f, "API")?;
 
 		if !self.middleware.is_empty() {
 			write!(f, " MIDDLEWARE ")?;

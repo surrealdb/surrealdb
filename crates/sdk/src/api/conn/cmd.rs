@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde::ser::SerializeMap as _;
 use surrealdb_core::expr::{Expr, LogicalPlan};
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_types::{Array, Notification as CoreNotification, Object, Value, Variables};
+use surrealdb_types::{Array, Notification, Object, Value, Variables};
 use uuid::Uuid;
 
 use super::MlExportConfig;
@@ -122,7 +122,7 @@ pub(crate) enum Command {
 	},
 	SubscribeLive {
 		uuid: Uuid,
-		notification_sender: Sender<CoreNotification>,
+		notification_sender: Sender<Result<Notification>>,
 	},
 	Kill {
 		uuid: Uuid,

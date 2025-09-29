@@ -372,7 +372,7 @@ impl Expr {
 			}
 			Expr::Remove(remove_statement) => {
 				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					remove_statement.compute(ctx, &opt, doc).await.map_err(ControlFlow::Err)
+					remove_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 				})
 				.await
 			}

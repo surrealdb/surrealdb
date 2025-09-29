@@ -1,7 +1,6 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::fmt::{EscapeIdent, QuoteStr};
 use crate::sql::access::AccessDuration;
 use crate::sql::{AccessType, Base, Expr};
 
@@ -9,12 +8,12 @@ use crate::sql::{AccessType, Base, Expr};
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineAccessStatement {
 	pub kind: DefineKind,
-	pub name: String,
+	pub name: Expr,
 	pub base: Base,
 	pub access_type: AccessType,
 	pub authenticate: Option<Expr>,
 	pub duration: AccessDuration,
-	pub comment: Option<String>,
+	pub comment: Option<Expr>,
 }
 
 impl Display for DefineAccessStatement {
@@ -30,7 +29,7 @@ impl Display for DefineAccessStatement {
 			}
 		}
 		// The specific access method definition is displayed by AccessType
-		write!(f, " {} ON {} TYPE {}", EscapeIdent(&self.name), self.base, self.access_type)?;
+		write!(f, " {} ON {} TYPE {}", self.name, self.base, self.access_type)?;
 		// The additional authentication clause
 		if let Some(ref v) = self.authenticate {
 			write!(f, " AUTHENTICATE {v}")?
@@ -44,7 +43,7 @@ impl Display for DefineAccessStatement {
 				f,
 				" FOR GRANT {},",
 				match self.duration.grant {
-					Some(dur) => format!("{}", dur),
+					Some(ref dur) => format!("{}", dur),
 					None => "NONE".to_string(),
 				}
 			)?;
@@ -54,7 +53,7 @@ impl Display for DefineAccessStatement {
 				f,
 				" FOR TOKEN {},",
 				match self.duration.token {
-					Some(dur) => format!("{}", dur),
+					Some(ref dur) => format!("{}", dur),
 					None => "NONE".to_string(),
 				}
 			)?;
@@ -63,12 +62,12 @@ impl Display for DefineAccessStatement {
 			f,
 			" FOR SESSION {}",
 			match self.duration.session {
-				Some(dur) => format!("{}", dur),
+				Some(ref dur) => format!("{}", dur),
 				None => "NONE".to_string(),
 			}
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", QuoteStr(v))?
+			write!(f, " COMMENT {}", v)?
 		}
 		Ok(())
 	}
@@ -78,12 +77,12 @@ impl From<DefineAccessStatement> for crate::expr::statements::DefineAccessStatem
 	fn from(v: DefineAccessStatement) -> Self {
 		crate::expr::statements::DefineAccessStatement {
 			kind: v.kind.into(),
-			name: v.name,
+			name: v.name.into(),
 			base: v.base.into(),
 			access_type: v.access_type.into(),
 			authenticate: v.authenticate.map(Into::into),
 			duration: v.duration.into(),
-			comment: v.comment,
+			comment: v.comment.map(Into::into),
 		}
 	}
 }
@@ -92,12 +91,12 @@ impl From<crate::expr::statements::DefineAccessStatement> for DefineAccessStatem
 	fn from(v: crate::expr::statements::DefineAccessStatement) -> Self {
 		DefineAccessStatement {
 			kind: v.kind.into(),
-			name: v.name,
+			name: v.name.into(),
 			base: v.base.into(),
 			access_type: v.access_type.into(),
 			authenticate: v.authenticate.map(Into::into),
 			duration: v.duration.into(),
-			comment: v.comment,
+			comment: v.comment.map(Into::into),
 		}
 	}
 }

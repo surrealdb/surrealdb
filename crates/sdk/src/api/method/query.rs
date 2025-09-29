@@ -351,7 +351,7 @@ pub struct IndexedResults {
 pub struct QueryStream<R>(pub(crate) Either<Stream<R>, SelectAll<Stream<R>>>);
 
 impl futures::Stream for QueryStream<Value> {
-	type Item = Notification<Value>;
+	type Item = Result<Notification<Value>>;
 
 	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
 		self.as_mut().0.poll_next_unpin(cx)

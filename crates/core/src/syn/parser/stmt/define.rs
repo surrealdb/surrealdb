@@ -38,10 +38,12 @@ impl Parser<'_> {
 	) -> ParseResult<DefineStatement> {
 		let next = self.next();
 		match next.kind {
-			t!("NAMESPACE") => self.parse_define_namespace().map(DefineStatement::Namespace),
-			t!("DATABASE") => self.parse_define_database().map(DefineStatement::Database),
+			t!("NAMESPACE") => {
+				self.parse_define_namespace(stk).await.map(DefineStatement::Namespace)
+			}
+			t!("DATABASE") => self.parse_define_database(stk).await.map(DefineStatement::Database),
 			t!("FUNCTION") => self.parse_define_function(stk).await.map(DefineStatement::Function),
-			t!("USER") => self.parse_define_user().map(DefineStatement::User),
+			t!("USER") => self.parse_define_user(stk).await.map(DefineStatement::User),
 			t!("PARAM") => self.parse_define_param(stk).await.map(DefineStatement::Param),
 			t!("TABLE") => self.parse_define_table(stk).await.map(DefineStatement::Table),
 			t!("API") => self.parse_define_api(stk).await.map(DefineStatement::Api),
@@ -54,16 +56,19 @@ impl Parser<'_> {
 			t!("INDEX") => {
 				stk.run(|stk| self.parse_define_index(stk)).await.map(DefineStatement::Index)
 			}
-			t!("ANALYZER") => self.parse_define_analyzer().map(DefineStatement::Analyzer),
+			t!("ANALYZER") => self.parse_define_analyzer(stk).await.map(DefineStatement::Analyzer),
 			t!("ACCESS") => self.parse_define_access(stk).await.map(DefineStatement::Access),
 			t!("CONFIG") => self.parse_define_config(stk).await.map(DefineStatement::Config),
 			t!("BUCKET") => self.parse_define_bucket(stk, next).await.map(DefineStatement::Bucket),
-			t!("SEQUENCE") => self.parse_define_sequence().map(DefineStatement::Sequence),
+			t!("SEQUENCE") => self.parse_define_sequence(stk).await.map(DefineStatement::Sequence),
 			_ => unexpected!(self, next, "a define statement keyword"),
 		}
 	}
 
-	pub(crate) fn parse_define_namespace(&mut self) -> ParseResult<DefineNamespaceStatement> {
+	pub(crate) async fn parse_define_namespace(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineNamespaceStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -73,7 +78,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.parse_ident()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		let mut res = DefineNamespaceStatement {
 			id: None,
 			name,
@@ -83,13 +88,16 @@ impl Parser<'_> {
 
 		while let t!("COMMENT") = self.peek_kind() {
 			self.pop_peek();
-			res.comment = Some(self.parse_string_lit()?);
+			res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 		}
 
 		Ok(res)
 	}
 
-	pub fn parse_define_database(&mut self) -> ParseResult<DefineDatabaseStatement> {
+	pub async fn parse_define_database(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineDatabaseStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -99,7 +107,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.parse_ident()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		let mut res = DefineDatabaseStatement {
 			name,
 			kind,
@@ -109,7 +117,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_string_lit()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				t!("CHANGEFEED") => {
 					self.pop_peek();
@@ -177,7 +185,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_string_lit()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
@@ -190,7 +198,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub fn parse_define_user(&mut self) -> ParseResult<DefineUserStatement> {
+	pub async fn parse_define_user(&mut self, stk: &mut Stk) -> ParseResult<DefineUserStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -200,7 +208,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.parse_ident()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
 		let base = self.parse_base()?;
 
@@ -213,7 +221,7 @@ impl Parser<'_> {
 			                                   * the viewer role
 			                                   * by default */
 			// TODO: Move out of the parser
-			token_duration: Some(PublicDuration::from_secs(3600)), // defaults to 1 hour.
+			token_duration: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(3600)))), /* defaults to 1 hour. */
 			..DefineUserStatement::default()
 		};
 
@@ -221,7 +229,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_string_lit()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				t!("PASSWORD") => {
 					let token = self.pop_peek();
@@ -275,7 +283,10 @@ impl Parser<'_> {
 										// duration must be set.
 										unexpected!(self, peek, "a token duration");
 									}
-									_ => res.token_duration = Some(self.next_token_value()?),
+									_ => {
+										res.token_duration =
+											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+									}
 								}
 							}
 							t!("SESSION") => {
@@ -285,7 +296,10 @@ impl Parser<'_> {
 										self.pop_peek();
 										res.session_duration = None;
 									}
-									_ => res.session_duration = Some(self.next_token_value()?),
+									_ => {
+										res.session_duration =
+											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+									}
 								}
 							}
 							_ => unexpected!(self, token, "`TOKEN` or `SESSION`"),
@@ -318,7 +332,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.parse_ident()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
 		// TODO: Parse base should no longer take an argument.
 		let base = self.parse_base()?;
@@ -337,7 +351,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_string_lit()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				t!("TYPE") => {
 					self.pop_peek();
@@ -345,7 +359,7 @@ impl Parser<'_> {
 					match peek.kind {
 						t!("JWT") => {
 							self.pop_peek();
-							res.access_type = AccessType::Jwt(self.parse_jwt()?);
+							res.access_type = AccessType::Jwt(self.parse_jwt(stk).await?);
 						}
 						t!("RECORD") => {
 							let token = self.pop_peek();
@@ -375,7 +389,7 @@ impl Parser<'_> {
 								match token.kind {
 									t!("JWT") => {
 										self.pop_peek();
-										let jwt = self.parse_jwt()?;
+										let jwt = self.parse_jwt(stk).await?;
 										ac.jwt = jwt.clone();
 										// Use same issuer for refreshed tokens.
 										if let Some(mut bearer) = ac.bearer {
@@ -450,7 +464,7 @@ impl Parser<'_> {
 							}
 							if self.eat(t!("WITH")) {
 								expected!(self, t!("JWT"));
-								ac.jwt = self.parse_jwt()?;
+								ac.jwt = self.parse_jwt(stk).await?;
 							}
 							res.access_type = AccessType::Bearer(ac);
 						}
@@ -473,7 +487,10 @@ impl Parser<'_> {
 										self.pop_peek();
 										res.duration.grant = None
 									}
-									_ => res.duration.grant = Some(self.next_token_value()?),
+									_ => {
+										res.duration.grant =
+											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+									}
 								}
 							}
 							t!("TOKEN") => {
@@ -489,7 +506,10 @@ impl Parser<'_> {
 										// parties that support it.
 										unexpected!(self, peek, "a token duration");
 									}
-									_ => res.duration.token = Some(self.next_token_value()?),
+									_ => {
+										res.duration.token =
+											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+									}
 								}
 							}
 							t!("SESSION") => {
@@ -499,7 +519,10 @@ impl Parser<'_> {
 										self.pop_peek();
 										res.duration.session = None
 									}
-									_ => res.duration.session = Some(self.next_token_value()?),
+									_ => {
+										res.duration.session =
+											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+									}
 								}
 							}
 							_ => unexpected!(self, peek, "GRANT, TOKEN or SESSIONS"),
@@ -542,7 +565,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_string_lit()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
@@ -564,7 +587,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.parse_ident()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		let mut res = DefineTableStatement {
 			name,
 			permissions: Permissions::none(),
@@ -577,7 +600,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_string_lit()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				t!("DROP") => {
 					self.pop_peek();
@@ -732,7 +755,7 @@ impl Parser<'_> {
 		}
 
 		if self.eat(t!("COMMENT")) {
-			res.comment = Some(self.parse_string_lit()?);
+			res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 		}
 
 		Ok(res)
@@ -749,10 +772,10 @@ impl Parser<'_> {
 			DefineKind::Default
 		};
 
-		let name = self.parse_ident()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = self.parse_ident()?;
+		let what = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 
 		let mut res = DefineEventStatement {
 			kind,
@@ -778,7 +801,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_string_lit()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				_ => break,
 			}
@@ -796,10 +819,10 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.parse_local_idiom(stk).await?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = self.parse_ident()?;
+		let what = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 
 		let mut res = DefineFieldStatement {
 			name,
@@ -847,7 +870,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_string_lit()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				t!("REFERENCE") => {
 					if !self.settings.references_enabled {
@@ -881,10 +904,10 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.parse_ident()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = self.parse_ident()?;
+		let what = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 
 		let mut res = DefineIndexStatement {
 			name,
@@ -901,14 +924,19 @@ impl Parser<'_> {
 				// COLUMNS and FIELDS are the same tokenkind
 				t!("FIELDS") => {
 					self.pop_peek();
-					res.cols = vec![self.parse_local_idiom(stk).await?];
+					res.cols = vec![stk.run(|ctx| self.parse_expr_field(ctx)).await?];
 					while self.eat(t!(",")) {
-						res.cols.push(self.parse_local_idiom(stk).await?);
+						res.cols.push(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 					}
 				}
 				t!("UNIQUE") => {
 					self.pop_peek();
 					res.index = Index::Uniq;
+				}
+				t!("COUNT") => {
+					self.pop_peek();
+					let cond = self.try_parse_condition(stk).await?;
+					res.index = Index::Count(cond);
 				}
 				t!("FULLTEXT") => {
 					self.pop_peek();
@@ -1061,16 +1089,21 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_string_lit()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				_ => break,
 			}
 		}
-
+		if matches!(res.index, Index::Count(_)) && !res.cols.is_empty() {
+			bail!("Cannot create a count index with fields");
+		}
 		Ok(res)
 	}
 
-	pub fn parse_define_analyzer(&mut self) -> ParseResult<DefineAnalyzerStatement> {
+	pub async fn parse_define_analyzer(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineAnalyzerStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -1080,7 +1113,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.parse_ident()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		let mut res = DefineAnalyzerStatement {
 			name,
 
@@ -1179,7 +1212,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_string_lit()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				_ => break,
 			}
@@ -1206,7 +1239,7 @@ impl Parser<'_> {
 			DefineKind::Default
 		};
 
-		let name = self.parse_ident()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 
 		let mut res = DefineBucketStatement {
 			name,
@@ -1230,7 +1263,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_string_lit()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				_ => {
 					break;
@@ -1241,7 +1274,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub fn parse_define_sequence(&mut self) -> ParseResult<DefineSequenceStatement> {
+	pub async fn parse_define_sequence(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineSequenceStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -1251,18 +1287,18 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.parse_ident()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		let batch = if self.eat(t!("BATCH")) {
-			self.next_token_value()?
+			stk.run(|ctx| self.parse_expr_field(ctx)).await?
 		} else {
-			1000
+			Expr::Literal(Literal::Integer(1000))
 		};
 		let start = if self.eat(t!("START")) {
-			self.next_token_value()?
+			stk.run(|ctx| self.parse_expr_field(ctx)).await?
 		} else {
-			0
+			Expr::Literal(Literal::Integer(0))
 		};
-		let timeout = self.try_parse_timeout()?;
+		let timeout = self.try_parse_timeout(stk).await?;
 		Ok(DefineSequenceStatement {
 			name,
 			kind,
@@ -1477,7 +1513,7 @@ impl Parser<'_> {
 		Ok(Kind::Record(names))
 	}
 
-	pub fn parse_jwt(&mut self) -> ParseResult<access_type::JwtAccess> {
+	pub async fn parse_jwt(&mut self, stk: &mut Stk) -> ParseResult<access_type::JwtAccess> {
 		let mut res = access_type::JwtAccess {
 			// By default, a JWT access method is only used to verify.
 			issue: None,
@@ -1496,7 +1532,7 @@ impl Parser<'_> {
 						let next = self.next();
 						match next.kind {
 							t!("KEY") => {
-								let key = self.parse_string_lit()?;
+								let key = stk.run(|stk| self.parse_expr_field(stk)).await?;
 								res.verify = access_type::JwtAccessVerify::Key(
 									access_type::JwtAccessVerifyKey {
 										alg,
@@ -1526,7 +1562,7 @@ impl Parser<'_> {
 			}
 			t!("URL") => {
 				self.pop_peek();
-				let url = self.parse_string_lit()?;
+				let url = stk.run(|stk| self.parse_expr_field(stk)).await?;
 				res.verify = access_type::JwtAccessVerify::Jwks(access_type::JwtAccessVerifyJwks {
 					url,
 				});
@@ -1562,7 +1598,7 @@ impl Parser<'_> {
 					}
 					t!("KEY") => {
 						self.pop_peek();
-						let key = self.parse_string_lit()?;
+						let key = stk.run(|stk| self.parse_expr_field(stk)).await?;
 						// If the algorithm is symmetric and a key is already defined, a different
 						// key is not expected.
 						if let JwtAccessVerify::Key(ref ver) = res.verify {

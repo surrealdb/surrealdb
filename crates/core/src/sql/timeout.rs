@@ -1,16 +1,15 @@
 use std::fmt;
-use std::ops::Deref;
 
+use crate::sql::{Expr, Literal};
 use crate::types::PublicDuration;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Timeout(pub PublicDuration);
+pub struct Timeout(pub Expr);
 
-impl Deref for Timeout {
-	type Target = PublicDuration;
-	fn deref(&self) -> &Self::Target {
-		&self.0
+impl Default for Timeout {
+	fn default() -> Self {
+		Self(Expr::Literal(Literal::Duration(PublicDuration::default())))
 	}
 }
 
@@ -34,6 +33,6 @@ impl From<crate::expr::Timeout> for Timeout {
 
 impl From<std::time::Duration> for Timeout {
 	fn from(v: std::time::Duration) -> Self {
-		Self(PublicDuration::from(v))
+		Self(Expr::Literal(Literal::Duration(PublicDuration::from(v))))
 	}
 }

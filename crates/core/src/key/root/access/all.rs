@@ -15,7 +15,7 @@ pub(crate) struct AccessRoot<'a> {
 
 impl_kv_key_storekey!(AccessRoot<'_> => Vec<u8>);
 
-pub fn new(ac: &str) -> AccessRoot {
+pub fn new(ac: &str) -> AccessRoot<'_> {
 	AccessRoot::new(ac)
 }
 
