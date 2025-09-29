@@ -9,14 +9,13 @@ use std::time::Duration;
 
 use futures::stream::FuturesUnordered;
 use opentelemetry::Context as TelemetryContext;
-use surrealdb_core::rpc::DbResponse;
+use surrealdb_core::kvs::Datastore;
+use surrealdb_core::rpc::{DbResponse, DbResult};
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::core::kvs::Datastore;
-use crate::core::rpc::DbResult;
 use crate::rpc::websocket::Websocket;
 use crate::telemetry::metrics::ws::NotificationContext;
 

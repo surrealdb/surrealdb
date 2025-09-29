@@ -9,6 +9,7 @@ use futures::StreamExt;
 use futures::future::Either;
 use futures::stream::SelectAll;
 use indexmap::IndexMap;
+use surrealdb_core::expr::{LogicalPlan, TopLevelExpr};
 use surrealdb_core::rpc::{DbResultError, DbResultStats};
 use surrealdb_types::{self, SurrealValue, Value, Variables};
 use uuid::Uuid;
@@ -20,7 +21,6 @@ use crate::api::conn::Command;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, ExtraFeatures, Result, opt};
-use crate::core::expr::{LogicalPlan, TopLevelExpr};
 use crate::method::{OnceLockExt, WithStats};
 use crate::notification::Notification;
 

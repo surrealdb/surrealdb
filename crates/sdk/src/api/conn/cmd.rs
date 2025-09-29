@@ -7,14 +7,13 @@ use bincode::Options;
 use revision::Revisioned;
 use serde::Serialize;
 use serde::ser::SerializeMap as _;
-use surrealdb_core::expr::Expr;
+use surrealdb_core::expr::{Expr, LogicalPlan};
+use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_types::{Array, Notification as CoreNotification, Object, Value, Variables};
 use uuid::Uuid;
 
 use super::MlExportConfig;
 use crate::Result;
-use crate::core::expr::LogicalPlan;
-use crate::core::kvs::export::Config as DbExportConfig;
 use crate::opt::Resource;
 
 #[derive(Debug, Clone)]
@@ -138,9 +137,9 @@ pub(crate) enum Command {
 impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
+		use surrealdb_core::expr::{Data, Output, UpdateStatement, UpsertStatement};
 		use surrealdb_types::Uuid;
 
-		use crate::core::expr::{Data, Output, UpdateStatement, UpsertStatement};
 		use crate::engine::resource_to_exprs;
 
 		let res = match self {
@@ -535,7 +534,7 @@ impl Command {
 /// A struct which will be serialized as a map to behave like the previously
 /// used BTreeMap.
 ///
-/// This struct serializes as if it is a crate::core::expr::Value::Object.
+/// This struct serializes as if it is a surrealdb_core::expr::Value::Object.
 #[derive(Debug)]
 pub(crate) struct RouterRequest {
 	id: Option<i64>,
@@ -792,8 +791,8 @@ mod test {
 
 		assert_converts(
 			&request,
-			|i| crate::core::rpc::format::bincode::encode(i).unwrap(),
-			|b| crate::core::rpc::format::bincode::decode(&b).unwrap(),
+			|i| surrealdb_core::rpc::format::bincode::encode(i).unwrap(),
+			|b| surrealdb_core::rpc::format::bincode::decode(&b).unwrap(),
 		);
 
 		println!("test convert revisioned");

@@ -33,8 +33,9 @@ pub mod channel {
 
 /// Different error types for embedded and remote databases
 pub mod error {
+	pub use surrealdb_core::err::Error as Db;
+
 	pub use crate::api::err::Error as Api;
-	pub use crate::core::err::Error as Db;
 }
 
 pub mod parse {
@@ -53,6 +54,3 @@ pub use crate::notification::Notification;
 /// A specialized `Result` type
 pub type Result<T> = anyhow::Result<T>;
 pub use anyhow::Error;
-// Re-exporting core so it can be imported as `crate::core` so it's not grouped with third
-// party crates.
-use surrealdb_core as core;

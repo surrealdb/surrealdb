@@ -3,12 +3,11 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use surrealdb::types::Duration;
-
-use crate::core::dbs::capabilities::{
+use surrealdb_core::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget,
 	Targets,
 };
-use crate::core::kvs::export::TableConfig;
+use surrealdb_core::kvs::export::TableConfig;
 
 pub(crate) mod parser;
 

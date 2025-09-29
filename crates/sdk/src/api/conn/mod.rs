@@ -2,7 +2,8 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use async_channel::{Receiver, Sender};
-use surrealdb_core::rpc::DbResult;
+use indexmap::IndexMap;
+use surrealdb_core::rpc::{DbResult, DbResultError, DbResultStats};
 use surrealdb_types::{SurrealValue, Value};
 
 use crate::api::err::Error;
@@ -182,37 +183,24 @@ pub enum IndexedDbResults {
 }
 
 impl IndexedDbResults {
-	pub fn from_server_result(result: DbResult) -> Result<Self> {
+	pub(crate) fn from_server_result(result: DbResult) -> Result<Self> {
 		match result {
 			DbResult::Other(value) => Ok(Self::Other(value)),
-			DbResult::Query(_responses) => {
-				// let mut results =
-				// 	IndexMap::<usize, (DbResultStats, std::result::Result<Value,
-				// DbResultError>)>::with_capacity( 		responses.len(),
-				// 	);
+			DbResult::Query(responses) => {
+				let mut results = IndexMap::<
+					usize,
+					(DbResultStats, std::result::Result<Value, DbResultError>),
+				>::with_capacity(responses.len());
 
-				// for (index, response) in responses.into_iter().enumerate() {
-				// 	let stats = DbResultStats::default().with_execution_time(response.time);
+				for (index, response) in responses.into_iter().enumerate() {
+					let stats = DbResultStats::default().with_execution_time(response.time);
+					results.insert(index, (stats, response.result));
+				}
 
-				// 	// match response.result {
-				// 	// 	Ok(value) => {
-				// 	// 		map.insert(index, (stats, Ok(response.result)));
-				// 	// 	}
-				// 	// 	Status::Err => {
-				// 	// 		map.insert(
-				// 	// 			index,
-				// 	// 			(stats, Err(Error::Query(response.result.into_string()).into())),
-				// 	// 		);
-				// 	// 	}
-				// 	// }
-				// 	// results.insert(index, (stats, response.result));
-				// }
-				todo!("STU")
-
-				// Ok(Self::Query(IndexedResults {
-				// 	results,
-				// 	live_queries: IndexMap::default(),
-				// }))
+				Ok(Self::Query(IndexedResults {
+					results,
+					live_queries: IndexMap::default(),
+				}))
 			}
 			// Live notifications don't call this method
 			DbResult::Live(..) => unreachable!(),

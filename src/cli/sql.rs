@@ -11,15 +11,15 @@ use surrealdb::method::WithStats;
 use surrealdb::opt::Config;
 use surrealdb::types::{SurrealValue, Value, object};
 use surrealdb::{IndexedResults, Notification};
+use surrealdb_core::dbs::Capabilities as CoreCapabilities;
 use surrealdb_core::rpc::DbResultStats;
+use surrealdb_core::sql::{Expr, Param, TopLevelExpr};
 
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
 use crate::cli::abstraction::{
 	AuthArguments, DatabaseConnectionArguments, LevelSelectionArguments,
 };
 use crate::cnf::PKG_VERSION;
-use crate::core::dbs::Capabilities as CoreCapabilities;
-use crate::core::sql::{Expr, Param, TopLevelExpr};
 use crate::dbs::DbsCapabilities;
 
 #[derive(Args, Debug)]
@@ -196,7 +196,7 @@ pub async fn init(
 			continue;
 		}
 		// Complete the request
-		match crate::core::syn::parse_with_capabilities(&line, &capabilities) {
+		match surrealdb_core::syn::parse_with_capabilities(&line, &capabilities) {
 			Ok(mut query) => {
 				let mut namespace = None;
 				let mut database = None;
@@ -444,7 +444,7 @@ impl Validator for InputValidator<'_> {
 		} else if input.is_empty() {
 			Valid(None) // Ignore empty lines
 		} else {
-			match crate::core::syn::parse_with_capabilities(input, self.capabilities) {
+			match surrealdb_core::syn::parse_with_capabilities(input, self.capabilities) {
 				Err(e) => Invalid(Some(format!(" --< {e}"))),
 				_ => Valid(None),
 			}

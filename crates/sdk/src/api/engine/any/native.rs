@@ -5,6 +5,8 @@ use std::sync::atomic::AtomicI64;
 use anyhow::bail;
 #[cfg(feature = "protocol-http")]
 use reqwest::ClientBuilder;
+#[allow(unused_imports, reason = "Used when a DB engine is disabled.")]
+use surrealdb_core::err::Error as DbError;
 use tokio::sync::watch;
 #[cfg(feature = "protocol-ws")]
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -27,8 +29,6 @@ use crate::api::method::BoxFuture;
 use crate::api::opt::Tls;
 use crate::api::opt::{Endpoint, EndpointKind};
 use crate::api::{Result, Surreal, conn};
-#[allow(unused_imports, reason = "Used when a DB engine is disabled.")]
-use crate::core::err::Error as DbError;
 use crate::opt::WaitFor;
 
 impl crate::api::Connection for Any {}
@@ -150,7 +150,7 @@ impl conn::Sealed for Any {
 						let base_url = address.url;
 						let req = client.get(base_url.join("health")?).header(
 							reqwest::header::USER_AGENT,
-							&*crate::core::cnf::SURREALDB_USER_AGENT,
+							&*surrealdb_core::cnf::SURREALDB_USER_AGENT,
 						);
 						http::health(req).await?;
 						tokio::spawn(http::native::run_router(base_url, client, route_rx));

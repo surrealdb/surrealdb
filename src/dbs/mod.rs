@@ -5,14 +5,14 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::Args;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
-
-use crate::cli::CF;
-use crate::core::dbs::Session;
-use crate::core::dbs::capabilities::{
+use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::capabilities::{
 	ArbitraryQueryTarget, Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
 	RouteTarget, Targets,
 };
-use crate::core::kvs::Datastore;
+use surrealdb_core::kvs::Datastore;
+
+use crate::cli::CF;
 
 const TARGET: &str = "surreal::dbs";
 

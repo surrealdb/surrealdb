@@ -3,10 +3,10 @@ use std::sync::Arc;
 use axum::extract::ws::Message;
 use opentelemetry::Context as TelemetryContext;
 use surrealdb_core::rpc::DbResponse;
+use surrealdb_core::rpc::format::Format;
 use tokio::sync::mpsc::Sender;
 use tracing::Span;
 
-use crate::core::rpc::format::Format;
 use crate::rpc::format::WsFormat;
 use crate::telemetry::metrics::ws::record_rpc;
 

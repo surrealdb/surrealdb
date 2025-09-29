@@ -10,13 +10,13 @@ use std::sync::LazyLock;
 
 use protocol::{Client, Test};
 use semver::Version;
+use surrealdb_core::expr::TopLevelExpr;
 use surrealdb_types::Variables;
 use types::{USER, User};
 
 use crate::api::opt::PatchOp;
 use crate::api::opt::auth::{Database, Jwt, Namespace, Record, Root};
 use crate::api::{IndexedResults as QueryResponse, Surreal};
-use crate::core::expr::TopLevelExpr;
 
 static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
 

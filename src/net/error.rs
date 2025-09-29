@@ -5,9 +5,8 @@ use axum::response::{IntoResponse, Response};
 use http::{HeaderName, StatusCode};
 use opentelemetry::global::Error as OpentelemetryError;
 use serde::{Serialize, Serializer};
+use surrealdb_core::api::err::ApiError;
 use thiserror::Error;
-
-use crate::core::api::err::ApiError;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -129,24 +128,24 @@ impl<E: StdError + Send + Sync + 'static> From<E> for ResponseError {
 
 impl IntoResponse for ResponseError {
 	fn into_response(self) -> Response {
-		use crate::core::iam::Error as SurrealIamError;
+		use surrealdb_core::iam::Error as SurrealIamError;
 
 		if let Some(e) = self.0.downcast_ref() {
 			match e {
-				crate::core::err::Error::InvalidAuth =>
+				surrealdb_core::err::Error::InvalidAuth =>
 					ErrorMessage{
 						code: StatusCode::UNAUTHORIZED,
 						details: Some("Authentication failed".to_string()),
 						description: Some("Your authentication details are invalid. Reauthenticate using valid authentication parameters.".to_string()),
 						information: Some("There was a problem with authentication".to_string())
 					}.into_response(),
-					crate::core::err::Error::IamError(SurrealIamError::NotAllowed{ .. }) => ErrorMessage{
+					surrealdb_core::err::Error::IamError(SurrealIamError::NotAllowed{ .. }) => ErrorMessage{
 						code: StatusCode::FORBIDDEN,
 						details: Some("Forbidden".to_string()),
 						description: Some("Not allowed to do this.".to_string()),
 						information: Some(e.to_string()),
 					}.into_response(),
-					crate::core::err::Error::ApiError(e) => ErrorMessage {
+					surrealdb_core::err::Error::ApiError(e) => ErrorMessage {
 						code: e.status_code(),
 						details: Some("An error occured while processing this API request".to_string()),
 						description: Some(e.to_string()),

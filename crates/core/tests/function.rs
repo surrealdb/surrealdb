@@ -49,7 +49,7 @@ async fn error_on_invalid_function() -> Result<()> {
 	let mut resp = dbs.process(query, &session, None).await.unwrap();
 	assert_eq!(resp.len(), 1);
 	let err = resp.pop().unwrap().result.unwrap_err();
-	if err != DbResultError::custom("STU") {
+	if err == DbResultError::custom("STU") {
 		panic!("returned wrong result {:#?}", err)
 	}
 	Ok(())

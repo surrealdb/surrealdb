@@ -13,65 +13,6 @@ use tokio::sync::watch;
 
 use crate::Result;
 
-macro_rules! transparent_wrapper{
-	(
-		$(#[$m:meta])*
-		$vis:vis struct $name:ident($field_vis:vis $inner:ty)
-	) => {
-		$(#[$m])*
-		#[repr(transparent)]
-		$vis struct $name($field_vis $inner);
-
-		#[allow(dead_code)]
-		impl $name{
-			#[doc(hidden)]
-			pub fn from_inner(inner: $inner) -> Self{
-				$name(inner)
-			}
-
-			#[doc(hidden)]
-			pub fn from_inner_ref(inner: &$inner) -> &Self{
-				unsafe{
-					std::mem::transmute::<&$inner,&$name>(inner)
-				}
-			}
-
-			#[doc(hidden)]
-			pub fn from_inner_mut(inner: &mut $inner) -> &mut Self{
-				unsafe{
-					std::mem::transmute::<&mut $inner,&mut $name>(inner)
-				}
-			}
-
-			#[doc(hidden)]
-			pub fn into_inner(self) -> $inner{
-				self.0
-			}
-
-			#[doc(hidden)]
-			pub fn into_inner_ref(&self) -> &$inner{
-				&self.0
-			}
-
-			#[doc(hidden)]
-			pub fn into_inner_mut(&mut self) -> &mut $inner{
-				&mut self.0
-			}
-		}
-
-		impl std::fmt::Display for $name{
-			fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result{
-				self.0.fmt(fmt)
-			}
-		}
-		impl std::fmt::Debug for $name{
-			fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result{
-				self.0.fmt(fmt)
-			}
-		}
-	};
-}
-
 pub mod engine;
 pub mod err;
 #[cfg(feature = "protocol-http")]

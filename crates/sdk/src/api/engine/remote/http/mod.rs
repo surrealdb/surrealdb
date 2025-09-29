@@ -8,6 +8,7 @@ use indexmap::IndexMap;
 use reqwest::RequestBuilder;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
+use surrealdb_core::rpc;
 use surrealdb_core::rpc::DbResponse;
 use surrealdb_types::{SurrealValue, Value};
 #[cfg(not(target_family = "wasm"))]
@@ -23,7 +24,6 @@ use wasm_bindgen_futures::spawn_local;
 use crate::api::conn::{Command, IndexedDbResults, RequestData, RouterRequest};
 use crate::api::err::Error;
 use crate::api::{Connect, Result, Surreal};
-use crate::core::rpc;
 // use crate::engine::remote::Response;
 use crate::headers::{AUTH_DB, AUTH_NS, DB, NS};
 use crate::opt::IntoEndpoint;
@@ -236,7 +236,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 		}
 	} else {
 		let response: Vec<QueryMethodResponse> =
-			crate::core::rpc::format::bincode::decode(&res.bytes().await?)
+			surrealdb_core::rpc::format::bincode::decode(&res.bytes().await?)
 				.map_err(|x| format!("Failed to deserialize bincode payload: {x}"))
 				.map_err(crate::api::Error::InvalidResponse)?;
 		for res in response {
@@ -263,7 +263,7 @@ async fn send_request(
 ) -> Result<IndexedDbResults> {
 	let url = base_url.join(RPC_PATH).unwrap();
 
-	let body = crate::core::rpc::format::bincode::encode(&req)
+	let body = surrealdb_core::rpc::format::bincode::encode(&req)
 		.map_err(|x| format!("Failed to serialized to bincode: {x}"))
 		.map_err(crate::api::Error::UnserializableValue)?;
 
@@ -271,7 +271,7 @@ async fn send_request(
 	let response = http_req.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
 
-	let response: DbResponse = crate::core::rpc::format::bincode::decode(&bytes)
+	let response: DbResponse = surrealdb_core::rpc::format::bincode::decode(&bytes)
 		.map_err(|x| format!("Failed to deserialize bincode payload: {x}"))
 		.map_err(crate::api::Error::InvalidResponse)?;
 
@@ -400,7 +400,7 @@ async fn router(
 			key,
 			value,
 		} => {
-			crate::core::rpc::check_protected_param(&key)?;
+			surrealdb_core::rpc::check_protected_param(&key)?;
 			vars.insert(key, value);
 			Ok(IndexedDbResults::Other(Value::None))
 		}

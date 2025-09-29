@@ -20,6 +20,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures::Stream;
+use surrealdb_core::expr;
 use surrealdb_types::{RecordIdKey, Value};
 #[cfg(not(target_family = "wasm"))]
 use tokio::time::Instant;
@@ -31,7 +32,6 @@ use wasmtimer::std::Instant;
 use wasmtimer::tokio::Interval;
 
 use super::opt::{QueryRange, Resource};
-use crate::core::expr;
 
 // used in http and all local engines.
 #[allow(dead_code)]
@@ -67,7 +67,7 @@ fn public_record_id_key_to_literal(x: RecordIdKey) -> expr::RecordIdKeyLit {
 			a.inner().iter().cloned().map(expr::Expr::from_public_value).collect(),
 		),
 		RecordIdKey::Object(o) => {
-			use crate::core::expr::ObjectEntry;
+			use surrealdb_core::expr::ObjectEntry;
 			expr::RecordIdKeyLit::Object(
 				o.inner()
 					.iter()

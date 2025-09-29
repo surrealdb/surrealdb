@@ -1,22 +1,19 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{Generics, Ident, WhereClause};
+use syn::{Generics, Ident};
 
 use crate::Enum;
 
-pub fn impl_enum(
-	name: &Ident,
-	generics: &Generics,
-	where_clause: &Option<WhereClause>,
-	r#enum: Enum,
-) -> TokenStream {
+pub fn impl_enum(name: &Ident, generics: &Generics, r#enum: Enum) -> TokenStream {
 	let into_value = r#enum.into_value(&r#enum.attrs);
 	let from_value = r#enum.from_value(&name.to_string(), &r#enum.attrs);
 	let is_value = r#enum.is_value(&r#enum.attrs);
 	let kind_of = r#enum.kind_of(&r#enum.attrs);
 
+	let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+
 	quote! {
-		impl #generics SurrealValue for #name #generics #where_clause {
+		impl #impl_generics SurrealValue for #name #type_generics #where_clause {
 			fn into_value(self) -> surrealdb_types::Value {
 				#into_value
 			}

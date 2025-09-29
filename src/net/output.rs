@@ -24,7 +24,7 @@ impl Output {
 	// subtle bugs and format differences.
 	#[deprecated]
 	pub fn json_value(val: &Value) -> Output {
-		match crate::core::rpc::format::json::encode(val.clone()) {
+		match surrealdb_core::rpc::format::json::encode(val.clone()) {
 			Ok(v) => Output::Json(v),
 			Err(_) => Output::Fail,
 		}

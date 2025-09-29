@@ -8,12 +8,12 @@ use std::task::{Context, Poll};
 use async_channel::Receiver;
 use futures::{Stream, StreamExt};
 use semver::Version;
+use surrealdb_core::kvs::export::{Config as DbExportConfig, TableConfig};
 
 use crate::Surreal;
 use crate::api::conn::{Command, MlExportConfig};
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Error, ExtraFeatures, Result};
-use crate::core::kvs::export::{Config as DbExportConfig, TableConfig};
 use crate::method::{ExportConfig as Config, Model, OnceLockExt};
 
 /// A database export future

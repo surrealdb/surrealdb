@@ -5,7 +5,10 @@ use std::task::{Context, Poll};
 
 use async_channel::Receiver;
 use futures::StreamExt;
-use surrealdb_core::expr::{RecordIdKeyLit, RecordIdLit};
+use surrealdb_core::expr::{
+	BinaryOperator, Cond, Expr, Fields, Idiom, Literal, LiveStatement, RecordIdKeyLit, RecordIdLit,
+	TopLevelExpr,
+};
 use surrealdb_types::{
 	self, Action, Notification as CoreNotification, RecordIdKey, SurrealValue, Value,
 };
@@ -20,9 +23,6 @@ use crate::api::conn::{Command, Router};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, ExtraFeatures, Result};
-use crate::core::expr::{
-	BinaryOperator, Cond, Expr, Fields, Idiom, Literal, LiveStatement, TopLevelExpr,
-};
 use crate::engine::any::Any;
 use crate::method::{Live, OnceLockExt, Query, Select};
 use crate::notification::Notification;
@@ -64,7 +64,7 @@ where
 			Resource::Object(_) => return Err(Error::LiveOnObject.into()),
 			Resource::Array(_) => return Err(Error::LiveOnArray.into()),
 			Resource::Range(range) => {
-				let record = range.into_inner();
+				let record = range.0;
 
 				let RecordIdKey::Range(range) = record.key else {
 					panic!("invalid resource?");
@@ -84,7 +84,7 @@ where
 							a.inner().iter().cloned().map(Expr::from_public_value).collect(),
 						),
 						RecordIdKey::Object(o) => {
-							use crate::core::expr::ObjectEntry;
+							use surrealdb_core::expr::ObjectEntry;
 							RecordIdKeyLit::Object(
 								o.inner()
 									.iter()

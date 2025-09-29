@@ -2,11 +2,11 @@ use std::io;
 use std::path::PathBuf;
 
 use serde::Serialize;
+use surrealdb_core::dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError};
 use surrealdb_types::Value;
 use thiserror::Error;
 
 use crate::api::IndexedResults;
-use crate::core::dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError};
 
 /// An error originating from a remote SurrealDB database
 #[derive(Error, Debug)]

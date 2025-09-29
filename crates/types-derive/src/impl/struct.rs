@@ -1,15 +1,10 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{Generics, Ident, WhereClause};
+use syn::{Generics, Ident};
 
 use crate::{Fields, Strategy, With};
 
-pub fn impl_struct(
-	name: &Ident,
-	generics: &Generics,
-	where_clause: &Option<WhereClause>,
-	fields: Fields,
-) -> TokenStream {
+pub fn impl_struct(name: &Ident, generics: &Generics, fields: Fields) -> TokenStream {
 	let strategy = Strategy::for_struct();
 	let match_fields = fields.match_fields();
 	let from_ok = quote!(Ok(Self #match_fields));
@@ -72,8 +67,10 @@ pub fn impl_struct(
 		quote!()
 	};
 
+	let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+
 	quote! {
-		impl #generics SurrealValue for #name #generics #where_clause {
+		impl #impl_generics SurrealValue for #name #type_generics #where_clause {
 			fn into_value(self) -> surrealdb_types::Value {
 				#let_fields
 				#into_value

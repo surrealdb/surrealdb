@@ -1,8 +1,9 @@
 use std::future::IntoFuture;
 
+use surrealdb_core::expr::TopLevelExpr;
+
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Result, Surreal};
-use crate::core::expr::TopLevelExpr;
 
 /// A transaction commit future
 #[derive(Debug)]

@@ -232,7 +232,7 @@ async fn router_handle_route(
 		trace!("Request {:?}", request);
 
 		// Unwrap because a router request cannot fail to serialize.
-		let payload = crate::core::rpc::format::revision::encode(&request).unwrap();
+		let payload = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
 
 		Message::Binary(payload)
 	};
@@ -351,7 +351,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 										.unwrap();
 
 										let value =
-											crate::core::rpc::format::revision::encode(&request)
+											surrealdb_core::rpc::format::revision::encode(&request)
 												.unwrap();
 										Message::Binary(value)
 									};
@@ -379,7 +379,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 
 			// Let's try to find out the ID of the response that failed to deserialise
 			if let Message::Binary(binary) = message {
-				match crate::core::rpc::format::revision::decode(&binary) {
+				match surrealdb_core::rpc::format::revision::decode(&binary) {
 					Ok(ErrorResponse {
 						id,
 					}) => {
@@ -453,7 +453,7 @@ async fn router_reconnect(
 						.into_router_request(None)
 						.expect("replay commands should always convert to route requests");
 
-					let message = crate::core::rpc::format::revision::encode(&request).unwrap();
+					let message = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
 
 					if let Err(error) = state.sink.send(Message::Binary(message)).await {
 						trace!("{error}");
@@ -469,7 +469,7 @@ async fn router_reconnect(
 					.into_router_request(None)
 					.unwrap();
 					trace!("Request {:?}", request);
-					let payload = crate::core::rpc::format::revision::encode(&request).unwrap();
+					let payload = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
 
 					if let Err(error) = state.sink.send(Message::Binary(payload)).await {
 						trace!("{error}");
@@ -498,7 +498,7 @@ pub(crate) async fn run_router(
 ) {
 	let ping = {
 		let request = Command::Health.into_router_request(None).unwrap();
-		let value = crate::core::rpc::format::revision::encode(&request).unwrap();
+		let value = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
 		Message::Binary(value)
 	};
 
@@ -634,8 +634,8 @@ mod tests {
 	use flate2::Compression;
 	use flate2::write::GzEncoder;
 	use rand::{Rng, thread_rng};
+	use surrealdb_core::rpc;
 
-	use crate::core::rpc;
 	use crate::types::{Array, Value};
 
 	#[test_log::test]
@@ -722,7 +722,7 @@ mod tests {
 		{
 			// Unversioned
 			let (duration, payload) =
-				timed(&|| crate::core::rpc::format::bincode::encode(&vector).unwrap());
+				timed(&|| surrealdb_core::rpc::format::bincode::encode(&vector).unwrap());
 			results.push((
 				payload.len(),
 				UNVERSIONED,
@@ -746,7 +746,7 @@ mod tests {
 		{
 			// Versioned
 			let (duration, payload) =
-				timed(&|| crate::core::rpc::format::revision::encode(&vector).unwrap());
+				timed(&|| surrealdb_core::rpc::format::revision::encode(&vector).unwrap());
 			results.push((payload.len(), VERSIONED, duration, payload.len() as f32 / ref_payload));
 
 			// Compressed Versioned

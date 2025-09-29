@@ -14,16 +14,15 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 	let input = parse_macro_input!(input as DeriveInput);
 	let name = &input.ident;
 	let generics = &input.generics;
-	let where_clause = &input.generics.where_clause;
 
 	match &input.data {
 		syn::Data::Struct(data) => {
 			let fields = Fields::parse(&data.fields, &input.attrs);
-			impl_struct(name, generics, where_clause, fields)
+			impl_struct(name, generics, fields)
 		}
 		syn::Data::Enum(data) => {
 			let r#enum = Enum::parse(data, &input.attrs);
-			impl_enum(name, generics, where_clause, r#enum)
+			impl_enum(name, generics, r#enum)
 		}
 		syn::Data::Union(_) => panic!("SurrealValue cannot be derived for unions"),
 	}

@@ -5,11 +5,9 @@ use surrealdb_types::{Array, Object, RecordId, RecordIdKey, RecordIdKeyRange, Va
 use crate::api::Result;
 use crate::api::err::Error;
 
-transparent_wrapper!(
-	/// A table range.
-	#[derive(Clone, PartialEq)]
-	pub struct QueryRange(pub RecordId)
-);
+/// A table range.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueryRange(pub RecordId);
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Direction {

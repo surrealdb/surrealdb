@@ -2,8 +2,9 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::core::dbs::Capabilities as CoreCapabilities;
-use crate::core::iam::Level;
+use surrealdb_core::dbs::Capabilities as CoreCapabilities;
+use surrealdb_core::iam::Level;
+
 use crate::opt::capabilities::Capabilities;
 
 /// Configuration for server connection, including: strictness, notifications,
