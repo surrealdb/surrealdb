@@ -1,8 +1,9 @@
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
+use std::str::FromStr;
 
 use chrono::offset::LocalResult;
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
 use revision::Revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -70,6 +71,13 @@ impl Datetime {
 	}
 }
 
+impl FromStr for Datetime {
+	type Err = anyhow::Error;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Ok(Self(DateTime::parse_from_rfc3339(s)?.to_utc()))
+	}
+}
+
 impl From<DateTime<Utc>> for Datetime {
 	fn from(v: DateTime<Utc>) -> Self {
 		Self(v)
@@ -84,7 +92,7 @@ impl From<Datetime> for DateTime<Utc> {
 
 impl Display for Datetime {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "{}Z", self.0.format("%Y-%m-%dT%H:%M:%S%.9f"))
+		self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true).fmt(f)
 	}
 }
 

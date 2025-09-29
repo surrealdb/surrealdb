@@ -580,7 +580,7 @@ pub async fn create_record_with_id_in_content(new_db: impl CreateDb) {
 
 	assert_eq!(
 		error.to_string(),
-		"Found jane for the `id` field, but the value does not match the `id` record id"
+		"Found user:jane for the `id` field, but a specific record has been specified"
 	);
 
 	let _: Option<Record> = db

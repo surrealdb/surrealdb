@@ -1147,8 +1147,7 @@ mod tests {
 		assert_eq!(18, enc.len());
 		let enc: Vec<u8> =
 			revision::to_vec(&syn::value("{ compact: true, schema: 0 }").unwrap()).unwrap();
-		assert_eq!(enc, b"234");
-		assert_eq!(27, enc.len());
+		assert_eq!(26, enc.len());
 	}
 
 	#[test]

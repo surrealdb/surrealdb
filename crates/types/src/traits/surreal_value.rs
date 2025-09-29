@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 
+use anyhow::Context;
 use rust_decimal::Decimal;
 
 use crate::{
@@ -575,13 +576,31 @@ impl_surreal_value!(
 
 impl_surreal_value!(
 	RecordId as Kind::Record(vec![]),
-	is_record(value) => matches!(value, Value::RecordId(_)),
+	is_record(value) => {
+		match value {
+			Value::RecordId(_) => true,
+			Value::String(s) => Self::parse_simple(s).is_ok(),
+			Value::Object(o) => {
+				o.get("id").is_some()
+			}
+			_ => false,
+		}
+	},
 	from_record(self) => Value::RecordId(self),
 	into_record(value) => {
-		let Value::RecordId(r) = value else {
-			return Err(conversion_error(Self::kind_of(), value));
-		};
-		Ok(r)
+		match value {
+			Value::RecordId(r) => Ok(r),
+			Value::String(s) => Ok(Self::parse_simple(&s)?),
+			Value::Object(o) => {
+				let v = o.get("id").context("Invalid record id: {value}")?;
+				v.clone().into_record()
+			}
+			Value::Array(a) => {
+				let first = a.first().context("Invalid record id: {value}")?;
+				first.clone().into_record()
+			}
+			_ => Err(anyhow::anyhow!("Invalid record id: {value}")),
+		}
 	},
 	is_record_and(self, callback) => {
 		if let Value::RecordId(r) = self {

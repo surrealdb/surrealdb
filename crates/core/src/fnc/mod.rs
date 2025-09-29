@@ -1588,7 +1588,6 @@ mod tests {
 	use crate::dbs::Capabilities;
 	use crate::dbs::capabilities::ExperimentalTarget;
 	use crate::sql::{Expr, Function};
-	use crate::types::PublicValue;
 
 	#[tokio::test]
 	async fn implementations_are_present() {
@@ -1653,10 +1652,10 @@ mod tests {
 				let ses = crate::dbs::Session::owner().with_ns("test").with_db("test");
 				let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 				let tmp = res.remove(0).result.unwrap();
-				if tmp == PublicValue::String("object".to_owned()) {
+				if tmp == crate::types::PublicValue::String("object".to_owned()) {
 					// Assume this function is superseded by a module of the
 					// same name.
-				} else if tmp != PublicValue::String("function".to_owned()) {
+				} else if tmp != crate::types::PublicValue::String("function".to_owned()) {
 					problems.push(format!("function {name} not exported to JavaScript: {tmp:?}"));
 				}
 			}

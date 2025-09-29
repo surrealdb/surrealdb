@@ -332,9 +332,7 @@ args = [
     "${_TEST_FEATURES}",
     "--test",
     "api",
-    # "api_integration::${_TEST_API_ENGINE}",
-    # "--",
-    "${@}",
+    "api_integration::${_TEST_API_ENGINE}",
 ]
 
 [tasks.ci-api-integration]

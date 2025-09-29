@@ -164,20 +164,20 @@ mod tests {
 	use crate::types::PublicDatetime;
 
 	#[rstest]
-	#[case("2021-01-01T00:00:00Z", Datetime(DateTime::<Utc>::from_timestamp(0, 0).unwrap()), PublicDatetime::from_timestamp(0, 0).unwrap())]
+	#[case("2021-01-01T00:00:00Z", Datetime(DateTime::<Utc>::from_timestamp(1_609_459_200, 0).unwrap()), PublicDatetime::from_timestamp(1_609_459_200, 0).unwrap())]
 	fn test_from_str(
 		#[case] input: &str,
 		#[case] expected: Datetime,
 		#[case] expected_public: PublicDatetime,
 	) {
 		let internal_actual = Datetime::from_str(input).unwrap();
-		let public_actual = PublicDatetime::from(internal_actual.clone());
+		let public_actual = PublicDatetime::from_str(input).unwrap();
 
 		assert_eq!(internal_actual.timestamp(), expected.timestamp());
 
 		assert_eq!(internal_actual, expected);
 		assert_eq!(public_actual, expected_public);
 
-		assert_eq!(internal_actual.to_string(), public_actual.to_string());
+		assert_eq!(internal_actual.to_raw_string(), public_actual.to_string());
 	}
 }

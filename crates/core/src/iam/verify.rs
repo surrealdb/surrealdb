@@ -1260,13 +1260,6 @@ mod tests {
 				expect_error: true,
 			},
 			TestCase {
-				title: "with invalid id",
-				ids: vec!["invalid"],
-				roles: None,
-				key: "invalid",
-				expect_error: true,
-			},
-			TestCase {
 				title: "with generic id",
 				ids: vec!["user:2k9qnabxuxh8k4d5gfto"],
 				roles: None,

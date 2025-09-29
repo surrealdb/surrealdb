@@ -368,14 +368,26 @@ where
 		let result = match value {
 			Value::Array(vec) => match &mut vec[..] {
 				[] => Ok(None),
-				[value] => T::from_value(mem::take(value)).map(Some),
+				[value] => {
+					let value = mem::take(value);
+					match value {
+						Value::None => Ok(None),
+						v => T::from_value(v).map(Some),
+					}
+				}
 				_ => Err(Error::LossyTake(QueryResponse {
 					results: mem::take(&mut response.results),
 					live_queries: mem::take(&mut response.live_queries),
 				})
 				.into()),
 			},
-			_ => T::from_value(mem::take(value)).map(Some),
+			value => {
+				let value = mem::take(value);
+				match value {
+					Value::None => Ok(None),
+					v => T::from_value(v).map(Some),
+				}
+			}
 		};
 		response.results.swap_remove(&self);
 		result

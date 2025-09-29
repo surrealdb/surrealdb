@@ -35,6 +35,11 @@ impl Object {
 		self.0.get_mut(key)
 	}
 
+	/// Get an iterator over the keys in the object
+	pub fn keys(&self) -> std::collections::btree_map::Keys<String, Value> {
+		self.0.keys()
+	}
+
 	/// Insert a key-value pair into the object
 	pub fn insert(&mut self, key: impl Into<String>, value: impl SurrealValue) -> Option<Value> {
 		self.0.insert(key.into(), value.into_value())
