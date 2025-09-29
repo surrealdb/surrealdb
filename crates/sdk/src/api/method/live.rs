@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -7,10 +8,9 @@ use async_channel::Receiver;
 use futures::StreamExt;
 use surrealdb_core::expr::{
 	BinaryOperator, Cond, Expr, Fields, Idiom, Literal, LiveStatement, RecordIdKeyLit, RecordIdLit,
-	TopLevelExpr,
 };
 use surrealdb_types::{
-	self, Action, Notification as CoreNotification, RecordIdKey, SurrealValue, Value,
+	self, Action, Notification as CoreNotification, RecordIdKey, SurrealValue, Value, Variables,
 };
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
@@ -148,12 +148,12 @@ where
 			}
 			Resource::Unspecified => return Err(Error::LiveOnUnspecified.into()),
 		}
-		let query = Query::normal(
-			client.clone(),
-			vec![TopLevelExpr::Live(Box::new(stmt))],
-			Default::default(),
-			false,
-		);
+		let query = Query {
+			txn: None,
+			client: client.clone(),
+			query: Cow::Owned(format!("{}", stmt)),
+			variables: Ok(Variables::new()),
+		};
 		let Value::Uuid(id) = query.await?.take::<Value>(0)? else {
 			return Err(Error::InternalError(
 				"successufull live query didn't return a uuid".to_string(),

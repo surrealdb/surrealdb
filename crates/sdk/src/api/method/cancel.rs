@@ -1,7 +1,5 @@
 use std::future::IntoFuture;
 
-use surrealdb_core::expr::TopLevelExpr;
-
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Result, Surreal};
 
@@ -21,7 +19,7 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			self.client.query(TopLevelExpr::Cancel).await?;
+			self.client.query("CANCEL").await?;
 			Ok(self.client)
 		})
 	}

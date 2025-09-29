@@ -1,7 +1,5 @@
 //! The different options and types for use in API functions
 
-use std::borrow::Cow;
-
 pub mod auth;
 pub mod capabilities;
 
@@ -242,21 +240,4 @@ pub enum WaitFor {
 	Connection,
 	/// Waits for the desired database to be selected
 	Database,
-}
-
-/// Forwards a raw query without trying to parse for live select statements
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[doc(hidden)]
-pub struct Raw(pub(crate) Cow<'static, str>);
-
-impl From<&'static str> for Raw {
-	fn from(query: &'static str) -> Self {
-		Self(Cow::Borrowed(query))
-	}
-}
-
-impl From<String> for Raw {
-	fn from(query: String) -> Self {
-		Self(Cow::Owned(query))
-	}
 }

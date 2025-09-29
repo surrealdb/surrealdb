@@ -5,9 +5,8 @@ use std::time::Duration;
 use serde_json::json;
 use surrealdb::IndexedResults;
 use surrealdb::opt::auth::{Database, Namespace, Record as RecordAccess};
-use surrealdb::opt::{PatchOp, PatchOps, Raw, Resource};
+use surrealdb::opt::{PatchOp, PatchOps, Resource};
 use surrealdb::types::{RecordId, RecordIdKey, SurrealValue, Value, array, object};
-use surrealdb_core::expr::TopLevelExpr;
 use surrealdb_core::syn;
 use ulid::Ulid;
 
@@ -390,18 +389,8 @@ pub async fn query_raw(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
-	let _ = db
-		.query(Raw::from("CREATE user:john SET name = 'John Doe'"))
-		.await
-		.unwrap()
-		.check()
-		.unwrap();
-	let mut response = db
-		.query(Raw::from("SELECT name FROM user:john".to_owned()))
-		.await
-		.unwrap()
-		.check()
-		.unwrap();
+	let _ = db.query("CREATE user:john SET name = 'John Doe'").await.unwrap().check().unwrap();
+	let mut response = db.query("SELECT name FROM user:john").await.unwrap().check().unwrap();
 	let Some(name): Option<String> = response.take("name").unwrap() else {
 		panic!("query returned no record");
 	};
@@ -476,12 +465,12 @@ pub async fn query_chaining(new_db: impl CreateDb) {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let response = db
-		.query(TopLevelExpr::Begin)
+		.query("BEGIN")
 		.query("CREATE account:one SET balance = 135605.16")
 		.query("CREATE account:two SET balance = 91031.31")
 		.query("UPDATE account:one SET balance += 300.00")
 		.query("UPDATE account:two SET balance -= 300.00")
-		.query(TopLevelExpr::Commit)
+		.query("COMMIT")
 		.await
 		.unwrap();
 	response.check().unwrap();
@@ -724,7 +713,7 @@ pub async fn binding_edges(new_db: impl CreateDb) {
 	assert_eq!(
 		value,
 		Value::Array(array![Value::Object(
-			object! { id: "knows:one", in: "person:john", out: "person:jane" }
+			object! { id: rid!("knows:one"), in: rid!("person:john"), out: rid!("person:jane") }
 		)])
 	);
 	//
@@ -739,7 +728,7 @@ pub async fn binding_edges(new_db: impl CreateDb) {
 	assert_eq!(
 		value,
 		Value::Array(array![Value::Object(
-			object! { id: "knows:two", in: "person:john", out: "person:jane" }
+			object! { id: rid!("knows:two"), in: rid!("person:john"), out: rid!("person:jane") }
 		)])
 	);
 	//
@@ -757,7 +746,7 @@ pub async fn binding_edges(new_db: impl CreateDb) {
 	assert_eq!(
 		value,
 		Value::Array(array![Value::Object(
-			object! { id: "knows:three", in: "person:john", out: "person:jane" }
+			object! { id: rid!("knows:three"), in: rid!("person:john"), out: rid!("person:jane") }
 		)])
 	);
 	//
@@ -773,7 +762,7 @@ pub async fn binding_edges(new_db: impl CreateDb) {
 	assert_eq!(
 		value,
 		Value::Array(array![Value::Object(
-			object! { id: "knows:four", in: "person:john", out: "person:jane" }
+			object! { id: rid!("knows:four"), in: rid!("person:john"), out: rid!("person:jane") }
 		)])
 	);
 }
@@ -1028,7 +1017,7 @@ pub async fn update_table_with_content(new_db: impl CreateDb) {
         CREATE type::thing($table, 'zoey') SET name = 'Zoey';
     ";
 	let table = "user";
-	let response = db.query(sql).bind(("table".to_string(), table)).await.unwrap();
+	let response = db.query(sql).bind(("table", table)).await.unwrap();
 	response.check().unwrap();
 	let users: Vec<RecordBuf> = db
 		.update(table)
@@ -1071,7 +1060,7 @@ pub async fn update_record_range_with_content(new_db: impl CreateDb) {
         CREATE type::thing($table, 'zoey') SET name = 'Zoey';
     ";
 	let table = "user";
-	let response = db.query(sql).bind(("table".to_string(), table)).await.unwrap();
+	let response = db.query(sql).bind(("table", table)).await.unwrap();
 	response.check().unwrap();
 	let users: Vec<RecordBuf> = db
 		.update(table)
@@ -1455,7 +1444,7 @@ pub async fn delete_record_range(new_db: impl CreateDb) {
         CREATE type::thing($table, 'zoey') SET name = 'Zoey';
     ";
 	let table = "user";
-	let response = db.query(sql).bind(("table".to_string(), table)).await.unwrap();
+	let response = db.query(sql).bind(("table", table)).await.unwrap();
 	response.check().unwrap();
 	let users: Vec<RecordBuf> = db.delete(table).range("jane".."zoey").await.unwrap();
 	assert_eq!(

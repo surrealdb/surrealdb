@@ -84,3 +84,20 @@ impl From<Variables> for Object {
 		Object(vars.0)
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_variables_serde() {
+		let vars = Variables::new();
+		let json = serde_json::to_string(&vars).unwrap();
+		assert_eq!(json, "{}");
+
+		let vars2 =
+			Variables::from_iter(vec![("name".to_string(), "John".to_string().into_value())]);
+		let json = serde_json::to_string(&vars2).unwrap();
+		assert_eq!(json, "{\"name\":\"John\"}");
+	}
+}

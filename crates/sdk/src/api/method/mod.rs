@@ -5,11 +5,11 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 
-use surrealdb_types::{self, Array, SurrealValue, Value};
+use surrealdb_types::{self, Array, SurrealValue, Value, Variables};
 
 use crate::api::opt::auth::{Credentials, Jwt};
 use crate::api::opt::{IntoEndpoint, auth};
-use crate::api::{Connect, Connection, OnceLockExt, Surreal, opt};
+use crate::api::{Connect, Connection, OnceLockExt, Surreal};
 use crate::opt::{IntoExportDestination, WaitFor};
 
 pub(crate) mod live;
@@ -621,12 +621,13 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn query(&'_ self, query: impl opt::IntoQuery) -> Query<'_, C> {
-		let result = query.into_query(self).0;
+	#[must_use = "queries do nothing unless you `.await` or poll them"]
+	pub fn query<'client>(&'client self, query: impl Into<Cow<'client, str>>) -> Query<'client, C> {
 		Query {
 			txn: None,
-			inner: result,
 			client: Cow::Borrowed(self),
+			query: query.into(),
+			variables: Ok(Variables::new()),
 		}
 	}
 

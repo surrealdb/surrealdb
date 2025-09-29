@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use async_channel::{Receiver, Sender};
 use indexmap::IndexMap;
-use surrealdb_core::rpc::{DbResult, DbResultError, DbResultStats};
+use surrealdb_core::rpc::{DbResult, DbResultStats};
 use surrealdb_types::{SurrealValue, Value};
 
 use crate::api::err::Error;
@@ -187,10 +187,7 @@ impl IndexedDbResults {
 		match result {
 			DbResult::Other(value) => Ok(Self::Other(value)),
 			DbResult::Query(responses) => {
-				let mut results = IndexMap::<
-					usize,
-					(DbResultStats, std::result::Result<Value, DbResultError>),
-				>::with_capacity(responses.len());
+				let mut results = IndexMap::with_capacity(responses.len());
 
 				for (index, response) in responses.into_iter().enumerate() {
 					let stats = DbResultStats::default().with_execution_time(response.time);

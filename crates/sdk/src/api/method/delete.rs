@@ -58,10 +58,12 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async move {
 				let router = client.inner.router.extract()?;
+
+				let what = resource?;
 				router
 					.$method(Command::Delete {
 						txn,
-						what: resource?,
+						what,
 					})
 					.await
 			})

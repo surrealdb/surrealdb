@@ -4,23 +4,21 @@ use std::future::IntoFuture;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use anyhow::bail;
 use futures::StreamExt;
 use futures::future::Either;
 use futures::stream::SelectAll;
 use indexmap::IndexMap;
-use surrealdb_core::expr::{LogicalPlan, TopLevelExpr};
 use surrealdb_core::rpc::{DbResultError, DbResultStats};
 use surrealdb_types::{self, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
+use super::Stream;
 use super::transaction::WithTransaction;
-use super::{Stream, live};
 use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
-use crate::api::{Connection, ExtraFeatures, Result, opt};
+use crate::api::{Connection, Result, opt};
 use crate::method::{OnceLockExt, WithStats};
 use crate::notification::Notification;
 
@@ -30,7 +28,8 @@ use crate::notification::Notification;
 pub struct Query<'r, C: Connection> {
 	pub(crate) txn: Option<Uuid>,
 	pub(crate) client: Cow<'r, Surreal<C>>,
-	pub(crate) inner: Result<ValidQuery>,
+	pub(crate) query: Cow<'r, str>,
+	pub(crate) variables: Result<Variables>,
 }
 
 impl<C> WithTransaction for Query<'_, C>
@@ -43,19 +42,6 @@ where
 	}
 }
 
-#[derive(Debug)]
-pub(crate) enum ValidQuery {
-	Raw {
-		query: Cow<'static, str>,
-		bindings: Variables,
-	},
-	Normal {
-		query: Vec<TopLevelExpr>,
-		register_live_queries: bool,
-		bindings: Variables,
-	},
-}
-
 pub trait IntoVariables {
 	fn into_variables(self) -> Result<Variables>;
 }
@@ -63,7 +49,6 @@ pub trait IntoVariables {
 impl<T: SurrealValue> IntoVariables for T {
 	fn into_variables(self) -> Result<Variables> {
 		let value = self.into_value();
-		tracing::warn!("IntoVariables: {value:?}");
 		match value {
 			Value::Object(obj) => Ok(Variables::from(obj)),
 			Value::Array(arr) => {
@@ -86,48 +71,14 @@ impl<'r, C> Query<'r, C>
 where
 	C: Connection,
 {
-	pub(crate) fn normal(
-		client: Cow<'r, Surreal<C>>,
-		query: Vec<TopLevelExpr>,
-		bindings: Variables,
-		register_live_queries: bool,
-	) -> Self {
-		Query {
-			txn: None,
-			client,
-			inner: Ok(ValidQuery::Normal {
-				query,
-				bindings,
-				register_live_queries,
-			}),
-		}
-	}
-
-	pub(crate) fn map_valid<F>(self, f: F) -> Self
-	where
-		F: FnOnce(ValidQuery) -> Result<ValidQuery>,
-	{
-		match self.inner {
-			Ok(x) => Query {
-				txn: self.txn,
-				client: self.client,
-				inner: f(x),
-			},
-			x => Query {
-				txn: self.txn,
-				client: self.client,
-				inner: x,
-			},
-		}
-	}
-
 	/// Converts to an owned type which can easily be moved to a different
 	/// thread
 	pub fn into_owned(self) -> Query<'static, C> {
 		Query {
 			txn: self.txn,
 			client: Cow::Owned(self.client.into_owned()),
-			inner: self.inner,
+			query: Cow::Owned(self.query.into_owned()),
+			variables: self.variables,
 		}
 	}
 }
@@ -140,95 +91,27 @@ where
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
+		let Self {
+			txn,
+			client,
+			query,
+			variables,
+		} = self;
+
 		Box::pin(async move {
 			// Extract the router from the client
-			let router = self.client.inner.router.extract()?;
+			let router = client.inner.router.extract()?;
 
-			match self.inner? {
-				ValidQuery::Raw {
-					query,
-					bindings,
-				} => {
-					tracing::warn!("Raw::Vars: {bindings:?}");
-					router
-						.execute_query(Command::RawQuery {
-							query,
-							txn: self.txn,
-							variables: bindings,
-						})
-						.await
-				}
-				ValidQuery::Normal {
-					query,
-					register_live_queries,
-					bindings,
-				} => {
-					tracing::warn!("Normal::Vars: {bindings:?}");
-					// Collect the indexes of the live queries which should be registerd.
-					let query_indicies = if register_live_queries {
-						query
-							.iter()
-							// BEGIN, COMMIT, and CANCEL don't return a result.
-							.filter(|x| {
-								!matches!(
-									x,
-									TopLevelExpr::Begin
-										| TopLevelExpr::Commit | TopLevelExpr::Cancel
-								)
-							})
-							.enumerate()
-							.filter(|(_, x)| matches!(x, TopLevelExpr::Live(_)))
-							.map(|(i, _)| i)
-							.collect()
-					} else {
-						Vec::new()
-					};
+			tracing::warn!("query: {}", query);
+			tracing::warn!("variables: {:?}", variables);
 
-					// If there are live queries and it is not supported, return an error.
-					if !query_indicies.is_empty()
-						&& !router.features.contains(&ExtraFeatures::LiveQueries)
-					{
-						return Err(Error::LiveQueriesNotSupported.into());
-					}
-
-					let query = LogicalPlan {
-						expressions: query,
-					};
-
-					let mut response = router
-						.execute_query(Command::Query {
-							txn: self.txn,
-							query,
-							variables: bindings,
-						})
-						.await?;
-
-					for idx in query_indicies {
-						let Some((_, result)) = response.results.get(&idx) else {
-							continue;
-						};
-
-						// This is a live query. We are using this as a workaround to avoid
-						// creating another public error variant for this internal error.
-						let res = match result {
-							Ok(id) => {
-								let Value::Uuid(uuid) = id else {
-									bail!(Error::InternalError(
-										"successfull live query did not return a uuid".to_string(),
-									));
-								};
-								live::register(router, uuid.0).await.map(|rx| {
-									Stream::new(self.client.inner.clone().into(), uuid.0, Some(rx))
-								})
-							}
-							Err(_) => Err(anyhow::Error::new(Error::NotLiveQuery(idx))),
-						};
-						response.live_queries.insert(idx, res);
-					}
-
-					Ok(response)
-				}
-			}
+			router
+				.execute_query(Command::RawQuery {
+					query: Cow::Owned(query.into_owned()),
+					txn,
+					variables: variables?,
+				})
+				.await
 		})
 	}
 }
@@ -248,43 +131,27 @@ where
 	}
 }
 
-impl<C> Query<'_, C>
+impl<'r, C> Query<'r, C>
 where
 	C: Connection,
 {
 	/// Chains a query onto an existing query
-	pub fn query(self, surql: impl opt::IntoQuery) -> Self {
+	pub fn query(self, surql: impl Into<Cow<'r, str>>) -> Self {
 		let client = self.client.clone();
-		self.map_valid(move |valid| match valid {
-			ValidQuery::Raw {
-				..
-			} => {
-				Err(Error::InvalidParams("Appending to raw queries is not supported".to_owned())
-					.into())
-			}
-			ValidQuery::Normal {
-				mut query,
-				register_live_queries,
-				bindings,
-			} => match client.query(surql).inner {
-				Ok(ValidQuery::Normal {
-					query: stmts,
-					..
-				}) => {
-					query.extend(stmts);
-					Ok(ValidQuery::Normal {
-						query,
-						register_live_queries,
-						bindings,
-					})
-				}
-				Ok(ValidQuery::Raw {
-					..
-				}) => Err(Error::InvalidParams("Appending raw queries is not supported".to_owned())
-					.into()),
-				Err(error) => Err(error),
-			},
-		})
+		let query = if self.query.is_empty() {
+			surql.into()
+		} else if self.query.ends_with(';') {
+			Cow::Owned(format!("{} {}", self.query, surql.into()))
+		} else {
+			Cow::Owned(format!("{}; {}", self.query, surql.into()))
+		};
+
+		Query {
+			txn: self.txn,
+			client,
+			query,
+			variables: self.variables,
+		}
 	}
 
 	/// Return query statistics along with its results
@@ -330,25 +197,23 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn bind(self, bindings: impl IntoVariables) -> Self {
-		self.map_valid(move |mut valid| {
-			let current_bindings = match &mut valid {
-				ValidQuery::Raw {
-					bindings,
-					..
-				} => bindings,
-				ValidQuery::Normal {
-					bindings,
-					..
-				} => bindings,
-			};
+	pub fn bind(self, vars: impl IntoVariables) -> Self {
+		let variables = match (self.variables, vars.into_variables()) {
+			(Ok(mut a), Ok(b)) => {
+				a.extend(b);
+				Ok(a)
+			}
+			(Ok(_a), Err(e)) => Err(e),
+			(Err(e), Ok(_b)) => Err(e),
+			(Err(e), Err(_f)) => Err(e),
+		};
 
-			let bindings = bindings.into_variables();
-
-			current_bindings.extend(bindings.expect("TODO: Handle error"));
-
-			Ok(valid)
-		})
+		Query {
+			txn: self.txn,
+			client: self.client,
+			query: self.query,
+			variables,
+		}
 	}
 }
 
