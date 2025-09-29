@@ -4,7 +4,7 @@ use std::ops::{Bound, RangeFrom, RangeFull, RangeTo, RangeToInclusive};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::{Range, RecordIdKey, SurrealValue};
+use crate::{Kind, Range, RecordIdKey, SurrealValue, Value};
 
 /// Represents a range of record identifier keys in SurrealDB
 ///
@@ -17,6 +17,70 @@ pub struct RecordIdKeyRange {
 	pub start: Bound<RecordIdKey>,
 	/// The upper bound of the range
 	pub end: Bound<RecordIdKey>,
+}
+
+impl SurrealValue for RecordIdKeyRange {
+	fn kind_of() -> Kind {
+		Kind::Range
+	}
+
+	fn is_value(value: &Value) -> bool {
+		if let Value::Range(r) = value {
+			(match &r.start {
+				Bound::Unbounded => true,
+				Bound::Included(x) => RecordIdKey::is_value(x),
+				Bound::Excluded(x) => RecordIdKey::is_value(x),
+			} && match &r.end {
+				Bound::Unbounded => true,
+				Bound::Included(x) => RecordIdKey::is_value(x),
+				Bound::Excluded(x) => RecordIdKey::is_value(x),
+			})
+		} else {
+			false
+		}
+	}
+
+	fn into_value(self) -> Value {
+		Value::Range(Box::new(Range {
+			start: self.start.map(RecordIdKey::into_value),
+			end: self.end.map(RecordIdKey::into_value),
+		}))
+	}
+
+	fn from_value(value: Value) -> anyhow::Result<Self> {
+		if let Value::Range(r) = value {
+			Ok(RecordIdKeyRange {
+				start: match r.start {
+					Bound::Unbounded => Bound::Unbounded,
+					Bound::Included(x) => {
+						Bound::Included(RecordIdKey::from_value(x).map_err(|e| {
+							anyhow::anyhow!("Failed to convert Bound value to record id key: {e}")
+						})?)
+					}
+					Bound::Excluded(x) => {
+						Bound::Excluded(RecordIdKey::from_value(x).map_err(|e| {
+							anyhow::anyhow!("Failed to convert Bound value to record id key: {e}")
+						})?)
+					}
+				},
+				end: match r.end {
+					Bound::Unbounded => Bound::Unbounded,
+					Bound::Included(x) => {
+						Bound::Included(RecordIdKey::from_value(x).map_err(|e| {
+							anyhow::anyhow!("Failed to convert Bound value to record id key: {e}")
+						})?)
+					}
+					Bound::Excluded(x) => {
+						Bound::Excluded(RecordIdKey::from_value(x).map_err(|e| {
+							anyhow::anyhow!("Failed to convert Bound value to record id key: {e}")
+						})?)
+					}
+				},
+			})
+		} else {
+			Err(anyhow::anyhow!("Failed to convert to RecordIdKeyRange"))
+		}
+	}
 }
 
 impl RecordIdKeyRange {

@@ -2,8 +2,6 @@
 
 use std::borrow::Cow;
 
-use anyhow::Context;
-
 pub mod auth;
 pub mod capabilities;
 
@@ -19,11 +17,12 @@ pub use endpoint::*;
 pub use export::*;
 pub use query::*;
 pub use resource::*;
-use surrealdb_types::{Array, Kind, Object, SurrealValue, Value};
+use surrealdb_types::{Array, SurrealValue, Value};
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 pub use tls::*;
 
-#[derive(Debug)]
+#[derive(Debug, SurrealValue)]
+#[surreal(untagged, lowercase)]
 enum InnerOp {
 	Add {
 		path: String,
@@ -40,110 +39,6 @@ enum InnerOp {
 		path: String,
 		value: String,
 	},
-}
-
-impl SurrealValue for InnerOp {
-	fn kind_of() -> Kind {
-		Kind::Object
-	}
-
-	fn is_value(value: &Value) -> bool {
-		matches!(value, Value::Object(_))
-	}
-
-	fn into_value(self) -> Value {
-		match self {
-			InnerOp::Add {
-				path,
-				value,
-			} => {
-				// { "op": "add", "path": "/biscuits/1", "value": { "name": "Ginger Nut" } }
-				let mut obj = Object::new();
-				obj.insert("op".to_string(), Value::String("add".to_string()));
-				obj.insert("path".to_string(), Value::String(path.to_string()));
-				obj.insert("value".to_string(), value);
-				Value::Object(obj)
-			}
-			InnerOp::Remove {
-				path,
-			} => {
-				// { "op": "remove", "path": "/biscuits/1" }
-				let mut obj = Object::new();
-				obj.insert("op".to_string(), Value::String("remove".to_string()));
-				obj.insert("path".to_string(), Value::String(path.to_string()));
-				Value::Object(obj)
-			}
-			InnerOp::Replace {
-				path,
-				value,
-			} => {
-				// { "op": "replace", "path": "/biscuits/1", "value": { "name": "Ginger Nut" } }
-				let mut obj = Object::new();
-				obj.insert("op".to_string(), Value::String("replace".to_string()));
-				obj.insert("path".to_string(), Value::String(path.to_string()));
-				obj.insert("value".to_string(), value);
-				Value::Object(obj)
-			}
-			InnerOp::Change {
-				path,
-				value,
-			} => {
-				// { "op": "change", "path": "/biscuits/1", "value": "name" }
-				let mut obj = Object::new();
-				obj.insert("op".to_string(), Value::String("change".to_string()));
-				obj.insert("path".to_string(), Value::String(path.to_string()));
-				obj.insert("value".to_string(), Value::String(value.to_string()));
-				Value::Object(obj)
-			}
-		}
-	}
-
-	fn from_value(value: Value) -> anyhow::Result<Self> {
-		let Value::Object(mut obj) = value else {
-			return Err(anyhow::anyhow!("Expected Object, got {:?}", value.kind()));
-		};
-		let op = obj.remove("op").context("Key 'op' missing")?;
-		let op = op.into_string()?;
-
-		match op.as_str() {
-			"add" => {
-				let path = obj.remove("path").context("Key 'path' missing")?;
-				let path = path.into_string()?;
-				let value = obj.remove("value").context("Key 'value' missing")?;
-				Ok(InnerOp::Add {
-					path,
-					value,
-				})
-			}
-			"remove" => {
-				let path = obj.remove("path").context("Key 'path' missing")?;
-				let path = path.into_string()?;
-				Ok(InnerOp::Remove {
-					path,
-				})
-			}
-			"replace" => {
-				let path = obj.remove("path").context("Key 'path' missing")?;
-				let path = path.into_string()?;
-				let value = obj.remove("value").context("Key 'value' missing")?;
-				Ok(InnerOp::Replace {
-					path,
-					value,
-				})
-			}
-			"change" => {
-				let path = obj.remove("path").context("Key 'path' missing")?;
-				let path = path.into_string()?;
-				let value = obj.remove("value").context("Key 'value' missing")?;
-				let value = value.into_string()?;
-				Ok(InnerOp::Change {
-					path,
-					value,
-				})
-			}
-			_ => Err(anyhow::anyhow!("Invalid operation '{op}'")),
-		}
-	}
 }
 
 /// A [JSON Patch] operation

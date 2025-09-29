@@ -1,7 +1,7 @@
 use std::fmt::{self, Display};
 
 use revision::revisioned;
-use surrealdb_types::{Kind, SurrealValue};
+use surrealdb_types::SurrealValue;
 
 use crate::api::path::Path;
 use crate::catalog::Permission;
@@ -10,7 +10,6 @@ use crate::expr::statements::info::InfoStructure;
 use crate::fmt::Fmt;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::ToSql;
-use crate::types::PublicValue;
 use crate::val::{Array, Object, Value};
 
 /// The API definition.
@@ -92,8 +91,9 @@ impl InfoStructure for ApiDefinition {
 
 /// REST API method.
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(SurrealValue, Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[surreal(untagged, lowercase)]
 pub enum ApiMethod {
 	/// REST DELETE method.
 	Delete,
@@ -107,35 +107,6 @@ pub enum ApiMethod {
 	Put,
 	/// REST TRACE method.
 	Trace,
-}
-
-impl SurrealValue for ApiMethod {
-	fn kind_of() -> Kind {
-		Kind::String
-	}
-
-	fn is_value(value: &PublicValue) -> bool {
-		matches!(value, PublicValue::String(_))
-	}
-
-	fn into_value(self) -> PublicValue {
-		PublicValue::String(self.to_string())
-	}
-
-	fn from_value(value: PublicValue) -> anyhow::Result<Self> {
-		match value {
-			PublicValue::String(s) => match s.to_ascii_lowercase().as_str() {
-				"delete" => Ok(Self::Delete),
-				"get" => Ok(Self::Get),
-				"patch" => Ok(Self::Patch),
-				"post" => Ok(Self::Post),
-				"put" => Ok(Self::Put),
-				"trace" => Ok(Self::Trace),
-				unexpected => Err(anyhow::anyhow!("method does not match: {unexpected}")),
-			},
-			_ => Err(anyhow::anyhow!("method does not match: {value:?}")),
-		}
-	}
 }
 
 impl Display for ApiMethod {

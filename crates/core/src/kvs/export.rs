@@ -4,7 +4,7 @@ use anyhow::Result;
 use async_channel::Sender;
 use chrono::TimeZone;
 use chrono::prelude::Utc;
-use surrealdb_types::{Array, Kind, SurrealValue, Value};
+use surrealdb_types::{SurrealValue, Value};
 
 use super::Transaction;
 use crate::catalog::providers::{
@@ -95,10 +95,13 @@ impl Config {
 	}
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, SurrealValue)]
+#[surreal(untagged)]
 pub enum TableConfig {
 	#[default]
+	#[surreal(value = true)]
 	All,
+	#[surreal(value = false)]
 	None,
 	Some(Vec<String>),
 }
@@ -150,55 +153,6 @@ impl TryFrom<&Value> for TableConfig {
 				.map(TableConfig::Some),
 			v => Err(anyhow::Error::new(Error::InvalidExportConfig(
 				v.to_owned(),
-				"a bool, none, null or array<string>".into(),
-			))),
-		}
-	}
-}
-
-impl SurrealValue for TableConfig {
-	fn kind_of() -> Kind {
-		Kind::Object
-	}
-
-	fn is_value(value: &Value) -> bool {
-		matches!(value, Value::Bool(_) | Value::None | Value::Null | Value::Array(_))
-	}
-
-	fn into_value(self) -> Value {
-		match self {
-			TableConfig::All => Value::Bool(true),
-			TableConfig::None => Value::Bool(false),
-			TableConfig::Some(v) => Value::Array(Array::from_values(
-				v.into_iter().map(Value::String).collect::<Vec<_>>(),
-			)),
-		}
-	}
-
-	fn from_value(value: Value) -> anyhow::Result<Self> {
-		match value {
-			Value::Bool(b) => {
-				if b {
-					Ok(TableConfig::All)
-				} else {
-					Ok(TableConfig::None)
-				}
-			}
-			Value::None | Value::Null => Ok(TableConfig::None),
-			Value::Array(v) => v
-				.iter()
-				.cloned()
-				.map(|v| match v {
-					Value::String(str) => Ok(str),
-					v => Err(anyhow::Error::new(Error::InvalidExportConfig(
-						v.clone(),
-						"a string".into(),
-					))),
-				})
-				.collect::<Result<Vec<String>>>()
-				.map(TableConfig::Some),
-			v => Err(anyhow::Error::new(Error::InvalidExportConfig(
-				v.clone(),
 				"a bool, none, null or array<string>".into(),
 			))),
 		}

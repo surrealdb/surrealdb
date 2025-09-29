@@ -4,11 +4,16 @@ use std::str::FromStr;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::{Kind, KindLiteral, SurrealValue, Uuid, Value};
+// Needed because we use the SurrealValue derive macro inside the crate which exports it :)
+use crate as surrealdb_types;
+use crate::{SurrealValue, Uuid, Value};
 
 /// The action that caused the notification
 #[revisioned(revision = 1)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+	Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, SurrealValue,
+)]
+#[surreal(untagged, uppercase)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Action {
 	/// Record was created.
@@ -19,29 +24,6 @@ pub enum Action {
 	Delete,
 	/// The live query was killed.
 	Killed,
-}
-
-impl SurrealValue for Action {
-	fn kind_of() -> Kind {
-		Kind::Either(vec![
-			Kind::Literal(KindLiteral::String(String::from("CREATE"))),
-			Kind::Literal(KindLiteral::String(String::from("UPDATE"))),
-			Kind::Literal(KindLiteral::String(String::from("DELETE"))),
-			Kind::Literal(KindLiteral::String(String::from("KILLED"))),
-		])
-	}
-
-	fn is_value(value: &Value) -> bool {
-		matches!(value, Value::String(_))
-	}
-
-	fn into_value(self) -> Value {
-		Value::String(self.to_string())
-	}
-
-	fn from_value(value: Value) -> anyhow::Result<Self> {
-		Self::from_str(&value.into_string()?)
-	}
 }
 
 impl Display for Action {

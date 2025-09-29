@@ -6,7 +6,7 @@ use anyhow::Result;
 use revision::revisioned;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
-use surrealdb_types::{Kind, Object, SurrealValue, Value};
+use surrealdb_types::{Kind, KindLiteral, SurrealValue, Value, object};
 
 use crate::expr::TopLevelExpr;
 use crate::rpc::DbResultError;
@@ -14,11 +14,13 @@ use crate::rpc::DbResultError;
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Response";
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize, SurrealValue)]
+#[surreal(untagged, lowercase)]
 #[serde(rename_all = "lowercase")]
 pub enum QueryType {
 	// Any kind of query
 	#[default]
+	#[surreal(value = none)]
 	Other,
 	// Indicates that the response live query id must be tracked
 	Live,
@@ -67,73 +69,73 @@ impl QueryResult {
 
 impl SurrealValue for QueryResult {
 	fn kind_of() -> Kind {
-		Kind::Object
+		Kind::Either(vec![
+			Kind::Literal(KindLiteral::Object(map! [
+				"status".to_string() => Kind::Literal(KindLiteral::String("OK".to_string())),
+				"time".to_string() => Kind::String,
+				"result".to_string() => Kind::Any,
+				"query_type".to_string() => QueryType::kind_of(),
+			])),
+			Kind::Literal(KindLiteral::Object(map! [
+				"status".to_string() => Kind::Literal(KindLiteral::String("ERR".to_string())),
+				"time".to_string() => Kind::String,
+				"result".to_string() => Kind::String,
+				"query_type".to_string() => QueryType::kind_of(),
+			])),
+		])
 	}
 
 	fn is_value(value: &Value) -> bool {
-		matches!(value, Value::Object(_))
+		value.is_object_and(|map| {
+			map.get("status").is_some_and(Status::is_value)
+				&& map.get("time").is_some_and(Value::is_string)
+				&& map.get("result").is_some()
+				&& map.get("query_type").is_some_and(QueryType::is_value)
+		})
 	}
 
-	/// Convert's the response into a value as it is send across the net.
 	fn into_value(self) -> Value {
-		let mut res = Object::new();
-		res.insert("time".to_owned(), Value::String(format!("{:?}", self.time)));
-
-		if !matches!(self.query_type, QueryType::Other) {
-			res.insert("type".to_owned(), Value::String(self.query_type.to_string()));
-		}
-
-		match self.result {
-			Ok(v) => {
-				res.insert("status".to_owned(), Value::String("OK".to_string()));
-				res.insert("result".to_owned(), v);
-			}
-			Err(e) => {
-				res.insert("status".to_owned(), Value::String("ERR".to_string()));
-				res.insert("result".to_owned(), Value::String(e.to_string()));
-			}
-		}
-
-		Value::Object(res)
+		Value::Object(object! {
+			status: Status::from(&self.result).into_value(),
+			time: format!("{:?}", self.time).into_value(),
+			result: match self.result {
+				Ok(v) => v.into_value(),
+				Err(e) => Value::from_string(e.to_string()),
+			},
+			query_type: self.query_type.into_value(),
+		})
 	}
 
 	fn from_value(value: Value) -> anyhow::Result<Self> {
-		let Value::Object(mut obj) = value else {
+		// Assert required fields
+		let Value::Object(mut map) = value else {
 			anyhow::bail!("Expected object for QueryResult");
 		};
+		let Some(status) = map.remove("status") else {
+			anyhow::bail!("Expected status for QueryResult");
+		};
+		let Some(time) = map.remove("time") else {
+			anyhow::bail!("Expected time for QueryResult");
+		};
+		let Some(result) = map.remove("result") else {
+			anyhow::bail!("Expected result for QueryResult");
+		};
 
-		let time_str = obj
-			.remove("time")
-			.and_then(|v| v.into_string().ok())
-			.unwrap_or_else(|| "0ns".to_string());
-		// Parse duration string (e.g. "1.234ms" -> Duration)
-		let time = surrealdb_types::Duration::from_str(&time_str)
+		// Grab status, query type and time
+		let status = Status::from_value(status)?;
+		let query_type =
+			map.remove("query_type").map(QueryType::from_value).transpose()?.unwrap_or_default();
+
+		let time = surrealdb_types::Duration::from_str(&time.into_string()?)
+			.map_err(|_| anyhow::anyhow!("Invalid time for QueryResult"))
 			.map(std::time::Duration::from)
 			.unwrap_or_default();
 
-		let query_type = obj
-			.remove("type")
-			.and_then(|v| v.into_string().ok())
-			.map(|s| match s.as_str() {
-				"live" => QueryType::Live,
-				"kill" => QueryType::Kill,
-				_ => QueryType::Other,
-			})
-			.unwrap_or_default();
-
-		let status = obj
-			.remove("status")
-			.and_then(|v| v.into_string().ok())
-			.unwrap_or_else(|| "OK".to_string());
-
-		let result = if status == "OK" {
-			Ok(obj.remove("result").unwrap_or_default())
+		// Grab result based on status
+		let result = if status.is_ok() {
+			Ok(Value::from_value(result)?)
 		} else {
-			let error_msg = obj
-				.remove("result")
-				.and_then(|v| v.into_string().ok())
-				.unwrap_or_else(|| "Unknown error".to_string());
-			Err(DbResultError::custom(error_msg))
+			Err(DbResultError::from_value(result)?)
 		};
 
 		Ok(QueryResult {
@@ -145,11 +147,31 @@ impl SurrealValue for QueryResult {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, SurrealValue)]
 #[serde(rename_all = "UPPERCASE")]
+#[surreal(untagged, uppercase)]
 pub enum Status {
 	Ok,
 	Err,
+}
+
+impl Status {
+	pub fn is_ok(&self) -> bool {
+		matches!(self, Status::Ok)
+	}
+
+	pub fn is_err(&self) -> bool {
+		matches!(self, Status::Err)
+	}
+}
+
+impl<'a, T, E> From<&'a Result<T, E>> for Status {
+	fn from(result: &'a Result<T, E>) -> Self {
+		match result {
+			Ok(_) => Status::Ok,
+			Err(_) => Status::Err,
+		}
+	}
 }
 
 impl Serialize for QueryResult {

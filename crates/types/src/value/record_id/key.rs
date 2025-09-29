@@ -3,7 +3,9 @@ use std::fmt::{self, Debug};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::{Array, Kind, Number, Object, Range, RecordIdKeyRange, SurrealValue, Uuid, Value};
+// Needed because we use the SurrealValue derive macro inside the crate which exports it :)
+use crate as surrealdb_types;
+use crate::{Array, Number, Object, RecordIdKeyRange, SurrealValue, Uuid, Value};
 
 /// The characters which are supported in server record IDs
 pub const ID_CHARS: [char; 36] = [
@@ -16,7 +18,10 @@ pub const ID_CHARS: [char; 36] = [
 /// Record identifiers can have various types of keys including numbers, strings, UUIDs,
 /// arrays, objects, or ranges. This enum provides type-safe representation for all key types.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(
+	Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize, SurrealValue,
+)]
+#[surreal(untagged, lowercase)]
 pub enum RecordIdKey {
 	/// A numeric key
 	Number(i64),
@@ -49,55 +54,6 @@ impl RecordIdKey {
 	/// Returns if this key is a range.
 	pub fn is_range(&self) -> bool {
 		matches!(self, RecordIdKey::Range(_))
-	}
-}
-
-impl SurrealValue for RecordIdKey {
-	fn kind_of() -> Kind {
-		Kind::Record(vec![])
-	}
-
-	fn is_value(value: &Value) -> bool {
-		matches!(value, Value::RecordId(_))
-	}
-
-	/// Returns surrealql value of this key.
-	fn into_value(self) -> Value {
-		match self {
-			RecordIdKey::Number(n) => Value::Number(Number::Int(n)),
-			RecordIdKey::String(s) => Value::String(s),
-			RecordIdKey::Uuid(u) => Value::Uuid(u),
-			RecordIdKey::Object(object) => Value::Object(object),
-			RecordIdKey::Array(array) => Value::Array(array),
-			RecordIdKey::Range(range) => Value::Range(Box::new(Range {
-				start: range.start.map(RecordIdKey::into_value),
-				end: range.end.map(RecordIdKey::into_value),
-			})),
-		}
-	}
-
-	/// Tries to convert a value into a record id key,
-	///
-	/// Returns None if the value cannot be converted.
-	fn from_value(value: Value) -> anyhow::Result<Self> {
-		// NOTE: This method dictates how coversion between values and record id keys
-		// behave. This method is reimplementing previous (before expr inversion pr)
-		// behavior but I am not sure if it is the right one, float and decimal
-		// generaly implicitly convert to other number types but here they are
-		// rejected.
-		match value {
-			Value::Number(Number::Int(i)) => Ok(RecordIdKey::Number(i)),
-			Value::String(s) => Ok(RecordIdKey::String(s)),
-			// NOTE: This was previously (before expr inversion pr) also rejected in this
-			// conversion, a bug I assume.
-			Value::Uuid(uuid) => Ok(RecordIdKey::Uuid(uuid)),
-			Value::Array(array) => Ok(RecordIdKey::Array(array)),
-			Value::Object(object) => Ok(RecordIdKey::Object(object)),
-			Value::Range(range) => {
-				RecordIdKeyRange::from_value_range(*range).map(|x| RecordIdKey::Range(Box::new(x)))
-			}
-			_ => Err(anyhow::anyhow!("Failed to convert to RecordIdKey")),
-		}
 	}
 }
 

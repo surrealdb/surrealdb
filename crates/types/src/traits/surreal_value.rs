@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 use anyhow::Context;
 use rust_decimal::Decimal;
@@ -28,6 +29,42 @@ pub trait SurrealValue {
 	fn from_value(value: Value) -> anyhow::Result<Self>
 	where
 		Self: Sized;
+}
+
+impl<T: SurrealValue> SurrealValue for Box<T> {
+	fn kind_of() -> Kind {
+		T::kind_of()
+	}
+
+	fn is_value(value: &Value) -> bool {
+		T::is_value(value)
+	}
+
+	fn into_value(self) -> Value {
+		T::into_value(*self)
+	}
+
+	fn from_value(value: Value) -> anyhow::Result<Self> {
+		T::from_value(value).map(Box::new)
+	}
+}
+
+impl<T: SurrealValue + Clone> SurrealValue for Arc<T> {
+	fn kind_of() -> Kind {
+		T::kind_of()
+	}
+
+	fn is_value(value: &Value) -> bool {
+		T::is_value(value)
+	}
+
+	fn into_value(self) -> Value {
+		T::into_value(self.as_ref().clone())
+	}
+
+	fn from_value(value: Value) -> anyhow::Result<Self> {
+		T::from_value(value).map(Arc::new)
+	}
 }
 
 macro_rules! impl_surreal_value {
