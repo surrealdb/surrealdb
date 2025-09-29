@@ -21,7 +21,7 @@ impl Object {
 	}
 
 	/// Get an iterator over the key-value pairs in the object
-	pub fn iter(&self) -> std::collections::btree_map::Iter<String, Value> {
+	pub fn iter(&self) -> std::collections::btree_map::Iter<'_, String, Value> {
 		self.0.iter()
 	}
 
@@ -36,7 +36,7 @@ impl Object {
 	}
 
 	/// Get an iterator over the keys in the object
-	pub fn keys(&self) -> std::collections::btree_map::Keys<String, Value> {
+	pub fn keys(&self) -> std::collections::btree_map::Keys<'_, String, Value> {
 		self.0.keys()
 	}
 

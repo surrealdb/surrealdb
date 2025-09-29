@@ -311,7 +311,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn set(&self, key: impl Into<String>, value: impl SurrealValue) -> Set<C> {
+	pub fn set(&self, key: impl Into<String>, value: impl SurrealValue) -> Set<'_, C> {
 		Set {
 			client: Cow::Borrowed(self),
 			key: key.into(),

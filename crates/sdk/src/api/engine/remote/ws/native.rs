@@ -334,37 +334,32 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 				}
 				// If `id` is not set, this may be a live query notification
 				None => {
-					match response.result {
-						Ok(DbResult::Live(notification)) => {
-							let live_query_id = notification.id.0;
-							// Check if this live query is registered
-							if let Some(sender) = state.live_queries.get(&live_query_id) {
-								// Send the notification back to the caller or kill live query
-								// if the receiver is already dropped
-								if sender.send(Ok(notification)).await.is_err() {
-									state.live_queries.remove(&live_query_id);
-									let kill = {
-										let request = Command::Kill {
-											uuid: live_query_id,
-										}
-										.into_router_request(None)
-										.unwrap();
-
-										let value =
-											surrealdb_core::rpc::format::revision::encode(&request)
-												.unwrap();
-										Message::Binary(value)
-									};
-									if let Err(error) = state.sink.send(kill).await {
-										trace!(
-											"failed to send kill query to the server; {error:?}"
-										);
-										return HandleResult::Disconnected;
+					if let Ok(DbResult::Live(notification)) = response.result {
+						let live_query_id = notification.id.0;
+						// Check if this live query is registered
+						if let Some(sender) = state.live_queries.get(&live_query_id) {
+							// Send the notification back to the caller or kill live query
+							// if the receiver is already dropped
+							if sender.send(Ok(notification)).await.is_err() {
+								state.live_queries.remove(&live_query_id);
+								let kill = {
+									let request = Command::Kill {
+										uuid: live_query_id,
 									}
+									.into_router_request(None)
+									.unwrap();
+
+									let value =
+										surrealdb_core::rpc::format::revision::encode(&request)
+											.unwrap();
+									Message::Binary(value)
+								};
+								if let Err(error) = state.sink.send(kill).await {
+									trace!("failed to send kill query to the server; {error:?}");
+									return HandleResult::Disconnected;
 								}
 							}
 						}
-						_ => {}
 					}
 				}
 			}

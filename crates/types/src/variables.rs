@@ -26,7 +26,7 @@ impl Variables {
 	}
 
 	/// Get an iterator over the variables in the map.
-	pub fn iter(&self) -> std::collections::btree_map::Iter<String, Value> {
+	pub fn iter(&self) -> std::collections::btree_map::Iter<'_, String, Value> {
 		self.0.iter()
 	}
 
