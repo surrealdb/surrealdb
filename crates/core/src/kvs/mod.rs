@@ -50,7 +50,10 @@ pub(crate) mod tasklease;
 mod tests;
 mod util;
 
-pub use ds::Datastore;
+pub use api::Transaction as KVTransaction;
+pub use clock::SizedClock;
+pub use ds::requirements::{TransactionBuilderFactoryRequirements, TransactionBuilderRequirements};
+pub use ds::{Datastore, DatastoreFlavor, TransactionBuilder, TransactionBuilderFactory};
 #[cfg(not(target_family = "wasm"))]
 pub(crate) use index::{ConsumeResult, IndexBuilder};
 pub(crate) use key::{KVKey, KVValue, impl_kv_key_storekey, impl_kv_value_revisioned};

@@ -19,8 +19,7 @@ pub enum SizedClock {
 }
 
 impl SizedClock {
-	#[allow(dead_code, reason = "Not used when none of the storage backends are enabled.")]
-	pub(crate) fn system() -> Self {
+	pub fn system() -> Self {
 		Self::System(Default::default())
 	}
 

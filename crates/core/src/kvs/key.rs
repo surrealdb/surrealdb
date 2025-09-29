@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use roaring::{RoaringBitmap, RoaringTreemap};
 
 /// KVKey is a trait that defines a key for the key-value store.
-pub(crate) trait KVKey: Debug + Sized {
+pub trait KVKey: Debug + Sized {
 	/// The associated value type for this key.
 	type ValueType: KVValue;
 

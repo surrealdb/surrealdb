@@ -31,6 +31,7 @@ use ml::MlCommand;
 use semver::Version;
 use sql::SqlCommandArguments;
 use start::StartCommandArguments;
+use surrealdb_core::kvs::TransactionBuilderFactory;
 use upgrade::UpgradeCommandArguments;
 use validate::ValidateCommandArguments;
 use validator::parser::tracing::{CustomFilter, CustomFilterParser};
@@ -199,7 +200,7 @@ impl LogFileRotation {
 	}
 }
 
-pub async fn init() -> ExitCode {
+pub async fn init<F: TransactionBuilderFactory>() -> ExitCode {
 	// Enables ANSI code support on Windows
 	#[cfg(windows)]
 	nu_ansi_term::enable_ansi_support().ok();
@@ -248,7 +249,7 @@ pub async fn init() -> ExitCode {
 	let guards = telemetry.init().expect("Unable to configure logs");
 	// After version warning we can run the respective command
 	let output = match args.command {
-		Commands::Start(args) => start::init(args).await,
+		Commands::Start(args) => start::init::<F>(args).await,
 		Commands::Import(args) => import::init(args).await,
 		Commands::Export(args) => export::init(args).await,
 		Commands::Version(args) => version::init(args).await,
@@ -276,7 +277,7 @@ pub async fn init() -> ExitCode {
 		profile.encode(&mut content).unwrap();
 		file.write_all(&content).unwrap();
 	};
-	// Error and exit the programme
+	// Error and exit the program
 	if let Err(e) = output {
 		// Output any error
 		error!("{}", e);

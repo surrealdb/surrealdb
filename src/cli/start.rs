@@ -3,13 +3,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-#[cfg(feature = "ml")]
-use anyhow::Context;
-use anyhow::Result;
-use clap::Args;
-use surrealdb::engine::{any, tasks};
-use tokio_util::sync::CancellationToken;
-
 use super::config::{CF, Config};
 use crate::cnf::LOGO;
 #[cfg(feature = "ml")]
@@ -18,6 +11,13 @@ use crate::core::options::EngineOptions;
 use crate::dbs::StartCommandDbsOptions;
 use crate::net::client_ip::ClientIp;
 use crate::{dbs, env, net};
+#[cfg(feature = "ml")]
+use anyhow::Context;
+use anyhow::Result;
+use clap::Args;
+use surrealdb::engine::{any, tasks};
+use surrealdb_core::kvs::TransactionBuilderFactory;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
@@ -148,7 +148,7 @@ struct StartCommandWebTlsOptions {
 	web_key: Option<PathBuf>,
 }
 
-pub async fn init(
+pub async fn init<F: TransactionBuilderFactory>(
 	StartCommandArguments {
 		path,
 		username: user,
@@ -215,7 +215,7 @@ pub async fn init(
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();
 	// Start the datastore
-	let datastore = Arc::new(dbs::init(dbs).await?);
+	let datastore = Arc::new(dbs::init::<F>(dbs).await?);
 	// Start the node agent
 	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &CF.get().unwrap().engine);
 	// Start the web server
