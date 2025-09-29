@@ -1,5 +1,5 @@
+use std::collections::HashSet;
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::AtomicI64;
 use std::time::Duration;
 
@@ -10,7 +10,8 @@ use futures::{FutureExt, SinkExt, StreamExt};
 use pharos::{Channel, Events, Observable, ObserveConfig};
 use revision::revisioned;
 use serde::Deserialize;
-use surrealdb_types::Value;
+use surrealdb_core::rpc::{DbResponse, DbResult};
+use surrealdb_types::{Value, object};
 use tokio::sync::watch;
 use trice::Instant;
 use wasm_bindgen_futures::spawn_local;
@@ -19,15 +20,13 @@ use wasmtimer::tokio::MissedTickBehavior;
 use ws_stream_wasm::{WsEvent, WsMessage as Message, WsMeta, WsStream};
 
 use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
-use crate::api::conn::{self, Command, DbResponse, RequestData, Route, Router};
-use crate::api::engine::remote::Response;
+use crate::api::conn::{self, Command, IndexedDbResults, RequestData, Route, Router};
 use crate::api::engine::remote::ws::{Client, PING_INTERVAL};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 use crate::api::{ExtraFeatures, Surreal};
 use crate::engine::IntervalStream;
-use crate::engine::remote::Data;
 use crate::opt::WaitFor;
 
 type MessageStream = SplitStream<WsStream>;
@@ -122,7 +121,7 @@ async fn router_handle_request(
 			ref notification_sender,
 		} => {
 			state.live_queries.insert(*uuid, notification_sender.clone());
-			if response.send(Ok(DbResponse::Other(Value::None))).await.is_err() {
+			if response.send(Ok(IndexedDbResults::Other(Value::None))).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			// There is nothing to send to the server here
@@ -195,7 +194,7 @@ async fn router_handle_response(
 	state: &mut RouterState,
 	_endpoint: &Endpoint,
 ) -> HandleResult {
-	match Response::try_from(&response) {
+	match ws_message_to_db_response(&response) {
 		Ok(option) => {
 			// We are only interested in responses that are not empty
 			if let Some(response) = option {
@@ -203,7 +202,7 @@ async fn router_handle_response(
 				match response.id {
 					// If `id` is set this is a normal response
 					Some(id) => {
-						if let Ok(id) = id.coerce_to() {
+						if let Ok(id) = id.into_int() {
 							// We can only route responses with IDs
 							if let Some(pending) = state.pending_requests.remove(&id) {
 								match pending.effect {
@@ -211,24 +210,24 @@ async fn router_handle_response(
 									RequestEffect::Insert => {
 										// For insert, we need to flatten single responses in an
 										// array
-										if let Ok(Data::Other(Value::Array(value))) =
+										if let Ok(DbResult::Other(Value::Array(value))) =
 											response.result
 										{
 											if value.len() == 1 {
 												let _ = pending
 													.response_channel
-													.send(DbResponse::from_server_result(Ok(
-														Data::Other(
+													.send(IndexedDbResults::from_server_result(
+														DbResult::Other(
 															value.into_iter().next().unwrap(),
 														),
-													)))
+													))
 													.await;
 											} else {
 												let _ = pending
 													.response_channel
-													.send(DbResponse::from_server_result(Ok(
-														Data::Other(Value::Array(value)),
-													)))
+													.send(IndexedDbResults::from_server_result(
+														DbResult::Other(Value::Array(value)),
+													))
 													.await;
 											}
 											return HandleResult::Ok;
@@ -248,7 +247,12 @@ async fn router_handle_response(
 								}
 								let _res = pending
 									.response_channel
-									.send(DbResponse::from_server_result(response.result))
+									.send(match response.result {
+										Ok(db_result) => {
+											IndexedDbResults::from_server_result(db_result)
+										}
+										Err(error) => Err(Error::Query(error.to_string()).into()),
+									})
 									.await;
 							} else {
 								warn!(
@@ -259,7 +263,7 @@ async fn router_handle_response(
 					}
 					// If `id` is not set, this may be a live query notification
 					None => match response.result {
-						Ok(Data::Live(notification)) => {
+						Ok(DbResult::Live(notification)) => {
 							let live_query_id = notification.id;
 							// Check if this live query is registered
 							if let Some(sender) = state.live_queries.get(&live_query_id) {
@@ -306,7 +310,7 @@ async fn router_handle_response(
 				}) = surrealdb_core::rpc::format::revision::decode(&binary)
 				{
 					// Return an error if an ID was returned
-					if let Some(Ok(id)) = id.map(Value::coerce_to) {
+					if let Some(Ok(id)) = id.map(Value::into_int) {
 						if let Some(req) = state.pending_requests.remove(&id) {
 							let _res = req.response_channel.send(Err(error)).await;
 						} else {
@@ -422,9 +426,9 @@ pub(crate) async fn run_router(
 	let _ = conn_tx.send(Ok(())).await;
 
 	let ping = {
-		let mut request = BTreeMap::new();
-		request.insert("method".to_owned(), "ping".into());
-		let value = Value::from(request);
+		let value = Value::Object(object! {
+			"method": "ping",
+		});
 		let value = surrealdb_core::rpc::format::revision::encode(&value).unwrap();
 		Message::Binary(value)
 	};
@@ -516,17 +520,15 @@ pub(crate) async fn run_router(
 	}
 }
 
-impl Response {
-	fn try_from(message: &Message) -> Result<Option<Self>> {
-		match message {
-			Message::Text(text) => {
-				trace!("Received an unexpected text message; {text}");
-				Ok(None)
-			}
-			Message::Binary(binary) => surrealdb_core::rpc::format::revision::decode(&binary)
-				.map(Some)
-				.map_err(|error| Error::InvalidResponse(error))
-				.map_err(anyhow::Error::new),
+fn ws_message_to_db_response(message: &Message) -> Result<Option<DbResponse>> {
+	match message {
+		Message::Text(text) => {
+			trace!("Received an unexpected text message; {text}");
+			Ok(None)
 		}
+		Message::Binary(binary) => surrealdb_core::rpc::format::revision::decode(&binary)
+			.map(Some)
+			.map_err(|error| Error::InvalidResponse(error.to_string()))
+			.map_err(anyhow::Error::new),
 	}
 }

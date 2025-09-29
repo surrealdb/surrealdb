@@ -6,10 +6,11 @@ use std::task::Poll;
 use async_channel::{Receiver, Sender};
 use futures::stream::poll_fn;
 use futures::{FutureExt, StreamExt};
-use surrealdb_core::dbs::{Session, Variables};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::Level;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::options::EngineOptions;
+use surrealdb_types::Variables;
 use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
 use wasm_bindgen_futures::spawn_local;
@@ -62,8 +63,8 @@ pub(crate) async fn run_router(
 ) {
 	let configured_root = match address.config.auth {
 		Level::Root => Some(Root {
-			username: &address.config.username,
-			password: &address.config.password,
+			username: address.config.username.clone(),
+			password: address.config.password.clone(),
 		}),
 		_ => None,
 	};
@@ -75,8 +76,9 @@ pub(crate) async fn run_router(
 				return;
 			}
 			// If a root user is specified, setup the initial datastore credentials
-			if let Some(root) = configured_root {
-				if let Err(error) = kvs.initialise_credentials(root.username, root.password).await {
+			if let Some(ref root) = configured_root {
+				if let Err(error) = kvs.initialise_credentials(&root.username, &root.password).await
+				{
 					conn_tx.send(Err(error.into())).await.ok();
 					return;
 				}
