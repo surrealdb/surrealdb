@@ -84,7 +84,8 @@ impl Display for Idiom {
 				| Expr::Literal(_)
 				| Expr::Table(_)
 				| Expr::Mock(_)
-				| Expr::Constant(_) => x.fmt(f)?,
+				| Expr::Constant(_)
+				| Expr::Param(_) => x.fmt(f)?,
 				_ => {
 					write!(f, "({x})")?;
 				}

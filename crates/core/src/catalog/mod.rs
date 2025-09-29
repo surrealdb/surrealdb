@@ -210,7 +210,7 @@ mod test {
         comment: Some("comment".to_string()),
         permissions: Permission::Full,
         returns: Some(Kind::Any),
-    }, 34)]
+    }, 36)]
 	#[case::index(IndexDefinition {
         index_id: IndexId(123),
         name: "test".to_string(),
