@@ -2,9 +2,10 @@ use std::fmt::Display;
 use std::time::Duration;
 
 use anyhow::Context;
-use revision::revisioned;
+use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
 use surrealdb_types::object;
+use thiserror::Error;
 
 use crate::dbs::QueryResult;
 use crate::rpc::RpcError;
@@ -116,120 +117,204 @@ impl SurrealValue for DbResult {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, Eq, SurrealValue, Serialize, Deserialize)]
-pub struct DbResultError {
-	pub code: i64,
-	pub message: String,
+#[derive(Clone, Debug, PartialEq, Eq, Error, SurrealValue, Serialize, Deserialize)]
+pub enum DbResultError {
+	ParseError(String),
+	InvalidRequest(String),
+	MethodNotFound(String),
+	MethodNotAllowed(String),
+	InvalidParams(String),
+	LiveQueryNotSupported,
+	BadLiveQueryConfig(String),
+	BadGraphQLConfig(String),
+	InternalError(String),
+	Thrown(String),
+	SerializationError(String),
+	DeserializationError(String),
+	ClientSideError(String),
+	InvalidAuth(String),
+	QueryNotExecuted(String),
+	QueryTimedout,
+	QueryCancelled,
 }
 
 impl DbResultError {
-	pub fn parse_error() -> DbResultError {
-		DbResultError {
-			code: -32700,
-			message: "Parse error".to_string(),
+	const PARSE_ERROR: i64 = -32700;
+	const INVALID_REQUEST: i64 = -32600;
+	const METHOD_NOT_FOUND: i64 = -32601;
+	const METHOD_NOT_ALLOWED: i64 = -32602;
+	const INVALID_PARAMS: i64 = -32603;
+	const LIVE_QUERY_NOT_SUPPORTED: i64 = -32604;
+	const BAD_LIVE_QUERY_CONFIG: i64 = -32605;
+	const BAD_GRAPHQL_CONFIG: i64 = -32606;
+	const INTERNAL_ERROR: i64 = -32000;
+	const CLIENT_SIDE_ERROR: i64 = -32001;
+	const INVALID_AUTH: i64 = -32002;
+	const QUERY_NOT_EXECUTED: i64 = -32003;
+	const QUERY_TIMEDOUT: i64 = -32004;
+	const QUERY_CANCELLED: i64 = -32005;
+	const THROWN: i64 = -32006;
+	const SERIALIZATION_ERROR: i64 = -32007;
+	const DESERIALIZATION_ERROR: i64 = -32008;
+
+	pub fn code(&self) -> i64 {
+		match self {
+			Self::ParseError(_) => Self::PARSE_ERROR,
+			Self::InvalidRequest(_) => Self::INVALID_REQUEST,
+			Self::MethodNotFound(_) => Self::METHOD_NOT_FOUND,
+			Self::MethodNotAllowed(_) => Self::METHOD_NOT_ALLOWED,
+			Self::InvalidParams(_) => Self::INVALID_PARAMS,
+			Self::LiveQueryNotSupported => Self::LIVE_QUERY_NOT_SUPPORTED,
+			Self::BadLiveQueryConfig(_) => Self::BAD_LIVE_QUERY_CONFIG,
+			Self::BadGraphQLConfig(_) => Self::BAD_GRAPHQL_CONFIG,
+			Self::InternalError(_) => Self::INTERNAL_ERROR,
+			Self::Thrown(_) => Self::THROWN,
+			Self::SerializationError(_) => Self::SERIALIZATION_ERROR,
+			Self::DeserializationError(_) => Self::DESERIALIZATION_ERROR,
+			Self::ClientSideError(_) => Self::CLIENT_SIDE_ERROR,
+			Self::InvalidAuth(_) => Self::INVALID_AUTH,
+			Self::QueryNotExecuted(_) => Self::QUERY_NOT_EXECUTED,
+			Self::QueryTimedout => Self::QUERY_TIMEDOUT,
+			Self::QueryCancelled => Self::QUERY_CANCELLED,
 		}
 	}
 
-	pub fn invalid_request() -> DbResultError {
-		DbResultError {
-			code: -32600,
-			message: "Invalid Request".to_string(),
+	pub fn from_code(code: i64, message: String) -> DbResultError {
+		match code {
+			Self::PARSE_ERROR => Self::ParseError(message),
+			Self::INVALID_REQUEST => Self::InvalidRequest(message),
+			Self::METHOD_NOT_FOUND => Self::MethodNotFound(message),
+			Self::METHOD_NOT_ALLOWED => Self::MethodNotAllowed(message),
+			Self::INVALID_PARAMS => Self::InvalidParams(message),
+			Self::LIVE_QUERY_NOT_SUPPORTED => Self::LiveQueryNotSupported,
+			Self::BAD_LIVE_QUERY_CONFIG => Self::BadLiveQueryConfig(message),
+			Self::BAD_GRAPHQL_CONFIG => Self::BadGraphQLConfig(message),
+			Self::INTERNAL_ERROR => Self::InternalError(message),
+			Self::THROWN => Self::Thrown(message),
+			Self::SERIALIZATION_ERROR => Self::SerializationError(message),
+			Self::DESERIALIZATION_ERROR => Self::DeserializationError(message),
+			Self::CLIENT_SIDE_ERROR => Self::ClientSideError(message),
+			Self::INVALID_AUTH => Self::InvalidAuth(message),
+			Self::QUERY_NOT_EXECUTED => Self::QueryNotExecuted(message),
+			Self::QUERY_TIMEDOUT => Self::QueryTimedout,
+			Self::QUERY_CANCELLED => Self::QueryCancelled,
+			// For any unknown code, map to InternalError
+			_ => Self::InternalError(format!("Unknown error code {}: {}", code, message)),
 		}
 	}
+}
 
-	pub fn method_not_found() -> DbResultError {
-		DbResultError {
-			code: -32601,
-			message: "Method not found".to_string(),
-		}
+#[revisioned(revision = 1)]
+#[derive(Serialize, Deserialize)]
+struct DbResultSerde {
+	code: i64,
+	message: String,
+}
+
+// Serialize as if it were struct with a code and message field.
+impl Revisioned for DbResultError {
+	fn revision() -> u16 {
+		1
 	}
 
-	pub fn method_not_allowed() -> DbResultError {
-		DbResultError {
-			code: -32603,
-			message: "Method not allowed".to_string(),
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
+		let message = match self {
+			Self::ParseError(msg) => msg.clone(),
+			Self::InvalidRequest(msg) => msg.clone(),
+			Self::MethodNotFound(msg) => msg.clone(),
+			Self::MethodNotAllowed(msg) => msg.clone(),
+			Self::InvalidParams(msg) => msg.clone(),
+			Self::LiveQueryNotSupported => "Live query not supported".to_string(),
+			Self::BadLiveQueryConfig(msg) => msg.clone(),
+			Self::BadGraphQLConfig(msg) => msg.clone(),
+			Self::InternalError(msg) => msg.clone(),
+			Self::Thrown(msg) => msg.clone(),
+			Self::SerializationError(msg) => msg.clone(),
+			Self::DeserializationError(msg) => msg.clone(),
+			Self::ClientSideError(msg) => msg.clone(),
+			Self::InvalidAuth(msg) => msg.clone(),
+			Self::QueryNotExecuted(msg) => msg.clone(),
+			Self::QueryTimedout => "Query timed out".to_string(),
+			Self::QueryCancelled => "Query cancelled".to_string(),
+		};
+		DbResultSerde {
+			code: self.code(),
+			message,
 		}
+		.serialize_revisioned(writer)
 	}
 
-	pub fn invalid_params(message: impl Into<String>) -> DbResultError {
-		DbResultError {
-			code: -32602,
-			message: format!("Invalid params: {}", message.into()),
-		}
-	}
-
-	pub fn lq_not_suported() -> DbResultError {
-		DbResultError {
-			code: -32604,
-			message: "Live Query not supported".to_string(),
-		}
-	}
-
-	pub fn bad_lq_config() -> DbResultError {
-		DbResultError {
-			code: -32605,
-			message: "Bad Live Query config".to_string(),
-		}
-	}
-
-	pub fn bad_gql_config() -> DbResultError {
-		DbResultError {
-			code: -32606,
-			message: "Bad GraphQL config".to_string(),
-		}
-	}
-
-	pub fn custom(message: impl Into<String>) -> DbResultError {
-		DbResultError {
-			code: -32000,
-			message: message.into(),
-		}
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		let serde: DbResultSerde = Revisioned::deserialize_revisioned(reader)?;
+		Ok(DbResultError::from_code(serde.code, serde.message))
 	}
 }
 
 impl Display for DbResultError {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "{}", self.message)
-	}
-}
-
-impl std::error::Error for DbResultError {
-	fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-		None
+		match self {
+			Self::ParseError(msg) => write!(f, "{}", msg),
+			Self::InvalidRequest(msg) => write!(f, "{}", msg),
+			Self::MethodNotFound(msg) => write!(f, "{}", msg),
+			Self::MethodNotAllowed(msg) => write!(f, "{}", msg),
+			Self::InvalidParams(msg) => write!(f, "{}", msg),
+			Self::LiveQueryNotSupported => write!(f, "Live query not supported"),
+			Self::BadLiveQueryConfig(msg) => write!(f, "{}", msg),
+			Self::BadGraphQLConfig(msg) => write!(f, "{}", msg),
+			Self::InternalError(msg) => write!(f, "{}", msg),
+			Self::Thrown(msg) => write!(f, "{}", msg),
+			Self::SerializationError(msg) => write!(f, "{}", msg),
+			Self::DeserializationError(msg) => write!(f, "{}", msg),
+			Self::ClientSideError(msg) => write!(f, "{}", msg),
+			Self::InvalidAuth(msg) => write!(f, "{}", msg),
+			Self::QueryNotExecuted(msg) => write!(f, "{}", msg),
+			Self::QueryTimedout => write!(f, "Query timed out"),
+			Self::QueryCancelled => write!(f, "Query cancelled"),
+		}
 	}
 }
 
 impl From<RpcError> for DbResultError {
 	fn from(error: RpcError) -> Self {
 		match error {
-			RpcError::ParseError => DbResultError::parse_error(),
-			RpcError::InvalidRequest => DbResultError::invalid_request(),
-			RpcError::MethodNotFound => DbResultError::method_not_found(),
-			RpcError::MethodNotAllowed => DbResultError::method_not_allowed(),
-			RpcError::InvalidParams(message) => DbResultError::invalid_params(message),
-			RpcError::InternalError(error) => DbResultError::custom(error.to_string()),
-			RpcError::LqNotSuported => DbResultError::lq_not_suported(),
-			RpcError::BadLQConfig => DbResultError::bad_lq_config(),
-			RpcError::BadGQLConfig => DbResultError::bad_gql_config(),
-			RpcError::Thrown(message) => DbResultError::custom(message),
-			RpcError::Serialize(message) => DbResultError::custom(message),
-			RpcError::Deserialize(message) => DbResultError::custom(message),
+			RpcError::ParseError => DbResultError::ParseError("Parse error".to_string()),
+			RpcError::InvalidRequest => {
+				DbResultError::InvalidRequest("Invalid request".to_string())
+			}
+			RpcError::MethodNotFound => {
+				DbResultError::MethodNotFound("Method not found".to_string())
+			}
+			RpcError::MethodNotAllowed => {
+				DbResultError::MethodNotAllowed("Method not allowed".to_string())
+			}
+			RpcError::InvalidParams(message) => DbResultError::InvalidParams(message),
+			RpcError::InternalError(error) => DbResultError::InternalError(error.to_string()),
+			RpcError::LqNotSuported => DbResultError::LiveQueryNotSupported,
+			RpcError::BadLQConfig => {
+				DbResultError::BadLiveQueryConfig("Bad live query config".to_string())
+			}
+			RpcError::BadGQLConfig => {
+				DbResultError::BadGraphQLConfig("Bad GraphQL config".to_string())
+			}
+			RpcError::Thrown(message) => DbResultError::Thrown(message),
+			RpcError::Serialize(message) => DbResultError::SerializationError(message),
+			RpcError::Deserialize(message) => DbResultError::DeserializationError(message),
 		}
 	}
 }
-
-pub type DbResponseResult = Result<DbResult, DbResultError>;
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DbResponse {
 	pub id: Option<PublicValue>,
-	pub result: DbResponseResult,
+	pub result: Result<DbResult, DbResultError>,
 }
 
 impl DbResponse {
-	pub fn new(id: Option<PublicValue>, result: DbResponseResult) -> Self {
+	pub fn new(id: Option<PublicValue>, result: Result<DbResult, DbResultError>) -> Self {
 		Self {
 			id,
 			result,

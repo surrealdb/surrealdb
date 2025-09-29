@@ -8,8 +8,8 @@ use surrealdb_core::rpc::DbResultStats;
 use surrealdb_types::{self, SurrealValue, Value};
 
 use crate::api::err::Error;
+use crate::api::method::live::Stream;
 use crate::api::{IndexedResults as QueryResponse, Result};
-use crate::method::{self, Stream};
 use crate::notification::Notification;
 
 /// Represents a way to take a single query result from a list of responses
@@ -295,13 +295,16 @@ mod query_stream {
 		fn query_stream(
 			self,
 			response: &mut super::QueryResponse,
-		) -> super::Result<super::method::QueryStream<R>>;
+		) -> super::Result<crate::api::method::QueryStream<R>>;
 	}
 }
 
 impl QueryStream<Value> for usize {}
 impl query_stream::Sealed<Value> for usize {
-	fn query_stream(self, response: &mut QueryResponse) -> Result<method::QueryStream<Value>> {
+	fn query_stream(
+		self,
+		response: &mut QueryResponse,
+	) -> Result<crate::api::method::QueryStream<Value>> {
 		let stream = response
 			.live_queries
 			.swap_remove(&self)
@@ -320,13 +323,16 @@ impl query_stream::Sealed<Value> for usize {
 				true => Err(Error::NotLiveQuery(self).into()),
 				false => Err(Error::QueryIndexOutOfBounds(self).into()),
 			})?;
-		Ok(method::QueryStream(Either::Left(stream)))
+		Ok(crate::api::method::QueryStream(Either::Left(stream)))
 	}
 }
 
 impl QueryStream<Value> for () {}
 impl query_stream::Sealed<Value> for () {
-	fn query_stream(self, response: &mut QueryResponse) -> Result<method::QueryStream<Value>> {
+	fn query_stream(
+		self,
+		response: &mut QueryResponse,
+	) -> Result<crate::api::method::QueryStream<Value>> {
 		let mut streams = Vec::with_capacity(response.live_queries.len());
 		for (index, result) in mem::take(&mut response.live_queries) {
 			match result {
@@ -350,7 +356,7 @@ impl query_stream::Sealed<Value> for () {
 				}
 			}
 		}
-		Ok(method::QueryStream(Either::Right(select_all(streams))))
+		Ok(crate::api::method::QueryStream(Either::Right(select_all(streams))))
 	}
 }
 
@@ -362,7 +368,7 @@ where
 	fn query_stream(
 		self,
 		response: &mut QueryResponse,
-	) -> Result<method::QueryStream<Notification<R>>> {
+	) -> Result<crate::api::method::QueryStream<Notification<R>>> {
 		let mut stream = response
 			.live_queries
 			.swap_remove(&self)
@@ -381,7 +387,7 @@ where
 				true => Err(Error::NotLiveQuery(self).into()),
 				false => Err(Error::QueryIndexOutOfBounds(self).into()),
 			})?;
-		Ok(method::QueryStream(Either::Left(Stream {
+		Ok(crate::api::method::QueryStream(Either::Left(Stream {
 			client: stream.client.clone(),
 			id: mem::take(&mut stream.id),
 			rx: stream.rx.take(),
@@ -398,7 +404,7 @@ where
 	fn query_stream(
 		self,
 		response: &mut QueryResponse,
-	) -> Result<method::QueryStream<Notification<R>>> {
+	) -> Result<crate::api::method::QueryStream<Notification<R>>> {
 		let mut streams = Vec::with_capacity(response.live_queries.len());
 		for (index, result) in mem::take(&mut response.live_queries) {
 			let mut stream = match result {
@@ -428,6 +434,6 @@ where
 				response_type: PhantomData,
 			});
 		}
-		Ok(method::QueryStream(Either::Right(select_all(streams))))
+		Ok(crate::api::method::QueryStream(Either::Right(select_all(streams))))
 	}
 }

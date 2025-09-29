@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{RecordIdKeyRange, SurrealValue, Value};
+use surrealdb_types::{RecordIdKeyRange, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -61,9 +61,10 @@ macro_rules! into_future {
 
 				let what = resource?;
 				router
-					.$method(Command::Delete {
+					.$method(Command::RawQuery {
 						txn,
-						what,
+						query: Cow::Owned(format!("DELETE {}", what.into_value())),
+						variables: Variables::new(),
 					})
 					.await
 			})

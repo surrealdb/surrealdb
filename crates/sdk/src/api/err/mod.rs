@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 use surrealdb_core::dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError};
+use surrealdb_core::rpc::DbResultError;
 use surrealdb_types::Value;
 use thiserror::Error;
 
@@ -273,6 +274,26 @@ pub enum Error {
 	/// The engine used does not support data versioning
 	#[error("The '{0}' engine does not support data versioning")]
 	VersionsNotSupported(String),
+
+	/// Method not found
+	#[error("Method not found: {0}")]
+	MethodNotFound(String),
+
+	/// Method not allowed
+	#[error("Method not allowed: {0}")]
+	MethodNotAllowed(String),
+
+	/// Bad live query configuration
+	#[error("Bad live query configuration: {0}")]
+	BadLiveQueryConfig(String),
+
+	/// Bad GraphQL configuration
+	#[error("Bad GraphQL configuration: {0}")]
+	BadGraphQLConfig(String),
+
+	/// A thrown error from the database
+	#[error("Thrown error: {0}")]
+	Thrown(String),
 }
 
 impl serde::ser::Error for Error {
@@ -299,5 +320,30 @@ impl Serialize for Error {
 		S: serde::Serializer,
 	{
 		serializer.serialize_str(self.to_string().as_str())
+	}
+}
+
+// There is a 1:1 mapping between DbResultError and Error
+impl From<DbResultError> for Error {
+	fn from(err: DbResultError) -> Self {
+		match err {
+			DbResultError::ParseError(message) => Error::ParseError(message),
+			DbResultError::InvalidRequest(message) => Error::InvalidRequest(message),
+			DbResultError::MethodNotFound(message) => Error::MethodNotFound(message),
+			DbResultError::MethodNotAllowed(message) => Error::MethodNotAllowed(message),
+			DbResultError::InvalidParams(message) => Error::InvalidParams(message),
+			DbResultError::LiveQueryNotSupported => Error::LiveQueriesNotSupported,
+			DbResultError::BadLiveQueryConfig(message) => Error::BadLiveQueryConfig(message),
+			DbResultError::BadGraphQLConfig(message) => Error::BadGraphQLConfig(message),
+			DbResultError::InternalError(message) => Error::InternalError(message),
+			DbResultError::Thrown(message) => Error::Thrown(message),
+			DbResultError::SerializationError(message) => Error::SerializeValue(message),
+			DbResultError::DeserializationError(message) => Error::DeSerializeValue(message),
+			DbResultError::ClientSideError(message) => Error::Query(message),
+			DbResultError::InvalidAuth(message) => Error::Query(message),
+			DbResultError::QueryNotExecuted(message) => Error::Query(message),
+			DbResultError::QueryTimedout => Error::Query("Query timed out".to_string()),
+			DbResultError::QueryCancelled => Error::Query("Query cancelled".to_string()),
+		}
 	}
 }

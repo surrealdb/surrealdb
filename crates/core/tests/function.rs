@@ -49,7 +49,7 @@ async fn error_on_invalid_function() -> Result<()> {
 	let mut resp = dbs.process(query, &session, None).await.unwrap();
 	assert_eq!(resp.len(), 1);
 	let err = resp.pop().unwrap().result.unwrap_err();
-	if err == DbResultError::custom("STU") {
+	if err == DbResultError::InternalError("STU".to_string()) {
 		panic!("returned wrong result {:#?}", err)
 	}
 	Ok(())
@@ -3888,7 +3888,7 @@ async fn function_outside_database() -> Result<()> {
 	let ses = Session::owner().with_ns("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 
-	assert_eq!(res.remove(0).result.unwrap_err(), DbResultError::custom("STU"));
+	assert_eq!(res.remove(0).result.unwrap_err(), DbResultError::InternalError("STU".to_string()));
 
 	Ok(())
 }

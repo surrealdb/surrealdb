@@ -277,17 +277,16 @@ mod mem {
 	#[test_log::test(tokio::test)]
 	async fn cant_sign_into_default_root_account() {
 		let db = Surreal::new::<Mem>(()).await.unwrap();
-		let Some(DbError::InvalidAuth) = db
-			.signin(Root {
+		assert_eq!(
+			db.signin(Root {
 				username: ROOT_USER.to_string(),
 				password: ROOT_PASS.to_string(),
 			})
 			.await
 			.unwrap_err()
-			.downcast_ref()
-		else {
-			panic!("unexpected successful login");
-		};
+			.downcast_ref(),
+			Some(&DbError::InvalidAuth)
+		);
 	}
 
 	#[test_log::test(tokio::test)]

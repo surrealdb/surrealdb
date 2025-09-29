@@ -2,13 +2,11 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use async_channel::{Receiver, Sender};
-use indexmap::IndexMap;
-use surrealdb_core::rpc::{DbResult, DbResultStats};
+use surrealdb_core::dbs::QueryResult;
 use surrealdb_types::{SurrealValue, Value};
 
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
-use crate::api::method::query::IndexedResults;
 use crate::api::opt::Endpoint;
 use crate::api::{ExtraFeatures, Result, Surreal};
 
@@ -32,7 +30,7 @@ pub(crate) struct Route {
 	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
 	pub(crate) request: RequestData,
 	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
-	pub(crate) response: Sender<Result<IndexedDbResults>>,
+	pub(crate) response: Sender<Result<Vec<QueryResult>>>,
 }
 
 /// Message router
@@ -50,10 +48,10 @@ impl Router {
 		self.last_id.fetch_add(1, Ordering::SeqCst)
 	}
 
-	pub(crate) fn send(
+	pub(crate) fn send_command(
 		&self,
 		command: Command,
-	) -> BoxFuture<'_, Result<Receiver<Result<IndexedDbResults>>>> {
+	) -> BoxFuture<'_, Result<Receiver<Result<Vec<QueryResult>>>>> {
 		Box::pin(async move {
 			let id = self.next_id();
 			let (sender, receiver) = async_channel::bounded(1);
@@ -70,31 +68,33 @@ impl Router {
 	}
 
 	/// Receive responses for all methods except `query`
-	pub(crate) fn recv(
+	pub(crate) fn recv_value(
 		&self,
-		receiver: Receiver<Result<IndexedDbResults>>,
-	) -> BoxFuture<'_, Result<Value>> {
+		receiver: Receiver<Result<Vec<QueryResult>>>,
+	) -> BoxFuture<'_, std::result::Result<Value, Error>> {
 		Box::pin(async move {
-			let response = receiver.recv().await?;
-			match response? {
-				IndexedDbResults::Other(value) => Ok(value),
-				IndexedDbResults::Query(..) => unreachable!(),
+			let response = receiver.recv().await.map_err(|_| Error::ConnectionUninitialised)?;
+			let mut results = response.map_err(|e| Error::InternalError(e.to_string()))?;
+
+			match results.len() {
+				0 => Ok(Value::None),
+				1 => {
+					let result = results.remove(0);
+					result.result.map_err(Error::from)
+				}
+				_ => Err(Error::InternalError(
+					"expected the database to return one or no results".to_string(),
+				)),
 			}
 		})
 	}
 
 	/// Receive the response of the `query` method
-	pub(crate) fn recv_query(
+	pub(crate) fn recv_results(
 		&self,
-		receiver: Receiver<Result<IndexedDbResults>>,
-	) -> BoxFuture<'_, Result<IndexedResults>> {
-		Box::pin(async move {
-			let response = receiver.recv().await?;
-			match response? {
-				IndexedDbResults::Query(results) => Ok(results),
-				IndexedDbResults::Other(..) => unreachable!(),
-			}
-		})
+		receiver: Receiver<Result<Vec<QueryResult>>>,
+	) -> BoxFuture<'_, Result<Vec<QueryResult>>> {
+		Box::pin(async move { receiver.recv().await? })
 	}
 
 	/// Execute all methods except `query`
@@ -103,8 +103,8 @@ impl Router {
 		R: SurrealValue,
 	{
 		Box::pin(async move {
-			let rx = self.send(command).await?;
-			let value = self.recv(rx).await?;
+			let rx = self.send_command(command).await?;
+			let value = self.recv_value(rx).await?;
 			R::from_value(value)
 		})
 	}
@@ -115,8 +115,8 @@ impl Router {
 		R: SurrealValue,
 	{
 		Box::pin(async move {
-			let rx = self.send(command).await?;
-			match self.recv(rx).await? {
+			let rx = self.send_command(command).await?;
+			match self.recv_value(rx).await? {
 				Value::None | Value::Null => Ok(None),
 				value => Ok(Some(R::from_value(value)?)),
 			}
@@ -129,8 +129,8 @@ impl Router {
 		R: SurrealValue,
 	{
 		Box::pin(async move {
-			let rx = self.send(command).await?;
-			match self.recv(rx).await? {
+			let rx = self.send_command(command).await?;
+			match self.recv_value(rx).await? {
 				Value::None | Value::Null => Ok(Vec::new()),
 				Value::Array(array) => {
 					array.into_iter().map(R::from_value).collect::<Result<Vec<R>>>()
@@ -143,8 +143,8 @@ impl Router {
 	/// Execute methods that return nothing
 	pub(crate) fn execute_unit(&self, command: Command) -> BoxFuture<'_, Result<()>> {
 		Box::pin(async move {
-			let rx = self.send(command).await?;
-			match self.recv(rx).await? {
+			let rx = self.send_command(command).await?;
+			match self.recv_value(rx).await? {
 				Value::None | Value::Null => Ok(()),
 				Value::Array(array) if array.is_empty() => Ok(()),
 				value => Err(Error::FromValue {
@@ -159,49 +159,20 @@ impl Router {
 	/// Execute methods that return a raw value
 	pub(crate) fn execute_value(&self, command: Command) -> BoxFuture<'_, Result<Value>> {
 		Box::pin(async move {
-			let rx = self.send(command).await?;
-			self.recv(rx).await
+			let rx = self.send_command(command).await?;
+			self.recv_value(rx).await.map_err(Into::into)
 		})
 	}
 
 	/// Execute the `query` method
-	pub(crate) fn execute_query(&self, command: Command) -> BoxFuture<'_, Result<IndexedResults>> {
+	pub(crate) fn execute_query(
+		&self,
+		command: Command,
+	) -> BoxFuture<'_, Result<Vec<QueryResult>>> {
 		Box::pin(async move {
-			let rx = self.send(command).await?;
-			self.recv_query(rx).await
+			let rx = self.send_command(command).await?;
+			self.recv_results(rx).await
 		})
-	}
-}
-
-/// The database response sent from the router to the caller
-#[derive(Debug)]
-pub enum IndexedDbResults {
-	/// The response sent for the `query` method
-	Query(IndexedResults),
-	/// The response sent for any method except `query`
-	Other(Value),
-}
-
-impl IndexedDbResults {
-	pub(crate) fn from_server_result(result: DbResult) -> Result<Self> {
-		match result {
-			DbResult::Other(value) => Ok(Self::Other(value)),
-			DbResult::Query(responses) => {
-				let mut results = IndexMap::with_capacity(responses.len());
-
-				for (index, response) in responses.into_iter().enumerate() {
-					let stats = DbResultStats::default().with_execution_time(response.time);
-					results.insert(index, (stats, response.result));
-				}
-
-				Ok(Self::Query(IndexedResults {
-					results,
-					live_queries: IndexMap::default(),
-				}))
-			}
-			// Live notifications don't call this method
-			DbResult::Live(..) => unreachable!(),
-		}
 	}
 }
 

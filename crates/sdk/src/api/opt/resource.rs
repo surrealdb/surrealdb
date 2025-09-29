@@ -1,6 +1,8 @@
 use std::ops::{self, Bound};
 
-use surrealdb_types::{Array, Object, RecordId, RecordIdKey, RecordIdKeyRange, Value};
+use surrealdb_types::{
+	Array, Kind, Object, RecordId, RecordIdKey, RecordIdKeyRange, SurrealValue, Value,
+};
 
 use crate::api::Result;
 use crate::api::err::Error;
@@ -52,8 +54,39 @@ impl Resource {
 		}
 	}
 
-	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-	pub(crate) fn into_value(self) -> Value {
+	pub fn is_single_recordid(&self) -> bool {
+		match self {
+			Resource::RecordId(rid) => !matches!(rid.key, RecordIdKey::Range(_)),
+			_ => false,
+		}
+	}
+}
+
+impl SurrealValue for Resource {
+	fn kind_of() -> Kind {
+		Kind::Either(vec![
+			Kind::String,
+			Kind::Record(vec![]),
+			Kind::Object,
+			Kind::Array(Box::new(Kind::Any), None),
+			Kind::Range,
+			Kind::None,
+		])
+	}
+
+	fn is_value(value: &Value) -> bool {
+		matches!(
+			value,
+			Value::String(_)
+				| Value::RecordId(_)
+				| Value::Object(_)
+				| Value::Array(_)
+				| Value::Range(_)
+				| Value::None
+		)
+	}
+
+	fn into_value(self) -> Value {
 		match self {
 			Resource::Table(x) => Value::String(x),
 			Resource::RecordId(x) => Value::RecordId(x),
@@ -63,11 +96,9 @@ impl Resource {
 			Resource::Unspecified => Value::None,
 		}
 	}
-	pub fn is_single_recordid(&self) -> bool {
-		match self {
-			Resource::RecordId(rid) => !matches!(rid.key, RecordIdKey::Range(_)),
-			_ => false,
-		}
+
+	fn from_value(value: Value) -> anyhow::Result<Self> {
+		Err(anyhow::anyhow!("Invalid resource: {value}"))
 	}
 }
 
@@ -350,17 +381,6 @@ impl<R> into_resource::Sealed<Vec<R>> for QueryRange {
 		Ok(self.into())
 	}
 }
-
-// impl<T, R> IntoResource<Vec<R>> for Table<T> where T: Into<String> {}
-// impl<T, R> into_resource::Sealed<Vec<R>> for Table<T>
-// where
-// 	T: Into<String>,
-// {
-// 	fn into_resource(self) -> Result<Resource> {
-// 		let t = self.0.into();
-// 		Ok(t.into())
-// 	}
-// }
 
 impl<R> IntoResource<Vec<R>> for &str {}
 impl<R> into_resource::Sealed<Vec<R>> for &str {

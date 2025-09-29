@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{SurrealValue, Value};
+use surrealdb_types::{SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use crate::Surreal;
@@ -39,7 +39,7 @@ where
 }
 
 macro_rules! into_future {
-	() => {
+	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Patch {
 				txn,
@@ -56,14 +56,22 @@ macro_rules! into_future {
 				}
 				let patches = surrealdb_types::Value::Array(surrealdb_types::Array::from(vec));
 				let router = client.inner.router.extract()?;
-				let cmd = Command::Patch {
+
+				let what = resource?.into_value();
+				let operation = if upsert {
+					"UPSERT"
+				} else {
+					"UPDATE"
+				};
+				let query = format!("{operation} {what} PATCH {patches}");
+
+				let cmd = Command::RawQuery {
 					txn,
-					upsert,
-					what: resource?,
-					data: Some(patches),
+					query: Cow::Owned(query),
+					variables: Variables::new(),
 				};
 
-				router.execute_query(cmd).await?.take(0)
+				router.$method(cmd).await
 			})
 		}
 	};
@@ -76,7 +84,7 @@ where
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {}
+	into_future! {execute_value}
 }
 
 impl<'r, Client, R> IntoFuture for Patch<'r, Client, Option<R>>
@@ -87,7 +95,7 @@ where
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {}
+	into_future! {execute_opt}
 }
 
 impl<'r, Client, R> IntoFuture for Patch<'r, Client, Vec<R>>
@@ -98,7 +106,7 @@ where
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {}
+	into_future! {execute_vec}
 }
 
 impl<'r, C, R> Patch<'r, C, R>

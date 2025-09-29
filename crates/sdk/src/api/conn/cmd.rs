@@ -7,14 +7,12 @@ use bincode::Options;
 use revision::Revisioned;
 use serde::Serialize;
 use serde::ser::SerializeMap as _;
-use surrealdb_core::expr::{Expr, LogicalPlan};
 use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_types::{Array, Notification, Object, Value, Variables};
 use uuid::Uuid;
 
 use super::MlExportConfig;
 use crate::Result;
-use crate::opt::Resource;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -33,57 +31,6 @@ pub(crate) enum Command {
 		token: String,
 	},
 	Invalidate,
-	Create {
-		txn: Option<Uuid>,
-		what: Resource,
-		data: Option<Value>,
-	},
-	Upsert {
-		txn: Option<Uuid>,
-		what: Resource,
-		data: Option<Value>,
-	},
-	Update {
-		txn: Option<Uuid>,
-		what: Resource,
-		data: Option<Value>,
-	},
-	Insert {
-		txn: Option<Uuid>,
-		// inserts can only be on a table.
-		what: Option<String>,
-		data: Value,
-	},
-	InsertRelation {
-		txn: Option<Uuid>,
-		what: Option<String>,
-		data: Value,
-	},
-	Patch {
-		txn: Option<Uuid>,
-		what: Resource,
-		data: Option<Value>,
-		upsert: bool,
-	},
-	Merge {
-		txn: Option<Uuid>,
-		what: Resource,
-		data: Option<Value>,
-		upsert: bool,
-	},
-	Select {
-		txn: Option<Uuid>,
-		what: Resource,
-	},
-	Delete {
-		txn: Option<Uuid>,
-		what: Resource,
-	},
-	Query {
-		txn: Option<Uuid>,
-		query: LogicalPlan,
-		variables: Variables,
-	},
 	RawQuery {
 		txn: Option<Uuid>,
 		query: Cow<'static, str>,
@@ -137,10 +84,7 @@ pub(crate) enum Command {
 impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
-		use surrealdb_core::expr::{Data, Output, UpdateStatement, UpsertStatement};
 		use surrealdb_types::Uuid;
-
-		use crate::engine::resource_to_exprs;
 
 		let res = match self {
 			Command::Use {
@@ -186,222 +130,6 @@ impl Command {
 				params: None,
 				transaction: None,
 			},
-			Command::Create {
-				txn,
-				what,
-				data,
-			} => {
-				let mut params = vec![what.into_value()];
-				if let Some(data) = data {
-					params.push(data);
-				}
-
-				RouterRequest {
-					id,
-					method: "create",
-					params: Some(Value::Array(Array::from(params))),
-					transaction: txn,
-				}
-			}
-			Command::Upsert {
-				txn,
-				what,
-				data,
-				..
-			} => {
-				let mut params = vec![what.into_value()];
-				if let Some(data) = data {
-					params.push(data);
-				}
-
-				RouterRequest {
-					id,
-					method: "upsert",
-					params: Some(Value::Array(Array::from(params))),
-					transaction: txn,
-				}
-			}
-			Command::Update {
-				txn,
-				what,
-				data,
-				..
-			} => {
-				let mut params = vec![what.into_value()];
-
-				if let Some(data) = data {
-					params.push(data);
-				}
-
-				RouterRequest {
-					id,
-					method: "update",
-					params: Some(Value::Array(Array::from(params))),
-					transaction: txn,
-				}
-			}
-			Command::Insert {
-				txn,
-				what,
-				data,
-			} => {
-				let table = match what {
-					Some(table) => Value::String(table),
-					None => Value::None,
-				};
-
-				let params = vec![table, data];
-
-				RouterRequest {
-					id,
-					method: "insert",
-					params: Some(Value::Array(Array::from(params))),
-					transaction: txn,
-				}
-			}
-			Command::InsertRelation {
-				txn,
-				what,
-				data,
-			} => {
-				let table = match what {
-					Some(table) => Value::String(table),
-					None => Value::None,
-				};
-				let params = vec![table, data];
-
-				RouterRequest {
-					id,
-					method: "insert_relation",
-					params: Some(Value::Array(Array::from(params))),
-					transaction: txn,
-				}
-			}
-			Command::Patch {
-				txn,
-				what,
-				data,
-				upsert,
-				..
-			} => {
-				let query = if upsert {
-					let expr = UpsertStatement {
-						only: false,
-						what: resource_to_exprs(what),
-						with: None,
-						data: data.map(|x| Data::PatchExpression(Expr::from_public_value(x))),
-						cond: None,
-						output: Some(Output::After),
-						timeout: None,
-						parallel: false,
-						explain: None,
-					};
-					expr.to_string()
-				} else {
-					let expr = UpdateStatement {
-						only: false,
-						what: resource_to_exprs(what),
-						with: None,
-						data: data.map(|x| Data::PatchExpression(Expr::from_public_value(x))),
-						cond: None,
-						output: Some(Output::After),
-						timeout: None,
-						parallel: false,
-						explain: None,
-					};
-					expr.to_string()
-				};
-
-				let variables = surrealdb_types::Object::default();
-				let params: Vec<Value> = vec![Value::String(query), Value::Object(variables)];
-
-				RouterRequest {
-					id,
-					method: "query",
-					params: Some(Value::Array(Array::from(params))),
-					transaction: txn,
-				}
-			}
-			Command::Merge {
-				txn,
-				what,
-				data,
-				upsert,
-				..
-			} => {
-				let query = if upsert {
-					let expr = UpsertStatement {
-						only: false,
-						what: resource_to_exprs(what),
-						with: None,
-						data: data.map(|x| Data::MergeExpression(Expr::from_public_value(x))),
-						cond: None,
-						output: Some(Output::After),
-						timeout: None,
-						parallel: false,
-						explain: None,
-					};
-					expr.to_string()
-				} else {
-					let expr = UpdateStatement {
-						only: false,
-						what: resource_to_exprs(what),
-						with: None,
-						data: data.map(|x| Data::MergeExpression(Expr::from_public_value(x))),
-						cond: None,
-						output: Some(Output::After),
-						timeout: None,
-						parallel: false,
-						explain: None,
-					};
-					expr.to_string()
-				};
-
-				let variables = Object::default();
-				let params: Vec<Value> = vec![Value::String(query), Value::Object(variables)];
-
-				RouterRequest {
-					id,
-					method: "query",
-					params: Some(Value::Array(Array::from(params))),
-					transaction: txn,
-				}
-			}
-			Command::Select {
-				txn,
-				what,
-				..
-			} => RouterRequest {
-				id,
-				method: "select",
-				params: Some(Value::Array(vec![what.into_value()].into())),
-				transaction: txn,
-			},
-			Command::Delete {
-				txn,
-				what,
-				..
-			} => RouterRequest {
-				id,
-				method: "delete",
-				params: Some(Value::Array(vec![what.into_value()].into())),
-				transaction: txn,
-			},
-			Command::Query {
-				txn,
-				query,
-				variables,
-			} => {
-				let query = query.to_string();
-				let params: Vec<Value> =
-					vec![Value::String(query), Value::Object(variables.into())];
-				RouterRequest {
-					id,
-					method: "query",
-					params: Some(Value::Array(Array::from(params))),
-					transaction: txn,
-				}
-			}
 			Command::RawQuery {
 				txn,
 				query,
@@ -493,41 +221,6 @@ impl Command {
 			}
 		};
 		Some(res)
-	}
-
-	#[cfg(feature = "protocol-http")]
-	pub(crate) fn needs_flatten(&self) -> bool {
-		match self {
-			Command::Upsert {
-				what,
-				..
-			}
-			| Command::Update {
-				what,
-				..
-			}
-			| Command::Patch {
-				what,
-				..
-			}
-			| Command::Merge {
-				what,
-				..
-			}
-			| Command::Select {
-				what,
-				..
-			}
-			| Command::Delete {
-				what,
-				..
-			} => matches!(what, Resource::RecordId(_)),
-			Command::Insert {
-				data,
-				..
-			} => !data.is_array(),
-			_ => false,
-		}
 	}
 }
 

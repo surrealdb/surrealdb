@@ -8,17 +8,18 @@ use futures::StreamExt;
 use futures::future::Either;
 use futures::stream::SelectAll;
 use indexmap::IndexMap;
+use surrealdb_core::dbs::QueryType;
 use surrealdb_core::rpc::{DbResultError, DbResultStats};
 use surrealdb_types::{self, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
-use super::Stream;
 use super::transaction::WithTransaction;
 use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Result, opt};
+use crate::method::live::Stream;
 use crate::method::{OnceLockExt, WithStats};
 use crate::notification::Notification;
 
@@ -105,13 +106,40 @@ where
 			tracing::warn!("query: {}", query);
 			tracing::warn!("variables: {:?}", variables);
 
-			router
+			let results = router
 				.execute_query(Command::RawQuery {
 					query: Cow::Owned(query.into_owned()),
 					txn,
 					variables: variables?,
 				})
-				.await
+				.await?;
+
+			let mut indexed_results = IndexedResults::new();
+
+			for (index, result) in results.into_iter().enumerate() {
+				let stats = DbResultStats::default().with_execution_time(result.time);
+
+				match result.query_type {
+					QueryType::Other => {
+						indexed_results.results.insert(index, (stats, result.result));
+					}
+					QueryType::Live => {
+						let live_query_id = result.result?.into_uuid()?;
+						let live_stream = crate::method::live::register(
+							router,
+							live_query_id.into(),
+						)
+						.await
+						.map(|rx| {
+							Stream::new(client.inner.clone().into(), live_query_id.into(), Some(rx))
+						});
+						indexed_results.live_queries.insert(index, live_stream);
+					}
+					QueryType::Kill => {}
+				}
+			}
+
+			Ok(indexed_results)
 		})
 	}
 }
@@ -659,7 +687,7 @@ mod tests {
 	#[test]
 	fn take_from_an_errored_query() {
 		let mut response = IndexedResults {
-			results: to_map(vec![Err(DbResultError::custom("STU"))]),
+			results: to_map(vec![Err(DbResultError::InternalError("STU".to_string()))]),
 			..IndexedResults::new()
 		};
 		response.take::<Option<()>>(0).unwrap_err();
@@ -909,14 +937,14 @@ mod tests {
 			Ok(Value::from_int(0)),
 			Ok(Value::from_int(1)),
 			Ok(Value::from_int(2)),
-			Err(DbResultError::custom("test")),
+			Err(DbResultError::InternalError("test".to_string())),
 			Ok(Value::from_int(3)),
 			Ok(Value::from_int(4)),
 			Ok(Value::from_int(5)),
-			Err(DbResultError::custom("test")),
+			Err(DbResultError::InternalError("test".to_string())),
 			Ok(Value::from_int(6)),
 			Ok(Value::from_int(7)),
-			Err(DbResultError::custom("test")),
+			Err(DbResultError::InternalError("test".to_string())),
 		];
 		let response = IndexedResults {
 			results: to_map(response),
@@ -924,7 +952,7 @@ mod tests {
 		};
 		let err = response.check().unwrap_err();
 
-		assert_eq!(err, DbResultError::custom("test"));
+		assert_eq!(err, DbResultError::InternalError("test".to_string()));
 	}
 
 	#[test]
@@ -933,14 +961,14 @@ mod tests {
 			Ok(Value::from_int(0)),
 			Ok(Value::from_int(1)),
 			Ok(Value::from_int(2)),
-			Err(DbResultError::custom("test")),
+			Err(DbResultError::InternalError("test".to_string())),
 			Ok(Value::from_int(3)),
 			Ok(Value::from_int(4)),
 			Ok(Value::from_int(5)),
-			Err(DbResultError::custom("test")),
+			Err(DbResultError::InternalError("test".to_string())),
 			Ok(Value::from_int(6)),
 			Ok(Value::from_int(7)),
-			Err(DbResultError::custom("test")),
+			Err(DbResultError::InternalError("test".to_string())),
 		];
 		let mut response = IndexedResults {
 			results: to_map(response),
@@ -949,9 +977,9 @@ mod tests {
 		let errors = response.take_errors();
 		assert_eq!(response.num_statements(), 8);
 		assert_eq!(errors.len(), 3);
-		assert_eq!(errors[&10], DbResultError::custom("test"));
-		assert_eq!(errors[&7], DbResultError::custom("test"));
-		assert_eq!(errors[&3], DbResultError::custom("test"));
+		assert_eq!(errors[&10], DbResultError::InternalError("test".to_string()));
+		assert_eq!(errors[&7], DbResultError::InternalError("test".to_string()));
+		assert_eq!(errors[&3], DbResultError::InternalError("test".to_string()));
 		let Some(value): Option<i32> = response.take(2).unwrap() else {
 			panic!("statement not found");
 		};

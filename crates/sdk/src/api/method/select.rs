@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{RecordIdKeyRange, SurrealValue, Value};
+use surrealdb_types::{RecordIdKeyRange, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -59,10 +59,14 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async move {
 				let router = client.inner.router.extract()?;
+
+				let what = resource?;
+
 				router
-					.$method(Command::Select {
+					.$method(Command::RawQuery {
 						txn,
-						what: resource?,
+						query: Cow::Owned(format!("SELECT * FROM {}", what.into_value())),
+						variables: Variables::new(),
 					})
 					.await
 			})

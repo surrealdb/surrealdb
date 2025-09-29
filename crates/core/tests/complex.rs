@@ -171,7 +171,7 @@ fn ok_graph_traversal_depth() -> Result<()> {
 					assert_eq!(res, val);
 				}
 				Err(res) => {
-					assert_eq!(res, DbResultError::custom("STU"));
+					assert_eq!(res, DbResultError::InternalError("STU".to_string()));
 					assert!(n > 10, "Max traversals: {}", n - 1);
 				}
 			}
@@ -211,7 +211,7 @@ fn excessive_cast_chain_depth() -> Result<()> {
 		//
 		let tmp = res.next().unwrap();
 		let err = tmp.unwrap_err();
-		assert_eq!(err, DbResultError::custom("STU"));
+		assert_eq!(err, DbResultError::InternalError("STU".to_string()));
 		//
 		Ok(())
 	})

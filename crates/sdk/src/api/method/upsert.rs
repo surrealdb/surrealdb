@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{self, RecordIdKeyRange, SurrealValue, Value};
+use surrealdb_types::{self, RecordIdKeyRange, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -59,11 +59,14 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async move {
 				let router = client.inner.router.extract()?;
+
+				let what = resource?;
+
 				router
-					.$method(Command::Upsert {
+					.$method(Command::RawQuery {
 						txn,
-						what: resource?,
-						data: None,
+						query: Cow::Owned(format!("UPSERT {}", what.into_value())),
+						variables: Variables::new(),
 					})
 					.await
 			})
@@ -148,10 +151,17 @@ where
 				content => Some(content),
 			};
 
-			Ok(Command::Upsert {
+			let what = self.resource?.into_value();
+
+			let query = match data {
+				None => format!("UPSERT {what}"),
+				Some(content) => format!("UPSERT {what} CONTENT {content}"),
+			};
+
+			Ok(Command::RawQuery {
 				txn: self.txn,
-				what: self.resource?,
-				data,
+				query: Cow::Owned(query),
+				variables: Variables::new(),
 			})
 		})
 	}

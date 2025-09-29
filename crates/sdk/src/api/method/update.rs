@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{self, RecordIdKeyRange, SurrealValue, Value};
+use surrealdb_types::{self, RecordIdKeyRange, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -59,11 +59,14 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async move {
 				let router = client.inner.router.extract()?;
+
+				let what = resource?;
+
 				router
-					.$method(Command::Update {
+					.$method(Command::RawQuery {
 						txn,
-						what: resource?,
-						data: None,
+						query: Cow::Owned(format!("UPDATE {}", what.into_value())),
+						variables: Variables::new(),
 					})
 					.await
 			})
@@ -143,17 +146,17 @@ where
 				"Tried to update non-object-like data as content, only structs and objects are supported",
 			)?;
 
-			let what = self.resource?;
+			let what = self.resource?.into_value();
 
-			let data = match data {
-				Value::None => None,
-				content => Some(content),
+			let query = match data {
+				Value::None => format!("UPDATE {what}"),
+				content => format!("UPDATE {what} CONTENT {content}"),
 			};
 
-			Ok(Command::Update {
+			Ok(Command::RawQuery {
 				txn: self.txn,
-				what,
-				data,
+				query: Cow::Owned(query),
+				variables: Variables::new(),
 			})
 		})
 	}

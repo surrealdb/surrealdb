@@ -7,6 +7,7 @@ use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use revision::revisioned;
 use serde::Deserialize;
+use surrealdb_core::dbs::QueryResultBuilder;
 use surrealdb_core::rpc::{DbResponse, DbResult};
 use tokio::net::TcpStream;
 use tokio::sync::watch;
@@ -22,7 +23,7 @@ use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use trice::Instant;
 
 use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
-use crate::api::conn::{self, Command, IndexedDbResults, RequestData, Route, Router};
+use crate::api::conn::{self, Command, RequestData, Route, Router};
 use crate::api::engine::remote::ws::{Client, PING_INTERVAL};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
@@ -177,17 +178,12 @@ async fn router_handle_route(
 				key: key.clone(),
 			};
 		}
-		Command::Insert {
-			..
-		} => {
-			effect = RequestEffect::Insert;
-		}
 		Command::SubscribeLive {
 			ref uuid,
 			ref notification_sender,
 		} => {
 			state.live_queries.insert(*uuid, notification_sender.clone());
-			if response.clone().send(Ok(IndexedDbResults::Other(Value::None))).await.is_err() {
+			if response.clone().send(Ok(vec![QueryResultBuilder::instant_none()])).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			// There is nothing to send to the server here
@@ -246,7 +242,6 @@ async fn router_handle_route(
 			});
 		}
 		Err(error) => {
-			let error = Error::Ws(error.to_string());
 			if response.send(Err(error.into())).await.is_err() {
 				trace!("Receiver dropped");
 			}
@@ -271,45 +266,9 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 					if let Value::Number(surrealdb_types::Number::Int(id_num)) = id {
 						match state.pending_requests.remove(&id_num) {
 							Some(pending) => {
-								let resp = match response.result {
-									Ok(db_result) => {
-										IndexedDbResults::from_server_result(db_result)
-									}
-									Err(e) => Err(Error::Query(e.to_string()).into()),
-								};
-
-								let resp = match resp {
-									Ok(x) => x,
-									Err(e) => {
-										let _ = pending.response_channel.send(Err(e)).await;
-										return HandleResult::Ok;
-									}
-								};
 								// We can only route responses with IDs
 								match pending.effect {
 									RequestEffect::None => {}
-									RequestEffect::Insert => {
-										// For insert, we need to flatten single responses in an
-										// array
-										if let IndexedDbResults::Other(Value::Array(array)) = resp {
-											if array.len() == 1 {
-												let _ = pending
-													.response_channel
-													.send(Ok(IndexedDbResults::Other(
-														array.into_iter().next().unwrap(),
-													)))
-													.await;
-											} else {
-												let _ = pending
-													.response_channel
-													.send(Ok(IndexedDbResults::Other(
-														Value::Array(array),
-													)))
-													.await;
-											}
-											return HandleResult::Ok;
-										}
-									}
 									RequestEffect::Set {
 										key,
 										value,
@@ -322,7 +281,10 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 										state.vars.shift_remove(&key);
 									}
 								}
-								let _res = pending.response_channel.send(Ok(resp)).await;
+								todo!("STU")
+								// let _res =
+								// pending.response_channel.send(response.result.map_err(|e|
+								// e.into())).await;
 							}
 							_ => {
 								warn!(

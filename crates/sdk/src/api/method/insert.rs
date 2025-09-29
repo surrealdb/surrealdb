@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{Object, SurrealValue, Value};
+use surrealdb_types::{SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::insert_relation::InsertRelation;
@@ -60,28 +60,16 @@ macro_rules! into_future {
 				..
 			} = self;
 			Box::pin(async move {
-				let (table, data) = match resource? {
-					Resource::Table(table) => (table.into(), Value::Object(Object::default())),
-					Resource::RecordId(record_id) => {
-						let mut map = Object::default();
-						map.insert("id".to_string(), record_id.key.into_value());
-						(record_id.table, Value::Object(map))
-					}
-					Resource::Object(_) => return Err(Error::InsertOnObject.into()),
-					Resource::Array(_) => return Err(Error::InsertOnArray.into()),
-					Resource::Range {
-						..
-					} => return Err(Error::InsertOnRange.into()),
-					Resource::Unspecified => return Err(Error::InsertOnUnspecified.into()),
-				};
-				let cmd = Command::Insert {
-					txn,
-					what: Some(table.to_string()),
-					data,
-				};
+				let what = resource?;
 
 				let router = client.inner.router.extract()?;
-				router.$method(cmd).await
+				router
+					.$method(Command::RawQuery {
+						txn,
+						query: Cow::Owned(format!("INSERT INTO {}", what.into_value())),
+						variables: Variables::new(),
+					})
+					.await
 			})
 		}
 	};
@@ -136,11 +124,14 @@ where
 				"Tried to insert non-object-like data as content, only structs and objects are supported",
 			)?;
 			match self.resource? {
-				Resource::Table(table) => Ok(Command::Insert {
-					txn: self.txn,
-					what: Some(table),
-					data,
-				}),
+				Resource::Table(table) => {
+					let query = format!("INSERT INTO {} {}", table, data);
+					Ok(Command::RawQuery {
+						txn: self.txn,
+						query: Cow::Owned(query),
+						variables: Variables::new(),
+					})
+				}
 				Resource::RecordId(thing) => {
 					if data.is_array() {
 						Err(Error::InvalidParams(
@@ -152,21 +143,26 @@ where
 							x.insert("id".to_string(), thing.key.into_value());
 						}
 
-						Ok(Command::Insert {
+						let query = format!("INSERT INTO {} {}", thing.table, data);
+						Ok(Command::RawQuery {
 							txn: self.txn,
-							what: Some(thing.table),
-							data,
+							query: Cow::Owned(query),
+							variables: Variables::new(),
 						})
 					}
 				}
 				Resource::Object(_) => Err(Error::InsertOnObject.into()),
 				Resource::Array(_) => Err(Error::InsertOnArray.into()),
 				Resource::Range(_) => Err(Error::InsertOnRange.into()),
-				Resource::Unspecified => Ok(Command::Insert {
-					txn: self.txn,
-					what: None,
-					data,
-				}),
+				Resource::Unspecified => {
+					// When unspecified, we just INSERT the data directly
+					let query = format!("INSERT {}", data);
+					Ok(Command::RawQuery {
+						txn: self.txn,
+						query: Cow::Owned(query),
+						variables: Variables::new(),
+					})
+				}
 			}
 		})
 	}
@@ -189,11 +185,14 @@ where
 				"Tried to insert non-object-like data as relation data, only structs and objects are supported",
 			)?;
 			match self.resource? {
-				Resource::Table(table) => Ok(Command::InsertRelation {
-					txn: self.txn,
-					what: Some(table),
-					data,
-				}),
+				Resource::Table(table) => {
+					let query = format!("INSERT RELATION INTO {} {}", table, data);
+					Ok(Command::RawQuery {
+						txn: self.txn,
+						query: Cow::Owned(query),
+						variables: Variables::new(),
+					})
+				}
 				Resource::RecordId(thing) => {
 					if data.is_array() {
 						Err(Error::InvalidParams(
@@ -205,18 +204,23 @@ where
 							x.insert("id".to_string(), thing.key.into_value());
 						}
 
-						Ok(Command::InsertRelation {
+						let query = format!("INSERT RELATION INTO {} {}", thing.table, data);
+						Ok(Command::RawQuery {
 							txn: self.txn,
-							what: Some(thing.table),
-							data,
+							query: Cow::Owned(query),
+							variables: Variables::new(),
 						})
 					}
 				}
-				Resource::Unspecified => Ok(Command::InsertRelation {
-					txn: self.txn,
-					what: None,
-					data,
-				}),
+				Resource::Unspecified => {
+					// When unspecified, we just INSERT RELATION the data directly
+					let query = format!("INSERT RELATION {}", data);
+					Ok(Command::RawQuery {
+						txn: self.txn,
+						query: Cow::Owned(query),
+						variables: Variables::new(),
+					})
+				}
 				Resource::Object(_) => Err(Error::InsertOnObject.into()),
 				Resource::Array(_) => Err(Error::InsertOnArray.into()),
 				Resource::Range(_) => Err(Error::InsertOnRange.into()),

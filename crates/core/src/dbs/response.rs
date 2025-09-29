@@ -1,6 +1,6 @@
 use std::fmt;
 use std::str::FromStr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use revision::revisioned;
@@ -51,7 +51,7 @@ impl QueryType {
 
 /// The return value when running a query set on the database.
 #[revisioned(revision = 1)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct QueryResult {
 	pub time: Duration,
 	pub result: Result<Value, DbResultError>,
@@ -142,6 +142,56 @@ impl SurrealValue for QueryResult {
 			result,
 			query_type,
 		})
+	}
+}
+
+pub struct QueryResultBuilder {
+	start_time: Instant,
+	result: Result<Value, DbResultError>,
+	query_type: QueryType,
+}
+
+impl QueryResultBuilder {
+	pub fn started_now() -> Self {
+		Self {
+			start_time: Instant::now(),
+			result: Ok(Value::None),
+			query_type: QueryType::Other,
+		}
+	}
+
+	pub fn instant_none() -> QueryResult {
+		QueryResult {
+			time: Duration::ZERO,
+			result: Ok(Value::None),
+			query_type: QueryType::Other,
+		}
+	}
+
+	pub fn with_result(mut self, result: Result<Value, DbResultError>) -> Self {
+		self.result = result;
+		self
+	}
+
+	pub fn with_query_type(mut self, query_type: QueryType) -> Self {
+		self.query_type = query_type;
+		self
+	}
+
+	pub fn finish(self) -> QueryResult {
+		QueryResult {
+			time: self.start_time.elapsed(),
+			result: self.result,
+			query_type: self.query_type,
+		}
+	}
+
+	pub fn finish_with_result(self, result: Result<Value, DbResultError>) -> QueryResult {
+		QueryResult {
+			time: self.start_time.elapsed(),
+			result,
+			query_type: self.query_type,
+		}
 	}
 }
 

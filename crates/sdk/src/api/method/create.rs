@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{self, SurrealValue, Value};
+use surrealdb_types::{self, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -58,10 +58,13 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async move {
 				let router = client.inner.router.extract()?;
-				let cmd = Command::Create {
+
+				let what = resource?;
+
+				let cmd = Command::RawQuery {
 					txn,
-					what: resource?,
-					data: None,
+					query: Cow::Owned(format!("CREATE {}", what.into_value())),
+					variables: Variables::new(),
 				};
 				router.$method(cmd).await
 			})
@@ -107,15 +110,14 @@ where
 				"Tried to create non-object-like data as content, only structs and objects are supported",
 			)?;
 
-			let data = match content {
-				Value::None | Value::Null => None,
-				content => Some(content),
-			};
+			let what = self.resource?.into_value();
 
-			Ok(Command::Create {
+			let query = format!("CREATE {what} CONTENT {content}");
+
+			Ok(Command::RawQuery {
 				txn: self.txn,
-				what: self.resource?,
-				data,
+				query: Cow::Owned(query),
+				variables: Variables::new(),
 			})
 		})
 	}
@@ -138,15 +140,14 @@ where
 				"Tried to create non-object-like data as content, only structs and objects are supported",
 			)?;
 
-			let data = match content {
-				Value::None | Value::Null => None,
-				content => Some(content),
-			};
+			let what = self.resource?.into_value();
 
-			Ok(Command::Create {
+			let query = format!("CREATE {what} CONTENT {content}");
+
+			Ok(Command::RawQuery {
 				txn: self.txn,
-				what: self.resource?,
-				data,
+				query: Cow::Owned(query),
+				variables: Variables::new(),
 			})
 		})
 	}

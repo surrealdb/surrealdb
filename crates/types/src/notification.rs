@@ -53,7 +53,7 @@ impl FromStr for Action {
 
 /// A live query notification.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, SurrealValue)]
 #[non_exhaustive]
 pub struct Notification {
 	/// The id of the LIVE query to which this notification belongs

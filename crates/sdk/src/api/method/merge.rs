@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{SurrealValue, Value};
+use surrealdb_types::{SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::validate_data;
@@ -40,7 +40,7 @@ where
 }
 
 macro_rules! into_future {
-	() => {
+	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Merge {
 				txn,
@@ -64,13 +64,22 @@ macro_rules! into_future {
 				};
 
 				let router = client.inner.router.extract()?;
-				let cmd = Command::Merge {
-					upsert,
-					txn,
-					what: resource?,
-					data: content,
+
+				let what = resource?.into_value();
+				let query = match (upsert, content) {
+					(true, Some(data)) => format!("UPSERT {what} MERGE {data}"),
+					(true, None) => format!("UPSERT {what}"),
+					(false, Some(data)) => format!("UPDATE {what} MERGE {data}"),
+					(false, None) => format!("UPDATE {what}"),
 				};
-				router.execute_query(cmd).await?.take(0)
+
+				let cmd = Command::RawQuery {
+					txn,
+					query: Cow::Owned(query),
+					variables: Variables::new(),
+				};
+
+				router.$method(cmd).await
 			})
 		}
 	};
@@ -84,7 +93,7 @@ where
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {}
+	into_future! {execute_value}
 }
 
 impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, Option<R>>
@@ -96,7 +105,7 @@ where
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {}
+	into_future! {execute_opt}
 }
 
 impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, Vec<R>>
@@ -108,5 +117,5 @@ where
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {}
+	into_future! {execute_vec}
 }

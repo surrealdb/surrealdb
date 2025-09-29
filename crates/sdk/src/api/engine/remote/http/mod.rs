@@ -8,8 +8,8 @@ use indexmap::IndexMap;
 use reqwest::RequestBuilder;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
-use surrealdb_core::rpc;
-use surrealdb_core::rpc::DbResponse;
+use surrealdb_core::dbs::{QueryResult, QueryResultBuilder};
+use surrealdb_core::rpc::{self, DbResponse, DbResult};
 use surrealdb_types::{SurrealValue, Value};
 #[cfg(not(target_family = "wasm"))]
 use tokio::fs::OpenOptions;
@@ -21,7 +21,7 @@ use url::Url;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local;
 
-use crate::api::conn::{Command, IndexedDbResults, RequestData, RouterRequest};
+use crate::api::conn::{Command, RequestData, RouterRequest};
 use crate::api::err::Error;
 use crate::api::{Connect, Result, Surreal};
 // use crate::engine::remote::Response;
@@ -260,7 +260,7 @@ async fn send_request(
 	client: &reqwest::Client,
 	headers: &HeaderMap,
 	auth: &Option<Auth>,
-) -> Result<IndexedDbResults> {
+) -> Result<Vec<QueryResult>> {
 	let url = base_url.join(RPC_PATH).unwrap();
 
 	let body = surrealdb_core::rpc::format::bincode::encode(&req)
@@ -275,16 +275,14 @@ async fn send_request(
 		.map_err(|x| format!("Failed to deserialize bincode payload: {x}"))
 		.map_err(crate::api::Error::InvalidResponse)?;
 
-	IndexedDbResults::from_server_result(response.result?)
-}
-
-fn flatten_dbresponse_array(res: IndexedDbResults) -> IndexedDbResults {
-	match res {
-		IndexedDbResults::Other(Value::Array(array)) if array.len() == 1 => {
-			let v = array.into_iter().next().unwrap();
-			IndexedDbResults::Other(v)
+	match response.result? {
+		DbResult::Query(results) => Ok(results),
+		DbResult::Other(value) => {
+			Ok(vec![QueryResultBuilder::started_now().finish_with_result(Ok(value))])
 		}
-		x => x,
+		DbResult::Live(notification) => Ok(vec![
+			QueryResultBuilder::started_now().finish_with_result(Ok(notification.into_value())),
+		]),
 	}
 }
 
@@ -295,26 +293,8 @@ async fn router(
 	headers: &mut HeaderMap,
 	vars: &mut IndexMap<String, Value>,
 	auth: &mut Option<Auth>,
-) -> Result<IndexedDbResults> {
+) -> Result<Vec<QueryResult>> {
 	match req.command {
-		Command::Query {
-			txn,
-			query,
-			mut variables,
-		} => {
-			// Extend variables with session vars
-			for (key, value) in vars.clone() {
-				variables.insert(key, value);
-			}
-			let req = Command::Query {
-				txn,
-				query,
-				variables,
-			}
-			.into_router_request(None)
-			.expect("query should be valid request");
-			send_request(req, base_url, client, headers, auth).await
-		}
 		Command::Use {
 			namespace,
 			database,
@@ -349,13 +329,17 @@ async fn router(
 			.into_router_request(None)
 			.expect("signin should be a valid router request");
 
-			let IndexedDbResults::Other(value) =
-				send_request(req, base_url, client, headers, auth).await?
-			else {
-				return Err(Error::InternalError(
-					"recieved invalid result from server".to_string(),
-				)
-				.into());
+			let results = send_request(req, base_url, client, headers, auth).await?;
+
+			let value = match results.first() {
+				Some(result) => result.clone().result?,
+				None => {
+					error!("recieved invalid result from server");
+					return Err(Error::InternalError(
+						"Recieved invalid result from server".to_string(),
+					)
+					.into());
+				}
 			};
 
 			match Credentials::from_value(value.clone()) {
@@ -375,7 +359,7 @@ async fn router(
 				}
 			}
 
-			Ok(IndexedDbResults::Other(value))
+			Ok(results)
 		}
 		Command::Authenticate {
 			token,
@@ -385,16 +369,16 @@ async fn router(
 			}
 			.into_router_request(None)
 			.expect("authenticate should be a valid router request");
-			send_request(req, base_url, client, headers, auth).await?;
+			let results = send_request(req, base_url, client, headers, auth).await?;
 
 			*auth = Some(Auth::Bearer {
 				token,
 			});
-			Ok(IndexedDbResults::Other(Value::None))
+			Ok(results)
 		}
 		Command::Invalidate => {
 			*auth = None;
-			Ok(IndexedDbResults::Other(Value::None))
+			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		Command::Set {
 			key,
@@ -402,13 +386,13 @@ async fn router(
 		} => {
 			surrealdb_core::rpc::check_protected_param(&key)?;
 			vars.insert(key, value);
-			Ok(IndexedDbResults::Other(Value::None))
+			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		Command::Unset {
 			key,
 		} => {
 			vars.shift_remove(&key);
-			Ok(IndexedDbResults::Other(Value::None))
+			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		#[cfg(target_family = "wasm")]
 		Command::ExportFile {
@@ -443,7 +427,7 @@ async fn router(
 				.header(CONTENT_TYPE, "application/json")
 				.header(ACCEPT, "application/octet-stream");
 			export_file(request, path).await?;
-			Ok(IndexedDbResults::Other(Value::None))
+			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		Command::ExportBytes {
 			bytes,
@@ -460,7 +444,7 @@ async fn router(
 				.header(CONTENT_TYPE, "application/json")
 				.header(ACCEPT, "application/octet-stream");
 			export_bytes(request, bytes).await?;
-			Ok(IndexedDbResults::Other(Value::None))
+			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		#[cfg(not(target_family = "wasm"))]
 		Command::ExportMl {
@@ -475,7 +459,7 @@ async fn router(
 				.auth(auth)
 				.header(ACCEPT, "application/octet-stream");
 			export_file(request, path).await?;
-			Ok(IndexedDbResults::Other(Value::None))
+			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		Command::ExportBytesMl {
 			bytes,
@@ -489,7 +473,7 @@ async fn router(
 				.auth(auth)
 				.header(ACCEPT, "application/octet-stream");
 			export_bytes(request, bytes).await?;
-			Ok(IndexedDbResults::Other(Value::None))
+			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		#[cfg(not(target_family = "wasm"))]
 		Command::ImportFile {
@@ -502,7 +486,7 @@ async fn router(
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/octet-stream");
 			import(request, path).await?;
-			Ok(IndexedDbResults::Other(Value::None))
+			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		#[cfg(not(target_family = "wasm"))]
 		Command::ImportMl {
@@ -515,18 +499,14 @@ async fn router(
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/octet-stream");
 			import(request, path).await?;
-			Ok(IndexedDbResults::Other(Value::None))
+			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		Command::SubscribeLive {
 			..
 		} => Err(Error::LiveQueriesNotSupported.into()),
 		cmd => {
-			let needs_flatten = cmd.needs_flatten();
 			let req = cmd.into_router_request(None).unwrap();
-			let mut res = send_request(req, base_url, client, headers, auth).await?;
-			if needs_flatten {
-				res = flatten_dbresponse_array(res);
-			}
+			let res = send_request(req, base_url, client, headers, auth).await?;
 			Ok(res)
 		}
 	}

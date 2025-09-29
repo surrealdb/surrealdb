@@ -364,7 +364,7 @@ impl Websocket {
 							if shutdown.is_cancelled() {
 								// Process the response
 								crate::rpc::response::send(
-									DbResponse::failure(req.id, DbResultError::custom(SERVER_SHUTTING_DOWN)),
+									DbResponse::failure(req.id, DbResultError::InternalError(SERVER_SHUTTING_DOWN.to_string())),
 									otel_cx.clone(),
 									rpc.format,
 									chn
@@ -376,7 +376,7 @@ impl Websocket {
 							else if ALLOC.is_beyond_threshold() {
 								// Process the response
 								crate::rpc::response::send(
-									DbResponse::failure(req.id, DbResultError::custom(SERVER_OVERLOADED)),
+									DbResponse::failure(req.id, DbResultError::InternalError(SERVER_OVERLOADED.to_string())),
 									otel_cx.clone(),
 									rpc.format,
 									chn
@@ -431,7 +431,7 @@ impl Websocket {
 		debug!("Process RPC request");
 		// Check that the method is a valid method
 		if !method.is_valid() {
-			return Err(DbResultError::method_not_found());
+			return Err(DbResultError::MethodNotFound("Method not found".to_string()));
 		}
 		// Execute the specified method
 		RpcContext::execute(rpc.as_ref(), version, txn, method, params).await.map_err(Into::into)

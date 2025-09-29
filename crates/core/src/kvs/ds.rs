@@ -45,7 +45,7 @@ use crate::dbs::capabilities::{
 };
 use crate::dbs::executor::convert_value_to_public_value;
 use crate::dbs::node::Timestamp;
-use crate::dbs::{Capabilities, Executor, Options, QueryResult, Session};
+use crate::dbs::{Capabilities, Executor, Options, QueryResult, QueryResultBuilder, Session};
 use crate::err::Error;
 use crate::expr::statements::DefineUserStatement;
 use crate::expr::{Base, Expr, FlowResultExt as _, LogicalPlan};
@@ -1432,7 +1432,8 @@ impl Datastore {
 		session: &mut Session,
 		namespace: Option<String>,
 		database: Option<String>,
-	) -> Result<()> {
+	) -> Result<QueryResult> {
+		let query_result = QueryResultBuilder::started_now();
 		match (namespace, database) {
 			(Some(ns), Some(db)) => {
 				let tx = self.transaction(TransactionType::Write, LockType::Optimistic).await?;
@@ -1462,7 +1463,7 @@ impl Datastore {
 			}
 		}
 
-		Ok(())
+		Ok(query_result.finish())
 	}
 
 	/// Get a db model by name.

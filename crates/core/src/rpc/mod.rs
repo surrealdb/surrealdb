@@ -14,7 +14,7 @@ pub use format::Format;
 pub use method::Method;
 pub use protocol::v1::RpcProtocolV1;
 pub use request::Request;
-pub use response::{DbResponse, DbResponseResult, DbResult, DbResultError, DbResultStats};
+pub use response::{DbResponse, DbResult, DbResultError, DbResultStats};
 
 use crate::cnf::PROTECTED_PARAM_NAMES;
 
