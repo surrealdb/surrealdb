@@ -191,7 +191,7 @@ impl Command {
 				what,
 				data,
 			} => {
-				let mut params = vec![what.into_core_value()];
+				let mut params = vec![what.into_value()];
 				if let Some(data) = data {
 					params.push(data);
 				}
@@ -209,7 +209,7 @@ impl Command {
 				data,
 				..
 			} => {
-				let mut params = vec![what.into_core_value()];
+				let mut params = vec![what.into_value()];
 				if let Some(data) = data {
 					params.push(data);
 				}
@@ -227,7 +227,7 @@ impl Command {
 				data,
 				..
 			} => {
-				let mut params = vec![what.into_core_value()];
+				let mut params = vec![what.into_value()];
 
 				if let Some(data) = data {
 					params.push(data);
@@ -374,7 +374,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "select",
-				params: Some(Value::Array(vec![what.into_core_value()].into())),
+				params: Some(Value::Array(vec![what.into_value()].into())),
 				transaction: txn,
 			},
 			Command::Delete {
@@ -384,7 +384,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "delete",
-				params: Some(Value::Array(vec![what.into_core_value()].into())),
+				params: Some(Value::Array(vec![what.into_value()].into())),
 				transaction: txn,
 			},
 			Command::Query {

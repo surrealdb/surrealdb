@@ -53,7 +53,7 @@ impl Resource {
 	}
 
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-	pub(crate) fn into_core_value(self) -> Value {
+	pub(crate) fn into_value(self) -> Value {
 		match self {
 			Resource::Table(x) => Value::String(x),
 			Resource::RecordId(x) => Value::RecordId(x),

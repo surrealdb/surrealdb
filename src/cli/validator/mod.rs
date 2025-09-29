@@ -85,8 +85,8 @@ pub(crate) fn key_valid(v: &str) -> Result<String, String> {
 	}
 }
 
-pub(crate) fn duration(v: &str) -> Result<Duration, String> {
-	Duration::from_str(v).map_err(|_| String::from("invalid duration"))
+pub(crate) fn duration(v: &str) -> Result<std::time::Duration, String> {
+	Duration::from_str(v).map(|d| d.inner()).map_err(|_| String::from("invalid duration"))
 }
 
 pub(crate) fn net_targets(value: &str) -> Result<Targets<NetTarget>, String> {

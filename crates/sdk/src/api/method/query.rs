@@ -57,15 +57,27 @@ pub(crate) enum ValidQuery {
 }
 
 pub trait IntoVariables {
-	fn into_variables(self) -> Variables;
+	fn into_variables(self) -> Result<Variables>;
 }
 
 impl<T: SurrealValue> IntoVariables for T {
-	fn into_variables(self) -> Variables {
+	fn into_variables(self) -> Result<Variables> {
 		let value = self.into_value();
+		tracing::warn!("IntoVariables: {value:?}");
 		match value {
-			Value::Object(obj) => Variables::from(obj),
-			_ => Variables::new(), // For non-object values, return empty Variables
+			Value::Object(obj) => Ok(Variables::from(obj)),
+			Value::Array(arr) => {
+				let mut vars = Variables::new();
+				for v in arr.chunks(2) {
+					let key = v[0].clone().into_string().unwrap();
+					let value = v[1].clone();
+					vars.insert(key, value);
+				}
+				Ok(vars)
+			}
+			unexpected => {
+				Err(Error::InvalidParams(format!("Invalid variables type: {unexpected:?}")).into())
+			}
 		}
 	}
 }
@@ -137,6 +149,7 @@ where
 					query,
 					bindings,
 				} => {
+					tracing::warn!("Raw::Vars: {bindings:?}");
 					router
 						.execute_query(Command::RawQuery {
 							query,
@@ -150,6 +163,7 @@ where
 					register_live_queries,
 					bindings,
 				} => {
+					tracing::warn!("Normal::Vars: {bindings:?}");
 					// Collect the indexes of the live queries which should be registerd.
 					let query_indicies = if register_live_queries {
 						query
@@ -331,7 +345,7 @@ where
 
 			let bindings = bindings.into_variables();
 
-			current_bindings.extend(bindings);
+			current_bindings.extend(bindings.expect("TODO: Handle error"));
 
 			Ok(valid)
 		})

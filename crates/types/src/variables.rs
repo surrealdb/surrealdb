@@ -7,6 +7,7 @@ use crate::{Object, SurrealValue, Value};
 
 /// Represents a set of variables that can be used in a query.
 #[derive(Clone, Debug, Default, Eq, PartialEq, SurrealValue, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct Variables(BTreeMap<String, Value>);
 
 impl Variables {
