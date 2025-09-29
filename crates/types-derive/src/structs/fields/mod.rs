@@ -211,7 +211,7 @@ impl Fields {
 				Strategy::TagContentKeys {
 					tag,
 					variant,
-					..
+					content,
 				} => {
 					if attrs.value.is_some() {
 						panic!("Unit variants can only have a value with untagged enums");
@@ -220,6 +220,7 @@ impl Fields {
 					quote! {{
 						let mut map = surrealdb_types::Object::new();
 						map.insert(#tag.to_string(), surrealdb_types::Value::String(#variant.to_string()));
+						map.insert(#content.to_string(), surrealdb_types::Value::Object(surrealdb_types::Object::new()));
 						surrealdb_types::Value::Object(map)
 					}}
 				}
@@ -444,7 +445,7 @@ impl Fields {
 						content,
 					} => With::Map(quote! {{
 						if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
-							if let Some(surrealdb_types::Value::Object(_)) = map.remove(#content) {
+							if map.get(#content).is_some_and(|v| v.is_object_and(|o| o.is_empty())) {
 								#ok
 							} else {
 								return Err(surrealdb_types::anyhow::anyhow!("Expected object value"))
