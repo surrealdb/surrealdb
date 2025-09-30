@@ -954,7 +954,7 @@ jobs:
   # ----------------------------------------
 
   required-checks:
-    name: ${{ needs.sdk-javascript.outputs.tests-failed == 'true' || needs.sdk-golang.outputs.tests-failed == 'true' || needs.sdk-python.outputs.tests-failed == 'true' || needs.sdk-php.outputs.tests-failed == 'true' || needs.sdk-dotnet.outputs.tests-failed == 'true' && '⚠️  Required checks (SDK tests failed)' || 'Required checks' }}
+    name: Required checks
     runs-on: ubuntu-latest
     needs:
       # Server build
