@@ -1061,6 +1061,7 @@ allow_apis = ["net"]
 allow_unsafe = true
 
 [pkg.memmap2]
+allow_apis = ["fs"]
 allow_unsafe = true
 
 [pkg.rayon-core]
@@ -1435,3 +1436,14 @@ allow_unsafe = true
 allow_unsafe = true
 allow_apis = ["fs", "process"]
 
+[pkg.crossbeam-queue]
+allow_unsafe = true
+
+[pkg.crossbeam-skiplist]
+allow_unsafe = true
+
+[pkg.fs2]
+allow_unsafe = true
+
+[pkg.guardian]
+allow_unsafe = true

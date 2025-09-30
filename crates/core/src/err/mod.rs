@@ -1494,7 +1494,6 @@ impl From<ToStrError> for Error {
 impl From<surrealkv::Error> for Error {
 	fn from(e: surrealkv::Error) -> Error {
 		match e {
-			surrealkv::Error::TransactionReadConflict => Error::TxRetryable,
 			surrealkv::Error::TransactionWriteConflict => Error::TxRetryable,
 			_ => Error::Tx(e.to_string()),
 		}
