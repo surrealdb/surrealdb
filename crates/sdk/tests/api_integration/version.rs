@@ -4,11 +4,10 @@ use surrealdb::Value;
 use ulid::Ulid;
 
 use super::CreateDb;
-use crate::api_integration::NS;
 
 pub async fn select_with_version(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
 	// Create the initial version and record its timestamp.
@@ -63,7 +62,7 @@ pub async fn select_with_version(new_db: impl CreateDb) {
 
 pub async fn create_with_version(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
 	// Create a record in the past.
@@ -108,7 +107,7 @@ pub async fn create_with_version(new_db: impl CreateDb) {
 
 pub async fn insert_with_version(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
 	// Create a record in the past.
@@ -153,7 +152,7 @@ pub async fn insert_with_version(new_db: impl CreateDb) {
 
 pub async fn info_for_db_with_versioned_tables(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
 	// Record the timestamp before creating a testing table.
@@ -182,7 +181,7 @@ pub async fn info_for_db_with_versioned_tables(new_db: impl CreateDb) {
 
 pub async fn info_for_table_with_versioned_fields(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
 	// Create the testing table.
