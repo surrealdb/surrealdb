@@ -1,4 +1,4 @@
-name: 'Setup Databases'
+name: 'Setup databases'
 description: 'Install TiKV and/or FoundationDB based on requirements'
 
 inputs:
@@ -22,8 +22,10 @@ runs:
       if: ${{ inputs.tikv == 'true' }}
       shell: bash
       run: |
-        while ! ~/.tiup/bin/tiup -v; do
-          curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
+        attempt=0
+        while ! $HOME/.tiup/bin/tiup -v && [ $attempt -lt 10 ]; do
+          attempt=$((attempt + 1))
+          curl --proto '=https' --tlsv1.2 -sSf --connect-timeout 30 --max-time 120 https://tiup-mirrors.pingcap.com/install.sh | sh
         done
 
     - name: Install FoundationDB
