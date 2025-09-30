@@ -389,7 +389,7 @@ impl TransactionBuilderFactory for DatastoreFlavor {
 				bail!(Error::Ds("Unable to load the specified datastore".into()))
 			}
 		};
-		Ok((Box::new(v), c))
+		Ok((Box::<DatastoreFlavor>::new(v), c))
 	}
 
 	fn path_valid(v: &str) -> Result<String> {
