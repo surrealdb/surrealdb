@@ -49,18 +49,11 @@ jobs:
             target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.runner }}
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build binary
         run: cargo build --target ${{ matrix.target }}
@@ -79,28 +72,21 @@ jobs:
     name: Check format
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
       - name: Lookup the nightly toolchain
         id: info
         run: |
           set -x
           echo "toolchain=$(cat rust-toolchain.nightly)" >> $GITHUB_OUTPUT
 
-      - name: Install nightly toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ steps.info.outputs.toolchain }}
           components: rustfmt
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Check format
         run: cargo make ci-format
@@ -109,22 +95,15 @@ jobs:
     name: Check clippy
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
           components: clippy
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Run clippy
         run: cargo make ci-clippy
@@ -133,22 +112,15 @@ jobs:
     name: Check clippy (release)
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
           components: clippy
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Run clippy release
         run: cargo make ci-clippy-release
@@ -157,21 +129,14 @@ jobs:
     name: Check workspace
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Check workspace
         run: cargo make ci-check
@@ -180,21 +145,14 @@ jobs:
     name: Check workspace (release)
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Check workspace release
         run: cargo make ci-check-release
@@ -204,20 +162,12 @@ jobs:
     runs-on: ubuntu-latest
     env:
       msrv: "1.87" # This should be updated if the MSRV is updated.
-
     steps:
-      - name: Install MSRV toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.msrv }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
         run: cargo +${{ env.msrv }} install --debug --locked cargo-make
@@ -229,22 +179,15 @@ jobs:
     name: Check Wasm
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) v1
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: wasm32-unknown-unknown
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Check wasm
         run: cargo make ci-check-wasm
@@ -253,13 +196,11 @@ jobs:
     name: Check revision
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install revision-lock
         run: cargo install revision-lock
@@ -271,21 +212,14 @@ jobs:
     name: Check docs
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Check docs
         run: cargo make ci-docs
@@ -312,21 +246,14 @@ jobs:
     name: CLI integration tests
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Run CLI integration tests
         run: cargo make ci-cli-integration
@@ -335,21 +262,14 @@ jobs:
     name: HTTP integration tests
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Run HTTP integration tests
         run: cargo make ci-http-integration
@@ -358,21 +278,14 @@ jobs:
     name: WebSocket integration tests
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Run WebSocket integration tests
         run: cargo make ci-ws-integration
@@ -381,21 +294,14 @@ jobs:
     name: ML integration tests
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Run ML integration tests
         run: cargo make ci-ml-integration
@@ -404,21 +310,14 @@ jobs:
     name: GraphQL integration
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      #- name: Install cargo-make
-        #run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       #- name: Run GraphQL integration tests
         #run: cargo make ci-graphql-integration
@@ -431,23 +330,16 @@ jobs:
     name: Test workspace
     runs-on: [ runner-arm64-2xlarge ]
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
-        uses: taiki-e/install-action@3216b6964cbfe053bb8b9a2ef245bd9300e2061d # (Actions must be pinned by commit hash) v2.62.14
+        uses: ./.github/actions/install-tools
         with:
-          tool: cargo-llvm-cov,cargo-nextest,cargo-make
+          tools: cargo-llvm-cov,cargo-nextest,cargo-make
 
       - name: Test workspace + coverage
         run: cargo make ci-workspace-coverage
@@ -472,38 +364,23 @@ jobs:
       matrix:
         engine: [mem, rocksdb, surrealkv, tikv, fdb]
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          shared-key: kvs-${{ matrix.engine }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          cache-key: kvs-${{ matrix.engine }}
 
       - name: Install tools
-        uses: taiki-e/install-action@3216b6964cbfe053bb8b9a2ef245bd9300e2061d # (Actions must be pinned by commit hash) v2.62.14
+        uses: ./.github/actions/install-tools
         with:
-          tool: cargo-nextest,cargo-make
+          tools: cargo-llvm-cov,cargo-nextest,cargo-make
 
-      - name: Install TiKV
-        if: ${{ matrix.engine == 'tikv' }}
-        timeout-minutes: 10
-        run: |
-          while ! ~/.tiup/bin/tiup -v; do
-            curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
-          done
-
-      - name: Install FoundationDB
-        if: ${{ matrix.engine == 'fdb' }}
-        uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a # (Actions must be pinned by commit hash) v.2.2.0
+      - name: Setup databases
+        uses: ./.github/actions/setup-databases
         with:
-          version: "7.3.47"
+          tikv: ${{ matrix.engine == 'tikv' }}
+          foundationdb: ${{ matrix.engine == 'fdb' }}
 
       - name: Test engine
         run: cargo make ci-${{ matrix.engine }}-kvs
@@ -516,18 +393,11 @@ jobs:
     name: Test SDK build
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build local
         working-directory: tests/sdk/local
@@ -544,49 +414,26 @@ jobs:
       matrix:
         engine: [any, ws, http, mem, file, rocksdb, surrealkv, tikv, fdb]
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          shared-key: sdk-${{ matrix.engine }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          cache-key: sdk-${{ matrix.engine }}
 
       - name: Install tools
-        uses: taiki-e/install-action@3216b6964cbfe053bb8b9a2ef245bd9300e2061d # (Actions must be pinned by commit hash) v2.62.14
+        uses: ./.github/actions/install-tools
         with:
-          tool: cargo-nextest,cargo-make
+          tools: cargo-llvm-cov,cargo-nextest,cargo-make
 
-      - name: Install TiKV
-        if: ${{ matrix.engine == 'tikv' }}
-        timeout-minutes: 10
-        run: |
-          while ! ~/.tiup/bin/tiup -v; do
-            curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
-          done
-
-      - name: Install FoundationDB
-        if: ${{ matrix.engine == 'fdb' }}
-        uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a # (Actions must be pinned by commit hash) v.2.2.0
+      - name: Setup databases
+        uses: ./.github/actions/setup-databases
         with:
-          version: "7.3.47"
+          tikv: ${{ matrix.engine == 'tikv' }}
+          foundationdb: ${{ matrix.engine == 'fdb' }}
 
       - name: Test engine
         run: cargo make ci-api-integration-${{ matrix.engine }}
-
-      - name: Debug info
-        if: always()
-        run: |
-          set -x
-          free -m
-          df -h
-          ps auxf
 
   # ----------------------------------------
   # Database upgrade tests
@@ -596,21 +443,14 @@ jobs:
     name: Database upgrade from previous versions
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
   # ----------------------------------------
   # SurrealQL language tests
@@ -620,18 +460,11 @@ jobs:
     name: SurrealQL language tests
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
           workspaces: crates/language-tests
 
       - name: Build SurrealQL test tool
@@ -648,18 +481,11 @@ jobs:
     name: SurrealQL upgrade tests
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             crates/language-tests
             ./
@@ -695,14 +521,8 @@ jobs:
         with:
           repository: "surrealdb/surrealdb.js"
 
-      - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
-        with:
-          name: surreal-amd64
-          path: ${{ github.workspace }}/artifacts
-
-      - name: Set file permissions
-        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+      - name: Setup SurrealDB
+        uses: ./.github/actions/setup-surrealdb
 
       - name: Setup JavaScript
         uses: oven-sh/setup-bun@v2
@@ -742,14 +562,10 @@ jobs:
         with:
           repository: "surrealdb/surrealdb.go"
 
-      - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+      - name: Setup SurrealDB
+        uses: ./.github/actions/setup-surrealdb
         with:
-          name: surreal-amd64
-          path: ${{ github.workspace }}/artifacts
-
-      - name: Set file permissions
-        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+          start: true
 
       - name: Setup Golang
         uses: actions/setup-go@v4
@@ -757,27 +573,6 @@ jobs:
           go-version: ${{ matrix.version }}
           check-latest: true
           cache-dependency-path: go.sum
-
-      - name: Start SurrealDB
-        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
-
-      - name: Wait for startup
-        run: |
-          # Wait for SurrealDB to be ready
-          for i in {1..30}; do
-            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
-              echo "SurrealDB is ready"
-              break
-            fi
-            echo "Waiting for SurrealDB to start... (attempt $i/30)"
-            sleep 2
-          done
-
-          # Final check
-          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
-            echo "SurrealDB failed to start"
-            exit 1
-          fi
 
       - name: Run Golang tests (HTTP)
         run: go test -v -cover ./...
@@ -805,14 +600,10 @@ jobs:
         with:
           repository: "surrealdb/surrealdb.py"
 
-      - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+      - name: Setup SurrealDB
+        uses: ./.github/actions/setup-surrealdb
         with:
-          name: surreal-amd64
-          path: ${{ github.workspace }}/artifacts
-
-      - name: Set file permissions
-        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+          start: true
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -824,27 +615,6 @@ jobs:
         with:
           version: "latest"
           enable-cache: true
-
-      - name: Start SurrealDB
-        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
-
-      - name: Wait for startup
-        run: |
-          # Wait for SurrealDB to be ready
-          for i in {1..30}; do
-            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
-              echo "SurrealDB is ready"
-              break
-            fi
-            echo "Waiting for SurrealDB to start... (attempt $i/30)"
-            sleep 2
-          done
-
-          # Final check
-          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
-            echo "SurrealDB failed to start"
-            exit 1
-          fi
 
       - name: Install dependencies
         run: uv sync --group dev
@@ -881,14 +651,10 @@ jobs:
         with:
           repository: "surrealdb/surrealdb.php"
 
-      - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+      - name: Setup SurrealDB
+        uses: ./.github/actions/setup-surrealdb
         with:
-          name: surreal-amd64
-          path: ${{ github.workspace }}/artifacts
-
-      - name: Set file permissions
-        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+          start: true
 
       - name: Setup PHP
         uses: shivammathur/setup-php@cf4cade2721270509d5b1c766ab3549210a39a2a # (Actions must be pinned by commit hash) v2
@@ -899,27 +665,6 @@ jobs:
         uses: php-actions/composer@8a65f0d3c6a1d17ca4800491a40b5756a4c164f3 # (Actions must be pinned by commit hash) v6.1.2
         with:
           php_version: ${{ matrix.version }}
-
-      - name: Start SurrealDB
-        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
-
-      - name: Wait for startup
-        run: |
-          # Wait for SurrealDB to be ready
-          for i in {1..30}; do
-            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
-              echo "SurrealDB is ready"
-              break
-            fi
-            echo "Waiting for SurrealDB to start... (attempt $i/30)"
-            sleep 2
-          done
-
-          # Final check
-          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
-            echo "SurrealDB failed to start"
-            exit 1
-          fi
 
       - name: Run PHP tests
         run: composer test-coverage-v2
@@ -940,14 +685,10 @@ jobs:
         with:
           repository: "surrealdb/surrealdb.net"
 
-      - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+      - name: Setup SurrealDB
+        uses: ./.github/actions/setup-surrealdb
         with:
-          name: surreal-amd64
-          path: ${{ github.workspace }}/artifacts
-
-      - name: Set file permissions
-        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+          start: true
 
       - name: Setup dotnet
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # (Actions must be pinned by commit hash) v4.3.1
@@ -962,27 +703,6 @@ jobs:
 
       - name: Build
         run: dotnet build --no-restore
-
-      - name: Start SurrealDB
-        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
-
-      - name: Wait for startup
-        run: |
-          # Wait for SurrealDB to be ready
-          for i in {1..30}; do
-            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
-              echo "SurrealDB is ready"
-              break
-            fi
-            echo "Waiting for SurrealDB to start... (attempt $i/30)"
-            sleep 2
-          done
-
-          # Final check
-          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
-            echo "SurrealDB failed to start"
-            exit 1
-          fi
 
       - name: Run .NET tests
         run: >

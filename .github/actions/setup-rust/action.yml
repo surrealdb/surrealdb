@@ -1,0 +1,53 @@
+name: 'Setup Rust Environment'
+description: 'Install Rust toolchain, checkout sources, and setup cache'
+
+inputs:
+  toolchain:
+    description: 'Rust toolchain version'
+    required: false
+    default: '1.87'
+  components:
+    description: 'Additional Rust components to install (space-separated)'
+    required: false
+    default: ''
+  targets:
+    description: 'Additional targets to install (space-separated)'
+    required: false
+    default: ''
+  cache-key:
+    description: 'Additional cache key suffix'
+    required: false
+    default: ''
+  save-cache:
+    description: 'Whether to save cache (typically only on main branch)'
+    required: false
+    default: 'false'
+  workspaces:
+    description: 'Workspaces to cache (multi-line string)'
+    required: false
+    default: ''
+  cache-directories:
+    description: 'Additional cache directories'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        components: ${{ inputs.components }}
+        targets: ${{ inputs.targets }}
+
+    - name: Checkout sources
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+    - name: Setup cache
+      uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
+      with:
+        save-if: ${{ inputs.save-cache }}
+        shared-key: ${{ inputs.cache-key }}
+        workspaces: ${{ inputs.workspaces }}
+        cache-directories: ${{ inputs.cache-directories }}
