@@ -7,6 +7,7 @@ use crate::catalog::{ApiConfigDefinition, MiddlewareDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::expr::expression::VisitExpression;
 use crate::expr::{Expr, FlowResultExt};
 use crate::fmt::Fmt;
 
@@ -18,12 +19,30 @@ pub struct ApiConfig {
 	pub permissions: Permission,
 }
 
+impl VisitExpression for ApiConfig {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.middleware.iter().for_each(|m| m.visit(visitor));
+	}
+}
+
 /// The api middleware as it is received from ast.
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Middleware {
 	pub name: String,
 	pub args: Vec<Expr>,
+}
+
+impl VisitExpression for Middleware {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.args.iter().for_each(|expr| expr.visit(visitor));
+	}
 }
 
 impl ApiConfig {

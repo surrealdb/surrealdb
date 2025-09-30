@@ -45,6 +45,7 @@ pub(crate) mod cache;
 pub(crate) mod index;
 pub(crate) mod savepoint;
 pub(crate) mod sequences;
+pub(crate) mod slowlog;
 pub(crate) mod tasklease;
 #[cfg(test)]
 mod tests;
