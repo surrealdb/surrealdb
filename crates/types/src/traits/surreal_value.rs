@@ -5,9 +5,10 @@ use std::sync::Arc;
 use anyhow::Context;
 use rust_decimal::Decimal;
 
+use crate as surrealdb_types;
 use crate::{
-	Array, Bytes, Datetime, Duration, File, Geometry, GeometryKind, Kind, KindLiteral, Number,
-	Object, Range, RecordId, SurrealNone, SurrealNull, Uuid, Value,
+	Array, Bytes, Datetime, Duration, File, Geometry, Kind, Number, Object, Range, RecordId,
+	SurrealNone, SurrealNull, Uuid, Value, kind,
 };
 
 /// Trait for converting between SurrealDB values and Rust types
@@ -209,14 +210,14 @@ macro_rules! impl_surreal_value {
 
 // Concrete type implementations using the macro
 impl_surreal_value!(
-	Value as Kind::Any,
+	Value as kind!(any),
 	(_value) => true,
 	(self) => self,
 	(value) => Ok(value)
 );
 
 impl_surreal_value!(
-	() as Kind::None,
+	() as kind!(none),
 	(value) => matches!(value, Value::None),
 	(self) => Value::None,
 	(value) => {
@@ -229,7 +230,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	SurrealNone as Kind::None,
+	SurrealNone as kind!(none),
 	is_none(value) => matches!(value, Value::None),
 	(self) => Value::None,
 	(value) => {
@@ -242,7 +243,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	SurrealNull as Kind::Null,
+	SurrealNull as kind!(null),
 	is_null(value) => matches!(value, Value::Null),
 	(self) => Value::Null,
 	(value) => {
@@ -255,7 +256,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	bool as Kind::Bool,
+	bool as kind!(bool),
 	is_bool(value) => matches!(value, Value::Bool(_)),
 	from_bool(self) => Value::Bool(self),
 	into_bool(value) => {
@@ -285,7 +286,7 @@ impl Value {
 }
 
 impl_surreal_value!(
-	Number as Kind::Number,
+	Number as kind!(number),
 	is_number(value) => matches!(value, Value::Number(_)),
 	from_number(self) => Value::Number(self),
 	into_number(value) => {
@@ -304,7 +305,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	i64 as Kind::Int,
+	i64 as kind!(int),
 	is_int(value) => matches!(value, Value::Number(Number::Int(_))),
 	from_int(self) => Value::Number(Number::Int(self)),
 	into_int(value) => {
@@ -323,7 +324,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	f64 as Kind::Float,
+	f64 as kind!(float),
 	is_float(value) => matches!(value, Value::Number(Number::Float(_))),
 	from_float(self) => Value::Number(Number::Float(self)),
 	into_float(value) => {
@@ -342,7 +343,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	Decimal as Kind::Decimal,
+	Decimal as kind!(decimal),
 	is_decimal(value) => matches!(value, Value::Number(Number::Decimal(_))),
 	from_decimal(self) => Value::Number(Number::Decimal(self)),
 	into_decimal(value) => {
@@ -361,7 +362,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	String as Kind::String,
+	String as kind!(string),
 	is_string(value) => matches!(value, Value::String(_)),
 	from_string(self) => Value::String(self),
 	into_string(value) => {
@@ -381,7 +382,7 @@ impl_surreal_value!(
 
 impl SurrealValue for Cow<'static, str> {
 	fn kind_of() -> Kind {
-		Kind::String
+		kind!(string)
 	}
 
 	fn is_value(value: &Value) -> bool {
@@ -402,7 +403,7 @@ impl SurrealValue for Cow<'static, str> {
 
 impl SurrealValue for &'static str {
 	fn kind_of() -> Kind {
-		Kind::String
+		kind!(string)
 	}
 
 	fn is_value(value: &Value) -> bool {
@@ -419,7 +420,7 @@ impl SurrealValue for &'static str {
 }
 
 impl_surreal_value!(
-	Duration as Kind::Duration,
+	Duration as kind!(duration),
 	is_duration(value) => matches!(value, Value::Duration(_)),
 	from_duration(self) => Value::Duration(self),
 	into_duration(value) => {
@@ -438,7 +439,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	std::time::Duration as Kind::Duration,
+	std::time::Duration as kind!(duration),
 	(value) => matches!(value, Value::Duration(_)),
 	(self) => Value::Duration(Duration(self)),
 	(value) => {
@@ -450,7 +451,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	Datetime as Kind::Datetime,
+	Datetime as kind!(datetime),
 	is_datetime(value) => matches!(value, Value::Datetime(_)),
 	from_datetime(self) => Value::Datetime(self),
 	into_datetime(value) => {
@@ -469,7 +470,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	chrono::DateTime<chrono::Utc> as Kind::Datetime,
+	chrono::DateTime<chrono::Utc> as kind!(datetime),
 	(value) => matches!(value, Value::Datetime(_)),
 	(self) => Value::Datetime(Datetime(self)),
 	(value) => {
@@ -481,7 +482,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	Uuid as Kind::Uuid,
+	Uuid as kind!(uuid),
 	is_uuid(value) => matches!(value, Value::Uuid(_)),
 	from_uuid(self) => Value::Uuid(self),
 	into_uuid(value) => {
@@ -500,7 +501,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	uuid::Uuid as Kind::Uuid,
+	uuid::Uuid as kind!(uuid),
 	(value) => matches!(value, Value::Uuid(_)),
 	(self) => Value::Uuid(Uuid(self)),
 	(value) => {
@@ -512,7 +513,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	Array as Kind::Array(Box::new(Kind::Any), None),
+	Array as kind!(array),
 	is_array(value) => matches!(value, Value::Array(_)),
 	from_array(self) => Value::Array(self),
 	into_array(value) => {
@@ -531,7 +532,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	Object as Kind::Object,
+	Object as kind!(object),
 	is_object(value) => matches!(value, Value::Object(_)),
 	from_object(self) => Value::Object(self),
 	into_object(value) => {
@@ -550,7 +551,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	Geometry as Kind::Geometry(vec![]),
+	Geometry as kind!(geometry),
 	is_geometry(value) => matches!(value, Value::Geometry(_)),
 	from_geometry(self) => Value::Geometry(self),
 	into_geometry(value) => {
@@ -569,7 +570,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	Bytes as Kind::Bytes,
+	Bytes as kind!(bytes),
 	is_bytes(value) => matches!(value, Value::Bytes(_)),
 	from_bytes(self) => Value::Bytes(self),
 	into_bytes(value) => {
@@ -588,7 +589,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	Vec<u8> as Kind::Bytes,
+	Vec<u8> as kind!(bytes),
 	(value) => matches!(value, Value::Bytes(_)),
 	(self) => Value::Bytes(Bytes(self)),
 	(value) => {
@@ -600,7 +601,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	bytes::Bytes as Kind::Bytes,
+	bytes::Bytes as kind!(bytes),
 	(value) => matches!(value, Value::Bytes(_)),
 	(self) => Value::Bytes(Bytes(self.to_vec())),
 	(value) => {
@@ -612,7 +613,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	RecordId as Kind::Record(vec![]),
+	RecordId as kind!(record),
 	is_record(value) => {
 		match value {
 			Value::RecordId(_) => true,
@@ -649,7 +650,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	File as Kind::File(vec![]),
+	File as kind!(file),
 	is_file(value) => matches!(value, Value::File(_)),
 	from_file(self) => Value::File(self),
 	into_file(value) => {
@@ -668,7 +669,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	Range as Kind::Range,
+	Range as kind!(range),
 	is_range(value) => matches!(value, Value::Range(_)),
 	from_range(self) => Value::Range(Box::new(self)),
 	into_range(value) => {
@@ -688,7 +689,7 @@ impl_surreal_value!(
 
 // Generic implementations using the macro
 impl_surreal_value!(
-	<T> Vec<T> as Kind::Array(Box::new(T::kind_of()), None),
+	<T> Vec<T> as kind!(array<(T::kind_of())>),
 	is_vec<T>(value) => {
 		if let Value::Array(Array(a)) = value {
 			a.iter().all(T::is_value)
@@ -710,7 +711,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	<T> Option<T> as Kind::Either(vec![Kind::None, T::kind_of()]),
+	<T> Option<T> as kind!(none | (T::kind_of())),
 	is_option<T>(value) => matches!(value, Value::None) || T::is_value(value),
 	from_option<T>(self) => self.map(T::into_value).unwrap_or(Value::None),
 	into_option<T>(value) => match value{
@@ -720,7 +721,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	<V> BTreeMap<String, V> as Kind::Object,
+	<V> BTreeMap<String, V> as kind!(object),
 	(value) => {
 		if let Value::Object(Object(o)) = value {
 			o.iter().all(|(_, v)| V::is_value(v))
@@ -742,7 +743,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	<V> HashMap<String, V> as Kind::Object,
+	<V> HashMap<String, V> as kind!(object),
 	(value) => {
 		if let Value::Object(Object(o)) = value {
 			o.iter().all(|(_, v)| V::is_value(v))
@@ -765,7 +766,7 @@ impl_surreal_value!(
 
 // Geometry implementations
 impl_surreal_value!(
-	geo::Point as Kind::Geometry(vec![GeometryKind::Point]),
+	geo::Point as kind!(geometry<point>),
 	is_point(value) => matches!(value, Value::Geometry(Geometry::Point(_))),
 	from_point(self) => Value::Geometry(Geometry::Point(self)),
 	into_point(value) => {
@@ -784,7 +785,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	geo::LineString as Kind::Geometry(vec![GeometryKind::Line]),
+	geo::LineString as kind!(geometry<line>),
 	is_line(value) => matches!(value, Value::Geometry(Geometry::Line(_))),
 	from_line(self) => Value::Geometry(Geometry::Line(self)),
 	into_line(value) => {
@@ -803,7 +804,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	geo::Polygon as Kind::Geometry(vec![GeometryKind::Polygon]),
+	geo::Polygon as kind!(geometry<polygon>),
 	is_polygon(value) => matches!(value, Value::Geometry(Geometry::Polygon(_))),
 	from_polygon(self) => Value::Geometry(Geometry::Polygon(self)),
 	into_polygon(value) => {
@@ -822,7 +823,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	geo::MultiPoint as Kind::Geometry(vec![GeometryKind::MultiPoint]),
+	geo::MultiPoint as kind!(geometry<multipoint>),
 	is_multipoint(value) => matches!(value, Value::Geometry(Geometry::MultiPoint(_))),
 	from_multipoint(self) => Value::Geometry(Geometry::MultiPoint(self)),
 	into_multipoint(value) => {
@@ -841,7 +842,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	geo::MultiLineString as Kind::Geometry(vec![GeometryKind::MultiLine]),
+	geo::MultiLineString as kind!(geometry<multiline>),
 	is_multiline(value) => matches!(value, Value::Geometry(Geometry::MultiLine(_))),
 	from_multiline(self) => Value::Geometry(Geometry::MultiLine(self)),
 	into_multiline(value) => {
@@ -860,7 +861,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	geo::MultiPolygon as Kind::Geometry(vec![GeometryKind::MultiPolygon]),
+	geo::MultiPolygon as kind!(geometry<multipolygon>),
 	is_multipolygon(value) => matches!(value, Value::Geometry(Geometry::MultiPolygon(_))),
 	from_multipolygon(self) => Value::Geometry(Geometry::MultiPolygon(self)),
 	into_multipolygon(value) => {
@@ -884,7 +885,7 @@ macro_rules! impl_tuples {
         $(
             impl<$($t: SurrealValue),+> SurrealValue for ($($t,)+) {
                 fn kind_of() -> Kind {
-                    Kind::Literal(KindLiteral::Array(vec![$($t::kind_of()),+]))
+					kind!(array<$(($t::kind_of()))|+>)
                 }
 
                 fn is_value(value: &Value) -> bool {
@@ -947,7 +948,7 @@ macro_rules! impl_numeric {
 		$(
 			impl SurrealValue for $k {
 				fn kind_of() -> Kind {
-					Kind::Number
+					kind!(number)
 				}
 
 				fn is_value(value: &Value) -> bool {
@@ -982,7 +983,7 @@ impl_numeric! {
 
 impl SurrealValue for serde_json::Value {
 	fn kind_of() -> Kind {
-		Kind::Any
+		kind!(any)
 	}
 
 	fn is_value(_value: &Value) -> bool {
@@ -1057,7 +1058,7 @@ macro_rules! impl_slice {
 		$(
 			impl<T: SurrealValue> SurrealValue for [T; $n] {
 				fn kind_of() -> Kind {
-					Kind::Array(Box::new(T::kind_of()), Some($n))
+					kind!(array<(T::kind_of()), $n>)
 				}
 
 	fn is_value(value: &Value) -> bool {
@@ -1094,7 +1095,7 @@ impl_slice!(
 
 impl SurrealValue for http::HeaderMap {
 	fn kind_of() -> Kind {
-		Kind::Object
+		kind!(object)
 	}
 
 	fn is_value(value: &Value) -> bool {
@@ -1181,7 +1182,7 @@ impl SurrealValue for http::HeaderMap {
 
 impl SurrealValue for http::StatusCode {
 	fn kind_of() -> Kind {
-		Kind::Number
+		kind!(number)
 	}
 
 	fn is_value(value: &Value) -> bool {

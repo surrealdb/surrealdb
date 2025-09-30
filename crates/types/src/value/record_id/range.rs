@@ -4,7 +4,8 @@ use std::ops::{Bound, RangeFrom, RangeFull, RangeTo, RangeToInclusive};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::{Kind, Range, RecordIdKey, SurrealValue, Value};
+use crate as surrealdb_types;
+use crate::{Kind, Range, RecordIdKey, SurrealValue, Value, kind};
 
 /// Represents a range of record identifier keys in SurrealDB
 ///
@@ -21,7 +22,7 @@ pub struct RecordIdKeyRange {
 
 impl SurrealValue for RecordIdKeyRange {
 	fn kind_of() -> Kind {
-		Kind::Range
+		kind!(range)
 	}
 
 	fn is_value(value: &Value) -> bool {

@@ -6,7 +6,7 @@ use anyhow::Result;
 use revision::revisioned;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
-use surrealdb_types::{Kind, KindLiteral, SurrealValue, Value, object};
+use surrealdb_types::{Kind, SurrealValue, Value, kind, object};
 
 use crate::expr::TopLevelExpr;
 use crate::rpc::DbResultError;
@@ -69,20 +69,19 @@ impl QueryResult {
 
 impl SurrealValue for QueryResult {
 	fn kind_of() -> Kind {
-		Kind::Either(vec![
-			Kind::Literal(KindLiteral::Object(map! [
-				"status".to_string() => Kind::Literal(KindLiteral::String("OK".to_string())),
-				"time".to_string() => Kind::String,
-				"result".to_string() => Kind::Any,
-				"query_type".to_string() => QueryType::kind_of(),
-			])),
-			Kind::Literal(KindLiteral::Object(map! [
-				"status".to_string() => Kind::Literal(KindLiteral::String("ERR".to_string())),
-				"time".to_string() => Kind::String,
-				"result".to_string() => Kind::String,
-				"query_type".to_string() => QueryType::kind_of(),
-			])),
-		])
+		kind!(
+			{
+				status: "OK",
+				time: string,
+				result: any,
+				query_type: (QueryType::kind_of()),
+			} | {
+				status: "ERR",
+				time: string,
+				result: string,
+				query_type: (QueryType::kind_of()),
+			}
+		)
 	}
 
 	fn is_value(value: &Value) -> bool {
