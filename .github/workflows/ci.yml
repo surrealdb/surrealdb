@@ -505,7 +505,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        engine: [mem, file, rocksdb, surrealkv, tikv, fdb]
+        engine: [mem, rocksdb, surrealkv, tikv, fdb]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
