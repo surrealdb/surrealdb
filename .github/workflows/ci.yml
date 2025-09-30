@@ -450,6 +450,9 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@76081f88faadd9c23688b78b70c734925ea84cca # (Actions must be pinned by commit hash) cargo-llvm-cov
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@76081f88faadd9c23688b78b70c734925ea84cca # (Actions must be pinned by commit hash) nextest
+
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
@@ -488,6 +491,7 @@ jobs:
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: kvs-${{ matrix.engine }}
 
       - name: Install TiKV
         if: ${{ matrix.engine == 'tikv' }}
@@ -502,6 +506,9 @@ jobs:
         uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a # (Actions must be pinned by commit hash) v.2.2.0
         with:
           version: "7.3.47"
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@76081f88faadd9c23688b78b70c734925ea84cca # (Actions must be pinned by commit hash) nextest
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -557,6 +564,7 @@ jobs:
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: sdk-${{ matrix.engine }}
 
       - name: Install TiKV
         if: ${{ matrix.engine == 'tikv' }}
@@ -571,6 +579,9 @@ jobs:
         uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a # (Actions must be pinned by commit hash) v.2.2.0
         with:
           version: "7.3.47"
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@76081f88faadd9c23688b78b70c734925ea84cca # (Actions must be pinned by commit hash) nextest
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make

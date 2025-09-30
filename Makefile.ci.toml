@@ -252,6 +252,7 @@ category = "CI - INTEGRATION TESTS"
 command = "cargo"
 args = [
     "llvm-cov",
+    "nextest",
     "--html",
     "--locked",
     "--no-default-features",
@@ -306,7 +307,8 @@ private = true
 command = "cargo"
 env = { RUST_BACKTRACE = 1 }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--package",
     "surrealdb-core",
@@ -314,6 +316,7 @@ args = [
     "--features",
     "${_TEST_FEATURES}",
     "--lib",
+    "--",
     "kvs::tests",
 ]
 
@@ -322,7 +325,8 @@ private = true
 command = "cargo"
 env = { RUST_BACKTRACE = 1 }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--package",
     "surrealdb",
@@ -331,8 +335,6 @@ args = [
     "${_TEST_FEATURES}",
     "--test",
     "api",
-    # "api_integration::${_TEST_API_ENGINE}",
-    # "--",
     "${@}",
 ]
 
