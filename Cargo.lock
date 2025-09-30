@@ -5662,6 +5662,7 @@ name = "surreal"
 version = "3.0.0-alpha.10"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "argon2",
  "assert_fs",
  "async-graphql",
