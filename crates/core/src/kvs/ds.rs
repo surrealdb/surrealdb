@@ -68,6 +68,7 @@ use crate::kvs::ds::requirements::{
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
+use crate::kvs::slowlog::SlowLog;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 use crate::kvs::{LockType, TransactionType};
 use crate::sql::Ast;
@@ -96,8 +97,8 @@ pub struct Datastore {
 	auth_enabled: bool,
 	/// The maximum duration timeout for running multiple statements in a query.
 	query_timeout: Option<Duration>,
-	/// The duration threshold determining when a query should be logged
-	slow_log_threshold: Option<Duration>,
+	/// The slow log configuration determining when a query should be logged
+	slow_log: Option<SlowLog>,
 	/// The maximum duration timeout for running multiple statements in a
 	/// transaction.
 	transaction_timeout: Option<Duration>,
@@ -575,7 +576,7 @@ impl Datastore {
 			strict: false,
 			auth_enabled: false,
 			query_timeout: None,
-			slow_log_threshold: None,
+				slow_log: None,
 			transaction_timeout: None,
 			notification_channel: None,
 			capabilities: Arc::new(Capabilities::default()),
@@ -600,7 +601,7 @@ impl Datastore {
 			strict: self.strict,
 			auth_enabled: self.auth_enabled,
 			query_timeout: self.query_timeout,
-			slow_log_threshold: self.slow_log_threshold,
+			slow_log: self.slow_log.clone(),
 			transaction_timeout: self.transaction_timeout,
 			capabilities: self.capabilities,
 			notification_channel: self.notification_channel,
@@ -646,9 +647,22 @@ impl Datastore {
 		self
 	}
 
-	/// Set a global slow log threshold
-	pub fn with_slow_log_threshold(mut self, duration: Option<Duration>) -> Self {
-		self.slow_log_threshold = duration;
+	/// Set a global slow log configuration
+	///
+	/// Parameters:
+	/// - `duration`: Minimum execution time for a statement to be considered "slow". When `None`,
+	///   slow logging is disabled.
+	/// - `param_allow`: If non-empty, only parameters with names present in this list will be
+	///   logged when a query is slow.
+	/// - `param_deny`: Parameter names that should never be logged. This list always takes
+	///   precedence over `param_allow`.
+	pub fn with_slow_log(
+		mut self,
+		duration: Option<Duration>,
+		param_allow: Vec<String>,
+		param_deny: Vec<String>,
+	) -> Self {
+		self.slow_log = duration.map(|d| SlowLog::new(d, param_allow, param_deny));
 		self
 	}
 
@@ -1537,7 +1551,7 @@ impl Datastore {
 	pub fn setup_ctx(&self) -> Result<MutableContext> {
 		let mut ctx = MutableContext::from_ds(
 			self.query_timeout,
-			self.slow_log_threshold,
+			self.slow_log.clone(),
 			self.capabilities.clone(),
 			self.index_stores.clone(),
 			#[cfg(not(target_family = "wasm"))]
