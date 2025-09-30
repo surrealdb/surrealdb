@@ -1,3 +1,31 @@
+/**
+[test]
+
+[[test.results]]
+value = "[{ id: foo:1, v: 1 }]"
+
+[[test.results]]
+value = "[{ id: foo:2, v: 2 }]"
+
+[[test.results]]
+value = "[{ id: foo:3, v: 3 }]"
+
+[[test.results]]
+value = "[{ id: foo:4, v: 4 }]"
+
+[[test.results]]
+value = "[{ id: foo:5, v: 5 }]"
+
+[[test.results]]
+value = "[{ ord: 1 }, { ord: 2 }, { ord: 3 }, { ord: 4 }, { ord: 5 }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ ord2: 1 }, { ord2: 2 }, { ord2: 3 }, { ord2: 4 }, { ord2: 5 }]"
+
+*/
 
 CREATE foo:1 SET v = 1;
 CREATE foo:2 SET v = 2;
