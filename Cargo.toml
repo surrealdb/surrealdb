@@ -87,7 +87,7 @@ fst = "0.4.7"
 futures = "0.3.30"
 futures-util = "0.3.30"
 fuzzy-matcher = "0.3.7"
-geo = "0.28.0"
+geo = { version = "0.28.0", default-features = false }
 geo-types = "0.7.13"
 getrandom = "0.3.2"
 hex = "0.4.3"
@@ -233,7 +233,6 @@ revision = { workspace = true, features = [
 
 # Crates only used by the root surrealdb crate
 anyhow.workspace = true
-arc-swap = "1.7.1"
 axum = { version = "0.7.5", features = ["tracing", "ws"] }
 axum-extra = { version = "0.9.3", features = [
     "query",
@@ -287,7 +286,7 @@ chrono.workspace = true
 ciborium.workspace = true
 futures.workspace = true
 futures-util.workspace = true
-geo.workspace = true
+geo = { workspace = true, default-features = false }
 geo-types.workspace = true
 http.workspace = true
 num_cpus.workspace = true

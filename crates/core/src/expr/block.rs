@@ -31,22 +31,9 @@ impl Revisioned for Block {
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
 		let query: String = Revisioned::deserialize_revisioned(reader)?;
 
-		let expr = crate::syn::parse_with_settings(
-			query.as_bytes(),
-			crate::syn::parser::ParserSettings {
-				references_enabled: true,
-				bearer_access_enabled: true,
-				define_api_enabled: true,
-				files_enabled: true,
-				..Default::default()
-			},
-			async |p, stk| p.parse_expr(stk).await,
-		)
-		.map_err(|err| revision::Error::Conversion(err.to_string()))?;
-		match expr {
-			crate::sql::Expr::Block(x) => Ok((*x).into()),
-			x => Ok(Block(vec![x.into()])),
-		}
+		let expr = crate::syn::block(&query)
+			.map_err(|err| revision::Error::Conversion(err.to_string()))?;
+		Ok(expr.into())
 	}
 }
 
