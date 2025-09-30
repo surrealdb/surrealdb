@@ -173,3 +173,12 @@ pub fn length_mismatch_error(
 ) -> anyhow::Error {
 	LengthMismatchError::new(expected, actual, target_type).into()
 }
+
+/// Helper function to create a conversion error for union types (Either)
+/// where the value doesn't match any of the possible types
+pub fn union_conversion_error(expected: Kind, value: impl Into<Value>) -> anyhow::Error {
+	let value = value.into();
+	ConversionError::from_value(expected, &value)
+		.with_context("Value does not match any variant in union type")
+		.into()
+}

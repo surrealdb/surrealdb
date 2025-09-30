@@ -18,6 +18,7 @@ pub use notification::*;
 // Re-export the derive macro
 pub use surrealdb_types_derive::{SurrealValue, kind};
 pub use traits::*;
+pub use utils::either::*;
 pub use value::*;
 pub use variables::*;
 
