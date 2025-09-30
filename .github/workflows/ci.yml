@@ -373,7 +373,7 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: [ runner-arm64-2xlarge ]
+    runs-on: [ runner-amd64-2xlarge ]
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -387,19 +387,10 @@ jobs:
       - name: Install tools
         uses: ./.github/actions/install-tools
         with:
-          tools: cargo-llvm-cov,cargo-nextest,cargo-make
+          tools: cargo-nextest,cargo-make
 
-      - name: Test workspace + coverage
-        run: cargo make ci-workspace-coverage
-
-      - name: Upload coverage report
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # (Actions must be pinned by commit hash) v4.6.2
-        timeout-minutes: 1
-        continue-on-error: true
-        with:
-          name: code-coverage-report
-          path: target/llvm-cov/html/
-          retention-days: 5
+      - name: Test workspace
+        run: cargo make ci-test-workspace
 
   # ----------------------------------------
   # Storage engine tests
@@ -425,7 +416,7 @@ jobs:
       - name: Install tools
         uses: ./.github/actions/install-tools
         with:
-          tools: cargo-llvm-cov,cargo-nextest,cargo-make
+          tools: cargo-nextest,cargo-make
 
       - name: Setup databases
         uses: ./.github/actions/setup-databases
@@ -481,7 +472,7 @@ jobs:
       - name: Install tools
         uses: ./.github/actions/install-tools
         with:
-          tools: cargo-llvm-cov,cargo-nextest,cargo-make
+          tools: cargo-nextest,cargo-make
 
       - name: Setup databases
         uses: ./.github/actions/setup-databases
