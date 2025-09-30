@@ -4,6 +4,7 @@
 #![deny(clippy::mem_forget)]
 
 use std::process::ExitCode;
+
 use surrealdb_core::kvs::DatastoreFlavor;
 
 fn main() -> ExitCode {

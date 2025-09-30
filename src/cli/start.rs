@@ -3,14 +3,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::config::{CF, Config};
-use crate::cnf::LOGO;
-#[cfg(feature = "ml")]
-use crate::core::ml::execution::session::set_environment;
-use crate::core::options::EngineOptions;
-use crate::dbs::StartCommandDbsOptions;
-use crate::net::client_ip::ClientIp;
-use crate::{dbs, env, net};
 #[cfg(feature = "ml")]
 use anyhow::Context;
 use anyhow::Result;
@@ -19,12 +11,20 @@ use surrealdb::engine::{any, tasks};
 use surrealdb_core::kvs::TransactionBuilderFactory;
 use tokio_util::sync::CancellationToken;
 
+use super::config::{CF, Config};
+use crate::cnf::LOGO;
+#[cfg(feature = "ml")]
+use crate::core::ml::execution::session::set_environment;
+use crate::core::options::EngineOptions;
+use crate::dbs::StartCommandDbsOptions;
+use crate::net::client_ip::ClientIp;
+use crate::{dbs, env, net};
+
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
 	#[arg(help = "Database path used for storing data")]
 	#[arg(env = "SURREAL_PATH", index = 1)]
 	#[arg(default_value = "memory")]
-	#[arg(value_parser = super::validator::path_valid)]
 	path: String,
 	#[arg(help = "Whether to hide the startup banner")]
 	#[arg(env = "SURREAL_NO_BANNER", long)]
@@ -167,6 +167,8 @@ pub async fn init<F: TransactionBuilderFactory>(
 		..
 	}: StartCommandArguments,
 ) -> Result<()> {
+	// Check the path is valid
+	F::path_valid(&path)?;
 	// Check if we should output a banner
 	if !no_banner {
 		println!("{LOGO}");

@@ -258,7 +258,7 @@ pub async fn init<F: TransactionBuilderFactory>() -> ExitCode {
 		Commands::Ml(args) => ml::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,
 		Commands::Validate(args) => validate::init(args).await,
-		Commands::Fix(args) => fix::init(args).await,
+		Commands::Fix(args) => fix::init::<F>(args).await,
 	};
 	// Save the flamegraph and profile
 	#[cfg(feature = "performance-profiler")]

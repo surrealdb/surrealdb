@@ -192,6 +192,8 @@ pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
 		path: &str,
 		clock: Option<Arc<SizedClock>>,
 	) -> Result<(Box<dyn TransactionBuilder>, Arc<SizedClock>)>;
+
+	fn path_valid(v: &str) -> Result<String>;
 }
 
 pub mod requirements {
@@ -361,6 +363,19 @@ impl TransactionBuilderFactory for DatastoreFlavor {
 			}
 		};
 		Ok((Box::new(v), c))
+	}
+
+	fn path_valid(v: &str) -> Result<String> {
+		match v {
+			"memory" => Ok(v.to_string()),
+			v if v.starts_with("file:") => Ok(v.to_string()),
+			v if v.starts_with("rocksdb:") => Ok(v.to_string()),
+			v if v.starts_with("surrealkv:") => Ok(v.to_string()),
+			v if v.starts_with("surrealkv+versioned:") => Ok(v.to_string()),
+			v if v.starts_with("tikv:") => Ok(v.to_string()),
+			v if v.starts_with("fdb:") => Ok(v.to_string()),
+			_ => bail!("Provide a valid database path parameter"),
+		}
 	}
 }
 
