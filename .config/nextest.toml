@@ -2,6 +2,7 @@
 # https://nexte.st/book/configuration.html
 
 [profile.default]
+test-threads = 4
 
 # Configure test group for KVS tests
 [[profile.default.overrides]]
