@@ -18,8 +18,7 @@ fn lex_js_function_body_inner(lexer: &mut Lexer) -> Result<(), SyntaxError> {
 			return Err(SyntaxError::new(format_args!(
 				"Invalid JavaScript function, encountered unexpected eof"
 			))
-			.with_span(span, MessageKind::Error)
-			.with_data_pending());
+			.with_span(span, MessageKind::Error));
 		};
 		match byte {
 			b'`' => lex_js_string(lexer, b'`')?,
@@ -63,8 +62,7 @@ fn lex_js_string(lexer: &mut Lexer, enclosing_byte: u8) -> Result<(), SyntaxErro
 			return Err(SyntaxError::new(format_args!(
 				"Invalid JavaScript function, encountered unexpected eof"
 			))
-			.with_span(span, MessageKind::Error)
-			.with_data_pending());
+			.with_span(span, MessageKind::Error));
 		};
 		if byte == enclosing_byte {
 			return Ok(());
@@ -98,8 +96,7 @@ fn lex_js_multi_comment(lexer: &mut Lexer) -> Result<(), SyntaxError> {
 			return Err(SyntaxError::new(format_args!(
 				"Invalid JavaScript function, encountered unexpected eof"
 			))
-			.with_span(span, MessageKind::Error)
-			.with_data_pending());
+			.with_span(span, MessageKind::Error));
 		};
 		if byte == b'*' && lexer.reader.peek() == Some(b'/') {
 			lexer.reader.next();

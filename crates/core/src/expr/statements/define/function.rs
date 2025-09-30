@@ -10,6 +10,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::expression::VisitExpression;
 use crate::expr::{Base, Block, Expr, Kind};
 use crate::fmt::{EscapeKwFreeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
@@ -24,6 +25,16 @@ pub struct DefineFunctionStatement {
 	pub comment: Option<Expr>,
 	pub permissions: Permission,
 	pub returns: Option<Kind>,
+}
+
+impl VisitExpression for DefineFunctionStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.block.visit(visitor);
+		self.comment.iter().for_each(|comment| comment.visit(visitor));
+	}
 }
 
 impl DefineFunctionStatement {

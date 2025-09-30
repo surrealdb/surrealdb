@@ -7,7 +7,7 @@ Invalid token, failed to parse duration digits: number too large to fit in targe
   --> [15:1]
    |
 15 | 18446744073709551616s
-   | ^^^^^^^^^^^^^^^^^^^^^ 
+   | ^^^^^^^^^^^^^^^^^^^^^
 """
 
 */

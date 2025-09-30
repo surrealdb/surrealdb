@@ -29,29 +29,29 @@ surrealdb-types = { version = "=3.0.0-alpha.10", path = "crates/types" }
 surrealdb-types-derive = { version = "=3.0.0-alpha.10", path = "crates/types-derive" }
 
 # External surreal crates
-affinitypool = { version = "0.3.1" }
+affinitypool = "0.3.1"
 dmp = "0.2.3"
 indxdb = "0.6.0"
-ipnet = "2.9.0"
+lexicmp = "0.2.0"
+revision = "0.11.0"
+storekey = { version = "0.8.0", features = ["uuid"] }
 surrealkv = { version = "0.9.1" }
 surrealml = { version = "0.1.9", package = "surrealml-core", features = [
     "dynamic",
 ] }
-## Somewhat a surreal crate as it is maintained by @Delskayn.
-js = { version = "0.9.0", package = "rquickjs" }
-lexicmp = "0.2.0"
-## Also maintained by @Delskayn
-reblessive = "0.4.3"
-revision = "0.11.0"
-## Maintained by @rushmorem
-serde-content = "0.1.0"
-storekey = { version = "0.8.0", features = ["uuid"] }
 trice = "0.4.0"
-vart = "0.8.1"
+vart = "0.9.3"
+## Maintained by @Delskayn
+js = { version = "0.9.0", package = "rquickjs" }
+reblessive = "0.4.3"
+## Maintained by @rushmorem
+ipnet = "2.9.0"
+serde-content = "0.1.0"
 
 # External Kv stores
-foundationdb = { version = "0.9.0", default-features = false, features = [
+foundationdb = { version = "0.9.2", default-features = false, features = [
     "embedded-fdb-include",
+    "fdb-7_3",
 ] }
 rocksdb = { version = "0.23.0", features = ["lz4", "snappy"] }
 # Managed by surreal but mostly external code
@@ -95,12 +95,12 @@ http = "1.1.0"
 indexmap = "2.1.0"
 jemallocator = { version = "0.6.0", package = "tikv-jemallocator" }
 jsonwebtoken = "9.3.0"
-linfa-linalg = "=0.1.0"
+linfa-linalg = "=0.2.1"
 md-5 = "0.10.6"
 nanoid = "0.4.0"
 native-tls = "0.2.11"
-ndarray = "=0.15.6"
-ndarray-stats = "=0.5.1"
+ndarray = "=0.16.1"
+ndarray-stats = "=0.6.0"
 num-traits = "0.2.18"
 num_cpus = "1.16.0"
 object_store = "0.12.0"
@@ -204,12 +204,8 @@ storage-indxdb = ["surrealdb/kv-indxdb"]
 storage-rocksdb = ["surrealdb/kv-rocksdb"]
 storage-surrealkv = ["surrealdb/kv-surrealkv"]
 storage-tikv = ["surrealdb/kv-tikv"]
-# FoundationDB features
 storage-fdb = ["surrealdb/kv-fdb"]
-storage-fdb-7_1 = ["surrealdb/kv-fdb-7_1"]
-storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
-# Deprecated features
-# Doesn't do anything. Use a version specific `storage-fdb-*` feature instead.
+# Commercial features
 enterprise = ["surrealdb-core/enterprise"]
 
 [dependencies]
@@ -376,7 +372,6 @@ systemd-units = { enable = true }
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(docker)',
-    'cfg(kv_fdb)',
     'cfg(storage)',
 ] }
 
@@ -464,4 +459,3 @@ inherits = "dev"
 debug = true
 inherits = "release"
 strip = false
-

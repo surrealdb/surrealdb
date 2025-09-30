@@ -29,40 +29,40 @@ macro_rules! t {
 	};
 
 	("r\"") => {
-		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::RecordIdDouble)
+		$crate::syn::token::TokenKind::String($crate::syn::token::StringKind::RecordIdDouble)
 	};
 	("r'") => {
-		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::RecordId)
+		$crate::syn::token::TokenKind::String($crate::syn::token::StringKind::RecordId)
 	};
 	("u\"") => {
-		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::UuidDouble)
+		$crate::syn::token::TokenKind::String($crate::syn::token::StringKind::UuidDouble)
 	};
 	("u'") => {
-		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::Uuid)
+		$crate::syn::token::TokenKind::String($crate::syn::token::StringKind::Uuid)
 	};
 	("d\"") => {
-		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::DateTimeDouble)
+		$crate::syn::token::TokenKind::String($crate::syn::token::StringKind::DateTimeDouble)
 	};
 	("d'") => {
-		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::DateTime)
+		$crate::syn::token::TokenKind::String($crate::syn::token::StringKind::DateTime)
 	};
 	("b\"") => {
-		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::BytesDouble)
+		$crate::syn::token::TokenKind::String($crate::syn::token::StringKind::BytesDouble)
 	};
 	("b'") => {
-		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::Bytes)
+		$crate::syn::token::TokenKind::String($crate::syn::token::StringKind::Bytes)
 	};
 	("f\"") => {
-		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::FileDouble)
+		$crate::syn::token::TokenKind::String($crate::syn::token::StringKind::FileDouble)
 	};
 	("f'") => {
-		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::File)
+		$crate::syn::token::TokenKind::String($crate::syn::token::StringKind::File)
 	};
 	("\"") => {
-		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::PlainDouble)
+		$crate::syn::token::TokenKind::String($crate::syn::token::StringKind::PlainDouble)
 	};
 	("'") => {
-		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::Plain)
+		$crate::syn::token::TokenKind::String($crate::syn::token::StringKind::Plain)
 	};
 	("\"r") => {
 		$crate::syn::token::TokenKind::CloseString {
