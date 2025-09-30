@@ -1,4 +1,4 @@
-name: Continuous integration
+name: CI
 
 run-name: "CI run '${{ github.head_ref || github.ref_name }}'"
 
