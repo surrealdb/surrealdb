@@ -404,16 +404,9 @@ run_task = { name = [
     "stop-tikv",
 ], fork = true, parallel = false }
 
-[tasks.ci-api-integration-fdb-7_1]
+[tasks.ci-api-integration-fdb]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb-7_1" }
-run_task = { name = [
-    "test-api-integration",
-], fork = true, parallel = false }
-
-[tasks.ci-api-integration-fdb-7_3]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb-7_3" }
+env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb" }
 run_task = { name = [
     "test-api-integration",
 ], fork = true, parallel = false }
@@ -427,8 +420,7 @@ dependencies = [
     "ci-api-integration-rocksdb",
     "ci-api-integration-surrealkv",
     "ci-api-integration-tikv",
-    "ci-api-integration-fdb-7_1",
-    "ci-api-integration-fdb-7_3",
+    "ci-api-integration-fdb",
     "ci-api-integration-http",
     "ci-api-integration-ws",
 ]
@@ -466,16 +458,9 @@ run_task = { name = [
     "stop-tikv",
 ], fork = true, parallel = false }
 
-[tasks.ci-fdb-7_1-kvs]
+[tasks.ci-fdb-kvs]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb-7_1" }
-run_task = { name = [
-    "test-kvs",
-], fork = true, parallel = false }
-
-[tasks.ci-fdb-7_3-kvs]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb-7_3" }
+env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb" }
 run_task = { name = [
     "test-kvs",
 ], fork = true, parallel = false }

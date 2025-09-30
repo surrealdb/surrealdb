@@ -4,7 +4,7 @@
   inherit target;
 
   features = with util.features;
-    [ default storage-tikv storage-fdb-7_3 ];
+    [ default storage-tikv storage-fdb ];
 
   buildSpec = with pkgs;
     let crossCompiling = !util.isNative target;
