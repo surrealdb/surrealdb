@@ -121,7 +121,6 @@ pub enum GluedValue {
 	Datetime(Datetime),
 	Uuid(Uuid),
 	Number(NumberKind),
-	String(String),
 	#[default]
 	None,
 	Bytes(Bytes),
@@ -191,6 +190,7 @@ pub struct Parser<'a> {
 	glued_value: GluedValue,
 	pub(crate) table_as_field: bool,
 	settings: ParserSettings,
+	unscape_buffer: Vec<u8>,
 }
 
 impl<'a> Parser<'a> {
@@ -213,6 +213,7 @@ impl<'a> Parser<'a> {
 			glued_value: GluedValue::None,
 			table_as_field: true,
 			settings,
+			unscape_buffer: Vec::new(),
 		}
 	}
 

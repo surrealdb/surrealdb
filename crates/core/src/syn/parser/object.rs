@@ -123,15 +123,8 @@ impl Parser<'_> {
 				let str = self.lexer.span_str(token.span);
 				Ok(str.to_string())
 			}
-			TokenKind::Identifier => {
-				self.pop_peek();
-				let str = self.lexer.string.take().unwrap();
-				Ok(str)
-			}
-			t!("\"") | t!("'") | TokenKind::Glued(Glued::String) => {
-				let str = self.parse_string_lit()?;
-				Ok(str)
-			}
+			TokenKind::Identifier => self.parse_ident(),
+			t!("\"") | t!("'") => Ok(self.parse_string_lit()?),
 			TokenKind::Digits => {
 				self.pop_peek();
 				let span = self.lexer.lex_compound(token, compound::number)?.span;

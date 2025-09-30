@@ -15,6 +15,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::user::UserDuration;
 use crate::expr::{Base, Expr, Idiom, Literal};
@@ -32,6 +33,16 @@ pub struct DefineUserStatement {
 	pub roles: Vec<String>,
 	pub duration: UserDuration,
 	pub comment: Option<Expr>,
+}
+
+impl VisitExpression for DefineUserStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.name.visit(visitor);
+		self.comment.iter().for_each(|expr| expr.visit(visitor));
+	}
 }
 
 impl Default for DefineUserStatement {
