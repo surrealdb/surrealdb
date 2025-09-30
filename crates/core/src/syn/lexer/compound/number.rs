@@ -183,7 +183,8 @@ pub fn number(lexer: &mut Lexer, start: Token) -> Result<Numeric, SyntaxError> {
 			} else if number_str.as_bytes()[0] == b'+' && number_str.as_bytes()[1] == b'I'
 				|| number_str.as_bytes()[0] == b'I'
 			{
-				// No need to check the whole string, if it starts with '+I' or 'I' it  has to be infinity
+				// No need to check the whole string, if it starts with '+I' or 'I' it  has to be
+				// infinity
 				Ok(Numeric::Float(f64::INFINITY))
 			} else {
 				number_str.parse().map(Numeric::Integer).map_err(
